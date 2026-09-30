@@ -1,0 +1,15 @@
+{
+  "name": "@localdot/spike-v02-spine-toy",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4754 --strictPort"
+  },
+  "dependencies": {
+    "@esotericsoftware/spine-core": "4.3.13",
+    "@esotericsoftware/spine-pixi-v8": "4.3.13",
+    "pixi.js": "8.21.0"
+  },
+  "devDependencies": { "vite": "8.3.1" }
+}
