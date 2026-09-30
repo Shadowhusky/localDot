@@ -1,3 +1,4 @@
+export * from "./controller.ts";
 export * from "./gaze.ts";
 export * from "./life.ts";
 export * from "./params.ts";
