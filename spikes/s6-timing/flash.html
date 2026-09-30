@@ -1,0 +1,10 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>flash</title>
+<style>html,body{margin:0;height:100%;background:#000}</style>
+<script>
+  let on = false;
+  const flip = () => { on = !on; document.body.style.background = on ? "#fff" : "#000"; };
+  addEventListener("keydown", flip);
+  addEventListener("mousedown", flip);
+</script>
