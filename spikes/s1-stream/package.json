@@ -1,0 +1,6 @@
+{
+  "name": "@localdot/spike-s1-stream",
+  "private": true,
+  "type": "module",
+  "dependencies": { "http-proxy": "1.18.1" }
+}
