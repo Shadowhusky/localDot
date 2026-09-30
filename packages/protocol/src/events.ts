@@ -1,0 +1,276 @@
+import { z } from "zod";
+import { Point, Rect } from "./geometry.ts";
+import { Input } from "./input.ts";
+import { Target } from "./target.ts";
+
+const envelope = {
+  v: z.literal(1),
+  id: z.string().min(1),
+  seq: z.number().int().nonnegative(),
+  t: z.number().int().nonnegative(),
+  agent: z.string().min(1),
+  step: z.string().min(1).optional(),
+};
+
+const event = <T extends string, D extends z.ZodType>(type: T, data: D) =>
+  z.object({ ...envelope, type: z.literal(type), data });
+
+export const Risk = z.enum(["none", "low", "medium", "high"]);
+const PlanStatus = z.enum(["todo", "doing", "done", "skipped"]);
+
+export const PointerPlan = z.object({
+  from: Point,
+  to: Point,
+  startsAt: z.number().int().nonnegative(),
+  durationMs: z.number().nonnegative(),
+  seed: z.number().int().nonnegative(),
+  curve: z.literal("minjerk-bow-v1"),
+});
+
+export const SessionStart = event(
+  "session.start",
+  z.object({
+    screen: z.object({
+      w: z.number().int().positive(),
+      h: z.number().int().positive(),
+      scale: z.number().positive(),
+    }),
+    os: z.enum(["linux", "macos"]),
+    title: z.string().max(200).optional(),
+  }),
+);
+export const SessionEnd = event(
+  "session.end",
+  z.object({ reason: z.enum(["done", "stopped", "error"]) }),
+);
+export const AgentState = event(
+  "agent.state",
+  z.object({
+    state: z.enum([
+      "idle",
+      "thinking",
+      "acting",
+      "observing",
+      "waiting_user",
+      "paused",
+      "error",
+      "done",
+    ]),
+    reason: z.string().max(200).optional(),
+  }),
+);
+export const Heartbeat = event(
+  "heartbeat",
+  z.object({ ongoing: z.boolean(), everyMs: z.number().int().positive() }),
+);
+export const ThoughtDelta = event("thought.delta", z.object({ text: z.string() }));
+export const PlanSet = event(
+  "plan.set",
+  z.object({
+    items: z.array(z.object({ id: z.string(), text: z.string().max(200), status: PlanStatus })),
+  }),
+);
+export const PlanUpdate = event("plan.update", z.object({ id: z.string(), status: PlanStatus }));
+export const StepStart = event(
+  "step.start",
+  z.object({
+    kind: z.enum(["gui", "shell", "file", "browser", "ask", "think"]),
+    planItem: z.string().optional(),
+  }),
+);
+export const StepEnd = event(
+  "step.end",
+  z.object({
+    status: z.enum(["ok", "failed", "blocked", "cancelled"]),
+    note: z.string().max(500).optional(),
+  }),
+);
+export const ActionIntent = event(
+  "action.intent",
+  z.object({
+    verb: z.enum(["click", "move", "drag", "scroll", "type", "key", "wait"]),
+    label: z.string().min(1).max(80),
+    point: Point.optional(),
+    risk: Risk,
+    pointer: PointerPlan.optional(),
+  }),
+);
+export const ActionTarget = event("action.target", z.object({ target: Target }));
+export const ActionCancel = event(
+  "action.cancel",
+  z.object({
+    reason: z.enum(["preflight", "policy", "user", "model", "timeout", "stale"]),
+    detail: z.string().max(500).optional(),
+  }),
+);
+export const ActionDispatch = event("action.dispatch", z.object({ input: Input }));
+export const ActionResult = event(
+  "action.result",
+  z.object({ ok: z.boolean(), error: z.string().max(500).optional() }),
+);
+export const TextProgress = event(
+  "text.progress",
+  z
+    .object({
+      chunk: z.string().optional(),
+      count: z.number().int().nonnegative(),
+      masked: z.boolean(),
+      caret: Rect.optional(),
+    })
+    .refine((d) => !(d.masked && d.chunk !== undefined), {
+      message: "masked text.progress must not carry the typed chunk",
+    }),
+);
+export const ScreenSettle = event(
+  "screen.settle",
+  z.object({
+    frameT: z.number().int().nonnegative(),
+    changed: z.array(Rect),
+    noVisibleChange: z.boolean(),
+  }),
+);
+export const Observe = event(
+  "observe",
+  z.object({
+    frameId: z.string(),
+    image: z.string(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+  }),
+);
+export const StepVerify = event(
+  "step.verify",
+  z.object({
+    status: z.enum(["success", "unexpected", "failed"]),
+    evidence: z.string().max(500).optional(),
+  }),
+);
+export const ToolStart = event(
+  "tool.start",
+  z.object({ tool: z.string(), title: z.string().max(200) }),
+);
+export const ToolOutput = event(
+  "tool.output",
+  z.object({ stream: z.enum(["stdout", "stderr"]), chunk: z.string() }),
+);
+export const ToolEnd = event(
+  "tool.end",
+  z.object({ ok: z.boolean(), exitCode: z.number().int().optional() }),
+);
+export const FileChange = event(
+  "file.change",
+  z.object({
+    path: z.string(),
+    op: z.enum(["create", "modify", "delete"]),
+    patch: z.string().optional(),
+  }),
+);
+export const ApprovalKind = z.enum([
+  "purchase",
+  "send",
+  "post",
+  "delete",
+  "login",
+  "captcha",
+  "download",
+  "install",
+  "permission",
+  "other",
+]);
+export const ApprovalRequest = event(
+  "approval.request",
+  z.object({
+    approvalId: z.string(),
+    kind: ApprovalKind,
+    title: z.string().max(200),
+    preview: z
+      .object({ fields: z.array(z.tuple([z.string(), z.string()])), image: z.string().optional() })
+      .optional(),
+    target: Target.optional(),
+    risk: z.enum(["medium", "high"]),
+  }),
+);
+export const ApprovalResolve = event(
+  "approval.resolve",
+  z.object({
+    approvalId: z.string(),
+    decision: z.enum(["approve", "deny", "take_control"]),
+    by: z.enum(["user", "timeout"]),
+    note: z.string().max(500).optional(),
+  }),
+);
+export const ControlChange = event(
+  "control.change",
+  z.object({
+    holder: z.enum(["agent", "user"]),
+    reason: z.enum(["user_takeover", "handoff_request", "resume"]),
+  }),
+);
+export const PauseChange = event(
+  "pause.change",
+  z.object({ paused: z.boolean(), atStepBoundary: z.boolean() }),
+);
+export const MemoryChange = event(
+  "memory.change",
+  z.object({ file: z.enum(["USER.md", "MEMORY.md"]), patch: z.string() }),
+);
+export const KeyUse = event(
+  "key.use",
+  z.object({
+    secretId: z.string(),
+    host: z.string(),
+    method: z.string(),
+    path: z.string(),
+    decision: z.enum(["allow", "deny", "ask"]),
+  }),
+);
+export const CameraHint = event(
+  "camera.hint",
+  z.object({
+    focus: Rect,
+    zoom: z.number().positive().optional(),
+    reason: z.enum(["typing", "small-target", "approval"]),
+  }),
+);
+
+export const LocalDotEvent = z.discriminatedUnion("type", [
+  SessionStart,
+  SessionEnd,
+  AgentState,
+  Heartbeat,
+  ThoughtDelta,
+  PlanSet,
+  PlanUpdate,
+  StepStart,
+  StepEnd,
+  ActionIntent,
+  ActionTarget,
+  ActionCancel,
+  ActionDispatch,
+  ActionResult,
+  TextProgress,
+  ScreenSettle,
+  Observe,
+  StepVerify,
+  ToolStart,
+  ToolOutput,
+  ToolEnd,
+  FileChange,
+  ApprovalRequest,
+  ApprovalResolve,
+  ControlChange,
+  PauseChange,
+  MemoryChange,
+  KeyUse,
+  CameraHint,
+]);
+export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
+export type EventType = LocalDotEvent["type"];
+export type EventOf<T extends EventType> = Extract<LocalDotEvent, { type: T }>;
+
+type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+export type EventDraft = DistributiveOmit<LocalDotEvent, "v" | "id" | "seq" | "t">;
+
+export function parseEvent(value: unknown): LocalDotEvent {
+  return LocalDotEvent.parse(value);
+}
