@@ -53,3 +53,49 @@ describe("toDevice", () => {
     expect(toDevice({ x: 640, y: 400 }, { ...screen, scale: 2 })).toEqual({ x: 1280, y: 800 });
   });
 });
+
+describe("degenerate spaces and screens", () => {
+  it("rejects a zero-size model space instead of guessing a corner", () => {
+    const zero: CoordSpace = { kind: "pixels", width: 0, height: 0 };
+    expect(() => toScreen(0, 0, zero, screen)).toThrow(RangeError);
+    expect(() => toScreen(5, 5, zero, screen)).toThrow(RangeError);
+  });
+
+  it("rejects a model space with a missing size", () => {
+    const missing = { kind: "pixels" } as unknown as CoordSpace;
+    expect(() => toScreen(10, 10, missing, screen)).toThrow(RangeError);
+  });
+
+  it("rejects a model space with a NaN size", () => {
+    const nan: CoordSpace = { kind: "resizedPixels", width: Number.NaN, height: 640 };
+    expect(() => toScreen(10, 10, nan, screen)).toThrow(RangeError);
+  });
+
+  it("rejects a zero-size screen", () => {
+    const zero: Screen = { width: 0, height: 0, scale: 1 };
+    expect(() => toScreen(500, 500, per1000, zero)).toThrow(RangeError);
+    expect(() => toModel({ x: 0, y: 0 }, per1000, zero)).toThrow(RangeError);
+    expect(() => toDevice({ x: 0, y: 0 }, zero)).toThrow(RangeError);
+  });
+
+  it("rejects a screen with a NaN size", () => {
+    const nan: Screen = { ...screen, width: Number.NaN };
+    expect(() => toScreen(500, 500, per1000, nan)).toThrow(RangeError);
+    expect(() => toModel({ x: 10, y: 10 }, per1000, nan)).toThrow(RangeError);
+  });
+
+  it("rejects a non-integer screen size", () => {
+    const fractional: Screen = { ...screen, width: 1280.5 };
+    expect(() => toScreen(500, 500, per1000, fractional)).toThrow(RangeError);
+  });
+
+  it("rejects a NaN device scale", () => {
+    const nan: Screen = { ...screen, scale: Number.NaN };
+    expect(() => toDevice({ x: 640, y: 400 }, nan)).toThrow(RangeError);
+    expect(() => toModel({ x: 640, y: 400 }, per1000, nan)).toThrow(RangeError);
+  });
+
+  it("rejects a zero device scale", () => {
+    expect(() => toDevice({ x: 640, y: 400 }, { ...screen, scale: 0 })).toThrow(RangeError);
+  });
+});
