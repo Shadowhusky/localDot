@@ -1,4 +1,6 @@
+export * from "./attention.ts";
 export * from "./controller.ts";
+export * from "./event-driver.ts";
 export * from "./gaze.ts";
 export * from "./life.ts";
 export * from "./params.ts";
