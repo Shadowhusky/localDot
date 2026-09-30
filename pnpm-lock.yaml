@@ -24,6 +24,19 @@ importers:
         specifier: 5.0.3
         version: 5.0.3(@types/node@24.19.0)(happy-dom@20.14.5)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(tsx@4.23.15))
 
+  apps/avatar-harness:
+    dependencies:
+      '@localdot/avatar':
+        specifier: workspace:*
+        version: link:../../packages/avatar
+      '@localdot/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+    devDependencies:
+      vite:
+        specifier: 8.3.1
+        version: 8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(tsx@4.23.15)
+
   apps/daemon:
     dependencies:
       '@hono/node-server':

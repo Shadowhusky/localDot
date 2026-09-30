@@ -1,0 +1,19 @@
+{
+  "name": "@localdot/avatar-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 4753 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --host 127.0.0.1 --port 4753 --strictPort",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@localdot/avatar": "workspace:*",
+    "@localdot/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "vite": "8.3.1"
+  }
+}

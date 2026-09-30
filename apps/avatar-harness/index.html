@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>localDot Avatar Harness</title>
+<style>
+:root {
+  --void: #0A0B0D; --surface: #15161A; --line: #25272C;
+  --text: #EEEFF1; --text-2: #999CA4; --xenon: #3FB5DE;
+  --avatar-body: #ECEDEF; --avatar-eye: #0A0B0D; --avatar-blush: #E88AA0;
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; background: var(--void); color: var(--text); font: 14px/1.5 -apple-system, "Inter", system-ui, sans-serif; }
+main { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
+aside { border-right: 1px solid var(--line); padding: 20px; display: grid; align-content: start; gap: 14px; overflow-y: auto; }
+#avatar { width: 200px; height: 200px; }
+section { display: grid; place-items: center; padding: 24px; min-width: 0; }
+#desktop { position: relative; width: min(100%, calc((100vh - 48px) * 1.6)); aspect-ratio: 1280 / 800; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
+#desktop p { position: absolute; inset: auto 16px 12px; margin: 0; color: var(--text-2); }
+#focus { position: absolute; width: 28px; height: 28px; margin: -14px 0 0 -14px; border: 2px solid var(--xenon); border-radius: 50%; opacity: 0; pointer-events: none; }
+h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--text-2); margin: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 6px; }
+button { background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 5px 10px; font: inherit; }
+button:active { transform: scale(0.97); }
+button:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
+#status { color: var(--text-2); font-variant-numeric: tabular-nums; min-height: 1.5em; }
+</style>
+</head>
+<body>
+<main>
+  <aside>
+    <div id="avatar"></div>
+    <div id="status"></div>
+    <h2>Session</h2>
+    <div class="row"><button id="replay" type="button">Replay sample session</button></div>
+    <h2>Agent state</h2>
+    <div class="row" id="states"></div>
+    <h2>Reactions</h2>
+    <div class="row" id="reactions"></div>
+    <h2>Voice</h2>
+    <div class="row"><button id="speak" type="button">Speak sample</button></div>
+    <label><input id="reduced" type="checkbox"> Reduced motion</label>
+  </aside>
+  <section>
+    <div id="desktop"><div id="focus"></div><p>Move the pointer here: the companion looks at it</p></div>
+  </section>
+</main>
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
