@@ -29,9 +29,27 @@ describe("rigProblems", () => {
   });
 
   it("reports missing structure without crashing", () => {
-    const problems = rigProblems({} as RigDescription);
+    const problems = rigProblems({});
     expect(problems).toContain("bones must be an array");
     expect(problems).toContain("parts must be an array");
+  });
+
+  it("reports physics that is not an array, treating null as no physics", () => {
+    expect(rigProblems({ ...toyRig(), physics: {} })).toEqual(["physics must be an array"]);
+    expect(rigProblems({ ...toyRig(), physics: null })).toEqual([]);
+  });
+
+  it("reports null entries and variant values instead of throwing", () => {
+    const rig = toyRig();
+    const parts = rig.parts.map((p) =>
+      p.name === "mouth" ? { ...p, variants: { ...p.variants, A: null } } : p,
+    );
+    expect(rigProblems({ ...rig, bones: [null] })).toEqual(["bones[0] must be an object"]);
+    expect(rigProblems({ ...rig, parts: [null, ...rig.parts] })).toEqual([
+      "parts[0] must be an object",
+    ]);
+    expect(rigProblems({ ...rig, physics: [null] })).toEqual(["physics[0] must be an object"]);
+    expect(rigProblems({ ...rig, parts })).toEqual(['variant "mouth-A" must be an object']);
   });
 
   it("rejects empty boxes and bad tips", () => {
@@ -50,5 +68,9 @@ describe("validateRig", () => {
   it("throws one RigError listing every problem", () => {
     expect(() => validateRig(broken())).toThrow(RigError);
     expect(() => validateRig(broken())).toThrow(/unknown bone "missing"/);
+  });
+
+  it("throws a RigError, not a TypeError, for malformed input", () => {
+    expect(() => validateRig({ ...toyRig(), physics: {} })).toThrow(RigError);
   });
 });

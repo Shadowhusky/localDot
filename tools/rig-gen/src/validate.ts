@@ -12,24 +12,41 @@ export class RigError extends Error {
 
 const finite = (...values: number[]) => values.every((v) => Number.isFinite(v));
 const validBox = (b: Box | undefined) => !!b && finite(b.x, b.y, b.w, b.h) && b.w > 0 && b.h > 0;
-const isPoint = (p: unknown) =>
-  typeof p === "object" && p !== null && finite((p as Box).x, (p as Box).y);
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null;
+const isPoint = (p: unknown) => isObject(p) && finite(p.x as number, p.y as number);
 
-function structureProblems(desc: RigDescription): string[] {
+function listProblems(label: string, list: unknown): string[] {
+  if (!Array.isArray(list)) return [`${label} must be an array`];
   const problems: string[] = [];
-  if (typeof desc !== "object" || desc === null) return ["the rig description must be an object"];
-  if (!Array.isArray(desc.bones)) problems.push("bones must be an array");
-  if (!Array.isArray(desc.parts)) problems.push("parts must be an array");
-  if (typeof desc.canvas !== "object" || desc.canvas === null)
-    problems.push("canvas must be an object");
-  if (!isPoint(desc.root)) problems.push("root must be a finite point");
-  if (!isPoint(desc.headTurn)) problems.push("headTurn must be a finite point");
+  for (const [i, entry] of list.entries()) {
+    if (!isObject(entry)) problems.push(`${label}[${i}] must be an object`);
+  }
   return problems;
 }
 
-export function rigProblems(desc: RigDescription): string[] {
-  const structure = structureProblems(desc);
+function structureProblems(desc: unknown): string[] {
+  if (!isObject(desc)) return ["the rig description must be an object"];
+  const problems = [
+    ...listProblems("bones", desc.bones),
+    ...listProblems("parts", desc.parts),
+    ...listProblems("physics", desc.physics ?? []),
+  ];
+  if (!isObject(desc.canvas)) problems.push("canvas must be an object");
+  if (!isPoint(desc.root)) problems.push("root must be a finite point");
+  if (!isPoint(desc.headTurn)) problems.push("headTurn must be a finite point");
+  for (const part of Array.isArray(desc.parts) ? desc.parts : []) {
+    if (!isObject(part)) continue;
+    for (const [key, variant] of Object.entries(part.variants ?? {})) {
+      if (!isObject(variant)) problems.push(`variant "${part.name}-${key}" must be an object`);
+    }
+  }
+  return problems;
+}
+
+export function rigProblems(input: unknown): string[] {
+  const structure = structureProblems(input);
   if (structure.length > 0) return structure;
+  const desc = input as RigDescription;
   const problems: string[] = [];
   if (!desc.name) problems.push("name is empty");
   if (!(finite(desc.canvas.w, desc.canvas.h) && desc.canvas.w > 0 && desc.canvas.h > 0)) {
@@ -89,7 +106,7 @@ export function rigProblems(desc: RigDescription): string[] {
   return problems;
 }
 
-export function validateRig(desc: RigDescription): void {
+export function validateRig(desc: unknown): void {
   const problems = rigProblems(desc);
   if (problems.length > 0) throw new RigError(problems);
 }
