@@ -43,6 +43,15 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
+  packages/avatar:
+    dependencies:
+      '@localdot/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      '@localdot/stage':
+        specifier: workspace:*
+        version: link:../stage
+
   packages/protocol:
     dependencies:
       zod:
