@@ -1,0 +1,9 @@
+[project]
+name = "v01-seethrough"
+version = "0.0.0"
+requires-python = ">=3.12"
+dependencies = [
+    "gradio_client>=1.13",
+    "pillow>=11",
+    "psd-tools>=1.22.0",
+]
