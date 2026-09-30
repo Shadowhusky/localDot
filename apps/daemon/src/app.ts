@@ -1,0 +1,40 @@
+import { Hono } from "hono";
+import { setCookie } from "hono/cookie";
+import { isAllowedHost, isAllowedOrigin, SESSION_COOKIE, tokenFromHeaders } from "./guard.ts";
+import { tokensMatch } from "./token.ts";
+
+export interface AppOptions {
+  token: string;
+  port: number;
+}
+
+export function createApp({ token, port }: AppOptions): Hono {
+  const app = new Hono();
+
+  app.use("*", async (c, next) => {
+    if (!isAllowedHost(new URL(c.req.url).host, port)) return c.text("forbidden host", 403);
+    if (!isAllowedOrigin(c.req.header("origin"), port)) return c.text("forbidden origin", 403);
+    await next();
+  });
+
+  app.get("/healthz", (c) => c.text("ok"));
+
+  app.get("/auth/claim", (c) => {
+    if (!tokensMatch(token, c.req.query("token"))) return c.text("unauthorized", 401);
+    setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: "Strict", path: "/" });
+    return c.redirect("/", 302);
+  });
+
+  app.use("/api/*", async (c, next) => {
+    const given = tokenFromHeaders({
+      authorization: c.req.header("authorization"),
+      cookie: c.req.header("cookie"),
+    });
+    if (!tokensMatch(token, given)) return c.text("unauthorized", 401);
+    await next();
+  });
+
+  app.get("/api/whoami", (c) => c.json({ ok: true }));
+
+  return app;
+}

@@ -1,0 +1,21 @@
+{
+  "name": "@localdot/daemon",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@hono/node-server": "2.1.3",
+    "@localdot/protocol": "workspace:*",
+    "hono": "4.13.12",
+    "ws": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/ws": "8.18.2",
+    "tsx": "4.23.15"
+  }
+}
