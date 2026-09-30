@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 cd "$(dirname "$0")"
-CONFIG=${CONFIG:-iron-proxy.yaml}
+# IPV6=1 selects iron-proxy.ipv6.yaml and probes the Mac's own IPv6 addresses.
+IPV6=${IPV6:-}
+CONFIG=${CONFIG:-iron-proxy${IPV6:+.ipv6}.yaml}
 LOG=out/iron-proxy.log
 SURROGATE=ld_spike_surrogate_7f3c9a1e5b2d4f60
 UNKNOWN=ld_spike_unknown_0000000000000000
 FAILS=0
+REDACT=()
+# Printed output shows the Mac's own IPv6 addresses as placeholders: they are this network's public addresses.
+redact() {
+  local s=$1 pair
+  for pair in ${REDACT[@]+"${REDACT[@]}"}; do s=${s//"${pair%%=*}"/"${pair#*=}"}; done
+  printf '%s\n' "$s"
+}
 cleanup() {
   docker rm -f ld-s4-cell ld-s4-gate >/dev/null 2>&1 || true
   docker network rm ld-s4-sbx ld-s4-egress >/dev/null 2>&1 || true
@@ -32,7 +41,7 @@ expect() {
   local got=blocked before audit
   before=$(wc -l < "$LOG")
   if "$@" >/dev/null 2>&1; then got=ok; fi
-  audit=$(audit_since "$before")
+  audit=$(redact "$(audit_since "$before")")
   if [[ $got != "$want" ]]; then printf 'FAIL  %-8s %s (wanted %s)\n' "$got" "$desc" "$want"; FAILS=$((FAILS + 1))
   elif [[ -n $why && ! $audit =~ $why ]]; then printf 'FAIL  %-8s %s (wrong reason)\n' "$got" "$desc"; FAILS=$((FAILS + 1))
   else printf 'ok    %-8s %s\n' "$got" "$desc"; fi
@@ -77,8 +86,36 @@ if [[ -n $LAN_IP ]]; then
 fi
 expect ok "control: host -> 127.0.0.1:4799 directly (listener bound to 127.0.0.1 only)" '' curl -sS -m 5 -o /dev/null http://127.0.0.1:4799/
 expect blocked "127.0.0.1:4799 through the proxy" 'denied by upstream_deny_cidrs: 127\.0\.0\.1 ' docker exec ld-s4-cell curl $P -f http://127.0.0.1:4799/
-expect ok "0.0.0.0:4799 reaches the same loopback-only listener (0.0.0.0/8 not in the deny list)" 'GET 0\.0\.0\.0:4799/ allow 200$' sh -c "docker exec ld-s4-cell curl $P -f http://0.0.0.0:4799/ | grep -q host-ok"
-expect ok "[::]:4799 reaches the same loopback-only listener (::/128 not in the deny list)" 'GET \[::\]:4799/ allow 200$' sh -c "docker exec ld-s4-cell curl $P -f 'http://[::]:4799/' | grep -q host-ok"
+if [[ -n $IPV6 ]]; then
+  expect blocked "0.0.0.0:4799 once 0.0.0.0/8 is in the deny list" 'denied by upstream_deny_cidrs: 0\.0\.0\.0 in 0\.0\.0\.0/8' docker exec ld-s4-cell curl $P -f http://0.0.0.0:4799/
+  expect blocked "[::]:4799 once ::/128 is in the deny list" 'denied by upstream_deny_cidrs: :: in ::/128' docker exec ld-s4-cell curl $P -f 'http://[::]:4799/'
+else
+  expect ok "0.0.0.0:4799 reaches the same loopback-only listener (0.0.0.0/8 not in the deny list)" 'GET 0\.0\.0\.0:4799/ allow 200$' sh -c "docker exec ld-s4-cell curl $P -f http://0.0.0.0:4799/ | grep -q host-ok"
+  expect ok "[::]:4799 reaches the same loopback-only listener (::/128 not in the deny list)" 'GET \[::\]:4799/ allow 200$' sh -c "docker exec ld-s4-cell curl $P -f 'http://[::]:4799/' | grep -q host-ok"
+fi
+if [[ -n $IPV6 ]]; then
+  own=$(ifconfig en0 2>/dev/null || true; ifconfig en1 2>/dev/null || true)
+  GUA_STABLE=$(awk '$1 == "inet6" && $2 ~ /^[23]/ && / secured/ && !/temporary/ {print $2; exit}' <<< "$own")
+  GUA_TEMP=$(awk '$1 == "inet6" && $2 ~ /^[23]/ && /temporary/ && !/deprecated/ {print $2; exit}' <<< "$own")
+  GUA_OLD=$(awk '$1 == "inet6" && $2 ~ /^[23]/ && /deprecated/ {print $2; exit}' <<< "$own")
+  ULA_OWN=$(awk '$1 == "inet6" && $2 ~ /^f[cd]/ && / secured/ {print $2; exit}' <<< "$own")
+  for pair in "$GUA_STABLE=GUA-stable" "$GUA_TEMP=GUA-temporary" "$GUA_OLD=GUA-deprecated" "$ULA_OWN=ULA-own"; do
+    if [[ $pair != =* ]]; then REDACT+=("$pair"); fi
+  done
+  echo "info  Mac's own IPv6 on en0/en1: ULA-own, GUA-stable, GUA-temporary and $(awk '$1 == "inet6" && $2 ~ /^[23]/ && /deprecated/' <<< "$own" | wc -l | tr -d ' ') deprecated temporaries (global, prefixlen 64, ${GUA_STABLE%%:*}:...); IPv6 wildcard TCP listeners visible to this user: $(lsof -nP -iTCP -sTCP:LISTEN | awk '$5 == "IPv6" && $9 ~ /^\*:/' | wc -l | tr -d ' ')"
+  if [[ -n $ULA_OWN ]]; then
+    expect blocked "Mac's own ULA [ULA-own]:1234 (fc00::/7)" 'denied by upstream_deny_cidrs: ULA-own in fc00::/7' docker exec ld-s4-cell curl $P -f "http://[$ULA_OWN]:1234/"
+  fi
+  if [[ -n $GUA_STABLE ]]; then
+    expect blocked "Mac's own stable global IPv6 [GUA-stable]:1234 passes the guard; the Mac refuses it" 'GET \[GUA-stable\]:1234/ error 502 err=dial tcp \[GUA-stable\]:1234: connect: connection refused' docker exec ld-s4-cell curl $P -f "http://[$GUA_STABLE]:1234/"
+  fi
+  if [[ -n $GUA_TEMP ]]; then
+    expect blocked "Mac's own temporary global IPv6 [GUA-temporary]:1234 passes the guard; the Mac refuses it" 'GET \[GUA-temporary\]:1234/ error 502 err=dial tcp \[GUA-temporary\]:1234: connect: connection refused' docker exec ld-s4-cell curl $P -f "http://[$GUA_TEMP]:1234/"
+  fi
+  if [[ -n $GUA_OLD ]]; then
+    expect blocked "Mac's own deprecated temporary [GUA-deprecated]:1234 passes the guard; the Mac refuses it" 'GET \[GUA-deprecated\]:1234/ error 502 err=dial tcp \[GUA-deprecated\]:1234: connect: connection refused' docker exec ld-s4-cell curl $P -f "http://[$GUA_OLD]:1234/"
+  fi
+fi
 reflected=$(docker exec ld-s4-cell curl $P -H "Authorization: $SURROGATE" https://postman-echo.com/headers 2>/dev/null | jq -rR 'fromjson? | .headers.authorization' || true)
 echo "info  authorization that postman-echo reflected into the cell: ${reflected:-none (request failed)}"
 expect ok "surrogate in X-Api-Key (not in match_headers) is not swapped" 'GET postman-echo\.com/headers allow 200 swapped$' sh -c "docker exec ld-s4-cell curl $P -H 'Authorization: $SURROGATE' -H 'X-Api-Key: $SURROGATE' https://postman-echo.com/headers | grep -q '\"x-api-key\":\"$SURROGATE\"'"
@@ -91,6 +128,6 @@ expect ok "example.com is terminated too: curl rejects its leaf (permitted subtr
 echo "info  leaf served for example.com: $(docker exec ld-s4-cell curl $PB -k -v -o /dev/null https://example.com/ 2>&1 | grep -E '^\*  (subject|issuer):' | sed 's/^\*  //' | paste -sd ';' - | sed 's/;/; /g')"
 echo "info  remote_addr of every audited request: $(jq -rR 'fromjson? | select(.msg == "request") | .audit.remote_addr | sub(":[0-9]+$"; "")' "$LOG" | sort | uniq -c | awk '{printf "%s%s x%s", (NR > 1 ? ", " : ""), $2, $1}')"
 echo "info  iron-proxy RSS after the probes: $(ps -o rss= -p "$PROXY_PID" | awk '{printf "%.1f MB", $1 / 1024}')"
-echo "--- audit sample"; tail -n 5 out/iron-proxy.log
+echo "--- audit sample"; tail -n 5 "$LOG" | while IFS= read -r line; do redact "$line"; done
 echo "failures: $FAILS"
 exit "$FAILS"

@@ -1,0 +1,62 @@
+# run.sh with IPV6=1: iron-proxy.yaml with the deny list FINDINGS first recommended (the brief's plus 0.0.0.0/8
+# and ::/128), and ULA and global IPv6 allowlisted so the Mac's own IPv6 addresses reach the guard.
+dns:
+  enabled: false
+proxy:
+  # Unset, http_listen and https_listen default to :80 and :443 on every interface (and
+  # metrics.listen to :9090); none of the three can be switched off.
+  http_listen: "127.0.0.1:4794"
+  https_listen: "127.0.0.1:4795"
+  tunnel_listen: "127.0.0.1:4796"
+  upstream_deny_cidrs:
+    - "127.0.0.0/8"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "169.254.0.0/16"
+    - "100.64.0.0/10"
+    - "::1/128"
+    - "fc00::/7"
+    - "fe80::/10"
+    - "0.0.0.0/8"
+    - "::/128"
+tls:
+  mode: "mitm"
+  ca_cert: "out/ca.crt"
+  ca_key: "out/ca.key"
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "postman-echo.com"
+        - "example.com"
+        - "www.postman-echo.com"
+        - "localhost"
+      # Private ranges are allowlisted on purpose so the private-address probes reach
+      # upstream_deny_cidrs instead of stopping at the allowlist.
+      cidrs:
+        - "127.0.0.0/8"
+        - "10.0.0.0/8"
+        - "172.16.0.0/12"
+        - "192.168.0.0/16"
+        - "169.254.0.0/16"
+        - "0.0.0.0/8"
+        - "::/128"
+        - "fc00::/7"
+        - "2000::/3"
+  - name: secrets
+    config:
+      secrets:
+        - source:
+            type: env
+            var: LD_SPIKE_SECRET
+          proxy_value: "ld_spike_surrogate_7f3c9a1e5b2d4f60"
+          match_headers: ["Authorization"]
+          require: true
+          rules:
+            - host: "postman-echo.com"
+              # Without methods the rule also matches the synthetic CONNECT, which never carries
+              # the Authorization header, so require: true would reject every tunnel.
+              methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+metrics:
+  listen: "127.0.0.1:4797"
