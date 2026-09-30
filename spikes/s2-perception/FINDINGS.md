@@ -11,45 +11,51 @@ Thunar 4.20.7, xfce4-terminal 1.1.5, Mousepad 0.7.0 · Node 25.6.0
   It returns trees with roles, names and screen frames for all six apps; none returned `none`. It injects real XTest
   input: in Step 6, `hello` landed in A1. Its cursor overlay stays off only with `mcp --no-overlay`.
 - **The fallback would be no more accurate for native apps.** Raw AT-SPI extents read through libatspi (which is
-  what pyatspi wraps; `atspi-extents.py`) match the driver's frames exactly for Thunar, Calc and Chromium's
-  browser chrome. That includes LibreOffice's own 27/45 px error. The driver is worse only on Chromium web content,
-  where it adds an offset that raw AT-SPI does not have. Web content should come from CDP anyway: a walk takes
-  2.1–2.3 s for example.com and 12 s for a full Wikipedia article.
+  what pyatspi wraps; `atspi-extents.py`) match the driver's frames exactly for Thunar, the terminal, Calc and
+  Chromium's browser chrome, with GTK window scaling off and on. That includes LibreOffice's own menu-bar-height
+  error. The driver is worse only on Chromium web content, where it adds an offset that raw AT-SPI does not have.
+  Web content should come from CDP anyway: a walk takes 2.1–2.3 s for example.com and 12 s for a full Wikipedia
+  article.
 - **Changes needed:**
   1. **Launch.** Run the bundled binary directly, not the pip entry point:
      `/opt/venv/lib/python3.14/site-packages/cua_driver/bin/cua-driver mcp --no-overlay`. Run it as `abc` with
      `DISPLAY=:1`, the xfce4-session's `DBUS_SESSION_BUS_ADDRESS`, `CUA_DRIVER_RS_TELEMETRY_ENABLED=0` and
      `CUA_DRIVER_RS_UPDATE_CHECK=0`. Why each is needed is under Setup.
-  2. **Pointer and keys through our own XTest** (the fallback's xdotool half). Keep the driver for perception and
-     for accessibility actions. The driver can only deliver input with `delivery_mode: "foreground"`, because
-     background input needs uinput, which Xvfb cannot use. Foreground clicks and typing block for 843–893 ms (medians),
-     although the pointer moves about 30 ms in. The call returns no injection timestamp, and `input()` must return one. S6 should
-     confirm this change.
-  3. **`desktopd` normalises frames per toolkit.**
-     - Chromium's browser chrome comes back in logical px (DIPs) at 2×.
-     - Chromium web boxes should come from CDP.
-     - LibreOffice's VCL widgets are reported too high by the height of its native menu bar, and Calc cells are not
-       in the tree at all.
+  2. **`desktopd` maps every frame into desktop device pixels** with one transform per toolkit (see "Canonical
+     space and one transform per toolkit"). It never uses the driver's window-local `screenshot_frame`, which is
+     wrong whenever a toolkit reports logical px. It also handles two gaps in the trees:
+     - Calc cells are not in the tree at all.
      - Calc and Writer windows with the same geometry return each other's elements.
-  4. **Image.**
+  3. **Image.**
      - Exactly one D-Bus session bus. Today a second, autolaunched bus exists, and it can take over the
        accessibility bus's socket.
      - Thunar opens in List View.
      - Chromium runs maximized.
+- **Open question for Task 5 (S6): should pointer and keys bypass the driver?**
+  - The driver injects only in foreground mode here. A foreground click or keystroke call returns after 843–893 ms
+    (medians) and gives no injection timestamp, but `input()` must return one.
+  - This spike timed pointer motion only: the X pointer reached the target about 30 ms into the call. The
+    ButtonPress and the key events were never timed.
+  - The rest of the call may be the documented foreground round trip (activate, confirm focus, inject, restore). Our
+    own XTest path might need that too, and it was not timed.
+  - S6 should time both paths with XI2 raw events before anything moves off the driver.
 
 ## Trees and frame accuracy per app
 
-| App | Tree | Worst offset 1× | Worst offset 2× | Notes |
-|---|---|---|---|---|
-| Chromium, browser chrome | good | ≤ 1 px | ≤ 1 px after ×2 (frames are logical px) | tabs, toolbar buttons, address bar, window buttons; raw AT-SPI returns the same values |
-| Chromium, web content | partial | +4 px x (restored window), 0 (maximized) | +18, +23 (restored), 0, −1 (maximized) | the driver adds the offset; raw AT-SPI is exact at both scales and sizes are exact; text comes as one `static` row per character; headings are not rows |
-| LibreOffice Calc | partial | 27 px y on VCL widgets, 0 on GTK widgets | 45 px y | the shift equals the native menu bar height; raw AT-SPI is identical; cells are not walked (`truncation_reason: huge_container`), so A1 has no frame; a duplicate menu bar with different frames is also listed |
-| LibreOffice Writer | partial | 27 px y (toolbars, paragraph) | not run | its tree also lists Calc's document (Sheet1 table and tab, Calc-only toolbar buttons): both windows were 1280×750+0+50 |
-| Thunar | good in List View, partial in the default icon view | 0 | 0 | the icon view is one `directory pane` with no items; after Ctrl+2 each file is a row of cells (name, size, type, date) with exact frames |
-| xfce4-terminal | good | 0 | 0 | menus and the VTE widget; the terminal text is not in the tree |
-| Mousepad | good | 0 | not run | menus and the text view |
+Offsets are in device px, measured after each toolkit's transform (see "Canonical space and one transform per
+toolkit"). "GTK ×1" and "GTK ×2" are the 2× desktop with `Gdk/WindowScalingFactor` 1 and 2.
 
-- **How to read the offsets.** "0" means the overlay's 1 px stroke sits on the control's edges in 4–6× crops. The
+| App | Tree | Worst offset 1× | 2×, GTK ×1 | 2×, GTK ×2 | Notes |
+|---|---|---|---|---|---|
+| Chromium, browser chrome | good | ≤ 1 px | ≤ 1 px | ≤ 1 px | frames are Chromium DIPs (×2 at 2×); tabs, toolbar buttons, address bar, window buttons; raw AT-SPI returns the same values |
+| Chromium, web content | partial | +4, 0 restored; 0, 0 maximized | +18, +23 restored; 0, −1 maximized | +18, +37 restored; 0, 0 maximized | the driver adds the offset; raw AT-SPI is exact device px in all six cases and sizes are exact; text comes as one `static` row per character; headings are not rows |
+| LibreOffice Calc | partial | 27 px y on VCL widgets, 0 on GTK widgets | 45 px y | 54 px y (27 logical px) | the shift equals the native menu bar height; raw AT-SPI is identical; cells are not walked (`truncation_reason: huge_container`), so A1 has no frame; a duplicate menu bar with different frames is also listed |
+| LibreOffice Writer | partial | 27 px y (toolbars, paragraph) | not run | not run | its tree also lists Calc's document (Sheet1 table and tab, Calc-only toolbar buttons): both windows were 1280×750+0+50 |
+| Thunar | good in List View, partial in the default icon view | 0 | 0 | 0 | the icon view is one `directory pane` with no items; after Ctrl+2 each file is a row of cells (name, size, type, date) with exact frames |
+| xfce4-terminal | good | 0 | 0 | 0 | menus and the VTE widget; the terminal text is not in the tree |
+| Mousepad | good | 0 | not run | not run | menus and the text view |
+
+- **How to read the offsets.** "0" means the overlay's 1 px stroke sits on the control's edges in 1–6× crops. The
   Chromium web numbers are exact pixel boxes from `markers.mjs`.
 - **Chromium web content.** A marker page has solid-colour controls at known CSS positions. Driver frame minus
   pixel box, for all three markers:
@@ -57,22 +63,30 @@ Thunar 4.20.7, xfce4-terminal 1.1.5, Mousepad 0.7.0 · Node 25.6.0
   | | Restored | Maximized |
   |---|---|---|
   | 1× | (+4, 0) | (0, 0) |
-  | 2× | (+18, +23) | (0, −1) |
+  | 2×, GTK ×1 | (+18, +23) | (0, −1) |
+  | 2×, GTK ×2 | (+18, +37) | (0, 0) |
 
-  Raw AT-SPI gave the pixel boxes exactly: at 1× restored `marker red` was (54,164); at 2× restored it was (108,300)
-  while the driver reported (126,323).
+  Raw AT-SPI gave the pixel boxes exactly for `marker red`:
+
+  | | Raw AT-SPI | Driver |
+  |---|---|---|
+  | 1×, restored | (54,164) | (58,164) |
+  | 2×, GTK ×1, restored | (108,300) | (126,323) |
+  | 2×, GTK ×2, restored | (108,328) | (126,365) |
 - **LibreOffice.** The error is systematic. The toolbar buttons and their panels, the sheet table and the sheet
-  tabs are reported exactly one menu-bar height too high: 27 px at 1×, 45 px at 2×. Other widgets are
-  correct: the Name Box and font-name text fields (children of shifted panels), the Add-sheet button, the
-  scrollbars and the sidebar. A consumer
-  that trusts these frames misses. A1's centre derived from the table frame (33,187) falls in the column header.
+  tabs are reported exactly one menu-bar height too high. In frame units that is 27 px at 1×, 45 px at 2× with
+  GTK ×1 (LibreOffice then scales its own UI to the 192 dpi), and 27 logical px (54 device px) at 2× with GTK ×2.
+  Other widgets are correct: the Name Box and font-name text fields (children of shifted panels), the Add-sheet
+  button, the scrollbars and the sidebar. A consumer that trusts these frames misses: A1's centre derived from the
+  table frame (33,187) falls in the column header.
 - **Web trees are slow.** Chromium's example.com tree ran out of the default 1000 ms budget (539 nodes visited).
   Wikipedia's "Accessibility" article gave 202 elements at 1000 ms and 977 at 5000 ms (both truncated). The
   complete tree has 2251 elements and took 12.1 s.
 
 ## Latency
 
-Each value is the median of 7 calls in one MCP session, with `timeout_ms: 5000`.
+Each value is the median of 7 calls in one MCP session, with `timeout_ms: 5000`. The 2× numbers are from the GTK ×1
+desktop.
 
 | `get_window_state` | Tree only | Tree + window shot | Window shot only |
 |---|---|---|---|
@@ -97,9 +111,13 @@ Each value is the median of 7 calls in one MCP session, with `timeout_ms: 5000`.
   | Foreground XTest pixel click | 886 ms Thunar, 893 ms Calc | `path=x11_xtest_fg` |
   | Foreground `type_text` of one character (Mousepad) | 843 ms | |
 
-- **When the input lands.** In two foreground clicks the X pointer reached the target 29 and 35 ms after a
-  container-clock stamp taken just before each call. The polling interval was about 13 ms. Each call returned
-  860–868 ms after it started.
+- **When the pointer moves.** This measures pointer motion, not when input lands.
+  - Polling `xdotool getmouselocation` about every 13 ms, the X pointer reached the click target 29 and 35 ms after
+    a container-clock stamp taken just before each of two foreground clicks.
+  - Each call returned 860–868 ms after it started.
+  - The ButtonPress and the key events of `type_text` were not timed.
+  - The tail may be the foreground focus round trip rather than idle waiting. S6 decides this (see the open
+    question in the Result).
 
 ## Input and the driver's cursor (Step 6)
 
@@ -131,41 +149,71 @@ Each value is the median of 7 calls in one MCP session, with `timeout_ms: 5000`.
 
 ## 2× coordinate space (Ruling 16)
 
-- **The 2× container state.** Same flags plus `SELKIES_MANUAL_WIDTH=2560 SELKIES_MANUAL_HEIGHT=1600
-  SELKIES_SCALING_DPI=192`. With no viewer connected:
-  - `xdpyinfo` reported 2560×1600 at 96 dpi (S1, with a viewer, saw 192);
-  - `xrdb` had `Xft.dpi: 192`;
-  - XFCE had `Xft/DPI` 96 and `Gdk/WindowScalingFactor` 1.
-
-  Chromium rendered at scale 2 and LibreOffice's UI grew (a 45 px menu bar). Thunar's windows stayed 640×480, with
-  larger text.
-- **Answer: frames come back in device pixels (2560×1600), with one Chromium exception.** The driver knows a single
-  space, the X screen:
+- **Two 2× desktops were measured.** Both used `SELKIES_MANUAL_WIDTH=2560 SELKIES_MANUAL_HEIGHT=1600
+  SELKIES_SCALING_DPI=192` with no viewer connected (`xdpyinfo` read 96 dpi; S1, with a viewer, saw 192).
+  - **GTK ×1**, as the image starts: `Gdk/WindowScalingFactor` 1, XFCE `Xft/DPI` 96, `xrdb` `Xft.dpi: 192`.
+    - GTK apps are not scaled: Thunar's window stays 640×480 device px.
+    - LibreOffice scales its own UI from the 192 dpi, giving a 45 px menu bar.
+    - Chromium renders at scale 2.
+  - **GTK ×2**, S1's proposal for Part 2: `xfconf-query -c xsettings -p /Gdk/WindowScalingFactor -s 2` and
+    `-p /Xft/DPI -s 96`. Selkies had set `Xft/DPI` to 192 by then, and the change also reset `xrdb` `Xft.dpi` to
+    96. Apps were started after the change.
+    - GTK windows double: Thunar 1280×960 device px, the panel 54 px tall.
+    - LibreOffice doubles too: its Welcome dialog is 1374×818 for 687×409.
+    - Chromium stays at scale 2, in a 2100×1506 window.
+- **The driver itself has one space: X11 device pixels.**
   - `get_screen_size` reports 2560×1600 at `scale_factor` 1;
   - `get_desktop_state` returns a 2560×1600 PNG at `frame_scale` 1;
-  - `list_windows` bounds are X11 geometry in that space.
+  - `list_windows` bounds are X11 geometry;
+  - `coordinate_frame: "desktop"` clicks use it ((322, 365) selected B2).
+- **It passes element frames through as each toolkit reports them.** The driver's frames equal raw AT-SPI
+  everywhere except Chromium web content. Toolkits differ in units:
 
-  Element frames are whatever each toolkit reports:
-
-  | Toolkit | Space | Fit on the 2× full-screen screenshot |
+  | Toolkit | GTK ×1 | GTK ×2 |
   |---|---|---|
-  | GTK (Thunar, terminal) | device px | exact; driver frame = raw AT-SPI, e.g. Thunar Home (1057,634) 31×40 in both |
-  | LibreOffice | device px | VCL widgets 45 px too high, as at 1× |
-  | Chromium browser chrome | logical px (DIPs) | ≤ 1 px after ×2 |
-  | Chromium web content | device px | offset by the driver (above) |
+  | GTK apps (Thunar, terminal) | device px: Thunar Home (1057,634) 31×40 | logical px: Thunar's File menu is (0,39) 39×27 for a window at device (1,78) |
+  | LibreOffice (gtk3) | device px | logical px: File menu (0,38) 39×27 for a window at device (0,77) |
+  | Chromium browser chrome | logical px: root frame 1050×767 at (10,23) for an X window 2100×1534+20+46 | logical px: root frame 1050×753 at (10,37) for 2100×1506+20+74 |
+  | Chromium web content (raw AT-SPI) | device px | device px |
 
-  For Chromium's browser chrome, the root frame is 1050×767 at (10,23) for an X window of 2100×1534+20+46.
-  Maximized, it is (0,13) 1280×787 for (0,27) 2560×1573. Raw AT-SPI gives the same logical values, so this is
-  Chromium's behaviour. The driver passes them through as if they were device px, so its window-local
-  `screenshot_frame`s go negative: the root frame maps to (−6, −14).
+  With window scaling on, GTK and LibreOffice frames come back logical. That fits GTK's ATK bridge building extents
+  from widget allocations and window origins in application px (the mechanism is inferred, not traced).
+- **The driver's derived pixel numbers are wrong whenever a frame is logical.** It computes `screenshot_frame` as
+  (frame − window origin) × `frame_scale`, treating frames as device px.
+  - Under GTK ×2, Thunar's Home button gets (93, −8) 30×30; its true place in that screenshot is (186.5, 59.9)
+    60×60.
+  - For Chromium chrome at 2× the root frame gets (−6, −14).
+  - Clicks by `element_token` go through the accessibility action and are unaffected.
 - **Window screenshots are downscaled at 2×.** `get_window_state` caps its screenshot at 1.15 MP (long edge 1568)
-  unless `max_image_dimension: 0` is passed. Calc's came back 1377×834 (`frame_scale` 0.538), restored Chromium's
-  1254×916 (0.597), the terminal's 1357×846 (0.882).
+  unless `max_image_dimension: 0` is passed. With GTK ×1, Calc's came back 1377×834 (`frame_scale` 0.538),
+  restored Chromium's 1254×916 (0.597), and the terminal's 1357×846 (0.882).
 - **Click coordinates follow the frame you pick.** Window-frame click x/y are pixels of that downscaled image:
   (250, 200) became screen (465, 422) and selected C4. With `coordinate_frame: "desktop"`, x/y are device px.
-- **Mapping for the product.** Keep `desktopd` in device space (device = logical ×2 at 2×) and click with
-  `coordinate_frame: "desktop"`. Divide GTK, LibreOffice and web frames by the scale to reach the 1280×800 model
-  space. Use Chromium chrome frames as they come (they are already logical), and take web boxes from CDP.
+
+### Canonical space and one transform per toolkit
+
+- **The canonical space is desktop device pixels**, the X root: 2560×1600 at 2×, 1280×800 at 1×. Selkies streams
+  it, `get_desktop_state` returns it, and XTest and `coordinate_frame: "desktop"` clicks use it.
+- **`desktopd` converts every frame into it with the transform for its toolkit**, then derives the model and
+  overlay space once: model = device ÷ S, where S is the desktop scale (2 at 2×, 1 at 1×). The parameters:
+  - **g** is `Gdk/WindowScalingFactor`.
+  - **c** is Chromium's device scale factor: X11 window width ÷ the width of Chromium's root `frame` element. It
+    was 1 at 1× and 2 at 2× with both GTK settings.
+  - **m** is LibreOffice's native menu bar height in frame units, the `h` of its `menu` rows. It was 27 with
+    `Xft/DPI` 96, and 45 when LibreOffice renders at 192 dpi with g = 1.
+
+| Toolkit | device px = | Measured with |
+|---|---|---|
+| GTK3 apps (Thunar, xfce4-terminal, Mousepad) | frame × g | Thunar and the terminal at 1× with g=1, 2× with g=1 and 2× with g=2; Mousepad at 1× only. All exact |
+| LibreOffice gtk3, GTK-drawn parts (menus, text entries, Add-sheet button, scrollbars, sidebar) | frame × g | Calc in the same three: exact |
+| LibreOffice gtk3, VCL-drawn parts (toolbars and their panels, sheet table, sheet tabs, document text) | (frame + (0, m)) × g | Calc in the same three. No attribute marks a VCL part, so this is a per-role workaround at best; treat LibreOffice frames as unreliable |
+| Chromium browser chrome (`in_web_content` absent) | frame × c | 1× (c=1); 2× with g=1 and with g=2 (c=2): ≤ 1 px |
+| Chromium web content | CDP box (CSS px) × c + the content area's device origin | the driver's frames carry a driver-added offset. Raw AT-SPI web extents are already device px, exact in all six marker cases, if CDP is ever unavailable |
+
+- **In the planned product desktop** (2×, g = 2, `Xft/DPI` 96, c = 2), every native frame the driver returns is
+  already in model units (1280×800), and device = frame × 2.
+- **Only Chromium web content needs CDP.** The one other departure is LibreOffice's VCL offset, which is
+  LibreOffice's.
 
 ## Setup that was needed
 
@@ -258,6 +306,12 @@ Calls used, with their argument names as `out/tools.json` defines them:
   bus takeover, and a third time only for the 1× raw-AT-SPI check. 2× used the same command with
   `-e SELKIES_MANUAL_WIDTH=2560 -e SELKIES_MANUAL_HEIGHT=1600 -e SELKIES_SCALING_DPI=192`. Apps were launched with the
   brief's `docker exec -d -u abc -e DISPLAY=:1 …` lines, plus `libreoffice --writer` and `mousepad`.
+- **GTK ×2 desktop.** A fresh 2× container. Before starting any app:
+  `docker exec -u abc -e DISPLAY=:1 -e DBUS_SESSION_BUS_ADDRESS=… ld-s2 sh -c 'xfconf-query -c xsettings -p
+  /Gdk/WindowScalingFactor -s 2; xfconf-query -c xsettings -p /Xft/DPI -s 96'`. Then Calc, Thunar and the terminal
+  were started with the brief's lines, and Chromium with the marker page. Each app went through `./capture.sh`, and
+  its frames were drawn ×2 with `node overlay.mjs out/<label>-s.png out/<label>-state.json out/<label>-overlay-x2.png
+  2`.
 - **Trees and overlays.** `./capture.sh <label> <pid> <window_id>` (the `SCALE` env var sets the overlay scale)
   writes `out/<label>-state.json`, `-s.png` and `-overlay.png`. I looked at each overlay whole and in 2–6×
   nearest-neighbour crops.
@@ -305,7 +359,7 @@ Chromium, 1×, example.com (`tree_markdown`, 828 lines, 785 of them `static` cha
 Calc, 1× (`structuredContent.elements`, window at 0,50; `truncation_reason=huge_container`, 129 elements):
 ```
 [1]   menu "File"          frame={"h":27,"w":39,"x":0,"y":50}     native menu bar, correct
-[14]  menu "File"          frame={"h":22,"w":36,"x":0,"y":50}     hidden second menu bar
+[14]  menu "File"          frame={"h":22,"w":36,"x":0,"y":50}     duplicate menu bar
 [62]  button "New"         frame={"h":36,"w":45,"x":4,"y":52}     on screen y 79-115: 27 px high
 [94]  panel "Font Name"    frame={"h":30,"w":207,"x":4,"y":93}    27 px high
 [95]  text "DejaVu Sans"   frame={"h":30,"w":179,"x":4,"y":120}   child of [94], correct
@@ -313,8 +367,27 @@ Calc, 1× (`structuredContent.elements`, window at 0,50; `truncation_reason=huge
 [29]  page tab "Sheet1"    frame={"h":23,"w":66,"x":133,"y":725}   on screen y 752-775
 [28]  button "Add"         frame={"h":23,"w":23,"x":104,"y":752}   same row as the tab, correct
 ```
-Calc, 2×: VCL parent and GTK child pairs differ by 45 px (panel `Font Name` y=125, child `DejaVu Sans` y=170; the
-Name Box panel y=181, child `A1` y=226), and the tab `Sheet1` is at y=1477 against `Add` at y=1522.
+Calc, 2×, GTK ×1: VCL parent and GTK child pairs differ by 45 px (panel `Font Name` y=125, child `DejaVu Sans`
+y=170; the Name Box panel y=181, child `A1` y=226). The tab `Sheet1` is at y=1477 against `Add` at y=1522.
+
+Calc, 2×, GTK ×2 (window at device 0,77, so logical 0,38.5): the same pairs differ by 27 logical px (panel
+`Font Name` y=81, child `DejaVu Sans` y=108; Name Box panel y=118, child `A1` y=145). `File` is (0,38) 39×27, `New`
+(4,40) 45×36, the tab `Sheet1` (133,725) 66×23, and `Add` (104,752) 23×23.
+
+GTK ×2 settings (`xfconf-query`, `xdpyinfo`, `xrdb`) and window geometry (`list_windows`):
+```
+before: scale=1 Xft/DPI=192
+after:  scale=2 Xft/DPI=96
+  dimensions:    2560x1600 pixels (678x424 millimeters)
+  resolution:    96x96 dots per inch
+Xft.dpi:	96
+window_id=48234508 pid=949 "File System - Thunar" 1280x960+1+78 app=Thunar-real
+window_id=50331651 pid=971 "Terminal - @46d964706182:/" 1636x970+923+629 app=Xfce4-terminal
+window_id=52428802 pid=1177 "S2 marker - Chromium" 2100x1506+20+74 app=Chromium
+window_id=54525988 pid=1206 "Untitled 1 — LibreOffice Calc" 2560x1523+0+77 app=libreoffice-calc
+window_id=54526639 pid=1206 "Welcome to LibreOffice!" 1374x818+593+452 app=Soffice
+window_id=23068675 pid=537 "xfce4-panel" 2560x54+0+0 app=Xfce4-panel
+```
 
 Thunar, 1×, icon view:
 ```
@@ -332,19 +405,32 @@ xfce4-terminal, 1×:
 ```
 1x restored  red: button frame {"h":40,"w":120,"x":58,"y":164} x1 vs pixels {"x":54,"y":164,"w":120,"h":40} -> dx 4 dy 0 dw 0 dh 0
 1x maximized red: button frame {"h":40,"w":120,"x":40,"y":154} x1 vs pixels {"x":40,"y":154,"w":120,"h":40} -> dx 0 dy 0 dw 0 dh 0
-2x restored  red: button frame {"h":80,"w":240,"x":126,"y":323} x1 vs pixels {"x":108,"y":300,"w":240,"h":80} -> dx 18 dy 23 dw 0 dh 0
-2x maximized red: button frame {"h":80,"w":240,"x":80,"y":280} x1 vs pixels {"x":80,"y":281,"w":240,"h":80} -> dx 0 dy -1 dw 0 dh 0
+2x GTK×1 restored  red: button frame {"h":80,"w":240,"x":126,"y":323} x1 vs pixels {"x":108,"y":300,"w":240,"h":80} -> dx 18 dy 23 dw 0 dh 0
+2x GTK×1 maximized red: button frame {"h":80,"w":240,"x":80,"y":280} x1 vs pixels {"x":80,"y":281,"w":240,"h":80} -> dx 0 dy -1 dw 0 dh 0
+2x GTK×2 restored  red: button frame {"h":80,"w":240,"x":126,"y":365} x1 vs pixels {"x":108,"y":328,"w":240,"h":80} -> dx 18 dy 37 dw 0 dh 0
+2x GTK×2 maximized red: button frame {"h":80,"w":240,"x":80,"y":308} x1 vs pixels {"x":80,"y":308,"w":240,"h":80} -> dx 0 dy 0 dw 0 dh 0
 (green and blue markers: the same dx/dy in every case)
 ```
 `atspi-extents.py` (raw AT-SPI) against the driver:
 ```
 1x Chromium  raw button 'marker red': x=54 y=164 w=120 h=40      driver {"x":58,"y":164,"w":120,"h":40}
 1x Chromium  raw button 'Reload': x=92 y=83 w=34 h=34            driver {"x":92,"y":83,"w":34,"h":34}
-2x Chromium  raw button 'marker red': x=108 y=300 w=240 h=80     driver {"x":126,"y":323,"w":240,"h":80}
-2x Chromium  raw button 'Minimize': x=960 y=23 w=32 h=40         driver {"x":960,"y":23,"w":32,"h":40}
-2x Calc      raw button 'New': x=4 y=51 w=81 h=61                driver {"x":4,"y":51,"w":81,"h":61}
-2x Calc      raw page tab 'Sheet1': x=203 y=1477 w=130 h=37      driver {"x":203,"y":1477,"w":130,"h":37}
-2x Thunar    raw button 'Home': x=1057 y=634 w=31 h=40           driver {"x":1057,"y":634,"w":31,"h":40}
+2x GTK×1 Chromium  raw button 'marker red': x=108 y=300 w=240 h=80  driver {"x":126,"y":323,"w":240,"h":80}
+2x GTK×1 Chromium  raw button 'Minimize': x=960 y=23 w=32 h=40      driver {"x":960,"y":23,"w":32,"h":40}
+2x GTK×1 Calc      raw button 'New': x=4 y=51 w=81 h=61             driver {"x":4,"y":51,"w":81,"h":61}
+2x GTK×1 Calc      raw page tab 'Sheet1': x=203 y=1477 w=130 h=37   driver {"x":203,"y":1477,"w":130,"h":37}
+2x GTK×1 Thunar    raw button 'Home': x=1057 y=634 w=31 h=40        driver {"x":1057,"y":634,"w":31,"h":40}
+2x GTK×2 Thunar    raw button 'Home': x=97 y=70 w=31 h=31           driver {"x":97,"y":70,"w":31,"h":31}
+2x GTK×2 Thunar    raw menu 'File': x=0 y=39 w=39 h=27              driver {"x":0,"y":39,"w":39,"h":27}
+2x GTK×2 terminal  raw menu 'File': x=461 y=314 w=39 h=27           driver {"x":461,"y":314,"w":39,"h":27}
+2x GTK×2 terminal  raw terminal 'Terminal': x=461 y=341 w=802 h=458 driver {"x":461,"y":341,"w":802,"h":458}
+2x GTK×2 Calc      raw button 'New': x=4 y=40 w=45 h=36             driver {"x":4,"y":40,"w":45,"h":36}
+2x GTK×2 Calc      raw page tab 'Sheet1': x=133 y=725 w=66 h=23     driver {"x":133,"y":725,"w":66,"h":23}
+2x GTK×2 Calc      raw button 'Add': x=104 y=752 w=23 h=23          driver {"x":104,"y":752,"w":23,"h":23}
+2x GTK×2 Chromium  raw button 'marker red': x=108 y=328 w=240 h=80  driver {"x":126,"y":365,"w":240,"h":80}
+2x GTK×2 Chromium  raw button 'Minimize': x=960 y=37 w=32 h=40      driver {"x":960,"y":37,"w":32,"h":40}
+2x GTK×2 Chromium  raw document web 'S2 marker': x=28 y=248 w=2084 h=1324 (driver identical)
+2x GTK×2 Thunar    driver screenshot_frame for Home: {"x":93,"y":-8,"w":30,"h":30}; true place in that 1237x928 shot: (186.5,59.9) 60x60
 ```
 `get_window_state`, 7 calls each (1× first, then 2×):
 ```
