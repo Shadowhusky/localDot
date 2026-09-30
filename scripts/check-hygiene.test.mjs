@@ -1,5 +1,7 @@
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { findViolations } from "./check-hygiene.mjs";
+import { findViolations, readTextFile } from "./check-hygiene.mjs";
 
 const repo = (map) => ({ list: Object.keys(map), read: (file) => map[file] ?? null });
 
@@ -28,5 +30,12 @@ describe("findViolations", () => {
 
   it("skips binary files", () => {
     expect(findViolations(["img.png"], () => null)).toEqual([]);
+  });
+});
+
+describe("readTextFile", () => {
+  it("returns null for a file that no longer exists", () => {
+    const missing = join(dirname(fileURLToPath(import.meta.url)), "missing.txt");
+    expect(readTextFile(missing)).toBeNull();
   });
 });
