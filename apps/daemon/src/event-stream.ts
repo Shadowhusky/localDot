@@ -25,9 +25,15 @@ export function attachEventStream(
     noServer: true,
     handleProtocols: (protocols) => (protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false),
   });
+  const base = `http://127.0.0.1:${port}`;
   server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     socket.on("error", () => socket.destroy());
-    const url = new URL(req.url ?? "/", `http://127.0.0.1:${port}`);
+    const target = req.url ?? "/";
+    if (!URL.canParse(target, base)) {
+      refuse(socket, "400 Bad Request");
+      return;
+    }
+    const url = new URL(target, base);
     const sessionId = STREAM_PATH.exec(url.pathname)?.[1];
     const given = tokenFromHeaders({
       authorization: req.headers.authorization,
@@ -41,12 +47,17 @@ export function attachEventStream(
       sessionId !== undefined &&
       ULID_PATTERN.test(sessionId);
     if (!allowed) {
-      socket.end("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      refuse(socket, "403 Forbidden");
       return;
     }
     const fromSeq = Math.max(0, Number(url.searchParams.get("fromSeq")) || 0);
     wss.handleUpgrade(req, socket, head, (ws) => streamSession(ws, eventLog, sessionId, fromSeq));
   });
+}
+
+function refuse(socket: Duplex, status: string): void {
+  socket.once("finish", () => socket.destroy());
+  socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
 }
 
 function streamSession(
@@ -55,17 +66,22 @@ function streamSession(
   sessionId: string,
   fromSeq: number,
 ): void {
+  // ws closes the connection itself after a protocol error; an unhandled 'error' would crash the daemon.
+  ws.on("error", () => {});
   let nextSeq = fromSeq;
   const send = (event: LocalDotEvent) => {
     if (event.seq < nextSeq) return;
     ws.send(JSON.stringify(event));
     nextSeq = event.seq + 1;
   };
-  for (const event of eventLog.read(sessionId, fromSeq)) send(event);
+  try {
+    for (const event of eventLog.read(sessionId, fromSeq)) send(event);
+  } catch {
+    ws.close(1011, "backlog unavailable");
+    return;
+  }
   const unsubscribe = eventLog.subscribe((sid, event) => {
     if (sid === sessionId) send(event);
   });
   ws.on("close", unsubscribe);
-  // ws closes the connection itself after a protocol error; an unhandled 'error' would crash the daemon.
-  ws.on("error", () => {});
 }

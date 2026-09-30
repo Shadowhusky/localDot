@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import type { Server } from "node:http";
 import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -28,7 +28,8 @@ afterEach(() => stop?.());
 
 async function start() {
   const port = await freePort();
-  const eventLog = new EventLog(mkdtempSync(join(tmpdir(), "local dot's stream-")));
+  const home = mkdtempSync(join(tmpdir(), "local dot's stream-"));
+  const eventLog = new EventLog(home);
   const server = serve({
     fetch: createApp({ token: TOKEN, port, eventLog }).fetch,
     hostname: "127.0.0.1",
@@ -43,7 +44,7 @@ async function start() {
   const origin = `http://127.0.0.1:${port}`;
   const open = (path: string, protocols: string[], options: ClientOptions = { origin }) =>
     new WebSocket(`ws://127.0.0.1:${port}${path}`, protocols, options);
-  return { port, eventLog, origin, open };
+  return { port, home, eventLog, origin, open };
 }
 
 const rawUpgrade = (port: number, target: string) =>
@@ -53,6 +54,7 @@ const rawUpgrade = (port: number, target: string) =>
       const [status = ""] = String(chunk).split("\r\n");
       resolve({ socket, status });
     });
+    socket.once("close", () => resolve({ socket, status: "" }));
     socket.write(
       [
         `GET ${target} HTTP/1.1`,
@@ -153,5 +155,32 @@ describe("event stream", () => {
     socket.write(Buffer.from([0x81, 0x02, 0x68, 0x69]));
     await new Promise((resolve) => socket.once("close", resolve));
     expect(await opens(open(path, [WS_PROTOCOL, TOKEN_PROTOCOL]))).toBe(true);
+  });
+
+  it("answers 400 to a malformed request target and keeps serving", async () => {
+    const { port, eventLog, open } = await start();
+    const targets = [
+      "http://127.0.0.1:99999/x",
+      "http://[/x",
+      "//[/x",
+      "http://%zz/x",
+      "http://a:b:c/x",
+    ];
+    for (const target of targets) {
+      const { socket, status } = await rawUpgrade(port, target);
+      socket.destroy();
+      expect(status, target).toBe("HTTP/1.1 400 Bad Request");
+    }
+    const path = `/api/sessions/${eventLog.createSession()}/stream`;
+    expect(await opens(open(path, [WS_PROTOCOL, TOKEN_PROTOCOL]))).toBe(true);
+  });
+
+  it("closes the stream with 1011 when the backlog cannot be read", async () => {
+    const { home, eventLog, open } = await start();
+    const id = eventLog.createSession();
+    mkdirSync(join(home, "sessions", id, "events.jsonl"));
+    const ws = open(`/api/sessions/${id}/stream`, [WS_PROTOCOL, TOKEN_PROTOCOL]);
+    const code = await new Promise<number>((resolve) => ws.on("close", resolve));
+    expect(code).toBe(1011);
   });
 });
