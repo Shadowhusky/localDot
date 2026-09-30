@@ -106,6 +106,43 @@ describe("AvatarController", () => {
     expect(run(3000).expressions.smug ?? 0).toBeLessThan(0.05);
   });
 
+  it("closes the mouth after a malformed track that skipped preparation", () => {
+    const { avatar, run } = make();
+    avatar.speak({
+      lang: "en",
+      startsAt: 0,
+      visemes: [
+        { t: 0, shape: "A" },
+        { t: Number.NaN, shape: "A" },
+      ],
+    });
+    expect(run(5000)).toMatchObject({ mouthShape: "rest", mouthOpen: 0 });
+  });
+
+  it("fades a reply's mood once its speech has finished", () => {
+    const { avatar, run } = make();
+    avatar.setMood("smug", 1);
+    avatar.speak(
+      prepareTrack({
+        lang: "en",
+        startsAt: 0,
+        visemes: [
+          { t: 0, shape: "A" },
+          { t: 300, shape: "rest" },
+        ],
+      }),
+    );
+    expect(run(500).expressions.smug ?? 0).toBeGreaterThan(0.5);
+    expect(run(2000).expressions.smug ?? 0).toBeLessThan(0.05);
+  });
+
+  it("fades a mood set without speech after a few seconds", () => {
+    const { avatar, run } = make();
+    avatar.setMood("smug", 1);
+    expect(run(3000).expressions.smug ?? 0).toBeGreaterThan(0.9);
+    expect(run(6000).expressions.smug ?? 0).toBeLessThan(0.05);
+  });
+
   it("keeps every parameter finite and in range under random input", () => {
     const { avatar, run } = make();
     const states = [

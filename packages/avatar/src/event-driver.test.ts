@@ -126,6 +126,45 @@ describe("EventDriver", () => {
     expect(d.calls).toEqual(["react:cheer"]);
   });
 
+  it("stops waiting for an approval once the session ends", () => {
+    const d = make();
+    d.driver.handle(
+      ev("approval.request", {
+        approvalId: "a1",
+        kind: "send",
+        title: "Send the report",
+        risk: "high",
+      }),
+    );
+    d.driver.handle(ev("session.end", { reason: "stopped" }));
+    d.at(5000);
+    d.driver.handle(
+      ev("action.intent", { verb: "click", label: "Files", point: { x: 30, y: 40 }, risk: "none" }),
+    );
+    expect(d.looking()).toEqual({ x: 30, y: 40 });
+  });
+
+  it("starts a new session without the previous session's error streak", () => {
+    const d = make();
+    d.driver.handle(ev("action.result", { ok: false, error: "File is locked" }));
+    d.at(1000);
+    d.driver.handle(ev("session.start", { screen: { w: 1280, h: 800, scale: 1 }, os: "linux" }));
+    d.at(2000);
+    d.driver.handle(ev("action.result", { ok: false, error: "File is locked" }));
+    expect(d.calls).toEqual(["react:wince", "react:wince"]);
+  });
+
+  it("turns to the user while the agent waits for them, then back to the target", () => {
+    const d = make();
+    d.driver.handle(
+      ev("action.intent", { verb: "click", label: "Save", point: { x: 10, y: 20 }, risk: "none" }),
+    );
+    d.driver.handle(ev("agent.state", { state: "waiting_user" }));
+    expect(d.looking()).toBeNull();
+    d.driver.handle(ev("agent.state", { state: "acting" }));
+    expect(d.looking()).toEqual({ x: 10, y: 20 });
+  });
+
   it("does not react to chatter", () => {
     const d = make();
     d.driver.handle(ev("thought.delta", { text: "hmm" }));

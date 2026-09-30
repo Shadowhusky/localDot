@@ -26,6 +26,8 @@ export class EventDriver {
   readonly #toPage: (p: Point) => Point;
   readonly #now: () => number;
   #lastErrorAt = Number.NEGATIVE_INFINITY;
+  #approvalPending = false;
+  #waitingForUser = false;
 
   constructor(
     sink: AvatarSink,
@@ -42,6 +44,8 @@ export class EventDriver {
     switch (event.type) {
       case "agent.state":
         this.#sink.setState(event.data.state);
+        this.#waitingForUser = event.data.state === "waiting_user";
+        this.#faceUser(t);
         break;
       case "action.intent":
         if (event.data.point) this.attention.set("target", this.#toPage(event.data.point), t);
@@ -71,21 +75,40 @@ export class EventDriver {
         break;
       }
       case "approval.request":
-        this.attention.set("approval", null, t);
+        this.#approvalPending = true;
+        this.#faceUser(t);
         break;
       case "approval.resolve":
-        this.attention.clear("approval");
+        this.#approvalPending = false;
+        this.#faceUser(t);
         if (event.data.decision === "approve") this.#sink.react("nod");
+        break;
+      case "session.start":
+        this.#resetSession(t);
         break;
       case "session.end":
         if (event.data.reason === "done") this.#sink.react("cheer");
         else if (event.data.reason === "error") this.#error(t);
+        this.#resetSession(t);
         break;
     }
   }
 
   update(): void {
     this.#sink.setAttention(this.attention.resolve(this.#now()).point);
+  }
+
+  // The "approval" source is the top priority: she faces the user for an approval or a question.
+  #faceUser(t: number): void {
+    if (this.#approvalPending || this.#waitingForUser) this.attention.set("approval", null, t);
+    else this.attention.clear("approval");
+  }
+
+  #resetSession(t: number): void {
+    this.#approvalPending = false;
+    this.#waitingForUser = false;
+    this.#faceUser(t);
+    this.#lastErrorAt = Number.NEGATIVE_INFINITY;
   }
 
   #error(t: number): void {

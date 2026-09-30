@@ -3,7 +3,7 @@ import { DEFAULT_GAZE_LIMITS, type GazeLimits, gazeTargets, type Point } from ".
 import { BlinkSchedule, breathAt, swayAt } from "./life.ts";
 import { type AvatarParams, clamp, sanitizeParams } from "./params.ts";
 import { type ReactionKind, ReactionMixer, type ReactionOffsets } from "./reactions.ts";
-import { mouthAt, type SpeechTrack } from "./speech.ts";
+import { MOUTH_TAIL_MS, mouthAt, prepareTrack, type SpeechTrack } from "./speech.ts";
 import { SpringChannel } from "./spring-channel.ts";
 import { type AgentStateName, STATE_POSES, StateGate, THINKING_HMM_MS } from "./states.ts";
 
@@ -18,6 +18,7 @@ export interface ControllerOptions {
 export const EYE_SPRING: SpringParams = { dampingRatio: 1, response: 0.08 };
 export const HEAD_SPRING: SpringParams = { dampingRatio: 1, response: 0.35 };
 const POSE_SPRING: SpringParams = { dampingRatio: 1, response: 0.4 };
+export const MOOD_HOLD_MS = 4000;
 
 type Channel = "eyeX" | "eyeY" | "headX" | "headY" | "bodyX" | "brow" | "eyeOpen";
 
@@ -36,6 +37,7 @@ export class AvatarController {
   readonly #channels: Record<Channel, SpringChannel>;
   readonly #expressionChannels = new Map<string, SpringChannel>();
   readonly #moods = new Map<string, number>();
+  #moodUntil = Number.NEGATIVE_INFINITY;
 
   constructor(options: ControllerOptions, now: () => number = () => performance.now()) {
     this.#now = now;
@@ -75,13 +77,25 @@ export class AvatarController {
   }
 
   speak(track: SpeechTrack | null): void {
-    this.#track = track;
-    if (track === null) this.#moods.clear();
+    this.#track = track && prepareTrack(track);
+    if (this.#track === null) {
+      this.#moods.clear();
+      return;
+    }
+    const last = this.#track.visemes.at(-1);
+    if (last && Number.isFinite(this.#track.startsAt)) {
+      this.#moodUntil = this.#track.startsAt + last.t + MOUTH_TAIL_MS;
+    }
   }
 
+  // A reply's mood lasts while its speech plays, or MOOD_HOLD_MS for a reply with no speech.
   setMood(mood: string, weight: number): void {
-    if (weight > 0 && Number.isFinite(weight)) this.#moods.set(mood, clamp(weight, 0, 1));
-    else this.#moods.delete(mood);
+    if (weight > 0 && Number.isFinite(weight)) {
+      this.#moods.set(mood, clamp(weight, 0, 1));
+      this.#moodUntil = this.#now() + MOOD_HOLD_MS;
+    } else {
+      this.#moods.delete(mood);
+    }
   }
 
   setReducedMotion(on: boolean): void {
@@ -90,6 +104,7 @@ export class AvatarController {
 
   frame(): AvatarParams {
     const t = this.#now();
+    if (t > this.#moodUntil) this.#moods.clear();
     const state = this.#gate.current(t);
     const pose = STATE_POSES[state];
     const gaze = gazeTargets(this.#attention, this.#headCenter, this.#reach, this.#limits);
