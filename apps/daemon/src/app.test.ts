@@ -3,8 +3,10 @@ import { createApp } from "./app.ts";
 
 const PORT = 4750;
 const TOKEN = "t".repeat(43);
+const LOOPBACK = `127.0.0.1:${PORT}`;
 const app = createApp({ token: TOKEN, port: PORT });
-const url = (path: string, host = `127.0.0.1:${PORT}`) => `http://${host}${path}`;
+const url = (path: string, host = LOOPBACK) => `http://${host}${path}`;
+const bearer = { authorization: `Bearer ${TOKEN}` };
 
 describe("host and origin guard", () => {
   it("serves health on the loopback host", async () => {
@@ -28,6 +30,23 @@ describe("host and origin guard", () => {
     expect(foreign.status).toBe(403);
     expect(nullOrigin.status).toBe(403);
   });
+
+  const refusals: [string, string, Record<string, string>][] = [
+    ["evil Host", "evil.com", {}],
+    ["portless Host", "127.0.0.1", {}],
+    ["null Origin", LOOPBACK, { origin: "null" }],
+    ["wrong-port Origin", LOOPBACK, { origin: `http://127.0.0.1:${PORT + 1}` }],
+  ];
+  const paths = ["/healthz", "/api/whoami", "/does-not-exist"];
+
+  it.each(
+    refusals.flatMap(([label, host, headers]) =>
+      paths.map((path) => [label, path, host, headers] as const),
+    ),
+  )("refuses %s on %s even with a valid bearer token", async (_label, path, host, headers) => {
+    const res = await app.request(url(path, host), { headers: { host, ...bearer, ...headers } });
+    expect(res.status).toBe(403);
+  });
 });
 
 describe("token guard", () => {
@@ -35,33 +54,30 @@ describe("token guard", () => {
     expect((await app.request(url("/api/whoami"))).status).toBe(401);
   });
 
-  it("accepts a bearer token or the session cookie", async () => {
-    const bearer = await app.request(url("/api/whoami"), {
-      headers: { authorization: `Bearer ${TOKEN}` },
-    });
-    const cookie = await app.request(url("/api/whoami"), {
-      headers: { cookie: `localdot_session=${TOKEN}` },
-    });
-    expect(bearer.status).toBe(200);
-    expect(cookie.status).toBe(200);
+  it("accepts the bearer token", async () => {
+    const res = await app.request(url("/api/whoami"), { headers: bearer });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ ok: true });
   });
 
-  it("claims a strict http-only session cookie with the right token only", async () => {
-    expect((await app.request(url("/auth/claim?token=wrong"))).status).toBe(401);
-    const ok = await app.request(url(`/auth/claim?token=${TOKEN}`));
-    expect(ok.status).toBe(302);
-    const cookie = ok.headers.get("set-cookie") ?? "";
-    expect(cookie).toContain("localdot_session=");
-    expect(cookie).toContain("HttpOnly");
-    expect(cookie).toContain("SameSite=Strict");
+  it("ignores a session cookie even when it carries the right token", async () => {
+    const res = await app.request(url("/api/whoami"), {
+      headers: { cookie: `localdot_session=${TOKEN}` },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  it("has no cookie claim route", async () => {
+    const res = await app.request(url(`/auth/claim?token=${TOKEN}`));
+    expect(res.status).toBe(404);
+    expect(res.headers.get("set-cookie")).toBeNull();
   });
 
   it("never authenticates against an empty token", async () => {
     const emptyTokenApp = createApp({ token: "", port: PORT });
-    const cookie = await emptyTokenApp.request(url("/api/whoami"), {
-      headers: { cookie: "localdot_session=" },
+    const res = await emptyTokenApp.request(url("/api/whoami"), {
+      headers: { authorization: "Bearer " },
     });
-    expect(cookie.status).toBe(401);
-    expect((await emptyTokenApp.request(url("/auth/claim?token="))).status).toBe(401);
+    expect(res.status).toBe(401);
   });
 });

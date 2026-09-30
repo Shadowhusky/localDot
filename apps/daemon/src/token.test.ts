@@ -8,9 +8,27 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { localdotHome } from "./paths.ts";
 import { loadOrCreateToken, tokensMatch } from "./token.ts";
+
+const fsHooks = vi.hoisted(() => ({ beforePublish: undefined as (() => void) | undefined }));
+
+// Lets a test create a rival token file between the existence check and the publish step.
+vi.mock("node:fs", async (importOriginal) => {
+  const fs = await importOriginal<typeof import("node:fs")>();
+  const hooked =
+    <A extends unknown[], R>(fn: (...args: A) => R) =>
+    (...args: A): R => {
+      fsHooks.beforePublish?.();
+      return fn(...args);
+    };
+  return { ...fs, linkSync: hooked(fs.linkSync), renameSync: hooked(fs.renameSync) };
+});
+
+afterEach(() => {
+  fsHooks.beforePublish = undefined;
+});
 
 const tempHome = () => mkdtempSync(join(tmpdir(), "local dot's home-"));
 
@@ -22,6 +40,7 @@ describe("loadOrCreateToken", () => {
     expect(first).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(statSync(file).mode & 0o777).toBe(0o600);
     expect(loadOrCreateToken(file)).toBe(first);
+    expect(readdirSync(join(home, "nested"))).toEqual(["daemon-token"]);
   });
 
   it.each([
@@ -36,6 +55,20 @@ describe("loadOrCreateToken", () => {
     expect(token).toMatch(/^[A-Za-z0-9_-]{43}$/);
     expect(readFileSync(file, "utf8").trim()).toBe(token);
     expect(statSync(file).mode & 0o777).toBe(0o600);
+    expect(readdirSync(home)).toEqual(["daemon-token"]);
+  });
+
+  it("keeps a token another process created first instead of clobbering it", () => {
+    const home = tempHome();
+    const file = join(home, "daemon-token");
+    const rival = "r".repeat(43);
+    fsHooks.beforePublish = () => {
+      fsHooks.beforePublish = undefined;
+      writeFileSync(file, `${rival}\n`, { mode: 0o600 });
+    };
+    expect(loadOrCreateToken(file)).toBe(rival);
+    expect(readFileSync(file, "utf8").trim()).toBe(rival);
+    expect(loadOrCreateToken(file)).toBe(rival);
     expect(readdirSync(home)).toEqual(["daemon-token"]);
   });
 

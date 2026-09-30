@@ -1,6 +1,5 @@
 import { Hono } from "hono";
-import { setCookie } from "hono/cookie";
-import { isAllowedHost, isAllowedOrigin, SESSION_COOKIE, tokenFromHeaders } from "./guard.ts";
+import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { tokensMatch } from "./token.ts";
 
 export interface AppOptions {
@@ -23,17 +22,8 @@ export function createApp({ token, port }: AppOptions): Hono {
 
   app.get("/healthz", (c) => c.text("ok"));
 
-  app.get("/auth/claim", (c) => {
-    if (!tokensMatch(token, c.req.query("token"))) return c.text("unauthorized", 401);
-    setCookie(c, SESSION_COOKIE, token, { httpOnly: true, sameSite: "Strict", path: "/" });
-    return c.redirect("/", 302);
-  });
-
   app.use("/api/*", async (c, next) => {
-    const given = tokenFromHeaders({
-      authorization: c.req.header("authorization"),
-      cookie: c.req.header("cookie"),
-    });
+    const given = tokenFromHeaders({ authorization: c.req.header("authorization") });
     if (!tokensMatch(token, given)) return c.text("unauthorized", 401);
     await next();
   });

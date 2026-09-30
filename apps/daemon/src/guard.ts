@@ -1,4 +1,4 @@
-export const SESSION_COOKIE = "localdot_session";
+export const WS_TOKEN_PREFIX = "localdot.token.";
 
 export function isAllowedHost(host: string | undefined, port: number): boolean {
   return host === `127.0.0.1:${port}` || host === `localhost:${port}`;
@@ -14,14 +14,13 @@ export function isAllowedOrigin(origin: string | undefined, port: number): boole
 
 export function tokenFromHeaders(headers: {
   authorization?: string | undefined;
-  cookie?: string | undefined;
+  "sec-websocket-protocol"?: string | undefined;
 }): string | undefined {
   const bearer = headers.authorization?.match(/^Bearer (.+)$/)?.[1];
   if (bearer) return bearer;
-  const prefix = `${SESSION_COOKIE}=`;
-  return headers.cookie
-    ?.split(";")
-    .map((part) => part.trim())
-    .find((part) => part.startsWith(prefix))
-    ?.slice(prefix.length);
+  return headers["sec-websocket-protocol"]
+    ?.split(",")
+    .map((protocol) => protocol.trim())
+    .find((protocol) => protocol.startsWith(WS_TOKEN_PREFIX))
+    ?.slice(WS_TOKEN_PREFIX.length);
 }
