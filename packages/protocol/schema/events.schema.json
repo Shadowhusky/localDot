@@ -55,23 +55,41 @@
                   "exclusiveMinimum": 0
                 }
               },
-              "required": ["w", "h", "scale"],
+              "required": [
+                "w",
+                "h",
+                "scale"
+              ],
               "additionalProperties": false
             },
             "os": {
               "type": "string",
-              "enum": ["linux", "macos"]
+              "enum": [
+                "linux",
+                "macos"
+              ]
             },
             "title": {
               "type": "string",
               "maxLength": 200
             }
           },
-          "required": ["screen", "os"],
+          "required": [
+            "screen",
+            "os"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -112,14 +130,28 @@
           "properties": {
             "reason": {
               "type": "string",
-              "enum": ["done", "stopped", "error"]
+              "enum": [
+                "done",
+                "stopped",
+                "error"
+              ]
             }
           },
-          "required": ["reason"],
+          "required": [
+            "reason"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -176,11 +208,21 @@
               "maxLength": 200
             }
           },
-          "required": ["state"],
+          "required": [
+            "state"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -228,11 +270,22 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["ongoing", "everyMs"],
+          "required": [
+            "ongoing",
+            "everyMs"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -275,11 +328,21 @@
               "type": "string"
             }
           },
-          "required": ["text"],
+          "required": [
+            "text"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -332,19 +395,38 @@
                   },
                   "status": {
                     "type": "string",
-                    "enum": ["todo", "doing", "done", "skipped"]
+                    "enum": [
+                      "todo",
+                      "doing",
+                      "done",
+                      "skipped"
+                    ]
                   }
                 },
-                "required": ["id", "text", "status"],
+                "required": [
+                  "id",
+                  "text",
+                  "status"
+                ],
                 "additionalProperties": false
               }
             }
           },
-          "required": ["items"],
+          "required": [
+            "items"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -388,14 +470,30 @@
             },
             "status": {
               "type": "string",
-              "enum": ["todo", "doing", "done", "skipped"]
+              "enum": [
+                "todo",
+                "doing",
+                "done",
+                "skipped"
+              ]
             }
           },
-          "required": ["id", "status"],
+          "required": [
+            "id",
+            "status"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -436,17 +534,34 @@
           "properties": {
             "kind": {
               "type": "string",
-              "enum": ["gui", "shell", "file", "browser", "ask", "think"]
+              "enum": [
+                "gui",
+                "shell",
+                "file",
+                "browser",
+                "ask",
+                "think"
+              ]
             },
             "planItem": {
               "type": "string"
             }
           },
-          "required": ["kind"],
+          "required": [
+            "kind"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -487,18 +602,33 @@
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["ok", "failed", "blocked", "cancelled"]
+              "enum": [
+                "ok",
+                "failed",
+                "blocked",
+                "cancelled"
+              ]
             },
             "note": {
               "type": "string",
               "maxLength": 500
             }
           },
-          "required": ["status"],
+          "required": [
+            "status"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -539,7 +669,15 @@
           "properties": {
             "verb": {
               "type": "string",
-              "enum": ["click", "move", "drag", "scroll", "type", "key", "wait"]
+              "enum": [
+                "click",
+                "move",
+                "drag",
+                "scroll",
+                "type",
+                "key",
+                "wait"
+              ]
             },
             "label": {
               "type": "string",
@@ -556,12 +694,20 @@
                   "type": "number"
                 }
               },
-              "required": ["x", "y"],
+              "required": [
+                "x",
+                "y"
+              ],
               "additionalProperties": false
             },
             "risk": {
               "type": "string",
-              "enum": ["none", "low", "medium", "high"]
+              "enum": [
+                "none",
+                "low",
+                "medium",
+                "high"
+              ]
             },
             "pointer": {
               "type": "object",
@@ -576,7 +722,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["x", "y"],
+                  "required": [
+                    "x",
+                    "y"
+                  ],
                   "additionalProperties": false
                 },
                 "to": {
@@ -589,7 +738,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["x", "y"],
+                  "required": [
+                    "x",
+                    "y"
+                  ],
                   "additionalProperties": false
                 },
                 "startsAt": {
@@ -611,15 +763,34 @@
                   "const": "minjerk-bow-v1"
                 }
               },
-              "required": ["from", "to", "startsAt", "durationMs", "seed", "curve"],
+              "required": [
+                "from",
+                "to",
+                "startsAt",
+                "durationMs",
+                "seed",
+                "curve"
+              ],
               "additionalProperties": false
             }
           },
-          "required": ["verb", "label", "risk"],
+          "required": [
+            "verb",
+            "label",
+            "risk"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -671,7 +842,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["x", "y"],
+                  "required": [
+                    "x",
+                    "y"
+                  ],
                   "additionalProperties": false
                 },
                 "bbox": {
@@ -692,12 +866,24 @@
                       "minimum": 0
                     }
                   },
-                  "required": ["x", "y", "w", "h"],
+                  "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "h"
+                  ],
                   "additionalProperties": false
                 },
                 "source": {
                   "type": "string",
-                  "enum": ["ax", "dom", "som", "ocr", "vision", "coords"]
+                  "enum": [
+                    "ax",
+                    "dom",
+                    "som",
+                    "ocr",
+                    "vision",
+                    "coords"
+                  ]
                 },
                 "role": {
                   "type": "string",
@@ -728,15 +914,28 @@
                   "type": "boolean"
                 }
               },
-              "required": ["point", "source"],
+              "required": [
+                "point",
+                "source"
+              ],
               "additionalProperties": false
             }
           },
-          "required": ["target"],
+          "required": [
+            "target"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -777,18 +976,35 @@
           "properties": {
             "reason": {
               "type": "string",
-              "enum": ["preflight", "policy", "user", "model", "timeout", "stale"]
+              "enum": [
+                "preflight",
+                "policy",
+                "user",
+                "model",
+                "timeout",
+                "stale"
+              ]
             },
             "detail": {
               "type": "string",
               "maxLength": 500
             }
           },
-          "required": ["reason"],
+          "required": [
+            "reason"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -838,7 +1054,11 @@
                     },
                     "button": {
                       "type": "string",
-                      "enum": ["left", "right", "middle"]
+                      "enum": [
+                        "left",
+                        "right",
+                        "middle"
+                      ]
                     },
                     "count": {
                       "anyOf": [
@@ -872,11 +1092,19 @@
                           "type": "number"
                         }
                       },
-                      "required": ["x", "y"],
+                      "required": [
+                        "x",
+                        "y"
+                      ],
                       "additionalProperties": false
                     }
                   },
-                  "required": ["kind", "button", "count", "at"],
+                  "required": [
+                    "kind",
+                    "button",
+                    "count",
+                    "at"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -896,11 +1124,17 @@
                           "type": "number"
                         }
                       },
-                      "required": ["x", "y"],
+                      "required": [
+                        "x",
+                        "y"
+                      ],
                       "additionalProperties": false
                     }
                   },
-                  "required": ["kind", "to"],
+                  "required": [
+                    "kind",
+                    "to"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -920,7 +1154,10 @@
                           "type": "number"
                         }
                       },
-                      "required": ["x", "y"],
+                      "required": [
+                        "x",
+                        "y"
+                      ],
                       "additionalProperties": false
                     },
                     "to": {
@@ -933,7 +1170,10 @@
                           "type": "number"
                         }
                       },
-                      "required": ["x", "y"],
+                      "required": [
+                        "x",
+                        "y"
+                      ],
                       "additionalProperties": false
                     },
                     "path": {
@@ -948,12 +1188,19 @@
                             "type": "number"
                           }
                         },
-                        "required": ["x", "y"],
+                        "required": [
+                          "x",
+                          "y"
+                        ],
                         "additionalProperties": false
                       }
                     }
                   },
-                  "required": ["kind", "from", "to"],
+                  "required": [
+                    "kind",
+                    "from",
+                    "to"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -973,7 +1220,10 @@
                           "type": "number"
                         }
                       },
-                      "required": ["x", "y"],
+                      "required": [
+                        "x",
+                        "y"
+                      ],
                       "additionalProperties": false
                     },
                     "dx": {
@@ -983,7 +1233,12 @@
                       "type": "number"
                     }
                   },
-                  "required": ["kind", "at", "dx", "dy"],
+                  "required": [
+                    "kind",
+                    "at",
+                    "dx",
+                    "dy"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1002,7 +1257,11 @@
                       "type": "boolean"
                     }
                   },
-                  "required": ["kind", "chars", "masked"],
+                  "required": [
+                    "kind",
+                    "chars",
+                    "masked"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1020,7 +1279,10 @@
                       }
                     }
                   },
-                  "required": ["kind", "combo"],
+                  "required": [
+                    "kind",
+                    "combo"
+                  ],
                   "additionalProperties": false
                 },
                 {
@@ -1036,17 +1298,30 @@
                       "maximum": 9007199254740991
                     }
                   },
-                  "required": ["kind", "ms"],
+                  "required": [
+                    "kind",
+                    "ms"
+                  ],
                   "additionalProperties": false
                 }
               ]
             }
           },
-          "required": ["input"],
+          "required": [
+            "input"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1093,11 +1368,21 @@
               "maxLength": 500
             }
           },
-          "required": ["ok"],
+          "required": [
+            "ok"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1165,15 +1450,31 @@
                   "minimum": 0
                 }
               },
-              "required": ["x", "y", "w", "h"],
+              "required": [
+                "x",
+                "y",
+                "w",
+                "h"
+              ],
               "additionalProperties": false
             }
           },
-          "required": ["count", "masked"],
+          "required": [
+            "count",
+            "masked"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1237,7 +1538,12 @@
                     "minimum": 0
                   }
                 },
-                "required": ["x", "y", "w", "h"],
+                "required": [
+                  "x",
+                  "y",
+                  "w",
+                  "h"
+                ],
                 "additionalProperties": false
               }
             },
@@ -1245,11 +1551,23 @@
               "type": "boolean"
             }
           },
-          "required": ["frameT", "changed", "noVisibleChange"],
+          "required": [
+            "frameT",
+            "changed",
+            "noVisibleChange"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1305,11 +1623,24 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["frameId", "image", "width", "height"],
+          "required": [
+            "frameId",
+            "image",
+            "width",
+            "height"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1350,18 +1681,32 @@
           "properties": {
             "status": {
               "type": "string",
-              "enum": ["success", "unexpected", "failed"]
+              "enum": [
+                "success",
+                "unexpected",
+                "failed"
+              ]
             },
             "evidence": {
               "type": "string",
               "maxLength": 500
             }
           },
-          "required": ["status"],
+          "required": [
+            "status"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1408,11 +1753,22 @@
               "maxLength": 200
             }
           },
-          "required": ["tool", "title"],
+          "required": [
+            "tool",
+            "title"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1453,17 +1809,31 @@
           "properties": {
             "stream": {
               "type": "string",
-              "enum": ["stdout", "stderr"]
+              "enum": [
+                "stdout",
+                "stderr"
+              ]
             },
             "chunk": {
               "type": "string"
             }
           },
-          "required": ["stream", "chunk"],
+          "required": [
+            "stream",
+            "chunk"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1511,11 +1881,21 @@
               "maximum": 9007199254740991
             }
           },
-          "required": ["ok"],
+          "required": [
+            "ok"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1559,17 +1939,32 @@
             },
             "op": {
               "type": "string",
-              "enum": ["create", "modify", "delete"]
+              "enum": [
+                "create",
+                "modify",
+                "delete"
+              ]
             },
             "patch": {
               "type": "string"
             }
           },
-          "required": ["path", "op"],
+          "required": [
+            "path",
+            "op"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1654,7 +2049,9 @@
                   "type": "string"
                 }
               },
-              "required": ["fields"],
+              "required": [
+                "fields"
+              ],
               "additionalProperties": false
             },
             "target": {
@@ -1670,7 +2067,10 @@
                       "type": "number"
                     }
                   },
-                  "required": ["x", "y"],
+                  "required": [
+                    "x",
+                    "y"
+                  ],
                   "additionalProperties": false
                 },
                 "bbox": {
@@ -1691,12 +2091,24 @@
                       "minimum": 0
                     }
                   },
-                  "required": ["x", "y", "w", "h"],
+                  "required": [
+                    "x",
+                    "y",
+                    "w",
+                    "h"
+                  ],
                   "additionalProperties": false
                 },
                 "source": {
                   "type": "string",
-                  "enum": ["ax", "dom", "som", "ocr", "vision", "coords"]
+                  "enum": [
+                    "ax",
+                    "dom",
+                    "som",
+                    "ocr",
+                    "vision",
+                    "coords"
+                  ]
                 },
                 "role": {
                   "type": "string",
@@ -1727,19 +2139,38 @@
                   "type": "boolean"
                 }
               },
-              "required": ["point", "source"],
+              "required": [
+                "point",
+                "source"
+              ],
               "additionalProperties": false
             },
             "risk": {
               "type": "string",
-              "enum": ["medium", "high"]
+              "enum": [
+                "medium",
+                "high"
+              ]
             }
           },
-          "required": ["approvalId", "kind", "title", "risk"],
+          "required": [
+            "approvalId",
+            "kind",
+            "title",
+            "risk"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1783,22 +2214,41 @@
             },
             "decision": {
               "type": "string",
-              "enum": ["approve", "deny", "take_control"]
+              "enum": [
+                "approve",
+                "deny",
+                "take_control"
+              ]
             },
             "by": {
               "type": "string",
-              "enum": ["user", "timeout"]
+              "enum": [
+                "user",
+                "timeout"
+              ]
             },
             "note": {
               "type": "string",
               "maxLength": 500
             }
           },
-          "required": ["approvalId", "decision", "by"],
+          "required": [
+            "approvalId",
+            "decision",
+            "by"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1839,18 +2289,36 @@
           "properties": {
             "holder": {
               "type": "string",
-              "enum": ["agent", "user"]
+              "enum": [
+                "agent",
+                "user"
+              ]
             },
             "reason": {
               "type": "string",
-              "enum": ["user_takeover", "handoff_request", "resume"]
+              "enum": [
+                "user_takeover",
+                "handoff_request",
+                "resume"
+              ]
             }
           },
-          "required": ["holder", "reason"],
+          "required": [
+            "holder",
+            "reason"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1896,11 +2364,22 @@
               "type": "boolean"
             }
           },
-          "required": ["paused", "atStepBoundary"],
+          "required": [
+            "paused",
+            "atStepBoundary"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -1941,17 +2420,31 @@
           "properties": {
             "file": {
               "type": "string",
-              "enum": ["USER.md", "MEMORY.md"]
+              "enum": [
+                "USER.md",
+                "MEMORY.md"
+              ]
             },
             "patch": {
               "type": "string"
             }
           },
-          "required": ["file", "patch"],
+          "required": [
+            "file",
+            "patch"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -2004,14 +2497,32 @@
             },
             "decision": {
               "type": "string",
-              "enum": ["allow", "deny", "ask"]
+              "enum": [
+                "allow",
+                "deny",
+                "ask"
+              ]
             }
           },
-          "required": ["secretId", "host", "method", "path", "decision"],
+          "required": [
+            "secretId",
+            "host",
+            "method",
+            "path",
+            "decision"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     },
     {
@@ -2068,7 +2579,12 @@
                   "minimum": 0
                 }
               },
-              "required": ["x", "y", "w", "h"],
+              "required": [
+                "x",
+                "y",
+                "w",
+                "h"
+              ],
               "additionalProperties": false
             },
             "zoom": {
@@ -2077,14 +2593,29 @@
             },
             "reason": {
               "type": "string",
-              "enum": ["typing", "small-target", "approval"]
+              "enum": [
+                "typing",
+                "small-target",
+                "approval"
+              ]
             }
           },
-          "required": ["focus", "reason"],
+          "required": [
+            "focus",
+            "reason"
+          ],
           "additionalProperties": false
         }
       },
-      "required": ["v", "id", "seq", "t", "agent", "type", "data"],
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
       "additionalProperties": false
     }
   ]
