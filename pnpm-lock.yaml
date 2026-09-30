@@ -33,6 +33,12 @@ importers:
 
   packages/providers: {}
 
+  packages/stage:
+    dependencies:
+      '@localdot/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+
 packages:
 
   '@biomejs/biome@2.5.15':
