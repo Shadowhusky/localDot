@@ -31,6 +31,12 @@ describe("pointerAt", () => {
     expect(Math.max(...ys)).toBeLessThanOrEqual(25 + 1e-9);
   });
 
+  it("eases the bow in and out with no sideways velocity at departure or at the overshoot", () => {
+    const primaryEnd = plan.startsAt + 0.85 * plan.durationMs;
+    expect(Math.abs(pointerAt(plan, plan.startsAt + 1).y)).toBeLessThan(0.01);
+    expect(Math.abs(pointerAt(plan, primaryEnd - 1).y)).toBeLessThan(0.01);
+  });
+
   it("is deterministic for a seed and varies across seeds", () => {
     expect(pointerAt(plan, 1200)).toEqual(pointerAt(plan, 1200));
     const other = { ...plan, seed: 8 };

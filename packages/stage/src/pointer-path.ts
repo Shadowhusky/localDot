@@ -10,7 +10,8 @@ export interface PointerPlan {
 }
 
 // The primary sub-movement overshoots slightly and a corrective one settles on the target, as a
-// human hand does; both are minimum-jerk so the path has no velocity jumps.
+// human hand does. Both, and the sideways bow over the primary, are minimum-jerk eased so the path
+// has no velocity jumps.
 const PRIMARY_SHARE = 0.85;
 
 const minJerk = (u: number) => u * u * u * (10 - 15 * u + 6 * u * u);
@@ -36,7 +37,9 @@ export function pointerAt(plan: PointerPlan, tMs: number): Point {
   const tau = (tMs - startsAt) / durationMs;
   const along = progress(tau, overshoot);
   const bow =
-    side * Math.min(0.05 * distance, 36) * Math.sin(Math.PI * Math.min(1, tau / PRIMARY_SHARE));
+    side *
+    Math.min(0.05 * distance, 36) *
+    Math.sin(Math.PI * minJerk(Math.min(1, tau / PRIMARY_SHARE)));
   const nx = -dy / distance;
   const ny = dx / distance;
   return { x: from.x + dx * along + nx * bow, y: from.y + dy * along + ny * bow };
