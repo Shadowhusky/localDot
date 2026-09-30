@@ -1,0 +1,40 @@
+# The brief's Step 3 config. Only http_listen, https_listen and metrics.listen are added.
+dns:
+  enabled: false
+proxy:
+  http_listen: "127.0.0.1:4794"
+  https_listen: "127.0.0.1:4795"
+  tunnel_listen: "127.0.0.1:4796"
+  upstream_deny_cidrs:
+    - "127.0.0.0/8"
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+    - "169.254.0.0/16"
+    - "100.64.0.0/10"
+    - "::1/128"
+    - "fc00::/7"
+    - "fe80::/10"
+tls:
+  mode: "mitm"
+  ca_cert: "out/ca.crt"
+  ca_key: "out/ca.key"
+transforms:
+  - name: allowlist
+    config:
+      domains:
+        - "postman-echo.com"
+        - "example.com"
+  - name: secrets
+    config:
+      secrets:
+        - source:
+            type: env
+            var: LD_SPIKE_SECRET
+          proxy_value: "ld_spike_surrogate_7f3c9a1e5b2d4f60"
+          match_headers: ["Authorization"]
+          require: true
+          rules:
+            - host: "postman-echo.com"
+metrics:
+  listen: "127.0.0.1:4797"
