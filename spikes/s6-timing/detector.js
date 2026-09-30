@@ -12,6 +12,7 @@
   const flipTs = new Set();
   let buf = new Uint8Array(0);
   let last = null;
+  let skew = null;
 
   const reader = new MediaStreamTrackProcessor({ track: video.srcObject.getVideoTracks()[0].clone() }).readable.getReader();
   (async () => {
@@ -44,7 +45,7 @@
       frames.push(entry);
       const bright = entry.y > cfg.threshold;
       if (last !== null && bright !== last) {
-        post({ kind: "flip", ...entry, bright, i: frames.length - 1, prevAt: prev?.at });
+        post({ kind: "flip", ...entry, bright, i: frames.length - 1, prevAt: prev?.at, skew });
         const shown = presented.findLast((p) => p.ts === entry.ts);
         if (shown) post({ kind: "presented", ...shown });
         else flipTs.add(entry.ts);
@@ -64,10 +65,18 @@
 
   window.ldDetectFrames = () => frames;
   window.ldDetectPresented = () => presented;
+  // performance.now()'s wall clock minus Date.now(), read at each Date.now() tick edge for 20 ms. It blocks the
+  // page for those 20 ms, so it runs once here and otherwise only on demand, never during a run.
   window.ldClockSkew = () => {
     const d = [];
-    for (let i = 0; i < 2000; i++) d.push(wall() - Date.now());
-    return d.reduce((a, b) => a + b, 0) / d.length - 0.5;
+    let prev = Date.now();
+    for (const stop = wall() + 20; wall() < stop; ) {
+      const t = Date.now();
+      if (t !== prev) d.push(wall() - t);
+      prev = t;
+    }
+    return d.reduce((a, b) => a + b, 0) / d.length;
   };
+  skew = window.ldClockSkew();
   return `detecting on ${video.tagName}#${video.id} ${video.videoWidth}x${video.videoHeight}, visibility ${document.visibilityState}`;
 })();

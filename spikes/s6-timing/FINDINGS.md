@@ -5,50 +5,83 @@
 2.0.0, pixelflux 2.1.0, Chromium 154.0.8037.57, Mousepad 0.7.0, xdotool 3.20160805.1, Cua Driver 0.30.4, plus xinput
 1.6.4 installed at run time · viewer: Chrome 154.0.8037.92, 1300×813 CSS px at DPR 2 on a 144 Hz display · Node 25.6.0
 
-**Result: GO-WITH-CHANGES.**
+**Result: GO-WITH-CHANGES.** Revised in fix round 1 (Ruling 23). The first version pooled all injectors, swapped early
+and late for the ring, headlined a p50 constant, and favoured the driver with an unfair comparison.
 
-- **The frame showing an input reaches our page 9.5 ms (1×) and 15.4 ms (2×) after the X server sees the input.**
-  These are p50s over 370 trials per scale: two apps, keys, clicks and typing, both injectors.
-  - The brief's lines, from the host's write to the first frame that shows the flip, with `tap.js` running:
-    - 1×: `n=50/50 p50=11.4ms p95=18.9ms min=9.1ms`
-    - 2×: `n=50/50 p50=17.5ms p95=27.3ms min=13.8ms`
-  - Target p95 ≤ 80 ms at 1×: **met**, and far under the brief's example (38/61 ms).
-  - Without `tap.js`: 1× `n=50/50 p50=11.1ms p95=19.1ms min=6.4ms`, 2× `n=50/50 p50=16.7ms p95=23.2ms min=13.1ms`.
-- **Compensation constant: 10 ms at 1×, 15 ms at 2×** (pooled p50s of 9.5 and 15.4 ms).
-  - Count it from the X server's raw input event to the frame's arrival on the page.
-  - The encoded chunk reaches the page 0.4–0.7 ms before its decoded frame (pooled raw → chunk p50: 9.1 and 14.7 ms).
-  - The brief's p50s also include the host-to-container write (send → raw p50 0.7–1.3 ms), which `desktopd` won't
-    have when it stamps injections itself.
+- **The brief's lines** (`measure.mjs 50`: the host's write to a persistent `xdotool -`, then the first frame that
+  shows the flip, with `tap.js` running):
+  - 1×: `n=50/50 p50=11.4ms p95=18.9ms min=9.1ms`
+  - 2×: `n=50/50 p50=17.5ms p95=27.3ms min=13.8ms`
+  - Target p95 ≤ 80 ms at 1×: **met**. Without `tap.js`: 1× `n=50/50 p50=11.1ms p95=19.1ms min=6.4ms`, 2×
+    `n=50/50 p50=16.7ms p95=23.2ms min=13.1ms`.
+- **Press → frame depends on the injector and the scale.** Values are p50 / p99 in ms (n):
+
+  | Injector | 1× | 2× |
+  |---|---|---|
+  | own XTest click, control acts on press | 9.6 / 19.6 (50) | 13.8 / 23.1 (50) |
+  | driver click, control acts on press | 5.9 / 18.4 (110) | 14.2 / 26.4 (110) |
+  | driver key or type | 8.0 / 17.4 (120) | 14.0 / 24.4 (120) |
+  | bare XTest key (`xdotool key`, no activation) | 10.2 / 19.1 (100) | 16.3 / 29.3 (100) |
+  | xdotool `--sync` recipe, click | 9.5 / 27.5 (30) | 19.9 / 43.8 (30) |
+  | xdotool `--sync` recipe, key or type | 11.3 / 18.3 (60) | 16.1 / 26.3 (60) |
+
+  - On a control that acts on release: own XTest 15.1 / 34.5 (1×) and 20.4 / 43.5 (2×); driver 50.8 / 65.0 (1×) and
+    57.0 / 78.0 (2×).
+  - Pooling the injectors is not valid. In the first session the driver reached the frame ~3 ms sooner at the median
+    than the other injectors, at both scales. In the fix-round session it did only at 1×.
+- **Ring onset: use each injector's p99 for C, not the p50.** The ring starts at press + C. It is *early* when it starts
+  before the frame that shows the input.
+  - **p50 breaks the spec.** It is early for about half of all dispatches, e.g. 54 of 110 driver clicks at 2×, by up
+    to 23.0 ms. The spec requires that no effect appears before the frame on which the input lands.
+  - **p99 nearly holds.**
+    - C is 18.4–19.6 ms at 1× and 23.1–26.4 ms at 2× for own XTest and driver clicks, and 17.4 / 24.4 ms for driver
+      keys.
+    - At most 1 early ring per group of 50–120, by up to 10.8 ms.
+    - For own XTest and the driver on press-acting controls and keys, no ring is more than a frame late. Bare XTest
+      keys at 2× had 2 of 100; the xdotool `--sync` recipe's clicks had 16 of 30 (1×) and 25 of 30 (2×).
+  - **No constant meets the rule for every target**, because a control that acts on release shows the click later.
+    Strict compliance needs the ring to start on the frame that changes at the dispatch point, with C = p99 as the
+    timeout.
+- **Input path: our own XTest (as S2 proposed), not the driver's click.** Same session, 50 clicks per cell, p50 ms:
+
+  | | own XTest 1× | own XTest 2× | driver 1× (watch 0) | driver 2× (watch 0) |
+  |---|---|---|---|---|
+  | send → press | 2.0 | 1.8 | 14.3 | 12.8 |
+  | send → release | 2.7 | 2.4 | 51.1 | 49.7 |
+  | send → frame, control acts on press | 11.7 | 15.6 | 20.5 | 28.6 |
+  | send → frame, control acts on release | 17.2 | 21.7 | 65.4 | 68.3 |
+  | call returns | 7.7 | 6.5 | 62.9 | 61.0 |
+
+  - **The driver's hold makes the ring early on release.** It holds the button ~37 ms, so a control that acts on
+    release shows the click ~37 ms later. With C taken from clicks on press-acting controls, every driver click on a
+    release-acting control rang more than a frame early: 50/50 at both scales, by up to 46.6 / 51.6 ms. With own XTest
+    that was 10/50 at 1× (by up to 14.9 ms) and 20/50 at 2× (by up to 20.4 ms; 2 of them more than a frame early).
+  - **What own XTest costs.**
+    - `desktopd` must activate windows and confirm focus itself; the driver's foreground call does that.
+    - With its sub-millisecond release, a release-acting control's frame has a longer tail: press → frame p95 is 33.1 /
+      39.7 ms against 16.3 / 21.7 on press-acting controls.
+    - A 37 ms hold removed that tail (release → frame p95 23.6 vs 31.9 ms at 1×) but added the 37 ms.
+  - **Neither path returns an injection timestamp.** `desktopd` takes it from XI2 raw events either way.
 - **Frame interval: 16.7 ms at the configured 60 fps.** In continuous typing, 1× ran at 61.4 fps (frame gap p50
   16.3 ms). 2× ran at 52.3 fps (gap p50 16.7 ms, p90 32.4 ms); Mousepad dropped frames under 200 keys/s, while S1's
   continuous scroll held 61 fps at 2×.
-- **The drawn cursor lands within one frame of the frame showing the input: yes.** With the p50 as the constant, this
-  held in 369 of 370 trials at 1× and 366 of 370 at 2×.
-  - The ring is at most 4.7 ms (1×) or 5.8 ms (2×) early, and at most 18.0 ms or 28.4 ms late.
-  - The five trials more than a frame late are all clicks: 27.5 ms at 1×; 32.9, 37.2, 42.7 and 43.8 ms at 2×.
-  - The p5–p95 spread (12.1 ms at 1×, 13.4 ms at 2×) is under one frame. It is consistent with where the input lands
-    in the 60 Hz render and capture cycles; that was not isolated.
-- **Input path: keep Cua Driver.** Launch it with `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=0` and take the injection
-  time from XI2 raw events. This reverses S2's provisional plan to move pointer and keys to our own XTest.
-  - **The driver injects sooner.** It presses 11–16 ms (p50) into a call; the brief's xdotool recipe presses at
-    33–36 ms. From the send, the driver's effect frame arrives at 22–30 ms (p50) and xdotool's at 43–60 ms.
-  - **S2's 843–893 ms calls are the driver's post-action window watch, not injection.** The watch is documented and
-    lasts 800 ms by default on Linux X11. At 0, the same calls return in 30–36 ms (one character) and 62–68 ms (a
-    click, including its ~37 ms press hold). The injection timing does not change.
-  - **Neither path returns an injection timestamp.** An XI2 listener sees the X server's raw event for either
-    injector, within ~2 ms.
 - **Changes needed:**
-  1. **Injection timestamp.** `desktopd` runs an XI2 raw-event listener (as `xilog.py` does). `input()` returns the
-     first RawButtonPress or RawKeyPress after each call. The same events can drive `text.progress`, because every
-     typed character's key press is observed.
-  2. **Driver launch.** Start the driver with `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=0`. This loses window-change
-     evidence (`effect: confirmed` when an action opens a window); `settle()` and the fresh screenshot already cover
-     it.
-  3. **Constant per scale and per host.** 2× costs ~6 ms more here, and this M3 Ultra is faster than the spec's
-     M1-class target. Re-measure on target hardware, or calibrate in the field with the content check under
-     "Constant".
-  4. **Clock mapping.** `desktopd`'s clock and the daemon's differ by about a millisecond, and the offset moved up to
-     1 ms within a single 20–45 s run. Map them with a periodic lowest-RTT ping.
+  1. **Own injector.** `desktopd` injects pointer and keys through its own XTest client.
+     - It activates windows with `_NET_ACTIVE_WINDOW` and waits for the active-window change as an event. xdotool's
+       `--sync` instead polls, costing ~30 ms.
+     - It sends press and release without xdotool's 100 ms click delay.
+     - The click hold is open: ~1 ms is fastest, and a longer hold avoids Chromium's missed frame on release-acting
+       controls. Holds between 1 and 37 ms were not tested.
+  2. **Injection timestamp.** `input()` returns the XI2 raw press time from a listener in `desktopd` (as `xilog.py`
+     does). The same events can drive `text.progress`.
+  3. **Ring onset.** C per injector and scale at the p99: own XTest 19.6 ms at 1× and 23.1 ms at 2× (50 clicks each,
+     so that is the sample maximum; re-measure on the target machine). Alternatively, start the ring on the first frame
+     that changes at the dispatch point, which is what strict compliance needs.
+  4. **Driver.** Keep Cua Driver for trees, windows and screenshots (S2). If its input calls serve as a fallback,
+     launch it with `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=0`; its default 800 ms post-action watch is why S2's calls
+     took ~870 ms.
+  5. **Clock mapping.** `desktopd`'s clock and the daemon's differ by about a millisecond and drifted up to 1 ms within
+     a 20–45 s run. Map them with a periodic lowest-RTT ping.
 
 ## Injection to frame: the brief's measurement
 
@@ -70,36 +103,142 @@ the flash page. Values are p50 / p95 (min–max) in ms.
   matters only for DOM overlays over the `<video>`; when the stage draws video and ring in one canvas, the display
   delay applies to both.
 - **2× costs ~6 ms at the p50.** This fits S1's per-frame encode times: 2–4 ms at 1×, 8–14 ms at 2×.
-- **Fastest arrival.** The chunk reached the page as early as 4.3 ms (1×) or 8.8 ms (2×) after the raw event (pooled
-  minimums).
+- **Fastest arrival.** The chunk reached the page as early as 4.3 ms (1×) or 8.8 ms (2×) after the raw event: the
+  minimum over all trials.
 
-## Constant
+## Ring onset per injector
 
-Pooled per scale over the two runs above and the nine input-path runs below (370 trials), from the raw event to the
-frame on the page (ms):
+**Definitions.**
 
-| | p5 | p25 | p50 | p75 | p95 | p99 | max | mean |
-|---|---|---|---|---|---|---|---|---|
-| 1× | 5.3 | 6.8 | **9.5** | 13.9 | 17.4 | 19.1 | 27.5 | 10.5 |
-| 2× | 11.0 | 13.2 | **15.4** | 19.4 | 24.4 | 32.9 | 43.8 | 16.6 |
+- L is the frame's arrival minus the raw press, and the ring starts at press + C.
+- The ring is **early** when L > C: it starts before the frame that shows the input, by L − C.
+- It is **late** when L < C, by C − L. One frame is 16.7 ms.
+- All values come from `trials.csv` (every final trial, both sessions) through `node summary.mjs`.
+  - `summary.mjs` reads the 2-decimal CSV, so a percentile can differ by 0.1 ms from a run's own printout.
+  - With 50 trials, p99 is the sample maximum.
 
-Counts in 2 ms bins:
+```
+1x: press -> frame (ms), and p50 of the other spans
+| injector | n | p5 | p25 | p50 | p75 | p95 | p99 | max | send→press | press→release | release→frame |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| driver click, mousedown | 110 | 5.1 | 5.4 | 5.9 | 11.6 | 16.1 | 18.4 | 20.5 | 14.9 | 37.0 | -30.5 |
+| driver click, mouseup | 50 | 43.2 | 47.3 | 50.8 | 55.2 | 60.4 | 65.0 | 65.0 | 14.9 | 37.2 | 12.8 |
+| driver key/type | 120 | 5.2 | 5.8 | 8.0 | 13.4 | 15.4 | 17.4 | 18.5 | 14.6 | 0.1 | 7.9 |
+| xdotool --sync click, mousedown | 30 | 6.0 | 8.7 | 9.5 | 15.7 | 21.2 | 27.5 | 27.5 | 35.2 | 0.8 | 8.8 |
+| xdotool --sync key/type | 60 | 6.4 | 8.3 | 11.3 | 14.3 | 17.9 | 18.3 | 18.3 | 34.1 | 5.6 | 5.0 |
+| own XTest click, mousedown | 50 | 6.0 | 8.5 | 9.6 | 13.5 | 16.3 | 19.6 | 19.6 | 2.0 | 0.7 | 9.0 |
+| own XTest click, mouseup | 50 | 8.4 | 9.9 | 15.1 | 19.3 | 33.1 | 34.5 | 34.5 | 2.0 | 0.8 | 14.1 |
+| own XTest 37 ms hold click, mouseup | 50 | 46.8 | 50.0 | 53.7 | 56.9 | 65.9 | 71.3 | 71.3 | 2.0 | 40.6 | 12.2 |
+| bare key | 100 | 8.6 | 9.1 | 10.2 | 14.3 | 17.7 | 19.1 | 19.1 | 1.2 | 7.8 | 3.0 |
 
-- 1×: `4–6:72 6–8:42 8–10:86 10–12:31 12–14:52 14–16:56 16–18:20 18–20:8 20–22:2 26–28:1`
-- 2×: `8–10:3 10–12:34 12–14:95 14–16:68 16–18:44 18–20:52 20–22:35 22–24:20 24–26:7 26–28:6 28–30:2 32–34:1 36–38:1
-  42–44:2`
+1x: ring onset at press + C. Early = the ring starts before the frame showing the input (L > C); late = after it.
+| injector | C | ms | early | max early | > 1 frame early | max late | > 1 frame late |
+|---|---|---|---|---|---|---|---|
+| driver click, mousedown | p50 | 5.9 | 54/110 | 14.6 | 0 | 0.9 | 0 |
+| driver click, mousedown | p95 | 16.1 | 5/110 | 4.3 | 0 | 11.2 | 0 |
+| driver click, mousedown | p99 | 18.4 | 1/110 | 2.1 | 0 | 13.4 | 0 |
+| driver click, mousedown | max | 20.5 | 0/110 | 0 | 0 | 15.5 | 0 |
+| driver click, mouseup | p50 | 50.8 | 24/50 | 14.2 | 0 | 8.5 | 0 |
+| driver click, mouseup | p95 | 60.4 | 2/50 | 4.6 | 0 | 18.1 | 3 |
+| driver click, mouseup | p99 | 65.0 | 0/50 | 0 | 0 | 22.7 | 16 |
+| driver click, mouseup | max | 65.0 | 0/50 | 0 | 0 | 22.7 | 16 |
+| driver key/type | p50 | 8.0 | 59/120 | 10.5 | 0 | 3.2 | 0 |
+| driver key/type | p95 | 15.4 | 5/120 | 3.1 | 0 | 10.6 | 0 |
+| driver key/type | p99 | 17.4 | 1/120 | 1.1 | 0 | 12.6 | 0 |
+| driver key/type | max | 18.5 | 0/120 | 0 | 0 | 13.7 | 0 |
+| xdotool --sync click, mousedown | p50 | 9.5 | 14/30 | 18.0 | 1 | 3.9 | 0 |
+| xdotool --sync click, mousedown | p95 | 21.2 | 1/30 | 6.3 | 0 | 15.6 | 0 |
+| xdotool --sync click, mousedown | p99 | 27.5 | 0/30 | 0 | 0 | 21.9 | 16 |
+| xdotool --sync click, mousedown | max | 27.5 | 0/30 | 0 | 0 | 21.9 | 16 |
+| xdotool --sync key/type | p50 | 11.3 | 29/60 | 7.0 | 0 | 6.4 | 0 |
+| xdotool --sync key/type | p95 | 17.9 | 2/60 | 0.5 | 0 | 12.9 | 0 |
+| xdotool --sync key/type | p99 | 18.3 | 0/60 | 0 | 0 | 13.4 | 0 |
+| xdotool --sync key/type | max | 18.3 | 0/60 | 0 | 0 | 13.4 | 0 |
+| own XTest click, mousedown | p50 | 9.6 | 24/50 | 10.0 | 0 | 4.3 | 0 |
+| own XTest click, mousedown | p95 | 16.3 | 2/50 | 3.3 | 0 | 10.9 | 0 |
+| own XTest click, mousedown | p99 | 19.6 | 0/50 | 0 | 0 | 14.3 | 0 |
+| own XTest click, mousedown | max | 19.6 | 0/50 | 0 | 0 | 14.3 | 0 |
+| own XTest click, mouseup | p50 | 15.1 | 24/50 | 19.4 | 3 | 6.6 | 0 |
+| own XTest click, mouseup | p95 | 33.1 | 2/50 | 1.4 | 0 | 24.7 | 32 |
+| own XTest click, mouseup | p99 | 34.5 | 0/50 | 0 | 0 | 26.0 | 36 |
+| own XTest click, mouseup | max | 34.5 | 0/50 | 0 | 0 | 26.0 | 36 |
+| own XTest 37 ms hold click, mouseup | p50 | 53.7 | 24/50 | 17.6 | 1 | 10.1 | 0 |
+| own XTest 37 ms hold click, mouseup | p95 | 65.9 | 2/50 | 5.5 | 0 | 22.2 | 8 |
+| own XTest 37 ms hold click, mouseup | p99 | 71.3 | 0/50 | 0 | 0 | 27.7 | 27 |
+| own XTest 37 ms hold click, mouseup | max | 71.3 | 0/50 | 0 | 0 | 27.7 | 27 |
+| bare key | p50 | 10.2 | 49/100 | 8.9 | 0 | 4.5 | 0 |
+| bare key | p95 | 17.7 | 4/100 | 1.4 | 0 | 12.1 | 0 |
+| bare key | p99 | 19.1 | 0/100 | 0 | 0 | 13.5 | 0 |
+| bare key | max | 19.1 | 0/100 | 0 | 0 | 13.5 | 0 |
 
-- **Use the p50: 10 ms at 1×, 15 ms at 2×.** The product streams at 2×. Stamp both ends the same way every time: the
-  injection from the X server's raw event, and the frame from its arrival. Arrival as a chunk is ~0.5 ms earlier than
-  as a decoded frame, which is negligible against a 16.7 ms frame.
-- **Early or late.** The p50 centres the error.
-  - The spec's pixel oracle says "no click ring appears before the dispatch frame". If that means before the frame
-    that shows the input, the p50 breaks it by up to ~6 ms in about half of all dispatches.
-  - The p99 (19 ms at 1×, 33 ms at 2×) satisfies it, but the ring then trails by up to a frame.
+1x: a click on a control that acts on release, with C from the same injector's mousedown p99
+| injector | C | early | max early | > 1 frame early | max late |
+|---|---|---|---|---|---|
+| driver click, mouseup | 18.4 | 50/50 | 46.6 | 50 | 0.0 |
+| own XTest click, mouseup | 19.6 | 10/50 | 14.9 | 0 | 11.2 |
+
+2x: press -> frame (ms), and p50 of the other spans
+| injector | n | p5 | p25 | p50 | p75 | p95 | p99 | max | send→press | press→release | release→frame |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| driver click, mousedown | 110 | 12.0 | 12.7 | 14.2 | 19.8 | 23.8 | 26.4 | 37.2 | 13.4 | 36.8 | -22.9 |
+| driver click, mouseup | 50 | 48.6 | 53.3 | 57.0 | 59.9 | 62.9 | 78.0 | 78.0 | 11.2 | 37.1 | 18.6 |
+| driver key/type | 120 | 11.1 | 12.6 | 14.0 | 17.4 | 21.5 | 24.4 | 25.4 | 11.6 | 0.1 | 13.9 |
+| xdotool --sync click, mousedown | 30 | 16.9 | 18.2 | 19.9 | 25.4 | 42.7 | 43.8 | 43.8 | 36.3 | 0.8 | 19.2 |
+| xdotool --sync key/type | 60 | 10.1 | 13.4 | 16.1 | 19.8 | 23.7 | 26.3 | 26.3 | 33.7 | 4.9 | 10.8 |
+| own XTest click, mousedown | 50 | 12.0 | 12.4 | 13.8 | 18.8 | 21.7 | 23.1 | 23.1 | 1.8 | 0.7 | 13.3 |
+| own XTest click, mouseup | 50 | 12.5 | 14.7 | 20.4 | 29.4 | 39.7 | 43.5 | 43.5 | 1.4 | 0.7 | 19.6 |
+| bare key | 100 | 13.0 | 14.3 | 16.3 | 20.1 | 24.0 | 29.3 | 29.3 | 0.9 | 7.3 | 9.1 |
+
+2x: ring onset at press + C. Early = the ring starts before the frame showing the input (L > C); late = after it.
+| injector | C | ms | early | max early | > 1 frame early | max late | > 1 frame late |
+|---|---|---|---|---|---|---|---|
+| driver click, mousedown | p50 | 14.2 | 54/110 | 23.0 | 1 | 2.4 | 0 |
+| driver click, mousedown | p95 | 23.8 | 5/110 | 13.4 | 0 | 11.9 | 0 |
+| driver click, mousedown | p99 | 26.4 | 1/110 | 10.8 | 0 | 14.5 | 0 |
+| driver click, mousedown | max | 37.2 | 0/110 | 0 | 0 | 25.4 | 86 |
+| driver click, mouseup | p50 | 57.0 | 24/50 | 21.0 | 1 | 9.0 | 0 |
+| driver click, mouseup | p95 | 62.9 | 2/50 | 15.1 | 0 | 14.9 | 0 |
+| driver click, mouseup | p99 | 78.0 | 0/50 | 0 | 0 | 29.9 | 43 |
+| driver click, mouseup | max | 78.0 | 0/50 | 0 | 0 | 29.9 | 43 |
+| driver key/type | p50 | 14.0 | 58/120 | 11.4 | 0 | 3.6 | 0 |
+| driver key/type | p95 | 21.5 | 5/120 | 3.9 | 0 | 11.1 | 0 |
+| driver key/type | p99 | 24.4 | 1/120 | 1.0 | 0 | 14.0 | 0 |
+| driver key/type | max | 25.4 | 0/120 | 0 | 0 | 15.0 | 0 |
+| xdotool --sync click, mousedown | p50 | 19.9 | 14/30 | 23.9 | 2 | 7.8 | 0 |
+| xdotool --sync click, mousedown | p95 | 42.7 | 1/30 | 1.1 | 0 | 30.6 | 24 |
+| xdotool --sync click, mousedown | p99 | 43.8 | 0/30 | 0 | 0 | 31.7 | 25 |
+| xdotool --sync click, mousedown | max | 43.8 | 0/30 | 0 | 0 | 31.7 | 25 |
+| xdotool --sync key/type | p50 | 16.1 | 29/60 | 10.2 | 0 | 6.5 | 0 |
+| xdotool --sync key/type | p95 | 23.7 | 2/60 | 2.6 | 0 | 14.1 | 0 |
+| xdotool --sync key/type | p99 | 26.3 | 0/60 | 0 | 0 | 16.7 | 1 |
+| xdotool --sync key/type | max | 26.3 | 0/60 | 0 | 0 | 16.7 | 1 |
+| own XTest click, mousedown | p50 | 13.8 | 24/50 | 9.3 | 0 | 2.0 | 0 |
+| own XTest click, mousedown | p95 | 21.7 | 2/50 | 1.5 | 0 | 9.8 | 0 |
+| own XTest click, mousedown | p99 | 23.1 | 0/50 | 0 | 0 | 11.3 | 0 |
+| own XTest click, mousedown | max | 23.1 | 0/50 | 0 | 0 | 11.3 | 0 |
+| own XTest click, mouseup | p50 | 20.4 | 24/50 | 23.1 | 5 | 8.2 | 0 |
+| own XTest click, mouseup | p95 | 39.7 | 2/50 | 3.8 | 0 | 27.5 | 30 |
+| own XTest click, mouseup | p99 | 43.5 | 0/50 | 0 | 0 | 31.3 | 34 |
+| own XTest click, mouseup | max | 43.5 | 0/50 | 0 | 0 | 31.3 | 34 |
+| bare key | p50 | 16.3 | 48/100 | 13.1 | 0 | 3.7 | 0 |
+| bare key | p95 | 24.0 | 4/100 | 5.4 | 0 | 11.4 | 0 |
+| bare key | p99 | 29.3 | 0/100 | 0 | 0 | 16.7 | 2 |
+| bare key | max | 29.3 | 0/100 | 0 | 0 | 16.7 | 2 |
+
+2x: a click on a control that acts on release, with C from the same injector's mousedown p99
+| injector | C | early | max early | > 1 frame early | max late |
+|---|---|---|---|---|---|
+| driver click, mouseup | 26.4 | 50/50 | 51.6 | 50 | 0.0 |
+| own XTest click, mouseup | 23.1 | 20/50 | 20.4 | 2 | 10.9 |
+```
+
+- **What the first version got wrong.** It pooled every injector and read the sign backwards. For that pooled data
+  with C = p50, rings were early in 184/370 (1×) and 183/370 (2×) trials, by up to 18.0 / 28.4 ms, and late by at most
+  4.7 / 5.8 ms. The first version said the reverse.
 - **Field calibration needs a content check.** On a still screen, the first frame after an injection was its effect in
-  all 560 flash-page trials. It was not in 96 of 180 Mousepad trials, because the stream sends extra frames after every
-  change (see "Frame interval and the stream's own frames"). A calibrator must check that the frame changed where the
-  input landed.
+  all 1010 flash-page trials of both sessions. It was not in 96 of 180 Mousepad trials, because the stream sends extra
+  frames after every change (see "Frame interval and the stream's own frames"). A calibrator, or a ring that
+  waits for its frame, must check that the frame changed where the input landed.
 
 ## Input paths (Ruling 19)
 
@@ -120,7 +259,7 @@ Counts in 2 ms bins:
   - "watch 0" adds `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=0` to the driver's environment.
 - **Units.** p50 / p95 in ms. "Held" is the p50 of raw release minus raw press.
 
-1× (1280×800):
+First session, 30 trials per path. 1× (1280×800):
 
 | Action and target | Path | send → raw | raw → frame | send → frame | send → return | held | timestamp |
 |---|---|---|---|---|---|---|---|
@@ -150,10 +289,10 @@ Counts in 2 ms bins:
 
 For comparison, the brief's bare `key space` (no activation) reaches the X server 0.7–1.3 ms after the host's write.
 
-- **Raw → frame is set by the app and the stream, not by the injector.** For each target the three paths agree
-  within one frame: p50 6.2–14.3 ms at 1×, 12.7–19.9 ms at 2×. The differences probably come from where each path's
-  press lands in the 60 Hz cycles. The xdotool click tail at 2× (42.7 and 43.8 ms) was the worst; the driver's clicks
-  peaked at 26.3 and 37.2 ms.
+- **Raw → frame also depends on the injector, by a few ms.** In this session the driver's p50 was about 3 ms lower
+  than xdotool's or the bare keys' at both scales (a permutation test in review gave p < 0.0001). In the same-session
+  comparison below it was 4 ms lower at 1× and 2 ms higher at 2× than a bare XTest click. The cause was not isolated.
+  The xdotool click tail at 2× (42.7 and 43.8 ms) was the worst; the driver's clicks peaked at 26.3 and 37.2 ms.
 - **Send → raw.**
   - The driver presses 11–16 ms into the call, after activating the target and confirming focus.
   - The xdotool recipe presses at 33–36 ms, and almost all of that is `windowactivate --sync`. The type path has no
@@ -174,6 +313,51 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
   - xdotool prints nothing.
 - **Press hold.** The driver holds a click ~37 ms and a key 0.1 ms; xdotool holds a click 0.8 ms and a key 5–8 ms.
   With the driver, controls that act on release respond ~37 ms after the press.
+
+### Fair comparison (fix round 1)
+
+**Method.**
+
+- **Why.** The first session compared the driver with an xdotool recipe that loses ~30 ms to xdotool's own `--sync`
+  poll. Its flash page also acted on press only, which hides the driver's ~37 ms hold.
+- **Paths.**
+  - Own XTest: `windowactivate <wid>` without `--sync`, then `mousemove X Y click --delay 0 1`, as one chain.
+  - Driver: the foreground `click` with watch 0; the watch does not change injection.
+- **Pages.** Both paths ran against the flash page twice:
+  - as before (flips on `mousedown`);
+  - as `flash.html#up` (flips on `mouseup`, titled "flash up", opened with `setup.sh up`).
+- **Session.** 50 clicks per cell, at 2× and then at 1×, in a fresh viewer session.
+
+Values are p50 / p95 in ms. "press → frame" is L for the onset tables.
+
+| Scale, page | Path | send → press | send → release | press → frame | release → frame | send → frame | returns |
+|---|---|---|---|---|---|---|---|
+| 2×, mousedown | own XTest | 1.8 / 2.2 | 2.4 / 3.6 | 13.8 / 21.7 | 13.3 / 21.0 | 15.6 / 23.6 | 6.5 / 7.8 |
+| 2×, mousedown | driver | 12.8 / 14.6 | 49.7 / 58.1 | 15.6 / 22.3 | −21.7 / −14.3 | 28.6 / 35.5 | 61.0 / 69.4 |
+| 2×, mouseup | own XTest | 1.4 / 1.8 | 2.0 / 2.5 | 20.4 / 39.7 | 19.6 / 39.0 | 21.7 / 41.1 | 6.2 / 7.1 |
+| 2×, mouseup | driver | 11.2 / 13.2 | 48.6 / 55.6 | 57.0 / 62.9 | 18.6 / 26.3 | 68.3 / 75.5 | 61.0 / 68.9 |
+| 1×, mousedown | own XTest | 2.0 / 3.0 | 2.7 / 4.1 | 9.6 / 16.3 | 9.0 / 15.7 | 11.7 / 19.0 | 7.7 / 8.4 |
+| 1×, mousedown | driver | 14.3 / 15.5 | 51.1 / 57.9 | 5.6 / 15.6 | −30.7 / −21.6 | 20.5 / 29.4 | 62.9 / 69.9 |
+| 1×, mouseup | own XTest | 2.1 / 2.9 | 2.8 / 3.7 | 15.0 / 33.1 | 14.1 / 31.9 | 17.2 / 34.5 | 7.4 / 8.5 |
+| 1×, mouseup | driver | 14.9 / 16.3 | 52.3 / 58.8 | 50.8 / 60.4 | 12.9 / 22.5 | 65.4 / 75.4 | 64.6 / 71.6 |
+| 1×, mouseup | own XTest, 37 ms hold | 2.0 / 2.9 | 42.9 / 50.4 | 53.7 / 65.9 | 12.2 / 23.6 | 56.0 / 67.7 | 47.5 / 55.1 |
+
+- **Own XTest presses 11–13 ms and releases ~48 ms sooner than the driver.** End to end it is faster at both scales on
+  both pages: send → frame p50 is 9–13 ms lower on the mousedown page and 47–48 ms lower on the mouseup page.
+- **Press → frame on the mousedown page: no consistent winner.** The driver was faster at 1× (5.6 vs 9.6 ms) and
+  slower at 2× (15.6 vs 13.8 ms). The first session's driver advantage therefore did not hold against an injector
+  without `--sync`.
+- **The mouseup page shows the hold.**
+  - The driver's frame waits for its release: press → frame is 50.8 / 57.0 ms, while release → frame is 12.9 / 18.6
+    ms.
+  - Own XTest releases ~0.7 ms after the press, and its frame then has a longer tail: press → frame p95 is 33.1 / 39.7
+    ms, against 16.3 / 21.7 on the mousedown page.
+  - The exploratory 37 ms hold (1×, `LD_HOLD_MS=37`) brought own XTest's release → frame to 12.2 / 23.6 ms, the
+    driver's level (12.9 / 22.5). So the extra tail comes from the sub-millisecond release, not from the injector.
+- **Clock checks this session.** The viewer's `ldClockSkew()` read +0.03 to +0.06 ms at the start of the 2× session
+  and −0.13 to −0.15 at its end; −0.07 to −0.10 at the start of 1× and −0.26 to −0.27 at its end. The host's read
+  −0.03 to +0.02 ms throughout. Each flip carries the viewer's value from detector start (`viewer_skew` in
+  `trials.csv`).
 
 ### The driver's 800 ms post-action watch
 
@@ -212,8 +396,8 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
   - Mousepad: one frame 87–106 ms after, then four or five from ~360 to ~450 ms after.
   - Frames in a run are 15–21 ms apart.
   - They are probably quality refinement; the mechanism was not traced.
-  - They never fell between a flash-page input and its flip: in all 560 flash-page trials the flip was the first frame
-    after the raw event. In Mousepad each trial ends with a BackSpace whose frame lands ~445 ms before the next key, and
+  - They never fell between a flash-page input and its flip: in all 1010 flash-page trials of both sessions the flip
+    was the first frame after the raw press. In Mousepad each trial ends with a BackSpace whose frame lands ~445 ms before the next key, and
     96 of 180 trials had one of these frames between the key and the glyph.
 - **Diagnostic repeat (1×, xdotool, Mousepad, n=30).** Every frame was logged with the luma of four regions: the whole
   changed cell, the glyph's centre, and the old and new caret columns.
@@ -227,13 +411,14 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
   127.0.0.1:4791, with S1's Selkies environment and `--shm-size=1g`.
   - `setup.sh` is Step 1 plus: it installs xinput (the image lacks it), copies `flash.html` and `xilog.py`, and opens
     the flash page in a kiosk Chromium.
-  - At 1× the same steps were run by hand before the script existed.
+  - `setup.sh up` reopens the page as `flash.html#up`.
+  - In the first 1× session the same steps were run by hand, before the script existed.
 - **Viewer.** A separate Chrome with its own profile on 127.0.0.1:9222, driven by the DevTools MCP.
   - It ran with `--disable-backgrounding-occluded-windows --disable-renderer-backgrounding
     --disable-background-timer-throttling`, so an occluded window could not throttle it. The page read `visible` at
     every check.
   - It loaded `http://127.0.0.1:4792` through S1's `proxy.mjs`.
-  - The tap runs evaluated `tap.js`, then `detector.js`.
+  - The brief's tap runs evaluated `tap.js`, then `detector.js`; every other run used the detector alone.
 - **Frames (Ruling 20).** `detector.js` reads a `MediaStreamTrackProcessor` on a clone of `#videoStream`'s track.
   - **Sampling.** For each `VideoFrame` (I444 here) it `copyTo`s one rect of the luma plane and averages it: on the
     flash page 32×32 at the centre (0 black, 255 white); in Mousepad the middle half of the typed glyph's cell (241
@@ -243,22 +428,24 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
   - **"chunk on the page":** `timeOrigin + VideoFrame.timestamp / 1000`. Selkies' client code stamps each chunk with
     `performance.now() * 1e3` when it arrives, before its worker decodes it.
   - **Expected display:** `requestVideoFrameCallback`'s `expectedDisplayTime`, matched through `mediaTime` = timestamp.
-  - **Clock check.** The page's clock agreed with `Date.now()` within 0.1 ms.
-- **Raw events.** `xilog.py` runs in the desktop as `abc`. It reads `stdbuf -oL xinput test-xi2 --root` and stamps each
-  raw event with `CLOCK_REALTIME` and `CLOCK_MONOTONIC`.
+- **Clock skew.** `ldClockSkew()` (page) and `inputs.mjs` (host) compare the `performance.now()` wall clock with
+  `Date.now()` at each `Date.now()` tick edge for 20 ms. Values are under "Fair comparison".
+  - The first session used a 2000-read average instead. That fits in well under a millisecond, so it only bounded the
+    skew to ±0.5 ms; the round-0 claim "within 0.1 ms" was not supported.
+- **Raw events.** `xilog.py` runs in the desktop as `abc`. It reads `stdbuf -oL xinput test-xi2 --root` and stamps
+  each raw event with `CLOCK_REALTIME` and `CLOCK_MONOTONIC`.
   - The X server's own event time (whole ms on the monotonic clock; the kernel's coarse clock ticks at 1 ms here) was
     0.7–2.3 ms earlier than the logger's stamp.
-  - So raw-event times are up to ~2 ms late: raw → frame reads up to ~2 ms low, and send → raw up to ~2 ms high.
-  - A `desktopd` listener built this way has the same bias, so the constant holds for it.
+  - So raw-event times are up to ~2 ms late: press → frame reads up to ~2 ms low, and send → press up to ~2 ms high.
+  - A `desktopd` listener built this way has the same bias, so the onsets hold for it.
 - **Clocks.** `xi.mjs` maps container time to the host clock. Before and after each run it sends 40 pings over the
   logger's `docker exec` pipe and uses the one with the lowest RTT.
-  - Minimum RTT was 0.62–1.17 ms, and the ten fastest pings agreed within 0.05–0.23 ms.
-  - The offset (container − host) was −1.49 to −0.32 ms and moved by up to 1.00 ms within a run.
-  - The mean of the two estimates is used, so the send / raw / frame split carries about ±1 ms.
+  - Minimum RTT was 0.55–1.17 ms, and the offset (container − host) was −1.49 to −0.32 ms.
+  - The offset moved by up to 1 ms within a run, so the send / press / frame split carries about ±1 ms.
   - send → frame and all page-side spans use the host clock only.
-- **Matching.** Each trial owns the window from its send to the next send. Its raw event is the first raw press of the
-  expected kind in that window, and its frame is the first flip. A missed flip would count as missing instead of
-  borrowing the next trial's; none was missed.
+- **Matching.** Each trial owns the window from its send to the next send. Its press is the first raw press of the
+  expected kind in that window. Its release is the next raw release with the same detail. Its frame is the first flip
+  in the window. None was missed.
 - **Pacing.** 400 ms between sends plus 0–16.7 ms of random jitter. On its own, 400 ms is exactly 24 frames at 60 Hz,
   which could keep every send at the same capture phase. Each run starts with one untimed input, because a still
   screen gives the detector no baseline.
@@ -267,17 +454,21 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
 - **Typing target.** `mousepad.sh` closes the kiosk, turns caret blink off (`/Net/CursorBlink`), sets Mousepad to
   DejaVu Sans Mono 72 and opens it. It derives the region from a before/after screenshot diff of one typed `x`, and all
   180 matched frames showed the glyph (luma 164–165).
-- **Pooling.** `node summary.mjs out/*-1280x800-*.json`, and the same with `2560x1600`. The dry run, the 3-trial checks
-  and the diagnostic are kept in `out/checks/`; `out/` is git-ignored, so the per-trial values are under "Raw".
+- **Tables.** `node summary.mjs export out/*.json > trials.csv` writes one row per final trial: 1190 rows. The dry run,
+  the 3-trial checks and the diagnostic stay in the git-ignored `out/checks/`. `node summary.mjs` prints every table
+  above from `trials.csv`.
 - **Telemetry.** Every driver launch carried `CUA_DRIVER_RS_TELEMETRY_ENABLED=0` and `CUA_DRIVER_RS_UPDATE_CHECK=0` with
   `mcp --no-overlay`. The binary was also read with `strings`, which does not run it.
 
 ## Files and changes from the brief
 
-- `flash.html`: the brief's page plus a `mousedown` toggle, so clicks flash too (Ruling 19).
+- `flash.html`: the brief's page plus a click toggle. `mousedown` flips it, or `mouseup` for `flash.html#up`, which is
+  also titled "flash up".
 - `collector.mjs`: the brief's, but it keeps each whole payload instead of only `at`.
-- `detector.js`: replaced per Ruling 20; it no longer calls `readPixels` on `#ld-tap`. The optional `extra` regions
-  were added for the diagnostic after the main runs; the flip logic is unchanged.
+- `detector.js`: replaced per Ruling 20; it no longer calls `readPixels` on `#ld-tap`.
+  - Optional `extra` regions were added for the Mousepad diagnostic.
+  - `skew` was added to each flip in fix round 1.
+  - The flip logic is unchanged.
 - `measure.mjs`: the brief's loop, plus:
   - one warm-up key;
   - 0–16.7 ms of jitter;
@@ -288,11 +479,13 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
 - Added:
   - `run-desktop.sh`: S1's command on the S2 image. It removes the container with `-v`, because the image's `/config`
     volume would otherwise be left behind.
-  - `setup.sh`: Step 1.
+  - `setup.sh`: Step 1; `setup.sh up` opens the mouseup page.
   - `xilog.py` and `xi.mjs`: raw events and clock mapping.
-  - `inputs.mjs`: the Ruling 19 comparison.
+  - `inputs.mjs`: the Ruling 19 comparison, with release times, the `xtest` path, `LD_HOLD_MS` and the host's clock
+    skew.
   - `mousepad.sh`: the typing target.
-  - `summary.mjs`: pooling.
+  - `summary.mjs`: export, per-injector latency and the onset tables.
+  - `trials.csv`: every final trial.
 - The brief's `docker rm -f ld-s1-desktop` became `docker rm -fv ld-s6-desktop`.
 
 ## Not covered
@@ -302,6 +495,11 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
 - **A busy screen** (video, animation), where an input's frame competes with other damage.
 - **Other apps.** Only Chromium and Mousepad were measured; Calc was not used.
 - **Other input.** Scroll, drag, double click, and the cadence of multi-character typing.
+- **Own XTest's focus handling.** Activation without `--sync` was only exercised on an already-active window. Clicking
+  a background window activated it through the window manager (see "Focus"); typing into one was not tested without
+  the driver.
+- **Click holds between 1 and 37 ms.**
+- **Why the driver's press → frame was shorter at 1× and in the first session.**
 - **The daemon's own chunk stamps.** The page's receive stamp stood in for them; the proxy hop is loopback.
 
 ## Raw
@@ -313,84 +511,23 @@ For comparison, the brief's bare `key space` (no activation) reaches the X serve
 2x tap:    n=50/50 p50=17.5ms p95=27.3ms min=13.8ms
 2x no tap: n=50/50 p50=16.7ms p95=23.2ms min=13.1ms
 ```
-`summary.mjs`:
+Per-trial values for all 1190 final trials are in `trials.csv`: send → press, send → release, press → frame, release
+→ frame, press → chunk, send → return, and both clock skews. The first version listed the first session's raw → frame
+and send → raw here; `trials.csv` holds the same values to two decimals.
+
+Fix-round runs, `inputs.mjs` output lines. The driver runs had `CUA_DRIVER_WINDOW_CHANGE_TIMEOUT_MS=0`.
 ```
-1x pooled raw->frame    n=370 p50=9.5ms p95=17.4ms min=4.8ms max=27.5ms
-1x pooled raw->received n=370 p50=9.1ms p95=17.0ms min=4.3ms max=27.1ms
-1x C = p50 = 9.5 ms: 369/370 trials within one 60 Hz frame (±16.7 ms); error -4.7 to +18.0 ms
-2x pooled raw->frame    n=370 p50=15.4ms p95=24.4ms min=9.6ms max=43.8ms
-2x pooled raw->received n=370 p50=14.7ms p95=23.6ms min=8.8ms max=43.2ms
-2x C = p50 = 15.4 ms: 366/370 trials within one 60 Hz frame (±16.7 ms); error -5.8 to +28.4 ms
-```
-Per trial, in trial order (ms): raw → frame, then send → raw. Headers carry the screen and, for input paths, the p50
-press hold. `cua` is the driver and `xdo` is xdotool:
-```
-[1280x800] cua click flash (press->release p50 36.9 ms)
-  raw->frame: 15.0 5.5 9.5 10.8 5.3 5.6 17.7 7.7 13.9 12.4 6.0 5.8 11.6 5.6 11.9 5.7 5.5 16.2 6.6 10.2 16.1 5.6 6.4 5.9 5.6 5.9 14.9 13.3 5.1 5.3
-  send->raw:  15.6 15.8 16.4 15.2 13.6 10.5 14.2 13.5 15.4 15.0 12.6 15.6 15.1 14.0 14.8 15.0 15.0 15.9 15.8 15.1 15.4 15.8 16.5 14.8 17.5 17.2 17.0 17.0 16.1 15.4
-[1280x800] cua click flash watch=0 (press->release p50 37.4 ms)
-  raw->frame: 4.9 7.0 5.1 5.9 5.4 5.1 14.2 13.0 6.6 12.4 15.8 5.1 7.1 5.5 5.0 5.5 13.0 5.3 5.6 5.2 20.5 14.3 5.4 5.4 18.4 10.1 8.9 5.1 14.6 7.0
-  send->raw:  11.4 16.7 15.9 14.8 21.0 11.6 16.1 16.4 16.0 15.0 15.3 14.6 16.2 15.5 14.0 14.8 14.2 16.1 15.8 10.1 15.7 17.1 15.3 16.8 17.2 16.5 16.4 11.6 15.5 16.0
-[1280x800] cua type flash (press->release p50 0.1 ms)
-  raw->frame: 15.8 6.0 6.9 14.0 5.7 6.1 5.3 5.6 14.6 6.2 5.9 10.0 5.4 10.0 5.5 18.5 14.3 10.2 5.6 5.9 12.8 11.2 6.6 5.8 5.5 13.0 5.4 5.9 7.8 5.2
-  send->raw:  15.1 14.5 15.5 13.1 14.3 16.4 16.5 17.3 17.1 13.2 16.1 14.5 12.0 14.8 14.7 16.4 15.1 14.8 14.6 16.9 16.0 15.4 15.8 16.7 16.4 15.7 15.8 14.9 14.5 13.1
-[1280x800] cua type flash watch=0 (press->release p50 0.1 ms)
-  raw->frame: 16.1 5.4 12.5 4.8 5.7 6.2 13.8 5.4 7.4 5.2 13.6 10.6 17.4 5.2 5.8 15.8 5.1 10.9 5.0 14.1 9.5 14.8 7.5 5.2 5.5 14.1 13.9 5.4 15.3 14.3
-  send->raw:  16.8 13.6 14.0 12.7 12.8 15.2 9.8 14.8 14.1 15.2 16.3 13.9 15.2 14.0 16.7 15.0 14.0 14.6 14.8 14.8 15.0 15.7 12.3 15.4 14.2 14.0 16.5 14.6 15.3 14.5
-[1280x800] cua type mousepad (press->release p50 0.1 ms)
-  raw->frame: 6.7 11.5 13.8 6.1 14.4 14.7 9.2 6.0 5.7 6.1 9.0 9.3 7.6 5.9 6.2 14.9 5.8 14.6 13.4 5.8 13.4 14.5 9.5 8.0 8.0 5.3 10.5 7.7 8.3 14.0
-  send->raw:  14.1 13.2 15.6 14.3 13.7 15.7 12.5 14.8 15.3 14.2 15.4 12.6 13.5 13.4 13.9 10.7 13.8 11.0 14.4 14.6 13.5 14.0 17.0 13.9 14.7 15.0 13.5 15.0 15.0 15.7
-[1280x800] cua type mousepad watch=0 (press->release p50 0.1 ms)
-  raw->frame: 5.7 12.3 6.6 15.4 12.8 7.7 10.5 9.0 7.2 10.2 8.4 6.6 5.6 13.9 5.1 12.3 5.5 13.7 13.9 5.8 5.8 12.8 5.8 5.6 9.2 9.2 10.2 14.2 13.5 8.0
-  send->raw:  14.2 12.1 13.9 14.4 14.0 14.2 15.1 11.2 16.0 14.2 13.7 14.5 11.6 12.1 14.2 13.6 13.4 14.6 14.7 12.2 14.9 14.4 15.0 14.6 13.6 14.4 13.6 14.7 13.5 14.1
-[1280x800] xdo click flash (press->release p50 0.8 ms)
-  raw->frame: 13.7 13.8 8.7 9.1 8.7 16.3 9.4 8.9 6.0 9.1 15.7 14.1 9.3 27.5 5.6 8.5 14.9 16.4 17.8 8.1 8.3 17.4 21.2 9.5 18.1 9.3 8.4 9.5 14.3 15.5
-  send->raw:  39.7 42.7 34.8 35.2 35.7 34.1 36.8 33.9 32.9 37.4 36.7 36.7 34.3 38.5 38.1 33.9 35.4 35.0 35.2 33.1 36.4 39.9 34.2 33.6 34.3 33.4 33.8 43.0 34.7 33.0
-[1280x800] xdo type flash (press->release p50 4.8 ms)
-  raw->frame: 8.8 9.6 14.3 11.0 15.7 13.6 15.8 9.4 16.8 5.3 8.6 18.0 14.3 11.8 14.5 8.5 17.8 14.9 8.3 15.7 8.7 14.7 9.4 16.8 8.3 15.0 16.6 18.3 13.6 10.4
-  send->raw:  42.0 42.4 34.7 32.6 32.8 36.4 40.5 37.4 33.4 33.6 34.0 34.4 35.8 35.5 37.5 34.2 40.0 36.6 40.7 34.1 33.3 43.4 37.4 35.0 36.4 36.3 36.2 38.8 32.5 32.9
-[1280x800] xdo type mousepad (press->release p50 7.6 ms)
-  raw->frame: 12.4 6.5 12.7 10.4 13.5 4.9 13.9 6.8 12.0 6.5 6.8 6.6 7.4 6.4 7.2 14.7 10.9 11.3 12.3 6.9 11.1 11.3 13.0 5.0 7.6 10.6 14.2 13.5 7.1 13.1
-  send->raw:  39.1 33.1 33.3 33.0 33.9 32.3 35.7 33.1 33.7 34.1 33.8 32.9 32.4 33.2 32.9 33.0 32.8 32.5 35.1 33.8 32.3 33.0 37.2 32.8 34.4 32.9 34.2 32.4 33.0 35.3
-[2560x1600] cua click flash (press->release p50 38.0 ms)
-  raw->frame: 20.7 14.2 16.9 21.9 17.8 20.2 13.7 13.4 13.5 12.9 12.9 22.8 26.3 24.8 14.4 14.3 20.7 12.7 13.4 23.8 11.8 18.9 13.6 13.4 13.4 15.6 13.7 24.0 14.3 12.9
-  send->raw:  13.9 15.3 14.8 13.5 14.4 15.1 15.5 15.2 14.6 14.9 13.6 13.1 15.2 13.3 14.2 14.7 14.2 16.1 15.3 13.6 16.6 14.6 15.8 14.6 14.5 15.8 15.5 14.0 15.6 15.3
-[2560x1600] cua click flash watch=0 (press->release p50 36.7 ms)
-  raw->frame: 12.8 12.3 12.0 12.9 12.1 12.1 11.9 12.7 12.5 17.3 12.1 12.7 12.6 17.9 21.3 12.7 19.9 17.8 21.3 12.2 12.6 21.5 12.8 15.1 16.4 11.9 12.8 12.3 37.2 11.8
-  send->raw:  14.4 13.8 12.5 13.8 14.8 10.9 13.6 13.4 13.1 14.0 12.5 12.3 13.6 13.2 13.4 13.5 14.8 13.5 13.1 13.5 12.7 12.9 9.9 13.5 13.0 14.6 12.7 14.8 12.2 12.0
-[2560x1600] cua type flash (press->release p50 0.1 ms)
-  raw->frame: 13.3 13.4 13.5 18.8 18.7 12.8 12.2 12.8 25.4 14.8 22.0 14.2 19.9 23.6 19.5 16.8 12.6 12.4 21.3 12.7 13.0 14.9 13.4 12.7 21.5 15.1 13.2 14.0 22.7 13.7
-  send->raw:  14.5 15.9 13.0 15.4 14.6 14.2 14.0 14.9 13.6 11.2 14.7 16.1 11.0 15.2 14.0 15.4 16.7 14.9 13.7 13.8 13.9 13.7 14.5 11.0 12.5 13.5 13.6 13.8 14.3 11.0
-[2560x1600] cua type flash watch=0 (press->release p50 0.1 ms)
-  raw->frame: 13.3 14.8 13.8 14.0 18.8 13.4 15.2 17.1 13.7 14.3 20.2 14.0 11.4 12.6 12.1 18.5 13.1 19.9 19.6 17.4 11.8 12.4 12.5 17.4 11.8 15.2 12.7 19.6 18.2 11.9
-  send->raw:  13.1 8.2 10.3 10.2 9.3 9.7 10.2 9.2 11.2 10.1 13.3 12.9 10.7 14.1 9.6 10.2 10.4 10.5 11.2 13.3 8.6 11.3 12.1 11.2 11.4 12.1 12.3 13.0 11.1 10.5
-[2560x1600] cua type mousepad (press->release p50 0.1 ms)
-  raw->frame: 13.3 11.9 18.1 13.1 19.0 14.4 15.3 13.3 14.2 11.1 13.7 13.3 14.1 11.1 15.6 12.2 15.5 19.2 11.8 12.6 16.4 18.9 12.1 13.0 11.0 15.4 14.9 10.8 24.4 18.5
-  send->raw:  13.2 12.6 11.0 13.9 11.0 11.4 11.1 14.1 11.8 10.9 13.8 11.2 10.3 13.1 11.1 10.5 11.2 11.8 12.8 11.8 11.7 11.1 10.7 15.1 10.5 10.8 14.1 10.6 9.4 10.0
-[2560x1600] cua type mousepad watch=0 (press->release p50 0.1 ms)
-  raw->frame: 12.4 18.8 15.6 13.7 17.9 10.4 11.9 12.0 10.9 15.1 13.5 14.0 19.9 19.9 15.4 15.0 19.2 11.2 13.8 11.1 10.8 11.4 14.6 16.2 10.8 13.8 12.4 11.8 16.4 20.6
-  send->raw:  24.0 10.4 11.5 10.6 11.3 10.5 13.5 11.4 11.4 12.1 11.6 11.8 11.0 14.9 10.1 10.1 10.4 10.8 12.5 10.2 12.0 10.6 12.8 11.0 10.8 10.9 11.6 11.9 11.0 12.3
-[2560x1600] xdo click flash (press->release p50 0.8 ms)
-  raw->frame: 28.8 19.0 26.6 22.5 19.1 18.5 25.6 17.3 22.5 19.4 17.7 20.6 24.7 19.9 16.9 25.4 17.5 42.7 43.8 22.3 12.1 18.2 32.9 17.8 23.0 17.9 19.0 18.5 27.9 18.3
-  send->raw:  35.3 34.7 35.6 36.4 40.5 34.7 38.4 33.3 37.1 35.9 33.4 40.0 42.2 36.1 43.3 36.6 37.5 35.2 39.4 35.7 36.3 36.2 36.6 41.9 32.6 36.3 34.1 43.9 38.6 33.6
-[2560x1600] xdo type flash (press->release p50 5.1 ms)
-  raw->frame: 26.3 20.4 18.8 23.7 16.3 14.2 15.0 15.8 20.4 13.9 15.5 14.1 14.0 21.9 13.4 21.8 17.4 15.3 23.8 19.8 16.7 20.2 15.2 22.7 21.2 16.3 16.9 18.6 14.4 23.2
-  send->raw:  41.4 34.6 34.7 34.6 38.5 33.7 32.2 42.1 32.7 34.6 37.3 42.6 32.7 33.7 33.9 32.9 35.7 33.4 32.7 31.9 42.1 35.8 32.9 39.6 41.1 32.2 32.7 42.3 35.0 33.8
-[2560x1600] xdo type mousepad (press->release p50 4.9 ms)
-  raw->frame: 16.1 18.7 10.6 18.2 19.4 20.5 15.6 17.8 13.5 9.6 10.5 11.0 10.7 10.4 10.1 9.7 14.3 19.3 10.6 16.5 14.7 9.8 10.3 10.1 11.3 10.5 17.2 12.6 19.7 20.0
-  send->raw:  36.6 36.5 32.1 36.6 33.0 33.7 31.8 33.5 32.9 32.1 32.4 33.2 34.6 31.7 32.9 32.7 31.8 34.8 32.2 36.6 35.0 34.5 32.2 33.7 32.6 33.7 32.3 33.0 34.7 32.5
-[1280x800] measure 1x-notap
-  raw->frame: 9.0 7.9 8.6 8.3 14.7 9.0 14.3 11.0 9.5 8.9 8.6 8.7 9.0 17.9 9.6 9.4 8.9 14.3 15.9 13.6 8.9 19.1 14.2 9.1 9.5 9.5 14.4 12.8 8.9 9.5 11.8 9.4 9.6 13.1 8.6 15.0 11.9 13.6 17.3 9.1 8.6 15.9 14.3 13.1 9.8 16.1 5.7 12.4 13.2 13.7
-  send->raw:  0.9 0.9 1.0 1.1 1.4 1.2 2.1 0.9 1.1 1.3 1.1 1.0 1.3 1.3 1.2 1.0 1.2 0.9 1.3 1.0 1.2 1.2 1.1 1.0 1.0 1.5 1.0 1.3 1.2 1.4 1.1 1.6 1.4 1.7 1.2 1.0 1.4 1.4 1.8 1.7 1.1 1.5 2.1 1.6 1.2 1.7 0.8 1.1 1.0 1.0
-[1280x800] measure 1x-tap
-  raw->frame: 14.0 9.3 9.7 14.6 13.8 15.4 8.8 16.9 12.8 12.8 9.1 10.2 16.1 9.6 15.7 17.7 8.7 9.1 15.0 9.7 13.7 14.3 11.3 9.1 9.5 9.6 14.0 18.2 9.8 9.9 18.1 9.2 10.3 8.8 9.7 10.3 8.5 9.4 9.2 8.5 14.1 9.7 13.8 15.8 17.5 9.4 9.1 15.2 13.2 9.1
-  send->raw:  1.8 1.3 1.4 1.3 1.8 1.9 1.8 1.3 1.6 1.4 1.6 1.5 1.3 1.3 1.5 1.6 1.5 1.5 1.9 1.5 1.9 1.5 1.6 1.4 1.0 1.0 1.0 0.9 1.0 1.1 0.8 1.1 0.8 1.1 1.6 1.0 0.8 1.2 0.9 0.5 1.2 1.0 0.8 1.0 1.4 0.8 1.1 1.4 1.4 1.0
-[2560x1600] measure 2x-notap
-  raw->frame: 26.0 21.3 13.9 13.0 19.1 13.8 14.3 21.8 18.0 14.6 13.8 20.0 12.6 21.7 14.7 14.6 19.0 14.3 16.4 14.3 15.7 22.5 14.7 19.8 15.9 21.4 16.2 19.2 15.7 21.3 14.5 13.8 20.0 14.7 17.0 16.1 12.6 14.1 18.3 19.9 15.8 13.0 13.0 13.5 12.8 17.9 21.0 16.3 24.0 12.8
-  send->raw:  0.6 0.6 0.8 0.6 0.7 0.7 0.7 0.9 0.7 0.7 0.6 0.7 0.6 0.7 0.7 0.6 0.7 0.8 0.8 0.6 0.7 0.7 0.7 0.7 0.6 1.1 0.6 1.3 0.7 0.6 0.6 0.7 0.7 0.8 0.7 0.6 0.5 0.7 0.9 0.8 1.0 1.2 1.1 1.2 1.0 1.2 1.0 0.9 1.0 1.0
-[2560x1600] measure 2x-tap
-  raw->frame: 25.2 15.5 14.3 20.1 20.8 23.5 23.4 13.8 13.1 22.5 13.2 14.7 13.4 21.7 17.6 19.1 13.3 13.2 19.6 13.1 13.3 20.7 16.2 19.2 16.4 16.3 15.4 21.3 20.0 14.9 21.4 26.9 29.3 16.0 19.7 13.6 21.0 15.2 17.6 16.4 16.4 16.3 22.1 14.6 15.4 15.0 15.4 21.2 21.2 16.0
-  send->raw:  2.1 1.1 1.1 0.9 1.3 1.1 1.2 1.1 1.2 1.1 1.1 1.0 1.0 1.1 1.5 1.3 1.1 0.8 0.9 0.7 1.0 1.3 0.9 0.9 0.6 1.4 1.0 0.7 1.3 0.7 1.3 1.7 1.7 0.9 0.6 0.6 1.5 0.8 1.0 1.1 1.0 1.2 1.0 0.8 0.8 0.8 0.9 0.7 1.0 0.9
+2x mousedown, xtest: send->raw p50=1.8 p95=2.2 | send->release 2.4/3.6 | raw->frame 13.8/21.7 (11.8-23.2) | release->frame 13.3/21.0 | send->frame 15.6/23.6 | send->return 6.5/7.8
+2x mousedown, cua:   send->raw 12.8/14.6 | send->release 49.7/58.1 | raw->frame 15.6/22.3 (11.9-25.8) | release->frame -21.7/-14.3 | send->frame 28.6/35.5 | send->return 61.0/69.4
+2x mouseup, xtest:   send->raw 1.4/1.8 | send->release 2.0/2.5 | raw->frame 20.4/39.7 (12.2-43.5) | release->frame 19.6/39.0 | send->frame 21.7/41.1 | send->return 6.2/7.1
+2x mouseup, cua:     send->raw 11.2/13.2 | send->release 48.6/55.6 | raw->frame 57.0/62.9 (48.1-78.0) | release->frame 18.6/26.3 | send->frame 68.3/75.5 | send->return 61.0/68.9
+1x mousedown, xtest: send->raw 2.0/3.0 | send->release 2.7/4.1 | raw->frame 9.6/16.3 (5.3-19.6) | release->frame 9.0/15.7 | send->frame 11.7/19.0 | send->return 7.7/8.4
+1x mousedown, cua:   send->raw 14.3/15.5 | send->release 51.1/57.9 | raw->frame 5.6/15.6 (5.0-16.6) | release->frame -30.7/-21.6 | send->frame 20.5/29.4 | send->return 62.9/69.9
+1x mouseup, xtest:   send->raw 2.1/2.9 | send->release 2.8/3.7 | raw->frame 15.0/33.1 (8.4-34.5) | release->frame 14.1/31.9 | send->frame 17.2/34.5 | send->return 7.4/8.5
+1x mouseup, cua:     send->raw 14.9/16.3 | send->release 52.3/58.8 | raw->frame 50.8/60.4 (42.3-65.0) | release->frame 12.9/22.5 | send->frame 65.4/75.4 | send->return 64.6/71.6
+1x mouseup, xtest, LD_HOLD_MS=37: send->raw 2.0/2.9 | send->release 42.9/50.4 | raw->frame 53.7/65.9 (43.6-71.3) | release->frame 12.2/23.6 | send->frame 56.0/67.7 | send->return 47.5/55.1
+viewer ldClockSkew(): 2x start 0.060 0.045 0.025, 2x end -0.125 -0.145 -0.145, 1x start -0.095 -0.070 -0.085, 1x end -0.260 -0.260 -0.270 ms
+host skew per run (start -> end): 0.00..0.02 -> -0.03..-0.02 ms
 ```
 Mousepad diagnostic (1×, xdotool): every frame from 460 ms before a key to 40 ms after it, as ms from the raw key
 event:glyph-centre luma (241 empty, 164 glyph). Four consecutive trials; the previous trial's BackSpace lands near

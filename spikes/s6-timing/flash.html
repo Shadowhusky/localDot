@@ -5,6 +5,9 @@
 <script>
   let on = false;
   const flip = () => { on = !on; document.body.style.background = on ? "#fff" : "#000"; };
+  // flash.html#up flips on mouseup instead of mousedown, like controls that act on release.
+  const up = location.hash === "#up";
+  if (up) document.title = "flash up";
   addEventListener("keydown", flip);
-  addEventListener("mousedown", flip);
+  addEventListener(up ? "mouseup" : "mousedown", flip);
 </script>
