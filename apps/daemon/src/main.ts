@@ -4,7 +4,7 @@ import { createApp } from "./app.ts";
 import { localdotHome } from "./paths.ts";
 import { loadOrCreateToken } from "./token.ts";
 
-const port = Number(process.env.LOCALDOT_PORT ?? 4700);
+const port = Number(process.env.LOCALDOT_PORT ?? 4750);
 const home = localdotHome();
 const tokenFile = join(home, "daemon-token");
 const token = loadOrCreateToken(tokenFile);

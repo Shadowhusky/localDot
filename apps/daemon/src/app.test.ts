@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
 
-const PORT = 4700;
+const PORT = 4750;
 const TOKEN = "t".repeat(43);
 const app = createApp({ token: TOKEN, port: PORT });
 const url = (path: string, host = `127.0.0.1:${PORT}`) => `http://${host}${path}`;
@@ -15,6 +15,11 @@ describe("host and origin guard", () => {
   it("refuses rebinding hosts and hosts without the port", async () => {
     expect((await app.request(url("/healthz", "evil.com"))).status).toBe(403);
     expect((await app.request(url("/healthz", "127.0.0.1"))).status).toBe(403);
+  });
+
+  it("refuses a foreign Host header even when the URL host is loopback", async () => {
+    const res = await app.request(url("/healthz"), { headers: { host: "evil.com" } });
+    expect(res.status).toBe(403);
   });
 
   it("refuses foreign and null origins", async () => {
@@ -49,5 +54,14 @@ describe("token guard", () => {
     expect(cookie).toContain("localdot_session=");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("SameSite=Strict");
+  });
+
+  it("never authenticates against an empty token", async () => {
+    const emptyTokenApp = createApp({ token: "", port: PORT });
+    const cookie = await emptyTokenApp.request(url("/api/whoami"), {
+      headers: { cookie: "localdot_session=" },
+    });
+    expect(cookie.status).toBe(401);
+    expect((await emptyTokenApp.request(url("/auth/claim?token="))).status).toBe(401);
   });
 });
