@@ -117,6 +117,12 @@ importers:
         specifier: 8.3.1
         version: 8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(tsx@4.23.15)
 
+  tools/rig-gen:
+    devDependencies:
+      '@esotericsoftware/spine-core':
+        specifier: 4.3.13
+        version: 4.3.13
+
 packages:
 
   '@biomejs/biome@2.5.15':

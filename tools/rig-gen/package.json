@@ -1,0 +1,19 @@
+{
+  "name": "@localdot/rig-gen",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "bin": {
+    "rig-gen": "./src/bin.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "devDependencies": {
+    "@esotericsoftware/spine-core": "4.3.13"
+  }
+}
