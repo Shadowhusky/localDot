@@ -1,10 +1,15 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
+import { EventLog } from "./event-log.ts";
 
 const PORT = 4750;
 const TOKEN = "t".repeat(43);
 const LOOPBACK = `127.0.0.1:${PORT}`;
-const app = createApp({ token: TOKEN, port: PORT });
+const eventLog = new EventLog(mkdtempSync(join(tmpdir(), "local dot's app-")));
+const app = createApp({ token: TOKEN, port: PORT, eventLog });
 const url = (path: string, host = LOOPBACK) => `http://${host}${path}`;
 const bearer = { authorization: `Bearer ${TOKEN}` };
 
@@ -37,7 +42,7 @@ describe("host and origin guard", () => {
     ["null Origin", LOOPBACK, { origin: "null" }],
     ["wrong-port Origin", LOOPBACK, { origin: `http://127.0.0.1:${PORT + 1}` }],
   ];
-  const paths = ["/healthz", "/api/whoami", "/does-not-exist"];
+  const paths = ["/healthz", "/api/whoami", "/api/sessions", "/does-not-exist"];
 
   it.each(
     refusals.flatMap(([label, host, headers]) =>
@@ -52,6 +57,7 @@ describe("host and origin guard", () => {
 describe("token guard", () => {
   it("rejects API calls without the token", async () => {
     expect((await app.request(url("/api/whoami"))).status).toBe(401);
+    expect((await app.request(url("/api/sessions"))).status).toBe(401);
   });
 
   it("accepts the bearer token", async () => {
@@ -74,10 +80,38 @@ describe("token guard", () => {
   });
 
   it("never authenticates against an empty token", async () => {
-    const emptyTokenApp = createApp({ token: "", port: PORT });
+    const emptyTokenApp = createApp({ token: "", port: PORT, eventLog });
     const res = await emptyTokenApp.request(url("/api/whoami"), {
       headers: { authorization: "Bearer " },
     });
     expect(res.status).toBe(401);
+  });
+});
+
+describe("session routes", () => {
+  it("lists sessions and returns a session's events", async () => {
+    const id = eventLog.createSession("routes");
+    eventLog.append(id, { type: "agent.state", agent: "main", data: { state: "idle" } });
+    const list = (await (await app.request(url("/api/sessions"), { headers: bearer })).json()) as {
+      id: string;
+    }[];
+    expect(list.map((s) => s.id)).toContain(id);
+    const events = (await (
+      await app.request(url(`/api/sessions/${id}/events`), { headers: bearer })
+    ).json()) as unknown[];
+    expect(events).toHaveLength(1);
+    const later = (await (
+      await app.request(url(`/api/sessions/${id}/events?fromSeq=1`), { headers: bearer })
+    ).json()) as unknown[];
+    expect(later).toEqual([]);
+  });
+
+  it("answers 400 for a malformed session id", async () => {
+    const res = await app.request(url("/api/sessions/not-a-ulid/events"), { headers: bearer });
+    expect(res.status).toBe(400);
+    const traversal = await app.request(url("/api/sessions/..%2F..%2Fetc/events"), {
+      headers: bearer,
+    });
+    expect(traversal.status).toBe(400);
   });
 });

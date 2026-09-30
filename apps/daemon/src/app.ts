@@ -1,13 +1,16 @@
+import { ULID_PATTERN } from "@localdot/protocol";
 import { Hono } from "hono";
+import type { EventLog } from "./event-log.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { tokensMatch } from "./token.ts";
 
 export interface AppOptions {
   token: string;
   port: number;
+  eventLog: EventLog;
 }
 
-export function createApp({ token, port }: AppOptions): Hono {
+export function createApp({ token, port, eventLog }: AppOptions): Hono {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
@@ -29,6 +32,15 @@ export function createApp({ token, port }: AppOptions): Hono {
   });
 
   app.get("/api/whoami", (c) => c.json({ ok: true }));
+
+  app.get("/api/sessions", (c) => c.json(eventLog.listSessions()));
+
+  app.get("/api/sessions/:id/events", (c) => {
+    const id = c.req.param("id");
+    if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
+    const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
+    return c.json(eventLog.read(id, fromSeq));
+  });
 
   return app;
 }
