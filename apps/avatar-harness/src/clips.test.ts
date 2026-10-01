@@ -39,7 +39,7 @@ describe("CLIPS", () => {
     }
   });
 
-  it("idles for 12 s: looks both ways, glances back at the user, sways, leans, rolls and blinks", () => {
+  it("idles for 12 s: looks both ways, glances at the user, tips the head, shifts a little, blinks", () => {
     expect(CLIPS.idle.steps).toEqual([]);
     expect(CLIPS.idle.durationMs).toBe(12_000);
     const frames = play(CLIPS.idle);
@@ -56,7 +56,8 @@ describe("CLIPS", () => {
     const range = (key: "headX" | "bodyX" | "headRoll" | "wind") =>
       Math.max(...values(key)) - Math.min(...values(key));
     expect(range("headX")).toBeGreaterThan(0.3);
-    expect(range("bodyX")).toBeGreaterThan(0.6);
+    expect(range("bodyX")).toBeGreaterThan(0.1);
+    expect(Math.max(...values("bodyX").map(Math.abs))).toBeLessThanOrEqual(0.12);
     expect(Math.min(...values("headRoll"))).toBeLessThan(-0.45);
     expect(Math.max(...values("headRoll"))).toBeGreaterThan(0.45);
     expect(range("wind")).toBeGreaterThan(0.8);

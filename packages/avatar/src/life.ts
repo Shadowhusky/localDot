@@ -81,7 +81,7 @@ export function swayAt(
   return {
     x: fast(0.075) + slow(0.045),
     y: slow(0.05) + fast(0.03),
-    body: fast(0.32) + slow(0.13),
+    body: fast(0.085) + slow(0.035),
     roll: wave(0.55, 0.09 + random() * 0.02) + fast(0.2),
     wind: fast(0.6) + slow(0.4),
   };
