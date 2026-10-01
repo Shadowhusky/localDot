@@ -51,12 +51,75 @@ func TestTheConstraintsPermitTheHostsAndNoAddress(t *testing.T) {
 	if got := slices.Sorted(slices.Values(c.PermittedDNSDomains)); !slices.Equal(got, []string{"api.example.test", "postman-echo.com"}) {
 		t.Fatalf("permitted %v", c.PermittedDNSDomains)
 	}
+	if got := slices.Sorted(slices.Values(c.ExcludedDNSDomains)); !slices.Equal(got, []string{".api.example.test", ".postman-echo.com"}) {
+		t.Fatalf("excluded names %v, want every host's subdomains", c.ExcludedDNSDomains)
+	}
 	var excluded []string
 	for _, r := range c.ExcludedIPRanges {
 		excluded = append(excluded, r.String())
 	}
 	if !slices.Equal(excluded, []string{"0.0.0.0/0", "::/0"}) {
 		t.Fatalf("excluded IP ranges %v, want all of IPv4 and IPv6", excluded)
+	}
+}
+
+// api.example.test ends in pi.example.test without being beneath it.
+func TestAForgedLeafForASubdomainOfABoundHostIsRefused(t *testing.T) {
+	ca, err := New("cell-1", []string{"api.example.test", "pi.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, host := range map[string]string{
+		"x.api.example.test":  "x.api.example.test",
+		"*.api.example.test":  "y.api.example.test",
+		"x.pi.example.test":   "x.pi.example.test",
+		"a.b.pi.example.test": "a.b.pi.example.test",
+	} {
+		if err := verify(ca, forge(t, ca, []string{name}, nil), host); !notAuthorized(err) {
+			t.Errorf("a forged leaf for %s: %v", name, err)
+		}
+	}
+	for _, host := range ca.Hosts() {
+		cert, err := ca.Leaf(host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := verify(ca, cert.Leaf, host); err != nil {
+			t.Errorf("the bound %s: %v", host, err)
+		}
+	}
+}
+
+// One CA cannot also refuse the parent's other subdomains, such as x.example.test: the subtree that
+// permits example.test holds them all, and only excluding .example.test would cover every one,
+// which would refuse api.example.test too.
+func TestNestedBoundHostsBothVerifyAndTheInnerSubtreeIsRefused(t *testing.T) {
+	ca, err := New("cell-1", []string{"example.test", "api.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, host := range []string{"example.test", "api.example.test"} {
+		cert, err := ca.Leaf(host)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := verify(ca, cert.Leaf, host); err != nil {
+			t.Errorf("the bound %s: %v", host, err)
+		}
+	}
+	if err := verify(ca, forge(t, ca, []string{"x.api.example.test"}, nil), "x.api.example.test"); !notAuthorized(err) {
+		t.Errorf("a forged leaf beneath the inner bound host: %v", err)
+	}
+	if got := ca.Certificate().ExcludedDNSDomains; !slices.Equal(got, []string{".api.example.test"}) {
+		t.Errorf("excluded names %v, want only the inner host's subdomains", got)
+	}
+}
+
+func TestNewRefusesAnEmptyHost(t *testing.T) {
+	for _, hosts := range [][]string{{""}, {"api.example.test", ""}} {
+		if ca, err := New("cell-1", hosts); !errors.Is(err, errEmptyHost) || ca != nil {
+			t.Errorf("New(%q): CA made %v, error %v; an empty name constraint permits every name", hosts, ca != nil, err)
+		}
 	}
 }
 

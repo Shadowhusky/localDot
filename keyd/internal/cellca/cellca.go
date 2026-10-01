@@ -16,11 +16,14 @@ import (
 	"math/big"
 	"net"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 )
 
 var ErrNotPermitted = errors.New("cellca: not one of this cell's intercepted hosts")
+
+var errEmptyHost = errors.New("cellca: an empty host would permit every name")
 
 const (
 	caLifetime   = 397 * 24 * time.Hour
@@ -42,6 +45,9 @@ type CA struct {
 // New makes a CA permitted to vouch only for hosts. With no hosts it is constrained to the
 // reserved name "invalid", so it can vouch for nothing real.
 func New(cellID string, hosts []string) (*CA, error) {
+	if slices.Contains(hosts, "") {
+		return nil, errEmptyHost
+	}
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -72,6 +78,7 @@ func New(cellID string, hosts []string) (*CA, error) {
 		ExtKeyUsage:                 []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		PermittedDNSDomainsCritical: true,
 		PermittedDNSDomains:         permitted,
+		ExcludedDNSDomains:          subdomainsOf(hosts),
 		ExcludedIPRanges: []*net.IPNet{
 			{IP: net.IP{0, 0, 0, 0}, Mask: net.CIDRMask(0, 32)},
 			{IP: net.IPv6zero, Mask: net.CIDRMask(0, 128)},
@@ -98,6 +105,19 @@ func New(cellID string, hosts []string) (*CA, error) {
 		now:     time.Now,
 		leaves:  map[string]*tls.Certificate{},
 	}, nil
+}
+
+// subdomainsOf names the subdomains of each host for exclusion, since a permitted DNS name also
+// covers its subdomains. A host with another host beneath it keeps its subdomains: exclusions win,
+// so excluding them would refuse that host too.
+func subdomainsOf(hosts []string) []string {
+	var out []string
+	for _, h := range hosts {
+		if !slices.ContainsFunc(hosts, func(o string) bool { return strings.HasSuffix(o, "."+h) }) {
+			out = append(out, "."+h)
+		}
+	}
+	return out
 }
 
 func (ca *CA) Certificate() *x509.Certificate { return ca.cert }
