@@ -141,8 +141,13 @@ function relay(
   const upstream = new WebSocket(`${opts.stream.baseUrl.replace(/^http/, "ws")}/api/websockets`, {
     headers: { authorization: opts.stream.authorization },
     perMessageDeflate: false,
-    handshakeTimeout: deps.upstreamTimeoutMs ?? UPSTREAM_TIMEOUT_MS,
   });
+  // ws's handshakeTimeout only fires on an idle socket, so a cell that drips its answer would keep
+  // the dial open; terminating while connecting closes the upstream, which refuses the viewer.
+  const dial = setTimeout(
+    () => upstream.terminate(),
+    deps.upstreamTimeoutMs ?? UPSTREAM_TIMEOUT_MS,
+  );
   let client: WebSocket | undefined;
   let finished = false;
   // 1012 sends the client back to reconnect, with a fresh ticket once its cell is ready again.
@@ -175,6 +180,7 @@ function relay(
   socket.once("close", abandon);
 
   upstream.on("open", () => {
+    clearTimeout(dial);
     opts.wss.handleUpgrade(req, socket, head, (ws) => {
       socket.off("close", abandon);
       client = ws;
@@ -198,6 +204,7 @@ function relay(
   upstream.on("pong", () => watchdog.touch());
   upstream.on("error", () => {});
   upstream.on("close", () => {
+    clearTimeout(dial);
     const refused = !client && !finished;
     finish("disconnected");
     if (refused) refuse(socket, "502 Bad Gateway");
@@ -233,7 +240,9 @@ class CellStreams {
     return viewer;
   }
 
+  // A relay that has left the count can still hear its cell, which must not move the cell's state.
   update(id: string, viewer: Viewer, state: RelayState, lastAt: number): void {
+    if (!this.#viewers.get(id)?.has(viewer)) return;
     viewer.state = state;
     viewer.lastAt = lastAt;
     this.#report(id);

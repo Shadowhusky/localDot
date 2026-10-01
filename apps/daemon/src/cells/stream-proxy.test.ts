@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
 import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket, WebSocketServer } from "ws";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
+import { webDir } from "../static-ui.ts";
 import { attachUpgradeRouter } from "../upgrade-router.ts";
 import { TicketRegistry } from "./secrets.ts";
 import { desktopStreamRoute, type StreamProxyDeps } from "./stream-proxy.ts";
@@ -61,7 +62,8 @@ interface Seen {
 // A Selkies stand-in: basic auth on every request and upgrade, an answer that is the request's
 // own path as JSON unless `answer` says otherwise, an echoing WebSocket that answers pings only
 // while `alive` (ws's automatic pong is off), optional pings or messages of its own every 40 ms,
-// a way to drop the connection and a way to wedge it (stop reading, like a paused container).
+// a way to drop the connection and a way to wedge it (stop reading, like a paused container) and
+// unwedge it.
 // `seen` records every request and upgrade that reached it.
 async function fakeSelkies() {
   const port = await freePort();
@@ -133,7 +135,10 @@ async function fakeSelkies() {
   const wedge = () => {
     for (const socket of raw) socket.pause();
   };
-  return { baseUrl: `http://127.0.0.1:${port}`, seen, state, wedge };
+  const unwedge = () => {
+    for (const socket of raw) socket.resume();
+  };
+  return { baseUrl: `http://127.0.0.1:${port}`, seen, state, wedge, unwedge };
 }
 
 // Accepts connections and never answers, like a wedged cell.
@@ -141,6 +146,27 @@ async function silentCell() {
   const port = await freePort();
   const held = new Set<Socket>();
   const server = createServer((socket) => held.add(socket));
+  await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
+  stops.push(() => {
+    for (const socket of held) socket.destroy();
+    server.close();
+  });
+  return `http://127.0.0.1:${port}`;
+}
+
+// Answers an upgrade with the start of a 101 and then one byte every 100 ms, so its socket is never
+// idle and its handshake never completes.
+async function drippingCell() {
+  const port = await freePort();
+  const held = new Set<Socket>();
+  const server = createServer((socket) => {
+    held.add(socket);
+    socket.once("data", () => {
+      socket.write("HTTP/1.1 101 Switching Protocols\r\n");
+      const drip = setInterval(() => socket.write("X"), 100);
+      socket.once("close", () => clearInterval(drip));
+    });
+  });
   await new Promise<void>((r) => server.listen(port, "127.0.0.1", r));
   stops.push(() => {
     for (const socket of held) socket.destroy();
@@ -158,7 +184,8 @@ async function daemon(upstreamBaseUrl: string, overrides: Partial<StreamProxyDep
   writeFileSync(join(vendorDir, "index.html"), "<html>selkies-core</html>");
   writeFileSync(join(vendorDir, "assets", "core.js"), "// core");
   const desktop = { cells, tickets, vendorDir, pingEveryMs: 50, stallAfterMs: 150, ...overrides };
-  const eventLog = new EventLog(mkdtempSync(join(tmpdir(), "local dot's proxy-")));
+  const logDir = mkdtempSync(join(tmpdir(), "local dot's proxy-"));
+  const eventLog = new EventLog(logDir);
   const app = createApp({ token: TOKEN, port, eventLog, cells: { cells, tickets }, desktop });
   const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }) as Server;
   attachUpgradeRouter(server, { port, token: TOKEN }, [desktopStreamRoute(desktop)]);
@@ -171,6 +198,8 @@ async function daemon(upstreamBaseUrl: string, overrides: Partial<StreamProxyDep
     server.closeAllConnections();
     server.close();
     eventLog.close();
+    rmSync(vendorDir, { recursive: true, force: true });
+    rmSync(logDir, { recursive: true, force: true });
   });
   const origin = `http://127.0.0.1:${port}`;
   const streamAt = (cellId: string, stream: StreamEndpoint) =>
@@ -260,6 +289,25 @@ describe("desktop stream proxy over HTTP", () => {
     expect(selkies.seen).toEqual([{ url: "/api/status", authorization: AUTH, cookie: undefined }]);
   });
 
+  it("serves the vendored Selkies client from the folder the daemon is started with", async () => {
+    const dir = webDir("vendor/selkies");
+    const d = await daemon(await silentCell(), { vendorDir: dir });
+    const index = await d.fetch(`${d.prefix}/`);
+    expect(index.status).toBe(200);
+    const html = await index.text();
+    expect(html).toContain('<div id="app"></div>');
+    expect(html).not.toContain('rel="manifest"');
+    const linked = [...html.matchAll(/="\.\/assets\/([^"]+)"/g)].map((m) => m[1]);
+    const shipped = readdirSync(join(dir, "assets"));
+    expect(linked).toHaveLength(2);
+    expect(shipped).toEqual(
+      expect.arrayContaining([...linked, expect.stringMatching(/^selkies-core-/)]),
+    );
+    for (const asset of shipped) {
+      expect((await d.fetch(`${d.prefix}/assets/${asset}`)).status, asset).toBe(200);
+    }
+  });
+
   it("proxies only GET api/status and api/websockets and answers 404 to the rest without dialing the cell", async () => {
     const selkies = await fakeSelkies();
     const d = await daemon(selkies.baseUrl);
@@ -337,7 +385,9 @@ describe("desktop stream proxy over HTTP", () => {
     expect((await d.fetch(`${other.prefix}/api/status`)).status).toBe(200);
     // fetch() and the daemon's URL parsing fold "../" and "%2e%2e/" away before any route runs; an
     // encoded separator survives both and reaches readStatic's guard, aimed at a file that exists.
-    writeFileSync(join(tmpdir(), "ld-proxy-outside.txt"), "secret");
+    const outside = join(tmpdir(), "ld-proxy-outside.txt");
+    writeFileSync(outside, "secret");
+    stops.push(() => rmSync(outside, { force: true }));
     expect((await d.fetch(`${d.prefix}/..%2fld-proxy-outside.txt`)).status).toBe(404);
     expect((await d.fetch(`${d.prefix}/assets/..%2f..%2fld-proxy-outside.txt`)).status).toBe(404);
     d.quietly("failed");
@@ -456,6 +506,12 @@ describe("desktop stream relay", () => {
     ws.close();
     await until("no viewer", () => d.stream()?.viewers === 0);
     expect(d.stream()?.connection).toBe("none");
+    // The cell's late pongs reach a relay that has already left the count: it reports nothing.
+    const before = d.cells.streamUpdates.length;
+    selkies.unwedge();
+    await settle(300);
+    expect(d.cells.streamUpdates.slice(before)).toEqual([]);
+    expect(d.stream()?.connection).toBe("none");
   });
 
   it("closes every relay with 1012 when the cell leaves ready, and the old ticket opens nothing", async () => {
@@ -541,6 +597,22 @@ describe("desktop stream relay", () => {
     expect(await within(silent, 3000, "silent cell")).toContain("502");
     d.cells.endpointsById.delete(d.id);
     expect(await refusal(d.open(`${d.prefix}/api/websockets`))).toContain("503");
+  });
+
+  it("cuts a dial that drips its upgrade answer at the timeout, and never an open relay", async () => {
+    const selkies = await fakeSelkies();
+    const d = await daemon(await drippingCell(), { upstreamTimeoutMs: 300 });
+    const refused = refusal(d.open(`${d.prefix}/api/websockets`));
+    expect(await within(refused, 1500, "the dripping cell")).toContain("502");
+    expect(d.stream()).toMatchObject({ connection: "disconnected", viewers: 0 });
+    d.streamAt({ baseUrl: selkies.baseUrl, authorization: AUTH });
+    const ws = d.open(`${d.prefix}/api/websockets`);
+    await opened(ws);
+    await settle(600);
+    const echoed = new Promise<string>((r) => ws.once("message", (data) => r(String(data))));
+    ws.send("still here");
+    expect(await echoed).toBe("echo:still here");
+    expect(d.stream()).toMatchObject({ connection: "live", viewers: 1 });
   });
 
   it("writes nothing to the console, so no path, ticket or token reaches a log", async () => {
