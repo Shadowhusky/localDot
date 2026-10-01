@@ -33,7 +33,10 @@ const explicitDefaults = (schema) =>
       .filter(([, p]) => p.default !== undefined)
       .map(([k, p]) => [k, p.default]),
   );
-const denyLabel = (options) => options?.find((o) => /\b(deny|decline|cancel|reject|no)\b/i.test(o.label))?.label;
+// Whole labels only: a word search would pick "Allow (no further prompts)".
+const DENY_LABELS = new Set(["cancel", "deny", "decline", "reject", "no"]);
+const denyLabel = (options) =>
+  options?.find((o) => typeof o?.label === "string" && DENY_LABELS.has(o.label.trim().toLowerCase()))?.label;
 
 // Codex's built-in tools are always refused, and so is every question put to the user (its text can
 // be model-written). Only Codex's approval prompt for a call to localDot's own MCP server passes.

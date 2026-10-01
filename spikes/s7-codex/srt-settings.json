@@ -4,7 +4,8 @@
     "deniedDomains": []
   },
   "filesystem": {
-    "denyRead": ["~/.ssh", "~/.aws", "~/.localdot"],
+    "denyRead": ["~", "/Volumes"],
+    "allowRead": ["~/.codex", "~/.local/bin", ".", "../s5-models/out/probe.png", "../../node_modules"],
     "allowWrite": ["~/.codex", "./out"],
     "denyWrite": []
   }

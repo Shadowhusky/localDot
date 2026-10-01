@@ -6,6 +6,10 @@ model `gpt-6-astra`, reasoning `medium`, service tier `priority` (the last three
 blobs: `client.mjs` `83719bef`, `harness.mjs` `5a8994ec`, `tools-probe.mjs` `dbecbb2a`; `mcp-tools.mjs` `717161b8`,
 `srt-settings.json` `6927cfdd` and `package.json` `3715d347` are exactly as in the brief.
 
+The runs used the blobs above. After them, the final review changed two files: `harness.mjs`'s `denyLabel` now
+accepts only an exact deny label (see "Approvals"), and `srt-settings.json` holds a tighter default profile that has not
+been run (see "Reproduce").
+
 **Result: GO-WITH-CHANGES. ChatGPT plans ship in M8 through the Codex harness.** Codex's app-server ran inside `srt`,
 signed in with ChatGPT, and drove localDot's MCP `screenshot` and `click` end to end. The screenshot image reached the
 model, and the click landed on Gamma's centre, (990, 642), in 2 of 2 turns. Every model request went to
@@ -182,6 +186,10 @@ A direct check of `decideServerRequest` with synthetic requests (the reviewer's 
 - An approval-style `requestUserInput` with no deny option: no answer.
 - An elicitation from `localdot` with another `codex_approval_kind`, or in `url` mode: declined.
 - A boolean field with no default: left out of the reply rather than set to `true`.
+- Added by the final review: options "Allow" / "Allow (no further prompts)" / "Cancel". The runs' `denyLabel`, a word
+  search for deny, decline, cancel, reject or no, answered "Allow (no further prompts)". It now accepts only a whole
+  label (Cancel, Deny, Decline, Reject or No, in any case), so it answers Cancel here, and nothing when no option is
+  exactly one of those. The cases above answer as before.
 
 ## Codex's built-in tools: what the model can call
 
@@ -403,8 +411,22 @@ prove that nothing else ran. That is one more reason to remove the command tools
 
 ## Reproduce
 
+**Warning: the spike runs Codex with your own `~/.codex`.** It reuses the ChatGPT sign-in there, so `srt-settings.json`
+has to let the sandboxed harness write to that folder, and whatever it writes there (`config.toml` with its `notify`
+program and approval settings, `auth.json`, `skills/`, `rules/`) takes effect outside the sandbox the next time you run
+Codex. M8 gives the harness a localDot-owned `CODEX_HOME` with its own sign-in instead.
+
+The default `srt-settings.json` denies reads of `~` and `/Volumes` except Codex's home (`~/.codex`), its binary
+(`~/.local/bin`, for the standalone install) and what the spike itself reads: this folder, the repository's
+`node_modules` (pnpm's packages for the MCP server) and `../s5-models/out/probe.png`. That is P9/P11's read rule plus a
+`/Volumes` deny, with the spike's own files allowed back in because a checkout can sit under either. Its relative
+entries resolve against this folder, which `client.mjs` gives srt as its working directory. This profile has not been
+run: every run above used the brief's settings. If Codex needs another path (git metadata, say), add it to
+`allowRead`. To repeat the runs exactly, `git show 6927cfdd > out/srt-settings-brief.json` and run with
+`S7_SETTINGS=out/srt-settings-brief.json`.
+
 ```bash
-cd "/Volumes/Husky's SSD 4T/Projects/localdot"
+cd <repo>
 pnpm install
 (cd spikes/s5-models && node probe-image.mjs)        # only if spikes/s5-models/out/probe.png is missing
 cd spikes/s7-codex
