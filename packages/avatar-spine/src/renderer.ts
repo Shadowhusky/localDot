@@ -39,19 +39,25 @@ export class SpineRenderer implements AvatarRenderer {
       preserveDrawingBuffer: true,
     });
     const { skeletonUrl, atlasUrl } = this.#options;
-    for (const src of [skeletonUrl, atlasUrl])
-      if (!Assets.resolver.hasKey(src)) Assets.add({ alias: src, src });
-    await Assets.load([skeletonUrl, atlasUrl]);
-    const spine = Spine.from({
-      skeleton: skeletonUrl,
-      atlas: atlasUrl,
-      autoUpdate: !this.#options.manualClock,
-    });
-    const problems = bindingProblems(this.#options.binding, spine.skeleton.data);
-    if (problems.length > 0) {
-      spine.destroy();
+    let spine: Spine | null = null;
+    try {
+      for (const src of [skeletonUrl, atlasUrl])
+        if (!Assets.resolver.hasKey(src)) Assets.add({ alias: src, src });
+      await Assets.load([skeletonUrl, atlasUrl]);
+      spine = Spine.from({
+        skeleton: skeletonUrl,
+        atlas: atlasUrl,
+        autoUpdate: !this.#options.manualClock,
+      });
+      const problems = bindingProblems(this.#options.binding, spine.skeleton.data);
+      if (problems.length > 0) {
+        throw new Error(`avatar rig does not match its binding: ${problems.join("; ")}`);
+      }
+    } catch (error) {
+      // An initialised app and an auto-updating Spine both keep ticking until destroyed.
+      spine?.destroy();
       app.destroy(true, { children: true });
-      throw new Error(`avatar rig does not match its binding: ${problems.join("; ")}`);
+      throw error;
     }
     el.appendChild(app.canvas);
     app.stage.addChild(spine);
