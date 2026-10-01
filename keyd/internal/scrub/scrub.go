@@ -42,8 +42,9 @@ func New(pairs ...Pair) (*Scrubber, error) {
 		if len(p.Secret) < minSecret {
 			return nil, fmt.Errorf("scrub: a secret shorter than %d bytes would match too much", minSecret)
 		}
-		if slices.ContainsFunc(p.Replacement, func(b byte) bool { return !unreserved(b) }) {
-			return nil, errors.New("scrub: a replacement must be letters, digits and -._~, which no encoder escapes")
+		// An empty replacement would let the text on either side of a deleted secret close up into it.
+		if len(p.Replacement) == 0 || slices.ContainsFunc(p.Replacement, func(b byte) bool { return !unreserved(b) }) {
+			return nil, errors.New("scrub: a replacement must be one or more letters, digits and -._~, which no encoder escapes")
 		}
 		for _, n := range forms(p.Secret, p.Replacement) {
 			if len(n.find) == 0 || seen[string(n.find)] {

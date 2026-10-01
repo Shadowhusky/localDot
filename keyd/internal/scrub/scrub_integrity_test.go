@@ -168,6 +168,14 @@ func TestTheShortestSecretIsEightBytes(t *testing.T) {
 	}
 }
 
+func TestAnEmptyReplacementIsRefused(t *testing.T) {
+	for _, r := range [][]byte{nil, {}} {
+		if _, err := New(Pair{Secret: []byte(secret), Replacement: r}); err == nil {
+			t.Fatalf("New accepted the empty replacement %#v", r)
+		}
+	}
+}
+
 func TestAFormThatCouldStillGrowIsReplacedAtEOF(t *testing.T) {
 	s := scrubberOf(t, tilde, amp)
 	cases := map[string]string{
