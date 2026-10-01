@@ -2,7 +2,7 @@ name: ci
 on: [push, pull_request]
 jobs:
   check:
-    runs-on: ubuntu-24.04-arm
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -15,3 +15,4 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test
       - run: pnpm hygiene
+      - run: pnpm --filter @localdot/protocol schema && git diff --exit-code packages/protocol/schema

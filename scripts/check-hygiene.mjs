@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -35,12 +35,14 @@ export function findViolations(files, readText) {
   return violations;
 }
 
+const UNREADABLE_AS_TEXT = new Set(["ENOENT", "EISDIR", "ENOTDIR"]);
+
 export function readTextFile(file) {
   try {
     const buffer = readFileSync(file);
     return buffer.subarray(0, 8000).includes(0) ? null : buffer.toString("utf8");
   } catch (error) {
-    if (error.code === "ENOENT") return null;
+    if (UNREADABLE_AS_TEXT.has(error.code)) return null;
     throw error;
   }
 }
@@ -62,7 +64,8 @@ function repoFiles(root) {
   return out.split("\0").filter(Boolean);
 }
 
-if (process.argv[1] === SCRIPT_PATH) {
+// argv[1] keeps the spelling it was run by, symlinks included; import.meta.url is the real path.
+if (process.argv[1] && realpathSync(process.argv[1]) === realpathSync(SCRIPT_PATH)) {
   const root = repoRoot();
   const violations = findViolations(repoFiles(root), (file) => readTextFile(join(root, file)));
   for (const v of violations) console.error(`hygiene: ${v.rule} in ${v.where} of ${v.file}`);
