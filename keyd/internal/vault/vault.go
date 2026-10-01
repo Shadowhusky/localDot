@@ -38,9 +38,21 @@ type Record struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+func (r Record) clone() Record {
+	r.Hosts = slices.Clone(r.Hosts)
+	r.Methods = slices.Clone(r.Methods)
+	r.Paths = slices.Clone(r.Paths)
+	return r
+}
+
+func validKind(k Kind) bool {
+	return k == KindLLM || k == KindHTTP
+}
+
 const (
-	minValueLen = 8
-	maxValueLen = 8192
+	minValueLen  = 8
+	maxValueLen  = 8192
+	indexVersion = 1
 )
 
 var (
@@ -86,7 +98,8 @@ type Vault struct {
 }
 
 // Open loads the index at path; a missing file is an empty vault. An empty path keeps the index
-// in memory only, for a vault whose values are in memory too.
+// in memory only, for a vault whose values are in memory too. An index keyd could not have written
+// is refused whole.
 func Open(store Store, path string) (*Vault, error) {
 	v := &Vault{store: store, path: path, now: time.Now, records: map[string]Record{}, cache: map[string][]byte{}}
 	if path == "" {
@@ -103,35 +116,79 @@ func Open(store Store, path string) (*Vault, error) {
 	if err := json.Unmarshal(data, &idx); err != nil {
 		return nil, fmt.Errorf("vault index %s: %w", path, err)
 	}
+	if idx.V != indexVersion {
+		return nil, fmt.Errorf("vault index %s: version %d, want %d", path, idx.V, indexVersion)
+	}
 	for _, r := range idx.Secrets {
+		_, repeated := v.records[r.ID]
+		switch {
+		case !ValidID(r.ID):
+			return nil, fmt.Errorf("vault index %s: secret id %q is invalid or reserved", path, r.ID)
+		case !validKind(r.Kind):
+			return nil, fmt.Errorf("vault index %s: secret %s has unknown kind %q", path, r.ID, r.Kind)
+		case repeated:
+			return nil, fmt.Errorf("vault index %s: secret %s appears twice", path, r.ID)
+		}
 		v.records[r.ID] = r
 	}
 	return v, nil
 }
 
+// Put stores the value, then the record. An error means nothing changed, as far as the store
+// allows: the old record and value stay in force, or a new secret leaves nothing behind.
 func (v *Vault) Put(rec Record, value []byte) error {
 	if !ValidID(rec.ID) {
 		return fmt.Errorf("secret id %q: want 1-64 of a-z 0-9 _ - starting with a letter or digit, not a reserved name", rec.ID)
 	}
-	if rec.Kind != KindLLM && rec.Kind != KindHTTP {
+	if !validKind(rec.Kind) {
 		return fmt.Errorf("secret kind %q: want llm or http", rec.Kind)
 	}
 	if err := ValidValue(value); err != nil {
 		return err
 	}
+	rec = rec.clone()
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	now := v.now().UTC()
 	rec.CreatedAt, rec.UpdatedAt = now, now
-	if old, ok := v.records[rec.ID]; ok {
+	old, had := v.records[rec.ID]
+	var prev []byte
+	if had {
 		rec.CreatedAt = old.CreatedAt
+		prev, _ = v.valueLocked(rec.ID)
 	}
 	if err := v.store.Put(rec.ID, value); err != nil {
+		v.restoreValueLocked(rec.ID, prev)
 		return err
 	}
 	v.records[rec.ID] = rec
+	if err := v.saveLocked(); err != nil {
+		if had {
+			v.records[rec.ID] = old
+		} else {
+			delete(v.records, rec.ID)
+		}
+		// The rename may have landed before the directory sync failed.
+		_ = v.saveLocked()
+		v.restoreValueLocked(rec.ID, prev)
+		return err
+	}
 	v.cache[rec.ID] = slices.Clone(value)
-	return v.saveLocked()
+	return nil
+}
+
+// restoreValueLocked undoes a store write that Put cannot keep. Without an old value to put back,
+// it deletes the item, so a restored record never meets the new value.
+func (v *Vault) restoreValueLocked(id string, prev []byte) {
+	if prev != nil {
+		v.cache[id] = prev
+		if v.store.Put(id, prev) == nil {
+			return
+		}
+	} else {
+		delete(v.cache, id)
+	}
+	_ = v.store.Delete(id)
 }
 
 func (v *Vault) Delete(id string) error {
@@ -152,7 +209,7 @@ func (v *Vault) Record(id string) (Record, bool) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	r, ok := v.records[id]
-	return r, ok
+	return r.clone(), ok
 }
 
 func (v *Vault) Records() []Record {
@@ -160,7 +217,7 @@ func (v *Vault) Records() []Record {
 	defer v.mu.Unlock()
 	out := make([]Record, 0, len(v.records))
 	for _, r := range v.records {
-		out = append(out, r)
+		out = append(out, r.clone())
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
 	return out
@@ -173,14 +230,22 @@ func (v *Vault) Value(id string) ([]byte, error) {
 	if _, ok := v.records[id]; !ok {
 		return nil, ErrNotFound
 	}
+	value, err := v.valueLocked(id)
+	if err != nil {
+		return nil, err
+	}
+	return slices.Clone(value), nil
+}
+
+func (v *Vault) valueLocked(id string) ([]byte, error) {
 	if cached, ok := v.cache[id]; ok {
-		return slices.Clone(cached), nil
+		return cached, nil
 	}
 	value, err := v.store.Get(id)
 	if err != nil {
 		return nil, err
 	}
-	v.cache[id] = slices.Clone(value)
+	v.cache[id] = value
 	return value, nil
 }
 
@@ -188,7 +253,7 @@ func (v *Vault) saveLocked() error {
 	if v.path == "" {
 		return nil
 	}
-	idx := indexFile{V: 1, Secrets: make([]Record, 0, len(v.records))}
+	idx := indexFile{V: indexVersion, Secrets: make([]Record, 0, len(v.records))}
 	for _, r := range v.records {
 		idx.Secrets = append(idx.Secrets, r)
 	}
@@ -200,8 +265,11 @@ func (v *Vault) saveLocked() error {
 	return writeFileAtomic(v.path, data)
 }
 
+// writeFileAtomic syncs the new file before renaming it over path, and the directory after, so a
+// crash leaves the old index or the new one, never an empty file or a lost rename.
 func writeFileAtomic(path string, data []byte) error {
-	tmp, err := os.CreateTemp(filepath.Dir(path), ".secrets-*")
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".secrets-*")
 	if err != nil {
 		return err
 	}
@@ -214,8 +282,20 @@ func writeFileAtomic(path string, data []byte) error {
 		tmp.Close()
 		return err
 	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return err
+	}
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	if err := os.Rename(tmp.Name(), path); err != nil {
+		return err
+	}
+	d, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer d.Close()
+	return d.Sync()
 }
