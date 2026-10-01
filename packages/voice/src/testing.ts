@@ -5,7 +5,7 @@ export class FakeSource {
   buffer: { getChannelData(channel: number): Float32Array } | null = null;
   onended: (() => void) | null = null;
   startedAt: number | null = null;
-  stopped = false;
+  stoppedAt: number | null = null;
   connected = true;
   connect(): void {}
   disconnect(): void {
@@ -14,8 +14,30 @@ export class FakeSource {
   start(at: number): void {
     this.startedAt = at;
   }
-  stop(): void {
-    this.stopped = true;
+  stop(at = 0): void {
+    this.stoppedAt = at;
+  }
+  get stopped(): boolean {
+    return this.stoppedAt !== null;
+  }
+}
+
+// A GainNode stand-in that records its automation as [kind, value, time].
+export class FakeGain {
+  readonly automation: ["set" | "ramp", number, number][] = [];
+  readonly gain = {
+    value: 1,
+    setValueAtTime: (value: number, at: number) => {
+      this.automation.push(["set", value, at]);
+    },
+    linearRampToValueAtTime: (value: number, at: number) => {
+      this.automation.push(["ramp", value, at]);
+    },
+  };
+  connected = true;
+  connect(): void {}
+  disconnect(): void {
+    this.connected = false;
   }
 }
 
@@ -27,6 +49,7 @@ export class FakeAudioContext {
   readonly destination = {};
   readonly outputLatency = 0.05;
   readonly sources: FakeSource[] = [];
+  readonly gains: FakeGain[] = [];
   createBuffer(_channels: number, length: number, sampleRate: number) {
     const data = new Float32Array(length);
     return { length, sampleRate, duration: length / sampleRate, getChannelData: () => data };
@@ -35,6 +58,11 @@ export class FakeAudioContext {
     const source = new FakeSource();
     this.sources.push(source);
     return source;
+  }
+  createGain(): FakeGain {
+    const gain = new FakeGain();
+    this.gains.push(gain);
+    return gain;
   }
   readonly #stateListeners: (() => void)[] = [];
   resume(): Promise<void> {

@@ -14,6 +14,7 @@ export interface PlaybackContext extends AudioClock {
   readonly state: AudioContextState;
   createBuffer(channels: number, length: number, sampleRate: number): AudioBuffer;
   createBufferSource(): AudioBufferSourceNode;
+  createGain(): GainNode;
   resume(): Promise<void>;
   addEventListener(type: "statechange", listener: () => void): void;
 }
@@ -34,8 +35,12 @@ export interface SentenceAudio {
   ended: boolean;
 }
 
-export const START_LEAD_S = 0.08;
+// The mouth starts to open MOUTH_LEAD_MS (150 ms) before the first sample, so the first chunk of a
+// reply plays at least that long after its track is handed over.
+export const START_LEAD_S = 0.16;
 export const MIN_LEAD_S = 0.02;
+// A barge-in fades out over this long, well inside its 150 ms, rather than clicking off mid-wave.
+export const FADE_OUT_S = 0.015;
 const KEEP_AFTER_END_S = 1;
 
 // Where a moment of a sentence (ms from its first sample) plays on the audio clock; a gap from a
@@ -51,6 +56,10 @@ export function contextTimeOf(sentence: SentenceAudio, ms: number): number {
   return chunk.at + (sample - chunk.sample) / SAMPLE_RATE;
 }
 
+// To the microsecond: float drift would put a time sitting on a boundary just past it, so an onset
+// on a 12 fps frame would show a frame late and a hop would land in the next envelope slot.
+const snap = (ms: number) => Math.round(ms * 1000) / 1000;
+
 export function buildTrack(
   sentences: SentenceAudio[],
   toPerf: (contextTime: number) => number,
@@ -61,8 +70,7 @@ export function buildTrack(
   if (!first || base === undefined) return null;
   const visemes: Viseme[] = [];
   const add = (v: Viseme) => {
-    // To the microsecond: float drift would put an onset on a 12 fps frame boundary a frame late.
-    const t = Math.round(v.t * 1000) / 1000;
+    const t = snap(v.t);
     const last = visemes.at(-1);
     if (last && t - last.t < 0.5) visemes.pop();
     if (visemes.at(-1)?.shape !== v.shape) visemes.push({ t, shape: v.shape });
@@ -75,8 +83,10 @@ export function buildTrack(
     if (s.ended && (own.at(-1)?.shape ?? "rest") !== "rest") {
       add({ t: rel((s.samples / SAMPLE_RATE) * 1000), shape: "rest" });
     }
+    // Each hop fills the slot it starts in, as the avatar reads the envelope, so a sentence that
+    // ends mid-hop leaves no hole before the next one.
     s.levels.forEach((level, i) => {
-      const k = Math.round(rel(i * ENVELOPE_STEP_MS) / ENVELOPE_STEP_MS);
+      const k = Math.floor(snap(rel(i * ENVELOPE_STEP_MS)) / ENVELOPE_STEP_MS);
       if (k >= 0) envelope[k] = level;
     });
   }
@@ -98,7 +108,7 @@ export class VoicePlayer {
   readonly #sink: SpeechSink;
   readonly #now: () => number;
   readonly #sentences = new Map<number, Sentence>();
-  readonly #sources = new Set<AudioBufferSourceNode>();
+  readonly #sources = new Map<AudioBufferSourceNode, GainNode>();
   readonly #firstAudio = new Map<number, number>();
   #cursor = 0;
   #ignoreBelow = 0;
@@ -147,12 +157,18 @@ export class VoicePlayer {
     buffer.getChannelData(0).set(samples);
     const source = this.#ctx.createBufferSource();
     source.buffer = buffer;
-    source.connect(this.#ctx.destination);
+    const gain = this.#ctx.createGain();
+    source.connect(gain);
+    gain.connect(this.#ctx.destination);
     const lead = this.#sources.size === 0 ? START_LEAD_S : MIN_LEAD_S;
     const at = Math.max(this.#cursor, this.#ctx.currentTime + lead);
-    source.onended = () => this.#sources.delete(source);
+    source.onended = () => {
+      this.#sources.delete(source);
+      source.disconnect();
+      gain.disconnect();
+    };
     source.start(at);
-    this.#sources.add(source);
+    this.#sources.set(source, gain);
     this.#cursor = at + samples.length / SAMPLE_RATE;
     if (sentence.chunks.length === 0) {
       this.#firstAudio.set(id, audioToPerf(this.#ctx, at, this.#now()));
@@ -177,16 +193,19 @@ export class VoicePlayer {
     this.#publish();
   }
 
-  // Barge-in: silence now, mouth to rest, and anything still arriving for these sentences dropped.
+  // Barge-in: a quick fade to silence, mouth to rest, and anything still arriving for these
+  // sentences dropped. Each source lets go of its nodes once it ends after the fade.
   stop(): void {
-    for (const source of this.#sources) {
-      source.onended = null;
+    const now = this.#ctx.currentTime;
+    const silentAt = now + FADE_OUT_S;
+    for (const [source, gain] of this.#sources) {
+      gain.gain.setValueAtTime(1, now);
+      gain.gain.linearRampToValueAtTime(0, silentAt);
       try {
-        source.stop();
+        source.stop(silentAt);
       } catch {
         // A source that never started throws on stop; it is silent either way.
       }
-      source.disconnect();
     }
     this.#sources.clear();
     const highest = Math.max(this.#ignoreBelow - 1, ...this.#sentences.keys());

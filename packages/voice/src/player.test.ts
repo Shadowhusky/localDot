@@ -1,3 +1,4 @@
+import { MOUTH_LEAD_MS } from "@localdot/avatar";
 import { describe, expect, it } from "vitest";
 import { START_LEAD_S, VoicePlayer } from "./player.ts";
 import { FakeAudioContext, RecordingSink, tone } from "./testing.ts";
@@ -28,12 +29,22 @@ describe("VoicePlayer", () => {
     player.begin(1, "en");
     player.audio(1, tone(0.1, 0.15));
     player.audio(1, tone(0.1, 0));
-    expect(sink.last?.startsAt).toBeCloseTo(5000 + 10_080 + 50, 6);
+    expect(sink.last?.startsAt).toBeCloseTo(5000 + 10_160 + 50, 6);
     expect(shapes(sink.last)).toEqual([
       [0, "A"],
       [100, "rest"],
     ]);
-    expect(player.firstAudioAt(1)).toBeCloseTo(15_130, 6);
+    expect(player.firstAudioAt(1)).toBeCloseTo(15_210, 6);
+  });
+
+  it("hands the mouth its first track in time for the whole pre-open", () => {
+    const { ctx, sink, player } = setup();
+    player.begin(1, "en");
+    player.audio(1, tone(0.1, 0.15));
+    expect(sink.tracks).toHaveLength(1);
+    // The track arrives as the chunk is scheduled; output latency only adds to the lead.
+    const leadMs = ((ctx.sources[0]?.startedAt ?? 0) - ctx.currentTime) * 1000;
+    expect(leadMs).toBeGreaterThanOrEqual(MOUTH_LEAD_MS);
   });
 
   it("swaps in a sentence's aligned visemes, offset by the sentences before it", () => {
@@ -69,8 +80,20 @@ describe("VoicePlayer", () => {
     ]);
     expect(shapes(sink.last)).toEqual([
       [0, "A"],
-      [290, "I"],
+      [210, "I"],
     ]);
+  });
+
+  it("keeps the envelope whole across back-to-back sentences", () => {
+    const { sink, player } = setup();
+    [0.205, 0.2, 0.2].forEach((seconds, i) => {
+      player.begin(i + 1, "en");
+      player.audio(i + 1, tone(seconds, 0.15));
+      player.end(i + 1);
+    });
+    const envelope = [...(sink.last?.envelope ?? [])];
+    expect(envelope).toHaveLength(60);
+    expect(envelope.every((level) => level > 0.5)).toBe(true);
   });
 
   it("stops every sound and closes the mouth on barge-in, then ignores the old sentences", () => {
@@ -80,7 +103,7 @@ describe("VoicePlayer", () => {
     player.audio(1, tone(0.5, 0.15));
     player.audio(2, tone(0.5, 0.15));
     player.stop();
-    expect(ctx.sources.every((s) => s.stopped && !s.connected)).toBe(true);
+    expect(ctx.sources.every((s) => s.stopped)).toBe(true);
     expect(sink.last).toBeNull();
     expect(player.speaking).toBe(false);
     player.audio(2, tone(0.1, 0.15));
@@ -88,6 +111,29 @@ describe("VoicePlayer", () => {
     player.begin(3, "en");
     player.audio(3, tone(0.1, 0.15));
     expect(ctx.sources[2]?.startedAt).toBeCloseTo(10 + START_LEAD_S, 9);
+  });
+
+  it("fades out over 15 ms on barge-in instead of cutting the waveform", () => {
+    const { ctx, player } = setup();
+    player.begin(1, "en");
+    player.audio(1, tone(0.5, 0.15));
+    player.audio(1, tone(0.5, 0.15));
+    ctx.currentTime = 10.4;
+    player.stop();
+    const end = 10.4 + 0.015;
+    expect(ctx.gains.map((g) => g.automation)).toEqual([
+      [
+        ["set", 1, 10.4],
+        ["ramp", 0, end],
+      ],
+      [
+        ["set", 1, 10.4],
+        ["ramp", 0, end],
+      ],
+    ]);
+    expect(ctx.sources.map((s) => s.stoppedAt)).toEqual([end, end]);
+    for (const source of ctx.sources) source.onended?.();
+    expect([...ctx.sources, ...ctx.gains].every((node) => !node.connected)).toBe(true);
   });
 
   it("keeps the mouth still while the browser holds audio back, then moves with the sound", async () => {
