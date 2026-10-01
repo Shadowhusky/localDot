@@ -6,7 +6,8 @@
       "**",
       "!spikes",
       "!packages/protocol/schema",
-      "!packages/avatar-spine/fixtures/toy/pack"
+      "!packages/avatar-spine/fixtures/toy/pack",
+      "!apps/voiced/tests/fixtures"
     ]
   },
   "formatter": { "enabled": true, "indentStyle": "space", "indentWidth": 2, "lineWidth": 100 },
