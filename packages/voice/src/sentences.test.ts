@@ -55,6 +55,19 @@ describe("SentenceSplitter", () => {
     for (const piece of cjkPieces) expect(speechUnits(piece)).toBeLessThanOrEqual(MAX_UNITS + 1);
   });
 
+  it("keeps numbers, times and links whole when it cuts at a clause", () => {
+    expect(split("You have 1,024 files left.")).toEqual(["You have 1,024 files left."]);
+    expect(split("Meet me at 10:30 tomorrow.")).toEqual(["Meet me at 10:30 tomorrow."]);
+    expect(split("See https://example.com for the docs.")).toEqual([
+      "See https://example.com for the docs.",
+    ]);
+    expect(split("下午3:45开会。")).toEqual(["下午3:45开会。"]);
+    expect(split(`${"word ".repeat(39)}1,024 more.`)).toEqual([
+      "word ".repeat(39).trim(),
+      "1,024 more.",
+    ]);
+  });
+
   it("drops pieces with nothing to say", () => {
     expect(split("…… !! \n\n ok.")).toEqual(["ok."]);
     expect(split("   ")).toEqual([]);
@@ -75,5 +88,10 @@ describe("detectLang", () => {
     expect(detectLang("東京都庁")).toBe("zh");
     expect(detectLang("42!", "ja")).toBe("ja");
     expect(detectLang("42!")).toBe("en");
+  });
+
+  it("reads a katakana middle dot in a Chinese name as punctuation", () => {
+    expect(detectLang("史蒂夫・乔布斯创立了苹果公司。")).toBe("zh");
+    expect(detectLang("ジョン・スミスです。")).toBe("ja");
   });
 });

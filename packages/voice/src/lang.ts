@@ -1,6 +1,7 @@
 export type Lang = "zh" | "en" | "ja";
 
-const KANA = /[\u{3040}-\u{30ff}\u{31f0}-\u{31ff}\u{ff66}-\u{ff9f}]/u;
+// Without the katakana middle dot (U+30FB), which Chinese also writes between the parts of a name.
+const KANA = /[\u{3040}-\u{30fa}\u{30fc}-\u{30ff}\u{31f0}-\u{31ff}\u{ff66}-\u{ff9f}]/u;
 export const HAN = /[\u{3400}-\u{4dbf}\u{4e00}-\u{9fff}\u{f900}-\u{faff}]/u;
 export const CJK = new RegExp(`${KANA.source}|${HAN.source}`, "u");
 const LATIN = /[A-Za-z]/;

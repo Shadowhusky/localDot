@@ -1,7 +1,10 @@
 import { CJK } from "./lang.ts";
 
 const SENTENCE_END = new Set(["。", "！", "？", "!", "?", "…", "\n"]);
-const CLAUSE_END = new Set(["，", "、", ",", ";", "；", "：", ":"]);
+const CLAUSE_END = new Set(["，", "、", "；", "："]);
+// ASCII marks also sit inside numbers, times and links (1,024, 10:30, https://), so they end a clause
+// only when whitespace follows, as "." ends a sentence.
+const SPACED_CLAUSE_END = new Set([",", ";", ":"]);
 const CLOSERS = new Set(["”", "’", "」", "』", "）", ")", '"', "'", "]", "】"]);
 const SPEAKABLE = /[\p{L}\p{N}]/u;
 
@@ -56,7 +59,8 @@ export class SentenceSplitter {
     for (let i = 0; i < text.length; i++) {
       const ch = text[i] as string;
       const next = text[i + 1];
-      if (SENTENCE_END.has(ch) || (ch === "." && next !== undefined && /\s/.test(next))) {
+      const spaced = next !== undefined && /\s/.test(next);
+      if (SENTENCE_END.has(ch) || (ch === "." && spaced)) {
         return withClosers(text, i + 1);
       }
       if (/\s/.test(ch)) {
@@ -64,7 +68,7 @@ export class SentenceSplitter {
         continue;
       }
       units += CJK.test(ch) ? 2 : 1;
-      if (CLAUSE_END.has(ch)) {
+      if (CLAUSE_END.has(ch) || (SPACED_CLAUSE_END.has(ch) && spaced)) {
         if (this.#first && units >= FIRST_MIN_UNITS) return withClosers(text, i + 1);
         lastClause = i + 1;
       }
