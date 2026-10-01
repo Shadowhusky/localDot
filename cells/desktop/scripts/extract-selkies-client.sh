@@ -1,11 +1,16 @@
 #!/usr/bin/env bash
 # Copies Selkies' dashboard (index.html, assets, icons, the MPL-2.0 text) out of the pinned base
 # image into <dest>, using the selkies-client build stage so no container runs and nothing is
-# bind-mounted. <dest> is replaced, so it must lie strictly inside this repository.
+# bind-mounted. <dest> is replaced, so it must lie strictly inside this repository and be either
+# missing or a previous extraction.
 set -euo pipefail
 raw=${1:?usage: extract-selkies-client.sh <dest>}
 root="$(cd "$(dirname "$0")/../../.." && pwd -P)"
 home="$(cd "$HOME" && pwd -P)"
+if [ ! -f "$root/cells/desktop/Dockerfile" ]; then
+  echo "extract-selkies-client.sh: refusing: $root/cells/desktop/Dockerfile is missing, so $root is not this repository" >&2
+  exit 1
+fi
 # Resolve <dest> without creating anything: its deepest existing ancestor physically, the rest as
 # written, which may not step through "." or "..".
 base=$raw
@@ -23,6 +28,10 @@ case "$dest" in
 esac
 if [ "$ok" != yes ]; then
   echo "extract-selkies-client.sh: refusing to replace $raw: <dest> must be inside $root" >&2
+  exit 1
+fi
+if { [ -e "$dest" ] || [ -L "$dest" ]; } && ! { [ -f "$dest/index.html" ] && [ -d "$dest/assets" ]; }; then
+  echo "extract-selkies-client.sh: refusing to replace $raw: it is not a previous extraction (index.html and assets/)" >&2
   exit 1
 fi
 cd "$(dirname "$0")/.."
