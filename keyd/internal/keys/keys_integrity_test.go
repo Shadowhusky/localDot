@@ -719,3 +719,53 @@ func TestSwapsOnOneHeaderCompose(t *testing.T) {
 		}
 	}
 }
+
+func TestABasicHeaderCarriesAtMostOneUserAndOnePasswordSecret(t *testing.T) {
+	r := NewRegistry()
+	const host = "basic.example.test"
+	rec := func(id, format string) vault.Record {
+		return vault.Record{ID: id, Kind: vault.KindHTTP, Hosts: []string{host}, Header: "Authorization", Format: format}
+	}
+	u := mint(t, r, "c1", binding(t, rec("user", "basic-user")))
+	u2 := mint(t, r, "c1", binding(t, rec("user", "basic-user")))
+	uOther := mint(t, r, "c1", binding(t, rec("user-other", "basic-user")))
+	p := mint(t, r, "c1", binding(t, rec("pass", "basic-password")))
+	p2 := mint(t, r, "c1", binding(t, rec("pass", "basic-password")))
+	pOther := mint(t, r, "c1", binding(t, rec("pass-other", "basic-password")))
+	pFar := mint(t, r, "c1", binding(t, vault.Record{ID: "pass-far", Kind: vault.KindHTTP, Hosts: []string{"far.example.test"}, Header: "Authorization", Format: "basic-password"}))
+	pForeign := mint(t, r, "c2", binding(t, rec("pass", "basic-password")))
+	d := https(host)
+
+	h := hdr("Authorization", basicOf(u, p))
+	v := at(t, r, d, "GET", "/", h)
+	wantAllow(t, "a user and a password of two secrets", v, 2)
+	values := map[string]string{"user": "real-user-value", "pass": "real-password-value"}
+	if err := ApplySwaps(h, v.Swaps, func(id string) ([]byte, error) { return []byte(values[id]), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := h.Values("Authorization"), []string{basicOf("real-user-value", "real-password-value")}; !slices.Equal(got, want) {
+		t.Errorf("the pair swapped to %q, want %q", got, want)
+	}
+
+	for _, c := range []struct{ name, user, pass string }{
+		{"two user secrets, one in each half", u, uOther},
+		{"two user secrets in the user half", u + uOther, ""},
+		{"two password secrets, one in each half", pOther, p},
+		{"two password secrets in the password half", "x", p + pOther},
+		{"each in the other's half", p, u},
+		{"the user in the password half", "x", u},
+		{"the password in the user half", p, ""},
+		{"the user half with extra text", u + "x", p},
+		{"the user half after extra text", "x" + u, p},
+		{"the password half with extra text", u, p + "x"},
+		{"the password half after a space", u, " " + p},
+		{"the password half before a colon", u, p + ":"},
+		{"two surrogates of the user secret", u, u2},
+		{"two surrogates of the password secret", p2, p},
+		{"the password twice", u, p + p},
+		{"a password bound to another host", u, pFar},
+		{"another cell's password", u, pForeign},
+	} {
+		wantDeny(t, c.name, at(t, r, d, "GET", "/", hdr("Authorization", basicOf(c.user, c.pass))), ReasonMisplacedSurrogate)
+	}
+}
