@@ -1,6 +1,7 @@
-import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerClient } from "./docker.ts";
 import { CellOrchestrator, UnknownCellError } from "./orchestrator.ts";
@@ -50,6 +51,32 @@ const waitUntil = (pred: () => boolean, ms = 2000) =>
 const callsTo = (request: string) =>
   fake.state.calls.filter((c) => `${c.method} ${c.path}` === request).length;
 
+// Root reads a mode-000 file anyway, so an unreadable cell.json can't be staged as root.
+const isRoot = process.getuid?.() === 0;
+
+// Collects what would otherwise reach Node's unhandledRejection handler and end the daemon.
+async function withRejectionsCaught(run: (rejections: unknown[]) => Promise<void>) {
+  const rejections: unknown[] = [];
+  const record = (reason: unknown) => rejections.push(reason);
+  process.on("unhandledRejection", record);
+  try {
+    await run(rejections);
+  } finally {
+    process.off("unhandledRejection", record);
+  }
+}
+
+const quiet = () => vi.spyOn(console, "error").mockImplementation(() => {});
+
+// Counts reads of cell.json, to show which calls stay off the disk.
+class CountingStore extends CellStore {
+  reads = 0;
+  override get(id: string) {
+    this.reads += 1;
+    return super.get(id);
+  }
+}
+
 async function setup(
   opts: {
     desktopd?: (store: CellStore) => () => DesktopdHealth | undefined;
@@ -58,12 +85,13 @@ async function setup(
     readyTimeoutMs?: number;
     restartBackoffMs?: number[];
     sleep?: (ms: number) => Promise<void>;
+    makeStore?: (home: string) => CellStore;
   } = {},
 ) {
   fake = await startFakeDocker();
   const home = mkdtempSync(join(tmpdir(), "local dot's orch-"));
   homes.push(home);
-  const store = new CellStore(home);
+  const store = (opts.makeStore ?? ((dir) => new CellStore(dir)))(home);
   const changes: CellSummary[] = [];
   const probe = (opts.desktopd ?? runningDesktop)(store);
   const orchestrator = new CellOrchestrator({
@@ -631,49 +659,42 @@ describe("CellOrchestrator background loops", () => {
 });
 
 describe("CellOrchestrator background failures", () => {
-  // Collects what would otherwise reach Node's unhandledRejection handler and end the daemon.
-  async function withRejectionsCaught(run: (rejections: unknown[]) => Promise<void>) {
-    const rejections: unknown[] = [];
-    const record = (reason: unknown) => rejections.push(reason);
-    process.on("unhandledRejection", record);
-    try {
-      await run(rejections);
-    } finally {
-      process.off("unhandledRejection", record);
-    }
-  }
-
-  it("keeps watching through an unreadable cell.json, with no unhandled rejection", async () => {
-    await withRejectionsCaught(async (rejections) => {
-      const { orchestrator, store, home, stateOf } = await setup();
-      const cell = await orchestrator.create({ scale: 2 });
-      await stateOf(cell.id, "ready");
-      const desktop = fake.state.containers.get(store.get(cell.id)?.docker.desktop ?? "");
-      const file = join(home, "cells", cell.id, "cell.json");
-      const error = vi.spyOn(console, "error").mockImplementation(() => {});
-      try {
-        chmodSync(file, 0o000);
-        if (desktop) {
-          desktop.running = false;
-          desktop.exitCode = 137;
+  it.skipIf(isRoot)(
+    "keeps watching through an unreadable cell.json, with no unhandled rejection",
+    async () => {
+      await withRejectionsCaught(async (rejections) => {
+        // A probe that reads no records, so only the orchestrator could touch the file.
+        const { orchestrator, store, home, stateOf } = await setup({
+          probeDesktopd: async () => healthy,
+        });
+        const cell = await orchestrator.create({ scale: 2 });
+        await stateOf(cell.id, "ready");
+        const desktop = fake.state.containers.get(store.get(cell.id)?.docker.desktop ?? "");
+        const file = join(home, "cells", cell.id, "cell.json");
+        const error = quiet();
+        try {
+          chmodSync(file, 0o000);
+          if (desktop) {
+            desktop.running = false;
+            desktop.exitCode = 137;
+          }
+          await waitUntil(() => desktop?.starts === 2 && desktop.running);
+          await new Promise((r) => setTimeout(r, 50));
+          expect(rejections).toEqual([]);
+          expect(desktop?.starts).toBe(2);
+          // The record held in memory carries the cell through; nothing reads the file again.
+          expect(error.mock.calls.filter((call) => String(call[0]).includes(cell.id))).toEqual([]);
+        } finally {
+          chmodSync(file, 0o600);
+          error.mockRestore();
         }
-        await waitUntil(() => desktop?.starts === 2 && desktop.running);
-        await new Promise((r) => setTimeout(r, 50));
-        expect(rejections).toEqual([]);
-        expect(desktop?.starts).toBe(2);
-        expect(error.mock.calls).toContainEqual([
-          `cell ${cell.id}: cell.json is unreadable (EACCES); state change not sent`,
-        ]);
-      } finally {
-        chmodSync(file, 0o600);
-        error.mockRestore();
-      }
-    });
-  });
+      });
+    },
+  );
 
-  it("ends a background check that throws with one line, and no unhandled rejection", async () => {
+  it("fails a cell whose background check throws, with one line and no unhandled rejection", async () => {
     await withRejectionsCaught(async (rejections) => {
-      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      const error = quiet();
       try {
         const { orchestrator } = await setup({
           probeDesktopd: async () => {
@@ -687,11 +708,247 @@ describe("CellOrchestrator background failures", () => {
         await new Promise((r) => setTimeout(r, 50));
         expect(rejections).toEqual([]);
         expect(error.mock.calls).toEqual([[`cell ${cell.id}: background check stopped (EPROBE)`]]);
-        expect(orchestrator.get(cell.id)?.state).toBe("starting");
+        expect(orchestrator.get(cell.id)).toMatchObject({
+          state: "failed",
+          error: "background check stopped (EPROBE)",
+        });
       } finally {
         error.mockRestore();
       }
     });
+  });
+
+  it("catches a listener's rejection and logs only the cell id and the error code", async () => {
+    await withRejectionsCaught(async (rejections) => {
+      const error = quiet();
+      try {
+        const { orchestrator, stateOf } = await setup();
+        orchestrator.subscribe(async () => {
+          throw Object.assign(new Error("listener saw /Users/x/secret"), { code: "ELISTEN" });
+        });
+        orchestrator.subscribe(() => {
+          throw new Error("listener saw /Users/x/secret");
+        });
+        const cell = await orchestrator.create({ scale: 2 });
+        await stateOf(cell.id, "ready");
+        await new Promise((r) => setTimeout(r, 20));
+        expect(rejections).toEqual([]);
+        expect(new Set(error.mock.calls.map((call) => call.join(" ")))).toEqual(
+          new Set([
+            `cell ${cell.id}: a state listener failed (ELISTEN)`,
+            `cell ${cell.id}: a state listener failed (no error code)`,
+          ]),
+        );
+      } finally {
+        error.mockRestore();
+      }
+    });
+  });
+
+  it("fails a cell whose stop Docker refuses, instead of leaving it stopping", async () => {
+    const { orchestrator, store, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    fake.state.failRequests.add(`POST /containers/${store.get(cell.id)?.docker.desktop}/stop`);
+    await expect(orchestrator.stop(cell.id)).rejects.toThrow("refusing");
+    expect(orchestrator.get(cell.id)).toMatchObject({
+      state: "failed",
+      error: expect.stringContaining("stop failed"),
+    });
+  });
+
+  it("fails a ready cell whose container was removed outside localDot", async () => {
+    const { orchestrator, store, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    fake.state.containers.delete(store.get(cell.id)?.docker.desktop ?? "");
+    await waitUntil(() => orchestrator.get(cell.id)?.state === "failed", 1000);
+    expect(orchestrator.get(cell.id)).toMatchObject({
+      state: "failed",
+      error: "desktop container is missing: removed outside localDot",
+    });
+  });
+
+  it("keeps watching a ready cell through a passing inspect error", async () => {
+    const { orchestrator, store, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const desktop = store.get(cell.id)?.docker.desktop ?? "";
+    const inspect = `GET /containers/${desktop}/json`;
+    fake.state.failRequests.add(inspect);
+    const inspects = callsTo(inspect);
+    await waitUntil(() => callsTo(inspect) > inspects + 5);
+    fake.state.failRequests.delete(inspect);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(orchestrator.get(cell.id)?.state).toBe("ready");
+    expect(fake.state.containers.get(desktop)?.starts).toBe(1);
+  });
+
+  it("names the gate at once when it exits while the cell starts", async () => {
+    const { orchestrator, store } = await setup({ desktopd: () => () => undefined });
+    const cell = await orchestrator.create({ scale: 2 });
+    const gate = fake.state.containers.get(store.get(cell.id)?.docker.gate ?? "");
+    if (gate) {
+      gate.running = false;
+      gate.exitCode = 1;
+    }
+    await waitUntil(() => orchestrator.get(cell.id)?.state === "failed", 1000);
+    expect(orchestrator.get(cell.id)).toMatchObject({
+      state: "failed",
+      error: "gate container exited with 1",
+    });
+  });
+
+  it("clamps desktopd's detail when it copies it into the error", async () => {
+    const screen = { w: 1, h: 1, junk: "x".repeat(10_000) } as DesktopdHealth["screen"];
+    const { orchestrator, stateOf } = await setup({
+      desktopd: () => () => ({ ...healthy, ok: false, screen }),
+      readyTimeoutMs: 30,
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    const failed = await stateOf(cell.id, "failed");
+    expect(failed.error).toMatch(/^not ready after 0\.03 s: desktopd not ready: /);
+    expect(failed.error?.length).toBeLessThanOrEqual(300);
+  });
+});
+
+describe("CellOrchestrator records and endpoints", () => {
+  it("hands out endpoints only while the cell is ready", async () => {
+    const answer = Promise.withResolvers<DesktopdHealth | undefined>();
+    const { orchestrator, stateOf } = await setup({ probeDesktopd: () => answer.promise });
+    const cell = await orchestrator.create({ scale: 2 });
+    expect(orchestrator.get(cell.id)?.state).toBe("starting");
+    expect(orchestrator.endpoints(cell.id)).toBeUndefined();
+    answer.resolve(healthy);
+    await stateOf(cell.id, "ready");
+    expect(orchestrator.endpoints(cell.id)).toBeDefined();
+    await orchestrator.stop(cell.id);
+    expect(orchestrator.endpoints(cell.id)).toBeUndefined();
+  });
+
+  it("hands out no endpoints for a cell that failed while it held ports", async () => {
+    const { orchestrator, stateOf } = await setup({
+      desktopd: () => () => ({ ...healthy, ok: false }),
+      readyTimeoutMs: 30,
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "failed");
+    expect(orchestrator.endpoints(cell.id)).toBeUndefined();
+  });
+
+  it("serves records from memory, so endpoints, reads and stream updates touch no disk", async () => {
+    let store: CountingStore | undefined;
+    const { orchestrator, stateOf } = await setup({
+      makeStore: (home) => {
+        store = new CountingStore(home);
+        return store;
+      },
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const reads = store?.reads ?? 0;
+    for (let i = 0; i < 100; i++) {
+      orchestrator.endpoints(cell.id);
+      orchestrator.get(cell.id);
+      orchestrator.updateStream(cell.id, { viewers: i });
+    }
+    expect((store?.reads ?? 0) - reads).toBe(0);
+  });
+
+  it("refuses to create while a cell record can't be read, whose keyd port may be taken", async () => {
+    const { orchestrator, store, home } = await setup();
+    store.save(sampleRecord());
+    const unreadable = ulid();
+    mkdirSync(join(home, "cells", unreadable, "cell.json"), { recursive: true });
+    const error = quiet();
+    try {
+      const err = await orchestrator.create({ scale: 2 }).catch((e: unknown) => e);
+      expect(err).toMatchObject({
+        name: "SkippedCellsError",
+        message: expect.stringContaining(unreadable),
+      });
+      expect(fake.state.calls.filter((c) => c.method === "POST")).toEqual([]);
+    } finally {
+      error.mockRestore();
+    }
+  });
+
+  it("reconciles every other cell when one record can't be read", async () => {
+    const { orchestrator, home, stateOf } = await setup();
+    const first = await orchestrator.create({ scale: 2 });
+    await stateOf(first.id, "ready");
+    const second = await orchestrator.create({ scale: 2 });
+    await stateOf(second.id, "ready");
+    orchestrator.dispose();
+    // The first read lists the record; the next, a moment later, fails.
+    let reads = 0;
+    const flaky = new (class extends CellStore {
+      override get(id: string) {
+        if (id === first.id && ++reads > 1) {
+          throw Object.assign(new Error(`EACCES: permission denied, open '${home}'`), {
+            code: "EACCES",
+          });
+        }
+        return super.get(id);
+      }
+    })(home);
+    const fresh = new CellOrchestrator({
+      docker: new DockerClient(fake.socketPath),
+      store: flaky,
+      images,
+      probeDesktopd: async () => healthy,
+      probeStream: async () => true,
+      sleep: async () => {},
+    });
+    made.push(fresh);
+    const error = quiet();
+    try {
+      await fresh.reconcile();
+      await waitUntil(() => fresh.get(second.id)?.state === "ready", 1000);
+      expect(fresh.get(second.id)?.state).toBe("ready");
+      expect(error.mock.calls).toContainEqual([`cell ${first.id}: not reconciled (EACCES)`]);
+    } finally {
+      error.mockRestore();
+    }
+  });
+});
+
+describe("CellOrchestrator undo", () => {
+  it.each([
+    ["the desktop cannot start", "POST /containers/localdot-desktop-"],
+    ["the gate cannot join its internal network", "POST /networks/localdot-cell-"],
+  ])("emits removed and undoes everything when %s", async (_what, failing) => {
+    const { orchestrator, store, changes } = await setup();
+    fake.state.failRequests.add(failing);
+    const err = await orchestrator.create({ scale: 2 }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(Error);
+    const id = changes[0]?.id ?? "";
+    expect(changes.every((c) => c.id === id)).toBe(true);
+    expect(changes.at(-1)?.state).toBe("removed");
+    expect(orchestrator.get(id)).toBeUndefined();
+    expect(store.list()).toEqual([]);
+    expect({
+      containers: fake.state.containers.size,
+      networks: fake.state.networks.size,
+      volumes: fake.state.volumes.size,
+    }).toEqual({ containers: 0, networks: 0, volumes: 0 });
+  });
+
+  it("logs each undo step that fails, naming the object and the status", async () => {
+    const { orchestrator, changes } = await setup();
+    fake.state.failRequests.add("POST /containers/localdot-desktop-");
+    fake.state.failRequests.add("DELETE /networks/");
+    const error = quiet();
+    try {
+      await orchestrator.create({ scale: 2 }).catch(() => {});
+      const id = changes[0]?.id ?? "";
+      expect(error.mock.calls).toEqual([
+        [`cell ${id}: could not undo network localdot-egress-${id} (status 500)`],
+        [`cell ${id}: could not undo network localdot-cell-${id} (status 500)`],
+      ]);
+    } finally {
+      error.mockRestore();
+    }
   });
 });
 

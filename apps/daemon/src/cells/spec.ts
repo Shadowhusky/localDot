@@ -29,11 +29,13 @@ export function cellNames(id: string, prefix = NAME_PREFIX) {
 }
 
 // Plain --internal still exposes Docker Desktop VM listeners on the bridge gateway (S3, D14).
+// IPv6 is pinned off: the isolated gateway option covers IPv4 only.
 export function isolatedNetworkSpec(name: string) {
   return {
     Name: name,
     Driver: "bridge",
     Internal: true,
+    EnableIPv6: false,
     Options: { [ISOLATED_GATEWAY_OPTION]: "isolated" },
   };
 }
@@ -43,7 +45,7 @@ export function internalNetworkSpec(name: string) {
 }
 
 export function egressNetworkSpec(name: string) {
-  return { Name: name, Driver: "bridge", Labels: LABELS };
+  return { Name: name, Driver: "bridge", EnableIPv6: false, Labels: LABELS };
 }
 
 export function homeVolumeSpec(name: string) {

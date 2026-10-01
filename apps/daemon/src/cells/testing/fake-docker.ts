@@ -37,6 +37,9 @@ export interface FakeDockerState {
   // An engine that ignores isolated gateway mode reports a gateway on internal networks.
   gatewayOnInternal: boolean;
   failCreate: Set<string>;
+  // "METHOD /path" prefixes answered with a 500, so a test can fail a start, a connect or an
+  // inspect of an object whose cell id it does not know yet.
+  failRequests: Set<string>;
   // A request whose "METHOD path" is held here is answered only once the promise settles, the way
   // a slow Docker operation keeps the caller waiting; the reply reflects the state at that moment.
   holds: Map<string, Promise<void>>;
@@ -80,6 +83,7 @@ export async function startFakeDocker(
     nextPort: 50000,
     gatewayOnInternal: false,
     failCreate: new Set(),
+    failRequests: new Set(),
     holds: new Map(),
     ...overrides,
   };
@@ -90,6 +94,8 @@ export async function startFakeDocker(
     [...state.failCreate].some((prefix) => name.startsWith(prefix));
   const findNetwork = (ref: string) =>
     state.networks.get(ref) ?? [...state.networks.values()].find((n) => n.Id === ref);
+  const mounts = (c: FakeContainer) =>
+    ((c.body.HostConfig.Mounts as { Source?: string }[] | undefined) ?? []).map((m) => m.Source);
   const containerJson = (c: FakeContainer) => ({
     Id: `id-${c.name}`,
     Name: `/${c.name}`,
@@ -125,6 +131,9 @@ export async function startFakeDocker(
     if (method === "POST" && path === "/networks/create") {
       const spec = body as { Name: string; Internal?: boolean; Options?: Record<string, string> };
       if (failsCreate(spec.Name)) return json(500, { message: `refusing to create ${spec.Name}` });
+      if (state.networks.has(spec.Name)) {
+        return json(409, { message: `network with name ${spec.Name} already exists` });
+      }
       networkSeq += 1;
       const net: FakeNetwork = {
         Id: `net-${networkSeq}`,
@@ -141,6 +150,14 @@ export async function startFakeDocker(
       const net = findNetwork(segment(network));
       if (!net) return notFound("network");
       if (method === "DELETE") {
+        const attached = [...state.containers.values()].some(
+          (c) => c.running && net.Name in c.networks,
+        );
+        if (attached) {
+          return json(403, {
+            message: `error while removing network: network ${net.Name} id ${net.Id} has active endpoints`,
+          });
+        }
         state.networks.delete(net.Name);
         return { status: 204 };
       }
@@ -172,11 +189,23 @@ export async function startFakeDocker(
     }
     const volume = /^\/volumes\/([^/]+)$/.exec(path);
     if (method === "DELETE" && volume) {
-      return state.volumes.delete(segment(volume)) ? { status: 204 } : notFound("volume");
+      const name = segment(volume);
+      if (!state.volumes.has(name)) return notFound("volume");
+      // Docker refuses an in-use volume even with force=true, and a stopped container uses it too.
+      const user = [...state.containers.values()].find((c) => mounts(c).includes(name));
+      if (user)
+        return json(409, { message: `remove ${name}: volume is in use - [id-${user.name}]` });
+      state.volumes.delete(name);
+      return { status: 204 };
     }
     if (method === "POST" && path === "/containers/create") {
       const name = query.get("name") ?? "";
       if (failsCreate(name)) return json(500, { message: `refusing to create ${name}` });
+      if (state.containers.has(name)) {
+        return json(409, {
+          message: `Conflict. The container name "/${name}" is already in use by container "id-${name}". You have to remove (or rename) that container to be able to reuse that name.`,
+        });
+      }
       const spec = body as FakeContainer["body"];
       const networks: Record<string, unknown> = {};
       for (const [net, cfg] of Object.entries(spec.NetworkingConfig?.EndpointsConfig ?? {})) {
@@ -216,7 +245,15 @@ export async function startFakeDocker(
     }
     const container = /^\/containers\/([^/]+)$/.exec(path);
     if (method === "DELETE" && container) {
-      return state.containers.delete(segment(container)) ? { status: 204 } : notFound("container");
+      const c = state.containers.get(segment(container));
+      if (!c) return notFound("container");
+      if (c.running && query.get("force") !== "true") {
+        return json(409, {
+          message: `You cannot remove a running container id-${c.name}. Stop the container before attempting removal or force remove`,
+        });
+      }
+      state.containers.delete(c.name);
+      return { status: 204 };
     }
     return json(404, { message: `fake docker: no route ${method} ${path}` });
   }
@@ -235,7 +272,10 @@ export async function startFakeDocker(
       const body = text ? JSON.parse(text) : undefined;
       state.calls.push({ method: req.method ?? "", path, query: url.searchParams, body });
       await state.holds.get(`${req.method} ${path}`);
+      const request = `${req.method} ${path}`;
+      const failed = [...state.failRequests].some((prefix) => request.startsWith(prefix));
       const out =
+        (failed ? json(500, { message: `fake docker: refusing ${request}` }) : undefined) ??
         (api === undefined ? undefined : refusal(api, path)) ??
         handle(req.method ?? "", path, url.searchParams, body);
       if (out.body === undefined) {

@@ -75,6 +75,11 @@ interface NetworkInspect {
   IPAM: { Config: { Subnet?: string }[] };
 }
 
+interface UndoStep {
+  what: string;
+  run(): unknown;
+}
+
 interface ContainerInspect {
   State: { Running: boolean; ExitCode: number; Error: string };
   NetworkSettings: {
@@ -87,6 +92,15 @@ export class UnknownCellError extends Error {
   constructor(readonly cellId: string) {
     super(`unknown cell ${cellId}`);
     this.name = "UnknownCellError";
+  }
+}
+
+export class SkippedCellsError extends Error {
+  constructor(readonly cellIds: string[]) {
+    super(
+      `cell records that can't be read (${cellIds.join(", ")}) may still hold their keyd ports: fix or remove them in the cells folder before creating another computer`,
+    );
+    this.name = "SkippedCellsError";
   }
 }
 
@@ -106,6 +120,11 @@ const isStatus = (err: unknown, ...statuses: number[]) =>
 const objectPath = (kind: "containers" | "networks" | "volumes", name: string, action?: string) =>
   `/${kind}/${encodeURIComponent(name)}${action ? `/${action}` : ""}`;
 
+// Detail that comes from a container or from desktopd is cut to this length before it is shown.
+const MAX_DETAIL = 200;
+const clamp = (text: string) =>
+  text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL - 1)}…` : text;
+
 // Spec, error handling: a crashed cell is restarted with backoff. Docker's own restart policy is not
 // used (P2-R14): it would restart behind the daemon's back and change the published ports unseen.
 const DEFAULT_RESTART_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000];
@@ -122,6 +141,8 @@ export class CellOrchestrator {
   readonly #watchEveryMs: number;
   readonly #restartBackoffMs: number[];
   readonly #live = new Map<string, Live>();
+  // Records never change once created, so each is read from disk once, not per request or event.
+  readonly #records = new Map<string, CellRecord>();
   readonly #listeners = new Set<CellListener>();
   readonly #reservedKeydPorts = new Set<number>();
   readonly #queues = new Map<string, Promise<void>>();
@@ -145,19 +166,20 @@ export class CellOrchestrator {
   }
 
   get(id: string): CellSummary | undefined {
-    const record = this.#store.get(id);
+    const record = this.#record(id);
     return record && this.#summary(record);
   }
 
   record(id: string): CellRecord | undefined {
-    return this.#store.get(id);
+    return this.#record(id);
   }
 
+  // Only a ready cell's ports are its own: any other state may hold ports Docker has handed on.
   endpoints(id: string): CellEndpoints | undefined {
-    const record = this.#store.get(id);
     const live = this.#live.get(id);
-    if (!record || !live?.ports) return undefined;
-    return endpointsFor(record, live.ports);
+    if (live?.state !== "ready" || !live.ports) return undefined;
+    const record = this.#record(id);
+    return record && endpointsFor(record, live.ports);
   }
 
   subscribe(listener: CellListener): () => void {
@@ -180,12 +202,14 @@ export class CellOrchestrator {
   // Restart counters live in memory, so a daemon restart starts them again at 0.
   async reconcile(): Promise<void> {
     for (const { id } of this.#store.list()) {
-      await this.#queued(id, () => this.#reconcile(id));
+      await this.#queued(id, () => this.#reconcile(id)).catch((err: unknown) => {
+        console.error(`cell ${id}: not reconciled (${codeOf(err)})`);
+      });
     }
   }
 
   async #reconcile(id: string): Promise<void> {
-    const record = this.#store.get(id);
+    const record = this.#record(id);
     if (!record) return;
     try {
       const desktop = await this.#inspect(record.docker.desktop);
@@ -215,10 +239,12 @@ export class CellOrchestrator {
 
   async create(opts: { scale: Scale }): Promise<CellSummary> {
     const id = ulid();
+    const { records, skipped } = this.#store.inventory();
+    if (skipped.length > 0) throw new SkippedCellsError(skipped);
     // keyd tells cells apart by their listener port (M3), so the port is reserved before the first
     // await: two concurrent creates never get the same one.
     const keydPort = allocateKeydPort([
-      ...this.#store.list().map((r) => r.keydPort),
+      ...records.map((r) => r.keydPort),
       ...this.#reservedKeydPorts,
     ]);
     this.#reservedKeydPorts.add(keydPort);
@@ -231,24 +257,28 @@ export class CellOrchestrator {
 
   async #provision(id: string, keydPort: number, scale: Scale): Promise<CellSummary> {
     const names = cellNames(id, this.#namePrefix);
-    const undo: (() => Promise<unknown>)[] = [];
+    const undo: UndoStep[] = [];
     try {
       const internal = await this.#docker.request<{ Id: string }>({
         method: "POST",
         path: "/networks/create",
         body: internalNetworkSpec(names.internalNetwork),
       });
-      undo.push(() =>
-        this.#docker.request({ method: "DELETE", path: objectPath("networks", internal.Id) }),
-      );
+      undo.push({
+        what: `network ${names.internalNetwork}`,
+        run: () =>
+          this.#docker.request({ method: "DELETE", path: objectPath("networks", internal.Id) }),
+      });
       const egress = await this.#docker.request<{ Id: string }>({
         method: "POST",
         path: "/networks/create",
         body: egressNetworkSpec(names.egressNetwork),
       });
-      undo.push(() =>
-        this.#docker.request({ method: "DELETE", path: objectPath("networks", egress.Id) }),
-      );
+      undo.push({
+        what: `network ${names.egressNetwork}`,
+        run: () =>
+          this.#docker.request({ method: "DELETE", path: objectPath("networks", egress.Id) }),
+      });
       const internalSubnet = await this.#subnet(internal.Id);
       const egressSubnet = await this.#subnet(egress.Id);
       await this.#docker.request({
@@ -256,13 +286,15 @@ export class CellOrchestrator {
         path: "/volumes/create",
         body: homeVolumeSpec(names.homeVolume),
       });
-      undo.push(() =>
-        this.#docker.request({
-          method: "DELETE",
-          path: objectPath("volumes", names.homeVolume),
-          query: { force: "true" },
-        }),
-      );
+      undo.push({
+        what: `volume ${names.homeVolume}`,
+        run: () =>
+          this.#docker.request({
+            method: "DELETE",
+            path: objectPath("volumes", names.homeVolume),
+            query: { force: "true" },
+          }),
+      });
       const record: CellRecord = {
         v: 1,
         id,
@@ -287,16 +319,36 @@ export class CellOrchestrator {
           query: { name },
           body: spec,
         });
-        undo.push(() => this.#removeContainer(name));
+        undo.push({ what: `container ${name}`, run: () => this.#removeContainer(name) });
       }
+      // Before the save, so a save that fails part-way leaves no folder behind either.
+      undo.push({
+        what: "the cell record",
+        run: () => {
+          this.#store.remove(id);
+          this.#records.delete(id);
+        },
+      });
       this.#store.save(record);
-      undo.push(async () => this.#store.remove(id));
+      this.#records.set(id, record);
       if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
       return this.#summary(record);
     } catch (err) {
-      for (const step of undo.reverse()) await step().catch(() => {});
+      // Subscribers may have seen the cell start; they see it go, so none keeps a ghost.
+      if (this.#live.has(id)) this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });
+      await this.#undo(id, undo);
       this.#live.delete(id);
       throw err;
+    }
+  }
+
+  async #undo(id: string, steps: UndoStep[]): Promise<void> {
+    for (const step of steps.reverse()) {
+      try {
+        await step.run();
+      } catch (err) {
+        console.error(`cell ${id}: could not undo ${step.what} (${statusOf(err)})`);
+      }
     }
   }
 
@@ -315,17 +367,30 @@ export class CellOrchestrator {
 
   async #stop(id: string): Promise<void> {
     const record = this.#require(id);
-    this.#set(id, { state: "stopping", restarts: 0, stream: NO_STREAM });
-    for (const name of [record.docker.desktop, record.docker.gate]) {
-      await this.#docker
-        .request({
-          method: "POST",
-          path: objectPath("containers", name, "stop"),
-          query: { t: "10" },
-        })
-        .catch((err) => {
-          if (!isStatus(err, 304, 404)) throw err;
+    const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
+    this.#set(id, stopping);
+    try {
+      for (const name of [record.docker.desktop, record.docker.gate]) {
+        await this.#docker
+          .request({
+            method: "POST",
+            path: objectPath("containers", name, "stop"),
+            query: { t: "10" },
+          })
+          .catch((err) => {
+            if (!isStatus(err, 304, 404)) throw err;
+          });
+      }
+    } catch (err) {
+      if (this.#current(id, stopping)) {
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          error: `stop failed: ${messageOf(err)}`,
+          stream: NO_STREAM,
         });
+      }
+      throw err;
     }
     this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
   }
@@ -359,6 +424,7 @@ export class CellOrchestrator {
     }
     this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });
     this.#store.remove(id);
+    this.#records.delete(id);
     this.#live.delete(id);
   }
 
@@ -440,17 +506,14 @@ export class CellOrchestrator {
         }
         lastDetail = "desktopd is ready; the stream is not answering yet";
       } else if (health) {
-        lastDetail = `desktopd not ready: hidpi ${JSON.stringify(health.hidpi)}, screen ${JSON.stringify(health.screen)}`;
+        lastDetail = clamp(
+          `desktopd not ready: hidpi ${JSON.stringify(health.hidpi)}, screen ${JSON.stringify(health.screen)}`,
+        );
       }
-      const desktop = await this.#inspect(record.docker.desktop).catch(() => undefined);
+      const exited = await this.#exitedContainer(record);
       if (!this.#current(record.id, live)) return;
-      if (desktop && !desktop.State.Running) {
-        const detail = desktop.State.Error ? `: ${desktop.State.Error}` : "";
-        this.#set(record.id, {
-          ...live,
-          state: "failed",
-          error: `desktop container exited with ${desktop.State.ExitCode}${detail}`,
-        });
+      if (exited) {
+        this.#set(record.id, { ...live, state: "failed", error: exited.detail });
         return;
       }
       await this.#sleep(1000);
@@ -474,16 +537,20 @@ export class CellOrchestrator {
       const exited = await this.#exitedContainer(record);
       if (!this.#current(record.id, live)) return;
       if (exited === undefined) continue;
+      if (exited.gone) {
+        this.#set(record.id, { ...live, state: "failed", error: exited.detail });
+        return;
+      }
       const attempt = live.restarts + 1;
       if (attempt > this.#restartBackoffMs.length) {
         this.#set(record.id, {
           ...live,
           state: "failed",
-          error: `${exited}; gave up after ${live.restarts} restarts`,
+          error: `${exited.detail}; gave up after ${live.restarts} restarts`,
         });
         return;
       }
-      const note = `${exited}; restarting (attempt ${attempt} of ${this.#restartBackoffMs.length})`;
+      const note = `${exited.detail}; restarting (attempt ${attempt} of ${this.#restartBackoffMs.length})`;
       const restarting: Live = { ...live, state: "starting", restarts: attempt, error: note };
       this.#set(record.id, restarting);
       await this.#sleep(this.#restartBackoffMs[attempt - 1] ?? 0);
@@ -492,7 +559,7 @@ export class CellOrchestrator {
       const restarted = await this.#queued(record.id, async () =>
         this.#current(record.id, restarting) ? this.#startContainers(record, attempt, note) : false,
       ).catch(() => false);
-      if (restarted) await this.#waitReady(record);
+      if (restarted) this.#detach(record.id, this.#waitReady(record));
       return;
     }
   }
@@ -513,11 +580,14 @@ export class CellOrchestrator {
     return run;
   }
 
-  // Readiness and watch run with no caller to hand an error to: one that escapes ends that loop
-  // with one line, never the daemon (an unhandled rejection would).
+  // Readiness and watch run with no caller to hand an error to: one that escapes fails the cell, if
+  // nothing has taken it over since, with one line, and never ends the daemon.
   #detach(id: string, loop: Promise<void>): void {
-    void loop.catch((err) => {
-      console.error(`cell ${id}: background check stopped (${codeOf(err)})`);
+    const entry = this.#live.get(id);
+    void loop.catch((err: unknown) => {
+      const error = `background check stopped (${codeOf(err)})`;
+      console.error(`cell ${id}: ${error}`);
+      if (entry && this.#current(id, entry)) this.#set(id, { ...entry, state: "failed", error });
     });
   }
 
@@ -527,14 +597,27 @@ export class CellOrchestrator {
     return !this.#disposed && this.#live.get(id) === entry;
   }
 
-  async #exitedContainer(record: CellRecord): Promise<string | undefined> {
+  // A container that is gone (404) can't be restarted; any other inspect error says nothing about
+  // it, so the container counts as running until an answer says otherwise.
+  async #exitedContainer(
+    record: CellRecord,
+  ): Promise<{ detail: string; gone: boolean } | undefined> {
     for (const [role, name] of [
       ["desktop", record.docker.desktop],
       ["gate", record.docker.gate],
     ] as const) {
-      const info = await this.#inspect(name).catch(() => undefined);
+      const info = await this.#inspect(name).catch((err: unknown) =>
+        isStatus(err, 404) ? null : undefined,
+      );
+      if (info === null) {
+        return { detail: `${role} container is missing: removed outside localDot`, gone: true };
+      }
       if (info && !info.State.Running) {
-        return `${role} container exited with ${info.State.ExitCode}`;
+        const reason = info.State.Error ? `: ${clamp(info.State.Error)}` : "";
+        return {
+          detail: `${role} container exited with ${info.State.ExitCode}${reason}`,
+          gone: false,
+        };
       }
     }
     return undefined;
@@ -579,8 +662,16 @@ export class CellOrchestrator {
   }
 
   #require(id: string): CellRecord {
-    const record = this.#store.get(id);
+    const record = this.#record(id);
     if (!record) throw new UnknownCellError(id);
+    return record;
+  }
+
+  #record(id: string): CellRecord | undefined {
+    const cached = this.#records.get(id);
+    if (cached) return cached;
+    const record = this.#store.get(id);
+    if (record) this.#records.set(id, record);
     return record;
   }
 
@@ -589,22 +680,17 @@ export class CellOrchestrator {
     this.#emit(id);
   }
 
+  // Every cell with a state has its record in memory, so an event never reads the disk.
   #emit(id: string): void {
-    let record: CellRecord | undefined;
-    try {
-      record = this.#store.get(id);
-    } catch (err) {
-      // The loops keep going without the event; the file's own text never reaches the log.
-      console.error(`cell ${id}: cell.json is unreadable (${codeOf(err)}); state change not sent`);
-      return;
-    }
+    const record = this.#records.get(id);
     if (!record) return;
     const summary = this.#summary(record);
     for (const listener of this.#listeners) {
       try {
-        listener(summary);
+        const result: unknown = listener(summary);
+        if (result instanceof Promise) result.catch((err: unknown) => listenerFailed(id, err));
       } catch (err) {
-        console.error(`cell listener failed: ${String(err)}`);
+        listenerFailed(id, err);
       }
     }
   }
@@ -632,4 +718,14 @@ function messageOf(err: unknown): string {
 
 function codeOf(err: unknown): string {
   return (err as NodeJS.ErrnoException | undefined)?.code ?? "no error code";
+}
+
+function statusOf(err: unknown): string {
+  if (!(err instanceof DockerError)) return codeOf(err);
+  return err.status ? `status ${err.status}` : "Docker unreachable";
+}
+
+// Only the code: a listener's error message may quote anything it was handling.
+function listenerFailed(id: string, err: unknown): void {
+  console.error(`cell ${id}: a state listener failed (${codeOf(err)})`);
 }

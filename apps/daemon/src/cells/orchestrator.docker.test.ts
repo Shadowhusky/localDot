@@ -4,14 +4,25 @@ import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DockerClient } from "./docker.ts";
 import { imagesFromEnv } from "./images.ts";
+import { hostAddress } from "./ipv4.ts";
 import { CellOrchestrator } from "./orchestrator.ts";
 import { probeDesktopd, probeStream } from "./readiness.ts";
 import { cellNames } from "./spec.ts";
 import { CellStore } from "./store.ts";
-import { DOCKER_TESTS, docker, dockerExec, dockerOk, removeAll } from "./testing/docker-cli.ts";
+import {
+  DOCKER_TESTS,
+  docker,
+  dockerExec,
+  dockerOk,
+  removeAll,
+  subnetOf,
+} from "./testing/docker-cli.ts";
 import type { CellSummary } from "./types.ts";
 
 const PREFIX = "localdot-test-";
+// Docker Desktop's address for the Mac (host.docker.internal), and an address on the internet.
+const DESKTOP_HOST_ADDRESS = "192.168.65.254";
+const PUBLIC_ADDRESS = "1.1.1.1";
 const BOUNDED_LOGS = { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } };
 
 // A probe counts only with the exit status it is expected to have: a missing tool also exits
@@ -91,6 +102,11 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     probe(desktop, 6, "curl", "-sS", "-m", "5", "https://example.com");
     probe(desktop, 6, "curl", "-sS", "-m", "5", "http://host.docker.internal:4750/");
     probe(desktop, 2, "sh", "-c", "getent hosts example.com");
+    // By address too, DNS aside: no gateway on the subnet, no route to the Mac or the internet (7).
+    const gatewaySlot = hostAddress(subnetOf(record.docker.internalNetwork), 1);
+    for (const address of [gatewaySlot, DESKTOP_HOST_ADDRESS, PUBLIC_ADDRESS]) {
+      probe(desktop, 7, "curl", "-sS", "-m", "5", `http://${address}:4750/`);
+    }
     probe(
       desktop,
       0,
@@ -161,9 +177,18 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
       ),
     );
 
+    for (const network of [record.docker.internalNetwork, record.docker.egressNetwork]) {
+      expect(docker("network", "inspect", "-f", "{{.EnableIPv6}}", network)).toBe("false");
+    }
+
     const endpoints = orchestrator.endpoints(id);
     if (!endpoints) throw new Error("endpoints missing");
-    expect(endpoints.desktopd.baseUrl).toMatch(/^http:\/\/127\.0\.0\.1:\d+$/);
+    // What Docker actually bound, not what the daemon assumed: one 127.0.0.1 port per relay.
+    const bound = JSON.parse(docker("inspect", "-f", "{{json .NetworkSettings.Ports}}", gate));
+    expect(bound).toEqual({
+      "8081/tcp": [{ HostIp: "127.0.0.1", HostPort: new URL(endpoints.desktopd.baseUrl).port }],
+      "8082/tcp": [{ HostIp: "127.0.0.1", HostPort: new URL(endpoints.stream.baseUrl).port }],
+    });
     const health = await probeDesktopd(endpoints.desktopd);
     expect(health?.ok).toBe(true);
   }, 300_000);

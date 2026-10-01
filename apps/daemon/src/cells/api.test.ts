@@ -6,6 +6,7 @@ import { afterAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
 import { DockerError } from "./docker.ts";
+import { SkippedCellsError } from "./orchestrator.ts";
 import { TicketRegistry } from "./secrets.ts";
 import { FakeOrchestrator } from "./testing/fake-orchestrator.ts";
 import type { CellSummary } from "./types.ts";
@@ -150,6 +151,14 @@ describe("cell API", () => {
     const failed = await app.request(url("/api/cells"), { method: "POST", headers: bearer });
     expect(failed.status).toBe(502);
     expect(await failed.text()).toContain("Docker Desktop");
+  });
+
+  it("refuses a new cell with 409 while a cell record can't be read", async () => {
+    const { app, cells } = setup();
+    cells.failWith = new SkippedCellsError(["01ARZ3NDEKTSV4RRFFQ69G5FAV"]);
+    const res = await app.request(url("/api/cells"), { method: "POST", headers: bearer });
+    expect(res.status).toBe(409);
+    expect(await res.text()).toContain("01ARZ3NDEKTSV4RRFFQ69G5FAV");
   });
 
   it("mints stream tickets only through the authenticated API", async () => {

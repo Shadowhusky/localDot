@@ -83,7 +83,31 @@ const malformed: [string, (r: CellRecord) => unknown][] = [
   ["the version is not 1", (r) => ({ ...r, v: 2 })],
   ["the id is another cell's", (r) => ({ ...r, id: ulid() })],
   ["the file holds null", () => null],
+  [
+    "the gate's name is another cell's",
+    (r) => ({ ...r, docker: { ...r.docker, gate: `localdot-gate-${ulid()}` } }),
+  ],
+  [
+    "the internal network's name lacks the cell id",
+    (r) => ({ ...r, docker: { ...r.docker, internalNetwork: "localdot-cell" } }),
+  ],
+  [
+    "the desktop's name is someone else's container",
+    (r) => ({ ...r, docker: { ...r.docker, desktop: "postgres" } }),
+  ],
+  ["an address has three parts", (r) => ({ ...r, docker: { ...r.docker, desktopIp: "172.24.0" } })],
+  [
+    "an address has an octet past 255",
+    (r) => ({ ...r, docker: { ...r.docker, gateInternalIp: "172.24.0.256" } }),
+  ],
+  [
+    "an address is a host name",
+    (r) => ({ ...r, docker: { ...r.docker, gateEgressIp: "gate.local" } }),
+  ],
 ];
+
+// Root reads a mode-000 file anyway, so the EACCES case can't be staged as root.
+const isRoot = process.getuid?.() === 0;
 
 describe("CellStore", () => {
   it("round-trips a record through a 0600 file in a 0700 directory", () => {
@@ -152,7 +176,7 @@ describe("CellStore", () => {
     expect(error.mock.calls).toEqual([[invalid(record.id)]]);
   });
 
-  it("lists the good records past a malformed one and unreadable ones, logging only error codes", () => {
+  it("lists the good records past a malformed one and an unreadable one, logging only error codes", () => {
     const dir = home();
     const store = new CellStore(dir);
     const older = sampleRecord(ulid(), "2026-10-01T09:00:00.000Z");
@@ -161,21 +185,49 @@ describe("CellStore", () => {
     store.save(newer);
     const bad = sampleRecord();
     writeRecord(dir, bad.id, { ...bad, scale: 3 });
-    const locked = sampleRecord();
-    store.save(locked);
-    chmodSync(join(dir, "cells", locked.id, "cell.json"), 0o000);
     const folder = ulid();
     mkdirSync(join(dir, "cells", folder, "cell.json"), { recursive: true });
     const error = quietErrors();
 
     expect(store.list().map((r) => r.id)).toEqual([older.id, newer.id]);
     expect(error.mock.calls.map((call) => call.join(" ")).sort()).toEqual(
-      [
-        invalid(bad.id),
-        `cell ${locked.id}: cell.json is unreadable (EACCES), skipping it`,
-        `cell ${folder}: cell.json is unreadable (EISDIR), skipping it`,
-      ].sort(),
+      [invalid(bad.id), `cell ${folder}: cell.json is unreadable (EISDIR), skipping it`].sort(),
     );
+  });
+
+  it.skipIf(isRoot)("skips a cell.json it may not read, logging only the error code", () => {
+    const dir = home();
+    const store = new CellStore(dir);
+    const good = sampleRecord();
+    store.save(good);
+    const locked = sampleRecord();
+    store.save(locked);
+    chmodSync(join(dir, "cells", locked.id, "cell.json"), 0o000);
+    const error = quietErrors();
+
+    expect(store.list().map((r) => r.id)).toEqual([good.id]);
+    expect(error.mock.calls).toEqual([
+      [`cell ${locked.id}: cell.json is unreadable (EACCES), skipping it`],
+    ]);
+  });
+
+  it("reports the ids of the cells it skips, so a create can refuse while any exist", () => {
+    const dir = home();
+    const store = new CellStore(dir);
+    const good = sampleRecord();
+    store.save(good);
+    const bad = sampleRecord();
+    writeRecord(dir, bad.id, { ...bad, scale: 3 });
+    const folder = ulid();
+    mkdirSync(join(dir, "cells", folder, "cell.json"), { recursive: true });
+    const empty = ulid();
+    mkdirSync(join(dir, "cells", empty));
+    const error = quietErrors();
+
+    const { records, skipped } = store.inventory();
+    expect(records.map((r) => r.id)).toEqual([good.id]);
+    expect([...skipped].sort()).toEqual([bad.id, folder, empty].sort());
+    expect(error.mock.calls).toContainEqual([`cell ${empty}: cell.json is missing, skipping it`]);
   });
 
   it("passes over folders that are not ULIDs and ULID-named files without reading them", () => {

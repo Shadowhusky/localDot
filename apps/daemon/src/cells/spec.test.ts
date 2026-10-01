@@ -19,6 +19,7 @@ describe("network specs", () => {
       Name: "n",
       Driver: "bridge",
       Internal: true,
+      EnableIPv6: false,
       Options: { [ISOLATED_GATEWAY_OPTION]: "isolated" },
       Labels: { "localdot.cell": "1" },
     });
@@ -26,9 +27,14 @@ describe("network specs", () => {
       Name: "p",
       Driver: "bridge",
       Internal: true,
+      EnableIPv6: false,
       Options: { [ISOLATED_GATEWAY_OPTION]: "isolated" },
     });
-    expect(egressNetworkSpec("e")).toMatchObject({ Name: "e", Driver: "bridge" });
+    expect(egressNetworkSpec("e")).toMatchObject({
+      Name: "e",
+      Driver: "bridge",
+      EnableIPv6: false,
+    });
     expect((egressNetworkSpec("e") as { Internal?: boolean }).Internal).toBeUndefined();
   });
 
@@ -116,6 +122,51 @@ describe("desktopSpec", () => {
     expect(spec.Env).toContain(`PASSWORD=${record.tokens.stream}`);
     expect(spec.Env).toContain("SELKIES_MANUAL_WIDTH=2560");
     expect(desktopSpec({ ...record, scale: 1 }, "i").Env).toContain("SELKIES_MANUAL_HEIGHT=800");
+  });
+});
+
+describe("container spec keys", () => {
+  // Nothing beyond these reaches Docker: no Privileged, CapAdd, Binds, Devices or RestartPolicy.
+  it("sets exactly the gate's and the desktop's chosen keys", () => {
+    const gate = gateSpec(record, "g");
+    const desktop = desktopSpec(record, "d");
+    expect(Object.keys(gate).sort()).toEqual([
+      "Env",
+      "ExposedPorts",
+      "HostConfig",
+      "Image",
+      "Labels",
+      "NetworkingConfig",
+      "User",
+    ]);
+    expect(Object.keys(gate.HostConfig).sort()).toEqual([
+      "CapDrop",
+      "LogConfig",
+      "Memory",
+      "NetworkMode",
+      "PidsLimit",
+      "PortBindings",
+      "ReadonlyRootfs",
+      "SecurityOpt",
+    ]);
+    expect(Object.keys(desktop).sort()).toEqual([
+      "Env",
+      "HostConfig",
+      "Image",
+      "Labels",
+      "NetworkingConfig",
+    ]);
+    expect(Object.keys(desktop.HostConfig).sort()).toEqual([
+      "CapDrop",
+      "LogConfig",
+      "Memory",
+      "MemorySwap",
+      "Mounts",
+      "NanoCpus",
+      "NetworkMode",
+      "PidsLimit",
+      "ShmSize",
+    ]);
   });
 });
 

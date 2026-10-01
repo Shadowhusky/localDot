@@ -64,6 +64,37 @@ describe("probeDesktopd", () => {
   });
 });
 
+describe("probeDesktopd's limits", () => {
+  const answering = (body: string) =>
+    serve((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(body);
+    });
+
+  it("reads an answer of up to 64 KiB", async () => {
+    const health = { ...notReady, pad: "x".repeat(60 * 1024) };
+    const baseUrl = await answering(JSON.stringify(health));
+    expect(await probeDesktopd({ baseUrl, token: "t" })).toEqual(health);
+  });
+
+  it("gives no answer for a body past 64 KiB, however it ends", async () => {
+    const baseUrl = await answering(
+      JSON.stringify({ ...notReady, ok: true, pad: "x".repeat(65 * 1024) }),
+    );
+    expect(await probeDesktopd({ baseUrl, token: "t" })).toBeUndefined();
+  });
+
+  it.each([
+    ["ok is a string", JSON.stringify({ ...notReady, ok: "true" })],
+    ["ok is missing", JSON.stringify({ ...notReady, ok: undefined })],
+    ["the answer is not an object", "[true]"],
+    ["the answer is null", "null"],
+  ])("gives no answer when %s", async (_what, body) => {
+    const baseUrl = await answering(body);
+    expect(await probeDesktopd({ baseUrl, token: "t" })).toBeUndefined();
+  });
+});
+
 describe("probeStream", () => {
   it("asks Selkies' /api/health with the cell's basic credentials", async () => {
     const seen: { url?: string; authorization?: string }[] = [];

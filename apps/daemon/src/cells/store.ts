@@ -1,6 +1,7 @@
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
+  existsSync,
   mkdirSync,
   readdirSync,
   readFileSync,
@@ -14,24 +15,30 @@ import { KEYD_PORT_RANGE } from "./ports.ts";
 import type { CellDocker, CellRecord } from "./types.ts";
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-// Docker's own rule for container and volume names; the addresses fit it too.
+// Docker's own rule for container and volume names.
 const DOCKER_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.-]+$/;
-const DOCKER_FIELDS = Object.keys({
-  internalNetwork: true,
-  egressNetwork: true,
-  homeVolume: true,
-  gate: true,
-  desktop: true,
-  gateInternalIp: true,
-  gateEgressIp: true,
-  desktopIp: true,
-} satisfies Record<keyof CellDocker, true>);
+const OCTET = "(25[0-5]|2[0-4][0-9]|1[0-9][0-9]|[1-9]?[0-9])";
+const DOTTED_QUAD = new RegExp(`^${OCTET}(\\.${OCTET}){3}$`);
+const DOCKER_FIELDS = Object.entries({
+  internalNetwork: "name",
+  egressNetwork: "name",
+  homeVolume: "name",
+  gate: "name",
+  desktop: "name",
+  gateInternalIp: "address",
+  gateEgressIp: "address",
+  desktopIp: "address",
+} satisfies Record<keyof CellDocker, "name" | "address">);
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const matches = (pattern: RegExp, value: unknown) =>
   typeof value === "string" && pattern.test(value);
+
+// Each name ends in the cell's own id, so a record can only ever point at its own cell's objects.
+const isOwnName = (value: unknown, id: string) =>
+  matches(DOCKER_NAME_PATTERN, value) && (value as string).endsWith(`-${id}`);
 
 // cell.json can be edited by hand, and its fields end up in Docker API paths, container env and
 // keyd's port table, so a record counts only in the shape the daemon writes.
@@ -49,7 +56,9 @@ function isCellRecord(value: unknown, id: string): value is CellRecord {
     matches(TOKEN_PATTERN, tokens.desktopd) &&
     matches(TOKEN_PATTERN, tokens.stream) &&
     isObject(docker) &&
-    DOCKER_FIELDS.every((field) => matches(DOCKER_NAME_PATTERN, docker[field]))
+    DOCKER_FIELDS.every(([field, kind]) =>
+      kind === "name" ? isOwnName(docker[field], id) : matches(DOTTED_QUAD, docker[field]),
+    )
   );
 }
 
@@ -64,19 +73,21 @@ export class CellStore {
   }
 
   list(): CellRecord[] {
-    return readdirSync(this.#root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && ULID_PATTERN.test(entry.name))
-      .flatMap((entry) => {
-        try {
-          const record = this.get(entry.name);
-          return record ? [record] : [];
-        } catch (err) {
-          const code = (err as NodeJS.ErrnoException).code ?? "no error code";
-          console.error(`cell ${entry.name}: cell.json is unreadable (${code}), skipping it`);
-          return [];
-        }
-      })
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return this.inventory().records;
+  }
+
+  // The cells that can't be used are reported by id: one may still have containers running.
+  inventory(): { records: CellRecord[]; skipped: string[] } {
+    const records: CellRecord[] = [];
+    const skipped: string[] = [];
+    for (const entry of readdirSync(this.#root, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name)) continue;
+      const record = this.#listed(entry.name);
+      if (record) records.push(record);
+      else skipped.push(entry.name);
+    }
+    records.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    return { records, skipped };
   }
 
   get(id: string): CellRecord | undefined {
@@ -117,6 +128,20 @@ export class CellStore {
 
   remove(id: string): void {
     rmSync(this.#dir(id), { recursive: true, force: true });
+  }
+
+  #listed(id: string): CellRecord | undefined {
+    try {
+      const record = this.get(id);
+      if (!record && !existsSync(this.#file(id))) {
+        console.error(`cell ${id}: cell.json is missing, skipping it`);
+      }
+      return record;
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code ?? "no error code";
+      console.error(`cell ${id}: cell.json is unreadable (${code}), skipping it`);
+      return undefined;
+    }
   }
 
   #dir(id: string): string {

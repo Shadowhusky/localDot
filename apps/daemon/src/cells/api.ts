@@ -1,7 +1,7 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { DockerError } from "./docker.ts";
-import { type CellApi, UnknownCellError } from "./orchestrator.ts";
+import { type CellApi, SkippedCellsError, UnknownCellError } from "./orchestrator.ts";
 import type { TicketRegistry } from "./secrets.ts";
 
 export interface CellApiDeps {
@@ -87,6 +87,7 @@ async function withDocker(c: Context, fn: () => Promise<Response>): Promise<Resp
     return await fn();
   } catch (err) {
     if (err instanceof UnknownCellError) return c.text("unknown cell", 404);
+    if (err instanceof SkippedCellsError) return c.text(err.message, 409);
     if (err instanceof DockerError) return c.text(err.message, 502);
     throw err;
   }
