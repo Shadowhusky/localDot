@@ -11,6 +11,7 @@
   },
   "dependencies": {
     "@localdot/avatar": "workspace:*",
+    "@localdot/avatar-spine": "workspace:*",
     "@localdot/protocol": "workspace:*"
   },
   "devDependencies": {

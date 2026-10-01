@@ -5,6 +5,8 @@ import {
   MascotRenderer,
   type ReactionKind,
 } from "@localdot/avatar";
+import { SpineRenderer } from "@localdot/avatar-spine";
+import { loadPack } from "./packs.ts";
 import { SAMPLE_SCREEN, SAMPLE_SESSION, sampleTrack } from "./samples.ts";
 
 const STATES: AgentStateName[] = [
@@ -37,7 +39,12 @@ const toPage = (p: { x: number; y: number }) => {
   };
 };
 
-const renderer = new MascotRenderer();
+const query = new URLSearchParams(location.search);
+const useSpine = query.get("renderer") === "spine";
+avatarEl.dataset.renderer = useSpine ? "spine" : "mascot";
+const renderer = useSpine
+  ? new SpineRenderer(await loadPack(query.get("pack") === "dev" ? "dev" : "toy"))
+  : new MascotRenderer();
 await renderer.mount(avatarEl);
 const controller = new AvatarController({
   seed: 7,

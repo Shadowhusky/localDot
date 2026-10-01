@@ -15,6 +15,7 @@ html, body { height: 100%; margin: 0; background: var(--void); color: var(--text
 main { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
 aside { border-right: 1px solid var(--line); padding: 20px; display: grid; align-content: start; gap: 14px; overflow-y: auto; }
 #avatar { width: 200px; height: 200px; }
+#avatar[data-renderer="spine"] { width: 240px; height: 360px; }
 section { display: grid; place-items: center; padding: 24px; min-width: 0; }
 #desktop { position: relative; width: min(100%, calc((100vh - 48px) * 1.6)); aspect-ratio: 1280 / 800; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; }
 #desktop p { position: absolute; inset: auto 16px 12px; margin: 0; color: var(--text-2); }

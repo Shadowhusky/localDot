@@ -29,6 +29,9 @@ importers:
       '@localdot/avatar':
         specifier: workspace:*
         version: link:../../packages/avatar
+      '@localdot/avatar-spine':
+        specifier: workspace:*
+        version: link:../../packages/avatar-spine
       '@localdot/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
