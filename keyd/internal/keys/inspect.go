@@ -41,9 +41,10 @@ type occurrence struct {
 	basic  bool
 }
 
-// Inspect finds every surrogate-shaped token in the request line, its host included, and the
-// headers. Each must be a surrogate of this cell, bound to this destination, appear exactly once,
-// and sit exactly in its bound header in its bound format; otherwise the request is refused.
+// Inspect finds every surrogate-shaped token in the request line, its host, user information and
+// opaque form included, and the headers. Each must be a surrogate of this cell, bound to this
+// destination, appear exactly once, and sit exactly in its bound header in its bound format;
+// otherwise the request is refused.
 func (r *Registry) Inspect(d Dest, method string, u *url.URL, h http.Header) Verdict {
 	occ := scan(u, h)
 	var v Verdict
@@ -176,7 +177,12 @@ func placed(e Entry, occ []occurrence, h http.Header) bool {
 func scan(u *url.URL, h http.Header) []occurrence {
 	var out []occurrence
 	inURL := map[string]bool{}
-	for _, part := range []string{u.Host, u.EscapedPath(), u.Path, u.RawQuery, unescape(u.RawQuery)} {
+	parts := []string{u.Host, u.EscapedPath(), u.Path, u.RawQuery, unescape(u.RawQuery), u.Opaque, unescape(u.Opaque), u.Fragment}
+	if u.User != nil {
+		pass, _ := u.User.Password()
+		parts = append(parts, u.User.Username(), pass)
+	}
+	for _, part := range parts {
 		for _, t := range surrogate.Find(part) {
 			if !inURL[t] {
 				inURL[t] = true

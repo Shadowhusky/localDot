@@ -824,3 +824,35 @@ func TestASurrogateInABasicCredentialIsFoundHoweverItIsSpelled(t *testing.T) {
 	wantDeny(t, "the user and password pair after two spaces", at(t, r, https("basic.example.test"), "GET", "/", hdr("Authorization", "Basic  "+pair)), ReasonMisplacedSurrogate)
 	wantDeny(t, "the user and password pair without padding", at(t, r, https("basic.example.test"), "GET", "/", hdr("Authorization", "Basic "+strings.TrimRight(base64.StdEncoding.EncodeToString([]byte(u+":"+p+"x")), "="))), ReasonMisplacedSurrogate)
 }
+
+func TestASurrogateAnywhereInTheTargetIsRefused(t *testing.T) {
+	f := newFixture(t)
+	tok := f.bearer.Token
+	unknown, _ := surrogate.Mint("key")
+	encoded := "ld%5F" + tok[3:]
+	bound := hdr("Authorization", "Bearer "+tok)
+	for _, c := range []struct {
+		name, target, reason string
+		h                    http.Header
+	}{
+		{"as the user", "https://" + tok + "@api.example.test/", ReasonMisplacedSurrogate, http.Header{}},
+		{"as the password", "https://u:" + tok + "@api.example.test/", ReasonMisplacedSurrogate, http.Header{}},
+		{"percent-encoded in the user", "https://" + encoded + "@api.example.test/", ReasonMisplacedSurrogate, http.Header{}},
+		{"percent-encoded in the password", "https://u:" + encoded + "@api.example.test/", ReasonMisplacedSurrogate, http.Header{}},
+		{"as the user, and in its header", "https://" + tok + "@api.example.test/", ReasonMisplacedSurrogate, bound},
+		{"unknown, as the password of a plain request", "http://u:" + unknown + "@api.example.test/", ReasonUnknownSurrogate, bound},
+		{"as an opaque target", "http:" + tok, ReasonMisplacedSurrogate, http.Header{}},
+		{"percent-encoded in an opaque target", "http:" + encoded, ReasonMisplacedSurrogate, http.Header{}},
+		{"in an opaque target, and in its header", "https:" + tok, ReasonMisplacedSurrogate, bound},
+	} {
+		wantDeny(t, "a surrogate "+c.name, at(t, f.r, https(integrityHost), "GET", c.target, c.h), c.reason)
+	}
+	// Only a URL built by hand has a fragment: net/http leaves a # in the path or the query.
+	for _, raw := range []string{"/#" + tok, "/#" + encoded} {
+		u, err := url.Parse(raw)
+		if err != nil {
+			t.Fatal(err)
+		}
+		wantDeny(t, "a surrogate in a fragment", f.r.Inspect(https(integrityHost), "GET", u, bound), ReasonMisplacedSurrogate)
+	}
+}
