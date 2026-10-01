@@ -43,6 +43,11 @@ describe("sanitizeParams", () => {
     expect(sanitizeParams({ ...NEUTRAL_PARAMS, wind: undefined }).wind).toBe(0);
   });
 
+  it("never hands out a negative zero", () => {
+    expect(Object.is(sanitizeParams({ ...NEUTRAL_PARAMS, headRoll: -0 }).headRoll, 0)).toBe(true);
+    expect(Object.is(sanitizeParams({ ...NEUTRAL_PARAMS, wind: -0 }).wind, 0)).toBe(true);
+  });
+
   it("drops expressions whose weight is zero or invalid", () => {
     const p = sanitizeParams({
       ...NEUTRAL_PARAMS,

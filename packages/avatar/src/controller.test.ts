@@ -206,6 +206,45 @@ describe("AvatarController", () => {
     }
   });
 
+  const LIFE = ["headX", "headY", "bodyX", "headRoll", "wind", "breath"] as const;
+  const step = (a: AvatarParams, b: AvatarParams) =>
+    Math.max(...LIFE.map((key) => Math.abs((a[key] ?? 0) - (b[key] ?? 0))));
+
+  it("eases the sway, roll, lean, breath and breeze out when reduced motion comes on", () => {
+    for (const seed of [1, 7, 247]) {
+      for (const onAt of [4000, 9008, 15008]) {
+        const { avatar, run } = make({ seed });
+        avatar.setAttention("user");
+        let previous = run(onAt);
+        avatar.setReducedMotion(true);
+        for (let t = onAt + FRAME_MS; t <= onAt + 2000; t += FRAME_MS) {
+          const p = run(t);
+          expect(step(p, previous)).toBeLessThan(0.03);
+          previous = p;
+        }
+        const settled = run(onAt + 1200);
+        for (const key of LIFE) expect(Math.abs(settled[key] ?? 0)).toBeLessThan(0.05);
+      }
+    }
+  });
+
+  it("never pops when reduced motion flips on and back off", () => {
+    for (const seed of [1, 7, 247]) {
+      for (const onAt of [4000, 9008, 15008]) {
+        const { avatar, run } = make({ seed });
+        avatar.setAttention("user");
+        let previous = run(onAt);
+        avatar.setReducedMotion(true);
+        for (let t = onAt + FRAME_MS; t <= onAt + 3000; t += FRAME_MS) {
+          if (t === onAt + 304) avatar.setReducedMotion(false);
+          const p = run(t);
+          expect(step(p, previous)).toBeLessThan(0.03);
+          previous = p;
+        }
+      }
+    }
+  });
+
   it("keeps idle sway and wander inside the gaze's head range and the wander's eye range", () => {
     for (const seed of [1, 2, 3, 4]) {
       const { run } = make({ seed });

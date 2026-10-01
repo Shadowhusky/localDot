@@ -33,13 +33,13 @@ export interface ControllerOptions {
 export const EYE_SPRING: SpringParams = { dampingRatio: 1, response: 0.08 };
 export const HEAD_SPRING: SpringParams = { dampingRatio: 1, response: 0.35 };
 const POSE_SPRING: SpringParams = { dampingRatio: 1, response: 0.4 };
-const SWAY_IN_SPRING: SpringParams = { dampingRatio: 1, response: 1.5 };
+const LIFE_SPRING: SpringParams = { dampingRatio: 1, response: 1.5 };
 // Roll per unit of head turn: she tilts toward the side she looks.
 const LOOK_TILT = 0.8;
 export const MOOD_HOLD_MS = 4000;
 export const SPEECH_GAZE_HOLD_MS = 800;
 
-type Channel = "eyeX" | "eyeY" | "headX" | "headY" | "bodyX" | "brow" | "eyeOpen" | "swayIn";
+type Channel = "eyeX" | "eyeY" | "headX" | "headY" | "bodyX" | "brow" | "eyeOpen" | "life";
 
 export class AvatarController {
   readonly #now: () => number;
@@ -81,7 +81,7 @@ export class AvatarController {
       bodyX: new SpringChannel(0, POSE_SPRING, t),
       brow: new SpringChannel(0, POSE_SPRING, t),
       eyeOpen: new SpringChannel(1, POSE_SPRING, t),
-      swayIn: new SpringChannel(0, SWAY_IN_SPRING, t),
+      life: new SpringChannel(0, LIFE_SPRING, t),
     };
   }
 
@@ -146,7 +146,7 @@ export class AvatarController {
     ch.bodyX.retarget(this.#reducedMotion ? 0 : pose.bodyX, t);
     ch.brow.retarget(pose.brow, t);
     ch.eyeOpen.retarget(pose.eyeOpen, t);
-    ch.swayIn.retarget(this.#reducedMotion ? 0 : 1, t);
+    ch.life.retarget(this.#reducedMotion ? 0 : 1, t);
 
     const targets: Record<string, number> = { ...pose.expressions };
     if (state === "thinking" && this.#gate.heldFor(t) >= THINKING_HMM_MS) targets.hmm = 0.6;
@@ -164,8 +164,9 @@ export class AvatarController {
       delete offsets.bodyX;
     }
 
-    // Eases in from the first frame, and back in after reduced motion, so it never pops.
-    const swayIn = this.#reducedMotion ? 0 : ch.swayIn.value(t);
+    // Idle life eases in from the first frame, and out and back in with reduced motion, so it never
+    // pops.
+    const life = ch.life.value(t);
     const sway = swayAt(t, this.#seed);
     const blink = this.#blinks.closure(t);
     const wink = expressions.wink ?? 0;
@@ -173,12 +174,10 @@ export class AvatarController {
     const mouth = mouthAt(this.#track, t);
 
     return sanitizeParams({
-      headX: ch.headX.value(t) + (offsets.headX ?? 0) + sway.x * swayIn,
-      headY: ch.headY.value(t) + (offsets.headY ?? 0) + sway.y * swayIn,
-      headRoll: this.#reducedMotion ? 0 : (sway.roll + LOOK_TILT * ch.headX.value(t)) * swayIn,
-      bodyX: this.#reducedMotion
-        ? 0
-        : ch.bodyX.value(t) + (offsets.bodyX ?? 0) + sway.body * swayIn,
+      headX: ch.headX.value(t) + (offsets.headX ?? 0) + sway.x * life,
+      headY: ch.headY.value(t) + (offsets.headY ?? 0) + sway.y * life,
+      headRoll: (sway.roll + LOOK_TILT * ch.headX.value(t)) * life,
+      bodyX: ch.bodyX.value(t) + (offsets.bodyX ?? 0) + sway.body * life,
       eyeOpenL: eyeOpen * (1 - blink),
       eyeOpenR: eyeOpen * (1 - blink) * (1 - wink),
       eyeX: ch.eyeX.value(t),
@@ -186,9 +185,9 @@ export class AvatarController {
       brow: ch.brow.value(t) + (offsets.brow ?? 0),
       mouthShape: mouth.shape,
       mouthOpen: mouth.open,
-      breath: this.#reducedMotion ? 0 : breathAt(t),
+      breath: breathAt(t) * life,
       blush: Math.max(offsets.blush ?? 0, expressions.blush ?? 0),
-      wind: this.#reducedMotion ? 0 : sway.wind * swayIn,
+      wind: sway.wind * life,
       expressions,
     });
   }

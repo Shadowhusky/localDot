@@ -43,7 +43,9 @@ export function clamp(value: number, min: number, max: number): number {
 }
 
 const finiteOr = (value: number, fallback: number) => (Number.isFinite(value) ? value : fallback);
-const signedUnit = (value: number, fallback: number) => clamp(finiteOr(value, fallback), -1, 1);
+// `|| 0` folds −0 into 0, so a channel at rest reads as a plain zero.
+const signedUnit = (value: number, fallback: number) =>
+  clamp(finiteOr(value, fallback), -1, 1) || 0;
 const unit = (value: number, fallback: number) => clamp(finiteOr(value, fallback), 0, 1);
 
 export function sanitizeParams(p: AvatarParams): AvatarParams {
