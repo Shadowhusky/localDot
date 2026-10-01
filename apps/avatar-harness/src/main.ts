@@ -8,6 +8,7 @@ import {
 import { SpineRenderer } from "@localdot/avatar-spine";
 import { loadPack } from "./packs.ts";
 import { SAMPLE_SCREEN, SAMPLE_SESSION, sampleTrack } from "./samples.ts";
+import { mountVoice } from "./voice.ts";
 
 const STATES: AgentStateName[] = [
   "idle",
@@ -53,6 +54,7 @@ const controller = new AvatarController({
   reducedMotion: matchMedia("(prefers-reduced-motion: reduce)").matches,
 });
 const driver = new EventDriver(controller, toPage);
+mountVoice(controller);
 addEventListener("resize", () => controller.setHeadCenter(headCenter()));
 
 desktopEl.addEventListener("pointermove", (e) =>

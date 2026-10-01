@@ -26,6 +26,10 @@ button { background: var(--surface); color: var(--text); border: 1px solid var(-
 button:active { transform: scale(0.97); }
 button:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
 #status { color: var(--text-2); font-variant-numeric: tabular-nums; min-height: 1.5em; }
+.say { display: grid; gap: 8px; margin: 0; }
+textarea { box-sizing: border-box; width: 100%; resize: vertical; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
+textarea:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
+.note { margin: 0; min-height: 1.5em; color: var(--text-2); }
 </style>
 </head>
 <body>
@@ -40,7 +44,11 @@ button:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
     <h2>Reactions</h2>
     <div class="row" id="reactions"></div>
     <h2>Voice</h2>
-    <div class="row"><button id="speak" type="button">Speak sample</button></div>
+    <form id="say-form" class="say">
+      <textarea id="say-text" rows="3" placeholder="What she says: 中文, English or 日本語"></textarea>
+      <div class="row"><button type="submit">Speak</button><button id="stop" type="button">Stop</button><button id="speak" type="button">Sample mouth</button></div>
+    </form>
+    <p id="voice-note" class="note" aria-live="polite"></p>
     <label><input id="reduced" type="checkbox"> Reduced motion</label>
   </aside>
   <section>

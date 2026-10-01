@@ -9,7 +9,7 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const PORT = 9334;
 const USAGE = `usage: node capture.mjs --url <url> [--size 1280x800] [--wait "<js expression>"]
   [--run "<js async function body>"] [--screenshot <file.png>] [--full-page]
-  [--eval "<js expression>" --out <file.json>] [--timeout 60000] [--allow-errors]`;
+  [--eval "<js expression>" --out <file.json>] [--timeout 60000] [--allow-errors] [--mute]`;
 
 function readOptions(argv) {
   let values;
@@ -27,6 +27,7 @@ function readOptions(argv) {
         out: { type: "string" },
         timeout: { type: "string", default: "60000" },
         "allow-errors": { type: "boolean", default: false },
+        mute: { type: "boolean", default: false },
       },
     }));
   } catch (error) {
@@ -48,7 +49,7 @@ function portIsFree(port) {
   });
 }
 
-function launchChrome(profile) {
+function launchChrome(profile, flags) {
   // Its own process group, so closing it also reaps the GPU and renderer helpers.
   const chrome = spawn(
     CHROME,
@@ -61,6 +62,7 @@ function launchChrome(profile) {
       "--no-default-browser-check",
       // A fresh profile otherwise asks the macOS keychain for access.
       "--use-mock-keychain",
+      ...flags,
       "about:blank",
     ],
     { detached: true, stdio: ["ignore", "ignore", "pipe"] },
@@ -293,7 +295,7 @@ async function main() {
     return 1;
   }
   const profile = mkdtempSync(join(tmpdir(), "localdot-capture-"));
-  const chrome = launchChrome(profile);
+  const chrome = launchChrome(profile, options.mute ? ["--mute-audio"] : []);
   const cleanup = async () => {
     await closeChrome(chrome.chrome);
     rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

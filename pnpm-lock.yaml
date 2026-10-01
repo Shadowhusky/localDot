@@ -38,6 +38,9 @@ importers:
       '@localdot/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@localdot/voice':
+        specifier: workspace:*
+        version: link:../../packages/voice
       pixi.js:
         specifier: 8.21.0
         version: 8.21.0
