@@ -42,12 +42,17 @@ type CA struct {
 	leaves  map[string]*tls.Certificate
 }
 
-// New makes a CA permitted to vouch only for hosts. With no hosts it is constrained to the
-// reserved name "invalid", so it can vouch for nothing real.
+// New makes a CA permitted to vouch only for hosts, which it keeps in lowercase. With no hosts it
+// is constrained to the reserved name "invalid", so it can vouch for nothing real.
 func New(cellID string, hosts []string) (*CA, error) {
 	if slices.Contains(hosts, "") {
 		return nil, errEmptyHost
 	}
+	lower := make([]string, len(hosts))
+	for i, h := range hosts {
+		lower[i] = strings.ToLower(h)
+	}
+	hosts = lower
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return nil, err
@@ -108,19 +113,27 @@ func New(cellID string, hosts []string) (*CA, error) {
 }
 
 // subdomainsOf names the subdomains of each host for exclusion, since a permitted DNS name also
-// covers its subdomains. A host with another host beneath it keeps its subdomains: exclusions win,
-// so excluding them would refuse that host too.
+// covers its subdomains. A host with another host beneath it, in any case, keeps its subdomains:
+// exclusions win, so excluding them would refuse that host too.
 func subdomainsOf(hosts []string) []string {
 	var out []string
 	for _, h := range hosts {
-		if !slices.ContainsFunc(hosts, func(o string) bool { return strings.HasSuffix(o, "."+h) }) {
+		beneath := func(o string) bool { return strings.HasSuffix(strings.ToLower(o), "."+strings.ToLower(h)) }
+		if !slices.ContainsFunc(hosts, beneath) {
 			out = append(out, "."+h)
 		}
 	}
 	return out
 }
 
-func (ca *CA) Certificate() *x509.Certificate { return ca.cert }
+// Certificate returns a copy, so no caller can change the certificate Leaf signs under.
+func (ca *CA) Certificate() *x509.Certificate {
+	c, err := x509.ParseCertificate(slices.Clone(ca.cert.Raw))
+	if err != nil {
+		panic(err)
+	}
+	return c
+}
 
 // CertPEM is the public certificate the cell installs as a trust anchor.
 func (ca *CA) CertPEM() []byte { return slices.Clone(ca.certPEM) }

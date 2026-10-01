@@ -279,3 +279,113 @@ func TestHostsAreExactlyTheNamesLeafServes(t *testing.T) {
 		t.Fatalf("a host-less CA and its reserved constraint name: %v", err)
 	}
 }
+
+func TestSerialsAreRandom127BitNumbersNeverReused(t *testing.T) {
+	ca, _ := New("cell-1", []string{"a.example.test", "b.example.test", "c.example.test", "d.example.test"})
+	now := time.Now()
+	ca.now = func() time.Time { return now }
+	serials := []*big.Int{ca.Certificate().SerialNumber}
+	for range 10 {
+		for _, h := range ca.Hosts() {
+			cert, err := ca.Leaf(h)
+			if err != nil {
+				t.Fatal(err)
+			}
+			serials = append(serials, cert.Leaf.SerialNumber)
+		}
+		now = now.Add(leafLifetime)
+	}
+	// A uniform draw below 2^127 has 64 bits or fewer with odds of 2^-63, and all 41 draws miss the
+	// top bit with odds of 2^-41.
+	seen := map[string]bool{}
+	widest := 0
+	for _, s := range serials {
+		if s.BitLen() <= 64 || s.BitLen() > 127 {
+			t.Fatalf("serial %x has %d bits, want a random number below 2^127", s, s.BitLen())
+		}
+		if seen[s.String()] {
+			t.Fatalf("serial %x issued twice", s)
+		}
+		seen[s.String()] = true
+		widest = max(widest, s.BitLen())
+	}
+	if widest != 127 {
+		t.Fatalf("the widest of %d serials has %d bits, want 127", len(serials), widest)
+	}
+}
+
+func TestALeafIsRenewedExactlyADayBeforeItExpires(t *testing.T) {
+	ca, _ := New("cell-1", []string{"api.example.test"})
+	now := time.Now().Truncate(time.Second)
+	ca.now = func() time.Time { return now }
+	first, err := ca.Leaf("api.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	now = first.Leaf.NotAfter.Add(-24*time.Hour - time.Second)
+	if again, _ := ca.Leaf("api.example.test"); again != first {
+		t.Fatal("a leaf was renewed more than a day before it expires")
+	}
+	now = first.Leaf.NotAfter.Add(-24 * time.Hour)
+	if renewed, _ := ca.Leaf("api.example.test"); renewed == first {
+		t.Fatal("a leaf a day from expiry was reused")
+	}
+}
+
+func TestASingleHostCARefusesItsSubdomains(t *testing.T) {
+	ca, _ := New("cell-1", []string{"api.example.test"})
+	if err := verify(ca, forge(t, ca, []string{"x.api.example.test"}, nil), "x.api.example.test"); !notAuthorized(err) {
+		t.Fatalf("a forged leaf for x.api.example.test: %v", err)
+	}
+}
+
+func TestNewLowercasesItsHosts(t *testing.T) {
+	hosts := []string{"Example.test", "api.example.test"}
+	ca, err := New("cell-1", hosts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if hosts[0] != "Example.test" {
+		t.Errorf("New changed its caller's hosts to %v", hosts)
+	}
+	for _, host := range []string{"example.test", "api.example.test"} {
+		cert, err := ca.Leaf(host)
+		if err != nil {
+			t.Errorf("Leaf(%q): %v", host, err)
+			continue
+		}
+		if err := verify(ca, cert.Leaf, host); err != nil {
+			t.Errorf("the bound %s: %v", host, err)
+		}
+	}
+	if got := ca.Hosts(); !slices.Equal(got, []string{"api.example.test", "example.test"}) {
+		t.Errorf("Hosts %v", got)
+	}
+}
+
+func TestSubdomainsOfFindsANestedHostInAnyCase(t *testing.T) {
+	if got := subdomainsOf([]string{"Example.test", "api.example.test"}); !slices.Equal(got, []string{".api.example.test"}) {
+		t.Fatalf("excluded names %v, want only the inner host's subdomains", got)
+	}
+}
+
+func TestChangingTheReturnedCertificateChangesNothing(t *testing.T) {
+	ca, _ := New("cell-1", []string{"api.example.test"})
+	notAfter := ca.Certificate().NotAfter
+	other, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	c := ca.Certificate()
+	c.PublicKey = other.Public()
+	c.PermittedDNSDomains[0] = "bank.example"
+	c.NotAfter = c.NotAfter.AddDate(10, 0, 0)
+	c.Raw[0] ^= 0xff
+	cert, err := ca.Leaf("api.example.test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verify(ca, cert.Leaf, "api.example.test"); err != nil {
+		t.Fatal(err)
+	}
+	if got := ca.Certificate(); !got.NotAfter.Equal(notAfter) || !slices.Equal(got.PermittedDNSDomains, []string{"api.example.test"}) {
+		t.Fatalf("the CA now ends %v and permits %v", got.NotAfter, got.PermittedDNSDomains)
+	}
+}
