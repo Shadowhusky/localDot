@@ -62,17 +62,26 @@ func Valid(s string) bool {
 // and every other part has a fixed length.
 func Find(s string) []string {
 	var found []string
+	for _, span := range FindIndex(s) {
+		found = append(found, s[span[0]:span[1]])
+	}
+	return found
+}
+
+// FindIndex returns the byte span [start, end) of each substring Find returns, in the same order.
+func FindIndex(s string) [][2]int {
+	var spans [][2]int
 	for i := 0; i < len(s); i++ {
 		next := strings.Index(s[i:], "ld_")
 		if next < 0 {
 			break
 		}
 		i += next
-		if tok := leadingToken.FindString(s[i:]); tok != "" {
-			found = append(found, tok)
+		if loc := leadingToken.FindStringIndex(s[i:]); loc != nil {
+			spans = append(spans, [2]int{i, i + loc[1]})
 		}
 	}
-	return found
+	return spans
 }
 
 // ID names a token in logs without revealing it.

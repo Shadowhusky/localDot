@@ -1,7 +1,9 @@
 package surrogate
 
 import (
+	"math/rand/v2"
 	"regexp"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -28,6 +30,21 @@ func TestMintRejectsBadTags(t *testing.T) {
 	for _, tag := range []string{"", "a", "ANT", "an_t", "abcdefghijklm", "an-t"} {
 		if _, err := Mint(tag); err == nil {
 			t.Errorf("Mint(%q) succeeded, want an error", tag)
+		}
+	}
+}
+
+func TestMintAcceptsTheShortestAndLongestTags(t *testing.T) {
+	for _, tag := range []string{"ab", "09", "abcdefghijkl", "a1b2c3d4e5f6"} {
+		tok, err := Mint(tag)
+		if err != nil {
+			t.Fatalf("Mint(%q): %v", tag, err)
+		}
+		if !Valid(tok) || !strings.HasPrefix(tok, "ld_"+tag+"_") {
+			t.Fatalf("Mint(%q) = %q", tag, tok)
+		}
+		if got := Find("x" + tok + "y"); len(got) != 1 || got[0] != tok {
+			t.Errorf("Find misses a token with the %d-character tag %q: %v", len(tag), tag, got)
 		}
 	}
 }
@@ -111,6 +128,84 @@ func TestFindReportsOverlappingTokens(t *testing.T) {
 	for _, c := range cases {
 		if got := Find(c.text); len(got) != 2 || got[0] != c.shadow || got[1] != c.hidden {
 			t.Errorf("Find(%q) = %v, want %v", c.text, got, []string{c.shadow, c.hidden})
+		}
+	}
+}
+
+func TestFindAndFindIndexMatchABruteForceSearch(t *testing.T) {
+	var pool []string
+	for _, tag := range []string{"ab", "ld", "key", "abcdef", "abcdefghijkl"} {
+		for range 4 {
+			tok, err := Mint(tag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pool = append(pool, tok)
+		}
+	}
+	rng := rand.New(rand.NewPCG(1, 2))
+	run := func(chars string, n int) string {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = chars[rng.IntN(len(chars))]
+		}
+		return string(b)
+	}
+	piece := func() string {
+		tok := pool[rng.IntN(len(pool))]
+		sep := strings.LastIndexByte(tok[:len(tok)-checksumLen-1], '_')
+		switch rng.IntN(9) {
+		case 0, 1:
+			return tok
+		case 2: // a checksum one or two short, completed by a following token's "l" or "ld"
+			return tok[:len(tok)-1-rng.IntN(2)]
+		case 3: // a body two short, completed by a following "ld_" and 6-character tag
+			return tok[:sep+1+randomLen-2]
+		case 4:
+			return tok[rng.IntN(len(tok)):]
+		case 5:
+			return tok[:rng.IntN(len(tok))]
+		case 6:
+			return []string{"l", "ld", "ld_", "d_", "_"}[rng.IntN(5)]
+		case 7:
+			return run(alphabet, rng.IntN(24))
+		default:
+			return run(" /=:.-x", 1)
+		}
+	}
+	overlaps := map[int]int{}
+	for range 2000 {
+		var text string
+		for range 1 + rng.IntN(5) {
+			text += piece()
+		}
+		var want [][2]int
+		var wantText []string
+		for i := range len(text) {
+			for j := i + 1; j <= len(text); j++ {
+				if shape.MatchString(text[i:j]) {
+					want = append(want, [2]int{i, j})
+					wantText = append(wantText, text[i:j])
+				}
+			}
+		}
+		if got := FindIndex(text); !slices.Equal(got, want) {
+			t.Fatalf("FindIndex(%q) = %v, want %v", text, got, want)
+		}
+		if got := Find(text); !slices.Equal(got, wantText) {
+			t.Fatalf("Find(%q) = %q, want %q", text, got, wantText)
+		}
+		for k := 1; k < len(want); k++ {
+			if n := want[k-1][1] - want[k][0]; n > 0 {
+				overlaps[n]++
+			}
+		}
+	}
+	// A token overlaps the next on its last "l" or "ld", or on nine bytes when its body ends in
+	// "ld" and its checksum is the next token's 6-character tag.
+	for _, n := range []int{1, 2, 9} {
+		if overlaps[n] < 10 {
+			t.Errorf("%d overlaps of %d bytes in the corpus, want at least 10: %v", overlaps[n], n, overlaps)
 		}
 	}
 }
