@@ -23,7 +23,7 @@ How sources are cited:
 | D1 | Stream transport | **Selkies element tap.** Keep Selkies 2.0 (WebSocket, H.264). Frames come from its client's `<video id="videoStream">`: a `MediaStreamTrackProcessor` on a clone of that element's track yields every decoded frame as an I444 `VideoFrame` that can move to a worker. No decoder of our own, no VNC. `SELKIES_ENABLE_CURSORS=false` keeps the pointer out of the frames. | S1 "Result", "Step 6: frame tap" (the track saw every frame: 1389 decoded, 1388 presented at 2×), "Step 2 facts"; S6 "Method" (all 1190 trials read frames this way); Rulings 14, 15, 20 | VNC fallback (S1 "Step 7: VNC fallback": image pull denied); browsers other than Chrome 154; Selkies' client inside localDot's own page (S1 tapped Selkies' dashboard through the proxy); per-new-frame upload and worker-transfer cost; 4:2:0 hardware decode |
 | D2 | Stream scale | **2×**: 2560×1600 device px for logical 1280×800, with HiDPI XFCE (`Gdk/WindowScalingFactor` 2, `Xft/DPI` 96, the `Default-xhdpi` xfwm4 theme, a doubled panel). 1× stays switchable. | S1 "Result" (only 2× is sharp on a DPR-2 viewer; both scales hold 62 fps in continuous motion; 2× costs 2.5–3× the container CPU, peak 251 % against the 400 % target, and 35 vs 14 Mbps), "2× rendering"; S2 "2× coordinate space (Ruling 16)"; S6 "Injection to frame: the brief's measurement" (2× adds ~6 ms at the p50); Ruling 14 | Cost on M1-class hardware; the full HiDPI fix on a running desktop; the GTK ×2 settings with a viewer connected (Selkies sets its own DPI); smoothness under partial damage |
 | D3 | Perception backend | **Cua Driver 0.30.4, pinned, for perception only** (trees, windows, screenshots), not the xdotool + pyatspi fallback. Run the bundled binary as `cua-driver mcp --no-overlay` as the desktop user, with `DISPLAY=:1`, the XFCE session's `DBUS_SESSION_BUS_ADDRESS`, and `CUA_DRIVER_RS_TELEMETRY_ENABLED=0` and `CUA_DRIVER_RS_UPDATE_CHECK=0` baked into the image; resolve the binary path at build time. Web-page boxes come from CDP. | S2 "Result" (raw AT-SPI is no more accurate for native apps), "Trees and frame accuracy per app", "Latency", "Setup that was needed"; S6 "Result" change 4; Rulings 18, 25; ledger "Part 2 design input (S2)" and the opt-out ENV input | VSCodium; Writer and Mousepad at 2×; Calc cells (absent from the tree); the update-check opt-out on the wire; hit-test latency (a tree-only snapshot takes 83 ms to 2.3 s) |
-| D4 | Gate topology and keyd bind address | Each cell sits alone on an isolated-gateway internal network (D14). Its gate (socat as `nobody`) is on that network and on its own egress bridge, listens only on its internal-network address, and relays outbound TCP to `host.docker.internal:<the cell's keyd port>`. **keyd listeners bind `127.0.0.1`.** Inbound ports are published only as `-p 127.0.0.1:<port>:…` on the gate. keyd knows the cell by listener port plus a per-cell `Proxy-Authorization` token: relayed traffic arrives from 127.0.0.1, and any container with egress can reach the listeners. | S3 "Result", "Run 2" (`cell -> gate -> host listener (127.0.0.1)` ok, failures 0), "Docker Desktop surprises" 3; S4 "keyd requirements in iron-proxy 0.52.0" (Per-listener identity: the S4 desktop on the default bridge reached the listener with no gate); ledger "Task 2: design note for Part 2", "Part 3 (keyd) design inputs from S4" | Cell DNS failures take ~10 s (musl); `host.docker.internal` resolves to an IPv6 ULA first; the VM-listener probe set was a lower bound |
+| D4 | Gate topology and keyd bind address | Each cell sits alone on an isolated-gateway internal network (D14). Its gate (socat as `nobody`) is on that network and on its own egress bridge. The relay to keyd listens only on the gate's internal-network address and forwards outbound TCP to `host.docker.internal:<the cell's keyd port>`; the inbound relay is reachable only through the port published on 127.0.0.1 (`-p 127.0.0.1:<port>:…` on the gate), which Docker delivers through the egress bridge. **keyd listeners bind `127.0.0.1`.** keyd knows the cell by listener port plus a per-cell `Proxy-Authorization` token: relayed traffic arrives from 127.0.0.1, and any container with egress can reach the listeners. | S3 "Result", "Run 2" (`cell -> gate -> host listener (127.0.0.1)` ok, failures 0), "Docker Desktop surprises" 3; `spikes/s3-network/run.sh` (the gate starts on its egress network with the published port, then joins the internal network); S4 "keyd requirements in iron-proxy 0.52.0" (Per-listener identity: the S4 desktop on the default bridge reached the listener with no gate); ledger "Task 2: design note for Part 2", "Part 3 (keyd) design inputs from S4" | Relay bind addresses (untested: S3's socat relays listened on every interface); cell DNS failures take ~10 s (musl); `host.docker.internal` resolves to an IPv6 ULA first; the VM-listener probe set was a lower bound |
 | D5 | keyd data plane | **Our own on goproxy (`elazarl/goproxy`)**, not iron-proxy per cell: iron-proxy 0.52 lacks 4 of keyd's 7 requirements (selective MITM, response scrubbing, per-listener identity, unknown-surrogate block). Adapt from iron-proxy (Apache-2.0): the dial-time check in `net.Dialer.Control`, the Basic-auth-aware header swap, the SNI = Host check, the audit shape. Port S4's `run.sh` and `chromium.sh` probes as acceptance tests. | S4 "Result", "keyd requirements in iron-proxy 0.52.0", "Surprises"; Ruling 28; ledger "Part 3 (keyd) design inputs" from S4 and from S5 | goproxy's per-host MITM; the upstream-TLS verification rule; a decision hook |
 | D6 | Response scrubbing needed | **Yes.** An echo service reflected the swapped real value (a dummy) back into the cell, and iron-proxy's response transform is a no-op. | S4 "keyd requirements in iron-proxy 0.52.0" (Response scrubbing), "Run 2", "Run 3" | The scrubber (plain, base64, URL-encoded, hex); a value split across streamed chunks; compressed bodies |
 | D7 | Selective MITM available | **No in iron-proxy** (`tls.mode` is process-wide: `mitm` breaks every host outside the CA's name constraints, `sni-only` swaps nothing), **so keyd builds it**: terminate only hosts that need a swap or HTTP policy, with the per-cell name-constrained CA, and pass the rest through with an SNI check. Chromium 154 trusts the constrained CA once it is in NSS and enforces the constraints (`--proxy-server`, `--disable-quic`). | S4 "keyd requirements in iron-proxy 0.52.0" (Selective MITM), "Step 5: Chromium and the cell CA" (example.com: "Not permitted by name constraints") | goproxy's per-host MITM; clients other than Chromium and curl; `certutil` (libnss3-tools) is not in the image |
@@ -84,7 +84,8 @@ Now (gate row, Language column):
 > socat or haproxy
 
 New:
-> socat, listening only on the gate's internal-network address
+> socat; the relay to keyd listens only on the gate's internal-network address, and the inbound relay is reachable only
+> through the port published on 127.0.0.1
 
 Now (Codex harness row, Holds column):
 > the user's ChatGPT login, owned by Codex in the Keychain
@@ -93,8 +94,9 @@ New:
 > the user's ChatGPT login, signed in separately for localDot and kept by Codex in a localDot-owned `CODEX_HOME` (S7
 > found the login in `auth.json` there; Keychain storage is untested)
 
-Why: S3 relays with socat, which otherwise listens on the egress side too (ledger "Task 2: design note for Part 2");
-S7 "Sign-in mode", "Result" change 4.
+Why: S3 relays with socat, which otherwise listens on every interface, the egress side included (ledger "Task 2: design
+note for Part 2"; `spikes/s3-network/gate/relay.sh`); the published inbound port arrives through the gate's egress
+bridge (`spikes/s3-network/run.sh`). S7 "Sign-in mode", "Result" change 4.
 
 **A3. Trust rule 1: isolated-gateway networks, gate relays, proxy token** (D4, D14)
 
@@ -107,13 +109,16 @@ New:
 > Each cell sits alone on an internal Docker network created with
 > `docker network create --internal -o com.docker.network.bridge.gateway_mode_ipv4=isolated`: no default route, no
 > external DNS and no reachable gateway address (with plain `--internal`, Docker Desktop VM listeners answer on the
-> bridge gateway). Its gate, which has its
-> own egress bridge network and listens only on its internal-network address, relays outbound TCP to one keyd listener
-> reserved for that cell. The port identifies the cell and a per-cell `Proxy-Authorization` token proves it, because
-> any container with egress can reach keyd's 127.0.0.1 listeners through `host.docker.internal`.
+> bridge gateway). Its gate, which has its own egress bridge network, relays outbound TCP to one keyd listener reserved
+> for that cell; that relay listens only on the gate's internal-network address, and the gate's inbound relay is
+> reachable only through the port published on 127.0.0.1. The port identifies the cell and a per-cell
+> `Proxy-Authorization` token proves it, because any container with egress can reach keyd's 127.0.0.1 listeners through
+> `host.docker.internal`.
 
-Why: S3 "Run 1" against "Run 2", "Docker Desktop surprises" 1 and 3; S4 "keyd requirements in iron-proxy 0.52.0"
-(Per-listener identity); ledger "Spec amendment" (trust rule 1), "Part 3 (keyd) design inputs from S4".
+Why: S3 "Run 1" against "Run 2", "Docker Desktop surprises" 1 and 3; `spikes/s3-network/run.sh` (the published inbound
+port arrives through the gate's egress bridge); S4 "keyd requirements in iron-proxy 0.52.0" (Per-listener identity);
+ledger "Spec amendment" (trust rule 1), "Task 2: design note for Part 2" (the relay to keyd), "Part 3 (keyd) design
+inputs from S4".
 
 **A4. Trust rule 6: cookie-free auth** (D16)
 
