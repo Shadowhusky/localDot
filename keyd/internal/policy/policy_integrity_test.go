@@ -17,7 +17,9 @@ var (
 	tab     = string(rune(9))
 	newline = string(rune(10))
 	// 443 in Arabic-Indic digits.
-	arabic443 = string([]rune{0x664, 0x664, 0x663})
+	arabic443    = string([]rune{0x664, 0x664, 0x663})
+	fullwidthDot = string(rune(0xff0e))
+	invalidByte  = string([]byte{0xff})
 )
 
 // numericSpellings are addresses written so that a parser, not a reader, sees the number. macOS's
@@ -271,6 +273,116 @@ func TestForRoleRefusesEveryOtherRoleWithNoEgress(t *testing.T) {
 	for _, r := range []Role{"", "Brain", "DESKTOP", " browser", "browser ", "gateway", "web", "root"} {
 		if p, err := ForRole(r); err == nil || p != (Policy{}) {
 			t.Errorf("ForRole(%q) = %+v, %v", r, p, err)
+		}
+	}
+}
+
+func TestABareDenyEntryIsDeniedLikeItsSubdomains(t *testing.T) {
+	desktop, _ := ForRole(Desktop)
+	browser, _ := ForRole(Browser)
+	for _, e := range []string{"localhost", "local", "internal", "intranet", "private", "corp", "home", "lan", "home.arpa", "ldot"} {
+		if !Denied(e) {
+			t.Errorf("Denied(%q) = false", e)
+		}
+		for _, p := range []Policy{desktop, browser} {
+			if d := p.Connect(Target{e, 443}, nil); d != (Decision{Reason: ReasonHostDenied}) {
+				t.Errorf("%s CONNECT %s: %+v", p.Role, e, d)
+			}
+			if d := p.PlainHTTP(Target{e, 80}); d != (Decision{Reason: ReasonHostDenied}) {
+				t.Errorf("%s http %s: %+v", p.Role, e, d)
+			}
+		}
+		if err := ValidBindingHost(e); err == nil {
+			t.Errorf("%q accepted as a binding host", e)
+		}
+	}
+	// home.arpa is the one bare entry that is a name, so it also arrives through the parser.
+	for _, c := range []struct {
+		hostport    string
+		defaultPort int
+	}{{"home.arpa:443", 0}, {"HOME.ARPA.:443", 0}, {"home.arpa", 80}} {
+		got, reason := ParseHostPort(c.hostport, c.defaultPort)
+		d := desktop.PlainHTTP(got)
+		if c.defaultPort == 0 {
+			d = desktop.Connect(got, nil)
+		}
+		if reason != "" || d != (Decision{Reason: ReasonHostDenied}) {
+			t.Errorf("%s: %q %+v, want host-denied", c.hostport, reason, d)
+		}
+	}
+}
+
+func TestAHostOnTheWireIsASCII(t *testing.T) {
+	for _, h := range []string{
+		"ap" + dottedI + ".example.test", kelvin + "eyd.example.test", "AP" + dottedI + ".EXAMPLE.TEST.",
+		"pr" + dottedI + "nter.local", kelvin + "eyd.ldot", "b" + uUmlaut + "cher.example",
+		"api.example" + fullwidthDot + "test", "api.example.test" + invalidByte,
+	} {
+		forms := []struct {
+			hostport    string
+			defaultPort int
+		}{{h + ":443", 0}, {h, 80}, {h + ":80", 80}}
+		for _, f := range forms {
+			if got, reason := ParseHostPort(f.hostport, f.defaultPort); reason != ReasonHostInvalid {
+				t.Errorf("ParseHostPort(%q, %d) = %+v, %q, want host-invalid", f.hostport, f.defaultPort, got, reason)
+			}
+		}
+		if err := ValidBindingHost(h); err == nil {
+			t.Errorf("%q accepted as a binding host", h)
+		}
+	}
+	// An IDN arrives as xn--, which is ASCII and still a name.
+	cases := map[string]Target{
+		"xn--bcher-kva.example:443":  {"xn--bcher-kva.example", 443},
+		"XN--BCHER-KVA.EXAMPLE.:443": {"xn--bcher-kva.example", 443},
+		"api.xn--p1ai:443":           {"api.xn--p1ai", 443},
+	}
+	for in, want := range cases {
+		if got, reason := ParseHostPort(in, 0); reason != "" || got != want {
+			t.Errorf("ParseHostPort(%q) = %+v, %q, want %+v", in, got, reason, want)
+		}
+	}
+	if err := ValidBindingHost("xn--bcher-kva.example"); err != nil {
+		t.Error(err)
+	}
+}
+
+func TestAPortIsWrittenOnlyOneWay(t *testing.T) {
+	for _, p := range []string{"+443", "+0443", "-0", "+0", "0443", "00443", "080", "+80", "065535", "00", "0000000000443"} {
+		for _, def := range []int{0, 80} {
+			if got, reason := ParseHostPort("example.test:"+p, def); reason != ReasonHostInvalid {
+				t.Errorf("ParseHostPort(%q, %d) = %+v, %q, want host-invalid", "example.test:"+p, def, got, reason)
+			}
+		}
+	}
+	for _, port := range []int{1, 80, 443, 8080, 10000, 65535} {
+		in := net.JoinHostPort("example.test", strconv.Itoa(port))
+		if got, reason := ParseHostPort(in, 0); reason != "" || got != (Target{"example.test", port}) {
+			t.Errorf("ParseHostPort(%q) = %+v, %q", in, got, reason)
+		}
+	}
+}
+
+func TestBracketsHoldAnAddressOrNothing(t *testing.T) {
+	type input struct {
+		hostport    string
+		defaultPort int
+	}
+	for _, c := range []input{
+		{"[example.test]:443", 0}, {"[api.example.test]:443", 0}, {"[API.EXAMPLE.TEST.]:443", 0}, {"[printer.local]:443", 0},
+		{"[localhost]:443", 0}, {"[example.test]", 80}, {"[example.test]:80", 80}, {"[127.1]:443", 0}, {"[0x7f.0x1]", 80},
+		{"[]:443", 0}, {"[]", 80},
+	} {
+		if got, reason := ParseHostPort(c.hostport, c.defaultPort); reason != ReasonHostInvalid || got != (Target{}) {
+			t.Errorf("ParseHostPort(%q, %d) = %+v, %q, want host-invalid", c.hostport, c.defaultPort, got, reason)
+		}
+	}
+	for _, c := range []input{
+		{"[::1]:443", 0}, {"[::ffff:127.0.0.1]:443", 0}, {"[127.0.0.1]:443", 0}, {"[fe80::1%25en0]:443", 0},
+		{"[2001:db8::1]:80", 80}, {"[::1]", 80},
+	} {
+		if got, reason := ParseHostPort(c.hostport, c.defaultPort); reason != ReasonIPLiteral || got != (Target{}) {
+			t.Errorf("ParseHostPort(%q, %d) = %+v, %q, want ip-literal", c.hostport, c.defaultPort, got, reason)
 		}
 	}
 }

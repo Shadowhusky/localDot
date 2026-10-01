@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"strconv"
 	"strings"
+	"unicode"
 )
 
 const (
@@ -96,12 +97,24 @@ func ParseHostPort(hostport string, defaultPort int) (Target, string) {
 			host = host[1 : len(host)-1]
 		}
 	}
+	if !canonicalPort(portText) {
+		return Target{}, ReasonHostInvalid
+	}
 	port, err := strconv.Atoi(portText)
 	if err != nil || port < 1 || port > 65535 {
 		return Target{}, ReasonHostInvalid
 	}
 	if _, err := netip.ParseAddr(host); err == nil {
 		return Target{}, ReasonIPLiteral
+	}
+	// Brackets hold an IPv6 literal or nothing: never a name.
+	if strings.HasPrefix(hostport, "[") {
+		return Target{}, ReasonHostInvalid
+	}
+	// A host on the wire is ASCII; an IDN arrives as xn--. This runs before lower-casing, which
+	// would turn U+0130 into "i" and U+212A into "k".
+	if strings.ContainsFunc(host, func(r rune) bool { return r > unicode.MaxASCII }) {
+		return Target{}, ReasonHostInvalid
 	}
 	host = strings.TrimSuffix(strings.ToLower(host), ".")
 	if !validName(host) {
@@ -112,11 +125,8 @@ func ParseHostPort(hostport string, defaultPort int) (Target, string) {
 
 // Denied reports whether host is a local or reserved name that no cell may reach by name.
 func Denied(host string) bool {
-	if host == "localhost" {
-		return true
-	}
 	for _, suffix := range deniedSuffixes {
-		if strings.HasSuffix(host, "."+suffix) {
+		if host == suffix || strings.HasSuffix(host, "."+suffix) {
 			return true
 		}
 	}
@@ -156,4 +166,18 @@ func validName(host string) bool {
 	// (127.1, 0x7f.0x1) never do.
 	tld := labels[len(labels)-1]
 	return strings.HasPrefix(tld, "xn--") || !strings.ContainsFunc(tld, func(r rune) bool { return r < 'a' || r > 'z' })
+}
+
+// canonicalPort reports whether s is a port written the one way: one to five ASCII digits and no
+// leading zero. strconv.Atoi alone would also take a sign and leading zeros.
+func canonicalPort(s string) bool {
+	if len(s) == 0 || len(s) > 5 || (len(s) > 1 && s[0] == '0') {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
