@@ -73,9 +73,10 @@ func (r *Registry) Inspect(d Dest, method string, u *url.URL, h http.Header) Ver
 
 // permitted applies an HTTP binding's method and path limits. A limited binding matches only a path
 // every server reads the same way: decoded, clean (one trailing slash allowed), printable ASCII,
-// without ; or a backslash, and with no encoded dot, slash, backslash, percent or NUL in the raw
-// path. A method limit also refuses the headers and the _method parameter that make a server treat
-// a request as another method.
+// without ;, ?, # or a backslash, with no segment that starts with two dots, and with no encoded
+// dot, slash, backslash, percent or NUL in the raw path, as sent or as re-escaped. A method limit
+// also refuses the headers and the _method parameter that make a server treat a request as another
+// method.
 func permitted(b Binding, method string, u *url.URL, h http.Header) bool {
 	if len(b.Paths) > 0 && !unambiguousPath(u) {
 		return false
@@ -89,12 +90,12 @@ func permitted(b Binding, method string, u *url.URL, h http.Header) bool {
 var ambiguousEscapes = []string{"%2e", "%2f", "%5c", "%25", "%00"}
 
 func unambiguousPath(u *url.URL) bool {
-	raw := strings.ToLower(u.EscapedPath())
+	raw := strings.ToLower(u.RawPath + " " + u.EscapedPath())
 	if slices.ContainsFunc(ambiguousEscapes, func(e string) bool { return strings.Contains(raw, e) }) {
 		return false
 	}
 	p := u.Path
-	if !strings.HasPrefix(p, "/") || !printable(p) || strings.ContainsAny(p, `;\`) {
+	if !strings.HasPrefix(p, "/") || !printable(p) || strings.ContainsAny(p, `;\?#`) || strings.Contains(p, "/..") {
 		return false
 	}
 	clean := path.Clean(p)

@@ -5,10 +5,12 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math/rand/v2"
 	"net/http"
 	"net/url"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -854,5 +856,126 @@ func TestASurrogateAnywhereInTheTargetIsRefused(t *testing.T) {
 			t.Fatal(err)
 		}
 		wantDeny(t, "a surrogate in a fragment", f.r.Inspect(https(integrityHost), "GET", u, bound), ReasonMisplacedSurrogate)
+	}
+}
+
+func TestPathLimitsRefuseSegmentsAServerMayReadAsAParent(t *testing.T) {
+	r := NewRegistry()
+	tok := mint(t, r, "c1", binding(t, vault.Record{ID: "ro", Kind: vault.KindHTTP, Hosts: []string{"ro.example.test"}, Header: "Authorization", Format: "bearer", Paths: []string{"/v1/"}}))
+	h := hdr("Authorization", "Bearer "+tok)
+	d := https("ro.example.test")
+	for _, target := range []string{
+		"/v1/..%3F", "/v1/..%3f", "/v1/..%3Fadmin", "/v1/..%23", "/v1/..%23x", "/v1/..#x", "/v1/.%2e#v1", "/v1/%2e%2e#",
+		"/v1/..%20", "/v1/..%20%20/", "/v1/...", "/v1/..x", "/v1/x/..%3F/y", "/v1/x%3Fy", "/v1/x%23y", "/v1/x#y", "/v1/x%2e{",
+	} {
+		wantDeny(t, fmt.Sprintf("path %q", target), at(t, r, d, "GET", target, h), ReasonSurrogatePolicy)
+	}
+	for _, target := range []string{"/v1/.well-known", "/v1/a..b", "/v1/x.", "/v1/x?y=..%3F#z"} {
+		wantAllow(t, fmt.Sprintf("path %q", target), at(t, r, d, "GET", target, h), 1)
+	}
+}
+
+// pctDecode decodes every valid %XX, as most servers do, independently of the code under test.
+func pctDecode(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == '%' && i+2 < len(s) {
+			if v, err := strconv.ParseUint(s[i+1:i+3], 16, 8); err == nil {
+				b.WriteByte(byte(v))
+				i += 2
+				continue
+			}
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
+}
+
+// removeDots resolves . and .. segments as RFC 3986 section 5.2.4 does.
+func removeDots(p string) string {
+	in := strings.Split(p, "/")
+	var out []string
+	for i, seg := range in {
+		switch seg {
+		case ".", "..":
+			if seg == ".." && len(out) > 1 {
+				out = out[:len(out)-1]
+			}
+			if i == len(in)-1 {
+				out = append(out, "")
+			}
+		default:
+			out = append(out, seg)
+		}
+	}
+	return "/" + strings.TrimPrefix(strings.Join(out, "/"), "/")
+}
+
+// serverReadings are the ways real servers have read a request path.
+func serverReadings(raw string) map[string]string {
+	decoded := pctDecode(raw)
+	overlong := strings.NewReplacer(string([]byte{0xc0, 0xae}), ".", string([]byte{0xc0, 0xaf}), "/", string([]byte{0xc1, 0x9c}), backslash).Replace(decoded)
+	split := decoded
+	if i := strings.IndexAny(split, "?#"); i >= 0 {
+		split = split[:i]
+	}
+	params := func(p string) string {
+		segs := strings.Split(p, "/")
+		for i, seg := range segs {
+			segs[i], _, _ = strings.Cut(seg, ";")
+		}
+		return strings.Join(segs, "/")
+	}
+	trimmed := strings.Split(decoded, "/")
+	for i, seg := range trimmed {
+		if tr := strings.TrimRight(seg, " "); tr != seg && strings.Trim(tr, ".") == "" && len(tr) >= 2 {
+			trimmed[i] = ".."
+		}
+	}
+	return map[string]string{
+		"removes dot segments before decoding":           removeDots(raw),
+		"decodes first":                                  removeDots(decoded),
+		"decodes twice":                                  removeDots(pctDecode(decoded)),
+		"reads a backslash as a slash":                   removeDots(strings.ReplaceAll(decoded, backslash, "/")),
+		"drops ; parameters, then decodes":               removeDots(pctDecode(params(raw))),
+		"decodes, then drops ; parameters":               removeDots(params(decoded)),
+		"decodes overlong UTF-8":                         removeDots(overlong),
+		"decodes, then splits off a query or a fragment": removeDots(split),
+		"decodes and trims trailing spaces":              removeDots(strings.Join(trimmed, "/")),
+	}
+}
+
+func TestNoPathAllowedUnderAPrefixIsReadOutsideIt(t *testing.T) {
+	r := NewRegistry()
+	tok := mint(t, r, "c1", binding(t, vault.Record{ID: "ro", Kind: vault.KindHTTP, Hosts: []string{"ro.example.test"}, Header: "Authorization", Format: "bearer", Paths: []string{"/v1/"}}))
+	h := hdr("Authorization", "Bearer "+tok)
+	d := https("ro.example.test")
+	pieces := []string{"/", "/", "/", "v1", "admin", "x", ".", "..", "...", "%2e", "%2E", "%2f", "%2F", "%5c", "%5C", "%25", "%00",
+		"%3b", ";", backslash, "%3f", "%3F", "%23", "#", "?", "%09", "%20", "%20", "%c0%ae", "%c0%af", "%c1%9c", "a", "%41", "//",
+		"~", "%7e", "-", "_", "..;", "%252e", "%252f", "%2e%2e", ".%2e", "%u002e", "%", "%2", "%zz", ":", "@", "!", "$", "&", "'",
+		"(", ")", "*", "+", ",", "=", "{"}
+	allowed := 0
+	for _, seed := range []uint64{1, 2} {
+		rng := rand.New(rand.NewPCG(seed, 9))
+		for range 30000 {
+			var b strings.Builder
+			b.WriteString("/v1/")
+			for range 1 + rng.IntN(6) {
+				b.WriteString(pieces[rng.IntN(len(pieces))])
+			}
+			u, err := url.ParseRequestURI(b.String())
+			if err != nil || !r.Inspect(d, "GET", u, h).Allow {
+				continue
+			}
+			allowed++
+			for how, read := range serverReadings(u.EscapedPath()) {
+				if !strings.HasPrefix(read, "/v1/") {
+					t.Errorf("%q is allowed under /v1/, but a server that %s reads it as %q", b.String(), how, read)
+				}
+			}
+		}
+	}
+	if allowed < 1000 {
+		t.Fatalf("only %d paths were allowed: the generator no longer covers clean paths", allowed)
 	}
 }
