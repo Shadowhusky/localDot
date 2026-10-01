@@ -1,17 +1,22 @@
 import json
-import struct
 import threading
 
-import numpy as np
 import pytest
 
-from conftest import RECEIVE_DEADLINE_S, WS_PROTOCOLS, WS_URL, FakeSynth, client, engines, slot
+from conftest import (
+    RECEIVE_DEADLINE_S,
+    WS_PROTOCOLS,
+    WS_URL,
+    FakeSynth,
+    cancel_and_wait,
+    client,
+    engines,
+    frame,
+    say,
+    slot,
+    until_done,
+)
 from voiced.slots import ModelSlot
-
-
-def frame(data: bytes) -> tuple[int, int, list[int]]:
-    sentence_id, seq = struct.unpack("<II", data[:8])
-    return sentence_id, seq, np.frombuffer(data[8:], dtype="<i2").tolist()
 
 
 class ThreadNotingSlot(ModelSlot):
@@ -24,31 +29,6 @@ class ThreadNotingSlot(ModelSlot):
     def get(self) -> object:
         self.threads.append(threading.current_thread().name)
         return super().get()
-
-
-def say(socket, sentence_id, text="Hello there.", lang="en"):
-    socket.send_text(json.dumps({"type": "say", "id": sentence_id, "text": text, "lang": lang}))
-
-
-def until_done(socket, sentence_id) -> list[tuple[int | None, str]]:
-    """The id and kind of every message, up to that sentence's end or error."""
-    seen = []
-    while True:
-        message = socket.receive()
-        if message.get("bytes") is not None:
-            seen.append((frame(message["bytes"])[0], "audio"))
-            continue
-        reply = json.loads(message["text"])
-        seen.append((reply.get("id"), reply["type"]))
-        if reply.get("id") == sentence_id and reply["type"] in ("end", "error"):
-            return seen
-
-
-def cancel_and_wait(socket) -> None:
-    socket.send_text(json.dumps({"type": "cancel"}))
-    # Replies keep message order, so once this one arrives the cancel has been handled.
-    socket.send_text(json.dumps({"type": "barrier"}))
-    assert socket.receive_json()["message"] == "unknown message"
 
 
 def test_greets_with_the_voice_then_streams_a_sentence_and_its_end():

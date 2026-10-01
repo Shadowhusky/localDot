@@ -9,8 +9,10 @@ from typing import Any
 import numpy as np
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
+from voiced.align import warm_up
 from voiced.engines import Engines
 from voiced.slots import LoadFailed, LoadRefused
+from voiced.visemes import build_track
 from voiced.wire import Say, encode_audio_frame, error, parse_say, to_int16, valid_id
 from voiced.worker import Worker
 
@@ -70,11 +72,23 @@ class TtsSession:
     async def _speak_queued(self) -> None:
         with contextlib.suppress(WebSocketDisconnect):
             # Loading as the session opens spares the first sentence the cold load.
-            await self._load(None, self._generation)
+            synth = await self._load(None, self._generation)
+            if synth is not None:
+                await self._warm_aligner(synth.sample_rate)
             while True:
                 say, generation = await self._queue.get()
                 if generation == self._generation:
                     await self._speak(say, generation)
+
+    async def _warm_aligner(self, sample_rate: int) -> None:
+        """Loads the aligner and every language's front-end before the first track needs them; loading
+        them then would hold up the next sentence.
+
+        A failure is left to each sentence's track, which retries the load and reports it.
+        """
+        with contextlib.suppress(Exception):
+            aligner = await self._worker.run(self._engines.slots["aligner"].get)
+            await self._worker.run(warm_up, aligner, sample_rate)
 
     async def _load(self, sentence_id: int | None, generation: int) -> Any:
         """The voice, loaded if need be; None once the failure has been reported."""
@@ -98,6 +112,21 @@ class TtsSession:
         if generation != self._generation:
             return
         await self._socket.send_json({"type": "end", "id": say.id, "samples": int(audio.size)})
+        await self._send_track(say, audio, synth.sample_rate, generation)
+
+    async def _send_track(self, say: Say, audio: np.ndarray, sample_rate: int, generation: int) -> None:
+        """Mouth shapes for a finished sentence; the page keeps following the audio if this fails."""
+        if audio.size == 0:
+            return
+        try:
+            aligner = await self._worker.run(self._engines.slots["aligner"].get)
+            units = await self._worker.run(aligner.align, audio, sample_rate, say.text, say.lang)
+            visemes = await self._worker.run(build_track, units, say.lang)
+        except Exception as failure:
+            await self._report(failure, say.id, generation, "align_failed")
+            return
+        if generation == self._generation:
+            await self._socket.send_json({"type": "track", "id": say.id, "lang": say.lang, "visemes": visemes})
 
     async def _stream(self, synth: Any, say: Say, generation: int) -> np.ndarray:
         chunks: list[np.ndarray] = []

@@ -6,6 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from voiced.align import load_aligner
 from voiced.config import Settings
 from voiced.lmstudio import lm_studio_refusal
 from voiced.slots import ModelSlot
@@ -49,5 +50,8 @@ def model_slot(settings: Settings, loader: Callable[[], Any], guarded: bool = Tr
 def mlx_engines(settings: Settings) -> Engines:
     return Engines(
         voice="pack" if settings.voice else "stock",
-        slots={"tts": model_slot(settings, lambda: load_synthesizer(settings.voice))},
+        slots={
+            "tts": model_slot(settings, lambda: load_synthesizer(settings.voice)),
+            "aligner": model_slot(settings, load_aligner),
+        },
     )
