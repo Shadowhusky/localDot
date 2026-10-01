@@ -1,3 +1,7 @@
+import time
+from collections.abc import Iterator
+
+import numpy as np
 from starlette.testclient import TestClient
 
 from voiced.app import create_app
@@ -23,3 +27,23 @@ def engines(**slots: ModelSlot) -> Engines:
 
 def client(app_engines: Engines) -> TestClient:
     return TestClient(create_app(Settings(token=TOKEN), app_engines), base_url=BASE_URL)
+
+
+class FakeSynth:
+    """Alternating ±0.5 chunks of 0.1 s; can fail at a chunk or take its time per chunk."""
+
+    sample_rate = 24_000
+
+    def __init__(self, chunks: int = 2, fail_at: int | None = None, delay_s: float = 0.0) -> None:
+        self.chunks = chunks
+        self.fail_at = fail_at
+        self.delay_s = delay_s
+        self.spoken: list[tuple[str, str]] = []
+
+    def stream(self, text: str, lang: str) -> Iterator[np.ndarray]:
+        self.spoken.append((text, lang))
+        for i in range(self.chunks):
+            if self.fail_at == i:
+                raise RuntimeError("model fell over")
+            time.sleep(self.delay_s)
+            yield np.full(2400, 0.5 if i % 2 == 0 else -0.5, dtype=np.float32)

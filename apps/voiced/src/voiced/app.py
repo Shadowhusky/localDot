@@ -1,21 +1,26 @@
 """voiced's HTTP and WebSocket routes behind the request guard."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.responses import JSONResponse
-from starlette.routing import Route
+from starlette.routing import Route, WebSocketRoute
 from starlette.types import ASGIApp
+from starlette.websockets import WebSocket
 
 from voiced.config import Settings
 from voiced.engines import Engines
-from voiced.guard import Guard
+from voiced.guard import PROTOCOL, Guard, offered_protocols
+from voiced.tts import TtsSession
 from voiced.worker import Worker
 
 SWEEP_EVERY_S = 30.0
+
+log = logging.getLogger(__name__)
 
 
 def create_app(settings: Settings, engines: Engines, worker: Worker | None = None) -> ASGIApp:
@@ -24,6 +29,10 @@ def create_app(settings: Settings, engines: Engines, worker: Worker | None = Non
     async def health(_: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "voice": engines.voice, "slots": engines.status()})
 
+    async def tts(socket: WebSocket) -> None:
+        await accept(socket)
+        await TtsSession(socket, engines, model_worker).run()
+
     @asynccontextmanager
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
         sweeper = asyncio.create_task(sweep_forever(engines, model_worker))
@@ -31,11 +40,21 @@ def create_app(settings: Settings, engines: Engines, worker: Worker | None = Non
         sweeper.cancel()
         model_worker.close()
 
-    app = Starlette(routes=[Route("/health", health)], lifespan=lifespan)
+    routes = [Route("/health", health), WebSocketRoute("/tts", tts)]
+    app = Starlette(routes=routes, lifespan=lifespan)
     return Guard(app, settings.token, settings.port)
+
+
+async def accept(socket: WebSocket) -> None:
+    # A browser-style client fails the handshake unless the server picks one of its subprotocols.
+    offered = offered_protocols(dict(socket.headers.items()))
+    await socket.accept(subprotocol=PROTOCOL if PROTOCOL in offered else None)
 
 
 async def sweep_forever(engines: Engines, worker: Worker) -> None:
     while True:
         await asyncio.sleep(SWEEP_EVERY_S)
-        await worker.run(engines.sweep)
+        try:
+            await worker.run(engines.sweep)
+        except Exception:
+            log.exception("model sweep failed")

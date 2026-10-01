@@ -8,6 +8,7 @@ from typing import Any
 from voiced.config import Settings
 from voiced.lmstudio import lm_studio_refusal
 from voiced.slots import ModelSlot
+from voiced.synth import load_synthesizer
 
 
 @dataclass
@@ -36,4 +37,7 @@ def model_slot(settings: Settings, loader: Callable[[], Any], guarded: bool = Tr
 
 
 def mlx_engines(settings: Settings) -> Engines:
-    return Engines(voice="pack" if settings.voice else "stock", slots={})
+    return Engines(
+        voice="pack" if settings.voice else "stock",
+        slots={"tts": model_slot(settings, lambda: load_synthesizer(settings.voice))},
+    )
