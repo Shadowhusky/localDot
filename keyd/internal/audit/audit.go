@@ -30,14 +30,21 @@ const (
 )
 
 const (
-	maxDetail  = 512
-	tailWindow = 64 * 1024
+	maxField  = 2048
+	maxDetail = 512
+	cutMark   = "…"
+	// No line Write produces, newline included, is longer: every text field is capped, and JSON
+	// writes a byte as at most six (\u00XX).
+	maxLine = 256 << 10
+	// Open reads enough to hold the last line and the partial line a crash can leave after it.
+	tailWindow = 2 * maxLine
 )
 
 var genesis = strings.Repeat("0", 64)
 
-// Line never carries a secret value or a surrogate; SurrogateID names a surrogate instead, and
-// Write turns surrogate-shaped text in the fields a request controls into surrogate:<ID>.
+// Line never carries a secret value or a surrogate; SurrogateID names a surrogate instead. Write
+// treats every text field as the request's: it writes surrogate-shaped text as [surrogate:<ID>]
+// and cuts each field to 2 KiB, Detail to 512 bytes, ending a cut field in "…".
 type Line struct {
 	V            int     `json:"v"`
 	Seq          uint64  `json:"seq"`
@@ -125,6 +132,18 @@ func (l *Log) resume() (int64, error) {
 		return 0, err
 	}
 	end := bytes.LastIndexByte(tail, '\n') + 1
+	if end == 0 && start > 0 {
+		return 0, fmt.Errorf("no line end in the last %d bytes", tailWindow)
+	}
+	if end > 0 {
+		last := tail[bytes.LastIndexByte(tail[:end-1], '\n')+1 : end-1]
+		var line Line
+		if err := json.Unmarshal(last, &line); err != nil {
+			return 0, fmt.Errorf("last line: %w", err)
+		}
+		sum := sha256.Sum256(last)
+		l.seq, l.prev = line.Seq, hex.EncodeToString(sum[:])
+	}
 	partial := int64(len(tail) - end)
 	l.size = start + int64(end)
 	if partial > 0 {
@@ -132,19 +151,6 @@ func (l *Log) resume() (int64, error) {
 			return 0, err
 		}
 	}
-	if end == 0 {
-		if start > 0 {
-			return 0, fmt.Errorf("no line end in the last %d bytes", tailWindow)
-		}
-		return partial, nil
-	}
-	last := tail[bytes.LastIndexByte(tail[:end-1], '\n')+1 : end-1]
-	var line Line
-	if err := json.Unmarshal(last, &line); err != nil {
-		return 0, fmt.Errorf("last line: %w", err)
-	}
-	sum := sha256.Sum256(last)
-	l.seq, l.prev = line.Seq, hex.EncodeToString(sum[:])
 	return partial, nil
 }
 
@@ -163,9 +169,6 @@ func (l *Log) Write(line Line) (Line, error) {
 	l.mu.Lock()
 	line.V, line.Seq, line.Prev = 1, l.seq+1, l.prev
 	line.Time = l.now().UTC().Format(time.RFC3339Nano)
-	if len(line.Detail) > maxDetail {
-		line.Detail = line.Detail[:maxDetail]
-	}
 	raw, err := json.Marshal(line)
 	if err == nil {
 		err = l.append(raw)
@@ -213,18 +216,22 @@ func (l *Log) Close() error {
 	return l.f.Close()
 }
 
-// redact writes the surrogate-shaped text in the fields a request controls as surrogate:<ID>.
-// Token-shaped runs that overlap or touch form one span, written once with the IDs of its runs in
-// start order, comma-separated: surrogate:<ID>,<ID>. Rewriting run by run would let one run's ID
-// take the start of a run overlapping it and leave the rest, its random body and checksum, in the
-// line.
+// redact rewrites and caps every text field but Time and Prev, which are Write's own. It cuts after
+// rewriting, so a cut never leaves part of a token unrewritten.
 func redact(l Line) Line {
-	for _, field := range []*string{&l.Method, &l.Host, &l.Path, &l.SNI, &l.Route, &l.Model, &l.Detail} {
-		*field = redactText(*field)
+	for _, field := range []*string{&l.Kind, &l.Cell, &l.Mode, &l.Method, &l.Host, &l.Path, &l.SNI, &l.Route,
+		&l.Model, &l.Decision, &l.Reason, &l.SecretID, &l.SurrogateID, &l.Usage} {
+		*field = clip(redactText(*field), maxField)
 	}
+	l.Detail = clip(redactText(l.Detail), maxDetail)
 	return l
 }
 
+// redactText writes each run of overlapping or touching token-shaped spans once, as
+// [surrogate:<ID>], or [surrogate:<ID>,<ID>] naming the run's tokens in start order. Rewriting token
+// by token would let one token's ID take the start of a token overlapping it and leave the rest, its
+// random body and checksum, in the line. The brackets are outside the token alphabet, so a rewrite
+// cannot complete a token shape with the text beside it.
 func redactText(s string) string {
 	spans := surrogate.FindIndex(s)
 	if len(spans) == 0 {
@@ -240,20 +247,35 @@ func redactText(s string) string {
 			end = max(end, spans[i][1])
 		}
 		b.WriteString(s[done:start])
-		b.WriteString("surrogate:" + strings.Join(ids, ","))
+		b.WriteString("[surrogate:" + strings.Join(ids, ",") + "]")
 		done = end
 	}
 	b.WriteString(s[done:])
 	return b.String()
 }
 
-// Verify checks the chain and the sequence numbers and returns how many lines are intact.
+// clip cuts s to at most n bytes, ending a cut in cutMark.
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-len(cutMark)] + cutMark
+}
+
+// Verify checks the chain and the sequence numbers and returns how many lines are intact. It
+// hashes each line exactly as stored, so a change to a line breaks the chain at the next one. Write
+// never writes a control character (JSON escapes them), so one is an edit even in the newest line,
+// which no later line vouches for.
 func Verify(r io.Reader) (int, error) {
 	sc := bufio.NewScanner(r)
-	sc.Buffer(make([]byte, 64*1024), 1<<20)
+	sc.Buffer(make([]byte, 64*1024), maxLine)
+	sc.Split(splitLines)
 	prev, seq, n := genesis, uint64(0), 0
 	for sc.Scan() {
 		raw := sc.Bytes()
+		if i := bytes.IndexFunc(raw, func(r rune) bool { return r < ' ' }); i >= 0 {
+			return n, fmt.Errorf("audit line %d: control character at byte %d", n+1, i)
+		}
 		var line struct {
 			Seq  uint64 `json:"seq"`
 			Prev string `json:"prev"`
@@ -271,4 +293,15 @@ func Verify(r io.Reader) (int, error) {
 		prev, seq, n = hex.EncodeToString(sum[:]), line.Seq, n+1
 	}
 	return n, sc.Err()
+}
+
+// splitLines splits at each newline and, unlike bufio.ScanLines, keeps a carriage return before it.
+func splitLines(data []byte, atEOF bool) (int, []byte, error) {
+	if i := bytes.IndexByte(data, '\n'); i >= 0 {
+		return i + 1, data[:i], nil
+	}
+	if atEOF && len(data) > 0 {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }

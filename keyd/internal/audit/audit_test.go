@@ -6,8 +6,11 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"os"
 	"path/filepath"
+	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -213,7 +216,7 @@ func TestSurrogatesAreWrittenAsTheirIDs(t *testing.T) {
 		t.Fatal(err)
 	}
 	data, _ := os.ReadFile(path)
-	named := "surrogate:" + surrogate.ID(tok)
+	named := "[surrogate:" + surrogate.ID(tok) + "]"
 	if strings.Contains(string(data), tok) || strings.Contains(hooked.Path+hooked.Host+hooked.Detail, tok) || line.Path != "/keys/"+named || line.Host != named+".example.test" {
 		t.Fatalf("written %s; returned %+v", data, line)
 	}
@@ -261,7 +264,7 @@ func TestOverlappingSurrogatesAreWrittenAsOneSpan(t *testing.T) {
 		for i, tok := range c.tokens {
 			ids[i] = surrogate.ID(tok)
 		}
-		named := "surrogate:" + strings.Join(ids, ",")
+		named := "[surrogate:" + strings.Join(ids, ",") + "]"
 		if line.Path != "/keys/"+named+"/x" || line.Detail != "lookup "+named || hooked != line {
 			t.Errorf("%s: returned %+v, hooked %+v", c.name, line, hooked)
 		}
@@ -274,6 +277,217 @@ func TestOverlappingSurrogatesAreWrittenAsOneSpan(t *testing.T) {
 			if bytes.Contains(data, []byte(body)) || bytes.Contains(data, []byte(sum)) {
 				t.Errorf("%s: the body or checksum of %s survives: %s", c.name, tok, data)
 			}
+		}
+	}
+}
+
+// textFields names Line's text fields that Write takes from its caller; Time and Prev are its own.
+func textFields(t *testing.T) []string {
+	t.Helper()
+	var names []string
+	typ := reflect.TypeFor[Line]()
+	for i := range typ.NumField() {
+		if f := typ.Field(i); f.Type.Kind() == reflect.String && f.Name != "Time" && f.Name != "Prev" {
+			names = append(names, f.Name)
+		}
+	}
+	if len(names) != 15 {
+		t.Fatalf("Line has %d text fields, want 15: %v", len(names), names)
+	}
+	return names
+}
+
+func withField(name, value string) Line {
+	var line Line
+	reflect.ValueOf(&line).Elem().FieldByName(name).SetString(value)
+	return line
+}
+
+func field(line Line, name string) string {
+	return reflect.ValueOf(line).FieldByName(name).String()
+}
+
+func TestEveryTextFieldIsRedacted(t *testing.T) {
+	l, path := openLog(t)
+	tok, _ := surrogate.Mint("key")
+	named := "[surrogate:" + surrogate.ID(tok) + "]"
+	for _, name := range textFields(t) {
+		line, err := l.Write(withField(name, "x"+tok+"y"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := field(line, name); got != "x"+named+"y" {
+			t.Errorf("%s written as %q", name, got)
+		}
+	}
+	data, _ := os.ReadFile(path)
+	if strings.Contains(string(data), tok) {
+		t.Errorf("the surrogate reached the file: %s", data)
+	}
+}
+
+func TestARewriteNeverCompletesATokenShape(t *testing.T) {
+	l, path := openLog(t)
+	tok, _ := surrogate.Mint("key")
+	named := "[surrogate:" + surrogate.ID(tok) + "]"
+	// With four or five checksum characters, the token's "ld" or "l" completes the run itself: an overlap.
+	for _, checksum := range []string{"", "0", "01", "012"} {
+		before := "/k/ld_ab_" + strings.Repeat("Q", 22) + "_" + checksum
+		line, err := l.Write(Line{Kind: KindRequest, Path: before + tok + "/x", Decision: Deny})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line.Path != before+named+"/x" {
+			t.Errorf("%q written as %q", before+tok, line.Path)
+		}
+	}
+	data, _ := os.ReadFile(path)
+	if found := surrogate.Find(string(data)); len(found) > 0 {
+		t.Errorf("a rewrite completed the token shapes %q", found)
+	}
+}
+
+func TestTextFieldsAreCappedAtFixedLengths(t *testing.T) {
+	l, _ := openLog(t)
+	tok, _ := surrogate.Mint("key")
+	for _, name := range textFields(t) {
+		limit := 2048
+		if name == "Detail" {
+			limit = 512
+		}
+		for _, n := range []int{limit, limit + 1, 1 << 20} {
+			value := strings.Repeat("a", n)
+			line, err := l.Write(withField(name, value))
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := value
+			if n > limit {
+				want = value[:limit-len("…")] + "…"
+			}
+			if got := field(line, name); got != want {
+				t.Errorf("%s of %d bytes written as %d bytes ending %q", name, n, len(got), got[max(0, len(got)-4):])
+			}
+		}
+		line, err := l.Write(withField(name, strings.Repeat("a", limit-30)+tok))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := field(line, name); strings.Contains(got, tok[:12]) {
+			t.Errorf("%s: a surrogate across the cap was cut before it was rewritten: %q", name, got[len(got)-40:])
+		}
+	}
+}
+
+func TestAOneMiBPathIsCappedAndTheLogStillOpens(t *testing.T) {
+	l, path := openLog(t)
+	line, err := l.Write(Line{Kind: KindRequest, Method: "GET", Host: "h.example.test", Path: "/" + strings.Repeat("a", 1<<20), Decision: Allow})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(line.Path) != 2048 || !strings.HasSuffix(line.Path, "…") {
+		t.Fatalf("a 1 MiB path written as %d bytes", len(line.Path))
+	}
+	l.Close()
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after a 1 MiB path: %v", err)
+	}
+	defer again.Close()
+	if _, err := again.Write(Line{Kind: KindKeyd, Decision: Allow, Reason: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	data, _ := os.ReadFile(path)
+	if n, err := Verify(bytes.NewReader(data)); err != nil || n != 2 {
+		t.Fatalf("Verify = %d, %v", n, err)
+	}
+}
+
+func TestTheLongestLinesReopenAndVerify(t *testing.T) {
+	l, path := openLog(t)
+	var longest Line
+	v := reflect.ValueOf(&longest).Elem()
+	for _, name := range textFields(t) {
+		v.FieldByName(name).SetString(strings.Repeat("<", 4096)) // JSON writes each as <
+	}
+	longest.Port, longest.Status = math.MinInt, math.MinInt
+	longest.BytesIn, longest.BytesOut, longest.CostMicroUSD = math.MinInt64, math.MinInt64, math.MinInt64
+	longest.DurationMs, longest.Swapped = -math.MaxFloat64, true
+	for range 3 {
+		if _, err := l.Write(longest); err != nil {
+			t.Fatal(err)
+		}
+	}
+	l.Close()
+	all := lines(t, path)
+	for _, raw := range all {
+		if len(raw)+1 > 256<<10 {
+			t.Fatalf("a %d-byte line", len(raw)+1)
+		}
+	}
+	t.Logf("the longest line is %d bytes", len(all[0])+1)
+	// A crash just before the next line's newline leaves the longest partial line there can be.
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	f.Write(all[2])
+	f.Close()
+	again, err := Open(path)
+	if err != nil {
+		t.Fatalf("Open after the longest lines: %v", err)
+	}
+	again.Close()
+	data, _ := os.ReadFile(path)
+	if n, err := Verify(bytes.NewReader(data)); err != nil || n != 4 {
+		t.Fatalf("Verify = %d, %v", n, err)
+	}
+}
+
+func TestVerifyCatchesAControlCharacterInAnyLine(t *testing.T) {
+	l, path := openLog(t)
+	for range 3 {
+		if _, err := l.Write(Line{Kind: KindRequest, Decision: Allow}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	data, _ := os.ReadFile(path)
+	if n, err := Verify(bytes.NewReader(data)); err != nil || n != 3 {
+		t.Fatalf("Verify = %d, %v", n, err)
+	}
+	newest := bytes.LastIndexByte(data[:len(data)-1], '\n') + 1
+	for name, bad := range map[string][]byte{
+		"a CR ending the first line":   bytes.Replace(data, []byte("}\n"), []byte("}\r\n"), 1),
+		"a CR ending the newest line":  append(bytes.Clone(data[:len(data)-1]), "\r\n"...),
+		"a tab inside the newest line": slices.Concat(data[:newest+1], []byte("\t"), data[newest+1:]),
+	} {
+		if n, err := Verify(bytes.NewReader(bad)); err == nil {
+			t.Errorf("%s: Verify = %d, nil", name, n)
+		}
+	}
+}
+
+func TestOpenLeavesALogItCannotResumeUncut(t *testing.T) {
+	for name, tail := range map[string]string{
+		"no line end within reach": strings.Repeat("a", 4<<20),
+		"an unreadable last line":  "not json\npartial",
+	} {
+		path := filepath.Join(t.TempDir(), "audit.jsonl")
+		l, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := l.Write(Line{Kind: KindKeyd, Decision: Allow, Reason: "start"}); err != nil {
+			t.Fatal(err)
+		}
+		l.Close()
+		f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		f.WriteString(tail)
+		f.Close()
+		before, _ := os.ReadFile(path)
+		if again, err := Open(path); err == nil {
+			again.Close()
+			t.Errorf("%s: Open succeeded", name)
+		}
+		if after, _ := os.ReadFile(path); !bytes.Equal(after, before) {
+			t.Errorf("%s: Open cut %d bytes before refusing", name, len(before)-len(after))
 		}
 	}
 }
