@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { TARGETS } from "../s5-models/probe-image.mjs";
-import { harnessOverrides, threadParams } from "./harness.mjs";
+import { decideServerRequest, harnessOverrides, threadParams } from "./harness.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const out = join(here, "out");
@@ -78,56 +78,6 @@ const send = (method, params, timeoutMs = 120_000) => {
   });
 };
 
-const repoRoot = join(here, "..", "..");
-const ours = (params) =>
-  params?.serverName !== undefined
-    ? params.serverName === "localdot"
-    : /\blocaldot\b/i.test(JSON.stringify(params ?? {}).split(repoRoot).join(""));
-const schemaDefaults = (schema) =>
-  Object.fromEntries(
-    Object.entries(schema?.properties ?? {})
-      .filter(([, p]) => p.default !== undefined || p.type === "boolean")
-      .map(([k, p]) => [k, p.default ?? true]),
-  );
-const pick = (options, pattern) => options?.find((o) => pattern.test(o.label))?.label;
-
-// Codex's built-in tools are always refused; only prompts about localDot's own MCP server pass.
-function decide(method, params) {
-  switch (method) {
-    case "item/commandExecution/requestApproval":
-    case "item/fileChange/requestApproval":
-      return { verdict: "declined", result: { decision: "decline" } };
-    case "item/permissions/requestApproval":
-      return { verdict: "declined", result: { permissions: {}, scope: "turn" } };
-    case "execCommandApproval":
-    case "applyPatchApproval":
-      return { verdict: "declined", result: { decision: { denied: { rejection: "localDot declines Codex built-in tools" } } } };
-    case "mcpServer/elicitation/request":
-      return ours(params) && params.mode !== "url"
-        ? { verdict: "approved", result: { action: "accept", content: schemaDefaults(params.requestedSchema) } }
-        : { verdict: "declined", result: { action: "decline" } };
-    case "item/tool/requestUserInput": {
-      const approve = ours(params);
-      const answers = Object.fromEntries(
-        (params?.questions ?? []).map((q) => {
-          const label = approve
-            ? (pick(q.options, /^(allow|approve|accept|yes|run)(?!.*(session|always))/i) ?? pick(q.options, /allow|approve|accept|yes/i))
-            : pick(q.options, /deny|decline|cancel|reject|no\b/i);
-          return [q.id, { answers: label ? [label] : [] }];
-        }),
-      );
-      return { verdict: approve ? "approved" : "declined", result: { answers } };
-    }
-    case "item/tool/call":
-      return {
-        verdict: "declined",
-        result: { success: false, contentItems: [{ type: "inputText", text: "localDot exposes no dynamic tools" }] },
-      };
-    default:
-      return { verdict: "declined", error: { code: -32601, message: `localDot spike declines ${method}` } };
-  }
-}
-
 const serverRequests = [];
 const items = new Map();
 const notifications = {};
@@ -157,7 +107,7 @@ createInterface({ input: child.stdout }).on("line", (line) => {
     return;
   }
   if (msg.id !== undefined) {
-    const { verdict, result, error } = decide(msg.method, msg.params);
+    const { verdict, result, error } = decideServerRequest(msg.method, msg.params);
     serverRequests.push({ t: ms(), method: msg.method, verdict, params: msg.params });
     console.log(`${verdict} ${msg.method}${msg.params?.command ? `: ${JSON.stringify(msg.params.command)}` : ""}`);
     write(error ? { id: msg.id, error } : { id: msg.id, result });

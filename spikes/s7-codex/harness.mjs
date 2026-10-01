@@ -27,6 +27,53 @@ export function harnessOverrides({ keepBaseUrl = false, noBuiltins = false } = {
   return overrides;
 }
 
+const explicitDefaults = (schema) =>
+  Object.fromEntries(
+    Object.entries(schema?.properties ?? {})
+      .filter(([, p]) => p.default !== undefined)
+      .map(([k, p]) => [k, p.default]),
+  );
+const denyLabel = (options) => options?.find((o) => /\b(deny|decline|cancel|reject|no)\b/i.test(o.label))?.label;
+
+// Codex's built-in tools are always refused, and so is every question put to the user (its text can
+// be model-written). Only Codex's approval prompt for a call to localDot's own MCP server passes.
+export function decideServerRequest(method, params) {
+  switch (method) {
+    case "item/commandExecution/requestApproval":
+    case "item/fileChange/requestApproval":
+      return { verdict: "declined", result: { decision: "decline" } };
+    case "item/permissions/requestApproval":
+      return { verdict: "declined", result: { permissions: {}, scope: "turn" } };
+    case "execCommandApproval":
+    case "applyPatchApproval":
+      return { verdict: "declined", result: { decision: { denied: { rejection: "localDot declines Codex built-in tools" } } } };
+    case "mcpServer/elicitation/request": {
+      const kind = params?._meta?.codex_approval_kind;
+      const ours =
+        params?.serverName === "localdot" && params.mode !== "url" && (kind === undefined || kind === "mcp_tool_call");
+      return ours
+        ? { verdict: "approved", result: { action: "accept", content: explicitDefaults(params.requestedSchema) } }
+        : { verdict: "declined", result: { action: "decline" } };
+    }
+    case "item/tool/requestUserInput":
+      return {
+        verdict: "declined",
+        result: {
+          answers: Object.fromEntries(
+            (params?.questions ?? []).map((q) => [q.id, { answers: [denyLabel(q.options)].filter(Boolean) }]),
+          ),
+        },
+      };
+    case "item/tool/call":
+      return {
+        verdict: "declined",
+        result: { success: false, contentItems: [{ type: "inputText", text: "localDot exposes no dynamic tools" }] },
+      };
+    default:
+      return { verdict: "declined", error: { code: -32601, message: `localDot spike declines ${method}` } };
+  }
+}
+
 export const threadParams = (cwd) => ({
   approvalPolicy: "on-request",
   approvalsReviewer: "user",

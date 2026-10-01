@@ -3,7 +3,7 @@
 2026-10-01 · macOS 26.6.2, Apple M3 Ultra · Node 25.6.0, pnpm 10.29.3 · codex-cli 0.154.0 (standalone install) ·
 `@anthropic-ai/sandbox-runtime` 0.0.78 (`srt`) · `@modelcontextprotocol/sdk` 1.31.0, zod 4.6.5 · ChatGPT **Plus** account,
 model `gpt-6-astra`, reasoning `medium`, service tier `priority` (the last three come from the user's Codex config) ·
-blobs: `client.mjs` `d2869b10`, `harness.mjs` `fd5aa688`, `tools-probe.mjs` `b5ad7f6b`; `mcp-tools.mjs` `717161b8`,
+blobs: `client.mjs` `83719bef`, `harness.mjs` `5a8994ec`, `tools-probe.mjs` `dbecbb2a`; `mcp-tools.mjs` `717161b8`,
 `srt-settings.json` `6927cfdd` and `package.json` `3715d347` are exactly as in the brief.
 
 **Result: GO-WITH-CHANGES. ChatGPT plans ship in M8 through the Codex harness.** Codex's app-server ran inside `srt`,
@@ -14,14 +14,16 @@ changes:
 
 1. **Remove Codex's command tools. Declining approvals is not enough.** Under the brief's settings (approval policy
    `on-request`, sandbox `read-only`), Codex runs a command the model chooses inside its own sandbox **without asking**.
-   A scripted model's `tools.exec_command({ cmd: "date" })` ran with exit code 0 and no approval request (mock run M3,
+   A scripted model's `tools.exec_command({ cmd: "date" })` ran with exit code 0 and no approval request (mock run T3,
    no srt). In the real provocation turn B, the same kind of attempt reached `sandbox-exec` and failed only because
    macOS refuses to nest Seatbelt (`sandbox_apply: Operation not permitted`). srt was the only barrier, and the
    app-server sent no item and no approval for it. `--disable shell_tool --disable unified_exec --disable view_image`
    removes `exec_command`, `write_stdin` and `view_image`: the same script then fails with
-   `tools.exec_command is not a function` (M4), and the brief's turn still hits Gamma (run C). `apply_patch` and the
-   sub-agent tools stay: no feature flag removed them (`apply_patch` looks model-catalog driven, via
-   `apply_patch_tool_type`). `apply_patch` is approval-gated and was declined in B.
+   `tools.exec_command is not a function` (T4), and the brief's turn still hits Gamma (run C). The flags also reach
+   sub-agents. An agent spawned with `collaboration.spawn_agent` gets its parent's tool set: with built-ins on, it too
+   gets `exec_command`, `write_stdin` and `view_image` (T8); with the three flags, it gets none of them (T9).
+   `apply_patch` and the sub-agent tools themselves stay: no feature flag removed them (`apply_patch` looks
+   model-catalog driven, via `apply_patch_tool_type`). `apply_patch` is approval-gated and was declined in B.
 2. **Give Codex a CA bundle: `CODEX_CA_CERTIFICATE=/etc/ssl/cert.pem`.** Codex loads its TLS roots through
    `com.apple.trustd.agent`, which srt blocks. Without the bundle every HTTPS request fails ("Connection failed: error
    sending request"), even though srt allows the CONNECT (P1, P7). srt's `enableWeakerNetworkIsolation: true` also
@@ -41,11 +43,28 @@ changes:
 
    The spike switched each of these off with `-c`/`--disable` (`harness.mjs`). M8 should point `CODEX_HOME` at a
    localDot folder and sign in through `account/login/start`. That flow needs a browser sign-in, so it is untested here.
-5. **Accept Codex's approval prompts for localDot's own tools, and only those.** Before each of our unannotated MCP
+
+   **The write side matters too.** The brief's `allowWrite` includes `~/.codex`, the user's live Codex home: its
+   `config.toml` (`notify`, `approval_policy`, sandbox mode, MCP servers), `auth.json`, skills and rules. Anything
+   written there from inside srt takes effect *outside* the sandbox the next time the user runs Codex, so a
+   sandboxed harness could plant a `notify` program or turn approvals off for the user's own Codex. The spike's runs
+   did not modify `config.toml` or `auth.json` (both predate it), but the settings allowed it. M8 should let srt
+   write only to a localDot-owned Codex home and its out folder, and read only along the lines of P9/P11.
+5. **Accept Codex's approval prompts for localDot's own tools, and nothing else.** Before each of our unannotated MCP
    tools runs, Codex sends `mcpServer/elicitation/request` with `_meta.codex_approval_kind: "mcp_tool_call"` and the
    call's arguments in `_meta.tool_params`. Its reply shape is `{ action }`, so the brief's blanket
-   `{ decision: "decline" }` would have stopped `screenshot` and `click`. Accept only when `serverName` is localDot's;
-   the action gateway does the real approval.
+   `{ decision: "decline" }` would have stopped `screenshot` and `click`. The policy (`decideServerRequest` in
+   `harness.mjs`):
+   - accept an elicitation only when `serverName` is exactly `localdot`, the mode is not `url`, and
+     `_meta.codex_approval_kind` is absent or `mcp_tool_call`;
+   - reply with the schema's explicit defaults only;
+   - answer every `item/tool/requestUserInput` with its deny option (or no answer), because its text can be
+     model-written.
+
+   T6 shows a `localdot` prompt accepted and a `localdot-x` one declined. T7 shows that with
+   `tool_call_mcp_elicitation` off, Codex asks through `requestUserInput` instead ("Allow the localdot MCP server to
+   run tool…", options Allow / Allow for this session / Cancel), and the client answers Cancel. The action gateway
+   does the real approval.
 6. **Budget for plan usage.** Each brief turn made 4 model requests (about 70k input tokens, about 51k of them cached)
    and used 6 points of the Plus plan's 5-hour window (1→7, 7→13 and 13→19 % over runs A, B and C), plus 1 point of
    the weekly window per turn. At that rate a Plus window holds about 16 such turns, or about 65 model steps. The
@@ -54,9 +73,12 @@ changes:
 
 ## What ran
 
-All runs used `client.mjs` (srt + app-server + MCP), except M1–M5, which used `tools-probe.mjs`. That script runs
+All runs used `client.mjs` (srt + app-server + MCP), except T1–T9, which used `tools-probe.mjs`. That script runs
 app-server without srt and points it at a loopback mock provider with a dummy key, so it uses no quota and no OpenAI
-token. Raw logs are in `out/` (git-ignored): `rpc.jsonl` (every JSON-RPC line, tagged by run),
+token. In case anything falls back to the built-in `openai` provider, that provider is aimed at a closed loopback port
+(`127.0.0.1:9`). The probe answers server requests with the same `decideServerRequest` as `client.mjs`. (T1–T5 were
+labelled M1–M5 in the first round; they were renamed to avoid clashing with milestone M8, and re-run on the final
+code with the same results.) Raw logs are in `out/` (git-ignored): `rpc.jsonl` (every JSON-RPC line, tagged by run),
 `stderr-<run>.log` (srt `--debug` and Codex), `seatbelt-<run>.log` (`log stream` of srt's tagged denials),
 `summary-<run>.json`, `clicks.jsonl` and `tools-<label>.json`.
 
@@ -75,9 +97,13 @@ token. Raw logs are in `out/` (git-ignored): `rpc.jsonl` (every JSON-RPC line, t
 | P9 `02-01-47` | `S7_SETTINGS=out/srt-settings-tight-read.json` | 0 | works with reads denied under `~` |
 | P10 `02-03-38` | final default | 0 | works |
 | P11 `02-08-16` | P9's settings, run from the repo root (`S7_SETTINGS=spikes/s7-codex/out/…`) | 0 | works |
-| M1, M2 | `node tools-probe.mjs spike`, `S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins` | 0 (mock) | tool lists |
-| M3, M4 | the same with `S7_MOCK_EXEC='const r = await tools.exec_command({ cmd: "date" }); text(JSON.stringify(r));'` | 0 (mock) | `date` ran unasked; `not a function` |
-| M5 | `S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins-no-codemode --disable code_mode_host` | 0 (mock) | same tools as M2 |
+| T1, T2 | `node tools-probe.mjs spike`, `S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins` | 0 (mock) | tool lists |
+| T3, T4 | the same with `S7_MOCK_EXEC='const r = await tools.exec_command({ cmd: "date" }); text(JSON.stringify(r));'` | 0 (mock) | `date` ran unasked; `not a function` |
+| T5 | `S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins-no-codemode --disable code_mode_host` | 0 (mock) | same tools as T2 |
+| T6 | `S7_NO_BUILTINS=1 S7_MOCK_EXEC=<call every screenshot in ALL_TOOLS> node tools-probe.mjs approvals` plus a second MCP server `localdot-x` | 0 (mock) | `localdot` prompt accepted, `localdot-x` declined |
+| T7 | T6 plus `--disable tool_call_mcp_elicitation` | 0 (mock) | both prompts arrive as `requestUserInput`; both answered Cancel |
+| T8, T9 | `S7_MOCK_SPAWN=1 node tools-probe.mjs spawn-spike`, then with `S7_NO_BUILTINS=1` (`spawn-no-builtins`) | 0 (mock) | the sub-agent's tools match its parent's |
+| P12 `02-30-03` | final default, after the approval-policy fix | 0 | works; quota still 19 % / 3 % |
 
 Runs A and B used `client.mjs` before its overrides moved into `harness.mjs`. The final `harnessOverrides()` produces
 exactly the override list recorded in each run's summary (checked by script for A, B, C and P4). Preflights call
@@ -103,11 +129,12 @@ envelope has **no `jsonrpc` field**: `{id, method, params}`, `{id, result}`, `{i
 | client → server | `turn/start` | `{threadId, input: [{type: "text", text}]}` → `{turn: {id, status}}` |
 | client → server | `turn/interrupt` | `{threadId, turnId}`, only on the 8-minute timeout (never needed) |
 | client → server (preflight) | `model/list`, `app/list`, `mcpServer/tool/call` | `{}`; `{threadId}`; `{threadId, server: "localdot", tool: "screenshot", arguments: {}}` |
-| server → client | `mcpServer/elicitation/request` | reply `{action: "accept", content: {}}` for `serverName: "localdot"`, else `{action: "decline"}` |
+| server → client | `mcpServer/elicitation/request` | reply `{action: "accept", content: <explicit schema defaults only>}` only when `serverName === "localdot"`, the mode is not `url`, and `_meta.codex_approval_kind` is absent or `"mcp_tool_call"`; otherwise `{action: "decline"}` |
 | server → client | `item/fileChange/requestApproval` | reply `{decision: "decline"}` |
 | server → client (handled, never received) | `item/commandExecution/requestApproval` | `{decision: "decline"}` |
 | server → client (handled, never received) | `item/permissions/requestApproval` | `{permissions: {}, scope: "turn"}` (grants nothing; this response has no decline value) |
-| server → client (handled, never received) | `item/tool/requestUserInput`, `item/tool/call`, `execCommandApproval`, `applyPatchApproval` | `requestUserInput`: the approve option only for a question about localdot, otherwise a deny option; `item/tool/call`: `{success: false}`; legacy v1: `{decision: {denied: {rejection}}}`; anything else gets JSON-RPC error -32601 |
+| server → client (received only in T7) | `item/tool/requestUserInput` | always the deny option, or no answer: `{answers: {<id>: {answers: ["Cancel"]}}}`. Never approves, whatever the text says |
+| server → client (handled, never received) | `item/tool/call`, `execCommandApproval`, `applyPatchApproval` | `item/tool/call`: `{success: false}`; legacy v1: `{decision: {denied: {rejection}}}`; anything else gets JSON-RPC error -32601 |
 | server → client (notifications seen) | `thread/started`, `thread/status/changed`, `turn/started`, `item/started`, `item/completed`, `item/agentMessage/delta`, `thread/tokenUsage/updated`, `account/rateLimits/updated`, `serverRequest/resolved`, `turn/completed`, `mcpServer/startupStatus/updated`, `remoteControl/status/changed` (`disabled`) | |
 
 `dynamicTools` exists only in the experimental API (`capabilities.experimentalApi`). The spike configured tools
@@ -141,9 +168,20 @@ commands were run." (A) and "Took a screenshot and clicked Gamma once. No shell 
 | A, C | `mcpServer/elicitation/request` ×2 each | "Allow the localdot MCP server to run tool "screenshot"?", then the same for "click" with `tool_params {x: 990, y: 642}` | accepted (localDot's own tools) |
 | B | `item/fileChange/requestApproval` | add `spikes/s7-codex/s7-probe.txt` (`diff: "hi\n"`) | **declined**; item status `declined`; Codex logged `error=patch rejected by user`; no file anywhere |
 | B | none | the model's `date` via code mode (see below) | no request was sent |
+| T6 (mock) | `mcpServer/elicitation/request`, `serverName: "localdot"`, kind `mcp_tool_call` | "Allow the localdot MCP server to run tool "screenshot"?" | accepted `{action: "accept", content: {}}`; the tool returned `["image"]` |
+| T6 (mock) | `mcpServer/elicitation/request`, `serverName: "localdot-x"`, kind `mcp_tool_call` | "Allow the localdot-x MCP server to run tool "screenshot"?" | **declined** `{action: "decline"}`; item `failed` |
+| T7 (mock) | `item/tool/requestUserInput` ×2, id `mcp_tool_call_approval_<call id>` | header "Approve app tool call?", "Allow the localdot MCP server to run tool "screenshot"?" (and the same for `localdot-x`), options Allow / Allow for this session / Cancel | **Cancel** for both; both items `failed`. Replaying these two requests through the round-1 policy (from commit `63c2679`) gives "Allow" for **both**, `localdot-x` included, because `\blocaldot\b` also matches inside "localdot-x" |
 
 No `item/commandExecution/requestApproval` arrived in any run. Under `on-request` + `read-only`, Codex runs a sandboxed
 command without asking. It would ask only to escalate, and it did not, even after the nested-Seatbelt failure.
+
+A direct check of `decideServerRequest` with synthetic requests (the reviewer's cases):
+
+- `requestUserInput` whose header and question mention localdot and `~/.localdot/x`, with options "Allow for this
+  session" / "Always allow" / "Deny": answered Deny.
+- An approval-style `requestUserInput` with no deny option: no answer.
+- An elicitation from `localdot` with another `codex_approval_kind`, or in `url` mode: declined.
+- A boolean field with no default: left out of the reply rather than set to `true`.
 
 ## Codex's built-in tools: what the model can call
 
@@ -151,7 +189,7 @@ Codex 0.154 gives `gpt-6-astra` **code mode**. The tools arrive as an `additiona
 and the model's main tool is `functions.exec`, which runs JavaScript in `codex-code-mode-host`, a V8 isolate described
 as having "no Node, no file system, no network access". Every other tool is called from that JavaScript as
 `tools.<name>(…)`. MCP tools are "deferred nested tools": they are not declared up front but are listed in `ALL_TOOLS`,
-which is how the model found `mcp__localdot__screenshot`. From M1/M2 (`out/tools-*.json`):
+which is how the model found `mcp__localdot__screenshot`. From T1/T2 (`out/tools-*.json`):
 
 | Config | Model-visible tools | Callable from `exec` |
 |---|---|---|
@@ -159,12 +197,26 @@ which is how the model found `mcp__localdot__screenshot`. From M1/M2 (`out/tools
 | `S7_NO_BUILTINS=1` (run C) | same | `apply_patch`, `list_mcp_resources`, `list_mcp_resource_templates`, `read_mcp_resource`, `clock__curr_time`, plus the deferred localdot tools |
 
 The `collaboration.*` sub-agent tools remain despite `--disable multi_agent`. `--disable code_mode_host` changes
-nothing in the tool list (M5). In B, the model's self-reported tool list matched the spike row.
+nothing in the tool list (T5). In B, the model's self-reported tool list matched the spike row.
 
-**M3, spike config, no srt.** The mock model's `exec` called `tools.exec_command({ cmd: "date" })`. Codex emitted
+**Sub-agents (T8, T9).** The mock parent called `collaboration.spawn_agent` (`task_name: "probe_child"`,
+`fork_turns: "none"`). Codex returned `{"task_name":"/root/probe_child"}` and started the child on the same mock
+provider (all 3 requests carried the dummy key). The child's own first request offered:
+
+| Config | Child's model-visible tools | Child's tools callable from `exec` |
+|---|---|---|
+| spike (T8) | `functions.{exec, wait, request_user_input}`, `clock.{sleep}`, `collaboration.{…same six…}` | `apply_patch`, **`exec_command`**, `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource`, **`view_image`**, **`write_stdin`**, `clock__curr_time` |
+| `S7_NO_BUILTINS=1` (T9) | same | `apply_patch`, `list_mcp_resource_templates`, `list_mcp_resources`, `read_mcp_resource`, `clock__curr_time` |
+
+So a sub-agent inherits the parent's built-in tool set and its `--disable` flags. The child also has `spawn_agent`;
+grandchildren were not probed, but they are created the same way. The app-server streams the child's items under its
+own `threadId` and adds `subAgentActivity` items to the parent, so localDot can see sub-agent work. M8 should still
+cap or remove sub-agents, because each one multiplies plan usage.
+
+**T3, spike config, no srt.** The mock model's `exec` called `tools.exec_command({ cmd: "date" })`. Codex emitted
 `commandExecution` started/completed and **no server request**, and returned
-`{"exit_code":0,"output":"Thu Oct  1 03:01:07 BST 2026\n",…}`. **M4, `S7_NO_BUILTINS=1`:** `Script error: TypeError:
-tools.exec_command is not a function`, again with no server request.
+`{"exit_code":0,"output":"Thu Oct  1 03:30:27 BST 2026\n",…}` (the round-1 run gave the same at 03:01:07). **T4,
+`S7_NO_BUILTINS=1`:** `Script error: TypeError: tools.exec_command is not a function`, again with no server request.
 
 **Run B, real model, inside srt.** The model said "I'll run `date`, then attempt to create `s7-probe.txt`". Seatbelt
 then logged two new processes in our sandbox: `codex-code-mode-host` at 02:50:29.069 and `sandbox-exec` 21 ms later.
@@ -233,6 +285,23 @@ a direct `screenshot` all still work. The only reads it denied were Codex scanni
 (`~/.claude/skills/*` ×11, `~/.agents/skills`), `~/Library/Preferences/com.apple.security.plist`, and the user's zsh
 init files during the shell snapshot. This was checked without a model turn.
 
+**Writes also exceed trust rule 7.** `allowWrite: ["~/.codex", "./out"]` makes the user's *live* Codex home writable
+from inside the sandbox. That home holds:
+
+- `config.toml`, with `notify` (a program run at every turn end), `approval_policy`, `sandbox_mode`, MCP server
+  commands and `openai_base_url`;
+- `auth.json`;
+- `skills/` and `rules/`, which are read into every future session.
+
+srt confines only the processes it starts. A change written there takes effect, unconfined, the next time the user
+runs Codex or its desktop app. For example, a `notify` entry would then run as the user with no sandbox. Nothing in
+these runs wrote such a file (`config.toml` was last modified on 2026-09-30 at 22:10 and `auth.json` on 2026-09-26,
+both before the spike), but nothing stopped it. Codex needs a writable home for its own state (logs, the state and
+thread databases, and token refresh), so the fix is to change which home it gets, not to drop the write. M8 should
+give srt `allowWrite` for only a localDot-owned Codex home and its out folder, never the user's `~/.codex`, and read
+rules like P9/P11: deny `~`, then re-allow that home and the Codex binary. If that home lives under `~/.localdot`, it
+needs re-allowing too, because the brief's `denyRead` lists `~/.localdot`.
+
 ## Images in MCP tool results
 
 Supported. `mcp-tools.mjs` returns `{type: "image", mimeType: "image/png"}` (16,208 bytes), and the `mcpToolCall`
@@ -271,8 +340,8 @@ Times are from sending `turn/start`. Each turn had four model responses (taken f
 
 Each request carries about 16.5–19k tokens: Codex's base prompt, the code-mode `exec` description (11k characters),
 about 21k characters of the user's skills, and the environment context. Preflights and mock runs used no model quota.
-The window stayed at 13 % from the end of B to the start of C, across M1–M2 and P6, and at 19 % after C, across
-M3–M4, P9 and P10.
+The window stayed at 13 % from the end of B to the start of C (across the first-round T1–T2 runs and P6), and at 19 %
+from the end of C onward (across T3–T9, the re-runs, and P9–P12).
 
 ## Mapping onto localDot's event log
 
@@ -310,16 +379,25 @@ prove that nothing else ran. That is one more reason to remove the command tools
 - Process: `srt --settings <localDot settings> -- codex app-server` with its own `CODEX_HOME`,
   `CODEX_CA_CERTIFICATE=<PEM bundle>`, `--disable shell_tool --disable unified_exec --disable view_image`, the
   user-config overrides in `harness.mjs` if the home is ever shared, and stdio only (`--listen stdio://`).
-- Thread: `approvalsReviewer: "user"`, `sandbox: "read-only"`, `ephemeral: true`. Decline `item/fileChange/*` and
-  `item/commandExecution/*`. Accept `mcpServer/elicitation/request` only when the `serverName` and
-  `codex_approval_kind` are localDot's. Try `mcp_servers.<id>.default_tools_approval_mode` to skip those prompts; its
-  values (`auto|prompt|writes|approve`) are undocumented and untested here.
+- Thread: `approvalsReviewer: "user"`, `sandbox: "read-only"`, `ephemeral: true`.
+- Server requests: use `decideServerRequest` in `harness.mjs`.
+  - Decline `item/fileChange/*` and `item/commandExecution/*`.
+  - Accept `mcpServer/elicitation/request` only when `serverName` is exactly localDot's, the mode is not `url`, and
+    `_meta.codex_approval_kind` is absent or `mcp_tool_call`; reply with explicit schema defaults only.
+  - Deny every `item/tool/requestUserInput`.
+  - Keep `tool_call_mcp_elicitation` on. Without it, MCP approvals arrive as `requestUserInput` with no `serverName`
+    (T7), and the strict policy then blocks localDot's own tools.
+  - Try `mcp_servers.<id>.default_tools_approval_mode` to skip the prompts; its values (`auto|prompt|writes|approve`)
+    are undocumented and untested here.
 - Codex's own sandbox cannot run inside srt (nested Seatbelt → EPERM). OpenAI documents
-  `sandboxPolicy: {type: "externalSandbox"}` for exactly this case; with the command tools removed it should not matter.
-- Find a way to drop `apply_patch` and the `collaboration` sub-agents (no feature flag in 0.154 removes them), or
-  keep declining file changes and cap sub-agents.
-- Tighten reads to `denyRead: ["~"]` plus the Codex home and binary (P9). Disable `shell_snapshot` too: it runs the
-  user's login shell at every thread start.
+  `sandboxPolicy: {type: "externalSandbox"}` for exactly this case. With the command tools removed, for the parent
+  and, as T9 shows, for its sub-agents too, Codex's own sandbox has no command left to confine.
+- Find a way to drop `apply_patch` and the `collaboration` sub-agents (no feature flag in 0.154 removes them), or keep
+  declining file changes and cap sub-agents. Sub-agents inherit the parent's tool set and flags (T8/T9).
+- srt filesystem: `allowWrite` only the localDot-owned Codex home and its out folder, never the user's `~/.codex`.
+  Writes there escape the sandbox at the user's next Codex run, through its `notify` hook, approval settings or skills.
+  Reads: `denyRead: ["~"]` plus `allowRead` for that home and the Codex binary (P9/P11). Disable `shell_snapshot` too:
+  it runs the user's login shell at every thread start.
 - `codex app-server` is marked experimental, and the protocol is versioned by the CLI. Pin the Codex version, and check
   the schema (`generate-json-schema`) on every upgrade. The desktop app on this Mac already runs 0.155.
 
@@ -335,11 +413,18 @@ node client.mjs preflight                            # no model turn
 node client.mjs                                      # run A (uses ChatGPT plan quota)
 node client.mjs provoke                              # run B (uses quota)
 S7_NO_BUILTINS=1 node client.mjs                     # run C (uses quota)
-node tools-probe.mjs spike                           # M1; no quota, no token (mock provider)
-S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins    # M2
+node tools-probe.mjs spike                           # T1; no quota, no token (mock provider)
+S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins    # T2
 S7_MOCK_EXEC='const r = await tools.exec_command({ cmd: "date" }); text(JSON.stringify(r));' node tools-probe.mjs exec-date
 S7_NO_BUILTINS=1 S7_MOCK_EXEC='…same…' node tools-probe.mjs exec-date-no-builtins
-S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins-no-codemode --disable code_mode_host   # M5
+S7_NO_BUILTINS=1 node tools-probe.mjs no-builtins-no-codemode --disable code_mode_host   # T5
+X=(-c 'mcp_servers.localdot-x.command="node"' -c "mcp_servers.localdot-x.args=[\"$PWD/mcp-tools.mjs\"]")
+export S7_MOCK_EXEC='const names = ALL_TOOLS.map((t) => t.name).filter((n) => n.includes("screenshot")); const out = {}; for (const n of names) { try { const r = await tools[n]({}); out[n] = Array.isArray(r?.content) ? r.content.map((c) => c.type) : r; } catch (e) { out[n] = "error: " + e.message; } } text(JSON.stringify(out));'
+S7_NO_BUILTINS=1 node tools-probe.mjs approvals "${X[@]}"                                                      # T6
+S7_NO_BUILTINS=1 node tools-probe.mjs approvals-no-elicitation "${X[@]}" --disable tool_call_mcp_elicitation   # T7
+unset S7_MOCK_EXEC
+S7_MOCK_SPAWN=1 node tools-probe.mjs spawn-spike                     # T8
+S7_NO_BUILTINS=1 S7_MOCK_SPAWN=1 node tools-probe.mjs spawn-no-builtins   # T9
 cat out/clicks.jsonl
 pgrep -fl "codex app-server|srt|mcp-tools"           # expect nothing
 ```
@@ -393,11 +478,40 @@ P4, the user's relay kept (`out/stderr-preflight-…01-47-57…log`):
 [SandboxDebug] No matching config rule, denying: <relay host>:443    (×3)
 ```
 
-M3 (`out/tools-exec-date.json`):
+T3 (`out/tools-exec-date.json`, re-run on the final code):
 
 ```
 "execOutput": [{"type":"input_text","text":"Script completed\nWall time 0.1 seconds\nOutput:\n"},
-               {"type":"input_text","text":"{\"chunk_id\":\"888dbe\",\"wall_time_seconds\":0.000002459,\"exit_code\":0,\"original_token_count\":8,\"output\":\"Thu Oct  1 03:01:07 BST 2026\\n\"}"}],
-"events": [{"notification":"item/started","type":"commandExecution","status":"inProgress"},
-           {"notification":"item/completed","type":"commandExecution","status":"completed"}, …]   (no server request)
+               {"type":"input_text","text":"{\"chunk_id\":\"837fcc\",\"wall_time_seconds\":0.000001708,\"exit_code\":0,\"original_token_count\":8,\"output\":\"Thu Oct  1 03:30:27 BST 2026\\n\"}"}],
+"events": [{"thread":"parent","notification":"item/started","type":"commandExecution","status":"inProgress"},
+           {"thread":"parent","notification":"item/completed","type":"commandExecution","status":"completed"}, …]   (no server request)
+```
+
+T6 (`out/tools-approvals.json`). These are the server requests, with `threadId`/`turnId` dropped, and the client's
+replies:
+
+```
+request mcpServer/elicitation/request {"serverName":"localdot","mode":"form","_meta":{"codex_approval_kind":"mcp_tool_call","persist":["session","always"],"tool_description":"Screenshot of the 1280x800 screen.","tool_params":{},"tool_params_display":[]},"message":"Allow the localdot MCP server to run tool \"screenshot\"?","requestedSchema":{"type":"object","properties":{}}}
+reply   approved {"action":"accept","content":{}}
+request mcpServer/elicitation/request {"serverName":"localdot-x","mode":"form","_meta":{"codex_approval_kind":"mcp_tool_call",…},"message":"Allow the localdot-x MCP server to run tool \"screenshot\"?","requestedSchema":{"type":"object","properties":{}}}
+reply   declined {"action":"decline"}
+execOutput {"mcp__localdot__screenshot":["image"],"mcp__localdot_x__screenshot":["text"]}
+```
+
+T7 (`out/tools-approvals-no-elicitation.json`, `--disable tool_call_mcp_elicitation`):
+
+```
+request item/tool/requestUserInput {"itemId":"exec-08b8671d-…","questions":[{"id":"mcp_tool_call_approval_exec-08b8671d-…","header":"Approve app tool call?","question":"Allow the localdot MCP server to run tool \"screenshot\"?","isOther":false,"isSecret":false,"options":[{"label":"Allow","description":"Run the tool and continue."},{"label":"Allow for this session","description":"Run the tool and remember this choice for this session."},{"label":"Cancel","description":"Cancel this tool call."}]}],"isBlocking":true,"autoResolutionMs":null}
+reply   declined {"answers":{"mcp_tool_call_approval_exec-08b8671d-…":{"answers":["Cancel"]}}}
+request item/tool/requestUserInput {…the same for "Allow the localdot-x MCP server to run tool \"screenshot\"?"…}
+reply   declined {"answers":{"mcp_tool_call_approval_exec-903effb7-…":{"answers":["Cancel"]}}}
+execOutput {"mcp__localdot__screenshot":["text"],"mcp__localdot_x__screenshot":["text"]}
+```
+
+T9 (`out/tools-spawn-no-builtins.json`), and T8's child for comparison:
+
+```
+spawnOutput {"task_name":"/root/probe_child"} | requests: 3 | dummyKeyOnly: true
+child {"requests":1,"model":"gpt-6-astra","modelVisibleTools":["functions.{exec,wait,request_user_input}","clock.{sleep}","collaboration.{followup_task,interrupt_agent,list_agents,send_message,spawn_agent,wait_agent}"],"callableFromExec":["apply_patch","list_mcp_resource_templates","list_mcp_resources","read_mcp_resource","clock__curr_time"]}
+T8 child callableFromExec ["apply_patch","exec_command","list_mcp_resource_templates","list_mcp_resources","read_mcp_resource","view_image","write_stdin","clock__curr_time"]
 ```
