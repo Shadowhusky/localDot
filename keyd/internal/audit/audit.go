@@ -8,9 +8,13 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
+	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -41,6 +45,9 @@ const (
 )
 
 var genesis = strings.Repeat("0", 64)
+
+// clock stamps the lines a new Log writes and the name of a log set aside; tests fix it.
+var clock = time.Now
 
 // Line never carries a secret value or a surrogate; SurrogateID names a surrogate instead. Write
 // treats every text field as the request's: it writes surrogate-shaped text as [surrogate:<ID>]
@@ -74,9 +81,11 @@ type Line struct {
 	Prev         string  `json:"prev"`
 }
 
-// file is what Log needs of *os.File; tests put a failing one in its place.
+// file is what Log needs of *os.File; tests put a failing one in its place. Log writes at the end it
+// tracks, not in append mode, so a repair line can take a partial line's place before it is cut.
 type file interface {
 	io.Writer
+	io.Seeker
 	io.ReaderAt
 	Stat() (os.FileInfo, error)
 	Truncate(size int64) error
@@ -94,10 +103,22 @@ type Log struct {
 	hook func(Line)
 }
 
-// Open appends to path, resuming the chain from its last line. A partial last line, left by a
-// crash mid-write, is cut off and the repair is itself recorded.
+// Open appends to path, resuming the chain from its last line. A partial last line, left by a crash
+// mid-write, is overwritten by a line recording the repair; if that line cannot be written, the
+// partial line stays for the next start. A log Open cannot resume, with no line end within reach or
+// a last line that is not JSON, is renamed aside byte for byte as <path>.damaged-<UTC time>, and a
+// new chain starts whose first line names it.
 func Open(path string) (*Log, error) {
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE|os.O_APPEND, 0o600)
+	f, err := openFile(path, os.O_RDWR|os.O_CREATE)
+	if err != nil {
+		return nil, err
+	}
+	return start(path, f)
+}
+
+// openFile opens the log's file as keyd's alone, 0600 whatever the umask or an older mode.
+func openFile(path string, flag int) (*os.File, error) {
+	f, err := os.OpenFile(path, flag, 0o600)
 	if err != nil {
 		return nil, err
 	}
@@ -105,53 +126,107 @@ func Open(path string) (*Log, error) {
 		f.Close()
 		return nil, err
 	}
-	l := &Log{f: f, prev: genesis, now: time.Now}
-	partial, err := l.resume()
+	return f, nil
+}
+
+// start resumes the log in f as Open describes; tests hand it a failing file.
+func start(path string, f file) (*Log, error) {
+	l := &Log{f: f, prev: genesis, now: clock}
+	partial, damage, err := l.resume()
+	if err == nil && damage != "" {
+		f.Close()
+		return rotate(path, damage)
+	}
+	if err == nil && partial > 0 {
+		err = l.repair(partial)
+	}
 	if err != nil {
 		f.Close()
 		return nil, fmt.Errorf("audit %s: %w", path, err)
 	}
-	if partial > 0 {
-		if _, err := l.Write(Line{Kind: KindKeyd, Decision: Error, Reason: "audit-repair", BytesIn: partial, Detail: "dropped a partial last line"}); err != nil {
-			f.Close()
-			return nil, err
-		}
-	}
 	return l, nil
 }
 
-func (l *Log) resume() (int64, error) {
+// resume reads the chain's end from the last line. It reports a log it cannot read as damage, and a
+// partial last line by its length; it changes neither.
+func (l *Log) resume() (partial int64, damage string, err error) {
 	info, err := l.f.Stat()
 	if err != nil {
-		return 0, err
+		return 0, "", err
 	}
 	size := info.Size()
-	start := max(0, size-tailWindow)
-	tail := make([]byte, size-start)
-	if _, err := l.f.ReadAt(tail, start); err != nil && err != io.EOF {
-		return 0, err
+	from := max(0, size-tailWindow)
+	tail := make([]byte, size-from)
+	if _, err := l.f.ReadAt(tail, from); err != nil && err != io.EOF {
+		return 0, "", err
 	}
 	end := bytes.LastIndexByte(tail, '\n') + 1
-	if end == 0 && start > 0 {
-		return 0, fmt.Errorf("no line end in the last %d bytes", tailWindow)
+	if end == 0 && from > 0 {
+		return 0, fmt.Sprintf("no line end in the last %d bytes", tailWindow), nil
 	}
 	if end > 0 {
 		last := tail[bytes.LastIndexByte(tail[:end-1], '\n')+1 : end-1]
 		var line Line
 		if err := json.Unmarshal(last, &line); err != nil {
-			return 0, fmt.Errorf("last line: %w", err)
+			return 0, "last line: " + err.Error(), nil
 		}
 		sum := sha256.Sum256(last)
 		l.seq, l.prev = line.Seq, hex.EncodeToString(sum[:])
 	}
-	partial := int64(len(tail) - end)
-	l.size = start + int64(end)
-	if partial > 0 {
-		if err := l.f.Truncate(l.size); err != nil {
-			return 0, err
-		}
+	l.size = from + int64(end)
+	return int64(len(tail) - end), "", nil
+}
+
+// repair writes the line recording a partial last line over it, then cuts what is left of it, so a
+// repair line that cannot be written leaves the partial line for the next start.
+func (l *Log) repair(partial int64) error {
+	if _, err := l.Write(Line{Kind: KindKeyd, Decision: Error, Reason: "audit-repair", BytesIn: partial, Detail: "dropped a partial last line"}); err != nil {
+		return err
 	}
-	return partial, nil
+	return l.f.Truncate(l.size)
+}
+
+// rotate sets aside a log Open cannot resume and starts a new chain whose first line names it, with
+// its size, its SHA-256 and why. Only a failed rename or new file stops keyd. The keyd lock keeps
+// every other process away, so a name checked free is still free when the rename uses it.
+func rotate(path, damage string) (*Log, error) {
+	sum, size, err := hashFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("audit %s: %w", path, err)
+	}
+	aside := path + ".damaged-" + clock().UTC().Format("20060102T150405.000000000Z")
+	if _, err := os.Lstat(aside); !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("audit %s: cannot set it aside: %s exists", path, aside)
+	}
+	if err := os.Rename(path, aside); err != nil {
+		return nil, fmt.Errorf("audit %s: %w", path, err)
+	}
+	f, err := openFile(path, os.O_RDWR|os.O_CREATE|os.O_EXCL)
+	if err != nil {
+		return nil, fmt.Errorf("audit %s: %w", path, err)
+	}
+	l := &Log{f: f, prev: genesis, now: clock}
+	name := filepath.Base(aside)
+	if _, err := l.Write(Line{Kind: KindKeyd, Decision: Error, Reason: "audit-rotated", BytesIn: size, Detail: name + " sha256:" + sum + ": " + damage}); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("audit %s: %w", path, err)
+	}
+	log.Printf("keyd: audit log %s could not be resumed (%s); it is set aside as %s and a new chain begins", path, damage, name)
+	return l, nil
+}
+
+func hashFile(path string) (string, int64, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", 0, err
+	}
+	defer f.Close()
+	h := sha256.New()
+	n, err := io.Copy(h, f)
+	if err != nil {
+		return "", 0, err
+	}
+	return hex.EncodeToString(h.Sum(nil)), n, nil
 }
 
 // OnWrite registers a function called after each line is written.
@@ -193,6 +268,9 @@ func (l *Log) append(raw []byte) error {
 		if err := l.f.Truncate(l.size); err != nil {
 			return err
 		}
+	}
+	if _, err := l.f.Seek(l.size, io.SeekStart); err != nil {
+		return err
 	}
 	n, err := l.f.Write(append(raw, '\n'))
 	if err != nil {

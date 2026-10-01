@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"log"
 	"math"
 	"os"
 	"path/filepath"
@@ -282,13 +284,22 @@ func TestOverlappingSurrogatesAreWrittenAsOneSpan(t *testing.T) {
 }
 
 // textFields names Line's text fields that Write takes from its caller; Time and Prev are its own.
+// It fails on a field of any kind but text, a number or a flag: redact would not cover it.
 func textFields(t *testing.T) []string {
 	t.Helper()
 	var names []string
 	typ := reflect.TypeFor[Line]()
 	for i := range typ.NumField() {
-		if f := typ.Field(i); f.Type.Kind() == reflect.String && f.Name != "Time" && f.Name != "Prev" {
-			names = append(names, f.Name)
+		f := typ.Field(i)
+		switch f.Type.Kind() {
+		case reflect.String:
+			if f.Name != "Time" && f.Name != "Prev" {
+				names = append(names, f.Name)
+			}
+		case reflect.Bool, reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Float32, reflect.Float64:
+		default:
+			t.Fatalf("Line.%s has kind %s, which redact does not cover", f.Name, f.Type.Kind())
 		}
 	}
 	if len(names) != 15 {
@@ -404,15 +415,31 @@ func TestAOneMiBPathIsCappedAndTheLogStillOpens(t *testing.T) {
 }
 
 func TestTheLongestLinesReopenAndVerify(t *testing.T) {
-	l, path := openLog(t)
 	var longest Line
 	v := reflect.ValueOf(&longest).Elem()
 	for _, name := range textFields(t) {
-		v.FieldByName(name).SetString(strings.Repeat("<", 4096)) // JSON writes each as <
+		limit := 2048
+		if name == "Detail" {
+			limit = 512
+		}
+		v.FieldByName(name).SetString(strings.Repeat("<", limit)) // JSON writes each as \u003c
 	}
 	longest.Port, longest.Status = math.MinInt, math.MinInt
 	longest.BytesIn, longest.BytesOut, longest.CostMicroUSD = math.MinInt64, math.MinInt64, math.MinInt64
 	longest.DurationMs, longest.Swapped = -math.MaxFloat64, true
+	// The longest seq and time too: twenty digits, and nine places of a second.
+	worst, worstPath := openLog(t)
+	worst.seq = math.MaxUint64 - 1
+	worst.now = func() time.Time { return time.Date(2026, 10, 1, 12, 0, 0, 123456789, time.UTC) }
+	if _, err := worst.Write(longest); err != nil {
+		t.Fatal(err)
+	}
+	n := len(lines(t, worstPath)[0]) + 1
+	if n > 256<<10 {
+		t.Fatalf("a %d-byte line", n)
+	}
+	t.Logf("the longest line is %d bytes", n)
+	l, path := openLog(t)
 	for range 3 {
 		if _, err := l.Write(longest); err != nil {
 			t.Fatal(err)
@@ -420,12 +447,6 @@ func TestTheLongestLinesReopenAndVerify(t *testing.T) {
 	}
 	l.Close()
 	all := lines(t, path)
-	for _, raw := range all {
-		if len(raw)+1 > 256<<10 {
-			t.Fatalf("a %d-byte line", len(raw)+1)
-		}
-	}
-	t.Logf("the longest line is %d bytes", len(all[0])+1)
 	// A crash just before the next line's newline leaves the longest partial line there can be.
 	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
 	f.Write(all[2])
@@ -464,30 +485,174 @@ func TestVerifyCatchesAControlCharacterInAnyLine(t *testing.T) {
 	}
 }
 
-func TestOpenLeavesALogItCannotResumeUncut(t *testing.T) {
-	for name, tail := range map[string]string{
-		"no line end within reach": strings.Repeat("a", 4<<20),
-		"an unreadable last line":  "not json\npartial",
+// realistic writes n ordinary request lines.
+func realistic(t *testing.T, path string, n int) {
+	t.Helper()
+	l, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	for i := range n {
+		if _, err := l.Write(Line{Kind: KindRequest, Cell: "c1", Port: 4760, Method: "POST", Host: "api.anthropic.com",
+			Path: fmt.Sprintf("/v1/messages/%d", i), Status: 200, BytesIn: 1234, BytesOut: 5678, DurationMs: 812.5,
+			Decision: Allow, SecretID: "anthropic", Swapped: true}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// A log Open cannot resume is set aside byte for byte, and the new chain's first line names it with
+// its size, its SHA-256 and the cause. Two of the shapes are a power cut's: a tail the file's size
+// reached but its data did not, and a last line whose first block was lost.
+func TestOpenSetsAsideALogItCannotResume(t *testing.T) {
+	for name, damage := range map[string]func([]byte) []byte{
+		"no line end within reach":   func(d []byte) []byte { return append(d, strings.Repeat("a", 4<<20)...) },
+		"an unreadable last line":    func(d []byte) []byte { return append(d, "not json\npartial"...) },
+		"a NUL tail past the window": func(d []byte) []byte { return append(d, make([]byte, 600<<10)...) },
+		"a torn last line": func(d []byte) []byte {
+			torn := bytes.Clone(d)
+			start := bytes.LastIndexByte(torn[:len(torn)-1], '\n') + 1
+			clear(torn[start : start+16])
+			return torn
+		},
 	} {
 		path := filepath.Join(t.TempDir(), "audit.jsonl")
-		l, err := Open(path)
-		if err != nil {
+		realistic(t, path, 50)
+		data, _ := os.ReadFile(path)
+		before := damage(data)
+		if err := os.WriteFile(path, before, 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := l.Write(Line{Kind: KindKeyd, Decision: Allow, Reason: "start"}); err != nil {
-			t.Fatal(err)
+		var logged bytes.Buffer
+		log.SetOutput(&logged)
+		l, err := Open(path)
+		log.SetOutput(os.Stderr)
+		if err != nil {
+			t.Errorf("%s: Open: %v", name, err)
+			continue
 		}
 		l.Close()
-		f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-		f.WriteString(tail)
-		f.Close()
-		before, _ := os.ReadFile(path)
-		if again, err := Open(path); err == nil {
-			again.Close()
-			t.Errorf("%s: Open succeeded", name)
+		aside, _ := filepath.Glob(path + ".damaged-*")
+		if len(aside) != 1 {
+			t.Errorf("%s: set aside as %v", name, aside)
+			continue
 		}
-		if after, _ := os.ReadFile(path); !bytes.Equal(after, before) {
-			t.Errorf("%s: Open cut %d bytes before refusing", name, len(before)-len(after))
+		if kept, _ := os.ReadFile(aside[0]); !bytes.Equal(kept, before) {
+			t.Errorf("%s: the log set aside is not the damaged log", name)
 		}
+		fresh, _ := os.ReadFile(path)
+		if n, err := Verify(bytes.NewReader(fresh)); err != nil || n != 1 {
+			t.Errorf("%s: the new log: Verify = %d, %v", name, n, err)
+		}
+		var first Line
+		_ = json.Unmarshal(bytes.TrimSuffix(fresh, []byte("\n")), &first)
+		sum := sha256.Sum256(before)
+		named := filepath.Base(aside[0]) + " sha256:" + hex.EncodeToString(sum[:]) + ": "
+		if first.Kind != KindKeyd || first.Decision != Error || first.Reason != "audit-rotated" || first.BytesIn != int64(len(before)) ||
+			!strings.HasPrefix(first.Detail, named) || len(first.Detail) == len(named) {
+			t.Errorf("%s: the new log starts %+v", name, first)
+		}
+		if strings.Count(logged.String(), "\n") != 1 || !strings.Contains(logged.String(), filepath.Base(aside[0])) {
+			t.Errorf("%s: logged %q", name, logged.String())
+		}
+		again, err := Open(path)
+		if err != nil {
+			t.Errorf("%s: reopening the new log: %v", name, err)
+			continue
+		}
+		again.Close()
+		if more, _ := filepath.Glob(path + ".damaged-*"); len(more) != 1 {
+			t.Errorf("%s: reopening set more aside: %v", name, more)
+		}
+	}
+}
+
+// A full disk: the repair line cannot be written, so the partial line must still be there for the
+// next start to repair, rather than cut with nothing to say so.
+func TestARepairThatCannotBeWrittenLeavesThePartialLine(t *testing.T) {
+	l, path := openLog(t)
+	if _, err := l.Write(Line{Kind: KindKeyd, Decision: Allow, Reason: "start"}); err != nil {
+		t.Fatal(err)
+	}
+	l.Close()
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(`{"v":1,"seq":2,"tim`)
+	f.Close()
+	before, _ := os.ReadFile(path)
+	raw, err := os.OpenFile(path, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := start(path, &failingFile{file: raw, keep: 0}); err == nil {
+		t.Fatal("Open succeeded without writing its repair line")
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, before) {
+		t.Fatalf("the failed repair changed the log from %q to %q", before, after)
+	}
+	again, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again.Close()
+	data, _ := os.ReadFile(path)
+	if n, err := Verify(bytes.NewReader(data)); err != nil || n != 2 {
+		t.Fatalf("Verify after the repair = %d, %v", n, err)
+	}
+}
+
+// chained links hand-made lines as Write would, from first, so a test can break one rule alone.
+func chained(first string, seqs ...uint64) []byte {
+	var out []byte
+	prev := first
+	for _, seq := range seqs {
+		line := fmt.Sprintf(`{"v":1,"seq":%d,"time":"2026-10-01T12:00:00Z","kind":"keyd","decision":"allow","prev":"%s"}`, seq, prev)
+		sum := sha256.Sum256([]byte(line))
+		prev = hex.EncodeToString(sum[:])
+		out = append(out, line+"\n"...)
+	}
+	return out
+}
+
+func TestVerifyChecksTheSequenceAndTheFirstLink(t *testing.T) {
+	zeros := strings.Repeat("0", 64)
+	if n, err := Verify(bytes.NewReader(chained(zeros, 1, 2, 3))); err != nil || n != 3 {
+		t.Fatalf("an intact chain: Verify = %d, %v", n, err)
+	}
+	for name, bad := range map[string][]byte{
+		"a skipped seq":            chained(zeros, 1, 2, 4),
+		"a repeated seq":           chained(zeros, 1, 2, 2),
+		"a first seq of 2":         chained(zeros, 2, 3),
+		"a first link off genesis": chained(strings.Repeat("ab", 32), 1, 2),
+	} {
+		if n, err := Verify(bytes.NewReader(bad)); err == nil {
+			t.Errorf("%s: Verify = %d, nil", name, n)
+		}
+	}
+}
+
+// A set-aside name already taken is never overwritten: Open refuses, and both files stay as they were.
+func TestOpenNeverOverwritesALogSetAsideBefore(t *testing.T) {
+	clock = func() time.Time { return time.Date(2026, 10, 1, 12, 0, 0, 0, time.UTC) }
+	t.Cleanup(func() { clock = time.Now })
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	realistic(t, path, 3)
+	f, _ := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString("not json\n")
+	f.Close()
+	taken := path + ".damaged-20261001T120000.000000000Z"
+	if err := os.WriteFile(taken, []byte("set aside before\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	before, _ := os.ReadFile(path)
+	if l, err := Open(path); err == nil {
+		l.Close()
+		t.Fatal("Open set the log aside over an earlier one")
+	}
+	if kept, _ := os.ReadFile(taken); string(kept) != "set aside before\n" {
+		t.Fatalf("the earlier log now holds %q", kept)
+	}
+	if after, _ := os.ReadFile(path); !bytes.Equal(after, before) {
+		t.Fatal("the damaged log changed")
 	}
 }

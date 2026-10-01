@@ -54,9 +54,10 @@ func NewHub() *Hub {
 	return &Hub{subs: map[*subscriber]struct{}{}}
 }
 
-// Subscribe returns a channel with room for buf events and a cancel that closes it.
+// Subscribe returns a channel with room for buf events, at least one, and a slot more for a drop
+// notice, and a cancel that closes it.
 func (h *Hub) Subscribe(buf int) (<-chan Event, func()) {
-	s := &subscriber{ch: make(chan Event, buf)}
+	s := &subscriber{ch: make(chan Event, max(buf, 1)+1)}
 	h.mu.Lock()
 	h.subs[s] = struct{}{}
 	h.mu.Unlock()
@@ -71,7 +72,9 @@ func (h *Hub) Subscribe(buf int) (<-chan Event, func()) {
 	}
 }
 
-// Publish never blocks.
+// Publish never blocks: an event a subscriber has no room for is counted as dropped. The count goes
+// out as a notice in the slot kept for it, only with the next event behind it, so a subscriber that
+// catches up always reads events again.
 func (h *Hub) Publish(e Event) {
 	if e.Time.IsZero() {
 		e.Time = time.Now().UTC()
@@ -79,19 +82,15 @@ func (h *Hub) Publish(e Event) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	for s := range h.subs {
-		if s.dropped > 0 {
-			select {
-			case s.ch <- Event{Type: TypeDropped, Time: e.Time, Data: Dropped{Count: s.dropped}}:
-				s.dropped = 0
-			default:
-				s.dropped++
-				continue
-			}
-		}
-		select {
-		case s.ch <- e:
-		default:
+		// Only Publish sends, under h.mu, so the room counted here is still there for both sends.
+		if len(s.ch) >= cap(s.ch)-1 {
 			s.dropped++
+			continue
 		}
+		if s.dropped > 0 {
+			s.ch <- Event{Type: TypeDropped, Time: e.Time, Data: Dropped{Count: s.dropped}}
+			s.dropped = 0
+		}
+		s.ch <- e
 	}
 }
