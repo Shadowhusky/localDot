@@ -1,0 +1,98 @@
+:root {
+  color-scheme: dark;
+  --color-void: #0a0b0d;
+  --color-surface: #15161a;
+  --color-surface-2: #1d1e23;
+  --color-line: #25272c;
+  --color-text: #eeeff1;
+  --color-text-2: #999ca4;
+  --color-text-3: #5d6068;
+  --color-xenon: #3fb5de;
+  --color-xenon-a08: rgba(63, 181, 222, 0.08);
+  --color-xenon-a40: rgba(63, 181, 222, 0.4);
+  --color-hud: rgba(14, 15, 18, 0.74);
+  --color-hud-solid: rgba(14, 15, 18, 0.92);
+  --color-hud-line: rgba(255, 255, 255, 0.1);
+  --color-hud-button: rgba(255, 255, 255, 0.08);
+  --color-edge: rgba(0, 0, 0, 0.55);
+  --color-edge-stage: rgba(255, 255, 255, 0.05);
+  --color-shade-hud: rgba(0, 0, 0, 0.35);
+  --color-cursor-fill: #ffffff;
+  --color-cursor-rim: #121316;
+  --color-avatar-body: #ecedef;
+  --color-avatar-eye: #0a0b0d;
+  --font-ui: -apple-system, "Inter", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --spacing-rail: 264px;
+  --radius-stage: 12px;
+  --shadow-stage: 0 30px 80px var(--color-edge), 0 0 0 1px var(--color-edge-stage);
+  --duration-press: 100ms;
+  --ease-press: ease-out;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  background: var(--color-void);
+  color: var(--color-text);
+  font: 13.5px / 1.55 var(--font-ui);
+  font-optical-sizing: auto;
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+button:active {
+  transform: scale(0.97);
+  transition: transform var(--duration-press) var(--ease-press);
+}
+
+.notice {
+  max-width: 480px;
+  margin: 20vh auto 0;
+  padding: 0 16px;
+  color: var(--color-text-2);
+}
+
+.notice h1 {
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  color: var(--color-text);
+  margin-bottom: 8px;
+}
+
+.notice code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  color: var(--color-text);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  button:active {
+    transform: none;
+    opacity: 0.6;
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  :root {
+    --color-hud: var(--color-hud-solid);
+  }
+}

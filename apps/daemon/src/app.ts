@@ -7,6 +7,7 @@ import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
 import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
+import { serveUi } from "./static-ui.ts";
 import { tokensMatch } from "./token.ts";
 
 export interface AppOptions {
@@ -15,9 +16,10 @@ export interface AppOptions {
   eventLog: EventLog;
   cells?: CellApiDeps;
   desktop?: StreamProxyDeps;
+  ui?: { dir: string };
 }
 
-export function createApp({ token, port, eventLog, cells, desktop }: AppOptions): Hono {
+export function createApp({ token, port, eventLog, cells, desktop, ui }: AppOptions): Hono {
   const app = new Hono();
 
   // Hono's default handler logs the whole error, and a message can quote a file path or the
@@ -39,6 +41,8 @@ export function createApp({ token, port, eventLog, cells, desktop }: AppOptions)
   });
 
   app.get("/healthz", (c) => c.text("ok"));
+
+  if (ui) serveUi(app, ui.dir);
 
   // The Selkies iframe can carry no install token: its routes authorise themselves by ticket.
   if (desktop) desktopRoutes(app, desktop);

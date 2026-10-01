@@ -50,6 +50,7 @@ const app = createApp({
   eventLog,
   cells: { cells: orchestrator, tickets },
   desktop,
+  ui: { dir: webDir("dist") },
 });
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
