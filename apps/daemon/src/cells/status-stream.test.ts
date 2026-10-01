@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { WS_TOKEN_PREFIX } from "../guard.ts";
 import { attachUpgradeRouter, WS_PROTOCOL } from "../upgrade-router.ts";
-import { cellStatusRoute } from "./status-stream.ts";
+import { cellStatusRoute, followCell } from "./status-stream.ts";
 import { FakeOrchestrator } from "./testing/fake-orchestrator.ts";
 import type { CellSummary } from "./types.ts";
 
@@ -67,6 +67,7 @@ describe("cell status socket", () => {
     expect(got.map((c) => c.state)).toEqual(["ready", "ready", "removed"]);
     expect(got[1]?.stream.connection).toBe("live");
     expect(await closed(ws)).toBe(1000);
+    await vi.waitFor(() => expect(cells.listeners.size).toBe(0));
   });
 
   it("refuses unknown cells, bad ids and missing tokens", async () => {
@@ -99,5 +100,32 @@ describe("cell status socket", () => {
     const ws = open(`/api/cells/${cell.id}/status`);
     await new Promise((r) => ws.once("open", r));
     ws.close();
+  });
+});
+
+describe("a status socket that falls behind", () => {
+  it("is cut off once over 1 MiB is buffered, and stops listening", async () => {
+    const cells = new FakeOrchestrator();
+    const cell = await cells.create({ scale: 2 });
+    const handlers = new Map<string, () => void>();
+    const ws = {
+      bufferedAmount: 0,
+      send: vi.fn(),
+      close: vi.fn(),
+      terminate: vi.fn(() => handlers.get("close")?.()),
+      on: vi.fn((event: "close" | "error", handler: () => void) => {
+        handlers.set(event, handler);
+      }),
+    };
+    followCell(ws, cells, cell);
+    expect(ws.send).toHaveBeenCalledOnce();
+    cells.emit({ ...cell, state: "ready" });
+    expect(ws.send).toHaveBeenCalledTimes(2);
+
+    ws.bufferedAmount = 1024 * 1024 + 1;
+    cells.emit({ ...cell, state: "stopping" });
+    expect(ws.send).toHaveBeenCalledTimes(2);
+    expect(ws.terminate).toHaveBeenCalledOnce();
+    expect(cells.listeners.size).toBe(0);
   });
 });

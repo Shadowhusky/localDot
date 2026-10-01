@@ -153,6 +153,32 @@ describe("cell API", () => {
     expect(await failed.text()).toContain("Docker Desktop");
   });
 
+  it("refuses a create body over 1 KiB with 413", async () => {
+    const { app, cells } = setup();
+    const res = await app.request(url("/api/cells"), {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ scale: 2, pad: "x".repeat(2048) }),
+    });
+    expect(res.status).toBe(413);
+    expect(cells.list()).toEqual([]);
+  });
+
+  it("revokes the cell's stream ticket even when its removal fails", async () => {
+    const { app, cells, tickets } = setup();
+    const cell = await readyCell(cells);
+    const { ticket } = await minted(app, cell.id);
+    vi.spyOn(cells, "remove").mockRejectedValueOnce(
+      new DockerError(500, "removal failed", `/containers/localdot-gate-${cell.id}`),
+    );
+    const res = await app.request(url(`/api/cells/${cell.id}`), {
+      method: "DELETE",
+      headers: bearer,
+    });
+    expect(res.status).toBe(502);
+    expect(tickets.resolve(ticket)).toBeUndefined();
+  });
+
   it("refuses a new cell with 409 while a cell record can't be read", async () => {
     const { app, cells } = setup();
     cells.failWith = new SkippedCellsError(["01ARZ3NDEKTSV4RRFFQ69G5FAV"]);

@@ -1,5 +1,6 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { DockerError } from "./docker.ts";
 import { type CellApi, SkippedCellsError, UnknownCellError } from "./orchestrator.ts";
 import type { TicketRegistry } from "./secrets.ts";
@@ -18,7 +19,8 @@ export function cellRoutes(app: Hono, { cells, tickets }: CellApiDeps): void {
 
   app.get("/api/cells", (c) => c.json(cells.list()));
 
-  app.post("/api/cells", async (c) => {
+  // The only option is the scale, so anything near a kilobyte is not a create request.
+  app.post("/api/cells", bodyLimit({ maxSize: 1024 }), async (c) => {
     const body = ((await c.req.json().catch(() => null)) ?? {}) as { scale?: unknown };
     const scale =
       body.scale === undefined || body.scale === 2 ? 2 : body.scale === 1 ? 1 : undefined;
@@ -54,8 +56,12 @@ export function cellRoutes(app: Hono, { cells, tickets }: CellApiDeps): void {
   app.delete("/api/cells/:id", (c) =>
     withCell(c, (id) =>
       withDocker(c, async () => {
-        await cells.remove(id, { purgeHome: c.req.query("purge") === "1" });
-        tickets.revoke(id);
+        // Even a removal that fails part-way leaves no stream path open to the cell.
+        try {
+          await cells.remove(id, { purgeHome: c.req.query("purge") === "1" });
+        } finally {
+          tickets.revoke(id);
+        }
         return c.body(null, 204);
       }),
     ),
