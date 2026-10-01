@@ -3,6 +3,7 @@ package scrub
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/hex"
 	"fmt"
 	"html"
 	"io"
@@ -10,7 +11,9 @@ import (
 	"net/url"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 const (
@@ -204,4 +207,85 @@ func TestStreamingMatchesOneShotWhenALongerSpellingCouldFollow(t *testing.T) {
 			t.Fatalf("split at %d: %q, want %q", split, got, want)
 		}
 	}
+}
+
+func TestAnOpenStreamReleasesEverythingItHasDecided(t *testing.T) {
+	const ceiling = 5 * time.Second
+	s := scrubber(t)
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { pw.Close() })
+	r := s.Reader(pr)
+	var mu sync.Mutex
+	var released []byte
+	grew := make(chan struct{}, 1)
+	go func() {
+		buf := make([]byte, 4096)
+		for {
+			n, err := r.Read(buf)
+			mu.Lock()
+			released = append(released, buf[:n]...)
+			mu.Unlock()
+			select {
+			case grew <- struct{}{}:
+			default:
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	write := func(p string) {
+		t.Helper()
+		done := make(chan error, 1)
+		go func() { _, err := pw.Write([]byte(p)); done <- err }()
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Fatal(err)
+			}
+		case <-time.After(ceiling):
+			t.Fatal("the reader stopped taking input")
+		}
+	}
+	// await waits, with the stream still open, until at least n bytes of want have come back.
+	await := func(want string, n int) {
+		t.Helper()
+		deadline := time.After(ceiling)
+		for {
+			mu.Lock()
+			got := string(released)
+			mu.Unlock()
+			if !strings.HasPrefix(want, got) {
+				t.Fatalf("released %q, want a start of %q", got, want)
+			}
+			if len(got) >= n {
+				return
+			}
+			select {
+			case <-grew:
+			case <-deadline:
+				t.Fatalf("the open stream released %q, want at least %d bytes of %q", got, n, want)
+			}
+		}
+	}
+
+	// c, r and y each open a needle for this secret, so this event cannot take the fast path.
+	want := "data: {\"delta\":\"cry\"}\n\n"
+	write(want)
+	await(want, len(want))
+
+	write("data: {\"echo\":\"" + secret + "\"} more\n\n")
+	want += "data: {\"echo\":\"" + surrogate + "\"} more\n\n"
+	await(want, len(want))
+
+	// A byte's longest spelling is 6 characters, so a partial match never runs past 6 times the
+	// longest form, which is hex.
+	long := hex.EncodeToString([]byte(secret))
+	filler := strings.Repeat("cry ", 250)
+	written := filler + long[:len(long)-1]
+	write(written)
+	await(want+filler, len(want)+len(written)-(6*len(long)-1))
+	write(long[len(long)-1:] + " end\n\n")
+	want += filler + hex.EncodeToString([]byte(surrogate)) + " end\n\n"
+	await(want, len(want))
 }
