@@ -50,6 +50,10 @@ export function attachEventStream(
       refuse(socket, "403 Forbidden");
       return;
     }
+    if (!eventLog.hasSession(sessionId)) {
+      refuse(socket, "404 Not Found");
+      return;
+    }
     const fromSeq = Math.max(0, Number(url.searchParams.get("fromSeq")) || 0);
     wss.handleUpgrade(req, socket, head, (ws) => streamSession(ws, eventLog, sessionId, fromSeq));
   });

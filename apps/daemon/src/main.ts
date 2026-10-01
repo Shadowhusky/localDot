@@ -1,14 +1,22 @@
 import type { Server } from "node:http";
+import { constants } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { EventLog } from "./event-log.ts";
 import { attachEventStream } from "./event-stream.ts";
+import { acquireDaemonLock, DaemonLockedError } from "./lock.ts";
 import { localdotHome } from "./paths.ts";
+import { parsePort } from "./port.ts";
 import { loadOrCreateToken } from "./token.ts";
 
-const port = Number(process.env.LOCALDOT_PORT ?? 4750);
+const port = portFromEnv();
 const home = localdotHome();
+const releaseLock = lockHome(join(home, "daemon.lock"));
+process.on("exit", releaseLock);
+for (const signal of ["SIGINT", "SIGTERM"] as const) {
+  process.on(signal, () => process.exit(128 + constants.signals[signal]));
+}
 const tokenFile = join(home, "daemon-token");
 const token = loadOrCreateToken(tokenFile);
 const eventLog = new EventLog(home);
@@ -20,6 +28,27 @@ const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
 // serve() is typed as HTTP/1-or-HTTP/2; this daemon only ever creates an HTTP/1 server.
 attachEventStream(server as Server, { port, token, eventLog });
 server.on("error", (err: NodeJS.ErrnoException) => {
-  console.error(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);
-  process.exit(1);
+  fail(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);
 });
+
+function portFromEnv(): number {
+  try {
+    return parsePort(process.env.LOCALDOT_PORT);
+  } catch (err) {
+    return fail(`LOCALDOT_PORT: ${(err as Error).message}`);
+  }
+}
+
+function lockHome(file: string): () => void {
+  try {
+    return acquireDaemonLock(file);
+  } catch (err) {
+    if (!(err instanceof DaemonLockedError)) throw err;
+    return fail(`${err.message}; remove ${file} if that process is not localdot`);
+  }
+}
+
+function fail(message: string): never {
+  console.error(message);
+  process.exit(1);
+}

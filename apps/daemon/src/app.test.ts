@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { ulid } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { createApp } from "./app.ts";
 import { EventLog } from "./event-log.ts";
@@ -104,6 +105,12 @@ describe("session routes", () => {
       await app.request(url(`/api/sessions/${id}/events?fromSeq=1`), { headers: bearer })
     ).json()) as unknown[];
     expect(later).toEqual([]);
+  });
+
+  it("answers 404 for a well-formed id that names no session", async () => {
+    const res = await app.request(url(`/api/sessions/${ulid()}/events`), { headers: bearer });
+    expect(res.status).toBe(404);
+    expect(await res.text()).toBe("unknown session");
   });
 
   it("answers 400 for a malformed session id", async () => {

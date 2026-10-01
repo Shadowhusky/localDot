@@ -1,6 +1,6 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { Hono } from "hono";
-import type { EventLog } from "./event-log.ts";
+import { type EventLog, UnknownSessionError } from "./event-log.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { tokensMatch } from "./token.ts";
 
@@ -39,7 +39,12 @@ export function createApp({ token, port, eventLog }: AppOptions): Hono {
     const id = c.req.param("id");
     if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
     const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
-    return c.json(eventLog.read(id, fromSeq));
+    try {
+      return c.json(eventLog.read(id, fromSeq));
+    } catch (err) {
+      if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
+      throw err;
+    }
   });
 
   return app;

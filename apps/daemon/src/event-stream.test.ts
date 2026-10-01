@@ -4,7 +4,7 @@ import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
-import type { EventDraft, LocalDotEvent } from "@localdot/protocol";
+import { type EventDraft, type LocalDotEvent, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { type ClientOptions, WebSocket } from "ws";
 import { createApp } from "./app.ts";
@@ -47,7 +47,7 @@ async function start() {
   return { port, home, eventLog, origin, open };
 }
 
-const rawUpgrade = (port: number, target: string) =>
+const rawUpgrade = (port: number, target: string, auth = [`Authorization: Bearer ${TOKEN}`]) =>
   new Promise<{ socket: Socket; status: string }>((resolve) => {
     const socket = connect(port, "127.0.0.1");
     socket.once("data", (chunk) => {
@@ -63,7 +63,7 @@ const rawUpgrade = (port: number, target: string) =>
         "Connection: Upgrade",
         "Sec-WebSocket-Version: 13",
         "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
-        `Authorization: Bearer ${TOKEN}`,
+        ...auth,
         "",
         "",
       ].join("\r\n"),
@@ -136,6 +136,18 @@ describe("event stream", () => {
     expect(await opens(open(`/api/sessions/${eventLog.createSession()}/stream`, both))).toBe(true);
     expect(await opens(open("/api/sessions/..%2F..%2Fetc/stream", both))).toBe(false);
     expect(await opens(open("/api/sessions/01j9zq3v8y7x6w5t4s3r2q1p0n/stream", both))).toBe(false);
+  });
+
+  it("answers 404 to an authorized upgrade for a session that does not exist", async () => {
+    const { port, open } = await start();
+    const path = `/api/sessions/${ulid()}/stream`;
+    const authorized = await rawUpgrade(port, path);
+    authorized.socket.destroy();
+    expect(authorized.status).toBe("HTTP/1.1 404 Not Found");
+    const anonymous = await rawUpgrade(port, path, []);
+    anonymous.socket.destroy();
+    expect(anonymous.status).toBe("HTTP/1.1 403 Forbidden");
+    expect(await opens(open(path, [WS_PROTOCOL, TOKEN_PROTOCOL]))).toBe(false);
   });
 
   it("refuses an absolute-form target naming a foreign host", async () => {

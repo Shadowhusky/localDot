@@ -30,6 +30,13 @@ export interface SessionSummary {
 
 export type EventListener = (sessionId: string, event: LocalDotEvent) => void;
 
+export class UnknownSessionError extends Error {
+  constructor(readonly sessionId: string) {
+    super(`unknown session ${sessionId}`);
+    this.name = "UnknownSessionError";
+  }
+}
+
 interface SessionState {
   file: string;
   bytes: number;
@@ -111,8 +118,12 @@ export class EventLog {
     return event;
   }
 
+  hasSession(sessionId: string): boolean {
+    return ULID_PATTERN.test(sessionId) && existsSync(join(this.#root, sessionId));
+  }
+
   read(sessionId: string, fromSeq = 0): LocalDotEvent[] {
-    return readValid(this.#fileOf(sessionId)).events.filter((e) => e.seq >= fromSeq);
+    return readValid(this.#existingFileOf(sessionId)).events.filter((e) => e.seq >= fromSeq);
   }
 
   listSessions(): SessionSummary[] {
@@ -139,6 +150,12 @@ export class EventLog {
     return join(this.#root, sessionId, "events.jsonl");
   }
 
+  #existingFileOf(sessionId: string): string {
+    const file = this.#fileOf(sessionId);
+    if (!this.hasSession(sessionId)) throw new UnknownSessionError(sessionId);
+    return file;
+  }
+
   #recoverAll(): void {
     for (const entry of readdirSync(this.#root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name)) continue;
@@ -154,8 +171,7 @@ export class EventLog {
     const cached = this.#states.get(sessionId);
     // Bytes this log did not write (a stray or torn write) send the session back through recovery.
     if (cached && sizeOf(cached.file) === cached.bytes) return cached;
-    const file = this.#fileOf(sessionId);
-    if (!existsSync(join(this.#root, sessionId))) throw new Error(`unknown session ${sessionId}`);
+    const file = this.#existingFileOf(sessionId);
     const { events, validBytes } = readValid(file);
     if (existsSync(file)) truncateSync(file, validBytes);
     const lastSeq = events.reduce((max, e) => Math.max(max, e.seq), -1);
@@ -175,7 +191,7 @@ export class EventLog {
 
   #write(sessionId: string, state: SessionState, line: string): void {
     try {
-      appendFileSync(state.file, line);
+      appendFileSync(state.file, line, { mode: 0o600 });
     } catch (err) {
       try {
         truncateSync(state.file, state.bytes);

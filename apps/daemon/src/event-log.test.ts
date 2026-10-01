@@ -9,10 +9,10 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { EventDraft, LocalDotEvent } from "@localdot/protocol";
+import { type EventDraft, type LocalDotEvent, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Clock } from "./clock.ts";
-import { EventLog } from "./event-log.ts";
+import { EventLog, UnknownSessionError } from "./event-log.ts";
 import { DatabaseSync } from "./sqlite.ts";
 
 const fsHooks = vi.hoisted(() => ({ tearNextAppend: false }));
@@ -292,5 +292,25 @@ describe("EventLog", () => {
     const log = new EventLog(home(), fakeClock());
     expect(() => log.read("../../etc")).toThrow("invalid session id");
     expect(() => log.append("01j9zq3v8y7x6w5t4s3r2q1p0n", thinking)).toThrow("invalid session id");
+  });
+
+  it("tells a session that does not exist apart from an empty one", () => {
+    const log = new EventLog(home(), fakeClock());
+    const empty = log.createSession();
+    const unknown = ulid();
+    expect(log.hasSession(empty)).toBe(true);
+    expect(log.read(empty)).toEqual([]);
+    expect(log.hasSession(unknown)).toBe(false);
+    expect(log.hasSession("../../etc")).toBe(false);
+    expect(() => log.read(unknown)).toThrow(UnknownSessionError);
+    expect(() => log.append(unknown, thinking)).toThrow(UnknownSessionError);
+  });
+
+  it("creates each session's log private to the user", () => {
+    const dir = home();
+    const log = new EventLog(dir, fakeClock());
+    const id = log.createSession();
+    log.append(id, thinking);
+    expect(statSync(sessionFile(dir, id)).mode & 0o777).toBe(0o600);
   });
 });

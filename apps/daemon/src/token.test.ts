@@ -9,7 +9,6 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { localdotHome } from "./paths.ts";
 import { loadOrCreateToken, tokensMatch } from "./token.ts";
 
 const fsHooks = vi.hoisted(() => ({ beforePublish: undefined as (() => void) | undefined }));
@@ -93,11 +92,5 @@ describe("tokensMatch", () => {
 
   it("never matches an empty expected token", () => {
     expect(tokensMatch("", "")).toBe(false);
-  });
-});
-
-describe("localdotHome", () => {
-  it("honours LOCALDOT_HOME", () => {
-    expect(localdotHome({ LOCALDOT_HOME: "/tmp/x" })).toBe("/tmp/x");
   });
 });
