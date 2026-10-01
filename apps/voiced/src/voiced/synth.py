@@ -12,6 +12,15 @@ TTS_STOCK = "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-8bit"
 STOCK_SPEAKER = "Vivian"
 LANG_NAMES = {"zh": "Chinese", "en": "English", "ja": "Japanese"}
 STREAM_INTERVAL_S = 0.32
+CODEC_HZ = 12.5
+# About twice the slowest speech measured (0.26 s a Han character), never under 6 s: without a cap a
+# missed end token streams on to mlx-audio's 4096 codec frames, five and a half minutes.
+MAX_SECONDS_PER_CHAR = 0.6
+MIN_SECONDS = 6.0
+
+
+def max_tokens(text: str) -> int:
+    return round(CODEC_HZ * max(MIN_SECONDS, MAX_SECONDS_PER_CHAR * len(text)))
 
 
 class MlxSynthesizer:
@@ -26,6 +35,7 @@ class MlxSynthesizer:
             "lang_code": LANG_NAMES[lang],
             "stream": True,
             "streaming_interval": STREAM_INTERVAL_S,
+            "max_tokens": max_tokens(text),
         }
         if self.voice:
             options.update(ref_audio=str(self.voice.audio), ref_text=self.voice.text)
