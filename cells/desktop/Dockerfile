@@ -66,10 +66,12 @@ ENV CUA_DRIVER_RS_TELEMETRY_ENABLED=0 \
     START_DOCKER=false
 
 COPY root/ /
-RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run
+RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run \
+      /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run
 
-# One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
-# are locked where the client could change them; "|locked" is Selkies' bool suffix (D1, D2).
+# One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). Every Selkies value
+# a client could change is locked: "|locked" on bools, a one-value span on ranges, one item on enums
+# (D1, D2). File transfers take "none" because s6 drops an empty variable, which re-enables them.
 ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
     LOCALDOT_SCALE=2 \
     SELKIES_MANUAL_WIDTH=2560 \
@@ -79,19 +81,19 @@ ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
     SELKIES_SCALING_DPI=96 \
     SELKIES_ENABLE_CURSORS="false|locked" \
     SELKIES_ENCODER=h264enc \
-    SELKIES_FRAMERATE=60 \
-    SELKIES_VIDEO_FULLCOLOR=true \
-    SELKIES_AUDIO_ENABLED=false \
-    SELKIES_MICROPHONE_ENABLED=false \
-    SELKIES_WEBCAM_ENABLED=false \
-    SELKIES_GAMEPAD_ENABLED=false \
+    SELKIES_FRAMERATE=60-60 \
+    SELKIES_VIDEO_FULLCOLOR="true|locked" \
+    SELKIES_AUDIO_ENABLED="false|locked" \
+    SELKIES_MICROPHONE_ENABLED="false|locked" \
+    SELKIES_WEBCAM_ENABLED="false|locked" \
+    SELKIES_GAMEPAD_ENABLED="false|locked" \
     SELKIES_ENABLE_CLIPBOARD=false \
-    SELKIES_FILE_TRANSFERS= \
-    SELKIES_PRINTING_ENABLED=false \
-    SELKIES_COMMAND_ENABLED=false \
-    SELKIES_UI_SHOW_SIDEBAR=false \
-    SELKIES_UI_SHOW_CORE_BUTTONS=false \
-    SELKIES_UI_SHOW_LOGO=false \
+    SELKIES_FILE_TRANSFERS=none \
+    SELKIES_PRINTING_ENABLED="false|locked" \
+    SELKIES_COMMAND_ENABLED="false|locked" \
+    SELKIES_UI_SHOW_SIDEBAR="false|locked" \
+    SELKIES_UI_SHOW_CORE_BUTTONS="false|locked" \
+    SELKIES_UI_SHOW_LOGO="false|locked" \
     SELKIES_UI_TITLE=localDot \
     NO_GAMEPAD=1 \
     NO_WEBCAM=1 \

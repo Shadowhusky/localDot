@@ -21,9 +21,11 @@ case "$scale" in
   2) theme=Default-xhdpi ;;
   *) echo "startwm: LOCALDOT_SCALE must be 1 or 2, got $scale" >&2; exit 1 ;;
 esac
+# An xfconfd that outlived the last session (or that Selkies' DPI restore activated) flushes its
+# pending changes as it exits, and would serve stale values while it dies: it must be gone first.
+if pkill -u "$(id -u)" -x xfconfd; then
+  while pgrep -u "$(id -u)" -x xfconfd >/dev/null; do sleep 0.1; done
+fi
 sed "s/@SCALE@/$scale/g" /defaults/localdot/xsettings.xml.in > "$conf/xsettings.xml"
 sed "s/@THEME@/$theme/g" /defaults/localdot/xfwm4.xml.in > "$conf/xfwm4.xml"
-# xfconfd caches channels in memory: one started before this copy (Selkies' DPI restore can
-# activate it) would write stale values back over these files.
-pkill -u "$(id -u)" -x xfconfd || true
 exec /usr/bin/xfce4-session

@@ -1,0 +1,4 @@
+#!/usr/bin/with-contenv bash
+# NO_GAMEPAD makes init-selkies-config overwrite the image's SELKIES_GAMEPAD_ENABLED with a plain
+# "false", which Selkies reports unlocked. This puts the locked value back before Selkies starts.
+printf 'false|locked' > /run/s6/container_environment/SELKIES_GAMEPAD_ENABLED

@@ -1,5 +1,6 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { WebSocket } from "ws";
+import { type RawData, WebSocket } from "ws";
 import {
   DOCKER_TESTS,
   docker,
@@ -141,26 +142,48 @@ interface ServerSetting {
   value: unknown;
   locked?: boolean;
   allowed?: unknown[];
+  min?: number;
+  max?: number;
 }
 
-// Selkies sends its settings, each with its lock, as soon as a stream socket opens.
+interface ServerMessage {
+  type?: string;
+  settings?: Record<string, ServerSetting>;
+}
+
+// Selkies sends its settings, each with its lock, as soon as a stream socket opens. Its other
+// text messages ("MODE websockets", "DISPLAY_CONFIG_UPDATE,…") are not JSON.
 function serverSettings(ws: WebSocket): Promise<Record<string, ServerSetting>> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error("no server_settings within 15 s")), 15_000);
-    ws.on("message", (data, isBinary) => {
+    const onMessage = (data: RawData, isBinary: boolean) => {
       if (isBinary) return;
-      const text = data.toString();
-      if (!text.startsWith("{")) return;
-      const msg = JSON.parse(text) as { type?: string; settings?: Record<string, ServerSetting> };
-      if (msg.type !== "server_settings" || !msg.settings) return;
+      let msg: ServerMessage | null;
+      try {
+        msg = JSON.parse(data.toString()) as ServerMessage | null;
+      } catch {
+        return;
+      }
+      if (msg?.type !== "server_settings" || !msg.settings) return;
       clearTimeout(timer);
+      ws.off("message", onMessage);
       resolve(msg.settings);
-    });
+    };
+    ws.on("message", onMessage);
     ws.on("error", (error) => {
       clearTimeout(timer);
       reject(error);
     });
   });
+}
+
+// Resolves with "open", or with the error ws raises when the upgrade is refused.
+function upgradeOutcome(url: string): Promise<string> {
+  const ws = new WebSocket(url);
+  return new Promise<string>((resolve) => {
+    ws.once("open", () => resolve("open"));
+    ws.on("error", (error) => resolve(error.message));
+  }).finally(() => ws.terminate());
 }
 
 describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", () => {
@@ -221,7 +244,9 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     });
     expect(page.status).toBe(200);
     // The page's entry module imports the client core (assets/selkies-core-*.js).
-    const entry = /src="\.\/(assets\/index-[^"]+\.js)"/.exec(await page.text())?.[1];
+    const html = await page.text();
+    const entry = /src="\.\/(assets\/index-[^"]+\.js)"/.exec(html)?.[1];
+    expect(entry, html).toBeDefined();
     const script = await fetch(`http://127.0.0.1:${port2}/${entry}`, {
       headers: { authorization: STREAM_AUTH },
     });
@@ -232,20 +257,47 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     });
     expect(health.status).toBe(200);
     expect((await fetch(`http://127.0.0.1:${port2}/api/health`)).status).toBe(401);
+    expect(await upgradeOutcome(`ws://127.0.0.1:${port2}/api/websockets`)).toBe(
+      "Unexpected server response: 401",
+    );
   });
 
-  it("locks the scaling settings and keeps the HiDPI settings while a stream socket is open", async () => {
+  it("locks every Selkies switch and keeps the HiDPI settings while a stream socket is open", async () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port2}/api/websockets`, {
       headers: { authorization: STREAM_AUTH },
     });
     const settings = await serverSettings(ws);
-    sleepSync(3000);
+    await sleep(3000);
     ws.close();
+    const lockedOff = [
+      "enable_resize",
+      "use_css_scaling",
+      "enable_cursors",
+      "audio_enabled",
+      "microphone_enabled",
+      "webcam_enabled",
+      "gamepad_enabled",
+      "printing_enabled",
+      "command_enabled",
+      "ui_show_sidebar",
+      "ui_show_core_buttons",
+      "ui_show_logo",
+    ];
+    for (const name of lockedOff) {
+      expect(settings[name], name).toMatchObject({ value: false, locked: true });
+    }
+    expect(settings.video_fullcolor).toMatchObject({ value: true, locked: true });
+    expect(settings.manual_resolution).toMatchObject({ value: true, locked: true });
     expect(settings.scaling_dpi).toMatchObject({ value: "96", locked: true });
-    expect(settings.enable_resize).toMatchObject({ value: false, locked: true });
-    expect(settings.use_css_scaling).toMatchObject({ value: false, locked: true });
-    expect(settings.enable_cursors).toMatchObject({ value: false, locked: true });
-    expect(settings.encoder?.allowed).toEqual(["h264enc"]);
+    // A range is locked when its span is one value, an enum when it allows one item.
+    expect(settings.framerate).toMatchObject({ value: [60, 60], min: 60, max: 60 });
+    expect(settings.encoder).toMatchObject({ value: "h264enc", allowed: ["h264enc"] });
+    // No client message sets the clipboard or file-transfer policy, so Selkies gives them no lock.
+    expect(settings.enable_clipboard?.value).toBe("false");
+    for (const name of ["clipboard_enabled", "clipboard_in_enabled", "clipboard_out_enabled"]) {
+      expect(settings[name]?.value, name).toBe(false);
+    }
+    expect(settings.file_transfers).toMatchObject({ value: [], allowed: [] });
     expect(xfconf(C2, "xsettings", "/Gdk/WindowScalingFactor")).toBe("2");
     expect(xfconf(C2, "xsettings", "/Xft/DPI")).toBe("96");
   });
