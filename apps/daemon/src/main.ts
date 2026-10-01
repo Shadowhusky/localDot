@@ -5,7 +5,7 @@ import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { EventLog } from "./event-log.ts";
 import { attachEventStream } from "./event-stream.ts";
-import { acquireDaemonLock, DaemonLockedError } from "./lock.ts";
+import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
 import { localdotHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { loadOrCreateToken } from "./token.ts";
@@ -14,7 +14,7 @@ const port = portFromEnv();
 const home = localdotHome();
 const releaseLock = lockHome(join(home, "daemon.lock"));
 process.on("exit", releaseLock);
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
+for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => process.exit(128 + constants.signals[signal]));
 }
 const tokenFile = join(home, "daemon-token");
@@ -43,8 +43,11 @@ function lockHome(file: string): () => void {
   try {
     return acquireDaemonLock(file);
   } catch (err) {
-    if (!(err instanceof DaemonLockedError)) throw err;
-    return fail(`${err.message}; remove ${file} if that process is not localdot`);
+    if (err instanceof DaemonLockedError) {
+      return fail(`${err.message}; remove ${file} if that process is not localdot`);
+    }
+    if (err instanceof DaemonLockError) return fail(err.message);
+    throw err;
   }
 }
 

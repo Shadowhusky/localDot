@@ -1,4 +1,4 @@
-export const DEFAULT_PORT = 4750;
+const DEFAULT_PORT = 4750;
 
 export function parsePort(value: string | undefined): number {
   if (value === undefined) return DEFAULT_PORT;
