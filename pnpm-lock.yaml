@@ -114,6 +114,12 @@ importers:
         specifier: workspace:*
         version: link:../protocol
 
+  packages/voice:
+    dependencies:
+      '@localdot/avatar':
+        specifier: workspace:*
+        version: link:../avatar
+
   spikes/s1-stream:
     dependencies:
       http-proxy:
