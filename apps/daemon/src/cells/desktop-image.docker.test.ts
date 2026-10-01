@@ -152,6 +152,36 @@ const PLANK_DOCK = "net.launchpad.plank.dock.settings:/net/launchpad/plank/docks
 const COMPOSITOR_RUNNING = `from Xlib import X, display
 d = display.Display()
 print(d.get_selection_owner(d.intern_atom("_NET_WM_CM_S0")) != X.NONE)`;
+const WALLPAPER = "/usr/share/backgrounds/localdot/mojave-nord-light.png";
+// Flat colours of the wallpaper itself, so a drawn pixel shows which image xfdesktop uses.
+const SKY = "srgb(164,173,189)";
+const DUNE = "srgb(86,53,38)";
+
+const screenPixel = (name: string, x: number, y: number) =>
+  outputAs(
+    name,
+    "abc",
+    "import",
+    "-window",
+    "root",
+    "-crop",
+    `1x1+${x}+${y}`,
+    "-format",
+    "%[pixel:p{0,0}]",
+    "info:",
+  );
+
+// xfdesktop reads the wallpaper under the X output's own name ("screen" under Xvfb).
+function wallpaper(name: string): string {
+  const output = /^(\S+) connected/m.exec(outputAs(name, "abc", "xrandr"))?.[1];
+  const image = xfconf(
+    name,
+    "xfce4-desktop",
+    `/backdrop/screen0/monitor${output}/workspace0/last-image`,
+  );
+  outputOf(name, "test", "-f", image);
+  return image;
+}
 
 // One Thunar window shows the GTK theme, the icons and the window decorations together. The
 // session's Thunar daemon owns that window, so it is closed with Ctrl+W rather than killed.
@@ -395,6 +425,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
       "/usr/share/plank/themes/WhiteSur-Light/dock.theme",
       "/usr/share/doc/localdot-themes/WhiteSur-gtk-theme.COPYING",
       "/usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING",
+      "/usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE",
       "/usr/share/doc/localdot-themes/THIRD-PARTY.md",
     );
     const closeButton = (theme: string) =>
@@ -419,8 +450,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     );
     // The menu bar renders light whatever the wallpaper, and Plank's translucent dock needs the
     // compositor (without one it draws an opaque grey block).
-    const barPixel = ["-crop", "1x1+1280+10", "-format", "%[pixel:p{0,0}]", "info:"];
-    expect(outputAs(C2, "abc", "import", "-window", "root", ...barPixel)).toBe("srgb(241,241,241)");
+    expect(screenPixel(C2, 1280, 10)).toBe("srgb(241,241,241)");
     expect(outputAs(C2, "abc", "python3", "-c", COMPOSITOR_RUNNING).trim()).toBe("True");
     expect(dockerExecAs(C2, "abc", "pgrep", "-x", "plank").status).toBe(0);
     expect(outputAs(C2, "abc", "gsettings", "get", PLANK_DOCK, "theme").trim()).toBe(
@@ -483,6 +513,14 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(appleLogos).toBe("");
   });
 
+  it("draws WhiteSur's light dune wallpaper from a new home's xfdesktop settings", () => {
+    expect(wallpaper(C2)).toBe(WALLPAPER);
+    expect(screenPixel(C2, 2400, 200)).toBe(SKY);
+    expect(screenPixel(C2, 2000, 1200)).toBe(DUNE);
+    // A dock shadow would draw a band across the screen above Plank's tall, transparent window.
+    expect(screenPixel(C2, 2000, dockWindow(C2, "plank").y - 6)).toBe(DUNE);
+  });
+
   it("saves a 2x screenshot of the themed desktop for the executor to look at", () => {
     saveLook(C2, "look-2x.png", "2560x1600");
   });
@@ -506,6 +544,9 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(dock.y + dock.height).toBe(800);
     expect(dock.strut).toBe("0, 0, 0, 66, 0, 0, 0, 0, 0, 0, 0, 1279");
     expect(xfconf(C1, "xsettings", "/Net/ThemeName")).toBe("WhiteSur-Light");
+    expect(wallpaper(C1)).toBe(WALLPAPER);
+    expect(screenPixel(C1, 1200, 100)).toBe(SKY);
+    expect(screenPixel(C1, 1000, 600)).toBe(DUNE);
     saveLook(C1, "look-1x.png", "1280x800");
   });
 });

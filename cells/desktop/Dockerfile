@@ -112,6 +112,20 @@ RUN set -eu; \
     /tmp/whitesur-icons/install.sh -d /usr/share/icons -t default; \
     cp /tmp/whitesur-icons/COPYING /usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING; \
     rm -rf /tmp/whitesur-icons
+
+ARG WHITESUR_WALLPAPERS_COMMIT=4fe5ae7a01f38f8ff9a25c343e0a49234c1012c9
+ARG WALLPAPER_SHA256=4a5867e8c67e04ef23e8a13ce38644053ddb3aebeb0d02706924ffdfb0d95833
+ARG WALLPAPER_LICENSE_SHA256=5a9518c6e0636dee418520a999426422aa33a2c5a0d8dedf62cadceec8d1b3c6
+
+# Wallpaper (MIT): WhiteSur-wallpapers' flat light dune in Nord colours (tag 2023-06-11), a
+# grey-blue sky over sand browns.
+RUN set -eu; \
+    src="https://raw.githubusercontent.com/vinceliuice/WhiteSur-wallpapers/${WHITESUR_WALLPAPERS_COMMIT}"; \
+    mkdir -p /usr/share/backgrounds/localdot; \
+    curl -fsSL -o /usr/share/backgrounds/localdot/mojave-nord-light.png "$src/Wallpaper-nord/Mojave-nord-light.png"; \
+    echo "${WALLPAPER_SHA256}  /usr/share/backgrounds/localdot/mojave-nord-light.png" | sha256sum -c -; \
+    curl -fsSL -o /usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE "$src/LICENSE"; \
+    echo "${WALLPAPER_LICENSE_SHA256}  /usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE" | sha256sum -c -
 COPY THIRD-PARTY.md /usr/share/doc/localdot-themes/THIRD-PARTY.md
 
 COPY root/ /

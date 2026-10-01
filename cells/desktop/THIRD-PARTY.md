@@ -5,6 +5,7 @@
 | linuxserver webtop (Ubuntu 26.04, XFCE 4.20, Selkies 2.0.0) | 53afe260-ls3, `sha256:73f966bd414cd4aef183c96aba8fab37dd98715f41a278b655fee594d36bd804` | GPL-3.0-only (image), Selkies MPL-2.0 | base image |
 | WhiteSur GTK theme (light) | tag 2026-09-10, commit 99247ecd219bdc1c7409baff062b4aafcf1102a7 | MIT | `/usr/share/themes/WhiteSur-Light*`, `/usr/share/plank/themes/WhiteSur-Light`, license at `/usr/share/doc/localdot-themes/WhiteSur-gtk-theme.COPYING` |
 | WhiteSur icon theme | tag 2026-09-10, commit 73d8040da51a9ed74e47c7366e7e9ff437601a5c | GPL-3.0 (separately licensed data) | `/usr/share/icons/WhiteSur*`, license at `/usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING` |
+| WhiteSur wallpapers: `Wallpaper-nord/Mojave-nord-light.png` | tag 2023-06-11, commit 4fe5ae7a01f38f8ff9a25c343e0a49234c1012c9, `sha256:4a5867e8c67e04ef23e8a13ce38644053ddb3aebeb0d02706924ffdfb0d95833` | MIT | `/usr/share/backgrounds/localdot/mojave-nord-light.png`, license at `/usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE` |
 | Plank | 0.11.89-6ubuntu1 (Ubuntu package) | GPL-3.0-or-later | `/usr/bin/plank`, license at `/usr/share/doc/plank/copyright` |
 | Cua Driver | 0.30.4 | MIT | `/opt/cua`, `/usr/local/bin/cua-driver` |
 | VSCodium | 1.135.06055 | MIT | `/usr/share/codium` |
