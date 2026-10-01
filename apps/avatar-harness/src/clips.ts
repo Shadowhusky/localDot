@@ -1,7 +1,7 @@
 import type { AvatarController } from "@localdot/avatar";
 import { sampleTrack } from "./samples.ts";
 
-export type ClipName = "blink" | "talk" | "turn";
+export type ClipName = "blink" | "talk" | "turn" | "idle";
 
 export interface ClipStep {
   atMs: number;
@@ -36,4 +36,7 @@ export const CLIPS: Record<ClipName, Clip> = {
       { atMs: 3600, act: (c) => c.setAttention({ x: 0, y: BEYOND_REACH }) },
     ],
   },
+  // Nothing scripted: breathing, blinks, the gaze wander and the sway. Seed 43 looks both ways
+  // and glances back at the user within the 12 s.
+  idle: { durationMs: 12_000, seed: 43, steps: [] },
 };
