@@ -1,9 +1,9 @@
 import { Spine } from "@esotericsoftware/spine-pixi-v8";
 import type { AvatarParams, AvatarRenderer, Presence } from "@localdot/avatar";
-import { Application, Assets } from "pixi.js";
+import { Application, Assets, Graphics } from "pixi.js";
 import { applyPose } from "./apply.ts";
 import type { SpineRigBinding } from "./binding.ts";
-import { type Frame, fitFrame } from "./layout.ts";
+import { type Frame, fitFrame, frameRect } from "./layout.ts";
 import { mapParams } from "./pose.ts";
 import { bindingProblems } from "./validate.ts";
 
@@ -20,6 +20,7 @@ export class SpineRenderer implements AvatarRenderer {
   readonly #options: SpineRendererOptions;
   #app: Application | null = null;
   #spine: Spine | null = null;
+  #clip: Graphics | null = null;
   #presence: Presence = "glance";
   #observer: ResizeObserver | null = null;
 
@@ -59,10 +60,13 @@ export class SpineRenderer implements AvatarRenderer {
       app.destroy(true, { children: true });
       throw error;
     }
+    const clip = new Graphics();
+    spine.mask = clip;
     el.appendChild(app.canvas);
-    app.stage.addChild(spine);
+    app.stage.addChild(spine, clip);
     this.#app = app;
     this.#spine = spine;
+    this.#clip = clip;
     this.#observer = new ResizeObserver(() => {
       app.renderer.resize(Math.max(1, el.clientWidth), Math.max(1, el.clientHeight));
       this.#layout();
@@ -93,24 +97,25 @@ export class SpineRenderer implements AvatarRenderer {
 
   unmount(): void {
     this.#observer?.disconnect();
+    this.#clip?.destroy();
     this.#app?.destroy(true, { children: true });
     this.#observer = null;
     this.#app = null;
     this.#spine = null;
+    this.#clip = null;
   }
 
   #layout(): void {
     const app = this.#app;
     const spine = this.#spine;
-    if (!app || !spine) return;
-    const placement = fitFrame(
-      this.#options.frames[this.#presence],
-      this.#options.root,
-      app.screen.width,
-      app.screen.height,
-    );
+    const clip = this.#clip;
+    if (!app || !spine || !clip) return;
+    const frame = this.#options.frames[this.#presence];
+    const placement = fitFrame(frame, this.#options.root, app.screen.width, app.screen.height);
     if (!placement) return;
     spine.scale.set(placement.scale);
     spine.position.set(placement.x, placement.y);
+    const { x, y, w, h } = frameRect(frame, this.#options.root, placement);
+    clip.clear().rect(x, y, w, h).fill(0xffffff);
   }
 }

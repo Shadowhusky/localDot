@@ -24,3 +24,17 @@ export function fitFrame(
   const cy = frame.y + frame.h / 2;
   return { scale, x: width / 2 - (cx - root.x) * scale, y: height / 2 - (cy - root.y) * scale };
 }
+
+export function frameRect(
+  frame: Frame,
+  root: { x: number; y: number },
+  placement: Placement,
+): { x: number; y: number; w: number; h: number } {
+  const { x, y, scale } = placement;
+  return {
+    x: x + (frame.x - root.x) * scale,
+    y: y + (frame.y - root.y) * scale,
+    w: frame.w * scale,
+    h: frame.h * scale,
+  };
+}
