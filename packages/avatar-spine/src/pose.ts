@@ -49,6 +49,7 @@ export function mapParams(p: AvatarParams, b: SpineRigBinding): RigPose {
     rotation: -p.bodyX * b.ranges.bodyDeg,
     scaleY: 1 + p.breath * b.ranges.breath,
   };
+  if (b.head) pose.bones[b.head] = { rotation: -(p.headRoll ?? 0) * (b.ranges.headRollDeg ?? 0) };
   const eyes = [
     [b.eyes.left, p.eyeOpenL],
     [b.eyes.right, p.eyeOpenR],

@@ -27,6 +27,7 @@ function structureProblems(b: unknown): string[] {
   };
   name("headX", b.headX);
   name("headY", b.headY);
+  if (b.head != null) name("head", b.head);
   name("body", b.body);
   const eyes = object("eyes", b.eyes);
   for (const side of SIDES) {
@@ -73,6 +74,11 @@ export function bindingProblems(b: SpineRigBinding, data: SkeletonData): string[
   slider(b.headX);
   slider(b.headY);
   bone(b.body);
+  if (b.head) {
+    bone(b.head);
+    if (!Number.isFinite(b.ranges.headRollDeg))
+      problems.push("ranges.headRollDeg must be a finite number");
+  }
   bone(b.brows.left);
   bone(b.brows.right);
   for (const eye of [b.eyes.left, b.eyes.right]) {

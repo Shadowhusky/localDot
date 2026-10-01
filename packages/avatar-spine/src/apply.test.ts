@@ -89,6 +89,21 @@ describe("bindingProblems", () => {
     ]);
   });
 
+  it("accepts a head roll binding and names a missing head bone or roll range", () => {
+    const rolling = {
+      ...toyBinding,
+      head: "head",
+      ranges: { ...toyBinding.ranges, headRollDeg: 3 },
+    };
+    expect(problemsOf(rolling)).toEqual([]);
+    expect(problemsOf({ ...rolling, head: "skull" })).toEqual(['bone "skull" not found']);
+    expect(problemsOf({ ...rolling, ranges: toyBinding.ranges })).toEqual([
+      "ranges.headRollDeg must be a finite number",
+    ]);
+    expect(problemsOf({ ...rolling, head: "" })).toEqual(["head must be a non-empty string"]);
+    expect(problemsOf({ ...toyBinding, head: null })).toEqual([]);
+  });
+
   it("treats a null blush or arms as absent", () => {
     expect(problemsOf({ ...toyBinding, blush: null, arms: null })).toEqual([]);
   });
@@ -113,6 +128,8 @@ describe("bindingProblems", () => {
         { ...toyBinding, arms: { ...arms, hide: junk } },
         { ...toyBinding, ranges: junk },
         { ...toyBinding, ranges: { ...ranges, irisY: junk } },
+        { ...toyBinding, head: junk },
+        { ...toyBinding, head: "head", ranges: { ...ranges, headRollDeg: junk } },
       ]) {
         expect(() => problemsOf(binding)).not.toThrow();
       }
@@ -125,6 +142,28 @@ describe("applyPose", () => {
     const skeleton = toy();
     apply(skeleton, { headX: 1 });
     expect(skeleton.findBone("features")?.appliedPose.worldX).toBeCloseTo(14.4, 3);
+  });
+
+  it("rolls the head about its own pivot", () => {
+    const rolling = {
+      ...toyBinding,
+      head: "head",
+      ranges: { ...toyBinding.ranges, headRollDeg: 10 },
+    };
+    const pose = (headRoll: number) => {
+      const skeleton = toy();
+      applyPose(skeleton, mapParams({ ...NEUTRAL_PARAMS, headRoll }, rolling));
+      skeleton.updateWorldTransform(Physics.none);
+      const at = (name: string) => skeleton.findBone(name)?.appliedPose;
+      return { head: at("head"), iris: at("iris-l") };
+    };
+    const level = pose(0);
+    const rolled = pose(1);
+    expect(rolled.head?.worldX).toBeCloseTo(level.head?.worldX ?? Number.NaN, 6);
+    expect(rolled.head?.worldY).toBeCloseTo(level.head?.worldY ?? Number.NaN, 6);
+    // The iris sits 40 left of and 110 above the pivot: a 10° roll toward the right carries it
+    // 40·(1 − cos 10°) + 110·sin 10° ≈ 19.71 to the right.
+    expect((rolled.iris?.worldX ?? 0) - (level.iris?.worldX ?? 0)).toBeCloseTo(19.71, 2);
   });
 
   it("offsets bones from their setup pose without accumulating", () => {

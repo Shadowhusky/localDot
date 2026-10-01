@@ -24,6 +24,17 @@ describe("mapParams", () => {
     expect(body?.scaleY).toBeCloseTo(1.012, 9);
   });
 
+  it("rolls a head bone the binding names, and leaves the head alone otherwise", () => {
+    const rolling = {
+      ...toyBinding,
+      head: "head",
+      ranges: { ...toyBinding.ranges, headRollDeg: 3 },
+    };
+    expect(mapParams(frame({ headRoll: 1 }), rolling).bones.head).toEqual({ rotation: -3 });
+    expect(mapParams(frame({ headRoll: -0.5 }), rolling).bones.head).toEqual({ rotation: 1.5 });
+    expect(map({ headRoll: 1 }).bones.head).toBeUndefined();
+  });
+
   it("moves irises and brows within their ranges", () => {
     const pose = map({ eyeX: 1, eyeY: -1, brow: 1 });
     expect(pose.bones["iris-l"]).toEqual({ x: 6, y: -4 });
