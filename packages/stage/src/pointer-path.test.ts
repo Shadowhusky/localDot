@@ -51,4 +51,11 @@ describe("pointerAt", () => {
   it("jumps straight to the target when the duration is zero", () => {
     expect(pointerAt({ ...plan, durationMs: 0 }, 1000)).toEqual(plan.to);
   });
+
+  it("holds an instant plan at the start until it begins", () => {
+    const instant = { ...plan, durationMs: 0 };
+    expect(pointerAt(instant, 0)).toEqual(plan.from);
+    expect(pointerAt(instant, 999)).toEqual(plan.from);
+    expect(pointerAt(instant, 1000)).toEqual(plan.to);
+  });
 });

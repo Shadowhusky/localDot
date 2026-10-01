@@ -23,8 +23,8 @@ const progress = (tau: number, overshoot: number) =>
 
 export function pointerAt(plan: PointerPlan, tMs: number): Point {
   const { from, to, startsAt, durationMs, seed } = plan;
+  if (tMs < startsAt) return { x: from.x, y: from.y };
   if (durationMs <= 0 || tMs >= startsAt + durationMs) return { x: to.x, y: to.y };
-  if (tMs <= startsAt) return { x: from.x, y: from.y };
 
   const random = mulberry32(seed);
   const overshoot = 0.02 + random() * 0.01;
