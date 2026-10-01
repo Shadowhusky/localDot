@@ -11,6 +11,20 @@ import {
 export const DESKTOP_IMAGE = "localdot/desktop:dev";
 const C = "localdot-test-desktop-tools";
 
+// A probe's output counts only if it exited 0: `out` joins stderr, and Docker's "executable file
+// not found" error names the missing binary.
+function outputOf(...cmd: string[]): string {
+  const r = dockerExec(C, ...cmd);
+  expect(r.status, `${cmd.join(" ")}: ${r.out}`).toBe(0);
+  return r.out;
+}
+
+function outputAs(user: string, ...cmd: string[]): string {
+  const r = dockerExecAs(C, user, ...cmd);
+  expect(r.status, `${cmd.join(" ")} as ${user}: ${r.out}`).toBe(0);
+  return r.out;
+}
+
 describe.skipIf(!DOCKER_TESTS)("desktop image: pinned tools", () => {
   beforeAll(() => {
     if (!dockerOk("image", "inspect", DESKTOP_IMAGE)) {
@@ -23,27 +37,25 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: pinned tools", () => {
   afterAll(() => removeAll({ containers: [C] }));
 
   it("ships the app set", () => {
-    expect(dockerExec(C, "libreoffice", "--version").out).toContain("LibreOffice");
-    expect(dockerExecAs(C, "abc", "codium", "--version").out.split("\n")[0]).toBe("1.135.06055");
-    expect(dockerExec(C, "gimp", "--version").out).toMatch(/Image Manipulation Program/);
-    expect(dockerExec(C, "ffmpeg", "-version").out).toContain("ffmpeg version");
-    expect(dockerExec(C, "convert", "-version").out).toContain("ImageMagick");
-    expect(dockerExec(C, "pandoc", "--version").out).toContain("pandoc");
-    expect(dockerExec(C, "chromium-browser", "--version").out).toContain("Chromium");
+    expect(outputOf("libreoffice", "--version")).toContain("LibreOffice");
+    expect(outputAs("abc", "codium", "--version").split("\n")[0]).toBe("1.135.06055");
+    expect(outputOf("gimp", "--version")).toMatch(/Image Manipulation Program/);
+    expect(outputOf("ffmpeg", "-version")).toContain("ffmpeg version");
+    expect(outputOf("convert", "-version")).toContain("ImageMagick");
+    expect(outputOf("pandoc", "--version")).toMatch(/^pandoc \d/m);
+    expect(outputOf("chromium-browser", "--version")).toContain("Chromium");
     for (const tool of ["thunar", "xfce4-terminal", "mousepad", "git", "curl", "jq", "python3"]) {
       expect(dockerExec(C, "sh", "-c", `command -v ${tool}`).status, tool).toBe(0);
     }
   });
 
   it("ships Node 24.21.0", () => {
-    expect(dockerExec(C, "node", "--version").out.trim()).toBe("v24.21.0");
-    expect(dockerExec(C, "readlink", "-f", "/usr/local/bin/node").out.trim()).toBe(
-      "/opt/node/bin/node",
-    );
+    expect(outputOf("node", "--version").trim()).toBe("v24.21.0");
+    expect(outputOf("readlink", "-f", "/usr/local/bin/node").trim()).toBe("/opt/node/bin/node");
   });
 
   it("runs Cua Driver 0.30.4 as the desktop user with telemetry and update checks off", () => {
-    expect(dockerExecAs(C, "abc", "cua-driver", "--version").out).toContain("0.30.4");
+    expect(outputAs("abc", "cua-driver", "--version")).toContain("0.30.4");
     const env = docker("image", "inspect", "--format", "{{json .Config.Env}}", DESKTOP_IMAGE);
     expect(env).toContain('"CUA_DRIVER_RS_TELEMETRY_ENABLED=0"');
     expect(env).toContain('"CUA_DRIVER_RS_UPDATE_CHECK=0"');
@@ -52,7 +64,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: pinned tools", () => {
   });
 
   it("has Inter, JetBrains Mono, Noto CJK and Noto Color Emoji", () => {
-    const families = dockerExec(C, "fc-list", ":", "family").out;
+    const families = outputOf("fc-list", ":", "family");
     expect(families).toMatch(/\bInter\b/);
     expect(families).toContain("JetBrains Mono");
     expect(families).toContain("Noto Sans CJK");
