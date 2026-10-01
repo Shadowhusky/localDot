@@ -4,6 +4,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
@@ -312,5 +313,74 @@ describe("EventLog", () => {
     const id = log.createSession();
     log.append(id, thinking);
     expect(statSync(sessionFile(dir, id)).mode & 0o777).toBe(0o600);
+  });
+
+  it("stores each session's title and start time in its folder", () => {
+    const dir = home();
+    const log = new EventLog(dir);
+    const id = log.createSession("Compare flights");
+    const file = join(dir, "sessions", id, "session.json");
+    expect(statSync(file).mode & 0o777).toBe(0o600);
+    const meta = JSON.parse(readFileSync(file, "utf8")) as {
+      id: string;
+      title: string | null;
+      startedAt: string;
+    };
+    expect(meta.id).toBe(id);
+    expect(meta.title).toBe("Compare flights");
+    expect(Number.isNaN(Date.parse(meta.startedAt))).toBe(false);
+    expect(
+      JSON.parse(readFileSync(join(dir, "sessions", log.createSession(), "session.json"), "utf8"))
+        .title,
+    ).toBeNull();
+  });
+
+  it("rebuilds the sessions index from the session folders", () => {
+    const dir = home();
+    const first = new EventLog(dir);
+    const a = first.createSession("A");
+    const b = first.createSession("B");
+    first.append(a, thinking);
+    first.append(a, idle);
+    first.append(b, thinking);
+    const before = first.listSessions();
+    first.close();
+    for (const suffix of ["", "-journal", "-wal", "-shm"])
+      rmSync(join(dir, `index.sqlite${suffix}`), { force: true });
+    const second = new EventLog(dir);
+    // A and B usually start in the same millisecond: listSessions breaks that tie by id, so the
+    // order survives a rebuild, but B need not come before A.
+    expect(second.listSessions()).toEqual(before);
+    expect(new Map(second.listSessions().map((s) => [s.id, [s.title, s.events]]))).toEqual(
+      new Map([
+        [a, ["A", 2]],
+        [b, ["B", 1]],
+      ]),
+    );
+  });
+
+  it("orders sessions that start in the same millisecond by id, highest first", () => {
+    const dir = home();
+    const low = ulid(1_759_312_800_000, (n) => new Uint8Array(n));
+    const high = ulid(1_759_312_800_000, (n) => new Uint8Array(n).fill(7));
+    for (const id of [low, high]) {
+      mkdirSync(join(dir, "sessions", id), { recursive: true });
+      writeFileSync(join(dir, "sessions", id, "events.jsonl"), "");
+    }
+    expect(new EventLog(dir).listSessions().map((s) => s.id)).toEqual([high, low]);
+  });
+
+  it("derives session.json from the ULID for a folder that lacks it", () => {
+    const dir = home();
+    const id = ulid(1_759_312_800_000);
+    mkdirSync(join(dir, "sessions", id), { recursive: true });
+    writeFileSync(join(dir, "sessions", id, "events.jsonl"), "");
+    const log = new EventLog(dir);
+    const meta = JSON.parse(readFileSync(join(dir, "sessions", id, "session.json"), "utf8")) as {
+      title: string | null;
+      startedAt: string;
+    };
+    expect(meta).toEqual({ id, title: null, startedAt: "2025-10-01T10:00:00.000Z" });
+    expect(log.listSessions().map((s) => s.id)).toContain(id);
   });
 });

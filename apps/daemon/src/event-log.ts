@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
@@ -5,8 +6,11 @@ import {
   mkdirSync,
   readdirSync,
   readFileSync,
+  renameSync,
+  rmSync,
   statSync,
   truncateSync,
+  writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import {
@@ -15,6 +19,7 @@ import {
   parseEvent,
   ULID_PATTERN,
   ulid,
+  ulidTime,
 } from "@localdot/protocol";
 import { type Clock, monotonicClock } from "./clock.ts";
 import { DatabaseSync, type StatementSync } from "./sqlite.ts";
@@ -26,6 +31,12 @@ export interface SessionSummary {
   title: string | null;
   startedAt: string;
   events: number;
+}
+
+export interface SessionMeta {
+  id: string;
+  title: string | null;
+  startedAt: string;
 }
 
 export type EventListener = (sessionId: string, event: LocalDotEvent) => void;
@@ -82,10 +93,13 @@ export class EventLog {
 
   createSession(title?: string): string {
     const id = ulid();
-    mkdirSync(join(this.#root, id), { recursive: true, mode: 0o700 });
+    const dir = join(this.#root, id);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const meta: SessionMeta = { id, title: title ?? null, startedAt: new Date().toISOString() };
+    writeMeta(dir, meta);
     this.#db
       .prepare("INSERT INTO sessions (id, title, started_at) VALUES (?, ?, ?)")
-      .run(id, title ?? null, new Date().toISOString());
+      .run(id, meta.title, meta.startedAt);
     this.#states.set(id, {
       file: this.#fileOf(id),
       bytes: 0,
@@ -131,7 +145,7 @@ export class EventLog {
       .prepare(`
         SELECT s.id AS id, s.title AS title, s.started_at AS startedAt, COUNT(e.seq) AS events
         FROM sessions s LEFT JOIN events e ON e.session_id = s.id
-        GROUP BY s.id ORDER BY s.started_at DESC
+        GROUP BY s.id ORDER BY s.started_at DESC, s.id DESC
       `)
       .all() as unknown as SessionSummary[];
   }
@@ -172,6 +186,10 @@ export class EventLog {
     // Bytes this log did not write (a stray or torn write) send the session back through recovery.
     if (cached && sizeOf(cached.file) === cached.bytes) return cached;
     const file = this.#existingFileOf(sessionId);
+    const meta = readMeta(join(this.#root, sessionId), sessionId);
+    this.#db
+      .prepare("INSERT OR IGNORE INTO sessions (id, title, started_at) VALUES (?, ?, ?)")
+      .run(meta.id, meta.title, meta.startedAt);
     const { events, validBytes } = readValid(file);
     if (existsSync(file)) truncateSync(file, validBytes);
     const lastSeq = events.reduce((max, e) => Math.max(max, e.seq), -1);
@@ -262,4 +280,30 @@ function parseLine(line: string): LocalDotEvent | undefined {
   } catch {
     return undefined;
   }
+}
+
+function writeMeta(dir: string, meta: SessionMeta): void {
+  const file = join(dir, "session.json");
+  const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+  writeFileSync(temp, `${JSON.stringify(meta)}\n`, { mode: 0o600, flag: "wx" });
+  try {
+    renameSync(temp, file);
+  } finally {
+    rmSync(temp, { force: true });
+  }
+}
+
+// A folder without session.json predates this file: its ULID carries the start time.
+function readMeta(dir: string, id: string): SessionMeta {
+  try {
+    const meta = JSON.parse(readFileSync(join(dir, "session.json"), "utf8")) as SessionMeta;
+    if (meta.id === id && typeof meta.startedAt === "string") return meta;
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error(`session ${id}: unreadable session.json, deriving it: ${String(err)}`);
+    }
+  }
+  const meta: SessionMeta = { id, title: null, startedAt: new Date(ulidTime(id)).toISOString() };
+  writeMeta(dir, meta);
+  return meta;
 }

@@ -18,3 +18,10 @@ export function ulid(
   for (const byte of bytes) entropy += CROCKFORD.charAt(byte % 32);
   return time + entropy;
 }
+
+export function ulidTime(id: string): number {
+  if (!ULID_PATTERN.test(id)) throw new RangeError(`not a ULID: ${id}`);
+  let time = 0;
+  for (const char of id.slice(0, 10)) time = time * 32 + CROCKFORD.indexOf(char);
+  return time;
+}
