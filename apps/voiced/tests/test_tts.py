@@ -8,6 +8,7 @@ from conftest import (
     WS_PROTOCOLS,
     WS_URL,
     FakeSynth,
+    ThreadNotingSlot,
     cancel_and_wait,
     client,
     engines,
@@ -17,18 +18,6 @@ from conftest import (
     until_done,
 )
 from voiced.slots import ModelSlot
-
-
-class ThreadNotingSlot(ModelSlot):
-    """Notes the thread of every get."""
-
-    def __init__(self, value: object, threads: list[str]) -> None:
-        super().__init__(lambda: value, idle_unload_s=600)
-        self.threads = threads
-
-    def get(self) -> object:
-        self.threads.append(threading.current_thread().name)
-        return super().get()
 
 
 def test_greets_with_the_voice_then_streams_a_sentence_and_its_end():

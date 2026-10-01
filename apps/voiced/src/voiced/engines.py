@@ -8,6 +8,7 @@ from typing import Any
 
 from voiced.align import load_aligner
 from voiced.config import Settings
+from voiced.listen import load_recognizer, load_vad
 from voiced.lmstudio import lm_studio_refusal
 from voiced.slots import ModelSlot
 from voiced.synth import load_synthesizer
@@ -53,5 +54,7 @@ def mlx_engines(settings: Settings) -> Engines:
         slots={
             "tts": model_slot(settings, lambda: load_synthesizer(settings.voice)),
             "aligner": model_slot(settings, load_aligner),
+            "asr": model_slot(settings, lambda: load_recognizer(settings.accurate_asr)),
+            "vad": model_slot(settings, load_vad, guarded=False),
         },
     )

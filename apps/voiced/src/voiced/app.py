@@ -16,6 +16,7 @@ from starlette.websockets import WebSocket
 from voiced.config import Settings
 from voiced.engines import Engines
 from voiced.guard import PROTOCOL, Guard, offered_protocols
+from voiced.stt import SttSession
 from voiced.tts import TtsSession
 from voiced.visemes import Unit, build_track
 from voiced.wire import LANGS
@@ -37,6 +38,10 @@ def create_app(settings: Settings, engines: Engines, worker: Worker | None = Non
     async def tts(socket: WebSocket) -> None:
         await accept(socket)
         await TtsSession(socket, engines, model_worker, tts_lock).run()
+
+    async def stt(socket: WebSocket) -> None:
+        await accept(socket)
+        await SttSession(socket, engines, model_worker).run()
 
     async def visemes(request: Request) -> JSONResponse:
         """Mouth shapes for a cloud voice's own timings (ElevenLabs gives one per character)."""
@@ -62,6 +67,7 @@ def create_app(settings: Settings, engines: Engines, worker: Worker | None = Non
         Route("/health", health),
         Route("/visemes", visemes, methods=["POST"]),
         WebSocketRoute("/tts", tts),
+        WebSocketRoute("/stt", stt),
     ]
     app = Starlette(routes=routes, lifespan=lifespan)
     return Guard(app, settings.token, settings.port)

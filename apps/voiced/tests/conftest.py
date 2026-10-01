@@ -43,6 +43,18 @@ def slot(value: object, guard=None) -> ModelSlot:
     return ModelSlot(lambda: value, idle_unload_s=600, guard=guard)
 
 
+class ThreadNotingSlot(ModelSlot):
+    """Notes the thread of every get."""
+
+    def __init__(self, value: object, threads: list[str]) -> None:
+        super().__init__(lambda: value, idle_unload_s=600)
+        self.threads = threads
+
+    def get(self) -> object:
+        self.threads.append(threading.current_thread().name)
+        return super().get()
+
+
 def engines(**slots: ModelSlot) -> Engines:
     return Engines(voice="stock", slots=slots)
 
@@ -144,3 +156,23 @@ class FakeAligner:
         words = text.split()
         span = audio.size / sample_rate / len(words)
         return [Unit(word, i * span, (i + 1) * span) for i, word in enumerate(words)]
+
+
+class FakeRecognizer:
+    """Says how much audio it heard, e.g. "1.2s", so tests can tell which audio was decoded."""
+
+    def __init__(self, lang: str | None = "en") -> None:
+        self.lang = lang
+        self.heard: list[float] = []
+
+    def transcribe(self, audio):
+        seconds = round(audio.size / 16_000, 2)
+        self.heard.append(seconds)
+        return f"{seconds}s", self.lang
+
+
+class FakeProbe:
+    """Speech wherever the frame is loud."""
+
+    def probability(self, frame):
+        return 0.9 if float(np.abs(frame).mean()) > 0.1 else 0.0
