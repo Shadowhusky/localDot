@@ -1,11 +1,30 @@
 #!/usr/bin/env bash
 # Copies Selkies' dashboard (index.html, assets, icons, the MPL-2.0 text) out of the pinned base
 # image into <dest>, using the selkies-client build stage so no container runs and nothing is
-# bind-mounted. <dest> is resolved to an absolute path before the cd into the build context.
+# bind-mounted. <dest> is replaced, so it must lie strictly inside this repository.
 set -euo pipefail
 raw=${1:?usage: extract-selkies-client.sh <dest>}
-mkdir -p "$raw"
-dest="$(cd "$raw" && pwd)"
+root="$(cd "$(dirname "$0")/../../.." && pwd -P)"
+home="$(cd "$HOME" && pwd -P)"
+# Resolve <dest> without creating anything: its deepest existing ancestor physically, the rest as
+# written, which may not step through "." or "..".
+base=$raw
+rest=
+until [ -d "$base" ]; do
+  rest="/$(basename "$base")$rest"
+  base="$(dirname "$base")"
+done
+dest="$(cd "$base" && pwd -P)$rest"
+case "$rest/" in */./* | */../*) dest=/ ;; esac
+case "$dest" in
+  / | "$home" | "$root") ok=no ;;
+  "$root"/*) ok=yes ;;
+  *) ok=no ;;
+esac
+if [ "$ok" != yes ]; then
+  echo "extract-selkies-client.sh: refusing to replace $raw: <dest> must be inside $root" >&2
+  exit 1
+fi
 cd "$(dirname "$0")/.."
 rm -rf "$dest"
 docker build --target selkies-client --output "type=local,dest=$dest" .

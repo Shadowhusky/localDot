@@ -19,14 +19,29 @@
   worker.postMessage({ type: "init", canvas: offscreen }, [offscreen]);
   worker.onmessage = (e) => { statsEl.textContent = JSON.stringify(e.data); };
   let tappedTrackId = null;
+  // The clone only sees frames sent after it exists, and the client writes its first frames before
+  // the poll can tap: on a still screen nothing follows. So the worker starts from the <video>'s
+  // current frame, taken after the clone so that no frame falls between the two.
+  const currentFrame = (video) => {
+    if (video.readyState < 2) return undefined;
+    try {
+      return new VideoFrame(video);
+    } catch (err) {
+      console.log("seed failed", err.message);
+      return undefined;
+    }
+  };
   const tap = () => {
     const video = frame.contentDocument?.getElementById("videoStream");
     const track = video?.srcObject?.getVideoTracks?.()[0];
     if (!track || track.id === tappedTrackId) return;
     tappedTrackId = track.id;
     const processor = new MediaStreamTrackProcessor({ track: track.clone() });
-    worker.postMessage({ type: "frames", readable: processor.readable }, [processor.readable]);
-    console.log("tapped", track.id, JSON.stringify(track.getSettings()));
+    const first = currentFrame(video);
+    const seed = first ? `seed ${first.displayWidth}x${first.displayHeight} ${first.format}` : "no seed";
+    const transfer = first ? [processor.readable, first] : [processor.readable];
+    worker.postMessage({ type: "frames", readable: processor.readable, first }, transfer);
+    console.log("tapped", track.id, `readyState ${video.readyState}, ${seed}`, JSON.stringify(track.getSettings()));
   };
   setInterval(tap, 250);
   window.ldReady = () => tappedTrackId !== null;
