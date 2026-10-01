@@ -1,4 +1,5 @@
 export * from "./build.ts";
+export * from "./cli.ts";
 export * from "./mesh.ts";
 export * from "./space.ts";
 export * from "./toy.ts";

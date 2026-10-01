@@ -52,6 +52,16 @@ describe("rigProblems", () => {
     expect(rigProblems({ ...rig, parts })).toEqual(['variant "mouth-A" must be an object']);
   });
 
+  it("rejects rotation physics, since rig-gen bones have no length", () => {
+    const withPhysics = (spec: object) =>
+      rigProblems({ ...toyRig(), physics: [{ bone: "hair-tip", ...spec }] });
+    expect(withPhysics({ rotate: 1 })).toEqual([
+      'physics on "hair-tip" cannot rotate: rig-gen bones have no length; use x',
+    ]);
+    expect(withPhysics({ rotate: 0, x: 1 })).toEqual([]);
+    expect(withPhysics({ rotate: null })).toEqual([]);
+  });
+
   it("rejects empty boxes and bad tips", () => {
     const rig = toyRig();
     const face = rig.parts.find((p) => p.name === "face");

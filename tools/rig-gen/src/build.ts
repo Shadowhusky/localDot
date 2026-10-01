@@ -1,6 +1,13 @@
 import { gridMesh } from "./mesh.ts";
 import { boneWorlds, round2, round4, toWorld, type WorldPoint } from "./space.ts";
-import { type Box, type PartSpec, type RigDescription, SPINE_VERSION } from "./types.ts";
+import {
+  type Box,
+  HEAD_X,
+  HEAD_Y,
+  type PartSpec,
+  type RigDescription,
+  SPINE_VERSION,
+} from "./types.ts";
 import { validateRig } from "./validate.ts";
 
 type Json = Record<string, unknown>;
@@ -20,6 +27,73 @@ export function tipWeight(v: number, from: number): number {
   if (v <= from) return 0;
   const t = Math.min(1, (v - from) / (1 - from));
   return t * t * (3 - 2 * t);
+}
+
+function turnAnimation(desc: RigDescription, axis: "x" | "y"): Json {
+  const turn = axis === "x" ? desc.headTurn.x : desc.headTurn.y;
+  const timeline = axis === "x" ? "translatex" : "translatey";
+  const bones: Record<string, Json> = {};
+  for (const bone of desc.bones) {
+    if (!bone.depth) continue;
+    const shift = round2(turn * bone.depth);
+    bones[bone.name] = {
+      [timeline]: [
+        { time: 0, value: -shift },
+        { time: 0.5, value: 0 },
+        { time: 1, value: shift },
+      ],
+    };
+  }
+  const deforms: Record<string, Json> = {};
+  for (const part of desc.parts) {
+    const spec = part.mesh;
+    if (!spec?.bulge) continue;
+    const grid = gridMesh(spec.cols, spec.rows);
+    // A turning sphere: the middle travels, the rim stays.
+    const offsets = (sign: number) =>
+      grid.cells.flatMap(([i, j]) => {
+        const shift = round2(
+          sign *
+            turn *
+            (spec.bulge as number) *
+            Math.cos(Math.PI * (i / spec.cols - 0.5)) *
+            Math.cos(Math.PI * (j / spec.rows - 0.5)),
+        );
+        return axis === "x" ? [shift, 0] : [0, shift];
+      });
+    deforms[part.name] = {
+      [part.name]: {
+        deform: [
+          { time: 0, vertices: offsets(-1) },
+          { time: 0.5 },
+          { time: 1, vertices: offsets(1) },
+        ],
+      },
+    };
+  }
+  const animation: Json = {};
+  if (Object.keys(bones).length > 0) animation.bones = bones;
+  if (Object.keys(deforms).length > 0) animation.attachments = { default: deforms };
+  return animation;
+}
+
+function constraintsFor(desc: RigDescription): Json[] {
+  return [
+    { name: HEAD_X, type: "slider", additive: true, time: 0.5, animation: HEAD_X },
+    { name: HEAD_Y, type: "slider", additive: true, time: 0.5, animation: HEAD_Y },
+    ...(desc.physics ?? []).map((p) => ({
+      name: `${p.bone}-physics`,
+      type: "physics",
+      bone: p.bone,
+      rotate: p.rotate ?? 0,
+      x: p.x ?? 1,
+      inertia: p.inertia ?? 0.5,
+      strength: p.strength ?? 100,
+      damping: p.damping ?? 0.85,
+      mass: p.mass ?? 1,
+      gravity: p.gravity ?? 0,
+    })),
+  ];
 }
 
 export function buildSkeleton(desc: RigDescription): SpineSkeletonJson {
@@ -110,8 +184,8 @@ export function buildSkeleton(desc: RigDescription): SpineSkeletonJson {
         ? { name: p.name, bone: p.bone }
         : { name: p.name, bone: p.bone, attachment: p.name },
     ),
-    constraints: [],
+    constraints: constraintsFor(desc),
     skins: [{ name: "default", attachments }],
-    animations: {},
+    animations: { [HEAD_X]: turnAnimation(desc, "x"), [HEAD_Y]: turnAnimation(desc, "y") },
   };
 }

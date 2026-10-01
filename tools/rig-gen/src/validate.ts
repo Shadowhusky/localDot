@@ -101,6 +101,9 @@ export function rigProblems(input: unknown): string[] {
   for (const p of desc.physics ?? []) {
     if (!bones.has(p.bone)) problems.push(`physics on unknown bone "${p.bone}"`);
     if (physics.has(p.bone)) problems.push(`bone "${p.bone}" has physics twice`);
+    if ((p.rotate ?? 0) !== 0) {
+      problems.push(`physics on "${p.bone}" cannot rotate: rig-gen bones have no length; use x`);
+    }
     physics.add(p.bone);
   }
   return problems;

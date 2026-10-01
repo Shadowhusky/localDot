@@ -88,6 +88,6 @@ export function toyRig(): RigDescription {
         tip: { bone: "hair-tip", from: 0.4 },
       },
     ],
-    physics: [{ bone: "hair-tip", rotate: 1, inertia: 0.5, strength: 100, damping: 0.85, mass: 1 }],
+    physics: [{ bone: "hair-tip", x: 1, inertia: 0.5, strength: 100, damping: 0.85, mass: 1 }],
   };
 }
