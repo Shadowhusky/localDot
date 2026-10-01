@@ -1,7 +1,7 @@
-import { mkdtempSync, rmSync, statSync } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DockerClient } from "./docker.ts";
 import { CellOrchestrator, UnknownCellError } from "./orchestrator.ts";
 import { ISOLATED_GATEWAY_OPTION } from "./spec.ts";
@@ -627,6 +627,71 @@ describe("CellOrchestrator background loops", () => {
     answer = healthy;
     await new Promise((r) => setTimeout(r, 50));
     expect({ changes: changes.length, probes }).toEqual(seen);
+  });
+});
+
+describe("CellOrchestrator background failures", () => {
+  // Collects what would otherwise reach Node's unhandledRejection handler and end the daemon.
+  async function withRejectionsCaught(run: (rejections: unknown[]) => Promise<void>) {
+    const rejections: unknown[] = [];
+    const record = (reason: unknown) => rejections.push(reason);
+    process.on("unhandledRejection", record);
+    try {
+      await run(rejections);
+    } finally {
+      process.off("unhandledRejection", record);
+    }
+  }
+
+  it("keeps watching through an unreadable cell.json, with no unhandled rejection", async () => {
+    await withRejectionsCaught(async (rejections) => {
+      const { orchestrator, store, home, stateOf } = await setup();
+      const cell = await orchestrator.create({ scale: 2 });
+      await stateOf(cell.id, "ready");
+      const desktop = fake.state.containers.get(store.get(cell.id)?.docker.desktop ?? "");
+      const file = join(home, "cells", cell.id, "cell.json");
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        chmodSync(file, 0o000);
+        if (desktop) {
+          desktop.running = false;
+          desktop.exitCode = 137;
+        }
+        await waitUntil(() => desktop?.starts === 2 && desktop.running);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(rejections).toEqual([]);
+        expect(desktop?.starts).toBe(2);
+        expect(error.mock.calls).toContainEqual([
+          `cell ${cell.id}: cell.json is unreadable (EACCES); state change not sent`,
+        ]);
+      } finally {
+        chmodSync(file, 0o600);
+        error.mockRestore();
+      }
+    });
+  });
+
+  it("ends a background check that throws with one line, and no unhandled rejection", async () => {
+    await withRejectionsCaught(async (rejections) => {
+      const error = vi.spyOn(console, "error").mockImplementation(() => {});
+      try {
+        const { orchestrator } = await setup({
+          probeDesktopd: async () => {
+            throw Object.assign(new Error("probe exploded at /Users/x/cell.json"), {
+              code: "EPROBE",
+            });
+          },
+        });
+        const cell = await orchestrator.create({ scale: 2 });
+        await waitUntil(() => error.mock.calls.length > 0, 500);
+        await new Promise((r) => setTimeout(r, 50));
+        expect(rejections).toEqual([]);
+        expect(error.mock.calls).toEqual([[`cell ${cell.id}: background check stopped (EPROBE)`]]);
+        expect(orchestrator.get(cell.id)?.state).toBe("starting");
+      } finally {
+        error.mockRestore();
+      }
+    });
   });
 });
 

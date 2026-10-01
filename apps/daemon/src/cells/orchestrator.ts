@@ -193,7 +193,7 @@ export class CellOrchestrator {
       if (desktop.State.Running && gate.State.Running) {
         const ports = await this.#readPorts(record.docker.gate);
         this.#set(id, { state: "starting", restarts: 0, ports, stream: NO_STREAM });
-        void this.#waitReady(record);
+        this.#detach(id, this.#waitReady(record));
       } else if (!desktop.State.Running && !gate.State.Running) {
         this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
       } else {
@@ -291,7 +291,7 @@ export class CellOrchestrator {
       }
       this.#store.save(record);
       undo.push(async () => this.#store.remove(id));
-      if (await this.#startContainers(record, 0)) void this.#waitReady(record);
+      if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
       return this.#summary(record);
     } catch (err) {
       for (const step of undo.reverse()) await step().catch(() => {});
@@ -306,7 +306,7 @@ export class CellOrchestrator {
 
   async #start(id: string): Promise<void> {
     const record = this.#require(id);
-    if (await this.#startContainers(record, 0)) void this.#waitReady(record);
+    if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
   }
 
   stop(id: string): Promise<void> {
@@ -435,7 +435,7 @@ export class CellOrchestrator {
             ports,
             stream: NO_STREAM,
           });
-          void this.#watch(record);
+          this.#detach(record.id, this.#watch(record));
           return;
         }
         lastDetail = "desktopd is ready; the stream is not answering yet";
@@ -513,6 +513,14 @@ export class CellOrchestrator {
     return run;
   }
 
+  // Readiness and watch run with no caller to hand an error to: one that escapes ends that loop
+  // with one line, never the daemon (an unhandled rejection would).
+  #detach(id: string, loop: Promise<void>): void {
+    void loop.catch((err) => {
+      console.error(`cell ${id}: background check stopped (${codeOf(err)})`);
+    });
+  }
+
   // A loop that awaited goes on only while the cell still holds the entry it set or read: a stop, a
   // remove, a newer start or dispose() in the meantime wins (a user's Stop beats a restart).
   #current(id: string, entry: Live): boolean {
@@ -582,7 +590,14 @@ export class CellOrchestrator {
   }
 
   #emit(id: string): void {
-    const record = this.#store.get(id);
+    let record: CellRecord | undefined;
+    try {
+      record = this.#store.get(id);
+    } catch (err) {
+      // The loops keep going without the event; the file's own text never reaches the log.
+      console.error(`cell ${id}: cell.json is unreadable (${codeOf(err)}); state change not sent`);
+      return;
+    }
     if (!record) return;
     const summary = this.#summary(record);
     for (const listener of this.#listeners) {
@@ -613,4 +628,8 @@ export class CellOrchestrator {
 
 function messageOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+function codeOf(err: unknown): string {
+  return (err as NodeJS.ErrnoException | undefined)?.code ?? "no error code";
 }
