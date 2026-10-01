@@ -1,0 +1,6 @@
+[Desktop Entry]
+Type=Application
+Name=Dock
+Exec=/usr/local/bin/localdot-plank
+OnlyShowIn=XFCE;
+X-GNOME-Autostart-enabled=true

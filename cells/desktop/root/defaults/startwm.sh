@@ -17,15 +17,19 @@ fi
 # not survive a restart, on purpose (the look is localDot's, not the agent's).
 scale="${LOCALDOT_SCALE:-2}"
 case "$scale" in
-  1) theme=Default ;;
-  2) theme=Default-xhdpi ;;
+  1) theme=WhiteSur-Light ;;
+  2) theme=WhiteSur-Light-xhdpi ;;
   *) echo "startwm: LOCALDOT_SCALE must be 1 or 2, got $scale" >&2; exit 1 ;;
 esac
 # An xfconfd that outlived the last session (or that Selkies' DPI restore activated) flushes its
 # pending changes as it exits, and would serve stale values while it dies: it must be gone first.
-if pkill -u "$(id -u)" -x xfconfd; then
-  while pgrep -u "$(id -u)" -x xfconfd >/dev/null; do sleep 0.1; done
-fi
+# One still there after 5 s (D-Bus can re-activate it) is killed, which skips the flush.
+uid="$(id -u)"
+for _ in $(seq 50); do
+  pkill -u "$uid" -x xfconfd || break
+  sleep 0.1
+done
+pkill -KILL -u "$uid" -x xfconfd || true
 sed "s/@SCALE@/$scale/g" /defaults/localdot/xsettings.xml.in > "$conf/xsettings.xml"
 sed "s/@THEME@/$theme/g" /defaults/localdot/xfwm4.xml.in > "$conf/xfwm4.xml"
 exec /usr/bin/xfce4-session

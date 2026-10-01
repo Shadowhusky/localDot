@@ -65,13 +65,63 @@ ENV CUA_DRIVER_RS_TELEMETRY_ENABLED=0 \
     QT_ACCESSIBILITY=1 \
     START_DOCKER=false
 
+# The base runs Thunar as thunar-real behind a wrapper, so its windows carry that class. Naming
+# it in thunar.desktop before Plank's window matcher (BAMF) indexes the desktop files at install
+# lets the dock put Thunar's windows on its Files item.
+RUN sed -i '/^\[Desktop Entry\]$/a StartupWMClass=Thunar-real' /usr/share/applications/thunar.desktop \
+ && apt-get update \
+ && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends plank \
+ && rm -rf /var/lib/apt/lists/*
+
+ARG WHITESUR_GTK_TAG=2026-09-10
+ARG WHITESUR_GTK_COMMIT=99247ecd219bdc1c7409baff062b4aafcf1102a7
+
+# WhiteSur GTK theme (MIT), light: the repo's pre-built Light-solid theme, installed as
+# WhiteSur-Light, plus the xfwm4 -hdpi/-xhdpi variants assembled the way its installer does
+# (libs/lib-install.sh), so no sassc build is needed. Light-solid has Light's xfwm4 and Plank files
+# but an opaque #f1f1f1 panel with dark text, where Light's panel is a 15 % white tint with white
+# text over the wallpaper. Its GNOME Shell part is left out: this desktop has none, and its
+# activities icon is the Apple logo.
+RUN set -eu; \
+    git clone --depth 1 --branch "$WHITESUR_GTK_TAG" https://github.com/vinceliuice/WhiteSur-gtk-theme /tmp/whitesur-gtk; \
+    test "$(git -C /tmp/whitesur-gtk rev-parse HEAD)" = "$WHITESUR_GTK_COMMIT"; \
+    tar -xJf /tmp/whitesur-gtk/release/WhiteSur-Light-solid.tar.xz -C /usr/share/themes \
+      --transform 's,^WhiteSur-Light-solid,WhiteSur-Light,'; \
+    rm -rf /usr/share/themes/WhiteSur-Light/gnome-shell; \
+    for size in hdpi xhdpi; do \
+      mkdir -p "/usr/share/themes/WhiteSur-Light-${size}/xfwm4"; \
+      cp /tmp/whitesur-gtk/src/assets/xfwm4/assets-Light-${size}/*.png "/usr/share/themes/WhiteSur-Light-${size}/xfwm4/"; \
+      cp /tmp/whitesur-gtk/src/main/xfwm4/themerc-Light "/usr/share/themes/WhiteSur-Light-${size}/xfwm4/themerc"; \
+    done; \
+    mkdir -p /usr/share/plank/themes/WhiteSur-Light /usr/share/doc/localdot-themes; \
+    cp /usr/share/themes/WhiteSur-Light/plank/dock.theme /usr/share/plank/themes/WhiteSur-Light/dock.theme; \
+    cp /tmp/whitesur-gtk/COPYING /usr/share/doc/localdot-themes/WhiteSur-gtk-theme.COPYING; \
+    rm -rf /tmp/whitesur-gtk
+
+ARG WHITESUR_ICONS_TAG=2026-09-10
+ARG WHITESUR_ICONS_COMMIT=73d8040da51a9ed74e47c7366e7e9ff437601a5c
+
+# WhiteSur icon theme (GPL-3.0): separately licensed data inside the image, like the base (P2-R13).
+# Its start-here and folder-apple icons, and the links to them, are the Apple logo: they are removed
+# before the installer copies the theme and builds its icon caches.
+RUN set -eu; \
+    git clone --depth 1 --branch "$WHITESUR_ICONS_TAG" https://github.com/vinceliuice/WhiteSur-icon-theme /tmp/whitesur-icons; \
+    test "$(git -C /tmp/whitesur-icons rev-parse HEAD)" = "$WHITESUR_ICONS_COMMIT"; \
+    find /tmp/whitesur-icons/src /tmp/whitesur-icons/links \
+      \( -name start-here.svg -o -name start-here-symbolic.svg -o -name 'folder-apple*' -o -lname 'start-here*' \) -delete; \
+    /tmp/whitesur-icons/install.sh -d /usr/share/icons -t default; \
+    cp /tmp/whitesur-icons/COPYING /usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING; \
+    rm -rf /tmp/whitesur-icons
+COPY THIRD-PARTY.md /usr/share/doc/localdot-themes/THIRD-PARTY.md
+
 COPY root/ /
 RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run \
-      /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run
+      /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run /usr/local/bin/localdot-plank
 
-# One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). Every Selkies value
-# a client could change is locked: "|locked" on bools, a one-value span on ranges, one item on enums
-# (D1, D2). File transfers take "none" because s6 drops an empty variable, which re-enables them.
+# One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
+# set here that a client could change are locked: "|locked" on bools, a one-value span on ranges,
+# one item on enums (D1, D2). File transfers take "none" because s6 drops an empty variable, which
+# re-enables them.
 ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
     LOCALDOT_SCALE=2 \
     SELKIES_MANUAL_WIDTH=2560 \
@@ -88,6 +138,7 @@ ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
     SELKIES_WEBCAM_ENABLED="false|locked" \
     SELKIES_GAMEPAD_ENABLED="false|locked" \
     SELKIES_ENABLE_CLIPBOARD=false \
+    SELKIES_ENABLE_BINARY_CLIPBOARD="false|locked" \
     SELKIES_FILE_TRANSFERS=none \
     SELKIES_PRINTING_ENABLED="false|locked" \
     SELKIES_COMMAND_ENABLED="false|locked" \

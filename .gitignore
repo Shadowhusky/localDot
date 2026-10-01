@@ -8,8 +8,7 @@ coverage/
 !.env.example
 spikes/**/out/
 spikes/**/bin/
-cells/desktop/desktopd/dist/
-apps/web/dist/
 apps/web/e2e/out/
 spikes/s8-hosted-client/client/
 test-results/
+apps/daemon/src/cells/testing/out/

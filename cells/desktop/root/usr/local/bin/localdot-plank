@@ -1,0 +1,20 @@
+#!/bin/bash
+# Plank keeps its settings in dconf and its launchers on the home volume; the dock's look and its
+# items are pinned before every start.
+dock="net.launchpad.plank.dock.settings:/net/launchpad/plank/docks/dock1/"
+launchers="${HOME}/.config/plank/dock1/launchers"
+mkdir -p "$launchers"
+rm -f "$launchers"/*.dockitem
+items=()
+for app in thunar chromium xfce4-terminal codium org.xfce.mousepad \
+  libreoffice-writer libreoffice-calc libreoffice-impress gimp; do
+  printf '[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/%s.desktop\n' \
+    "$app" > "$launchers/$app.dockitem"
+  items+=("'$app.dockitem'")
+done
+gsettings set "$dock" dock-items "[$(IFS=,; echo "${items[*]}")]"
+gsettings set "$dock" theme "'WhiteSur-Light'"
+gsettings set "$dock" position "'bottom'"
+gsettings set "$dock" hide-mode "'none'"
+gsettings set "$dock" icon-size 48
+exec plank

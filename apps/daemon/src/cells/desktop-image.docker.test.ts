@@ -1,4 +1,7 @@
+import { mkdirSync } from "node:fs";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type RawData, WebSocket } from "ws";
 import {
@@ -16,6 +19,7 @@ import {
 
 export const DESKTOP_IMAGE = "localdot/desktop:dev";
 const C = "localdot-test-desktop-tools";
+const OUT = fileURLToPath(new URL("./testing/out/", import.meta.url));
 
 // A probe's output counts only if it exited 0: `out` joins stderr, and Docker's "executable file
 // not found" error names the missing binary.
@@ -126,16 +130,42 @@ function startDesktop(name: string, scale: 1 | 2): { port: number } {
 const xfconf = (name: string, channel: string, prop: string) =>
   outputAs(name, "abc", "xfconf-query", "-c", channel, "-p", prop).trim();
 
-function panelGeometry(name: string): { WIDTH: number; HEIGHT: number }[] {
-  const ids = outputAs(name, "abc", "xdotool", "search", "--classname", "xfce4-panel").trim();
-  return ids
-    .split("\n")
-    .filter(Boolean)
-    .map((id) => {
-      const out = outputAs(name, "abc", "xdotool", "getwindowgeometry", "--shell", id);
-      const pick = (key: string) => Number(new RegExp(`^${key}=(\\d+)$`, "m").exec(out)?.[1]);
-      return { WIDTH: pick("WIDTH"), HEIGHT: pick("HEIGHT") };
-    });
+// Where the menu-bar panel or the dock sits, and the screen edge it reserves: its strut reads left,
+// right, top, bottom, then each edge's start and end.
+function dockWindow(name: string, classname: string) {
+  const search = ["xdotool", "search", "--onlyvisible", "--classname", classname];
+  waitFor(classname, () => dockerExecAs(name, "abc", ...search).status === 0, 60_000);
+  const id = outputAs(name, "abc", ...search).trim();
+  const geometry = outputAs(name, "abc", "xdotool", "getwindowgeometry", "--shell", id);
+  const pick = (key: string) => Number(new RegExp(`^${key}=(\\d+)$`, "m").exec(geometry)?.[1]);
+  const strut = outputAs(name, "abc", "xprop", "-id", id, "_NET_WM_STRUT_PARTIAL");
+  return {
+    x: pick("X"),
+    y: pick("Y"),
+    width: pick("WIDTH"),
+    height: pick("HEIGHT"),
+    strut: /= ([\d, ]+)$/m.exec(strut)?.[1],
+  };
+}
+
+const PLANK_DOCK = "net.launchpad.plank.dock.settings:/net/launchpad/plank/docks/dock1/";
+const COMPOSITOR_RUNNING = `from Xlib import X, display
+d = display.Display()
+print(d.get_selection_owner(d.intern_atom("_NET_WM_CM_S0")) != X.NONE)`;
+
+// One Thunar window shows the GTK theme, the icons and the window decorations together. The
+// session's Thunar daemon owns that window, so it is closed with Ctrl+W rather than killed.
+function saveLook(name: string, file: string, size: string): void {
+  const search = ["xdotool", "search", "--onlyvisible", "--class", "Thunar"];
+  outputAs(name, "abc", "sh", "-c", "thunar /config >/dev/null 2>&1 &");
+  waitFor("Thunar", () => dockerExecAs(name, "abc", ...search).status === 0, 60_000);
+  sleepSync(2000);
+  outputAs(name, "abc", "import", "-window", "root", `/tmp/${file}`);
+  expect(outputOf(name, "identify", "-format", "%wx%h", `/tmp/${file}`)).toBe(size);
+  docker("cp", `${name}:/tmp/${file}`, join(OUT, file));
+  const window = outputAs(name, "abc", ...search).trim();
+  outputAs(name, "abc", "xdotool", "windowactivate", "--sync", window, "key", "ctrl+w");
+  waitFor("Thunar to close", () => dockerExecAs(name, "abc", ...search).status === 1, 30_000);
 }
 
 interface ServerSetting {
@@ -179,7 +209,7 @@ function serverSettings(ws: WebSocket): Promise<Record<string, ServerSetting>> {
 
 // Resolves with "open", or with the error ws raises when the upgrade is refused.
 function upgradeOutcome(url: string): Promise<string> {
-  const ws = new WebSocket(url);
+  const ws = new WebSocket(url, { handshakeTimeout: 15_000 });
   return new Promise<string>((resolve) => {
     ws.once("open", () => resolve("open"));
     ws.on("error", (error) => resolve(error.message));
@@ -192,6 +222,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
   let port2 = 0;
 
   beforeAll(() => {
+    mkdirSync(OUT, { recursive: true });
     removeAll({ containers: [C2, C1], volumes: [HOME_VOLUME] });
     port2 = startDesktop(C2, 2).port;
   });
@@ -228,10 +259,16 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
   it("renders HiDPI XFCE at 2x: window scaling 2, Xft/DPI 96, xhdpi theme, doubled panel", () => {
     expect(xfconf(C2, "xsettings", "/Gdk/WindowScalingFactor")).toBe("2");
     expect(xfconf(C2, "xsettings", "/Xft/DPI")).toBe("96");
-    expect(xfconf(C2, "xfwm4", "/general/theme")).toBe("Default-xhdpi");
+    expect(xfconf(C2, "xfwm4", "/general/theme")).toBe("WhiteSur-Light-xhdpi");
     expect(outputAs(C2, "abc", "xdpyinfo")).toMatch(/dimensions:\s+2560x1600/);
     // The panel's window is one pixel taller than its xfconf size of 26: 27 at 1x, 54 at 2x.
-    expect(panelGeometry(C2)).toContainEqual({ WIDTH: 2560, HEIGHT: 54 });
+    expect(dockWindow(C2, "xfce4-panel")).toEqual({
+      x: 0,
+      y: 0,
+      width: 2560,
+      height: 54,
+      strut: "0, 0, 54, 0, 0, 0, 0, 0, 0, 2558, 0, 0",
+    });
   });
 
   it("starts Selkies fixed at 2560x1600 with audio off and the stream behind basic auth", async () => {
@@ -270,6 +307,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     await sleep(3000);
     ws.close();
     const lockedOff = [
+      "enable_binary_clipboard",
       "enable_resize",
       "use_css_scaling",
       "enable_cursors",
@@ -339,14 +377,135 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     });
   });
 
+  it("wears the WhiteSur light look with a dock and a menu-bar panel", () => {
+    expect(xfconf(C2, "xsettings", "/Net/ThemeName")).toBe("WhiteSur-Light");
+    expect(xfconf(C2, "xsettings", "/Net/IconThemeName")).toBe("WhiteSur");
+    expect(xfconf(C2, "xfwm4", "/general/button_layout")).toBe("CHM|");
+    // xfconf only echoes the templates, and xfwm4 falls back to Default for a missing theme.
+    outputOf(
+      C2,
+      "ls",
+      "/usr/share/themes/WhiteSur-Light/gtk-3.0/gtk.css",
+      "/usr/share/themes/WhiteSur-Light/gtk-4.0/gtk.css",
+      "/usr/share/themes/WhiteSur-Light/xfwm4/themerc",
+      "/usr/share/themes/WhiteSur-Light-hdpi/xfwm4/themerc",
+      "/usr/share/themes/WhiteSur-Light-xhdpi/xfwm4/themerc",
+      "/usr/share/icons/WhiteSur/index.theme",
+      "/usr/share/icons/WhiteSur/actions/symbolic/view-app-grid-symbolic.svg",
+      "/usr/share/plank/themes/WhiteSur-Light/dock.theme",
+      "/usr/share/doc/localdot-themes/WhiteSur-gtk-theme.COPYING",
+      "/usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING",
+      "/usr/share/doc/localdot-themes/THIRD-PARTY.md",
+    );
+    const closeButton = (theme: string) =>
+      outputOf(
+        C2,
+        "identify",
+        "-format",
+        "%wx%h",
+        `/usr/share/themes/${theme}/xfwm4/close-active.png`,
+      );
+    expect(closeButton("WhiteSur-Light")).toBe("24x28");
+    expect(closeButton("WhiteSur-Light-xhdpi")).toBe("48x56");
+    const plugins = outputAs(C2, "abc", "xfconf-query", "-c", "xfce4-panel", "-l", "-v");
+    expect(plugins).toContain("applicationsmenu");
+    expect(plugins).not.toContain("tasklist");
+    // No session menu: the cell has no logind, and a log-out would end the agent's session.
+    expect(plugins).not.toContain("actions");
+    // A name the icon theme lacks draws GTK's red "missing image" sign on the menu button.
+    const menuIcon = /button-icon\s+(\S+)/.exec(plugins)?.[1];
+    expect(outputOf(C2, "find", "/usr/share/icons/WhiteSur/", "-name", `${menuIcon}.svg`)).not.toBe(
+      "",
+    );
+    // The menu bar renders light whatever the wallpaper, and Plank's translucent dock needs the
+    // compositor (without one it draws an opaque grey block).
+    const barPixel = ["-crop", "1x1+1280+10", "-format", "%[pixel:p{0,0}]", "info:"];
+    expect(outputAs(C2, "abc", "import", "-window", "root", ...barPixel)).toBe("srgb(241,241,241)");
+    expect(outputAs(C2, "abc", "python3", "-c", COMPOSITOR_RUNNING).trim()).toBe("True");
+    expect(dockerExecAs(C2, "abc", "pgrep", "-x", "plank").status).toBe(0);
+    expect(outputAs(C2, "abc", "gsettings", "get", PLANK_DOCK, "theme").trim()).toBe(
+      "'WhiteSur-Light'",
+    );
+    // The dock reserves a band for its 48 px icons (96 device px at 2x) at the bottom edge. With
+    // the compositor its window is taller than that band (room for the icons to bounce).
+    const dock = dockWindow(C2, "plank");
+    expect(dock.y + dock.height).toBe(1600);
+    expect(dock.strut).toBe("0, 0, 0, 132, 0, 0, 0, 0, 0, 0, 0, 2559");
+    const launchers = outputAs(
+      C2,
+      "abc",
+      "sh",
+      "-c",
+      "sed -n 's,^Launcher=file://,,p' /config/.config/plank/dock1/launchers/*.dockitem | xargs ls",
+    );
+    expect(launchers.trim().split("\n")).toEqual(
+      [
+        "chromium",
+        "codium",
+        "gimp",
+        "libreoffice-calc",
+        "libreoffice-impress",
+        "libreoffice-writer",
+        "org.xfce.mousepad",
+        "thunar",
+        "xfce4-terminal",
+      ].map((app) => `/usr/share/applications/${app}.desktop`),
+    );
+  });
+
+  // WhiteSur draws the Apple logo for its start-here icons and its GNOME Shell activities button.
+  it("ships WhiteSur without its Apple logos", () => {
+    const appleLogos = outputOf(
+      C2,
+      "find",
+      "/usr/share/themes/WhiteSur-Light",
+      "/usr/share/icons/WhiteSur",
+      "/usr/share/icons/WhiteSur-light",
+      "/usr/share/icons/WhiteSur-dark",
+      "(",
+      "-path",
+      "*/gnome-shell",
+      "-o",
+      "-name",
+      "start-here.svg",
+      "-o",
+      "-name",
+      "start-here-symbolic.svg",
+      "-o",
+      "-name",
+      "folder-apple*",
+      "-o",
+      "-lname",
+      "start-here*",
+      ")",
+      "-print",
+    );
+    expect(appleLogos).toBe("");
+  });
+
+  it("saves a 2x screenshot of the themed desktop for the executor to look at", () => {
+    saveLook(C2, "look-2x.png", "2560x1600");
+  });
+
   // C1 starts on C2's home, so the 2x settings already in it must give way to the 1x ones.
   it("switches to 1x with LOCALDOT_SCALE=1", () => {
     removeAll({ containers: [C2] });
     startDesktop(C1, 1);
     expect(xfconf(C1, "xsettings", "/Gdk/WindowScalingFactor")).toBe("1");
     expect(xfconf(C1, "xsettings", "/Xft/DPI")).toBe("96");
-    expect(xfconf(C1, "xfwm4", "/general/theme")).toBe("Default");
+    expect(xfconf(C1, "xfwm4", "/general/theme")).toBe("WhiteSur-Light");
     expect(outputAs(C1, "abc", "xdpyinfo")).toMatch(/dimensions:\s+1280x800/);
-    expect(panelGeometry(C1)).toContainEqual({ WIDTH: 1280, HEIGHT: 27 });
+    expect(dockWindow(C1, "xfce4-panel")).toEqual({
+      x: 0,
+      y: 0,
+      width: 1280,
+      height: 27,
+      strut: "0, 0, 27, 0, 0, 0, 0, 0, 0, 1279, 0, 0",
+    });
+    const dock = dockWindow(C1, "plank");
+    expect(dock.y + dock.height).toBe(800);
+    expect(dock.strut).toBe("0, 0, 0, 66, 0, 0, 0, 0, 0, 0, 0, 1279");
+    expect(xfconf(C1, "xsettings", "/Net/ThemeName")).toBe("WhiteSur-Light");
+    saveLook(C1, "look-1x.png", "1280x800");
   });
 });
