@@ -22,7 +22,7 @@ export async function probeDesktopd(
   }
 }
 
-async function readCapped(res: Response, max: number): Promise<string | undefined> {
+export async function readCapped(res: Response, max: number): Promise<string | undefined> {
   const chunks: Uint8Array[] = [];
   let size = 0;
   for await (const chunk of res.body ?? []) {

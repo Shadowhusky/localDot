@@ -1,6 +1,7 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { Hono } from "hono";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
+import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { tokensMatch } from "./token.ts";
@@ -10,9 +11,10 @@ export interface AppOptions {
   port: number;
   eventLog: EventLog;
   cells?: CellApiDeps;
+  desktop?: StreamProxyDeps;
 }
 
-export function createApp({ token, port, eventLog, cells }: AppOptions): Hono {
+export function createApp({ token, port, eventLog, cells, desktop }: AppOptions): Hono {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
@@ -26,6 +28,9 @@ export function createApp({ token, port, eventLog, cells }: AppOptions): Hono {
   });
 
   app.get("/healthz", (c) => c.text("ok"));
+
+  // The Selkies iframe can carry no install token: its routes authorise themselves by ticket.
+  if (desktop) desktopRoutes(app, desktop);
 
   app.use("/api/*", async (c, next) => {
     const given = tokenFromHeaders({ authorization: c.req.header("authorization") });

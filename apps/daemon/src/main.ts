@@ -10,12 +10,14 @@ import { probeDesktopd, probeStream } from "./cells/readiness.ts";
 import { TicketRegistry } from "./cells/secrets.ts";
 import { cellStatusRoute } from "./cells/status-stream.ts";
 import { CellStore } from "./cells/store.ts";
+import { desktopStreamRoute } from "./cells/stream-proxy.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { EventLog } from "./event-log.ts";
 import { sessionStreamRoute } from "./event-stream.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
 import { localdotHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
+import { webDir } from "./static-ui.ts";
 import { loadOrCreateToken } from "./token.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
 
@@ -41,7 +43,14 @@ const orchestrator = new CellOrchestrator({
 await orchestrator
   .reconcile()
   .catch((err) => console.error(`cell reconcile failed: ${String(err)}`));
-const app = createApp({ token, port, eventLog, cells: { cells: orchestrator, tickets } });
+const desktop = { cells: orchestrator, tickets, vendorDir: webDir("vendor/selkies") };
+const app = createApp({
+  token,
+  port,
+  eventLog,
+  cells: { cells: orchestrator, tickets },
+  desktop,
+});
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
   console.log(`localdot daemon on http://127.0.0.1:${port} (token in ${tokenFile})`);
@@ -51,6 +60,7 @@ const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
 attachUpgradeRouter(server as Server, { port, token }, [
   sessionStreamRoute(eventLog),
   cellStatusRoute(orchestrator),
+  desktopStreamRoute(desktop),
 ]);
 server.on("error", (err: NodeJS.ErrnoException) => {
   fail(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);
