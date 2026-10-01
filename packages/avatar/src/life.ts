@@ -25,8 +25,12 @@ export class BlinkSchedule {
   closure(tMs: number): number {
     if (!(tMs >= 0)) return 0;
     this.#extendTo(tMs);
-    const start = this.#latestAtOrBefore(tMs);
+    const current = this.#starts.findLastIndex((start) => start <= tMs);
+    const start = this.#starts[current];
     if (start === undefined) return 0;
+    // Earlier blinks are over (a double blink's first ends before its second starts), and the
+    // clock that asks only moves forward.
+    this.#starts.splice(0, current);
     const dt = tMs - start;
     if (dt < CLOSE_MS) return dt / CLOSE_MS;
     if (dt < CLOSE_MS + HOLD_MS) return 1;
@@ -46,23 +50,6 @@ export class BlinkSchedule {
       if (this.#random() < DOUBLE_BLINK_CHANCE) this.#starts.push(next + DOUBLE_BLINK_GAP_MS);
       this.#horizon = this.#starts[this.#starts.length - 1] as number;
     }
-  }
-
-  #latestAtOrBefore(tMs: number): number | undefined {
-    let lo = 0;
-    let hi = this.#starts.length - 1;
-    let found: number | undefined;
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1;
-      const start = this.#starts[mid] as number;
-      if (start <= tMs) {
-        found = start;
-        lo = mid + 1;
-      } else {
-        hi = mid - 1;
-      }
-    }
-    return found;
   }
 }
 

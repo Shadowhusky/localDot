@@ -42,6 +42,14 @@ describe("BlinkSchedule", () => {
     expect(schedule.closure(s + BLINK_MS + 1)).toBe(0);
   });
 
+  it("forgets blinks that are over, however long the session runs", () => {
+    const schedule = new BlinkSchedule(5);
+    const hours = 10 * 3600 * 1000;
+    for (let t = 0; t <= hours; t += 250) schedule.closure(t);
+    expect(schedule.startsUntil(hours).length).toBeLessThanOrEqual(2);
+    expect(new BlinkSchedule(5).startsUntil(hours).length).toBeGreaterThan(5000);
+  });
+
   it("stays cheap and correct ten hours into a session", () => {
     const schedule = new BlinkSchedule(5);
     const started = performance.now();

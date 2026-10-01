@@ -61,6 +61,16 @@ describe("GazeWander", () => {
     expect(wander.at(Number.NaN)).toEqual({ x: 0, y: 0 });
   });
 
+  it("forgets looks that are over, however long the session runs", () => {
+    const wander = new GazeWander(5);
+    const hours = 10 * 3600 * 1000;
+    for (let t = 0; t <= hours; t += 250) wander.at(t);
+    expect(wander.looksUntil(hours).length).toBeLessThanOrEqual(2);
+    const fresh = new GazeWander(5).looksUntil(hours);
+    expect(wander.at(hours)).toEqual(new GazeWander(5).at(hours));
+    expect(fresh.length).toBeGreaterThan(5000);
+  });
+
   it("stays cheap ten hours into a session", () => {
     const wander = new GazeWander(5);
     const started = performance.now();

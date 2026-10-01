@@ -26,8 +26,12 @@ export class GazeWander {
 
   at(tMs: number): Point {
     this.#extendTo(tMs);
-    const look = this.#looks.findLast((l) => l.at <= tMs);
-    return look ? { x: look.x, y: look.y } : { x: 0, y: 0 };
+    const current = this.#looks.findLastIndex((l) => l.at <= tMs);
+    const look = this.#looks[current];
+    if (!look) return { x: 0, y: 0 };
+    // Earlier looks are over, and the clock that asks only moves forward.
+    this.#looks.splice(0, current);
+    return { x: look.x, y: look.y };
   }
 
   looksUntil(tMs: number): Look[] {
