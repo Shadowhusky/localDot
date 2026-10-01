@@ -10,9 +10,11 @@
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
+    "@esotericsoftware/spine-pixi-v8": "4.3.13",
     "@localdot/avatar": "workspace:*",
     "@localdot/avatar-spine": "workspace:*",
-    "@localdot/protocol": "workspace:*"
+    "@localdot/protocol": "workspace:*",
+    "pixi.js": "8.21.0"
   },
   "devDependencies": {
     "vite": "8.3.1"
