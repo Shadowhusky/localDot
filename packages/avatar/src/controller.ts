@@ -33,9 +33,10 @@ export interface ControllerOptions {
 export const EYE_SPRING: SpringParams = { dampingRatio: 1, response: 0.08 };
 export const HEAD_SPRING: SpringParams = { dampingRatio: 1, response: 0.35 };
 const POSE_SPRING: SpringParams = { dampingRatio: 1, response: 0.4 };
+const SWAY_IN_SPRING: SpringParams = { dampingRatio: 1, response: 1.5 };
 export const MOOD_HOLD_MS = 4000;
 
-type Channel = "eyeX" | "eyeY" | "headX" | "headY" | "bodyX" | "brow" | "eyeOpen";
+type Channel = "eyeX" | "eyeY" | "headX" | "headY" | "bodyX" | "brow" | "eyeOpen" | "swayIn";
 
 export class AvatarController {
   readonly #now: () => number;
@@ -76,6 +77,7 @@ export class AvatarController {
       bodyX: new SpringChannel(0, POSE_SPRING, t),
       brow: new SpringChannel(0, POSE_SPRING, t),
       eyeOpen: new SpringChannel(1, POSE_SPRING, t),
+      swayIn: new SpringChannel(0, SWAY_IN_SPRING, t),
     };
   }
 
@@ -139,6 +141,7 @@ export class AvatarController {
     ch.bodyX.retarget(this.#reducedMotion ? 0 : pose.bodyX, t);
     ch.brow.retarget(pose.brow, t);
     ch.eyeOpen.retarget(pose.eyeOpen, t);
+    ch.swayIn.retarget(this.#reducedMotion ? 0 : 1, t);
 
     const targets: Record<string, number> = { ...pose.expressions };
     if (state === "thinking" && this.#gate.heldFor(t) >= THINKING_HMM_MS) targets.hmm = 0.6;
@@ -156,16 +159,20 @@ export class AvatarController {
       delete offsets.bodyX;
     }
 
-    const sway = this.#reducedMotion ? { x: 0, y: 0 } : swayAt(t, this.#seed);
+    // Eases in from the first frame, and back in after reduced motion, so it never pops.
+    const swayIn = this.#reducedMotion ? 0 : ch.swayIn.value(t);
+    const sway = swayAt(t, this.#seed);
     const blink = this.#blinks.closure(t);
     const wink = expressions.wink ?? 0;
     const eyeOpen = ch.eyeOpen.value(t) + (offsets.eyeOpen ?? 0);
     const mouth = mouthAt(this.#track, t);
 
     return sanitizeParams({
-      headX: ch.headX.value(t) + (offsets.headX ?? 0) + sway.x,
-      headY: ch.headY.value(t) + (offsets.headY ?? 0) + sway.y,
-      bodyX: this.#reducedMotion ? 0 : ch.bodyX.value(t) + (offsets.bodyX ?? 0),
+      headX: ch.headX.value(t) + (offsets.headX ?? 0) + sway.x * swayIn,
+      headY: ch.headY.value(t) + (offsets.headY ?? 0) + sway.y * swayIn,
+      bodyX: this.#reducedMotion
+        ? 0
+        : ch.bodyX.value(t) + (offsets.bodyX ?? 0) + sway.body * swayIn,
       eyeOpenL: eyeOpen * (1 - blink),
       eyeOpenR: eyeOpen * (1 - blink) * (1 - wink),
       eyeX: ch.eyeX.value(t),

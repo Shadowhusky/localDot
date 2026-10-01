@@ -34,7 +34,8 @@ describe("AvatarController", () => {
   });
 
   it("moves the eyes to a target before the head", () => {
-    const { avatar, run } = make();
+    // Reduced motion removes the sway and leaves the gaze alone.
+    const { avatar, run } = make({ reducedMotion: true });
     avatar.setAttention({ x: 400, y: 0 });
     const early = run(60);
     expect(early.eyeX).toBeGreaterThan(0.6 * 0.8);
@@ -141,6 +142,74 @@ describe("AvatarController", () => {
       const p = run(t);
       expect(p.eyeX).toBeCloseTo(0, 3);
       expect(p.eyeY).toBeCloseTo(0, 3);
+    }
+  });
+
+  it("sways the head and body while facing the user, easing in from a still first frame", () => {
+    for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
+      const { avatar, run } = make({ seed });
+      avatar.setAttention("user");
+      let previous = run(0);
+      for (const key of ["headX", "headY", "bodyX"] as const)
+        expect(previous[key]).toBeCloseTo(0, 9);
+      const peak = { headX: 0, headY: 0, bodyX: 0 };
+      for (let t = FRAME_MS; t <= 60_000; t += FRAME_MS) {
+        const p = run(t);
+        for (const key of ["headX", "headY", "bodyX"] as const) {
+          expect(Math.abs(p[key] - previous[key])).toBeLessThan(0.01);
+          peak[key] = Math.max(peak[key], Math.abs(p[key]));
+        }
+        previous = p;
+      }
+      expect(peak.headX).toBeGreaterThan(0.08);
+      expect(peak.headY).toBeGreaterThan(0.05);
+      expect(peak.bodyX).toBeGreaterThan(0.08);
+    }
+  });
+
+  it("stops the sway under reduced motion and eases it back in afterwards", () => {
+    const { avatar, run } = make({ seed: 2, reducedMotion: true });
+    avatar.setAttention("user");
+    for (let t = 0; t <= 10_000; t += FRAME_MS) {
+      const p = run(t);
+      expect([p.headX, p.headY, p.bodyX]).toEqual([0, 0, 0]);
+    }
+    let previous = run(10_000);
+    avatar.setReducedMotion(false);
+    for (let t = 10_000 + FRAME_MS; t <= 14_000; t += FRAME_MS) {
+      const p = run(t);
+      for (const key of ["headX", "headY", "bodyX"] as const) {
+        expect(Math.abs(p[key] - previous[key])).toBeLessThan(0.01);
+      }
+      previous = p;
+    }
+  });
+
+  it("keeps idle sway and wander inside the gaze's head range and the wander's eye range", () => {
+    for (const seed of [1, 2, 3, 4]) {
+      const { run } = make({ seed });
+      for (let t = 0; t <= 300_000; t += 48) {
+        const p = run(t);
+        expect(Math.abs(p.headX)).toBeLessThanOrEqual(0.36);
+        expect(Math.abs(p.headY)).toBeLessThanOrEqual(0.36);
+        expect(Math.abs(p.eyeX)).toBeLessThanOrEqual(0.6);
+        expect(Math.abs(p.eyeY)).toBeLessThanOrEqual(0.3);
+        expect(Math.abs(p.bodyX)).toBeLessThanOrEqual(0.12);
+      }
+    }
+  });
+
+  it("keeps the sway on top of a full turn inside the head limit", () => {
+    for (const seed of [1, 2, 3, 4]) {
+      for (const far of [-10_000, 10_000]) {
+        const { avatar, run } = make({ seed });
+        avatar.setAttention({ x: far, y: -far });
+        for (let t = 0; t <= 60_000; t += 48) {
+          const p = run(t);
+          expect(Math.abs(p.headX)).toBeLessThanOrEqual(0.6);
+          expect(Math.abs(p.headY)).toBeLessThanOrEqual(0.6);
+        }
+      }
     }
   });
 

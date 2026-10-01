@@ -56,14 +56,33 @@ describe("BlinkSchedule", () => {
 });
 
 describe("swayAt", () => {
-  it("is small, deterministic and smooth", () => {
-    for (let t = 0; t < 30_000; t += 16) {
+  it("stays within ±0.12 across, ±0.08 up and down and ±0.12 of lean, deterministic and slow", () => {
+    for (let t = 0; t < 60_000; t += 16) {
       const a = swayAt(t, 9);
       const b = swayAt(t + 16, 9);
-      expect(Math.abs(a.x)).toBeLessThanOrEqual(0.04);
-      expect(Math.abs(a.y)).toBeLessThanOrEqual(0.025);
-      expect(Math.abs(b.x - a.x)).toBeLessThan(0.001);
+      expect(Math.abs(a.x)).toBeLessThanOrEqual(0.12);
+      expect(Math.abs(a.y)).toBeLessThanOrEqual(0.08);
+      expect(Math.abs(a.body)).toBeLessThanOrEqual(0.12);
+      for (const key of ["x", "y", "body"] as const) {
+        expect(Math.abs(b[key] - a[key])).toBeLessThan(0.002);
+      }
     }
     expect(swayAt(1234, 9)).toEqual(swayAt(1234, 9));
+    expect(swayAt(1234, 9)).not.toEqual(swayAt(1234, 10));
+  });
+
+  it("drifts far enough within a minute to read on a rig", () => {
+    for (const seed of [1, 3, 5, 7, 9]) {
+      const peak = { x: 0, y: 0, body: 0 };
+      for (let t = 0; t < 60_000; t += 100) {
+        const s = swayAt(t, seed);
+        for (const key of ["x", "y", "body"] as const) {
+          peak[key] = Math.max(peak[key], Math.abs(s[key]));
+        }
+      }
+      expect(peak.x).toBeGreaterThan(0.08);
+      expect(peak.y).toBeGreaterThan(0.05);
+      expect(peak.body).toBeGreaterThan(0.08);
+    }
   });
 });

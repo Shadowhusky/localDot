@@ -11,10 +11,10 @@ const FPS = 30;
 const FULL_TURN = HEAD_SHARE * DEFAULT_GAZE_LIMITS.head;
 
 // Plays a clip the way record.ts does: head at the origin, 700 px reach, one frame per tick.
-function play(clip: Clip): AvatarParams[] {
+function play(clip: Clip, reducedMotion = false): AvatarParams[] {
   let now = 0;
   const controller = new AvatarController(
-    { seed: clip.seed, headCenter: { x: 0, y: 0 }, reach: 700 },
+    { seed: clip.seed, headCenter: { x: 0, y: 0 }, reach: 700, reducedMotion },
     () => now,
   );
   const pending = [...clip.steps];
@@ -40,13 +40,12 @@ describe("CLIPS", () => {
   });
 
   it("turns the head across the controller's full range both ways", () => {
-    const frames = play(CLIPS.turn);
-    // Idle sway moves the head up to 0.04 either way, so one side may fall that far short.
+    // Reduced motion removes the sway and leaves the gaze alone.
+    const frames = play(CLIPS.turn, true);
     for (const axis of ["headX", "headY"] as const) {
       const values = frames.map((p) => p[axis]);
-      expect(Math.max(...values.map(Math.abs))).toBeGreaterThanOrEqual(FULL_TURN - 0.02);
-      expect(Math.min(...values)).toBeLessThanOrEqual(-(FULL_TURN - 0.04));
-      expect(Math.max(...values)).toBeGreaterThanOrEqual(FULL_TURN - 0.04);
+      expect(Math.min(...values)).toBeLessThanOrEqual(-(FULL_TURN - 0.005));
+      expect(Math.max(...values)).toBeGreaterThanOrEqual(FULL_TURN - 0.005);
     }
   });
 });

@@ -66,19 +66,18 @@ export class BlinkSchedule {
   }
 }
 
-export function swayAt(tMs: number, seed: number): { x: number; y: number } {
+// Head drift (x across, y up) and a body lean. Each is a 6–8 s sine plus a 10–14 s one, far enough
+// apart in frequency that the two never cancel for long.
+export function swayAt(tMs: number, seed: number): { x: number; y: number; body: number } {
   const random = mulberry32(seed);
-  const f1 = 0.11 + random() * 0.05;
-  const f2 = 0.07 + random() * 0.04;
-  const phases = [random(), random(), random(), random()].map((r) => r * 2 * Math.PI);
   const t = tMs / 1000;
-  const tau = 2 * Math.PI;
+  const wave = (amplitude: number, hz: number) =>
+    amplitude * Math.sin(2 * Math.PI * (hz * t + random()));
+  const fast = (amplitude: number) => wave(amplitude, 0.13 + random() * 0.04);
+  const slow = (amplitude: number) => wave(amplitude, 0.07 + random() * 0.025);
   return {
-    x:
-      0.025 * Math.sin(tau * f1 * t + (phases[0] as number)) +
-      0.015 * Math.sin(tau * f2 * t + (phases[1] as number)),
-    y:
-      0.015 * Math.sin(tau * f2 * 1.3 * t + (phases[2] as number)) +
-      0.01 * Math.sin(tau * f1 * 0.7 * t + (phases[3] as number)),
+    x: fast(0.075) + slow(0.045),
+    y: slow(0.05) + fast(0.03),
+    body: slow(0.075) + fast(0.045),
   };
 }
