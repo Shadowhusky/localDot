@@ -1,12 +1,12 @@
 import type { LocalDotEvent, Rect } from "@localdot/protocol";
-import { AttentionEngine } from "./attention.ts";
+import { AttentionEngine, type AttentionPoint } from "./attention.ts";
 import type { Point } from "./gaze.ts";
 import type { ReactionKind } from "./reactions.ts";
 import type { AgentStateName } from "./states.ts";
 
 export interface AvatarSink {
   setState(state: AgentStateName): void;
-  setAttention(point: Point | null): void;
+  setAttention(point: AttentionPoint | null): void;
   react(kind: ReactionKind): boolean;
 }
 
@@ -100,7 +100,7 @@ export class EventDriver {
 
   // The "approval" source is the top priority: she faces the user for an approval or a question.
   #faceUser(t: number): void {
-    if (this.#approvalPending || this.#waitingForUser) this.attention.set("approval", null, t);
+    if (this.#approvalPending || this.#waitingForUser) this.attention.set("approval", "user", t);
     else this.attention.clear("approval");
   }
 

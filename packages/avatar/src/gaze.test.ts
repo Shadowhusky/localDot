@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gazeTargets } from "./gaze.ts";
+import { gazeTargets, gazeToward } from "./gaze.ts";
 
 const head = { x: 200, y: 300 };
 
@@ -31,5 +31,23 @@ describe("gazeTargets", () => {
     const zero = { eyeX: 0, eyeY: 0, headX: 0, headY: 0 };
     expect(gazeTargets({ x: Number.NaN, y: 1 }, head, 500)).toEqual(zero);
     expect(gazeTargets({ x: 10, y: 10 }, head, 0)).toEqual(zero);
+  });
+});
+
+describe("gazeToward", () => {
+  it("maps a direction onto the eye range and a share of the head range", () => {
+    const g = gazeToward({ x: 0.5, y: -0.25 }, { head: 0.6, eye: 0.8 });
+    expect(g.eyeX).toBeCloseTo(0.4, 12);
+    expect(g.eyeY).toBeCloseTo(-0.2, 12);
+    expect(g.headX).toBeCloseTo(0.18, 12);
+    expect(g.headY).toBeCloseTo(-0.09, 12);
+  });
+
+  it("clamps a direction past the edge of the reach", () => {
+    const g = gazeToward({ x: 3, y: -2 });
+    expect(g.eyeX).toBe(1);
+    expect(g.eyeY).toBe(-1);
+    expect(g.headX).toBeCloseTo(0.36, 12);
+    expect(g.headY).toBeCloseTo(-0.36, 12);
   });
 });

@@ -20,16 +20,19 @@ export const ATTENTION_TTL_MS: Record<AttentionSource, number> = {
   input: 4000,
 };
 
+// The user sits in front of the screen, not at a point on it.
+export type AttentionPoint = Point | "user";
+
 export interface Attention {
   source: AttentionSource | "idle";
-  point: Point | null;
+  point: AttentionPoint | null;
 }
 
 export class AttentionEngine {
-  readonly #entries = new Map<AttentionSource, { point: Point | null; at: number }>();
+  readonly #entries = new Map<AttentionSource, { point: AttentionPoint; at: number }>();
 
-  set(source: AttentionSource, point: Point | null, tMs: number): void {
-    if (point && !(Number.isFinite(point.x) && Number.isFinite(point.y))) return;
+  set(source: AttentionSource, point: AttentionPoint, tMs: number): void {
+    if (point !== "user" && !(Number.isFinite(point.x) && Number.isFinite(point.y))) return;
     this.#entries.set(source, { point, at: tMs });
   }
 

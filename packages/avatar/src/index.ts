@@ -11,3 +11,4 @@ export * from "./renderer.ts";
 export * from "./speech.ts";
 export * from "./spring-channel.ts";
 export * from "./states.ts";
+export * from "./wander.ts";

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { AttentionEngine } from "./attention.ts";
 
 describe("AttentionEngine", () => {
-  it("looks at the user when there is nothing to attend to", () => {
+  it("has nothing to attend to before any source is set", () => {
     expect(new AttentionEngine().resolve(0)).toEqual({ source: "idle", point: null });
   });
 
@@ -20,8 +20,8 @@ describe("AttentionEngine", () => {
   it("keeps looking at the user during an approval until it is cleared", () => {
     const a = new AttentionEngine();
     a.set("target", { x: 1, y: 1 }, 0);
-    a.set("approval", null, 0);
-    expect(a.resolve(100_000)).toEqual({ source: "approval", point: null });
+    a.set("approval", "user", 0);
+    expect(a.resolve(100_000)).toEqual({ source: "approval", point: "user" });
     a.clear("approval");
     expect(a.resolve(100)).toEqual({ source: "target", point: { x: 1, y: 1 } });
   });

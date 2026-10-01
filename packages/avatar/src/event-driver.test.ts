@@ -1,5 +1,6 @@
 import { parseEvent } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
+import type { AttentionPoint } from "./attention.ts";
 import { EventDriver } from "./event-driver.ts";
 import type { Point } from "./gaze.ts";
 
@@ -10,7 +11,7 @@ const ev = (type: string, data: unknown) =>
 const make = (toPage: (p: Point) => Point = (p) => p) => {
   let now = 0;
   const calls: string[] = [];
-  let attention: Point | null | undefined;
+  let attention: AttentionPoint | null | undefined;
   const driver = new EventDriver(
     {
       setState: (state) => {
@@ -80,7 +81,7 @@ describe("EventDriver", () => {
         risk: "high",
       }),
     );
-    expect(d.looking()).toBeNull();
+    expect(d.looking()).toBe("user");
     d.at(1000);
     d.driver.handle(ev("approval.resolve", { approvalId: "a1", decision: "approve", by: "user" }));
     expect(d.calls).toContain("react:nod");
@@ -160,7 +161,7 @@ describe("EventDriver", () => {
       ev("action.intent", { verb: "click", label: "Save", point: { x: 10, y: 20 }, risk: "none" }),
     );
     d.driver.handle(ev("agent.state", { state: "waiting_user" }));
-    expect(d.looking()).toBeNull();
+    expect(d.looking()).toBe("user");
     d.driver.handle(ev("agent.state", { state: "acting" }));
     expect(d.looking()).toEqual({ x: 10, y: 20 });
   });

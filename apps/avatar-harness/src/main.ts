@@ -95,12 +95,13 @@ const tick = () => {
   const now = performance.now();
   driver.update();
   const focus = driver.attention.resolve(now);
-  const showFocus = focus.point && (focus.source === "target" || focus.source === "changed");
+  const point = focus.point === "user" ? null : focus.point;
+  const showFocus = point && (focus.source === "target" || focus.source === "changed");
   focusEl.style.opacity = showFocus ? "1" : "0";
-  if (focus.point) {
+  if (point) {
     const r = desktopEl.getBoundingClientRect();
-    focusEl.style.left = `${focus.point.x - r.left}px`;
-    focusEl.style.top = `${focus.point.y - r.top}px`;
+    focusEl.style.left = `${point.x - r.left}px`;
+    focusEl.style.top = `${point.y - r.top}px`;
   }
   renderer.apply(controller.frame(), now - last);
   last = now;

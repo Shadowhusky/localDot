@@ -9,6 +9,7 @@ export interface Pose {
   bodyX: number;
   eyeBiasX: number;
   eyeBiasY: number;
+  wanders: boolean;
   expressions: Record<string, number>;
 }
 
@@ -19,15 +20,16 @@ const BASE: Pose = {
   bodyX: 0,
   eyeBiasX: 0,
   eyeBiasY: 0,
+  wanders: true,
   expressions: {},
 };
 
 export const STATE_POSES: Record<AgentStateName, Pose> = {
   idle: BASE,
-  thinking: { ...BASE, eyeBiasX: -0.4, eyeBiasY: 0.5, headY: 0.05 },
+  thinking: { ...BASE, eyeBiasX: -0.4, eyeBiasY: 0.5, headY: 0.05, wanders: false },
   acting: { ...BASE, headY: -0.05, bodyX: 0.05, brow: 0.1 },
   observing: { ...BASE, brow: 0.05 },
-  waiting_user: { ...BASE, brow: 0.5, headY: 0.05 },
+  waiting_user: { ...BASE, brow: 0.5, headY: 0.05, wanders: false },
   paused: { ...BASE, eyeOpen: 0.9 },
   error: { ...BASE, brow: -0.4, eyeOpen: 0.8, expressions: { worried: 0.6 } },
   done: { ...BASE, expressions: { smug: 0.7 } },

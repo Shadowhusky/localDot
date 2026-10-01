@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { AvatarController } from "./controller.ts";
+import { AvatarController, type ControllerOptions } from "./controller.ts";
 import type { AvatarParams } from "./params.ts";
 import { prepareTrack } from "./speech.ts";
+import { GazeWander, type Look } from "./wander.ts";
 
 const FRAME_MS = 16;
 
 // Steps a fake clock in display frames, calling frame() each time, as the UI's rAF loop does.
-const make = () => {
+const make = (options: Partial<ControllerOptions> = {}) => {
   let now = 0;
   const avatar = new AvatarController(
-    { seed: 1, headCenter: { x: 0, y: 0 }, reach: 500 },
+    { seed: 1, headCenter: { x: 0, y: 0 }, reach: 500, ...options },
     () => now,
   );
   const run = (toMs: number): AvatarParams => {
@@ -68,6 +69,79 @@ describe("AvatarController", () => {
     avatar.setState("thinking");
     expect(run(4000).expressions.hmm ?? 0).toBe(0);
     expect(run(6500).expressions.hmm ?? 0).toBeGreaterThan(0.3);
+  });
+
+  it("wanders through its seed's looks when nothing holds attention, glancing at the user", () => {
+    const { run } = make();
+    const looks = new GazeWander(1).looksUntil(30_000);
+    expect(looks.slice(1).some((look) => look.x === 0 && look.y === 0)).toBe(true);
+    for (const look of looks.slice(0, -1)) {
+      const p = run(look.at + 400);
+      expect(p.eyeX).toBeCloseTo(look.x, 2);
+      expect(p.eyeY).toBeCloseTo(look.y, 2);
+    }
+  });
+
+  it("keeps wandering under reduced motion, eyes first and the head after", () => {
+    const { avatar, run } = make();
+    avatar.setReducedMotion(true);
+    const looks = new GazeWander(1).looksUntil(30_000);
+    for (const [i, look] of looks.slice(1, -1).entries()) {
+      const before = looks[i] as Look;
+      const progress = (value: number, share: number) =>
+        (value - before.x * share) / ((look.x - before.x) * share);
+      const early = run(look.at + 60);
+      expect(progress(early.eyeX, 1)).toBeGreaterThan(0.8);
+      expect(progress(early.headX, 0.36)).toBeLessThan(0.4);
+      const settled = run(look.at + 900);
+      expect(settled.headX).toBeCloseTo(look.x * 0.36, 2);
+      expect(settled.headY).toBeCloseTo(look.y * 0.36, 2);
+    }
+  });
+
+  it("turns to a point at once and back to the wander smoothly once attention lapses", () => {
+    const { avatar, run } = make();
+    const looks = new GazeWander(1).looksUntil(60_000);
+    const look = looks.find(
+      (l, i) => l.at > 2000 && l.x !== 0 && ((looks[i + 1] as Look).at ?? 0) - l.at > 3000,
+    ) as Look;
+    run(look.at - 500);
+    avatar.setAttention({ x: 400, y: 0 });
+    expect(run(look.at - 400).eyeX).toBeCloseTo(0.8, 1);
+    expect(run(look.at + 1000).eyeX).toBeCloseTo(0.8, 2);
+    avatar.setAttention(null);
+    let previous = run(look.at + 1000);
+    for (let t = look.at + 1000 + FRAME_MS; t <= look.at + 2500; t += FRAME_MS) {
+      const p = run(t);
+      expect(Math.abs(p.headX - previous.headX)).toBeLessThan(0.03);
+      previous = p;
+    }
+    expect(run(look.at + 2500).eyeX).toBeCloseTo(look.x, 2);
+  });
+
+  it("keeps the gaze a state sets itself: aside while thinking, on the user while waiting", () => {
+    for (const [state, eyeX, eyeY] of [
+      ["thinking", -0.4, 0.5],
+      ["waiting_user", 0, 0],
+    ] as const) {
+      const { avatar, run } = make();
+      avatar.setState(state);
+      for (let t = 1500; t <= 20_000; t += 250) {
+        const p = run(t);
+        expect(p.eyeX).toBeCloseTo(eyeX, 2);
+        expect(p.eyeY).toBeCloseTo(eyeY, 2);
+      }
+    }
+  });
+
+  it("faces the user when attention is on them instead of wandering", () => {
+    const { avatar, run } = make();
+    avatar.setAttention("user");
+    for (let t = 0; t <= 20_000; t += 250) {
+      const p = run(t);
+      expect(p.eyeX).toBeCloseTo(0, 3);
+      expect(p.eyeY).toBeCloseTo(0, 3);
+    }
   });
 
   it("moves the mouth with a speech track", () => {
