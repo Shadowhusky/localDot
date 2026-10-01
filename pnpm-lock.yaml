@@ -68,6 +68,25 @@ importers:
         specifier: workspace:*
         version: link:../stage
 
+  packages/avatar-spine:
+    dependencies:
+      '@esotericsoftware/spine-core':
+        specifier: 4.3.13
+        version: 4.3.13
+      '@esotericsoftware/spine-pixi-v8':
+        specifier: 4.3.13
+        version: 4.3.13(pixi.js@8.21.0)
+      '@localdot/avatar':
+        specifier: workspace:*
+        version: link:../avatar
+      pixi.js:
+        specifier: 8.21.0
+        version: 8.21.0
+    devDependencies:
+      '@localdot/rig-gen':
+        specifier: workspace:*
+        version: link:../../tools/rig-gen
+
   packages/protocol:
     dependencies:
       zod:

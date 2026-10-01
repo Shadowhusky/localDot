@@ -1,0 +1,16 @@
+import type { SpineRigBinding } from "./binding.ts";
+
+export const toyBinding: SpineRigBinding = {
+  headX: "head-x",
+  headY: "head-y",
+  body: "body",
+  eyes: {
+    left: { iris: "iris-l", open: ["eye-white-l", "iris-l", "lash-l"], state: "eye-l-state" },
+    right: { iris: "iris-r", open: ["eye-white-r", "iris-r", "lash-r"], state: "eye-r-state" },
+  },
+  brows: { left: "brow-l", right: "brow-r" },
+  mouth: "mouth",
+  blush: "blush",
+  arms: { slot: "torso", variant: "crossed", hide: ["tie"] },
+  ranges: { irisX: 6, irisY: 4, brow: 6, bodyDeg: 3, breath: 0.012 },
+};

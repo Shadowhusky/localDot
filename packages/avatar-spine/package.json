@@ -1,0 +1,21 @@
+{
+  "name": "@localdot/avatar-spine",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@esotericsoftware/spine-core": "4.3.13",
+    "@esotericsoftware/spine-pixi-v8": "4.3.13",
+    "@localdot/avatar": "workspace:*",
+    "pixi.js": "8.21.0"
+  },
+  "devDependencies": {
+    "@localdot/rig-gen": "workspace:*"
+  }
+}
