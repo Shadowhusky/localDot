@@ -194,6 +194,21 @@
   overflow: hidden;
 }
 
+.stage-veil {
+  display: grid;
+  place-items: center;
+  padding: 0 var(--spacing-gutter);
+  text-align: center;
+  background: var(--color-hud-solid);
+  color: var(--color-text-2);
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--duration-veil) var(--ease-veil);
+}
+
 .stage > canvas,
 .stage > .stage-veil {
   position: absolute;
@@ -302,8 +317,26 @@
   }
 }
 
+/* Selkies' client runs here only to decode; the stage paints its frames. */
+.desktop-frame {
+  position: absolute;
+  left: var(--spacing-client-frame-off);
+  top: var(--spacing-client-frame-off);
+  width: var(--spacing-client-frame);
+  height: var(--spacing-client-frame);
+  opacity: 0;
+  border: 0;
+  pointer-events: none;
+}
+
+.stage-veil.on,
+.stage-veil[role="alert"] {
+  opacity: 1;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .stage > canvas {
+  .stage > canvas,
+  .stage > .stage-veil {
     transition: none;
   }
 }

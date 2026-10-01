@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
+import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
 const TOKEN = "a".repeat(43);
@@ -147,6 +148,40 @@ describe("App token states", () => {
       `POST /api/cells/${CELL_ID}/stop`,
       `POST /api/cells/${CELL_ID}/start`,
     ]);
+  });
+
+  it("mints a fresh stream ticket each time the status socket reopens, not on its first open", async () => {
+    const restore = fakeChromium();
+    try {
+      vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+      window.localStorage.setItem(TOKEN_KEY, TOKEN);
+      const calls: string[] = [];
+      const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const path = new URL(String(input)).pathname;
+        calls.push(`${init?.method ?? "GET"} ${path}`);
+        if (path.endsWith("/stream-ticket")) {
+          return json({
+            ticket: "T".repeat(22),
+            path: `/cells/${CELL_ID}/desktop/${"T".repeat(22)}/`,
+          });
+        }
+        return json([summary("ready", "live")]);
+      }) as typeof fetch;
+      const minted = () => calls.filter((c) => c === `POST /api/cells/${CELL_ID}/stream-ticket`);
+      render(<App fetchImpl={fetchImpl} />);
+      await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+      await waitFor(() => expect(minted()).toHaveLength(1));
+      act(() => FakeWebSocket.instances[0]?.onopen?.());
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(minted()).toHaveLength(1);
+      act(() => FakeWebSocket.instances[0]?.onclose?.());
+      act(() => vi.advanceTimersByTime(500));
+      await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+      act(() => FakeWebSocket.instances[1]?.onopen?.());
+      await waitFor(() => expect(minted()).toHaveLength(2));
+    } finally {
+      restore();
+    }
   });
 
   it("goes back to No computer and closes the status socket when the cell is removed", async () => {

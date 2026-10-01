@@ -59,6 +59,8 @@
   --spacing-focus-offset: 2px;
   --spacing-notice: 480px;
   --spacing-notice-gap: 8px;
+  --spacing-client-frame: 2px;
+  --spacing-client-frame-off: -20px;
   --radius-stage: 12px;
   --radius-full: 9999px;
   --radius-stop: 1.5px;
@@ -67,8 +69,10 @@
   --blur-hud: 16px;
   --duration-press: 100ms;
   --duration-lit: 400ms;
+  --duration-veil: 240ms;
   --ease-press: ease-out;
   --ease-lit: ease-out;
+  --ease-veil: ease-out;
 }
 
 * {

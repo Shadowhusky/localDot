@@ -7,6 +7,8 @@ export interface CellController {
   cell: CellSummary | null;
   busy: boolean;
   error: string | null;
+  // Times the status socket has reopened after its first open.
+  reconnects: number;
   start(): void;
   stop(): void;
 }
@@ -18,6 +20,7 @@ export function useCell(api: ApiClient): CellController {
   const [listed, setListed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [reconnects, setReconnects] = useState(0);
   const cellId = cell?.id ?? null;
 
   useEffect(() => {
@@ -39,6 +42,7 @@ export function useCell(api: ApiClient): CellController {
 
   useEffect(() => {
     if (!cellId) return;
+    let opened = false;
     const socket = openSocket({
       url: api.socketUrl(`/api/cells/${cellId}/status`),
       protocols: api.socketProtocols(),
@@ -46,6 +50,10 @@ export function useCell(api: ApiClient): CellController {
         onMessage: (data) => {
           const next = JSON.parse(data) as CellSummary;
           setCell(next.state === "removed" ? null : next);
+        },
+        onOpen: () => {
+          if (opened) setReconnects((n) => n + 1);
+          opened = true;
         },
       },
     });
@@ -75,5 +83,5 @@ export function useCell(api: ApiClient): CellController {
     if (cellId) void run(() => api.post(`/api/cells/${cellId}/stop`));
   }, [api, cellId, run]);
 
-  return { cell, busy: busy || !listed, error, start, stop };
+  return { cell, busy: busy || !listed, error, reconnects, start, stop };
 }

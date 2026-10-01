@@ -7,6 +7,7 @@ import { ConversationRail } from "./shell/ConversationRail.tsx";
 import { PlanRail } from "./shell/PlanRail.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
+import { Stage } from "./stage/Stage.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -50,7 +51,7 @@ export function App({ fetchImpl }: AppProps) {
 }
 
 function Theatre({ api }: { api: ApiClient }) {
-  const { cell, busy, error, start, stop } = useCell(api);
+  const { cell, busy, error, reconnects, start, stop } = useCell(api);
   const hud = hudFor(cell, busy);
   useEffect(() => {
     document.title = `localDot — ${hud.label}`;
@@ -63,7 +64,9 @@ function Theatre({ api }: { api: ApiClient }) {
       <TopBar title="Your computer" live={hud.live} />
       <div className="house">
         <ConversationRail />
-        <StageColumn hud={error ? { ...hud, caption: error } : hud} onStart={start} onStop={stop} />
+        <StageColumn hud={error ? { ...hud, caption: error } : hud} onStart={start} onStop={stop}>
+          <Stage cell={cell} api={api} reconnects={reconnects} />
+        </StageColumn>
         <PlanRail />
       </div>
     </div>
