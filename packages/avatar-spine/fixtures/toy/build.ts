@@ -51,11 +51,12 @@ const rect =
   (color: Rgba): Painter =>
   () =>
     color;
+// Image y runs downwards: a positive curve lifts the ends (a smile), a negative one arches.
 const bar =
   (color: Rgba, thickness: number, curve = 0): Painter =>
   (x, y, w, h) => {
     const t = (x / w) * 2 - 1;
-    const centre = h / 2 + curve * (t * t - 0.5) * h;
+    const centre = h / 2 - curve * (t * t - 0.5) * h;
     return Math.abs(y - centre) <= thickness / 2 ? color : null;
   };
 
