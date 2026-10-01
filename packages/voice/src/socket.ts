@@ -53,16 +53,21 @@ export class VoiceSocket {
     this.#closed = false;
     if (this.#socket) return;
     const socket = this.#create(this.#url, this.#protocols);
+    // A replaced socket can still report its close late; only the current one speaks for us.
+    const current = () => this.#socket === socket;
     socket.binaryType = "arraybuffer";
     socket.onopen = () => {
+      if (!current()) return;
       this.#attempt = 0;
       this.#handlers.status?.(true);
     };
     socket.onmessage = (event) => {
+      if (!current()) return;
       if (typeof event.data === "string") this.#handlers.text(event.data);
       else if (event.data instanceof ArrayBuffer) this.#handlers.binary(new Uint8Array(event.data));
     };
     socket.onclose = () => {
+      if (!current()) return;
       this.#socket = null;
       this.#handlers.status?.(false);
       if (this.#closed) return;
@@ -82,7 +87,10 @@ export class VoiceSocket {
   close(): void {
     this.#closed = true;
     clearTimeout(this.#timer);
-    this.#socket?.close();
+    const socket = this.#socket;
     this.#socket = null;
+    if (!socket) return;
+    socket.close();
+    this.#handlers.status?.(false);
   }
 }

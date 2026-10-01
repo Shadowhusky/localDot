@@ -28,6 +28,8 @@ export class Speaker {
   readonly #send: (message: TtsClientMessage) => boolean;
   readonly #events: SpeakerEvents;
   #nextId = 1;
+  // stop() starts a new generation; a reply from an older one stays silent however it streams on.
+  #generation = 0;
 
   constructor(
     player: VoicePlayer,
@@ -40,11 +42,20 @@ export class Speaker {
   }
 
   reply(hint?: Lang): Reply {
+    const generation = this.#generation;
     const splitter = new SentenceSplitter();
+    const live = () => generation === this.#generation;
     const speak = (sentences: string[]) => {
       for (const text of sentences) this.#sentence(text, hint);
     };
-    return { push: (delta) => speak(splitter.push(delta)), end: () => speak(splitter.flush()) };
+    return {
+      push: (delta) => {
+        if (live()) speak(splitter.push(delta));
+      },
+      end: () => {
+        if (live()) speak(splitter.flush());
+      },
+    };
   }
 
   say(text: string, hint?: Lang): void {
@@ -54,6 +65,7 @@ export class Speaker {
   }
 
   stop(): void {
+    this.#generation++;
     this.#player.stop();
     this.#send({ type: "cancel" });
   }
@@ -71,6 +83,8 @@ export class Speaker {
         this.#player.end(message.id);
         break;
       case "error":
+        // A failed sentence gets no end from voiced; ending it rests the mouth and lets it go.
+        if (message.id !== null) this.#player.end(message.id);
         this.#events.error?.(message.id, message.code, message.message);
         break;
       case "notice":
@@ -90,6 +104,7 @@ export class Speaker {
     this.#player.begin(id, lang);
     this.#events.sentence?.(id, text, lang);
     if (!this.#send({ type: "say", id, text, lang })) {
+      this.#player.end(id);
       this.#events.error?.(id, "unavailable", "voice offline");
     }
   }

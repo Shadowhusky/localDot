@@ -76,10 +76,12 @@ export function tone(seconds: number, rms: number): Int16Array {
   return out;
 }
 
-// A browser WebSocket stand-in that a test opens, feeds and closes by hand.
+// A browser WebSocket stand-in that a test opens, feeds and closes by hand. A browser reports a close
+// later; with `lateClose`, close() only starts closing and the test calls closed() when it lands.
 export class FakeSocket {
   binaryType: BinaryType = "blob";
   readyState = 0;
+  lateClose = false;
   onopen: ((event: Event) => void) | null = null;
   onclose: ((event: CloseEvent) => void) | null = null;
   onerror: ((event: Event) => void) | null = null;
@@ -95,6 +97,10 @@ export class FakeSocket {
     this.sent.push(data);
   }
   close(): void {
+    this.readyState = 2;
+    if (!this.lateClose) this.closed();
+  }
+  closed(): void {
     this.readyState = 3;
     this.onclose?.({} as CloseEvent);
   }
@@ -107,10 +113,11 @@ export class FakeSocket {
   }
 }
 
-export function socketFactory() {
+export function socketFactory(options: { lateClose?: boolean } = {}) {
   const sockets: FakeSocket[] = [];
   const create = (url: string, protocols: string[]) => {
     const socket = new FakeSocket(url, protocols);
+    socket.lateClose = options.lateClose ?? false;
     sockets.push(socket);
     return socket;
   };

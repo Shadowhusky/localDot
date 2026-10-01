@@ -72,4 +72,28 @@ describe("VoiceSocket", () => {
     expect(sockets).toHaveLength(3);
     expect(status).toEqual([false, false, true, false]);
   });
+
+  it("ignores a replaced socket's late close and messages", () => {
+    const { sockets, create } = socketFactory({ lateClose: true });
+    const texts: string[] = [];
+    const status: boolean[] = [];
+    const socket = new VoiceSocket(
+      "ws://x",
+      { text: (t) => texts.push(t), binary: () => {}, status: (s) => status.push(s) },
+      { create },
+    );
+    socket.connect();
+    sockets[0]?.open();
+    socket.close();
+    socket.connect();
+    sockets[1]?.open();
+    sockets[0]?.receive('{"type":"stale"}');
+    sockets[0]?.closed();
+    vi.advanceTimersByTime(60_000);
+    expect(socket.open).toBe(true);
+    expect(socket.send("listen")).toBe(true);
+    expect(sockets).toHaveLength(2);
+    expect(texts).toEqual([]);
+    expect(status).toEqual([true, false, true]);
+  });
 });

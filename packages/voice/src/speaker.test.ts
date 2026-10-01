@@ -65,6 +65,40 @@ describe("Speaker", () => {
     expect(ctx.sources).toHaveLength(1);
   });
 
+  it("lets nothing more of a reply through once she is interrupted", () => {
+    const { ctx, sink, sent, speaker } = setup();
+    const reply = speaker.reply();
+    reply.push("First sentence here. Second");
+    speaker.audio({ id: 1, seq: 0, pcm: tone(0.3, 0.15) });
+    speaker.stop();
+    reply.push(" sentence keeps streaming. Third.");
+    reply.end();
+    expect(sent.at(-1)).toEqual({ type: "cancel" });
+    expect(ctx.sources).toHaveLength(1);
+    expect(sink.last).toBeNull();
+    speaker.say("A new reply.");
+    expect(sent.at(-1)).toMatchObject({ type: "say", text: "A new reply." });
+  });
+
+  it("closes a sentence that fails after its audio starts, so the track moves on", () => {
+    const { ctx, sink, speaker } = setup();
+    speaker.say(Array.from({ length: 41 }, (_, i) => `Line ${i + 1}.`).join(" "));
+    speaker.audio({ id: 1, seq: 0, pcm: tone(0.3, 0.15) });
+    speaker.message({ type: "error", id: 1, code: "synthesis_failed", message: "" });
+    expect(sink.last?.visemes.map((v) => [Math.round(v.t), v.shape])).toEqual([
+      [0, "A"],
+      [300, "rest"],
+    ]);
+    for (let id = 2; id <= 41; id++) {
+      speaker.audio({ id, seq: 0, pcm: tone(0.5, 0.15) });
+      speaker.message({ type: "end", id, samples: 12_000 });
+      ctx.currentTime += 0.5;
+    }
+    // Only the last few sentences are still within a second of playing.
+    expect(sink.last?.startsAt).toBeGreaterThan(5000 + 25_000);
+    expect(sink.last?.envelope?.length).toBeLessThanOrEqual(250);
+  });
+
   it("reports each sentence as unavailable while the voice route is down", () => {
     const { errors, speaker } = setup(false);
     speaker.say("Still here. Just quiet.");

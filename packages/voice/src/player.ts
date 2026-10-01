@@ -200,15 +200,17 @@ export class VoicePlayer {
     return this.#firstAudio.get(id);
   }
 
-  // A suspended context plays nothing, so the mouth waits for the sound instead of moving silently.
   #publish(): void {
-    if (this.blocked) return;
     const now = this.#ctx.currentTime;
+    // An ended sentence goes a second after its audio, or at once if it never had any.
     for (const [id, s] of this.#sentences) {
-      if (s.ended && contextTimeOf(s, (s.samples / SAMPLE_RATE) * 1000) < now - KEEP_AFTER_END_S) {
-        this.#sentences.delete(id);
-      }
+      const over =
+        s.chunks.length === 0 ||
+        contextTimeOf(s, (s.samples / SAMPLE_RATE) * 1000) < now - KEEP_AFTER_END_S;
+      if (s.ended && over) this.#sentences.delete(id);
     }
+    // A suspended context plays nothing, so the mouth waits for the sound instead of moving silently.
+    if (this.blocked) return;
     const perfNow = this.#now();
     const track = buildTrack([...this.#sentences.values()], (t) =>
       audioToPerf(this.#ctx, t, perfNow),
