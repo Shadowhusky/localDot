@@ -1,5 +1,10 @@
 import { Spine } from "@esotericsoftware/spine-pixi-v8";
-import type { AvatarParams, AvatarRenderer, Presence } from "@localdot/avatar";
+import {
+  type AvatarParams,
+  type AvatarRenderer,
+  NEUTRAL_PARAMS,
+  type Presence,
+} from "@localdot/avatar";
 import { Application, Assets, Graphics } from "pixi.js";
 import { applyPose } from "./apply.ts";
 import type { SpineRigBinding } from "./binding.ts";
@@ -54,6 +59,9 @@ export class SpineRenderer implements AvatarRenderer {
       if (problems.length > 0) {
         throw new Error(`avatar rig does not match its binding: ${problems.join("; ")}`);
       }
+      // A setup pose need not be neutral (rig-gen leaves the blush opaque), and the first frame
+      // can render before the host's first apply().
+      applyPose(spine.skeleton, mapParams(NEUTRAL_PARAMS, this.#options.binding));
     } catch (error) {
       // An initialised app and an auto-updating Spine both keep ticking until destroyed.
       spine?.destroy();

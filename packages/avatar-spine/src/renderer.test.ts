@@ -131,6 +131,16 @@ describe("SpineRenderer.mount", () => {
     expect(spine.destroy).not.toHaveBeenCalled();
     expect(el.querySelector("canvas")).not.toBeNull();
   });
+
+  it("holds the neutral pose until the host's first apply", async () => {
+    const spine = toySpine();
+    const blush = spine.skeleton.findSlot("blush");
+    // rig-gen writes no slot colours, so the setup pose shows the blush fully opaque.
+    expect(blush?.pose.color.a).toBe(1);
+    pixi.from.mockReturnValueOnce(spine);
+    await new SpineRenderer(options()).mount(host());
+    expect(blush?.pose.color.a).toBe(0);
+  });
 });
 
 describe("SpineRenderer frame clip", () => {
