@@ -69,6 +69,7 @@ ENV CUA_DRIVER_RS_TELEMETRY_ENABLED=0 \
 # it in thunar.desktop before Plank's window matcher (BAMF) indexes the desktop files at install
 # lets the dock put Thunar's windows on its Files item.
 RUN sed -i '/^\[Desktop Entry\]$/a StartupWMClass=Thunar-real' /usr/share/applications/thunar.desktop \
+ && grep -qx 'StartupWMClass=Thunar-real' /usr/share/applications/thunar.desktop \
  && apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends plank \
  && rm -rf /var/lib/apt/lists/*

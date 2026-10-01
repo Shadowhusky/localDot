@@ -3,10 +3,10 @@
 # settings follow LOCALDOT_SCALE on every start so a cell can switch between 2x and 1x.
 set -eu
 conf="${HOME}/.config/xfce4/xfconf/xfce-perchannel-xml"
-if [ ! -d "$conf" ]; then
-  mkdir -p "$conf"
-  cp /defaults/xfce/*.xml "$conf"/
-fi
+# Each default fills in only a channel the home lacks, even when xfconfd made the folder first.
+# (--update=none is cp -n without coreutils' "non-portable" warning.)
+mkdir -p "$conf"
+cp --update=none /defaults/xfce/*.xml "$conf"/
 # LibreOffice's first-run dialogs are modal and invisible to the accessibility tree (S2).
 lo="${HOME}/.config/libreoffice/4/user"
 if [ ! -f "$lo/registrymodifications.xcu" ]; then
@@ -30,6 +30,9 @@ for _ in $(seq 50); do
   sleep 0.1
 done
 pkill -KILL -u "$uid" -x xfconfd || true
-sed "s/@SCALE@/$scale/g" /defaults/localdot/xsettings.xml.in > "$conf/xsettings.xml"
-sed "s/@THEME@/$theme/g" /defaults/localdot/xfwm4.xml.in > "$conf/xfwm4.xml"
+# Written whole, then renamed into place: an xfconfd re-activated meanwhile never reads half a file.
+sed "s/@SCALE@/$scale/g" /defaults/localdot/xsettings.xml.in > "$conf/xsettings.xml.new"
+mv -f "$conf/xsettings.xml.new" "$conf/xsettings.xml"
+sed "s/@THEME@/$theme/g" /defaults/localdot/xfwm4.xml.in > "$conf/xfwm4.xml.new"
+mv -f "$conf/xfwm4.xml.new" "$conf/xfwm4.xml"
 exec /usr/bin/xfce4-session

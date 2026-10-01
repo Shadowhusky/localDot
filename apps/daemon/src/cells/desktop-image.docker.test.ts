@@ -249,14 +249,15 @@ function upgradeOutcome(url: string): Promise<string> {
 describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", () => {
   const C2 = "localdot-test-desktop-2x";
   const C1 = "localdot-test-desktop-1x";
+  const HOME_EDIT = "localdot-test-desktop-home-edit";
   let port2 = 0;
 
   beforeAll(() => {
     mkdirSync(OUT, { recursive: true });
-    removeAll({ containers: [C2, C1], volumes: [HOME_VOLUME] });
+    removeAll({ containers: [C2, C1, HOME_EDIT], volumes: [HOME_VOLUME] });
     port2 = startDesktop(C2, 2).port;
   });
-  afterAll(() => removeAll({ containers: [C2, C1], volumes: [HOME_VOLUME] }));
+  afterAll(() => removeAll({ containers: [C2, C1, HOME_EDIT], volumes: [HOME_VOLUME] }));
 
   it("runs exactly one session bus at the fixed address and no dbus-launch", () => {
     // dbus-launch puts --session after its own flags, so this counts its buses too.
@@ -409,7 +410,17 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
 
   it("wears the WhiteSur light look with a dock and a menu-bar panel", () => {
     expect(xfconf(C2, "xsettings", "/Net/ThemeName")).toBe("WhiteSur-Light");
-    expect(xfconf(C2, "xsettings", "/Net/IconThemeName")).toBe("WhiteSur");
+    const icons = xfconf(C2, "xsettings", "/Net/IconThemeName");
+    expect(icons).toBe("WhiteSur-light");
+    // WhiteSur draws its panel-size status icons white for a dark bar; its -light variant
+    // recolours them dark, which the light bar needs for any non-symbolic tray icon.
+    const statusIcon = outputOf(
+      C2,
+      "cat",
+      `/usr/share/icons/${icons}/status/16/audio-volume-high.svg`,
+    );
+    expect(statusIcon).toContain("color:#363636");
+    expect(statusIcon).not.toContain("#f2f2f2");
     expect(xfconf(C2, "xfwm4", "/general/button_layout")).toBe("CHM|");
     // xfconf only echoes the templates, and xfwm4 falls back to Default for a missing theme.
     outputOf(
@@ -421,12 +432,13 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
       "/usr/share/themes/WhiteSur-Light-hdpi/xfwm4/themerc",
       "/usr/share/themes/WhiteSur-Light-xhdpi/xfwm4/themerc",
       "/usr/share/icons/WhiteSur/index.theme",
-      "/usr/share/icons/WhiteSur/actions/symbolic/view-app-grid-symbolic.svg",
+      "/usr/share/icons/WhiteSur-light/index.theme",
       "/usr/share/plank/themes/WhiteSur-Light/dock.theme",
       "/usr/share/doc/localdot-themes/WhiteSur-gtk-theme.COPYING",
       "/usr/share/doc/localdot-themes/WhiteSur-icon-theme.COPYING",
       "/usr/share/doc/localdot-themes/WhiteSur-wallpapers.LICENSE",
       "/usr/share/doc/localdot-themes/THIRD-PARTY.md",
+      "/usr/share/doc/plank/copyright",
     );
     const closeButton = (theme: string) =>
       outputOf(
@@ -445,9 +457,9 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(plugins).not.toContain("actions");
     // A name the icon theme lacks draws GTK's red "missing image" sign on the menu button.
     const menuIcon = /button-icon\s+(\S+)/.exec(plugins)?.[1];
-    expect(outputOf(C2, "find", "/usr/share/icons/WhiteSur/", "-name", `${menuIcon}.svg`)).not.toBe(
-      "",
-    );
+    expect(
+      outputOf(C2, "find", "-L", `/usr/share/icons/${icons}/`, "-name", `${menuIcon}.svg`),
+    ).not.toBe("");
     // The menu bar renders light whatever the wallpaper, and Plank's translucent dock needs the
     // compositor (without one it draws an opaque grey block).
     expect(screenPixel(C2, 1280, 10)).toBe("srgb(241,241,241)");
@@ -525,9 +537,22 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     saveLook(C2, "look-2x.png", "2560x1600");
   });
 
-  // C1 starts on C2's home, so the 2x settings already in it must give way to the 1x ones.
+  // C1 starts on C2's home, so the 2x settings already in it must give way to the 1x ones, and a
+  // channel missing from it (as when xfconfd made the folder first) is filled from the defaults.
   it("switches to 1x with LOCALDOT_SCALE=1", () => {
     removeAll({ containers: [C2] });
+    docker(
+      "run",
+      "--rm",
+      "--name",
+      HOME_EDIT,
+      "-v",
+      `${HOME_VOLUME}:/config`,
+      "--entrypoint",
+      "rm",
+      DESKTOP_IMAGE,
+      "/config/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml",
+    );
     startDesktop(C1, 1);
     expect(xfconf(C1, "xsettings", "/Gdk/WindowScalingFactor")).toBe("1");
     expect(xfconf(C1, "xsettings", "/Xft/DPI")).toBe("96");
