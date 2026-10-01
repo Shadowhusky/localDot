@@ -8,6 +8,12 @@ describe("allocateKeydPort", () => {
     expect(allocateKeydPort([4760, 4762])).toBe(4761);
   });
 
+  it("serves keyd on 4760-4789 and hands out 4789 once it is the only free port", () => {
+    expect(KEYD_PORT_RANGE).toEqual({ from: 4760, to: 4789 });
+    const taken = Array.from({ length: 29 }, (_, i) => 4760 + i);
+    expect(allocateKeydPort(taken)).toBe(4789);
+  });
+
   it("fails when the range is exhausted", () => {
     const all: number[] = [];
     for (let p = KEYD_PORT_RANGE.from; p <= KEYD_PORT_RANGE.to; p++) all.push(p);

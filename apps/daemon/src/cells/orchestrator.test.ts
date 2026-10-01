@@ -260,15 +260,30 @@ describe("CellOrchestrator lifecycle", () => {
   });
 
   it("percent-encodes the names it reads from a cell record into Docker API paths", async () => {
-    const { orchestrator, store, stateOf } = await setup();
+    const { orchestrator, store, home, stateOf } = await setup();
     const victim = await orchestrator.create({ scale: 2 });
     await stateOf(victim.id, "ready");
     const victimNetwork = store.get(victim.id)?.docker.internalNetwork ?? "";
     const edited = sampleRecord();
     edited.docker.gate = `../networks/${victimNetwork}`;
     store.save(edited);
+    // The loader refuses such a name (store.test.ts); this store hands it over regardless, so the
+    // encoding is tested on its own.
+    const unchecked = new (class extends CellStore {
+      override get(id: string) {
+        return id === edited.id ? edited : super.get(id);
+      }
+    })(home);
+    const other = new CellOrchestrator({
+      docker: new DockerClient(fake.socketPath),
+      store: unchecked,
+      images,
+      probeDesktopd: async () => undefined,
+      probeStream: async () => false,
+    });
+    made.push(other);
 
-    await orchestrator.remove(edited.id);
+    await other.remove(edited.id);
 
     expect(fake.state.networks.has(victimNetwork)).toBe(true);
     const encoded = `/containers/${encodeURIComponent(edited.docker.gate)}`;
