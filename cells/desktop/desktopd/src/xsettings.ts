@@ -3,7 +3,10 @@ import { promisify } from "node:util";
 
 export type Run = (file: string, args: string[]) => Promise<{ stdout: string }>;
 
-const execFileAsync: Run = promisify(execFile);
+const execFileP = promisify(execFile);
+// A wedged X server or xfconfd would otherwise leave a stuck child behind every /healthz poll.
+const execFileAsync: Run = (file, args) =>
+  execFileP(file, args, { timeout: 2_000, killSignal: "SIGKILL" });
 
 export interface Xsettings {
   windowScalingFactor: number | null;
@@ -15,19 +18,44 @@ export interface Screen {
   h: number;
 }
 
-// xfconf-query exits 1 for an unset property; unset means XFCE's default (1x, 96 dpi).
+const DOES_NOT_EXIST = /^Property ".*" does not exist on channel ".*"\.\n?$/;
+
+// null: unset, which means XFCE's default (1x, 96 dpi). xfconf-query fails with only the "does
+// not exist" line for an unset property, but also for a read that xfconfd dropped mid-call; a
+// listing of the channel comes back whole or empty, and the session's channel is never empty, so
+// it tells the two apart. Any other failure throws: the value is not known.
 export async function xfconfInt(
   run: Run,
   channel: string,
   property: string,
 ): Promise<number | null> {
+  let stdout: string;
   try {
-    const { stdout } = await run("xfconf-query", ["-c", channel, "-p", property]);
-    const n = Number(stdout.trim());
-    return Number.isFinite(n) ? n : null;
-  } catch {
+    ({ stdout } = await run("xfconf-query", ["-c", channel, "-p", property]));
+  } catch (err) {
+    if (!doesNotExist(err)) throw err;
+    const listed = await listProperties(run, channel);
+    if (listed.length === 0 || listed.includes(property)) {
+      throw new Error(`xfconf ${channel} ${property}: the read failed`);
+    }
     return null;
   }
+  const text = stdout.trim();
+  if (!/^-?\d+$/.test(text)) throw new Error(`xfconf ${channel} ${property}: not an integer`);
+  return Number(text);
+}
+
+function doesNotExist(err: unknown): boolean {
+  const { code, stderr } = err as { code?: unknown; stderr?: unknown };
+  return code === 1 && typeof stderr === "string" && DOES_NOT_EXIST.test(stderr);
+}
+
+async function listProperties(run: Run, channel: string): Promise<string[]> {
+  const { stdout } = await run("xfconf-query", ["-c", channel, "-l"]);
+  return stdout
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
 }
 
 async function isRunning(run: Run, uid: number, name: string): Promise<boolean> {
@@ -39,9 +67,9 @@ async function isRunning(run: Run, uid: number, name: string): Promise<boolean> 
   }
 }
 
-// null: not known yet. xfconf-query D-Bus-activates an xfconfd when none runs, and one started
-// before startwm.sh has written the HiDPI templates and exec'd xfce4-session would load the
-// previous session's files and keep them for this session.
+// null: not known yet, as when a read fails. xfconf-query D-Bus-activates an xfconfd when none
+// runs, and one started before startwm.sh has written the HiDPI templates and exec'd
+// xfce4-session would load the previous session's files and keep them for this session.
 export async function readXsettings(
   uid: number,
   run: Run = execFileAsync,
@@ -49,10 +77,14 @@ export async function readXsettings(
   if (!(await isRunning(run, uid, "xfce4-session")) || !(await isRunning(run, uid, "xfconfd"))) {
     return null;
   }
-  return {
-    windowScalingFactor: await xfconfInt(run, "xsettings", "/Gdk/WindowScalingFactor"),
-    xftDpi: await xfconfInt(run, "xsettings", "/Xft/DPI"),
-  };
+  try {
+    return {
+      windowScalingFactor: await xfconfInt(run, "xsettings", "/Gdk/WindowScalingFactor"),
+      xftDpi: await xfconfInt(run, "xsettings", "/Xft/DPI"),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export async function readScreen(): Promise<Screen | null> {

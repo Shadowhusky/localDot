@@ -31,6 +31,12 @@ describe("desktopd health", () => {
     ).toBe(401);
   });
 
+  it("refuses a wrong token of the right length", async () => {
+    const a = app({ scale: 2, factor: 2, dpi: 96, screen: { w: 2560, h: 1600 } });
+    const wrong = `Bearer ${"e".repeat(TOKEN.length)}`;
+    expect((await a.request("/healthz", { headers: { authorization: wrong } })).status).toBe(401);
+  });
+
   it("reports ok at 2x with window scaling 2, Xft/DPI 96 and a 2560x1600 screen", async () => {
     const res = await app({ scale: 2, factor: 2, dpi: 96, screen: { w: 2560, h: 1600 } }).request(
       "/healthz",
