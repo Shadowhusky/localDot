@@ -49,12 +49,19 @@ async function fakeDocker(
         res.end();
         return;
       }
-      res.writeHead(r.status, { "content-type": "application/json" });
-      res.end(JSON.stringify(r.body));
+      // Docker sends a small JSON reply with its length; writeHead without one would chunk it.
+      const text = JSON.stringify(r.body);
+      res.writeHead(r.status, {
+        "content-type": "application/json",
+        "content-length": Buffer.byteLength(text),
+      });
+      res.end(text);
     });
   });
   return { socketPath, seen };
 }
+
+const missingSocket = () => join(tmpdir(), "ld-missing.sock");
 
 describe("DockerClient", () => {
   it("sends JSON with the API version prefix and parses JSON replies", async () => {
@@ -78,14 +85,15 @@ describe("DockerClient", () => {
 
   it("encodes query parameters and resolves undefined for empty replies", async () => {
     const { socketPath, seen } = await fakeDocker(() => ({ status: 204 }));
+    const query = { filters: JSON.stringify({ label: ["localdot.cell=a b"] }), name: "x&y=z w" };
     await expect(
-      new DockerClient(socketPath).request({
-        method: "DELETE",
-        path: "/containers/c1",
-        query: { force: "true", v: "false" },
-      }),
+      new DockerClient(socketPath).request({ method: "DELETE", path: "/containers/c1", query }),
     ).resolves.toBeUndefined();
-    expect(seen[0]?.url).toBe(`/${DOCKER_API}/containers/c1?force=true&v=false`);
+    expect(seen[0]?.url).toBe(
+      `/${DOCKER_API}/containers/c1?filters=%7B%22label%22%3A%5B%22localdot.cell%3Da+b%22%5D%7D&name=x%26y%3Dz+w`,
+    );
+    const decoded = new URL(seen[0]?.url ?? "", "http://docker").searchParams;
+    expect(Object.fromEntries(decoded)).toEqual(query);
   });
 
   it("turns error replies into DockerError carrying Docker's message", async () => {
@@ -98,7 +106,67 @@ describe("DockerClient", () => {
       .catch((e) => e);
     expect(err).toBeInstanceOf(DockerError);
     expect(err).toMatchObject({ status: 404, path: "/containers/c1/json" });
-    expect((err as Error).message).toContain("No such container: c1");
+    expect((err as Error).message).toBe("docker 404 on /containers/c1/json: No such container: c1");
+  });
+
+  it("resolves a 304 (nothing to do) and rejects any other 3xx as DockerError", async () => {
+    const { socketPath } = await fakeDocker((seen) => ({
+      status: seen.url.endsWith("/start") ? 304 : 301,
+    }));
+    const client = new DockerClient(socketPath);
+    await expect(
+      client.request({ method: "POST", path: "/containers/c1/start" }),
+    ).resolves.toBeUndefined();
+    const err = await client
+      .request({ method: "GET", path: "/containers/c1/json" })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(DockerError);
+    expect(err).toMatchObject({ status: 301, path: "/containers/c1/json" });
+  });
+
+  it("reads a chunked reply whole", async () => {
+    const socketPath = await listen((_req, res) => {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.write('{"Id":');
+      setTimeout(() => res.write('"abc","Warn'), 10);
+      setTimeout(() => res.end('ings":[]}'), 20);
+    });
+    await expect(
+      new DockerClient(socketPath).request({ method: "GET", path: "/containers/c1/json" }),
+    ).resolves.toEqual({ Id: "abc", Warnings: [] });
+  });
+
+  it("reads a large reply whole", async () => {
+    const containers = Array.from({ length: 20_000 }, (_, i) => ({
+      Id: `c${i}`,
+      Labels: { "localdot.cell": `cell-${i}` },
+    }));
+    const { socketPath } = await fakeDocker(() => ({ status: 200, body: containers }));
+    const out = await new DockerClient(socketPath).request<typeof containers>({
+      method: "GET",
+      path: "/containers/json",
+    });
+    expect(JSON.stringify(containers).length).toBeGreaterThan(1_000_000);
+    expect(out).toEqual(containers);
+  });
+
+  it("rejects, never throws, for a body it cannot serialise or a path Node refuses", async () => {
+    const client = new DockerClient(missingSocket());
+    const call = (path: string, body?: unknown) => {
+      try {
+        return client.request({ method: "POST", path, body });
+      } catch (err) {
+        return `threw ${String(err)}`;
+      }
+    };
+    for (const [path, body] of [
+      ["/containers/create", { Memory: 1n }],
+      ["/containers/a b/start", undefined],
+    ] as const) {
+      const pending = call(path, body);
+      expect(pending, path).toBeInstanceOf(Promise);
+      await expect(pending, path).rejects.toMatchObject({ name: "DockerError", status: 0, path });
+    }
   });
 
   it("rejects a reply cut off mid-body as DockerError 0", async () => {
@@ -127,7 +195,7 @@ describe("DockerClient", () => {
   });
 
   it("reports an unreachable socket as DockerError 0", async () => {
-    const err = await new DockerClient(join(tmpdir(), "ld-missing.sock")).version().catch((e) => e);
+    const err = await new DockerClient(missingSocket()).version().catch((e) => e);
     expect(err).toBeInstanceOf(DockerError);
     expect((err as DockerError).status).toBe(0);
     expect((err as Error).message).toContain("Docker Desktop");
@@ -139,5 +207,10 @@ describe("DockerClient", () => {
       "/Users/me/.docker/run/docker.sock",
     );
     expect(dockerSocketPath({ DOCKER_HOST: "tcp://1.2.3.4:2375" })).toBe("/var/run/docker.sock");
+    expect(dockerSocketPath({ DOCKER_HOST: "unix://" })).toBe("/var/run/docker.sock");
+  });
+
+  it("refuses an empty socket path, which Node would trade for TCP to localhost:80", () => {
+    expect(() => new DockerClient("")).toThrow("the Docker socket path is empty");
   });
 });
