@@ -1,14 +1,16 @@
-import type { IncomingMessage, Server } from "node:http";
-import type { Duplex } from "node:stream";
+import type { Server } from "node:http";
 import { type LocalDotEvent, ULID_PATTERN } from "@localdot/protocol";
-import { type WebSocket, WebSocketServer } from "ws";
+import type { WebSocket } from "ws";
 import type { EventLog } from "./event-log.ts";
-import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
-import { tokensMatch } from "./token.ts";
+import {
+  attachUpgradeRouter,
+  refuse,
+  tokenSocketServer,
+  type UpgradeRoute,
+  WS_PROTOCOL,
+} from "./upgrade-router.ts";
 
-export const WS_PROTOCOL = "localdot.v1";
-
-const STREAM_PATH = /^\/api\/sessions\/([^/]+)\/stream$/;
+export { WS_PROTOCOL };
 
 export interface EventStreamOptions {
   port: number;
@@ -16,52 +18,33 @@ export interface EventStreamOptions {
   eventLog: EventLog;
 }
 
+export function sessionStreamRoute(eventLog: EventLog): UpgradeRoute {
+  const wss = tokenSocketServer();
+  return {
+    pattern: /^\/api\/sessions\/([^/]+)\/stream$/,
+    params: ["id"],
+    auth: "token",
+    open({ req, socket, head, url, params }) {
+      const sessionId = params.id ?? "";
+      if (!ULID_PATTERN.test(sessionId)) {
+        refuse(socket, "403 Forbidden");
+        return;
+      }
+      if (!eventLog.hasSession(sessionId)) {
+        refuse(socket, "404 Not Found");
+        return;
+      }
+      const fromSeq = Math.max(0, Number(url.searchParams.get("fromSeq")) || 0);
+      wss.handleUpgrade(req, socket, head, (ws) => streamSession(ws, eventLog, sessionId, fromSeq));
+    },
+  };
+}
+
 export function attachEventStream(
   server: Server,
   { port, token, eventLog }: EventStreamOptions,
 ): void {
-  // Never select the localdot.token.<t> entry: the chosen subprotocol is echoed back in the response.
-  const wss = new WebSocketServer({
-    noServer: true,
-    handleProtocols: (protocols) => (protocols.has(WS_PROTOCOL) ? WS_PROTOCOL : false),
-  });
-  const base = `http://127.0.0.1:${port}`;
-  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
-    socket.on("error", () => socket.destroy());
-    const target = req.url ?? "/";
-    if (!URL.canParse(target, base)) {
-      refuse(socket, "400 Bad Request");
-      return;
-    }
-    const url = new URL(target, base);
-    const sessionId = STREAM_PATH.exec(url.pathname)?.[1];
-    const given = tokenFromHeaders({
-      authorization: req.headers.authorization,
-      "sec-websocket-protocol": req.headers["sec-websocket-protocol"],
-    });
-    const allowed =
-      isAllowedHost(req.headers.host, port) &&
-      isAllowedHost(url.host, port) &&
-      isAllowedOrigin(req.headers.origin, port) &&
-      tokensMatch(token, given) &&
-      sessionId !== undefined &&
-      ULID_PATTERN.test(sessionId);
-    if (!allowed) {
-      refuse(socket, "403 Forbidden");
-      return;
-    }
-    if (!eventLog.hasSession(sessionId)) {
-      refuse(socket, "404 Not Found");
-      return;
-    }
-    const fromSeq = Math.max(0, Number(url.searchParams.get("fromSeq")) || 0);
-    wss.handleUpgrade(req, socket, head, (ws) => streamSession(ws, eventLog, sessionId, fromSeq));
-  });
-}
-
-function refuse(socket: Duplex, status: string): void {
-  socket.once("finish", () => socket.destroy());
-  socket.end(`HTTP/1.1 ${status}\r\nConnection: close\r\n\r\n`);
+  attachUpgradeRouter(server, { port, token }, [sessionStreamRoute(eventLog)]);
 }
 
 function streamSession(

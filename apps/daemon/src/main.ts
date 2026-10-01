@@ -3,12 +3,21 @@ import { constants } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
+import { DockerClient } from "./cells/docker.ts";
+import { imagesFromEnv } from "./cells/images.ts";
+import { CellOrchestrator } from "./cells/orchestrator.ts";
+import { probeDesktopd, probeStream } from "./cells/readiness.ts";
+import { TicketRegistry } from "./cells/secrets.ts";
+import { cellStatusRoute } from "./cells/status-stream.ts";
+import { CellStore } from "./cells/store.ts";
+import { findDockerSocket } from "./doctor-socket.ts";
 import { EventLog } from "./event-log.ts";
-import { attachEventStream } from "./event-stream.ts";
+import { sessionStreamRoute } from "./event-stream.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
 import { localdotHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { loadOrCreateToken } from "./token.ts";
+import { attachUpgradeRouter } from "./upgrade-router.ts";
 
 const port = portFromEnv();
 const home = localdotHome();
@@ -20,13 +29,29 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
 const tokenFile = join(home, "daemon-token");
 const token = loadOrCreateToken(tokenFile);
 const eventLog = new EventLog(home);
-const app = createApp({ token, port, eventLog });
+const tickets = new TicketRegistry();
+const orchestrator = new CellOrchestrator({
+  docker: new DockerClient(findDockerSocket().path),
+  store: new CellStore(home),
+  images: imagesFromEnv(),
+  probeDesktopd,
+  probeStream,
+});
+// The daemon serves the UI without Docker; the UI shows the cell as failed with the reason.
+await orchestrator
+  .reconcile()
+  .catch((err) => console.error(`cell reconcile failed: ${String(err)}`));
+const app = createApp({ token, port, eventLog, cells: { cells: orchestrator, tickets } });
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
   console.log(`localdot daemon on http://127.0.0.1:${port} (token in ${tokenFile})`);
+  console.log(`open http://127.0.0.1:${port}/#token=${token}`);
 });
 // serve() is typed as HTTP/1-or-HTTP/2; this daemon only ever creates an HTTP/1 server.
-attachEventStream(server as Server, { port, token, eventLog });
+attachUpgradeRouter(server as Server, { port, token }, [
+  sessionStreamRoute(eventLog),
+  cellStatusRoute(orchestrator),
+]);
 server.on("error", (err: NodeJS.ErrnoException) => {
   fail(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);
 });

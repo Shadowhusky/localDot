@@ -1,5 +1,6 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { Hono } from "hono";
+import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { tokensMatch } from "./token.ts";
@@ -8,9 +9,10 @@ export interface AppOptions {
   token: string;
   port: number;
   eventLog: EventLog;
+  cells?: CellApiDeps;
 }
 
-export function createApp({ token, port, eventLog }: AppOptions): Hono {
+export function createApp({ token, port, eventLog, cells }: AppOptions): Hono {
   const app = new Hono();
 
   app.use("*", async (c, next) => {
@@ -47,5 +49,6 @@ export function createApp({ token, port, eventLog }: AppOptions): Hono {
     }
   });
 
+  if (cells) cellRoutes(app, cells);
   return app;
 }
