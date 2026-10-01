@@ -1,8 +1,11 @@
 import time
 from collections.abc import Iterator
 
+import anyio
 import numpy as np
-from starlette.testclient import TestClient
+import pytest
+from starlette.testclient import TestClient, WebSocketTestSession
+from starlette.types import Message
 
 from voiced.app import create_app
 from voiced.config import Settings
@@ -15,6 +18,21 @@ BASE_URL = "http://127.0.0.1:4752"
 WS_URL = "ws://127.0.0.1:4752"
 AUTH = {"authorization": f"Bearer {TOKEN}"}
 WS_PROTOCOLS = ["localdot.v1", f"localdot.token.{TOKEN}"]
+RECEIVE_DEADLINE_S = 2.0
+
+
+def _receive_by_deadline(self: WebSocketTestSession) -> Message:
+    async def receive() -> Message:
+        with anyio.fail_after(RECEIVE_DEADLINE_S):
+            return await self._send_rx.receive()
+
+    return self.portal.call(receive)
+
+
+@pytest.fixture(autouse=True)
+def receive_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A socket that never answers fails its test fast instead of hanging the suite."""
+    monkeypatch.setattr(WebSocketTestSession, "receive", _receive_by_deadline)
 
 
 def slot(value: object, guard=None) -> ModelSlot:

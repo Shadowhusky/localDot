@@ -1,3 +1,4 @@
+import http.client
 import io
 import json
 
@@ -34,3 +35,13 @@ def test_allows_when_lm_studio_is_not_running_or_answers_oddly():
     assert lm_studio_refusal("http://127.0.0.1:1234", lambda u, t: io.BytesIO(b"<html>")) is None
     assert lm_studio_refusal("http://127.0.0.1:1234", answering({"models": "nope"})) is None
     assert lm_studio_refusal("http://127.0.0.1:1234", answering([1, 2])) is None
+
+
+def test_allows_when_the_url_or_the_reply_is_broken():
+    assert lm_studio_refusal("http://127.0.0.1:12x4") is None
+
+    class Dropped(io.BytesIO):
+        def read(self, *_: object) -> bytes:
+            raise http.client.IncompleteRead(b'{"models": [')
+
+    assert lm_studio_refusal("http://127.0.0.1:1234", lambda url, timeout: Dropped()) is None

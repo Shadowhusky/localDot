@@ -79,3 +79,13 @@ def test_cancel_stops_the_sentence_and_drops_the_queue():
                 assert json.loads(message["text"])["id"] == 3
                 break
     assert 2 not in seen and seen.count(1) < 199 and seen.count(3) == 2
+
+
+def test_a_refused_sentence_never_echoes_an_id_that_is_not_one():
+    with client(engines(tts=slot(FakeSynth()))).websocket_connect(f"{WS_URL}/tts", subprotocols=WS_PROTOCOLS) as socket:
+        socket.receive_json()
+        replies = []
+        for bad in (True, 2**40, -1):
+            say(socket, bad)
+            replies.append(socket.receive_json())
+    assert [(reply["id"], reply["code"]) for reply in replies] == [(None, "bad_request")] * 3

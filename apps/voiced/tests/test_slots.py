@@ -82,3 +82,20 @@ def test_engines_report_each_slot_and_sweep_the_idle_ones():
     busy.get()
     assert both.sweep() == ["tts"]
     assert both.status() == {"tts": {"state": "idle", "reason": None}, "asr": {"state": "ready", "reason": None}}
+
+
+def test_a_slot_that_fails_to_unload_is_logged_and_the_others_still_unload(caplog):
+    clock = Clock()
+
+    def broken_release() -> None:
+        raise RuntimeError("release failed")
+
+    stuck = ModelSlot(lambda: "a", 600, clock=clock, release=broken_release)
+    idle = ModelSlot(lambda: "b", 600, clock=clock, release=lambda: None)
+    both = Engines(voice="stock", slots={"aligner": stuck, "tts": idle})
+    stuck.get()
+    idle.get()
+    clock.now = 600
+    assert both.sweep() == ["tts"]
+    assert idle.state == "idle"
+    assert "aligner" in caplog.text and "RuntimeError: release failed" in caplog.text

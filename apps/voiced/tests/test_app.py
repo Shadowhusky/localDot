@@ -7,7 +7,6 @@ from starlette.websockets import WebSocketDisconnect
 from conftest import AUTH, TOKEN, WS_URL, client, engines, slot
 from voiced.app import create_app, sweep_forever
 from voiced.config import Settings
-from voiced.slots import ModelSlot
 from voiced.worker import Worker
 
 
@@ -39,25 +38,31 @@ def test_websockets_are_refused_before_they_open():
     assert foreign.value.code == 4403
 
 
-def test_a_failing_sweep_is_logged_and_idle_models_still_unload(monkeypatch, caplog):
+class FlakySweeps:
+    """Engines whose first sweep fails outright."""
+
+    def __init__(self) -> None:
+        self.sweeps = 0
+
+    def sweep(self) -> list[str]:
+        self.sweeps += 1
+        if self.sweeps == 1:
+            raise RuntimeError("sweep fell over")
+        return []
+
+
+def test_a_failing_sweep_is_logged_and_the_next_one_still_runs(monkeypatch, caplog):
     monkeypatch.setattr("voiced.app.SWEEP_EVERY_S", 0)
+    flaky = FlakySweeps()
 
-    def broken_release() -> None:
-        raise RuntimeError("release failed")
-
-    stuck = ModelSlot(lambda: "aligner", 0, release=broken_release)
-    idle = ModelSlot(lambda: "tts", 0, release=lambda: None)
-    stuck.get()
-    idle.get()
-
-    async def sweep_until_unloaded() -> None:
+    async def sweep_twice() -> None:
         worker = Worker()
-        sweeper = asyncio.create_task(sweep_forever(engines(aligner=stuck, tts=idle), worker))
-        while idle.state == "ready" and not sweeper.done():
+        sweeper = asyncio.create_task(sweep_forever(flaky, worker))
+        while flaky.sweeps < 2 and not sweeper.done():
             await asyncio.sleep(0.001)
         sweeper.cancel()
         worker.close()
 
-    asyncio.run(asyncio.wait_for(sweep_until_unloaded(), 2))
-    assert idle.state == "idle"
-    assert "model sweep failed" in caplog.text and "RuntimeError: release failed" in caplog.text
+    asyncio.run(asyncio.wait_for(sweep_twice(), 2))
+    assert flaky.sweeps >= 2
+    assert "model sweep failed" in caplog.text and "RuntimeError: sweep fell over" in caplog.text

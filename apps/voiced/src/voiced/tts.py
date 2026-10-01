@@ -8,7 +8,7 @@ from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from voiced.engines import Engines
 from voiced.slots import LoadFailed, LoadRefused
-from voiced.wire import Say, encode_audio_frame, error, parse_say, to_int16
+from voiced.wire import Say, encode_audio_frame, error, parse_say, to_int16, valid_id
 from voiced.worker import Worker
 
 
@@ -55,8 +55,8 @@ class TtsSession:
             return
         say = parse_say(message)
         if isinstance(say, str):
-            sentence_id = message.get("id") if isinstance(message.get("id"), int) else None
-            await self._socket.send_json(error(sentence_id, say, "sentence refused"))
+            sentence_id = message.get("id")
+            await self._socket.send_json(error(sentence_id if valid_id(sentence_id) else None, say, "sentence refused"))
             return
         self._queue.put_nowait((say, self._generation))
 

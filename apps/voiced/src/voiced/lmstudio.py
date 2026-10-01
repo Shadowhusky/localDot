@@ -1,5 +1,6 @@
 """The user's swap-crash rule: no voice model loads beside a huge LM Studio model."""
 
+import http.client
 import json
 import urllib.request
 from collections.abc import Callable
@@ -17,12 +18,12 @@ def _open(url: str, timeout: float) -> IO[bytes]:
 def lm_studio_refusal(base_url: str, opener: Opener = _open, timeout: float = 0.5) -> str | None:
     """A reason to refuse when LM Studio reports a loaded model over 30 GB, else None.
 
-    LM Studio not running, or answering oddly, is not a reason to refuse.
+    LM Studio not running, unreachable at a broken URL, or answering oddly is not a reason to refuse.
     """
     try:
         with opener(f"{base_url}/api/v1/models", timeout) as response:
             listing = json.load(response)
-    except (OSError, ValueError):
+    except (OSError, ValueError, http.client.HTTPException):
         return None
     models = listing.get("models") if isinstance(listing, dict) else None
     for model in models if isinstance(models, list) else []:

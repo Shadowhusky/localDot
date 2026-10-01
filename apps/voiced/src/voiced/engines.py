@@ -1,6 +1,7 @@
 """The models voiced serves, each in a slot that loads on first use."""
 
 import gc
+import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
@@ -9,6 +10,8 @@ from voiced.config import Settings
 from voiced.lmstudio import lm_studio_refusal
 from voiced.slots import ModelSlot
 from voiced.synth import load_synthesizer
+
+log = logging.getLogger(__name__)
 
 
 @dataclass
@@ -20,7 +23,14 @@ class Engines:
         return {name: {"state": slot.state, "reason": slot.reason} for name, slot in self.slots.items()}
 
     def sweep(self) -> list[str]:
-        return [name for name, slot in self.slots.items() if slot.sweep()]
+        swept = []
+        for name, slot in self.slots.items():
+            try:
+                if slot.sweep():
+                    swept.append(name)
+            except Exception:
+                log.exception("unloading the %s model failed", name)
+        return swept
 
 
 def release_memory() -> None:

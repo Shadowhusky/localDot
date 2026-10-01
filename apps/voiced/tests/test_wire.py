@@ -1,6 +1,6 @@
 import numpy as np
 
-from voiced.wire import Say, encode_audio_frame, parse_say, to_int16
+from voiced.wire import Say, encode_audio_frame, parse_say, to_int16, valid_id
 
 
 def test_frames_match_the_browser_decoder_byte_for_byte():
@@ -16,3 +16,8 @@ def test_parse_say_accepts_a_sentence_and_names_what_is_wrong():
     assert parse_say({"id": 3, "text": "   ", "lang": "en"}) == "bad_request"
     assert parse_say({"id": 3, "text": "a" * 401, "lang": "en"}) == "too_long"
     assert parse_say(["say"]) == "bad_request"
+
+
+def test_a_sentence_id_is_a_uint32_and_never_a_bool():
+    assert [valid_id(n) for n in (0, 7, 0xFFFFFFFF)] == [True, True, True]
+    assert [valid_id(n) for n in (-1, 2**32, True, 3.0, "3", None)] == [False] * 6

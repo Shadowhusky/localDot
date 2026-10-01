@@ -2,6 +2,7 @@
 
 import struct
 from dataclasses import dataclass
+from typing import TypeGuard
 
 import numpy as np
 
@@ -29,12 +30,17 @@ class Say:
     lang: str
 
 
+def valid_id(value: object) -> TypeGuard[int]:
+    """A sentence id fits the frame header's u32; JSON true is not an id."""
+    return isinstance(value, int) and not isinstance(value, bool) and 0 <= value <= 0xFFFFFFFF
+
+
 def parse_say(message: object) -> Say | str:
     """A valid sentence, or the reason it is not one."""
     if not isinstance(message, dict):
         return "bad_request"
     sentence_id, text, lang = message.get("id"), message.get("text"), message.get("lang")
-    if not isinstance(sentence_id, int) or isinstance(sentence_id, bool) or not 0 <= sentence_id <= 0xFFFFFFFF:
+    if not valid_id(sentence_id):
         return "bad_request"
     if not isinstance(text, str) or not text.strip() or lang not in LANGS:
         return "bad_request"
