@@ -1,25 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { FakeWebSocket } from "../testing/fake-websocket.ts";
 import { openSocket } from "./socket.ts";
-
-class FakeWebSocket {
-  static instances: FakeWebSocket[] = [];
-  onopen: (() => void) | null = null;
-  onmessage: ((e: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
-  onerror: (() => void) | null = null;
-  closed = false;
-  constructor(
-    readonly url: string,
-    readonly protocols: string[],
-  ) {
-    FakeWebSocket.instances.push(this);
-  }
-  close() {
-    this.closed = true;
-    this.onclose?.();
-  }
-}
 
 describe("openSocket", () => {
   beforeEach(() => {

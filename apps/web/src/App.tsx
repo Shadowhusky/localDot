@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { hudFor } from "./cells/hud-state.ts";
+import { useCell } from "./cells/useCell.ts";
 import { type ApiClient, createApi } from "./lib/api.ts";
 import { bootstrapToken, forgetToken } from "./lib/token.ts";
+import { ConversationRail } from "./shell/ConversationRail.tsx";
+import { PlanRail } from "./shell/PlanRail.tsx";
+import { StageColumn } from "./shell/StageColumn.tsx";
+import { TopBar } from "./shell/TopBar.tsx";
+import "./app.css";
 
 export interface AppProps {
   fetchImpl?: typeof fetch;
@@ -37,25 +44,30 @@ export function App({ fetchImpl }: AppProps) {
         : null,
     [token, fetchImpl],
   );
-  const [connected, setConnected] = useState(false);
-
-  useEffect(() => {
-    if (!api) return;
-    let cancelled = false;
-    setConnected(false);
-    api.get("/api/whoami").then(
-      () => {
-        if (!cancelled) setConnected(true);
-      },
-      () => {},
-    );
-    return () => {
-      cancelled = true;
-    };
-  }, [api]);
 
   if (!api) return <NoToken rejected={rejected} />;
-  return <p className="notice">{connected ? "Connected to the daemon." : "Connecting…"}</p>;
+  return <Theatre api={api} />;
+}
+
+function Theatre({ api }: { api: ApiClient }) {
+  const { cell, busy, error, start, stop } = useCell(api);
+  const hud = hudFor(cell, busy);
+  useEffect(() => {
+    document.title = `localDot — ${hud.label}`;
+    return () => {
+      document.title = "localDot";
+    };
+  }, [hud.label]);
+  return (
+    <div className="app">
+      <TopBar title="Your computer" live={hud.live} />
+      <div className="house">
+        <ConversationRail />
+        <StageColumn hud={error ? { ...hud, caption: error } : hud} onStart={start} onStop={stop} />
+        <PlanRail />
+      </div>
+    </div>
+  );
 }
 
 function NoToken({ rejected }: { rejected: boolean }) {

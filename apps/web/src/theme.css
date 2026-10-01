@@ -23,11 +23,52 @@
   --color-avatar-eye: #0a0b0d;
   --font-ui: -apple-system, "Inter", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --spacing-app-min: 600px;
+  --spacing-bar: 44px;
+  --spacing-gutter: 20px;
+  --spacing-edge: 16px;
+  --spacing-bar-gap: 12px;
+  --spacing-bar-glyph-gap: 7px;
+  --spacing-modes-gap: 22px;
+  --spacing-mark: 4px;
+  --spacing-mark-drop: 8px;
+  --spacing-lamp: 6px;
+  --spacing-mascot-bar: 16px;
   --spacing-rail: 264px;
+  --spacing-rail-top: 18px;
+  --spacing-rail-gap: 14px;
+  --spacing-rail-section: 22px;
+  --spacing-say-gap: 16px;
+  --spacing-avatar: 44px;
+  --spacing-dock-gap: 10px;
+  --spacing-pill: 40px;
+  --spacing-input-x: 14px;
+  --spacing-stage-reserve: 200px;
+  --spacing-hud-top: 14px;
+  --spacing-hud-x: 12px;
+  --spacing-hud-inset: 5px;
+  --spacing-hud-glyph-gap: 8px;
+  --spacing-hud-acts-gap: 4px;
+  --spacing-mascot-hud: 18px;
+  --spacing-button: 30px;
+  --spacing-button-glyph-gap: 6px;
+  --spacing-stop: 8px;
+  --spacing-caption: 640px;
+  --spacing-caption-top: 26px;
+  --spacing-caption-gap: 8px;
+  --spacing-focus-offset: 2px;
+  --spacing-notice: 480px;
+  --spacing-notice-gap: 8px;
   --radius-stage: 12px;
+  --radius-full: 9999px;
+  --radius-stop: 1.5px;
   --shadow-stage: 0 30px 80px var(--color-edge), 0 0 0 1px var(--color-edge-stage);
+  --shadow-hud: inset 0 0 0 1px var(--color-hud-line), 0 8px 24px var(--color-shade-hud);
+  --blur-hud: 16px;
   --duration-press: 100ms;
+  --duration-lit: 400ms;
   --ease-press: ease-out;
+  --ease-lit: ease-out;
 }
 
 * {
@@ -63,10 +104,15 @@ button:active {
   transition: transform var(--duration-press) var(--ease-press);
 }
 
+:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: var(--spacing-focus-offset);
+}
+
 .notice {
-  max-width: 480px;
+  max-width: var(--spacing-notice);
   margin: 20vh auto 0;
-  padding: 0 16px;
+  padding: 0 var(--spacing-edge);
   color: var(--color-text-2);
 }
 
@@ -75,7 +121,7 @@ button:active {
   font-weight: 600;
   letter-spacing: -0.01em;
   color: var(--color-text);
-  margin-bottom: 8px;
+  margin-bottom: var(--spacing-notice-gap);
 }
 
 .notice code {
