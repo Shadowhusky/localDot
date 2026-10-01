@@ -18,6 +18,8 @@ export function applyPose(skeleton: Skeleton, pose: RigPose): void {
   }
   for (const [slot, attachment] of Object.entries(pose.attachments))
     skeleton.setAttachment(slot, attachment);
+  if (pose.wind !== undefined)
+    for (const constraint of skeleton.physics) constraint.pose.wind = pose.wind;
   for (const [name, alpha] of Object.entries(pose.alpha)) {
     const slot = skeleton.findSlot(name);
     if (slot) slot.pose.color.a = alpha;

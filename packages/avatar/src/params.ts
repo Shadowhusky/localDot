@@ -15,6 +15,8 @@ export interface AvatarParams {
   mouthOpen: number;
   breath: number;
   blush: number;
+  // A breeze on the hair physics; positive blows toward the viewer's right.
+  wind?: number;
   expressions: Record<string, number>;
 }
 
@@ -32,6 +34,7 @@ export const NEUTRAL_PARAMS: AvatarParams = {
   mouthOpen: 0,
   breath: 0,
   blush: 0,
+  wind: 0,
   expressions: {},
 };
 
@@ -64,6 +67,7 @@ export function sanitizeParams(p: AvatarParams): AvatarParams {
     mouthOpen: unit(p.mouthOpen, 0),
     breath: unit(p.breath, 0),
     blush: unit(p.blush, 0),
+    wind: signedUnit(p.wind ?? 0, 0),
     expressions,
   };
 }

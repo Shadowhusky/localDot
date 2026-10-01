@@ -188,6 +188,7 @@ export class AvatarController {
       mouthOpen: mouth.open,
       breath: this.#reducedMotion ? 0 : breathAt(t),
       blush: Math.max(offsets.blush ?? 0, expressions.blush ?? 0),
+      wind: this.#reducedMotion ? 0 : sway.wind * swayIn,
       expressions,
     });
   }

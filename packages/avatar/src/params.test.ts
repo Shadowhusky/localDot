@@ -36,6 +36,13 @@ describe("sanitizeParams", () => {
     expect(sanitizeParams({ ...NEUTRAL_PARAMS, headRoll: undefined }).headRoll).toBe(0);
   });
 
+  it("keeps the wind within ±1 and reads a missing or invalid wind as still air", () => {
+    expect(NEUTRAL_PARAMS.wind).toBe(0);
+    expect(sanitizeParams({ ...NEUTRAL_PARAMS, wind: -2 }).wind).toBe(-1);
+    expect(sanitizeParams({ ...NEUTRAL_PARAMS, wind: Number.NaN }).wind).toBe(0);
+    expect(sanitizeParams({ ...NEUTRAL_PARAMS, wind: undefined }).wind).toBe(0);
+  });
+
   it("drops expressions whose weight is zero or invalid", () => {
     const p = sanitizeParams({
       ...NEUTRAL_PARAMS,

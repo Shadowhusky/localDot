@@ -23,5 +23,7 @@ export interface SpineRigBinding {
     bodyDeg: number;
     breath: number;
     headRollDeg?: number;
+    // Physics wind on the hair at a full breeze.
+    hairWind?: number;
   };
 }

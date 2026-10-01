@@ -104,6 +104,15 @@ describe("bindingProblems", () => {
     expect(problemsOf({ ...toyBinding, head: null })).toEqual([]);
   });
 
+  it("names a wind range that is not a finite number", () => {
+    const windy = (hairWind: unknown) => ({
+      ...toyBinding,
+      ranges: { ...toyBinding.ranges, hairWind },
+    });
+    expect(problemsOf(windy(2))).toEqual([]);
+    expect(problemsOf(windy("2"))).toEqual(["ranges.hairWind must be a finite number"]);
+  });
+
   it("treats a null blush or arms as absent", () => {
     expect(problemsOf({ ...toyBinding, blush: null, arms: null })).toEqual([]);
   });
@@ -164,6 +173,14 @@ describe("applyPose", () => {
     // The iris sits 40 left of and 110 above the pivot: a 10° roll toward the right carries it
     // 40·(1 − cos 10°) + 110·sin 10° ≈ 19.71 to the right.
     expect((rolled.iris?.worldX ?? 0) - (level.iris?.worldX ?? 0)).toBeCloseTo(19.71, 2);
+  });
+
+  it("sets the wind on every physics constraint", () => {
+    const skeleton = toy();
+    const windy = { ...toyBinding, ranges: { ...toyBinding.ranges, hairWind: 3 } };
+    applyPose(skeleton, mapParams({ ...NEUTRAL_PARAMS, wind: 0.5 }, windy));
+    expect(skeleton.physics.length).toBeGreaterThan(0);
+    for (const constraint of skeleton.physics) expect(constraint.pose.wind).toBe(1.5);
   });
 
   it("offsets bones from their setup pose without accumulating", () => {

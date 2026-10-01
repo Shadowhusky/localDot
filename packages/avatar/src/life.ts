@@ -66,12 +66,12 @@ export class BlinkSchedule {
   }
 }
 
-// Head drift (x across, y up), a body lean and a head roll. Each sums two sines with periods of
-// 6–14 s, far enough apart in frequency that the two never cancel for long.
+// Head drift (x across, y up), a body lean, a head roll and a breeze on the hair. Each sums two
+// sines with periods of 6–14 s, far enough apart in frequency that the two never cancel for long.
 export function swayAt(
   tMs: number,
   seed: number,
-): { x: number; y: number; body: number; roll: number } {
+): { x: number; y: number; body: number; roll: number; wind: number } {
   const random = mulberry32(seed);
   const t = tMs / 1000;
   const wave = (amplitude: number, hz: number) =>
@@ -83,5 +83,6 @@ export function swayAt(
     y: slow(0.05) + fast(0.03),
     body: fast(0.32) + slow(0.13),
     roll: wave(0.55, 0.09 + random() * 0.02) + fast(0.2),
+    wind: fast(0.6) + slow(0.4),
   };
 }

@@ -101,5 +101,7 @@ export function bindingProblems(b: SpineRigBinding, data: SkeletonData): string[
   for (const key of RANGES) {
     if (!Number.isFinite(b.ranges[key])) problems.push(`ranges.${key} must be a finite number`);
   }
+  if (b.ranges.hairWind !== undefined && !Number.isFinite(b.ranges.hairWind))
+    problems.push("ranges.hairWind must be a finite number");
   return problems;
 }

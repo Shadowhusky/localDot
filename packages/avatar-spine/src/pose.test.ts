@@ -35,6 +35,12 @@ describe("mapParams", () => {
     expect(map({ headRoll: 1 }).bones.head).toBeUndefined();
   });
 
+  it("blows on the hair physics within the binding's wind range, and not at all without one", () => {
+    const windy = { ...toyBinding, ranges: { ...toyBinding.ranges, hairWind: 2 } };
+    expect(mapParams(frame({ wind: -0.5 }), windy).wind).toBe(-1);
+    expect(map({ wind: 1 }).wind).toBeUndefined();
+  });
+
   it("moves irises and brows within their ranges", () => {
     const pose = map({ eyeX: 1, eyeY: -1, brow: 1 });
     expect(pose.bones["iris-l"]).toEqual({ x: 6, y: -4 });

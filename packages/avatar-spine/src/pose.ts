@@ -13,6 +13,7 @@ export interface RigPose {
   bones: Record<string, BoneOffset>;
   attachments: Record<string, string | null>;
   alpha: Record<string, number>;
+  wind?: number;
 }
 
 export type EyeState = "open" | "half" | "closed" | "smile";
@@ -50,6 +51,7 @@ export function mapParams(p: AvatarParams, b: SpineRigBinding): RigPose {
     scaleY: 1 + p.breath * b.ranges.breath,
   };
   if (b.head) pose.bones[b.head] = { rotation: -(p.headRoll ?? 0) * (b.ranges.headRollDeg ?? 0) };
+  if (b.ranges.hairWind !== undefined) pose.wind = (p.wind ?? 0) * b.ranges.hairWind;
   const eyes = [
     [b.eyes.left, p.eyeOpenL],
     [b.eyes.right, p.eyeOpenR],
