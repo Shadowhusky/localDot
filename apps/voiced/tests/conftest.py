@@ -1,3 +1,4 @@
+import threading
 import time
 from collections.abc import Iterator
 
@@ -48,20 +49,45 @@ def client(app_engines: Engines) -> TestClient:
 
 
 class FakeSynth:
-    """Alternating ±0.5 chunks of 0.1 s; can fail at a chunk or take its time per chunk."""
+    """Alternating ±0.5 chunks of 0.1 s; can fail at a chunk, garble one, or take its time per chunk.
+
+    With a gate, every chunk after the first waits for it to open. `decoded` names each chunk's sentence;
+    `threads` names the thread that ran each step of a stream, its close included.
+    """
 
     sample_rate = 24_000
 
-    def __init__(self, chunks: int = 2, fail_at: int | None = None, delay_s: float = 0.0) -> None:
+    def __init__(
+        self,
+        chunks: int = 2,
+        fail_at: int | None = None,
+        delay_s: float = 0.0,
+        garbled_at: int | None = None,
+        gate: threading.Event | None = None,
+    ) -> None:
         self.chunks = chunks
         self.fail_at = fail_at
         self.delay_s = delay_s
+        self.garbled_at = garbled_at
+        self.gate = gate
         self.spoken: list[tuple[str, str]] = []
+        self.decoded: list[str] = []
+        self.threads: list[str] = []
 
     def stream(self, text: str, lang: str) -> Iterator[np.ndarray]:
         self.spoken.append((text, lang))
-        for i in range(self.chunks):
-            if self.fail_at == i:
-                raise RuntimeError("model fell over")
-            time.sleep(self.delay_s)
-            yield np.full(2400, 0.5 if i % 2 == 0 else -0.5, dtype=np.float32)
+        try:
+            for i in range(self.chunks):
+                self.threads.append(threading.current_thread().name)
+                if i > 0 and self.gate is not None:
+                    self.gate.wait(RECEIVE_DEADLINE_S)
+                if self.fail_at == i:
+                    raise RuntimeError("model fell over")
+                time.sleep(self.delay_s)
+                self.decoded.append(text)
+                if self.garbled_at == i:
+                    yield np.array(["static"])
+                else:
+                    yield np.full(2400, 0.5 if i % 2 == 0 else -0.5, dtype=np.float32)
+        finally:
+            self.threads.append(threading.current_thread().name)

@@ -25,13 +25,14 @@ log = logging.getLogger(__name__)
 
 def create_app(settings: Settings, engines: Engines, worker: Worker | None = None) -> ASGIApp:
     model_worker = worker or Worker()
+    tts_lock = asyncio.Lock()
 
     async def health(_: Request) -> JSONResponse:
         return JSONResponse({"ok": True, "voice": engines.voice, "slots": engines.status()})
 
     async def tts(socket: WebSocket) -> None:
         await accept(socket)
-        await TtsSession(socket, engines, model_worker).run()
+        await TtsSession(socket, engines, model_worker, tts_lock).run()
 
     @asynccontextmanager
     async def lifespan(_: Starlette) -> AsyncIterator[None]:
