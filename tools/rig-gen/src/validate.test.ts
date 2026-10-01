@@ -28,6 +28,25 @@ describe("rigProblems", () => {
     expect(problems).toContain('physics on unknown bone "ghost"');
   });
 
+  it("names a bone whose inherit mode Spine does not have", () => {
+    const rig = toyRig();
+    rig.bones.push({
+      name: "spin",
+      parent: "head",
+      at: { x: 0, y: 0 },
+      inherit: "noRotation" as RigDescription["bones"][number]["inherit"],
+    });
+    expect(rigProblems(rig)).toEqual(['bone "spin" has an unknown inherit mode "noRotation"']);
+    rig.bones.pop();
+    rig.bones.push({
+      name: "level",
+      parent: "head",
+      at: { x: 0, y: 0 },
+      inherit: "onlyTranslation",
+    });
+    expect(rigProblems(rig)).toEqual([]);
+  });
+
   it("reports missing structure without crashing", () => {
     const problems = rigProblems({});
     expect(problems).toContain("bones must be an array");

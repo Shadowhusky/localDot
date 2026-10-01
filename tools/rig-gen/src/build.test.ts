@@ -1,4 +1,4 @@
-import type { MeshAttachment, Slot } from "@esotericsoftware/spine-core";
+import { type MeshAttachment, Physics, type Slot } from "@esotericsoftware/spine-core";
 import { describe, expect, it } from "vitest";
 import { buildSkeleton, tipWeight } from "./build.ts";
 import { boneWorlds, toWorld } from "./space.ts";
@@ -29,6 +29,23 @@ describe("buildSkeleton", () => {
       x: -40,
       y: 110,
     });
+  });
+
+  it("passes a bone's inherit mode to Spine, which then keeps the bone level as its parents roll", () => {
+    const rig = toyRig();
+    const tip = rig.bones.find((b) => b.name === "hair-tip");
+    if (tip) tip.inherit = "noRotationOrReflection";
+    const built = buildSkeleton(rig);
+    expect(built.bones.find((b) => b.name === "hair-tip")).toMatchObject({
+      inherit: "noRotationOrReflection",
+    });
+    expect(built.bones.find((b) => b.name === "head")).not.toHaveProperty("inherit");
+    const skeleton = loadSkeleton(built);
+    const head = skeleton.findBone("head");
+    if (head) head.pose.rotation = 10;
+    skeleton.updateWorldTransform(Physics.none);
+    expect(head?.appliedPose.getWorldRotationX()).toBeCloseTo(10, 6);
+    expect(skeleton.findBone("hair-tip")?.appliedPose.getWorldRotationX()).toBeCloseTo(0, 6);
   });
 
   it("keeps parts in draw order and leaves hidden slots empty", () => {

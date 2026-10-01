@@ -14,7 +14,7 @@ type Json = Record<string, unknown>;
 
 export interface SpineSkeletonJson {
   skeleton: { spine: string; x: number; y: number; width: number; height: number; images: string };
-  bones: { name: string; parent?: string; x?: number; y?: number }[];
+  bones: { name: string; parent?: string; x?: number; y?: number; inherit?: string }[];
   slots: { name: string; bone: string; attachment?: string }[];
   constraints: Json[];
   skins: { name: string; attachments: Record<string, Record<string, Json>> }[];
@@ -176,7 +176,8 @@ export function buildSkeleton(desc: RigDescription): SpineSkeletonJson {
       { name: "root" },
       ...desc.bones.map((b) => {
         const parent = b.parent ?? "root";
-        return { name: b.name, parent, ...relative(worldOf(b.name), parent) };
+        const inherit = b.inherit ? { inherit: b.inherit } : {};
+        return { name: b.name, parent, ...relative(worldOf(b.name), parent), ...inherit };
       }),
     ],
     slots: desc.parts.map((p) =>

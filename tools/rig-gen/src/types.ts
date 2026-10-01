@@ -10,11 +10,22 @@ export interface Box {
   h: number;
 }
 
+// Spine's bone inherit modes: which parts of the parents' transforms a bone takes on.
+export const INHERIT_MODES = [
+  "normal",
+  "onlyTranslation",
+  "noRotationOrReflection",
+  "noScale",
+  "noScaleOrReflection",
+] as const;
+export type Inherit = (typeof INHERIT_MODES)[number];
+
 export interface BoneSpec {
   name: string;
   parent?: string;
   at: CanvasPoint;
   depth?: number;
+  inherit?: Inherit;
 }
 
 export interface MeshSpec {

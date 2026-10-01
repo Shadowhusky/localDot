@@ -1,4 +1,4 @@
-import type { Box, RigDescription } from "./types.ts";
+import { type Box, INHERIT_MODES, type RigDescription } from "./types.ts";
 
 export class RigError extends Error {
   readonly problems: string[];
@@ -63,6 +63,8 @@ export function rigProblems(input: unknown): string[] {
     if (!isPoint(bone.at)) problems.push(`bone "${bone.name}" has a non-finite position`);
     if (bone.depth !== undefined && !finite(bone.depth))
       problems.push(`bone "${bone.name}" has a non-finite depth`);
+    if (bone.inherit !== undefined && !INHERIT_MODES.includes(bone.inherit))
+      problems.push(`bone "${bone.name}" has an unknown inherit mode "${bone.inherit}"`);
     bones.add(bone.name);
   }
   const names = new Set<string>();
