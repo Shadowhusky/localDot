@@ -84,6 +84,16 @@ describe("SpineRenderer.mount", () => {
     expect(el.querySelector("canvas")).toBeNull();
   });
 
+  it("names a malformed binding's missing fields instead of failing on them", async () => {
+    pixi.from.mockReturnValueOnce(toySpine());
+    const binding = JSON.parse(
+      JSON.stringify({ ...toyBinding, eyes: { right: toyBinding.eyes.right } }),
+    );
+    await expect(new SpineRenderer(options(binding)).mount(host())).rejects.toThrow(
+      "avatar rig does not match its binding: eyes.left must be an object",
+    );
+  });
+
   it("keeps the app and shows its canvas when the pack matches", async () => {
     const spine = toySpine();
     pixi.from.mockReturnValueOnce(spine);

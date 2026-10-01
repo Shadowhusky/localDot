@@ -2,7 +2,57 @@ import { type SkeletonData, SliderData } from "@esotericsoftware/spine-core";
 import type { SpineRigBinding } from "./binding.ts";
 import { EYE_COMPOSITES, MOUTH_VARIANTS } from "./pose.ts";
 
+const SIDES = ["left", "right"] as const;
+const RANGES = ["irisX", "irisY", "brow", "bodyDeg", "breath"] as const;
+
+const isObject = (v: unknown): v is Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v);
+
+// Bindings are pack JSON with no schema, and spine-core's lookups throw on a missing or empty name.
+function structureProblems(b: unknown): string[] {
+  if (!isObject(b)) return ["the binding must be an object"];
+  const problems: string[] = [];
+  const name = (path: string, value: unknown) => {
+    if (typeof value !== "string" || value === "")
+      problems.push(`${path} must be a non-empty string`);
+  };
+  const names = (path: string, value: unknown) => {
+    if (!Array.isArray(value)) problems.push(`${path} must be an array`);
+    else for (const [i, item] of value.entries()) name(`${path}[${i}]`, item);
+  };
+  const object = (path: string, value: unknown) => {
+    if (isObject(value)) return value;
+    problems.push(`${path} must be an object`);
+    return undefined;
+  };
+  name("headX", b.headX);
+  name("headY", b.headY);
+  name("body", b.body);
+  const eyes = object("eyes", b.eyes);
+  for (const side of SIDES) {
+    const eye = eyes && object(`eyes.${side}`, eyes[side]);
+    if (!eye) continue;
+    name(`eyes.${side}.iris`, eye.iris);
+    names(`eyes.${side}.open`, eye.open);
+    name(`eyes.${side}.state`, eye.state);
+  }
+  const brows = object("brows", b.brows);
+  for (const side of SIDES) if (brows) name(`brows.${side}`, brows[side]);
+  name("mouth", b.mouth);
+  if (b.blush != null) name("blush", b.blush);
+  const arms = b.arms == null ? undefined : object("arms", b.arms);
+  if (arms) {
+    name("arms.slot", arms.slot);
+    name("arms.variant", arms.variant);
+    names("arms.hide", arms.hide);
+  }
+  object("ranges", b.ranges);
+  return problems;
+}
+
 export function bindingProblems(b: SpineRigBinding, data: SkeletonData): string[] {
+  const structure = structureProblems(b);
+  if (structure.length > 0) return structure;
   const problems: string[] = [];
   const slider = (name: string) => {
     if (!data.findConstraint(name, SliderData)) problems.push(`slider "${name}" not found`);
@@ -42,7 +92,8 @@ export function bindingProblems(b: SpineRigBinding, data: SkeletonData): string[
     attachment(b.arms.slot, `${b.arms.slot}-${b.arms.variant}`);
     for (const slot of b.arms.hide) attachment(slot, slot);
   }
-  if (!Object.values(b.ranges).every((v) => Number.isFinite(v)))
-    problems.push("ranges must be finite numbers");
+  for (const key of RANGES) {
+    if (!Number.isFinite(b.ranges[key])) problems.push(`ranges.${key} must be a finite number`);
+  }
   return problems;
 }
