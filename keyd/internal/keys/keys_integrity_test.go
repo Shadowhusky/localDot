@@ -1014,3 +1014,29 @@ func TestBindingsShareNoOperationsOrURL(t *testing.T) {
 		t.Error("editing a local route changed another binding")
 	}
 }
+
+func TestABaseURLErrorNamesTheFieldNotTheURL(t *testing.T) {
+	const secret = "real-secret-value-for-test"
+	for _, base := range []string{
+		"http://api.example.test/" + secret,
+		"https://u:" + secret + "@api.example.test/v1",
+		"https://" + secret + "@api.example.test/v1",
+		"https://api.example.test/v1?key=" + secret,
+		"https://api.example.test/v1#" + secret,
+		"https://api.example.test:8443/" + secret,
+		"https://api.example.test/" + secret + "/../v1",
+		"https://" + secret + "/v1",
+		"https://" + secret + ".local/v1",
+		"https://api.example.test/" + secret + "%zz",
+		"https://API.EXAMPLE.TEST/" + secret,
+	} {
+		_, err := FromRecord(vault.Record{ID: "x", Kind: vault.KindLLM, Provider: "openai-compatible", BaseURL: base})
+		if err == nil {
+			t.Errorf("base URL %q accepted", base)
+			continue
+		}
+		if msg := err.Error(); strings.Contains(msg, secret) || strings.Contains(strings.ToLower(msg), "example.test") || !strings.Contains(msg, "base URL") {
+			t.Errorf("FromRecord with base URL %q: %q, want the field and the reason only", base, msg)
+		}
+	}
+}

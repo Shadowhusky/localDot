@@ -187,16 +187,34 @@ func llmBinding(rec vault.Record) (Binding, error) {
 		base = strings.TrimSuffix(rec.BaseURL, "/")
 	}
 	u, err := url.Parse(base)
-	if err != nil || u.Scheme != "https" || u.User != nil || u.RawQuery != "" || u.Fragment != "" || u.Port() != "" {
-		return Binding{}, fmt.Errorf("keys: base URL %q must be https://host/path without a port, user, query or fragment", base)
-	}
-	if err := policy.ValidBindingHost(u.Hostname()); err != nil {
-		return Binding{}, err
-	}
-	if u.Path != "" && path.Clean(u.Path) != u.Path {
-		return Binding{}, fmt.Errorf("keys: base URL path %q is not clean", u.Path)
+	if reason := badBaseURL(u, err); reason != "" {
+		return Binding{}, errors.New("keys: base URL " + reason)
 	}
 	return Binding{SecretID: rec.ID, Tag: p.tag, Route: rec.ID, Upstream: u, Ops: slices.Clone(p.ops), Header: p.header, Format: p.format}, nil
+}
+
+// badBaseURL says what is wrong with a base URL without repeating any of it: a user may have
+// pasted a key into it.
+func badBaseURL(u *url.URL, err error) string {
+	switch {
+	case err != nil:
+		return "does not parse"
+	case u.Scheme != "https":
+		return "must use https"
+	case u.User != nil:
+		return "must not carry a user or password"
+	case u.Port() != "":
+		return "must not name a port"
+	case u.RawQuery != "":
+		return "must not carry a query"
+	case u.Fragment != "":
+		return "must not carry a fragment"
+	case policy.ValidBindingHost(u.Hostname()) != nil:
+		return "host is not a public, lowercase host name"
+	case u.Path != "" && path.Clean(u.Path) != u.Path:
+		return "path is not clean"
+	}
+	return ""
 }
 
 func httpBinding(rec vault.Record) (Binding, error) {
