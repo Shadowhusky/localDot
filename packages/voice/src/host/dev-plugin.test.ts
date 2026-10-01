@@ -3,10 +3,13 @@ import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
-import { voiceDevPlugin } from "./dev-plugin.ts";
+import type { TtsServerMessage } from "../wire.ts";
+import { createTtsRouter, voiceDevPlugin } from "./dev-plugin.ts";
 import { FakeChild } from "./fake-voiced.ts";
+import { type Budget, UNLIMITED } from "./router.ts";
+import { voiceSettingsFromEnv } from "./settings.ts";
 import type { SpawnLike } from "./supervisor.ts";
 
 const servers: Server[] = [];
@@ -120,5 +123,66 @@ describe("voiceDevPlugin", () => {
       { type: "error", id: 1, code: "unavailable", message: "no voice is available" },
     ]);
     expect(spawned).toHaveLength(0);
+  });
+});
+
+describe("createTtsRouter", () => {
+  const collect = () => {
+    const messages: TtsServerMessage[] = [];
+    return {
+      messages,
+      out: { frame: () => {}, message: (m: TtsServerMessage) => messages.push(m) },
+    };
+  };
+
+  it("answers every sentence as unavailable when voice output is off", async () => {
+    const { messages, out } = collect();
+    const router = createTtsRouter(
+      voiceSettingsFromEnv({ LOCALDOT_VOICE_OUTPUT: "off" }),
+      async () => null,
+      out,
+      UNLIMITED,
+    );
+    router.handle({ type: "say", id: 1, text: "Hi.", lang: "en" });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(messages).toEqual([
+      { type: "ready", voice: "none" },
+      { type: "error", id: 1, code: "unavailable", message: "no voice is available" },
+    ]);
+  });
+
+  it("skips an opted-in cloud voice that has no credentials, without calling out", async () => {
+    const { messages, out } = collect();
+    const router = createTtsRouter(
+      voiceSettingsFromEnv({ LOCALDOT_VOICE_OUTPUT: "azure", LOCALDOT_VOICE_FALLBACK: "azure" }),
+      async () => null,
+      out,
+      UNLIMITED,
+    );
+    router.handle({ type: "say", id: 1, text: "Hi.", lang: "en" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(messages.map((m) => (m.type === "notice" ? m.code : m.type))).toEqual([
+      "voice_offline",
+      "error",
+    ]);
+  });
+
+  it("names a configured cloud voice to the page without waking voiced", () => {
+    const NO_CLOUD: Budget = { allows: () => false, record: () => {} };
+    for (const [output, keys] of [
+      ["azure", { AZURE_SPEECH_KEY: "a-key", AZURE_SPEECH_REGION: "eastus" }],
+      ["elevenlabs", { ELEVENLABS_API_KEY: "e-key", ELEVENLABS_VOICE_ID: "v1" }],
+    ] as const) {
+      const { messages, out } = collect();
+      const endpoint = vi.fn(async () => null);
+      createTtsRouter(
+        voiceSettingsFromEnv({ LOCALDOT_VOICE_OUTPUT: output, ...keys }),
+        endpoint,
+        out,
+        NO_CLOUD,
+      ).close();
+      expect(messages).toEqual([{ type: "ready", voice: output }]);
+      expect(endpoint).not.toHaveBeenCalled();
+    }
   });
 });

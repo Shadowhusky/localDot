@@ -1,14 +1,20 @@
 import { Server } from "node:http";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { AzureTts } from "./azure.ts";
+import { UsageLedger } from "./budget.ts";
+import { ElevenLabsTts, voicedVisemes } from "./elevenlabs.ts";
 import { attachVoiceGateway, isLocalPage } from "./gateway.ts";
 import { LocalTts, type VoicedEndpoint } from "./local.ts";
 import {
-  type OutputSetting,
+  type Budget,
   type ProviderKind,
   providerOrder,
   type TtsOutput,
   type TtsProvider,
   TtsRouter,
 } from "./router.ts";
+import { type VoiceSettings, voiceSettingsFromEnv } from "./settings.ts";
 import { type SpawnLike, VoicedSupervisor } from "./supervisor.ts";
 
 // voiced imports its model libraries on start, so the first sentence may wait this long for it.
@@ -26,19 +32,27 @@ export function voicedCommand(voicedDir: string): string[] {
 }
 
 export function createTtsRouter(
-  output: OutputSetting,
+  settings: VoiceSettings,
   endpoint: () => Promise<VoicedEndpoint | null>,
   out: TtsOutput,
+  budget: Budget,
 ): TtsRouter {
+  const { azure, elevenlabs } = settings;
   const local = new LocalTts(endpoint, out);
-  const providers: Partial<Record<ProviderKind, TtsProvider>> = { local };
-  const order = providerOrder(output, "none");
+  const providers: Partial<Record<ProviderKind, TtsProvider>> = {
+    local,
+    ...(azure ? { azure: new AzureTts(() => azure, out) } : {}),
+    ...(elevenlabs
+      ? { elevenlabs: new ElevenLabsTts(() => elevenlabs, out, voicedVisemes(endpoint)) }
+      : {}),
+  };
+  const order = providerOrder(settings.output, settings.fallback);
   const first = order.find((kind) => providers[kind]);
   // voiced's greeting names the local voice (pack or stock), so connecting early tells the page
   // which voice will speak; any other first voice, or none, is named here instead.
   if (first === "local") void local.warm();
   else out.message({ type: "ready", voice: first ?? "none" });
-  return new TtsRouter({ order, providers, out });
+  return new TtsRouter({ order, providers, out, budget });
 }
 
 // Plays the daemon's part for the avatar harness: starts voiced on first use and serves /voice.
@@ -59,12 +73,14 @@ export function voiceDevPlugin(options: VoiceDevOptions) {
         (await supervisor.whenReady(READY_WAIT_MS))
           ? { host: supervisor.host, token: supervisor.token }
           : null;
-      const output: OutputSetting = env.LOCALDOT_VOICE_OUTPUT === "off" ? "off" : "local";
+      const settings = voiceSettingsFromEnv(env);
+      const home = env.LOCALDOT_HOME ?? join(homedir(), ".localdot");
+      const ledger = new UsageLedger(join(home, "voice-usage.json"), settings.limits);
       const detach = attachVoiceGateway(http, {
         authorize: (request) => isLocalPage(request, options.port),
         tts: (out) => {
-          if (output !== "off") supervisor.start();
-          return createTtsRouter(output, endpoint, out);
+          if (settings.output !== "off") supervisor.start();
+          return createTtsRouter(settings, endpoint, out, ledger);
         },
       });
       http.once("close", () => {

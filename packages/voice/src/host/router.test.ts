@@ -151,6 +151,30 @@ describe("TtsRouter", () => {
     ]);
   });
 
+  it("tells the page again when the voice goes offline after it came back", async () => {
+    const { messages, out } = collect();
+    let up = false;
+    const local = new FakeProvider("local", async () => {
+      if (!up) throw new ProviderError("unavailable", "boom");
+    });
+    const router = new TtsRouter({ order: ["local"], providers: { local }, out });
+    router.handle(say(1));
+    await settle();
+    up = true;
+    router.handle(say(2));
+    await settle();
+    up = false;
+    router.handle(say(3));
+    await settle();
+    expect(local.spoken).toEqual([2]);
+    expect(messages).toEqual([
+      { type: "notice", code: "voice_offline", message: expect.any(String) },
+      { type: "error", id: 1, code: "unavailable", message: expect.any(String) },
+      { type: "notice", code: "voice_offline", message: expect.any(String) },
+      { type: "error", id: 3, code: "unavailable", message: expect.any(String) },
+    ]);
+  });
+
   it("does not switch voices mid-sentence once audio went out", async () => {
     const { messages, out } = collect();
     const azure = new FakeProvider("azure");

@@ -108,6 +108,8 @@ export class TtsRouter {
       }
       try {
         await provider.speak(sentence, signal);
+        // The page drops its offline note once the voice is back, so a later outage needs a new one.
+        this.#noticed.delete("voice_offline");
         if (kind !== "local") this.#budget.record(kind, sentence.text);
         return;
       } catch (error) {

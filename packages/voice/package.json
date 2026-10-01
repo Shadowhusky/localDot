@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@localdot/avatar": "workspace:*",
+    "microsoft-cognitiveservices-speech-sdk": "1.52.0",
     "ws": "8.22.0"
   },
   "devDependencies": {
