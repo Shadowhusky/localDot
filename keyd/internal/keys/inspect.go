@@ -202,6 +202,10 @@ func scan(u *url.URL, h http.Header) []occurrence {
 				for _, t := range surrogate.Find(user + "\n" + pass) {
 					out = append(out, occurrence{token: t, header: canonical, basic: true})
 				}
+			} else {
+				for _, t := range surrogate.Find(looseBasic(value)) {
+					out = append(out, occurrence{token: t, header: canonical})
+				}
 			}
 		}
 	}
@@ -218,12 +222,47 @@ func order(occ []occurrence) []string {
 	return tokens
 }
 
+// looseBasic decodes a Basic credential as the most lenient servers do: any whitespace after the
+// scheme, the scheme in any case, either base64 alphabet, any padding, stray bytes skipped and no
+// colon needed. Its result is only searched for surrogates; placed refuses every one it finds.
+func looseBasic(value string) string {
+	f := strings.Fields(value)
+	if len(f) < 2 || !strings.EqualFold(f[0], "Basic") {
+		return ""
+	}
+	var b strings.Builder
+	for _, c := range []byte(strings.Join(f[1:], "")) {
+		switch {
+		case c == '-':
+			b.WriteByte('+')
+		case c == '_':
+			b.WriteByte('/')
+		case c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z', c >= '0' && c <= '9', c == '+', c == '/':
+			b.WriteByte(c)
+		}
+	}
+	s := b.String()
+	if len(s)%4 == 1 {
+		s = s[:len(s)-1]
+	}
+	raw, err := base64.RawStdEncoding.DecodeString(s)
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+var strictBase64 = base64.StdEncoding.Strict()
+
+// decodeBasic reads only canonical Basic: the scheme in ASCII letters of any case, one space, and
+// standard base64 with its padding and zero padding bits.
 func decodeBasic(value string) (user, pass string, ok bool) {
 	scheme, encoded, found := strings.Cut(value, " ")
-	if !found || !strings.EqualFold(scheme, "Basic") {
+	// Five bytes can only be ASCII here; EqualFold alone would also take U+017F for the s.
+	if !found || len(scheme) != len("Basic") || !strings.EqualFold(scheme, "Basic") {
 		return "", "", false
 	}
-	raw, err := base64.StdEncoding.DecodeString(encoded)
+	raw, err := strictBase64.DecodeString(encoded)
 	if err != nil {
 		return "", "", false
 	}

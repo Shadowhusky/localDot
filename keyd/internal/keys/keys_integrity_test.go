@@ -769,3 +769,58 @@ func TestABasicHeaderCarriesAtMostOneUserAndOnePasswordSecret(t *testing.T) {
 		wantDeny(t, c.name, at(t, r, d, "GET", "/", hdr("Authorization", basicOf(c.user, c.pass))), ReasonMisplacedSurrogate)
 	}
 }
+
+func TestASurrogateInABasicCredentialIsFoundHoweverItIsSpelled(t *testing.T) {
+	f := newFixture(t)
+	git := https("git.example.test")
+	// "~~~???" encodes to fn5+Pz8/, so the URL-safe spellings differ from the standard one.
+	cred := "~~~???:" + f.pass.Token
+	std := base64.StdEncoding.EncodeToString([]byte(cred))
+	const alphabet = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
+	last := strings.IndexByte(std, '=') - 1
+	padBits := std[:last] + string(alphabet[strings.IndexByte(alphabet, std[last])+1]) + std[last+1:]
+	if got, err := base64.StdEncoding.DecodeString(padBits); err != nil || string(got) != cred {
+		t.Fatalf("padBits does not decode to the credential: %v", err)
+	}
+	unpadded := base64.RawStdEncoding.EncodeToString([]byte(cred + "zz"))
+	unknown, _ := surrogate.Mint("key")
+	for _, c := range []struct {
+		name, value, reason string
+		d                   Dest
+	}{
+		{"two spaces after the scheme", "Basic  " + std, ReasonMisplacedSurrogate, git},
+		{"a tab after the scheme", "Basic" + tab + std, ReasonMisplacedSurrogate, git},
+		{"a tab and a space after the scheme", "Basic" + tab + " " + std, ReasonMisplacedSurrogate, git},
+		{"a lower-case scheme and two spaces", "basic  " + std, ReasonMisplacedSurrogate, git},
+		{"no padding", "Basic " + strings.TrimRight(std, "="), ReasonMisplacedSurrogate, git},
+		{"the URL-safe alphabet", "Basic " + base64.URLEncoding.EncodeToString([]byte(cred)), ReasonMisplacedSurrogate, git},
+		{"the URL-safe alphabet without padding", "Basic " + base64.RawURLEncoding.EncodeToString([]byte(cred)), ReasonMisplacedSurrogate, git},
+		{"no colon", "Basic " + base64.StdEncoding.EncodeToString([]byte(f.pass.Token)), ReasonMisplacedSurrogate, git},
+		{"no colon, a user", "Basic " + base64.StdEncoding.EncodeToString([]byte(f.user.Token)), ReasonMisplacedSurrogate, https("pay.example.test")},
+		{"trailing junk", "Basic " + std + ",x", ReasonMisplacedSurrogate, git},
+		{"a trailing word", "Basic " + std + " x", ReasonMisplacedSurrogate, git},
+		{"extra padding", "Basic " + std + "=", ReasonMisplacedSurrogate, git},
+		{"a space inside", "Basic " + std[:8] + " " + std[8:], ReasonMisplacedSurrogate, git},
+		{"padding bits set", "Basic " + padBits, ReasonMisplacedSurrogate, git},
+		{"a long s in the scheme", "Ba" + string(rune(0x17f)) + "ic " + std, ReasonMisplacedSurrogate, git},
+		{"a stray character after an unpadded credential", "Basic " + unpadded + "x", ReasonMisplacedSurrogate, git},
+		{"an unknown surrogate without a colon", "basic " + base64.RawURLEncoding.EncodeToString([]byte(unknown)), ReasonUnknownSurrogate, git},
+	} {
+		wantDeny(t, c.name, at(t, f.r, c.d, "GET", "/", hdr("Authorization", c.value)), c.reason)
+	}
+	hidden := "Basic  " + base64.StdEncoding.EncodeToString([]byte("x:"+f.raw.Token))
+	wantDeny(t, "a raw surrogate in a loose credential of another header", at(t, f.r, https(integrityHost), "GET", "/", hdr("X-Auth", hidden)), ReasonMisplacedSurrogate)
+	for _, scheme := range []string{"Basic ", "basic ", "BASIC "} {
+		wantAllow(t, scheme+"in canonical form", at(t, f.r, git, "GET", "/", hdr("Authorization", scheme+std)), 1)
+	}
+
+	r := NewRegistry()
+	rec := func(id, format string) vault.Record {
+		return vault.Record{ID: id, Kind: vault.KindHTTP, Hosts: []string{"basic.example.test"}, Header: "Authorization", Format: format}
+	}
+	u := mint(t, r, "c1", binding(t, rec("user", "basic-user")))
+	p := mint(t, r, "c1", binding(t, rec("pass", "basic-password")))
+	pair := base64.StdEncoding.EncodeToString([]byte(u + ":" + p))
+	wantDeny(t, "the user and password pair after two spaces", at(t, r, https("basic.example.test"), "GET", "/", hdr("Authorization", "Basic  "+pair)), ReasonMisplacedSurrogate)
+	wantDeny(t, "the user and password pair without padding", at(t, r, https("basic.example.test"), "GET", "/", hdr("Authorization", "Basic "+strings.TrimRight(base64.StdEncoding.EncodeToString([]byte(u+":"+p+"x")), "="))), ReasonMisplacedSurrogate)
+}
