@@ -8,3 +8,6 @@ coverage/
 !.env.example
 spikes/**/out/
 spikes/**/bin/
+.venv/
+__pycache__/
+.pytest_cache/
