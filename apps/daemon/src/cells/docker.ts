@@ -29,6 +29,13 @@ export interface DockerVersion {
   Arch: string;
 }
 
+// API versions compare as [major, minor] integers: read as decimals, 1.100 would sort below 1.47.
+export function compareApiVersions(a: string, b: string): number {
+  const [aMajor = Number.NaN, aMinor = Number.NaN] = a.replace(/^v/, "").split(".").map(Number);
+  const [bMajor = Number.NaN, bMinor = Number.NaN] = b.replace(/^v/, "").split(".").map(Number);
+  return aMajor - bMajor || aMinor - bMinor;
+}
+
 export function dockerSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   const host = env.DOCKER_HOST;
   const path = host?.startsWith("unix://") ? host.slice("unix://".length) : "";
@@ -43,8 +50,12 @@ export class DockerClient {
   }
 
   request<T = undefined>(req: DockerRequest): Promise<T> {
+    return this.#send<T>(`/${DOCKER_API}`, req);
+  }
+
+  #send<T>(prefix: string, req: DockerRequest): Promise<T> {
     const query = req.query ? `?${new URLSearchParams(req.query)}` : "";
-    const path = `/${DOCKER_API}${req.path}${query}`;
+    const path = `${prefix}${req.path}${query}`;
     return new Promise<T>((resolve, reject) => {
       const unreachable = (err: NodeJS.ErrnoException) =>
         reject(
@@ -113,6 +124,11 @@ export class DockerClient {
 
   version(): Promise<DockerVersion> {
     return this.request<DockerVersion>({ method: "GET", path: "/version" });
+  }
+
+  // Unversioned, so an engine that refuses DOCKER_API still says which API versions it serves.
+  engineVersion(): Promise<DockerVersion> {
+    return this.#send<DockerVersion>("", { method: "GET", path: "/version" });
   }
 }
 

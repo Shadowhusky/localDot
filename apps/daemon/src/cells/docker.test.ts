@@ -3,7 +3,13 @@ import { createServer, type RequestListener, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { DOCKER_API, DockerClient, DockerError, dockerSocketPath } from "./docker.ts";
+import {
+  compareApiVersions,
+  DOCKER_API,
+  DockerClient,
+  DockerError,
+  dockerSocketPath,
+} from "./docker.ts";
 
 interface Seen {
   method: string;
@@ -212,5 +218,19 @@ describe("DockerClient", () => {
 
   it("refuses an empty socket path, which Node would trade for TCP to localhost:80", () => {
     expect(() => new DockerClient("")).toThrow("the Docker socket path is empty");
+  });
+
+  it("asks for the engine's own version without the API prefix", async () => {
+    const engine = { Version: "26.1.4", ApiVersion: "1.45", MinAPIVersion: "1.24" };
+    const { socketPath, seen } = await fakeDocker(() => ({ status: 200, body: engine }));
+    await expect(new DockerClient(socketPath).engineVersion()).resolves.toEqual(engine);
+    expect(seen.map((s) => `${s.method} ${s.url}`)).toEqual(["GET /version"]);
+  });
+
+  it("compares API versions as integer pairs", () => {
+    expect(compareApiVersions("1.100", DOCKER_API)).toBeGreaterThan(0);
+    expect(compareApiVersions("1.45", "v1.47")).toBeLessThan(0);
+    expect(compareApiVersions("v1.47", "1.47")).toBe(0);
+    expect(compareApiVersions("2.0", "1.99")).toBeGreaterThan(0);
   });
 });

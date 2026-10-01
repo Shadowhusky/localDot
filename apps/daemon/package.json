@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "tsx watch src/main.ts",
+    "doctor": "tsx src/doctor-main.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit -p ."
   },

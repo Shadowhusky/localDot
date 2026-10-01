@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { compareApiVersions } from "../docker.ts";
 
 export interface FakeContainer {
   name: string;
@@ -49,6 +50,14 @@ export interface FakeDocker {
 
 const json = (status: number, body: unknown) => ({ status, body });
 const notFound = (what: string) => json(404, { message: `No such ${what}` });
+// Docker Desktop 4.60 answers /version at a refused API version with this, and no message.
+const refusedVersion = json(400, {
+  Platform: { Name: "Docker Desktop 4.60.0 (218231)" },
+  Version: "",
+  ApiVersion: "",
+  Os: "",
+  Arch: "",
+});
 // Docker decodes each path segment, so an encoded name reaches it as the name itself.
 const segment = (m: RegExpExecArray, i = 1) => decodeURIComponent(m[i] ?? "");
 
@@ -88,6 +97,19 @@ export async function startFakeDocker(
     HostConfig: c.body.HostConfig,
     NetworkSettings: { Ports: c.running ? c.ports : {}, Networks: c.networks },
   });
+
+  // The engine refuses a request at an API version outside its range; unversioned paths always pass.
+  function refusal(api: string, path: string): { status: number; body?: unknown } | undefined {
+    const { MinAPIVersion: min, ApiVersion: max } = state.version;
+    const tooOld = compareApiVersions(api, min) < 0;
+    if (!tooOld && compareApiVersions(api, max) <= 0) return undefined;
+    if (path === "/version") return refusedVersion;
+    return json(400, {
+      message: tooOld
+        ? `client version ${api} is too old. Minimum supported API version is ${min}, please upgrade your client to a newer version`
+        : `client version ${api} is too new. Maximum supported API version is ${max}`,
+    });
+  }
 
   function handle(
     method: string,
@@ -208,11 +230,14 @@ export async function startFakeDocker(
     });
     req.on("end", async () => {
       const url = new URL(req.url ?? "/", "http://docker");
-      const path = url.pathname.replace(/^\/v1\.\d+/, "");
+      const api = /^\/v(\d+\.\d+)\//.exec(url.pathname)?.[1];
+      const path = url.pathname.replace(/^\/v\d+\.\d+/, "");
       const body = text ? JSON.parse(text) : undefined;
       state.calls.push({ method: req.method ?? "", path, query: url.searchParams, body });
       await state.holds.get(`${req.method} ${path}`);
-      const out = handle(req.method ?? "", path, url.searchParams, body);
+      const out =
+        (api === undefined ? undefined : refusal(api, path)) ??
+        handle(req.method ?? "", path, url.searchParams, body);
       if (out.body === undefined) {
         res.writeHead(out.status);
         res.end();
