@@ -60,6 +60,7 @@ export class AvatarController {
   readonly #expressionChannels = new Map<string, SpringChannel>();
   readonly #moods = new Map<string, number>();
   #moodUntil = Number.NEGATIVE_INFINITY;
+  #gazeHoldUntil = Number.NEGATIVE_INFINITY;
 
   constructor(options: ControllerOptions, now: () => number = () => performance.now()) {
     this.#now = now;
@@ -107,6 +108,13 @@ export class AvatarController {
   }
 
   speak(track: SpeechTrack | null): void {
+    const t = this.#now();
+    const span = speechSpan(this.#track);
+    // A cleared or replaced track still holds her eyes on the user for the rest of its hold.
+    if (span && t >= span.from) {
+      const hold = Math.min(t, span.to) + SPEECH_GAZE_HOLD_MS;
+      this.#gazeHoldUntil = Math.max(this.#gazeHoldUntil, hold);
+    }
     this.#track = track && prepareTrack(track);
     if (this.#track === null) {
       this.#moods.clear();
@@ -202,6 +210,7 @@ export class AvatarController {
   }
 
   #speaking(t: number): boolean {
+    if (t <= this.#gazeHoldUntil) return true;
     const span = speechSpan(this.#track);
     return span !== null && t >= span.from && t <= span.to + SPEECH_GAZE_HOLD_MS;
   }

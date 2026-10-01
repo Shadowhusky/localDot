@@ -304,6 +304,43 @@ describe("AvatarController", () => {
     expect(previous.eyeX).toBeCloseTo(look.x, 2);
   });
 
+  it("keeps holding the user's eye when the track is cleared or the next sentence is queued", () => {
+    const looks = new GazeWander(1).looksUntil(60_000);
+    const look = looks.find(
+      (l, i) =>
+        l.at > 3000 && Math.abs(l.x) > 0.4 && ((looks[i + 1] as Look).at ?? 0) - l.at > 3500,
+    ) as Look;
+    const sentence = (startsAt: number) =>
+      prepareTrack({
+        lang: "en",
+        startsAt,
+        visemes: [
+          { t: 0, shape: "A" },
+          { t: 1000, shape: "rest" },
+        ],
+      });
+    const t0 = look.at + 100;
+    // Cleared the moment the audio ends: the hold still runs its 0.8 s.
+    const cleared = make();
+    cleared.run(t0);
+    cleared.avatar.speak(sentence(t0));
+    cleared.run(t0 + 1000);
+    cleared.avatar.speak(null);
+    for (let t = t0 + 1000; t <= t0 + 1790; t += FRAME_MS) {
+      expect(cleared.run(t).eyeX).toBeCloseTo(0, 2);
+    }
+    expect(cleared.run(t0 + 2600).eyeX).toBeCloseTo(look.x, 2);
+    // The next sentence handed over 300 ms after the last syllable, starting 500 ms later.
+    const queued = make();
+    queued.run(t0);
+    queued.avatar.speak(sentence(t0));
+    queued.run(t0 + 1300);
+    queued.avatar.speak(sentence(t0 + 1800));
+    for (let t = t0 + 1300; t <= t0 + 2800; t += FRAME_MS) {
+      expect(queued.run(t).eyeX).toBeCloseTo(0, 2);
+    }
+  });
+
   it("lets approval, a pointer or a target win over speech, but not the lower sources", () => {
     const speaking = () => {
       const made = make({ reducedMotion: true });
