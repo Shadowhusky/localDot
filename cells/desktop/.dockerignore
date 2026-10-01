@@ -1,0 +1,4 @@
+desktopd/node_modules
+desktopd/src
+desktopd/*.test.ts
+scripts

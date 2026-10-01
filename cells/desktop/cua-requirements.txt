@@ -1,0 +1,2 @@
+# cua-driver 0.30.4 and its dependency closure for linux/arm64, every wheel pinned by sha256
+cua-driver==0.30.4 --hash=sha256:9d7c9bb3eb6df2b52a93f711aa375bdf2c7fbc02fa925f15599b2986e7183f08
