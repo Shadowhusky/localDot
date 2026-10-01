@@ -1,0 +1,14 @@
+{
+  "name": "@localdot/spike-s5-models",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "ai": "7.0.123",
+    "@ai-sdk/anthropic": "4.0.69",
+    "@ai-sdk/openai": "4.0.82",
+    "@ai-sdk/google": "4.0.86",
+    "@ai-sdk/openai-compatible": "3.0.60",
+    "sharp": "0.35.5",
+    "zod": "4.6.5"
+  }
+}
