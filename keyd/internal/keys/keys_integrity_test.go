@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -661,4 +662,60 @@ func TestTheRegistryIsSafeForConcurrentUse(t *testing.T) {
 		}()
 	}
 	wg.Wait()
+}
+
+func TestAFailedSwapLeavesEveryHeaderUntouched(t *testing.T) {
+	f := newFixture(t)
+	values := map[string]string{"api": "real-bearer-value", "dd-api": "real-raw-value", "dd-app": "real-app-value", "pay": "real-user-value"}
+	boom := errors.New("keychain locked")
+	h := hdr("Dd-Api-Key", f.raw.Token, "Dd-Application-Key", f.rawApp.Token)
+	v := at(t, f.r, https(integrityHost), "GET", "/", h)
+	if !v.Allow || len(v.Swaps) != 2 {
+		t.Fatalf("%+v", v)
+	}
+	for _, c := range []struct {
+		name  string
+		h     http.Header
+		swaps []Entry
+	}{
+		{"two raw swaps from Inspect", h, v.Swaps},
+		{"a bearer swap, then a raw one", hdr("Authorization", "Bearer "+f.bearer.Token, "Dd-Api-Key", f.raw.Token), []Entry{f.bearer, f.raw}},
+		{"a basic swap, then a raw one", hdr("Authorization", basicOf(f.user.Token, "pw"), "Dd-Api-Key", f.raw.Token), []Entry{f.user, f.raw}},
+		{"a raw swap, then a basic one", hdr("Authorization", basicOf(f.user.Token, "pw"), "Dd-Api-Key", f.raw.Token), []Entry{f.raw, f.user}},
+	} {
+		for failing := 1; failing <= len(c.swaps); failing++ {
+			h := c.h.Clone()
+			h.Set("X-Keep", "1")
+			before := h.Clone()
+			calls := 0
+			err := ApplySwaps(h, c.swaps, func(id string) ([]byte, error) {
+				calls++
+				if calls == failing {
+					return nil, boom
+				}
+				return []byte(values[id]), nil
+			})
+			if !errors.Is(err, boom) {
+				t.Fatalf("%s, value %d failing: err = %v", c.name, failing, err)
+			}
+			if !maps.EqualFunc(h, before, slices.Equal[[]string]) {
+				t.Errorf("%s, value %d failing: the headers became %v; a failed swap must leave every header as it was", c.name, failing, h)
+			}
+		}
+	}
+}
+
+func TestSwapsOnOneHeaderCompose(t *testing.T) {
+	f := newFixture(t)
+	values := map[string]string{"pay": "real-user-value", "git": "real-password-value"}
+	value := func(id string) ([]byte, error) { return []byte(values[id]), nil }
+	for _, order := range [][]Entry{{f.user, f.pass}, {f.pass, f.user}} {
+		h := hdr("Authorization", basicOf(f.user.Token, f.pass.Token))
+		if err := ApplySwaps(h, order, value); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := h.Values("Authorization"), []string{basicOf("real-user-value", "real-password-value")}; !slices.Equal(got, want) {
+			t.Errorf("a user swap and a password swap on one header gave %q, want %q", got, want)
+		}
+	}
 }

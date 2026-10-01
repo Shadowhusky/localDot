@@ -230,8 +230,10 @@ func decodeBasic(value string) (user, pass string, ok bool) {
 	return strings.Cut(string(raw), ":")
 }
 
-// ApplySwaps rewrites each bound header with the real value, keeping its format.
+// ApplySwaps rewrites each bound header with the real value, keeping its format. It reads every
+// value before it writes any header, so an error leaves h untouched.
 func ApplySwaps(h http.Header, swaps []Entry, value func(secretID string) ([]byte, error)) error {
+	set := map[string]string{}
 	for _, e := range swaps {
 		real, err := value(e.Binding.SecretID)
 		if err != nil {
@@ -240,18 +242,25 @@ func ApplySwaps(h http.Header, swaps []Entry, value func(secretID string) ([]byt
 		b := e.Binding
 		switch b.Format {
 		case Raw:
-			h.Set(b.Header, string(real))
+			set[b.Header] = string(real)
 		case Bearer:
-			h.Set(b.Header, "Bearer "+string(real))
+			set[b.Header] = "Bearer " + string(real)
 		case BasicUser, BasicPassword:
-			user, pass, _ := decodeBasic(h.Get(b.Header))
+			current, ok := set[b.Header]
+			if !ok {
+				current = h.Get(b.Header)
+			}
+			user, pass, _ := decodeBasic(current)
 			if b.Format == BasicUser {
 				user = string(real)
 			} else {
 				pass = string(real)
 			}
-			h.Set(b.Header, "Basic "+base64.StdEncoding.EncodeToString([]byte(user+":"+pass)))
+			set[b.Header] = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
 		}
+	}
+	for name, v := range set {
+		h.Set(name, v)
 	}
 	return nil
 }
