@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer, type IncomingMessage, type Server } from "node:http";
-import { createServer, type Socket } from "node:net";
+import { connect, createServer, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { serve } from "@hono/node-server";
@@ -164,8 +164,10 @@ async function daemon(upstreamBaseUrl: string, overrides: Partial<StreamProxyDep
   attachUpgradeRouter(server, { port, token: TOKEN }, [desktopStreamRoute(desktop)]);
   await new Promise((r) => server.once("listening", r));
   const viewers = new Set<WebSocket>();
+  const rawViewers = new Set<Socket>();
   stops.push(() => {
     for (const ws of viewers) ws.terminate();
+    for (const socket of rawViewers) socket.destroy();
     server.closeAllConnections();
     server.close();
     eventLog.close();
@@ -195,11 +197,41 @@ async function daemon(upstreamBaseUrl: string, overrides: Partial<StreamProxyDep
       const cell = cells.get(id);
       if (cell) cells.cells.set(id, { ...cell, state });
     },
+    // Changes the state with an event, as the orchestrator does; the cell API revokes the ticket.
+    emitState: (state: CellState) => {
+      const cell = cells.get(id);
+      if (cell) cells.emit({ ...cell, state });
+    },
     open: (path: string, headers: Record<string, string> = {}) => {
       const ws = new WebSocket(`ws://127.0.0.1:${port}${path}`, { origin, headers });
       viewers.add(ws);
       return ws;
     },
+    // A viewer that completes the upgrade and then stops reading, so it never answers a close.
+    deaf: (path: string) =>
+      new Promise<void>((resolve, reject) => {
+        const socket = connect(port, "127.0.0.1");
+        rawViewers.add(socket);
+        socket.once("data", (chunk) => {
+          socket.pause();
+          const status = String(chunk).split("\r\n")[0] ?? "";
+          if (status === "HTTP/1.1 101 Switching Protocols") resolve();
+          else reject(new Error(status));
+        });
+        socket.write(
+          [
+            `GET ${path} HTTP/1.1`,
+            `Host: 127.0.0.1:${port}`,
+            `Origin: ${origin}`,
+            "Upgrade: websocket",
+            "Connection: Upgrade",
+            "Sec-WebSocket-Version: 13",
+            "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==",
+            "",
+            "",
+          ].join("\r\n"),
+        );
+      }),
     stream: () => cells.get(id)?.stream,
     connections: () =>
       cells.streamUpdates.filter((u) => u.id === id).map((u) => u.patch.connection),
@@ -424,6 +456,45 @@ describe("desktop stream relay", () => {
     ws.close();
     await until("no viewer", () => d.stream()?.viewers === 0);
     expect(d.stream()?.connection).toBe("none");
+  });
+
+  it("closes every relay with 1012 when the cell leaves ready, and the old ticket opens nothing", async () => {
+    const selkies = await fakeSelkies();
+    const d = await daemon(selkies.baseUrl);
+    const viewers = [d.open(`${d.prefix}/api/websockets`), d.open(`${d.prefix}/api/websockets`)];
+    await Promise.all(viewers.map(opened));
+    await until("two live viewers", () => d.stream()?.viewers === 2);
+    const codes = Promise.all(
+      viewers.map((ws) => new Promise<number>((r) => ws.once("close", (code) => r(code)))),
+    );
+    const before = d.connections().length;
+    d.emitState("stopping");
+    expect(await within(codes, 1000, "the viewers' close")).toEqual([1012, 1012]);
+    expect(d.stream()).toMatchObject({ connection: "none", viewers: 0 });
+    expect(d.connections().slice(before)).toEqual(["none"]);
+    await until("the cell's side closed", () => selkies.state.sockets.size === 0);
+    expect(await refusal(d.open(`${d.prefix}/api/websockets`))).toContain("403");
+    expect((await d.fetch(`${d.prefix}/`)).status).toBe(403);
+  });
+
+  it("cuts the cell's side at once when the cell leaves ready, even if a viewer never answers the close", async () => {
+    const selkies = await fakeSelkies();
+    const d = await daemon(selkies.baseUrl);
+    await d.deaf(`${d.prefix}/api/websockets`);
+    await until("a live viewer", () => d.stream()?.connection === "live");
+    d.emitState("failed");
+    await until("the cell's side closed", () => selkies.state.sockets.size === 0, 1000);
+    expect(d.stream()).toMatchObject({ connection: "none", viewers: 0 });
+  });
+
+  it("refuses a viewer still waiting on its cell with 503 when the cell leaves ready", async () => {
+    const d = await daemon(await silentCell());
+    const waiting = d.open(`${d.prefix}/api/websockets`);
+    await until("a connecting viewer", () => d.stream()?.viewers === 1);
+    const refused = refusal(waiting);
+    d.emitState("starting");
+    expect(await within(refused, 1000, "the refusal")).toContain("503");
+    expect(d.stream()).toMatchObject({ connection: "none", viewers: 0 });
   });
 
   it("closes the viewer with 1012 and reports disconnected when the upstream drops", async () => {

@@ -99,6 +99,10 @@ async function proxyApi(
 export function desktopStreamRoute(deps: StreamProxyDeps): UpgradeRoute {
   const wss = new WebSocketServer({ noServer: true });
   const streams = new CellStreams(deps.cells);
+  // Leaving ready revokes the cell's ticket, and the streams it opened go with it.
+  deps.cells.subscribe((cell) => {
+    if (cell.state !== "ready") streams.drop(cell.id);
+  });
   return {
     pattern: /^\/cells\/([^/]+)\/desktop\/([^/]+)\/api\/websockets$/,
     params: ["id", "ticket"],
@@ -139,7 +143,15 @@ function relay(
     perMessageDeflate: false,
     handshakeTimeout: deps.upstreamTimeoutMs ?? UPSTREAM_TIMEOUT_MS,
   });
-  const viewer = streams.open(id);
+  let client: WebSocket | undefined;
+  let finished = false;
+  // 1012 sends the client back to reconnect, with a fresh ticket once its cell is ready again.
+  const viewer = streams.open(id, () => {
+    finish("none");
+    if (client) client.close(1012, "cell left ready");
+    else refuse(socket, "503 Service Unavailable");
+    upstream.terminate();
+  });
   const watchdog = new StallWatchdog({
     pingEveryMs: deps.pingEveryMs ?? STREAM_PING_MS,
     stallAfterMs: deps.stallAfterMs ?? STREAM_STALL_MS,
@@ -148,8 +160,6 @@ function relay(
     },
     onChange: (state, lastAt) => streams.update(id, viewer, state, lastAt),
   });
-  let client: WebSocket | undefined;
-  let finished = false;
   // The relay leaves the count as soon as either side goes: the cell's close handshake can take
   // seconds, and its silence meanwhile must not read as a stall.
   const finish = (last: "none" | "disconnected") => {
@@ -200,6 +210,7 @@ type RelayState = "connecting" | "live" | "stalled";
 interface Viewer {
   state: RelayState;
   lastAt: number;
+  stop(): void;
 }
 
 const HEALTH: Record<RelayState, number> = { connecting: 0, stalled: 1, live: 2 };
@@ -215,8 +226,8 @@ class CellStreams {
     this.#cells = cells;
   }
 
-  open(id: string): Viewer {
-    const viewer: Viewer = { state: "connecting", lastAt: 0 };
+  open(id: string, stop: () => void): Viewer {
+    const viewer: Viewer = { state: "connecting", lastAt: 0, stop };
     this.#viewers.set(id, (this.#viewers.get(id) ?? new Set()).add(viewer));
     this.#report(id);
     return viewer;
@@ -230,13 +241,28 @@ class CellStreams {
 
   close(id: string, viewer: Viewer, last: "none" | "disconnected", lastAt: number): void {
     const viewers = this.#viewers.get(id);
-    viewers?.delete(viewer);
-    if (viewers?.size) {
+    if (!viewers?.delete(viewer)) return;
+    if (viewers.size) {
       this.#report(id);
       return;
     }
     this.#viewers.delete(id);
     this.#cells.updateStream(id, { connection: last, viewers: 0, lastUpstreamAt: lastAt || null });
+  }
+
+  // The relays are unregistered before they stop, so their own closes report nothing and the
+  // cell's stream is reported once.
+  drop(id: string): void {
+    const viewers = this.#viewers.get(id);
+    if (!viewers) return;
+    this.#viewers.delete(id);
+    for (const viewer of viewers) viewer.stop();
+    const lastAt = Math.max(0, ...[...viewers].map((v) => v.lastAt));
+    this.#cells.updateStream(id, {
+      connection: "none",
+      viewers: 0,
+      lastUpstreamAt: lastAt || null,
+    });
   }
 
   #report(id: string): void {
