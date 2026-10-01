@@ -14,6 +14,8 @@ export interface Clip {
   steps: ClipStep[];
 }
 
+const BEYOND_REACH = 10_000;
+
 // Blinks come every 2–6 s, so 7 s of idle always holds at least one.
 export const CLIPS: Record<ClipName, Clip> = {
   blink: { durationMs: 7000, seed: 3, steps: [] },
@@ -25,11 +27,13 @@ export const CLIPS: Record<ClipName, Clip> = {
   turn: {
     durationMs: 4800,
     seed: 9,
+    // Points are head-relative (record.ts puts the head at the origin) and beyond the reach, so
+    // the gaze clamps and the head turns through the controller's full range.
     steps: [
-      { atMs: 0, act: (c) => c.setAttention({ x: -400, y: 0 }) },
-      { atMs: 1200, act: (c) => c.setAttention({ x: 400, y: 0 }) },
-      { atMs: 2400, act: (c) => c.setAttention({ x: 0, y: -400 }) },
-      { atMs: 3600, act: (c) => c.setAttention({ x: 0, y: 400 }) },
+      { atMs: 0, act: (c) => c.setAttention({ x: -BEYOND_REACH, y: 0 }) },
+      { atMs: 1200, act: (c) => c.setAttention({ x: BEYOND_REACH, y: 0 }) },
+      { atMs: 2400, act: (c) => c.setAttention({ x: 0, y: -BEYOND_REACH }) },
+      { atMs: 3600, act: (c) => c.setAttention({ x: 0, y: BEYOND_REACH }) },
     ],
   },
 };
