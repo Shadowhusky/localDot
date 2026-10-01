@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"regexp"
+	"strings"
 )
 
 const (
@@ -19,7 +20,7 @@ const (
 
 var (
 	tagPattern   = regexp.MustCompile(`^[a-z0-9]{2,12}$`)
-	tokenPattern = regexp.MustCompile(`ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}`)
+	leadingToken = regexp.MustCompile(`^ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}`)
 	exactPattern = regexp.MustCompile(`^ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}$`)
 )
 
@@ -54,10 +55,24 @@ func Valid(s string) bool {
 	return checksum(s[:cut]) == s[cut+1:]
 }
 
-// Find returns every token-shaped string in s, checksum or not, in order, even when it is glued
-// to other characters: a surrogate made part of a longer word is still a misplaced surrogate.
+// Find returns every token-shaped substring of s, checksum or not, including those glued to other
+// characters or overlapping each other: a surrogate made part of a longer word is still a misplaced
+// surrogate, and a token-shaped run ending on a token's leading "ld" must not hide that token.
+// Results are ordered by start offset; no two can share one, as a tag ends at its first underscore
+// and every other part has a fixed length.
 func Find(s string) []string {
-	return tokenPattern.FindAllString(s, -1)
+	var found []string
+	for i := 0; i < len(s); i++ {
+		next := strings.Index(s[i:], "ld_")
+		if next < 0 {
+			break
+		}
+		i += next
+		if tok := leadingToken.FindString(s[i:]); tok != "" {
+			found = append(found, tok)
+		}
+	}
+	return found
 }
 
 // ID names a token in logs without revealing it.

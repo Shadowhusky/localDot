@@ -98,6 +98,23 @@ func TestFindSeesTokensGluedToOtherCharacters(t *testing.T) {
 	}
 }
 
+func TestFindReportsOverlappingTokens(t *testing.T) {
+	tok, _ := Mint("ant")
+	long, _ := Mint("abcdef")
+	checksumShort := "ld_xx_" + strings.Repeat("A", 22) + "_AAAA"
+	bodyShort := "ld_xx_" + strings.Repeat("A", 20)
+	cases := []struct{ text, shadow, hidden string }{
+		{checksumShort + tok, checksumShort + "ld", tok},
+		{checksumShort + "A" + tok, checksumShort + "Al", tok},
+		{bodyShort + long, bodyShort + "ld_abcdef", long},
+	}
+	for _, c := range cases {
+		if got := Find(c.text); len(got) != 2 || got[0] != c.shadow || got[1] != c.hidden {
+			t.Errorf("Find(%q) = %v, want %v", c.text, got, []string{c.shadow, c.hidden})
+		}
+	}
+}
+
 func TestIDIsStableAndHidesTheToken(t *testing.T) {
 	tok, _ := Mint("gem")
 	id := ID(tok)
