@@ -186,10 +186,6 @@ export class EventLog {
     // Bytes this log did not write (a stray or torn write) send the session back through recovery.
     if (cached && sizeOf(cached.file) === cached.bytes) return cached;
     const file = this.#existingFileOf(sessionId);
-    const meta = readMeta(join(this.#root, sessionId), sessionId);
-    this.#db
-      .prepare("INSERT OR IGNORE INTO sessions (id, title, started_at) VALUES (?, ?, ?)")
-      .run(meta.id, meta.title, meta.startedAt);
     const { events, validBytes } = readValid(file);
     if (existsSync(file)) truncateSync(file, validBytes);
     const lastSeq = events.reduce((max, e) => Math.max(max, e.seq), -1);
@@ -234,8 +230,12 @@ export class EventLog {
   }
 
   #rebuildIndex(sessionId: string, events: LocalDotEvent[]): void {
+    const meta = readMeta(join(this.#root, sessionId), sessionId);
     this.#db.exec("BEGIN IMMEDIATE");
     try {
+      this.#db
+        .prepare("INSERT OR IGNORE INTO sessions (id, title, started_at) VALUES (?, ?, ?)")
+        .run(meta.id, meta.title, meta.startedAt);
       this.#deleteEvents.run(sessionId);
       for (const event of events) this.#insert(sessionId, event);
       this.#db.exec("COMMIT");

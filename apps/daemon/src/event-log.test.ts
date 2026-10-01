@@ -224,6 +224,33 @@ describe("EventLog", () => {
     expect(log.listSessions()[0]?.events).toBe(3);
   });
 
+  it("keeps appending to a session recovered while the index is locked, and restores its row", {
+    timeout: 10_000,
+  }, () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const dir = home();
+    const first = new EventLog(dir, fakeClock());
+    const id = first.createSession("locked");
+    first.append(id, thinking);
+    first.close();
+    const other = new DatabaseSync(join(dir, "index.sqlite"));
+    // The row goes too, as with a deleted index, so the repair has to put it back.
+    other.prepare("DELETE FROM sessions WHERE id = ?").run(id);
+    other.exec("BEGIN IMMEDIATE");
+    const second = new EventLog(dir, fakeClock());
+    const locked = second.append(id, idle);
+    other.exec("ROLLBACK");
+    other.close();
+    expect(locked.seq).toBe(1);
+    expect(errors).toHaveBeenCalledTimes(2);
+    expect(second.append(id, idle).seq).toBe(2);
+    expect(second.read(id).map((e) => e.seq)).toEqual([0, 1, 2]);
+    expect(indexRows(dir, id)).toEqual(rowsOf(second.read(id)));
+    expect(second.listSessions()).toEqual([
+      expect.objectContaining({ id, title: "locked", events: 3 }),
+    ]);
+  });
+
   it("still appends and notifies other subscribers when one subscriber throws", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     const log = new EventLog(home(), fakeClock());
