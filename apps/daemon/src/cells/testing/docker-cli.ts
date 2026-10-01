@@ -27,6 +27,13 @@ export function dockerExecAs(
   return { status: r.status ?? -1, out: `${r.stdout ?? ""}${r.stderr ?? ""}` };
 }
 
+// `docker logs` keeps the container's two streams apart, and Selkies logs to stderr.
+export function dockerLogs(container: string): string {
+  const r = spawnSync("docker", ["logs", container], { encoding: "utf8" });
+  if (r.status !== 0) throw new Error(`docker logs ${container} exited ${r.status}: ${r.stderr}`);
+  return `${r.stdout}${r.stderr}`;
+}
+
 export function publishedPort(container: string, port: string): number {
   // docker port prints "127.0.0.1:55123" (one line per address family).
   const line = docker("port", container, port).split("\n")[0] ?? "";

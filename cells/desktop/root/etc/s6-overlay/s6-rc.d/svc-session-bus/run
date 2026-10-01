@@ -1,0 +1,5 @@
+#!/usr/bin/with-contenv bash
+# The one session bus of this desktop, at the address every process in the container carries.
+sock="${DBUS_SESSION_BUS_ADDRESS#unix:path=}"
+rm -f "$sock"
+exec s6-setuidgid abc dbus-daemon --session --nofork --nopidfile --address="$DBUS_SESSION_BUS_ADDRESS"

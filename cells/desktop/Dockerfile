@@ -65,6 +65,38 @@ ENV CUA_DRIVER_RS_TELEMETRY_ENABLED=0 \
     QT_ACCESSIBILITY=1 \
     START_DOCKER=false
 
+COPY root/ /
+RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run
+
+# One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
+# are locked where the client could change them; "|locked" is Selkies' bool suffix (D1, D2).
+ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
+    LOCALDOT_SCALE=2 \
+    SELKIES_MANUAL_WIDTH=2560 \
+    SELKIES_MANUAL_HEIGHT=1600 \
+    SELKIES_ENABLE_RESIZE="false|locked" \
+    SELKIES_USE_CSS_SCALING="false|locked" \
+    SELKIES_SCALING_DPI=96 \
+    SELKIES_ENABLE_CURSORS="false|locked" \
+    SELKIES_ENCODER=h264enc \
+    SELKIES_FRAMERATE=60 \
+    SELKIES_VIDEO_FULLCOLOR=true \
+    SELKIES_AUDIO_ENABLED=false \
+    SELKIES_MICROPHONE_ENABLED=false \
+    SELKIES_WEBCAM_ENABLED=false \
+    SELKIES_GAMEPAD_ENABLED=false \
+    SELKIES_ENABLE_CLIPBOARD=false \
+    SELKIES_FILE_TRANSFERS= \
+    SELKIES_PRINTING_ENABLED=false \
+    SELKIES_COMMAND_ENABLED=false \
+    SELKIES_UI_SHOW_SIDEBAR=false \
+    SELKIES_UI_SHOW_CORE_BUTTONS=false \
+    SELKIES_UI_SHOW_LOGO=false \
+    SELKIES_UI_TITLE=localDot \
+    NO_GAMEPAD=1 \
+    NO_WEBCAM=1 \
+    CUSTOM_USER=localdot
+
 # Selkies' web client (MPL-2.0), served by the daemon instead of by the cell (Task 4, Task 14). It
 # copies straight from the pinned image, so `--target selkies-client` never builds the base stage.
 FROM scratch AS selkies-client
