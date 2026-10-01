@@ -110,11 +110,12 @@ describe("buildSkeleton", () => {
   it("loads in the Spine runtime with every attachment", () => {
     const skeleton = loadSkeleton(json);
     const skin = skeleton.data.defaultSkin;
+    expect(skin).not.toBeNull();
     for (const [slotName, entries] of Object.entries(attachments)) {
       const slot = skeleton.data.findSlot(slotName);
       expect(slot).not.toBeNull();
       for (const placeholder of Object.keys(entries)) {
-        expect(skin?.getAttachment(slot?.index ?? -1, placeholder)).not.toBeNull();
+        expect(skin?.getAttachment(slot?.index ?? -1, placeholder)?.name).toBe(placeholder);
       }
     }
     const face = skeleton.findSlot("face");
