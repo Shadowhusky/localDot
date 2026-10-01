@@ -43,6 +43,22 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
+  cells/desktop/desktopd:
+    dependencies:
+      '@hono/node-server':
+        specifier: 2.1.3
+        version: 2.1.3(hono@4.13.12)
+      hono:
+        specifier: 4.13.12
+        version: 4.13.12
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+
   packages/protocol:
     dependencies:
       zod:

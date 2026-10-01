@@ -131,7 +131,8 @@ COPY THIRD-PARTY.md /usr/share/doc/localdot-themes/THIRD-PARTY.md
 
 COPY root/ /
 RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run \
-      /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run /usr/local/bin/localdot-plank
+      /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run /usr/local/bin/localdot-plank \
+      /etc/s6-overlay/s6-rc.d/svc-desktopd/run
 
 # One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
 # set here that a client could change are locked: "|locked" on bools, a one-value span on ranges,
@@ -178,3 +179,7 @@ COPY --from=lscr.io/linuxserver/webtop@sha256:73f966bd414cd4aef183c96aba8fab37dd
      /usr/share/common-licenses/MPL-2.0 /LICENSE
 
 FROM base AS desktop
+# The bundle lands in the final stage only, so `--target selkies-client` never needs it built.
+COPY desktopd/dist/desktopd.mjs /opt/localdot/desktopd.mjs
+RUN chmod 644 /opt/localdot/desktopd.mjs
+EXPOSE 3000 7700

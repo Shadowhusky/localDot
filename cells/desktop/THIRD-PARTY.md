@@ -10,6 +10,8 @@
 | Cua Driver | 0.30.4 | MIT | `/opt/cua`, `/usr/local/bin/cua-driver` |
 | VSCodium | 1.135.06055 | MIT | `/usr/share/codium` |
 | Node.js | 24.21.0 | MIT | `/opt/node` |
+| Hono | 4.13.12 | MIT | bundled into `/opt/localdot/desktopd.mjs`, license in its header |
+| @hono/node-server | 2.1.3 | MIT | bundled into `/opt/localdot/desktopd.mjs`, license in its header |
 
 localDot changed these components (2026-10-01):
 - WhiteSur GTK theme: `WhiteSur-Light` is the repository's pre-built `release/WhiteSur-Light-solid`

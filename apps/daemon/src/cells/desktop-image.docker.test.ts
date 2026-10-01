@@ -91,9 +91,10 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: pinned tools", () => {
 
 const STREAM_PASSWORD = "p".repeat(43);
 const STREAM_AUTH = `Basic ${Buffer.from(`localdot:${STREAM_PASSWORD}`).toString("base64")}`;
+const DESKTOPD_TOKEN = "d".repeat(43);
 const HOME_VOLUME = "localdot-test-desktop-home";
 
-function startDesktop(name: string, scale: 1 | 2): { port: number } {
+function startDesktop(name: string, scale: 1 | 2): { port: number; desktopd: number } {
   removeAll({ containers: [name] });
   const [w, h] = scale === 2 ? ["2560", "1600"] : ["1280", "800"];
   docker(
@@ -106,10 +107,14 @@ function startDesktop(name: string, scale: 1 | 2): { port: number } {
     "NET_RAW",
     "-p",
     "127.0.0.1:0:3000",
+    "-p",
+    "127.0.0.1:0:7700",
     "-v",
     `${HOME_VOLUME}:/config`,
     "-e",
     `PASSWORD=${STREAM_PASSWORD}`,
+    "-e",
+    `LOCALDOT_DESKTOPD_TOKEN=${DESKTOPD_TOKEN}`,
     "-e",
     `LOCALDOT_SCALE=${scale}`,
     "-e",
@@ -124,7 +129,22 @@ function startDesktop(name: string, scale: 1 | 2): { port: number } {
     180_000,
   );
   sleepSync(5000);
-  return { port: publishedPort(name, "3000") };
+  return { port: publishedPort(name, "3000"), desktopd: publishedPort(name, "7700") };
+}
+
+interface DesktopdHealth {
+  ok: boolean;
+  scale: number;
+  screen: unknown;
+  hidpi: { ok: boolean };
+}
+
+async function desktopdHealth(port: number): Promise<DesktopdHealth> {
+  const res = await fetch(`http://127.0.0.1:${port}/healthz`, {
+    headers: { authorization: `Bearer ${DESKTOPD_TOKEN}` },
+  });
+  expect(res.status).toBe(200);
+  return (await res.json()) as DesktopdHealth;
 }
 
 const xfconf = (name: string, channel: string, prop: string) =>
@@ -251,11 +271,14 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
   const C1 = "localdot-test-desktop-1x";
   const HOME_EDIT = "localdot-test-desktop-home-edit";
   let port2 = 0;
+  let desktopd2 = 0;
 
   beforeAll(() => {
     mkdirSync(OUT, { recursive: true });
     removeAll({ containers: [C2, C1, HOME_EDIT], volumes: [HOME_VOLUME] });
-    port2 = startDesktop(C2, 2).port;
+    const started = startDesktop(C2, 2);
+    port2 = started.port;
+    desktopd2 = started.desktopd;
   });
   afterAll(() => removeAll({ containers: [C2, C1, HOME_EDIT], volumes: [HOME_VOLUME] }));
 
@@ -543,9 +566,28 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     saveLook(C2, "look-2x.png", "2560x1600");
   });
 
+  it("runs desktopd as the desktop user behind the cell token", async () => {
+    const desktopd = outputOf(C2, "ps", "-eo", "user=,args=")
+      .split("\n")
+      .filter((line) => line.includes("desktopd.mjs"));
+    expect(desktopd).toEqual([
+      expect.stringMatching(/^abc\s+\/opt\/node\/bin\/node \/opt\/localdot\/desktopd\.mjs$/),
+    ]);
+    // The bundle carries Hono's and @hono/node-server's MIT notices in its header.
+    expect(
+      outputOf(C2, "grep", "-c", "^Permission is hereby granted", "/opt/localdot/desktopd.mjs"),
+    ).toBe("2\n");
+    expect((await fetch(`http://127.0.0.1:${desktopd2}/healthz`)).status).toBe(401);
+    const health = await desktopdHealth(desktopd2);
+    expect(health.ok).toBe(true);
+    expect(health.scale).toBe(2);
+    expect(health.screen).toEqual({ w: 2560, h: 1600 });
+    expect(health.hidpi.ok).toBe(true);
+  });
+
   // C1 starts on C2's home, so the 2x settings already in it must give way to the 1x ones, and a
   // channel missing from it (as when xfconfd made the folder first) is filled from the defaults.
-  it("switches to 1x with LOCALDOT_SCALE=1", () => {
+  it("switches to 1x with LOCALDOT_SCALE=1", async () => {
     removeAll({ containers: [C2] });
     docker(
       "run",
@@ -559,12 +601,18 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
       DESKTOP_IMAGE,
       "/config/.config/xfce4/xfconf/xfce-perchannel-xml/xfce4-desktop.xml",
     );
-    startDesktop(C1, 1);
+    const { desktopd } = startDesktop(C1, 1);
     expect(xfconf(C1, "xsettings", "/Gdk/WindowScalingFactor")).toBe("1");
     expect(xfconf(C1, "xsettings", "/Xft/DPI")).toBe("96");
     expect(xfconf(C1, "xfwm4", "/general/theme")).toBe("WhiteSur-Light");
     expect(xfconf(C1, "xfwm4", "/general/vblank_mode")).toBe("off");
     expect(outputAs(C1, "abc", "xdpyinfo")).toMatch(/dimensions:\s+1280x800/);
+    expect(await desktopdHealth(desktopd)).toMatchObject({
+      ok: true,
+      scale: 1,
+      screen: { w: 1280, h: 800 },
+      hidpi: { ok: true },
+    });
     expect(dockWindow(C1, "xfce4-panel")).toEqual({
       x: 0,
       y: 0,
