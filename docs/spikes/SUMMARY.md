@@ -60,10 +60,10 @@ per toolkit").
 ## 2. Spec amendments
 
 Quoted text is the spec's current wording, with line breaks joined. Amendments follow the spec's order, and each names
-the decision it carries. **A1 needs the user's sign-off.** A17's dwell clause and A30, A33 and A34's `doctor` check are
-derived here from the findings rather than from a ruling: the controller accepts or drops them.
+the decision it carries. **The user signed off A1 on 2026-10-01 ("keep").** A17's dwell clause and A30, A33 and
+A34's `doctor` check are derived here from the findings rather than from a ruling: the controller accepts or drops them.
 
-**A1. Success criterion 3, truthful visualization. NEEDS THE USER'S SIGN-OFF** (D8)
+**A1. Success criterion 3, truthful visualization. Signed off by the user, 2026-10-01** (D8)
 
 Now:
 > In recorded sessions the drawn cursor is within 2 px of every real input point, and no effect appears before the
@@ -566,7 +566,7 @@ New:
 > no click ring starts before the input's raw press, or more than one frame before the frame that shows a press-acting
 > control's change;
 
-Why: Ruling 26 (the pixel-oracle test allows at most one frame early); valid only once A1 is signed off.
+Why: Ruling 26 (the pixel-oracle test allows at most one frame early); A1 is signed off (2026-10-01).
 
 **A32. Security tests: the Codex harness** (D11)
 
@@ -753,8 +753,8 @@ Why: S1 "Result"; S3 "Result"; S5 "Result", "Coordinate space per model"; Ruling
 
 ## 4. Notes for the user
 
-- **Sign-off needed:** A1 changes success criterion 3. The click ring can start up to one frame before the frame that
-  shows a press-acting control's change, because no fixed delay matches a latency that varies per trial.
+- **Signed off 2026-10-01 ("keep"):** A1 changes success criterion 3. The click ring can start up to one frame before
+  the frame that shows a press-acting control's change, because no fixed delay matches a latency that varies per trial.
 - **Cua Driver telemetry:** Cua Driver sends content-free product telemetry by default (to a PostHog endpoint) and
   checks GitHub for updates. In S2's first container, `config` and `doctor` ran before telemetry was off, so one
   install-registration ping probably left that container; later containers disabled it first. Part 2 bakes the opt-outs
