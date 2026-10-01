@@ -56,15 +56,18 @@ describe("BlinkSchedule", () => {
 });
 
 describe("swayAt", () => {
-  it("stays within ±0.12 across, ±0.08 up and down and ±0.12 of lean, deterministic and slow", () => {
+  const RANGE = { x: 0.12, y: 0.08, body: 0.45, roll: 0.6 };
+  // Largest change in 16 ms: every component is a sine of 6 s or slower.
+  const STEP = { x: 0.002, y: 0.002, body: 0.008, roll: 0.009 };
+  const KEYS = ["x", "y", "body", "roll"] as const;
+
+  it("stays in range across, up, in lean and in roll, deterministic and slow", () => {
     for (let t = 0; t < 60_000; t += 16) {
       const a = swayAt(t, 9);
       const b = swayAt(t + 16, 9);
-      expect(Math.abs(a.x)).toBeLessThanOrEqual(0.12);
-      expect(Math.abs(a.y)).toBeLessThanOrEqual(0.08);
-      expect(Math.abs(a.body)).toBeLessThanOrEqual(0.12);
-      for (const key of ["x", "y", "body"] as const) {
-        expect(Math.abs(b[key] - a[key])).toBeLessThan(0.002);
+      for (const key of KEYS) {
+        expect(Math.abs(a[key])).toBeLessThanOrEqual(RANGE[key]);
+        expect(Math.abs(b[key] - a[key])).toBeLessThan(STEP[key]);
       }
     }
     expect(swayAt(1234, 9)).toEqual(swayAt(1234, 9));
@@ -73,16 +76,12 @@ describe("swayAt", () => {
 
   it("drifts far enough within a minute to read on a rig", () => {
     for (const seed of [1, 3, 5, 7, 9]) {
-      const peak = { x: 0, y: 0, body: 0 };
+      const peak = { x: 0, y: 0, body: 0, roll: 0 };
       for (let t = 0; t < 60_000; t += 100) {
         const s = swayAt(t, seed);
-        for (const key of ["x", "y", "body"] as const) {
-          peak[key] = Math.max(peak[key], Math.abs(s[key]));
-        }
+        for (const key of KEYS) peak[key] = Math.max(peak[key], Math.abs(s[key]));
       }
-      expect(peak.x).toBeGreaterThan(0.08);
-      expect(peak.y).toBeGreaterThan(0.05);
-      expect(peak.body).toBeGreaterThan(0.08);
+      for (const key of KEYS) expect(peak[key]).toBeGreaterThan(RANGE[key] * 0.66);
     }
   });
 });

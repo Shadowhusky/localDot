@@ -28,6 +28,14 @@ describe("sanitizeParams", () => {
     expect(p.eyeOpenR).toBe(1);
   });
 
+  it("keeps the head roll within ±1 and reads a missing or invalid roll as level", () => {
+    expect(NEUTRAL_PARAMS.headRoll).toBe(0);
+    expect(sanitizeParams({ ...NEUTRAL_PARAMS, headRoll: 3 }).headRoll).toBe(1);
+    expect(sanitizeParams({ ...NEUTRAL_PARAMS, headRoll: -0.4 }).headRoll).toBe(-0.4);
+    expect(sanitizeParams({ ...NEUTRAL_PARAMS, headRoll: Number.NaN }).headRoll).toBe(0);
+    expect(sanitizeParams({ ...NEUTRAL_PARAMS, headRoll: undefined }).headRoll).toBe(0);
+  });
+
   it("drops expressions whose weight is zero or invalid", () => {
     const p = sanitizeParams({
       ...NEUTRAL_PARAMS,

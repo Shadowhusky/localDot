@@ -3,6 +3,8 @@ export type MouthShape = "A" | "I" | "U" | "E" | "O" | "N" | "rest";
 export interface AvatarParams {
   headX: number;
   headY: number;
+  // Positive tips the top of the head toward the viewer's right.
+  headRoll?: number;
   bodyX: number;
   eyeOpenL: number;
   eyeOpenR: number;
@@ -19,6 +21,7 @@ export interface AvatarParams {
 export const NEUTRAL_PARAMS: AvatarParams = {
   headX: 0,
   headY: 0,
+  headRoll: 0,
   bodyX: 0,
   eyeOpenL: 1,
   eyeOpenR: 1,
@@ -50,6 +53,7 @@ export function sanitizeParams(p: AvatarParams): AvatarParams {
   return {
     headX: signedUnit(p.headX, n.headX),
     headY: signedUnit(p.headY, n.headY),
+    headRoll: signedUnit(p.headRoll ?? 0, 0),
     bodyX: signedUnit(p.bodyX, n.bodyX),
     eyeOpenL: unit(p.eyeOpenL, n.eyeOpenL),
     eyeOpenR: unit(p.eyeOpenR, n.eyeOpenR),

@@ -34,6 +34,8 @@ export const EYE_SPRING: SpringParams = { dampingRatio: 1, response: 0.08 };
 export const HEAD_SPRING: SpringParams = { dampingRatio: 1, response: 0.35 };
 const POSE_SPRING: SpringParams = { dampingRatio: 1, response: 0.4 };
 const SWAY_IN_SPRING: SpringParams = { dampingRatio: 1, response: 1.5 };
+// Roll per unit of head turn: she tilts toward the side she looks.
+const LOOK_TILT = 0.8;
 export const MOOD_HOLD_MS = 4000;
 export const SPEECH_GAZE_HOLD_MS = 800;
 
@@ -173,6 +175,7 @@ export class AvatarController {
     return sanitizeParams({
       headX: ch.headX.value(t) + (offsets.headX ?? 0) + sway.x * swayIn,
       headY: ch.headY.value(t) + (offsets.headY ?? 0) + sway.y * swayIn,
+      headRoll: this.#reducedMotion ? 0 : (sway.roll + LOOK_TILT * ch.headX.value(t)) * swayIn,
       bodyX: this.#reducedMotion
         ? 0
         : ch.bodyX.value(t) + (offsets.bodyX ?? 0) + sway.body * swayIn,

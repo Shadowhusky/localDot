@@ -145,26 +145,46 @@ describe("AvatarController", () => {
     }
   });
 
-  it("sways the head and body while facing the user, easing in from a still first frame", () => {
+  it("sways, leans and rolls while facing the user, easing in from a still first frame", () => {
+    const SWAYED = ["headX", "headY", "bodyX", "headRoll"] as const;
     for (const seed of [1, 2, 3, 4, 5, 6, 7, 8]) {
       const { avatar, run } = make({ seed });
       avatar.setAttention("user");
       let previous = run(0);
-      for (const key of ["headX", "headY", "bodyX"] as const)
-        expect(previous[key]).toBeCloseTo(0, 9);
-      const peak = { headX: 0, headY: 0, bodyX: 0 };
+      for (const key of SWAYED) expect(previous[key]).toBeCloseTo(0, 9);
+      const peak = { headX: 0, headY: 0, bodyX: 0, headRoll: 0 };
       for (let t = FRAME_MS; t <= 60_000; t += FRAME_MS) {
         const p = run(t);
-        for (const key of ["headX", "headY", "bodyX"] as const) {
-          expect(Math.abs(p[key] - previous[key])).toBeLessThan(0.01);
-          peak[key] = Math.max(peak[key], Math.abs(p[key]));
+        for (const key of SWAYED) {
+          expect(Math.abs((p[key] ?? 0) - (previous[key] ?? 0))).toBeLessThan(0.03);
+          peak[key] = Math.max(peak[key], Math.abs(p[key] ?? 0));
         }
         previous = p;
       }
       expect(peak.headX).toBeGreaterThan(0.08);
       expect(peak.headY).toBeGreaterThan(0.05);
-      expect(peak.bodyX).toBeGreaterThan(0.08);
+      expect(peak.bodyX).toBeGreaterThan(0.3);
+      expect(peak.headRoll).toBeGreaterThan(0.4);
     }
+  });
+
+  it("tilts the head toward the side she looks", () => {
+    const meanRoll = (x: number) => {
+      const { avatar, run } = make({ seed: 3 });
+      avatar.setAttention({ x, y: 0 });
+      let sum = 0;
+      let frames = 0;
+      for (let t = 2000; t <= 30_000; t += 100) {
+        sum += run(t).headRoll ?? 0;
+        frames++;
+      }
+      return sum / frames;
+    };
+    const right = meanRoll(400);
+    const left = meanRoll(-400);
+    expect(right - left).toBeGreaterThan(0.3);
+    expect(right).toBeGreaterThan(0);
+    expect(left).toBeLessThan(0);
   });
 
   it("stops the sway under reduced motion and eases it back in afterwards", () => {
@@ -172,14 +192,14 @@ describe("AvatarController", () => {
     avatar.setAttention("user");
     for (let t = 0; t <= 10_000; t += FRAME_MS) {
       const p = run(t);
-      expect([p.headX, p.headY, p.bodyX]).toEqual([0, 0, 0]);
+      expect([p.headX, p.headY, p.bodyX, p.headRoll]).toEqual([0, 0, 0, 0]);
     }
     let previous = run(10_000);
     avatar.setReducedMotion(false);
     for (let t = 10_000 + FRAME_MS; t <= 14_000; t += FRAME_MS) {
       const p = run(t);
-      for (const key of ["headX", "headY", "bodyX"] as const) {
-        expect(Math.abs(p[key] - previous[key])).toBeLessThan(0.01);
+      for (const key of ["headX", "headY", "bodyX", "headRoll"] as const) {
+        expect(Math.abs((p[key] ?? 0) - (previous[key] ?? 0))).toBeLessThan(0.03);
       }
       previous = p;
     }
@@ -194,7 +214,8 @@ describe("AvatarController", () => {
         expect(Math.abs(p.headY)).toBeLessThanOrEqual(0.36);
         expect(Math.abs(p.eyeX)).toBeLessThanOrEqual(0.6);
         expect(Math.abs(p.eyeY)).toBeLessThanOrEqual(0.3);
-        expect(Math.abs(p.bodyX)).toBeLessThanOrEqual(0.12);
+        expect(Math.abs(p.bodyX)).toBeLessThanOrEqual(0.45);
+        expect(Math.abs(p.headRoll ?? 0)).toBeLessThanOrEqual(0.8);
       }
     }
   });
@@ -380,9 +401,9 @@ describe("AvatarController", () => {
         avatar.react(reactions[Math.floor(rnd() * reactions.length)] as (typeof reactions)[number]);
       else if (pick < 0.55) avatar.setReducedMotion(rnd() < 0.5);
       const p = run(t);
-      for (const key of ["headX", "headY", "bodyX", "eyeX", "eyeY", "brow"] as const) {
+      for (const key of ["headX", "headY", "bodyX", "eyeX", "eyeY", "brow", "headRoll"] as const) {
         expect(Number.isFinite(p[key])).toBe(true);
-        expect(Math.abs(p[key])).toBeLessThanOrEqual(1);
+        expect(Math.abs(p[key] ?? Number.NaN)).toBeLessThanOrEqual(1);
       }
       for (const key of ["eyeOpenL", "eyeOpenR", "mouthOpen", "breath", "blush"] as const) {
         expect(p[key]).toBeGreaterThanOrEqual(0);
