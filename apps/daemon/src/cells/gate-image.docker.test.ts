@@ -177,4 +177,13 @@ describe.skipIf(!DOCKER_TESTS)("gate image", () => {
       ),
     ).toBe("true [ALL]");
   });
+
+  // Last: it stops the shared gate.
+  it("exits cleanly on docker stop instead of waiting to be killed", () => {
+    const started = Date.now();
+    docker("stop", "-t", "10", "localdot-test-gate");
+    const elapsedMs = Date.now() - started;
+    expect(docker("inspect", "-f", "{{.State.ExitCode}}", "localdot-test-gate")).toBe("0");
+    expect(elapsedMs).toBeLessThan(3000);
+  });
 });

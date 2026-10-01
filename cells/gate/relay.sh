@@ -3,6 +3,8 @@
 # inbound relays only on the egress network, where Docker delivers the ports it publishes.
 set -eu
 : "${LD_INTERNAL_ADDR:?}" "${LD_EGRESS_ADDR:?}" "${LD_DESKTOP_ADDR:?}" "${LD_KEYD_PORT:?}"
+# PID 1 ignores signals it doesn't trap; exiting takes the relays down with the container.
+trap 'exit 0' TERM INT
 
 has_addr() { ip -4 -o addr show | grep -q " inet $1/"; }
 
