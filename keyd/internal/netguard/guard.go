@@ -81,6 +81,9 @@ func New(own func() ([]netip.Prefix, error), allow ...netip.AddrPort) *Guard {
 
 func (g *Guard) Check(ap netip.AddrPort) error {
 	ap = normalize(ap)
+	if !ap.Addr().IsValid() {
+		return &DeniedError{Target: ap.String(), Rule: "invalid address"}
+	}
 	if g.allow[ap] {
 		return nil
 	}
@@ -108,12 +111,25 @@ func (g *Guard) Check(ap netip.AddrPort) error {
 }
 
 // Control is a net.Dialer.Control hook: Go calls it with the literal ip:port about to be connected.
-func (g *Guard) Control(_, address string, _ syscall.RawConn) error {
+func (g *Guard) Control(network, address string, _ syscall.RawConn) error {
+	if err := checkNetwork(network, address); err != nil {
+		return err
+	}
 	ap, err := netip.ParseAddrPort(address)
 	if err != nil {
 		return &DeniedError{Target: address, Rule: "unparsable dial address"}
 	}
 	return g.Check(ap)
+}
+
+// checkNetwork refuses every network but TCP and UDP: the address of a Unix socket is a path,
+// which can read as a public ip:port.
+func checkNetwork(network, address string) error {
+	switch network {
+	case "tcp", "tcp4", "tcp6", "udp", "udp4", "udp6":
+		return nil
+	}
+	return &DeniedError{Target: address, Rule: fmt.Sprintf("network %q", network)}
 }
 
 // InterfacePrefixes returns every address of every interface with its network's prefix length.

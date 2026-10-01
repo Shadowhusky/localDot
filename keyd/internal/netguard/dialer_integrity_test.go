@@ -41,6 +41,39 @@ func TestDialerChecksTheConnectedPeer(t *testing.T) {
 	}
 }
 
+// A Unix socket can be named like an address; its path must never reach the checks as one.
+// DialContext refuses before it makes a socket, and Control refuses on its own.
+func TestOnlyTCPAndUDPAreDialled(t *testing.T) {
+	t.Chdir(t.TempDir())
+	ln, err := net.Listen("unix", "8.8.8.8:443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	seen := make(chan struct{}, 1)
+	go func() {
+		if c, err := ln.Accept(); err == nil {
+			seen <- struct{}{}
+			c.Close()
+		}
+	}()
+	g := New(noOwn)
+	d := &Dialer{Guard: g, Resolver: &fakeResolver{}}
+	for _, network := range []string{"unix", "unixgram", "unixpacket", ""} {
+		c, err := d.DialContext(context.Background(), network, "8.8.8.8:443")
+		if c != nil {
+			c.Close()
+		}
+		if !errors.As(err, new(*DeniedError)) || errors.As(err, new(*net.OpError)) {
+			t.Errorf("DialContext over %q: %v, want it denied before a socket is made", network, err)
+		}
+		if err := g.Control(network, "8.8.8.8:443", nil); !errors.As(err, new(*DeniedError)) {
+			t.Errorf("Control over %q: %v, want it denied", network, err)
+		}
+	}
+	noConnection(t, seen)
+}
+
 // The address becomes the Mac's own after the lookup check, as a rotating temporary address can.
 // UDP, because a UDP connect sends nothing, so even a missing Control could not reach past the Mac.
 func TestDialerChecksAgainAtConnectTime(t *testing.T) {

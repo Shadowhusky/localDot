@@ -32,6 +32,9 @@ type Dialer struct {
 }
 
 func (d *Dialer) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	if err := checkNetwork(network, address); err != nil {
+		return nil, err
+	}
 	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
 		return nil, err
