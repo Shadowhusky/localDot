@@ -121,7 +121,9 @@ func sealAEAD(priv *ecdh.PrivateKey, peer *ecdh.PublicKey, senderPub, recipientP
 
 // sealAAD binds a sealed value to its record: the id and every field that says where the secret
 // may go, as the JSON array [id, kind, provider, baseURL, hosts, header, format, methods, paths]
-// with "" and [] for what is absent, which JSON.stringify writes byte for byte the same.
+// with "" and [] for what is absent. JSON.stringify writes the same bytes except at U+2028 and
+// U+2029, which Go escapes and it does not, so a seal over a record holding either never opens:
+// it fails closed.
 func sealAAD(rec Record) []byte {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

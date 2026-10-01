@@ -3,6 +3,7 @@ package vault
 import (
 	"crypto/ecdh"
 	"encoding/hex"
+	"errors"
 	"slices"
 	"testing"
 )
@@ -58,11 +59,16 @@ func TestOpenRefusesAnotherBindingKeyOrBytes(t *testing.T) {
 		{"bad version", changed(func(s *Sealed) { s.V = 2 }), o, weatherRecord},
 		{"short nonce", changed(func(s *Sealed) { s.Nonce = "AAAA" }), o, weatherRecord},
 		{"bad point", changed(func(s *Sealed) { s.EPK = "BAAA" }), o, weatherRecord},
+		{"off-curve point", changed(func(s *Sealed) { s.EPK = b64.EncodeToString(append([]byte{4}, make([]byte, 64)...)) }), o, weatherRecord},
 		{"not base64", changed(func(s *Sealed) { s.CT = "***" }), o, weatherRecord},
 	}
 	for _, c := range cases {
-		if _, err := c.opener.Open(c.sealed, c.rec); err == nil {
+		_, err := c.opener.Open(c.sealed, c.rec)
+		switch {
+		case err == nil:
 			t.Errorf("%s: Open succeeded", c.name)
+		case c.sealed.V == 1 && !errors.Is(err, errSealed):
+			t.Errorf("%s: %v, want the uniform error", c.name, err)
 		}
 	}
 	limited, _ := Seal(o.PublicKey(), rebound(func(r *Record) { r.Methods = []string{"GET"} }), fakeValue)
