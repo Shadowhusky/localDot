@@ -218,3 +218,62 @@ func TestSurrogatesAreWrittenAsTheirIDs(t *testing.T) {
 		t.Fatalf("written %s; returned %+v", data, line)
 	}
 }
+
+func TestOverlappingSurrogatesAreWrittenAsOneSpan(t *testing.T) {
+	mint := func(tag string) string {
+		tok, err := surrogate.Mint(tag)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	tok, other, hidden := mint("ant"), mint("key"), mint("hiddenbehind")
+	endsInLD := mint("oai")
+	for tries := 1; !strings.HasSuffix(endsInLD, "ld"); tries++ {
+		if tries == 1_000_000 {
+			t.Fatal("no surrogate's checksum ends in ld")
+		}
+		endsInLD = mint("oai")
+	}
+	body := func() string { return mint("xx")[6:28] }
+	b1, b2, b20 := body(), body(), body()[:20]
+	forged1, forged2 := "ld_xx_"+b1+"_Ab3Dld", "ld_yy_"+b2+"_Ef5Gld"
+	cases := []struct {
+		name   string
+		text   string
+		tokens []string
+	}{
+		{"two surrogates sharing ld", endsInLD + tok[2:], []string{endsInLD, tok}},
+		{"a checksum ending on a surrogate's l", "ld_xx_" + b1 + "_Ab3DE" + tok, []string{"ld_xx_" + b1 + "_Ab3DEl", tok}},
+		{"a body ending on a surrogate's ld", "ld_xx_" + b20 + hidden, []string{"ld_xx_" + b20 + hidden[:9], hidden}},
+		{"a chain of three", forged1[:33] + forged2[:33] + tok, []string{forged1, forged2, tok}},
+		{"two surrogates side by side", tok + other, []string{tok, other}},
+	}
+	for _, c := range cases {
+		l, path := openLog(t)
+		var hooked Line
+		l.OnWrite(func(line Line) { hooked = line })
+		line, err := l.Write(Line{Kind: KindRequest, Path: "/keys/" + c.text + "/x", Detail: "lookup " + c.text, Decision: Deny})
+		if err != nil {
+			t.Fatal(err)
+		}
+		ids := make([]string, len(c.tokens))
+		for i, tok := range c.tokens {
+			ids[i] = surrogate.ID(tok)
+		}
+		named := "surrogate:" + strings.Join(ids, ",")
+		if line.Path != "/keys/"+named+"/x" || line.Detail != "lookup "+named || hooked != line {
+			t.Errorf("%s: returned %+v, hooked %+v", c.name, line, hooked)
+		}
+		data, _ := os.ReadFile(path)
+		if len(surrogate.Find(string(data))) > 0 {
+			t.Errorf("%s: token-shaped text survives: %s", c.name, data)
+		}
+		for _, tok := range c.tokens {
+			body, sum := tok[len(tok)-29:len(tok)-7], tok[len(tok)-6:]
+			if bytes.Contains(data, []byte(body)) || bytes.Contains(data, []byte(sum)) {
+				t.Errorf("%s: the body or checksum of %s survives: %s", c.name, tok, data)
+			}
+		}
+	}
+}

@@ -213,14 +213,38 @@ func (l *Log) Close() error {
 	return l.f.Close()
 }
 
-// redact writes each surrogate-shaped token in the fields a request controls as surrogate:<ID>.
+// redact writes the surrogate-shaped text in the fields a request controls as surrogate:<ID>.
+// Token-shaped runs that overlap or touch form one span, written once with the IDs of its runs in
+// start order, comma-separated: surrogate:<ID>,<ID>. Rewriting run by run would let one run's ID
+// take the start of a run overlapping it and leave the rest, its random body and checksum, in the
+// line.
 func redact(l Line) Line {
 	for _, field := range []*string{&l.Method, &l.Host, &l.Path, &l.SNI, &l.Route, &l.Model, &l.Detail} {
-		for _, tok := range surrogate.Find(*field) {
-			*field = strings.ReplaceAll(*field, tok, "surrogate:"+surrogate.ID(tok))
-		}
+		*field = redactText(*field)
 	}
 	return l
+}
+
+func redactText(s string) string {
+	spans := surrogate.FindIndex(s)
+	if len(spans) == 0 {
+		return s
+	}
+	var b strings.Builder
+	done := 0
+	for i := 0; i < len(spans); {
+		start, end := spans[i][0], spans[i][1]
+		var ids []string
+		for ; i < len(spans) && spans[i][0] <= end; i++ {
+			ids = append(ids, surrogate.ID(s[spans[i][0]:spans[i][1]]))
+			end = max(end, spans[i][1])
+		}
+		b.WriteString(s[done:start])
+		b.WriteString("surrogate:" + strings.Join(ids, ","))
+		done = end
+	}
+	b.WriteString(s[done:])
+	return b.String()
 }
 
 // Verify checks the chain and the sequence numbers and returns how many lines are intact.
