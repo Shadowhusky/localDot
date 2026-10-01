@@ -1,6 +1,6 @@
 import { Spine } from "@esotericsoftware/spine-pixi-v8";
-import { applyPose, bindingProblems, fitFrame, mapParams } from "@localdot/avatar-spine";
-import { Application, Assets, Text } from "pixi.js";
+import { applyPose, bindingProblems, fitFrame, frameRect, mapParams } from "@localdot/avatar-spine";
+import { Application, Assets, Graphics, Text } from "pixi.js";
 import { loadPack } from "./packs.ts";
 import { SHEET_POSES } from "./sheet-poses.ts";
 
@@ -47,9 +47,12 @@ for (const [i, cell] of SHEET_POSES.entries()) {
   const y0 = Math.floor(i / COLUMNS) * CELL_H;
   spine.scale.set(placement.scale);
   spine.position.set(x0 + placement.x, y0 + LABEL_H + placement.y);
+  const box = frameRect(options.frames.glance, options.root, placement);
+  const clip = new Graphics().rect(x0 + box.x, y0 + LABEL_H + box.y, box.w, box.h).fill(0xffffff);
+  spine.mask = clip;
   applyPose(spine.skeleton, mapParams(cell.params, options.binding));
   spine.update(0);
-  app.stage.addChild(spine);
+  app.stage.addChild(spine, clip);
   const label = new Text({
     text: cell.label,
     style: { fill: "#999CA4", fontSize: 14, fontFamily: "-apple-system, Inter, sans-serif" },
