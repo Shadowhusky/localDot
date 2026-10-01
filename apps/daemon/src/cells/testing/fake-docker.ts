@@ -36,6 +36,9 @@ export interface FakeDockerState {
   // An engine that ignores isolated gateway mode reports a gateway on internal networks.
   gatewayOnInternal: boolean;
   failCreate: Set<string>;
+  // A request whose "METHOD path" is held here is answered only once the promise settles, the way
+  // a slow Docker operation keeps the caller waiting; the reply reflects the state at that moment.
+  holds: Map<string, Promise<void>>;
 }
 
 export interface FakeDocker {
@@ -68,6 +71,7 @@ export async function startFakeDocker(
     nextPort: 50000,
     gatewayOnInternal: false,
     failCreate: new Set(),
+    holds: new Map(),
     ...overrides,
   };
   let networkSeq = 20;
@@ -202,11 +206,12 @@ export async function startFakeDocker(
     req.on("data", (c) => {
       text += c;
     });
-    req.on("end", () => {
+    req.on("end", async () => {
       const url = new URL(req.url ?? "/", "http://docker");
       const path = url.pathname.replace(/^\/v1\.\d+/, "");
       const body = text ? JSON.parse(text) : undefined;
       state.calls.push({ method: req.method ?? "", path, query: url.searchParams, body });
+      await state.holds.get(`${req.method} ${path}`);
       const out = handle(req.method ?? "", path, url.searchParams, body);
       if (out.body === undefined) {
         res.writeHead(out.status);

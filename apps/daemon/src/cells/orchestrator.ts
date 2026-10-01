@@ -124,6 +124,7 @@ export class CellOrchestrator {
   readonly #live = new Map<string, Live>();
   readonly #listeners = new Set<CellListener>();
   readonly #reservedKeydPorts = new Set<number>();
+  readonly #queues = new Map<string, Promise<void>>();
   #disposed = false;
 
   constructor(deps: OrchestratorDeps) {
@@ -178,37 +179,42 @@ export class CellOrchestrator {
 
   // Restart counters live in memory, so a daemon restart starts them again at 0.
   async reconcile(): Promise<void> {
-    for (const record of this.#store.list()) {
-      try {
-        const desktop = await this.#inspect(record.docker.desktop);
-        const gate = await this.#inspect(record.docker.gate);
-        if (desktop.State.Running && gate.State.Running) {
-          const ports = await this.#readPorts(record.docker.gate);
-          this.#set(record.id, { state: "starting", restarts: 0, ports, stream: NO_STREAM });
-          void this.#waitReady(record);
-        } else if (!desktop.State.Running && !gate.State.Running) {
-          this.#set(record.id, { state: "stopped", restarts: 0, stream: NO_STREAM });
-        } else {
-          const [role, info] = desktop.State.Running ? ["gate", gate] : ["desktop", desktop];
-          this.#set(record.id, {
-            state: "failed",
-            restarts: 0,
-            error: `${role} container exited with ${info.State.ExitCode}; stop and start the computer`,
-            stream: NO_STREAM,
-          });
-        }
-      } catch (err) {
-        const error = isStatus(err, 404)
-          ? "containers missing: removed outside localDot"
-          : messageOf(err);
-        this.#set(record.id, { state: "failed", restarts: 0, error, stream: NO_STREAM });
+    for (const { id } of this.#store.list()) {
+      await this.#queued(id, () => this.#reconcile(id));
+    }
+  }
+
+  async #reconcile(id: string): Promise<void> {
+    const record = this.#store.get(id);
+    if (!record) return;
+    try {
+      const desktop = await this.#inspect(record.docker.desktop);
+      const gate = await this.#inspect(record.docker.gate);
+      if (desktop.State.Running && gate.State.Running) {
+        const ports = await this.#readPorts(record.docker.gate);
+        this.#set(id, { state: "starting", restarts: 0, ports, stream: NO_STREAM });
+        void this.#waitReady(record);
+      } else if (!desktop.State.Running && !gate.State.Running) {
+        this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
+      } else {
+        const [role, info] = desktop.State.Running ? ["gate", gate] : ["desktop", desktop];
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          error: `${role} container exited with ${info.State.ExitCode}; stop and start the computer`,
+          stream: NO_STREAM,
+        });
       }
+    } catch (err) {
+      const error = isStatus(err, 404)
+        ? "containers missing: removed outside localDot"
+        : messageOf(err);
+      this.#set(id, { state: "failed", restarts: 0, error, stream: NO_STREAM });
     }
   }
 
   async create(opts: { scale: Scale }): Promise<CellSummary> {
     const id = ulid();
-    const names = cellNames(id, this.#namePrefix);
     // keyd tells cells apart by their listener port (M3), so the port is reserved before the first
     // await: two concurrent creates never get the same one.
     const keydPort = allocateKeydPort([
@@ -216,6 +222,15 @@ export class CellOrchestrator {
       ...this.#reservedKeydPorts,
     ]);
     this.#reservedKeydPorts.add(keydPort);
+    try {
+      return await this.#queued(id, () => this.#provision(id, keydPort, opts.scale));
+    } finally {
+      this.#reservedKeydPorts.delete(keydPort);
+    }
+  }
+
+  async #provision(id: string, keydPort: number, scale: Scale): Promise<CellSummary> {
+    const names = cellNames(id, this.#namePrefix);
     const undo: (() => Promise<unknown>)[] = [];
     try {
       const internal = await this.#docker.request<{ Id: string }>({
@@ -252,7 +267,7 @@ export class CellOrchestrator {
         v: 1,
         id,
         createdAt: new Date().toISOString(),
-        scale: opts.scale,
+        scale,
         keydPort,
         tokens: { desktopd: newCellToken(), stream: newCellToken() },
         docker: {
@@ -282,17 +297,23 @@ export class CellOrchestrator {
       for (const step of undo.reverse()) await step().catch(() => {});
       this.#live.delete(id);
       throw err;
-    } finally {
-      this.#reservedKeydPorts.delete(keydPort);
     }
   }
 
-  async start(id: string): Promise<void> {
+  start(id: string): Promise<void> {
+    return this.#queued(id, () => this.#start(id));
+  }
+
+  async #start(id: string): Promise<void> {
     const record = this.#require(id);
     if (await this.#startContainers(record, 0)) void this.#waitReady(record);
   }
 
-  async stop(id: string): Promise<void> {
+  stop(id: string): Promise<void> {
+    return this.#queued(id, () => this.#stop(id));
+  }
+
+  async #stop(id: string): Promise<void> {
     const record = this.#require(id);
     this.#set(id, { state: "stopping", restarts: 0, stream: NO_STREAM });
     for (const name of [record.docker.desktop, record.docker.gate]) {
@@ -309,7 +330,11 @@ export class CellOrchestrator {
     this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
   }
 
-  async remove(id: string, opts: { purgeHome?: boolean } = {}): Promise<void> {
+  remove(id: string, opts: { purgeHome?: boolean } = {}): Promise<void> {
+    return this.#queued(id, () => this.#remove(id, opts));
+  }
+
+  async #remove(id: string, opts: { purgeHome?: boolean }): Promise<void> {
     const record = this.#require(id);
     const d = record.docker;
     const ignoreMissing = (err: unknown) => {
@@ -463,11 +488,29 @@ export class CellOrchestrator {
       this.#set(record.id, restarting);
       await this.#sleep(this.#restartBackoffMs[attempt - 1] ?? 0);
       if (!this.#current(record.id, restarting)) return;
-      if (await this.#startContainers(record, attempt, note).catch(() => false)) {
-        await this.#waitReady(record);
-      }
+      // Queued like a user's start: a Stop that lands during the restart runs after it.
+      const restarted = await this.#queued(record.id, async () =>
+        this.#current(record.id, restarting) ? this.#startContainers(record, attempt, note) : false,
+      ).catch(() => false);
+      if (restarted) await this.#waitReady(record);
       return;
     }
+  }
+
+  // One cell's create, start, stop, remove, restart and reconcile run one at a time, in the order
+  // they arrive, while other cells go on: a Start that lands during a Stop runs after it instead of
+  // interleaving with it and being lost. Readiness and the restart backoff wait outside the queue.
+  #queued<T>(id: string, op: () => Promise<T>): Promise<T> {
+    const run = (this.#queues.get(id) ?? Promise.resolve()).then(op);
+    const settled = run.then(
+      () => {},
+      () => {},
+    );
+    this.#queues.set(id, settled);
+    void settled.then(() => {
+      if (this.#queues.get(id) === settled) this.#queues.delete(id);
+    });
+    return run;
   }
 
   // A loop that awaited goes on only while the cell still holds the entry it set or read: a stop, a

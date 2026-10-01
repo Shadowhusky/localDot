@@ -207,6 +207,28 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     expect(docker("inspect", "-f", "{{.RestartCount}}", desktop)).toBe("0");
   }, 300_000);
 
+  it("runs a Start that lands during a Stop after the Stop, with no failure between", async () => {
+    if (!cell) throw new Error("no cell");
+    const id = cell.id;
+    const record = store.get(id);
+    if (!record) throw new Error("record missing");
+    const before = orchestrator.endpoints(id);
+    const states: string[] = [];
+    const off = orchestrator.subscribe((c) => {
+      if (c.id === id) states.push(c.state);
+    });
+    const ready = readyAgain(id);
+    await Promise.all([orchestrator.stop(id), orchestrator.start(id)]);
+    // Both calls are done, so the Start has run after the Stop and both containers are up again.
+    expect(states).toEqual(["stopping", "stopped", "starting", "starting"]);
+    expect(docker("inspect", "-f", "{{.State.Running}}", record.docker.gate)).toBe("true");
+    expect(docker("inspect", "-f", "{{.State.Running}}", record.docker.desktop)).toBe("true");
+    await ready;
+    off();
+    expect(states.at(-1)).toBe("ready");
+    expect(orchestrator.endpoints(id)?.desktopd.baseUrl).not.toBe(before?.desktopd.baseUrl);
+  }, 300_000);
+
   it("stops, starts with new ports, and removes everything but the home volume", async () => {
     if (!cell) throw new Error("no cell");
     const id = cell.id;

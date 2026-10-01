@@ -39,11 +39,16 @@ const runningDesktop = (store: CellStore) => () => {
   return names.every((n) => fake.state.containers.get(n)?.running) ? healthy : undefined;
 };
 
-const waitUntil = (pred: () => boolean) =>
+// Gives up after `ms` so a test that never gets there fails on its assertions, not a timeout.
+const waitUntil = (pred: () => boolean, ms = 2000) =>
   new Promise<void>((resolve) => {
-    const check = () => (pred() ? resolve() : setTimeout(check, 5));
+    const deadline = Date.now() + ms;
+    const check = () => (pred() || Date.now() > deadline ? resolve() : setTimeout(check, 5));
     check();
   });
+
+const callsTo = (request: string) =>
+  fake.state.calls.filter((c) => `${c.method} ${c.path}` === request).length;
 
 async function setup(
   opts: {
@@ -389,6 +394,174 @@ describe("CellOrchestrator restarts", () => {
     expect(orchestrator.get(cell.id)?.state).toBe("stopped");
     expect(changes.at(-1)).toMatchObject({ id: cell.id, state: "stopped" });
     expect(desktop?.starts).toBe(1);
+  });
+});
+
+describe("CellOrchestrator operation queue", () => {
+  it("runs a Start that lands during a Stop after it, ending ready with no failure between", async () => {
+    const { orchestrator, store, stateOf, changes } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const record = store.get(cell.id);
+    const gate = fake.state.containers.get(record?.docker.gate ?? "");
+    const desktop = fake.state.containers.get(record?.docker.desktop ?? "");
+    const from = changes.length;
+
+    await Promise.all([orchestrator.stop(cell.id), orchestrator.start(cell.id)]);
+    await waitUntil(() => orchestrator.get(cell.id)?.state === "ready");
+
+    expect(changes.slice(from).map((c) => c.state)).toEqual([
+      "stopping",
+      "stopped",
+      "starting",
+      "starting",
+      "ready",
+    ]);
+    expect({ gate: gate?.starts, desktop: desktop?.starts }).toEqual({ gate: 2, desktop: 2 });
+    expect({ gate: gate?.running, desktop: desktop?.running }).toEqual({
+      gate: true,
+      desktop: true,
+    });
+  });
+
+  it("runs a Stop that lands during a restart after it, leaving both containers stopped", async () => {
+    const { orchestrator, store, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const record = store.get(cell.id);
+    const gate = fake.state.containers.get(record?.docker.gate ?? "");
+    const desktop = fake.state.containers.get(record?.docker.desktop ?? "");
+    const startDesktop = `POST /containers/${record?.docker.desktop}/start`;
+    const held = Promise.withResolvers<void>();
+    fake.state.holds.set(startDesktop, held.promise);
+    const starts = callsTo(startDesktop);
+    if (desktop) {
+      desktop.running = false;
+      desktop.exitCode = 137;
+    }
+    await waitUntil(() => callsTo(startDesktop) > starts);
+
+    const stopping = orchestrator.stop(cell.id);
+    await new Promise((r) => setTimeout(r, 20));
+    held.resolve();
+    await stopping;
+
+    expect(orchestrator.get(cell.id)?.state).toBe("stopped");
+    expect({ gate: gate?.running, desktop: desktop?.running }).toEqual({
+      gate: false,
+      desktop: false,
+    });
+  });
+
+  it("runs a Stop that lands during reconcile after it, with no failure between", async () => {
+    const { orchestrator, store, stateOf } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    orchestrator.dispose();
+    const record = store.get(cell.id);
+    const inspectGate = `GET /containers/${record?.docker.gate}/json`;
+    const held = Promise.withResolvers<void>();
+    fake.state.holds.set(inspectGate, held.promise);
+    const fresh = new CellOrchestrator({
+      docker: new DockerClient(fake.socketPath),
+      store,
+      images,
+      probeDesktopd: async () => healthy,
+      probeStream: async () => true,
+      sleep: async () => {},
+    });
+    made.push(fresh);
+    const seen: CellSummary[] = [];
+    fresh.subscribe((c) => seen.push(c));
+    const inspects = callsTo(inspectGate);
+
+    const reconciling = fresh.reconcile();
+    await waitUntil(() => callsTo(inspectGate) > inspects);
+    const stopping = fresh.stop(cell.id);
+    await new Promise((r) => setTimeout(r, 20));
+    held.resolve();
+    await Promise.all([reconciling, stopping]);
+
+    expect(fresh.get(cell.id)?.state).toBe("stopped");
+    expect(seen.map((c) => c.state)).not.toContain("failed");
+  });
+
+  it("runs a Stop that lands while a new cell starts after it, leaving both containers stopped", async () => {
+    const { orchestrator, store } = await setup();
+    const held = Promise.withResolvers<void>();
+    let startGate = "";
+    // The new cell's id is known only once create() saves it and reports it starting.
+    orchestrator.subscribe((c) => {
+      if (startGate || c.state !== "starting") return;
+      startGate = `POST /containers/${store.get(c.id)?.docker.gate}/start`;
+      fake.state.holds.set(startGate, held.promise);
+    });
+    const creating = orchestrator.create({ scale: 2 });
+    await waitUntil(() => startGate !== "" && callsTo(startGate) === 1);
+    const id = store.list()[0]?.id ?? "";
+
+    const stopping = orchestrator.stop(id);
+    await new Promise((r) => setTimeout(r, 20));
+    held.resolve();
+    await Promise.all([creating, stopping]);
+
+    const record = store.get(id);
+    expect(orchestrator.get(id)?.state).toBe("stopped");
+    expect({
+      gate: fake.state.containers.get(record?.docker.gate ?? "")?.running,
+      desktop: fake.state.containers.get(record?.docker.desktop ?? "")?.running,
+    }).toEqual({ gate: false, desktop: false });
+  });
+
+  it("drops a restart that queued behind a remove", async () => {
+    const { orchestrator, store, stateOf, changes } = await setup();
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const record = store.get(cell.id);
+    const desktop = fake.state.containers.get(record?.docker.desktop ?? "");
+    const deleteDesktop = `DELETE /containers/${record?.docker.desktop}`;
+    const startGate = `POST /containers/${record?.docker.gate}/start`;
+    const held = Promise.withResolvers<void>();
+    fake.state.holds.set(deleteDesktop, held.promise);
+
+    const removing = orchestrator.remove(cell.id);
+    await waitUntil(() => callsTo(deleteDesktop) === 1);
+    const gateStarts = callsTo(startGate);
+    if (desktop) {
+      desktop.running = false;
+      desktop.exitCode = 137;
+    }
+    await waitUntil(() => changes.some((c) => (c.error ?? "").includes("restarting")));
+    await new Promise((r) => setTimeout(r, 20));
+    held.resolve();
+    await removing;
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(callsTo(startGate)).toBe(gateStarts);
+    expect(orchestrator.get(cell.id)).toBeUndefined();
+  });
+
+  it("keeps cells apart: one cell's slow stop holds up no other cell", async () => {
+    const { orchestrator, store, stateOf } = await setup();
+    const slow = await orchestrator.create({ scale: 2 });
+    const quick = await orchestrator.create({ scale: 2 });
+    await stateOf(slow.id, "ready");
+    await stateOf(quick.id, "ready");
+    const stopSlow = `POST /containers/${store.get(slow.id)?.docker.desktop}/stop`;
+    const held = Promise.withResolvers<void>();
+    fake.state.holds.set(stopSlow, held.promise);
+
+    const stoppingSlow = orchestrator.stop(slow.id);
+    await waitUntil(() => callsTo(stopSlow) === 1);
+    const quickStopped = await Promise.race([
+      orchestrator.stop(quick.id).then(() => true),
+      new Promise<false>((r) => setTimeout(() => r(false), 1000)),
+    ]);
+    expect(quickStopped).toBe(true);
+    expect(orchestrator.get(slow.id)?.state).toBe("stopping");
+    held.resolve();
+    await stoppingSlow;
+    expect(orchestrator.get(slow.id)?.state).toBe("stopped");
   });
 });
 
