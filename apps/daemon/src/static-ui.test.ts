@@ -8,6 +8,9 @@ import { EventLog } from "./event-log.ts";
 const PORT = 4750;
 const TOKEN = "t".repeat(43);
 const url = (path: string) => `http://127.0.0.1:${PORT}${path}`;
+const UI_CSP =
+  "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; " +
+  "base-uri 'none'; frame-ancestors 'self'; form-action 'none'";
 
 function appWithUi(dir: string) {
   return createApp({
@@ -30,12 +33,15 @@ describe("serveUi", () => {
     expect(index.headers.get("cache-control")).toBe("no-store");
     expect(index.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(index.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(index.headers.get("content-security-policy")).toBe(UI_CSP);
     expect(await index.text()).toContain("localDot");
     const asset = await app.request(url("/assets/index-abc.js"));
     expect(asset.status).toBe(200);
     expect(asset.headers.get("cache-control")).toContain("immutable");
     expect(asset.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
     expect(asset.headers.get("x-content-type-options")).toBe("nosniff");
+    // A worker script is governed by the policy it is served with, not its page's.
+    expect(asset.headers.get("content-security-policy")).toBe(UI_CSP);
     // URL parsing folds "../" and "%2e%2e/" away before routing; an encoded separator survives and
     // reaches readStatic's guard, aimed at a file that exists outside dist.
     writeFileSync(join(tmpdir(), "ld-ui-outside.txt"), "secret");

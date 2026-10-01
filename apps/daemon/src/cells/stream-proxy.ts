@@ -26,6 +26,35 @@ const CELL_API = new Map([
 ]);
 const MAX_CELL_ANSWER_BYTES = 64 * 1024;
 const SERVED = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
+
+// The client runs in localDot's origin, whose storage holds the install token, and acts on what its
+// cell sends, so whatever a cell makes it do stays inside this origin. The one widening: it runs its
+// socket and decoders in blob: workers. Its injected <style> and its audio worklet stay refused (the
+// stage shows video only). The sandbox drops dialogs, popups, downloads, pointer lock and navigating
+// the Theatre; the permissions deny the camera and microphone its cell can ask for, and the
+// clipboard, fullscreen, gamepads and wake lock it would use.
+const CLIENT_POLICY = {
+  "content-security-policy": [
+    "default-src 'self'",
+    "connect-src 'self'",
+    "img-src 'self' data: blob:",
+    "object-src 'none'",
+    "base-uri 'none'",
+    "frame-ancestors 'self'",
+    "form-action 'none'",
+    "worker-src blob:",
+    "sandbox allow-scripts allow-same-origin",
+  ].join("; "),
+  "permissions-policy": [
+    "camera=()",
+    "microphone=()",
+    "clipboard-read=()",
+    "clipboard-write=()",
+    "fullscreen=()",
+    "gamepad=()",
+    "screen-wake-lock=()",
+  ].join(", "),
+};
 const UNDER_TICKET = /^\/cells\/[^/]+\/desktop\/[^/]+(\/.*)$/;
 
 export interface StreamProxyDeps {
@@ -56,7 +85,7 @@ export function desktopRoutes(app: Hono, deps: StreamProxyDeps): void {
     }
     const file = vendored(deps.vendorDir, rel);
     if (!file) return c.text("not found", 404);
-    return c.body(file.body, 200, { ...SERVED, "content-type": file.type });
+    return c.body(file.body, 200, { ...SERVED, ...CLIENT_POLICY, "content-type": file.type });
   });
   app.all("/cells/:id/desktop/:ticket/*", (c) => c.text("method not allowed", 405));
 }

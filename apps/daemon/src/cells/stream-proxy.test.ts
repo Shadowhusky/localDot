@@ -21,6 +21,13 @@ const AUTH = `Basic ${Buffer.from("localdot:streamtoken").toString("base64")}`;
 const WRONG_AUTH = `Basic ${Buffer.from("localdot:wrong").toString("base64")}`;
 const DESKTOPD = { baseUrl: "http://127.0.0.1:1", token: "x".repeat(43) };
 const HOSTILE_PAGE = "<script>parent.document.title = 'owned'</script>";
+const CLIENT_CSP =
+  "default-src 'self'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; " +
+  "base-uri 'none'; frame-ancestors 'self'; form-action 'none'; worker-src blob:; " +
+  "sandbox allow-scripts allow-same-origin";
+const CLIENT_PERMISSIONS =
+  "camera=(), microphone=(), clipboard-read=(), clipboard-write=(), fullscreen=(), gamepad=(), " +
+  "screen-wake-lock=()";
 const freePort = () =>
   new Promise<number>((resolve) => {
     const probe = createServer().listen(0, "127.0.0.1", () => {
@@ -278,11 +285,17 @@ describe("desktop stream proxy over HTTP", () => {
     expect(index.headers.get("content-type")).toBe("text/html; charset=utf-8");
     expect(index.headers.get("cache-control")).toBe("no-store");
     expect(index.headers.get("x-content-type-options")).toBe("nosniff");
+    expect(index.headers.get("content-security-policy")).toBe(CLIENT_CSP);
+    expect(index.headers.get("permissions-policy")).toBe(CLIENT_PERMISSIONS);
     // The client probes its own page with HEAD after every socket close.
     const head = await d.fetch(`${d.prefix}/`, { method: "HEAD" });
     expect(head.status).toBe(200);
     expect(await head.text()).toBe("");
-    expect((await d.fetch(`${d.prefix}/assets/core.js`)).status).toBe(200);
+    expect(head.headers.get("content-security-policy")).toBe(CLIENT_CSP);
+    const asset = await d.fetch(`${d.prefix}/assets/core.js`);
+    expect(asset.status).toBe(200);
+    expect(asset.headers.get("content-security-policy")).toBe(CLIENT_CSP);
+    expect(asset.headers.get("permissions-policy")).toBe(CLIENT_PERMISSIONS);
     const status = await d.fetch(`${d.prefix}/api/status`);
     expect(status.status).toBe(200);
     expect(await status.json()).toEqual({ path: "/api/status" });
