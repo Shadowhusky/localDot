@@ -164,7 +164,7 @@ describe("AvatarController", () => {
       expect(peak.headX).toBeGreaterThan(0.08);
       expect(peak.headY).toBeGreaterThan(0.05);
       expect(peak.bodyX).toBeGreaterThan(0.3);
-      expect(peak.headRoll).toBeGreaterThan(0.4);
+      expect(peak.headRoll).toBeGreaterThan(0.5);
     }
   });
 
@@ -215,7 +215,7 @@ describe("AvatarController", () => {
         expect(Math.abs(p.eyeX)).toBeLessThanOrEqual(0.6);
         expect(Math.abs(p.eyeY)).toBeLessThanOrEqual(0.3);
         expect(Math.abs(p.bodyX)).toBeLessThanOrEqual(0.45);
-        expect(Math.abs(p.headRoll ?? 0)).toBeLessThanOrEqual(0.8);
+        expect(Math.abs(p.headRoll ?? 0)).toBeLessThanOrEqual(0.95);
       }
     }
   });

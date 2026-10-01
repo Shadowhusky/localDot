@@ -82,6 +82,6 @@ export function swayAt(
     x: fast(0.075) + slow(0.045),
     y: slow(0.05) + fast(0.03),
     body: fast(0.32) + slow(0.13),
-    roll: wave(0.45, 0.09 + random() * 0.02) + fast(0.15),
+    roll: wave(0.55, 0.09 + random() * 0.02) + fast(0.2),
   };
 }

@@ -56,9 +56,9 @@ describe("BlinkSchedule", () => {
 });
 
 describe("swayAt", () => {
-  const RANGE = { x: 0.12, y: 0.08, body: 0.45, roll: 0.6 };
+  const RANGE = { x: 0.12, y: 0.08, body: 0.45, roll: 0.75 };
   // Largest change in 16 ms: every component is a sine of 6 s or slower.
-  const STEP = { x: 0.002, y: 0.002, body: 0.008, roll: 0.009 };
+  const STEP = { x: 0.002, y: 0.002, body: 0.008, roll: 0.011 };
   const KEYS = ["x", "y", "body", "roll"] as const;
 
   it("stays in range across, up, in lean and in roll, deterministic and slow", () => {
@@ -81,7 +81,7 @@ describe("swayAt", () => {
         const s = swayAt(t, seed);
         for (const key of KEYS) peak[key] = Math.max(peak[key], Math.abs(s[key]));
       }
-      for (const key of KEYS) expect(peak[key]).toBeGreaterThan(RANGE[key] * 0.66);
+      for (const key of KEYS) expect(peak[key]).toBeGreaterThan(RANGE[key] * 0.83);
     }
   });
 });
