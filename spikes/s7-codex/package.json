@@ -1,0 +1,10 @@
+{
+  "name": "@localdot/spike-s7-codex",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "@anthropic-ai/sandbox-runtime": "0.0.78",
+    "zod": "4.6.5"
+  }
+}

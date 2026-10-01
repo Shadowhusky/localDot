@@ -1,0 +1,11 @@
+{
+  "network": {
+    "allowedDomains": ["api.openai.com", "chatgpt.com", "auth.openai.com", "ab.chatgpt.com"],
+    "deniedDomains": []
+  },
+  "filesystem": {
+    "denyRead": ["~/.ssh", "~/.aws", "~/.localdot"],
+    "allowWrite": ["~/.codex", "./out"],
+    "denyWrite": []
+  }
+}
