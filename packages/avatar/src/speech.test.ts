@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MOUTH_STEP_MS, mouthAt, prepareTrack, type SpeechTrack } from "./speech.ts";
+import { MOUTH_STEP_MS, mouthAt, prepareTrack, type SpeechTrack, speechSpan } from "./speech.ts";
 
 const track: SpeechTrack = prepareTrack({
   lang: "en",
@@ -91,5 +91,22 @@ describe("prepareTrack", () => {
       visemes: [{ t: 0, shape: "A" }],
     });
     expect(mouthAt(badStart, 50)).toEqual({ shape: "rest", open: 0 });
+  });
+});
+
+describe("speechSpan", () => {
+  it("runs from the mouth's lead-in to the last syllable", () => {
+    expect(speechSpan(track)).toEqual({ from: 850, to: 1500 });
+  });
+
+  it("allows the closing tail when a track never comes to rest", () => {
+    const open = prepareTrack({ lang: "en", startsAt: 0, visemes: [{ t: 0, shape: "A" }] });
+    expect(speechSpan(open)).toEqual({ from: -150, to: 400 });
+  });
+
+  it("has no span without a track or a start", () => {
+    expect(speechSpan(null)).toBeNull();
+    expect(speechSpan({ ...track, startsAt: Number.NaN })).toBeNull();
+    expect(speechSpan({ ...track, visemes: [] })).toBeNull();
   });
 });

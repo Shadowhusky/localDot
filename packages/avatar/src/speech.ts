@@ -60,6 +60,16 @@ export function mouthAt(track: SpeechTrack | null, tMs: number): Mouth {
   return { shape: current.shape, open: SHAPE_OPENNESS[current.shape] * envelopeScale(track, rel) };
 }
 
+export function speechSpan(track: SpeechTrack | null): { from: number; to: number } | null {
+  const first = track?.visemes[0];
+  const last = track?.visemes[track.visemes.length - 1];
+  if (!track || !first || !last || !Number.isFinite(track.startsAt)) return null;
+  return {
+    from: track.startsAt + first.t - MOUTH_LEAD_MS,
+    to: track.startsAt + last.t + (last.shape === "rest" ? 0 : MOUTH_TAIL_MS),
+  };
+}
+
 function latestAtOrBefore(visemes: Viseme[], t: number): Viseme | undefined {
   let found: Viseme | undefined;
   for (const v of visemes) {

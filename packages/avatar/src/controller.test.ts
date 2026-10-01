@@ -213,6 +213,66 @@ describe("AvatarController", () => {
     }
   });
 
+  it("faces the user while speaking, holds 0.8 s after the last syllable, then wanders again", () => {
+    const { avatar, run } = make();
+    const looks = new GazeWander(1).looksUntil(60_000);
+    const look = looks.find(
+      (l, i) => l.at > 2000 && l.x !== 0 && ((looks[i + 1] as Look).at ?? 0) - l.at > 3000,
+    ) as Look;
+    run(look.at + 300);
+    avatar.speak(
+      prepareTrack({
+        lang: "en",
+        startsAt: look.at + 500,
+        visemes: [
+          { t: 0, shape: "A" },
+          { t: 1000, shape: "rest" },
+        ],
+      }),
+    );
+    expect(run(look.at + 300).eyeX).toBeCloseTo(look.x, 2);
+    for (let t = look.at + 600; t <= look.at + 1500 + 790; t += FRAME_MS) {
+      expect(run(t).eyeX).toBeCloseTo(0, 2);
+    }
+    let previous = run(look.at + 2300);
+    for (let t = look.at + 2300 + FRAME_MS; t <= look.at + 2900; t += FRAME_MS) {
+      const p = run(t);
+      expect(Math.abs(p.headX - previous.headX)).toBeLessThan(0.03);
+      previous = p;
+    }
+    expect(previous.eyeX).toBeCloseTo(look.x, 2);
+  });
+
+  it("lets approval, a pointer or a target win over speech, but not the lower sources", () => {
+    const speaking = () => {
+      const made = make({ reducedMotion: true });
+      made.avatar.speak(
+        prepareTrack({
+          lang: "en",
+          startsAt: 0,
+          visemes: [
+            { t: 0, shape: "A" },
+            { t: 5000, shape: "rest" },
+          ],
+        }),
+      );
+      return made;
+    };
+    for (const source of ["pointer", "target"] as const) {
+      const { avatar, run } = speaking();
+      avatar.setAttention({ x: 400, y: 0 }, source);
+      expect(run(1000).eyeX).toBeCloseTo(0.8, 2);
+    }
+    for (const source of ["cursor", "changed", "input"] as const) {
+      const { avatar, run } = speaking();
+      avatar.setAttention({ x: 400, y: 0 }, source);
+      expect(run(1000).eyeX).toBeCloseTo(0, 2);
+    }
+    const { avatar, run } = speaking();
+    avatar.setAttention("user", "approval");
+    expect(run(1000).eyeX).toBeCloseTo(0, 2);
+  });
+
   it("moves the mouth with a speech track", () => {
     const { avatar, run } = make();
     avatar.speak(

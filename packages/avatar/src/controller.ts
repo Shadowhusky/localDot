@@ -1,5 +1,5 @@
 import type { SpringParams } from "@localdot/stage";
-import type { AttentionPoint } from "./attention.ts";
+import { type AttentionPoint, type AttentionSource, OUTRANKS_SPEECH } from "./attention.ts";
 import {
   DEFAULT_GAZE_LIMITS,
   type GazeLimits,
@@ -11,7 +11,7 @@ import {
 import { BlinkSchedule, breathAt, swayAt } from "./life.ts";
 import { type AvatarParams, clamp, sanitizeParams } from "./params.ts";
 import { type ReactionKind, ReactionMixer, type ReactionOffsets } from "./reactions.ts";
-import { MOUTH_TAIL_MS, mouthAt, prepareTrack, type SpeechTrack } from "./speech.ts";
+import { MOUTH_TAIL_MS, mouthAt, prepareTrack, type SpeechTrack, speechSpan } from "./speech.ts";
 import { SpringChannel } from "./spring-channel.ts";
 import {
   type AgentStateName,
@@ -35,6 +35,7 @@ export const HEAD_SPRING: SpringParams = { dampingRatio: 1, response: 0.35 };
 const POSE_SPRING: SpringParams = { dampingRatio: 1, response: 0.4 };
 const SWAY_IN_SPRING: SpringParams = { dampingRatio: 1, response: 1.5 };
 export const MOOD_HOLD_MS = 4000;
+export const SPEECH_GAZE_HOLD_MS = 800;
 
 type Channel = "eyeX" | "eyeY" | "headX" | "headY" | "bodyX" | "brow" | "eyeOpen" | "swayIn";
 
@@ -47,6 +48,7 @@ export class AvatarController {
   #headCenter: Point;
   #reducedMotion: boolean;
   #attention: AttentionPoint | null = null;
+  #source: AttentionSource | "idle" = "idle";
   #track: SpeechTrack | null = null;
   readonly #gate: StateGate;
   readonly #blinks: BlinkSchedule;
@@ -85,12 +87,13 @@ export class AvatarController {
     this.#gate.request(state, this.#now());
   }
 
-  // null means nothing holds attention, so the gaze wanders.
-  setAttention(point: AttentionPoint | null): void {
+  // null means nothing holds attention, so the gaze wanders; a bare point counts as a target.
+  setAttention(point: AttentionPoint | null, source?: AttentionSource | "idle"): void {
     this.#attention =
       point === "user" || (point && Number.isFinite(point.x) && Number.isFinite(point.y))
         ? point
         : null;
+    this.#source = this.#attention === null ? "idle" : (source ?? "target");
   }
 
   setHeadCenter(point: Point): void {
@@ -187,11 +190,17 @@ export class AvatarController {
   }
 
   #gaze(pose: Pose, t: number): GazeTargets {
-    const attention = this.#attention;
+    const outranksSpeech = this.#source !== "idle" && OUTRANKS_SPEECH.has(this.#source);
+    const attention = this.#speaking(t) && !outranksSpeech ? "user" : this.#attention;
     if (attention !== null && attention !== "user")
       return gazeTargets(attention, this.#headCenter, this.#reach, this.#limits);
     const wander = attention === null && pose.wanders;
     return gazeToward(wander ? this.#wander.at(t - this.#start) : { x: 0, y: 0 }, this.#limits);
+  }
+
+  #speaking(t: number): boolean {
+    const span = speechSpan(this.#track);
+    return span !== null && t >= span.from && t <= span.to + SPEECH_GAZE_HOLD_MS;
   }
 
   #sampleExpressions(targets: Record<string, number>, t: number): Record<string, number> {

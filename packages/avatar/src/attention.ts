@@ -20,6 +20,13 @@ export const ATTENTION_TTL_MS: Record<AttentionSource, number> = {
   input: 4000,
 };
 
+// While she speaks she faces the user, over every source ranked below these.
+export const OUTRANKS_SPEECH: ReadonlySet<AttentionSource> = new Set([
+  "approval",
+  "pointer",
+  "target",
+]);
+
 // The user sits in front of the screen, not at a point on it.
 export type AttentionPoint = Point | "user";
 

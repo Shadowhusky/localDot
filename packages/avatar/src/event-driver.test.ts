@@ -12,13 +12,15 @@ const make = (toPage: (p: Point) => Point = (p) => p) => {
   let now = 0;
   const calls: string[] = [];
   let attention: AttentionPoint | null | undefined;
+  let source: string | undefined;
   const driver = new EventDriver(
     {
       setState: (state) => {
         calls.push(`state:${state}`);
       },
-      setAttention: (point) => {
+      setAttention: (point, from) => {
         attention = point;
+        source = from;
       },
       react: (kind) => {
         calls.push(`react:${kind}`);
@@ -35,7 +37,11 @@ const make = (toPage: (p: Point) => Point = (p) => p) => {
     driver.update();
     return attention;
   };
-  return { driver, calls, at, looking };
+  const lookingBecause = () => {
+    driver.update();
+    return source;
+  };
+  return { driver, calls, at, looking, lookingBecause };
 };
 
 describe("EventDriver", () => {
@@ -56,6 +62,19 @@ describe("EventDriver", () => {
       }),
     );
     expect(d.looking()).toEqual({ x: 200, y: 100 });
+  });
+
+  it("says which source holds attention, so speech can outrank the lower ones", () => {
+    const d = make();
+    expect(d.lookingBecause()).toBe("idle");
+    d.driver.handle(
+      ev("screen.settle", {
+        frameT: 0,
+        changed: [{ x: 0, y: 0, w: 10, h: 10 }],
+        noVisibleChange: false,
+      }),
+    );
+    expect(d.lookingBecause()).toBe("changed");
   });
 
   it("prefers the centre of a target's box over its point", () => {
