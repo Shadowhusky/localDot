@@ -1,0 +1,33 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>S8 hosted client</title>
+<style>
+  body { margin: 0; background: #0A0B0D; color: #EEEFF1; font: 13px system-ui; }
+  #stage { display: block; width: 1280px; height: 800px; margin: 16px; background: #000; }
+  #desktop { position: absolute; left: -10px; top: -10px; width: 1px; height: 1px; opacity: 0; pointer-events: none; border: 0; }
+  #stats { margin: 0 16px; white-space: pre; }
+</style>
+<canvas id="stage"></canvas>
+<pre id="stats">waiting for #videoStream…</pre>
+<iframe id="desktop" src="/d/t1/" inert></iframe>
+<script type="module">
+  const canvas = document.getElementById("stage");
+  const statsEl = document.getElementById("stats");
+  const frame = document.getElementById("desktop");
+  const worker = new Worker("/worker.js");
+  const offscreen = canvas.transferControlToOffscreen();
+  worker.postMessage({ type: "init", canvas: offscreen }, [offscreen]);
+  worker.onmessage = (e) => { statsEl.textContent = JSON.stringify(e.data); };
+  let tappedTrackId = null;
+  const tap = () => {
+    const video = frame.contentDocument?.getElementById("videoStream");
+    const track = video?.srcObject?.getVideoTracks?.()[0];
+    if (!track || track.id === tappedTrackId) return;
+    tappedTrackId = track.id;
+    const processor = new MediaStreamTrackProcessor({ track: track.clone() });
+    worker.postMessage({ type: "frames", readable: processor.readable }, [processor.readable]);
+    console.log("tapped", track.id, JSON.stringify(track.getSettings()));
+  };
+  setInterval(tap, 250);
+  window.ldReady = () => tappedTrackId !== null;
+</script>
