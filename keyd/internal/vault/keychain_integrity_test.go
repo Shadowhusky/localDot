@@ -5,19 +5,20 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
 
-// failingFake is the fake tool with two more modes: FAKE_FAIL=add:<account> fails that one write,
-// and FAKE_FAIL=del:<account> that one delete.
+// failingFake is the fake tool with three more modes: FAKE_FAIL=add:<account> fails that one write,
+// FAKE_FAIL=del:<account> that one delete, and FAKE_FAIL=del every delete.
 func failingFake(t *testing.T) (*Keychain, string) {
 	t.Helper()
 	k, dir := fakeKeychain(t)
 	s := fakeSecurity
 	for from, to := range map[string]string{
 		`if [ "$FAKE_FAIL" = add ]; then`:                       `[ "$FAKE_FAIL" = "add:$acct" ] && return 1; if [ "$FAKE_FAIL" = add ]; then`,
-		`delete-generic-password) [ -f "$item" ] || return 44;`: `delete-generic-password) [ "$FAKE_FAIL" = "del:$acct" ] && return 1; [ -f "$item" ] || return 44;`,
+		`delete-generic-password) [ -f "$item" ] || return 44;`: `delete-generic-password) [ "$FAKE_FAIL" = "del:$acct" ] && return 1; [ "$FAKE_FAIL" = del ] && return 1; [ -f "$item" ] || return 44;`,
 	} {
 		if !strings.Contains(s, from) {
 			t.Fatalf("the fake has no %q", from)
@@ -106,14 +107,23 @@ func TestKeychainAFailedPutLeavesNoFragment(t *testing.T) {
 	}
 }
 
-func TestKeychainPutReportsAnOldChunkItCannotRemove(t *testing.T) {
-	k, _ := failingFake(t)
+// Get never reads past the count the item names, so once the new value has read back whole, an old
+// chunk the tool cannot remove is logged and the Put stands; the other old chunks still go.
+func TestKeychainPutStandsOverAnOldChunkItCannotRemove(t *testing.T) {
+	k, dir := failingFake(t)
 	if err := k.Put("weather", longValue(maxValueLen)); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("FAKE_FAIL", "del:weather.5")
-	if err := k.Put("weather", fakeValue); err == nil {
-		t.Fatal("Put succeeded with a chunk of the old value left behind")
+	t.Setenv("FAKE_FAIL", "del:weather.2")
+	if err := k.Put("weather", fakeValue); err != nil {
+		t.Fatalf("Put over an old chunk it cannot remove: %v", err)
+	}
+	if got, err := k.Get("weather"); err != nil || !bytes.Equal(got, fakeValue) {
+		t.Fatalf("Get = %q, %v", got, err)
+	}
+	want := []string{"localdot-keyd-test.weather", "localdot-keyd-test.weather.0", "localdot-keyd-test.weather.2"}
+	if items := storeItems(dir); !slices.Equal(items, want) {
+		t.Fatalf("items %v, want %v", items, want)
 	}
 }
 

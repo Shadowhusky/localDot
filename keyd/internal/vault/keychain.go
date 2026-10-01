@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -64,20 +65,24 @@ func (k *Keychain) Put(id string, value []byte) error {
 	if got, err := k.Get(id); err != nil || !bytes.Equal(got, value) {
 		return k.abandon(id, true, fmt.Errorf("keychain: store %s: the value did not read back intact", id))
 	}
+	// The value read back whole, and Get never reads past the count the item names, so an old chunk
+	// that stays is a fragment of the old value, not a failure of this one.
 	for i := n; i < maxChunks; i++ {
 		if err := k.remove(chunkAccount(id, i)); err != nil && !errors.Is(err, ErrNotFound) {
-			return err
+			log.Printf("keyd: storing secret %s left an old chunk behind: %v", id, err)
 		}
 	}
 	return nil
 }
 
 // abandon ends a failed Put. Once the Put has written an item the old value no longer reads back,
-// so the whole item goes, best effort: no fragment of either value stays behind.
+// so the whole item goes, best effort: no fragment of either value stays behind. A Put that wrote
+// nothing says so, and the old value stays.
 func (k *Keychain) abandon(id string, wrote bool, err error) error {
-	if wrote {
-		_ = k.Delete(id)
+	if !wrote {
+		return fmt.Errorf("%w (%w)", err, errUnchanged)
 	}
+	_ = k.Delete(id)
 	return err
 }
 

@@ -92,6 +92,7 @@ type Vault struct {
 	store   Store
 	path    string
 	now     func() time.Time
+	write   func(path string, data []byte) error
 	mu      sync.Mutex
 	records map[string]Record
 	cache   map[string][]byte
@@ -101,7 +102,7 @@ type Vault struct {
 // in memory only, for a vault whose values are in memory too. An index keyd could not have written
 // is refused whole.
 func Open(store Store, path string) (*Vault, error) {
-	v := &Vault{store: store, path: path, now: time.Now, records: map[string]Record{}, cache: map[string][]byte{}}
+	v := &Vault{store: store, path: path, now: time.Now, write: writeFileAtomic, records: map[string]Record{}, cache: map[string][]byte{}}
 	if path == "" {
 		return v, nil
 	}
@@ -134,8 +135,10 @@ func Open(store Store, path string) (*Vault, error) {
 	return v, nil
 }
 
-// Put stores the value, then the record. An error means nothing changed, as far as the store
-// allows: the old record and value stay in force, or a new secret leaves nothing behind.
+// Put stores the value, then the record. An error means nothing changed, as far as the store and the
+// disk allow: the old record and value stay in force, or a new secret leaves nothing behind. Where
+// that cannot be ensured, the secret fails closed instead: its value is deleted when the index on
+// disk may name either binding, and its record leaves memory when a value that must go cannot.
 func (v *Vault) Put(rec Record, value []byte) error {
 	if !ValidID(rec.ID) {
 		return fmt.Errorf("secret id %q: want 1-64 of a-z 0-9 _ - starting with a letter or digit, not a reserved name", rec.ID)
@@ -158,7 +161,9 @@ func (v *Vault) Put(rec Record, value []byte) error {
 		prev, _ = v.valueLocked(rec.ID)
 	}
 	if err := v.store.Put(rec.ID, value); err != nil {
-		v.restoreValueLocked(rec.ID, prev)
+		if !errors.Is(err, errUnchanged) {
+			v.restoreValueLocked(rec.ID, prev)
+		}
 		return err
 	}
 	v.records[rec.ID] = rec
@@ -168,8 +173,11 @@ func (v *Vault) Put(rec Record, value []byte) error {
 		} else {
 			delete(v.records, rec.ID)
 		}
-		// The rename may have landed before the directory sync failed.
-		_ = v.saveLocked()
+		// A rename that landed before its directory sync failed left the new index on disk; if the
+		// old one cannot be put back, the index may name either binding, so neither keeps a value.
+		if errors.Is(err, errNotSynced) && v.saveLocked() != nil {
+			prev = nil
+		}
 		v.restoreValueLocked(rec.ID, prev)
 		return err
 	}
@@ -178,7 +186,8 @@ func (v *Vault) Put(rec Record, value []byte) error {
 }
 
 // restoreValueLocked undoes a store write that Put cannot keep. Without an old value to put back,
-// it deletes the item, so a restored record never meets the new value.
+// it deletes the item, so a restored record never meets the new value; and if the item cannot be
+// deleted, the record leaves memory, so this process fails closed.
 func (v *Vault) restoreValueLocked(id string, prev []byte) {
 	if prev != nil {
 		v.cache[id] = prev
@@ -188,7 +197,9 @@ func (v *Vault) restoreValueLocked(id string, prev []byte) {
 	} else {
 		delete(v.cache, id)
 	}
-	_ = v.store.Delete(id)
+	if err := v.store.Delete(id); err != nil && !errors.Is(err, ErrNotFound) && prev == nil {
+		delete(v.records, id)
+	}
 }
 
 func (v *Vault) Delete(id string) error {
@@ -262,8 +273,12 @@ func (v *Vault) saveLocked() error {
 	if err != nil {
 		return err
 	}
-	return writeFileAtomic(v.path, data)
+	return v.write(v.path, data)
 }
+
+// errNotSynced, wrapped in a save's error, means its rename landed: the new index is in place, but
+// its directory was not synced.
+var errNotSynced = errors.New("the index's directory was not synced")
 
 // writeFileAtomic syncs the new file before renaming it over path, and the directory after, so a
 // crash leaves the old index or the new one, never an empty file or a lost rename.
@@ -292,6 +307,13 @@ func writeFileAtomic(path string, data []byte) error {
 	if err := os.Rename(tmp.Name(), path); err != nil {
 		return err
 	}
+	if err := syncDir(dir); err != nil {
+		return fmt.Errorf("%w: %w", errNotSynced, err)
+	}
+	return nil
+}
+
+func syncDir(dir string) error {
 	d, err := os.Open(dir)
 	if err != nil {
 		return err

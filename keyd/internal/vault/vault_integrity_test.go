@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -245,4 +246,206 @@ func copied(text string, value []byte) bool {
 		}
 	}
 	return false
+}
+
+// tear overwrites the start of a chunk, as an interrupted write would, so the value stops reading back.
+func tear(t *testing.T, dir, account string) {
+	t.Helper()
+	chunk := filepath.Join(dir, "store", "localdot-keyd-test."+account)
+	data, err := os.ReadFile(chunk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(chunk, append([]byte(strings.Repeat("0", 16)), data[16:]...), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The old value no longer reads back, the new one is shorter, and the tool refuses every delete. The
+// new value reads back whole, so the Put must stand: failing it left the old binding on the new value.
+func TestAPutStandsOnceItsValueReadsBack(t *testing.T) {
+	k, dir := failingFake(t)
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	v, err := Open(k, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := longValue(maxValueLen)
+	if err := v.Put(httpRecord("weather"), old); err != nil {
+		t.Fatal(err)
+	}
+	tear(t, dir, "weather.1")
+	cold, err := Open(k, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+	t.Setenv("FAKE_FAIL", "del")
+	rotated := httpRecord("weather")
+	rotated.Hosts = []string{"new-host.example.test"}
+	value := []byte("rotated-fake-value-for-test")
+	if err := cold.Put(rotated, value); err != nil {
+		t.Fatalf("Put of a value that read back: %v", err)
+	}
+	t.Setenv("FAKE_FAIL", "")
+	again, err := Open(k, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range map[string]*Vault{"in process": cold, "after a restart": again} {
+		rec, _ := v.Record("weather")
+		got, err := v.Value("weather")
+		if rec.Hosts[0] != "new-host.example.test" || err != nil || !bytes.Equal(got, value) {
+			t.Errorf("%s: the hosts %v with the value %q (%v)", name, rec.Hosts, got, err)
+		}
+	}
+	if !strings.Contains(logged.String(), "weather") || carries(logged.String(), value) || carries(logged.String(), old) {
+		t.Errorf("logged %q", logged.String())
+	}
+}
+
+// flakyStore refuses reads or deletes on demand.
+type flakyStore struct {
+	*Memory
+	getFails, deleteFails bool
+}
+
+func (f *flakyStore) Get(id string) ([]byte, error) {
+	if f.getFails {
+		return nil, errors.New("flaky: read refused")
+	}
+	return f.Memory.Get(id)
+}
+
+func (f *flakyStore) Delete(id string) error {
+	if f.deleteFails {
+		return errors.New("flaky: delete refused")
+	}
+	return f.Memory.Delete(id)
+}
+
+// The vault cannot read the old value to put back, the index cannot be saved, and the store refuses
+// to delete the new value. The old binding must not serve it: the record leaves memory.
+func TestARecordThatWouldServeTheNewValueLeavesMemory(t *testing.T) {
+	store := &flakyStore{Memory: NewMemory()}
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	v, err := Open(store, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Put(httpRecord("weather"), fakeValue); err != nil {
+		t.Fatal(err)
+	}
+	cold, err := Open(store, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocker := filepath.Join(t.TempDir(), "not-a-directory")
+	if err := os.WriteFile(blocker, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	cold.path = filepath.Join(blocker, "secrets.json")
+	store.getFails, store.deleteFails = true, true
+	rotated := httpRecord("weather")
+	rotated.Hosts = []string{"new-host.example.test"}
+	if err := cold.Put(rotated, []byte("rotated-fake-value-for-test")); err == nil {
+		t.Fatal("Put succeeded without saving the index")
+	}
+	store.getFails, store.deleteFails = false, false
+	rec, kept := cold.Record("weather")
+	if got, err := cold.Value("weather"); kept || !errors.Is(err, ErrNotFound) {
+		t.Fatalf("the hosts %v still serve %q (%v)", rec.Hosts, got, err)
+	}
+}
+
+// The tool refuses every write, so the Put stores nothing and the old value is still whole: undoing
+// the Put must leave it, not delete it.
+func TestAPutThatWroteNothingKeepsTheOldValue(t *testing.T) {
+	k, _ := fakeKeychain(t)
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	v, err := Open(k, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Put(httpRecord("weather"), fakeValue); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_FAIL", "add")
+	if err := v.Put(httpRecord("weather"), []byte("rotated-fake-value-for-test")); err == nil {
+		t.Fatal("Put succeeded with every write refused")
+	}
+	t.Setenv("FAKE_FAIL", "")
+	again, err := Open(k, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range map[string]*Vault{"in process": v, "after a restart": again} {
+		if got, err := v.Value("weather"); err != nil || !bytes.Equal(got, fakeValue) {
+			t.Errorf("%s: the value is %q (%v)", name, got, err)
+		}
+	}
+}
+
+// The save's rename lands but its directory cannot be synced, and the save that would put the old
+// index back fails before its rename. The index on disk names the new binding, so neither binding
+// may keep a value. Root reads any directory, so it skips.
+func TestAnIndexThatCannotBePutBackLeavesNoValue(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can read the directory")
+	}
+	store := NewMemory()
+	v, path := openTemp(t, store)
+	if err := v.Put(httpRecord("weather"), fakeValue); err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Dir(path)
+	if err := os.Chmod(dir, 0o300); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o700) })
+	saves := 0
+	v.write = func(path string, data []byte) error {
+		if saves++; saves == 2 {
+			return errors.New("the save putting the old index back failed before its rename")
+		}
+		return writeFileAtomic(path, data)
+	}
+	rotated := httpRecord("weather")
+	rotated.Hosts = []string{"new-host.example.test"}
+	if err := v.Put(rotated, []byte("rotated-fake-value-for-test")); err == nil {
+		t.Fatal("Put succeeded without syncing the index's directory")
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	again, err := Open(store, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, v := range map[string]*Vault{"in process": v, "after a restart": again} {
+		rec, _ := v.Record("weather")
+		if got, err := v.Value("weather"); err == nil {
+			t.Errorf("%s: the hosts %v keep the value %q", name, rec.Hosts, got)
+		}
+	}
+}
+
+// A save whose rename fails leaves the index on disk as it was, so the old value must stay.
+func TestAFailedRenameKeepsTheOldValue(t *testing.T) {
+	store := NewMemory()
+	v, _ := openTemp(t, store)
+	if err := v.Put(httpRecord("weather"), fakeValue); err != nil {
+		t.Fatal(err)
+	}
+	v.path = t.TempDir()
+	if err := v.Put(httpRecord("weather"), []byte("rotated-fake-value-for-test")); err == nil {
+		t.Fatal("Put succeeded with the index's rename refused")
+	}
+	got, err := v.Value("weather")
+	stored, _ := store.Get("weather")
+	if err != nil || !bytes.Equal(got, fakeValue) || !bytes.Equal(stored, fakeValue) {
+		t.Fatalf("after a refused rename the value is %q (%v), the store %q", got, err, stored)
+	}
 }

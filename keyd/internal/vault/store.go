@@ -9,6 +9,9 @@ import (
 // ErrNotFound means the store has no value for the id.
 var ErrNotFound = errors.New("vault: secret not found")
 
+// errUnchanged, wrapped in a Put's error, means the Put wrote nothing: the old value is still whole.
+var errUnchanged = errors.New("nothing was written")
+
 // Store keeps secret values by id; the Keychain in production, Memory in tests.
 type Store interface {
 	Put(id string, value []byte) error
