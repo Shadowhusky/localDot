@@ -47,7 +47,8 @@ func (o Op) ModelFrom(p string) string {
 }
 
 // Binding is where a secret may go. HTTP secrets name exact hosts reached over https on 443;
-// LLM secrets name a gateway route.
+// LLM secrets name a gateway route. FromRecord and LocalRoutes give each binding its own slices
+// and URL.
 type Binding struct {
 	SecretID string
 	Tag      string
@@ -144,7 +145,7 @@ var presets = map[string]preset{
 func LocalRoutes() map[string]Binding {
 	route := func(name, base string) Binding {
 		u, _ := url.Parse(base)
-		return Binding{Route: name, Upstream: u, Local: true, Ops: compatibleOps}
+		return Binding{Route: name, Upstream: u, Local: true, Ops: slices.Clone(compatibleOps)}
 	}
 	return map[string]Binding{
 		"lmstudio": route("lmstudio", "http://127.0.0.1:1234/v1"),
@@ -195,7 +196,7 @@ func llmBinding(rec vault.Record) (Binding, error) {
 	if u.Path != "" && path.Clean(u.Path) != u.Path {
 		return Binding{}, fmt.Errorf("keys: base URL path %q is not clean", u.Path)
 	}
-	return Binding{SecretID: rec.ID, Tag: p.tag, Route: rec.ID, Upstream: u, Ops: p.ops, Header: p.header, Format: p.format}, nil
+	return Binding{SecretID: rec.ID, Tag: p.tag, Route: rec.ID, Upstream: u, Ops: slices.Clone(p.ops), Header: p.header, Format: p.format}, nil
 }
 
 func httpBinding(rec vault.Record) (Binding, error) {

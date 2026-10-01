@@ -979,3 +979,38 @@ func TestNoPathAllowedUnderAPrefixIsReadOutsideIt(t *testing.T) {
 		t.Fatalf("only %d paths were allowed: the generator no longer covers clean paths", allowed)
 	}
 }
+
+func TestBindingsShareNoOperationsOrURL(t *testing.T) {
+	llm := func(provider, base string) Binding {
+		t.Helper()
+		b, err := FromRecord(vault.Record{ID: "r", Kind: vault.KindLLM, Provider: provider, BaseURL: base})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	edit := func(b Binding) {
+		op := b.Ops[0]
+		t.Cleanup(func() { b.Ops[0] = op })
+		b.Ops[0] = Op{Method: "DELETE", Path: regexp.MustCompile(`^.*$`)}
+		b.Upstream.Host = "evil.example.test"
+	}
+	for _, c := range []struct{ provider, base string }{
+		{"anthropic", ""}, {"openai", ""}, {"google", ""}, {"azure", "https://res.openai.azure.com/openai/v1"}, {"openai-compatible", "https://llm.example.test/v1"},
+	} {
+		a, b := llm(c.provider, c.base), llm(c.provider, c.base)
+		op, host := b.Ops[0], b.Upstream.Host
+		edit(a)
+		fresh := llm(c.provider, c.base)
+		if b.Ops[0] != op || fresh.Ops[0] != op || b.Upstream.Host != host || fresh.Upstream.Host != host {
+			t.Errorf("%s: editing one binding changed another", c.provider)
+		}
+	}
+	routes := LocalRoutes()
+	op := routes["ollama"].Ops[0]
+	edit(routes["lmstudio"])
+	again := LocalRoutes()["lmstudio"]
+	if routes["ollama"].Ops[0] != op || again.Ops[0] != op || again.Upstream.Host != "127.0.0.1:1234" || llm("openai-compatible", "https://llm.example.test/v1").Ops[0] != op {
+		t.Error("editing a local route changed another binding")
+	}
+}
