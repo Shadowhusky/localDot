@@ -1,0 +1,128 @@
+import { describe, expect, it } from "vitest";
+import {
+  cellNames,
+  DESKTOP_LIMITS,
+  desktopSpec,
+  egressNetworkSpec,
+  gateSpec,
+  ISOLATED_GATEWAY_OPTION,
+  internalNetworkSpec,
+  isolatedNetworkSpec,
+} from "./spec.ts";
+import { sampleRecord } from "./testing/sample-record.ts";
+
+const record = sampleRecord("01JXYZ0000000000000000ABCD");
+
+describe("network specs", () => {
+  it("creates every cell network internal with isolated gateway mode", () => {
+    expect(internalNetworkSpec("n")).toMatchObject({
+      Name: "n",
+      Driver: "bridge",
+      Internal: true,
+      Options: { [ISOLATED_GATEWAY_OPTION]: "isolated" },
+      Labels: { "localdot.cell": "1" },
+    });
+    expect(isolatedNetworkSpec("p")).toEqual({
+      Name: "p",
+      Driver: "bridge",
+      Internal: true,
+      Options: { [ISOLATED_GATEWAY_OPTION]: "isolated" },
+    });
+    expect(egressNetworkSpec("e")).toMatchObject({ Name: "e", Driver: "bridge" });
+    expect((egressNetworkSpec("e") as { Internal?: boolean }).Internal).toBeUndefined();
+  });
+
+  it("derives every Docker object name from the cell id and the name prefix", () => {
+    expect(cellNames("X")).toEqual({
+      internalNetwork: "localdot-cell-X",
+      egressNetwork: "localdot-egress-X",
+      homeVolume: "localdot-home-X",
+      gate: "localdot-gate-X",
+      desktop: "localdot-desktop-X",
+    });
+    expect(cellNames("X", "localdot-test-").desktop).toBe("localdot-test-desktop-X");
+  });
+});
+
+describe("gateSpec", () => {
+  const spec = gateSpec(record, "localdot/gate:dev");
+
+  it("is read-only, unprivileged, capability-free and bound to 127.0.0.1", () => {
+    expect(spec.User).toBe("nobody");
+    expect(spec.HostConfig).toMatchObject({
+      NetworkMode: record.docker.egressNetwork,
+      CapDrop: ["ALL"],
+      ReadonlyRootfs: true,
+      SecurityOpt: ["no-new-privileges"],
+      PidsLimit: 64,
+      PortBindings: {
+        "8081/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+        "8082/tcp": [{ HostIp: "127.0.0.1", HostPort: "" }],
+      },
+    });
+    expect("Binds" in spec.HostConfig).toBe(false);
+    expect("RestartPolicy" in spec.HostConfig).toBe(false);
+    expect(spec.NetworkingConfig.EndpointsConfig[record.docker.egressNetwork]).toEqual({
+      IPAMConfig: { IPv4Address: "172.25.0.10" },
+    });
+  });
+
+  it("tells the relays their addresses and the cell's keyd port", () => {
+    expect(spec.Env).toEqual([
+      "LD_INTERNAL_ADDR=172.24.0.10",
+      "LD_EGRESS_ADDR=172.25.0.10",
+      "LD_DESKTOP_ADDR=172.24.0.11",
+      "LD_KEYD_PORT=4760",
+    ]);
+  });
+});
+
+describe("desktopSpec", () => {
+  const spec = desktopSpec(record, "localdot/desktop:dev");
+
+  it("drops NET_RAW, keeps sudo possible, limits resources and mounts only the named home volume", () => {
+    expect(spec.HostConfig).toMatchObject({
+      NetworkMode: record.docker.internalNetwork,
+      CapDrop: ["NET_RAW"],
+      Mounts: [{ Type: "volume", Source: record.docker.homeVolume, Target: "/config" }],
+      ShmSize: DESKTOP_LIMITS.shmBytes,
+      Memory: DESKTOP_LIMITS.memoryBytes,
+      MemorySwap: DESKTOP_LIMITS.memoryBytes,
+      NanoCpus: DESKTOP_LIMITS.nanoCpus,
+      PidsLimit: DESKTOP_LIMITS.pids,
+    });
+    expect("Binds" in spec.HostConfig).toBe(false);
+    expect("SecurityOpt" in spec.HostConfig).toBe(false);
+    expect("CapAdd" in spec.HostConfig).toBe(false);
+    expect("RestartPolicy" in spec.HostConfig).toBe(false);
+    expect(spec.NetworkingConfig.EndpointsConfig[record.docker.internalNetwork]).toEqual({
+      IPAMConfig: { IPv4Address: "172.24.0.11" },
+    });
+  });
+
+  it("passes only the per-cell tokens and the scale into the container", () => {
+    const keys = spec.Env.map((e) => e.split("=")[0]);
+    expect(keys).toEqual([
+      "PUID",
+      "PGID",
+      "TZ",
+      "LOCALDOT_SCALE",
+      "SELKIES_MANUAL_WIDTH",
+      "SELKIES_MANUAL_HEIGHT",
+      "LOCALDOT_DESKTOPD_TOKEN",
+      "PASSWORD",
+    ]);
+    expect(spec.Env).toContain(`LOCALDOT_DESKTOPD_TOKEN=${record.tokens.desktopd}`);
+    expect(spec.Env).toContain(`PASSWORD=${record.tokens.stream}`);
+    expect(spec.Env).toContain("SELKIES_MANUAL_WIDTH=2560");
+    expect(desktopSpec({ ...record, scale: 1 }, "i").Env).toContain("SELKIES_MANUAL_HEIGHT=800");
+  });
+});
+
+describe("container logs", () => {
+  it("rotates both containers' json-file logs at 10 MB, keeping 3 files", () => {
+    const bounded = { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } };
+    expect(gateSpec(record, "g").HostConfig.LogConfig).toEqual(bounded);
+    expect(desktopSpec(record, "d").HostConfig.LogConfig).toEqual(bounded);
+  });
+});
