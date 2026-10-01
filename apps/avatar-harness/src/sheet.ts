@@ -1,5 +1,5 @@
 import { Spine } from "@esotericsoftware/spine-pixi-v8";
-import { applyPose, fitFrame, mapParams } from "@localdot/avatar-spine";
+import { applyPose, bindingProblems, fitFrame, mapParams } from "@localdot/avatar-spine";
 import { Application, Assets, Text } from "pixi.js";
 import { loadPack } from "./packs.ts";
 import { SHEET_POSES } from "./sheet-poses.ts";
@@ -12,6 +12,18 @@ const LABEL_H = 22;
 const options = await loadPack(
   new URLSearchParams(location.search).get("pack") === "dev" ? "dev" : "toy",
 );
+Assets.add({ alias: options.skeletonUrl, src: options.skeletonUrl });
+Assets.add({ alias: options.atlasUrl, src: options.atlasUrl });
+await Assets.load([options.skeletonUrl, options.atlasUrl]);
+const { skeletonData } = Spine.createOptions({
+  skeleton: options.skeletonUrl,
+  atlas: options.atlasUrl,
+});
+const problems = bindingProblems(options.binding, skeletonData);
+if (problems.length > 0) {
+  throw new Error(`avatar rig does not match its binding: ${problems.join("; ")}`);
+}
+
 const rows = Math.ceil(SHEET_POSES.length / COLUMNS);
 const app = new Application();
 await app.init({
@@ -22,9 +34,6 @@ await app.init({
   preserveDrawingBuffer: true,
 });
 document.body.appendChild(app.canvas);
-Assets.add({ alias: options.skeletonUrl, src: options.skeletonUrl });
-Assets.add({ alias: options.atlasUrl, src: options.atlasUrl });
-await Assets.load([options.skeletonUrl, options.atlasUrl]);
 
 for (const [i, cell] of SHEET_POSES.entries()) {
   const spine = Spine.from({
