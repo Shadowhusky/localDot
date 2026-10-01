@@ -1,6 +1,7 @@
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer } from "ws";
+import { errorCode } from "./error-code.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { tokensMatch } from "./token.ts";
 
@@ -83,10 +84,4 @@ export function attachUpgradeRouter(
     }
     refuse(socket, "404 Not Found");
   });
-}
-
-function errorCode(err: unknown): string {
-  const { code, name } = (err ?? {}) as { code?: unknown; name?: unknown };
-  if (typeof code === "string") return code;
-  return typeof name === "string" ? name : "no error code";
 }

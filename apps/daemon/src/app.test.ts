@@ -2,8 +2,10 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
+import { TicketRegistry } from "./cells/secrets.ts";
+import { FakeOrchestrator } from "./cells/testing/fake-orchestrator.ts";
 import { EventLog } from "./event-log.ts";
 
 const PORT = 4750;
@@ -120,5 +122,47 @@ describe("session routes", () => {
       headers: bearer,
     });
     expect(traversal.status).toBe(400);
+  });
+});
+
+describe("route errors", () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it("answer 500 with a fixed body and log only the route pattern and the error code", async () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    const id = ulid();
+    const file = join(tmpdir(), "local dot's home", "cells", id, "cell.json");
+    const unreadable = (): never => {
+      throw Object.assign(new Error(`EACCES: permission denied, open '${file}'`), {
+        code: "EACCES",
+      });
+    };
+    const cells = new FakeOrchestrator();
+    cells.get = unreadable;
+    cells.remove = async () => unreadable();
+    cells.list = () => {
+      throw new TypeError(`cannot list ${file}`);
+    };
+    const failing = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog,
+      cells: { cells, tickets: new TicketRegistry() },
+    });
+    const read = await failing.request(url(`/api/cells/${id}`), { headers: bearer });
+    const removed = await failing.request(url(`/api/cells/${id}`), {
+      method: "DELETE",
+      headers: bearer,
+    });
+    const listed = await failing.request(url("/api/cells"), { headers: bearer });
+    for (const res of [read, removed, listed]) {
+      expect(res.status).toBe(500);
+      expect(await res.text()).toBe("internal error");
+    }
+    expect(errors.mock.calls).toEqual([
+      ["request /api/cells/:id failed (EACCES)"],
+      ["request /api/cells/:id failed (EACCES)"],
+      ["request /api/cells failed (TypeError)"],
+    ]);
   });
 });

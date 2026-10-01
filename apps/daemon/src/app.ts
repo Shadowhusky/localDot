@@ -1,7 +1,10 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { routePath } from "hono/route";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
+import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { tokensMatch } from "./token.ts";
@@ -16,6 +19,14 @@ export interface AppOptions {
 
 export function createApp({ token, port, eventLog, cells, desktop }: AppOptions): Hono {
   const app = new Hono();
+
+  // Hono's default handler logs the whole error, and a message can quote a file path or the
+  // request. Middleware's own responses (bodyLimit's 413) pass through.
+  app.onError((err, c) => {
+    if (err instanceof HTTPException) return err.getResponse();
+    console.error(`request ${routePath(c)} failed (${errorCode(err)})`);
+    return c.text("internal error", 500);
+  });
 
   app.use("*", async (c, next) => {
     const urlHost = new URL(c.req.url).host;
