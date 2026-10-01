@@ -36,7 +36,7 @@ export const CLIPS: Record<ClipName, Clip> = {
       { atMs: 3600, act: (c) => c.setAttention({ x: 0, y: BEYOND_REACH }) },
     ],
   },
-  // Nothing scripted: breathing, blinks, the gaze wander and the sway. Seed 43 looks both ways
-  // and glances back at the user within the 12 s.
-  idle: { durationMs: 12_000, seed: 43, steps: [] },
+  // Nothing scripted: breathing, blinks, the gaze wander, the sway, roll and lean, and the breeze.
+  // Seed 247 looks both ways, glances back at the user and tips the head both ways within 12 s.
+  idle: { durationMs: 12_000, seed: 247, steps: [] },
 };

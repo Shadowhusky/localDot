@@ -6,6 +6,8 @@ describe("SHEET_POSES", () => {
     const labels = SHEET_POSES.map((p) => p.label);
     for (const x of [-1, 0, 1])
       for (const y of [-1, 0, 1]) expect(labels).toContain(`head ${x},${y}`);
+    for (const roll of [-1, 1])
+      for (const x of [-1, 1]) expect(labels).toContain(`roll ${roll}, head ${x}`);
     for (const eye of ["eyes open", "eyes half", "eyes closed", "eyes smile", "wink"])
       expect(labels).toContain(eye);
     for (const m of ["A", "I", "U", "E", "O", "N", "smile", "rest"])

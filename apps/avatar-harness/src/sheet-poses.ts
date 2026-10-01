@@ -14,6 +14,10 @@ export const SHEET_POSES: SheetPose[] = [
   ...[1, 0, -1].flatMap((y) =>
     [-1, 0, 1].map((x) => pose(`head ${x},${y}`, { headX: x, headY: y, eyeX: x, eyeY: y })),
   ),
+  // The jaw against the neck at the widest roll and turn.
+  ...[-1, 1].flatMap((roll) =>
+    [-1, 1].map((x) => pose(`roll ${roll}, head ${x}`, { headRoll: roll, headX: x, eyeX: x })),
+  ),
   pose("eyes open", {}),
   pose("eyes half", { eyeOpenL: 0.5, eyeOpenR: 0.5 }),
   pose("eyes closed", { eyeOpenL: 0, eyeOpenR: 0 }),

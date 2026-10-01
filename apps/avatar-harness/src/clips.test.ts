@@ -39,7 +39,7 @@ describe("CLIPS", () => {
     }
   });
 
-  it("idles for 12 s: looks both ways, glances back at the user, drifts and blinks", () => {
+  it("idles for 12 s: looks both ways, glances back at the user, sways, leans, rolls and blinks", () => {
     expect(CLIPS.idle.steps).toEqual([]);
     expect(CLIPS.idle.durationMs).toBe(12_000);
     const frames = play(CLIPS.idle);
@@ -52,11 +52,26 @@ describe("CLIPS", () => {
       (_, i) => i > 2 * FPS && onUser.slice(i, i + 24).every(Boolean),
     );
     expect(glance).toBeGreaterThan(0);
-    const range = (key: "headX" | "bodyX") =>
-      Math.max(...frames.map((p) => p[key])) - Math.min(...frames.map((p) => p[key]));
+    const values = (key: "headX" | "bodyX" | "headRoll" | "wind") => frames.map((p) => p[key] ?? 0);
+    const range = (key: "headX" | "bodyX" | "headRoll" | "wind") =>
+      Math.max(...values(key)) - Math.min(...values(key));
     expect(range("headX")).toBeGreaterThan(0.3);
-    expect(range("bodyX")).toBeGreaterThan(0.1);
+    expect(range("bodyX")).toBeGreaterThan(0.6);
+    expect(Math.min(...values("headRoll"))).toBeLessThan(-0.45);
+    expect(Math.max(...values("headRoll"))).toBeGreaterThan(0.45);
+    expect(range("wind")).toBeGreaterThan(0.8);
+    // Roll and lean both tip the eye line, so the clip should tip it clearly both ways.
+    const tilt = frames.map((p) => (p.headRoll ?? 0) + p.bodyX);
+    expect(Math.min(...tilt)).toBeLessThan(-0.7);
+    expect(Math.max(...tilt)).toBeGreaterThan(0.7);
     expect(frames.some((p) => p.eyeOpenL < 0.3)).toBe(true);
+  });
+
+  it("faces the user through the talk clip", () => {
+    for (const p of play(CLIPS.talk)) {
+      expect(Math.abs(p.eyeX)).toBeLessThan(0.02);
+      expect(Math.abs(p.eyeY)).toBeLessThan(0.02);
+    }
   });
 
   it("turns the head across the controller's full range both ways", () => {
