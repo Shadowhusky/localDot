@@ -24,6 +24,7 @@ export interface FakeNetwork {
   Internal: boolean;
   Options: Record<string, string>;
   subnet: string;
+  created: string;
 }
 
 export interface FakeDockerState {
@@ -43,6 +44,8 @@ export interface FakeDockerState {
   // A request whose "METHOD path" is held here is answered only once the promise settles, the way
   // a slow Docker operation keeps the caller waiting; the reply reflects the state at that moment.
   holds: Map<string, Promise<void>>;
+  // Rewrites a network inspect reply, for an engine that answers in a shape localdot doesn't expect.
+  networkInspect?: (reply: Record<string, unknown>) => unknown;
 }
 
 export interface FakeDocker {
@@ -141,9 +144,21 @@ export async function startFakeDocker(
         Internal: spec.Internal ?? false,
         Options: spec.Options ?? {},
         subnet: `172.${networkSeq}.0.0/16`,
+        created: new Date().toISOString(),
       };
       state.networks.set(net.Name, net);
       return json(201, { Id: net.Id, Warning: "" });
+    }
+    if (method === "GET" && path === "/networks") {
+      // Docker's name filter matches any part of the name.
+      const names: string[] = JSON.parse(query.get("filters") ?? "{}").name ?? [];
+      const listed = [...state.networks.values()].filter(
+        (n) => names.length === 0 || names.some((name) => n.Name.includes(name)),
+      );
+      return json(
+        200,
+        listed.map((n) => ({ Id: n.Id, Name: n.Name, Created: n.created, Internal: n.Internal })),
+      );
     }
     const network = /^\/networks\/([^/]+)$/.exec(path);
     if (network) {
@@ -165,13 +180,15 @@ export async function startFakeDocker(
         net.Internal && net.Options["com.docker.network.bridge.gateway_mode_ipv4"] === "isolated";
       const gateway =
         isolated && !state.gatewayOnInternal ? {} : { Gateway: net.subnet.replace(/0\/16$/, "1") };
-      return json(200, {
+      const reply = {
         Id: net.Id,
         Name: net.Name,
+        Created: net.created,
         Internal: net.Internal,
         Options: net.Options,
         IPAM: { Config: [{ Subnet: net.subnet, ...gateway }] },
-      });
+      };
+      return json(200, state.networkInspect ? state.networkInspect(reply) : reply);
     }
     const connect = /^\/networks\/([^/]+)\/connect$/.exec(path);
     if (method === "POST" && connect) {

@@ -29,20 +29,18 @@ describe("findDockerSocket", () => {
     expect(probes.context).not.toHaveBeenCalled();
   });
 
-  it("finds the docker context's socket when the default socket is off, and says how to fix it", () => {
+  it("finds the docker context's socket when the default socket is off", () => {
     expect(findDockerSocket({ HOME }, machine([USER_SOCKET], desktopLinux))).toEqual({
       path: USER_SOCKET,
       source: "the docker context desktop-linux",
-      fix: `localdot looks for /var/run/docker.sock (the default socket), which is missing: turn on "Allow the default Docker socket to be used" in Docker Desktop's Settings › Advanced, or set DOCKER_HOST=unix://${USER_SOCKET}`,
     });
   });
 
-  it("suggests the socket it found in place of a DOCKER_HOST that points nowhere", () => {
+  it("uses the socket it found in place of a DOCKER_HOST that points nowhere", () => {
     const env = { HOME, DOCKER_HOST: "unix:///tmp/gone.sock" };
     expect(findDockerSocket(env, machine([USER_SOCKET], desktopLinux))).toEqual({
       path: USER_SOCKET,
       source: "the docker context desktop-linux",
-      fix: `localdot looks for /tmp/gone.sock (DOCKER_HOST), which is missing: set DOCKER_HOST=unix://${USER_SOCKET}`,
     });
   });
 

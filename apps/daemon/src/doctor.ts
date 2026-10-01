@@ -30,12 +30,18 @@ export interface DoctorDeps {
   socket?: DockerSocket;
   // Docker tests name their probe localdot-test-*.
   probeNetwork?: string;
+  // How long the first /version may take before the socket counts as not answering.
+  versionDeadlineMs?: number;
 }
 
 // Isolated gateway mode for internal networks shipped with Engine 28; S3 verified it on 29.2.
 export const MIN_ENGINE_MAJOR = 28;
 const PROBE_NETWORK = "localdot-doctor-probe";
+// A probe this old belongs to no running doctor: a run takes seconds, so another doctor's probe
+// is never this old.
+const STALE_PROBE_MS = 5 * 60_000;
 const ENGINE_CHECKS = ["docker-engine", "isolated-gateway-mode", "image-desktop", "image-gate"];
+const TIMED_OUT = Symbol("timed out");
 
 export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const checks = [...(await dockerChecks(deps)), await portCheck(deps.port)];
@@ -47,10 +53,16 @@ async function dockerChecks({
   images,
   socket,
   probeNetwork,
+  versionDeadlineMs = 10_000,
 }: DoctorDeps): Promise<DoctorCheck[]> {
   let v: DockerVersion;
   try {
-    v = await docker.version();
+    const answer = await withDeadline(docker.version(), versionDeadlineMs);
+    if (answer === TIMED_OUT) {
+      const detail = `not answering on ${located(docker, socket)} after ${versionDeadlineMs / 1000} s`;
+      return [{ name: "docker-socket", ok: false, detail }, ...skipped(ENGINE_CHECKS)];
+    }
+    v = answer;
   } catch (err) {
     if (!(err instanceof DockerError && err.status === 400)) {
       const detail = `${located(docker, socket)}: ${messageOf(err)}`;
@@ -89,15 +101,13 @@ async function dockerChecks({
   ];
 }
 
+// The daemon finds its socket the same way (findDockerSocket), so any socket that answers will do.
 function socketCheck(
   docker: DockerClient,
   socket: DockerSocket | undefined,
   engine: string,
 ): DoctorCheck {
-  const detail = located(docker, socket, engine);
-  return socket?.fix
-    ? { name: "docker-socket", ok: false, detail: `${detail}, but ${socket.fix}` }
-    : { name: "docker-socket", ok: true, detail };
+  return { name: "docker-socket", ok: true, detail: located(docker, socket, engine) };
 }
 
 function located(docker: DockerClient, socket?: DockerSocket, engine?: string): string {
@@ -123,35 +133,40 @@ function skipped(names: string[]): DoctorCheck[] {
   return names.map((name) => ({ name, ok: false, detail: "skipped" }));
 }
 
+interface ProbeInspect {
+  Internal?: unknown;
+  Options?: Record<string, string> | null;
+  IPAM?: { Config?: { Subnet?: string; Gateway?: string }[] | null } | null;
+}
+
 async function isolatedGatewayCheck(docker: DockerClient, probe: string): Promise<DoctorCheck> {
   const name = "isolated-gateway-mode";
+  await removeStaleProbes(docker);
   let result: DoctorCheck;
+  let refused = false;
   try {
     // No localdot.cell label, so nothing that looks for cells ever finds the probe.
-    const created = await docker.request<{ Id: string }>({
-      method: "POST",
-      path: "/networks/create",
-      body: isolatedNetworkSpec(probe),
+    const created = await docker
+      .request<{ Id: string }>({
+        method: "POST",
+        path: "/networks/create",
+        body: isolatedNetworkSpec(probe),
+      })
+      .catch((err: unknown) => {
+        // A 4xx means Docker made nothing, and the name may be another doctor's probe.
+        refused = err instanceof DockerError && err.status >= 400 && err.status < 500;
+        throw err;
+      });
+    const info = await docker.request<ProbeInspect>({
+      method: "GET",
+      path: `/networks/${encodeURIComponent(created.Id)}`,
     });
-    const info = await docker.request<{
-      Options?: Record<string, string>;
-      IPAM: { Config: { Gateway?: string }[] };
-    }>({ method: "GET", path: `/networks/${encodeURIComponent(created.Id)}` });
-    // The API serializes an unset gateway as "" (or leaves it out); the CLI prints "invalid IP".
-    const raw = info.IPAM.Config[0]?.Gateway;
-    const gateway = raw && raw !== "invalid IP" ? raw : undefined;
-    const honoured = info.Options?.[ISOLATED_GATEWAY_OPTION] === "isolated" && !gateway;
-    result = {
-      name,
-      ok: honoured,
-      detail: honoured
-        ? "internal networks get no gateway address"
-        : `the engine still assigns a gateway (${gateway ?? "option dropped"}) to an isolated internal network`,
-    };
+    result = { name, ...gatewayVerdict(info) };
   } catch (err) {
     result = { name, ok: false, detail: messageOf(err) };
   }
-  // By name, and whatever happened above: a create whose reply was lost may still have made it.
+  if (refused) return result;
+  // By name, and whatever else happened above: a create whose reply was lost may still have made it.
   const leftover = await docker
     .request({ method: "DELETE", path: `/networks/${encodeURIComponent(probe)}` })
     .then(
@@ -164,6 +179,57 @@ async function isolatedGatewayCheck(docker: DockerClient, probe: string): Promis
     ok: false,
     detail: `${result.detail}; could not remove the probe network (docker network rm ${probe}): ${messageOf(leftover)}`,
   };
+}
+
+function gatewayVerdict(info: ProbeInspect): { ok: boolean; detail: string } {
+  const config = info.IPAM?.Config?.[0];
+  if (!config?.Subnet) {
+    return { ok: false, detail: "the engine created the probe network with no IPv4 subnet" };
+  }
+  if (info.Internal !== true) {
+    return { ok: false, detail: "the engine made the probe network, but not internal" };
+  }
+  // The API serializes an unset gateway as "" (or leaves it out); the CLI prints "invalid IP".
+  const raw = config.Gateway;
+  const gateway = raw && raw !== "invalid IP" ? raw : undefined;
+  const honoured = info.Options?.[ISOLATED_GATEWAY_OPTION] === "isolated" && !gateway;
+  return {
+    ok: honoured,
+    detail: honoured
+      ? "internal networks get no gateway address"
+      : `the engine still assigns a gateway (${gateway ?? "option dropped"}) to an isolated internal network`,
+  };
+}
+
+// A doctor stopped mid-probe (killed, or the Mac slept) leaves its network behind.
+async function removeStaleProbes(docker: DockerClient): Promise<void> {
+  const prefix = `${PROBE_NETWORK}-`;
+  const networks = await docker
+    .request<{ Id: string; Name: string; Created: string }[]>({
+      method: "GET",
+      path: "/networks",
+      query: { filters: JSON.stringify({ name: [prefix] }) },
+    })
+    .catch(() => []);
+  for (const network of networks) {
+    const age = Date.now() - Date.parse(network.Created);
+    if (!network.Name.startsWith(prefix) || !(age > STALE_PROBE_MS)) continue;
+    await docker
+      .request({ method: "DELETE", path: `/networks/${encodeURIComponent(network.Id)}` })
+      .catch(() => {});
+  }
+}
+
+async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<typeof TIMED_OUT>((resolve) => {
+    timer = setTimeout(() => resolve(TIMED_OUT), ms);
+  });
+  try {
+    return await Promise.race([work, late]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function imageCheck(

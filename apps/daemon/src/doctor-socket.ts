@@ -7,8 +7,6 @@ import { dockerSocketPath } from "./cells/docker.ts";
 export interface DockerSocket {
   path: string;
   source: string;
-  // Set when the daemon, which reads only DOCKER_HOST and the default path, would not find Docker.
-  fix?: string;
 }
 
 export interface DockerContext {
@@ -32,12 +30,7 @@ export function findDockerSocket(
   // With Docker Desktop's "Allow the default Docker socket to be used" off, /var/run/docker.sock is
   // missing and only the CLI's context knows where the engine listens.
   for (const found of otherSockets(env, probes)) {
-    if (found.path === path || !probes.exists(found.path)) continue;
-    const set = `set DOCKER_HOST=unix://${found.path}`;
-    const remedy = fromEnv
-      ? set
-      : `turn on "Allow the default Docker socket to be used" in Docker Desktop's Settings › Advanced, or ${set}`;
-    return { ...found, fix: `localdot looks for ${path} (${source}), which is missing: ${remedy}` };
+    if (found.path !== path && probes.exists(found.path)) return found;
   }
   return { path, source };
 }

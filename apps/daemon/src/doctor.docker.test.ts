@@ -46,7 +46,19 @@ describe.skipIf(!DOCKER_TESTS)("doctor against Docker Desktop", () => {
       exists: (path) => path !== dockerSocketPath({}) && existsSync(path),
     });
     expect(`unix://${socket.path}`).toBe(host);
-    expect(socket.fix).toContain(`DOCKER_HOST=unix://${socket.path}`);
-    expect((await new DockerClient(socket.path).version()).Os).toBe("linux");
+    expect(socket.source).toMatch(/^the docker context /);
+    // The daemon finds the same socket, so the doctor passes it rather than asking for a fix.
+    const report = await runDoctor({
+      docker: new DockerClient(socket.path),
+      socket,
+      images: imagesFromEnv(),
+      port: 4798,
+      probeNetwork,
+    });
+    expect(report.checks.find((c) => c.name === "docker-socket")).toEqual({
+      name: "docker-socket",
+      ok: true,
+      detail: expect.stringContaining(`${socket.path} (${socket.source}; Engine `),
+    });
   });
 });

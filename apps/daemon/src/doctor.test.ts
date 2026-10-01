@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient, DockerError, type DockerRequest } from "./cells/docker.ts";
 import { type FakeDocker, startFakeDocker } from "./cells/testing/fake-docker.ts";
 import { runDoctor } from "./doctor.ts";
+import { findDockerSocket } from "./doctor-socket.ts";
 
 const images = { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" };
 let fake: FakeDocker | undefined;
@@ -192,11 +193,10 @@ describe("runDoctor's readable answers", () => {
     expect(details(report)).not.toMatch(/[{}]/);
   });
 
-  it("says which socket it used, and fails one the daemon would not find by itself", async () => {
+  it("says which socket it used", async () => {
     fake = await startFakeDocker();
-    const docker = new DockerClient(fake.socketPath);
     const fromEnv = await runDoctor({
-      docker,
+      docker: new DockerClient(fake.socketPath),
       images,
       port: await freePort(),
       socket: { path: fake.socketPath, source: "DOCKER_HOST" },
@@ -205,20 +205,58 @@ describe("runDoctor's readable answers", () => {
       ok: true,
       detail: `${fake.socketPath} (DOCKER_HOST; Engine 29.2.0, API 1.53)`,
     });
+  });
 
-    const fix = "localdot looks for /var/run/docker.sock (the default socket), which is missing: …";
-    const viaContext = await runDoctor({
-      docker,
+  it("passes the docker context's socket, which the daemon finds too, and names it", async () => {
+    fake = await startFakeDocker();
+    const path = fake.socketPath;
+    const socket = findDockerSocket(
+      { HOME: "/Users/me" },
+      {
+        exists: (candidate) => candidate === path,
+        context: () => ({ name: "desktop-linux", host: `unix://${path}` }),
+      },
+    );
+    const report = await runDoctor({
+      docker: new DockerClient(socket.path),
+      socket,
       images,
       port: await freePort(),
-      socket: { path: fake.socketPath, source: "the docker context desktop-linux", fix },
     });
-    expect(byName(viaContext)["docker-socket"]).toMatchObject({
-      ok: false,
-      detail: `${fake.socketPath} (the docker context desktop-linux; Engine 29.2.0, API 1.53), but ${fix}`,
+    expect(byName(report)["docker-socket"]).toEqual({
+      name: "docker-socket",
+      ok: true,
+      detail: `${path} (the docker context desktop-linux; Engine 29.2.0, API 1.53)`,
     });
-    // The engine behind it is still checked, so the user sees that only the socket needs fixing.
-    expect(viaContext.checks.filter((c) => !c.ok).map((c) => c.name)).toEqual(["docker-socket"]);
+    expect(report.ok).toBe(true);
+  });
+
+  it("reports a socket that does not answer, and skips the engine checks", async () => {
+    fake = await startFakeDocker();
+    const answer = Promise.withResolvers<void>();
+    fake.state.holds.set("GET /version", answer.promise);
+    // Docker answers after a second, so a doctor without a deadline returns instead of hanging.
+    const late = setTimeout(answer.resolve, 1000);
+    try {
+      const report = await runDoctor({
+        docker: new DockerClient(fake.socketPath),
+        images,
+        port: await freePort(),
+        versionDeadlineMs: 50,
+      });
+      expect(byName(report)["docker-socket"]).toEqual({
+        name: "docker-socket",
+        ok: false,
+        detail: `not answering on ${fake.socketPath} after 0.05 s`,
+      });
+      expect(byName(report)["isolated-gateway-mode"]).toMatchObject({
+        ok: false,
+        detail: "skipped",
+      });
+    } finally {
+      clearTimeout(late);
+      answer.resolve();
+    }
   });
 
   it("names the socket it could not reach", async () => {
@@ -234,7 +272,90 @@ describe("runDoctor's readable answers", () => {
   });
 });
 
+describe("runDoctor's gateway check", () => {
+  it.each([
+    [
+      "has no IPAM at all",
+      (r: Record<string, unknown>) => ({ ...r, IPAM: null }),
+      "no IPv4 subnet",
+    ],
+    [
+      "has no IPv4 subnet",
+      (r: Record<string, unknown>) => ({ ...r, IPAM: { Config: [] } }),
+      "no IPv4 subnet",
+    ],
+    [
+      "is not internal",
+      (r: Record<string, unknown>) => ({ ...r, Internal: false }),
+      "not internal",
+    ],
+  ])("fails, with a reason, a probe network that %s", async (_what, reply, reason) => {
+    fake = await startFakeDocker({ networkInspect: reply });
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+    });
+    const check = byName(report)["isolated-gateway-mode"];
+    expect(check).toMatchObject({ ok: false, detail: expect.stringContaining(reason) });
+    expect(check?.detail).not.toMatch(/Cannot read|undefined|null/);
+    expect(fake.state.networks.size).toBe(0);
+  });
+});
+
 describe("runDoctor's probe network", () => {
+  const network = (name: string) => ({
+    method: "POST" as const,
+    path: "/networks/create",
+    body: { Name: name, Driver: "bridge" },
+  });
+
+  it("removes probe networks a killed doctor left behind, and none another doctor may use", async () => {
+    fake = await startFakeDocker();
+    const docker = new DockerClient(fake.socketPath);
+    for (const name of ["localdot-doctor-probe-stale", "localdot-doctor-probe-fresh", "other"]) {
+      await docker.request(network(name));
+    }
+    const age = (name: string, minutes: number) => {
+      const net = fake?.state.networks.get(name);
+      if (net) net.created = new Date(Date.now() - minutes * 60_000).toISOString();
+    };
+    age("localdot-doctor-probe-stale", 10);
+    age("localdot-doctor-probe-fresh", 1);
+    await runDoctor({ docker, images, port: await freePort() });
+    expect([...fake.state.networks.keys()].sort()).toEqual([
+      "localdot-doctor-probe-fresh",
+      "other",
+    ]);
+  });
+
+  it("leaves a network of its name alone when Docker refuses to create the probe", async () => {
+    fake = await startFakeDocker();
+    const docker = new DockerClient(fake.socketPath);
+    await docker.request(network("localdot-doctor-probe-taken"));
+    const report = await runDoctor({
+      docker,
+      images,
+      port: await freePort(),
+      probeNetwork: "localdot-doctor-probe-taken",
+    });
+    expect(byName(report)["isolated-gateway-mode"]).toMatchObject({ ok: false });
+    expect(fake.state.networks.has("localdot-doctor-probe-taken")).toBe(true);
+  });
+
+  it("still removes the probe by name when the create failed with a 5xx", async () => {
+    fake = await startFakeDocker();
+    fake.state.failRequests.add("POST /networks/create");
+    await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      probeNetwork: "localdot-doctor-probe-maybe",
+    });
+    const deletes = fake.state.calls.filter((c) => c.method === "DELETE").map((c) => c.path);
+    expect(deletes).toEqual(["/networks/localdot-doctor-probe-maybe"]);
+  });
+
   const creates = (f: FakeDocker) =>
     f.state.calls
       .filter((c) => c.method === "POST" && c.path === "/networks/create")
