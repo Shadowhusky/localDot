@@ -302,6 +302,12 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     });
   });
 
+  // xfwm4's default vblank mode syncs through XPresent, which doubled input-to-frame latency in S8.
+  // xfwm4 reads the mode only as it starts, after startwm.sh has written the template.
+  it("composites without vsync", () => {
+    expect(xfconf(C2, "xfwm4", "/general/vblank_mode")).toBe("off");
+  });
+
   it("starts Selkies fixed at 2560x1600 with audio off and the stream behind basic auth", async () => {
     const log = dockerLogs(C2);
     expect(log).toContain("fixed 2560x1600");
@@ -557,6 +563,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(xfconf(C1, "xsettings", "/Gdk/WindowScalingFactor")).toBe("1");
     expect(xfconf(C1, "xsettings", "/Xft/DPI")).toBe("96");
     expect(xfconf(C1, "xfwm4", "/general/theme")).toBe("WhiteSur-Light");
+    expect(xfconf(C1, "xfwm4", "/general/vblank_mode")).toBe("off");
     expect(outputAs(C1, "abc", "xdpyinfo")).toMatch(/dimensions:\s+1280x800/);
     expect(dockWindow(C1, "xfce4-panel")).toEqual({
       x: 0,
