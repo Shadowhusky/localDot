@@ -1,4 +1,5 @@
 export interface Presenter {
+  // Owns the frame and closes it once drawn or dropped; the pump closes it only on a throw.
   present(frame: VideoFrame): void;
 }
 
@@ -43,8 +44,9 @@ export function pumpFrames(
     const height = frame.displayHeight;
     try {
       presenter.present(frame);
-    } finally {
+    } catch (err) {
       frame.close();
+      throw err;
     }
     presented += 1;
     windowFrames += 1;

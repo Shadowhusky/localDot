@@ -12,4 +12,8 @@ export default defineConfig({
     viewport: { width: 1440, height: 900 },
     deviceScaleFactor: 2,
   },
+  projects: [
+    { name: "hidpi", use: { deviceScaleFactor: 2 } },
+    { name: "lodpi", testMatch: /pixel-oracle\.spec\.ts/, use: { deviceScaleFactor: 1 } },
+  ],
 });

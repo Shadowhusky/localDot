@@ -1,20 +1,35 @@
 import type { ReactNode } from "react";
-import type { HudActionKind, HudState } from "../cells/hud-state.ts";
 import { Caption } from "./Caption.tsx";
-import { Hud } from "./Hud.tsx";
+import { Hud, type HudProps } from "./Hud.tsx";
 
-export interface StageColumnProps {
-  hud: HudState;
-  onAction(kind: HudActionKind): void;
+export interface StageColumnProps extends HudProps {
+  control: boolean;
   children?: ReactNode;
 }
 
-export function StageColumn({ hud, onAction, children }: StageColumnProps) {
+export function StageColumn({
+  hud,
+  control,
+  onStart,
+  onStop,
+  onStopSession,
+  onRetry,
+  children,
+}: StageColumnProps) {
+  const classes = ["stage", hud.live ? "lit" : "", control ? "control" : ""]
+    .filter(Boolean)
+    .join(" ");
   return (
     <main className="stage-col">
-      <div className={hud.live ? "stage lit" : "stage"}>
+      <div className={classes}>
         {children}
-        <Hud hud={hud} onAction={onAction} />
+        <Hud
+          hud={hud}
+          onStart={onStart}
+          onStop={onStop}
+          onStopSession={onStopSession}
+          onRetry={onRetry}
+        />
       </div>
       <Caption text={hud.caption} />
     </main>

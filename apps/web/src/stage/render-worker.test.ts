@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { WorkerIn, WorkerOut } from "./render-worker.ts";
+import type { WorkerIn, WorkerOut } from "./worker-protocol.ts";
 
 // The presenter fails on the second frame, as a lost canvas would.
-vi.mock("./presenter.ts", () => ({
-  canvasPresenter: () => {
-    let shown = 0;
-    return {
-      present() {
-        shown += 1;
-        if (shown === 2) throw new Error("canvas lost");
-      },
-    };
+vi.mock("./pixi-presenter.ts", () => ({
+  PixiPresenter: {
+    create: async () => {
+      let shown = 0;
+      return {
+        present() {
+          shown += 1;
+          if (shown === 2) throw new Error("canvas lost");
+        },
+      };
+    },
   },
 }));
 
@@ -30,6 +32,7 @@ describe("render worker", () => {
       postMessage: (m) => posted.push(m),
     };
     vi.stubGlobal("self", scope);
+    vi.stubGlobal("requestAnimationFrame", () => 0);
     await import("./render-worker.ts");
     const frames = [frame(), frame(), frame()];
     const readable = new ReadableStream<VideoFrame>({
@@ -38,7 +41,17 @@ describe("render worker", () => {
         if (next) controller.enqueue(next);
       },
     });
-    scope.onmessage?.({ data: { type: "init", canvas: {} as OffscreenCanvas } });
+    scope.onmessage?.({
+      data: {
+        type: "init",
+        canvas: {} as OffscreenCanvas,
+        width: 1,
+        height: 1,
+        dpr: 1,
+        theme: {} as never,
+        reducedMotion: false,
+      },
+    });
     scope.onmessage?.({ data: { type: "frames", readable } });
     await vi.waitFor(() => expect(posted.filter((m) => m.type === "error")).toHaveLength(1));
     expect(posted.find((m) => m.type === "error")).toEqual({

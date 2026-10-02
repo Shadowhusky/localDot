@@ -1,13 +1,16 @@
-import { useEffect, useMemo, useState } from "react";
-import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
 import { forgetToken, keepToken, storedToken, takeFragmentToken } from "./lib/token.ts";
+import { mergeHud, sessionHud, stepRows } from "./session/session-view.ts";
+import { useLiveSession } from "./session/useLiveSession.ts";
+import { useNowMs } from "./session/useNowMs.ts";
 import { ConversationRail } from "./shell/ConversationRail.tsx";
 import { PlanRail } from "./shell/PlanRail.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
-import { Stage } from "./stage/Stage.tsx";
+import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -100,26 +103,44 @@ export function App({ fetchImpl }: AppProps) {
 function Theatre({ api }: { api: ApiClient }) {
   const { cell, status, pending, error, listed, reconnects, start, stop, retry } = useCell(api);
   const hud = hudFor({ cell, status, pending });
+  const stage = useRef<StageHandle>(null);
+  const session = useLiveSession(api, cell, stage);
+  const now = useNowMs(session.model, session.version);
+  const sHud = session.sessionId ? sessionHud(session.model, now) : null;
+  const merged = mergeHud(error ? { ...hud, caption: error } : hud, sHud);
+  const rows = session.sessionId ? stepRows(session.model) : [];
   useEffect(() => {
-    document.title = `localDot — ${hud.label}`;
-    return () => {
-      document.title = "localDot";
-    };
-  }, [hud.label]);
-  const onAction = (kind: HudActionKind) => {
-    if (kind === "start") start();
-    else if (kind === "stop") stop();
-    else retry();
-  };
+    document.title = `localDot — ${merged.label}`;
+  }, [merged.label]);
   return (
-    <div className="app">
-      <TopBar title="Your computer" live={hud.live} />
+    <div className={merged.control ? "app control" : "app"}>
+      <TopBar title={session.model.title ?? "Your computer"} live={hud.live} />
       <div className="house">
         <ConversationRail />
-        <StageColumn hud={error ? { ...hud, caption: error } : hud} onAction={onAction}>
-          <Stage cell={cell} api={api} reconnects={reconnects} listed={listed} />
+        <StageColumn
+          hud={merged}
+          control={merged.control}
+          onStart={start}
+          onStop={stop}
+          onStopSession={session.stop}
+          onRetry={retry}
+        >
+          <Stage
+            ref={stage}
+            cell={cell}
+            api={api}
+            control={merged.control}
+            reconnects={reconnects}
+            listed={listed}
+          />
         </StageColumn>
-        <PlanRail />
+        <PlanRail
+          rows={rows}
+          sessionId={session.sessionId}
+          scale={cell?.scale ?? 2}
+          api={api}
+          title={session.model.title}
+        />
       </div>
     </div>
   );

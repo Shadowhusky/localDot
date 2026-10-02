@@ -11,6 +11,9 @@ export class ApiError extends Error {
 }
 
 export interface ApiClient {
+  readonly token: string;
+  fetch: typeof fetch;
+  authorization(): string;
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   del(path: string): Promise<void>;
@@ -36,6 +39,7 @@ export function createApi(token: string, opts: ApiOptions = {}): ApiClient {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(15_000),
     });
     if (res.status === 401) {
       opts.onUnauthorized?.();
@@ -47,6 +51,9 @@ export function createApi(token: string, opts: ApiOptions = {}): ApiClient {
   }
 
   return {
+    token,
+    fetch: fetchImpl,
+    authorization: () => `Bearer ${token}`,
     get: (path) => call("GET", path),
     post: (path, body) => call("POST", path, body),
     del: async (path) => {

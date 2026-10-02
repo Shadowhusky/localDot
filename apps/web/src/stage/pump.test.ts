@@ -18,7 +18,12 @@ describe("pumpFrames", () => {
   it("presents every frame once, closes it, and reports stats at most every reportEveryMs", async () => {
     const frames = [fakeFrame(), fakeFrame(), fakeFrame(1280, 800)];
     const presented: VideoFrame[] = [];
-    const presenter: Presenter = { present: (f) => presented.push(f) };
+    const presenter: Presenter = {
+      present: (f) => {
+        presented.push(f);
+        f.close();
+      },
+    };
     const reports: PumpStats[] = [];
     let t = 0;
     const pump = pumpFrames(stream([...frames]), presenter, (s) => reports.push(s), {
@@ -45,7 +50,7 @@ describe("pumpFrames", () => {
         controller.enqueue(fakeFrame());
       },
     });
-    const pump = pumpFrames(endless, { present: () => {} }, () => {});
+    const pump = pumpFrames(endless, { present: (f) => f.close() }, () => {});
     await new Promise((r) => setTimeout(r, 20));
     await pump.stop();
     const after = pulls;
@@ -60,7 +65,12 @@ describe("pumpFrames", () => {
     const reports: PumpStats[] = [];
     const pump = pumpFrames(
       stream([next]),
-      { present: (f) => presented.push(f) },
+      {
+        present: (f) => {
+          presented.push(f);
+          f.close();
+        },
+      },
       (s) => reports.push(s),
       { first },
     );
@@ -79,6 +89,7 @@ describe("pumpFrames", () => {
       present(f) {
         if (f === first) throw new Error("detached");
         presented.push(f);
+        f.close();
       },
     };
     const pump = pumpFrames(stream([next]), presenter, () => {}, { first });
@@ -107,6 +118,7 @@ describe("pumpFrames", () => {
       present(f) {
         if (presented.length === 1) throw lost;
         presented.push(f);
+        f.close();
       },
     };
     const errors: unknown[] = [];

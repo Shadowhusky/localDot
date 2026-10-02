@@ -10,6 +10,10 @@
   --color-text-3: #7c7f87;
   --color-xenon: #3fb5de;
   --color-xenon-a08: rgba(63, 181, 222, 0.08);
+  --color-xenon-a10: rgba(63, 181, 222, 0.1);
+  --color-halo-target: rgba(10, 11, 13, 0.35);
+  --color-shade-cursor: rgba(0, 0, 0, 0.4);
+  --color-key-bevel: rgba(255, 255, 255, 0.06);
   --color-xenon-a40: rgba(63, 181, 222, 0.4);
   --color-hud: rgba(14, 15, 18, 0.74);
   --color-hud-solid: rgba(14, 15, 18, 0.92);

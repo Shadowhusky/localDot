@@ -1,34 +1,48 @@
-import type { HudActionKind, HudState } from "../cells/hud-state.ts";
+import type { HudState } from "../cells/hud-state.ts";
 import { Mascot } from "./Mascot.tsx";
 
-const LABELS: Record<HudActionKind, string> = {
-  start: "Start computer",
-  stop: "Stop computer",
-  retry: "Try again",
-};
+export interface HudProps {
+  hud: HudState & { control?: boolean; elapsedS?: number | null; stop?: boolean };
+  onStart(): void;
+  onStop(): void;
+  onStopSession(): void;
+  onRetry(): void;
+}
 
-// One button for the HUD's lifetime. A disabled one stays focusable (aria-disabled, not disabled),
-// so focus is never dropped while a request is out.
-export function Hud({ hud, onAction }: { hud: HudState; onAction(kind: HudActionKind): void }) {
-  const { kind, enabled } = hud.action;
+export function Hud({ hud, onStart, onStop, onStopSession, onRetry }: HudProps) {
   return (
-    <div className="hud">
+    <div className="hud" role="status" aria-live="polite">
       <span className="st">
         <Mascot />
-        <span role="status" data-testid="hud-status">
-          {hud.label}
-        </span>
+        <span data-testid="hud-status">{hud.label}</span>
+        {hud.elapsedS != null && (
+          <span className="t num" data-testid="hud-elapsed">
+            {hud.elapsedS} s
+          </span>
+        )}
       </span>
       <button
         type="button"
         className="a"
-        aria-disabled={enabled ? undefined : true}
+        aria-disabled={!hud.stop && !hud.action.enabled ? true : undefined}
+        data-testid={hud.stop ? "hud-stop-session" : undefined}
         onClick={() => {
-          if (enabled) onAction(kind);
+          if (hud.stop) onStopSession();
+          else if (hud.action.enabled) {
+            if (hud.action.kind === "start") onStart();
+            else if (hud.action.kind === "stop") onStop();
+            else onRetry();
+          }
         }}
       >
-        {kind === "stop" && <span className="sq" aria-hidden="true" />}
-        {LABELS[kind]}
+        {(hud.stop || hud.action.kind === "stop") && <span className="sq" aria-hidden="true" />}
+        {hud.stop
+          ? "Stop"
+          : hud.action.kind === "start"
+            ? "Start computer"
+            : hud.action.kind === "stop"
+              ? "Stop computer"
+              : "Try again"}
       </button>
     </div>
   );

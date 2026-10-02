@@ -1,4 +1,5 @@
 import { vi } from "vitest";
+import themeCss from "../theme.css?raw";
 
 // Keeps every worker the stage starts and what it is sent, so a test can read the protocol.
 export class FakeWorker {
@@ -23,6 +24,26 @@ export class FakeWorker {
 // jsdom has none of the APIs the stage taps frames with, like Safari and Firefox. These stand-ins
 // let it run as in Chromium; the returned function puts jsdom back.
 export function fakeChromium(): () => void {
+  // Apply the real tokens inline: jsdom does not reliably compute stylesheet variables.
+  const root = document.documentElement;
+  const previousStyle = root.style.cssText;
+  for (const declaration of (themeCss.match(/:root\s*\{([^}]+)\}/)?.[1] ?? "").matchAll(
+    /(--[\w-]+)\s*:\s*([^;]+);/g,
+  )) {
+    root.style.setProperty(declaration[1] as string, declaration[2] as string);
+  }
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe() {}
+      disconnect() {}
+    },
+  );
+  vi.stubGlobal("matchMedia", () => ({
+    matches: false,
+    addEventListener() {},
+    removeEventListener() {},
+  }));
   FakeWorker.instances = [];
   vi.stubGlobal("Worker", FakeWorker);
   vi.stubGlobal(
@@ -44,6 +65,7 @@ export function fakeChromium(): () => void {
     value: () => ({ offscreen: true }),
   });
   return () => {
+    root.style.cssText = previousStyle;
     vi.unstubAllGlobals();
     Reflect.deleteProperty(HTMLCanvasElement.prototype, "transferControlToOffscreen");
   };

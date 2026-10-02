@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 // runtime is already automatic.
 export default defineConfig({
   test: {
+    css: { include: [/theme\.css/] },
     include: [
       "packages/*/src/**/*.test.ts",
       "apps/*/src/**/*.test.ts",
