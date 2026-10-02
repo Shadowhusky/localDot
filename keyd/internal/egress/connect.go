@@ -102,7 +102,7 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 		finish(audit.Deny, ReasonSNIMismatch, nil)
 		return
 	}
-	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", net.JoinHostPort(t.Host, "443"))
+	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", absolute(net.JoinHostPort(t.Host, "443")))
 	if err != nil {
 		decision, reason := dialOutcome(err)
 		finish(decision, reason, err)

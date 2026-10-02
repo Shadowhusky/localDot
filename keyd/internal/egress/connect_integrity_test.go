@@ -2,7 +2,9 @@ package egress
 
 import (
 	"crypto/tls"
+	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -53,5 +55,30 @@ func TestTheSNIIsComparedInASCIIOnly(t *testing.T) {
 	}
 	if err := handshakeThrough(t, c, "kelvin.example.test:443", "KELVIN.example.test"); err != nil {
 		t.Fatalf("an upper-case ASCII SNI: %v", err)
+	}
+}
+
+// A passthrough dials the absolute name, as plain HTTP does, so the resolver's search domains never
+// apply; the ClientHello, and its SNI, reach the upstream as the client sent them.
+func TestAPassthroughDialsTheAbsoluteName(t *testing.T) {
+	w := newWorld(t)
+	seen := make(chan string, 4)
+	w.tlsUpstream("www.example.test", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		seen <- r.TLS.ServerName
+		io.WriteString(rw, "ok")
+	}))
+	c, rd := w.recordingCell("c1", policy.Desktop)
+	for _, u := range []string{"https://www.example.test/", "https://WWW.Example.test:443/"} {
+		resp, body := get(t, w.client(c), u)
+		if resp.StatusCode != 200 || body != "ok" {
+			t.Fatalf("%s: %d %q", u, resp.StatusCode, body)
+		}
+		if sni := <-seen; !strings.EqualFold(sni, "www.example.test") {
+			t.Fatalf("%s: upstream saw SNI %q", u, sni)
+		}
+	}
+	a := rd.addresses()
+	if len(a) != 2 || a[0] != "www.example.test.:443" || a[1] != "www.example.test.:443" {
+		t.Fatalf("dialled %q, want the absolute name twice", a)
 	}
 }
