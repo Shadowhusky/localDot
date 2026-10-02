@@ -1,6 +1,6 @@
 # Handoff: localDot cloud jobs → Codex agents (2026-10-02, ~15:05 UTC)
 
-The Claude cloud session that ran these jobs hit the weekly limit. Every job was stopped mid-flight, and all partial work is pushed. This file is the single entry point for whoever runs the jobs next, whether that is a Codex agent or a person dispatching Codex tasks.
+The Claude cloud session that ran these jobs hit the weekly limit. Every job was stopped mid-flight, and all partial work is pushed. This file is the single entry point for whoever runs the jobs next (the avatar voice work, which runs only on the Mac, is in §8), whether that is a Codex agent or a person dispatching Codex tasks.
 
 ## 1. How a job runs
 Each job is **one agent session**. It does exactly what its job file says. Give each Codex task the prompt in §5, nothing else.
@@ -103,7 +103,7 @@ push only the `claude/<job>` branch, and end with a status under 10 lines: DONE 
 BLOCKED, the branch and its head sha, and the top concerns.
 ```
 
-Run now, all in parallel: `part4a-task11`, `part4a-fixes-round2`, `plan-part7-fix1`, `plan-part5a-fix1`, `review-plan-part5c`, `plan-part5b`, `plan-part6`, `plan-part8`, `plan-part10`.
+Run now, all in parallel: `part4a-task11`, `part4a-fixes-round2`, `plan-part7-fix1`, `plan-part5a-fix1`, `review-plan-part5c`, `plan-part5b`, `plan-part6`, `plan-part8`, `plan-part10`. On the Mac, also run the local avatar lane in §8.
 
 ## 6. Decisions waiting on the user
 - **Part 2 web fix, three UI calls:**
@@ -126,3 +126,57 @@ Run now, all in parallel: `part4a-task11`, `part4a-fixes-round2`, `plan-part7-fi
 - The keyd Task 10 fix round: plain-HTTP upgrades to a host with a bound secret are refused until Tasks 11 and 12 can intercept them.
 
 The Mac originals of `planning` must take these commits before the controller's next re-sync.
+
+## 8. Avatar Part 3 (V4 Voice): a local lane on the Mac, not a cloud job
+This lane is separate from the jobs above, and it has to run on the developer's Mac:
+- the voice service runs MLX models, which need Apple Silicon;
+- the character's private voice pack never leaves the Mac.
+
+Run it as a local agent in the worktree below.
+
+### Where things are
+- **Worktree:** `/Volumes/Husky's SSD 4T/Projects/localdot-avatar`, on branch `wip/avatar-part3` (pushed). `feat/avatar-part3` @ `c812a79` is the last green tip; `wip/avatar-part3` adds the in-progress commits.
+- **Start here:** `docs/handoff/avatar-part3.md` in that worktree. It is also on `origin/wip/avatar-part3`.
+- **Full context on the Mac:**
+  - Plan: `/Volumes/Husky's SSD 4T/Projects/docs/superpowers/plans/2026-10-01-localdot-avatar-part3.md`.
+  - Spec: `/Volumes/Husky's SSD 4T/Projects/docs/superpowers/specs/2026-09-30-localdot-avatar-voice-design.md`.
+  - Execution ledger with every ruling: `.superpowers/sdd/2026-10-01-localdot-avatar-part3/progress.md` in the worktree. Its rulings amend the briefs.
+  - The same folder holds the task briefs (`task-N-brief.md`), `global-constraints.md` (including the private pack's path), the reports and `preflight.md`.
+
+### State (2026-10-02, about 16:30 UK time)
+- **Done:** Tasks 1–6 and 8.
+- **Task 7 review fix round:** items 3, 4 and 6 are done. Items 1, 2, 5 and 7 are in progress; a Claude agent was working on them at 16:29.
+- **Task 9:** partly built. The language fix is committed; the mic, listener and STT relay are work in progress.
+- **Task 10:** not started. It is live runs on the Mac: latency acceptance, the demo clip with the private voice, and a check of how far the mouth lags the voice.
+- **Last:** one final review of the whole branch.
+
+**Before you start:** run `git status` and `git log` in the worktree. If another agent's uncommitted changes or fresh commits are there, it may still be running. Never work alongside it on the same files.
+
+### Order
+1. Finish the Task 7 items.
+2. Finish Task 9, then its review.
+3. Task 10.
+4. The final review.
+
+Task 7 (`apps/voiced`) and Task 9 (`packages/voice`, harness) touch different files, so they can run in parallel.
+
+### Rules beyond COMMON.md
+- **Commits:**
+  - commit on `wip/avatar-part3` only, then push that branch;
+  - stage exact paths;
+  - no AI attribution;
+  - run `pnpm hygiene` before every commit: no character or franchise names in this repo, no key-shaped strings.
+- **Defaults:** voice input stays OFF by default. No live paid cloud calls in tests.
+- **Ports:** voiced on 4752, the harness on 4753, capture Chrome on 9334. Never 9222 or 4790–4799.
+- **Shared GPU:** before heavy local model runs, message the localDot core controller session if one is active.
+- **Private pack repo:** never push it. It has no remote and must stay on the Mac.
+
+### Prompt for a local agent
+```
+Resume localDot avatar Part 3 on this Mac. cd "/Volumes/Husky's SSD 4T/Projects/localdot-avatar", run
+`git status` and `git log --oneline -8`, then read docs/handoff/avatar-part3.md, then the ledger
+.superpowers/sdd/2026-10-01-localdot-avatar-part3/progress.md (its rulings amend the briefs) and the brief
+of the task you take. If another agent's uncommitted work is present, stop and ask. Continue from where the
+ledger stops, append your progress to the ledger, commit on wip/avatar-part3 and push it. End with a status
+under 10 lines.
+```
