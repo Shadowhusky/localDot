@@ -48,8 +48,12 @@ type recordingConn struct {
 }
 
 func (c *recordingConn) Read(p []byte) (int, error) {
-	if c.buf.Len() >= maxClientHello {
+	remaining := maxClientHello - c.buf.Len()
+	if remaining <= 0 {
 		return 0, io.ErrShortBuffer
+	}
+	if len(p) > remaining {
+		p = p[:remaining]
 	}
 	n, err := c.Conn.Read(p)
 	c.buf.Write(p[:n])

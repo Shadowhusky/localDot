@@ -216,7 +216,7 @@ func badBaseURL(u *url.URL, err error) string {
 		return "must use https"
 	case u.User != nil:
 		return "must not carry a user or password"
-	case u.Port() != "" || u.Host != u.Hostname():
+	case u.Port() != "" || strings.HasSuffix(u.Host, ":"):
 		return "must not name a port"
 	case u.RawQuery != "":
 		return "must not carry a query"

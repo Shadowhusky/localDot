@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net"
 	"net/http"
 	"strconv"
@@ -27,24 +28,25 @@ import (
 )
 
 const (
-	ReasonAuthMissing  = "proxy-auth-missing"
-	ReasonAuthInvalid  = "proxy-auth-invalid"
-	ReasonBadRequest   = "bad-request"
-	ReasonMethod       = "method-not-allowed"
-	ReasonNotFound     = "not-found"
-	ReasonHandshake    = "tls-handshake-failed"
-	ReasonHostMismatch = "host-mismatch"
-	ReasonUpgrade      = "upgrade-refused"
-	ReasonAddress      = "address-denied"
-	ReasonResolve      = "resolve-failed"
-	ReasonUpstream     = "upstream-error"
-	ReasonUpstreamTLS  = "upstream-tls"
-	ReasonAborted      = "upstream-aborted"
-	ReasonClientGone   = "client-aborted"
-	ReasonRevoked      = "revoked"
-	ReasonEncoding     = "undecodable-encoding"
-	ReasonSecret       = "secret-unavailable"
-	ReasonNoAudit      = "audit-unavailable"
+	ReasonAuthMissing   = "proxy-auth-missing"
+	ReasonAuthInvalid   = "proxy-auth-invalid"
+	ReasonBadRequest    = "bad-request"
+	ReasonMethod        = "method-not-allowed"
+	ReasonNotFound      = "not-found"
+	ReasonHandshake     = "tls-handshake-failed"
+	ReasonHostMismatch  = "host-mismatch"
+	ReasonUpgrade       = "upgrade-refused"
+	ReasonAddress       = "address-denied"
+	ReasonResolve       = "resolve-failed"
+	ReasonUpstream      = "upstream-error"
+	ReasonUpstreamTLS   = "upstream-tls"
+	ReasonAborted       = "upstream-aborted"
+	ReasonClientGone    = "client-aborted"
+	ReasonRevoked       = "revoked"
+	ReasonEncoding      = "undecodable-encoding"
+	ReasonSecret        = "secret-unavailable"
+	ReasonNoAudit       = "audit-unavailable"
+	ReasonConnectionCap = "connection-cap"
 )
 
 const (
@@ -53,21 +55,25 @@ const (
 	// maxHeaderBytes caps a request's line and headers. API calls need a few KiB; the cap bounds
 	// what one request makes keyd search for surrogates (net/http's default is 1 MiB).
 	maxHeaderBytes = 64 << 10
+	// Enough parallel fetches for a desktop browser, while bounding unauthenticated sockets
+	// and hijacked tunnels to 64 accepted client sockets per cell.
+	maxCellConnections = 64
 )
 
 var ErrPortInUse = errors.New("egress: listener port in use")
 
 type Cell struct {
-	cfg         Config
-	deps        Deps
-	ln          net.Listener
-	srv         *http.Server
-	connect     *goproxy.ProxyHttpServer
-	intercepted map[string]bool
-	authLog     rateLog
-	mu          sync.Mutex
-	gen         *generation
-	closed      bool
+	cfg           Config
+	deps          Deps
+	ln            net.Listener
+	srv           *http.Server
+	connect       *goproxy.ProxyHttpServer
+	intercepted   map[string]bool
+	authLog       rateLog
+	connectionLog rateLog
+	mu            sync.Mutex
+	gen           *generation
+	closed        bool
 }
 
 func Open(cfg Config, deps Deps) (*Cell, error) {
@@ -82,6 +88,7 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 		return nil, err
 	}
 	c := &Cell{cfg: cfg, deps: deps, ln: ln, gen: newGeneration(deps), intercepted: map[string]bool{}}
+	c.ln = &limitedListener{Listener: ln, slots: make(chan struct{}, maxCellConnections), refused: c.refuseConnection}
 	c.connect = c.newConnectProxy()
 	c.srv = &http.Server{
 		Handler:           c,
@@ -92,7 +99,7 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 		// Otherwise http.Server answers OPTIONS * itself, before the token check and the audit.
 		DisableGeneralOptionsHandler: true,
 	}
-	go c.srv.Serve(ln)
+	go c.srv.Serve(c.ln)
 	return c, nil
 }
 
@@ -171,6 +178,11 @@ func (c *Cell) authorize(values []string) string {
 // refuseAuth answers 407. Any container with egress can reach the listener, so refusals are
 // audited at most once a second, with the number left out.
 func (c *Cell) refuseAuth(w http.ResponseWriter, r *http.Request, reason string) {
+	r.Close = true
+	w.Header().Set("Connection", "close")
+	// net/http otherwise drains a small unread request body before closing. A client that
+	// withholds that body must not keep an unauthenticated socket indefinitely.
+	_ = http.NewResponseController(w).SetReadDeadline(time.Now())
 	if ok, suppressed := c.authLog.allow(time.Now()); ok {
 		l := audit.Line{Kind: audit.KindRequest, Method: r.Method, Host: r.URL.Hostname(), Decision: audit.Deny, Reason: reason, Status: http.StatusProxyAuthRequired}
 		if r.Method == http.MethodConnect {
@@ -184,6 +196,22 @@ func (c *Cell) refuseAuth(w http.ResponseWriter, r *http.Request, reason string)
 	w.Header().Set("Proxy-Authenticate", `Basic realm="localdot-keyd"`)
 	w.Header().Set("X-Keyd-Reason", reason)
 	http.Error(w, "keyd: proxy authentication required", http.StatusProxyAuthRequired)
+}
+
+func (c *Cell) refuseConnection() {
+	if ok, suppressed := c.connectionLog.allow(time.Now()); ok {
+		line := audit.Line{Kind: audit.KindRequest, Decision: audit.Deny, Reason: ReasonConnectionCap}
+		if suppressed > 0 {
+			line.Detail = fmt.Sprintf("%d earlier refusals not logged", suppressed)
+		}
+		c.record(line)
+	}
+}
+
+func (c *Cell) interceptedHosts() map[string]bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return maps.Clone(c.intercepted)
 }
 
 func (c *Cell) deny(w http.ResponseWriter, l audit.Line, status int, reason string) {

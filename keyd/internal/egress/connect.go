@@ -20,8 +20,9 @@ import (
 )
 
 const (
-	ReasonNotTLS      = "not-tls"
-	ReasonSNIMismatch = "sni-mismatch"
+	ReasonNotTLS                  = "not-tls"
+	ReasonSNIMismatch             = "sni-mismatch"
+	ReasonInterceptionUnavailable = "interception-unavailable"
 )
 
 var errNoDial = errors.New("egress: goproxy must not dial; every CONNECT is hijacked or refused")
@@ -51,9 +52,14 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 		return c.refuseConnect(ctx, line, reason)
 	}
 	line.Host = t.Host
-	d := c.cfg.Policy.Connect(t, c.intercepted)
+	d := c.cfg.Policy.Connect(t, c.interceptedHosts())
 	if !d.Allow {
 		return c.refuseConnect(ctx, line, d.Reason)
+	}
+	// Until selective interception is installed, a bound host must fail closed: passing its
+	// encrypted response through could return a secret without the response scrubber seeing it.
+	if d.MITM || len(c.boundTo(keys.Dest{Cell: c.cfg.CellID, Scheme: "https", Host: t.Host})) > 0 {
+		return c.refuseConnect(ctx, line, ReasonInterceptionUnavailable)
 	}
 	return c.hijack(func(client net.Conn) { c.passthrough(client, t, line) }), hostport
 }

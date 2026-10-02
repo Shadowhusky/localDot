@@ -212,7 +212,7 @@ func (w scrubbedWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 // stream is scrubbed; until then the cell gets 403 before any dial, or 502 at the 101 for a secret
 // bound while the request was in flight.
 func (c *Cell) refusesSwitch(d keys.Dest) bool {
-	return d.Scheme != "http" || c.intercepted[d.Host] || len(c.boundTo(d)) > 0
+	return d.Scheme != "http" || c.interceptedHosts()[d.Host] || len(c.boundTo(d)) > 0
 }
 
 // boundTo lists the records whose secrets the destination holds: those scrubberFor scrubs.
