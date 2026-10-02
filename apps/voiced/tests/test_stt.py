@@ -61,7 +61,7 @@ def test_hands_free_ends_a_turn_after_half_a_second_and_the_utterance_after_a_se
         seen = until(socket, "end")
     finals = [m for m in seen if m["type"] == "final"]
     assert seen[0] == {"type": "speech_started", "utterance": 1}
-    assert len(finals) == 1 and finals[0]["text"] == seen[-1]["text"] == "1.82s"
+    assert len(finals) == 1 and finals[0]["text"] == seen[-1]["text"] == "1.57s"
 
 
 def test_a_pause_under_a_second_keeps_one_utterance_and_decodes_each_turn_once():
@@ -73,7 +73,7 @@ def test_a_pause_under_a_second_keeps_one_utterance_and_decodes_each_turn_once()
         seen = until(socket, "end")
     finals = [m["text"] for m in seen if m["type"] == "final"]
     assert [m["utterance"] for m in seen if m["type"] == "speech_started"] == [1, 1]
-    assert finals == ["1.12s", "1.12s 1.31s"] and seen[-1]["text"] == finals[1]
+    assert finals == ["0.86s", "0.86s 1.06s"] and seen[-1]["text"] == finals[1]
 
 
 def test_a_long_pause_starts_a_second_utterance():
@@ -219,7 +219,7 @@ def test_listening_again_drops_the_open_utterance_without_a_word():
         after = until(socket, "end")
     assert before == [{"type": "speech_started", "utterance": 1}, {"type": "ready"}]
     assert {m["utterance"] for m in after} == {2}
-    assert after[-1]["text"] == "1.02s" and recognizer.heard[-1] == 1.02
+    assert after[-1]["text"] == "0.77s" and recognizer.heard[-1] == 0.77
 
 
 def test_audio_after_an_utterance_ends_in_the_same_chunk_starts_the_next():
@@ -229,7 +229,7 @@ def test_audio_after_an_utterance_ends_in_the_same_chunk_starts_the_next():
         socket.send_bytes(b"".join(pcm(s, loud) for s, loud in [(0.5, True), (1.2, False), (0.5, True), (1.2, False)]))
         seen = until(socket, "end")
         seen += until(socket, "end")
-    assert [(m["utterance"], m["text"]) for m in seen if m["type"] == "end"] == [(1, "1.02s"), (2, "1.18s")]
+    assert [(m["utterance"], m["text"]) for m in seen if m["type"] == "end"] == [(1, "0.77s"), (2, "0.93s")]
 
 
 def test_an_idle_unload_between_utterances_frees_the_speech_model():
@@ -347,3 +347,49 @@ def test_a_blip_of_one_or_two_frames_does_not_interrupt_her():
         assert socket.receive_json() == {"type": "ready"}
         stream(socket, (0.096, True), (1.216, False))
         assert socket.receive_json() == {"type": "speech_started", "utterance": 1}
+
+
+def test_a_pausing_turn_is_decoded_at_250_ms_and_its_final_reuses_that_text():
+    recognizer = FakeRecognizer()
+    with listening(recognizer) as socket:
+        socket.send_text(LISTEN_HANDSFREE)
+        socket.receive_json()
+        stream(socket, (1.0, True), (1.2, False))
+        seen = until(socket, "end")
+    partials = [m["text"] for m in seen if m["type"] == "partial"]
+    finals = [m["text"] for m in seen if m["type"] == "final"]
+    assert finals == [partials[-1]] == ["1.25s"] and seen[-1]["text"] == "1.25s"
+    assert len(recognizer.heard) == len(partials)
+
+
+def test_speech_resuming_between_250_and_500_ms_continues_the_turn():
+    with listening() as socket:
+        socket.send_text(LISTEN_HANDSFREE)
+        socket.receive_json()
+        stream(socket, (0.6, True), (0.35, False), (0.6, True), (1.2, False))
+        seen = until(socket, "end")
+    assert [m["type"] for m in seen].count("speech_started") == 1
+    assert [m["text"] for m in seen if m["type"] == "final"] == ["1.82s"] and seen[-1]["text"] == "1.82s"
+
+
+def test_letting_go_after_a_quarter_second_pause_needs_no_new_decode():
+    recognizer = FakeRecognizer()
+    with listening(recognizer) as socket:
+        socket.send_text(LISTEN_PTT)
+        socket.receive_json()
+        stream(socket, (1.0, True), (0.3, False))
+        socket.send_text(RELEASE)
+        seen = until(socket, "end")
+    partials = [m["text"] for m in seen if m["type"] == "partial"]
+    assert [m["text"] for m in seen if m["type"] == "final"] == [partials[-1]] == ["1.25s"]
+    assert len(recognizer.heard) == len(partials)
+
+
+def test_speech_after_the_early_decode_is_decoded_on_release():
+    with listening() as socket:
+        socket.send_text(LISTEN_PTT)
+        socket.receive_json()
+        stream(socket, (0.6, True), (0.3, False), (0.3, True))
+        socket.send_text(RELEASE)
+        seen = until(socket, "end")
+    assert [m["text"] for m in seen if m["type"] == "final"] == ["1.2s"] and seen[-1]["text"] == "1.2s"
