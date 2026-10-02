@@ -1191,6 +1191,63 @@ func TestBasicHalvesAreSwappedFromTheOriginalHeader(t *testing.T) {
 	}
 }
 
+func TestABaseURLNamesNoPortAndNoEscapes(t *testing.T) {
+	const secret = "real-secret-value-for-test"
+	for _, base := range []string{
+		"https://api.example.test:/v1",
+		"https://api.example.test:/" + secret,
+		"https://api.example.test/v1%2fadmin",
+		"https://api.example.test/v1%2Fadmin",
+		"https://api.example.test/v1%2f" + secret,
+		"https://api.example.test/v%31",
+		"https://api.example.test/%2e%2e/v1",
+	} {
+		_, err := FromRecord(vault.Record{ID: "x", Kind: vault.KindLLM, Provider: "openai-compatible", BaseURL: base})
+		if err == nil {
+			t.Errorf("base URL %q accepted", base)
+			continue
+		}
+		if msg := err.Error(); strings.Contains(msg, secret) || strings.Contains(strings.ToLower(msg), "example.test") || strings.Contains(msg, "%") || !strings.Contains(msg, "base URL") {
+			t.Errorf("FromRecord with base URL %q: %q, want the field and the reason only", base, msg)
+		}
+	}
+	for _, base := range []string{"https://llm.example.test/v1", "https://llm.example.test/openai/v1/", "https://llm.example.test", "https://llm.example.test/a-b_c.d~e/v1"} {
+		b, err := FromRecord(vault.Record{ID: "x", Kind: vault.KindLLM, Provider: "openai-compatible", BaseURL: base})
+		if err != nil {
+			t.Errorf("base URL %q refused: %v", base, err)
+			continue
+		}
+		if b.Upstream.String() != strings.TrimSuffix(base, "/") {
+			t.Errorf("base URL %q became %q", base, b.Upstream)
+		}
+	}
+}
+
+func TestPathPrefixesAreOnlyThoseALimitedPathCanMatch(t *testing.T) {
+	rec := func(prefix string) vault.Record {
+		return vault.Record{ID: "p", Kind: vault.KindHTTP, Hosts: []string{"ro.example.test"}, Header: "Authorization", Format: "bearer", Paths: []string{prefix}}
+	}
+	for _, prefix := range []string{"/v1?x", "/v1/?", "/v1?", "/v1#x", "/v1/#", "//", "/..x", "/v1/..x", "/v1/..x/", "/v1/...", "/v1/... /", "/v1 x", "/v1/ ", "/ v1"} {
+		if _, err := FromRecord(rec(prefix)); err == nil {
+			t.Errorf("path prefix %q accepted, though no request path can match it", prefix)
+		}
+	}
+	r := NewRegistry()
+	for _, prefix := range []string{"/", "/v1", "/v1/", "/v1/a..b", "/v1/.well-known/", "/v1/x.", "/v1/a-b_c~d"} {
+		b, err := FromRecord(rec(prefix))
+		if err != nil {
+			t.Errorf("path prefix %q refused: %v", prefix, err)
+			continue
+		}
+		tok := mint(t, r, "c1", b)
+		target := prefix
+		if strings.HasSuffix(target, "/") {
+			target += "x"
+		}
+		wantAllow(t, "a path under prefix "+prefix, at(t, r, https("ro.example.test"), "GET", target, hdr("Authorization", "Bearer "+tok)), 1)
+	}
+}
+
 func TestTheURLHostIsTheDestination(t *testing.T) {
 	f := newFixture(t)
 	bearer := hdr("Authorization", "Bearer "+f.bearer.Token)

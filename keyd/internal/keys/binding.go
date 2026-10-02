@@ -203,7 +203,7 @@ func badBaseURL(u *url.URL, err error) string {
 		return "must use https"
 	case u.User != nil:
 		return "must not carry a user or password"
-	case u.Port() != "":
+	case u.Port() != "" || u.Host != u.Hostname():
 		return "must not name a port"
 	case u.RawQuery != "":
 		return "must not carry a query"
@@ -211,6 +211,8 @@ func badBaseURL(u *url.URL, err error) string {
 		return "must not carry a fragment"
 	case policy.ValidBindingHost(u.Hostname()) != nil:
 		return "host is not a public, lowercase host name"
+	case u.RawPath != "" && u.EscapedPath() != u.Path:
+		return "path must not hold escapes"
 	case u.Path != "" && path.Clean(u.Path) != u.Path:
 		return "path is not clean"
 	}
@@ -251,10 +253,12 @@ func httpBinding(rec vault.Record) (Binding, error) {
 			return Binding{}, fmt.Errorf("keys: method %q", m)
 		}
 	}
+	// A prefix holds only what a limited request path may hold (see unambiguousPath), or it could
+	// never match.
 	for _, p := range rec.Paths {
 		clean := path.Clean(p)
-		if !strings.HasPrefix(p, "/") || clean != strings.TrimSuffix(p, "/") && clean != p || !printable(p) || strings.ContainsAny(p, `;\%`) {
-			return Binding{}, fmt.Errorf("keys: path prefix %q must be a clean absolute path of printable ASCII without ; \\ or %%", p)
+		if !strings.HasPrefix(p, "/") || clean != strings.TrimSuffix(p, "/") && clean != p || !printable(p) || strings.ContainsAny(p, `;\%?# `) || strings.Contains(p, "//") || strings.Contains(p, "/..") {
+			return Binding{}, fmt.Errorf("keys: path prefix %q must be a clean absolute path of printable ASCII without ; \\ %% ? # a space, // or a segment starting with ..", p)
 		}
 	}
 	return Binding{
