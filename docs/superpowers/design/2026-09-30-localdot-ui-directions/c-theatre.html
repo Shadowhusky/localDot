@@ -1,0 +1,278 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>localDot Theatre</title>
+<style>
+:root {
+  --void: #0A0B0D;
+  --surface: #15161A;
+  --surface-2: #1D1E23;
+  --line: #25272C;
+  --text: #EEEFF1;
+  --text-2: #999CA4;
+  --text-3: #5D6068;
+  --xenon: #3FB5DE;
+  --xenon-a08: rgba(63, 181, 222, 0.08);
+  --xenon-a40: rgba(63, 181, 222, 0.40);
+  --hud: rgba(14, 15, 18, 0.74);
+  --hud-solid: rgba(14, 15, 18, 0.92);
+  --hud-line: rgba(255, 255, 255, 0.10);
+  --edge: rgba(0, 0, 0, 0.55);
+  --cursor-fill: #FFFFFF;
+  --cursor-rim: #121316;
+  --avatar-body: #ECEDEF;
+  --avatar-eye: #0A0B0D;
+  --edge-stage: rgba(255, 255, 255, 0.05);
+  --shade-hud: rgba(0, 0, 0, 0.35);
+  --hud-button: rgba(255, 255, 255, 0.08);
+  --halo-target: rgba(10, 11, 13, 0.35);
+  --shade-cursor: rgba(0, 0, 0, 0.40);
+  --key-bevel: rgba(255, 255, 255, 0.06);
+  --ui: -apple-system, "Inter", system-ui, sans-serif;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { width: 1440px; height: 900px; overflow: hidden; }
+body { background: var(--void); color: var(--text); font: 12.5px/1.45 var(--ui); font-optical-sizing: auto; -webkit-font-smoothing: antialiased; }
+svg.i { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.mono { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.num { font-variant-numeric: tabular-nums; }
+
+.app { display: grid; grid-template-rows: 44px 1fr; height: 900px; }
+.bar { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; padding: 0 20px; }
+.bar-l, .bar-r { display: flex; align-items: center; gap: 12px; }
+.bar-r { justify-content: flex-end; gap: 18px; color: var(--text-2); }
+.brand { display: flex; align-items: center; gap: 7px; color: var(--text-2); font-weight: 600; font-size: 12.5px; }
+.brand svg { width: 16px; height: 16px; }
+.title { font-size: 13.5px; font-weight: 500; letter-spacing: -0.01em; color: var(--text); }
+.modes { display: flex; gap: 22px; font-size: 12.5px; font-weight: 500; color: var(--text-3); }
+.modes span { position: relative; }
+.modes span.on { color: var(--text); }
+.modes span.on::after { content: ""; position: absolute; left: 50%; bottom: -8px; width: 4px; height: 4px; margin-left: -2px; border-radius: 50%; background: var(--text); }
+.pace { display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 500; }
+.pace .i { width: 14px; height: 14px; }
+.live { display: flex; align-items: center; gap: 7px; font-size: 12.5px; font-weight: 500; }
+.live b { width: 6px; height: 6px; border-radius: 50%; background: var(--xenon); }
+.live .num { color: var(--text-3); }
+
+.house { display: grid; grid-template-columns: 212px 1fr 212px; column-gap: 20px; padding: 0 16px 16px; min-height: 0; }
+
+/* conversation rail */
+.rail { display: flex; flex-direction: column; min-height: 0; padding-top: 18px; }
+.rail-h { font-size: 11.5px; font-weight: 500; color: var(--text-3); margin-bottom: 14px; display: flex; justify-content: space-between; }
+.msgs { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 16px; overflow: hidden; }
+.you { align-self: flex-end; max-width: 188px; padding: 8px 11px; border-radius: 12px 12px 3px 12px; background: var(--surface-2); color: var(--text); line-height: 1.42; }
+.say { color: var(--text-2); line-height: 1.5; }
+.say.latest { color: var(--text); }
+.card { border-radius: 10px; background: var(--surface); padding: 10px 11px; display: grid; gap: 8px; }
+.card-t { display: flex; align-items: center; gap: 8px; }
+.card-t .i { width: 14px; height: 14px; color: var(--text-3); }
+.card-t div { line-height: 1.3; }
+.card-t b { font-weight: 500; display: block; }
+.card-t small { color: var(--text-3); font-size: 11.5px; }
+.card-v { display: flex; justify-content: space-between; align-items: baseline; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--text-2); }
+.card-v strong { color: var(--text); font-weight: 600; font-size: 13px; }
+.dock { display: grid; grid-template-columns: 44px 1fr; gap: 10px; align-items: center; padding-top: 14px; }
+.avatar { width: 44px; height: 44px; }
+.input { height: 40px; border-radius: 20px; background: var(--surface); display: flex; align-items: center; justify-content: space-between; padding: 0 5px 0 14px; color: var(--text-3); }
+.send { width: 30px; height: 30px; border-radius: 50%; background: var(--surface-2); display: grid; place-items: center; color: var(--text-3); }
+.send .i { width: 14px; height: 14px; stroke-width: 2; }
+
+/* stage */
+.stage-col { display: flex; flex-direction: column; align-items: center; justify-content: center; padding-bottom: 20px; min-width: 0; }
+.stage { --W: 944; --s: calc(var(--W) / 1280); position: relative; width: calc(var(--W) * 1px); height: calc(var(--W) * 0.625px); border-radius: 12px; box-shadow: 0 30px 80px var(--edge), 0 0 0 1px var(--edge-stage); }
+.stage > img { display: block; width: 100%; height: 100%; border-radius: 12px; }
+.rim { position: absolute; inset: -2px; border-radius: 14px; pointer-events: none; box-shadow: 0 0 0 2px var(--xenon), 0 0 28px 2px var(--xenon-a40); }
+.ov { position: absolute; }
+.hudpill { left: 50%; top: 14px; transform: translateX(-50%); display: flex; align-items: center; gap: 12px; height: 40px; padding: 0 5px 0 12px; border-radius: 20px; background: var(--hud); -webkit-backdrop-filter: blur(16px) saturate(140%); backdrop-filter: blur(16px) saturate(140%); box-shadow: inset 0 0 0 1px var(--hud-line), 0 8px 24px var(--shade-hud); white-space: nowrap; z-index: 4; }
+.hudpill .st { display: flex; align-items: center; gap: 8px; font-size: 13.5px; font-weight: 500; letter-spacing: -0.005em; }
+.hudpill .st svg { width: 18px; height: 18px; }
+.hudpill .t { color: var(--text-2); font-size: 12px; }
+.hudpill .acts { display: flex; gap: 4px; }
+.hudpill .a { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 12px; border-radius: 15px; background: var(--hud-button); font-weight: 500; font-size: 12.5px; }
+.hudpill .a .i { width: 14px; height: 14px; color: var(--text-2); }
+.hudpill .a .sq { width: 8px; height: 8px; border-radius: 1.5px; background: var(--text); }
+
+.tbox { left: calc(114px * var(--s) - 3px); top: calc(230px * var(--s) - 3px); width: calc(82px * var(--s) + 6px); height: calc(17px * var(--s) + 6px); border-radius: 4px; box-shadow: 0 0 0 1.5px var(--xenon), 0 0 0 2.5px var(--halo-target); background: var(--xenon-a08); }
+.rchip { left: calc(114px * var(--s) - 3px); top: calc(230px * var(--s) - 8px); transform: translateY(-100%); height: 19px; padding: 0 8px; display: flex; align-items: center; gap: 5px; border-radius: 10px; background: var(--hud-solid); color: var(--text); font-size: 11px; font-weight: 500; white-space: nowrap; }
+.rchip em { font-style: normal; color: var(--text-2); }
+.typing { left: calc(114px * var(--s) - 4px); top: calc(230px * var(--s) - 33px); transform: translateY(-100%); display: flex; align-items: center; gap: 8px; height: 32px; padding: 0 13px 0 11px; border-radius: 16px; background: var(--hud-solid); box-shadow: inset 0 0 0 1px var(--hud-line), 0 6px 18px var(--shade-hud); color: var(--text); font-size: 14px; font-weight: 500; white-space: nowrap; }
+.typing .i { width: 15px; height: 15px; color: var(--text-2); }
+.caret { width: 2px; height: 16px; margin-left: -6px; border-radius: 1px; background: var(--xenon); animation: blink 1.06s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }
+.ring { left: calc(160px * var(--s)); top: calc(241px * var(--s)); width: 52px; height: 52px; transform: translate(-50%, -50%); }
+.cursor { left: calc(160px * var(--s) - 2px); top: calc(241px * var(--s) - 2px); width: 18px; height: 24px; transform: rotate(-12deg); transform-origin: 2px 2px; filter: drop-shadow(0 1px 2px var(--shade-cursor)); overflow: visible; }
+.nchip { left: calc(160px * var(--s) + 13px); top: calc(241px * var(--s) + 22px); display: flex; align-items: center; gap: 4px; height: 19px; padding: 0 8px 0 3px; border-radius: 10px; background: var(--hud-solid); color: var(--text); font-size: 11px; font-weight: 500; }
+.nchip svg { width: 13px; height: 13px; }
+.keys { left: 50%; bottom: 46px; transform: translateX(-50%); display: flex; gap: 6px; opacity: 0.5; }
+.key { min-width: 32px; height: 30px; padding: 0 9px; display: grid; place-items: center; border-radius: 8px; background: var(--hud-solid); color: var(--text); font-size: 13px; font-weight: 500; box-shadow: inset 0 0 0 1px var(--hud-line), inset 0 -2px 0 var(--key-bevel); }
+
+.caption { margin-top: 26px; max-width: 640px; text-align: center; font-size: 15px; line-height: 1.45; font-weight: 500; letter-spacing: -0.01em; color: var(--text); }
+.caption span { color: var(--text-3); font-weight: 400; margin-right: 8px; }
+
+/* plan + steps rail */
+.rail.r { overflow: hidden; }
+.plan { display: grid; gap: 4px; margin-bottom: 22px; }
+.pi { display: flex; align-items: flex-start; gap: 9px; font-size: 12.5px; line-height: 1.35; padding: 3px 0; }
+.pi .g { width: 14px; height: 14px; margin-top: 1px; border-radius: 50%; flex: none; display: grid; place-items: center; }
+.pi.done { color: var(--text-3); }
+.pi.done .txt { text-decoration: line-through; text-decoration-color: var(--text-3); }
+.pi.done .g { background: var(--surface-2); color: var(--text-2); }
+.pi.done .g .i { width: 9px; height: 9px; stroke-width: 3; }
+.pi.doing { color: var(--text); font-weight: 500; }
+.pi.doing .g { box-shadow: inset 0 0 0 1.5px var(--xenon); }
+.pi.doing .g::after { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--xenon); }
+.pi.todo { color: var(--text-2); }
+.pi.todo .g { box-shadow: inset 0 0 0 1.5px var(--text-3); }
+.coll { display: flex; align-items: center; gap: 7px; color: var(--text-3); font-size: 12px; margin-bottom: 14px; }
+.coll .i { width: 13px; height: 13px; }
+.coll .num { margin-left: auto; white-space: nowrap; }
+.steps { display: grid; gap: 14px; }
+.step-cap { display: flex; align-items: flex-start; gap: 7px; font-size: 12.5px; line-height: 1.35; color: var(--text-2); margin-bottom: 6px; }
+.step-cap .i { width: 14px; height: 14px; margin-top: 1px; color: var(--text-3); }
+.step.now .step-cap { color: var(--text); font-weight: 500; }
+.step.now .step-cap .i { color: var(--xenon); }
+.step-row { display: grid; grid-template-columns: 160px 1fr; gap: 8px; }
+.thumb { position: relative; width: 160px; height: 100px; border-radius: 6px; overflow: hidden; background: var(--surface); }
+.step.now .thumb { box-shadow: 0 0 0 1.5px var(--xenon); }
+.thumb img { position: absolute; width: calc(1280px * var(--z)); left: calc(80px - var(--cx) * var(--z) * 1px); top: calc(50px - var(--cy) * var(--z) * 1px); }
+.thumb .tb { position: absolute; left: calc(80px + (var(--x1) - var(--cx)) * var(--z) * 1px - 2px); top: calc(50px + (var(--y1) - var(--cy)) * var(--z) * 1px - 2px); width: calc((var(--x2) - var(--x1)) * var(--z) * 1px + 4px); height: calc((var(--y2) - var(--y1)) * var(--z) * 1px + 4px); box-shadow: 0 0 0 1.5px var(--xenon); border-radius: 3px; }
+.meta { display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; padding: 2px 0; font-size: 11px; color: var(--text-3); }
+.okg { width: 16px; height: 16px; border-radius: 50%; background: var(--surface-2); color: var(--text-2); display: grid; place-items: center; }
+.okg .i { width: 9px; height: 9px; stroke-width: 3; }
+.step.now .meta { color: var(--text); }
+.pr { width: 18px; height: 18px; transform: rotate(-90deg); }
+
+@media (prefers-reduced-motion: reduce) { .caret { animation: none; } }
+@media (prefers-reduced-transparency: reduce) { .hudpill { background: var(--hud-solid); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+    <symbol id="i-chev" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+    <symbol id="i-chev-r" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+    <symbol id="i-gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+    <symbol id="i-hand" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-4 0"/><path d="M14 10V4a2 2 0 0 0-4 0v2"/><path d="M10 10.5V6a2 2 0 0 0-4 0v8"/><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"/></symbol>
+    <symbol id="i-kbd" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="M6 8h.01M10 8h.01M14 8h.01M18 8h.01M8 12h.01M12 12h.01M16 12h.01M7 16h10"/></symbol>
+    <symbol id="i-click" viewBox="0 0 24 24"><path d="M14 4.1 12 6"/><path d="m5.1 8-2.9-.8"/><path d="m6 12-1.9 2"/><path d="M7.2 2.2 8 5.1"/><path d="M9.04 9.69a.5.5 0 0 1 .65-.65l11 4.5a.5.5 0 0 1-.07.95l-4.35 1.04a1 1 0 0 0-.74.74l-1.04 4.35a.5.5 0 0 1-.95.07z"/></symbol>
+    <symbol id="i-window" viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M10 4v4M2 8h20M6 4v4"/></symbol>
+    <symbol id="i-type" viewBox="0 0 24 24"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></symbol>
+    <symbol id="i-file" viewBox="0 0 24 24"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4M16 13H8M16 17H8M10 9H8"/></symbol>
+    <symbol id="i-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></symbol>
+    <symbol id="dot" viewBox="0 0 64 64"><circle cx="32" cy="32" r="24" style="fill:var(--avatar-body)"/><rect x="39" y="21" width="4.6" height="9.5" rx="2.3" style="fill:var(--avatar-eye)"/><rect x="48.6" y="22" width="4.4" height="8.5" rx="2.2" style="fill:var(--avatar-eye)"/></symbol>
+    <clipPath id="arrow-clip"><path d="M2 2v17.6l4.5-4.3 3 6.9 3.3-1.4-2.9-6.6h6.3Z"/></clipPath>
+  </defs>
+</svg>
+
+<div class="app">
+  <header class="bar">
+    <div class="bar-l">
+      <span class="brand"><svg viewBox="0 0 64 64"><use href="#dot"/></svg>localDot</span>
+      <span class="title">Q3 revenue into a sheet</span>
+    </div>
+    <nav class="modes"><span>Glance</span><span class="on">Watch</span><span>Replay</span></nav>
+    <div class="bar-r">
+      <span class="pace"><svg class="i"><use href="#i-gauge"/></svg>Watch<svg class="i"><use href="#i-chev"/></svg></span>
+      <span class="live"><b></b>Live <span class="num">0:52</span></span>
+    </div>
+  </header>
+
+  <div class="house">
+    <aside class="rail">
+      <div class="rail-h"><span>Conversation</span></div>
+      <div class="msgs">
+        <div class="you">Put last quarter's revenue from the report into a sheet.</div>
+        <p class="say">Opening q3-report.pdf from Documents to find the figure.</p>
+        <div class="card">
+          <div class="card-t"><svg class="i"><use href="#i-file"/></svg><div><b>Read page 3 of 12</b><small>q3-report.pdf · 2.1 s</small></div></div>
+          <div class="card-v"><span>Total revenue, Q3</span><strong class="num">$4,820,000</strong></div>
+        </div>
+        <p class="say latest">Found Q3 in the PDF: $4.82M. Filling the sheet now.</p>
+      </div>
+      <div class="dock">
+        <svg class="avatar" viewBox="0 0 64 64" aria-label="dot">
+          <circle cx="32" cy="32" r="24" style="fill:var(--avatar-body)"/>
+          <rect x="40" y="19" width="4.6" height="9.5" rx="2.3" style="fill:var(--avatar-eye)"/>
+          <rect x="49.4" y="20" width="4.3" height="8.5" rx="2.15" style="fill:var(--avatar-eye)"/>
+        </svg>
+        <div class="input"><span>Message dot…</span><span class="send"><svg class="i"><use href="#i-up"/></svg></span></div>
+      </div>
+    </aside>
+
+    <main class="stage-col">
+      <div class="stage">
+        <img src="stage.png" alt="The virtual computer: LibreOffice Calc">
+        <div class="ov hudpill">
+          <span class="st"><svg viewBox="0 0 64 64"><use href="#dot"/></svg>Typing in “B2” <span class="t num">14 s</span></span>
+          <span class="acts"><span class="a"><svg class="i"><use href="#i-hand"/></svg>Take over</span><span class="a"><span class="sq"></span>Stop</span></span>
+        </div>
+        <div class="ov tbox"></div>
+        <div class="ov rchip"><em>Cell ·</em> “B2”</div>
+        <div class="ov typing"><svg class="i"><use href="#i-kbd"/></svg>Q3 revenue<span class="caret"></span></div>
+        <svg class="ov ring" viewBox="0 0 52 52">
+          <circle cx="26" cy="26" r="18" fill="none" style="stroke:var(--xenon)" stroke-width="1.5" opacity="0.4"/>
+          <circle cx="26" cy="26" r="10.5" fill="none" style="stroke:var(--xenon)" stroke-width="2" opacity="0.85"/>
+        </svg>
+        <svg class="ov cursor" viewBox="0 0 18 24">
+          <path d="M2 2v17.6l4.5-4.3 3 6.9 3.3-1.4-2.9-6.6h6.3Z" style="fill:var(--cursor-fill);stroke:var(--cursor-rim)" stroke-width="2.6" stroke-linejoin="round" paint-order="stroke"/>
+          <path d="M2 2v17.6l4.5-4.3 3 6.9 3.3-1.4-2.9-6.6h6.3Z" fill="none" style="stroke:var(--xenon)" stroke-width="2" stroke-linejoin="round" clip-path="url(#arrow-clip)"/>
+        </svg>
+        <div class="ov nchip"><svg viewBox="0 0 64 64"><use href="#dot"/></svg>dot</div>
+        <div class="ov keys"><span class="key">Ctrl</span><span class="key">S</span></div>
+        <div class="rim"></div>
+      </div>
+      <p class="caption"><span>dot</span>Found Q3 in the PDF: $4.82M. Filling the sheet now.</p>
+    </main>
+
+    <aside class="rail r">
+      <div class="rail-h"><span>Plan</span><span class="num">2 of 4</span></div>
+      <div class="plan">
+        <div class="pi done"><span class="g"><svg class="i"><use href="#i-check"/></svg></span><span class="txt">Find Q3 revenue in the report</span></div>
+        <div class="pi done"><span class="g"><svg class="i"><use href="#i-check"/></svg></span><span class="txt">Create q3-revenue.ods in Calc</span></div>
+        <div class="pi doing"><span class="g"></span><span class="txt">Enter the label and the amount</span></div>
+        <div class="pi todo"><span class="g"></span><span class="txt">Check the sheet against the PDF</span></div>
+      </div>
+      <div class="rail-h"><span>Steps</span><span>Following live</span></div>
+      <div class="coll"><svg class="i"><use href="#i-chev-r"/></svg>4 earlier steps<span class="num">9.8 s</span></div>
+      <div class="steps">
+        <div class="step">
+          <div class="step-cap"><svg class="i"><use href="#i-window"/></svg>Switched to LibreOffice Calc</div>
+          <div class="step-row">
+            <div class="thumb" style="--z:.5;--cx:320;--cy:100;--x1:249;--y1:1;--x2:391;--y2:26"><img src="stage.png" alt=""><span class="tb"></span></div>
+            <div class="meta"><span class="okg"><svg class="i"><use href="#i-check"/></svg></span><span class="num">0.4 s</span></div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-cap"><svg class="i"><use href="#i-kbd"/></svg>Saved as q3&#8209;revenue.ods</div>
+          <div class="step-row">
+            <div class="thumb" style="--z:.75;--cx:150;--cy:110;--x1:98;--y1:85;--x2:121;--y2:107"><img src="stage.png" alt=""><span class="tb"></span></div>
+            <div class="meta"><span class="okg"><svg class="i"><use href="#i-check"/></svg></span><span class="num">1.2 s</span></div>
+          </div>
+        </div>
+        <div class="step">
+          <div class="step-cap"><svg class="i"><use href="#i-click"/></svg>Clicked cell B2</div>
+          <div class="step-row">
+            <div class="thumb" style="--z:1;--cx:160;--cy:236;--x1:114;--y1:230;--x2:196;--y2:247"><img src="stage.png" alt=""><span class="tb"></span></div>
+            <div class="meta"><span class="okg"><svg class="i"><use href="#i-check"/></svg></span><span class="num">0.6 s</span></div>
+          </div>
+        </div>
+        <div class="step now">
+          <div class="step-cap"><svg class="i"><use href="#i-type"/></svg>Typing “Q3 revenue” in B2</div>
+          <div class="step-row">
+            <div class="thumb" style="--z:.62;--cx:200;--cy:228;--x1:114;--y1:230;--x2:196;--y2:247"><img src="stage.png" alt=""><span class="tb"></span></div>
+            <div class="meta">
+              <svg class="pr" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5" fill="none" style="stroke:var(--surface-2)" stroke-width="2.2"/><circle cx="10" cy="10" r="7.5" fill="none" style="stroke:var(--xenon)" stroke-width="2.2" stroke-linecap="round" stroke-dasharray="29 47.1"/></svg>
+              <span class="num">14 s</span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

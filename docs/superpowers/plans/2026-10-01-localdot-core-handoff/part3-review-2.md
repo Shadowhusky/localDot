@@ -1,0 +1,19 @@
+# Part 3 plan re-review (v2) — all 28 original findings ADDRESSED; new breakage to fix (v2 line numbers = scratchpad/part3-plan-v2.md)
+
+## Critical
+C1. Line 10564 `expect(baseline, …).toBeGreaterThan(0)` fails deterministically on the real path. `dump.frames` holds only decoded frames presented while the action's region is open (from arrival − 100 ms), and Selkies sends nothing for a still screen (spec A30; S1 "a still screen sends no frames"; the pointer is not in the frames). Before every flash-page and marker-page press the screen is still, so `baseline` is 0 for every click and the oracle spec fails at the first dispatch. v1's `if (baseline > 0 && …)` avoided this. Fix (preferred): give the oracle a baseline that exists without new frames — keep the latest decoded frame clone in the presenter/worker (`#latest`, replaced and the old one closed on each `present`) and, when `onTick` opens a region it has not seen, push one `FrameCapture` for it computed from `#latest` (with that frame's own `t`/`presented`); then the unconditional assertion and `firstChange` work on a still screen. Make sure the clone is closed when replaced or on dispose (VideoFrame leak), and that the unit tests cover "region opened on a still screen gets one baseline capture".
+
+## Important
+I1. Line 10032 `expect(cross(48 + 12, 48 + 12)).toBe(false)` fails: `crosshairMask(48, 48, 1)` (10133–10140) is true for r ∈ [16.5, 19.5]; (60, 60) has r = 16.97. Use a point off the ring and the arms, e.g. `cross(48 + 10, 48 + 10)` (r = 14.1) or `(48 + 8, 48 + 12)` — re-derive against the mask code.
+I2. ≈10530–10535 "scene cursor on the dispatch point at the press" takes the latest zoom-1 tick with t < pressT over the whole window; with four extract/readbacks plus PNG encodes per tick and region, a Fast click's 45 ms dwell may hold no tick, so the latest tick can come from the travel's last 100 ms where the cursor is up to OVERSHOOT_CAP_PX short → the ≤ 0.5 px assertion flakes. Filter ticks to t >= the arrival (intent pointer plan startsAt + durationMs, through the time helpers) and skip with a report line when no such tick exists. Also (out-of-scope note, apply if simple): capture the cursorShot only when the cursor is visible and at most once per 16 ms to recover tick rate.
+
+## Minor
+m1. 10520 `const sharp = ticks.filter(…)` shadows the module-level `sharp` import inside the zoom loop — rename (e.g. `sharpTick`).
+m2. 3324 `import { Injector, type Input }` — Injector is only a type now → `import type { Injector, Input }` (or `type Injector`) for Biome's useImportType.
+m3. 9901 `let clockCalls = 0` is declared after the fetchImpl closure that increments it (9893–9897) — move it above fetchImpl (noInvalidUseBeforeDeclaration).
+m4. ≈3690 and ≈8414 `performance.timeOrigin + frame.timestamp / 1000` (both probing() wrappers) — use `microsToMs(frame.timestamp)` so P3-C2 holds to the letter.
+m5. 4605–4606 comment says a click on the panel strut "gets a coordinates-only target with no app", but windowUnder now returns no window and hitTest returns `target: null` (asserted at 4527–4529) — align the comment.
+m6. ≈6992–6995 Task 9 Step 4's expected CLI line still reads "… action.intent Click the Name Box"; with the label dropped it is 'Click "Name Box"'.
+m7. 8109 the geometry test's last assertion compares two identical cameraFor calls (vacuous) — compare against a 1280×800 frame placed into the 2560×1600 session, or drop it.
+m8. 10221–10226 with the point at (32, 24) of the 96 px crop, the 11–21 CSS px band at DPR 2 (22–42 canvas px) is clipped top/left, so the pixel check sees ~60 % of the ring; say so in the comment (scene-level rings === 0 still asserted), or centre the point for the band crop and keep the offset only for cursorShot.
+m9. 2284–2285 comment overstates: with type_text, withPress awaits the driver call first, so the progress line is emitted after the whole string was delivered (the truthful order) — fix the comment.
