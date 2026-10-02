@@ -88,6 +88,11 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 		return nil, err
 	}
 	c := &Cell{cfg: cfg, deps: deps, ln: ln, gen: newGeneration(deps), intercepted: map[string]bool{}}
+	if cfg.CA != nil {
+		for _, host := range cfg.CA.Hosts() {
+			c.intercepted[host] = true
+		}
+	}
 	c.ln = &limitedListener{Listener: ln, slots: make(chan struct{}, maxCellConnections), refused: c.refuseConnection}
 	c.connect = c.newConnectProxy()
 	c.srv = &http.Server{

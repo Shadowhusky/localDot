@@ -56,9 +56,12 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 	if !d.Allow {
 		return c.refuseConnect(ctx, line, d.Reason)
 	}
-	// Until selective interception is installed, a bound host must fail closed: passing its
-	// encrypted response through could return a secret without the response scrubber seeing it.
-	if d.MITM || len(c.boundTo(keys.Dest{Cell: c.cfg.CellID, Scheme: "https", Host: t.Host})) > 0 {
+	if d.MITM {
+		return c.hijack(func(client net.Conn) { c.mitm(client, t, line) }), hostport
+	}
+	// A bound host absent from this cell's CA must fail closed rather than returning an
+	// encrypted response without the response scrubber seeing it.
+	if len(c.boundTo(keys.Dest{Cell: c.cfg.CellID, Scheme: "https", Host: t.Host})) > 0 {
 		return c.refuseConnect(ctx, line, ReasonInterceptionUnavailable)
 	}
 	return c.hijack(func(client net.Conn) { c.passthrough(client, t, line) }), hostport

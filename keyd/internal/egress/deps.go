@@ -6,6 +6,7 @@ import (
 	"net"
 
 	"github.com/shadowhusky/localdot/keyd/internal/audit"
+	"github.com/shadowhusky/localdot/keyd/internal/cellca"
 	"github.com/shadowhusky/localdot/keyd/internal/events"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/policy"
@@ -23,6 +24,8 @@ type Config struct {
 	// Port 0 picks a free port; tests use it.
 	Port  int
 	Token string
+	// CA terminates TLS for its hosts; without one nothing is intercepted.
+	CA *cellca.CA
 }
 
 type Deps struct {
