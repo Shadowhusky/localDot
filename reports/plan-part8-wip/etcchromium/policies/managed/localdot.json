@@ -1,0 +1,14 @@
+{
+  
+  "URLBlocklist": ["javascript://*", "chrome://*", "chrome-untrusted://*", "devtools://*", "view-source:*", "file://*", "chrome-extension://*", "data:*", "blob:*", "filesystem:*"],
+  "URLAllowlist": ["chrome://newtab", "chrome://new-tab-page"],
+  "AllowFileSelectionDialogs": false,
+  "PasswordManagerEnabled": false,
+  "AutofillAddressEnabled": false,
+  "AutofillCreditCardEnabled": false,
+  "DownloadDirectory": "/tmp/job-plan-part8/dl2",
+  "PromptForDownloadLocation": false,
+  "BrowserSignin": 0,
+  "SyncDisabled": true,
+  "ExtensionInstallBlocklist": ["*"]
+}

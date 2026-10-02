@@ -1,0 +1,12 @@
+import { launch, wait } from "./cdp.mjs";
+const c = launch();
+const ev = []; c.on((m) => ev.push(m.method));
+await wait(1500);
+const tr = async (m, p, s) => { try { const r = await c.send(m, p, s); console.log("ok", m, JSON.stringify(r).slice(0, 150)); return r; } catch (e) { console.log("ERR", m, e.message); } };
+const t = await tr("Target.getTargets");
+const ct = await tr("Target.createTarget", { url: "about:blank" });
+const a = await tr("Target.attachToTarget", { targetId: ct?.targetId, flatten: true });
+await tr("Page.enable", {}, a?.sessionId);
+await tr("Runtime.evaluate", { expression: "1+1" }, a?.sessionId);
+console.log("events", [...new Set(ev)].join(","));
+c.proc.kill("SIGKILL");
