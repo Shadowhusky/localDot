@@ -144,13 +144,39 @@ type preset struct {
 	ops    []Op
 }
 
-// A preset without a base takes the record's BaseURL.
+// A preset without a base takes the record's BaseURL. The first-class bearer providers (Part 5a,
+// P5a-R31) have fixed bases and list only the operation their official AI SDK package calls.
 var presets = map[string]preset{
 	"anthropic":         {"https://api.anthropic.com/v1", "X-Api-Key", Raw, "ant", anthropicOps},
 	"openai":            {"https://api.openai.com/v1", "Authorization", Bearer, "oai", openAIOps},
 	"google":            {"https://generativelanguage.googleapis.com/v1beta", "X-Goog-Api-Key", Raw, "gem", googleOps},
+	"xai":               {"https://api.x.ai/v1", "Authorization", Bearer, "xai", xaiOps},
+	"mistral":           {"https://api.mistral.ai/v1", "Authorization", Bearer, "mis", mistralOps},
+	"deepseek":          {"https://api.deepseek.com", "Authorization", Bearer, "dsk", chatOnlyOps},
+	"groq":              {"https://api.groq.com/openai/v1", "Authorization", Bearer, "grq", chatOnlyOps},
+	"openrouter":        {"https://openrouter.ai/api/v1", "Authorization", Bearer, "orr", openRouterOps},
 	"openai-compatible": {"", "Authorization", Bearer, "llm", compatibleOps},
 	"azure":             {"", "Api-Key", Raw, "azr", openAIOps},
+}
+
+// The first-class bearer providers' operations: the one their package calls, with the cap field it
+// sends, and the model listings as openAIStyle writes them. xAI's package speaks only its Responses
+// API; xAI's chat completions report reasoning tokens outside completion_tokens, which the meter
+// would undercharge, so the xAI route has no chat operation. Mistral's and OpenRouter's chat bodies
+// name the image rule keyd holds them by (llm.BodyMistral, llm.BodyOpenRouter).
+var (
+	chatOnlyOps   = withListings(chatOp("chat"))
+	mistralOps    = withListings(chatOp("mistral"))
+	openRouterOps = withListings(chatOp("openrouter"))
+	xaiOps        = withListings(Op{Method: "POST", Path: regexp.MustCompile(`^responses$`), Body: "responses", Cap: "max_output_tokens"})
+)
+
+func chatOp(body string) Op {
+	return Op{Method: "POST", Path: regexp.MustCompile(`^chat/completions$`), Body: body, Cap: "max_tokens"}
+}
+
+func withListings(op Op) []Op {
+	return append([]Op{op}, slices.DeleteFunc(openAIStyle(""), func(o Op) bool { return o.Method != "GET" })...)
 }
 
 // LocalRoutes are the gateway's routes to model servers on the Mac's loopback. They carry no

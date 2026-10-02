@@ -155,6 +155,8 @@ func (c *Cell) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		c.deny(w, line, http.StatusBadRequest, ReasonBadRequest)
 	case isInternal(r.URL):
 		c.serveInternal(w, r)
+	case isGateway(r.URL) && c.cfg.Policy.Gateway:
+		c.serveGateway(w, r)
 	default:
 		c.servePlain(w, r)
 	}
@@ -230,6 +232,7 @@ var alerts = map[string]bool{
 	keys.ReasonUnknownSurrogate:   true,
 	keys.ReasonMisplacedSurrogate: true,
 	keys.ReasonSurrogatePolicy:    true,
+	ReasonSurrogateMissing:        true,
 }
 
 // record writes the audit line and, for every use or misuse of a surrogate, a key.use event made

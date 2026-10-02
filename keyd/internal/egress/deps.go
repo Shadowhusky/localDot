@@ -9,6 +9,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/cellca"
 	"github.com/shadowhusky/localdot/keyd/internal/events"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
+	"github.com/shadowhusky/localdot/keyd/internal/llm"
 	"github.com/shadowhusky/localdot/keyd/internal/policy"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 )
@@ -35,5 +36,10 @@ type Deps struct {
 	Events   *events.Hub
 	Dialer   Dialer
 	// RootCAs verifies upstream TLS; nil means the system roots.
-	RootCAs *x509.CertPool
+	RootCAs  *x509.CertPool
+	Budget   *llm.Budget
+	Settings *llm.Settings
+	// Local are the gateway's routes to model servers on the Mac; LocalDialer reaches only them.
+	Local       map[string]keys.Binding
+	LocalDialer Dialer
 }

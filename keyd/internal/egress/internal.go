@@ -13,8 +13,12 @@ import (
 // isInternal reports whether u names keyd.ldot on port 80: ASCII letters in any case only, since
 // strings.EqualFold alone would also take U+212A (Kelvin) for the k, and no other port.
 func isInternal(u *url.URL) bool {
+	return isVirtualHost(u, internalHost)
+}
+
+func isVirtualHost(u *url.URL, host string) bool {
 	name := strings.TrimSuffix(u.Host, ":80")
-	return !strings.ContainsFunc(name, func(r rune) bool { return r > unicode.MaxASCII }) && strings.EqualFold(name, internalHost)
+	return !strings.ContainsFunc(name, func(r rune) bool { return r > unicode.MaxASCII }) && strings.EqualFold(name, host)
 }
 
 // serveInternal answers keyd.ldot, the name a cell's boot self-test uses to prove its proxy path

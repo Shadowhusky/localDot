@@ -31,12 +31,15 @@ var (
 	errSwitch   = errors.New("egress: upstream switched protocols on a host keyd must scrub")
 )
 
-// route is one request keyd forwards: where it goes and the audit line it will close.
+// route is one request keyd forwards: where it goes and the audit line it will close. Gateway
+// routes to local model servers use the local transport and meter what they relay.
 type route struct {
 	dest   keys.Dest
 	target *url.URL
 	line   audit.Line
 	gen    *generation
+	local  bool
+	meter  *gatewayMeter
 }
 
 func (c *Cell) servePlain(w http.ResponseWriter, r *http.Request) {
@@ -134,10 +137,14 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 			pr.Out.Host = ""
 			pr.Out.Header.Set("Accept-Encoding", "gzip")
 		},
-		Transport:     rt.gen.tr,
+		Transport:     transportFor(rt),
 		FlushInterval: -1,
 		ErrorLog:      log.New(io.Discard, "", 0),
 		ModifyResponse: func(resp *http.Response) error {
+			var usage io.Writer
+			if rt.meter != nil {
+				usage = rt.meter.start(resp)
+			}
 			// A secret bound while the request was in flight is caught here, before the switch.
 			if resp.StatusCode == http.StatusSwitchingProtocols && c.refusesSwitch(rt.dest) {
 				return errSwitch
@@ -146,6 +153,9 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 			l.Decision, l.Status = audit.Allow, resp.StatusCode
 			if !bodyAllowed(r.Method, resp.StatusCode) {
 				scrubber.Header(resp.Header)
+				if rt.meter != nil {
+					rt.meter.settle(&l, 0, true)
+				}
 				finish(l)
 				return nil
 			}
@@ -160,12 +170,19 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 			scrubber.Header(resp.Header)
 			resp.Header.Del("Content-Length")
 			resp.ContentLength = -1
+			body := scrubber.Reader(resp.Body)
+			if rt.meter != nil {
+				body = &teeCloser{Reader: io.TeeReader(body, usage), Closer: body}
+			}
 			resp.Body = &tally{
-				ReadCloser: scrubber.Reader(resp.Body),
+				ReadCloser: body,
 				atEOF:      func() { scrubber.Header(resp.Trailer) },
 				done: func(n int64, eof bool, err error) {
 					l.BytesOut = n
 					c.streamOutcome(&l, eof, err, r.Context(), rt.gen)
+					if rt.meter != nil {
+						rt.meter.settle(&l, n, eof && err == nil)
+					}
 					finish(l)
 				},
 			}
@@ -175,6 +192,9 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 			status, decision, reason := c.failure(err, r.Context(), rt.gen)
 			l := line
 			l.Decision, l.Reason, l.Status, l.Detail = decision, reason, status, err.Error()
+			if rt.meter != nil {
+				rt.meter.left(&l)
+			}
 			finish(l)
 			if reason == ReasonClientGone {
 				return

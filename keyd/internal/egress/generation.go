@@ -17,6 +17,7 @@ type generation struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	tr     *http.Transport
+	local  *http.Transport
 	mu     sync.Mutex
 	conns  map[net.Conn]struct{}
 }
@@ -36,7 +37,12 @@ func newGeneration(d Deps) *generation {
 		// relay asks for gzip itself and decodes it, so it sees every coding a body has.
 		DisableCompression: true,
 	}
-	return &generation{ctx: ctx, cancel: cancel, tr: tr, conns: map[net.Conn]struct{}{}}
+	localDial := func(context.Context, string, string) (net.Conn, error) { return nil, errNoLocal }
+	if d.LocalDialer != nil {
+		localDial = d.LocalDialer.DialContext
+	}
+	local := &http.Transport{DialContext: localDial, IdleConnTimeout: 90 * time.Second, DisableCompression: true}
+	return &generation{ctx: ctx, cancel: cancel, tr: tr, local: local, conns: map[net.Conn]struct{}{}}
 }
 
 // track registers a connection for the kill switch; one opened after the switch is closed at once.
@@ -64,6 +70,7 @@ func (g *generation) stop() {
 	g.conns = map[net.Conn]struct{}{}
 	g.mu.Unlock()
 	g.tr.CloseIdleConnections()
+	g.local.CloseIdleConnections()
 }
 
 // absolute ends a name with a dot, so the resolver's search domains never apply; the policy has
