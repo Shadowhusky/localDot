@@ -157,9 +157,42 @@ unpause returns 409 or treat an arbitrary 500 as success.
   `/tmp/localdot-part4b-task5-docker-final.log`, and
   `/tmp/localdot-part4b-task5-mutation-run.log`.
 
+## Task 6: cell proxy forwarder
+
+The separately bundled forwarder listens only on cell loopback, reads the proxy
+token for each request, replaces client proxy credentials, and relays HTTP and
+CONNECT through the configured gate. Proxy challenges become a 502 with a safe
+reason, and missing/invalid material fails closed. Its private HTTP agent ignores
+the process's proxy environment.
+
+Review reproduced connection-nominated headers crossing hops, upstream HTTP
+requests and pending tunnels surviving a client disconnect, truncated replies
+hanging clients, invalid token callbacks reaching the gate, and unbounded
+handshakes. These are fixed. HTTP and CONNECT handshakes have a 30-second bound;
+established streams remain usable. Both directions preserve bytes pipelined
+alongside CONNECT headers. Unsolicited upgrades are refused. The environment
+proxy test explicitly clears both NO_PROXY spellings so a loopback exemption
+cannot hide a leak.
+
+- All 716 host tests in 93 files pass, including 18 forwarder checks. Workspace
+  types, lint, hygiene and both desktopd bundles pass.
+- The built forwarder passes a network-isolated smoke run in the actual desktop
+  image's Node 24.21.0: HTTP, CONNECT echo, token rotation, hidden 407 and zero
+  contacts to the environment-proxy trap. The temporary container is removed.
+  This is runtime-specific verification, not a full Node 24 workspace test run.
+- Twelve mutations fail runtime assertions: missing/wrong proxy credentials,
+  exposed challenges, hop headers, cancellation, handshake deadline, truncated
+  replies, global environment proxy, malformed token and either CONNECT head.
+- Evidence: `/tmp/localdot-part4b-task6-review-red.log`,
+  `/tmp/localdot-part4b-task6-scoped-final.log`,
+  `/tmp/localdot-part4b-task6-full-host.log`,
+  `/tmp/localdot-part4b-task6-build.log`,
+  `/tmp/localdot-part4b-task6-node24.log`, and
+  `/tmp/localdot-part4b-task6-mutation-run.log`.
+
 ## Remaining integration
 
-Tasks 6–16: cell proxy/trust
+Tasks 7–16: cell trust
 installation and boot checks, orchestration, Stop/resume, event logging, key
 sheet, real-cell isolation/canary acceptance, documentation and CI. The system
 Keychain/Stop carry from Part 4a also remains.

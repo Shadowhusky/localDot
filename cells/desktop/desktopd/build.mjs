@@ -41,3 +41,14 @@ await build({
     js: `/*!\n${notices.map((n) => n.notice).join("\n")}*/\nimport { createRequire } from 'node:module'; const require = createRequire(import.meta.url);`,
   },
 });
+
+// The cell's proxy forwarder has only Node built-ins and runs as its own s6 service.
+await build({
+  entryPoints: [join(here, "src/forwarder-main.ts")],
+  outfile: join(here, "dist/forwarder.mjs"),
+  bundle: true,
+  platform: "node",
+  target: "node24",
+  format: "esm",
+  logLevel: "info",
+});
