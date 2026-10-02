@@ -1,0 +1,12 @@
+ apps/web/package.json                  |   1 +
+ apps/web/src/agent/Composer.tsx        |  35 ++++++++-
+ apps/web/src/agent/KeyFound.tsx        |  39 ++++++++++
+ apps/web/src/agent/key-guard.ts        | 100 ++++++++++++++++++++++++
+ apps/web/src/agent/useKeyGuard.ts      |  70 +++++++++++++++++
+ packages/protocol/src/index.ts         |   1 +
+ packages/protocol/src/tool-api-stub.ts |  18 +++++
+ packages/providers/package.json        |   4 +
+ packages/providers/src/index.ts        |   1 +
+ packages/providers/src/registry.ts     | 135 +++++++++++++++++++++++++++++++++
+ pnpm-lock.yaml                         |  12 ++-
+ 11 files changed, 413 insertions(+), 3 deletions(-)

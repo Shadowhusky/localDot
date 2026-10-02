@@ -1,0 +1,545 @@
+diff --git a/apps/web/package.json b/apps/web/package.json
+index 2d737bd..f8e393e 100644
+--- a/apps/web/package.json
++++ b/apps/web/package.json
+@@ -12,6 +12,7 @@
+   },
+   "dependencies": {
+     "@localdot/protocol": "workspace:*",
++    "@localdot/providers": "workspace:*",
+     "@localdot/stage": "workspace:*",
+     "react": "19.3.0",
+     "react-dom": "19.3.0"
+diff --git a/apps/web/src/agent/Composer.tsx b/apps/web/src/agent/Composer.tsx
+index 66dfda3..bd9f682 100644
+--- a/apps/web/src/agent/Composer.tsx
++++ b/apps/web/src/agent/Composer.tsx
+@@ -1,10 +1,15 @@
+ import { type FormEvent, type KeyboardEvent, useRef, useState } from "react";
++import type { KeyPreset } from "./key-guard.ts";
++import { KeyFound } from "./KeyFound.tsx";
+ import type { ChatMode } from "./status.ts";
+ import { useAction } from "./useAction.ts";
++import { useKeyGuard } from "./useKeyGuard.ts";
+ 
+ export interface ComposerProps {
+   mode: ChatMode;
+   send(text: string, kind: "task" | "steer" | "followup"): Promise<void>;
++  // Opens the Keys sheet with a key the user typed here (Review Focus 1).
++  onSaveKey(preset: KeyPreset): void;
+ }
+ 
+ const PLACEHOLDER = {
+@@ -17,10 +22,11 @@ const PLACEHOLDER = {
+ // state, so whatever is typed (a key pasted by mistake, Part 5b Task 11) is never copied around.
+ // Enter sends, Shift-Enter starts a new line; while dot works, a message is a steer ("now") unless
+ // the user picks "after the task" (a follow-up).
+-export function Composer({ mode, send }: ComposerProps) {
++export function Composer({ mode, send, onSaveKey }: ComposerProps) {
+   const box = useRef<HTMLTextAreaElement>(null);
+   const [later, setLater] = useState(false);
+   const { busy, problem, setProblem, run } = useAction();
++  const guard = useKeyGuard(onSaveKey);
+   const off = mode.kind === "off";
+ 
+   const submit = async (e?: FormEvent) => {
+@@ -33,6 +39,8 @@ export function Composer({ mode, send }: ComposerProps) {
+       setProblem("A message can be 8,000 characters at most.");
+       return;
+     }
++    // A key never leaves the page this way: the user saves it in Keys, removes it, or edits.
++    if (!guard.check(el)) return;
+     const kind = mode.kind === "task" ? "task" : mode.kind === "idle" || later ? "followup" : "steer";
+     if (await run(() => send(text, kind))) {
+       el.value = "";
+@@ -49,6 +57,26 @@ export function Composer({ mode, send }: ComposerProps) {
+ 
+   return (
+     <form className="composer" onSubmit={submit} aria-label="Message dot">
++      {guard.found && (
++        <KeyFound
++          label={guard.found.label}
++          onSave={guard.save}
++          onEdit={guard.dismiss}
++          {...(guard.found.sure
++            ? {
++                onRemove: () => {
++                  guard.removeKeys();
++                  void submit();
++                },
++              }
++            : {
++                onSendAnyway: () => {
++                  guard.allowOnce();
++                  void submit();
++                },
++              })}
++        />
++      )}
+       {mode.kind === "running" && (
+         <div className="when" role="group" aria-label="When dot reads it">
+           <button type="button" aria-pressed={!later} onClick={() => setLater(false)}>
+@@ -70,7 +98,10 @@ export function Composer({ mode, send }: ComposerProps) {
+           autoComplete="off"
+           spellCheck
+           onKeyDown={onKeyDown}
+-          onInput={() => problem && setProblem(null)}
++          onInput={() => {
++            if (problem) setProblem(null);
++            if (guard.found) guard.dismiss();
++          }}
+         />
+         <button type="submit" className="send" disabled={off || busy} aria-label="Send">
+           <svg viewBox="0 0 24 24" aria-hidden="true">
+diff --git a/apps/web/src/agent/KeyFound.tsx b/apps/web/src/agent/KeyFound.tsx
+new file mode 100644
+index 0000000..c8485ef
+--- /dev/null
++++ b/apps/web/src/agent/KeyFound.tsx
+@@ -0,0 +1,39 @@
++// What the chat says instead of sending a key (Review Focus 1). It names the kind of key and never
++// shows it; the buttons act on the text where it sits.
++export interface KeyFoundProps {
++  label: string | null;
++  onSave(): void;
++  onRemove?(): void;
++  onSendAnyway?(): void;
++  onEdit(): void;
++}
++
++export function KeyFound({ label, onSave, onRemove, onSendAnyway, onEdit }: KeyFoundProps) {
++  return (
++    <div className="key-found" role="alert">
++      <p>
++        {label
++          ? `That looks like ${label}. dot never gets keys: they stay in keyd on this Mac, and the computer gets a stand-in.`
++          : "This might be a key or a password. dot never needs one: keys stay in keyd, under Keys."}
++      </p>
++      <div className="key-found-acts">
++        <button type="button" className="card-btn" onClick={onSave}>
++          Save it in Keys
++        </button>
++        {onRemove && (
++          <button type="button" className="card-btn quiet" onClick={onRemove}>
++            Remove it and send
++          </button>
++        )}
++        {onSendAnyway && (
++          <button type="button" className="card-btn quiet" onClick={onSendAnyway}>
++            Send anyway
++          </button>
++        )}
++        <button type="button" className="card-btn quiet" onClick={onEdit}>
++          Keep editing
++        </button>
++      </div>
++    </div>
++  );
++}
+diff --git a/apps/web/src/agent/key-guard.ts b/apps/web/src/agent/key-guard.ts
+new file mode 100644
+index 0000000..7d215e1
+--- /dev/null
++++ b/apps/web/src/agent/key-guard.ts
+@@ -0,0 +1,100 @@
++import { findKeyLike, type KeyLikeKind, type KeyLikeMatch } from "@localdot/protocol";
++import { providerById } from "@localdot/providers";
++import type { Provider } from "../keys/binding.ts";
++
++// Text the user is about to send dot, checked for keys (Review Focus 1). A known key shape is
++// refused outright (the daemon refuses it too); a long random-looking token is asked about, since
++// some providers' keys (Mistral's, Cohere's, Azure's) have no prefix to tell them by.
++export type GuardResult =
++  | { kind: "clear" }
++  | { kind: "key"; matches: KeyLikeMatch[] }
++  | { kind: "maybe"; spans: { start: number; end: number }[] };
++
++// A run of 32 to 512 key characters that is not a hex digest, a UUID or a path, has letters and
++// digits, and is about as random as base62 text (Shannon entropy of at least 4.2 bits a character;
++// English identifiers and words stay well below).
++const TOKEN = /(?<![A-Za-z0-9_\-/.=+])[A-Za-z0-9_\-+/=]{32,512}(?![A-Za-z0-9_\-+/=])/g;
++const HEX = /^[0-9a-fA-F-]+$/;
++
++function entropy(s: string): number {
++  const counts = new Map<string, number>();
++  for (const c of s) counts.set(c, (counts.get(c) ?? 0) + 1);
++  let h = 0;
++  for (const n of counts.values()) {
++    const p = n / s.length;
++    h -= p * Math.log2(p);
++  }
++  return h;
++}
++
++export function findMaybeKey(text: string): { start: number; end: number }[] {
++  const spans: { start: number; end: number }[] = [];
++  TOKEN.lastIndex = 0;
++  for (let m = TOKEN.exec(text); m; m = TOKEN.exec(text)) {
++    const t = m[0];
++    if (HEX.test(t) || t.includes("/") || !/[0-9]/.test(t) || !/[A-Za-z]/.test(t)) continue;
++    if (entropy(t) >= 4.2) spans.push({ start: m.index, end: m.index + t.length });
++  }
++  return spans;
++}
++
++export function guardText(text: string): GuardResult {
++  const matches = findKeyLike(text);
++  if (matches.length > 0) return { kind: "key", matches };
++  const spans = findMaybeKey(text);
++  return spans.length > 0 ? { kind: "maybe", spans } : { kind: "clear" };
++}
++
++// The text with the spans cut out and the gaps closed, for the message the user keeps.
++export function withoutSpans(text: string, spans: readonly { start: number; end: number }[]): string {
++  let out = "";
++  let at = 0;
++  for (const s of [...spans].sort((a, b) => a.start - b.start)) {
++    out += text.slice(at, s.start);
++    at = s.end;
++  }
++  return (out + text.slice(at)).replace(/[ \t]{2,}/g, " ").replace(/ +\n/g, "\n").trim();
++}
++
++// What the Keys sheet is opened with when the user saves a key from the chat. The value goes
++// into the key field's DOM value only (KeyForm.prefill), never into React state.
++export interface KeyPreset {
++  kind: "llm" | "http";
++  provider?: Provider;
++  baseURL?: string;
++  id?: string;
++  value: string;
++}
++
++const LLM: Partial<Record<KeyLikeKind, string>> = {
++  anthropic: "anthropic",
++  openrouter: "openrouter",
++  "openai-style": "openai",
++  google: "google",
++  xai: "xai",
++  groq: "groq",
++  perplexity: "perplexity",
++  fireworks: "fireworks-ai",
++  cerebras: "cerebras",
++};
++
++export function presetFor(match: KeyLikeMatch | undefined, value: string): KeyPreset {
++  const registryId = match ? LLM[match.kind] : undefined;
++  const spec = registryId ? providerById(registryId) : undefined;
++  if (!spec) return { kind: match ? "http" : "llm", value };
++  const keyd = spec.keyd as Provider;
++  return {
++    kind: "llm",
++    provider: keyd,
++    id: spec.id === "fireworks-ai" ? "fireworks" : spec.id,
++    ...(keyd === "openai-compatible" && spec.baseURL ? { baseURL: spec.baseURL } : {}),
++    value,
++  };
++}
++
++// The first free name like "anthropic", "anthropic-2", … among the stored keys.
++export function freeKeyId(base: string, taken: readonly { id: string }[]): string {
++  const ids = new Set(taken.map((k) => k.id));
++  if (!ids.has(base)) return base;
++  for (let n = 2; ; n++) if (!ids.has(`${base}-${n}`)) return `${base}-${n}`;
++}
+diff --git a/apps/web/src/agent/useKeyGuard.ts b/apps/web/src/agent/useKeyGuard.ts
+new file mode 100644
+index 0000000..665c860
+--- /dev/null
++++ b/apps/web/src/agent/useKeyGuard.ts
+@@ -0,0 +1,70 @@
++import { withoutKeyLike } from "@localdot/protocol";
++import { useCallback, useRef, useState } from "react";
++import { guardText, type KeyPreset, presetFor, withoutSpans } from "./key-guard.ts";
++
++type Field = HTMLInputElement | HTMLTextAreaElement;
++
++export interface KeyGuard {
++  // What was found in the text last checked: a key's label, or null for a "maybe".
++  found: { label: string | null; sure: boolean } | null;
++  // True when the field's text may go to dot; otherwise `found` says why.
++  check(field: Field): boolean;
++  // Moves the first key out of the field into the Keys sheet, and leaves the rest of the text.
++  save(): void;
++  // Removes every key from the field's text (the caller sends what is left).
++  removeKeys(): void;
++  // Lets the next check pass a "maybe" the user confirmed.
++  allowOnce(): void;
++  dismiss(): void;
++}
++
++// Review Focus 1. The key never enters React state: it is read from the field's DOM value when
++// the user acts, handed to the Keys sheet's key field (also DOM only), and cut out of the field.
++export function useKeyGuard(onSaveKey: (preset: KeyPreset) => void): KeyGuard {
++  const [found, setFound] = useState<KeyGuard["found"]>(null);
++  const field = useRef<Field | null>(null);
++  const passOnce = useRef(false);
++
++  const check = useCallback((el: Field) => {
++    field.current = el;
++    const g = guardText(el.value);
++    if (g.kind === "clear" || (g.kind === "maybe" && passOnce.current)) {
++      passOnce.current = false;
++      setFound(null);
++      return true;
++    }
++    setFound(g.kind === "key" ? { label: g.matches[0]?.label ?? null, sure: true } : { label: null, sure: false });
++    return false;
++  }, []);
++
++  const save = useCallback(() => {
++    const el = field.current;
++    if (!el) return;
++    const text = el.value;
++    const g = guardText(text);
++    const span = g.kind === "key" ? g.matches[0] : g.kind === "maybe" ? g.spans[0] : undefined;
++    setFound(null);
++    if (!span) return;
++    const preset = presetFor(g.kind === "key" ? g.matches[0] : undefined, text.slice(span.start, span.end));
++    el.value = withoutSpans(text, [span]);
++    onSaveKey(preset);
++  }, [onSaveKey]);
++
++  const removeKeys = useCallback(() => {
++    const el = field.current;
++    if (el) el.value = withoutKeyLike(el.value);
++    setFound(null);
++  }, []);
++
++  const allowOnce = useCallback(() => {
++    passOnce.current = true;
++    setFound(null);
++  }, []);
++
++  const dismiss = useCallback(() => {
++    setFound(null);
++    field.current?.focus();
++  }, []);
++
++  return { found, check, save, removeKeys, allowOnce, dismiss };
++}
+diff --git a/packages/protocol/src/index.ts b/packages/protocol/src/index.ts
+index 7208ca4..e5bd084 100644
+--- a/packages/protocol/src/index.ts
++++ b/packages/protocol/src/index.ts
+@@ -10,3 +10,4 @@ export * from "./selftest.ts";
+ export * from "./text.ts";
+ export * from "./time.ts";
+ export * from "./key-like.ts";
++export * from "./tool-api-stub.ts";
+diff --git a/packages/protocol/src/tool-api-stub.ts b/packages/protocol/src/tool-api-stub.ts
+new file mode 100644
+index 0000000..4e51bdd
+--- /dev/null
++++ b/packages/protocol/src/tool-api-stub.ts
+@@ -0,0 +1,18 @@
++// SCRATCH STAND-IN for Part 5a Task 1's tool-api.ts: only ClientKind, which the registry imports.
++import { z } from "zod";
++
++export const ClientKind = z.enum([
++  "anthropic",
++  "openai",
++  "google",
++  "xai",
++  "mistral",
++  "deepseek",
++  "groq",
++  "openrouter",
++  "openai-compatible",
++  "azure",
++  "lmstudio",
++  "ollama",
++]);
++export type ClientKind = z.infer<typeof ClientKind>;
+diff --git a/packages/providers/package.json b/packages/providers/package.json
+index c66b489..1967d7e 100644
+--- a/packages/providers/package.json
++++ b/packages/providers/package.json
+@@ -8,5 +8,9 @@
+   },
+   "scripts": {
+     "typecheck": "tsc --noEmit -p ."
++  },
++  "dependencies": {
++    "@localdot/protocol": "workspace:*",
++    "zod": "4.6.5"
+   }
+ }
+diff --git a/packages/providers/src/index.ts b/packages/providers/src/index.ts
+index d959ef1..e28d632 100644
+--- a/packages/providers/src/index.ts
++++ b/packages/providers/src/index.ts
+@@ -1 +1,2 @@
+ export * from "./coordinates.ts";
++export * from "./registry.ts";
+diff --git a/packages/providers/src/registry.ts b/packages/providers/src/registry.ts
+new file mode 100644
+index 0000000..8361556
+--- /dev/null
++++ b/packages/providers/src/registry.ts
+@@ -0,0 +1,135 @@
++import type { ClientKind, LLM_PROVIDERS } from "@localdot/protocol";
++
++// keyd's provider kinds (Part 4a's route table, with Part 5a's five first-class presets) plus its
++// two built-in local routes.
++export type KeydKind = (typeof LLM_PROVIDERS)[number];
++export type LocalRoute = "lmstudio" | "ollama";
++
++// The first-class providers that keyd reaches with a bearer token at a base URL it fixes: each has
++// its official AI SDK package, its own client kind and its own keyd kind (P5a-R4, P5a-R31).
++export const FIRST_CLASS_BEARER = ["xai", "mistral", "deepseek", "groq", "openrouter"] as const;
++
++export interface ProviderSpec {
++  // models.dev's provider id, so the catalog's models attach to it.
++  id: string;
++  name: string;
++  client: ClientKind;
++  // How the key is stored in keyd: an `llm` secret of this kind, or a built-in local route.
++  keyd: KeydKind | LocalRoute;
++  // The upstream an openai-compatible key is bound to (keyd's `baseURL`); the user gives Azure's,
++  // and keyd's presets fix the first-class providers'.
++  baseURL?: string;
++  local?: boolean;
++  // Spec "Providers and sign-in": Bedrock and Vertex need keyd's signing, which is M8's.
++  availableIn?: "m8";
++}
++
++// Every API-key provider the spec names, and the local servers; each id is models.dev's provider
++// id. The first-class providers use their official AI SDK packages and their own keyd kinds; the
++// other eight speak OpenAI's chat completions at their documented base URLs (P5a-R4).
++export const PROVIDERS: readonly ProviderSpec[] = [
++  { id: "anthropic", name: "Anthropic", client: "anthropic", keyd: "anthropic" },
++  { id: "openai", name: "OpenAI", client: "openai", keyd: "openai" },
++  { id: "google", name: "Google Gemini", client: "google", keyd: "google" },
++  { id: "azure", name: "Azure OpenAI", client: "azure", keyd: "azure" },
++  { id: "xai", name: "xAI", client: "xai", keyd: "xai" },
++  { id: "mistral", name: "Mistral", client: "mistral", keyd: "mistral" },
++  { id: "deepseek", name: "DeepSeek", client: "deepseek", keyd: "deepseek" },
++  { id: "groq", name: "Groq", client: "groq", keyd: "groq" },
++  { id: "openrouter", name: "OpenRouter", client: "openrouter", keyd: "openrouter" },
++  {
++    id: "togetherai",
++    name: "Together",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://api.together.xyz/v1",
++  },
++  {
++    id: "fireworks-ai",
++    name: "Fireworks",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://api.fireworks.ai/inference/v1",
++  },
++  {
++    id: "cerebras",
++    name: "Cerebras",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://api.cerebras.ai/v1",
++  },
++  {
++    id: "perplexity",
++    name: "Perplexity",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://api.perplexity.ai",
++  },
++  {
++    id: "cohere",
++    name: "Cohere",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://api.cohere.ai/compatibility/v1",
++  },
++  {
++    id: "deepinfra",
++    name: "DeepInfra",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://api.deepinfra.com/v1/openai",
++  },
++  {
++    id: "moonshotai",
++    name: "Moonshot (Kimi)",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://api.moonshot.ai/v1",
++  },
++  {
++    id: "alibaba",
++    name: "Alibaba (Qwen)",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
++  },
++  {
++    id: "openai-compatible",
++    name: "Other (OpenAI-compatible)",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++  },
++  { id: "lmstudio", name: "LM Studio", client: "lmstudio", keyd: "lmstudio", local: true },
++  { id: "ollama", name: "Ollama", client: "ollama", keyd: "ollama", local: true },
++  {
++    id: "amazon-bedrock",
++    name: "Amazon Bedrock",
++    client: "openai-compatible",
++    keyd: "openai-compatible",
++    availableIn: "m8",
++  },
++  {
++    id: "google-vertex",
++    name: "Google Vertex AI",
++    client: "google",
++    keyd: "google",
++    availableIn: "m8",
++  },
++];
++
++export function providerById(id: string): ProviderSpec | undefined {
++  return PROVIDERS.find((p) => p.id === id);
++}
++
++// The keyd route a model is called through: a local server's built-in route, else the id of the
++// `llm` key the user stored for that provider (keyd: "a secret's route name is its id").
++export function routeFor(provider: ProviderSpec, keyId?: string): string | undefined {
++  if (provider.keyd === "lmstudio" || provider.keyd === "ollama") return provider.keyd;
++  return keyId;
++}
++
++// keyd's gateway for the brain (Part 4a): the route's base already ends in the provider's version
++// path, so an SDK's baseURL is this, and the brain reaches it through its keyd listener.
++export function gatewayBaseURL(route: string): string {
++  return `http://llm.ldot/${route}`;
++}
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index 8e7bfef..4346ff4 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -51,6 +51,9 @@ importers:
+       '@localdot/protocol':
+         specifier: workspace:*
+         version: link:../../packages/protocol
++      '@localdot/providers':
++        specifier: workspace:*
++        version: link:../../packages/providers
+       '@localdot/stage':
+         specifier: workspace:*
+         version: link:../../packages/stage
+@@ -115,7 +118,14 @@ importers:
+         specifier: 4.23.15
+         version: 4.23.15
+ 
+-  packages/providers: {}
++  packages/providers:
++    dependencies:
++      '@localdot/protocol':
++        specifier: workspace:*
++        version: link:../protocol
++      zod:
++        specifier: 4.6.5
++        version: 4.6.5
+ 
+   packages/stage:
+     dependencies:
