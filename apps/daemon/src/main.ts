@@ -36,6 +36,7 @@ const orchestrator = new CellOrchestrator({
   docker: new DockerClient(findDockerSocket().path),
   store: new CellStore(home),
   images: imagesFromEnv(),
+  streamFullcolor: process.env.LOCALDOT_STREAM_FULLCOLOR !== "0",
   probeDesktopd,
   probeStream,
 });

@@ -19,3 +19,30 @@ Run the daemon with `pnpm --filter @localdot/daemon start`. It listens on `http:
 another home). One daemon runs per home. The install token is in `<home>/daemon-token`, and auth is
 cookie-free: HTTP requests send `Authorization: Bearer <token>`, and WebSocket clients offer the
 subprotocols `localdot.v1, localdot.token.<token>`.
+
+## Images and the live desktop
+
+- `cells/gate/build.sh` builds `localdot/gate:dev`; `cells/desktop/build.sh` bundles `desktopd`
+  and builds `localdot/desktop:dev`. The first desktop build takes about 10–25 minutes.
+- `pnpm --filter @localdot/daemon doctor` checks Docker Desktop (Engine 28+), the images and
+  the daemon port.
+- Build the UI with `pnpm --filter @localdot/web build`, start the daemon, then open its
+  `#token=` link. **Start computer** creates an isolated desktop, gate and named home volume.
+  The live stream reaches Chrome through the daemon. **Stop computer** keeps the home volume
+  for the next start.
+- The desktop has the WhiteSur light theme, a menu bar and a Plank dock. Pinned versions and
+  licenses are in `cells/desktop/THIRD-PARTY.md`.
+- `LOCALDOT_DOCKER_TESTS=1 pnpm test:docker` runs the Docker suites.
+  `LOCALDOT_DOCKER_TESTS=1 pnpm --filter @localdot/web e2e` checks the live desktop in installed
+  Google Chrome, including Stop/Start and daemon restart recovery.
+- `LOCALDOT_MEASURE=1 pnpm --filter @localdot/web e2e --grep measure` records frame rate and CPU.
+  Repeat with `LOCALDOT_STREAM_FULLCOLOR=0` to measure 4:2:0 instead of the default 4:4:4.
+  Both modes keep the stream setting locked in the client. Results and screenshots are in
+  `apps/web/e2e/out/`.
+- Processes that need to stop the daemon should run `node --import tsx src/main.ts` from
+  `apps/daemon`; pnpm's start command does not forward SIGTERM.
+- `apps/web/vendor/selkies` is the pinned MPL-2.0 client served by the daemon. The cell supplies
+  stream data; the client code comes from the local installation.
+
+The token fragment is removed from the visible URL after loading. Browser history may retain
+the original install link, so treat that link as a credential.

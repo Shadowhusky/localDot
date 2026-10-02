@@ -84,7 +84,14 @@ export function gateSpec(record: CellRecord, image: string) {
   };
 }
 
-export function desktopEnv(record: CellRecord): string[] {
+export interface DesktopOptions {
+  fullcolor: boolean;
+}
+
+export function desktopEnv(
+  record: CellRecord,
+  opts: DesktopOptions = { fullcolor: true },
+): string[] {
   const [w, h] = record.scale === 2 ? [2560, 1600] : [1280, 800];
   return [
     "PUID=1000",
@@ -95,17 +102,22 @@ export function desktopEnv(record: CellRecord): string[] {
     `SELKIES_MANUAL_HEIGHT=${h}`,
     `LOCALDOT_DESKTOPD_TOKEN=${record.tokens.desktopd}`,
     `PASSWORD=${record.tokens.stream}`,
+    `SELKIES_VIDEO_FULLCOLOR=${opts.fullcolor}|locked`,
   ];
 }
 
 // The desktop keeps the default capability set minus NET_RAW and no no-new-privileges: the agent
 // installs software with passwordless sudo (spec, Hardening). Neither container gets a Docker
 // restart policy: the orchestrator restarts them itself and re-reads the ports (P2-R14).
-export function desktopSpec(record: CellRecord, image: string) {
+export function desktopSpec(
+  record: CellRecord,
+  image: string,
+  opts: DesktopOptions = { fullcolor: true },
+) {
   const d = record.docker;
   return {
     Image: image,
-    Env: desktopEnv(record),
+    Env: desktopEnv(record, opts),
     Labels: { "localdot.cell": record.id, "localdot.role": "desktop" },
     HostConfig: {
       NetworkMode: d.internalNetwork,

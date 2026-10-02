@@ -32,6 +32,7 @@ export interface OrchestratorDeps {
   docker: DockerClient;
   store: CellStore;
   images: Images;
+  streamFullcolor?: boolean;
   probeDesktopd(endpoint: CellEndpoints["desktopd"]): Promise<DesktopdHealth | undefined>;
   probeStream(endpoint: CellEndpoints["stream"]): Promise<boolean>;
   // Docker-backed tests pass "localdot-test-", so they never create or touch a real cell's objects.
@@ -133,6 +134,7 @@ export class CellOrchestrator {
   readonly #docker: DockerClient;
   readonly #store: CellStore;
   readonly #images: Images;
+  readonly #streamFullcolor: boolean;
   readonly #probeDesktopd: OrchestratorDeps["probeDesktopd"];
   readonly #probeStream: OrchestratorDeps["probeStream"];
   readonly #namePrefix: string;
@@ -152,6 +154,7 @@ export class CellOrchestrator {
     this.#docker = deps.docker;
     this.#store = deps.store;
     this.#images = deps.images;
+    this.#streamFullcolor = deps.streamFullcolor ?? true;
     this.#probeDesktopd = deps.probeDesktopd;
     this.#probeStream = deps.probeStream;
     this.#namePrefix = deps.namePrefix ?? NAME_PREFIX;
@@ -311,7 +314,10 @@ export class CellOrchestrator {
       };
       for (const [name, spec] of [
         [names.gate, gateSpec(record, this.#images.gate)],
-        [names.desktop, desktopSpec(record, this.#images.desktop)],
+        [
+          names.desktop,
+          desktopSpec(record, this.#images.desktop, { fullcolor: this.#streamFullcolor }),
+        ],
       ] as const) {
         await this.#docker.request({
           method: "POST",

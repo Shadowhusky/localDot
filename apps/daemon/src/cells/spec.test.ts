@@ -117,10 +117,15 @@ describe("desktopSpec", () => {
       "SELKIES_MANUAL_HEIGHT",
       "LOCALDOT_DESKTOPD_TOKEN",
       "PASSWORD",
+      "SELKIES_VIDEO_FULLCOLOR",
     ]);
     expect(spec.Env).toContain(`LOCALDOT_DESKTOPD_TOKEN=${record.tokens.desktopd}`);
     expect(spec.Env).toContain(`PASSWORD=${record.tokens.stream}`);
     expect(spec.Env).toContain("SELKIES_MANUAL_WIDTH=2560");
+    expect(spec.Env).toContain("SELKIES_VIDEO_FULLCOLOR=true|locked");
+    expect(desktopSpec(record, "i", { fullcolor: false }).Env).toContain(
+      "SELKIES_VIDEO_FULLCOLOR=false|locked",
+    );
     expect(desktopSpec({ ...record, scale: 1 }, "i").Env).toContain("SELKIES_MANUAL_HEIGHT=800");
   });
 });
