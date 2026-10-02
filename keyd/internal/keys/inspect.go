@@ -38,6 +38,16 @@ type Verdict struct {
 	SurrogateID string
 }
 
+// steps, when a test sets it, is told of every token lookup and comparison Inspect makes, so a pin
+// can bound its work by counting rather than timing.
+var steps func(n int)
+
+func countSteps(n int) {
+	if steps != nil {
+		steps(n)
+	}
+}
+
 type occurrence struct {
 	token  string
 	header string
@@ -175,6 +185,7 @@ func bound(b Binding, d Dest) bool {
 }
 
 func placed(e Entry, occ []occurrence, h http.Header) bool {
+	countSteps(len(occ))
 	var mine []occurrence
 	for _, o := range occ {
 		if o.token == e.Token {
@@ -257,10 +268,14 @@ func scan(u *url.URL, h http.Header) []occurrence {
 	return out
 }
 
+// order lists each token once, in the order first found.
 func order(occ []occurrence) []string {
 	var tokens []string
+	seen := make(map[string]bool, len(occ))
 	for _, o := range occ {
-		if !slices.Contains(tokens, o.token) {
+		countSteps(1)
+		if !seen[o.token] {
+			seen[o.token] = true
 			tokens = append(tokens, o.token)
 		}
 	}

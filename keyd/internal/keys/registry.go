@@ -40,22 +40,32 @@ func (e Entry) clone() Entry {
 type Registry struct {
 	mu      sync.RWMutex
 	byToken map[string]Entry
+	// byFolded maps each token, lower-cased, to the token, so a surrogate found in a header name
+	// resolves without a scan. Mint keeps the lower-cased forms unique.
+	byFolded map[string]string
 }
 
 func NewRegistry() *Registry {
-	return &Registry{byToken: map[string]Entry{}}
+	return &Registry{byToken: map[string]Entry{}, byFolded: map[string]string{}}
 }
 
 func (r *Registry) Mint(cell string, b Binding) (Entry, error) {
-	token, err := surrogate.Mint(b.Tag)
-	if err != nil {
-		return Entry{}, err
-	}
-	e := Entry{Token: token, ID: surrogate.ID(token), Cell: cell, Binding: b.clone()}
 	r.mu.Lock()
-	r.byToken[token] = e
-	r.mu.Unlock()
-	return e.clone(), nil
+	defer r.mu.Unlock()
+	for {
+		token, err := surrogate.Mint(b.Tag)
+		if err != nil {
+			return Entry{}, err
+		}
+		folded := strings.ToLower(token)
+		if _, taken := r.byFolded[folded]; taken {
+			continue
+		}
+		e := Entry{Token: token, ID: surrogate.ID(token), Cell: cell, Binding: b.clone()}
+		r.byToken[token] = e
+		r.byFolded[folded] = token
+		return e.clone(), nil
+	}
 }
 
 func (r *Registry) Lookup(token string) (Entry, bool) {
@@ -68,14 +78,14 @@ func (r *Registry) Lookup(token string) (Entry, bool) {
 // lookupFolded finds the entry whose token, lower-cased, is folded: a surrogate found in a header
 // name, whose case net/http has changed.
 func (r *Registry) lookupFolded(folded string) (Entry, bool) {
+	countSteps(1)
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	for token, e := range r.byToken {
-		if strings.ToLower(token) == folded {
-			return e.clone(), true
-		}
+	token, ok := r.byFolded[folded]
+	if !ok {
+		return Entry{}, false
 	}
-	return Entry{}, false
+	return r.byToken[token].clone(), true
 }
 
 func (r *Registry) ForCell(cell string) []Entry {
@@ -98,7 +108,7 @@ func (r *Registry) RevokeSecret(secretID string) int {
 	n := 0
 	for token, e := range r.byToken {
 		if e.Binding.SecretID == secretID {
-			delete(r.byToken, token)
+			r.drop(token)
 			n++
 		}
 	}
@@ -112,9 +122,15 @@ func (r *Registry) RevokeCell(cell string) int {
 	n := 0
 	for token, e := range r.byToken {
 		if e.Cell == cell {
-			delete(r.byToken, token)
+			r.drop(token)
 			n++
 		}
 	}
 	return n
+}
+
+// drop removes a token and its lower-cased form; the caller holds r.mu.
+func (r *Registry) drop(token string) {
+	delete(r.byToken, token)
+	delete(r.byFolded, strings.ToLower(token))
 }
