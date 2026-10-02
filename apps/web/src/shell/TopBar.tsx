@@ -1,5 +1,6 @@
 import { Mascot } from "./Mascot.tsx";
 
+// The lamp tells whether the stream is live; "Offline" read as if the daemon were down.
 export function TopBar({ title, live }: { title: string; live: boolean }) {
   return (
     <header className="bar">
@@ -20,7 +21,7 @@ export function TopBar({ title, live }: { title: string; live: boolean }) {
       <div className="bar-r">
         <span className={live ? "live on" : "live"}>
           <b aria-hidden="true" />
-          {live ? "Live" : "Offline"}
+          {live ? "Live" : "Not live"}
         </span>
       </div>
     </header>

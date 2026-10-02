@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { hudFor } from "./cells/hud-state.ts";
+import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
 import { forgetToken, keepToken, storedToken, takeFragmentToken } from "./lib/token.ts";
@@ -98,20 +98,25 @@ export function App({ fetchImpl }: AppProps) {
 }
 
 function Theatre({ api }: { api: ApiClient }) {
-  const { cell, busy, error, reconnects, start, stop } = useCell(api);
-  const hud = hudFor(cell, busy);
+  const { cell, status, pending, error, reconnects, start, stop, retry } = useCell(api);
+  const hud = hudFor({ cell, status, pending });
   useEffect(() => {
     document.title = `localDot — ${hud.label}`;
     return () => {
       document.title = "localDot";
     };
   }, [hud.label]);
+  const onAction = (kind: HudActionKind) => {
+    if (kind === "start") start();
+    else if (kind === "stop") stop();
+    else retry();
+  };
   return (
     <div className="app">
       <TopBar title="Your computer" live={hud.live} />
       <div className="house">
         <ConversationRail />
-        <StageColumn hud={error ? { ...hud, caption: error } : hud} onStart={start} onStop={stop}>
+        <StageColumn hud={error ? { ...hud, caption: error } : hud} onAction={onAction}>
           <Stage cell={cell} api={api} reconnects={reconnects} />
         </StageColumn>
         <PlanRail />

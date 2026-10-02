@@ -1,46 +1,84 @@
-import { useCallback, useEffect, useState } from "react";
-import type { ApiClient } from "../lib/api.ts";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { type ApiClient, ApiError } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
-import type { CellSummary } from "./types.ts";
+import { describeRequestError } from "./errors.ts";
+import type { CellStatus, CellView, Pending } from "./hud-state.ts";
+import type { CellState, CellSummary } from "./types.ts";
 
-export interface CellController {
-  cell: CellSummary | null;
-  busy: boolean;
+export interface CellController extends CellView {
+  // A refused request in plain words, until the cell's state next changes.
   error: string | null;
+  // Every cell id the daemon listed last.
+  listed: string[];
   // Times the status socket has reopened after its first open.
   reconnects: number;
   start(): void;
   stop(): void;
+  retry(): void;
 }
 
 const CELLS = "/api/cells";
 
 // One computer per install in Part 2: the first cell the daemon lists, created on demand. Until the
-// daemon has answered the list, the hook reports busy, so Start never creates a second computer.
+// daemon has answered the list, Start is disabled, so it never creates a second computer.
 export function useCell(api: ApiClient): CellController {
   const [cell, setCell] = useState<CellSummary | null>(null);
-  const [listed, setListed] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [listed, setListed] = useState<string[]>([]);
+  const [status, setStatus] = useState<CellStatus>("listing");
+  const [pending, setPending] = useState<Pending | null>("list");
   const [error, setError] = useState<string | null>(null);
   const [reconnects, setReconnects] = useState(0);
   const cellId = cell?.id ?? null;
+  // Read by callbacks that must see the latest value, not the one of their render.
+  const pendingRef = useRef<Pending | null>("list");
+  const stateRef = useRef<CellState | null>(null);
+  const mounted = useRef(true);
 
   useEffect(() => {
-    let cancelled = false;
-    api.get<CellSummary[]>(CELLS).then(
-      (cells) => {
-        if (cancelled) return;
-        setCell(cells[0] ?? null);
-        setListed(true);
-      },
-      (err: Error) => {
-        if (!cancelled) setError(err.message);
-      },
-    );
+    mounted.current = true;
     return () => {
-      cancelled = true;
+      mounted.current = false;
     };
-  }, [api]);
+  }, []);
+
+  const wait = useCallback((next: Pending | null) => {
+    pendingRef.current = next;
+    setPending(next);
+  }, []);
+
+  const show = useCallback((next: CellSummary | null) => {
+    stateRef.current = next?.state ?? null;
+    setCell(next);
+  }, []);
+
+  const adopt = useCallback(
+    (cells: CellSummary[]) => {
+      show(cells[0] ?? null);
+      setListed(cells.map((c) => c.id));
+      setStatus("known");
+    },
+    [show],
+  );
+
+  // Lists the cells and adopts the answer; when no answer comes, the computer's state is unknown.
+  const relist = useCallback(async () => {
+    try {
+      const cells = await api.get<CellSummary[]>(CELLS);
+      if (mounted.current) adopt(cells);
+    } catch (err) {
+      if (!mounted.current) return;
+      setError(describeRequestError(err));
+      show(null);
+      setStatus("unknown");
+    }
+  }, [api, adopt, show]);
+
+  useEffect(() => {
+    wait("list");
+    void relist().finally(() => {
+      if (mounted.current) wait(null);
+    });
+  }, [relist, wait]);
 
   useEffect(() => {
     if (!cellId) return;
@@ -55,7 +93,7 @@ export function useCell(api: ApiClient): CellController {
       try {
         await api.get("/api/whoami");
         const cells = await api.get<CellSummary[]>(CELLS);
-        if (!closed) setCell(cells[0] ?? null);
+        if (!closed) adopt(cells);
       } catch {
         // A 401 is handled by the api; without an answer, the socket keeps retrying.
       } finally {
@@ -68,7 +106,9 @@ export function useCell(api: ApiClient): CellController {
       handlers: {
         onMessage: (data) => {
           const next = JSON.parse(data) as CellSummary;
-          setCell(next.state === "removed" ? null : next);
+          // A refused request's message lasts until the state it was about moves on.
+          if (next.state !== stateRef.current) setError(null);
+          show(next.state === "removed" ? null : next);
         },
         onOpen: () => {
           if (opened) setReconnects((n) => n + 1);
@@ -81,30 +121,55 @@ export function useCell(api: ApiClient): CellController {
       closed = true;
       socket.close();
     };
-  }, [api, cellId]);
+  }, [api, cellId, adopt, show]);
 
-  const run = useCallback(async (action: () => Promise<unknown>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await action();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
+  const run = useCallback(
+    async (kind: Pending, action: () => Promise<void>) => {
+      if (pendingRef.current !== null) return;
+      wait(kind);
+      setError(null);
+      try {
+        await action();
+      } catch (err) {
+        if (!mounted.current) return;
+        setError(describeRequestError(err));
+        // No answer: the daemon may have acted (a create may have saved its record). A 404: the
+        // computer is gone. Either way the daemon's list says what is there now.
+        if (!(err instanceof ApiError) || err.status === 404) {
+          wait("list");
+          await relist();
+        }
+      } finally {
+        if (mounted.current) wait(null);
+      }
+    },
+    [relist, wait],
+  );
 
   const start = useCallback(() => {
-    void run(async () => {
-      if (cellId) await api.post(`/api/cells/${cellId}/start`);
-      else setCell(await api.post<CellSummary>("/api/cells", { scale: 2 }));
+    if (cellId) {
+      void run("start", async () => {
+        await api.post(`${CELLS}/${cellId}/start`);
+      });
+    } else {
+      void run("create", async () => {
+        const created = await api.post<CellSummary>(CELLS, { scale: 2 });
+        if (mounted.current) show(created);
+      });
+    }
+  }, [api, cellId, run, show]);
+
+  const stop = useCallback(() => {
+    if (!cellId) return;
+    void run("stop", async () => {
+      await api.post(`${CELLS}/${cellId}/stop`);
     });
   }, [api, cellId, run]);
 
-  const stop = useCallback(() => {
-    if (cellId) void run(() => api.post(`/api/cells/${cellId}/stop`));
-  }, [api, cellId, run]);
+  // relist() settles every failure itself: a list that gets no answer leaves the state unknown.
+  const retry = useCallback(() => {
+    void run("list", relist);
+  }, [relist, run]);
 
-  return { cell, busy: busy || !listed, error, reconnects, start, stop };
+  return { cell, status, pending, error, listed, reconnects, start, stop, retry };
 }

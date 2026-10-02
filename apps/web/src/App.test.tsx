@@ -43,6 +43,12 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+// The daemon's real 502 body for a create or start with Docker unreachable (a run against a missing
+// socket), and the caption the Theatre shows for it.
+const DOCKER_DOWN = "docker unreachable on /networks/create: ENOENT; is Docker Desktop running?";
+const DOCKER_DOWN_CAPTION =
+  "Docker isn't answering. Check that Docker Desktop is running, then try again.";
+
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const noCells = async () => json([]);
@@ -50,12 +56,14 @@ const unauthorized = async () => new Response("unauthorized", { status: 401 });
 const summary = (
   state: CellSummary["state"],
   connection: CellSummary["stream"]["connection"] = "none",
+  error?: string,
 ): CellSummary => ({
   id: CELL_ID,
   state,
   scale: 2,
   createdAt: "2026-10-01T10:00:00.000Z",
   stream: { connection, viewers: 0, lastUpstreamAt: null },
+  ...(error ? { error } : {}),
 });
 
 describe("App token states", () => {
@@ -98,13 +106,17 @@ describe("App token states", () => {
       return json([]);
     }) as typeof fetch;
     render(<App fetchImpl={fetchImpl} />);
-    expect(screen.queryByRole("button", { name: "Start computer" })).toBeNull();
-    const start = await screen.findByRole("button", { name: "Start computer" });
-    expect(screen.getByTestId("hud-status").textContent).toBe("No computer");
+    // Until the daemon has listed its cells, Start can't create a second computer.
+    expect(screen.getByTestId("hud-status").textContent).toBe("Checking…");
+    expect(screen.getByRole("button").getAttribute("aria-disabled")).toBe("true");
+    screen.getByRole("button").click();
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("No computer"));
+    const start = screen.getByRole("button", { name: "Start computer" });
+    expect(start.getAttribute("aria-disabled")).toBeNull();
     expect(screen.getByRole("navigation", { name: "Mode" }).textContent).toContain("Watch");
     start.click();
-    expect(await screen.findByText("Starting…")).toBeTruthy();
-    expect(calls).toContain("POST /api/cells");
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Starting…"));
+    expect(calls).toEqual(["GET /api/cells", "POST /api/cells"]);
   });
 
   it("forgets a rejected token and says so, without asking the daemon again", async () => {
@@ -166,16 +178,22 @@ describe("App token states", () => {
       const path = new URL(String(input)).pathname;
       calls.push(`${init?.method ?? "GET"} ${path}`);
       if (path.endsWith("/stop")) return new Response(null, { status: 202 });
-      if (path.endsWith("/start")) return new Response("Docker is not running", { status: 502 });
+      if (path.endsWith("/start")) return new Response(DOCKER_DOWN, { status: 502 });
       return json([summary("ready", "live")]);
     }) as typeof fetch;
     render(<App fetchImpl={fetchImpl} />);
-    (await screen.findByRole("button", { name: "Stop computer" })).click();
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Live"));
+    screen.getByRole("button", { name: "Stop computer" }).click();
+    await waitFor(() => expect(calls).toContain(`POST /api/cells/${CELL_ID}/stop`));
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("stopped")) }),
     );
-    (await screen.findByRole("button", { name: "Start computer" })).click();
-    expect(await screen.findByText("Docker is not running")).toBeTruthy();
+    await waitFor(() =>
+      expect(screen.getByRole("button").getAttribute("aria-disabled")).toBeNull(),
+    );
+    screen.getByRole("button", { name: "Start computer" }).click();
+    expect(await screen.findByText(DOCKER_DOWN_CAPTION)).toBeTruthy();
+    expect(document.body.textContent).not.toContain("ENOENT");
     expect(calls).toEqual([
       "GET /api/cells",
       `POST /api/cells/${CELL_ID}/stop`,
@@ -227,6 +245,155 @@ describe("App token states", () => {
     expect(screen.getByTestId("hud-status").textContent).toBe("No computer");
     expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
     expect(FakeWebSocket.instances[0]?.closed).toBe(true);
+  });
+});
+
+describe("App HUD", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.history.replaceState(null, "", "/");
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  afterEach(cleanup);
+
+  const status = () => screen.getByTestId("hud-status").textContent;
+  const button = () => screen.getByRole("button");
+  const caption = () => document.querySelector(".caption")?.textContent ?? "";
+  const pushState = (cell: CellSummary) =>
+    act(() => FakeWebSocket.instances.at(-1)?.onmessage?.({ data: JSON.stringify(cell) }));
+
+  it("says the computer's state is unknown when the list fails, and lists again on Try again", async () => {
+    let up = false;
+    const d = daemon(() => {
+      if (!up) throw new TypeError("Failed to fetch");
+      return json([summary("stopped")]);
+    });
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Unavailable"));
+    expect(caption()).toContain("localDot's daemon isn't answering.");
+    expect(screen.queryByText("No computer")).toBeNull();
+    up = true;
+    screen.getByRole("button", { name: "Try again" }).click();
+    await waitFor(() => expect(status()).toBe("Stopped"));
+    expect(d.seen()).toEqual(["GET /api/cells", "GET /api/cells"]);
+  });
+
+  it("keeps one HUD button through Start, disabled while the create is out, with focus kept", async () => {
+    const created = deferred<Response>();
+    const d = daemon(({ method }) => (method === "POST" ? created.promise : json([])));
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("No computer"));
+    const start = button();
+    start.focus();
+    start.click();
+    await waitFor(() => expect(status()).toBe("Starting…"));
+    expect(button()).toBe(start);
+    expect(start.getAttribute("aria-disabled")).toBe("true");
+    expect(document.activeElement).toBe(start);
+    start.click();
+    expect(d.seen()).toEqual(["GET /api/cells", "POST /api/cells"]);
+    created.resolve(json(summary("starting"), 202));
+    await waitFor(() => expect(start.getAttribute("aria-disabled")).toBeNull());
+    expect(button()).toBe(start);
+    expect(start.textContent).toBe("Stop computer");
+    expect(document.activeElement).toBe(start);
+  });
+
+  it("stops a computer that is still starting", async () => {
+    const d = daemon(({ method }) =>
+      method === "POST" ? new Response(null, { status: 202 }) : json([summary("starting")]),
+    );
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Starting…"));
+    screen.getByRole("button", { name: "Stop computer" }).click();
+    await waitFor(() => expect(d.seen()).toContain(`POST /api/cells/${CELL_ID}/stop`));
+  });
+
+  it("offers Stop again for a computer whose stop failed, and says why in plain words", async () => {
+    const d = daemon(({ method }) =>
+      method === "POST"
+        ? new Response(null, { status: 202 })
+        : json([summary("failed", "none", `stop failed: ${DOCKER_DOWN}`)]),
+    );
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Failed"));
+    expect(caption()).toContain("Your computer didn't stop");
+    expect(caption()).not.toContain("ENOENT");
+    screen.getByRole("button", { name: "Stop computer" }).click();
+    await waitFor(() => expect(d.seen()).toContain(`POST /api/cells/${CELL_ID}/stop`));
+  });
+
+  it("lists again after a create that got no answer, and adopts the computer the daemon saved", async () => {
+    let saved = false;
+    const d = daemon(({ method }) => {
+      if (method === "POST") {
+        saved = true;
+        throw new TypeError("Failed to fetch");
+      }
+      return json(saved ? [summary("starting")] : []);
+    });
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("No computer"));
+    button().click();
+    await waitFor(() =>
+      expect(d.seen()).toEqual(["GET /api/cells", "POST /api/cells", "GET /api/cells"]),
+    );
+    await waitFor(() => expect(status()).toBe("Starting…"));
+    expect(screen.getByRole("button", { name: "Stop computer" })).toBeTruthy();
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+  });
+
+  it("says a computer that no longer exists is gone, and lists again", async () => {
+    let gone = false;
+    const d = daemon(({ method }) => {
+      if (method === "POST") {
+        gone = true;
+        return new Response("unknown cell", { status: 404 });
+      }
+      return json(gone ? [] : [summary("stopped")]);
+    });
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Stopped"));
+    button().click();
+    await waitFor(() => expect(status()).toBe("No computer"));
+    expect(caption()).toContain("This computer no longer exists.");
+    expect(caption()).not.toContain("unknown cell");
+    expect(d.seen()).toEqual([
+      "GET /api/cells",
+      `POST /api/cells/${CELL_ID}/start`,
+      "GET /api/cells",
+    ]);
+  });
+
+  it("clears a refused request's message once the computer's state changes", async () => {
+    const d = daemon(({ method }) =>
+      method === "POST" ? new Response(DOCKER_DOWN, { status: 502 }) : json([summary("stopped")]),
+    );
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Stopped"));
+    button().click();
+    await waitFor(() => expect(caption()).toContain(DOCKER_DOWN_CAPTION));
+    pushState({
+      ...summary("stopped"),
+      stream: { connection: "none", viewers: 1, lastUpstreamAt: 1 },
+    });
+    expect(caption()).toContain(DOCKER_DOWN_CAPTION);
+    pushState(summary("starting"));
+    expect(caption()).not.toContain(DOCKER_DOWN_CAPTION);
+    expect(status()).toBe("Starting…");
+  });
+
+  it("announces the caption politely and names the stream state in the bar", async () => {
+    render(<App fetchImpl={daemon(() => json([summary("ready", "connecting")])).fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Connecting…"));
+    expect(document.querySelector(".caption")?.getAttribute("aria-live")).toBe("polite");
+    expect(document.querySelector(".bar .live")?.textContent).toBe("Not live");
+    expect(document.body.textContent).not.toContain("Offline");
+    pushState(summary("ready", "live"));
+    expect(document.querySelector(".bar .live")?.textContent).toBe("Live");
   });
 });
 

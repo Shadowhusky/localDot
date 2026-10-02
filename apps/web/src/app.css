@@ -246,10 +246,6 @@
   z-index: 4;
 }
 
-.hud:has(.acts:empty) {
-  padding-right: var(--spacing-hud-x);
-}
-
 .hud .st {
   display: flex;
   align-items: center;
@@ -264,15 +260,6 @@
   height: var(--spacing-mascot-hud);
 }
 
-.hud .acts {
-  display: flex;
-  gap: var(--spacing-hud-acts-gap);
-}
-
-.hud .acts:empty {
-  display: none;
-}
-
 .hud .a {
   display: flex;
   align-items: center;
@@ -285,11 +272,17 @@
   font-size: 12.5px;
 }
 
+/* A disabled button stays focusable (aria-disabled), so it can't drop focus mid-request. */
+.hud .a[aria-disabled="true"] {
+  color: var(--color-text-2);
+  cursor: default;
+}
+
 .hud .sq {
   width: var(--spacing-stop);
   height: var(--spacing-stop);
   border-radius: var(--radius-stop);
-  background: var(--color-text);
+  background: currentColor;
 }
 
 .caption {

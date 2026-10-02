@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { hudFor } from "./hud-state.ts";
+import { type CellView, hudFor } from "./hud-state.ts";
 import type { CellSummary } from "./types.ts";
 
 const cell = (
@@ -15,57 +15,128 @@ const cell = (
   ...(error ? { error } : {}),
 });
 
+const known = (c: CellSummary | null, pending: CellView["pending"] = null): CellView => ({
+  cell: c,
+  status: "known",
+  pending,
+});
+
+// Real orchestrator errors (apps/daemon/src/cells/orchestrator.ts) and a real DockerError body.
+const DOCKER_DOWN = "docker unreachable on /networks/create: ENOENT; is Docker Desktop running?";
+const RESTART_NOTE = "desktop container exited with 137; restarting (attempt 2 of 5)";
+
 describe("hudFor", () => {
-  it("offers to start when there is no computer or it is stopped or failed", () => {
-    expect(hudFor(null, false)).toMatchObject({
+  it("offers to start when there is no computer or it is stopped", () => {
+    expect(hudFor(known(null))).toMatchObject({
       label: "No computer",
-      action: "start",
+      action: { kind: "start", enabled: true },
       live: false,
     });
-    expect(hudFor(cell("stopped"), false)).toMatchObject({ label: "Stopped", action: "start" });
-    expect(
-      hudFor(cell("failed", "none", "desktop container exited with 137"), false),
-    ).toMatchObject({
-      label: "Failed",
-      caption: "desktop container exited with 137",
-      action: "start",
+    expect(hudFor(known(cell("stopped")))).toMatchObject({
+      label: "Stopped",
+      action: { kind: "start", enabled: true },
     });
   });
 
-  it("shows progress without an action while starting, stopping or busy", () => {
-    expect(hudFor(cell("starting"), false)).toMatchObject({ label: "Starting…", action: "none" });
-    expect(hudFor(cell("stopping"), false)).toMatchObject({ label: "Stopping…", action: "none" });
-    expect(hudFor(null, true)).toMatchObject({ action: "none" });
+  it("says it is checking while the first list is out, without offering a usable control", () => {
+    expect(hudFor({ cell: null, status: "listing", pending: "list" })).toMatchObject({
+      label: "Checking…",
+      action: { enabled: false },
+    });
+  });
+
+  it("does not claim there is no computer when the list failed, and offers to try again", () => {
+    const hud = hudFor({ cell: null, status: "unknown", pending: null });
+    expect(hud.label).not.toBe("No computer");
+    expect(hud).toMatchObject({ label: "Unavailable", action: { kind: "retry", enabled: true } });
+    expect(hudFor({ cell: null, status: "unknown", pending: "list" }).action).toEqual({
+      kind: "retry",
+      enabled: false,
+    });
+  });
+
+  it("says Starting… while the computer is being created", () => {
+    expect(hudFor(known(null, "create"))).toMatchObject({
+      label: "Starting…",
+      action: { kind: "stop", enabled: false },
+    });
+  });
+
+  it("offers Stop while starting, and disables the control while a request is out", () => {
+    expect(hudFor(known(cell("starting")))).toMatchObject({
+      label: "Starting…",
+      action: { kind: "stop", enabled: true },
+    });
+    expect(hudFor(known(cell("starting"), "start")).action).toEqual({
+      kind: "stop",
+      enabled: false,
+    });
+    expect(hudFor(known(cell("stopping")))).toMatchObject({
+      label: "Stopping…",
+      action: { kind: "start", enabled: false },
+    });
+  });
+
+  it("shows a failure in plain words and offers Start, or Stop again when the stop failed", () => {
+    const failed = hudFor(known(cell("failed", "none", `not ready after 120 s: ${DOCKER_DOWN}`)));
+    expect(failed).toMatchObject({ label: "Failed", action: { kind: "start", enabled: true } });
+    expect(failed.caption).toBe("Your computer didn't finish starting. Start it again.");
+    const stopFailed = hudFor(known(cell("failed", "none", `stop failed: ${DOCKER_DOWN}`)));
+    expect(stopFailed).toMatchObject({ label: "Failed", action: { kind: "stop", enabled: true } });
+    expect(stopFailed.caption).toBe(
+      "Your computer didn't stop: Docker isn't answering. Check that Docker Desktop is running, then stop it again.",
+    );
+  });
+
+  it("keeps Docker's and the daemon's own wording out of every caption", () => {
+    const errors = [
+      DOCKER_DOWN,
+      `stop failed: ${DOCKER_DOWN}`,
+      `not ready after 120 s: desktopd not ready: hidpi {"ok":false}, screen null`,
+      "desktop container exited with 1; stop and start the computer",
+      "gate container is missing: removed outside localDot",
+      "containers missing: removed outside localDot",
+      "desktop container exited with 137; gave up after 5 restarts",
+      "background check stopped (EACCES)",
+      "something new the daemon says",
+    ];
+    for (const error of errors) {
+      const { caption } = hudFor(known(cell("failed", "none", error)));
+      expect(caption, error).not.toMatch(/docker unreachable|ENOENT|desktopd|hidpi|EACCES|says/);
+      expect(caption.length, error).toBeGreaterThan(0);
+    }
   });
 
   it("reflects the stream once the computer is ready", () => {
-    expect(hudFor(cell("ready", "live"), false)).toMatchObject({
+    expect(hudFor(known(cell("ready", "live")))).toMatchObject({
       label: "Live",
-      action: "stop",
+      action: { kind: "stop", enabled: true },
       live: true,
     });
-    expect(hudFor(cell("ready", "connecting"), false)).toMatchObject({
+    expect(hudFor(known(cell("ready", "connecting")))).toMatchObject({
       label: "Connecting…",
       live: false,
     });
-    expect(hudFor(cell("ready", "stalled"), false)).toMatchObject({
+    expect(hudFor(known(cell("ready", "stalled")))).toMatchObject({
       label: "Reconnecting…",
       live: false,
     });
-    expect(hudFor(cell("ready", "disconnected"), false)).toMatchObject({
+    expect(hudFor(known(cell("ready", "disconnected")))).toMatchObject({
       label: "Reconnecting…",
-      action: "stop",
+      action: { kind: "stop", enabled: true },
     });
+    expect(hudFor(known(cell("ready", "live"), "stop")).action.enabled).toBe(false);
   });
 
-  it("shows a crash restart as reconnecting, with the orchestrator's note", () => {
-    const note = "desktop container exited with 137; restarting (attempt 2 of 5)";
-    expect(hudFor(cell("starting", "none", note), false)).toEqual({
+  it("shows a crash restart as reconnecting, with the attempt from the orchestrator's note", () => {
+    expect(hudFor(known(cell("starting", "none", RESTART_NOTE)))).toEqual({
       label: "Reconnecting…",
-      caption: note,
-      action: "stop",
+      caption: "Your computer stopped unexpectedly. Restarting it (attempt 2 of 5).",
+      action: { kind: "stop", enabled: true },
       live: false,
     });
-    expect(hudFor(cell("starting", "none", note), true).action).toBe("none");
+    expect(hudFor(known(cell("starting", "none", RESTART_NOTE), "stop")).action.enabled).toBe(
+      false,
+    );
   });
 });

@@ -48,7 +48,6 @@
   --spacing-hud-x: 12px;
   --spacing-hud-inset: 5px;
   --spacing-hud-glyph-gap: 8px;
-  --spacing-hud-acts-gap: 4px;
   --spacing-mascot-hud: 18px;
   --spacing-button: 30px;
   --spacing-button-glyph-gap: 6px;
@@ -103,7 +102,7 @@ button {
   cursor: pointer;
 }
 
-button:active {
+button:not([aria-disabled="true"]):active {
   transform: scale(0.97);
   transition: transform var(--duration-press) var(--ease-press);
 }
@@ -135,7 +134,7 @@ button:active {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  button:active {
+  button:not([aria-disabled="true"]):active {
     transform: none;
     opacity: 0.6;
   }
