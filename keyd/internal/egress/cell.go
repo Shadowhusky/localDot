@@ -133,7 +133,7 @@ func (c *Cell) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		c.deny(w, line, http.StatusMethodNotAllowed, ReasonMethod)
 	case !r.URL.IsAbs() || r.URL.Scheme != "http":
 		c.deny(w, line, http.StatusBadRequest, ReasonBadRequest)
-	case strings.EqualFold(r.URL.Hostname(), internalHost):
+	case isInternal(r.URL):
 		c.serveInternal(w, r)
 	default:
 		c.servePlain(w, r)

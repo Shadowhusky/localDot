@@ -965,3 +965,39 @@ func TestOptionsStarNeedsTheToken(t *testing.T) {
 		t.Fatalf("with the token: %d %v", resp.StatusCode, resp.Header)
 	}
 }
+
+// keyd.ldot is matched in ASCII letters of any case on port 80 only: U+212A (Kelvin) does not
+// fold into it, and another port is an ordinary plain request, which policy refuses.
+func TestOnlyKeydLdotOnPort80IsInternal(t *testing.T) {
+	w := newWorld(t)
+	c, rd := w.recordingCell("c1", policy.Desktop)
+	kelvin := string(rune(0x212a))
+	for target, want := range map[string]int{
+		"http://keyd.ldot/health":              http.StatusOK,
+		"http://KEYD.LDOT/health":              http.StatusOK,
+		"http://keyd.ldot:80/health":           http.StatusOK,
+		"http://" + kelvin + "eyd.ldot/health": http.StatusForbidden,
+		"http://" + kelvin + "EYD.LDOT/health": http.StatusForbidden,
+		"http://keyd.ldot:8080/health":         http.StatusForbidden,
+		"http://keyd.ldot:81/health":           http.StatusForbidden,
+		"http://keyd.ldot:443/health":          http.StatusForbidden,
+		"http://keyd.ldot:080/health":          http.StatusForbidden,
+	} {
+		resp, body := rawRequest(t, c, "GET "+target+" HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"+proxyAuth()+"\r\n")
+		if resp.StatusCode != want || (want != http.StatusOK) == strings.Contains(body, `"ok":true`) {
+			t.Errorf("%+q: %d %q, want %d", target, resp.StatusCode, body, want)
+		}
+	}
+	if a := rd.addresses(); len(a) != 0 {
+		t.Fatalf("dialled %v", a)
+	}
+	n := 0
+	for _, l := range w.lines() {
+		if l.Mode == "internal" {
+			n++
+		}
+	}
+	if n != 3 {
+		t.Fatalf("%d internal audit lines, want 3", n)
+	}
+}
