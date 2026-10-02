@@ -195,3 +195,4 @@ Task 9: review package 97bfb65..70a534e built; review + Task 10 implementer pend
 Resumed 2026-10-02 after the pause (agents stopped at the usage limit; routines blocked by auto mode — the user decides on cloud). Task 9 review (97bfb65..70a534e) + Task 10 implementer dispatched locally (pipelined). Task 10 BASE 70a534e.
 
 ## Task 10 (BASE 70a534e)
+2026-10-02: per the user, jobs moved to cloud sessions; the local Task 9 reviewer and Task 10 implementer were stopped before producing output. Both re-run as cloud jobs (Task 9 review → claude/review-part4a-task9; Task 10 on feat/core-part4a @ 70a534e → claude/part4a-task10).
