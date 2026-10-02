@@ -1,40 +1,50 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from "vitest";
-import { bootstrapToken, forgetToken, TOKEN_KEY } from "./token.ts";
+import { forgetToken, keepToken, storedToken, TOKEN_KEY, takeFragmentToken } from "./token.ts";
 
 const GOOD = "a".repeat(43);
+const NEWER = "b".repeat(43);
 
-describe("bootstrapToken", () => {
+describe("install token", () => {
   beforeEach(() => {
     window.localStorage.clear();
     window.history.replaceState(null, "", "/");
   });
 
-  it("stores a token from the fragment and removes the fragment from the address bar", () => {
+  it("reads a token from the fragment and removes the fragment, without storing the token", () => {
     window.location.hash = `#token=${GOOD}`;
-    expect(bootstrapToken()).toBe(GOOD);
-    expect(window.localStorage.getItem(TOKEN_KEY)).toBe(GOOD);
+    expect(takeFragmentToken()).toBe(GOOD);
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(window.location.hash).toBe("");
     expect(window.location.href.endsWith("/")).toBe(true);
+    expect(takeFragmentToken()).toBeNull();
   });
 
   it("ignores a malformed fragment token but still clears the fragment", () => {
-    window.location.hash = "#token=abc";
-    expect(bootstrapToken()).toBeNull();
+    for (const given of ["abc", "a".repeat(42), "a".repeat(44), "a".repeat(9000)]) {
+      window.location.hash = `#token=${given}`;
+      expect(takeFragmentToken(), given).toBeNull();
+      expect(window.location.hash).toBe("");
+    }
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(window.location.hash).toBe("");
   });
 
-  it("returns the stored token when there is no fragment, and nothing when the stored one is malformed", () => {
-    window.localStorage.setItem(TOKEN_KEY, GOOD);
-    expect(bootstrapToken()).toBe(GOOD);
+  it("keeps a token and reads it back, and reads nothing when the stored one is malformed", () => {
+    expect(storedToken()).toBeNull();
+    keepToken(GOOD);
+    expect(storedToken()).toBe(GOOD);
     window.localStorage.setItem(TOKEN_KEY, "short");
-    expect(bootstrapToken()).toBeNull();
+    expect(storedToken()).toBeNull();
+    // An oversized token would only earn the UI a 431 on every request.
+    window.localStorage.setItem(TOKEN_KEY, "a".repeat(44));
+    expect(storedToken()).toBeNull();
   });
 
-  it("forgets the token", () => {
-    window.localStorage.setItem(TOKEN_KEY, GOOD);
-    forgetToken();
+  it("forgets only the token the daemon rejected", () => {
+    keepToken(NEWER);
+    forgetToken(GOOD);
+    expect(storedToken()).toBe(NEWER);
+    forgetToken(NEWER);
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
   });
 });

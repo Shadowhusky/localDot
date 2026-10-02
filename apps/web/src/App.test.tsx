@@ -8,7 +8,40 @@ import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
 const TOKEN = "a".repeat(43);
+const NEWER = "b".repeat(43);
 const CELL_ID = "01JXYZ0000000000000000ABCD";
+
+interface Call {
+  method: string;
+  path: string;
+  token: string;
+}
+
+// Plays the daemon: answer(call) gives each request's response. Every call is recorded with the
+// token it carried.
+function daemon(answer: (call: Call) => Response | Promise<Response>) {
+  const calls: Call[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const auth = new Headers(init?.headers).get("authorization") ?? "";
+    const call = {
+      method: init?.method ?? "GET",
+      path: new URL(String(input)).pathname,
+      token: auth.replace(/^Bearer /, ""),
+    };
+    calls.push(call);
+    return answer(call);
+  }) as typeof fetch;
+  const seen = () => calls.map((c) => `${c.method} ${c.path}`);
+  return { fetchImpl, calls, seen };
+}
+
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
@@ -194,5 +227,106 @@ describe("App token states", () => {
     expect(screen.getByTestId("hud-status").textContent).toBe("No computer");
     expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
     expect(FakeWebSocket.instances[0]?.closed).toBe(true);
+  });
+});
+
+describe("App token hardening", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.history.replaceState(null, "", "/");
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+  afterEach(cleanup);
+
+  it("stores a token from the link only once the daemon has accepted it", async () => {
+    const whoami = deferred<Response>();
+    const d = daemon(({ path }) => (path === "/api/whoami" ? whoami.promise : json([])));
+    window.location.hash = `#token=${TOKEN}`;
+    render(<App fetchImpl={d.fetchImpl} />);
+    expect(window.location.hash).toBe("");
+    await waitFor(() => expect(d.seen()).toEqual(["GET /api/whoami"]));
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
+    whoami.resolve(json({ ok: true }));
+    await screen.findByRole("button", { name: "Start computer" });
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
+    expect(d.calls.every((c) => c.token === TOKEN)).toBe(true);
+  });
+
+  it("keeps the stored token when a link brings one the daemon rejects", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const d = daemon(({ token }) =>
+      token === TOKEN ? json([]) : new Response("unauthorized", { status: 401 }),
+    );
+    window.location.hash = `#token=${NEWER}`;
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() =>
+      expect(d.calls).toContainEqual({ method: "GET", path: "/api/whoami", token: NEWER }),
+    );
+    await screen.findByRole("button", { name: "Start computer" });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
+    expect(screen.queryByText("No access token")).toBeNull();
+    expect(d.calls.filter((c) => c.path === "/api/cells").every((c) => c.token === TOKEN)).toBe(
+      true,
+    );
+  });
+
+  it("says the link's token was rejected when there is no stored one, and stores nothing", async () => {
+    const d = daemon(() => new Response("unauthorized", { status: 401 }));
+    window.location.hash = `#token=${NEWER}`;
+    render(<App fetchImpl={d.fetchImpl} />);
+    expect(await screen.findByText(/rejected the token in the link/)).toBeTruthy();
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(d.seen()).toEqual(["GET /api/whoami"]);
+  });
+
+  it("does not let a late 401 for an older token erase the newer one", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const oldList = deferred<Response>();
+    const d = daemon(({ token, path }) => {
+      if (token === TOKEN && path === "/api/cells") return oldList.promise;
+      return path === "/api/whoami" ? json({ ok: true }) : json([]);
+    });
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(d.seen()).toEqual(["GET /api/cells"]));
+    window.location.hash = `#token=${NEWER}`;
+    await waitFor(() => expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER));
+    await screen.findByRole("button", { name: "Start computer" });
+    oldList.resolve(new Response("unauthorized", { status: 401 }));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
+    expect(screen.queryByText("No access token")).toBeNull();
+    expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
+  });
+
+  it("checks the link's token again when the daemon did not answer", async () => {
+    let answers = 0;
+    const d = daemon(({ path }) => {
+      if (path !== "/api/whoami") return json([]);
+      answers += 1;
+      if (answers === 1) throw new TypeError("Failed to fetch");
+      return json({ ok: true });
+    });
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+    try {
+      window.location.hash = `#token=${TOKEN}`;
+      render(<App fetchImpl={d.fetchImpl} />);
+      expect(await screen.findByText("Checking the link…")).toBeTruthy();
+      await waitFor(() => expect(answers).toBe(1));
+      expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
+      act(() => vi.advanceTimersByTime(2000));
+      await screen.findByRole("button", { name: "Start computer" });
+      expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("points at the link on the origin the page was opened from", () => {
+    render(<App fetchImpl={noCells as typeof fetch} />);
+    expect(screen.getByRole("alert").textContent).toContain(`${window.location.origin}/#token=…`);
+    expect(window.location.origin).not.toBe("http://127.0.0.1:4750");
   });
 });
