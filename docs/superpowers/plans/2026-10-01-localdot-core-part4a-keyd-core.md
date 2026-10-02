@@ -8487,6 +8487,9 @@ ruling P4a-C5):
   (`images.go`, P4a-R27), from the dimensions in its PNG or JPEG header, or at the provider's
   documented per-image maximum when keyd cannot read them (an image by URL or file id, or in another
   format). A 450 KB screenshot was 200,000 tokens of base64 text; it is now 1,334 tokens on Claude.
+  Part 5a's amendment adds Mistral's rule (`BodyMistral`, 4,051 tokens for that screenshot) and,
+  for OpenRouter, which serves every vendor's models, the largest rule keyd knows
+  (`BodyOpenRouter`).
   The text is the body less the images' data, which counts for at most the body's length, so the
   text is never below nothing: invalid UTF-8 in an image's data decodes to three bytes for each
   byte sent, which once made the input, and so the request's hold, negative (review 3, N-A).
@@ -9241,6 +9244,15 @@ func TestImagesArePricedByTheProvidersRule(t *testing.T) {
 		{"gemini file", BodyGemini, "m", `{"contents":[{"parts":[{"fileData":{"mimeType":"image/png","fileUri":"https://example.test/a.png"}}]}]}`, "", 2_240},
 		{"an image as text", BodyChat, "m", `{"messages":[{"role":"user","content":"` + shot + `"}]}`, "", 0},
 		{"no images in completions", "completions", "m", `{"prompt":"data:image/png;base64,` + shot + `"}`, "", 0},
+		// Mistral: 80·50 patches + 50 row breaks + 1; a photo, 125·94 + 94 + 1, in Mistral's own
+		// image_url string; one it cannot size holds a 2048-pixel square's 16,513 (P5a-R31).
+		{"mistral screenshot", BodyMistral, "mistral-medium-3", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":"data:image/png;base64,` + shot + `"}]}]}`, shot, 4_051},
+		{"mistral photo", BodyMistral, "mistral-medium-3", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/jpeg;base64,` + photo + `"}}]}]}`, photo, 11_845},
+		{"mistral by url", BodyMistral, "mistral-medium-3", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":"https://example.test/a.png"}]}]}`, "", 16_513},
+		// OpenRouter: the largest rule keyd knows, Mistral's for these, OpenAI's for a URL.
+		{"openrouter screenshot", BodyOpenRouter, "mistralai/mistral-medium-3", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,` + shot + `"}}]}]}`, shot, 4_051},
+		{"openrouter wide", BodyOpenRouter, "google/gemini-3.6-flash", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"data:image/png;base64,` + wide + `"}}]}]}`, wide, 250*38 + 38 + 1},
+		{"openrouter by url", BodyOpenRouter, "m", `{"messages":[{"role":"user","content":[{"type":"image_url","image_url":{"url":"https://example.test/a.png"}}]}]}`, "", 73_800},
 	}
 	for _, c := range cases {
 		data, tokens := imagesIn(c.api, c.model, []byte(c.body))
@@ -9936,6 +9948,10 @@ const (
 	BodyChat      = "chat"
 	BodyResponses = "responses"
 	BodyGemini    = "gemini"
+	// Chat completions whose images are billed by another rule than OpenAI's (Part 5a's amendment):
+	// Mistral's, and OpenRouter's, which serves every vendor's models.
+	BodyMistral    = "mistral"
+	BodyOpenRouter = "openrouter"
 )
 
 // BodyCompletions is OpenAI's completions API, whose prompt may be a list of prompts.
@@ -10210,6 +10226,9 @@ const (
 	anthropicMaxImage = 4_784
 	openAIMaxImage    = 73_800
 	geminiMaxImage    = 2_240
+	// Mistral's rule for a 2048-pixel square, more than any Mistral model's largest side: each
+	// scales a larger image down first (Pixtral to 1024 pixels a side).
+	mistralMaxImage = 128*128 + 128 + 1
 	// A header is read from at most this much base64: 192 KB, past every PNG header and nearly
 	// every JPEG's metadata.
 	maxImageHead = 1 << 18
@@ -10228,6 +10247,13 @@ func imagesIn(api, model string, body []byte) (data, tokens int64) {
 		rule, unread = geminiImage, geminiMaxImage
 	case BodyChat, BodyResponses:
 		rule, unread = openAIImage, openAIMaxImage
+		if strings.Contains(model, "4o-mini") {
+			rule = gpt4oMiniImage
+		}
+	case BodyMistral:
+		rule, unread = mistralImage, mistralMaxImage
+	case BodyOpenRouter:
+		rule, unread = largestImage, openAIMaxImage
 		if strings.Contains(model, "4o-mini") {
 			rule = gpt4oMiniImage
 		}
@@ -10253,7 +10279,7 @@ func imagesIn(api, model string, body []byte) (data, tokens int64) {
 	switch api {
 	case BodyAnthropic:
 		anthropicImages(doc, count)
-	case BodyChat:
+	case BodyChat, BodyMistral, BodyOpenRouter:
 		chatImages(doc, count)
 	case BodyResponses:
 		responsesImages(doc, count)
@@ -10405,6 +10431,21 @@ func openAIImage(w, h int) int64 {
 	return max((patches*246+99)/100, 85+170*openAITiles(w, h))
 }
 
+// Mistral (its "Vision" documentation): a token per 16-pixel patch of the image as sent, a break
+// token after each row of patches, and an end token; a 1280x800 screenshot is 4,051 tokens. Models
+// whose encoder merges patches (14 pixels, 2x2) bill fewer, and every model scales an image past
+// its largest side down first, so this, unscaled and capped at mistralMaxImage, is at least what
+// any Mistral model bills (Part 5a's amendment, P5a-R31).
+func mistralImage(w, h int) int64 {
+	return min(ceilDiv(w, 16)*ceilDiv(h, 16)+ceilDiv(h, 16)+1, mistralMaxImage)
+}
+
+// largestImage is the most any rule keyd knows bills, for a router that serves every vendor's
+// models (OpenRouter).
+func largestImage(w, h int) int64 {
+	return max(openAIImage(w, h), mistralImage(w, h), anthropicImage(w, h), geminiImage(w, h))
+}
+
 // gpt-4o-mini bills 2,833 tokens and 5,667 per tile.
 func gpt4oMiniImage(w, h int) int64 {
 	return 2_833 + 5_667*openAITiles(w, h)
@@ -10452,8 +10493,10 @@ func list(v any) []any {
 
 Run: `go test -race ./internal/llm/`
 Expected: `ok` (20 tests). Without the meter's `x_groq.usage`, `TestMeterReadsTheFirstClassBearerProviders`
-fails for Groq (nothing reported), and without the `models` check `TestReadRequest` fails for each
-list.
+fails for Groq (nothing reported), without the `models` check `TestReadRequest` fails for each
+list, and without Mistral's rule the `mistral` and `openrouter` cases of
+`TestImagesArePricedByTheProvidersRule` fail (OpenAI's rule holds 2,460 for a 4,051-token
+screenshot).
 
 - [ ] **Step 5: Format, vet, commit**
 
@@ -10507,7 +10550,9 @@ package calls, with the cap field that package sends (xAI: `responses`, `max_out
 others: `chat/completions`, `max_tokens`), plus the model listings. A key stored for one is its own
 route, with its own host, prices and audit lines, like every other preset. The upstream path is
 joined under `/`, so a base URL without a path (DeepSeek's `https://api.deepseek.com`, or a user's
-`https://api.perplexity.ai`) still sends an absolute path.
+`https://api.perplexity.ai`) still sends an absolute path. And no model priced at $0 both ways runs
+on a route that is not a local server's (403 `model-unpriced`, P5a-R32): keyd's budget is the
+runaway guard, and such a model would spend outside it.
 
 **Files:**
 - Create: `keyd/internal/egress/gateway.go`
@@ -10529,6 +10574,8 @@ joined under `/`, so a base URL without a path (DeepSeek's `https://api.deepseek
   `Pinned` (`map[string]bool` of `host:port`) with `DialContext`, `PinnedFor(map[string]keys.Binding) Pinned`;
   the reserved name `llm.ldot`; reasons `ReasonRouteUnknown`, `ReasonOpNotAllowed`,
   `ReasonSurrogateMissing`, `ReasonNoTask`, `ReasonBudgetTask`, `ReasonBudgetDay`,
+  `ReasonModelUnpriced` (403: a model priced at $0 both ways on a route that is not local; Part 5a's
+  amendment, P5a-R32),
   `ReasonBodyTooLarge`, `ReasonBadJSON`, `ReasonModelMissing`, `ReasonModelNotAllowed`,
   `ReasonChoiceCount` (400 whose body names the field); audit `mode` `"gateway"` with `route`,
   `model`, `costMicroUSD`, `usage` (`reported`, or `estimated` when the charge is the hold or a cut
@@ -11420,6 +11467,40 @@ func TestEachFirstClassBearerProviderHasItsOwnRoute(t *testing.T) {
 	}
 }
 
+// No price, no route (Part 5a's amendment, P5a-R32): a model priced at nothing both ways never
+// reaches a provider that bills, whether a router, a free model or a mistake in the prices; a
+// local server's free model still runs (TestLocalRoutesReachOnlyTheirServer).
+func TestAnUnpricedModelNeverRunsOnAPaidRoute(t *testing.T) {
+	var hits atomic.Int32
+	provider := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hits.Add(1) })
+	g := newGateway(t, provider, nil)
+	tok := g.llmRoute("openrouter", "openrouter", "", "openrouter.ai", "m", provider, "c1")["c1"]
+	if err := g.settings.SetModels("openrouter", []llm.Price{{Model: "openrouter/auto"}, {Model: "meta-llama/llama-4-maverick:free"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.settings.SetModels("anthropic", []llm.Price{{Model: "claude-sonnet-5-5", Input: 3, Output: 15, MaxOutput: 300_000}, {Model: "claude-unpriced"}}); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct{ route, header, model string }{
+		{"openrouter", "Bearer " + tok, "openrouter/auto"},
+		{"openrouter", "Bearer " + tok, "meta-llama/llama-4-maverick:free"},
+		{"anthropic", "", "claude-unpriced"},
+	} {
+		header := g.key()
+		path := "messages"
+		if c.route == "openrouter" {
+			header, path = http.Header{"Authorization": {c.header}}, "chat/completions"
+		}
+		resp, _ := g.post(t, "http://llm.ldot/"+c.route+"/"+path, header, `{"model":"`+c.model+`","messages":[]}`)
+		if resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != ReasonModelUnpriced {
+			t.Errorf("%s on %s: %d %q", c.model, c.route, resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+		}
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("an unpriced model reached the provider %d times", n)
+	}
+}
+
 // screenshot is a 1280x800 PNG padded to 450 KB, the size review 2 measured, in base64.
 func screenshot(t *testing.T) string {
 	t.Helper()
@@ -11576,10 +11657,10 @@ func TestTheFirstClassBearerPresets(t *testing.T) {
 		provider, upstream, tag, op, body, cap string
 	}{
 		{"xai", "https://api.x.ai/v1", "xai", "responses", "responses", "max_output_tokens"},
-		{"mistral", "https://api.mistral.ai/v1", "mis", "chat/completions", "chat", "max_tokens"},
+		{"mistral", "https://api.mistral.ai/v1", "mis", "chat/completions", "mistral", "max_tokens"},
 		{"deepseek", "https://api.deepseek.com", "dsk", "chat/completions", "chat", "max_tokens"},
 		{"groq", "https://api.groq.com/openai/v1", "grq", "chat/completions", "chat", "max_tokens"},
-		{"openrouter", "https://openrouter.ai/api/v1", "orr", "chat/completions", "chat", "max_tokens"},
+		{"openrouter", "https://openrouter.ai/api/v1", "orr", "chat/completions", "openrouter", "max_tokens"},
 	} {
 		b, err := FromRecord(vault.Record{ID: "my-" + c.provider, Kind: vault.KindLLM, Provider: c.provider})
 		if err != nil {
@@ -11652,10 +11733,10 @@ var presets = map[string]preset{
 	"openai":            {"https://api.openai.com/v1", "Authorization", Bearer, "oai", openAIOps},
 	"google":            {"https://generativelanguage.googleapis.com/v1beta", "X-Goog-Api-Key", Raw, "gem", googleOps},
 	"xai":               {"https://api.x.ai/v1", "Authorization", Bearer, "xai", xaiOps},
-	"mistral":           {"https://api.mistral.ai/v1", "Authorization", Bearer, "mis", chatOnlyOps},
+	"mistral":           {"https://api.mistral.ai/v1", "Authorization", Bearer, "mis", mistralOps},
 	"deepseek":          {"https://api.deepseek.com", "Authorization", Bearer, "dsk", chatOnlyOps},
 	"groq":              {"https://api.groq.com/openai/v1", "Authorization", Bearer, "grq", chatOnlyOps},
-	"openrouter":        {"https://openrouter.ai/api/v1", "Authorization", Bearer, "orr", chatOnlyOps},
+	"openrouter":        {"https://openrouter.ai/api/v1", "Authorization", Bearer, "orr", openRouterOps},
 	"openai-compatible": {"", "Authorization", Bearer, "llm", compatibleOps},
 	"azure":             {"", "Api-Key", Raw, "azr", openAIOps},
 }
@@ -11663,11 +11744,18 @@ var presets = map[string]preset{
 // The first-class bearer providers' operations: the one their package calls, with the cap field it
 // sends, and the model listings as openAIStyle writes them. xAI's package speaks only its Responses
 // API; xAI's chat completions report reasoning tokens outside completion_tokens, which the meter
-// would undercharge, so the xAI route has no chat operation.
+// would undercharge, so the xAI route has no chat operation. Mistral's and OpenRouter's chat bodies
+// name the image rule keyd holds them by (llm.BodyMistral, llm.BodyOpenRouter).
 var (
-	chatOnlyOps = withListings(Op{Method: "POST", Path: regexp.MustCompile(`^chat/completions$`), Body: "chat", Cap: "max_tokens"})
-	xaiOps      = withListings(Op{Method: "POST", Path: regexp.MustCompile(`^responses$`), Body: "responses", Cap: "max_output_tokens"})
+	chatOnlyOps   = withListings(chatOp("chat"))
+	mistralOps    = withListings(chatOp("mistral"))
+	openRouterOps = withListings(chatOp("openrouter"))
+	xaiOps        = withListings(Op{Method: "POST", Path: regexp.MustCompile(`^responses$`), Body: "responses", Cap: "max_output_tokens"})
 )
+
+func chatOp(body string) Op {
+	return Op{Method: "POST", Path: regexp.MustCompile(`^chat/completions$`), Body: body, Cap: "max_tokens"}
+}
 
 func withListings(op Op) []Op {
 	return append([]Op{op}, slices.DeleteFunc(openAIStyle(""), func(o Op) bool { return o.Method != "GET" })...)
@@ -11946,6 +12034,7 @@ const (
 	ReasonBadJSON          = "bad-json"
 	ReasonModelMissing     = "model-missing"
 	ReasonModelNotAllowed  = "model-not-allowed"
+	ReasonModelUnpriced    = "model-unpriced"
 	ReasonChoiceCount      = "choice-count"
 )
 
@@ -12025,6 +12114,12 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 	if model != "" {
 		if price, ok = c.deps.Settings.Price(name, model); !ok {
 			c.deny(w, line, http.StatusForbidden, ReasonModelNotAllowed)
+			return
+		}
+		// No price, no route (Part 5a's amendment, P5a-R32): a model priced at nothing both ways
+		// would spend outside the budget wherever the provider bills; only a local server's is free.
+		if !b.Local && price.Input == 0 && price.Output == 0 {
+			c.deny(w, line, http.StatusForbidden, ReasonModelUnpriced)
 			return
 		}
 	}
@@ -12274,12 +12369,13 @@ func (p Pinned) DialContext(ctx context.Context, network, address string) (net.C
 - [ ] **Step 5: Run the tests**
 
 Run: `go test -race ./internal/egress/ ./internal/keys/`
-Expected: `ok` for both (59 top-level tests in `egress`; `keys` gains `TestTheFirstClassBearerPresets`).
+Expected: `ok` for both (60 top-level tests in `egress`; `keys` gains `TestTheFirstClassBearerPresets`).
 Without the joined `/`, `TestEachFirstClassBearerProviderHasItsOwnRoute/deepseek` fails with 502
 `upstream-error`: the upstream URL's path is the relative `chat/completions`, which Go's HTTP/2
 client refuses (an HTTP/1 server answers it 400). Without the meter's `x_groq.usage`, its `groq`
 case is charged the hold (`usage` `estimated`); without the `models` check, every case relays the
-list to the provider. Against the gateway of the first draft, the parallel tests spent $90 of
+list to the provider. Without the `model-unpriced` check, `TestAnUnpricedModelNeverRunsOnAPaidRoute`
+fails for each model, and the provider is reached. Against the gateway of the first draft, the parallel tests spent $90 of
 a $5 task and $22.50 of a $10 day, and the Stop test's provider received the real key. Against the
 gateway of review 1's revision, each shape of `TestNoRequestShapeOvershootsTheBudget` spent past both
 limits, the screenshots were refused at once with $0.50 left, a refusal published no event,
@@ -14554,10 +14650,10 @@ SDK's `baseURL` becomes `http://llm.ldot/<route>`:
 | `openai` preset | `https://api.openai.com/v1` | `Authorization: Bearer` | `POST chat/completions` (`max_completion_tokens`), `completions` (`max_tokens`), `responses` (`max_output_tokens`), `embeddings`; `GET models`, `models/{id}` |
 | `google` preset | `https://generativelanguage.googleapis.com/v1beta` | `X-Goog-Api-Key` | `POST models/{model}:generateContent`, `:streamGenerateContent` (`generationConfig.maxOutputTokens`), `:countTokens` (free), `:embedContent`, `:batchEmbedContents`; `GET models`, `models/{id}` |
 | `xai` preset (Part 5a) | `https://api.x.ai/v1` | `Authorization: Bearer` | `POST responses` (`max_output_tokens`); `GET models`, `models/{id}` |
-| `mistral` preset (Part 5a) | `https://api.mistral.ai/v1` | `Authorization: Bearer` | `POST chat/completions` (`max_tokens`); `GET models`, `models/{id}` |
-| `deepseek` preset (Part 5a) | `https://api.deepseek.com` | `Authorization: Bearer` | as `mistral` |
-| `groq` preset (Part 5a) | `https://api.groq.com/openai/v1` | `Authorization: Bearer` | as `mistral`; usage read from `x_groq.usage` |
-| `openrouter` preset (Part 5a) | `https://openrouter.ai/api/v1` | `Authorization: Bearer` | as `mistral`; a `models` list is refused (`choice-count`) |
+| `mistral` preset (Part 5a) | `https://api.mistral.ai/v1` | `Authorization: Bearer` | `POST chat/completions` (`max_tokens`; images held by Mistral's rule); `GET models`, `models/{id}` |
+| `deepseek` preset (Part 5a) | `https://api.deepseek.com` | `Authorization: Bearer` | `POST chat/completions` (`max_tokens`; images by OpenAI's rule); `GET models`, `models/{id}` |
+| `groq` preset (Part 5a) | `https://api.groq.com/openai/v1` | `Authorization: Bearer` | as `deepseek`; usage read from `x_groq.usage` |
+| `openrouter` preset (Part 5a) | `https://openrouter.ai/api/v1` | `Authorization: Bearer` | as `deepseek`, but images held by the largest rule keyd knows; a `models` list is refused (`choice-count`) |
 | `openai-compatible` | the secret's `baseURL` (https) | `Authorization: Bearer` | as `openai`, but chat completions get `max_tokens` |
 | `azure` | the secret's `baseURL` (https) | `Api-Key` | as `openai` |
 | `lmstudio` (built in, no secret) | `http://127.0.0.1:1234/v1` | none (dropped) | as `openai-compatible` |
@@ -14576,7 +14672,8 @@ output price. The cap is the smallest the body names in any provider's cap field
 field (the route table's operations name it) and removes every other cap, so the brain's own cap
 (the AI SDK's `maxOutputTokens`) is kept when it is the smaller. A body asking for more than one
 answer (`n`, `best_of`, `candidateCount`, or a `prompt` list on `completions`), or a `models`
-list to fall back on, gets 400 `choice-count`. A request that does not fit beside
+list to fall back on, gets 400 `choice-count`. A model priced at $0 both ways runs only on a local
+route; anywhere else it gets 403 `model-unpriced` (Part 5a's amendment, P5a-R32). A request that does not fit beside
 the running ones waits for them; one whose input and a single output token do not fit in what is
 left gets 402; requests together never spend past a limit, but for what a provider bills beyond
 keyd's rules (P4a-R15). Screenshots should be PNG or JPEG, whose sizes keyd reads; an image in

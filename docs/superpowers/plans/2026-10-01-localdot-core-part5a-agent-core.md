@@ -43,11 +43,11 @@ sharp 0.35.5, Go 1.27.1 for keyd). New to the product, already in the lockfile t
 `@ai-sdk/google` 4.0.86, `@ai-sdk/openai-compatible` 3.0.60 (all Apache-2.0), `undici` 8.11.2 (MIT)
 in the brain. New to the lockfile, the first-class providers' official packages (spec "First-class
 providers", P5a-R4), each pinned to the release built on the lockfile's `@ai-sdk/provider` 4.0.20
-and `@ai-sdk/provider-utils` 5.0.52, so `pnpm install` adds these five and nothing else:
-`@ai-sdk/xai` 5.0.13, `@ai-sdk/mistral` 4.0.55, `@ai-sdk/deepseek` 3.0.57, `@ai-sdk/groq` 4.0.53
-(Apache-2.0, Vercel's AI SDK repository) and `@openrouter/ai-sdk-provider` 3.1.0 (Apache-2.0,
-OpenRouter's; no dependencies, `ai` ^7 and `zod` as peers). Checked against the npm registry on
-2026-10-02. The brain
+and `@ai-sdk/provider-utils` 5.0.52, so `pnpm install` adds these six and nothing else:
+`@ai-sdk/azure` 4.0.86, `@ai-sdk/xai` 5.0.13, `@ai-sdk/mistral` 4.0.55, `@ai-sdk/deepseek` 3.0.57,
+`@ai-sdk/groq` 4.0.53 (Apache-2.0, Vercel's AI SDK repository) and `@openrouter/ai-sdk-provider`
+3.1.0 (Apache-2.0, OpenRouter's; no dependencies, `ai` ^7 and `zod` as peers). Checked against the
+npm registry on 2026-10-02. The brain
 image is `node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2`
 (the multi-arch index digest, read from Docker Hub on 2026-10-02).
 
@@ -1646,6 +1646,25 @@ export const MODELS_DEV_FIXTURE = {
         modalities: { input: ["text", "image"], output: ["text"] },
         cost: { input: 2, output: 10 },
         limit: { context: 1_000_000, output: 64_000 },
+      },
+      // A router and a free model: both list $0, neither may run on keyd's budget unpriced.
+      "openrouter/auto": {
+        id: "openrouter/auto",
+        name: "Auto Router",
+        attachment: true,
+        tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        cost: { input: 0, output: 0 },
+        limit: { context: 2_000_000, output: 64_000 },
+      },
+      "meta-llama/llama-4-maverick:free": {
+        id: "meta-llama/llama-4-maverick:free",
+        name: "Meta: Llama 4 Maverick (free)",
+        attachment: true,
+        tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        cost: { input: 0, output: 0 },
+        limit: { context: 128_000, output: 4_096 },
       },
     },
   },
@@ -4562,10 +4581,13 @@ git commit -m "feat(gateway): the freshness check — a stale target cancels the
   - A failed refresh keeps the cache, and only one refresh runs at a time.
   - The host fetches public data with no key, so this is not a cell's egress.
 - **Settings.** `<home>/agent.json` holds the user's pick per role (`main`, `fast`, `local`: a
-  provider, a model and, for API-key providers, the keyd key) and an optional task budget.
+  provider, a model, for API-key providers the keyd key, and the user's price for a model the
+  catalog does not price) and an optional task budget.
 - **Bindings.** A pick is resolved against the registry, the catalog and keyd's records:
   - a key of another provider, or one bound to another base URL, is refused;
   - a local model missing from the catalog is allowed with defaults;
+  - on a paid route, a model priced at $0 both ways (the catalog's, or the Other provider's, which
+    the catalog never lists) needs the user's price, and OpenRouter's routers are refused (P5a-R32);
   - a model without tool calling cannot be `main`.
 
   The result becomes the `ModelBinding` the brain boots with. Its output cap is 16,000 tokens per
@@ -4586,7 +4608,7 @@ git commit -m "feat(gateway): the freshness check — a stale target cancels the
     `skillFiles(skill)`, `skillDesktopPath(name)` (`~/.skills/<name>`);
   - `CatalogStore { get(); refresh() }`;
   - `RoleChoice`, `AgentSettings`, `SettingsStore { get(); put(settings) }`;
-  - `Role`, `BindingError`, `ResolvedRole`, `OUTPUT_CAP_TOKENS`,
+  - `Role`, `BindingError`, `ResolvedRole`, `OUTPUT_CAP_TOKENS`, `unpriced(model)`,
     `resolveRole(role, choice, catalog, keys)`, `bindingOf(resolved, surrogates)`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -4770,7 +4792,7 @@ describe("CatalogStore", () => {
 `apps/daemon/src/agent/bindings.test.ts`:
 ```ts
 import type { KeydRecord } from "@localdot/protocol";
-import { normalizeCatalog } from "@localdot/providers";
+import { keydRouteModel, normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { describe, expect, it } from "vitest";
 import { BindingError, bindingOf, resolveRole } from "./bindings.ts";
@@ -4912,6 +4934,62 @@ describe("resolveRole", () => {
     expect(() =>
       resolveRole("main", { provider: "amazon-bedrock", model: "x" }, catalog, keys),
     ).toThrow(/M8/);
+  });
+
+  it("runs no unpriced model on a paid route, and no OpenRouter router (P5a-R32)", () => {
+    const more: KeydRecord[] = [
+      ...keys,
+      { id: "openrouter", kind: "llm", provider: "openrouter", createdAt: at, updatedAt: at },
+      {
+        id: "gateway",
+        kind: "llm",
+        provider: "openai-compatible",
+        baseURL: "https://llm.example.test/v1",
+        createdAt: at,
+        updatedAt: at,
+      },
+    ];
+    const free = "meta-llama/llama-4-maverick:free";
+    const price = { inputUSDPerMTok: 0.2, outputUSDPerMTok: 0.6 };
+    expect(() =>
+      resolveRole(
+        "main",
+        { provider: "openrouter", model: "openrouter/auto", key: "openrouter", price },
+        catalog,
+        more,
+      ),
+    ).toThrow(/picks a model at that model's price/);
+    expect(() =>
+      resolveRole("main", { provider: "openrouter", model: free, key: "openrouter" }, catalog, more),
+    ).toThrow(/no price in the catalog/);
+    const priced = resolveRole(
+      "main",
+      { provider: "openrouter", model: free, key: "openrouter", price },
+      catalog,
+      more,
+    );
+    expect(keydRouteModel(priced.model)).toMatchObject({
+      id: free,
+      inputUSDPerMTok: 0.2,
+      outputUSDPerMTok: 0.6,
+    });
+    // The Other provider's models are never in the catalog: the user names their price.
+    expect(() =>
+      resolveRole("main", { provider: "openai-compatible", model: "glm-5", key: "gateway" }, catalog, more),
+    ).toThrow(/no price in the catalog/);
+    expect(
+      resolveRole(
+        "main",
+        { provider: "openai-compatible", model: "glm-5", key: "gateway", price },
+        catalog,
+        more,
+      ).model.outputUSDPerMTok,
+    ).toBe(0.6);
+    // A local server's model is free and runs on keyd's local route, where nothing is billed.
+    expect(
+      resolveRole("local", { provider: "ollama", model: "qwen3.8:27b" }, catalog, []).model
+        .inputUSDPerMTok,
+    ).toBe(0);
   });
 });
 ```
@@ -5262,6 +5340,14 @@ export const RoleChoice = z.strictObject({
   provider: z.string().min(1).max(64),
   model: z.string().min(1).max(128),
   key: z.string().regex(SECRET_ID_PATTERN).optional(),
+  // The user's own list price for a model the catalog does not price (the Other provider's, or a
+  // catalog entry at $0): keyd runs no unpriced model on a paid route (P5a-R32).
+  price: z
+    .strictObject({
+      inputUSDPerMTok: z.number().positive().max(10_000),
+      outputUSDPerMTok: z.number().positive().max(10_000),
+    })
+    .optional(),
 });
 export type RoleChoice = z.infer<typeof RoleChoice>;
 
@@ -5337,6 +5423,14 @@ export class BindingError extends Error {
 // (P4a-R15), and a computer-use turn is short; reasoning models get room to think.
 export const OUTPUT_CAP_TOKENS = 16_000;
 
+// OpenRouter's routers (openrouter/auto and its kin): their price is never what the call costs.
+const ROUTER_MODEL = /^openrouter\//;
+
+// keyd's rule (P5a-R32, Part 4a's gateway): a model priced at nothing both ways is unpriced.
+export function unpriced(m: CatalogModel): boolean {
+  return m.inputUSDPerMTok === 0 && m.outputUSDPerMTok === 0;
+}
+
 export interface ResolvedRole {
   role: Role;
   providerId: string;
@@ -5386,7 +5480,7 @@ export function resolveRole(
   }
   const route = routeFor(provider, keyId);
   if (!route) throw new BindingError(role, "no route");
-  const model =
+  let model =
     (catalog && findModel(catalog, provider.id, choice.model)) ??
     (provider.local || provider.id === "openai-compatible" ? localModel(choice.model) : undefined);
   if (!model)
@@ -5394,6 +5488,30 @@ export function resolveRole(
       role,
       `${choice.model} is not in the ${provider.name} catalog; refresh the catalog`,
     );
+  // No price, no route (P5a-R32): keyd's budget is the runaway guard, and a paid route with an
+  // unpriced model would spend nothing against it. OpenRouter's routers bill the model they pick,
+  // never their own listed price, so they are refused by name.
+  if (!provider.local) {
+    if (provider.id === "openrouter" && ROUTER_MODEL.test(model.id)) {
+      throw new BindingError(
+        role,
+        `${model.id} picks a model at that model's price, which keyd cannot hold; pick the model itself`,
+      );
+    }
+    if (unpriced(model)) {
+      if (!choice.price) {
+        throw new BindingError(
+          role,
+          `${model.name} has no price in the catalog, and keyd runs no unpriced model on a paid route: give its price or pick another model`,
+        );
+      }
+      model = {
+        ...model,
+        inputUSDPerMTok: choice.price.inputUSDPerMTok,
+        outputUSDPerMTok: choice.price.outputUSDPerMTok,
+      };
+    }
+  }
   const capability = capabilityOf(provider, model);
   if (!usableAs(role, capability)) throw new BindingError(role, `${model.name} cannot call tools`);
   return {
@@ -5456,7 +5574,7 @@ or convert a file; open the result in the GUI afterwards if the user should see 
 
 Run: `pnpm exec vitest run apps/daemon/src/agent && pnpm --filter @localdot/daemon typecheck`
 Expected: PASS. `memory.test.ts` has 4 tests, `skills.test.ts` 3, `catalog-store.test.ts` 2 and
-`bindings.test.ts` 4.
+`bindings.test.ts` 5.
 
 - [ ] **Step 4: Commit**
 
@@ -8244,11 +8362,14 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
 - **`languageModel`.** One AI SDK client per `ClientKind`, with keyd's base URL
   (`http://llm.ldot/<route>`) and the surrogate in the provider's own header. Anthropic uses
   `x-api-key`, Azure `api-key`, the rest a bearer token, and local routes none. The first-class
-  providers use their official packages (P5a-R4): `@ai-sdk/xai` (xAI's Responses API, the
+  providers use their official packages (P5a-R4): `@ai-sdk/azure` (its Responses API, through the
+  route keyd binds to the resource's `/openai/v1`), `@ai-sdk/xai` (xAI's Responses API, the
   package's only language model), `@ai-sdk/mistral`, `@ai-sdk/deepseek`, `@ai-sdk/groq` and
   `@openrouter/ai-sdk-provider` (its chat model, asked for usage in the stream so keyd can meter
   it). Each sends exactly the operation and the output-cap field its keyd preset lists (P5a-R31),
   and a fixture per provider pins that, the bearer header, and the usage the SDK reads.
+  OpenAI's, Azure's and xAI's Responses models send `store: false`, and a reasoning model's
+  thinking goes to the next turn as encrypted content (P5a-R33).
 - **`toolSet`.** The ten v1 tools, none with an `execute`:
   - Anthropic 5.x gets `computerToolset_20260801`; older Claude models get `computer_20250124` at
     1280×800;
@@ -8298,6 +8419,7 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.69",
+    "@ai-sdk/azure": "4.0.86",
     "@ai-sdk/deepseek": "3.0.57",
     "@ai-sdk/google": "4.0.86",
     "@ai-sdk/groq": "4.0.53",
@@ -8325,9 +8447,11 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
 ```
 In `pnpm-workspace.yaml`, add `  - "cells/brain"` after `  - "cells/desktop/desktopd"`. In
 `vitest.config.ts`, add `"cells/brain/src/**/*.test.ts",` to `include` after the desktopd line.
-Run `pnpm install`. The lockfile gains exactly the five first-class packages above, from the npm
-registry; each resolves to the lockfile's `@ai-sdk/provider` 4.0.20 and `@ai-sdk/provider-utils`
-5.0.52, and `@openrouter/ai-sdk-provider` has no dependencies of its own. Check with
+Run `pnpm install`. The lockfile gains exactly the six first-class packages above (`@ai-sdk/azure`
+and the five bearer providers'), from the npm registry; each resolves to the lockfile's
+`@ai-sdk/provider` 4.0.20 and `@ai-sdk/provider-utils` 5.0.52 (`@ai-sdk/azure` 4.0.86 also to the
+pinned `@ai-sdk/openai` 4.0.82 and `@ai-sdk/deepseek` 3.0.57), and `@openrouter/ai-sdk-provider` has
+no dependencies of its own. Check with
 `pnpm why @ai-sdk/provider-utils`: one version, 5.0.52.
 
 - [ ] **Step 2: Write the test helpers and the failing tests**
@@ -8604,6 +8728,67 @@ export const FIRST_CLASS_STREAMS: readonly ProviderStream[] = [
     sse: chat({ usage: { ...usage, cost: 0.0042 } }),
   },
 ];
+
+// A Responses API answer from a reasoning model, as OpenAI, Azure and xAI stream it with
+// store: false (P5a-R33): the reasoning item comes back with its encrypted content, which the next
+// turn sends back in place of a reference to a stored response.
+const reasoningItem = {
+  type: "reasoning",
+  id: "rs_1",
+  summary: [],
+  status: "completed",
+  encrypted_content: "encrypted-reasoning-1",
+};
+const answer = {
+  ...message("completed", ""),
+  content: [{ type: "output_text", text: "ok", annotations: [], logprobs: [] }],
+};
+export const ENCRYPTED_REASONING = reasoningItem.encrypted_content;
+export const RESPONSES_WITH_REASONING = events(
+  [
+    { type: "response.created", response: { ...response, status: "in_progress" }, sequence_number: 0 },
+    {
+      type: "response.output_item.added",
+      output_index: 0,
+      item: { ...reasoningItem, encrypted_content: null },
+      sequence_number: 1,
+    },
+    { type: "response.output_item.done", output_index: 0, item: reasoningItem, sequence_number: 2 },
+    {
+      type: "response.output_item.added",
+      output_index: 1,
+      item: message("in_progress", ""),
+      sequence_number: 3,
+    },
+    {
+      type: "response.output_text.delta",
+      item_id: "msg_1",
+      output_index: 1,
+      content_index: 0,
+      delta: "ok",
+      logprobs: [],
+      sequence_number: 4,
+    },
+    { type: "response.output_item.done", output_index: 1, item: answer, sequence_number: 5 },
+    {
+      type: "response.completed",
+      response: {
+        ...response,
+        status: "completed",
+        incomplete_details: null,
+        output: [reasoningItem, answer],
+        usage: {
+          input_tokens: 1200,
+          output_tokens: 80,
+          input_tokens_details: { cached_tokens: 0 },
+          output_tokens_details: { reasoning_tokens: 30 },
+        },
+      },
+      sequence_number: 6,
+    },
+  ],
+  true,
+);
 ```
 
 `proxy-fetch.test.ts` stands in for keyd's listener with a real HTTP server. The real AI SDK
@@ -8614,11 +8799,16 @@ first-class bearer provider's official package with its fixture stream.
 ```ts
 import { createServer, type IncomingMessage } from "node:http";
 import type { AddressInfo } from "node:net";
-import { APICallError, streamText } from "ai";
+import { APICallError, type ModelMessage, streamText } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { languageModel } from "./models.ts";
 import { proxyFetch } from "./proxy-fetch.ts";
-import { FIRST_CLASS_STREAMS, STREAM_USAGE } from "./testing/provider-streams.ts";
+import {
+  ENCRYPTED_REASONING,
+  FIRST_CLASS_STREAMS,
+  RESPONSES_WITH_REASONING,
+  STREAM_USAGE,
+} from "./testing/provider-streams.ts";
 import { binding, PROXY_TOKEN, SURROGATE } from "./testing/scripted.ts";
 
 const SSE = [
@@ -8753,6 +8943,7 @@ async function recordingListener(sse: string) {
     proxyAuth?: string;
     authorization?: string;
     apiKey?: string;
+    azureKey?: string;
     body: Record<string, unknown>;
   }[] = [];
   const server = createServer((req, res) => {
@@ -8767,6 +8958,7 @@ async function recordingListener(sse: string) {
         proxyAuth: req.headers["proxy-authorization"],
         authorization: req.headers.authorization,
         apiKey: req.headers["x-api-key"] as string | undefined,
+        azureKey: req.headers["api-key"] as string | undefined,
         body: JSON.parse(text) as Record<string, unknown>,
       });
       res.writeHead(200, { "content-type": "text/event-stream" });
@@ -8807,8 +8999,63 @@ describe("the first-class bearer providers' official packages", () => {
       // model list, which keyd refuses (P5a-R31).
       expect(r?.body.stream_options).toEqual(s.asksForUsage ? { include_usage: true } : undefined);
       expect(r?.body).not.toHaveProperty("models");
+      // xAI's Responses API keeps nothing on xAI's side (P5a-R33).
+      if (s.client === "xai") expect(r?.body.store).toBe(false);
     });
   }
+});
+
+describe("the Responses APIs keep nothing on the provider (P5a-R33)", () => {
+  const cases = [
+    { client: "openai", auth: "authorization" },
+    { client: "azure", auth: "api-key" },
+    { client: "xai", auth: "authorization" },
+  ] as const;
+  for (const { client, auth } of cases) {
+    it(`${client}: store is false, and a reasoning model's thinking goes to the next turn encrypted`, async () => {
+      const listener = await recordingListener(RESPONSES_WITH_REASONING);
+      const model = languageModel(
+        binding({ client, route: client, model: "m", reasoning: true, computer: "generic" }),
+        proxyFetch(listener.url, PROXY_TOKEN),
+      );
+      const first = streamText({ model, prompt: "hi", maxRetries: 0 });
+      expect(await first.text).toBe("ok");
+      const messages: ModelMessage[] = [
+        { role: "user", content: "hi" },
+        ...(await first.response).messages,
+        { role: "user", content: "again" },
+      ];
+      expect(await streamText({ model, messages, maxRetries: 0 }).text).toBe("ok");
+      const [a, b] = listener.seen;
+      expect(a?.line).toBe(`POST http://llm.ldot/${client}/responses`);
+      if (auth === "api-key") {
+        // Azure's own header, and no Authorization at all.
+        expect([a?.azureKey, a?.authorization]).toEqual([SURROGATE, undefined]);
+      } else {
+        expect([a?.authorization, a?.azureKey]).toEqual([`Bearer ${SURROGATE}`, undefined]);
+      }
+      for (const body of [a?.body, b?.body]) {
+        expect(body?.store).toBe(false);
+        expect(body?.include).toEqual(["reasoning.encrypted_content"]);
+      }
+      const input = b?.body.input as { type?: string; encrypted_content?: string }[];
+      expect(input.filter((i) => i.type === "reasoning")).toMatchObject([
+        { encrypted_content: ENCRYPTED_REASONING },
+      ]);
+      expect(input.some((i) => i.type === "item_reference")).toBe(false);
+    });
+  }
+
+  it("asks a model that does not reason for no encrypted reasoning", async () => {
+    const listener = await recordingListener(RESPONSES_WITH_REASONING);
+    const model = languageModel(
+      binding({ client: "openai", route: "openai", model: "m", reasoning: false, computer: "generic" }),
+      proxyFetch(listener.url, PROXY_TOKEN),
+    );
+    await streamText({ model, prompt: "hi", maxRetries: 0 }).text;
+    expect(listener.seen[0]?.body.store).toBe(false);
+    expect(listener.seen[0]?.body).not.toHaveProperty("include");
+  });
 });
 ```
 
@@ -9035,6 +9282,7 @@ export function proxyFetch(proxyUrl: string, proxyToken: string): typeof fetch {
 `cells/brain/src/models.ts`:
 ```ts
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createAzure } from "@ai-sdk/azure";
 import { createDeepSeek } from "@ai-sdk/deepseek";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { createGroq } from "@ai-sdk/groq";
@@ -9045,7 +9293,27 @@ import { createXai } from "@ai-sdk/xai";
 import type { ModelBinding } from "@localdot/protocol";
 import { gatewayBaseURL } from "@localdot/providers";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
-import type { LanguageModel } from "ai";
+import { defaultSettingsMiddleware, type LanguageModel, wrapLanguageModel } from "ai";
+
+// Nothing the brain sends is kept on the provider (P5a-R33): the Responses APIs of OpenAI, Azure
+// and xAI store every request by default, screenshots of the user's desktop included. With
+// store: false, a reasoning model's thinking travels between turns as encrypted content instead
+// of an item_reference to the stored response: asked for here for OpenAI and Azure, and by the xAI
+// package itself whenever store is false.
+function stateless(
+  model: Parameters<typeof wrapLanguageModel>[0]["model"],
+  options: "openai" | "azure" | "xai",
+  reasoning: boolean,
+): LanguageModel {
+  const store =
+    options === "xai" || !reasoning
+      ? { store: false }
+      : { store: false, include: ["reasoning.encrypted_content"] };
+  return wrapLanguageModel({
+    model,
+    middleware: defaultSettingsMiddleware({ settings: { providerOptions: { [options]: store } } }),
+  });
+}
 
 // Every model is reached at keyd's gateway with keyd's stand-in for the key in the provider's own
 // auth header (Part 4a's route table); keyd swaps in the real key outside the cell. The first-class
@@ -9059,12 +9327,16 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
     case "anthropic":
       return createAnthropic({ baseURL, apiKey, fetch })(b.model);
     case "openai":
-      return createOpenAI({ baseURL, apiKey, fetch }).responses(b.model);
+      return stateless(
+        createOpenAI({ baseURL, apiKey, fetch }).responses(b.model),
+        "openai",
+        b.reasoning,
+      );
     case "google":
       return createGoogleGenerativeAI({ baseURL, apiKey, fetch })(b.model);
     case "xai":
       // The package's language model is xAI's Responses API, which reports usage unasked.
-      return createXai({ baseURL, apiKey, fetch })(b.model);
+      return stateless(createXai({ baseURL, apiKey, fetch })(b.model), "xai", b.reasoning);
     case "mistral":
       return createMistral({ baseURL, apiKey, fetch })(b.model);
     case "deepseek":
@@ -9076,14 +9348,14 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
       // always, never the completions API the package picks for one instruct model.
       return createOpenRouter({ baseURL, apiKey, fetch, compatibility: "strict" }).chat(b.model);
     case "azure":
-      // Azure's own header carries the stand-in; no Authorization header at all.
-      return createOpenAICompatible({
-        name: b.route,
-        baseURL,
-        headers: key ? { "api-key": key } : {},
-        fetch,
-        includeUsage: true,
-      })(b.model);
+      // Azure's own api-key header carries the stand-in. keyd's route ends in the resource's
+      // /openai/v1, so the package sends POST <route>/responses with no api-version; the model is
+      // the deployment's name.
+      return stateless(
+        createAzure({ baseURL, apiKey, fetch }).responses(b.model),
+        "azure",
+        b.reasoning,
+      );
     case "openai-compatible":
     case "lmstudio":
     case "ollama":
@@ -10999,7 +11271,7 @@ one) of every package it bundles into the bundle's header, and stops when a pack
 
 | Package | License |
 |---|---|
-| ai, @ai-sdk/provider, @ai-sdk/provider-utils, @ai-sdk/gateway, @ai-sdk/anthropic, @ai-sdk/openai, @ai-sdk/google, @ai-sdk/openai-compatible, @ai-sdk/xai, @ai-sdk/mistral, @ai-sdk/deepseek, @ai-sdk/groq | Apache-2.0 (Vercel's AI SDK; @ai-sdk/provider-utils ships no LICENSE file, so the bundle carries `ai`'s, from the same repository) |
+| ai, @ai-sdk/provider, @ai-sdk/provider-utils, @ai-sdk/gateway, @ai-sdk/anthropic, @ai-sdk/openai, @ai-sdk/google, @ai-sdk/openai-compatible, @ai-sdk/azure, @ai-sdk/xai, @ai-sdk/mistral, @ai-sdk/deepseek, @ai-sdk/groq | Apache-2.0 (Vercel's AI SDK; @ai-sdk/provider-utils ships no LICENSE file, so the bundle carries `ai`'s, from the same repository) |
 | @openrouter/ai-sdk-provider | Apache-2.0 (OpenRouter's; its own build carries copies of AI SDK utilities, Apache-2.0 too) |
 | undici | MIT |
 | zod | MIT |
@@ -11023,10 +11295,10 @@ LOCALDOT_TOOL_URL=http://127.0.0.1:9 LOCALDOT_TOOL_TOKEN=$(printf 'a%.0s' $(seq 
 node cells/brain/dist/brain.mjs; echo "exit $?"
 ```
 Expected:
-- the build prints `brain: 18 bundled packages: …` (zod, ai, eleven `@ai-sdk/*` packages: provider,
-  provider-utils, gateway, anthropic, openai, google, openai-compatible, xai, mistral, deepseek and
-  groq; @openrouter/ai-sdk-provider, eventsource-parser, @workflow/serde, @vercel/oidc and undici),
-  every one with a license, and the bundle is about 4.2 MB;
+- the build prints `brain: 19 bundled packages: …` (zod, ai, twelve `@ai-sdk/*` packages: provider,
+  provider-utils, gateway, anthropic, openai, azure, google, openai-compatible, xai, mistral,
+  deepseek and groq; @openrouter/ai-sdk-provider, eventsource-parser, @workflow/serde, @vercel/oidc
+  and undici), every one with a license, and the bundle is about 4.6 MB;
 - the first run fails to reach the tool API (`ToolApiError: tool API unreachable: fetch failed`)
   and exits 1;
 - the second says `brain: LOCALDOT_TOOL_URL and LOCALDOT_TOOL_TOKEN are required` and exits 2.
@@ -13213,7 +13485,7 @@ and keyd's carry `agent: "keyd"`.
 | `GET /api/agent/providers` | — | 200 `{ catalog: { fetchedAt, skipped } \| null, keyLayer: "online" \| "offline", keys: [{ id, provider, baseURL? }], providers: [{ id, name, keyd, local, baseURL?, availableIn?: "m8", models: [{ id, name, contextTokens, inputUSDPerMTok, outputUSDPerMTok, tier: "native" \| "vision-tools" \| "text-only" \| "no-tools", computer, coords, note }] }] }` |
 | `POST /api/agent/catalog/refresh` | — | 200 `{ fetchedAt, providers, skipped }` \| 502 text |
 | `GET /api/agent/settings` | — | 200 `AgentSettings` |
-| `PUT /api/agent/settings` | `AgentSettings`: `{ main?, fast?, local?: { provider, model, key? }, taskBudgetUSD? }` (strict) | 200 the saved settings \| 400 text (the role's reason, e.g. "main model: Anthropic needs a key: add one under Keys") \| 503 key layer offline |
+| `PUT /api/agent/settings` | `AgentSettings`: `{ main?, fast?, local?: { provider, model, key?, price?: { inputUSDPerMTok, outputUSDPerMTok } }, taskBudgetUSD? }` (strict; `price` only for a model the catalog prices at $0 or does not list, P5a-R32) | 200 the saved settings \| 400 text (the role's reason, e.g. "main model: Anthropic needs a key: add one under Keys") \| 503 key layer offline |
 | `POST /api/cells/:id/agent` | `{ task }` (1–8000 characters) | 202 `{ sessionId }` \| 400 (no main model, a binding problem) \| 409 (not ready, paused, a task running) \| 503 |
 | `GET /api/agent/sessions/:id` | — | 200 `{ sessionId, cellId, status: "starting" \| "running" \| "waiting_user" \| "paused" \| "idle" \| "ended", toolCalls, brainCellId?, pendingAsk?, pendingTakeover? }` \| 404 when not live |
 | `POST /api/agent/sessions/:id/messages` | `{ text, kind: "steer" \| "followup" }` | 202 \| 400 \| 404. A message to an idle task starts its next brain |
@@ -13251,7 +13523,9 @@ and keyd's carry `agent: "keyd"`.
 
 **What Part 5b does with them**
 - The picker: providers, models with their `note`, keys and the refresh, saving settings. The
-  local role is optional.
+  local role is optional. A model on a paid route listed at $0 both ways, or an Other model, needs
+  the user's price (`RoleChoice.price`), and OpenRouter's `openrouter/…` routers are not offered
+  (P5a-R32); the settings route's 400 says why.
 - The chat: a task when nothing runs, a steer or a follow-up while something does.
 - The plan rail and step timeline, from `plan.*`, `step.*`, `action.*` and `tool.*`.
 - The terminal panel, from `shell` steps' `tool.output`.
@@ -13274,7 +13548,7 @@ and keyd's carry `agent: "keyd"`.
 - Changing the model of a running task. The settings apply to the next brain start (a follow-up,
   a restart).
 
-## Decisions taken by this plan (P5a-R1 to P5a-R31)
+## Decisions taken by this plan (P5a-R1 to P5a-R33)
 
 - **P5a-R1 The loop is ours, one model call per turn, and the SDK executes nothing.** Every v1 tool
   is declared without `execute`; each call goes to the daemon's tool API in order.
@@ -13298,24 +13572,27 @@ and keyd's carry `agent: "keyd"`.
     access control. Refusing `Origin` stops a web page in the user's browser posting to it.
   - Cost if wrong: none found.
 - **P5a-R4 The eight non-first-class providers use the OpenAI-compatible client (narrowed by the
-  user's ruling, 2026-10-02).** The first-class providers use their official AI SDK packages:
-  Anthropic, OpenAI (Responses), Google, and now xAI (`@ai-sdk/xai` 5.0.13), Mistral
-  (`@ai-sdk/mistral` 4.0.55), DeepSeek (`@ai-sdk/deepseek` 3.0.57), Groq (`@ai-sdk/groq` 4.0.53) and
-  OpenRouter (`@openrouter/ai-sdk-provider` 3.1.0), each with its own keyd kind (P5a-R31). Together,
-  Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot and Alibaba reach their documented
-  OpenAI-compatible endpoints through `@ai-sdk/openai-compatible` and keyd's `openai-compatible`
-  kind, with the base URL the registry names. Azure keeps its own keyd kind and `api-key` header
-  through the OpenAI-compatible client, as before.
+  user's ruling, 2026-10-02).** The first-class providers use their official AI SDK packages, each
+  with its own keyd kind: Anthropic, OpenAI (Responses), Google, Azure OpenAI (`@ai-sdk/azure`
+  4.0.86, Apache-2.0, its Responses API with the `api-key` header, the controller's ruling of the
+  same day), xAI (`@ai-sdk/xai` 5.0.13), Mistral (`@ai-sdk/mistral` 4.0.55), DeepSeek
+  (`@ai-sdk/deepseek` 3.0.57), Groq (`@ai-sdk/groq` 4.0.53) and OpenRouter
+  (`@openrouter/ai-sdk-provider` 3.1.0) (P5a-R31). Together, Fireworks, Cerebras, Perplexity,
+  Cohere, DeepInfra, Moonshot and Alibaba reach their documented OpenAI-compatible endpoints
+  through `@ai-sdk/openai-compatible` and keyd's `openai-compatible` kind, with the base URL the
+  registry names.
   - Why: the user rejected the wider form. For the eight, the spec's "First-class providers"
     paragraph names the OpenAI-compatible client; their official packages (where one exists) wrap
     the same chat-completions API, and each would add a dependency and a keyd preset for no
-    capability the agent uses. Azure's `@ai-sdk/azure` was not part of the ruling; the ruling counts
-    Azure first-class through its keyd kind and header, which it has.
+    capability the agent uses. `@ai-sdk/azure` 4.0.86 is the release built on the pinned
+    `@ai-sdk/openai` 4.0.82, so it adds no second copy of the OpenAI client.
   - Cost if wrong: a provider-specific extra of the eight (Perplexity's citations, Cohere's
     documents) is not used, and a quirk of one in the chat-completions dialect (a cap field it
     ignores, usage it does not stream) costs a held budget rather than an error. Promoting one is
     a client kind, a case in `languageModel`, a pinned dependency and a keyd preset, as the five
-    show. If the user wants `@ai-sdk/azure` too, it is one more case and one more dependency.
+    show. Azure's key must be bound to the resource's `https://<resource>.openai.azure.com/openai/v1`
+    (keyd's `azure` kind takes the user's base URL); a key bound to a deployment URL of the older
+    API gets 404s.
 - **P5a-R5 Local servers are LM Studio and Ollama on keyd's fixed routes.** vLLM or another
   server works when it listens on 1234 or 11434, or behind an https endpoint.
   - Why: Part 4a fixes the local routes (P4a-R14), and changing keyd is outside this part.
@@ -13466,15 +13743,45 @@ and keyd's carry `agent: "keyd"`.
     undercharge, so the xAI route has no chat operation.
   - Cost if wrong: an operation outside the package's (Mistral's embeddings or FIM, OpenRouter's
     completions or Responses, xAI's chat) is refused with 403 until a line is added to its preset.
-    keyd prices images on these routes by OpenAI's rule (2,460 tokens for a 1280×800 screenshot);
-    Mistral's own rule bills about 4,000, so near a limit a Mistral request can cross it by the
-    difference, as P4a-R15 already allows for OpenAI-compatible servers. DeepSeek's and xAI's
+    keyd holds images on the xAI, DeepSeek and Groq routes by OpenAI's rule (2,460 tokens for a
+    1280×800 screenshot); on Mistral's by Mistral's own (4,051, a token per 16-pixel patch plus row
+    breaks), and on OpenRouter's, which serves every vendor's models, by the largest rule keyd knows
+    (controller's ruling; Part 4a's `BodyMistral` and `BodyOpenRouter`). DeepSeek's and xAI's
     cached input is charged at the input price (an overcharge). A provider that changes where it
-    reports usage is charged its holds in full until the meter learns the place. An OpenRouter
-    model the catalog prices at $0 costs nothing in keyd's budget, which is right for its `:free`
-    models but not for a router id (such as `openrouter/auto`) if the catalog lists one at $0
-    while OpenRouter bills the model it picks; the picker shows the $0, and M5's budget UI is the
-    place to warn.
+    reports usage is charged its holds in full until the meter learns the place. Unpriced models
+    are P5a-R32's.
+- **P5a-R32 No price, no route (controller's ruling, 2026-10-02).** keyd's budget is the runaway
+  guard, so no model runs on a paid route without a price. keyd refuses a request whose model is
+  priced at $0 both ways on any route that is not a local server's (403 `model-unpriced`, Part 4a's
+  amended Task 14). The daemon refuses the same pick first, with the reason: a catalog model at $0
+  both ways (OpenRouter's `:free` models, a router the catalog lists at $0) or a model the catalog
+  does not list (the Other provider's) needs the user's own price in its `RoleChoice.price`, which
+  becomes the route's price in keyd. OpenRouter's routers (`openrouter/…`, such as
+  `openrouter/auto`) are refused even with a price, because they bill the model they pick.
+  - Why: refusing is simpler than holding at a ceiling price, and it has no ceiling to be wrong
+    about (a router can pick a model dearer than any ceiling short of keyd's $10,000 per million
+    tokens, which would stop every task at once). Local servers stay free: nothing is billed there.
+  - Cost if wrong: OpenRouter's free models and every Other model need a price the user types
+    (Part 5b's picker asks for it); a free model then spends that price against the budget, which
+    only makes the guard stricter. A user who prices a model below its bill can still overspend by
+    the difference, as with any list price keyd holds.
+- **P5a-R33 Nothing the brain sends is kept on the provider (controller's ruling, 2026-10-02).**
+  OpenAI's, Azure's and xAI's Responses models are wrapped (the AI SDK's
+  `defaultSettingsMiddleware`) to send `store: false`: by default those APIs keep every request,
+  screenshots of the user's desktop included. Multi-turn reasoning works statelessly, as the AI SDK
+  documents it: for a reasoning model, OpenAI and Azure are asked for
+  `include: ["reasoning.encrypted_content"]` (`@ai-sdk/openai` 4.0.82 adds it itself only for the
+  model ids it knows reason, so the binding's `reasoning` flag asks for it too), and the xAI
+  package adds it whenever `store` is false. The next turn sends the reasoning back as encrypted
+  content in place of an `item_reference` to a stored response, and the daemon's transcript keeps
+  that content in the message parts (`TranscriptMessage.content` is kept as the AI SDK wrote it),
+  so a restarted brain carries it too.
+  - Why: the user's desktop must not be kept by a provider by default.
+  - Cost if wrong: every turn re-sends the reasoning (larger requests, the same tokens billed). A
+    model the catalog marks as not reasoning gets no `include`; if it does reason, its thinking is
+    dropped between turns (the answer stays correct, only the reasoning restarts). Anthropic,
+    Google and the chat-completions providers keep nothing between requests by design, so they need
+    no flag; their own retention policies (abuse monitoring) still apply.
 
 ## Verification
 
@@ -13520,7 +13827,7 @@ that copy. Setup:
     real `tool_use` streams through a listener stand-in).
 - **Static checks:** `pnpm typecheck` (all packages, `@localdot/brain` included), `pnpm hygiene`,
   and `biome check` on every file this plan adds (clean, after `--write`).
-- **Bundles:** `pnpm --filter @localdot/brain build` (13 packages then, 18 with the first-class
+- **Bundles:** `pnpm --filter @localdot/brain build` (13 packages then, 19 with the first-class
   providers; every license found) and
   `pnpm --filter @localdot/desktopd build`. The brain bundle starts and fails exactly as Task 12
   says.
@@ -13531,31 +13838,39 @@ that copy. Setup:
     P5a-R10.
 - **Red first:** with `proxyTunnel: true`, `brain-flow.test.ts` fails at the first model call.
 
-**Re-run for the first-class providers** (2026-10-02, job `plan-part5a-providers`), in a fresh
-scratch copy built the same way (`feat/core-part2` at `b02765f`, Part 3's and Part 4b's files from
-their plans, the same three stubs, with Part 4b's real `keyd/testing/keyd-process.ts` in place of
-its stub and Part 4b's `apps/web/src/keys/binding.ts`, which Task 1 now edits), with every block of
-this plan applied from its text:
-- **Install:** `pnpm install` added exactly the five pinned packages from the npm registry
-  (`@ai-sdk/xai` 5.0.13, `@ai-sdk/mistral` 4.0.55, `@ai-sdk/deepseek` 3.0.57, `@ai-sdk/groq` 4.0.53,
-  `@openrouter/ai-sdk-provider` 3.1.0); the lockfile still holds one `@ai-sdk/provider` (4.0.20)
-  and one `@ai-sdk/provider-utils` (5.0.52).
-- **The full unit suite:** 71 files, 559 tests passed, 7 skipped (Task 16's 4 and Part 2's 3). The
-  new tests: `catalog` 9 (two new), `bindings` 4 (one rewritten), `proxy-fetch` 8 (one per
-  first-class bearer provider, each through its official package and its fixture stream).
-- **Red first:** without `compatibility: "strict"`, the OpenRouter case fails (no
-  `stream_options.include_usage`, so keyd would charge every answer its hold).
+**Re-run for the first-class providers** (2026-10-02, job `plan-part5a-providers`, after the
+controller's rulings on Azure, provider-side storage and unpriced models), in a fresh scratch copy
+built the same way (`feat/core-part2` at `b02765f`, Part 3's and Part 4b's files from their plans,
+the same stubs, with Part 4b's real `keyd/testing/keyd-process.ts` in place of its stub and Part
+4b's `apps/web/src/keys/binding.ts`, which Task 1 now edits), with every block of this plan applied
+from its text:
+- **Install:** `pnpm install` added exactly the six pinned packages from the npm registry
+  (`@ai-sdk/azure` 4.0.86, `@ai-sdk/xai` 5.0.13, `@ai-sdk/mistral` 4.0.55, `@ai-sdk/deepseek`
+  3.0.57, `@ai-sdk/groq` 4.0.53, `@openrouter/ai-sdk-provider` 3.1.0); the lockfile still holds one
+  `@ai-sdk/provider` (4.0.20), one `@ai-sdk/provider-utils` (5.0.52) and one `@ai-sdk/openai`
+  (4.0.82).
+- **The full unit suite:** 71 files, 564 tests passed, 7 skipped (Task 16's 4 and Part 2's 3). The
+  new tests: `catalog` 9 (two new), `bindings` 5 (one rewritten, one new for P5a-R32),
+  `proxy-fetch` 12 (one per first-class bearer provider, and four for P5a-R33: OpenAI, Azure and
+  xAI send `store: false` and carry a reasoning model's thinking to the next turn encrypted, and a
+  model that does not reason asks for none).
+- **Red first:** without `compatibility: "strict"` the OpenRouter case fails; without the
+  `stateless` wrapper the five P5a-R33 checks fail; without the unpriced check the P5a-R32 test
+  fails.
 - **Static checks:** `pnpm typecheck` (every package, `@localdot/web` and `@localdot/brain`
   included), `pnpm hygiene`, and Biome clean on every file this plan adds or changes.
-- **Bundle:** 18 packages, every license found, about 4.2 MB; it starts and fails as Task 12 says.
-- **keyd (Part 4a's amendment, P5a-R31):** `origin/feat/core-part4a` at `70a534e` with Part 4a's
-  Tasks 10–14 applied from the amended plan text (goproxy v1.9.2 from proxy.golang.org), Go 1.27.1:
-  `gofmt` and `go vet` clean, and `go test -race ./...` passes (`llm` 20 tests, `egress` 59,
-  `keys` with `TestTheFirstClassBearerPresets`). Each of the three keyd changes was taken out once
-  and its test failed: Groq charged its hold, DeepSeek's empty base path answered 502, and a
-  `models` list reached the provider.
-- **Not run:** any real provider (no model call was made). The five fixtures follow each
-  package's own response schema; the providers' live answers are assumed to match them.
+- **Bundle:** 19 packages, every license found, about 4.6 MB; it starts and fails as Task 12 says.
+- **keyd (Part 4a's amendment, P5a-R31 and P5a-R32):** `origin/feat/core-part4a` at `70a534e` with
+  Part 4a's Tasks 10–14 applied from the amended plan text (goproxy v1.9.2 from proxy.golang.org),
+  Go 1.27.1: `gofmt` and `go vet` clean, and `go test -race ./...` passes (`llm` 20 tests, `egress`
+  60, `keys` with `TestTheFirstClassBearerPresets`). Each keyd change was taken out once and its
+  test failed: Groq charged its hold, DeepSeek's empty base path answered 502, a `models` list
+  reached the provider, OpenAI's rule held 2,460 for a 4,051-token Mistral screenshot, and three
+  unpriced models reached their providers.
+- **Not run:** any real provider (no model call was made). The fixtures follow each package's own
+  response schema; the providers' live answers are assumed to match them. Mistral's image rule is
+  from Mistral's vision documentation as recalled, not fetched (the job allows no third-party
+  calls).
 
 **What could not run** (assumptions on code that is not built yet, and checks this machine could
 not make; the pre-flight scan and the reviewers should look here first)
