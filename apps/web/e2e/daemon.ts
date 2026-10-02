@@ -1,5 +1,5 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,9 +32,18 @@ export interface RunningDaemon {
 }
 
 // A separate home and process group per run. No SSD bind mounts, no shared user's state.
-export async function startDaemon(env: Record<string, string> = {}): Promise<RunningDaemon> {
+export async function startDaemon(
+  env: Record<string, string> = {},
+  options: { calibrationFile?: string } = {},
+): Promise<RunningDaemon> {
   const scratch = mkdtempSync(join(tmpdir(), "local dot's e2e-"));
   const home = join(scratch, "home");
+  if (options.calibrationFile) {
+    mkdirSync(home, { recursive: true });
+    const target = join(home, "calibration.json");
+    copyFileSync(options.calibrationFile, target);
+    chmodSync(target, 0o600);
+  }
   const origin = `http://127.0.0.1:${E2E_PORT}`;
   let child: ChildProcess;
   let token = "";

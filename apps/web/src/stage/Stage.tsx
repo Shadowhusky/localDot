@@ -53,6 +53,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
 ) {
   const support = frameTapSupport();
   const canvas = useRef<StageCanvasHandle>(null);
+  const presentedAt = useRef(0);
   const [src, setSrc] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const cellId = cell?.id ?? null;
@@ -79,7 +80,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
         ({ path }) => {
           if (!cancelled) {
             forgetOldTickets({ cellId, livePath: path, listed: listedRef.current });
-            setSrc(path);
+            setSrc(`${path}#shared`);
           }
         },
         () => {},
@@ -97,10 +98,33 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }, [paused, params]);
 
   const onSource = useCallback((source: FrameSource) => {
+    presentedAt.current = Date.now();
     if (canvas.current) canvas.current.attach(source);
     else source.stop();
   }, []);
   const onLost = useCallback(() => setGeneration((g) => g + 1), []);
+  const lastPresentedAt = useCallback(() => presentedAt.current, []);
+  const onStats = useCallback(() => {
+    presentedAt.current = Date.now();
+  }, []);
+  useEffect(() => {
+    if (!ready) return;
+    // A browser-frozen tab can accumulate obsolete decoder messages. Resume with a fresh
+    // stream instead of making the viewer drain that backlog before seeing the current desktop.
+    const resume = () => {
+      canvas.current?.setView({ freeze: paused });
+      onLost();
+    };
+    const visible = () => {
+      if (document.visibilityState === "visible") resume();
+    };
+    document.addEventListener("resume", resume);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      document.removeEventListener("resume", resume);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [ready, paused, onLost]);
   const onFlip = useCallback((flip: Flip) => {
     flips.current.push(flip);
   }, []);
@@ -156,13 +180,14 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }
   return (
     <>
-      <StageCanvas ref={canvas} onFlip={onFlip} />
+      <StageCanvas ref={canvas} onFlip={onFlip} onStats={onStats} />
       {src && (
         <DesktopFrame
           key={`${src} ${generation}.${reconnects}`}
           src={src}
           onSource={onSource}
           onStale={onLost}
+          lastPresentedAt={lastPresentedAt}
         />
       )}
       <div className={paused ? "stage-veil on" : "stage-veil"} aria-hidden={!paused}>

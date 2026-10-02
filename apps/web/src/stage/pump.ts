@@ -73,20 +73,26 @@ export function pumpFrames(
     for (;;) {
       const { value: frame, done } = await reader.read();
       if (done || !frame) return;
+      if (stopping) {
+        frame.close();
+        return;
+      }
       show(frame);
     }
   };
   let stopping = false;
   const running = loop().catch(async (err: unknown) => {
     if (stopping) return;
-    await reader.cancel(err).catch(() => {});
+    void reader.cancel(err).catch(() => {});
     opts.onError?.(err);
   });
 
   return {
     async stop() {
       stopping = true;
-      await reader.cancel().catch(() => {});
+      // Cancellation closes our pending reads immediately. Its upstream acknowledgement can
+      // wait forever on a browser-suspended transferred stream, so it cannot block a fresh tap.
+      void reader.cancel().catch(() => {});
       await running;
     },
   };

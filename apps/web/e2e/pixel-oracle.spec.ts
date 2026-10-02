@@ -29,7 +29,20 @@ let cell: CellRef;
 
 test.skip(!DOCKER, "needs LOCALDOT_DOCKER_TESTS=1, the images and Docker Desktop");
 test.beforeAll(async () => {
-  daemon = await startDaemon();
+  const calibrationFile = fileURLToPath(new URL("./out/calibration.json", import.meta.url));
+  const calibration = JSON.parse(readFileSync(calibrationFile, "utf8"));
+  expect(calibration.trials, "oracle needs the full local calibration").toBeGreaterThanOrEqual(500);
+  for (const [injector, kind] of [
+    ["xtest", "click"],
+    ["xtest", "key"],
+    ["driver", "click"],
+  ] as const)
+    for (const scale of ["1", "2"])
+      expect(
+        calibration.onsetMs[injector][kind][scale],
+        `${injector} ${kind} ${scale}x onset`,
+      ).toBeGreaterThan(0);
+  daemon = await startDaemon({}, { calibrationFile });
   cell = await createReadyCell(daemon, 2);
 });
 test.afterAll(async () => {

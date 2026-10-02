@@ -187,10 +187,15 @@ function relay(
   opts: RelayOptions,
 ): void {
   const { id, deps, streams } = opts;
-  const upstream = new WebSocket(`${opts.stream.baseUrl.replace(/^http/, "ws")}/api/websockets`, {
-    headers: { authorization: opts.stream.authorization },
-    perMessageDeflate: false,
-  });
+  // Theatre clients only receive the desktop. Selkies' controller role would let one
+  // tab claim the other's primary display; this fixed role also caps input at the server.
+  const upstream = new WebSocket(
+    `${opts.stream.baseUrl.replace(/^http/, "ws")}/api/websockets?role=viewer`,
+    {
+      headers: { authorization: opts.stream.authorization },
+      perMessageDeflate: false,
+    },
+  );
   // ws's handshakeTimeout only fires on an idle socket, so a cell that drips its answer would keep
   // the dial open; terminating while connecting closes the upstream, which refuses the viewer.
   const dial = setTimeout(

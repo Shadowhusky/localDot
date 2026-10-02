@@ -32,6 +32,12 @@ let clock: StageClock | null = null;
 let viewport = { w: 1, h: 1 };
 let lastScene: Scene | null = null;
 const oracle = new OracleCapture();
+let animationFrame: number | null = null;
+
+function scheduleTick(): void {
+  if (animationFrame !== null) cancelAnimationFrame(animationFrame);
+  animationFrame = requestAnimationFrame(tick);
+}
 
 function sessionNow(): number | null {
   if (!clock) return null;
@@ -71,6 +77,7 @@ function probing(inner: Presenter): Presenter {
 }
 
 function tick(): void {
+  animationFrame = null;
   if (presenter) {
     const screen = screenNow();
     presenter.setScreen(model.screen ? { w: model.screen.w, h: model.screen.h } : null);
@@ -97,7 +104,7 @@ function tick(): void {
     if (oracle.enabled && t !== null)
       oracle.onTick(presenter, model, t, scene, cam, viewport, screen);
   }
-  requestAnimationFrame(tick);
+  animationFrame = requestAnimationFrame(tick);
 }
 
 let queue = Promise.resolve();
@@ -118,7 +125,7 @@ async function handle(m: WorkerIn): Promise<void> {
           warn: (message) => scope.postMessage({ type: "warn", message }),
         });
         oracle.dpr = m.dpr;
-        requestAnimationFrame(tick);
+        scheduleTick();
         return;
       }
       case "resize":
@@ -150,6 +157,7 @@ async function handle(m: WorkerIn): Promise<void> {
         if (m.view.zoom !== undefined) zoom = m.view.zoom;
         if (m.view.freeze !== undefined) freeze = m.view.freeze;
         if (m.view.reducedMotion !== undefined) view = { reducedMotion: m.view.reducedMotion };
+        scheduleTick();
         return;
       case "theme":
         presenter?.overlays.setTheme(m.theme);
@@ -175,7 +183,13 @@ async function handle(m: WorkerIn): Promise<void> {
           pump = pumpFrames(
             m.readable,
             probing(presenter),
-            (stats) => scope.postMessage({ type: "stats", stats }),
+            (stats) =>
+              scope.postMessage({
+                type: "stats",
+                // The stage outlives its taps. Keep its delivered-frame counter monotonic
+                // when a reconnect starts a fresh pump with its own local counter.
+                stats: { ...stats, presented: presenter?.presented ?? stats.presented },
+              }),
             { first: m.first, onError: report },
           );
         }

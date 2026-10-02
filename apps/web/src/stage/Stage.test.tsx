@@ -61,7 +61,7 @@ describe("Stage in a Chromium browser", () => {
   it("loads the client, out of sight and inert, from the path of a ticket it mints", async () => {
     const { api, calls } = daemon();
     render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
-    await waitFor(() => expect(client()?.getAttribute("src")).toBe(ticketPath(1)));
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(1)}#shared`));
     expect(client()?.hasAttribute("inert")).toBe(true);
     expect(calls).toEqual([`POST /api/cells/${CELL}/stream-ticket`]);
     expect(FakeWorker.instances).toHaveLength(1);
@@ -96,7 +96,7 @@ describe("Stage in a Chromium browser", () => {
     await waitFor(() => expect(client()).not.toBeNull());
     const before = client();
     view.rerender(<Stage cell={ready} api={api} reconnects={1} listed={[CELL]} />);
-    await waitFor(() => expect(client()?.getAttribute("src")).toBe(ticketPath(2)));
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
     expect(client()).not.toBe(before);
     expect(calls).toHaveLength(2);
   });
@@ -114,7 +114,7 @@ describe("Stage in a Chromium browser", () => {
     await act(async () => vi.advanceTimersByTime(9_000));
     expect(calls).toHaveLength(1);
     await act(async () => vi.advanceTimersByTime(1_500));
-    await waitFor(() => expect(client()?.getAttribute("src")).toBe(ticketPath(2)));
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
     expect(client()).not.toBe(before);
   });
 
@@ -126,7 +126,7 @@ describe("Stage in a Chromium browser", () => {
     const frames = () => FakeWorker.instances[0]?.sent.filter((s) => s.message.type === "frames");
     playInClient(client() as HTMLIFrameElement, "t1");
     await act(async () => vi.advanceTimersByTime(1_000));
-    expect(frames()).toHaveLength(1);
+    await waitFor(() => expect(frames()).toHaveLength(1));
     const [sent] = frames() ?? [];
     const first = sent?.message.first as { source?: unknown } | undefined;
     expect(first).toBeInstanceOf(VideoFrame);
@@ -134,7 +134,41 @@ describe("Stage in a Chromium browser", () => {
     expect(sent?.transfer).toEqual([sent?.message.readable, first]);
     playInClient(client() as HTMLIFrameElement, "t2");
     await act(async () => vi.advanceTimersByTime(1_000));
-    expect(frames()).toHaveLength(2);
+    await waitFor(() => expect(frames()).toHaveLength(2));
+  });
+
+  it("refreshes a stalled tap only when the client decodes another frame", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    const { api, calls } = daemon();
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
+    await waitFor(() => expect(client()).not.toBeNull());
+    const before = client() as HTMLIFrameElement;
+    playInClient(before, "t1");
+    let decoded = 10;
+    const video = before.contentDocument?.getElementById("videoStream");
+    Object.defineProperty(video, "getVideoPlaybackQuality", {
+      value: () => ({ totalVideoFrames: decoded }),
+    });
+    await act(async () => vi.advanceTimersByTime(1_000));
+    await act(async () => vi.advanceTimersByTime(30_000));
+    expect(calls).toHaveLength(1); // A still desktop has no new frames to present.
+    decoded += 1;
+    await act(async () => vi.advanceTimersByTime(250));
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
+    expect(client()).not.toBe(before);
+  });
+
+  it("refreshes after suspended timers resume even without a browser lifecycle event", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+    const { api, calls } = daemon();
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
+    await waitFor(() => expect(client()).not.toBeNull());
+    playInClient(client() as HTMLIFrameElement, "t1");
+    await act(async () => vi.advanceTimersByTime(1000));
+    vi.setSystemTime(Date.now() + 30_000);
+    await act(async () => vi.advanceTimersByTime(250));
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
+    expect(calls).toHaveLength(2);
   });
 
   it("removes the client and stops the frames when the cell leaves ready", async () => {

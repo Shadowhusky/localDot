@@ -89,7 +89,8 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: pinned tools", () => {
   });
 });
 
-const STREAM_PASSWORD = "p".repeat(43);
+// The random token may start with "-": hashing it must treat it as data, not an openssl option.
+const STREAM_PASSWORD = `-${"p".repeat(42)}`;
 const STREAM_AUTH = `Basic ${Buffer.from(`localdot:${STREAM_PASSWORD}`).toString("base64")}`;
 const DESKTOPD_TOKEN = "d".repeat(43);
 const HOME_VOLUME = "localdot-test-desktop-home";
@@ -573,10 +574,10 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     expect(desktopd).toEqual([
       expect.stringMatching(/^abc\s+\/opt\/node\/bin\/node \/opt\/localdot\/desktopd\.mjs$/),
     ]);
-    // The bundle carries Hono's and @hono/node-server's MIT notices in its header.
+    // The expanded bundle retains Hono, its server, the MCP SDK and their dependencies' notices.
     expect(
       outputOf(C2, "grep", "-c", "^Permission is hereby granted", "/opt/localdot/desktopd.mjs"),
-    ).toBe("2\n");
+    ).toBe("13\n");
     expect((await fetch(`http://127.0.0.1:${desktopd2}/healthz`)).status).toBe(401);
     const health = await desktopdHealth(desktopd2);
     expect(health.ok).toBe(true);

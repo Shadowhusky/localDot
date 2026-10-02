@@ -19,6 +19,18 @@ RUN apt-get update \
       fonts-inter fonts-jetbrains-mono fonts-noto-cjk fonts-noto-color-emoji \
  && rm -rf /var/lib/apt/lists/*
 
+# Stream credentials are random base64url strings and may begin with a hyphen. The base's
+# command-line password then becomes an openssl option; stdin treats every token as data.
+RUN python3 - <<'PY'
+from pathlib import Path
+init = Path('/etc/s6-overlay/s6-rc.d/init-nginx/run')
+old = 'openssl passwd -apr1 "${PASSWORD}"'
+new = 'printf \'%s\\n\' "${PASSWORD}" | openssl passwd -apr1 -stdin'
+source = init.read_text()
+assert source.count(old) == 1, 'pinned nginx password initializer changed'
+init.write_text(source.replace(old, new))
+PY
+
 RUN set -eu; \
     case "$(dpkg --print-architecture)" in \
       arm64) node_arch=arm64; sum="$NODE_SHA256_ARM64" ;; \

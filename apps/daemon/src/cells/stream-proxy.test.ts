@@ -170,6 +170,7 @@ async function drippingCell() {
   const held = new Set<Socket>();
   const server = createServer((socket) => {
     held.add(socket);
+    socket.on("error", () => {});
     socket.once("data", () => {
       socket.write("HTTP/1.1 101 Switching Protocols\r\n");
       const drip = setInterval(() => socket.write("X"), 100);
@@ -446,7 +447,7 @@ describe("desktop stream proxy over HTTP", () => {
     await opened(ws);
     expect(selkies.seen).toEqual([
       { url: "/api/status", authorization: AUTH, cookie: undefined },
-      { url: "/api/websockets", authorization: AUTH, cookie: undefined },
+      { url: "/api/websockets?role=viewer", authorization: AUTH, cookie: undefined },
     ]);
   });
 });

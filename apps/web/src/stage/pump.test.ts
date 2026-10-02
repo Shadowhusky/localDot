@@ -58,6 +58,16 @@ describe("pumpFrames", () => {
     expect(pulls).toBe(after);
   });
 
+  it("can stop a transferred stream whose upstream never acknowledges cancellation", async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const source = new ReadableStream<VideoFrame>({ cancel });
+    const present = vi.fn();
+    const pump = pumpFrames(source, { present }, () => {});
+    await pump.stop();
+    expect(cancel).toHaveBeenCalledTimes(1);
+    expect(present).not.toHaveBeenCalled();
+  });
+
   it("presents and closes the seed frame before the stream's first, and reports it at once", async () => {
     const first = fakeFrame();
     const next = fakeFrame();
