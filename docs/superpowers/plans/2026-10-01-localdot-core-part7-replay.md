@@ -299,3 +299,655 @@ apps/web/e2e/recorded-session.spec.ts, README.md, docs/replay.md                
 ```
 
 ---
+
+### Task 1: Spike S9 — the recorder's view of the Selkies stream
+
+The recorder is one more Selkies client, which nothing so far has run headless. S8 ran Selkies'
+own client in a page, and Part 3's Task 11 ran two of them. This spike answers the questions the
+recorder's constants rest on, on the real image, before any recorder code exists (risk first, as
+S8 did for Part 2).
+
+**Review tier:** light (throwaway spike code. It reuses the per-cell stream credential the proxy
+already holds, and adds no boundary).
+
+**Files:**
+- Create: `spikes/s9-recorder/package.json` (`ws` 8.22.0, already in the lockfile),
+  `spikes/s9-recorder/probe.mjs`, `spikes/s9-recorder/endpoint.ts`,
+  `spikes/s9-recorder/run-desktop.sh`, `spikes/s9-recorder/FINDINGS.md`
+
+**Interfaces:**
+- Consumes:
+  - the image `localdot/desktop:dev` (Part 3's);
+  - `CellOrchestrator.endpoints(id).stream` (`{ baseUrl, authorization }`, Part 2);
+  - the vendored client `apps/web/vendor/selkies/assets/selkies-core-*.js` as the protocol
+    reference;
+  - `parseSelkiesMessage` (Task 9 writes it; the spike carries its own 15-line copy).
+- Produces: `FINDINGS.md`, whose answers fix four values in Task 9 and Task 10:
+  - `RECORDER_HANDSHAKE` (the text messages the recorder sends);
+  - `KEYFRAME_EVERY_MS`, and whether `REQUEST_KEYFRAME` is needed at all;
+  - `IDLE_KEYFRAME` (whether a key frame can be had on a still screen);
+  - `FEED_MODE` (`own-connection` or `tap-viewer`).
+
+**The probe** (`probe.mjs`):
+- Takes `--endpoint <http://127.0.0.1:port>`, `--authorization "<header>"`, `--seconds <n>`,
+  `--mode shared|primary` and `--request-key <ms|off>`.
+- Dials `<endpoint>/api/websockets` with the header and `perMessageDeflate: false`. Selkies' client
+  uses no subprotocol.
+- Logs every text message with its arrival time.
+- For binary messages, logs `type`, `flags`, `frameId`, `region`, `width`, `height`, payload bytes,
+  key or not, and the NAL types of the payload.
+- Writes a summary JSON: frames, key frames, the inter-key intervals, bytes per second, the first
+  frame's latency after the handshake, and the latency from each `REQUEST_KEYFRAME` sent to the
+  next key frame.
+- **It never writes a payload to the repo.** An optional `--dump <dir outside the repo>` keeps the
+  raw access units for manual decoding with ffmpeg.
+
+`endpoint.ts` prints a cell's stream endpoint and authorization. It reads
+`<home>/cells/<id>/cell.json` through Part 2's `CellStore` and asks Docker for the gate's
+published `8082/tcp` port (`docker port localdot-gate-<id> 8082/tcp`, asserting exit status 0), so
+the probe dials exactly what the proxy dials. `run-desktop.sh` is S8's script with the container
+named `localdot-test-s9` and the stream on `127.0.0.1:4793`. It is used for the questions that need
+no daemon.
+
+**Questions** (each answered in `FINDINGS.md` with the raw numbers):
+- Q1 **Handshake, alone.** With no other client, does the passive "shared viewer" sequence produce
+  video? The sequence is the vendored client's `#shared` path: wait for the text `MODE websockets`,
+  send `STOP_VIDEO`, wait 250 ms, send `START_VIDEO`, and never send `SETTINGS,…`,
+  `CLIENT_FRAME_ACK`, `_gz,1` or input. If not, find the smallest addition that does (for example
+  `SETTINGS,{}`, or the primary's settings object). Record the exact messages and the time to the
+  first key frame.
+- Q2 **Handshake beside a viewer.** With the Theatre open on the same cell (one Selkies primary),
+  start and stop the probe 10 times. The viewer's `data-size` must never change, its `data-fps`
+  must not drop, and the probe's `frameId`s must match the viewer's. Check the second by logging the
+  viewer relay's frame ids for 10 s with a temporary `console.log` in a local, uncommitted copy of
+  `stream-proxy.ts`.
+- Q3 **Wire header.** Byte 0 is `4`, the codec nibble is `1` (H.264), the low nibble is `1` exactly
+  on frames whose payload holds an IDR, `width`×`height` is 2560×1600 at 2× and 1280×800 at 1×, and
+  `region` is always 0 with `h264enc`.
+- Q4 **Key frames.** Does every key payload carry SPS and PPS in-band (NAL types 7, 8, 5)? Record
+  the codec string from the SPS (expect `avc1.f4….` at 4:4:4 and `avc1.64….` with
+  `LOCALDOT_STREAM_FULLCOLOR=0`), and confirm with `ffprobe` on a dumped access unit that it
+  decodes.
+- Q5 **`REQUEST_KEYFRAME`.**
+  - During `load-continuous.sh` motion: the latency to the next IDR (p50 and max over 50 requests).
+  - On a still screen: does an IDR arrive at all, and how fast?
+- Q6 **Selkies' own cadence.** Without requests, the intervals between key frames over 60 s of
+  continuous motion and over 5 minutes of mostly still screen.
+- Q7 **Cost.** The container CPU (`docker stats`, as S1 measured it) at 2× under
+  `load-continuous.sh`, in three runs: one Theatre viewer; one viewer plus the probe; the probe
+  alone. Then decide the feed mode:
+  - if "viewer + probe" exceeds "viewer" by more than 10 percentage points of a core (Selkies
+    encodes per client), `FEED_MODE = tap-viewer`;
+  - otherwise `own-connection`.
+- Q8 **Backpressure.** Over 60 s of continuous motion, the probe, which sends no acks, receives at
+  least 98 % of the frames the acking viewer receives (compare the frame-id ranges).
+
+**Gate:**
+- If Q1 finds no handshake that yields video without disturbing a viewer (Q2), stop and report
+  BLOCKED with the transcripts. Every later recorder task depends on it.
+- If Q5 shows that `REQUEST_KEYFRAME` has no effect, set `KEYFRAME_EVERY_MS` to `0` (never
+  request), and record the seek cost Selkies' own cadence (Q6) gives. Task 13's decode policy
+  copes with long GOPs; only the seek latency grows.
+
+- [ ] **Step 1:** Write `probe.mjs`, `endpoint.ts` and `run-desktop.sh` as specified. Then run
+  `node spikes/s9-recorder/probe.mjs --help`.
+  Expected: usage text and exit 0.
+- [ ] **Step 2:** Run Q1, Q3, Q4 and Q6 against `run-desktop.sh` at 2× and at 1×.
+- [ ] **Step 3:** Run Q2, Q5, Q7 and Q8 against a daemon cell with the Theatre open in Chrome
+  (start the daemon with `node --import tsx src/main.ts`).
+- [ ] **Step 4:** Write `FINDINGS.md`. Its header gives the date, the Mac, Docker, the image digest
+  and the Chrome version. It answers Q1–Q8, then lists the four values above. Clean up:
+  `docker rm -fv localdot-test-s9` (exit 0) and stop the daemon. No `localdot-test-*` container is
+  left.
+- [ ] **Step 5: Commit**
+
+```bash
+pnpm format && pnpm lint
+git add spikes/s9-recorder
+git commit -m "chore(spikes): S9 the recorder's view of the Selkies stream"
+```
+
+---
+
+### Task 2: Protocol — the recording layout and the replay API schemas
+
+The on-disk format of a recording, and the JSON the daemon serves about sessions and recordings.
+Both the daemon and the web app parse these, and later milestones read the layout (M9's `doctor`
+and retention settings).
+
+**Review tier:** light (schemas; no boundary).
+
+**Files:**
+- Create: `packages/protocol/src/recording.ts`, `packages/protocol/src/recording.test.ts`
+- Modify: `packages/protocol/src/index.ts` (add `export * from "./recording.ts";`)
+
+**Interfaces:**
+- Consumes: `ULID_PATTERN` (`packages/protocol/src/ids.ts`), zod 4.6.5.
+- Produces the constants, schemas and types below. The JSON Schema export for keyd
+  (`events.schema.json`) does not change: keyd reads none of these.
+
+- [ ] **Step 1: Write the failing test**
+
+`packages/protocol/src/recording.test.ts`:
+```ts
+import { describe, expect, it } from "vitest";
+import { emptyManifest, FragmentEntry, RecordingManifest, SessionCard } from "./recording.ts";
+
+describe("recording schemas", () => {
+  it("accepts an empty manifest and a full one, and rejects a reversed span and a bad codec", () => {
+    expect(RecordingManifest.parse(emptyManifest("none", "no stream"))).toMatchObject({ state: "none", note: "no stream" });
+    const full = { ...emptyManifest("complete"), codec: "avc1.f4001f", width: 2560, height: 1600, firstMicros: 312_000, lastMicros: 9_000_000, bytes: 1234, fragments: 3, activity: [{ from: 312_000, to: 900_000 }], gaps: [{ from: 1_000_000, to: 2_000_000, reason: "user-control" as const }] };
+    expect(RecordingManifest.parse(full).codec).toBe("avc1.f4001f");
+    expect(() => RecordingManifest.parse({ ...full, activity: [{ from: 5, to: 4 }] })).toThrow();
+    expect(() => RecordingManifest.parse({ ...full, codec: "avc1.F4001F; rm -rf" })).toThrow();
+    expect(() => FragmentEntry.parse({ seq: 0, moofOffset: 0, endOffset: 1, startMicros: 0, endMicros: 1 })).toThrow();
+  });
+
+  it("validates a session card and refuses an id that is not a ULID", () => {
+    const card = { id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", title: null, startedAt: "2026-10-02T10:00:00.000Z", durationMs: 1000, verdict: "done", steps: 2, failedSteps: 0, coverFrameId: null, screen: { w: 2560, h: 1600, scale: 2 }, recording: { state: "complete", bytes: 10 } };
+    expect(SessionCard.parse(card).verdict).toBe("done");
+    expect(() => SessionCard.parse({ ...card, id: "../../etc" })).toThrow();
+  });
+});
+```
+
+Run: `pnpm exec vitest run packages/protocol/src/recording.test.ts`
+Expected: FAIL. `./recording.ts` does not exist.
+
+- [ ] **Step 2: Write the schemas**
+
+`packages/protocol/src/recording.ts` (complete, because this is the format):
+```ts
+import { z } from "zod";
+import { ULID_PATTERN } from "./ids.ts";
+
+// On-disk layout of one session's recording, under <home>/sessions/<id>/ (P7-R2):
+//   recording/video.mp4         fragmented MP4, one H.264 track, one GOP per fragment, ticks = session µs
+//   recording/fragments.jsonl   one FragmentEntry per committed fragment, appended after its bytes
+//   recording/journal/<µs>.bin  the open fragment's frames, one file per GOP (deleted once committed)
+//   recording/manifest.json     RecordingManifest, replaced atomically (temp file + rename)
+export const RECORDING_DIR = "recording";
+export const RECORDING_VIDEO = "video.mp4";
+export const RECORDING_FRAGMENTS = "fragments.jsonl";
+export const RECORDING_MANIFEST = "manifest.json";
+export const RECORDING_JOURNAL = "journal";
+export const SESSION_SUMMARY = "summary.json";
+export const SESSION_THUMBS = "thumbs";
+
+// Media time is session time: one tick per session microsecond (the envelope's `t` unit).
+export const MEDIA_TIMESCALE = 1_000_000;
+
+const Micros = z.number().int().nonnegative();
+const Ulid = z.string().regex(ULID_PATTERN);
+
+export const RecordingState = z.enum(["recording", "complete", "recovered", "failed", "expired", "none"]);
+export type RecordingState = z.infer<typeof RecordingState>;
+
+export const RecordingGapReason = z.enum(["user-control", "stream-lost", "disk-full", "size-cap", "recorder-error"]);
+export type RecordingGapReason = z.infer<typeof RecordingGapReason>;
+
+// A stretch of session time with no video on purpose or by failure; `to` is null while it lasts
+// or when the recording ended inside it.
+export const RecordingGap = z.object({ from: Micros, to: Micros.nullable(), reason: RecordingGapReason });
+export type RecordingGap = z.infer<typeof RecordingGap>;
+
+// Frames flowed: arrivals closer than ACTIVITY_JOIN_MICROS are one span (skip idle reads these).
+export const ACTIVITY_JOIN_MICROS = 500_000;
+export const ActivitySpan = z
+  .object({ from: Micros, to: Micros })
+  .refine((s) => s.to >= s.from, { message: "an activity span ends after it starts" });
+export type ActivitySpan = z.infer<typeof ActivitySpan>;
+
+export const RecordingManifest = z.object({
+  v: z.literal(1),
+  state: RecordingState,
+  codec: z.string().regex(/^avc1\.[0-9a-f]{6}$/).nullable(),
+  width: z.number().int().positive().max(16_384).nullable(),
+  height: z.number().int().positive().max(16_384).nullable(),
+  firstMicros: Micros.nullable(),
+  lastMicros: Micros.nullable(),
+  bytes: z.number().int().nonnegative(),
+  fragments: z.number().int().nonnegative(),
+  activity: z.array(ActivitySpan).max(200_000),
+  gaps: z.array(RecordingGap).max(10_000),
+  note: z.string().max(200).optional(),
+});
+export type RecordingManifest = z.infer<typeof RecordingManifest>;
+
+export const FragmentEntry = z.object({
+  seq: z.number().int().positive(),
+  moofOffset: z.number().int().nonnegative(),
+  endOffset: z.number().int().positive(),
+  startMicros: Micros,
+  endMicros: Micros,
+});
+export type FragmentEntry = z.infer<typeof FragmentEntry>;
+
+export function emptyManifest(state: RecordingState, note?: string): RecordingManifest {
+  return {
+    v: 1, state, codec: null, width: null, height: null, firstMicros: null, lastMicros: null,
+    bytes: 0, fragments: 0, activity: [], gaps: [], ...(note ? { note } : {}),
+  };
+}
+
+// The session index (GET /api/session-index) and one session's recording (GET /api/sessions/:id/recording).
+export const SessionVerdict = z.enum(["live", "done", "stopped", "error", "interrupted"]);
+export type SessionVerdict = z.infer<typeof SessionVerdict>;
+
+export const SessionCard = z.object({
+  id: Ulid,
+  title: z.string().max(200).nullable(),
+  startedAt: z.iso.datetime(),
+  durationMs: z.number().int().nonnegative().nullable(),
+  verdict: SessionVerdict,
+  steps: z.number().int().nonnegative(),
+  failedSteps: z.number().int().nonnegative(),
+  coverFrameId: Ulid.nullable(),
+  screen: z.object({ w: z.number().int().positive(), h: z.number().int().positive(), scale: z.number().positive() }).nullable(),
+  recording: z.object({ state: RecordingState, bytes: z.number().int().nonnegative() }),
+});
+export type SessionCard = z.infer<typeof SessionCard>;
+
+export const SessionIndexPage = z.object({ sessions: z.array(SessionCard), next: z.string().nullable() });
+export type SessionIndexPage = z.infer<typeof SessionIndexPage>;
+
+export const RecordingInfo = z.object({
+  manifest: RecordingManifest,
+  live: z.boolean(),
+  // The snapshot GET …/recording/video.mp4?upto=<fragments> serves: committed fragments only.
+  upto: z.number().int().nonnegative(),
+  servedBytes: z.number().int().nonnegative(),
+});
+export type RecordingInfo = z.infer<typeof RecordingInfo>;
+```
+
+Run: `pnpm exec vitest run packages/protocol && pnpm --filter @localdot/protocol typecheck`
+Expected: PASS. The two new tests pass, and every existing protocol test still does.
+
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint
+git add packages/protocol
+git commit -m "feat(protocol): recording layout, manifest and session index schemas"
+```
+
+**Acceptance:** `pnpm exec vitest run packages/protocol` passes. `pnpm typecheck` is clean.
+
+---
+
+### Task 3: mediabunny, pinned, with its MPL-2.0 notice
+
+**Review tier:** light (dependency and notices).
+
+**Files:**
+- Modify: `apps/daemon/package.json` (`"mediabunny": "1.61.0"`, `"sharp": "0.35.5"` in
+  `dependencies`), `apps/web/package.json` (`"mediabunny": "1.61.0"` in `dependencies`; `"build"`
+  becomes `"vite build && node scripts/notices.mjs"`), `pnpm-lock.yaml`
+- Create: `THIRD-PARTY.md`, `apps/web/scripts/notices.mjs`, `apps/web/scripts/notices.test.mjs`
+
+**Interfaces:**
+- Produces:
+  - `writeNotices({ webDir, outDir }): { files: string[] }` (exported from `notices.mjs`). It
+    writes `<outDir>/licenses/mediabunny-1.61.0.txt`: a header naming the package, its exact
+    version, its license and where to get its Source Code Form, followed by mediabunny's own
+    `LICENSE` text, unchanged.
+  - `notices.mjs` writes into `dist/assets/licenses/`, so the daemon's existing `/assets/*` route
+    serves the notice as `/assets/licenses/mediabunny-1.61.0.txt` with no new route.
+
+**MPL-2.0 handling (P7-R13):**
+- mediabunny's files are used unmodified. No `pnpm patch`, no vendored copy, no fork. MPL-2.0's
+  copyleft is per file, so it covers mediabunny's files and nothing of ours.
+- The daemon runs it from `node_modules` (Source Code Form, with its `LICENSE`).
+- The web build minifies it into localDot's chunks (Executable Form). MPL-2.0 §3.2(a) asks that the
+  recipients of an Executable Form be told how to get the Source Code Form. The notice file does
+  this, pointing at the npm tarball `mediabunny@1.61.0` and the upstream tag `v1.61.0` at
+  `https://github.com/Vanilagy/mediabunny`, and carries the license text (§3.2(b) permits our own
+  MIT terms for the larger work).
+- `THIRD-PARTY.md` (repo root) lists mediabunny (MPL-2.0, 1.61.0, used unmodified, notice shipped
+  with the UI build), next to the existing entries' pointers: Selkies' client notice in
+  `apps/web/vendor/selkies/NOTICE.md`, and the cell's list in `cells/desktop/THIRD-PARTY.md`.
+
+**Tests** (`apps/web/scripts/notices.test.mjs`; the file is not under `src`, so add
+`"apps/*/scripts/**/*.test.mjs"` to the root `vitest.config.ts`'s `include`):
+- `"writes the mediabunny notice with the license text, version and source location"`:
+  - `writeNotices` into a temp dir;
+  - the file exists and contains `Mozilla Public License Version 2.0`, `mediabunny 1.61.0` and
+    `https://github.com/Vanilagy/mediabunny`.
+- `"pins mediabunny exactly and never patches it"`:
+  - `apps/web/package.json` and `apps/daemon/package.json` both say exactly `"1.61.0"`;
+  - the root `package.json` has no `pnpm.patchedDependencies` entry for it;
+  - `pnpm-lock.yaml` resolves `mediabunny@1.61.0` and no other version.
+
+**Implementation notes:**
+- `notices.mjs` resolves mediabunny's `LICENSE` with
+  `createRequire(join(webDir, "package.json")).resolve("mediabunny/package.json")`. mediabunny's
+  `exports` doesn't list `package.json`, so resolve `mediabunny` itself and walk up to the folder
+  holding `LICENSE`. Its `package.json` field `"license"` must read `MPL-2.0`, or the script exits
+  1, so a relicensed upgrade cannot slip through.
+- The header is plain text with no build timestamp, so the build stays reproducible.
+
+- [ ] **Step 1:** Write the failing notices test. Run
+  `pnpm exec vitest run apps/web/scripts/notices.test.mjs`.
+  Expected: FAIL (no `notices.mjs`).
+- [ ] **Step 2:** Add the dependencies (`pnpm install`), `notices.mjs` and `THIRD-PARTY.md`. Run
+  the test (PASS), then `pnpm --filter @localdot/web build` and
+  `ls apps/web/dist/assets/licenses/`.
+  Expected: `mediabunny-1.61.0.txt`.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint
+git add THIRD-PARTY.md apps/web/package.json apps/web/scripts apps/daemon/package.json pnpm-lock.yaml vitest.config.ts
+git commit -m "chore(deps): pin mediabunny 1.61.0 with its MPL-2.0 notice"
+```
+
+**Acceptance:** the notices test passes, the build ships the notice, and `pnpm hygiene` is clean.
+
+---
+
+### Task 4: Test media — a synthetic H.264 stream that proves what was decoded
+
+Every recorder, replay and export test needs real H.264, with no encoder in Node and no binary
+fixture in the repo. This generator writes a valid Constrained Baseline stream whose every coded
+macroblock is I_PCM, so the samples are exact. Frame k of a GOP paints macroblock k − 1 white and
+skips the rest. So a decoder shows the right picture only if it decoded forward from the key frame,
+and `frameOfLuma` reads the frame index back from the decoded picture. It was verified while
+writing this plan: ffmpeg decodes all 60 frames of a 128×128, 20-frame-GOP stream, and
+`frameOfLuma` names every one correctly.
+
+**Review tier:** light (test helper).
+
+**Files:**
+- Create: `packages/stage/src/testing/h264-synth.ts`, `packages/stage/src/testing/h264-synth.test.ts`,
+  `packages/stage/src/testing/index.ts` (`export * from "./h264-synth.ts";`)
+- Modify: `packages/stage/package.json` (`"exports": { ".": "./src/index.ts", "./testing": "./src/testing/index.ts" }`)
+
+**Interfaces:**
+- Produces: `SYNTH_WHITE = 235`, `SYNTH_CODEC = "avc1.42C01E"`,
+  `SynthOptions { widthMbs; heightMbs; keyEvery }`, `SynthFrame { index; key; data }`,
+  `keyLevel(gop)`, `synthFrame(o, index)`, `synthStream(o, count)`, `frameOfLuma(o, mbLuma)`.
+  The daemon's recorder tests import it as `@localdot/stage/testing`, and so do the seeder
+  (Task 12) and the browser e2e (Task 13).
+
+- [ ] **Step 1: Write the failing test**
+
+`packages/stage/src/testing/h264-synth.test.ts`:
+```ts
+import { describe, expect, it } from "vitest";
+import { frameOfLuma, keyLevel, SYNTH_WHITE, synthFrame, synthStream } from "./h264-synth.ts";
+
+const o = { widthMbs: 8, heightMbs: 8, keyEvery: 20 };
+const nalTypes = (au: Uint8Array) => {
+  const t: number[] = [];
+  for (let i = 0; i + 3 < au.length; i++) if (au[i] === 0 && au[i + 1] === 0 && au[i + 2] === 1) t.push((au[i + 3] ?? 0) & 0x1f);
+  return t;
+};
+// What a decoder must show for frame i: the GOP's level, with the first p macroblocks white.
+const expectedLuma = (i: number) => {
+  const p = i % o.keyEvery;
+  return Array.from({ length: 64 }, (_, mb) => (mb < p ? SYNTH_WHITE : keyLevel(Math.floor(i / o.keyEvery))));
+};
+
+describe("synthetic H.264", () => {
+  it("starts each GOP with SPS, PPS and an IDR, and codes other frames as one P slice", () => {
+    expect(nalTypes(synthFrame(o, 0).data)).toEqual([7, 8, 5]);
+    expect(nalTypes(synthFrame(o, 20).data)).toEqual([7, 8, 5]);
+    expect(nalTypes(synthFrame(o, 7).data)).toEqual([1]);
+    expect(synthStream(o, 41).filter((f) => f.key).map((f) => f.index)).toEqual([0, 20, 40]);
+  });
+
+  it("never leaves a start-code prefix inside a NAL payload", () => {
+    for (const f of synthStream(o, 40)) {
+      const payloads = Buffer.from(f.data).toString("hex").split("00000001").slice(1);
+      expect(payloads).toHaveLength(nalTypes(f.data).length);
+      // 00 00 0x (x ≤ 3) at a byte boundary inside a payload would read as a start code.
+      for (const hex of payloads) expect(/^(?:..)*?00000[0-3]/.test(hex)).toBe(false);
+    }
+  });
+
+  it("reads the frame index back from the decoded picture", () => {
+    for (const i of [0, 1, 19, 20, 21, 39, 59]) expect(frameOfLuma(o, expectedLuma(i))).toBe(i);
+  });
+
+  it("refuses a GOP longer than the picture has macroblocks", () => {
+    expect(() => synthFrame({ widthMbs: 2, heightMbs: 2, keyEvery: 6 }, 0)).toThrow(RangeError);
+  });
+});
+```
+
+Run: `pnpm exec vitest run packages/stage/src/testing`
+Expected: FAIL. The module does not exist.
+
+- [ ] **Step 2: Write the generator**
+
+`packages/stage/src/testing/h264-synth.ts` (complete: the bitstream is the point):
+```ts
+// A tiny, valid H.264 Constrained Baseline stream for tests, with no encoder: every coded
+// macroblock is I_PCM, so a decoded frame carries exact sample values. A key frame fills the
+// picture with its GOP's level; the p-th frame after it paints macroblock p − 1 white and skips
+// the rest, so only a decoder that ran forward from the key frame shows the right picture, and
+// the picture tells which frame it is (`frameOfLuma`).
+
+export const SYNTH_WHITE = 235;
+export const SYNTH_CODEC = "avc1.42C01E";
+
+export interface SynthOptions {
+  widthMbs: number;
+  heightMbs: number;
+  keyEvery: number;
+}
+
+export interface SynthFrame {
+  index: number;
+  key: boolean;
+  data: Uint8Array;
+}
+
+export function keyLevel(gop: number): number {
+  return 16 + ((gop * 29) % 190);
+}
+
+class Bits {
+  readonly bytes: number[] = [];
+  #cur = 0;
+  #n = 0;
+
+  u(bits: number, value: number): void {
+    for (let i = bits - 1; i >= 0; i--) this.bit((value >>> i) & 1);
+  }
+
+  bit(b: number): void {
+    this.#cur = (this.#cur << 1) | b;
+    this.#n += 1;
+    if (this.#n === 8) {
+      this.bytes.push(this.#cur);
+      this.#cur = 0;
+      this.#n = 0;
+    }
+  }
+
+  ue(value: number): void {
+    const v = value + 1;
+    const len = 32 - Math.clz32(v);
+    this.u(len - 1, 0);
+    this.u(len, v);
+  }
+
+  se(value: number): void {
+    this.ue(value <= 0 ? -2 * value : 2 * value - 1);
+  }
+
+  align(): void {
+    while (this.#n !== 0) this.bit(0);
+  }
+
+  trailing(): Uint8Array {
+    this.bit(1);
+    this.align();
+    return Uint8Array.from(this.bytes);
+  }
+}
+
+// Annex B start code, NAL header, and the RBSP with emulation-prevention bytes.
+function nal(refIdc: number, type: number, rbsp: Uint8Array): Uint8Array {
+  const out = [0, 0, 0, 1, (refIdc << 5) | type];
+  let zeros = 0;
+  for (const b of rbsp) {
+    if (zeros >= 2 && b <= 3) {
+      out.push(3);
+      zeros = 0;
+    }
+    out.push(b);
+    zeros = b === 0 ? zeros + 1 : 0;
+  }
+  return Uint8Array.from(out);
+}
+
+// profile 66, constraint_set0+1, level 3.0; sps 0; log2_max_frame_num 4; POC type 2; one reference
+// frame; frame_mbs_only; direct_8x8_inference; no cropping, no VUI.
+function sps(o: SynthOptions): Uint8Array {
+  const b = new Bits();
+  b.u(8, 66);
+  b.u(8, 0xc0);
+  b.u(8, 30);
+  b.ue(0);
+  b.ue(0);
+  b.ue(2);
+  b.ue(1);
+  b.bit(0);
+  b.ue(o.widthMbs - 1);
+  b.ue(o.heightMbs - 1);
+  b.bit(1);
+  b.bit(1);
+  b.bit(0);
+  b.bit(0);
+  return nal(3, 7, b.trailing());
+}
+
+// CAVLC, one slice group, one reference index, QP 26, deblocking control present.
+function pps(): Uint8Array {
+  const b = new Bits();
+  b.ue(0);
+  b.ue(0);
+  b.bit(0);
+  b.bit(0);
+  b.ue(0);
+  b.ue(0);
+  b.ue(0);
+  b.bit(0);
+  b.u(2, 0);
+  b.se(0);
+  b.se(0);
+  b.se(0);
+  b.bit(1);
+  b.bit(0);
+  b.bit(0);
+  return nal(3, 8, b.trailing());
+}
+
+function pcm(b: Bits, luma: number): void {
+  b.align();
+  for (let i = 0; i < 256; i++) b.u(8, luma);
+  for (let i = 0; i < 128; i++) b.u(8, 128);
+}
+
+// IDR I slice: every macroblock I_PCM (mb_type 25) at the GOP's level; deblocking off.
+function idr(o: SynthOptions, gop: number): Uint8Array {
+  const b = new Bits();
+  b.ue(0);
+  b.ue(7);
+  b.ue(0);
+  b.u(4, 0);
+  b.ue(gop % 2);
+  b.bit(0);
+  b.bit(0);
+  b.se(0);
+  b.ue(1);
+  for (let mb = 0; mb < o.widthMbs * o.heightMbs; mb++) {
+    b.ue(25);
+    pcm(b, keyLevel(gop));
+  }
+  return nal(3, 5, b.trailing());
+}
+
+// P slice: skip to macroblock `mb`, paint it white as I_PCM (mb_type 5 + 25), skip the rest.
+function paint(o: SynthOptions, frameNum: number, mb: number): Uint8Array {
+  const total = o.widthMbs * o.heightMbs;
+  const b = new Bits();
+  b.ue(0);
+  b.ue(5);
+  b.ue(0);
+  b.u(4, frameNum % 16);
+  b.bit(0);
+  b.bit(0);
+  b.bit(0);
+  b.se(0);
+  b.ue(1);
+  b.ue(mb);
+  b.ue(30);
+  pcm(b, SYNTH_WHITE);
+  if (mb < total - 1) b.ue(total - 1 - mb);
+  return nal(2, 1, b.trailing());
+}
+
+const concat = (parts: Uint8Array[]): Uint8Array => {
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+};
+
+export function synthFrame(o: SynthOptions, index: number): SynthFrame {
+  if (o.keyEvery < 1 || o.keyEvery > o.widthMbs * o.heightMbs + 1) {
+    throw new RangeError("keyEvery must leave a macroblock for every frame of a GOP");
+  }
+  const gop = Math.floor(index / o.keyEvery);
+  const p = index % o.keyEvery;
+  if (p === 0) return { index, key: true, data: concat([sps(o), pps(), idr(o, gop)]) };
+  return { index, key: false, data: paint(o, p, p - 1) };
+}
+
+export function synthStream(o: SynthOptions, count: number): SynthFrame[] {
+  return Array.from({ length: count }, (_, i) => synthFrame(o, i));
+}
+
+// The frame a decoded picture shows, from the mean luma of each macroblock (row-major).
+export function frameOfLuma(o: SynthOptions, mbLuma: number[]): number {
+  const white = mbLuma.filter((v) => Math.abs(v - SYNTH_WHITE) <= 2).length;
+  const base = mbLuma.find((v) => Math.abs(v - SYNTH_WHITE) > 2);
+  if (base === undefined) throw new Error("every macroblock is white: the GOP is longer than the picture");
+  for (let gop = 0; gop < 4096; gop++) {
+    if (Math.abs(keyLevel(gop) - base) <= 2) return gop * o.keyEvery + white;
+  }
+  throw new Error(`no GOP has level ${base}`);
+}
+```
+
+Run: `pnpm exec vitest run packages/stage/src/testing`
+Expected: PASS (4 tests).
+
+**Implementation notes:**
+- `keyLevel` repeats every 190 GOPs. `frameOfLuma` returns the first GOP with that level, so a test
+  that reads frame indices back must keep its GOP count under 190, or compare modulo
+  `190 × keyEvery`. Task 13 compares modulo.
+- `keyEvery` may not exceed the macroblock count plus one. A 20×12-macroblock seeded video
+  (320×192) allows GOPs of up to 241 frames.
+- The stream decodes in Chrome's WebCodecs (Constrained Baseline). Task 13's e2e is the in-browser
+  proof. In Node the tests check structure only.
+
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint
+git add packages/stage
+git commit -m "test(stage): synthetic H.264 that tells which frame was decoded"
+```
+
+**Acceptance:** `pnpm exec vitest run packages/stage` passes. `pnpm --filter @localdot/stage typecheck`
+is clean.
+
+---
