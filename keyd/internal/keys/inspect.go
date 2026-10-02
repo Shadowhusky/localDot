@@ -42,6 +42,9 @@ type occurrence struct {
 	token  string
 	header string
 	basic  bool
+	// folded marks a token found in a lower-cased header name, which Inspect resolves to the
+	// registered token it folds from.
+	folded bool
 }
 
 // Inspect finds every surrogate-shaped token in the request line, its host, user information and
@@ -51,6 +54,13 @@ type occurrence struct {
 // writes it: the limits are d's, so a request bound elsewhere is refused, with or without a surrogate.
 func (r *Registry) Inspect(d Dest, method string, u *url.URL, h http.Header) Verdict {
 	occ := scan(u, h)
+	for i, o := range occ {
+		if o.folded {
+			if e, ok := r.lookupFolded(o.token); ok {
+				occ[i].token = e.Token
+			}
+		}
+	}
 	var v Verdict
 	for _, token := range order(occ) {
 		e, ok := r.Lookup(token)
@@ -218,8 +228,10 @@ func scan(u *url.URL, h http.Header) []occurrence {
 	slices.Sort(names)
 	for _, name := range names {
 		canonical := http.CanonicalHeaderKey(name)
-		for _, t := range surrogate.Find(name) {
-			out = append(out, occurrence{token: t, header: "name:" + name})
+		// net/http canonicalises a name (ld_ becomes Ld_, the rest lower case), so names are
+		// searched lower-cased; the token found is the registered one only in lower case.
+		for _, t := range surrogate.Find(strings.ToLower(name)) {
+			out = append(out, occurrence{token: t, header: "name:" + name, folded: true})
 		}
 		for _, value := range h[name] {
 			for _, t := range surrogate.Find(value) {

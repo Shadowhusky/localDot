@@ -3,6 +3,7 @@ package keys
 import (
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 
 	"github.com/shadowhusky/localdot/keyd/internal/surrogate"
@@ -62,6 +63,19 @@ func (r *Registry) Lookup(token string) (Entry, bool) {
 	defer r.mu.RUnlock()
 	e, ok := r.byToken[token]
 	return e.clone(), ok
+}
+
+// lookupFolded finds the entry whose token, lower-cased, is folded: a surrogate found in a header
+// name, whose case net/http has changed.
+func (r *Registry) lookupFolded(folded string) (Entry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for token, e := range r.byToken {
+		if strings.ToLower(token) == folded {
+			return e.clone(), true
+		}
+	}
+	return Entry{}, false
 }
 
 func (r *Registry) ForCell(cell string) []Entry {

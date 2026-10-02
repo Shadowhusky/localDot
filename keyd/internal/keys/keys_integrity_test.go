@@ -1392,3 +1392,31 @@ func TestALimitedPathRefusesSpaces(t *testing.T) {
 		wantDeny(t, "a limited path with a raw space", r.Inspect(d, "GET", u, hdr("Authorization", "Bearer "+tok)), ReasonSurrogatePolicy)
 	}
 }
+
+// A header name is matched in any case: net/http folds ld_ into Ld_ and lower-cases the rest, so a
+// surrogate there is found like one in a value. A known one is refused as misplaced under its own
+// secret, an unknown one as unknown, and ApplySwaps refuses headers that hold one.
+func TestASurrogateInAHeaderNameIsFoundInAnyCase(t *testing.T) {
+	f := newFixture(t)
+	unknown, _ := surrogate.Mint("key")
+	for _, e := range []Entry{f.bearer, f.raw, f.user, f.llm} {
+		for _, name := range []string{e.Token, http.CanonicalHeaderKey(e.Token), strings.ToUpper(e.Token), strings.ToLower(e.Token), "X-" + http.CanonicalHeaderKey(e.Token), http.CanonicalHeaderKey(e.Token) + "-Note", "x" + e.Token} {
+			h := http.Header{name: {"1"}}
+			v := at(t, f.r, https(integrityHost), "GET", "/", h)
+			if v.Allow || v.Reason != ReasonMisplacedSurrogate || v.SurrogateID != e.ID || v.SecretID != e.Binding.SecretID {
+				t.Errorf("%s in the name %q: %+v", e, name, v)
+			}
+			if err := ApplySwaps(h, nil, func(string) ([]byte, error) { return []byte("real-secret-value-for-test"), nil }); err == nil {
+				t.Errorf("%s in the name %q: ApplySwaps accepted it", e, name)
+			}
+		}
+	}
+	// The surrogate in its own header is allowed only while no name carries one.
+	ok := hdr("Authorization", "Bearer "+f.bearer.Token)
+	wantAllow(t, "the bearer alone", at(t, f.r, https(integrityHost), "GET", "/", ok), 1)
+	ok[http.CanonicalHeaderKey(f.bearer2.Token)] = []string{"1"}
+	wantDeny(t, "the bearer with a sibling in a name", at(t, f.r, https(integrityHost), "GET", "/", ok), ReasonMisplacedSurrogate)
+	for _, name := range []string{http.CanonicalHeaderKey(unknown), strings.ToUpper(unknown), "X-" + http.CanonicalHeaderKey(unknown)} {
+		wantDeny(t, "unknown in the name "+name, at(t, f.r, https(integrityHost), "GET", "/", http.Header{name: {"1"}}), ReasonUnknownSurrogate)
+	}
+}

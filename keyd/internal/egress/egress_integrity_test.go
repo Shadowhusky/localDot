@@ -902,3 +902,48 @@ func TestAnUpgradeToAnUnboundHostStillWorks(t *testing.T) {
 		t.Fatalf("audit %+v", l)
 	}
 }
+
+// net/http folds a header name's case (ld_ becomes Ld_) before keyd sees it: a surrogate in a
+// name is still found, refused and alerted before any dial, as it is in a value.
+func TestASurrogateInAHeaderNameIsRefusedAndAlerted(t *testing.T) {
+	w := newWorld(t)
+	var reached atomic.Bool
+	w.plainUpstream("api.example.test", http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached.Store(true) }))
+	w.secret(vault.Record{ID: "weather", Kind: vault.KindHTTP, Hosts: []string{"api.example.test"}, Header: "Authorization", Format: "bearer"}, echoed)
+	c, rd := w.recordingCell("c1", policy.Desktop)
+	known := w.mint("c1", "weather")
+	unknown, _ := surrogate.Mint("key")
+	sub, cancel := w.events.Subscribe(64)
+	defer cancel()
+	refusals := 0
+	for _, tc := range []struct {
+		tok, reason, secret string
+	}{{known, keys.ReasonMisplacedSurrogate, "weather"}, {unknown, keys.ReasonUnknownSurrogate, "unknown"}} {
+		for _, name := range []string{tc.tok, strings.ToUpper(tc.tok), http.CanonicalHeaderKey(tc.tok), "X-" + tc.tok, tc.tok + "-Note", "x" + tc.tok} {
+			resp, _ := rawRequest(t, c, "GET http://api.example.test/ HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"+name+": 1\r\n"+proxyAuth()+"\r\n")
+			if resp.StatusCode != http.StatusForbidden || resp.Header.Get("X-Keyd-Reason") != tc.reason {
+				t.Errorf("%s: %d %q, want 403 %q", name, resp.StatusCode, resp.Header.Get("X-Keyd-Reason"), tc.reason)
+			}
+			refusals++
+			select {
+			case e := <-sub:
+				ku, ok := e.Data.(events.KeyUse)
+				if !ok || ku.Decision != "deny" || ku.SecretID != tc.secret {
+					t.Errorf("%s: event %+v", name, e)
+				}
+			case <-time.After(2 * time.Second):
+				t.Errorf("%s: no key.use alert", name)
+			}
+		}
+	}
+	if a := rd.addresses(); len(a) != 0 || reached.Load() {
+		t.Fatalf("dialled %v, upstream reached %v", a, reached.Load())
+	}
+	logged := strings.ToLower(w.auditText())
+	if strings.Contains(logged, strings.ToLower(known)) || strings.Contains(logged, strings.ToLower(unknown)) {
+		t.Fatalf("audit carries a surrogate: %s", logged)
+	}
+	if refusals != 12 {
+		t.Fatalf("%d refusals", refusals)
+	}
+}
