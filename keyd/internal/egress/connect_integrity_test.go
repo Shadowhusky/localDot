@@ -3,7 +3,9 @@ package egress
 import (
 	"bufio"
 	"bytes"
+	"context"
 	"crypto/tls"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -607,6 +609,20 @@ func TestConnectAndPlainRequestsRunTogether(t *testing.T) {
 	w.tlsUpstream("www.example.test", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { io.WriteString(rw, "tls") }))
 	w.plainUpstream("ports.example.test", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { io.WriteString(rw, "plain") }))
 	c := w.cell("c1", policy.Desktop)
+	stopWrites, writesDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(writesDone)
+		for {
+			select {
+			case <-stopWrites:
+				return
+			default:
+				c.mu.Lock()
+				c.intercepted["changing.example.test"] = !c.intercepted["changing.example.test"]
+				c.mu.Unlock()
+			}
+		}
+	}()
 	var wg sync.WaitGroup
 	for i := 0; i < 8; i++ {
 		wg.Add(3)
@@ -643,6 +659,8 @@ func TestConnectAndPlainRequestsRunTogether(t *testing.T) {
 		}
 	}
 	wg.Wait()
+	close(stopWrites)
+	<-writesDone
 	if resp, body := get(t, w.client(c), "https://www.example.test/"); resp.StatusCode != 200 || body != "tls" {
 		t.Fatalf("afterwards: %d %q", resp.StatusCode, body)
 	}
@@ -667,4 +685,187 @@ func TestRevokeDuringAPassthroughDialEndsIt(t *testing.T) {
 	if l.Decision != audit.Error || l.SNI != "www.example.test" {
 		t.Fatalf("audit %+v", l)
 	}
+}
+
+// A TLS handshake remains bounded even if a connection implementation ignores read deadlines.
+// The context closes the blocked connection; both deadline operations are still attempted.
+type ignoringDeadlinesConn struct {
+	net.Conn
+	deadlines int
+}
+
+func (c *ignoringDeadlinesConn) SetReadDeadline(time.Time) error { c.deadlines++; return nil }
+func TestSNIPeekContextBoundsAConnectionIgnoringDeadlines(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	conn := &ignoringDeadlinesConn{Conn: server}
+	done := make(chan error, 1)
+	go func() { _, _, err := peekSNI(conn, 50*time.Millisecond); done <- err }()
+	select {
+	case err := <-done:
+		if err == nil || conn.deadlines != 2 {
+			t.Fatalf("peek: %v, %d deadlines", err, conn.deadlines)
+		}
+	case <-time.After(time.Second):
+		server.Close()
+		<-done
+		t.Fatal("SNI peek ignored its handshake context")
+	}
+}
+
+func TestSNIRecorderNeverReadsBeyond16KiB(t *testing.T) {
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+	go client.Write(make([]byte, 32<<10))
+	rec := &recordingConn{Conn: server}
+	n, err := rec.Read(make([]byte, 32<<10))
+	if err != nil || n != 16<<10 || rec.buf.Len() != 16<<10 {
+		t.Fatalf("read %d bytes, recorded %d, error %v; limit is 16 KiB", n, rec.buf.Len(), err)
+	}
+	if n, err := rec.Read(make([]byte, 1)); n != 0 || err != io.ErrShortBuffer {
+		t.Fatalf("over limit: %d %v", n, err)
+	}
+}
+
+type oneConnectionDialer struct{ conn net.Conn }
+
+func (d oneConnectionDialer) DialContext(context.Context, string, string) (net.Conn, error) {
+	return d.conn, nil
+}
+
+type blockedHelloWriteConn struct {
+	net.Conn
+	started, closed      chan struct{}
+	writeOnce, closeOnce sync.Once
+}
+
+func (c *blockedHelloWriteConn) Write([]byte) (int, error) {
+	c.writeOnce.Do(func() { close(c.started) })
+	<-c.closed
+	return 0, net.ErrClosed
+}
+
+func (c *blockedHelloWriteConn) Close() error {
+	c.closeOnce.Do(func() { close(c.closed) })
+	return c.Conn.Close()
+}
+
+// The upstream must be tracked before replaying the ClientHello: a blocked Write is not yet
+// in splice, so closing only the client cannot release it when the cell is revoked.
+func TestRevokeClosesAnUpstreamBlockedOnTheClientHello(t *testing.T) {
+	w := newWorld(t)
+	up, peer := net.Pipe()
+	defer peer.Close()
+	held := &blockedHelloWriteConn{Conn: up, started: make(chan struct{}), closed: make(chan struct{})}
+	defer held.Close()
+	c := w.cellWith("c1", policy.Desktop, oneConnectionDialer{held})
+	client, resp := rawConnect(t, c, "www.example.test:443")
+	defer client.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("CONNECT: %d", resp.StatusCode)
+	}
+	hello := handshakeRecords(clientHello([]serverName{{0, "www.example.test"}}, false, nil), 1<<14)
+	if _, err := client.Write(hello); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-held.started:
+	case <-time.After(time.Second):
+		t.Fatal("upstream replay never started")
+	}
+	c.Revoke()
+	select {
+	case <-held.closed:
+	case <-time.After(time.Second):
+		t.Fatal("revoke did not close the blocked upstream")
+	}
+	w.waitLine(func(l audit.Line) bool { return l.Mode == "passthrough" && l.Decision == audit.Error })
+}
+
+func TestSpliceClosesTheClientWhenTheUpstreamEndsFirst(t *testing.T) {
+	client, clientPeer := net.Pipe()
+	up, upPeer := net.Pipe()
+	defer clientPeer.Close()
+	defer client.Close()
+	defer up.Close()
+	defer upPeer.Close()
+	done := make(chan struct{})
+	go func() { splice(client, up); close(done) }()
+	upPeer.Close()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("upstream EOF left the client-to-upstream copy open")
+	}
+	if n, err := clientPeer.Read(make([]byte, 1)); n != 0 || err != io.EOF {
+		t.Fatalf("client still open: %d %v", n, err)
+	}
+}
+
+func TestGoproxyCannotUseItsDefaultDialers(t *testing.T) {
+	t.Setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+	w := newWorld(t)
+	p := w.cell("c1", policy.Desktop).newConnectProxy()
+	if p.ConnectDial != nil || p.ConnectDialWithReq != nil {
+		t.Fatal("goproxy CONNECT dialing remains enabled")
+	}
+	if conn, err := p.Tr.DialContext(context.Background(), "tcp", "127.0.0.1:1"); conn != nil || err != errNoDial {
+		t.Fatalf("goproxy transport dial: %v, %v", conn, err)
+	}
+	if sameHost("", "") {
+		t.Fatal("empty SNI matched")
+	}
+}
+
+func TestABoundSecretHostNeverGetsUninspectedPassthrough(t *testing.T) {
+	w := newWorld(t)
+	w.secret(vault.Record{ID: "weather", Kind: vault.KindHTTP, Hosts: []string{"api.example.test"}, Header: "Authorization", Format: "bearer"}, echoed)
+	c, rd := w.recordingCell("c1", policy.Desktop)
+	conn, resp := rawConnect(t, c, "api.example.test:443")
+	defer conn.Close()
+	if resp.StatusCode != http.StatusForbidden || resp.Header.Get("X-Keyd-Reason") != "interception-unavailable" {
+		t.Fatalf("bound host entered a tunnel: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+	if len(rd.addresses()) != 0 {
+		t.Fatalf("dialled %v", rd.addresses())
+	}
+}
+
+func TestInterceptedHostSnapshotsRemainStableDuringBindingChanges(t *testing.T) {
+	w := newWorld(t)
+	c := w.cell("c1", policy.Desktop)
+	var wg sync.WaitGroup
+	for reader := 0; reader < 8; reader++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for range 1000 {
+				snapshot := c.interceptedHosts()
+				first := true
+				var value bool
+				for _, current := range snapshot {
+					if first {
+						value, first = current, false
+					}
+					if current != value {
+						t.Error("snapshot mixed two binding generations")
+						return
+					}
+				}
+			}
+		}()
+	}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for generation := range 1000 {
+			c.mu.Lock()
+			for host := range 128 {
+				c.intercepted[fmt.Sprintf("host-%d.example.test", host)] = generation%2 == 0
+			}
+			c.mu.Unlock()
+		}
+	}()
+	wg.Wait()
 }

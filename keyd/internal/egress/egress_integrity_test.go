@@ -1144,6 +1144,7 @@ func TestA407ClosesTheConnection(t *testing.T) {
 		"a CONNECT":          "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n",
 		"OPTIONS *":          "OPTIONS * HTTP/1.1\r\nHost: x\r\n\r\n",
 		"a body":             "POST http://keyd.ldot/health HTTP/1.1\r\nHost: keyd.ldot\r\nContent-Length: 5\r\n\r\nhello",
+		"an unsent body":     "POST http://keyd.ldot/health HTTP/1.1\r\nHost: keyd.ldot\r\nContent-Length: 5\r\n\r\n",
 		"keep-alive asked":   health + "Connection: keep-alive\r\n\r\n",
 		"a pipelined second": health + "\r\n" + health + proxyAuth() + "\r\n",
 	} {
@@ -1156,12 +1157,25 @@ func TestA407ClosesTheConnection(t *testing.T) {
 			t.Fatal(err)
 		}
 		br := bufio.NewReader(conn)
+		var wire strings.Builder
+		for {
+			line, err := br.ReadString('\n')
+			if err != nil {
+				t.Fatal(err)
+			}
+			wire.WriteString(line)
+			if line == crlf {
+				break
+			}
+		}
+		// ReadResponse consumes Connection: close into resp.Close; verify the wire header too.
+		br = bufio.NewReader(io.MultiReader(strings.NewReader(wire.String()), br))
 		resp, err := http.ReadResponse(br, nil)
 		if err != nil {
 			t.Fatalf("%s: %v", name, err)
 		}
 		io.Copy(io.Discard, resp.Body)
-		if resp.StatusCode != http.StatusProxyAuthRequired || resp.Header.Get("Connection") != "close" || !resp.Close {
+		if resp.StatusCode != http.StatusProxyAuthRequired || !strings.Contains(strings.ToLower(wire.String()), "\r\nconnection: close\r\n") || !resp.Close {
 			t.Errorf("%s: %d, Connection %q, want 407 and close", name, resp.StatusCode, resp.Header.Get("Connection"))
 		}
 		if rest, err := io.ReadAll(br); err != nil || len(rest) != 0 {
@@ -1169,4 +1183,59 @@ func TestA407ClosesTheConnection(t *testing.T) {
 		}
 		conn.Close()
 	}
+}
+
+// A cell cannot exhaust host descriptors with unauthenticated half-open requests. Excess
+// sockets are refused before HTTP parsing, and closing a held socket returns its slot.
+func TestCellConnectionCapRefusesAtAcceptAndRecovers(t *testing.T) {
+	w := newWorld(t)
+	c := w.cell("c1", policy.Desktop)
+	var held []net.Conn
+	defer func() {
+		for _, conn := range held {
+			conn.Close()
+		}
+	}()
+	for range 64 {
+		conn, err := dialListener(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, conn)
+		io.WriteString(conn, "GET ")
+	}
+	for range 4 {
+		conn, err := dialListener(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn.SetReadDeadline(time.Now().Add(time.Second))
+		data, err := io.ReadAll(conn)
+		conn.Close()
+		if len(data) != 0 || err != nil {
+			t.Fatalf("excess socket not refused at accept: %q %v", data, err)
+		}
+	}
+	lines := w.lines()
+	if len(lines) != 1 || lines[0].Reason != "connection-cap" || lines[0].Cell != "c1" {
+		t.Fatalf("cap audit not rate limited: %+v", lines)
+	}
+	held[0].Close()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := dialListener(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
+		io.WriteString(conn, "GET http://keyd.ldot/health HTTP/1.1"+crlf+"Host: keyd.ldot"+crlf+proxyAuth()+crlf)
+		resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+		conn.Close()
+		if err == nil && resp.StatusCode == http.StatusOK {
+			resp.Body.Close()
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatal("listener did not recover after one connection closed")
 }
