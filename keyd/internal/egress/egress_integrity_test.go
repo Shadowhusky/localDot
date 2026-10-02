@@ -1130,3 +1130,43 @@ func TestFullHeaderBlocksInParallelAreAllAnswered(t *testing.T) {
 		t.Fatalf("%d audit lines, want 4", n)
 	}
 }
+
+// Every 407 closes its connection, so a client without the token holds one for no longer than it
+// takes to send a request. A request pipelined behind the refused one is never read.
+func TestA407ClosesTheConnection(t *testing.T) {
+	w := newWorld(t)
+	c := w.cell("c1", policy.Desktop)
+	bad := "Proxy-Authorization: Basic " + basicAuth("cell", strings.Repeat("x", len(testToken))) + "\r\n"
+	health := "GET http://keyd.ldot/health HTTP/1.1\r\nHost: keyd.ldot\r\n"
+	for name, req := range map[string]string{
+		"no token":           health + "\r\n",
+		"a wrong token":      health + bad + "\r\n",
+		"a CONNECT":          "CONNECT example.com:443 HTTP/1.1\r\nHost: example.com:443\r\n\r\n",
+		"OPTIONS *":          "OPTIONS * HTTP/1.1\r\nHost: x\r\n\r\n",
+		"a body":             "POST http://keyd.ldot/health HTTP/1.1\r\nHost: keyd.ldot\r\nContent-Length: 5\r\n\r\nhello",
+		"keep-alive asked":   health + "Connection: keep-alive\r\n\r\n",
+		"a pipelined second": health + "\r\n" + health + proxyAuth() + "\r\n",
+	} {
+		conn, err := dialListener(c)
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn.SetDeadline(time.Now().Add(15 * time.Second))
+		if _, err := io.WriteString(conn, req); err != nil {
+			t.Fatal(err)
+		}
+		br := bufio.NewReader(conn)
+		resp, err := http.ReadResponse(br, nil)
+		if err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		if resp.StatusCode != http.StatusProxyAuthRequired || resp.Header.Get("Connection") != "close" || !resp.Close {
+			t.Errorf("%s: %d, Connection %q, want 407 and close", name, resp.StatusCode, resp.Header.Get("Connection"))
+		}
+		if rest, err := io.ReadAll(br); err != nil || len(rest) != 0 {
+			t.Errorf("%s: after the 407 the connection gave %q, %v, want it closed", name, rest, err)
+		}
+		conn.Close()
+	}
+}
