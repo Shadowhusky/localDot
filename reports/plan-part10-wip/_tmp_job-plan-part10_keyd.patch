@@ -1,0 +1,771 @@
+diff --git a/keyd/internal/vault/keychain_acl_darwin.go b/keyd/internal/vault/keychain_acl_darwin.go
+new file mode 100644
+index 0000000..e14695f
+--- /dev/null
++++ b/keyd/internal/vault/keychain_acl_darwin.go
+@@ -0,0 +1,367 @@
++//go:build darwin && cgo
++
++package vault
++
++/*
++#cgo CFLAGS: -Wno-deprecated-declarations
++#cgo LDFLAGS: -framework Security -framework CoreFoundation
++#include <stdlib.h>
++#include <string.h>
++#include <Security/Security.h>
++
++static CFStringRef ld_str(const char *s) {
++	return CFStringCreateWithCString(kCFAllocatorDefault, s, kCFStringEncodingUTF8);
++}
++
++// A query for the service's generic passwords, in one keychain when kc is set (tests) or in the
++// default search list (the login keychain).
++static CFMutableDictionaryRef ld_query(const char *service, SecKeychainRef kc, int forAdd) {
++	CFMutableDictionaryRef q = CFDictionaryCreateMutable(kCFAllocatorDefault, 0,
++		&kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++	CFStringRef s = ld_str(service);
++	CFDictionarySetValue(q, kSecClass, kSecClassGenericPassword);
++	CFDictionarySetValue(q, kSecAttrService, s);
++	CFRelease(s);
++	if (kc != NULL) {
++		if (forAdd) {
++			CFDictionarySetValue(q, kSecUseKeychain, kc);
++		} else {
++			CFArrayRef list = CFArrayCreate(kCFAllocatorDefault, (const void **)&kc, 1, &kCFTypeArrayCallBacks);
++			CFDictionarySetValue(q, kSecMatchSearchList, list);
++			CFRelease(list);
++		}
++	}
++	return q;
++}
++
++static void ld_set_account(CFMutableDictionaryRef q, const char *account) {
++	CFStringRef a = ld_str(account);
++	CFDictionarySetValue(q, kSecAttrAccount, a);
++	CFRelease(a);
++}
++
++// Adds an item whose access list trusts only the calling program, named by its designated
++// requirement (for a Developer ID build: our team and identifier, so later keyd versions read it
++// and nothing else does without the user's consent). Fails on a duplicate; never replaces.
++static OSStatus ld_add(const char *service, SecKeychainRef kc, const char *account, const void *value, long length) {
++	SecTrustedApplicationRef self = NULL;
++	OSStatus st = SecTrustedApplicationCreateFromPath(NULL, &self);
++	if (st != errSecSuccess) return st;
++	CFArrayRef trusted = CFArrayCreate(kCFAllocatorDefault, (const void **)&self, 1, &kCFTypeArrayCallBacks);
++	CFRelease(self);
++	SecAccessRef access = NULL;
++	CFStringRef descriptor = ld_str("localDot key layer");
++	st = SecAccessCreate(descriptor, trusted, &access);
++	CFRelease(descriptor);
++	CFRelease(trusted);
++	if (st != errSecSuccess) return st;
++	CFMutableDictionaryRef q = ld_query(service, kc, 1);
++	ld_set_account(q, account);
++	CFStringRef label = ld_str(service);
++	CFDictionarySetValue(q, kSecAttrLabel, label);
++	CFRelease(label);
++	CFDataRef data = CFDataCreate(kCFAllocatorDefault, (const UInt8 *)value, (CFIndex)length);
++	CFDictionarySetValue(q, kSecValueData, data);
++	CFDictionarySetValue(q, kSecAttrAccess, access);
++	st = SecItemAdd(q, NULL);
++	CFRelease(data);
++	CFRelease(access);
++	CFRelease(q);
++	return st;
++}
++
++// Copies the item's value into a malloc'd buffer that the caller zeroes and frees.
++static OSStatus ld_get(const char *service, SecKeychainRef kc, const char *account, void **out, long *length) {
++	CFMutableDictionaryRef q = ld_query(service, kc, 0);
++	ld_set_account(q, account);
++	CFDictionarySetValue(q, kSecReturnData, kCFBooleanTrue);
++	CFDictionarySetValue(q, kSecMatchLimit, kSecMatchLimitOne);
++	CFTypeRef result = NULL;
++	OSStatus st = SecItemCopyMatching(q, &result);
++	CFRelease(q);
++	if (st != errSecSuccess) return st;
++	if (result == NULL || CFGetTypeID(result) != CFDataGetTypeID()) {
++		if (result != NULL) CFRelease(result);
++		return errSecDecode;
++	}
++	CFIndex n = CFDataGetLength((CFDataRef)result);
++	*out = malloc(n > 0 ? (size_t)n : 1);
++	if (*out == NULL) {
++		CFRelease(result);
++		return errSecAllocate;
++	}
++	memcpy(*out, CFDataGetBytePtr((CFDataRef)result), (size_t)n);
++	*length = (long)n;
++	CFRelease(result);
++	return errSecSuccess;
++}
++
++static OSStatus ld_delete(const char *service, SecKeychainRef kc, const char *account) {
++	CFMutableDictionaryRef q = ld_query(service, kc, 0);
++	ld_set_account(q, account);
++	OSStatus st = SecItemDelete(q);
++	CFRelease(q);
++	return st;
++}
++
++// The accounts of every item of the service, newline-separated, in a malloc'd string. Attributes
++// only: listing decrypts nothing and asks nothing of the access lists.
++static OSStatus ld_accounts(const char *service, SecKeychainRef kc, char **out) {
++	CFMutableDictionaryRef q = ld_query(service, kc, 0);
++	CFDictionarySetValue(q, kSecReturnAttributes, kCFBooleanTrue);
++	CFDictionarySetValue(q, kSecMatchLimit, kSecMatchLimitAll);
++	CFTypeRef result = NULL;
++	OSStatus st = SecItemCopyMatching(q, &result);
++	CFRelease(q);
++	if (st == errSecItemNotFound) {
++		*out = strdup("");
++		return *out == NULL ? errSecAllocate : errSecSuccess;
++	}
++	if (st != errSecSuccess) return st;
++	if (result == NULL || CFGetTypeID(result) != CFArrayGetTypeID()) {
++		if (result != NULL) CFRelease(result);
++		return errSecDecode;
++	}
++	CFMutableStringRef joined = CFStringCreateMutable(kCFAllocatorDefault, 0);
++	CFIndex n = CFArrayGetCount((CFArrayRef)result);
++	for (CFIndex i = 0; i < n; i++) {
++		CFDictionaryRef item = (CFDictionaryRef)CFArrayGetValueAtIndex((CFArrayRef)result, i);
++		CFTypeRef account = CFDictionaryGetValue(item, kSecAttrAccount);
++		if (account != NULL && CFGetTypeID(account) == CFStringGetTypeID()) {
++			CFStringAppend(joined, (CFStringRef)account);
++			CFStringAppend(joined, CFSTR("\n"));
++		}
++	}
++	CFRelease(result);
++	CFIndex max = CFStringGetMaximumSizeForEncoding(CFStringGetLength(joined), kCFStringEncodingUTF8) + 1;
++	*out = malloc((size_t)max);
++	if (*out == NULL) {
++		CFRelease(joined);
++		return errSecAllocate;
++	}
++	Boolean ok = CFStringGetCString(joined, *out, max, kCFStringEncodingUTF8);
++	CFRelease(joined);
++	if (!ok) {
++		free(*out);
++		*out = NULL;
++		return errSecDecode;
++	}
++	return errSecSuccess;
++}
++
++static OSStatus ld_open(const char *path, SecKeychainRef *kc) {
++	return SecKeychainOpen(path, kc);
++}
++
++// keyd never shows Keychain UI: an item that does not trust it, or a locked keychain, is an error.
++static void ld_no_ui(void) {
++	SecKeychainSetUserInteractionAllowed(false);
++}
++*/
++import "C"
++
++import (
++	"bytes"
++	"crypto/rand"
++	"encoding/hex"
++	"errors"
++	"fmt"
++	"log"
++	"regexp"
++	"strings"
++	"sync"
++	"time"
++	"unsafe"
++)
++
++const (
++	errSecItemNotFound          = -25300
++	errSecDuplicateItem         = -25299
++	errSecInteractionNotAllowed = -25308
++	errSecAuthFailed            = -25293
++)
++
++var (
++	aclAccount = regexp.MustCompile(`^([a-z0-9][a-z0-9_-]{0,63})@([0-9a-f]{24})$`)
++	noUI       sync.Once
++)
++
++// ACLKeychain stores each value as one generic password whose access list trusts only keyd itself
++// (P10-R6). Every Put writes a new item under a fresh account <id>@<16 hex nanoseconds><8 hex
++// random>, reads it back, and only then forgets the old one, so a Put never writes into an item
++// someone else created, and a Put that fails leaves the old value in force.
++type ACLKeychain struct {
++	service  string
++	keychain C.SecKeychainRef
++	mu       sync.Mutex
++	accounts map[string]string
++}
++
++// NewACLKeychain uses the login keychain (the default search list).
++func NewACLKeychain(service string) (*ACLKeychain, error) {
++	return openACL(service, "")
++}
++
++// NewACLKeychainAt uses the keychain file at path; tests create and unlock one of their own.
++func NewACLKeychainAt(service, path string) (*ACLKeychain, error) {
++	return openACL(service, path)
++}
++
++func openACL(service, path string) (*ACLKeychain, error) {
++	noUI.Do(func() { C.ld_no_ui() })
++	k := &ACLKeychain{service: service, accounts: map[string]string{}}
++	if path != "" {
++		cpath := C.CString(path)
++		defer C.free(unsafe.Pointer(cpath))
++		if st := C.ld_open(cpath, &k.keychain); st != 0 {
++			return nil, aclError("open", path, st)
++		}
++	}
++	if err := k.load(); err != nil {
++		return nil, err
++	}
++	return k, nil
++}
++
++// load finds each id's newest item; older ones (a Put killed before it removed them) are deleted.
++func (k *ACLKeychain) load() error {
++	cservice := C.CString(k.service)
++	defer C.free(unsafe.Pointer(cservice))
++	var out *C.char
++	if st := C.ld_accounts(cservice, k.keychain, &out); st != 0 {
++		return aclError("list", k.service, st)
++	}
++	listed := C.GoString(out)
++	C.free(unsafe.Pointer(out))
++	var stale []string
++	for _, account := range strings.Split(listed, "\n") {
++		m := aclAccount.FindStringSubmatch(account)
++		if m == nil {
++			continue
++		}
++		if prev, ok := k.accounts[m[1]]; !ok || account > prev {
++			if ok {
++				stale = append(stale, prev)
++			}
++			k.accounts[m[1]] = account
++		} else {
++			stale = append(stale, account)
++		}
++	}
++	for _, account := range stale {
++		if err := k.del(account); err != nil && !errors.Is(err, ErrNotFound) {
++			log.Printf("keyd: could not remove an older keychain item: %v", err)
++		}
++	}
++	return nil
++}
++
++func (k *ACLKeychain) Put(id string, value []byte) error {
++	if !idPattern.MatchString(id) {
++		return fmt.Errorf("keychain: %q is not a secret id", id)
++	}
++	if len(value) == 0 || len(value) > maxValueLen {
++		return fmt.Errorf("keychain: store %s: want 1-%d bytes", id, maxValueLen)
++	}
++	k.mu.Lock()
++	defer k.mu.Unlock()
++	var account string
++	for attempt := 0; ; attempt++ {
++		suffix := make([]byte, 4)
++		if _, err := rand.Read(suffix); err != nil {
++			return err
++		}
++		account = fmt.Sprintf("%s@%016x%s", id, uint64(time.Now().UnixNano()), hex.EncodeToString(suffix))
++		st := k.add(account, value)
++		if st == 0 {
++			break
++		}
++		if st == errSecDuplicateItem && attempt < 3 {
++			continue
++		}
++		return aclError("store", id, st)
++	}
++	got, err := k.get(account)
++	intact := err == nil && bytes.Equal(got, value)
++	clear(got)
++	if !intact {
++		_ = k.del(account)
++		return fmt.Errorf("keychain: store %s: the value did not read back intact", id)
++	}
++	old, had := k.accounts[id]
++	k.accounts[id] = account
++	if had {
++		if err := k.del(old); err != nil && !errors.Is(err, ErrNotFound) {
++			log.Printf("keyd: storing secret %s left its previous keychain item behind: %v", id, err)
++		}
++	}
++	return nil
++}
++
++func (k *ACLKeychain) Get(id string) ([]byte, error) {
++	k.mu.Lock()
++	defer k.mu.Unlock()
++	account, ok := k.accounts[id]
++	if !ok {
++		return nil, ErrNotFound
++	}
++	return k.get(account)
++}
++
++func (k *ACLKeychain) Delete(id string) error {
++	k.mu.Lock()
++	defer k.mu.Unlock()
++	account, ok := k.accounts[id]
++	if !ok {
++		return ErrNotFound
++	}
++	if err := k.del(account); err != nil && !errors.Is(err, ErrNotFound) {
++		return err
++	}
++	delete(k.accounts, id)
++	return nil
++}
++
++func (k *ACLKeychain) add(account string, value []byte) C.OSStatus {
++	cservice, caccount := C.CString(k.service), C.CString(account)
++	defer C.free(unsafe.Pointer(cservice))
++	defer C.free(unsafe.Pointer(caccount))
++	return C.ld_add(cservice, k.keychain, caccount, unsafe.Pointer(&value[0]), C.long(len(value)))
++}
++
++func (k *ACLKeychain) get(account string) ([]byte, error) {
++	cservice, caccount := C.CString(k.service), C.CString(account)
++	defer C.free(unsafe.Pointer(cservice))
++	defer C.free(unsafe.Pointer(caccount))
++	var out unsafe.Pointer
++	var n C.long
++	if st := C.ld_get(cservice, k.keychain, caccount, &out, &n); st != 0 {
++		return nil, aclError("read", account, st)
++	}
++	raw := unsafe.Slice((*byte)(out), int(n))
++	value := bytes.Clone(raw)
++	clear(raw)
++	C.free(out)
++	return value, nil
++}
++
++func (k *ACLKeychain) del(account string) error {
++	cservice, caccount := C.CString(k.service), C.CString(account)
++	defer C.free(unsafe.Pointer(cservice))
++	defer C.free(unsafe.Pointer(caccount))
++	if st := C.ld_delete(cservice, k.keychain, caccount); st != 0 {
++		return aclError("delete", account, st)
++	}
++	return nil
++}
++
++// An error names the operation, the item and the status; never a value.
++func aclError(op, what string, st C.OSStatus) error {
++	switch int(st) {
++	case errSecItemNotFound:
++		return ErrNotFound
++	case errSecInteractionNotAllowed, errSecAuthFailed:
++		return fmt.Errorf("keychain: %s %s: the login keychain is locked, or the item does not trust this keyd (OSStatus %d)", op, what, int(st))
++	}
++	return fmt.Errorf("keychain: %s %s: OSStatus %d", op, what, int(st))
++}
+diff --git a/keyd/internal/vault/keychain_acl_darwin_test.go b/keyd/internal/vault/keychain_acl_darwin_test.go
+new file mode 100644
+index 0000000..866c906
+--- /dev/null
++++ b/keyd/internal/vault/keychain_acl_darwin_test.go
+@@ -0,0 +1,109 @@
++//go:build darwin && cgo
++
++package vault
++
++import (
++	"bytes"
++	"errors"
++	"os/exec"
++	"path/filepath"
++	"strings"
++	"testing"
++)
++
++const aclTestService = "localdot-keyd-acl-test"
++
++// tempKeychain makes an unlocked keychain of the test's own, so no test touches the login keychain.
++func tempKeychain(t *testing.T) string {
++	t.Helper()
++	path := filepath.Join(t.TempDir(), "acl-test.keychain-db")
++	for _, args := range [][]string{
++		{"create-keychain", "-p", "acl-test-password", path},
++		{"unlock-keychain", "-p", "acl-test-password", path},
++		{"set-keychain-settings", path},
++	} {
++		if out, err := exec.Command("/usr/bin/security", args...).CombinedOutput(); err != nil {
++			t.Fatalf("security %s: %v: %s", args[0], err, out)
++		}
++	}
++	t.Cleanup(func() { _ = exec.Command("/usr/bin/security", "delete-keychain", path).Run() })
++	return path
++}
++
++func TestACLKeychainRoundTrip(t *testing.T) {
++	path := tempKeychain(t)
++	k, err := NewACLKeychainAt(aclTestService, path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	value := bytes.Repeat([]byte("acl-fake-value-"), 500)[:maxValueLen]
++	if err := k.Put("anthropic", value); err != nil {
++		t.Fatal(err)
++	}
++	got, err := k.Get("anthropic")
++	if err != nil || !bytes.Equal(got, value) {
++		t.Fatalf("read back %d bytes, err %v", len(got), err)
++	}
++	if err := k.Put("anthropic", []byte("acl-fake-value-two")); err != nil {
++		t.Fatal(err)
++	}
++	// A new store on the same keychain finds exactly the newest item.
++	again, err := NewACLKeychainAt(aclTestService, path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if got, err := again.Get("anthropic"); err != nil || string(got) != "acl-fake-value-two" {
++		t.Fatalf("after reopening: %q, %v", got, err)
++	}
++	if len(again.accounts) != 1 {
++		t.Fatalf("the replaced item is still listed: %v", again.accounts)
++	}
++	if err := again.Delete("anthropic"); err != nil {
++		t.Fatal(err)
++	}
++	if _, err := again.Get("anthropic"); !errors.Is(err, ErrNotFound) {
++		t.Fatalf("deleted value still reads: %v", err)
++	}
++}
++
++func TestACLKeychainItemsAreNotReadableByAnotherProgram(t *testing.T) {
++	path := tempKeychain(t)
++	k, err := NewACLKeychainAt(aclTestService, path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := k.Put("weather", []byte("acl-fake-value-weather")); err != nil {
++		t.Fatal(err)
++	}
++	reader := filepath.Join(t.TempDir(), "aclreader")
++	if out, err := exec.Command("go", "build", "-o", reader, "./testdata/aclreader").CombinedOutput(); err != nil {
++		t.Fatalf("build the reader: %v: %s", err, out)
++	}
++	out, err := exec.Command(reader, path, aclTestService, k.accounts["weather"]).Output()
++	if err != nil {
++		t.Fatal(err)
++	}
++	status := strings.TrimSpace(string(out))
++	// errSecInteractionNotAllowed: reading needs the user's consent, which no UI may ask for.
++	if status != "-25308" && status != "-25293" {
++		t.Fatalf("another program read the item silently (OSStatus %s)", status)
++	}
++}
++
++func TestACLKeychainNeverShowsUIForALockedKeychain(t *testing.T) {
++	path := tempKeychain(t)
++	k, err := NewACLKeychainAt(aclTestService, path)
++	if err != nil {
++		t.Fatal(err)
++	}
++	if err := k.Put("anthropic", []byte("acl-fake-value-locked")); err != nil {
++		t.Fatal(err)
++	}
++	if out, err := exec.Command("/usr/bin/security", "lock-keychain", path).CombinedOutput(); err != nil {
++		t.Fatalf("lock: %v: %s", err, out)
++	}
++	_, err = k.Get("anthropic")
++	if err == nil || !strings.Contains(err.Error(), "locked") {
++		t.Fatalf("a locked keychain gave %v, want the locked error (and no dialog)", err)
++	}
++}
+diff --git a/keyd/internal/vault/keychain_acl_other.go b/keyd/internal/vault/keychain_acl_other.go
+new file mode 100644
+index 0000000..e878726
+--- /dev/null
++++ b/keyd/internal/vault/keychain_acl_other.go
+@@ -0,0 +1,15 @@
++//go:build !darwin || !cgo
++
++package vault
++
++import "errors"
++
++// ACLKeychain exists only on macOS with cgo; elsewhere keyd runs with -vault memory or
++// keychain-tool.
++type ACLKeychain struct{ Store }
++
++var errNoACLKeychain = errors.New("keychain: the access-list keychain needs macOS (built with cgo)")
++
++func NewACLKeychain(string) (*ACLKeychain, error) { return nil, errNoACLKeychain }
++
++func NewACLKeychainAt(string, string) (*ACLKeychain, error) { return nil, errNoACLKeychain }
+diff --git a/keyd/internal/vault/migrate.go b/keyd/internal/vault/migrate.go
+new file mode 100644
+index 0000000..fc02d9a
+--- /dev/null
++++ b/keyd/internal/vault/migrate.go
+@@ -0,0 +1,65 @@
++package vault
++
++import (
++	"bytes"
++	"errors"
++	"fmt"
++)
++
++// MigrateReport says what Migrate did. Residue names the ids whose old copy could not be removed:
++// their value is still in the old store, readable by whatever that store trusts.
++type MigrateReport struct {
++	Moved   int
++	Residue []string
++}
++
++// Migrate moves each id's value from the old store (the /usr/bin/security items of P4a-R3, which
++// any process of the user can read) into the new one (the access-list items only a keyd signed by
++// localDot's team can read), then deletes the old copy. It is idempotent and safe to interrupt: an
++// id already in the new store only has its old copy removed, and an old copy is deleted only after
++// the new one reads back intact. An id in neither store is left to the vault, which reports it
++// missing. A read or write error stops the migration with nothing of that id lost.
++func Migrate(ids []string, from, to Store) (MigrateReport, error) {
++	var r MigrateReport
++	for _, id := range ids {
++		if got, err := to.Get(id); err == nil {
++			clear(got)
++			r.removeOld(from, id)
++			continue
++		} else if !errors.Is(err, ErrNotFound) {
++			return r, fmt.Errorf("migrate %s: %w", id, err)
++		}
++		value, err := from.Get(id)
++		if errors.Is(err, ErrNotFound) {
++			continue
++		}
++		if err != nil {
++			return r, fmt.Errorf("migrate %s: read the old copy: %w", id, err)
++		}
++		err = to.Put(id, value)
++		if err == nil {
++			var back []byte
++			back, err = to.Get(id)
++			if err == nil && !bytes.Equal(back, value) {
++				err = errors.New("the new copy did not read back intact")
++			}
++			clear(back)
++			if err != nil {
++				_ = to.Delete(id)
++			}
++		}
++		clear(value)
++		if err != nil {
++			return r, fmt.Errorf("migrate %s: %w", id, err)
++		}
++		r.Moved++
++		r.removeOld(from, id)
++	}
++	return r, nil
++}
++
++func (r *MigrateReport) removeOld(from Store, id string) {
++	if err := from.Delete(id); err != nil && !errors.Is(err, ErrNotFound) {
++		r.Residue = append(r.Residue, id)
++	}
++}
+diff --git a/keyd/internal/vault/migrate_test.go b/keyd/internal/vault/migrate_test.go
+new file mode 100644
+index 0000000..acb5c20
+--- /dev/null
++++ b/keyd/internal/vault/migrate_test.go
+@@ -0,0 +1,127 @@
++package vault
++
++import (
++	"bytes"
++	"errors"
++	"testing"
++)
++
++type faultyStore struct {
++	Store
++	failGet, failPut, failDelete error
++	corrupt                      bool
++}
++
++func (f *faultyStore) Get(id string) ([]byte, error) {
++	if f.failGet != nil {
++		return nil, f.failGet
++	}
++	v, err := f.Store.Get(id)
++	if err == nil && f.corrupt {
++		v[0] ^= 1
++	}
++	return v, err
++}
++
++func (f *faultyStore) Put(id string, value []byte) error {
++	if f.failPut != nil {
++		return f.failPut
++	}
++	return f.Store.Put(id, value)
++}
++
++func (f *faultyStore) Delete(id string) error {
++	if f.failDelete != nil {
++		return f.failDelete
++	}
++	return f.Store.Delete(id)
++}
++
++func value(t *testing.T, s Store, id string) []byte {
++	t.Helper()
++	v, err := s.Get(id)
++	if err != nil {
++		t.Fatalf("get %s: %v", id, err)
++	}
++	return v
++}
++
++func TestMigrateMovesEveryValueAndRemovesTheOldCopy(t *testing.T) {
++	from, to := NewMemory(), NewMemory()
++	_ = from.Put("anthropic", []byte("migrate-fake-value-a"))
++	_ = from.Put("weather", []byte("migrate-fake-value-w"))
++	r, err := Migrate([]string{"anthropic", "weather", "absent"}, from, to)
++	if err != nil || r.Moved != 2 || len(r.Residue) != 0 {
++		t.Fatalf("report %+v, err %v", r, err)
++	}
++	if !bytes.Equal(value(t, to, "weather"), []byte("migrate-fake-value-w")) {
++		t.Fatal("the value changed on the way")
++	}
++	for _, id := range []string{"anthropic", "weather"} {
++		if _, err := from.Get(id); !errors.Is(err, ErrNotFound) {
++			t.Fatalf("the old copy of %s is still readable: %v", id, err)
++		}
++	}
++	if _, err := to.Get("absent"); !errors.Is(err, ErrNotFound) {
++		t.Fatal("an id in neither store was invented")
++	}
++}
++
++func TestMigrateIsIdempotentAfterAnInterruption(t *testing.T) {
++	// Killed after the new copy was written, before the old one was deleted.
++	from, to := NewMemory(), NewMemory()
++	_ = from.Put("anthropic", []byte("migrate-old-fake-value"))
++	_ = to.Put("anthropic", []byte("migrate-new-fake-value"))
++	r, err := Migrate([]string{"anthropic"}, from, to)
++	if err != nil || r.Moved != 0 {
++		t.Fatalf("report %+v, err %v", r, err)
++	}
++	if !bytes.Equal(value(t, to, "anthropic"), []byte("migrate-new-fake-value")) {
++		t.Fatal("the new store's value was overwritten by the old one")
++	}
++	if _, err := from.Get("anthropic"); !errors.Is(err, ErrNotFound) {
++		t.Fatal("the old copy was not removed")
++	}
++}
++
++func TestMigrateKeepsTheOldCopyWhenTheNewOneFails(t *testing.T) {
++	cases := map[string]*faultyStore{
++		"a write error":       {Store: NewMemory(), failPut: errors.New("keychain locked")},
++		"a corrupt read-back": {Store: NewMemory(), corrupt: true},
++	}
++	for name, to := range cases {
++		t.Run(name, func(t *testing.T) {
++			from := NewMemory()
++			_ = from.Put("anthropic", []byte("migrate-fake-value-a"))
++			if _, err := Migrate([]string{"anthropic"}, from, to); err == nil {
++				t.Fatal("the migration reported success")
++			}
++			if !bytes.Equal(value(t, from, "anthropic"), []byte("migrate-fake-value-a")) {
++				t.Fatal("the old copy was lost")
++			}
++			if _, err := to.Store.Get("anthropic"); !errors.Is(err, ErrNotFound) {
++				t.Fatal("a copy that did not read back was left in the new store")
++			}
++		})
++	}
++}
++
++func TestMigrateStopsOnAnUnreadableStore(t *testing.T) {
++	from := NewMemory()
++	_ = from.Put("anthropic", []byte("migrate-fake-value-a"))
++	if _, err := Migrate([]string{"anthropic"}, &faultyStore{Store: from, failGet: errors.New("exit status 51")}, NewMemory()); err == nil {
++		t.Fatal("an unreadable old store passed")
++	}
++	if _, err := Migrate([]string{"anthropic"}, from, &faultyStore{Store: NewMemory(), failGet: errors.New("interaction not allowed")}); err == nil {
++		t.Fatal("an unreadable new store passed")
++	}
++}
++
++func TestMigrateReportsAnOldCopyItCouldNotRemove(t *testing.T) {
++	from := &faultyStore{Store: NewMemory(), failDelete: errors.New("exit status 45")}
++	_ = from.Store.Put("anthropic", []byte("migrate-fake-value-a"))
++	r, err := Migrate([]string{"anthropic"}, from, NewMemory())
++	if err != nil || r.Moved != 1 || len(r.Residue) != 1 || r.Residue[0] != "anthropic" {
++		t.Fatalf("report %+v, err %v", r, err)
++	}
++}
+diff --git a/keyd/internal/vault/testdata/aclreader/main.go b/keyd/internal/vault/testdata/aclreader/main.go
+new file mode 100644
+index 0000000..b45f380
+--- /dev/null
++++ b/keyd/internal/vault/testdata/aclreader/main.go
+@@ -0,0 +1,52 @@
++//go:build darwin && cgo
++
++// aclreader is another program: it asks the Keychain for an item without any UI and prints only
++// the outcome, never the value. keychain_acl_darwin_test.go builds it to prove that an item
++// written by ACLKeychain cannot be read silently by anything but the program that wrote it.
++package main
++
++/*
++#cgo CFLAGS: -Wno-deprecated-declarations
++#cgo LDFLAGS: -framework Security -framework CoreFoundation
++#include <Security/Security.h>
++
++static OSStatus read_item(const char *path, const char *service, const char *account) {
++	SecKeychainSetUserInteractionAllowed(false);
++	SecKeychainRef kc = NULL;
++	OSStatus st = SecKeychainOpen(path, &kc);
++	if (st != errSecSuccess) return st;
++	CFMutableDictionaryRef q = CFDictionaryCreateMutable(NULL, 0, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
++	CFStringRef s = CFStringCreateWithCString(NULL, service, kCFStringEncodingUTF8);
++	CFStringRef a = CFStringCreateWithCString(NULL, account, kCFStringEncodingUTF8);
++	CFArrayRef list = CFArrayCreate(NULL, (const void **)&kc, 1, &kCFTypeArrayCallBacks);
++	CFDictionarySetValue(q, kSecClass, kSecClassGenericPassword);
++	CFDictionarySetValue(q, kSecAttrService, s);
++	CFDictionarySetValue(q, kSecAttrAccount, a);
++	CFDictionarySetValue(q, kSecMatchSearchList, list);
++	CFDictionarySetValue(q, kSecReturnData, kCFBooleanTrue);
++	CFTypeRef out = NULL;
++	st = SecItemCopyMatching(q, &out);
++	if (out != NULL) CFRelease(out);
++	CFRelease(list);
++	CFRelease(a);
++	CFRelease(s);
++	CFRelease(q);
++	CFRelease(kc);
++	return st;
++}
++*/
++import "C"
++
++import (
++	"fmt"
++	"os"
++	"unsafe"
++)
++
++func main() {
++	path, service, account := C.CString(os.Args[1]), C.CString(os.Args[2]), C.CString(os.Args[3])
++	defer C.free(unsafe.Pointer(path))
++	defer C.free(unsafe.Pointer(service))
++	defer C.free(unsafe.Pointer(account))
++	fmt.Println(int(C.read_item(path, service, account)))
++}

@@ -1,0 +1,7 @@
+ keyd/internal/vault/keychain_acl_darwin.go      | 367 ++++++++++++++++++++++++
+ keyd/internal/vault/keychain_acl_darwin_test.go | 109 +++++++
+ keyd/internal/vault/keychain_acl_other.go       |  15 +
+ keyd/internal/vault/migrate.go                  |  65 +++++
+ keyd/internal/vault/migrate_test.go             | 127 ++++++++
+ keyd/internal/vault/testdata/aclreader/main.go  |  52 ++++
+ 6 files changed, 735 insertions(+)
