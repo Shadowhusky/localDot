@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -638,5 +639,41 @@ func TestRevokeDuringADialAnswers503(t *testing.T) {
 	resp, _ := get(t, w.client(c), "http://ports.example.test/")
 	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("X-Keyd-Reason") != ReasonRevoked {
 		t.Fatalf("%d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+}
+
+// Inspect may hold an absolute-form target to Dest.Host, so the listener names the destination by
+// ParseHostPort's reading of the same target: a proxy-form request to an allowed host passes
+// inspection, with its bound surrogate or without one, and a bad host keeps its own reason.
+func TestProxyFormRequestsPassInspectionUnderTheirOwnHost(t *testing.T) {
+	w := newWorld(t)
+	w.plainUpstream("api.example.test", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { io.WriteString(rw, "ok") }))
+	w.secret(vault.Record{ID: "weather", Kind: vault.KindHTTP, Hosts: []string{"api.example.test"}, Header: "Authorization", Format: "bearer"}, echoed)
+	c := w.cell("c1", policy.Desktop)
+	tok := w.mint("c1", "weather")
+	sub, cancel := w.events.Subscribe(16)
+	defer cancel()
+	for _, target := range []string{"http://api.example.test/v1", "http://API.example.test./v1", "http://api.example.test:80/v1"} {
+		if resp, body := get(t, w.client(c), target); resp.StatusCode != http.StatusOK || body != "ok" {
+			t.Errorf("%s: %d %q %q", target, resp.StatusCode, resp.Header.Get("X-Keyd-Reason"), body)
+		}
+		u, _ := url.Parse(target)
+		host, reason := policy.ParseHostPort(u.Host, 80)
+		v := w.registry.Inspect(keys.Dest{Cell: "c1", Scheme: "https", Host: host.Host}, "GET", u, http.Header{"Authorization": {"Bearer " + tok}})
+		if reason != "" || !v.Allow || len(v.Swaps) != 1 {
+			t.Errorf("%s with its surrogate: %q %+v", target, reason, v)
+		}
+	}
+	for target, want := range map[string]string{
+		"http://localhost:1234/v1": policy.ReasonHostInvalid,
+		"http://127.0.0.1/v1":      policy.ReasonIPLiteral,
+		"http://printer.local/v1":  policy.ReasonHostDenied,
+	} {
+		if resp, _ := get(t, w.client(c), target); resp.StatusCode != http.StatusForbidden || resp.Header.Get("X-Keyd-Reason") != want {
+			t.Errorf("%s: %d %q, want %q", target, resp.StatusCode, resp.Header.Get("X-Keyd-Reason"), want)
+		}
+	}
+	if len(sub) > 0 {
+		t.Fatalf("a request without a surrogate raised %+v", <-sub)
 	}
 }

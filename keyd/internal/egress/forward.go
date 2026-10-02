@@ -38,13 +38,15 @@ type route struct {
 func (c *Cell) servePlain(w http.ResponseWriter, r *http.Request) {
 	line := audit.Line{Kind: audit.KindRequest, Mode: "http", Method: r.Method, Host: r.URL.Hostname(), Path: r.URL.Path}
 	// A plain request never carries a surrogate. Looking before the host is checked catches one in
-	// the host name too, which would otherwise be refused as an invalid name without an alert.
-	if v := c.deps.Registry.Inspect(keys.Dest{Cell: c.cfg.CellID, Scheme: "http"}, r.Method, r.URL, r.Header); !v.Allow {
+	// the host name too, which would otherwise be refused as an invalid name without an alert. The
+	// destination is the parsed target's host, which Inspect may hold the request-URI to; a host
+	// that does not parse keeps its own reason unless a surrogate was found.
+	t, reason := policy.ParseHostPort(r.URL.Host, 80)
+	if v := c.deps.Registry.Inspect(keys.Dest{Cell: c.cfg.CellID, Scheme: "http", Host: t.Host}, r.Method, r.URL, r.Header); !v.Allow && (reason == "" || v.SurrogateID != "") {
 		line.SecretID, line.SurrogateID = v.SecretID, v.SurrogateID
 		c.deny(w, line, http.StatusForbidden, v.Reason)
 		return
 	}
-	t, reason := policy.ParseHostPort(r.URL.Host, 80)
 	if reason != "" {
 		c.deny(w, line, http.StatusForbidden, reason)
 		return
