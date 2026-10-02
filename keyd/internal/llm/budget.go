@@ -129,6 +129,12 @@ func (b *Budget) Begin(cell, taskID string, budgetUSD float64) error {
 		return errors.New("llm: invalid task budget")
 	}
 	t := b.records[taskID]
+	created := t == nil
+	var previousLimit int64
+	if t != nil {
+		previousLimit = t.limit
+	}
+	previousTask := b.tasks[cell]
 	if t == nil {
 		if budgetUSD == 0 {
 			budgetUSD = b.limits().PerTaskUSD
@@ -142,7 +148,20 @@ func (b *Budget) Begin(cell, taskID string, budgetUSD float64) error {
 		t.limit = micros(budgetUSD)
 	}
 	b.tasks[cell] = t
-	return b.saveLocked()
+	if err := b.saveLocked(); err != nil {
+		if created {
+			delete(b.records, taskID)
+		} else {
+			t.limit = previousLimit
+		}
+		if previousTask == nil {
+			delete(b.tasks, cell)
+		} else {
+			b.tasks[cell] = previousTask
+		}
+		return err
+	}
+	return nil
 }
 
 func (b *Budget) End(cell string) {

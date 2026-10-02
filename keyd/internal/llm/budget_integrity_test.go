@@ -96,3 +96,30 @@ func TestANegativeSettlementCannotRefundOrConsumeAHold(t *testing.T) {
 		t.Fatalf("invalid settlement consumed the real settlement: %+v", info)
 	}
 }
+
+func TestFailedTaskBeginKeepsThePreviousAccountAndLimit(t *testing.T) {
+	for _, nextTask := range []string{"existing", "replacement"} {
+		t.Run(nextTask, func(t *testing.T) {
+			c := &clock{time.Date(2026, 10, 2, 12, 0, 0, 0, time.Local)}
+			dir := filepath.Join(t.TempDir(), "ledger")
+			if err := os.Mkdir(dir, 0o700); err != nil {
+				t.Fatal(err)
+			}
+			b := openBudget(t, filepath.Join(dir, "spend.json"), c)
+			if err := b.Begin("cell", "existing", 2); err != nil {
+				t.Fatal(err)
+			}
+			spend(t, b, "cell", 250_000)
+			if err := os.Rename(dir, dir+"-moved"); err != nil {
+				t.Fatal(err)
+			}
+			if err := b.Begin("cell", nextTask, 8); err == nil {
+				t.Fatal("the budget save should have failed")
+			}
+			info, ok := b.Task("cell")
+			if !ok || info.ID != "existing" || info.LimitUSD != 2 || info.SpentUSD != .25 {
+				t.Fatalf("failed task start changed the previous account: %+v", info)
+			}
+		})
+	}
+}
