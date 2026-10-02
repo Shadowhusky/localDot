@@ -1,0 +1,25 @@
+#!/usr/bin/with-contenv bash
+# Installs the cell's CA, which the daemon writes to /etc/localdot/cell/ca.pem before every start,
+# as a plain trust anchor: into the system bundle (OpenSSL, GnuTLS, Go, rustls and Java read it;
+# Node reads ca.pem through NODE_EXTRA_CA_CERTS) and into abc's NSS database, which Chromium reads.
+# What it may vouch for is in the certificate: TLS server auth only, and only the hosts keyd
+# intercepts for this cell (P4b-C4). A start without the file removes the previous CA.
+set -euo pipefail
+cell=/etc/localdot/cell
+installed=/usr/local/share/ca-certificates/localdot-cell.crt
+nssdb=/config/.pki/nssdb
+if [[ -s $cell/ca.pem ]]; then
+  openssl x509 -in "$cell/ca.pem" -out "$installed"
+  chmod 0644 "$installed"
+else
+  rm -f "$installed"
+fi
+update-ca-certificates --fresh >/dev/null 2>&1
+s6-setuidgid abc mkdir -p "$nssdb"
+if ! s6-setuidgid abc certutil -d "sql:$nssdb" -L >/dev/null 2>&1; then
+  s6-setuidgid abc certutil -d "sql:$nssdb" -N --empty-password
+fi
+while s6-setuidgid abc certutil -d "sql:$nssdb" -D -n localdot-cell >/dev/null 2>&1; do :; done
+if [[ -s $cell/ca.pem ]]; then
+  s6-setuidgid abc certutil -d "sql:$nssdb" -A -t "C,," -n localdot-cell -i "$cell/ca.pem"
+fi

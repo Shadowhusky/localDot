@@ -1,4 +1,8 @@
 #!/bin/bash
 # localDot's Chromium launcher: maximized, with the accessibility tree and the DevTools protocol
 # desktopd reads web-content boxes from (A10, D13). /usr/bin/chromium is the base image's wrapper.
-exec /usr/bin/chromium --start-maximized --force-renderer-accessibility --remote-debugging-port=9222 "$@"
+# Chromium ignores credentials in a proxy URL; the loopback forwarder supplies the cell token.
+proxy=()
+if [ -n "${HTTPS_PROXY:-}" ]; then proxy=("--proxy-server=${HTTPS_PROXY}"); fi
+exec /usr/bin/chromium --start-maximized --force-renderer-accessibility --remote-debugging-port=9222 \
+  --disable-quic "${proxy[@]}" "$@"

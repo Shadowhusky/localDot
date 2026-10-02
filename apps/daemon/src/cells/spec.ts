@@ -88,6 +88,31 @@ export interface DesktopOptions {
   fullcolor: boolean;
 }
 
+// Every program in the desktop reaches keyd through the forwarder on the cell's loopback, which adds
+// the cell's proxy token; loopback itself stays inside the cell. The CA and token are files the
+// daemon writes at every start (keyd makes new ones each time it opens the cell), so the only
+// values here are fixed for the cell's life.
+export const CELL_PROXY = "http://127.0.0.1:3129";
+const LOOPBACK = "localhost,127.0.0.1,::1";
+const SYSTEM_CA_BUNDLE = "/etc/ssl/certs/ca-certificates.crt";
+
+export function keydEnv(record: CellRecord): string[] {
+  return [
+    `LOCALDOT_CELL_ID=${record.id}`,
+    `LOCALDOT_GATE_ADDR=${record.docker.gateInternalIp}`,
+    `HTTP_PROXY=${CELL_PROXY}`,
+    `HTTPS_PROXY=${CELL_PROXY}`,
+    `http_proxy=${CELL_PROXY}`,
+    `https_proxy=${CELL_PROXY}`,
+    `NO_PROXY=${LOOPBACK}`,
+    `no_proxy=${LOOPBACK}`,
+    "NODE_USE_ENV_PROXY=1",
+    "NODE_EXTRA_CA_CERTS=/etc/localdot/cell/ca.pem",
+    `SSL_CERT_FILE=${SYSTEM_CA_BUNDLE}`,
+    `REQUESTS_CA_BUNDLE=${SYSTEM_CA_BUNDLE}`,
+  ];
+}
+
 export function desktopEnv(
   record: CellRecord,
   opts: DesktopOptions = { fullcolor: true },
@@ -103,6 +128,7 @@ export function desktopEnv(
     `LOCALDOT_DESKTOPD_TOKEN=${record.tokens.desktopd}`,
     `PASSWORD=${record.tokens.stream}`,
     `SELKIES_VIDEO_FULLCOLOR=${opts.fullcolor}|locked`,
+    ...keydEnv(record),
   ];
 }
 

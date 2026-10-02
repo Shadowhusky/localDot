@@ -190,9 +190,40 @@ cannot hide a leak.
   `/tmp/localdot-part4b-task6-node24.log`, and
   `/tmp/localdot-part4b-task6-mutation-run.log`.
 
+## Task 7: proxy environment and certificate installation
+
+The desktop spec sets credential-free proxy addresses and loopback-only bypasses,
+plus the system/Node trust paths. Image startup installs the cell CA as a plain
+anchor in the system bundle and as `localdot-cell C,,` in the user's NSS database
+before the desktop session starts. Replacement and removal update both stores.
+The forwarder runs as `abc`; shell profiles load surrogates, sudo preserves proxy
+and trust variables, apt has an explicit proxy, and Chromium uses the forwarder
+with QUIC disabled. Apt configuration is added after build-time package installs.
+
+Review kept the plan's plain-anchor decision and tested its name constraints in
+both OpenSSL and Go, including IPv4/IPv6 leaves as well as unrelated DNS names
+and subdomains. Two initial Docker failures were fixture errors: a network-none
+container had no hostname mapping for sudo, and Docker regenerated `/etc/hosts`
+on restart. Persistent `--add-host` entries fix both without external networking.
+
+- All 717 host tests in 93 files, workspace types, lint and hygiene pass.
+- The rebuilt image passes five certificate/proxy checks and all nineteen
+  existing desktop image checks. Actual curl and Python TLS requests trust the
+  permitted leaf on loopback. OpenSSL and Go refuse other names, subdomains and
+  both IP families. Shell/sudo/apt behavior and the executed Chromium command are
+  verified, along with the forwarder's user and loopback binding.
+- Four Docker image mutations fail runtime assertions: absent system anchor,
+  NSS lacking CA trust, retaining a removed anchor, and Chromium missing its
+  proxy argument. Probe containers and mutation image tags are removed.
+- Evidence: `/tmp/localdot-part4b-task7-build.log`,
+  `/tmp/localdot-part4b-task7-docker-baseline.log`,
+  `/tmp/localdot-part4b-task7-docker-fixed.log`,
+  `/tmp/localdot-part4b-task7-launcher-final.log`,
+  `/tmp/localdot-part4b-task7-full-host.log`, and
+  `/tmp/localdot-part4b-task7-mutation-run.log`.
+
 ## Remaining integration
 
-Tasks 7–16: cell trust
-installation and boot checks, orchestration, Stop/resume, event logging, key
+Tasks 8–16: boot checks, orchestration, Stop/resume, event logging, key
 sheet, real-cell isolation/canary acceptance, documentation and CI. The system
 Keychain/Stop carry from Part 4a also remains.

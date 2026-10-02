@@ -8,6 +8,7 @@ import {
   ISOLATED_GATEWAY_OPTION,
   internalNetworkSpec,
   isolatedNetworkSpec,
+  keydEnv,
 } from "./spec.ts";
 import { sampleRecord } from "./testing/sample-record.ts";
 
@@ -106,7 +107,7 @@ describe("desktopSpec", () => {
     });
   });
 
-  it("passes only the per-cell tokens and the scale into the container", () => {
+  it("passes the per-cell tokens, scale and fixed proxy settings into the container", () => {
     const keys = spec.Env.map((e) => e.split("=")[0]);
     expect(keys).toEqual([
       "PUID",
@@ -118,6 +119,7 @@ describe("desktopSpec", () => {
       "LOCALDOT_DESKTOPD_TOKEN",
       "PASSWORD",
       "SELKIES_VIDEO_FULLCOLOR",
+      ...keydEnv(record).map((entry) => entry.split("=")[0]),
     ]);
     expect(spec.Env).toContain(`LOCALDOT_DESKTOPD_TOKEN=${record.tokens.desktopd}`);
     expect(spec.Env).toContain(`PASSWORD=${record.tokens.stream}`);
@@ -127,6 +129,24 @@ describe("desktopSpec", () => {
       "SELKIES_VIDEO_FULLCOLOR=false|locked",
     );
     expect(desktopSpec({ ...record, scale: 1 }, "i").Env).toContain("SELKIES_MANUAL_HEIGHT=800");
+    expect(spec.Env.join("\n")).not.toMatch(/ld_[a-z0-9]{2,12}_|BEGIN CERTIFICATE/);
+  });
+
+  it("routes desktop programs through the forwarder with only loopback exempt", () => {
+    expect(keydEnv(record)).toEqual([
+      "LOCALDOT_CELL_ID=01JXYZ0000000000000000ABCD",
+      "LOCALDOT_GATE_ADDR=172.24.0.10",
+      "HTTP_PROXY=http://127.0.0.1:3129",
+      "HTTPS_PROXY=http://127.0.0.1:3129",
+      "http_proxy=http://127.0.0.1:3129",
+      "https_proxy=http://127.0.0.1:3129",
+      "NO_PROXY=localhost,127.0.0.1,::1",
+      "no_proxy=localhost,127.0.0.1,::1",
+      "NODE_USE_ENV_PROXY=1",
+      "NODE_EXTRA_CA_CERTS=/etc/localdot/cell/ca.pem",
+      "SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt",
+      "REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt",
+    ]);
   });
 });
 

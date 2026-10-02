@@ -144,7 +144,8 @@ COPY THIRD-PARTY.md /usr/share/doc/localdot-themes/THIRD-PARTY.md
 COPY root/ /
 RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run \
       /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run /usr/local/bin/localdot-plank \
-      /etc/s6-overlay/s6-rc.d/svc-desktopd/run /usr/local/bin/localdot-chromium
+      /etc/s6-overlay/s6-rc.d/svc-desktopd/run /usr/local/bin/localdot-chromium \
+      /etc/s6-overlay/s6-rc.d/init-localdot-cell/run /etc/s6-overlay/s6-rc.d/svc-forwarder/run
 
 # One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
 # set here that a client could change are locked: "|locked" on bools, a one-value span on ranges,
@@ -196,4 +197,13 @@ COPY desktopd/dist/desktopd.mjs /opt/localdot/desktopd.mjs
 COPY desktopd/x/xhelper.py /opt/localdot/xhelper.py
 COPY desktopd/x/native.py /opt/localdot/native.py
 RUN chmod 644 /opt/localdot/desktopd.mjs
+# The apt proxy must land after every build-time apt-get invocation.
+COPY desktopd/dist/forwarder.mjs /opt/localdot/forwarder.mjs
+COPY cell/apt-proxy.conf /etc/apt/apt.conf.d/95localdot-proxy
+COPY cell/sudoers-proxy /etc/sudoers.d/localdot-proxy
+RUN chmod 644 /opt/localdot/forwarder.mjs /etc/apt/apt.conf.d/95localdot-proxy /etc/profile.d/localdot-cell.sh \
+ && chmod 440 /etc/sudoers.d/localdot-proxy \
+ && visudo -cf /etc/sudoers.d/localdot-proxy \
+ && install -d -m 755 /etc/localdot/cell \
+ && printf '\n# localDot web API key surrogates.\n. /etc/profile.d/localdot-cell.sh\n' >> /etc/bash.bashrc
 EXPOSE 3000 7700
