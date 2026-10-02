@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createDesktopdApp, type DesktopdHealth, hidpiReport } from "./app.ts";
+import type { XEvent, XHelper } from "./x/helper.ts";
 
 const TOKEN = "d".repeat(43);
 const bearer = { authorization: `Bearer ${TOKEN}` };
@@ -117,5 +118,194 @@ describe("desktopd health", () => {
         },
       });
     }
+  });
+});
+
+function fakeX(): XHelper & { emit(e: XEvent): void; calls: string[] } {
+  const listeners = new Set<(e: XEvent) => void>();
+  const calls: string[] = [];
+  let mono = 100;
+  return {
+    alive: true,
+    calls,
+    emit: (e) => {
+      for (const l of listeners) l(e);
+    },
+    async call(cmd, args = {}) {
+      calls.push(cmd);
+      mono += 1;
+      if (cmd === "ping" || cmd === "arm" || cmd === "move") return { mono } as never;
+      if (cmd === "click") {
+        for (const l of listeners)
+          l({ ev: "press", kind: "button", detail: Number(args.button), mono });
+        return { button: args.button, presses: 1 } as never;
+      }
+      if (cmd === "char") {
+        for (const l of listeners) l({ ev: "press", kind: "key", detail: 30, mono });
+        return { keycode: 30, mods: [] } as never;
+      }
+      if (cmd === "settle")
+        return {
+          changed: [[1, 2, 3, 4]],
+          lastChange: mono,
+          quiet: true,
+          noVisibleChange: false,
+        } as never;
+      return {} as never;
+    },
+    onEvent(l) {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    async close() {},
+  };
+}
+
+function fullApp(x: XHelper) {
+  return createDesktopdApp({
+    token: TOKEN,
+    scale: 2,
+    display: ":1",
+    readXsettings: async () => ({ windowScalingFactor: 2, xftDpi: 96 }),
+    readScreen: async () => ({ w: 2560, h: 1600 }),
+    x,
+    launch: (req) => ({ pid: 999 + req.args.length }),
+    clockMono: () => 42.5,
+  });
+}
+
+describe("desktopd input routes", () => {
+  it("stops typing when its response stream is cancelled", async () => {
+    const x = fakeX();
+    const a = fullApp(x);
+    const res = await a.request("/type", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({
+        text: "abcdef",
+        masked: false,
+        pace: { firstMs: 100, firstCount: 60, restMs: 0 },
+      }),
+    });
+    const reader = res.body?.getReader();
+    expect(reader).toBeDefined();
+    await reader?.read();
+    await reader?.cancel();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(x.calls.filter((cmd) => cmd === "char")).toHaveLength(1);
+  });
+  it("bounds authenticated request bodies before parsing or injecting", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/type", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ text: "x".repeat(70_000) }),
+    });
+    expect(res.status).toBe(413);
+    expect(x.calls).toHaveLength(0);
+  });
+  it("answers the clock and injects a click with the raw press time", async () => {
+    const a = fullApp(fakeX());
+    expect(await (await a.request("/clock", { headers: bearer })).json()).toEqual({ mono: 42.5 });
+    const res = await a.request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({
+        input: { kind: "click", button: "left", count: 1, at: { x: 1, y: 2 } },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({
+      pressMono: expect.any(Number),
+      presses: [expect.any(Number)],
+      injector: "xtest",
+    });
+  });
+
+  it("rejects bad bodies, unsupported kinds and reports a missing press as 504", async () => {
+    const x = fakeX();
+    x.call = (async (cmd: string) => (cmd === "arm" ? { mono: 1 } : { presses: 1 })) as never;
+    const a = fullApp(x);
+    const post = (body: unknown) =>
+      a.request("/input", {
+        method: "POST",
+        headers: { ...bearer, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    expect((await post({ input: { kind: "teleport" } })).status).toBe(400);
+    expect(
+      (await post({ input: { kind: "drag", from: { x: 0, y: 0 }, to: { x: 1, y: 1 } } })).status,
+    ).toBe(501);
+    expect(
+      (await post({ input: { kind: "click", button: "left", count: 1, at: { x: 1, y: 2 } } }))
+        .status,
+    ).toBe(504);
+  });
+
+  it("streams typing progress as NDJSON and ends with the result", async () => {
+    const a = fullApp(fakeX());
+    const res = await a.request("/type", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({
+        text: "hi",
+        masked: false,
+        pace: { firstMs: 0, firstCount: 60, restMs: 0 },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+    const lines = (await res.text())
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines.map((l) => l.count)).toEqual([1, 2, 2]);
+    expect(lines[0]).toMatchObject({ chunk: "h" });
+    expect(lines[2]).toMatchObject({ done: true, count: 2, injector: "xtest" });
+  });
+
+  it("settles, arms and launches", async () => {
+    const x = fakeX();
+    const a = fullApp(x);
+    const settled = await a.request("/settle", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(await settled.json()).toMatchObject({
+      changed: [{ x: 1, y: 2, w: 3, h: 4 }],
+      quiet: true,
+      noVisibleChange: false,
+    });
+    expect((await a.request("/arm", { method: "POST", headers: bearer })).status).toBe(200);
+    const launched = await a.request("/launch", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ app: "terminal" }),
+    });
+    expect(await launched.json()).toMatchObject({ pid: 999, armedMono: expect.any(Number) });
+    expect(
+      (
+        await a.request("/launch", {
+          method: "POST",
+          headers: { ...bearer, "content-type": "application/json" },
+          body: JSON.stringify({ app: "bash" }),
+        })
+      ).status,
+    ).toBe(400);
+  });
+
+  it("answers 503 on the input routes when the helper is missing", async () => {
+    const a = app({ scale: 2, factor: 2, dpi: 96, screen: { w: 2560, h: 1600 } });
+    expect(
+      (
+        await a.request("/input", {
+          method: "POST",
+          headers: { ...bearer, "content-type": "application/json" },
+          body: "{}",
+        })
+      ).status,
+    ).toBe(503);
+    expect((await a.request("/settle", { method: "POST", headers: bearer })).status).toBe(503);
   });
 });

@@ -2,6 +2,7 @@ import { type ClientRequest, request as httpRequest } from "node:http";
 
 // Engine 29.2 serves 1.53 and accepts 1.44+; 1.47 (Engine 27) is the oldest this code is written against.
 export const DOCKER_API = "v1.47";
+export const DOCKER_TIMEOUT_MS = 30_000;
 
 export class DockerError extends Error {
   constructor(
@@ -19,6 +20,7 @@ export interface DockerRequest {
   path: string;
   query?: Record<string, string>;
   body?: unknown;
+  timeoutMs?: number;
 }
 
 export interface DockerVersion {
@@ -43,7 +45,10 @@ export function dockerSocketPath(env: NodeJS.ProcessEnv = process.env): string {
 }
 
 export class DockerClient {
-  constructor(readonly socketPath: string = dockerSocketPath()) {
+  constructor(
+    readonly socketPath: string = dockerSocketPath(),
+    readonly timeoutMs = DOCKER_TIMEOUT_MS,
+  ) {
     // Node ignores an empty socketPath and connects to localhost:80, so whatever listens there
     // would get the request, cell tokens included.
     if (socketPath === "") throw new RangeError("the Docker socket path is empty");
@@ -54,12 +59,23 @@ export class DockerClient {
   }
 
   #send<T>(prefix: string, req: DockerRequest): Promise<T> {
+    const timeoutMs = req.timeoutMs ?? this.timeoutMs;
     const query = req.query ? `?${new URLSearchParams(req.query)}` : "";
     const path = `${prefix}${req.path}${query}`;
     return new Promise<T>((resolve, reject) => {
       const unreachable = (err: NodeJS.ErrnoException) =>
         reject(
-          new DockerError(0, `${err.code ?? err.message}; is Docker Desktop running?`, req.path),
+          err.name === "AbortError"
+            ? new DockerError(
+                0,
+                `no reply within ${timeoutMs} ms; is Docker Desktop responding?`,
+                req.path,
+              )
+            : new DockerError(
+                0,
+                `${err.code ?? err.message}; is Docker Desktop running?`,
+                req.path,
+              ),
         );
       let body: string | undefined;
       let r: ClientRequest;
@@ -71,6 +87,7 @@ export class DockerClient {
             socketPath: this.socketPath,
             method: req.method,
             path,
+            signal: AbortSignal.timeout(timeoutMs),
             headers: {
               host: "docker",
               ...(body === undefined

@@ -10,9 +10,13 @@
   },
   "dependencies": {
     "@hono/node-server": "2.1.3",
-    "hono": "4.13.12"
+    "@localdot/protocol": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "hono": "4.13.12",
+    "ws": "8.22.0"
   },
   "devDependencies": {
+    "@types/ws": "8.18.2",
     "esbuild": "0.28.2",
     "tsx": "4.23.15"
   }

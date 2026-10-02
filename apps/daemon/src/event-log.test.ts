@@ -70,6 +70,16 @@ const multibyte: EventDraft = {
 };
 
 describe("EventLog", () => {
+  it("maps daemon microseconds onto a session's time base", () => {
+    const clock = fakeClock(5_000_000);
+    const log = new EventLog(home(), clock);
+    const id = log.createSession("t");
+    expect(log.originOf(id)).toBe(5_000_000);
+    expect(log.toSessionT(id, 5_250_000)).toBe(250_000);
+    expect(log.toSessionT(id, 4_000_000)).toBe(0);
+    expect(() => log.toSessionT("01JXYZ0000000000000000ABCD", 1)).toThrow(UnknownSessionError);
+  });
+
   it("appends events with increasing seq and non-decreasing t", () => {
     const clock = fakeClock();
     const log = new EventLog(home(), clock);

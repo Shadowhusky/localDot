@@ -6,14 +6,18 @@
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "doctor": "tsx src/doctor-main.ts",
+    "puppet": "tsx src/puppet-main.ts",
     "start": "tsx src/main.ts",
     "typecheck": "tsc --noEmit -p ."
   },
   "dependencies": {
     "@hono/node-server": "2.1.3",
     "@localdot/protocol": "workspace:*",
+    "@localdot/providers": "workspace:*",
+    "@localdot/stage": "workspace:*",
     "hono": "4.13.12",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/ws": "8.18.2",

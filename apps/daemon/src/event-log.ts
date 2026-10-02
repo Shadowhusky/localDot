@@ -140,6 +140,14 @@ export class EventLog {
     return readValid(this.#existingFileOf(sessionId)).events.filter((e) => e.seq >= fromSeq);
   }
 
+  originOf(sessionId: string): number {
+    return this.#stateOf(sessionId).origin;
+  }
+
+  toSessionT(sessionId: string, daemonMicros: number): number {
+    return Math.max(0, Math.round(daemonMicros - this.originOf(sessionId)));
+  }
+
   listSessions(): SessionSummary[] {
     return this.#db
       .prepare(`

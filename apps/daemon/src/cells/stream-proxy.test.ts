@@ -452,6 +452,33 @@ describe("desktop stream proxy over HTTP", () => {
 });
 
 describe("desktop stream relay", () => {
+  it("pauses the upstream for a slow viewer and drains once the viewer catches up", async () => {
+    const selkies = await fakeSelkies();
+    const d = await daemon(selkies.baseUrl, { highWater: 256 * 1024, lowWater: 64 * 1024 });
+    const ws = d.open(`${d.prefix}/api/websockets`);
+    await new Promise((r) => ws.once("open", r));
+    let got = 0;
+    ws.on("message", () => {
+      got += 1;
+    });
+    ws.pause();
+    const chunk = Buffer.alloc(256 * 1024, 7);
+    const sockets = [...selkies.state.sockets];
+    for (let i = 0; i < 64; i++) sockets[0]?.send(chunk);
+    await settle(800);
+    // The daemon stopped reading: bytes are still queued on Selkies' side of the relay.
+    expect(sockets[0]?.bufferedAmount ?? 0).toBeGreaterThan(0);
+    // A pause the relay chose is no stall: the cell never reads "stalled" for it, so no other
+    // viewer sees "Reconnecting…" and the gateway holds nothing.
+    expect(d.connections()).not.toContain("stalled");
+    ws.resume();
+    await new Promise<void>((resolve) => {
+      const check = () => (got >= 64 ? resolve() : setTimeout(check, 20));
+      check();
+    });
+    expect(sockets[0]?.bufferedAmount).toBe(0);
+    ws.close();
+  });
   it("relays the WebSocket both ways, pings upstream, and reports stalled and live", async () => {
     const selkies = await fakeSelkies();
     const d = await daemon(selkies.baseUrl);

@@ -509,9 +509,9 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
       "-c",
       "sed -n 's,^Launcher=file://,,p' /config/.config/plank/dock1/launchers/*.dockitem | xargs ls",
     );
-    expect(launchers.trim().split("\n")).toEqual(
-      [
-        "chromium",
+    expect(launchers.trim().split("\n")).toEqual([
+      "/usr/local/share/applications/chromium.desktop",
+      ...[
         "codium",
         "gimp",
         "libreoffice-calc",
@@ -521,7 +521,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
         "thunar",
         "xfce4-terminal",
       ].map((app) => `/usr/share/applications/${app}.desktop`),
-    );
+    ]);
   });
 
   // WhiteSur draws the Apple logo for its start-here icons and its GNOME Shell activities button.

@@ -1,0 +1,38 @@
+{
+  "v": 1,
+  "title": "Oracle: press-acting clicks and typing",
+  "steps": [
+    {
+      "do": "launch",
+      "app": "chromium",
+      "args": ["--new-window", "file:///opt/localdot/flash.html"],
+      "waitMs": 8000,
+      "label": "Open the flash page"
+    },
+    { "do": "click", "x": 640, "y": 400, "label": "Click the page (centre)" },
+    { "do": "wait", "ms": 600 },
+    { "do": "click", "x": 500, "y": 300, "label": "Click the page (upper left)" },
+    { "do": "wait", "ms": 600 },
+    { "do": "click", "x": 780, "y": 500, "label": "Click the page (lower right)" },
+    { "do": "wait", "ms": 600 },
+    { "do": "click", "x": 640, "y": 400, "speed": "fast", "label": "Click the page (fast)" },
+    { "do": "wait", "ms": 600 },
+    { "do": "click", "x": 300, "y": 600, "speed": "instant", "label": "Click the page (instant)" },
+    { "do": "wait", "ms": 600 },
+    { "do": "type", "text": "abc" },
+    { "do": "wait", "ms": 600 },
+    { "do": "key", "combo": ["space"] },
+    { "do": "wait", "ms": 600 },
+    {
+      "do": "launch",
+      "app": "chromium",
+      "args": ["file:///opt/localdot/marker.html"],
+      "waitMs": 5000,
+      "label": "Open the marker page"
+    },
+    { "do": "click", "find": { "name": "Password" }, "label": "Click the password field" },
+    { "do": "type", "text": "hunter2" },
+    { "do": "click", "find": { "name": "marker red", "role": "button" } },
+    { "do": "wait", "ms": 1000 }
+  ]
+}

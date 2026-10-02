@@ -15,6 +15,8 @@ import { StallWatchdog } from "./watchdog.ts";
 // S8 measured at most 505 ms between signs of life on a live stream.
 export const STREAM_PING_MS = 500;
 export const STREAM_STALL_MS = 1500;
+export const RELAY_HIGH_WATER = 4 * 1024 ** 2;
+export const RELAY_LOW_WATER = 512 * 1024;
 const UPSTREAM_TIMEOUT_MS = 10_000;
 
 // The only cell endpoints Selkies' client calls (S8): GET api/status at start, and a plain GET of
@@ -80,6 +82,8 @@ export interface StreamProxyDeps {
   pingEveryMs?: number;
   stallAfterMs?: number;
   upstreamTimeoutMs?: number;
+  highWater?: number;
+  lowWater?: number;
 }
 
 // The ready check stands on its own: a revocation lost with a state event must not leave a
@@ -194,6 +198,7 @@ function relay(
     deps.upstreamTimeoutMs ?? UPSTREAM_TIMEOUT_MS,
   );
   let client: WebSocket | undefined;
+  let drain: NodeJS.Timeout | undefined;
   let finished = false;
   // 1012 sends the client back to reconnect, with a fresh ticket once its cell is ready again.
   const viewer = streams.open(id, () => {
@@ -215,6 +220,8 @@ function relay(
   const finish = (last: "none" | "disconnected") => {
     if (finished) return;
     finished = true;
+    clearInterval(drain);
+    drain = undefined;
     watchdog.stop();
     streams.close(id, viewer, last, watchdog.lastAt);
   };
@@ -235,7 +242,7 @@ function relay(
       ws.on("error", () => {});
       ws.on("close", () => {
         finish("none");
-        upstream.close();
+        upstream.terminate();
       });
       watchdog.start();
       streams.update(id, viewer, "live", watchdog.lastAt);
@@ -243,7 +250,23 @@ function relay(
   });
   upstream.on("message", (data, isBinary) => {
     watchdog.touch();
-    if (client?.readyState === WebSocket.OPEN) client.send(data, { binary: isBinary });
+    const viewer = client;
+    if (viewer?.readyState !== WebSocket.OPEN) return;
+    viewer.send(data, { binary: isBinary });
+    if (drain || viewer.bufferedAmount <= (deps.highWater ?? RELAY_HIGH_WATER)) return;
+    upstream.pause();
+    drain = setInterval(() => {
+      // This viewer's backpressure is intentional, and must not report a stalled computer.
+      watchdog.touch();
+      if (
+        viewer.bufferedAmount < (deps.lowWater ?? RELAY_LOW_WATER) ||
+        viewer.readyState !== WebSocket.OPEN
+      ) {
+        clearInterval(drain);
+        drain = undefined;
+        upstream.resume();
+      }
+    }, 20);
   });
   upstream.on("ping", () => watchdog.touch());
   upstream.on("pong", () => watchdog.touch());

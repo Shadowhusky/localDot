@@ -8,9 +8,13 @@
     "dev": "vite build --watch",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e",
     "shot": "tsx e2e/shot.ts",
-    "e2e": "playwright test"
+    "e2e": "playwright test",
+    "calibrate": "tsx e2e/calibrate.ts"
   },
   "dependencies": {
+    "@localdot/protocol": "workspace:*",
+    "@localdot/stage": "workspace:*",
+    "pixi.js": "8.21.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

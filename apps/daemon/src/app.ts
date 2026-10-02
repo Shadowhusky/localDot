@@ -6,6 +6,7 @@ import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
 import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
+import { type GatewayRoutesDeps, gatewayRoutes } from "./gateway/routes.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { serveUi } from "./static-ui.ts";
 import { tokensMatch } from "./token.ts";
@@ -17,9 +18,18 @@ export interface AppOptions {
   cells?: CellApiDeps;
   desktop?: StreamProxyDeps;
   ui?: { dir: string };
+  gateway?: GatewayRoutesDeps;
 }
 
-export function createApp({ token, port, eventLog, cells, desktop, ui }: AppOptions): Hono {
+export function createApp({
+  token,
+  port,
+  eventLog,
+  cells,
+  desktop,
+  ui,
+  gateway,
+}: AppOptions): Hono {
   const app = new Hono();
 
   // Hono's default handler logs the whole error, and a message can quote a file path or the
@@ -70,5 +80,6 @@ export function createApp({ token, port, eventLog, cells, desktop, ui }: AppOpti
   });
 
   if (cells) cellRoutes(app, cells);
+  if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   return app;
 }

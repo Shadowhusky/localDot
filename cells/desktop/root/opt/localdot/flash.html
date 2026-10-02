@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>flash</title>
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden;cursor:none}body.on{background:#fff}</style>
+</head>
+<body>
+<script>
+  const up = location.hash === "#up";
+  if (up) document.title = "flash up";
+  const flip = () => document.body.classList.toggle("on");
+  addEventListener(up ? "mouseup" : "mousedown", flip);
+  addEventListener("keydown", (e) => { if (!e.repeat) flip(); });
+  addEventListener("contextmenu", (e) => e.preventDefault());
+</script>
+</body>
+</html>

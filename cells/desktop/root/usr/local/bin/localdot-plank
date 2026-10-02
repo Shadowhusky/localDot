@@ -8,8 +8,10 @@ rm -f "$launchers"/*.dockitem
 items=()
 for app in thunar chromium xfce4-terminal codium org.xfce.mousepad \
   libreoffice-writer libreoffice-calc libreoffice-impress gimp; do
-  printf '[PlankDockItemPreferences]\nLauncher=file:///usr/share/applications/%s.desktop\n' \
-    "$app" > "$launchers/$app.dockitem"
+  dir=/usr/share/applications
+  [ -e "/usr/local/share/applications/$app.desktop" ] && dir=/usr/local/share/applications
+  printf '[PlankDockItemPreferences]\nLauncher=file://%s/%s.desktop\n' \
+    "$dir" "$app" > "$launchers/$app.dockitem"
   items+=("'$app.dockitem'")
 done
 gsettings set "$dock" dock-items "[$(IFS=,; echo "${items[*]}")]"

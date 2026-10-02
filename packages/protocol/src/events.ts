@@ -3,6 +3,7 @@ import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
 import { Target } from "./target.ts";
+import { boundedText } from "./text.ts";
 
 const envelope = {
   v: z.literal(1),
@@ -93,7 +94,7 @@ export const ActionIntent = event(
   "action.intent",
   z.object({
     verb: z.enum(["click", "move", "drag", "scroll", "type", "key", "wait"]),
-    label: z.string().min(1).max(80),
+    label: boundedText(80).refine((text) => text.length > 0),
     point: Point.optional(),
     risk: Risk,
     pointer: PointerPlan.optional(),

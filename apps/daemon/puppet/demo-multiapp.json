@@ -1,0 +1,22 @@
+{
+  "v": 1,
+  "title": "Demo: a sheet and a web page",
+  "steps": [
+    { "do": "launch", "app": "calc", "waitMs": 9000 },
+    { "do": "click", "find": { "name": "Name Box" } },
+    { "do": "type", "text": "B2", "label": "Go to B2" },
+    { "do": "key", "combo": ["Return"] },
+    { "do": "type", "text": "Q3 revenue" },
+    { "do": "key", "combo": ["Return"] },
+    { "do": "wait", "ms": 10000, "label": "Wait for the sheet" },
+    {
+      "do": "launch",
+      "app": "chromium",
+      "args": ["file:///opt/localdot/demo/index.html"],
+      "waitMs": 6000,
+      "label": "Open Chromium"
+    },
+    { "do": "click", "find": { "name": "Page two", "role": "link" } },
+    { "do": "wait", "ms": 1500, "label": "Done" }
+  ]
+}

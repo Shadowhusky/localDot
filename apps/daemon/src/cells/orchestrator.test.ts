@@ -320,6 +320,46 @@ describe("CellOrchestrator lifecycle", () => {
 });
 
 describe("CellOrchestrator restarts", () => {
+  it("a user start() during a restart's backoff leaves exactly one watch loop", async () => {
+    const held: (() => void)[] = [];
+    const { orchestrator, store, stateOf } = await setup({
+      restartBackoffMs: [7000, 7000],
+      sleep: (ms) => (ms === 7000 ? new Promise<void>((r) => held.push(r)) : Promise.resolve()),
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const record = store.get(cell.id);
+    const desktop = fake.state.containers.get(record?.docker.desktop ?? "");
+    const until = (pred: () => boolean) =>
+      new Promise<void>((resolve) => {
+        const check = () => (pred() ? resolve() : setTimeout(check, 5));
+        check();
+      });
+    if (desktop) {
+      desktop.running = false;
+      desktop.exitCode = 137;
+    }
+    await until(() =>
+      (orchestrator.get(cell.id)?.error ?? "").includes("restarting (attempt 1 of 2)"),
+    );
+    await until(() => held.length === 1);
+    await orchestrator.start(cell.id);
+    await stateOf(cell.id, "ready");
+    expect(desktop?.starts).toBe(2);
+    held[0]?.();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(desktop?.starts).toBe(2);
+    expect(orchestrator.get(cell.id)?.state).toBe("ready");
+    if (desktop) {
+      desktop.running = false;
+      desktop.exitCode = 137;
+    }
+    await until(() => held.length === 2);
+    held[1]?.();
+    await until(() => desktop?.starts === 3 && orchestrator.get(cell.id)?.state === "ready");
+    await new Promise((r) => setTimeout(r, 30));
+    expect(desktop?.starts).toBe(3);
+  });
   it("restarts an exited desktop with backoff and keeps the gate's published ports", async () => {
     const { orchestrator, store, stateOf, changes } = await setup();
     const cell = await orchestrator.create({ scale: 2 });

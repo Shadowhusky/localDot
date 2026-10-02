@@ -20,6 +20,7 @@ interface Seen {
 
 let server: Server | undefined;
 afterEach(() => {
+  server?.closeAllConnections();
   server?.close();
   server = undefined;
 });
@@ -70,6 +71,21 @@ async function fakeDocker(
 const missingSocket = () => join(tmpdir(), "ld-missing.sock");
 
 describe("DockerClient", () => {
+  it("gives up on a socket that never answers", async () => {
+    const socketPath = await listen(() => {});
+    const started = Date.now();
+    const err = await new DockerClient(socketPath, 200)
+      .request({ method: "GET", path: "/containers/c1/json" })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(DockerError);
+    expect(err).toMatchObject({ status: 0, path: "/containers/c1/json" });
+    expect((err as Error).message).toContain("no reply within 200 ms");
+    expect(Date.now() - started).toBeLessThan(2000);
+    const own = await new DockerClient(socketPath)
+      .request({ method: "GET", path: "/version", timeoutMs: 50 })
+      .catch((e) => e);
+    expect((own as Error).message).toContain("no reply within 50 ms");
+  });
   it("sends JSON with the API version prefix and parses JSON replies", async () => {
     const { socketPath, seen } = await fakeDocker(() => ({
       status: 201,

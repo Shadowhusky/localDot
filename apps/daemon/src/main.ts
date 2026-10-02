@@ -1,6 +1,7 @@
 import type { Server } from "node:http";
 import { constants } from "node:os";
 import { join } from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { createApp } from "./app.ts";
 import { DockerClient } from "./cells/docker.ts";
@@ -11,9 +12,16 @@ import { TicketRegistry } from "./cells/secrets.ts";
 import { cellStatusRoute } from "./cells/status-stream.ts";
 import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
+import { monotonicClock } from "./clock.ts";
+import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
 import { EventLog } from "./event-log.ts";
 import { sessionStreamRoute } from "./event-stream.ts";
+import { FrameStore } from "./gateway/frames.ts";
+import { ActionGateway } from "./gateway/gateway.ts";
+import { LiveSessions } from "./gateway/live.ts";
+import { loadOnsetTable } from "./gateway/onset-table.ts";
+import { policyFromEnv } from "./gateway/ring-onset.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
 import { localdotHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
@@ -30,7 +38,8 @@ for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
 }
 const tokenFile = join(home, "daemon-token");
 const token = loadOrCreateToken(tokenFile);
-const eventLog = new EventLog(home);
+const clock = monotonicClock();
+const eventLog = new EventLog(home, clock);
 const tickets = new TicketRegistry();
 const orchestrator = new CellOrchestrator({
   docker: new DockerClient(findDockerSocket().path),
@@ -40,11 +49,24 @@ const orchestrator = new CellOrchestrator({
   probeDesktopd,
   probeStream,
 });
-// The daemon serves the UI without Docker; the UI shows the cell as failed with the reason.
-await orchestrator
+// The UI remains available while Docker is unavailable or its startup reconcile is waiting.
+void orchestrator
   .reconcile()
   .catch((err) => console.error(`cell reconcile failed: ${String(err)}`));
 const desktop = { cells: orchestrator, tickets, vendorDir: webDir("vendor/selkies") };
+const registry = new DesktopdRegistry(orchestrator, clock);
+const onset = loadOnsetTable(home);
+const frames = new FrameStore(home);
+const gateway = new ActionGateway({
+  eventLog,
+  cells: orchestrator,
+  registry,
+  onset,
+  ringOnset: policyFromEnv(onset),
+  frames,
+  now: () => clock.nowMicros(),
+  sleep: (ms, signal) => sleep(ms, undefined, { signal }),
+});
 const app = createApp({
   token,
   port,
@@ -52,6 +74,7 @@ const app = createApp({
   cells: { cells: orchestrator, tickets },
   desktop,
   ui: { dir: webDir("dist") },
+  gateway: { registry, clock, eventLog, gateway, frames, live: new LiveSessions() },
 });
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {

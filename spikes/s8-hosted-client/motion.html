@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>motion</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  #bar { position: fixed; top: 0; bottom: 0; left: 0; width: 64px; background: #fff; }
+</style>
+</head>
+<body>
+<div id="bar"></div>
+<script>
+  // A full-height white bar on black, 16 CSS px further right on every animation frame. A frame the
+  // capture took while the compositor was still painting shows the bar's left edge at two places.
+  const bar = document.getElementById("bar");
+  let x = 0;
+  const step = () => {
+    x = (x + 16) % Math.max(16, innerWidth - 64);
+    bar.style.transform = `translateX(${x}px)`;
+    requestAnimationFrame(step);
+  };
+  requestAnimationFrame(step);
+</script>
+</body>
+</html>

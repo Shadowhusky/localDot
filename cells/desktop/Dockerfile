@@ -13,7 +13,7 @@ ARG CODIUM_SHA256_AMD64=5f5c00a9da9d232e4c84e9eee68bbdeb4d8737462022626ce3bdb694
 
 RUN apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      at-spi2-core python3-venv python3-xlib xinput libnss3-tools xz-utils x11-utils \
+      at-spi2-core python3-venv python3-xlib xinput libnss3-tools xz-utils x11-utils webp \
       libreoffice-calc libreoffice-writer libreoffice-impress libreoffice-gtk3 \
       gimp ffmpeg imagemagick pandoc \
       fonts-inter fonts-jetbrains-mono fonts-noto-cjk fonts-noto-color-emoji \
@@ -132,7 +132,7 @@ COPY THIRD-PARTY.md /usr/share/doc/localdot-themes/THIRD-PARTY.md
 COPY root/ /
 RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run \
       /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run /usr/local/bin/localdot-plank \
-      /etc/s6-overlay/s6-rc.d/svc-desktopd/run
+      /etc/s6-overlay/s6-rc.d/svc-desktopd/run /usr/local/bin/localdot-chromium
 
 # One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
 # set here that a client could change are locked: "|locked" on bools, a one-value span on ranges,
@@ -181,5 +181,7 @@ COPY --from=lscr.io/linuxserver/webtop@sha256:73f966bd414cd4aef183c96aba8fab37dd
 FROM base AS desktop
 # The bundle lands in the final stage only, so `--target selkies-client` never needs it built.
 COPY desktopd/dist/desktopd.mjs /opt/localdot/desktopd.mjs
+COPY desktopd/x/xhelper.py /opt/localdot/xhelper.py
+COPY desktopd/x/native.py /opt/localdot/native.py
 RUN chmod 644 /opt/localdot/desktopd.mjs
 EXPOSE 3000 7700
