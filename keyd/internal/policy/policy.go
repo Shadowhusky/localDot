@@ -55,7 +55,9 @@ type Decision struct {
 	Reason string
 }
 
-// Connect decides a CONNECT. intercepted holds the hosts keyd terminates for this cell.
+// Connect decides a CONNECT. intercepted holds the hosts keyd terminates for this cell. t must come
+// from ParseHostPort: Connect checks only the port, the bound hosts and the deny list, so a
+// hand-built target (an address, a mixed-case or dotted name) would pass.
 func (p Policy) Connect(t Target, intercepted map[string]bool) Decision {
 	if t.Port != 443 {
 		return Decision{Reason: ReasonPort}
@@ -66,7 +68,8 @@ func (p Policy) Connect(t Target, intercepted map[string]bool) Decision {
 	return p.web(t)
 }
 
-// PlainHTTP decides an absolute-form http:// request. keyd never swaps on one.
+// PlainHTTP decides an absolute-form http:// request. keyd never swaps on one. t must come from
+// ParseHostPort: PlainHTTP checks only the port and the deny list.
 func (p Policy) PlainHTTP(t Target) Decision {
 	if t.Port != 80 {
 		return Decision{Reason: ReasonPort}
