@@ -1,0 +1,26 @@
+--- FAIL: TestPassthroughKeepsTheUpstreamCertificate (0.01s)
+    connect_test.go:21: Get "https://www.example.test/page": Forbidden
+--- FAIL: TestConnectPolicy (0.01s)
+    connect_test.go:57: ip literal: 403 "surrogate-policy", want 403 "ip-literal"
+    connect_test.go:57: ipv6 literal: 403 "surrogate-policy", want 403 "ip-literal"
+    connect_test.go:57: mapped literal: 403 "surrogate-policy", want 403 "ip-literal"
+    connect_test.go:57: metadata literal: 403 "surrogate-policy", want 403 "ip-literal"
+    connect_test.go:57: tls on 443 only: 403 "surrogate-policy", want 403 "port-not-allowed"
+    connect_test.go:57: port required: 403 "surrogate-policy", want 403 "host-invalid"
+    connect_test.go:57: deny list: 403 "surrogate-policy", want 403 "host-denied"
+    connect_test.go:57: the gateway is plain http only: 403 "surrogate-policy", want 403 "host-denied"
+    connect_test.go:57: brain has no web: 403 "surrogate-policy", want 403 "web-not-allowed"
+--- FAIL: TestSNIMustMatchTheConnectHost (0.00s)
+    connect_test.go:87: CONNECT: 403
+--- FAIL: TestATunnelMustCarryTLS (0.00s)
+    connect_test.go:115: plain HTTP inside a tunnel got an answer
+--- FAIL: TestAPassthroughToAPrivateAddressIsRefusedAtDial (0.00s)
+    connect_test.go:126: CONNECT: 403
+--- FAIL: TestKeydNeverDialsThroughAnotherProxy (0.01s)
+    connect_test.go:148: Get "https://www.example.test/": Forbidden
+--- FAIL: TestOnlyAbsoluteHTTPIsServed (0.02s)
+    egress_integrity_test.go:349: "CONNECT ports.example.test:443 HTTP/1.1\r\nHost: ports.example.test:443\r\n": 403, want 405
+    egress_integrity_test.go:349: "CONNECT ports.example.test:80 HTTP/1.1\r\nHost: ports.example.test:80\r\n": 403, want 405
+FAIL
+FAIL	github.com/shadowhusky/localdot/keyd/internal/egress	3.007s
+FAIL

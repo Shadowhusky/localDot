@@ -1,0 +1,5 @@
+# github.com/shadowhusky/localdot/keyd/internal/egress [github.com/shadowhusky/localdot/keyd/internal/egress.test]
+internal/egress/connect_test.go:101:27: undefined: ReasonSNIMismatch
+internal/egress/connect_test.go:117:22: undefined: ReasonNotTLS
+FAIL	github.com/shadowhusky/localdot/keyd/internal/egress [build failed]
+FAIL
