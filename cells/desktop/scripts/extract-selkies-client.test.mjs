@@ -25,7 +25,7 @@ for arg in "$@"; do
 done
 mkdir -p "$dest/assets"
 printf '<head><link rel="manifest" href="manifest.json" crossorigin="use-credentials"></head>' > "$dest/index.html"
-echo "// core" > "$dest/assets/core.js"
+echo "// core" > "$dest/assets/selkies-core-New1.js"
 touch "$dest/icon.png" "$dest/icon-512.png" "$dest/LICENSE"
 `;
 
@@ -67,11 +67,11 @@ describe("extract-selkies-client.sh", () => {
     const dest = join(repo.root, "vendor");
     mkdirSync(join(dest, "assets"), { recursive: true });
     writeFileSync(join(dest, "index.html"), "old");
-    writeFileSync(join(dest, "assets", "old.js"), "// old");
+    writeFileSync(join(dest, "assets", "selkies-core-Old1.js"), "// old");
     const r = repo.run(dest);
     expect(r.status, r.stderr).toBe(0);
-    expect(existsSync(join(dest, "assets", "old.js"))).toBe(false);
-    expect(existsSync(join(dest, "assets", "core.js"))).toBe(true);
+    expect(existsSync(join(dest, "assets", "selkies-core-Old1.js"))).toBe(false);
+    expect(existsSync(join(dest, "assets", "selkies-core-New1.js"))).toBe(true);
   });
 
   it("refuses a tree without cells/desktop/Dockerfile, before touching anything", () => {
@@ -91,14 +91,20 @@ describe("extract-selkies-client.sh", () => {
     const notes = join(repo.root, "notes");
     mkdirSync(notes);
     writeFileSync(join(notes, "index.html"), "mine");
+    // index.html and assets/ alone are any web build's shape, not the marker of an extraction.
+    const site = join(repo.root, "site");
+    mkdirSync(join(site, "assets"), { recursive: true });
+    writeFileSync(join(site, "index.html"), "mine");
+    writeFileSync(join(site, "assets", "app.js"), "// mine");
     const file = join(repo.root, "notes.txt");
     writeFileSync(file, "mine");
-    for (const dest of [notes, file]) {
+    for (const dest of [notes, site, file]) {
       const r = repo.run(dest);
       expect(r.status, dest).toBe(1);
       expect(r.stderr).toContain("not a previous extraction");
     }
     expect(readFileSync(join(notes, "index.html"), "utf8")).toBe("mine");
+    expect(readFileSync(join(site, "assets", "app.js"), "utf8")).toBe("// mine");
     expect(readFileSync(file, "utf8")).toBe("mine");
     expect(repo.dockerRuns()).toEqual([]);
   });

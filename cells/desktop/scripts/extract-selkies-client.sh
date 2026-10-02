@@ -30,8 +30,17 @@ if [ "$ok" != yes ]; then
   echo "extract-selkies-client.sh: refusing to replace $raw: <dest> must be inside $root" >&2
   exit 1
 fi
-if { [ -e "$dest" ] || [ -L "$dest" ]; } && ! { [ -f "$dest/index.html" ] && [ -d "$dest/assets" ]; }; then
-  echo "extract-selkies-client.sh: refusing to replace $raw: it is not a previous extraction (index.html and assets/)" >&2
+# A previous extraction holds Selkies' core bundle, assets/selkies-core-<hash>.js; index.html and
+# assets/ alone are the shape of any web build.
+extracted() {
+  local f
+  for f in "$1"/assets/selkies-core-*.js; do
+    if [ -f "$f" ] && [ ! -L "$f" ]; then return 0; fi
+  done
+  return 1
+}
+if { [ -e "$dest" ] || [ -L "$dest" ]; } && ! { [ -d "$dest" ] && [ ! -L "$dest" ] && extracted "$dest"; }; then
+  echo "extract-selkies-client.sh: refusing to replace $raw: it is not a previous extraction (assets/selkies-core-*.js)" >&2
   exit 1
 fi
 cd "$(dirname "$0")/.."
@@ -45,4 +54,8 @@ if grep -q 'rel="manifest"' "$dest/index.html"; then
   exit 1
 fi
 ls "$dest/index.html" "$dest/assets" "$dest/icon.png" "$dest/icon-512.png" "$dest/LICENSE" >/dev/null
+if ! extracted "$dest"; then
+  echo "extract-selkies-client.sh: no assets/selkies-core-*.js in the build; the next run would refuse $raw" >&2
+  exit 1
+fi
 echo "extracted Selkies client to $dest"
