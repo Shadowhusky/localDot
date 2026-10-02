@@ -25,14 +25,16 @@ const CELL_API = new Map([
   ["/api/websockets", "text/plain; charset=utf-8"],
 ]);
 const MAX_CELL_ANSWER_BYTES = 64 * 1024;
-const SERVED = { "cache-control": "no-store", "x-content-type-options": "nosniff" };
+const NOSNIFF = { "x-content-type-options": "nosniff" };
+const SERVED = { "cache-control": "no-store", ...NOSNIFF };
 
 // The client runs in localDot's origin, whose storage holds the install token, and acts on what its
 // cell sends, so whatever a cell makes it do stays inside this origin. The one widening: it runs its
 // socket and decoders in blob: workers. Its injected <style> and its audio worklet stay refused (the
 // stage shows video only). The sandbox drops dialogs, popups, downloads, pointer lock and navigating
-// the Theatre; the permissions deny the camera and microphone its cell can ask for, and the
-// clipboard, fullscreen, gamepads and wake lock it would use.
+// the Theatre; the permissions deny the camera and microphone its cell can ask for, the clipboard,
+// fullscreen, gamepads and wake lock it would use, and every other powerful feature a page in this
+// origin could otherwise reach.
 const CLIENT_POLICY = {
   "content-security-policy": [
     "default-src 'self'",
@@ -53,6 +55,20 @@ const CLIENT_POLICY = {
     "fullscreen=()",
     "gamepad=()",
     "screen-wake-lock=()",
+    "display-capture=()",
+    "geolocation=()",
+    "keyboard-map=()",
+    "speaker-selection=()",
+    "window-management=()",
+    "usb=()",
+    "hid=()",
+    "serial=()",
+    "bluetooth=()",
+    "midi=()",
+    "payment=()",
+    "publickey-credentials-get=()",
+    "idle-detection=()",
+    "local-fonts=()",
   ].join(", "),
 };
 const UNDER_TICKET = /^\/cells\/[^/]+\/desktop\/[^/]+(\/.*)$/;
@@ -77,17 +93,17 @@ export function desktopRoutes(app: Hono, deps: StreamProxyDeps): void {
   // Hono answers HEAD from this route without the body; the client probes its page with HEAD.
   app.get("/cells/:id/desktop/:ticket/*", async (c) => {
     const id = cellFor(deps, c.req.param("id") ?? "", c.req.param("ticket") ?? "");
-    if (!id) return c.text("forbidden", 403);
+    if (!id) return c.text("forbidden", 403, NOSNIFF);
     const rel = UNDER_TICKET.exec(new URL(c.req.url).pathname)?.[1] ?? "";
     if (rel.startsWith("/api/")) {
       const type = c.req.method === "GET" ? CELL_API.get(rel) : undefined;
-      return type ? proxyApi(c, deps, id, rel, type) : c.text("not found", 404);
+      return type ? proxyApi(c, deps, id, rel, type) : c.text("not found", 404, NOSNIFF);
     }
     const file = vendored(deps.vendorDir, rel);
-    if (!file) return c.text("not found", 404);
+    if (!file) return c.text("not found", 404, NOSNIFF);
     return c.body(file.body, 200, { ...SERVED, ...CLIENT_POLICY, "content-type": file.type });
   });
-  app.all("/cells/:id/desktop/:ticket/*", (c) => c.text("method not allowed", 405));
+  app.all("/cells/:id/desktop/:ticket/*", (c) => c.text("method not allowed", 405, NOSNIFF));
 }
 
 function vendored(dir: string, rel: string): StaticFile | undefined {
@@ -108,7 +124,7 @@ async function proxyApi(
   type: string,
 ): Promise<Response> {
   const endpoints = deps.cells.endpoints(id);
-  if (!endpoints) return c.text("cell not running", 503);
+  if (!endpoints) return c.text("cell not running", 503, NOSNIFF);
   try {
     const res = await fetch(`${endpoints.stream.baseUrl}${path}`, {
       headers: { authorization: endpoints.stream.authorization },
@@ -118,10 +134,10 @@ async function proxyApi(
     const body = await readCapped(res, MAX_CELL_ANSWER_BYTES);
     // The client's fetch wrapper reloads its page on a same-origin 401 (S8): the cell refusing
     // the proxy's credential is the gateway's failure, not the viewer's.
-    if (body === undefined || res.status === 401) return c.text("bad gateway", 502);
+    if (body === undefined || res.status === 401) return c.text("bad gateway", 502, NOSNIFF);
     return new Response(body, { status: res.status, headers: { ...SERVED, "content-type": type } });
   } catch {
-    return c.text("cell unreachable", 502);
+    return c.text("cell unreachable", 502, NOSNIFF);
   }
 }
 

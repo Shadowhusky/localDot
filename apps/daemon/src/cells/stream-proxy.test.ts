@@ -27,7 +27,9 @@ const CLIENT_CSP =
   "sandbox allow-scripts allow-same-origin";
 const CLIENT_PERMISSIONS =
   "camera=(), microphone=(), clipboard-read=(), clipboard-write=(), fullscreen=(), gamepad=(), " +
-  "screen-wake-lock=()";
+  "screen-wake-lock=(), display-capture=(), geolocation=(), keyboard-map=(), " +
+  "speaker-selection=(), window-management=(), usb=(), hid=(), serial=(), bluetooth=(), " +
+  "midi=(), payment=(), publickey-credentials-get=(), idle-detection=(), local-fonts=()";
 const freePort = () =>
   new Promise<number>((resolve) => {
     const probe = createServer().listen(0, "127.0.0.1", () => {
@@ -377,13 +379,17 @@ describe("desktop stream proxy over HTTP", () => {
     const selkies = await fakeSelkies();
     const d = await daemon(selkies.baseUrl, { upstreamTimeoutMs: 300 });
     selkies.state.answer = { status: 200, type: "application/json", body: "x".repeat(65 * 1024) };
-    expect((await d.fetch(`${d.prefix}/api/status`)).status).toBe(502);
+    const tooMuch = await d.fetch(`${d.prefix}/api/status`);
+    expect(tooMuch.status).toBe(502);
+    expect(tooMuch.headers.get("x-content-type-options")).toBe("nosniff");
     d.streamAt({ baseUrl: `http://127.0.0.1:${await freePort()}`, authorization: AUTH });
     expect((await d.fetch(`${d.prefix}/api/status`)).status).toBe(502);
     d.streamAt({ baseUrl: await silentCell(), authorization: AUTH });
     expect((await within(d.fetch(`${d.prefix}/api/status`), 3000, "silent cell")).status).toBe(502);
     d.cells.endpointsById.delete(d.id);
-    expect((await d.fetch(`${d.prefix}/api/status`)).status).toBe(503);
+    const off = await d.fetch(`${d.prefix}/api/status`);
+    expect(off.status).toBe(503);
+    expect(off.headers.get("x-content-type-options")).toBe("nosniff");
   });
 
   it("refuses wrong tickets, another cell's ticket, a cell that is not ready and traversal", async () => {
@@ -392,6 +398,18 @@ describe("desktop stream proxy over HTTP", () => {
     const d = await daemon(selkies.baseUrl);
     const other = d.addCell(otherSelkies.baseUrl);
     expect((await d.fetch(`/cells/${d.id}/desktop/${"A".repeat(22)}/`)).status).toBe(403);
+    // Every refusal is plain text the browser may not sniff into a page.
+    for (const [path, method, status] of [
+      [`/cells/${d.id}/desktop/${"A".repeat(22)}/`, "GET", 403],
+      [`${d.prefix}/api/print/x`, "GET", 404],
+      [`${d.prefix}/api/status`, "HEAD", 404],
+      [`${d.prefix}/missing.js`, "GET", 404],
+      [`${d.prefix}/api/status`, "POST", 405],
+    ] as const) {
+      const res = await d.fetch(path, { method });
+      expect(res.status, `${method} ${path}`).toBe(status);
+      expect(res.headers.get("x-content-type-options"), `${method} ${path}`).toBe("nosniff");
+    }
     expect((await d.fetch(`/cells/${ulid()}/desktop/${d.ticket}/`)).status).toBe(403);
     expect((await d.fetch(`/cells/${other.id}/desktop/${d.ticket}/`)).status).toBe(403);
     expect((await d.fetch(`/cells/${other.id}/desktop/${d.ticket}/api/status`)).status).toBe(403);
