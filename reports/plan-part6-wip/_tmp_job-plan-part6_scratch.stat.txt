@@ -1,0 +1,26 @@
+ apps/daemon/src/agent/untrusted.ts             |   8 +
+ apps/daemon/src/safety/approval-text.test.ts   |  55 +++
+ apps/daemon/src/safety/approval-text.ts        | 131 ++++++
+ apps/daemon/src/safety/approvals.test.ts       | 111 +++++
+ apps/daemon/src/safety/approvals.ts            | 176 ++++++++
+ apps/daemon/src/safety/control.test.ts         | 128 ++++++
+ apps/daemon/src/safety/control.ts              | 206 +++++++++
+ apps/daemon/src/safety/gate.ts                 | 141 ++++++
+ apps/daemon/src/safety/handback.ts             |  96 ++++
+ apps/daemon/src/safety/repeat-guard.test.ts    |  42 ++
+ apps/daemon/src/safety/repeat-guard.ts         |  95 ++++
+ apps/daemon/src/safety/risk-words.ts           | 185 ++++++++
+ apps/daemon/src/safety/risk.test.ts            | 133 ++++++
+ apps/daemon/src/safety/risk.ts                 | 292 ++++++++++++
+ apps/daemon/src/safety/shell-risk.test.ts      | 121 +++++
+ apps/daemon/src/safety/shell-risk.ts           | 601 +++++++++++++++++++++++++
+ apps/daemon/src/safety/takeover.test.ts        | 152 +++++++
+ apps/daemon/src/safety/takeover.ts             | 239 ++++++++++
+ apps/daemon/src/safety/testing/fake-session.ts |  38 ++
+ packages/protocol/src/events.ts                |  68 ++-
+ packages/protocol/src/index.ts                 |   3 +
+ packages/protocol/src/safety.test.ts           | 125 +++++
+ packages/protocol/src/safety.ts                | 187 ++++++++
+ packages/protocol/src/text.ts                  |   7 +
+ packages/protocol/src/tools.ts                 |  16 +
+ 25 files changed, 3350 insertions(+), 6 deletions(-)
