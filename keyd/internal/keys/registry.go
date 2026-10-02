@@ -1,6 +1,8 @@
 package keys
 
 import (
+	"fmt"
+	"io"
 	"sync"
 
 	"github.com/shadowhusky/localdot/keyd/internal/surrogate"
@@ -13,6 +15,25 @@ type Entry struct {
 	ID      string
 	Cell    string
 	Binding Binding
+}
+
+// String names the entry as audit lines do, surrogate:<ID>, never by its token.
+func (e Entry) String() string {
+	id := e.ID
+	if id == "" && e.Token != "" {
+		id = surrogate.ID(e.Token)
+	}
+	return "surrogate:" + id
+}
+
+// Format prints String under every verb, so no verb, %+v and %#v included, prints the token.
+func (e Entry) Format(f fmt.State, _ rune) {
+	io.WriteString(f, e.String())
+}
+
+func (e Entry) clone() Entry {
+	e.Binding = e.Binding.clone()
+	return e
 }
 
 type Registry struct {
@@ -29,18 +50,18 @@ func (r *Registry) Mint(cell string, b Binding) (Entry, error) {
 	if err != nil {
 		return Entry{}, err
 	}
-	e := Entry{Token: token, ID: surrogate.ID(token), Cell: cell, Binding: b}
+	e := Entry{Token: token, ID: surrogate.ID(token), Cell: cell, Binding: b.clone()}
 	r.mu.Lock()
 	r.byToken[token] = e
 	r.mu.Unlock()
-	return e, nil
+	return e.clone(), nil
 }
 
 func (r *Registry) Lookup(token string) (Entry, bool) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	e, ok := r.byToken[token]
-	return e, ok
+	return e.clone(), ok
 }
 
 func (r *Registry) ForCell(cell string) []Entry {
@@ -49,7 +70,7 @@ func (r *Registry) ForCell(cell string) []Entry {
 	var out []Entry
 	for _, e := range r.byToken {
 		if e.Cell == cell {
-			out = append(out, e)
+			out = append(out, e.clone())
 		}
 	}
 	return out

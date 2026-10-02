@@ -47,8 +47,8 @@ func (o Op) ModelFrom(p string) string {
 }
 
 // Binding is where a secret may go. HTTP secrets name exact hosts reached over https on 443;
-// LLM secrets name a gateway route. FromRecord and LocalRoutes give each binding its own slices
-// and URL.
+// LLM secrets name a gateway route. FromRecord, LocalRoutes and the Registry give each binding its
+// own slices and URL.
 type Binding struct {
 	SecretID string
 	Tag      string
@@ -61,6 +61,19 @@ type Binding struct {
 	Format   Format
 	Methods  []string
 	Paths    []string
+}
+
+// clone copies the slices and the URL; the compiled paths, which nothing edits, are shared.
+func (b Binding) clone() Binding {
+	b.Hosts = slices.Clone(b.Hosts)
+	b.Ops = slices.Clone(b.Ops)
+	b.Methods = slices.Clone(b.Methods)
+	b.Paths = slices.Clone(b.Paths)
+	if b.Upstream != nil {
+		u := *b.Upstream
+		b.Upstream = &u
+	}
+	return b
 }
 
 func (b Binding) Op(method, p string) (Op, bool) {

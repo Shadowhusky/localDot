@@ -1248,6 +1248,111 @@ func TestPathPrefixesAreOnlyThoseALimitedPathCanMatch(t *testing.T) {
 	}
 }
 
+func TestTheRegistryHandsOutCopies(t *testing.T) {
+	r := NewRegistry()
+	recs := []vault.Record{
+		{ID: "web", Kind: vault.KindHTTP, Hosts: []string{integrityHost}, Header: "Authorization", Format: "bearer", Methods: []string{"GET"}, Paths: []string{"/v1/"}},
+		{ID: "llm", Kind: vault.KindLLM, Provider: "openai-compatible", BaseURL: "https://llm.example.test/v1"},
+	}
+	vandalise := func(b Binding) {
+		if len(b.Hosts) > 0 {
+			b.Hosts[0] = "evil.example.test"
+		}
+		if len(b.Methods) > 0 {
+			b.Methods[0] = "DELETE"
+		}
+		if len(b.Paths) > 0 {
+			b.Paths[0] = "/"
+		}
+		if len(b.Ops) > 0 {
+			b.Ops[0] = Op{Method: "DELETE", Path: regexp.MustCompile(`^.*$`)}
+		}
+		if b.Upstream != nil {
+			b.Upstream.Host = "evil.example.test"
+			b.Upstream.Path = "/evil"
+		}
+	}
+	intact := func(name string, e Entry) {
+		t.Helper()
+		got, ok := r.Lookup(e.Token)
+		if !ok {
+			t.Fatalf("%s: the surrogate no longer resolves", name)
+		}
+		b := got.Binding
+		switch b.SecretID {
+		case "web":
+			if !slices.Equal(b.Hosts, []string{integrityHost}) || !slices.Equal(b.Methods, []string{"GET"}) || !slices.Equal(b.Paths, []string{"/v1/"}) {
+				t.Errorf("%s: the stored binding became %+v", name, b)
+			}
+			h := hdr("Authorization", "Bearer "+e.Token)
+			wantAllow(t, name+": a GET under /v1/", at(t, r, https(integrityHost), "GET", "/v1/x", h), 1)
+			wantDeny(t, name+": a DELETE", at(t, r, https(integrityHost), "DELETE", "/v1/x", h), ReasonSurrogatePolicy)
+			wantDeny(t, name+": another host", at(t, r, https("evil.example.test"), "GET", "/v1/x", h), ReasonMisplacedSurrogate)
+		case "llm":
+			if b.Upstream.String() != "https://llm.example.test/v1" || b.Ops[0].Method != "POST" || b.Ops[0].Path.String() != `^chat/completions$` {
+				t.Errorf("%s: the stored binding became %+v, upstream %s", name, b, b.Upstream)
+			}
+		}
+	}
+	for _, rec := range recs {
+		given := binding(t, rec)
+		e, err := r.Mint("c1", given)
+		if err != nil {
+			t.Fatal(err)
+		}
+		vandalise(given)
+		intact(rec.ID+", the binding given to Mint edited", e)
+		vandalise(e.Binding)
+		intact(rec.ID+", the entry Mint returned edited", e)
+		got, _ := r.Lookup(e.Token)
+		vandalise(got.Binding)
+		intact(rec.ID+", the entry Lookup returned edited", e)
+		for _, listed := range r.ForCell("c1") {
+			vandalise(listed.Binding)
+		}
+		intact(rec.ID+", the entries ForCell returned edited", e)
+		v := r.Inspect(Dest{Cell: "c1", Scheme: "gateway", Route: "llm"}, "POST", &url.URL{Path: "/"}, hdr("Authorization", "Bearer "+e.Token))
+		for _, s := range v.Swaps {
+			vandalise(s.Binding)
+		}
+		intact(rec.ID+", the verdict's swaps edited", e)
+	}
+}
+
+func TestEntriesPrintOnlyTheSurrogateID(t *testing.T) {
+	f := newFixture(t)
+	e := f.bearer
+	v := at(t, f.r, https(integrityHost), "GET", "/", hdr("Authorization", "Bearer "+e.Token))
+	if !v.Allow {
+		t.Fatalf("%+v", v)
+	}
+	if got, want := fmt.Sprintf("%v", e), "surrogate:"+e.ID; got != want {
+		t.Errorf("%%v of an entry = %q, want %q", got, want)
+	}
+	if s, ok := any(e).(fmt.Stringer); !ok || s.String() != "surrogate:"+e.ID {
+		t.Errorf("an entry is not a fmt.Stringer naming its surrogate by ID")
+	}
+	if got := fmt.Sprintf("%v", Entry{Token: e.Token}); got != "surrogate:"+e.ID {
+		t.Errorf("%%v of an entry without its ID = %q, want the token's ID", got)
+	}
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s", "%q", "%x", "%X", "%d", "%T %v"} {
+		for name, arg := range map[string]any{
+			"an entry": e, "a pointer to an entry": &e, "a slice of entries": []Entry{e, f.raw}, "a map of entries": map[string]Entry{"k": e},
+			"a verdict": v, "a pointer to a verdict": &v, "a struct holding an entry": struct{ E Entry }{e},
+		} {
+			out := fmt.Sprintf(verb, arg)
+			if strings.Contains(out, e.Token) || strings.Contains(out, "ld_") || strings.Contains(out, hexOf(e.Token)) || strings.Contains(strings.ToLower(out), strings.ToLower(hexOf(e.Token))) {
+				t.Errorf("%s of %s prints the surrogate: %s", verb, name, out)
+			}
+			if verb != "%T %v" && verb != "%x" && verb != "%X" && verb != "%d" && !strings.Contains(out, "surrogate:"+e.ID) {
+				t.Errorf("%s of %s does not name the surrogate by its ID: %s", verb, name, out)
+			}
+		}
+	}
+}
+
+func hexOf(s string) string { return fmt.Sprintf("%x", []byte(s)) }
+
 func TestTheURLHostIsTheDestination(t *testing.T) {
 	f := newFixture(t)
 	bearer := hdr("Authorization", "Bearer "+f.bearer.Token)
