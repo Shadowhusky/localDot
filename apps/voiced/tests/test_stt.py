@@ -73,8 +73,7 @@ def test_a_pause_under_a_second_keeps_one_utterance_and_decodes_each_turn_once()
         seen = until(socket, "end")
     finals = [m["text"] for m in seen if m["type"] == "final"]
     assert [m["utterance"] for m in seen if m["type"] == "speech_started"] == [1, 1]
-    assert len(finals) == 2 and finals[1] == seen[-1]["text"]
-    assert seen[-1]["text"].count("s") == 2
+    assert finals == ["1.12s", "1.12s 1.31s"] and seen[-1]["text"] == finals[1]
 
 
 def test_a_long_pause_starts_a_second_utterance():
