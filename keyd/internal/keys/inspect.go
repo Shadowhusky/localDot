@@ -8,6 +8,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/shadowhusky/localdot/keyd/internal/surrogate"
 )
@@ -209,9 +210,15 @@ func scan(u *url.URL, h http.Header) []occurrence {
 				for _, t := range surrogate.Find(user + "\n" + pass) {
 					out = append(out, occurrence{token: t, header: canonical, basic: true})
 				}
-			} else {
-				for _, t := range surrogate.Find(looseBasic(value)) {
-					out = append(out, occurrence{token: t, header: canonical})
+				continue
+			}
+			found := map[string]bool{}
+			for _, decoded := range looseBasic(value) {
+				for _, t := range surrogate.Find(decoded) {
+					if !found[t] {
+						found[t] = true
+						out = append(out, occurrence{token: t, header: canonical})
+					}
 				}
 			}
 		}
@@ -231,14 +238,37 @@ func order(occ []occurrence) []string {
 
 // looseBasic decodes a Basic credential as the most lenient servers do: any whitespace after the
 // scheme, the scheme in any case, either base64 alphabet, any padding, stray bytes skipped and no
-// colon needed. Its result is only searched for surrogates; placed refuses every one it finds.
-func looseBasic(value string) string {
-	f := strings.Fields(value)
-	if len(f) < 2 || !strings.EqualFold(f[0], "Basic") {
-		return ""
+// colon needed. A server may also split the credential where it likes, so it is decoded joined, field
+// by field (fields end at whitespace or commas) and chunk by chunk (chunks end at =), each at every
+// base64 alignment. Its results are only searched for surrogates; placed refuses every one found.
+func looseBasic(value string) []string {
+	f := strings.FieldsFunc(value, func(r rune) bool { return unicode.IsSpace(r) || r == ',' })
+	scheme := slices.IndexFunc(f, func(s string) bool { return strings.EqualFold(s, "Basic") })
+	if scheme < 0 || scheme == len(f)-1 {
+		return nil
 	}
+	joined := strings.Join(f[scheme+1:], "")
+	pieces := append(append([]string{joined}, f[scheme+1:]...), strings.Split(joined, "=")...)
+	var out []string
+	for _, piece := range pieces {
+		letters := base64Letters(piece)
+		for shift := 0; shift < 4 && shift < len(letters); shift++ {
+			s := letters[shift:]
+			if len(s)%4 == 1 {
+				s = s[:len(s)-1]
+			}
+			if raw, err := base64.RawStdEncoding.DecodeString(s); err == nil {
+				out = append(out, string(raw))
+			}
+		}
+	}
+	return out
+}
+
+// base64Letters keeps the letters of either base64 alphabet, written in the standard one.
+func base64Letters(s string) string {
 	var b strings.Builder
-	for _, c := range []byte(strings.Join(f[1:], "")) {
+	for _, c := range []byte(s) {
 		switch {
 		case c == '-':
 			b.WriteByte('+')
@@ -248,15 +278,7 @@ func looseBasic(value string) string {
 			b.WriteByte(c)
 		}
 	}
-	s := b.String()
-	if len(s)%4 == 1 {
-		s = s[:len(s)-1]
-	}
-	raw, err := base64.RawStdEncoding.DecodeString(s)
-	if err != nil {
-		return ""
-	}
-	return string(raw)
+	return b.String()
 }
 
 var strictBase64 = base64.StdEncoding.Strict()

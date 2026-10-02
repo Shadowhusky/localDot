@@ -1040,3 +1040,66 @@ func TestABaseURLErrorNamesTheFieldNotTheURL(t *testing.T) {
 		}
 	}
 }
+
+func TestABasicCredentialIsSearchedHoweverAServerSplitsIt(t *testing.T) {
+	f := newFixture(t)
+	unknown, _ := surrogate.Mint("key")
+	padded := base64.StdEncoding.EncodeToString([]byte("x:" + f.pass.Token))
+	unpadded := base64.RawStdEncoding.EncodeToString([]byte("x:" + f.pass.Token))
+	alone := base64.RawURLEncoding.EncodeToString([]byte(f.pass.Token))
+	git, unbound := https("git.example.test"), https("unbound.example.test")
+	for _, d := range []Dest{git, unbound} {
+		for _, value := range []string{
+			"Basic Z " + padded,
+			"Basic Zm9vOmJhcg==, Basic " + padded,
+			"Basic Zm9vOmJhcg==,Basic " + padded,
+			"Bearer x, Basic " + padded,
+			"Basic Z." + padded,
+			"Basic Zm9vOmJhcg==" + padded,
+		} {
+			name := fmt.Sprintf("%q to %s", strings.ReplaceAll(value, padded, "<b64>"), d.Host)
+			wantDeny(t, name, at(t, f.r, d, "GET", "/", hdr("Authorization", value)), ReasonMisplacedSurrogate)
+		}
+		wantDeny(t, "an unknown surrogate after a misaligned field to "+d.Host,
+			at(t, f.r, d, "GET", "/", hdr("Authorization", "Basic Z "+base64.StdEncoding.EncodeToString([]byte("x:"+unknown)))), ReasonUnknownSurrogate)
+	}
+	// Every field before the credential takes each length modulo 4, under every separator.
+	var prefixes [][]int
+	for _, n := range []int{1, 2, 3} {
+		var grow func(acc []int)
+		grow = func(acc []int) {
+			if len(acc) == n {
+				prefixes = append(prefixes, slices.Clone(acc))
+				return
+			}
+			for l := 1; l <= 4; l++ {
+				grow(append(acc, l))
+			}
+		}
+		grow(nil)
+	}
+	const filler = "Zm9vOmJhcg"
+	checked := 0
+	for _, lengths := range prefixes {
+		for _, sep := range []string{" ", ", ", ",", tab, "  "} {
+			for _, enc := range []string{padded, unpadded, alone} {
+				fields := []string{}
+				for _, l := range lengths {
+					fields = append(fields, filler[:l])
+				}
+				value := "Basic " + strings.Join(append(fields, enc), sep)
+				for _, d := range []Dest{git, unbound} {
+					v := at(t, f.r, d, "GET", "/", hdr("Authorization", value))
+					if v.Allow || v.Reason != ReasonMisplacedSurrogate || v.SurrogateID != f.pass.ID {
+						t.Errorf("a credential in field %d after fields of lengths %v, separator %q, to %s: %+v, want deny %s",
+							len(lengths)+1, lengths, sep, d.Host, v, ReasonMisplacedSurrogate)
+					}
+					checked++
+				}
+			}
+		}
+	}
+	if checked != 2*3*5*(4+16+64) {
+		t.Fatalf("checked %d values", checked)
+	}
+}
