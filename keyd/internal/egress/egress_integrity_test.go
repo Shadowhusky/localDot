@@ -379,6 +379,7 @@ func TestProxyCredentialsAreExact(t *testing.T) {
 		"second line":     "Proxy-Authorization: Basic " + good + "\r\nProxy-Authorization: Basic " + basicAuth("cell", "other") + "\r\n",
 		"trailing junk":   "Proxy-Authorization: Basic " + good + "!!!!\r\n",
 		"another scheme":  "Proxy-Authorization: Bearer " + testToken + "\r\n",
+		"bearer basic":    "Proxy-Authorization: Bearer " + good + "\r\n",
 		"token as user":   "Proxy-Authorization: Basic " + basicAuth(testToken, "") + "\r\n",
 		"token prefix":    "Proxy-Authorization: Basic " + basicAuth("cell", testToken[:len(testToken)-1]) + "\r\n",
 		"token and more":  "Proxy-Authorization: Basic " + basicAuth("cell", testToken+"x") + "\r\n",
@@ -675,5 +676,30 @@ func TestProxyFormRequestsPassInspectionUnderTheirOwnHost(t *testing.T) {
 	}
 	if len(sub) > 0 {
 		t.Fatalf("a request without a surrogate raised %+v", <-sub)
+	}
+}
+
+// Close ends the cell's upstream connections too, pooled ones included.
+func TestCloseEndsPooledUpstreamConnections(t *testing.T) {
+	w := newWorld(t)
+	closed := make(chan struct{}, 4)
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { io.WriteString(rw, "ok") }))
+	srv.Config.ConnState = func(_ net.Conn, s http.ConnState) {
+		if s == http.StateClosed {
+			closed <- struct{}{}
+		}
+	}
+	srv.Start()
+	t.Cleanup(srv.Close)
+	w.publish("pool.example.test", "80", srv.Listener.Addr().String(), true)
+	c := w.cell("c1", policy.Desktop)
+	if _, body := get(t, w.client(c), "http://pool.example.test/"); body != "ok" {
+		t.Fatalf("%q", body)
+	}
+	c.Close()
+	select {
+	case <-closed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("a pooled upstream connection outlived Close")
 	}
 }
