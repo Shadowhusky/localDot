@@ -12412,10 +12412,9 @@ keyd must see no request at all for 4 s. After Resume the loop's old surrogate m
 
 `apps/daemon/src/keyd/testing/canary-scan.py`:
 ```python
-# Looks for each needle, raw and in its base64 and base64url forms (at each of the three offsets a
-# longer blob can put it at), hex and UTF-16LE, in every
-# process's environment, command line and readable memory, and in every regular file under the
-# paths given after --files. Prints {"processes", "bytes", "files", "hits": ["needle|form|where"]}:
+# Looks for each needle raw, in base64 and base64url (at each of the three offsets a longer blob
+# can put it at), in hex and in UTF-16LE, in every process's environment, command line and
+# readable memory, and in every regular file under the paths given after --files. Prints {"processes", "bytes", "files", "hits": ["needle|form|where"]}:
 # the processes whose memory it read, the bytes of memory it read, and the files it read.
 # Run as root with docker exec --privileged (reading other processes' memory needs ptrace rights).
 import base64, json, os, sys
@@ -13264,12 +13263,51 @@ plan's code is embedded from that copy. The setup:
 - **Chrome.** `keys.spec.ts` passed 2/2 against a daemon and a real keyd. The sheet's screenshots
   were checked. The web API form's "Sent as" select ran past the sheet's edge, and its columns are
   now `minmax(0, 1fr)`.
-- **The trust settings.** With OpenSSL 3.6.3:
+- **The trust settings** (fix pass 1's design, replaced by P4b-C4's plain anchor in fix pass 2).
+  With OpenSSL 3.6.3:
   - a TLS server certificate from the cell's CA verifies against the `TRUSTED CERTIFICATE` copy;
   - a code-signing chain is refused (error 28, "certificate rejected");
-  - a plain copy of the same CA, alone or next to the trusted one, accepts that code-signing chain.
+  - a plain copy of the same CA, alone or next to the trusted one, accepts that code-signing chain
+    (the residual R30 now records).
 
   GnuTLS 3.8.13 skips the `TRUSTED CERTIFICATE` block ("issuer is unknown").
+
+**Fix pass 2** (review 2 and ruling P4b-C4), re-verified on 2026-10-02 in a Linux scratch copy:
+Ubuntu 24.04, Node 24.21.0, pnpm 10.29.3, Go 1.27.1, TypeScript 7.0.2, Biome 2.5.15, Vitest 5.0.3,
+OpenSSL 3.0.13. No Docker, and no network but the package registries.
+- The scratch copy: `feat/core-part2` at `b02765f` (its Tasks 13 and 14 built) with this plan's
+  Tasks 2, 3, 5, 8 (desktopd's self-test and the daemon's types), 9, 10, 11's refresh, 12a, 12b
+  and Task 13's `useCell`, `hud-state` and `types` edits; `feat/core-part4a` at `70a534e` with
+  Task 1's `netguard` files.
+- `typecheck` in every package, Biome and `hygiene`: clean. Vitest: 59 files, 524 tests (3
+  Docker-only skips). Go: `gofmt` and `go vet` clean, `go test -race ./...` 9 packages `ok`, and
+  `netguard` five more times under `-race`.
+- `kill-switch-routes.test.ts`: 5/5 against a stand-in shaped like Part 3's `gatewayRoutes`, with
+  this plan's Stop, Resume and `withReadyCell` text pasted in.
+- **Red first.** Against fix pass 1's code: `kill-switch.test.ts` 6 of 19; the queued-refresh test
+  in `orchestrator-keyd.test.ts` with fix pass 1's `refreshRunningCells`; desktopd's
+  `selftest.test.ts` 7 of 11; the three new `netguard` tests; on `b02765f`, `App.test.tsx` 2 of 8
+  and the top bar's typecheck (`<Mascot size>`); the Keys button's accessible name.
+- **The plain anchor.** The Docker test's own `MINT_SH` and Go verifier, run on Linux: the CA
+  installed plain through `update-ca-certificates` (into a temporary store) gives one plain anchor
+  and no `TRUSTED CERTIFICATE`. `openssl verify -purpose sslserver` accepts the bound host's leaf
+  and refuses the other host's (error 47, permitted subtree violation) and the subdomain's
+  (error 48, excluded subtree violation). The Go verifier (`CGO_ENABLED=0 GOOS=linux`) answers
+  `ok`, "not permitted by any constraint" and "excluded by constraint". curl trusts the bound
+  leaf from `openssl s_server`. Against the `TRUSTED CERTIFICATE` form alone, Go answers
+  "certificate signed by unknown authority" (review 2, Minor 6).
+- **The canary's base64.** The new forms find a marker inside base64 and base64url blobs at every
+  offset (48 of 48 test files; fix pass 1's forms found 8), and the planted controls give the
+  labels the test expects.
+- **Part 4a at `70a534e`.** A throwaway Go test against `policy` confirmed Task 14's refusals
+  (`ip-literal` for IPv4 literals and `[::1]`, `port-not-allowed`, `host-denied` for
+  `printer.local`, `host-invalid` for `localhost`) and the binding hosts this plan uses
+  (`xn--bcher-kva.example` accepted, `bücher.example` refused, as the form's `new URL(x).href`
+  expects). Task 3's and Task 14's surrogate placements read against `keys/inspect.go` as built
+  (lenient Basic, user information, opaque targets and fragments scanned, `..` segments refused
+  for limited paths, all-or-nothing `ApplySwaps`, the one Basic user-and-password pair): every
+  expected reason holds, and this plan sends no path or method limits (R9) and builds no scrubber
+  replacement. `netguard` and `cellca` are unchanged since `56990a5`.
 
 **What could not be run** (assumptions this plan makes about code that does not exist yet, and
 what this Mac could not exercise):
@@ -13280,8 +13318,11 @@ what this Mac could not exercise):
    - `canary`;
    - Part 2's `desktop-image.docker.test.ts` and `live-desktop.spec.ts` against the Part 4b image.
 
-   Also unverified: the Dockerfile edit; `update-ca-certificates` on Ubuntu 26.04 keeping the
-   `TRUSTED CERTIFICATE` (the checks above used the Mac's OpenSSL); and NSS's copy in Chromium.
+   Also unverified: the Dockerfile edit; the oneshot and `update-ca-certificates` on Ubuntu 26.04
+   in the image (fix pass 2 checked them on Ubuntu 24.04 outside Docker); NSS's copy in Chromium;
+   and GnuTLS, rustls and Java against the plain anchor (no such client was at hand). Fix pass 2's
+   Docker test changes (the plain anchor, the keyd-profile CA, the Go verifier copied into the
+   cell, the canary's offset controls) typecheck and lint but did not run.
 2. **Part 3 is not on any branch yet**, so every edit to a Part 3 file is written against Part 3's
    plan text:
    - daemon: `gateway/live.ts`, `gateway/routes.ts` (`withReadyCell`, `GatewayRoutesDeps`), the
@@ -13296,11 +13337,19 @@ what this Mac could not exercise):
    `kill-switch-routes.test.ts` ran against a stand-in shaped like Part 3's `gatewayRoutes`, with
    stub `Clock` and `DesktopdRegistry` objects. `stop-and-keys.spec.ts` and the stage model test
    never ran: they depend on Part 3's puppet, terminal launch, step list and event schema.
-3. **Part 2 after `1ba1659`.** Its Tasks 13 to 15 are taken in their plan form: `App.tsx`'s
-   `Theatre`, `TopBar.tsx`, `app.css`, `hud-state.ts`, `useCell.ts` and `e2e/daemon.ts`.
-4. **Part 4a after `56990a5`.** `admin.go`'s status handler, `cmd/keyd/main.go` (its `Config`,
-   flags and `Serve`), `egress`, `keys` and `llm` are taken from the Part 4a plan. keyd's admin API,
-   ready line, flags, error codes, refusal reasons and event shapes matched that plan in every test
-   that touched them.
+3. **Part 2 after `b02765f`.** Its Tasks 13 and 14 are built and fix pass 2 rebased Tasks 12b and
+   13 onto them; its Task 15 (`e2e/daemon.ts`, the Playwright harness) is still taken in plan form.
+   Part 2's web fix round is still to land (`frame-ancestors 'none'` on `/`, a persistent HUD
+   button, a whoami probe, and changes to `App`, `useCell`, `Hud` and the socket), so this plan's
+   execution-time pre-flight re-verifies every UI edit and the two `App.test.tsx` changes against
+   Part 2's final tip.
+4. **Part 4a after `70a534e`.** `admin.go`'s status handler, `cmd/keyd/main.go` (its `Config`,
+   flags and `Serve`), `egress` and `llm` are taken from the Part 4a plan (its Task 10 is in
+   progress), and so are Task 1's edits to them. keyd's admin API, ready line, flags, error codes,
+   refusal reasons and event shapes matched that plan in every test that touched them. `keys` is
+   built and was rebase-checked (above).
 5. **A router that speaks NAT-PMP.** NAT-PMP's answer path ran only against the tests' fake router.
+   `TestKeepAsksAtOnceWhenTheGatewayChanges` ran on Linux only; on macOS its second gateway
+   (127.0.0.2) is not configured, which the test allows (that round fails and the next one asks
+   the fake router again).
 6. **The CI job** has not run.
