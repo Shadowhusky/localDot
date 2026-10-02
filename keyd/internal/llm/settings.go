@@ -60,11 +60,11 @@ func OpenSettings(path string) (*Settings, error) {
 	if s.data.V != 1 {
 		return nil, errors.New("llm: unsupported settings version")
 	}
-	if err := validateLimits(s.data.Limits); err != nil {
+	if err := ValidateLimits(s.data.Limits); err != nil {
 		return nil, err
 	}
 	for _, models := range s.data.Models {
-		if err := validateModels(models); err != nil {
+		if err := ValidateModels(models); err != nil {
 			return nil, err
 		}
 	}
@@ -77,7 +77,8 @@ func (s *Settings) Limits() Limits {
 	return s.data.Limits
 }
 
-func validateLimits(l Limits) error {
+// ValidateLimits checks a proposed policy before any live requests are canceled.
+func ValidateLimits(l Limits) error {
 	if math.IsNaN(l.PerTaskUSD) || math.IsInf(l.PerTaskUSD, 0) || math.IsNaN(l.PerDayUSD) || math.IsInf(l.PerDayUSD, 0) || l.PerTaskUSD <= 0 || l.PerDayUSD <= 0 || l.PerTaskUSD > l.PerDayUSD || l.PerDayUSD > 10_000 || micros(l.PerTaskUSD) < 1 {
 		return errors.New("llm: limits must be finite and positive, per task no more than per day, per day at most $10,000")
 	}
@@ -85,7 +86,7 @@ func validateLimits(l Limits) error {
 }
 
 func (s *Settings) SetLimits(l Limits) error {
-	if err := validateLimits(l); err != nil {
+	if err := ValidateLimits(l); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -101,7 +102,8 @@ func (s *Settings) Models(route string) []Price {
 	return slices.Clone(s.data.Models[route])
 }
 
-func validateModels(models []Price) error {
+// ValidateModels checks a proposed allowlist before any live requests are canceled.
+func ValidateModels(models []Price) error {
 	if len(models) > 64 {
 		return errors.New("llm: at most 64 models per route")
 	}
@@ -131,7 +133,7 @@ func validateModels(models []Price) error {
 }
 
 func (s *Settings) SetModels(route string, models []Price) error {
-	if err := validateModels(models); err != nil {
+	if err := ValidateModels(models); err != nil {
 		return err
 	}
 	s.mu.Lock()
