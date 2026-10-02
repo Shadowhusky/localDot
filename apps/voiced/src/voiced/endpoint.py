@@ -7,6 +7,8 @@ SILENCE_MS = 500
 MERGE_MS = 1000
 PARTIAL_EVERY_MS = 500
 THRESHOLD = 0.5
+# Speech is this many frames in a row, about 96 ms: a cough or a click is not someone talking to her.
+MIN_SPEECH_FRAMES = 3
 
 EventKind = Literal["speech_started", "turn_ended", "utterance_ended", "partial_due"]
 
@@ -32,22 +34,27 @@ class Endpointer:
         self._turn_ended = False
         self._silence_since: float | None = None
         self._next_partial_ms = 0.0
+        self._run = 0
 
     def push(self, probability: float, frame_ms: float) -> list[EndpointEvent]:
         start = self._clock_ms
         self._clock_ms += frame_ms
         events: list[EndpointEvent] = []
-        if probability >= THRESHOLD:
+        self._run = self._run + 1 if probability >= THRESHOLD else 0
+        mid_speech = self._speaking and self._silence_since is None
+        if self._run >= MIN_SPEECH_FRAMES or (self._run and mid_speech):
             if not self._open:
                 self._utterance += 1
                 self._open = True
-                self._next_partial_ms = start + PARTIAL_EVERY_MS
             if not self._speaking:
                 events.append(EndpointEvent("speech_started", self._utterance, start))
+                self._next_partial_ms = start + PARTIAL_EVERY_MS
             self._speaking = True
             self._turn_ended = False
             self._silence_since = None
-        elif self._open:
+        elif self._open and not self._run:
+            # A blip too short to be speech counts as part of the pause; frames that may yet become speech
+            # hold the pause where it is, so speech resuming just before a limit still keeps the turn.
             if self._silence_since is None:
                 self._silence_since = start
             paused = self._clock_ms - self._silence_since

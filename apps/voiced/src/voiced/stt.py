@@ -11,7 +11,7 @@ import numpy as np
 from starlette.types import Message
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
-from voiced.endpoint import Endpointer
+from voiced.endpoint import MIN_SPEECH_FRAMES, Endpointer
 from voiced.engines import Engines
 from voiced.slots import LoadFailed, LoadRefused
 from voiced.tts import describe
@@ -176,7 +176,8 @@ class SttSession:
     async def _frame(self, frame: np.ndarray, probability: float) -> None:
         self._frames.append(frame)
         if self._utterance is None:
-            del self._frames[:-PREROLL_FRAMES]
+            # Speech is only confirmed on its third frame, so those frames are kept on top of the preroll.
+            del self._frames[: -(PREROLL_FRAMES + MIN_SPEECH_FRAMES - 1)]
         for event in self._endpointer.push(probability, FRAME_MS):
             if event.kind == "speech_started":
                 self._turn_has_speech = True

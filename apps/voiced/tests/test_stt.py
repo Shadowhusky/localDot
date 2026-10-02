@@ -336,3 +336,14 @@ def test_speech_input_keeps_up_while_the_voice_model_is_busy():
             end = until(socket, "end")[-1]
             waited = time.perf_counter() - released
     assert end["text"] == "1.2s" and waited < 0.6
+
+
+def test_a_blip_of_one_or_two_frames_does_not_interrupt_her():
+    with listening() as socket:
+        socket.send_text(LISTEN_HANDSFREE)
+        socket.receive_json()
+        stream(socket, (0.032, True), (0.32, False), (0.064, True), (1.216, False))
+        socket.send_text(LISTEN_HANDSFREE)
+        assert socket.receive_json() == {"type": "ready"}
+        stream(socket, (0.096, True), (1.216, False))
+        assert socket.receive_json() == {"type": "speech_started", "utterance": 1}
