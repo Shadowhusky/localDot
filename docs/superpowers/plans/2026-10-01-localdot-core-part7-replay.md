@@ -4250,14 +4250,21 @@ test.afterAll(async () => {
   await daemon?.stop();
 });
 
-interface ExportResult { frames: number; bytes: number; hashes: string[] | null; peakOpenFrames: number; peakEncodeQueue: number; requests: string[] }
+interface ExportResult { frames: number; bytes: number; hashes: string[] | null; peakOpenFrames: number; peakEncodeQueue: number }
 
-// Exports through the real exporter into an OPFS file (the save picker cannot be scripted), and
-// returns what the e2e hook saw. The hook reads the file back itself for the checks below.
-async function exportSession(page: Page, sessionId: string, opts: { speed: 1 | 2 | 4 | 8; skipIdle: boolean; hashes: boolean; fromMs?: number; toMs?: number }): Promise<ExportResult> {
+async function openForExport(page: Page, sessionId: string): Promise<void> {
   await page.goto(`${daemon.origin}/?replay=${sessionId}&replayProbe=1&exportProbe=1#token=${daemon.token}`);
-  await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready", undefined, { timeout: 60_000 });
-  return page.evaluate((o) => (window as unknown as { __localdot: { exportProbe: { run(o: unknown): Promise<ExportResult> } } }).__localdot.exportProbe.run(o), opts);
+  await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready", undefined, { timeout: 120_000 });
+}
+
+// Runs the real exporter into an OPFS file (the save picker cannot be scripted). The e2e hook
+// reads the file back itself for the checks below.
+const runExport = (page: Page, opts: { speed: 1 | 2 | 4 | 8; skipIdle: boolean; hashes: boolean; fromMs?: number; toMs?: number }): Promise<ExportResult> =>
+  page.evaluate((o) => (window as unknown as { __localdot: { exportProbe: { run(o: unknown): Promise<ExportResult> } } }).__localdot.exportProbe.run(o), opts);
+
+async function exportSession(page: Page, sessionId: string, opts: Parameters<typeof runExport>[1]): Promise<ExportResult> {
+  await openForExport(page, sessionId);
+  return runExport(page, opts);
 }
 
 const fileScan = (page: Page, needles: string[]) =>
@@ -4268,23 +4275,25 @@ const fileScan = (page: Page, needles: string[]) =>
   }, needles);
 
 test("exports carry no identifying data and never leave the page (Review Focus 6)", async ({ page }) => {
-  const requests: { method: string; url: string }[] = [];
-  page.on("request", (r) => requests.push({ method: r.method(), url: r.url() }));
-  const before = requests.length;
-  const result = await exportSession(page, privacy.seed.sessionId, { speed: 2, skipIdle: true, hashes: false });
+  await openForExport(page, privacy.seed.sessionId);
+  // From here on, nothing may be sent anywhere: only bodiless reads from the daemon, and no
+  // WebSocket frame from the page (the Theatre's own polls are reads, so they pass).
+  const sent: string[] = [];
+  page.on("request", (r) => {
+    const origin = new URL(r.url()).origin;
+    if (!["GET", "HEAD"].includes(r.method()) || r.postData() !== null || origin !== daemon.origin || /export/i.test(r.url())) sent.push(`${r.method()} ${r.url()}`);
+  });
+  page.on("websocket", (ws) => ws.on("framesent", () => sent.push(`ws ${ws.url()}`)));
+  const result = await runExport(page, { speed: 2, skipIdle: true, hashes: false });
   expect(result.frames).toBeGreaterThan(0);
-  const during = requests.slice(before).filter((r) => !r.url.includes("/assets/"));
-  // Only reads: the recording, the event log, card, recording info and observe frames.
-  for (const r of during) {
-    expect(r.method, r.url).toBe("GET");
-    expect(r.url, r.url).toMatch(/\/api\/(sessions\/[0-9A-HJKMNP-TV-Z]{26}\/(recording(\/video\.mp4)?|events|card|frames\/[0-9A-HJKMNP-TV-Z]{26}|thumbs\/[0-9A-HJKMNP-TV-Z]{26})|session-index|whoami|clock)(\?.*)?$/);
-  }
+  expect(sent).toEqual([]);
   const scan = await fileScan(page, [MARKER, privacy.seed.sessionId, privacy.home, daemon.token, "Quarterly", "events.jsonl"]);
   expect(scan.size).toBe(result.bytes);
   expect(scan.found).toEqual([]);
   expect(scan.boxes).toEqual([]);
   // The takeover span is a card, never a recorded frame: the probe saw no video source inside it.
   const inside = await page.evaluate(() => (window as unknown as { __localdot: { exportProbe: { sourcesBetween(fromMs: number, toMs: number): string[] } } }).__localdot.exportProbe.sourcesBetween(60_000, 90_000));
+  expect(inside.length).toBeGreaterThan(0);
   expect(inside.every((s) => s !== "video")).toBe(true);
 });
 
@@ -4305,11 +4314,10 @@ test("exports a 2-hour session in bounded memory (Review Focus 4, export)", asyn
     await cdp.send("HeapProfiler.collectGarbage");
     return (await cdp.send("Performance.getMetrics")).metrics.find((m) => m.name === "JSHeapUsedSize")?.value ?? 0;
   };
-  await page.goto(`${daemon.origin}/?replay=${long.seed.sessionId}&replayProbe=1&exportProbe=1#token=${daemon.token}`);
-  await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready", undefined, { timeout: 120_000 });
+  await openForExport(page, long.seed.sessionId);
   const base = await mainHeap();
   const started = Date.now();
-  const result = await exportSession(page, long.seed.sessionId, { speed: 8, skipIdle: true, hashes: false });
+  const result = await runExport(page, { speed: 8, skipIdle: true, hashes: false });
   const seconds = (Date.now() - started) / 1000;
   expect(result.peakOpenFrames).toBeLessThanOrEqual(3);
   expect(result.peakEncodeQueue).toBeLessThanOrEqual(4);
@@ -4323,7 +4331,7 @@ test("exports a 2-hour session in bounded memory (Review Focus 4, export)", asyn
 The e2e hook `window.__localdot.exportProbe` exists only under `?exportProbe=1`:
 - `run(o)` exports the replayed session with `opfsSink("localdot-export-probe.mp4")`, `hashes`
   as asked, and the range defaulting to the whole session. It returns
-  `{ frames, bytes, hashes, peakOpenFrames, peakEncodeQueue, requests: [] }`.
+  `{ frames, bytes, hashes, peakOpenFrames, peakEncodeQueue }`.
 - `sourcesBetween(fromMs, toMs)` returns the `sourceAt` result of every exported frame whose
   session time lies in the range.
 
@@ -4349,3 +4357,514 @@ git commit -m "feat(web): export a replay to MP4 with the overlays burned in, re
 label at the speeds above 1×.
 
 ---
+
+### Task 16: Acceptance — a recorded puppet session replays, scrubs, jumps to live and exports; docs; the full suite
+
+Success criterion 4, end to end on a real cell:
+1. A puppet session runs **with no viewer**, at Fast speed. The daemon records it.
+2. It appears in the index, replays with scrubbing and chapters, and its frames match what the
+   cell showed.
+3. A live session offers "Jump to live".
+4. The recorded session exports to an MP4 that decodes.
+
+**Review tier:** light.
+
+**Files:**
+- Create: `apps/web/e2e/recorded-session.spec.ts`, `docs/replay.md`
+- Modify: `README.md` ("Replay" section), `.github/workflows/ci.yml` (the Docker-free replay and
+  export specs join the e2e job that already runs without Docker, if one exists; otherwise
+  document the command)
+- Test: the full suite
+
+**Interfaces:**
+- Consumes:
+  - Part 3's e2e helpers `createReadyCell(daemon, scale)`, `runPuppet(d, cellId, script)`,
+    `waitForSessionEnd(d, sessionId)` and `frameBytes(d, sessionId, frameId)`;
+  - `apps/daemon/puppet/demo-multiapp.json`;
+  - every interface above.
+- Produces: `docs/replay.md`, the user and operator note covering:
+  - where recordings live, the layout from Task 2, and the retention variables
+    `LOCALDOT_RECORDINGS_MAX_GB` and `LOCALDOT_RECORDINGS_MAX_DAYS`;
+  - `LOCALDOT_RECORDING=0`;
+  - what is never recorded (takeover) and what an export contains (`PRIVACY_NOTE`);
+  - mediabunny's MPL-2.0 notice location.
+
+**`recorded-session.spec.ts`** (`LOCALDOT_DOCKER_TESTS=1`, skipped otherwise, as in Parts 2 and 3).
+These are the named tests; the replay probe is the one from Task 13:
+- `"records a puppet session that nobody watched"`:
+  1. Start the daemon and create a 2× cell with `createReadyCell`. Open no page.
+  2. `runPuppet(demo-multiapp)`, then `waitForSessionEnd`.
+  3. `GET /recording` gives `manifest.state === "complete"`, `codec` matching `^avc1\.` (S9's),
+     `width` 2560 and `height` 1600, at least one activity span per GUI step, and no gap.
+  4. The session's `action.dispatch` events were logged at Fast speed: no viewer was attached, so
+     the gateway's travel durations equal Part 3's Fast formula. This is Part 3's assertion,
+     reused.
+- `"replays it with frames that match what the cell showed"`:
+  1. Open `/?replay=<id>&replayProbe=1`.
+  2. For each GUI step, seek exactly to the step's `observe` event time.
+  3. Probe the presented frame as a 320×200 RGBA thumbnail (probe op
+     `{ op: "thumb", w: 320, h: 200 }`, added here: the presented video frame drawn into a
+     320×200 OffscreenCanvas, as RGBA).
+  4. Decode the daemon's thumbnail of the same `observe` frame (`/thumbs/<frameId>`, through sharp
+     in Node).
+  5. The mean absolute difference over RGB is below 12. The observe screenshot and the stream's
+     frame show the same settled screen; the bound allows H.264 4:4:4 against WebP q80 and two
+     scalings.
+  6. The chapters equal the steps, and the step labels match the puppet script's.
+- `"offers Jump to live while a session runs, and goes live from it"`:
+  1. Start a second puppet run whose script has a `wait` of 20 s.
+  2. Open Replay on it: the `Jump to live` pill is visible.
+  3. Click it: the mode is Watch, the Selkies iframe is mounted, and `data-frames` rises within
+     10 s.
+  4. Stop the session.
+- `"exports the recorded session to an MP4 that decodes"`:
+  1. `__localdot.exportProbe.run({ speed: 4, skipIdle: true, hashes: false })`.
+  2. Read the OPFS file back with mediabunny in the page: one AVC track at 1920×1200, a duration
+     within 1 s of `playDuration(map) / 4`, and the first and last packets decodable
+     (`VideoSampleSink.getSample` returns non-null at both ends).
+- `afterAll`: Part 2's `daemon.stop()` deletes the cell (`?purge=1`), and the spec asserts that no
+  `localdot-test-*` container is left (exit status 0 on the `docker ps` probe).
+
+- [ ] **Step 1:** Write `recorded-session.spec.ts`. Add the `thumb` probe op to `probe.ts`. Run
+  `LOCALDOT_DOCKER_TESTS=1 pnpm --filter @localdot/web e2e --grep "recorded|Jump to live|exports the recorded"`.
+  Expected: four tests pass.
+- [ ] **Step 2:** Write `docs/replay.md` and the README section ("Replay": what is recorded, where
+  it lives, how to open Replay, the keys, and how to export).
+- [ ] **Step 3:** Run the whole suite:
+  ```bash
+  pnpm test && pnpm typecheck && pnpm lint && pnpm hygiene
+  pnpm --filter @localdot/web build
+  pnpm --filter @localdot/web e2e --grep "Review Focus|seeded session|idle|takeover gap|before and after|reduced motion|export"
+  LOCALDOT_DOCKER_TESTS=1 pnpm test:docker
+  LOCALDOT_DOCKER_TESTS=1 pnpm --filter @localdot/web e2e
+  ```
+  Expected: all green. Part 2's and Part 3's Docker and e2e suites pass with the recorder running,
+  and Part 3's two-viewer test still sees no stall: the recorder is one more Selkies client, never
+  a relay viewer.
+- [ ] **Step 4:** On the M1-class laptop, if one is available, record the cost of a recorded
+  session. Run S1's `load-continuous.sh` at 2× for 60 s under each of: no viewer; one viewer; one
+  viewer plus the recorder. Record the daemon's and the cell's CPU, and the bytes per second
+  written. Write them in `docs/measurements/2026-10-recorder.md`.
+- [ ] **Step 5: Commit**
+
+```bash
+pnpm format && pnpm lint
+git add apps/web README.md docs .github/workflows/ci.yml
+git commit -m "test(e2e): replay acceptance on a recorded puppet session, and the replay docs"
+```
+
+**Acceptance:** success criterion 4 holds on a real cell. A session nobody watched replays with
+scrubbing, a step timeline and "Jump to live", and exports to an MP4 that plays.
+
+---
+
+## The replay (M6)
+
+For the README, as Part 3's "The visual core (M2)":
+
+- The daemon records every live session, watched or not, as a fragmented MP4 in
+  `~/.localdot/sessions/<id>/recording/`. It takes the cell's H.264 stream as it arrives and
+  re-encodes nothing. The recording's clock is the event log's clock, so a frame's media time is
+  its session time.
+- A crash or a full disk loses no frame that reached the recorder: recovery rebuilds the tail from
+  a per-GOP journal.
+- Nothing is recorded while you have control of the computer.
+- Recordings older than 30 days, or beyond 20 GB in total, are removed oldest first
+  (`LOCALDOT_RECORDINGS_MAX_DAYS`, `LOCALDOT_RECORDINGS_MAX_GB`). A session without video still
+  replays, step by step, over its screenshots. `LOCALDOT_RECORDING=0` turns recording off.
+- Replay (the top bar's third mode) has these controls:
+  - the scrubber's chapters are the steps, and its ticks the clicks, typing, keys, approvals,
+    takeovers and failures;
+  - Space plays, K pauses, ←/→ step, J/L jump 10 s, `[`/`]` change the speed (½× to 8×), and B
+    compares a step's screen before and after;
+  - idle stretches are skipped by default and labelled;
+  - "Jump to live" returns to a running session.
+- Export renders the range you choose with the overlays burned in, at 30 fps, into a file you
+  pick. It never goes through the daemon.
+
+## Interfaces later milestones build on
+
+Exact module paths and exports as they exist at the end of this plan.
+
+**M5 (control and safety): the approval and takeover markers**
+- **Takeover.** M5 appends
+  `control.change { holder: "user", reason: "user_takeover" | "handoff_request" }` through
+  `EventLog.append` **before** the first user input reaches the cell, and
+  `control.change { holder: "agent", reason: "resume" }` at hand-back.
+  - `apps/daemon/src/recorder/control-gate.ts` `ControlGate` already keeps every frame stamped at
+    or after the first event, up to the first key frame after the second, out of the recording
+    and the journal. The recorder requests that key frame itself. M5 adds nothing to the recorder.
+  - The rule M5 must keep: the `control.change` is appended before the input path opens, never
+    after. Task 11's pin covers a frame stamped exactly at the change's `t`.
+- **Marks.** `approval.request/resolve`, `control.change` and `pause.change` already fold into
+  `SessionModel.marks` (`packages/stage/src/marks.ts`, `markOf`) with exact labels and tones.
+  They tick on the scrubber, keep the playback map busy, and burn into exports through captions.
+  - M5 can give approvals their own replay card: read
+    `model.marks.filter(m => m.kind === "approval" || m.kind === "decision")` and the matching
+    events. No schema change is needed.
+  - Approval previews' `image` (base64 in the schema) is not used by replay. If M5 moves it to a
+    file like `observe`'s, `Thumbnails` serves it unchanged through a frame id.
+- **Gaps.** `RecordingGap.reason: "user-control"` drives the replay card `You had control here`
+  and the export's burned-in card (`gapCard`, `apps/web/src/replay/replay-view.ts`).
+- **Lifecycle.** `LiveSessions.addHooks({ beforeRun, afterRun })` (`apps/daemon/src/gateway/live.ts`).
+  M5's Stop and kill switch abort the run, and the recorder's `afterRun` finalizes the recording.
+  Stop needs no recorder call of its own.
+
+**M7 (signed-in browser): the second screen**
+- A recording is per screen. The layout keeps `recording/` for the desktop, and M7 adds
+  `recording-<screen>/` with the same files (`RECORDING_*` names, `RecordingManifest`), written by
+  a second `SessionRecorder` whose `feed` is the browser cell's Selkies feed.
+- `SessionRecorderDeps.dir` and `RecorderDeps.feedFor(cellId, …)` already take any cell and
+  directory.
+- `RecordingInfo` is per screen: M7 adds `GET /api/sessions/:id/recording?screen=<name>`, with
+  today's route as `screen=desktop`.
+- Replay picks the screen in effect at t: `switch_screen` events fold into a `screens` timeline in
+  the model (M7's schema). The worker gets one `ReplaySource` per screen and `sourceAt` gains the
+  active screen. The decode policy, backdrop, export plan and pins work per screen unchanged.
+
+**M8 (premium feel), seams only (M9 ships first)**
+- The "what changed" flash: Part 3's `screen.settle.changed` (≤ 8 rectangles) is in the log.
+  M8's flash is a `Scene` part drawn from `sceneAt`, so replay and export show it with no replay
+  change. Replay adds no flash of its own.
+- Auto-camera: the replay worker and the export worker call `cameraFor(… zoom: 1)`. M8's
+  `camera.hint`-driven camera replaces that call in both, "cinematic in replay" per the spec.
+
+**M9 (ship)**
+- `doctor` should check the free space of `~/.localdot` against `MIN_FREE_START_BYTES`
+  (`apps/daemon/src/recorder/session-recorder.ts`) and report the recordings' total against
+  `retentionFromEnv()`.
+- Settings may expose `RetentionPolicy` and `LOCALDOT_RECORDING`.
+- `npx localdot`'s bundle must ship `dist/assets/licenses/mediabunny-1.61.0.txt` (Task 3).
+
+**Daemon (stable)**
+- `apps/daemon/src/recorder/`:
+  - `writer.ts`: `RecordingWriter`, `RecordedFrame`, `RecordingFs`, `FRAGMENT_MIN_SECONDS`;
+  - `recover.ts`: `recoverRecording`, `readFragments`, `StreamFormat`;
+  - `view.ts`: `openRecordingView`;
+  - `boxes.ts`: `mfraBox`, `topLevelBoxes`;
+  - `journal.ts`: the record codec;
+  - `wire.ts` and `annexb.ts`: the Selkies header and `avcCodecString`;
+  - `feed.ts`: `SelkiesFeed`, `FrameFeed`, `RECORDER_HANDSHAKE`;
+  - `session-recorder.ts`: `SessionRecorder`, `FrameGate` and the constants;
+  - `control-gate.ts`: `ControlGate`;
+  - `recorder.ts`: `Recorder`.
+- `apps/daemon/src/sessions/`: `streamEventLines`, `summarizeSession`, `SessionIndex`,
+  `Thumbnails`, `sweepRecordings`/`retentionFromEnv`, `replayRoutes`; `EventLog.logFile`,
+  `EventLog.forget`, and tail recovery.
+- Routes: `GET /api/session-index`, `GET /api/sessions/:id/card`,
+  `GET /api/sessions/:id/events` (NDJSON on `Accept`), `GET /api/sessions/:id/recording`,
+  `GET|HEAD /api/sessions/:id/recording/video.mp4?upto=`, `GET /api/sessions/:id/thumbs/:frameId`,
+  `DELETE /api/sessions/:id`.
+- Test helpers:
+  - `@localdot/stage/testing` (`synthStream`, `frameOfLuma`);
+  - `apps/daemon/src/recorder/testing/{seed-session.ts,fake-feed.ts,fake-selkies.ts,full-fs.ts}`;
+  - `apps/web/e2e/seed.ts`.
+
+**Stage and web (stable)**
+- `@localdot/stage`:
+  - `startedCount`, `observeAt`, `stepAt`, `planAt`, `markOf`, `TimelineMark`;
+  - `sceneAt(…, opts)`;
+  - `replay/`: `buildPlaybackMap`, `sessionAt`, `playAt`, `idleAt`, `busySpans`, `chapters`,
+    `ticks`, `ReplayClock`, `playMsAt`, `retime`, `REPLAY_SPEEDS`.
+- `@localdot/protocol` `recording.ts`: the layout constants, `MEDIA_TIMESCALE`,
+  `RecordingManifest`, `FragmentEntry`, `RecordingGap`, `SessionCard`, `SessionIndexPage`,
+  `RecordingInfo`.
+- `apps/web/src/stage/worker-protocol.ts`: `ReplaySource`, `ReplayTransport`, `ReplayStatus`,
+  `ReplayProbeCommand`, and the `replay-*` messages. `StageHandle.replay`, and `Stage`'s `mode`.
+- `apps/web/src/replay/`: `ReplayVideo`, `nextDecodeStep`, `sourceAt`, `ObserveBackdrop`,
+  `useReplay`, `replay-view.ts`.
+- `apps/web/src/export/`: `planExport`, `startExport`, `ExportSink`, `PRIVACY_NOTE`.
+
+**Part 7 obligations carried (not implemented here)**
+- If S9 finds per-client encoding (Q7), `ViewerTapFeed` (Task 9's contained change) replaces the
+  own connection while a viewer is attached.
+- If `REQUEST_KEYFRAME` has no effect on a still screen (S9 Q5), the newest fragment of a live
+  recording stays uncommitted through a long still stretch. A replay of a live session then shows
+  the last action's frames only once activity resumes. Crash safety is unaffected (the journal).
+- The recorder stops on a stream format change (`recorder-error`). A cell recreated at another
+  scale mid-session ends that session's video. Supporting it means a second track or file, which
+  M7's per-screen layout makes natural.
+- Replay of very long live sessions polls `GET /recording` every 2 s. A push over the session
+  stream would be leaner (M9).
+- The export's 2560×1600 option depends on the Mac's H.264 encoder accepting that size
+  (`canEncodeVideo`); it is disabled with its reason otherwise.
+
+## Decisions taken by this plan (P7-R1 to P7-R17)
+
+- **P7-R1 Recording happens in the daemon, as a passive Selkies client per live session.**
+  - **Why:**
+    - the spec requires replay "with zero, one or many viewers", the daemon stamping "every
+      incoming video chunk with its own monotonic clock", and "taps the same stream for
+      recording";
+    - Glance, the default mode, runs exactly when nobody watches;
+    - remuxing costs about 44 µs per frame in Node, with no decode and no encode;
+    - the evidence of what the agent did is written by a trusted host process on the event log's
+      own clock, never by the cell;
+    - see "Where recording happens".
+  - **If wrong:**
+    - if Selkies encodes per client, the extra client costs the cell CPU (S9 Q7). Then
+      `ViewerTapFeed` (Task 9's contained change) taps the relay while a viewer exists;
+    - if the passive handshake gets no video alone (S9 Q1), the recorder must send the primary's
+      `SETTINGS`, which S9 checks against a live viewer (Q2) before anything is built.
+- **P7-R2 Storage: one fragmented MP4 per session, one GOP per fragment, an append-only file,
+  `fragments.jsonl` written after each fragment's bytes, a per-GOP journal for the open fragment,
+  and recovery that appends the journal's frames and an `mfra`.** Live and cut-off recordings are
+  served as their committed fragments plus a fresh `mfra`, at a stable `upto` snapshot.
+  - **Why:**
+    - mediabunny 1.61.0 holds the open fragment in memory, so the journal is what makes a crash
+      lose nothing that reached the recorder (verified with SIGKILL at five points);
+    - one GOP per fragment works around mediabunny marking only a fragment's first sample as a
+      sync sample (verified);
+    - the synthesized `mfra` turns a whole-file walk into four reads (verified: 5.9 MB → 0.8 MB
+      read for one seek in a 2-hour file).
+  - **If wrong:** a mediabunny upgrade that changes fragment cutting or `trun` flags breaks the
+    seek pins (Task 7's per-GOP test, Task 8's seek pin). The version is pinned exactly (Task 3).
+- **P7-R3 Media time is session time.** Timescale 1 000 000 through `frameRate: 1_000_000`, and
+  packet timestamps are the frame's arrival in session µs, so the index from event-log time to
+  media time is the identity.
+  - **Why:** no mapping table to keep, crash-proof by construction, and exact to the µs at
+    2 hours (verified).
+  - **If wrong:** if a future mediabunny rejects `frameRate` that high, the fallback is its default
+    timescale 57 600 with a ±17 µs tolerance in the seek pins. Nothing visible changes.
+- **P7-R4 Key frames: request an IDR after 2 s of frames without one, and once when the screen
+  goes still. Never while still.**
+  - **Why:**
+    - an exact seek decodes at most about 2 s of frames;
+    - a still screen costs nothing (Selkies sends nothing);
+    - the idle IDR commits the fragment holding the last change.
+  - **If wrong:** if IDRs cost too much bitrate at 2× (S9 Q5 measures), raise
+    `KEYFRAME_EVERY_MICROS`. Seeks get slower, and the decode policy's preview path keeps
+    scrubbing responsive.
+- **P7-R5 Retention and caps.**
+  - The values: 20 GB of recordings in total and 30 days, by environment, settable in M9; 8 GB per
+    session; recording never starts below 2 GB free and stops cleanly below 1 GB.
+  - Expiry removes the video only. The log, screenshots, thumbnails and summary stay, so the
+    session still replays over its screenshots.
+  - **Why:** a 2× desktop streams 14–35 Mbps while moving (S1). A long busy session can reach
+    gigabytes, and nothing else bounds the disk.
+  - **If wrong:** users who want everything kept must raise the cap. The index says "Video removed"
+    and never hides the session.
+- **P7-R6 Thumbnails come from `observe` screenshots,** made 320×200 WebP by sharp and cached in
+  `thumbs/`, never decoded from the video.
+  - **Why:** the daemon decodes nothing; every step already ends with a settled screenshot (Part 3);
+    and the hover preview needs only the step's screen.
+  - **If wrong:** a stretch without steps (a takeover, long typing) has no fresh thumbnail.
+    The preview then shows the last step's.
+- **P7-R7 The session index is a `session_cards` table in `index.sqlite`, rebuildable from each
+  session's `summary.json` and folder (the spec's rule). `EventLog` recovers from the file's tail
+  and rebuilds its index only when stale.**
+  - **Why:** Part 1 re-read and re-indexed every log at every start (1.0 s per 2-hour log,
+    measured). Tail recovery takes 1 ms (verified, Part 1's 21 tests unchanged).
+  - **If wrong:** a log corrupted in the middle is still skipped line by line by `read()` and the
+    NDJSON stream, as before.
+- **P7-R8 Overlays in replay and export are `sceneAt(model, t, view)` and nothing else, in the
+  same worker and renderer as live. The video shown is the last frame with arrival ≤ t. Export
+  renders by frame index at a fixed 30 fps. The camera is zoom 1 (the auto-camera is M8's).**
+  - **Why:** "replay equals live" (research §4.1), deterministic across loads and exports (the
+    pins).
+  - **If wrong:** nothing is lost by construction. A future stateful overlay would break the
+    determinism pins first.
+- **P7-R9 Scrubbing, speed and skip idle.**
+  - The decode policy: during a drag, key-frame previews (latest wins); an exact seek on release
+    or after 120 ms still; while playing, sequential decode that jumps to the key frame when
+    1.5 s behind.
+  - Speeds ½× to 8×.
+  - Skip idle compresses quiet stretches of 1.5 s or more to 400 ms. A stretch is quiet when it
+    has no video activity, no action, no mark and no step edge. Labelled honestly: "Playing at
+    4× · idle skipped".
+  - Before/after uses the step's screenshots.
+  - The follow rule: stepping back pins; reaching a live session's edge goes live.
+  - **Why:**
+    - software decoding of 2× 4:4:4 cannot keep up with 8× motion, so frames are shed by GOP,
+      never shown out of time;
+    - thinking time with a still screen is the bulk of an agent session;
+    - research §4.9 asks for each of these.
+  - **If wrong:** the constants are named (`JUMP_AHEAD_MS`, `IDLE_MIN_MS`, `IDLE_KEEP_MS`) and
+    unit-tested, and tuning them is a one-line change.
+- **P7-R10 Privacy.**
+  - Nothing is recorded while the user has control: not the file, not the journal. Recording
+    resumes at a key frame.
+  - Exports carry no session id, title, path, token, event data or metadata box. They are never
+    uploaded, and their suggested name carries only the date.
+  - Pixels are **not** redacted: cells hold surrogates only (no real secret can be on screen),
+    and secret fields show dots at the source.
+  - **Why:** takeover is exactly logins, 2FA, CAPTCHAs and payment, and the model sees nothing
+    then either. Anything else the screen showed is what the user asked the agent to do, kept on
+    their own Mac.
+  - **If wrong:** a user who wants an export of their own takeover cannot have one. A page that
+    shows sensitive data the agent was asked to read (an email, a statement) is in the recording
+    and in any export of that range; the sheet's `PRIVACY_NOTE` says so before Save. Per-region
+    blur (research §4.9) is a later option: the `Target.secret` boxes in the log are where it
+    would start.
+- **P7-R11 Export runs in the browser.**
+  - It uses the same renderer at 30 fps CFR, mediabunny's `CanvasSource` (WebCodecs H.264,
+    hardware where the Mac has it), and `moov` at the end. It is streamed with acknowledged
+    4 MiB chunks into a file the user picks (File System Access).
+  - The sizes are 1280×800, 1920×1200 (default for 2×) and 2560×1600.
+  - The burn-in is the speed label, step captions and gap cards.
+  - **Why:**
+    - the overlays exist only in the renderer, and the spec puts them only in the viewer;
+    - the daemon has no encoder;
+    - streaming to the file keeps a 2-hour export's memory flat;
+    - the Theatre already needs Chromium.
+  - **If wrong:** a browser without `showSaveFilePicker` cannot export (`exportSupport` says why).
+    A daemon-written fallback would need an upload route, which this plan deliberately does not
+    add (privacy pin: exports never leave the page).
+- **P7-R12 Stretches without video replay over the `observe` screenshot in effect,** shown like a
+  1× frame scaled into the session's screen, with a card naming why.
+  - **Why:** "any session replays" must hold for a failed recorder, an expired recording, and the
+    time before the first frame.
+  - **If wrong:** the replay shows a slightly older screen where no screenshot followed a change,
+    with overlays still exact.
+- **P7-R13 mediabunny 1.61.0 (MPL-2.0) is used unmodified,** from `node_modules` in the daemon and
+  bundled in the UI. The UI build ships its license and a notice naming the Source Code Form
+  (Task 3), and the pin and the absence of patches are tested.
+  - **Why:** MPL-2.0 is file-level copyleft, and §3.2 asks for notice and source availability for
+    the Executable Form.
+  - **If wrong:** a patched mediabunny would need its modified files published under MPL-2.0; the
+    test forbids patches.
+- **P7-R14 No new protocol event.** Replay relies on the events listed under "Protocol events this
+  plan relies on". M4 and M5 events without producers yet fold into typed marks through `markOf`,
+  and future types become neutral marks.
+  - **Why:** keyd's schema export and Parts 3–5 are untouched; the recorder's state lives in the
+    session folder, not the log.
+  - **If wrong:** a later plan that wants recording state in the log adds `recording.*` events.
+    The manifest stays the source of truth.
+- **P7-R15 Replay lives in the existing render worker, and Replay mode unmounts the Selkies
+  iframe.**
+  - **Why:**
+    - one renderer, so the overlays are the same pixels;
+    - the viewer count drops, so the gateway may run Fast while the user reviews;
+    - "Jump to live" remounts it through Part 2's re-ticket path.
+  - **If wrong:** switching back to Watch costs a stream reconnect (about 1 s).
+- **P7-R16 The recorder hooks `LiveSessions`.** `beforeRun` starts it and waits up to 3 s for the
+  first key frame, `afterRun` finalizes, startup recovery runs before the daemon serves, and
+  SIGTERM finalizes within 5 s.
+  - **Why:** a session's first action is recorded, and a crash or restart never leaves a
+    half-written recording behind.
+  - **If wrong:** a cell whose stream is slow to start delays the first step by up to 3 s. The
+    timeout is a named constant.
+- **P7-R17 The browser suites replay seeded synthetic sessions, with no Docker.** The video is
+  I_PCM H.264, whose decoded picture tells which frame it is.
+  - **Why:**
+    - seek accuracy, determinism and memory are pinned on every machine, in seconds;
+    - the decode check is exact (frame identity), not perceptual;
+    - real cells are reserved for the one acceptance spec (Task 16).
+  - **If wrong:** the synthetic stream is Constrained Baseline 4:2:0, not 4:4:4 like the cell's.
+    Task 16's real-cell spec covers the real codec.
+
+## Verification (done while writing this plan)
+
+Run in a scratch copy with the pinned toolchain: Node 24.21.0, pnpm 10.29.3, TypeScript 7.0.2,
+Vitest 5.0.3, zod 4.6.5, mediabunny 1.61.0, tsx 4.23.15. The Linux scratch machine has no Docker
+and no Chrome.
+
+| What | How | Result |
+|---|---|---|
+| mediabunny's muxing path in Node | `EncodedVideoPacketSource("avc")`, Annex B with no description, `StreamTarget` to a file | fragmented writes are append-only until `finalize`; the timestamps are kept (the first packet at 3.25 s stays 3.25 s); ffprobe reads the file |
+| Session-µs timestamps | `frameRate: 1_000_000`, 40 packets at about 7 199 s | timescale 1 000 000; 40/40 µs-exact; 156/156 boundary seeks exact |
+| Key flags inside fragments | 1 s fragments with 12-frame GOPs | only the first sample is flagged as a key (mediabunny's `trun`); with `minimumFragmentDuration: 0`, every key is flagged |
+| Crash recovery | journal tail muxed separately, moof+mdat appended, `mfra` appended | 53/53 packets back; ffmpeg decodes all 53 with the right frame identity |
+| Seek cost of `mfra` | a 1 799-fragment "2-hour" file | without: 5.9 MB read; with a synthesized `mfra`: 4 reads, 0.2 ms |
+| Synthetic H.264 (Task 4) | ffmpeg decode of 60 frames, `frameOfLuma` on each | 60/60 identified |
+| Task 2, 4, 6 code | the plan's code blocks extracted and run | all tests pass; `tsc` clean |
+| Task 5 pin + Part 3's stage tests | Part 3's model, scene and camera extracted from its plan, patched as Task 5 says | 23 stage tests pass; the naive scene measured 0.99 ms per call, the indexed one passes the 0.2 ms bound |
+| Tasks 7, 8, 10, 11 pins | the test files as printed, against prototypes of the writer, recovery, view, session recorder and gate | 21/21 recorder tests pass, including SIGKILL at five points, ENOSPC, the takeover gate and the free-space floors |
+| Task 9 wire and Annex B | `wire.test.ts` | passes |
+| Task 12 long-log pins | Part 2's `EventLog` with Task 12's tail recovery; Part 1's `event-log.test.ts` | the reopen pin fails before (1 008 ms) and passes after (1 ms); NDJSON peak retained heap 0.6 MB for a 55 MB log; Part 1's 21 EventLog tests pass |
+| mediabunny output metadata | an MP4 with `fastStart: false` | no `udta` or `meta`; the handler name is `MediabunnyVideoHandler` |
+
+**Not verified here (no Docker, no Chrome):**
+- every Selkies question (S9 is Task 1);
+- the browser pins and the UI (Tasks 13–15);
+- the route security test (it needs Part 2's and Part 3's `createApp` as built);
+- the summaries, index, thumbnails and retention;
+- the feed tests;
+- the Docker acceptance (Task 16);
+- Biome on the plan's code. `pnpm format` reflows the long lines, as it did for Part 3's.
+
+## Assumptions on code not yet built (for the pre-flight)
+
+Part 7 builds on Part 3, which exists only as its plan. The pre-flight checks each of these
+against Part 3 as built:
+1. `packages/stage/src/model.ts` and `scene.ts` are as Part 3's Task 13 prints them, plus Task 15's
+   `frames` Map and `observe` case. Task 5's diff targets `sceneAt`'s `filter`, `cursorAt`'s
+   forward loop, `ringsAt` and `cancelAt`.
+2. `EventLog.toSessionT(sessionId, daemonMicros)` and `originOf`, as in Part 3's Task 5. Part 1's
+   `#stateOf`, `readValid`, `#rebuildIndex` and `#updateIndex` are as on `feat/core-part2`.
+3. `LiveSessions` (Part 3's Task 10 `live.ts`) has `start(cellId, sessionId, run)`, `get`, `cellOf`
+   and `stop`. The puppet route calls `start` synchronously and answers 202.
+4. `CellApi.endpoints(id).stream` is `{ baseUrl, authorization }`, and `StallWatchdog` has
+   `{ pingEveryMs, stallAfterMs, ping, onChange }`, `start`, `touch`, `stop` and `lastAt`
+   (Part 2's code).
+5. `main.ts` has a SIGTERM/SIGINT shutdown path that closes the event log and releases the lock.
+   If it has none, Task 10 adds one around `serve()`.
+6. `createApp`'s options are as Part 3 extended them (`gateway`), and Part 1's
+   `/api/sessions/:id/events` JSON route is unchanged.
+7. `PixiPresenter.create(canvas, opts)`, `present`, `setScreen`, `setCamera`, `draw`, `render` and
+   `extract(crop, layer, cam, scene)`; `videoPlacement` and its once-only warning; `Overlays`
+   reading `dpr` for screen-constant sizes (Part 3's Tasks 14a and 14b).
+8. `StageCanvas` and `Stage` are as Part 3's Task 14b prints them, and `useLiveSession`,
+   `sessionHud`, `stepRows`, `StepRow`, `PlanRail` and `thumbnailUrl` as its Task 15 prints them.
+   `ApiClient` has `token`, `authorization()` and `fetch`.
+9. Part 2's `apps/web/e2e/daemon.ts` `startDaemon(env)` (Task 13 adds `{ home }`). Part 3's e2e
+   helpers: `createReadyCell`, `runPuppet`, `waitForSessionEnd` and `frameBytes`.
+10. The Theatre's CSP (`default-src 'self'`, `connect-src 'self'`, `img-src 'self' data: blob:`)
+    allows module workers from `/assets`, `fetch` to the daemon, and blob URL images. mediabunny
+    needs no `eval` and no blob workers (it uses none in 1.61.0).
+11. Playwright 1.63's TypeScript loader resolves `@localdot/stage/testing` from the e2e specs
+    through the workspace link.
+12. Chrome 154 offers WebCodecs H.264 decode of 4:4:4 High (the live stage already depends on
+    it), `showSaveFilePicker`, OPFS `createWritable` and positioned writes, and
+    `VideoFrame.copyTo` for I420, NV12 and I444. `performance.memory` in a dedicated worker is
+    optional: the 2-hour pin annotates when it is absent.
+13. mediabunny 1.61.0's `CanvasSource`, `canEncodeVideo`, `Output.cancel()`,
+    `UrlSource({ requestInit, maxCacheSize, parallelism, getRetryDelay })` and
+    `VideoSampleSink.samples()` behave as documented in its typings (read while writing this plan).
+14. Selkies' wire header and handshake are as the vendored client parses and sends them. S9
+    (Task 1) confirms or amends both before Task 9.
+
+## Self-review
+
+**Spec → task map:**
+
+| Spec requirement | Task |
+|---|---|
+| Criterion 4: "any session replays" | 10 (records with no viewer), 12 (index), 13 (backdrop when no video), 16 |
+| …"with scrubbing" | 13 (decode policy, seek pins), 14 (scrubber) |
+| …"a step timeline" | 5 (steps, marks), 6 (chapters, ticks), 14 (chapters, rail as of t) |
+| …"and 'jump to live'" | 14 (pill, follow rule), 16 |
+| …"and exports to MP4" | 15, 16 |
+| M6: "Recorder (fMP4 via mediabunny)" | 7, 8, 9, 10, 11 |
+| M6: "thumbnails" | 12 (observe thumbs), 14 (hover, rail) |
+| M6: "session index" | 12, 14 (sessions rail) |
+| M6: "replay UI" | 13, 14 |
+| M6: "MP4 export" | 15 |
+| "The daemon stamps … every incoming video chunk with its own monotonic clock" | 9 (`arrivalMicros`), 10 (`toSessionT`) |
+| "Replay: … speeds up to 8×, skip idle, before/after compare, and jump to live" | 6, 13, 14 |
+| "Replays are deterministic" | 5, 13 and 15 (determinism pins) |
+| "Overlays exist only in the viewer" | 13 and 15 (rendered in the worker, never recorded in the cell) |
+| "`~/.localdot/` holds … sessions (events, `observe` screenshots, video, thumbnails)" | 2 (layout), 12 |
+| "End to end (Playwright): … replay scrubbing; MP4 export" | 13, 14, 15, 16 |
+| "Repository: mediabunny (MPL-2.0)" | 3 |
+| Error handling: a cell crashes (the stream drops) | 9 (backoff), 10 (`stream-lost` gap) |
+| "Takeover … No screenshots reach the model during takeover" | 11 (none reach the recording either) |
+
+**Placeholder scan:** no "TBD", "TODO" or "similar to Task N". Every test is named with its input
+and its expected result, and every pin is printed in full. Tasks 1 and 9 depend on S9's answers,
+but the defaults are given exactly (`RECORDER_HANDSHAKE`, the constants), and so are the
+contained fallbacks.
+
+**Consistency checks:**
+- `RecordingManifest`, `FragmentEntry` and `RecordingGap` (Task 2) are used unchanged by
+  Tasks 7–15.
+- `MEDIA_TIMESCALE` is the single timescale.
+- `FrameFeed` and `FeedHandlers` (Task 9) are used by `FakeFeed`, the session recorder and the
+  service.
+- `FrameGate` (Task 10) is implemented by `ControlGate` (Task 11).
+- `ReplaySource`, `ReplayTransport` and `ReplayProbeCommand` (Task 13) are used by Tasks 14 and 15.
+- `gapCard` and `speedLabel` (Task 14) are used by the export burn-in (Task 15).
+- `suggestedExportName` (Task 14) is used by Task 15.
+- Session time is ms everywhere in the stage, the page and export. It is µs in the recorder, the
+  manifest and the media timeline, and every conversion goes through `microsToMs` and
+  `msToMicros` (P3-C2).
