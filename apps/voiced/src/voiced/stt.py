@@ -68,6 +68,7 @@ class SttSession:
         self._turn_start = 0
         self._turn_has_speech = False
         self._partial_due = False
+        self._early: tuple[str, str | None] | None = None
         self._turns: list[tuple[str, str | None]] = []
         self._endpointer = Endpointer()
 
@@ -187,6 +188,9 @@ class SttSession:
             elif event.kind == "partial_due" and self._utterance is not None:
                 # Decoded once the batch is checked, so a backlog brings one partial, not one per 500 ms.
                 self._partial_due = True
+            elif event.kind == "turn_pausing" and self._utterance is not None:
+                # Decoded as soon as the pause looks final, so the final itself needs no decode.
+                self._early = await self._partial()
             elif event.kind == "turn_ended" and self._utterance is not None:
                 await self._end_turn()
             elif event.kind == "utterance_ended" and self._mode == "handsfree":
@@ -198,16 +202,22 @@ class SttSession:
         self._utterances += 1
         self._utterance = self._utterances
 
-    async def _partial(self) -> None:
+    async def _partial(self) -> tuple[str, str | None] | None:
         self._partial_due = False
         decoded = await self._decode(self._frames[self._turn_start :])
         if decoded is not None:
             parts = [t for t, _ in self._turns] + [decoded[0]]
             await self._send({"type": "partial", "utterance": self._utterance, "text": join_texts(parts)})
+        return decoded
 
     async def _end_turn(self) -> None:
         self._partial_due = False
-        decoded = await self._decode(self._frames[self._turn_start :])
+        early, self._early = self._early, None
+        if early is not None and self._endpointer.pausing:
+            # The early decode stands while its pause does: nothing but silence has come since.
+            decoded = early
+        else:
+            decoded = await self._decode(self._frames[self._turn_start :])
         self._turns.append(decoded or ("", None))
         self._turn_start = len(self._frames)
         self._turn_has_speech = False

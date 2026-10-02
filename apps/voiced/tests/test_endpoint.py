@@ -4,13 +4,13 @@ FRAME_MS = 32
 
 
 def run(pattern):
-    """pattern: list of (probability, milliseconds); returns events as (kind, utterance, at_ms)."""
+    """pattern: list of (probability, milliseconds); returns the turn and utterance boundaries as (kind, utterance, at_ms)."""
     ep = Endpointer()
     events = []
     for probability, ms in pattern:
         for _ in range(round(ms / FRAME_MS)):
             events += [(e.kind, e.utterance, e.at_ms) for e in ep.push(probability, FRAME_MS)]
-    return [e for e in events if e[0] != "partial_due"]
+    return [e for e in events if e[0] not in ("partial_due", "turn_pausing")]
 
 
 def test_a_turn_ends_after_500_ms_of_silence_and_the_utterance_after_1_s():
@@ -95,3 +95,13 @@ def test_a_resumed_turn_waits_500_ms_for_its_first_partial():
         for _ in range(round(ms / FRAME_MS)):
             due += [e.at_ms for e in ep.push(probability, FRAME_MS) if e.kind == "partial_due"]
     assert due == [576, 1856]
+
+
+def test_a_pause_of_250_ms_is_reported_once_and_cleared_when_speech_resumes():
+    ep = Endpointer()
+    pausing, states = [], []
+    for probability, ms in [(0.9, 320), (0.0, 320), (0.9, 320), (0.0, 640)]:
+        for _ in range(round(ms / FRAME_MS)):
+            pausing += [e.at_ms for e in ep.push(probability, FRAME_MS) if e.kind == "turn_pausing"]
+        states.append(ep.pausing)
+    assert pausing == [576, 1216] and states == [False, True, False, True]
