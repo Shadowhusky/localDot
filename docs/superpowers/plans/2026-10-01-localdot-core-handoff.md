@@ -66,6 +66,15 @@ the controller: Part 2 is executing on `feat/core-part2` (see "Decisions answere
   - this handoff and its folder;
   - `docs/superpowers/design/2026-09-30-localdot-ui-directions/`.
 
+## Decisions answered by the user (2026-10-02, cloud session)
+
+- **Pace (user: "why the app take so much effort and time?"):** see `jobs/PROCESS.md` on this branch.
+  - **Review tiers:** `full` (the review, fix round and re-review as before) only for security-boundary code. `light` (one review and one fix round, with Minors batched to the final review and no re-review) for everything else.
+  - **Plan format:** M5–M9 plans give interfaces and tests, not the complete code (`jobs/PLAN-WRITING.md`). Plan reviews are one review plus one fix pass, with a re-review only on a Critical.
+  - **Milestone order:** M9 ships before M8. The spec's Milestones section carries the note.
+- **The six cloud jobs of 2026-10-02 11:11** (Task 9 fix, Task 10, Part 2 web fix, M4 plan, M6 plan, 4b fix pass 2) all died on the weekly limit before pushing. They were re-run from one cloud session, each pushing its own `claude/` branch as its job file says.
+- **The Mac originals** of the spec, handoff and job files need the same edits before the next re-sync, or the re-sync will drop them.
+
 ## Decisions answered by the user (2026-10-01, in projects-5e)
 
 - **Part 2: approved.** Execution is running on `feat/core-part2` with SDD. The workspace is
