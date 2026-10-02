@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -11,6 +12,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // errSecItemNotFound is the exit status /usr/bin/security uses for a missing item.
@@ -20,8 +22,9 @@ const errSecItemNotFound = 44
 // so a value is stored in chunks that fit one line: 1,536 bytes are 3,072 hex characters, after
 // at most about 230 of command.
 const (
-	chunkBytes = 1536
-	maxChunks  = (maxValueLen + chunkBytes - 1) / chunkBytes
+	chunkBytes      = 1536
+	maxChunks       = (maxValueLen + chunkBytes - 1) / chunkBytes
+	keychainTimeout = 5 * time.Second
 )
 
 // Keychain stores values as generic passwords in the login keychain through /usr/bin/security.
@@ -32,6 +35,9 @@ const (
 type Keychain struct {
 	Service string
 	Path    string
+	// One deadline covers every chunk, verification and best-effort cleanup.
+	// Tests shorten it; production always uses keychainTimeout.
+	timeout time.Duration
 }
 
 func NewKeychain(service string) *Keychain {
@@ -52,23 +58,25 @@ func (k *Keychain) Put(id string, value []byte) error {
 	if err != nil {
 		return err
 	}
+	ctx, cancel := k.deadline()
+	defer cancel()
 	n := (len(value) + chunkBytes - 1) / chunkBytes
 	for i := range n {
 		part := value[i*chunkBytes : min(len(value), (i+1)*chunkBytes)]
-		if err := k.add(chunkAccount(id, i), gen+":"+hex.EncodeToString(part)); err != nil {
-			return k.abandon(id, i > 0, err)
+		if err := k.add(ctx, chunkAccount(id, i), gen+":"+hex.EncodeToString(part)); err != nil {
+			return k.abandon(ctx, id, i > 0, err)
 		}
 	}
-	if err := k.add(id, fmt.Sprintf("keyd:%s:%d", gen, n)); err != nil {
-		return k.abandon(id, true, err)
+	if err := k.add(ctx, id, fmt.Sprintf("keyd:%s:%d", gen, n)); err != nil {
+		return k.abandon(ctx, id, true, err)
 	}
-	if got, err := k.Get(id); err != nil || !bytes.Equal(got, value) {
-		return k.abandon(id, true, fmt.Errorf("keychain: store %s: the value did not read back intact", id))
+	if got, err := k.get(ctx, id); err != nil || !bytes.Equal(got, value) {
+		return k.abandon(ctx, id, true, fmt.Errorf("keychain: store %s: the value did not read back intact", id))
 	}
 	// The value read back whole, and Get never reads past the count the item names, so an old chunk
 	// that stays is a fragment of the old value, not a failure of this one.
 	for i := n; i < maxChunks; i++ {
-		if err := k.remove(chunkAccount(id, i)); err != nil && !errors.Is(err, ErrNotFound) {
+		if err := k.remove(ctx, chunkAccount(id, i)); err != nil && !errors.Is(err, ErrNotFound) {
 			log.Printf("keyd: storing secret %s left an old chunk behind: %v", id, err)
 		}
 	}
@@ -76,18 +84,26 @@ func (k *Keychain) Put(id string, value []byte) error {
 }
 
 // abandon ends a failed Put. Once the Put has written an item the old value no longer reads back,
-// so the whole item goes, best effort: no fragment of either value stays behind. A Put that wrote
-// nothing says so, and the old value stays.
-func (k *Keychain) abandon(id string, wrote bool, err error) error {
-	if !wrote {
+// so the whole item goes, best effort. A first command that failed normally
+// changed nothing, but a timed-out command may already have written its chunk.
+func (k *Keychain) abandon(ctx context.Context, id string, wrote bool, err error) error {
+	if !wrote && ctx.Err() == nil {
 		return fmt.Errorf("%w (%w)", err, errUnchanged)
 	}
-	_ = k.Delete(id)
-	return err
+	_ = k.delete(ctx, id)
+	// Strip errUnchanged if an earlier chunk did change, and keep only a static
+	// failure. The Vault then restores the previous value or fails closed.
+	return fmt.Errorf("keychain: store %s: write did not complete", id)
 }
 
 func (k *Keychain) Get(id string) ([]byte, error) {
-	head, err := k.find(id)
+	ctx, cancel := k.deadline()
+	defer cancel()
+	return k.get(ctx, id)
+}
+
+func (k *Keychain) get(ctx context.Context, id string) ([]byte, error) {
+	head, err := k.find(ctx, id)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +113,7 @@ func (k *Keychain) Get(id string) ([]byte, error) {
 	}
 	value := make([]byte, 0, count*chunkBytes)
 	for i := range count {
-		data, err := k.find(chunkAccount(id, i))
+		data, err := k.find(ctx, chunkAccount(id, i))
 		if err != nil && !errors.Is(err, ErrNotFound) {
 			return nil, err
 		}
@@ -114,9 +130,15 @@ func (k *Keychain) Get(id string) ([]byte, error) {
 // Delete removes the item and every chunk it may have had. A chunk it cannot remove is an error even
 // when the item is already gone, so a retry never reports success over a fragment left behind.
 func (k *Keychain) Delete(id string) error {
-	err := k.remove(id)
+	ctx, cancel := k.deadline()
+	defer cancel()
+	return k.delete(ctx, id)
+}
+
+func (k *Keychain) delete(ctx context.Context, id string) error {
+	err := k.remove(ctx, id)
 	for i := range maxChunks {
-		cerr := k.remove(chunkAccount(id, i))
+		cerr := k.remove(ctx, chunkAccount(id, i))
 		if cerr != nil && !errors.Is(cerr, ErrNotFound) && (err == nil || errors.Is(err, ErrNotFound)) {
 			err = cerr
 		}
@@ -125,30 +147,35 @@ func (k *Keychain) Delete(id string) error {
 }
 
 // add writes one item in a security -i session of one line, so the exit status is that line's.
-func (k *Keychain) add(account, data string) error {
+func (k *Keychain) add(ctx context.Context, account, data string) error {
 	line := fmt.Sprintf("add-generic-password -U -s %s -a %s -l localDot-%s -w %s\n", k.Service, account, account, data)
-	return k.run("store", account, strings.NewReader(line), nil, "-i")
+	return k.run(ctx, "store", account, strings.NewReader(line), nil, "-i")
 }
 
-func (k *Keychain) find(account string) (string, error) {
-	var out bytes.Buffer
-	if err := k.run("read", account, nil, &out, "find-generic-password", "-s", k.Service, "-a", account, "-w"); err != nil {
+func (k *Keychain) find(ctx context.Context, account string) (string, error) {
+	var out keychainOutput
+	if err := k.run(ctx, "read", account, nil, &out, "find-generic-password", "-s", k.Service, "-a", account, "-w"); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out.String()), nil
 }
 
-func (k *Keychain) remove(account string) error {
-	return k.run("delete", account, nil, nil, "delete-generic-password", "-s", k.Service, "-a", account)
+func (k *Keychain) remove(ctx context.Context, account string) error {
+	return k.run(ctx, "delete", account, nil, nil, "delete-generic-password", "-s", k.Service, "-a", account)
 }
 
 // run reports only how the tool ended; what it printed is dropped.
-func (k *Keychain) run(op, account string, stdin io.Reader, stdout io.Writer, args ...string) error {
-	cmd := exec.Command(k.Path, args...)
+func (k *Keychain) run(ctx context.Context, op, account string, stdin io.Reader, stdout io.Writer, args ...string) error {
+	cmd := exec.CommandContext(ctx, k.Path, args...)
+	// Do not wait indefinitely for an inherited stdout/stdin pipe after the
+	// process has exited or was killed at its deadline.
+	cmd.WaitDelay = 100 * time.Millisecond
 	cmd.Stdin, cmd.Stdout = stdin, stdout
 	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {
+	case ctx.Err() != nil:
+		return fmt.Errorf("keychain: %s %s: security timed out", op, account)
 	case err == nil:
 		return nil
 	case errors.As(err, &exit) && exit.ExitCode() == errSecItemNotFound:
@@ -156,7 +183,31 @@ func (k *Keychain) run(op, account string, stdin io.Reader, stdout io.Writer, ar
 	case errors.As(err, &exit):
 		return fmt.Errorf("keychain: %s %s: security exited with status %d", op, account, exit.ExitCode())
 	}
-	return fmt.Errorf("keychain: %s %s: %w", op, account, err)
+	if cmd.Process == nil {
+		return fmt.Errorf("keychain: %s %s: security could not start (%w)", op, account, errUnchanged)
+	}
+	return fmt.Errorf("keychain: %s %s: security failed", op, account)
+}
+
+func (k *Keychain) deadline() (context.Context, context.CancelFunc) {
+	limit := k.timeout
+	if limit <= 0 {
+		limit = keychainTimeout
+	}
+	return context.WithTimeout(context.Background(), limit)
+}
+
+// A single item is at most one hex chunk plus its generation marker. Bound
+// stdout independently of time, and never include it in an error.
+type keychainOutput struct{ data bytes.Buffer }
+
+func (out *keychainOutput) String() string { return out.data.String() }
+
+func (out *keychainOutput) Write(p []byte) (int, error) {
+	if out.data.Len()+len(p) > 2*chunkBytes+128 {
+		return 0, errors.New("keychain output exceeded its limit")
+	}
+	return out.data.Write(p)
 }
 
 func chunkAccount(id string, i int) string {

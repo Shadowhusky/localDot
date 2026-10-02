@@ -361,7 +361,7 @@ func managerFailure(w http.ResponseWriter, err error) {
 	switch {
 	case errors.Is(err, egress.ErrUnknownCell):
 		fail(w, http.StatusNotFound, "not-found", err.Error())
-	case errors.Is(err, egress.ErrCellExists), errors.Is(err, egress.ErrPortInUse):
+	case errors.Is(err, egress.ErrCellExists), errors.Is(err, egress.ErrPortInUse), errors.Is(err, egress.ErrCellChanged):
 		fail(w, http.StatusConflict, "conflict", err.Error())
 	case errors.As(err, &bad):
 		fail(w, http.StatusBadRequest, "bad-request", err.Error())

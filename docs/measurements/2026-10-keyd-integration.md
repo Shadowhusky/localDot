@@ -300,8 +300,44 @@ Task 10's kill-switch work.
   `/tmp/localdot-part4b-task9-mutation-recheck.log`, and
   `/tmp/localdot-part4b-task9-race-final.log`.
 
+## Task 10 foundation: Keychain and Stop latency
+
+The credential service separates policy publication from the lifecycle lock.
+Affected cells retain a canceled request generation while a secret is being
+stored, but Revoke, Close and shutdown finish without waiting for that storage.
+Credential/task requests already queued before Stop are invalidated. Publication
+cannot reopen a cell closed during the write. Credential metadata lookup also
+runs outside the lifecycle lock, including when another request is waiting for
+the Keychain to return a value.
+
+Each Keychain Put/Get/Delete shares a five-second deadline across chunks,
+verification and best-effort cleanup. Inherited pipes cannot hold command
+completion indefinitely, and stdout is bounded without exposing its contents.
+A first-chunk timeout is treated as an uncertain write so the vault restores
+the previous value instead of assuming that nothing changed.
+
+- The original implementation fails all five initial blocked-storage/Stop
+  checks. The fixed implementation passes those plus queued-issuance,
+  metadata-lookup, operation-deadline, interrupted-write and pipe regressions.
+- All 13 Go packages pass `KEYD_KEYCHAIN_TEST=1 go test -race ./...` on macOS.
+  The opt-in login Keychain test stores, reads and removes only fake canary
+  values, including the maximum supported value size. Later test refinements
+  pass the scoped race suite; production code is unchanged since the full run.
+- All fourteen deliberately broken security variants fail assertions. Review
+  also caught an embedded `bytes.Buffer.ReadFrom` bypass of the output bound;
+  the buffer is now private and a copy-path regression covers that bypass.
+- A real Docker 29.2 probe confirms credential archives can be written and
+  read while the desktop remains paused, and stopped without an explicit
+  unpause. Its isolated test container was removed.
+- Evidence: `/tmp/localdot-part4b-task10-storage-red.log`,
+  `/tmp/localdot-part4b-task10-go-full.log`,
+  `/tmp/localdot-part4b-task10-scoped-final.log`,
+  `/tmp/localdot-part4b-task10-storage-mutation-run.log`, and
+  `/tmp/localdot-part4b-task10-paused-archive.json`.
+
 ## Remaining integration
 
 Tasks 10–16: Stop/resume, event logging, key
-sheet, real-cell isolation/canary acceptance, documentation and CI. The system
-Keychain/Stop carry from Part 4a also remains.
+sheet, real-cell isolation/canary acceptance, documentation and CI. End-to-end
+Stop latency and the daemon pause/resume flow still need acceptance; the system
+Keychain carry is verified above.

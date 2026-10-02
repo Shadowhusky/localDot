@@ -25,6 +25,7 @@ import (
 var (
 	ErrUnknownCell   = errors.New("egress: no such cell")
 	ErrCellExists    = errors.New("egress: the cell is already open")
+	ErrCellChanged   = errors.New("egress: the cell was revoked or replaced during this request")
 	ErrManagerClosed = errors.New("egress: the cell manager is closed")
 	cellIDPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 )
@@ -84,18 +85,22 @@ type CellInfo struct {
 }
 
 type managed struct {
-	cell   *Cell
-	policy policy.Policy
-	ca     *cellca.CA
-	caDir  string
+	cell     *Cell
+	policy   policy.Policy
+	ca       *cellca.CA
+	caDir    string
+	revision uint64
 }
 
 // Manager opens, lists, revokes and closes cells.
 type Manager struct {
-	d      ManagerDeps
-	mu     sync.Mutex
-	cells  map[string]*managed
-	closed bool
+	d ManagerDeps
+	// Policy writes and credential issuance serialize independently of Stop.
+	// Never wait for policyMu, or a vault operation, while holding mu.
+	policyMu sync.Mutex
+	mu       sync.Mutex
+	cells    map[string]*managed
+	closed   bool
 }
 
 func NewManager(d ManagerDeps) *Manager {
@@ -113,6 +118,12 @@ func (m *Manager) Open(req OpenRequest) (Opened, error) {
 	if req.Port < m.d.Ports.Min || req.Port > m.d.Ports.Max {
 		return Opened{}, badRequest("port %d is outside %d-%d", req.Port, m.d.Ports.Min, m.d.Ports.Max)
 	}
+	m.policyMu.Lock()
+	defer m.policyMu.Unlock()
+	bindings, err := m.bindings(p, req.Secrets)
+	if err != nil {
+		return Opened{}, err
+	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
@@ -120,10 +131,6 @@ func (m *Manager) Open(req OpenRequest) (Opened, error) {
 	}
 	if _, ok := m.cells[req.CellID]; ok {
 		return Opened{}, ErrCellExists
-	}
-	bindings, err := m.bindings(p, req.Secrets)
-	if err != nil {
-		return Opened{}, err
 	}
 	var hosts []string
 	for _, b := range bindings {
@@ -196,6 +203,7 @@ func (m *Manager) Revoke(cellID string) (int, error) {
 	if !ok {
 		return 0, ErrUnknownCell
 	}
+	mc.revision++
 	n := m.d.Registry.RevokeCell(cellID)
 	m.d.Budget.End(cellID)
 	mc.cell.Revoke()
@@ -206,15 +214,20 @@ func (m *Manager) Revoke(cellID string) (int, error) {
 // Mint gives a running cell new surrogates. A secret bound to a host the cell's CA does not
 // cover needs the cell to be opened again.
 func (m *Manager) Mint(cellID string, secrets []string) (map[string]string, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	mc, ok := m.cells[cellID]
-	if !ok {
-		return nil, ErrUnknownCell
+	mc, revision, err := m.snapshot(cellID)
+	if err != nil {
+		return nil, err
 	}
+	m.policyMu.Lock()
+	defer m.policyMu.Unlock()
 	bindings, err := m.bindings(mc.policy, secrets)
 	if err != nil {
 		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cells[cellID] != mc || mc.revision != revision {
+		return nil, ErrCellChanged
 	}
 	covered := mc.ca.Hosts()
 	for _, b := range bindings {
@@ -232,11 +245,9 @@ func (m *Manager) Mint(cellID string, secrets []string) (map[string]string, erro
 }
 
 func (m *Manager) BeginTask(cellID, taskID string, budgetUSD float64) error {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	mc, ok := m.cells[cellID]
-	if !ok {
-		return ErrUnknownCell
+	mc, revision, err := m.snapshot(cellID)
+	if err != nil {
+		return err
 	}
 	if taskID == "" || len(taskID) > 128 {
 		return badRequest("task id must be 1-128 characters")
@@ -244,11 +255,30 @@ func (m *Manager) BeginTask(cellID, taskID string, budgetUSD float64) error {
 	if math.IsNaN(budgetUSD) || math.IsInf(budgetUSD, 0) || budgetUSD < 0 || budgetUSD > 10_000 || budgetUSD > 0 && math.Floor(budgetUSD*1e6+0.5) < 1 {
 		return badRequest("budget must be finite, nonnegative and no more than $10,000; positive budgets must round to at least one micro-dollar")
 	}
+	m.policyMu.Lock()
+	defer m.policyMu.Unlock()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.cells[cellID] != mc || mc.revision != revision {
+		return ErrCellChanged
+	}
 	if err := m.d.Budget.Begin(cellID, taskID, budgetUSD); err != nil {
 		return err
 	}
 	m.admin(cellID, mc.cell.Port(), "task-begin", taskID)
 	return nil
+}
+
+// Capture intent before waiting for publication. Stop invalidates requests
+// already waiting here, so they cannot issue fresh credentials after it returns.
+func (m *Manager) snapshot(cellID string) (*managed, uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	mc, ok := m.cells[cellID]
+	if !ok {
+		return nil, 0, ErrUnknownCell
+	}
+	return mc, mc.revision, nil
 }
 
 func (m *Manager) EndTask(cellID string) error {

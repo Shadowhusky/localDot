@@ -63,17 +63,18 @@ const (
 var ErrPortInUse = errors.New("egress: listener port in use")
 
 type Cell struct {
-	cfg           Config
-	deps          Deps
-	ln            net.Listener
-	srv           *http.Server
-	connect       *goproxy.ProxyHttpServer
-	intercepted   map[string]bool
-	authLog       rateLog
-	connectionLog rateLog
-	mu            sync.Mutex
-	gen           *generation
-	closed        bool
+	cfg            Config
+	deps           Deps
+	ln             net.Listener
+	srv            *http.Server
+	connect        *goproxy.ProxyHttpServer
+	intercepted    map[string]bool
+	authLog        rateLog
+	connectionLog  rateLog
+	mu             sync.Mutex
+	gen            *generation
+	closed         bool
+	policyChanging bool
 }
 
 func Open(cfg Config, deps Deps) (*Cell, error) {
@@ -136,7 +137,9 @@ func (c *Cell) Revoke() {
 		return
 	}
 	old := c.gen
-	c.gen = newGeneration(c.deps)
+	if !c.policyChanging {
+		c.gen = newGeneration(c.deps)
+	}
 	c.mu.Unlock()
 	old.stop()
 }
