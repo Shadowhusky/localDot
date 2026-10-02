@@ -1,7 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { SELFTEST_CHECK_IDS } from "@localdot/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { CellKeydWiring } from "../keyd/cell-wiring.ts";
+import { KeydClient } from "../keyd/client.ts";
+import { type KeydProcess, startKeyd, TEST_KEYD_PORTS } from "../keyd/testing/keyd-process.ts";
 import { DockerClient } from "./docker.ts";
 import { imagesFromEnv } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
@@ -38,14 +42,18 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
   let home = "";
   let store: CellStore;
   let orchestrator: CellOrchestrator;
+  let keyd: KeydProcess;
   const seen = new Set<string>();
   let cell: CellSummary | undefined;
 
-  beforeAll(() => {
+  beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "local dot's orch-docker-"));
-    store = new CellStore(home);
+    keyd = await startKeyd();
+    store = new CellStore(home, TEST_KEYD_PORTS);
+    const client = new DockerClient();
     orchestrator = new CellOrchestrator({
-      docker: new DockerClient(),
+      docker: client,
+      keyd: new CellKeydWiring({ keyd: new KeydClient(keyd.socketPath), docker: client }),
       store,
       images: imagesFromEnv(),
       probeDesktopd,
@@ -76,8 +84,8 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     });
 
   afterAll(async () => {
-    orchestrator.dispose();
-    for (const id of new Set([...seen, ...store.list().map((r) => r.id)])) {
+    orchestrator?.dispose();
+    for (const id of new Set([...seen, ...(store?.list() ?? []).map((r) => r.id)])) {
       if (store.get(id)) await orchestrator.remove(id, { purgeHome: true }).catch(() => {});
       const n = cellNames(id, PREFIX);
       removeAll({
@@ -86,7 +94,8 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
         volumes: [n.homeVolume],
       });
     }
-    rmSync(home, { recursive: true, force: true });
+    if (home) rmSync(home, { recursive: true, force: true });
+    await keyd?.stop();
   });
 
   it("creates a ready cell whose desktop reaches nothing but its gate", async () => {
@@ -99,13 +108,23 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     expect(desktop).toBe(`${PREFIX}desktop-${id}`);
 
     // 6: no DNS for outside names, 2: getent found nothing; the gate's keyd relay still answers.
-    probe(desktop, 6, "curl", "-sS", "-m", "5", "https://example.com");
-    probe(desktop, 6, "curl", "-sS", "-m", "5", "http://host.docker.internal:4750/");
+    probe(desktop, 6, "curl", "--noproxy", "*", "-sS", "-m", "5", "https://example.com");
+    probe(
+      desktop,
+      6,
+      "curl",
+      "--noproxy",
+      "*",
+      "-sS",
+      "-m",
+      "5",
+      "http://host.docker.internal:4750/",
+    );
     probe(desktop, 2, "sh", "-c", "getent hosts example.com");
     // By address too, DNS aside: no gateway on the subnet, no route to the Mac or the internet (7).
     const gatewaySlot = hostAddress(subnetOf(record.docker.internalNetwork), 1);
     for (const address of [gatewaySlot, DESKTOP_HOST_ADDRESS, PUBLIC_ADDRESS]) {
-      probe(desktop, 7, "curl", "-sS", "-m", "5", `http://${address}:4750/`);
+      probe(desktop, 7, "curl", "--noproxy", "*", "-sS", "-m", "5", `http://${address}:4750/`);
     }
     probe(
       desktop,
@@ -191,6 +210,9 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     });
     const health = await probeDesktopd(endpoints.desktopd);
     expect(health?.ok).toBe(true);
+    expect(health?.selftest?.checks.map((c) => `${c.id}:${c.ok}`)).toEqual(
+      SELFTEST_CHECK_IDS.map((id) => `${id}:true`),
+    );
   }, 300_000);
 
   it("restarts a killed gate on new ports and a killed desktop behind the same ones", async () => {

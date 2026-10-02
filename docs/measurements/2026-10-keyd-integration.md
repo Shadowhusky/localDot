@@ -257,8 +257,51 @@ review also covered partial DNS answers and cache expiry across clock changes.
   `/tmp/localdot-part4b-task8-image-build.log`, and
   `/tmp/localdot-part4b-task8-node24.log`.
 
+## Task 9: cell credentials and lifecycle integration
+
+Each desktop gets a fresh listener, cell token, CA and web-key surrogates before
+it boots. Gate-only recovery keeps the desktop's material; a lost keyd cell
+restarts the desktop with new material. Wiring validates the returned identity,
+role and surrogate set, requires a stopped desktop, and rejects shell-variable
+collisions. Failed uploads and partial refreshes clean up issued credentials.
+
+The orchestrator allocates from the configured range and keeps in-memory ports
+reserved even if a folder was deleted. It checks every internal-network IPAM
+entry for a gateway. Unreadable records stop only their own named containers,
+invalidate existing watches and require repair before another start. Remove
+enters `stopping` before awaiting cleanup. Isolation failures close keyd first
+and force-stop the desktop inside its lifecycle queue; an unsuccessful Docker
+stop is reported accurately instead of claiming the computer stopped.
+
+Review reproduced credential listeners surviving failed starts/uploads, stale
+isolation cleanup racing a new start, watchers reviving an unreadable record,
+and unconfirmed closes releasing records/ports. Fixes preserve a failed record
+when keyd cannot confirm cleanup, while still stopping/removing its processes.
+A later Remove retries cleanup. A missing/refused admin socket is distinguished
+from timeouts and server failures. The Stop latency/Keychain carry remains for
+Task 10's kill-switch work.
+
+- All 792 host tests in 97 files, workspace types, lint and hygiene pass.
+- All four real Docker/keyd orchestrator tests pass: the first desktop passes
+  every self-test check, gate and desktop crashes recover, concurrent Stop/Start
+  preserves ordering, and removal preserves the home unless explicitly purged.
+  Test listeners use 4791–4796, fake/in-memory keys and disabled external address
+  discovery. No test containers remain.
+- Eighteen mutations are caught. One initially survived because the race test
+  held Docker stop after the listener had already closed. Moving the hold to
+  keyd closure reproduces the actual overlap and kills that mutation; the
+  unmodified implementation passes. The other seventeen were caught initially.
+- Evidence: `/tmp/localdot-part4b-task9-review-red.log`,
+  `/tmp/localdot-part4b-task9-closure-red.log`,
+  `/tmp/localdot-part4b-task9-scoped-final.log`,
+  `/tmp/localdot-part4b-task9-full-host-final.log`,
+  `/tmp/localdot-part4b-task9-docker-final.log`,
+  `/tmp/localdot-part4b-task9-mutation-run.log`,
+  `/tmp/localdot-part4b-task9-mutation-recheck.log`, and
+  `/tmp/localdot-part4b-task9-race-final.log`.
+
 ## Remaining integration
 
-Tasks 9–16: orchestration, Stop/resume, event logging, key
+Tasks 10–16: Stop/resume, event logging, key
 sheet, real-cell isolation/canary acceptance, documentation and CI. The system
 Keychain/Stop carry from Part 4a also remains.

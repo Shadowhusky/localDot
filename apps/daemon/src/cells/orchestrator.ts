@@ -1,4 +1,6 @@
-import { ulid } from "@localdot/protocol";
+import { SELFTEST_CHECK_IDS, type SelfTestCheck, selfTestPassed, ulid } from "@localdot/protocol";
+import type { CellKeyd } from "../keyd/cell-wiring.ts";
+import { KeydUnavailableError } from "../keyd/client.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import type { Images } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
@@ -29,6 +31,7 @@ import {
 } from "./types.ts";
 
 export interface OrchestratorDeps {
+  keyd?: CellKeyd;
   docker: DockerClient;
   store: CellStore;
   images: Images;
@@ -73,7 +76,7 @@ interface Live {
 
 interface NetworkInspect {
   Id: string;
-  IPAM: { Config: { Subnet?: string }[] };
+  IPAM: { Config: { Subnet?: string; Gateway?: string }[] };
 }
 
 interface UndoStep {
@@ -97,9 +100,15 @@ export class UnknownCellError extends Error {
 }
 
 export class SkippedCellsError extends Error {
-  constructor(readonly cellIds: string[]) {
+  constructor(
+    readonly cellIds: string[],
+    where: { folder(id: string): string; containers(id: string): string } = {
+      folder: (id) => id,
+      containers: (id) => `localdot-*-${id}`,
+    },
+  ) {
     super(
-      `cell records that can't be read (${cellIds.join(", ")}) may still hold their keyd ports: fix or remove them in the cells folder before creating another computer`,
+      `cell records this daemon can't use (unreadable, or outside its keyd ports) may still hold keyd ports. Fix ${cellIds.map((id) => where.folder(id)).join(", ")} to start those computers again, or remove a folder and then its containers (${cellIds.map((id) => where.containers(id)).join(", ")}), before creating another computer`,
     );
     this.name = "SkippedCellsError";
   }
@@ -131,6 +140,7 @@ const clamp = (text: string) =>
 const DEFAULT_RESTART_BACKOFF_MS = [2000, 4000, 8000, 16000, 30000];
 
 export class CellOrchestrator {
+  readonly #keyd: CellKeyd | undefined;
   readonly #docker: DockerClient;
   readonly #store: CellStore;
   readonly #images: Images;
@@ -145,12 +155,15 @@ export class CellOrchestrator {
   readonly #live = new Map<string, Live>();
   // Records never change once created, so each is read from disk once, not per request or event.
   readonly #records = new Map<string, CellRecord>();
+  readonly #invalidRecords = new Set<string>();
+  readonly #unclosedKeyd = new Set<string>();
   readonly #listeners = new Set<CellListener>();
   readonly #reservedKeydPorts = new Set<number>();
   readonly #queues = new Map<string, Promise<void>>();
   #disposed = false;
 
   constructor(deps: OrchestratorDeps) {
+    this.#keyd = deps.keyd;
     this.#docker = deps.docker;
     this.#store = deps.store;
     this.#images = deps.images;
@@ -204,7 +217,9 @@ export class CellOrchestrator {
 
   // Restart counters live in memory, so a daemon restart starts them again at 0.
   async reconcile(): Promise<void> {
-    for (const { id } of this.#store.list()) {
+    const { records, skipped } = this.#store.inventory();
+    await this.#stopSkipped(skipped);
+    for (const { id } of records) {
       await this.#queued(id, () => this.#reconcile(id)).catch((err: unknown) => {
         console.error(`cell ${id}: not reconciled (${codeOf(err)})`);
       });
@@ -220,7 +235,7 @@ export class CellOrchestrator {
       if (desktop.State.Running && gate.State.Running) {
         const ports = await this.#readPorts(record.docker.gate);
         this.#set(id, { state: "starting", restarts: 0, ports, stream: NO_STREAM });
-        this.#detach(id, this.#waitReady(record));
+        if (!(await this.#rewireIfLost(id))) this.#detach(id, this.#waitReady(record));
       } else if (!desktop.State.Running && !gate.State.Running) {
         this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
       } else {
@@ -243,13 +258,22 @@ export class CellOrchestrator {
   async create(opts: { scale: Scale }): Promise<CellSummary> {
     const id = ulid();
     const { records, skipped } = this.#store.inventory();
-    if (skipped.length > 0) throw new SkippedCellsError(skipped);
+    if (skipped.length > 0) {
+      throw new SkippedCellsError(skipped, {
+        folder: (cell) => this.#store.folder(cell),
+        containers: (cell) => `${this.#namePrefix}*-${cell}`,
+      });
+    }
     // keyd tells cells apart by their listener port (M3), so the port is reserved before the first
     // await: two concurrent creates never get the same one.
-    const keydPort = allocateKeydPort([
-      ...records.map((r) => r.keydPort),
-      ...this.#reservedKeydPorts,
-    ]);
+    const keydPort = allocateKeydPort(
+      [
+        ...records.map((r) => r.keydPort),
+        ...[...this.#records.values()].map((r) => r.keydPort),
+        ...this.#reservedKeydPorts,
+      ],
+      this.#store.keydPorts,
+    );
     this.#reservedKeydPorts.add(keydPort);
     try {
       return await this.#queued(id, () => this.#provision(id, keydPort, opts.scale));
@@ -282,7 +306,7 @@ export class CellOrchestrator {
         run: () =>
           this.#docker.request({ method: "DELETE", path: objectPath("networks", egress.Id) }),
       });
-      const internalSubnet = await this.#subnet(internal.Id);
+      const internalSubnet = await this.#subnet(internal.Id, { isolated: true });
       const egressSubnet = await this.#subnet(egress.Id);
       await this.#docker.request({
         method: "POST",
@@ -331,6 +355,8 @@ export class CellOrchestrator {
       undo.push({
         what: "the cell record",
         run: () => {
+          // Keep the listener's identity and port reserved if cleanup did not get an answer.
+          if (this.#unclosedKeyd.has(id)) return;
           this.#store.remove(id);
           this.#records.delete(id);
         },
@@ -341,9 +367,19 @@ export class CellOrchestrator {
       return this.#summary(record);
     } catch (err) {
       // Subscribers may have seen the cell start; they see it go, so none keeps a ghost.
-      if (this.#live.has(id)) this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });
+      const keepRecord = this.#unclosedKeyd.has(id);
+      if (!keepRecord && this.#live.has(id))
+        this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });
       await this.#undo(id, undo);
-      this.#live.delete(id);
+      if (keepRecord) {
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          stream: NO_STREAM,
+          error:
+            "start failed; keyd cleanup could not be confirmed; remove this computer when the key layer responds",
+        });
+      } else this.#live.delete(id);
       throw err;
     }
   }
@@ -363,8 +399,33 @@ export class CellOrchestrator {
   }
 
   async #start(id: string): Promise<void> {
+    if (this.#invalidRecords.has(id)) {
+      const repaired = this.#store.get(id);
+      if (!repaired) throw new Error("fix the cell record before starting the computer");
+      this.#records.set(id, repaired);
+      this.#invalidRecords.delete(id);
+    }
     const record = this.#require(id);
     if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
+  }
+
+  // A running desktop whose keyd cell was lost must boot with a new CA and token.
+  async rewireIfLost(id: string): Promise<void> {
+    await this.#queued(id, () => this.#rewireIfLost(id));
+  }
+
+  async #rewireIfLost(id: string): Promise<boolean> {
+    const live = this.#live.get(id);
+    const record = this.#record(id);
+    if (!record || !this.#keyd || (live?.state !== "ready" && live?.state !== "starting"))
+      return false;
+    const wired = await this.#keyd.isWired(record).catch(() => true);
+    if (wired || !this.#current(id, live)) return false;
+    const note = "the key layer restarted; reconnecting the computer";
+    if (await this.#startContainers(record, live.restarts, note).catch(() => false)) {
+      this.#detach(id, this.#waitReady(record));
+    }
+    return true;
   }
 
   stop(id: string): Promise<void> {
@@ -375,6 +436,7 @@ export class CellOrchestrator {
     const record = this.#require(id);
     const stopping: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
     this.#set(id, stopping);
+    const closed = await this.#closeInKeyd(id);
     try {
       for (const name of [record.docker.desktop, record.docker.gate]) {
         await this.#docker
@@ -387,6 +449,10 @@ export class CellOrchestrator {
             if (!isStatus(err, 304, 404)) throw err;
           });
       }
+      if (!closed)
+        throw new Error(
+          "keyd closure could not be confirmed; try Stop again when the key layer responds",
+        );
     } catch (err) {
       if (this.#current(id, stopping)) {
         this.#set(id, {
@@ -411,26 +477,46 @@ export class CellOrchestrator {
     const ignoreMissing = (err: unknown) => {
       if (!isStatus(err, 404)) throw err;
     };
-    for (const name of [d.desktop, d.gate]) {
-      await this.#removeContainer(name).catch(ignoreMissing);
-    }
-    for (const name of [d.internalNetwork, d.egressNetwork]) {
-      await this.#docker
-        .request({ method: "DELETE", path: objectPath("networks", name) })
-        .catch(ignoreMissing);
-    }
-    if (opts.purgeHome) {
-      await this.#docker
-        .request({
-          method: "DELETE",
-          path: objectPath("volumes", d.homeVolume),
-          query: { force: "true" },
-        })
-        .catch(ignoreMissing);
+    const removing: Live = { state: "stopping", restarts: 0, stream: NO_STREAM };
+    this.#set(id, removing);
+    const closed = await this.#closeInKeyd(id);
+    try {
+      for (const name of [d.desktop, d.gate]) {
+        await this.#removeContainer(name).catch(ignoreMissing);
+      }
+      if (!closed)
+        throw new Error(
+          "keyd closure could not be confirmed; retry Remove when the key layer responds",
+        );
+      for (const name of [d.internalNetwork, d.egressNetwork]) {
+        await this.#docker
+          .request({ method: "DELETE", path: objectPath("networks", name) })
+          .catch(ignoreMissing);
+      }
+      if (opts.purgeHome) {
+        await this.#docker
+          .request({
+            method: "DELETE",
+            path: objectPath("volumes", d.homeVolume),
+            query: { force: "true" },
+          })
+          .catch(ignoreMissing);
+      }
+    } catch (err) {
+      if (this.#current(id, removing)) {
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          error: `remove failed: ${messageOf(err)}`,
+          stream: NO_STREAM,
+        });
+      }
+      throw err;
     }
     this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });
     this.#store.remove(id);
     this.#records.delete(id);
+    this.#invalidRecords.delete(id);
     this.#live.delete(id);
   }
 
@@ -445,6 +531,16 @@ export class CellOrchestrator {
     };
     this.#set(record.id, starting);
     try {
+      if (this.#keyd) {
+        let running = (await this.#inspect(d.desktop)).State.Running;
+        if (running && !(await this.#keyd.isWired(record))) {
+          await this.#stopContainer(d.desktop);
+          running = false;
+        }
+        if (!this.#current(record.id, starting)) return false;
+        if (!running) await this.#keyd.wire(record);
+        if (!this.#current(record.id, starting)) return false;
+      }
       await this.#docker.request({
         method: "POST",
         path: objectPath("containers", d.gate, "start"),
@@ -474,6 +570,9 @@ export class CellOrchestrator {
       return true;
     } catch (err) {
       if (this.#current(record.id, starting)) {
+        // A partial start must not strand its listener or either running container.
+        await this.#closeInKeyd(record.id);
+        await Promise.allSettled([this.#stopContainer(d.desktop), this.#stopContainer(d.gate)]);
         this.#set(record.id, {
           state: "failed",
           restarts,
@@ -495,7 +594,9 @@ export class CellOrchestrator {
     while (Date.now() < deadline) {
       const health = await this.#probeDesktopd(endpoints.desktopd);
       if (!this.#current(record.id, live)) return;
-      if (health?.ok) {
+      const ready =
+        health?.ok && (!this.#keyd || (health.selftest && selfTestPassed(health.selftest)));
+      if (ready) {
         const streaming = await this.#probeStream(endpoints.stream);
         if (!this.#current(record.id, live)) return;
         if (streaming) {
@@ -511,6 +612,20 @@ export class CellOrchestrator {
           return;
         }
         lastDetail = "desktopd is ready; the stream is not answering yet";
+      } else if (health?.selftest) {
+        const breach = health.selftest.checks.find((c) => c.kind === "isolation" && !c.ok);
+        if (breach) {
+          await this.#queued(record.id, () => this.#isolationFailure(record, live, breach));
+          return;
+        }
+        const { checks } = health.selftest;
+        const problems = [
+          ...checks.filter((c) => !c.ok).map((c) => `${c.id}: ${c.detail}`),
+          ...SELFTEST_CHECK_IDS.filter((id) => !checks.some((c) => c.id === id)).map(
+            (id) => `${id}: missing`,
+          ),
+        ];
+        lastDetail = `self-test failed: ${clamp(problems.join("; "))}`;
       } else if (health) {
         lastDetail = clamp(
           `desktopd not ready: hidpi ${JSON.stringify(health.hidpi)}, screen ${JSON.stringify(health.screen)}`,
@@ -529,6 +644,22 @@ export class CellOrchestrator {
       ...live,
       state: "failed",
       error: `not ready after ${this.#readyTimeoutMs / 1000} s: ${lastDetail}`,
+    });
+  }
+
+  async #isolationFailure(record: CellRecord, live: Live, breach: SelfTestCheck): Promise<void> {
+    if (!this.#current(record.id, live)) return;
+    // Hold the lifecycle queue so this cleanup cannot close a newer start's listener or desktop.
+    await this.#closeInKeyd(record.id);
+    let stopped = true;
+    await this.#stopContainer(record.docker.desktop, 0).catch(() => {
+      stopped = false;
+    });
+    if (!this.#current(record.id, live)) return;
+    this.#set(record.id, {
+      ...live,
+      state: "failed",
+      error: `network isolation check failed (${breach.id}: ${clamp(breach.detail)}); ${stopped ? "the computer was stopped" : "could not confirm the computer stopped; stop it in Docker"}`,
     });
   }
 
@@ -648,6 +779,64 @@ export class CellOrchestrator {
     });
   }
 
+  // Only unreadable folders in this home are ours to stop. Never scan by a shared prefix.
+  async #stopSkipped(skipped: string[]): Promise<void> {
+    for (const id of skipped) {
+      await this.#queued(id, async () => {
+        const names = cellNames(id, this.#namePrefix);
+        this.#invalidRecords.add(id);
+        // Reconcile may run while a watch still holds a cached record that became unreadable.
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          stream: NO_STREAM,
+          error: "cell.json can't be used; fix the record before starting the computer",
+        });
+        const closed = await this.#closeInKeyd(id);
+        let stopped = true;
+        for (const name of [names.desktop, names.gate]) {
+          await this.#stopContainer(name).catch((err: unknown) => {
+            stopped = false;
+            console.error(`cell ${id}: could not stop ${name} (${statusOf(err)})`);
+          });
+        }
+        console.error(
+          `cell ${id}: cell.json can't be used; ${closed && stopped ? "keyd closed the cell and its containers were stopped" : "cleanup could not be confirmed"}; fix or remove ${this.#store.folder(id)}`,
+        );
+      });
+    }
+  }
+
+  async #stopContainer(name: string, seconds = 10): Promise<void> {
+    await this.#docker
+      .request({
+        method: "POST",
+        path: objectPath("containers", name, "stop"),
+        query: { t: String(seconds) },
+      })
+      .catch((err) => {
+        if (!isStatus(err, 304, 404)) throw err;
+      });
+  }
+
+  async #closeInKeyd(id: string): Promise<boolean> {
+    try {
+      await this.#keyd?.close(id);
+      this.#unclosedKeyd.delete(id);
+      return true;
+    } catch (err) {
+      // A missing/refused local socket has no service behind it. A response timeout or a server
+      // error does not prove the listener is gone, so it must retain the cell record and port.
+      if (err instanceof KeydUnavailableError && ["ENOENT", "ECONNREFUSED"].includes(err.detail)) {
+        this.#unclosedKeyd.delete(id);
+        return true;
+      }
+      this.#unclosedKeyd.add(id);
+      console.error(`cell ${id}: keyd did not close it (${codeOf(err)})`);
+      return false;
+    }
+  }
+
   // v=true also removes the anonymous volumes an image's VOLUME lines create.
   #removeContainer(name: string): Promise<unknown> {
     return this.#docker.request({
@@ -657,13 +846,22 @@ export class CellOrchestrator {
     });
   }
 
-  async #subnet(networkId: string): Promise<string> {
+  async #subnet(networkId: string, opts: { isolated?: boolean } = {}): Promise<string> {
     const info = await this.#docker.request<NetworkInspect>({
       method: "GET",
       path: objectPath("networks", networkId),
     });
-    const subnet = info.IPAM.Config[0]?.Subnet;
+    const config = info.IPAM.Config[0];
+    const subnet = config?.Subnet;
     if (!subnet) throw new Error(`network ${networkId} has no IPv4 subnet`);
+    const gateway = info.IPAM.Config.find(
+      (entry) => entry.Gateway && entry.Gateway !== "invalid IP",
+    )?.Gateway;
+    if (opts.isolated && gateway && gateway !== "invalid IP") {
+      throw new Error(
+        `network ${networkId} has a gateway address (${clamp(gateway)}): this Docker Engine does not isolate internal networks; run the doctor`,
+      );
+    }
     return subnet;
   }
 

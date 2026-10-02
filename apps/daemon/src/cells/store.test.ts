@@ -53,6 +53,17 @@ const quietErrors = () => vi.spyOn(console, "error").mockImplementation(() => {}
 const invalid = (id: string) =>
   `cell ${id}: cell.json does not hold a valid cell record, skipping it`;
 
+it("keeps records in its own keyd port range only", () => {
+  const dir = home();
+  const record = sampleRecord("01JXYZ0000000000000000ABCD");
+  const e2e = new CellStore(dir, { from: 4791, to: 4796 });
+  e2e.save({ ...record, keydPort: 4791 });
+  expect(e2e.get(record.id)?.keydPort).toBe(4791);
+  expect(e2e.folder(record.id)).toBe(join(dir, "cells", record.id));
+  quietErrors();
+  expect(new CellStore(dir).get(record.id)).toBeUndefined();
+});
+
 const malformed: [string, (r: CellRecord) => unknown][] = [
   ["createdAt is not a string", (r) => ({ ...r, createdAt: 1_727_776_800_000 })],
   ["scale is neither 1 nor 2", (r) => ({ ...r, scale: 3 })],

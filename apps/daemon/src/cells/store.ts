@@ -11,7 +11,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { ULID_PATTERN } from "@localdot/protocol";
-import { KEYD_PORT_RANGE } from "./ports.ts";
+import { KEYD_PORT_RANGE, type PortRange } from "./ports.ts";
 import type { CellDocker, CellRecord } from "./types.ts";
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
@@ -42,7 +42,7 @@ const isOwnName = (value: unknown, id: string) =>
 
 // cell.json can be edited by hand, and its fields end up in Docker API paths, container env and
 // keyd's port table, so a record counts only in the shape the daemon writes.
-function isCellRecord(value: unknown, id: string): value is CellRecord {
+function isCellRecord(value: unknown, id: string, ports: PortRange): value is CellRecord {
   if (!isObject(value) || value.v !== 1 || value.id !== id) return false;
   const { createdAt, scale, keydPort, tokens, docker } = value;
   return (
@@ -50,8 +50,8 @@ function isCellRecord(value: unknown, id: string): value is CellRecord {
     (scale === 1 || scale === 2) &&
     typeof keydPort === "number" &&
     Number.isInteger(keydPort) &&
-    keydPort >= KEYD_PORT_RANGE.from &&
-    keydPort <= KEYD_PORT_RANGE.to &&
+    keydPort >= ports.from &&
+    keydPort <= ports.to &&
     isObject(tokens) &&
     matches(TOKEN_PATTERN, tokens.desktopd) &&
     matches(TOKEN_PATTERN, tokens.stream) &&
@@ -66,7 +66,10 @@ function isCellRecord(value: unknown, id: string): value is CellRecord {
 export class CellStore {
   readonly #root: string;
 
-  constructor(home: string) {
+  constructor(
+    home: string,
+    readonly keydPorts: PortRange = KEYD_PORT_RANGE,
+  ) {
     this.#root = join(home, "cells");
     mkdirSync(this.#root, { recursive: true, mode: 0o700 });
     chmodSync(this.#root, 0o700);
@@ -107,7 +110,7 @@ export class CellStore {
       console.error(`cell ${id}: cell.json is not valid JSON, skipping it`);
       return undefined;
     }
-    if (!isCellRecord(value, id)) {
+    if (!isCellRecord(value, id, this.keydPorts)) {
       console.error(`cell ${id}: cell.json does not hold a valid cell record, skipping it`);
       return undefined;
     }
@@ -128,6 +131,11 @@ export class CellStore {
 
   remove(id: string): void {
     rmSync(this.#dir(id), { recursive: true, force: true });
+  }
+
+  // Where a cell's record lives: what a user fixes or removes when it can't be read.
+  folder(id: string): string {
+    return this.#dir(id);
   }
 
   #listed(id: string): CellRecord | undefined {

@@ -672,6 +672,7 @@ describe("CellOrchestrator background loops", () => {
     expect(changes.filter((c) => c.id === cell.id).map((c) => c.state)).toEqual([
       "starting",
       "starting",
+      "stopping",
       "removed",
     ]);
     expect(orchestrator.get(cell.id)).toBeUndefined();
