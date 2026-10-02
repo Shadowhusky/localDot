@@ -97,9 +97,40 @@ startup removes its owned home, and failed builds remove their temporary output.
   `/tmp/localdot-part4b-task3-mutation-run.log`, and the final two runtime mutation
   logs under `/var/folders/lj/n6y361z92bbf8_sc2fkh0cf80000gn/T/localdot-p4b-task3-final-mut-p8ff9wrr/`.
 
+## Task 4: key API, health monitor and doctor
+
+The four key routes are behind the install token and existing Host/Origin guards.
+They accept only the strict sealed envelope, cap requests at 64 KiB, relay its
+authenticated binding unchanged, and distinguish stale seals, offline service,
+binding errors and vault failure. Doctor checks both audit availability and the
+hairpin guard; its subprocess test uses a disposable home.
+
+Review reproduced simultaneous saves reserving the same environment name,
+overlapping health requests, late replies notifying after shutdown, duplicate
+timers after restart, and an unhandled asynchronous health subscriber. Key
+mutations now serialize through the subsequent computer refresh. Polling shares
+an in-flight request and invalidates stopped generations. Subscriber failures
+are isolated and logged without their message. A successful key write whose
+computer refresh fails returns `restart: true`; it is not misreported as a failed
+write. Deletion has already revoked the key in keyd before its refresh callback.
+
+- The full host suite passes 691 tests in 90 files; workspace types, lint and
+  hygiene pass. The focused route/monitor/doctor suite has 48 tests.
+- Two real-service route tests pass: browser sealing, binding tamper refusal,
+  no plaintext in daemon storage/responses, and rejection after a new service
+  boot. Together with Task 3, six real-keyd integration tests have passed.
+- Eleven deliberate regressions fail runtime assertions: envelope/body limits,
+  name collisions and concurrent writes, refresh notification, stale-seal error,
+  overlapping/stopped health polls, audit and guard failure, and authentication.
+- Evidence: `/tmp/localdot-part4b-task4-review-red.log`,
+  `/tmp/localdot-part4b-task4-full-host.log`,
+  `/tmp/localdot-part4b-task4-real.log`,
+  `/tmp/localdot-part4b-task4-final-types.log`, and
+  `/tmp/localdot-part4b-task4-mutation-run.log`.
+
 ## Remaining integration
 
-Tasks 4–16: daemon routes, cell proxy/trust
+Tasks 5–16: cell proxy/trust
 installation and boot checks, orchestration, Stop/resume, event logging, key
 sheet, real-cell isolation/canary acceptance, documentation and CI. The system
 Keychain/Stop carry from Part 4a also remains.

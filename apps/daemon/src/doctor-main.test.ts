@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -8,9 +9,12 @@ const DAEMON = fileURLToPath(new URL("..", import.meta.url));
 const MAIN = fileURLToPath(new URL("./doctor-main.ts", import.meta.url));
 
 let fake: FakeDocker | undefined;
+let home: string | undefined;
 afterEach(async () => {
   await fake?.close();
   fake = undefined;
+  if (home) rmSync(home, { recursive: true, force: true });
+  home = undefined;
 });
 
 const freePort = () =>
@@ -34,12 +38,14 @@ describe("the doctor command", () => {
     fake = docker;
     const create = Promise.withResolvers<void>();
     docker.state.holds.set("POST /networks/create", create.promise);
+    home = mkdtempSync("/tmp/ld-doctor-test-");
     const child = spawn(process.execPath, ["--import", "tsx", MAIN], {
       cwd: DAEMON,
       env: {
         ...process.env,
         DOCKER_HOST: `unix://${docker.socketPath}`,
         LOCALDOT_PORT: String(await freePort()),
+        LOCALDOT_HOME: home,
       },
       stdio: "ignore",
     });

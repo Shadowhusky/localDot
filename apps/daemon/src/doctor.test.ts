@@ -4,8 +4,79 @@ import { DockerClient, DockerError, type DockerRequest } from "./cells/docker.ts
 import { type FakeDocker, startFakeDocker } from "./cells/testing/fake-docker.ts";
 import { runDoctor } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
+import { KeydClient } from "./keyd/client.ts";
+import { type FakeKeyd, startFakeKeyd } from "./keyd/testing/fake-keyd.ts";
 
 const images = { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" };
+describe("runDoctor's key layer checks", () => {
+  let keyd: FakeKeyd | undefined;
+  afterEach(async () => {
+    await keyd?.close();
+    keyd = undefined;
+  });
+
+  const keydChecks = async (client?: Pick<KeydClient, "status">) => {
+    fake = await startFakeDocker();
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+      keyd: client ?? new KeydClient(keyd?.socketPath ?? "/tmp/ld-no-keyd/admin.sock", 500),
+    });
+    return { report, checks: byName(report) };
+  };
+
+  it("passes while keyd answers and its hairpin guard knows the public address", async () => {
+    keyd = await startFakeKeyd();
+    const { report, checks } = await keydChecks();
+    expect(report.ok).toBe(true);
+    expect(checks.keyd?.detail).toContain(`boot ${keyd.bootId}`);
+    expect(checks["hairpin-guard"]).toMatchObject({
+      ok: true,
+      detail: expect.stringMatching(/^active/),
+    });
+  });
+
+  it("fails while the hairpin guard is unknown or off, and says why", async () => {
+    keyd = await startFakeKeyd();
+    keyd.hairpin = { state: "unknown", addresses: 0, error: "nat-pmp 192.168.1.1: timeout" };
+    const unknown = (await keydChecks()).checks["hairpin-guard"];
+    expect(unknown).toMatchObject({ ok: false });
+    expect(unknown?.detail).toMatch(/^unknown: .*keeps asking: nat-pmp 192\.168\.1\.1: timeout$/);
+    await fake?.close();
+    keyd.hairpin = { state: "off", addresses: 0 };
+    expect((await keydChecks()).checks["hairpin-guard"]?.detail).toMatch(/^off: /);
+  });
+
+  it("says to start keyd when it does not answer", async () => {
+    const { report, checks } = await keydChecks();
+    expect(report.ok).toBe(false);
+    expect(checks.keyd).toMatchObject({ ok: false, detail: expect.stringContaining("start keyd") });
+    expect(checks["hairpin-guard"]).toMatchObject({ ok: false, detail: "skipped" });
+  });
+
+  it("fails while the audit log cannot be written", async () => {
+    keyd = await startFakeKeyd();
+    keyd.auditOk = false;
+    const { report, checks } = await keydChecks();
+    expect(report.ok).toBe(false);
+    expect(checks.keyd).toMatchObject({ ok: false, detail: expect.stringContaining("disk full") });
+    expect(report.checks.slice(-2).map((check) => check.name)).toEqual(["keyd", "hairpin-guard"]);
+  });
+
+  it("does not assume that a missing hairpin status is active", async () => {
+    keyd = await startFakeKeyd();
+    const client = new KeydClient(keyd.socketPath);
+    const { report, checks } = await keydChecks({
+      status: async () => ({ ...(await client.status()), hairpin: undefined }),
+    });
+    expect(report.ok).toBe(false);
+    expect(checks["hairpin-guard"]).toMatchObject({
+      ok: false,
+      detail: expect.stringMatching(/^unknown:/),
+    });
+  });
+});
 let fake: FakeDocker | undefined;
 afterEach(async () => {
   await fake?.close();

@@ -3,6 +3,8 @@ import { DockerClient } from "./cells/docker.ts";
 import { imagesFromEnv } from "./cells/images.ts";
 import { runDoctor } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
+import { KeydClient, keydSocketPath } from "./keyd/client.ts";
+import { localdotHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 
 // The first Ctrl-C lets the run finish, so the probe network it may have made is removed; a
@@ -21,6 +23,7 @@ const report = await runDoctor({
   socket,
   images: imagesFromEnv(),
   port: parsePort(process.env.LOCALDOT_PORT),
+  keyd: new KeydClient(keydSocketPath(localdotHome())),
 });
 for (const check of report.checks) {
   console.log(`${check.ok ? "ok  " : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`);

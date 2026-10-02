@@ -8,6 +8,7 @@ import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
 import { type GatewayRoutesDeps, gatewayRoutes } from "./gateway/routes.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
+import { type KeyRoutesDeps, keyRoutes } from "./keyd/routes.ts";
 import { serveUi } from "./static-ui.ts";
 import { tokensMatch } from "./token.ts";
 
@@ -19,6 +20,7 @@ export interface AppOptions {
   desktop?: StreamProxyDeps;
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
+  keys?: KeyRoutesDeps;
 }
 
 export function createApp({
@@ -29,6 +31,7 @@ export function createApp({
   desktop,
   ui,
   gateway,
+  keys,
 }: AppOptions): Hono {
   const app = new Hono();
 
@@ -80,6 +83,7 @@ export function createApp({
   });
 
   if (cells) cellRoutes(app, cells);
+  if (keys) keyRoutes(app, keys);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   return app;
 }

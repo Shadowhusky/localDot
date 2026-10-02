@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
+import type { HairpinGuard, KeydStatus } from "@localdot/protocol";
 import {
   compareApiVersions,
   DOCKER_API,
@@ -10,6 +11,7 @@ import {
 import type { Images } from "./cells/images.ts";
 import { ISOLATED_GATEWAY_OPTION, isolatedNetworkSpec } from "./cells/spec.ts";
 import type { DockerSocket } from "./doctor-socket.ts";
+import type { KeydClient } from "./keyd/client.ts";
 
 export interface DoctorCheck {
   name: string;
@@ -32,6 +34,7 @@ export interface DoctorDeps {
   probeNetwork?: string;
   // How long the first /version may take before the socket counts as not answering.
   versionDeadlineMs?: number;
+  keyd?: Pick<KeydClient, "status">;
 }
 
 // Isolated gateway mode for internal networks shipped with Engine 28; S3 verified it on 29.2.
@@ -44,8 +47,62 @@ const ENGINE_CHECKS = ["docker-engine", "isolated-gateway-mode", "image-desktop"
 const TIMED_OUT = Symbol("timed out");
 
 export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
-  const checks = [...(await dockerChecks(deps)), await portCheck(deps.port)];
+  const checks = [
+    ...(await dockerChecks(deps)),
+    await portCheck(deps.port),
+    ...(deps.keyd ? await keydChecks(deps.keyd) : []),
+  ];
   return { ok: checks.every((c) => c.ok), checks };
+}
+
+async function keydChecks(keyd: Pick<KeydClient, "status">): Promise<DoctorCheck[]> {
+  let status: KeydStatus;
+  try {
+    status = await keyd.status();
+  } catch (err) {
+    return [
+      { name: "keyd", ok: false, detail: `${messageOf(err)}; start keyd (pnpm keyd)` },
+      ...skipped(["hairpin-guard"]),
+    ];
+  }
+  const { audit } = status;
+  const held = `; its audit log fails, so it holds every key back: ${audit.error ?? "no reason given"}`;
+  return [
+    {
+      name: "keyd",
+      ok: audit.ok,
+      detail: `boot ${status.bootId}, version ${status.version}${audit.ok ? "" : held}`,
+    },
+    hairpinCheck(status.hairpin ?? { state: "unknown", addresses: 0 }),
+  ];
+}
+
+// Hairpin NAT: a computer that can reach this network's public address reaches the router's own
+// services through it, unless keyd knows that address and denies it.
+function hairpinCheck(guard: HairpinGuard): DoctorCheck {
+  const name = "hairpin-guard";
+  if (guard.state === "active") {
+    const source = guard.source ?? "an unnamed source";
+    return {
+      name,
+      ok: true,
+      detail: `active: keyd denies this network's public address (from ${source})`,
+    };
+  }
+  if (guard.state === "off") {
+    return {
+      name,
+      ok: false,
+      detail:
+        "off: keyd asks neither the router nor STUN for the public address (-natpmp off -stun off)",
+    };
+  }
+  const why = guard.error ? `: ${guard.error}` : "";
+  return {
+    name,
+    ok: false,
+    detail: `unknown: keyd has not learned this network's public address and keeps asking${why}`,
+  };
 }
 
 async function dockerChecks({
