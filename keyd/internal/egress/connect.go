@@ -39,11 +39,13 @@ func (c *Cell) newConnectProxy() *goproxy.ProxyHttpServer {
 
 func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
 	line := audit.Line{Kind: audit.KindConnect, Method: http.MethodConnect, Host: hostport}
-	if v := c.deps.Registry.Inspect(keys.Dest{Cell: c.cfg.CellID, Scheme: "connect"}, http.MethodConnect, ctx.Req.URL, ctx.Req.Header); !v.Allow {
+	// Inspect holds the authority to the destination's host, so it gets the parsed one; a host that
+	// does not parse keeps its own reason unless a surrogate was found.
+	t, reason := policy.ParseHostPort(hostport, 0)
+	if v := c.deps.Registry.Inspect(keys.Dest{Cell: c.cfg.CellID, Scheme: "connect", Host: t.Host}, http.MethodConnect, ctx.Req.URL, ctx.Req.Header); !v.Allow && (reason == "" || v.SurrogateID != "") {
 		line.SecretID, line.SurrogateID = v.SecretID, v.SurrogateID
 		return c.refuseConnect(ctx, line, v.Reason)
 	}
-	t, reason := policy.ParseHostPort(hostport, 0)
 	if reason != "" {
 		return c.refuseConnect(ctx, line, reason)
 	}

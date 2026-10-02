@@ -319,14 +319,13 @@ func TestExpectContinueIsCheckedBeforeAnyDial(t *testing.T) {
 	}
 }
 
-// Only absolute http:// requests are served; CONNECT waits for its own task, and nothing is dialled.
+// Only absolute http:// requests and CONNECT are served, and nothing refused is dialled.
 func TestOnlyAbsoluteHTTPIsServed(t *testing.T) {
 	w := newWorld(t)
 	w.plainUpstream("ports.example.test", http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	c, rd := w.recordingCell("c1", policy.Desktop)
 	for req, want := range map[string]int{
-		"CONNECT ports.example.test:443 HTTP/1.1\r\nHost: ports.example.test:443\r\n":   http.StatusMethodNotAllowed,
-		"CONNECT ports.example.test:80 HTTP/1.1\r\nHost: ports.example.test:80\r\n":     http.StatusMethodNotAllowed,
+		"CONNECT ports.example.test:80 HTTP/1.1\r\nHost: ports.example.test:80\r\n":     http.StatusForbidden,
 		"GET https://ports.example.test/ HTTP/1.1\r\nHost: ports.example.test\r\n":      http.StatusBadRequest,
 		"GET ftp://ports.example.test/ HTTP/1.1\r\nHost: ports.example.test\r\n":        http.StatusBadRequest,
 		"GET ws://ports.example.test/ HTTP/1.1\r\nHost: ports.example.test\r\n":         http.StatusBadRequest,
