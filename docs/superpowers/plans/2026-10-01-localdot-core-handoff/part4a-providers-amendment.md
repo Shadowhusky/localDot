@@ -35,7 +35,9 @@ is its own route, with its own host, prices and audit lines. No new Go type, `Bo
     the bearer swap, its usage charged, the operation it never calls refused, and `models` refused.
   - **A fix found on the way:** the upstream path is now `path.Join("/", base, rest)`. A base URL
     without a path (DeepSeek's, or a user's `https://api.perplexity.ai`, which Part 5a's registry
-    names) sent the relative path `chat/completions`, and the provider answered 400.
+    names) gave the upstream request the relative path `chat/completions`. Go's HTTP/2 client
+    refuses that, so every request on such a route got 502 `upstream-error`; an HTTP/1 server
+    answers it 400.
   - `egress`: 58 tests become 59.
 - **Interfaces and decisions:**
   - the route table and `PUT /v1/secrets/{id}`'s provider list gain the five;

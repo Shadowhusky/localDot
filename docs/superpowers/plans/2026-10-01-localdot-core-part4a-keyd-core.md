@@ -12275,8 +12275,11 @@ func (p Pinned) DialContext(ctx context.Context, network, address string) (net.C
 
 Run: `go test -race ./internal/egress/ ./internal/keys/`
 Expected: `ok` for both (59 top-level tests in `egress`; `keys` gains `TestTheFirstClassBearerPresets`).
-Without the joined `/`, `TestEachFirstClassBearerProviderHasItsOwnRoute/deepseek` fails: the
-request goes out with the relative path `chat/completions`. Against the gateway of the first draft, the parallel tests spent $90 of
+Without the joined `/`, `TestEachFirstClassBearerProviderHasItsOwnRoute/deepseek` fails with 502
+`upstream-error`: the upstream URL's path is the relative `chat/completions`, which Go's HTTP/2
+client refuses (an HTTP/1 server answers it 400). Without the meter's `x_groq.usage`, its `groq`
+case is charged the hold (`usage` `estimated`); without the `models` check, every case relays the
+list to the provider. Against the gateway of the first draft, the parallel tests spent $90 of
 a $5 task and $22.50 of a $10 day, and the Stop test's provider received the real key. Against the
 gateway of review 1's revision, each shape of `TestNoRequestShapeOvershootsTheBudget` spent past both
 limits, the screenshots were refused at once with $0.50 left, a refusal published no event,

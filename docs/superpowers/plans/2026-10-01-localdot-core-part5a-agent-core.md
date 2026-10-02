@@ -1795,7 +1795,7 @@ describe("the first-class providers", () => {
     ]);
     for (const p of compatible.slice(0, 8)) {
       expect(p.keyd).toBe("openai-compatible");
-      expect(p.baseURL).toMatch(/^https:\/\/[a-z0-9.-]+\//);
+      expect(p.baseURL).toMatch(/^https:\/\/[a-z0-9.-]+(\/|$)/);
     }
   });
 
@@ -9043,8 +9043,8 @@ import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
 import { createXai } from "@ai-sdk/xai";
 import type { ModelBinding } from "@localdot/protocol";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { gatewayBaseURL } from "@localdot/providers";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import type { LanguageModel } from "ai";
 
 // Every model is reached at keyd's gateway with keyd's stand-in for the key in the provider's own
@@ -10999,7 +10999,8 @@ one) of every package it bundles into the bundle's header, and stops when a pack
 
 | Package | License |
 |---|---|
-| ai, @ai-sdk/provider, @ai-sdk/provider-utils, @ai-sdk/gateway, @ai-sdk/anthropic, @ai-sdk/openai, @ai-sdk/google, @ai-sdk/openai-compatible | Apache-2.0 (Vercel's AI SDK; @ai-sdk/provider-utils ships no LICENSE file, so the bundle carries `ai`'s, from the same repository) |
+| ai, @ai-sdk/provider, @ai-sdk/provider-utils, @ai-sdk/gateway, @ai-sdk/anthropic, @ai-sdk/openai, @ai-sdk/google, @ai-sdk/openai-compatible, @ai-sdk/xai, @ai-sdk/mistral, @ai-sdk/deepseek, @ai-sdk/groq | Apache-2.0 (Vercel's AI SDK; @ai-sdk/provider-utils ships no LICENSE file, so the bundle carries `ai`'s, from the same repository) |
+| @openrouter/ai-sdk-provider | Apache-2.0 (OpenRouter's; its own build carries copies of AI SDK utilities, Apache-2.0 too) |
 | undici | MIT |
 | zod | MIT |
 | eventsource-parser | MIT |
@@ -11022,8 +11023,10 @@ LOCALDOT_TOOL_URL=http://127.0.0.1:9 LOCALDOT_TOOL_TOKEN=$(printf 'a%.0s' $(seq 
 node cells/brain/dist/brain.mjs; echo "exit $?"
 ```
 Expected:
-- the build prints `brain: 13 bundled packages: …` (zod, ai, the five `@ai-sdk/*` packages,
-  eventsource-parser, @workflow/serde, @vercel/oidc, undici), and the bundle is about 3.5 MB;
+- the build prints `brain: 18 bundled packages: …` (zod, ai, eleven `@ai-sdk/*` packages: provider,
+  provider-utils, gateway, anthropic, openai, google, openai-compatible, xai, mistral, deepseek and
+  groq; @openrouter/ai-sdk-provider, eventsource-parser, @workflow/serde, @vercel/oidc and undici),
+  every one with a license, and the bundle is about 4.2 MB;
 - the first run fails to reach the tool API (`ToolApiError: tool API unreachable: fetch failed`)
   and exits 1;
 - the second says `brain: LOCALDOT_TOOL_URL and LOCALDOT_TOOL_TOKEN are required` and exits 2.
@@ -13517,7 +13520,8 @@ that copy. Setup:
     real `tool_use` streams through a listener stand-in).
 - **Static checks:** `pnpm typecheck` (all packages, `@localdot/brain` included), `pnpm hygiene`,
   and `biome check` on every file this plan adds (clean, after `--write`).
-- **Bundles:** `pnpm --filter @localdot/brain build` (13 packages, every license found) and
+- **Bundles:** `pnpm --filter @localdot/brain build` (13 packages then, 18 with the first-class
+  providers; every license found) and
   `pnpm --filter @localdot/desktopd build`. The brain bundle starts and fails exactly as Task 12
   says.
 - **How the AI SDK behaves**, probed before the loop was written:
@@ -13526,6 +13530,32 @@ that copy. Setup:
   - `@ai-sdk/openai-compatible` serializes a tool result's `content` as JSON text, which led to
     P5a-R10.
 - **Red first:** with `proxyTunnel: true`, `brain-flow.test.ts` fails at the first model call.
+
+**Re-run for the first-class providers** (2026-10-02, job `plan-part5a-providers`), in a fresh
+scratch copy built the same way (`feat/core-part2` at `b02765f`, Part 3's and Part 4b's files from
+their plans, the same three stubs, with Part 4b's real `keyd/testing/keyd-process.ts` in place of
+its stub and Part 4b's `apps/web/src/keys/binding.ts`, which Task 1 now edits), with every block of
+this plan applied from its text:
+- **Install:** `pnpm install` added exactly the five pinned packages from the npm registry
+  (`@ai-sdk/xai` 5.0.13, `@ai-sdk/mistral` 4.0.55, `@ai-sdk/deepseek` 3.0.57, `@ai-sdk/groq` 4.0.53,
+  `@openrouter/ai-sdk-provider` 3.1.0); the lockfile still holds one `@ai-sdk/provider` (4.0.20)
+  and one `@ai-sdk/provider-utils` (5.0.52).
+- **The full unit suite:** 71 files, 559 tests passed, 7 skipped (Task 16's 4 and Part 2's 3). The
+  new tests: `catalog` 9 (two new), `bindings` 4 (one rewritten), `proxy-fetch` 8 (one per
+  first-class bearer provider, each through its official package and its fixture stream).
+- **Red first:** without `compatibility: "strict"`, the OpenRouter case fails (no
+  `stream_options.include_usage`, so keyd would charge every answer its hold).
+- **Static checks:** `pnpm typecheck` (every package, `@localdot/web` and `@localdot/brain`
+  included), `pnpm hygiene`, and Biome clean on every file this plan adds or changes.
+- **Bundle:** 18 packages, every license found, about 4.2 MB; it starts and fails as Task 12 says.
+- **keyd (Part 4a's amendment, P5a-R31):** `origin/feat/core-part4a` at `70a534e` with Part 4a's
+  Tasks 10–14 applied from the amended plan text (goproxy v1.9.2 from proxy.golang.org), Go 1.27.1:
+  `gofmt` and `go vet` clean, and `go test -race ./...` passes (`llm` 20 tests, `egress` 59,
+  `keys` with `TestTheFirstClassBearerPresets`). Each of the three keyd changes was taken out once
+  and its test failed: Groq charged its hold, DeepSeek's empty base path answered 502, and a
+  `models` list reached the provider.
+- **Not run:** any real provider (no model call was made). The five fixtures follow each
+  package's own response schema; the providers' live answers are assumed to match them.
 
 **What could not run** (assumptions on code that is not built yet, and checks this machine could
 not make; the pre-flight scan and the reviewers should look here first)
