@@ -19,6 +19,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/elazarl/goproxy"
+
 	"github.com/shadowhusky/localdot/keyd/internal/audit"
 	"github.com/shadowhusky/localdot/keyd/internal/events"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
@@ -57,6 +59,7 @@ type Cell struct {
 	deps        Deps
 	ln          net.Listener
 	srv         *http.Server
+	connect     *goproxy.ProxyHttpServer
 	intercepted map[string]bool
 	authLog     rateLog
 	mu          sync.Mutex
@@ -76,6 +79,7 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 		return nil, err
 	}
 	c := &Cell{cfg: cfg, deps: deps, ln: ln, gen: newGeneration(deps), intercepted: map[string]bool{}}
+	c.connect = c.newConnectProxy()
 	c.srv = &http.Server{
 		Handler:           c,
 		ReadHeaderTimeout: 10 * time.Second,
@@ -130,7 +134,7 @@ func (c *Cell) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	line := audit.Line{Kind: audit.KindRequest, Method: r.Method, Host: r.URL.Hostname(), Path: r.URL.Path}
 	switch {
 	case r.Method == http.MethodConnect:
-		c.deny(w, line, http.StatusMethodNotAllowed, ReasonMethod)
+		c.connect.ServeHTTP(w, r)
 	case !r.URL.IsAbs() || r.URL.Scheme != "http":
 		c.deny(w, line, http.StatusBadRequest, ReasonBadRequest)
 	case isInternal(r.URL):
