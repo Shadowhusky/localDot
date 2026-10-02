@@ -6,7 +6,8 @@
   --color-line: #25272c;
   --color-text: #eeeff1;
   --color-text-2: #999ca4;
-  --color-text-3: #5d6068;
+  /* 4.9:1 on the void, 4.5:1 on the surface. */
+  --color-text-3: #7c7f87;
   --color-xenon: #3fb5de;
   --color-xenon-a08: rgba(63, 181, 222, 0.08);
   --color-xenon-a40: rgba(63, 181, 222, 0.4);

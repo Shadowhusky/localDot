@@ -1,3 +1,7 @@
+/* Below this width the rails give way to the stage, so the HUD and the caption keep their room
+   (with both rails, the HUD's widest state was clipped below ~880 px). */
+@custom-media --rails-collapse (width < 1180px);
+
 .app {
   display: grid;
   grid-template-rows: var(--spacing-bar) 1fr;
@@ -287,7 +291,8 @@
 
 .caption {
   margin-top: var(--spacing-caption-top);
-  max-width: var(--spacing-caption);
+  max-width: min(100%, var(--spacing-caption));
+  overflow-wrap: anywhere;
   text-align: center;
   font-size: 15px;
   line-height: 1.45;
@@ -331,5 +336,15 @@
   .stage > canvas,
   .stage > .stage-veil {
     transition: none;
+  }
+}
+
+@media (--rails-collapse) {
+  .house {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .rail {
+    display: none;
   }
 }
