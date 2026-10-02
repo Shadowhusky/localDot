@@ -1002,3 +1002,132 @@ func TestOnlyKeydLdotOnPort80IsInternal(t *testing.T) {
 		t.Fatalf("%d internal audit lines, want 3", n)
 	}
 }
+
+// sendLarge writes req while it reads the answer, since a server may answer before it has read
+// everything, and returns the answer without its body. It reports errors instead of failing the
+// test, so goroutines can call it.
+func sendLarge(c *Cell, req string) (*http.Response, error) {
+	conn, err := dialListener(c)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(2 * time.Minute))
+	go io.WriteString(conn, req)
+	resp, err := http.ReadResponse(bufio.NewReader(conn), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp.Body.Close()
+	return resp, nil
+}
+
+// shapeRequest builds an authenticated plain GET whose header block holds valueHeaders headers of
+// perHeader distinct surrogate shapes each, then nameHeaders headers named by one shape each. It
+// returns the request and the number of shapes in it.
+func shapeRequest(t *testing.T, valueHeaders, perHeader, nameHeaders int) (string, int) {
+	t.Helper()
+	shape := func() string {
+		tok, err := surrogate.Mint("key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return tok
+	}
+	var b strings.Builder
+	b.WriteString("GET http://free.example.test/ HTTP/1.1\r\nHost: free.example.test\r\nConnection: close\r\n" + proxyAuth())
+	for i := range valueHeaders {
+		b.WriteString("X-Shapes-" + strconv.Itoa(i) + ":")
+		for range perHeader {
+			b.WriteString(" " + shape())
+		}
+		b.WriteString("\r\n")
+	}
+	for range nameHeaders {
+		b.WriteString(http.CanonicalHeaderKey(shape()) + ": 1\r\n")
+	}
+	b.WriteString("\r\n")
+	return b.String(), valueHeaders*perHeader + nameHeaders
+}
+
+// The review's request: just under 1 MiB of distinct surrogate shapes in 16 headers, which
+// net/http's default limit lets through. The listener reads at most 64 KiB of header (plus
+// net/http's 4 KiB of slack) and answers 431, so Inspect never sees it, nothing is audited and
+// nothing is dialled.
+func TestAHeaderBlockOverTheCapIsRefusedUnread(t *testing.T) {
+	w := newWorld(t)
+	c, rd := w.recordingCell("c1", policy.Desktop)
+	req, shapes := shapeRequest(t, 16, 1750, 0)
+	if len(req) <= 1<<20-64<<10 || len(req) >= 1<<20 {
+		t.Fatalf("the request is %d bytes, want just under 1 MiB", len(req))
+	}
+	resp, err := sendLarge(c, req)
+	if err != nil {
+		t.Fatalf("%d bytes, %d shapes: %v", len(req), shapes, err)
+	}
+	if resp.StatusCode != http.StatusRequestHeaderFieldsTooLarge {
+		t.Fatalf("%d bytes, %d shapes: %d %q, want 431", len(req), shapes, resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+	}
+	// Just past the cap and its slack is refused too.
+	req, shapes = shapeRequest(t, 18, 107, 0)
+	if len(req) <= 64<<10+4096 || len(req) >= 72<<10 {
+		t.Fatalf("the request is %d bytes, want just over 68 KiB", len(req))
+	}
+	if resp, err := sendLarge(c, req); err != nil || resp.StatusCode != http.StatusRequestHeaderFieldsTooLarge {
+		t.Fatalf("%d bytes, %d shapes: %v %v, want 431", len(req), shapes, resp, err)
+	}
+	if a := rd.addresses(); len(a) != 0 {
+		t.Fatalf("dialled %v", a)
+	}
+	if lines := w.lines(); len(lines) != 0 {
+		t.Fatalf("the refused request was inspected: %+v", lines)
+	}
+}
+
+// Four clients at once each send the review's 1 MiB request and a header block just under 64 KiB
+// full of distinct shapes, values and names. Every one is answered: 431 for the first, 403
+// unknown-surrogate for the second.
+func TestFullHeaderBlocksInParallelAreAllAnswered(t *testing.T) {
+	w := newWorld(t)
+	c, rd := w.recordingCell("c1", policy.Desktop)
+	over, _ := shapeRequest(t, 16, 1750, 0)
+	under, shapes := shapeRequest(t, 12, 110, 250)
+	if len(under) >= 64<<10 || shapes < 1500 {
+		t.Fatalf("the request under the cap is %d bytes with %d shapes", len(under), shapes)
+	}
+	type answer struct {
+		status int
+		reason string
+		err    error
+	}
+	answers := make(chan answer, 8)
+	var wg sync.WaitGroup
+	for range 4 {
+		for _, req := range []string{over, under} {
+			wg.Go(func() {
+				resp, err := sendLarge(c, req)
+				if err != nil {
+					answers <- answer{err: err}
+					return
+				}
+				answers <- answer{status: resp.StatusCode, reason: resp.Header.Get("X-Keyd-Reason")}
+			})
+		}
+	}
+	wg.Wait()
+	close(answers)
+	count := map[answer]int{}
+	for a := range answers {
+		count[a]++
+	}
+	tooLarge, unknown := answer{status: http.StatusRequestHeaderFieldsTooLarge}, answer{status: http.StatusForbidden, reason: keys.ReasonUnknownSurrogate}
+	if len(count) != 2 || count[tooLarge] != 4 || count[unknown] != 4 {
+		t.Fatalf("answers %v, want 4 × 431 and 4 × 403 %s (%d bytes under the cap, %d shapes)", count, keys.ReasonUnknownSurrogate, len(under), shapes)
+	}
+	if a := rd.addresses(); len(a) != 0 {
+		t.Fatalf("dialled %v", a)
+	}
+	if n := len(w.lines()); n != 4 {
+		t.Fatalf("%d audit lines, want 4", n)
+	}
+}
