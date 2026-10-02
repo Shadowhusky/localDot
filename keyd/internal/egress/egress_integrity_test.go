@@ -811,7 +811,7 @@ func TestAnUpgradeToABoundHostIsRefusedBeforeAnyDial(t *testing.T) {
 	for _, target := range []string{"http://api.example.test/ws", "http://API.Example.TEST.:80/ws"} {
 		for _, spelling := range upgradeSpellings {
 			raw := sendRaw(t, c, "GET "+target+" HTTP/1.1\r\nHost: free.example.test\r\n"+spelling+proxyAuth()+"\r\n")
-			if strings.Contains(raw, echoed) || !strings.HasPrefix(raw, "HTTP/1.1 403 ") || !strings.Contains(raw, "X-Keyd-Reason: "+ReasonUpgrade) {
+			if strings.Contains(raw, echoed) || !strings.HasPrefix(raw, "HTTP/1.1 403 ") || !strings.Contains(raw, "X-Keyd-Reason: "+ReasonUpgrade) || !strings.Contains(raw, "Connection: close\r\n") {
 				t.Errorf("%s %q: %q", target, spelling, raw)
 			}
 			requests++
@@ -835,7 +835,7 @@ func TestAnUpgradeToABoundHostIsRefusedBeforeAnyDial(t *testing.T) {
 }
 
 // A secret bound to the host while the upgrade is in flight is caught at the 101: the switch is
-// refused, the upstream connection closed, and the echo never reaches the cell.
+// refused, both connections are closed, and the echo never reaches the cell.
 func TestA101FromAHostBoundMidRequestIsRefused(t *testing.T) {
 	w := newWorld(t)
 	w.rawUpstream("api.example.test", func(*http.Request) string {
@@ -844,7 +844,7 @@ func TestA101FromAHostBoundMidRequestIsRefused(t *testing.T) {
 	})
 	c := w.cell("c1", policy.Desktop)
 	raw := sendRaw(t, c, "GET http://api.example.test/ws HTTP/1.1\r\nHost: api.example.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"+proxyAuth()+"\r\n")
-	if strings.Contains(raw, echoed) || !strings.HasPrefix(raw, "HTTP/1.1 502 ") || !strings.Contains(raw, "X-Keyd-Reason: "+ReasonUpgrade) {
+	if strings.Contains(raw, echoed) || !strings.HasPrefix(raw, "HTTP/1.1 502 ") || !strings.Contains(raw, "X-Keyd-Reason: "+ReasonUpgrade) || !strings.Contains(raw, "Connection: close\r\n") {
 		t.Fatalf("%q", raw)
 	}
 	l := w.waitLine(reasonIs(ReasonUpgrade))
@@ -982,6 +982,7 @@ func TestOnlyKeydLdotOnPort80IsInternal(t *testing.T) {
 		"http://keyd.ldot:81/health":           http.StatusForbidden,
 		"http://keyd.ldot:443/health":          http.StatusForbidden,
 		"http://keyd.ldot:080/health":          http.StatusForbidden,
+		"http://keyd.ldot:/health":             http.StatusForbidden,
 	} {
 		resp, body := rawRequest(t, c, "GET "+target+" HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"+proxyAuth()+"\r\n")
 		if resp.StatusCode != want || (want != http.StatusOK) == strings.Contains(body, `"ok":true`) {
