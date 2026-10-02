@@ -681,8 +681,7 @@
             },
             "label": {
               "type": "string",
-              "minLength": 1,
-              "maxLength": 80
+              "maxLength": 160
             },
             "point": {
               "type": "object",
@@ -887,23 +886,23 @@
                 },
                 "role": {
                   "type": "string",
-                  "maxLength": 64
+                  "maxLength": 128
                 },
                 "name": {
                   "type": "string",
-                  "maxLength": 64
+                  "maxLength": 128
                 },
                 "app": {
                   "type": "string",
-                  "maxLength": 128
+                  "maxLength": 256
                 },
                 "window": {
                   "type": "string",
-                  "maxLength": 256
+                  "maxLength": 512
                 },
                 "url": {
                   "type": "string",
-                  "maxLength": 2048
+                  "maxLength": 4096
                 },
                 "mark": {
                   "type": "integer",
@@ -2129,23 +2128,23 @@
                 },
                 "role": {
                   "type": "string",
-                  "maxLength": 64
+                  "maxLength": 128
                 },
                 "name": {
                   "type": "string",
-                  "maxLength": 64
+                  "maxLength": 128
                 },
                 "app": {
                   "type": "string",
-                  "maxLength": 128
+                  "maxLength": 256
                 },
                 "window": {
                   "type": "string",
-                  "maxLength": 256
+                  "maxLength": 512
                 },
                 "url": {
                   "type": "string",
-                  "maxLength": 2048
+                  "maxLength": 4096
                 },
                 "mark": {
                   "type": "integer",
@@ -2501,16 +2500,20 @@
           "type": "object",
           "properties": {
             "secretId": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 64
             },
             "host": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 255
             },
             "method": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 16
             },
             "path": {
-              "type": "string"
+              "type": "string",
+              "maxLength": 512
             },
             "decision": {
               "type": "string",
@@ -2527,6 +2530,85 @@
             "method",
             "path",
             "decision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "budget.exceeded"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "task",
+                "day"
+              ]
+            },
+            "taskId": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "limitUSD": {
+              "type": "number",
+              "minimum": 0
+            },
+            "spentUSD": {
+              "type": "number",
+              "minimum": 0
+            },
+            "needUSD": {
+              "type": "number",
+              "minimum": 0
+            }
+          },
+          "required": [
+            "scope",
+            "limitUSD",
+            "spentUSD"
           ],
           "additionalProperties": false
         }

@@ -85,6 +85,35 @@ describe("parseEvent", () => {
     ).toThrow(/masked/);
   });
 
+  it("accepts keyd's key use and budget events and bounds what a cell chose", () => {
+    const keyUse = {
+      secretId: "weather",
+      host: "api.weather.example",
+      method: "GET",
+      path: "/v1",
+      decision: "deny",
+    };
+    expect(parseEvent({ ...base, agent: "keyd", type: "key.use", data: keyUse }).type).toBe(
+      "key.use",
+    );
+    expect(() =>
+      parseEvent({
+        ...base,
+        agent: "keyd",
+        type: "key.use",
+        data: { ...keyUse, path: `/${"a".repeat(512)}` },
+      }),
+    ).toThrow();
+    expect(
+      parseEvent({
+        ...base,
+        agent: "keyd",
+        type: "budget.exceeded",
+        data: { scope: "day", limitUSD: 20, spentUSD: 20.01, needUSD: 0.4 },
+      }).type,
+    ).toBe("budget.exceeded");
+  });
+
   it("exports JSON Schema that names every event type", () => {
     const schema = JSON.stringify(z.toJSONSchema(LocalDotEvent, { unrepresentable: "any" }));
     for (const type of [

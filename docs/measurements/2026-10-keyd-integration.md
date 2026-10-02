@@ -35,9 +35,34 @@ The command tests keep the improved Part 4a shutdown and input-validation
 behaviour; the discovery tests are in their own file. Live NAT-PMP/STUN was not
 used. The plan's router-IPv6 limitation remains: discovery learns public IPv4.
 
+## Task 2: protocol, browser sealing and readiness
+
+The protocol now defines strict sealed-key requests, validated keyd replies,
+the browser's ECDH/HKDF/AES-GCM seal, key/budget events and the eleven-check boot
+report. Browser and Go known-answer vectors agree in both directions. The event
+JSON schema is regenerated.
+
+Review fixed two plan mismatches: the provider enum now includes all ten
+providers in the amended Go gateway, and readiness verifies each required
+check's kind as well as its ID, uniqueness and result. A gateway isolation check
+cannot be relabelled as a trust check. Extra plaintext fields in either binding,
+the sealed blob or its envelope are refused.
+
+- All 46 protocol tests in eight files pass; workspace type checks, lint and
+  hygiene pass.
+- Twelve deliberate regressions fail runtime assertions: strict envelopes and
+  nested objects, authenticated binding, methods, fresh nonces, missing/relabelled
+  checks, report-summary trust, reserved IDs, environment-name collisions and
+  unknown guard states. An initial scratch-run configuration error was fixed;
+  it is not counted as a caught mutation.
+- Evidence: `/tmp/localdot-part4b-task2-review-red.log`,
+  `/tmp/localdot-part4b-task2-final-scoped.log`,
+  `/tmp/localdot-part4b-task2-final-types.log`, and
+  `/tmp/localdot-part4b-task2-mutation-retry.log`.
+
 ## Remaining integration
 
-Tasks 2–16: protocol and browser sealing, daemon client/routes, cell proxy/trust
+Tasks 3–16: daemon client/routes, cell proxy/trust
 installation and boot checks, orchestration, Stop/resume, event logging, key
 sheet, real-cell isolation/canary acceptance, documentation and CI. The system
 Keychain/Stop carry from Part 4a also remains.

@@ -227,14 +227,26 @@ export const MemoryChange = event(
   "memory.change",
   z.object({ file: z.enum(["USER.md", "MEMORY.md"]), patch: z.string() }),
 );
+// From keyd's audit: host, method and path are text the cell's request chose, cut to these
+// limits by the daemon and shown as plain text, never markup.
 export const KeyUse = event(
   "key.use",
   z.object({
-    secretId: z.string(),
-    host: z.string(),
-    method: z.string(),
-    path: z.string(),
+    secretId: z.string().max(64),
+    host: z.string().max(255),
+    method: z.string().max(16),
+    path: z.string().max(512),
     decision: z.enum(["allow", "deny", "ask"]),
+  }),
+);
+export const BudgetExceeded = event(
+  "budget.exceeded",
+  z.object({
+    scope: z.enum(["task", "day"]),
+    taskId: z.string().max(128).optional(),
+    limitUSD: z.number().nonnegative(),
+    spentUSD: z.number().nonnegative(),
+    needUSD: z.number().nonnegative().optional(),
   }),
 );
 export const CameraHint = event(
@@ -275,6 +287,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   PauseChange,
   MemoryChange,
   KeyUse,
+  BudgetExceeded,
   CameraHint,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
