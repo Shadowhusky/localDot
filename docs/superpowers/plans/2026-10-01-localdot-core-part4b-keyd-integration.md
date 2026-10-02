@@ -165,7 +165,7 @@ the tests named after it.
    - Task 14 probes a real cell with exact curl exit statuses (6, 7, 2).
    - Task 1 denies every IPv6 range outside `2000::/3` and the network's public address, learned
      from the router (NAT-PMP) or one STUN server; while it is unknown, `doctor` and the UI say so
-     and keyd asks again every 30 s.
+     and keyd keeps asking, at once when the network changes.
 4. **Stop leaving a surrogate usable or a process running.**
    - Task 10: revoke comes before pause, the pause happens even with keyd down, and a desktop that
      cannot be paused loses its keyd listener. A frozen cell stays frozen across a daemon restart, a
@@ -242,7 +242,10 @@ Part 4a's review left two holes in the dial-time guard (controller's interface n
      default gateway), so no third party learns anything;
   2. only if the router has no public answer (no NAT-PMP, a PCP-only router, or a router behind
      another NAT), it asks one STUN server, Cloudflare's; `-stun off` turns that off;
-  3. while the address is unknown it asks again every 30 s, and every 5 minutes once it is known;
+  3. while the address is unknown it asks again every 30 s (every 5 minutes after four failed rounds
+     in a row), and every 5 minutes once it is known. It also asks at once when the default gateway
+     changes (another network; it looks every 30 s), and a known address survives one failed round,
+     so one lost datagram does not turn the guard unknown (review 2, Minor 4);
   4. keyd's `/v1/status` reports the guard as `active`, `unknown` or `off`, and the daemon shows it
      in `doctor` and the UI (Tasks 4 and 12b), so it never fails open silently.
 
@@ -583,6 +586,73 @@ func TestKeepAsksAgainSoonWhileTheAddressIsUnknown(t *testing.T) {
 		t.Fatal("Keep did not stop")
 	}
 }
+
+func TestLearnKeepsAKnownGuardActiveForOneFailedRound(t *testing.T) {
+	public := &Public{}
+	d, _ := fakeRouter(t, netip.MustParseAddr("81.2.69.160"))
+	if err := public.Learn(d); err != nil {
+		t.Fatal(err)
+	}
+	lost := Discovery{Router: func() (netip.Addr, error) { return netip.Addr{}, errors.New("no route") }}
+	if err := public.Learn(lost); err == nil {
+		t.Fatal("a failed round counted as an answer")
+	}
+	if st := public.Status(); st.State != "active" || st.Source != "nat-pmp" || !strings.Contains(st.Error, "no route") {
+		t.Fatalf("after one failed round: %+v", st)
+	}
+	public.Learn(lost)
+	if st := public.Status(); st.State != "unknown" {
+		t.Fatalf("after two failed rounds: %+v", st)
+	}
+	if err := public.Learn(d); err != nil || public.Status().State != "active" {
+		t.Fatalf("an answer again: %v, %+v", err, public.Status())
+	}
+	public.Learn(lost)
+	if st := public.Status(); st.State != "active" {
+		t.Fatalf("the grace comes back with an answer: %+v", st)
+	}
+}
+
+func TestKeepAsksLessOftenAfterAFewFailedRounds(t *testing.T) {
+	public := &Public{}
+	stun, asked := fakeSTUN(t, netip.MustParseAddr("81.2.69.160"), 1000)
+	stop := make(chan struct{})
+	defer close(stop)
+	go public.Keep(Discovery{STUN: stun, Timeout: 5 * time.Millisecond}, time.Hour, 10*time.Millisecond, stop, t.Logf)
+	time.Sleep(500 * time.Millisecond)
+	if n := asked.Load(); n != quickRetries {
+		t.Fatalf("asked %d times in 0.5 s, want %d and then the long interval", n, quickRetries)
+	}
+}
+
+func TestKeepAsksAtOnceWhenTheGatewayChanges(t *testing.T) {
+	public := &Public{}
+	d, routerAsked := fakeRouter(t, netip.MustParseAddr("81.2.69.160"))
+	var gateway atomic.Value
+	gateway.Store(netip.MustParseAddr("127.0.0.1"))
+	d.Router = func() (netip.Addr, error) { return gateway.Load().(netip.Addr), nil }
+	stop := make(chan struct{})
+	defer close(stop)
+	go public.Keep(d, time.Hour, 10*time.Millisecond, stop, t.Logf)
+	deadline := time.Now().Add(3 * time.Second)
+	for public.Status().State != "active" && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	time.Sleep(100 * time.Millisecond)
+	if st, n := public.Status(), routerAsked.Load(); st.State != "active" || n != 1 {
+		t.Fatalf("before the change: %+v, router asked %d times", st, n)
+	}
+	// Another network: its router is asked at once, not after the long interval.
+	gateway.Store(netip.MustParseAddr("127.0.0.2"))
+	time.Sleep(100 * time.Millisecond)
+	gateway.Store(netip.MustParseAddr("127.0.0.1"))
+	for routerAsked.Load() < 2 && time.Now().Before(deadline.Add(2*time.Second)) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := routerAsked.Load(); n < 2 {
+		t.Fatalf("the router was not asked again after the gateway changed (%d)", n)
+	}
+}
 ```
 
 `keyd/internal/netguard/natpmp_test.go`:
@@ -790,6 +860,11 @@ const DefaultSTUN = "stun.cloudflare.com:3478"
 // maxPublic bounds the addresses kept: a dynamic address that changes daily adds one a day.
 const maxPublic = 16
 
+// quickRetries is how many failed rounds in a row Keep follows with a quick retry; after that it
+// asks at the long interval (or when the network changes), so an unknown guard does not ask a STUN
+// server every 30 s for as long as it lasts.
+const quickRetries = 4
+
 // Public holds the addresses this Mac's traffic leaves its network with. A home router answers on
 // its public address from inside the network (hairpin NAT), often with its admin page or with a
 // port it forwards to the LAN, so keyd denies those addresses like the Mac's own. Addresses once
@@ -798,6 +873,8 @@ type Public struct {
 	mu     sync.RWMutex
 	addrs  []netip.Addr
 	status PublicStatus
+	// graced: the guard stayed active through one failed round; the next one makes it unknown.
+	graced bool
 }
 
 // PublicStatus is the hairpin guard as keyd's /v1/status reports it: "active" while the last
@@ -854,17 +931,31 @@ func (p *Public) add(a netip.Addr) {
 func (p *Public) record(state, source string, err error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if state == "unknown" && p.status.State == "active" && !p.graced {
+		// One lost round is not a new network: the guard stays active (it still denies what it
+		// learned) and says why; the next failed round makes it unknown.
+		p.graced = true
+		p.status.Error = "the last round failed"
+		if err != nil {
+			p.status.Error = clip(p.status.Error + ": " + err.Error())
+		}
+		return
+	}
+	p.graced = false
 	p.status = PublicStatus{State: state, Source: source}
 	if state != "off" {
 		p.status.CheckedAt = time.Now().UTC().Format(time.RFC3339)
 	}
 	if err != nil {
-		msg := err.Error()
-		if len(msg) > 300 {
-			msg = msg[:300]
-		}
-		p.status.Error = msg
+		p.status.Error = clip(err.Error())
 	}
+}
+
+func clip(msg string) string {
+	if len(msg) > 300 {
+		return msg[:300]
+	}
+	return msg
 }
 
 // Learn asks the router, and asks STUN only when the router has no public answer: it does not
@@ -909,23 +1000,52 @@ func (p *Public) Learn(d Discovery) error {
 	return err
 }
 
-// Keep learns at once, then again every `every` while the address is known and every `retry`
-// while it is not, until stop is closed. A failed round goes to logf and to the status.
+// Keep learns at once, then keeps the address fresh until stop is closed:
+//   - while it is known, it asks again every `every`, and at once when the default gateway changes
+//     (another network), which it looks up every `retry` (only with the router as a source);
+//   - while it is not, it asks every `retry`, and every `every` after quickRetries failed rounds in
+//     a row, so a network that never answers is not asked every 30 s for as long as that lasts.
+//
+// A failed round goes to logf and to the status.
 func (p *Public) Keep(d Discovery, every, retry time.Duration, stop <-chan struct{}, logf func(string, ...any)) {
-	timer := time.NewTimer(0)
-	defer timer.Stop()
+	gateway := func() netip.Addr {
+		if d.Router == nil {
+			return netip.Addr{}
+		}
+		a, _ := d.Router()
+		return a
+	}
+	var (
+		failed int
+		seen   netip.Addr
+		next   time.Time
+	)
+	learn := func() {
+		seen = gateway()
+		wait := every
+		if err := p.Learn(d); err != nil {
+			failed++
+			if failed < quickRetries {
+				wait = retry
+			}
+			logf("keyd: no answer for the public address, which hairpin NAT needs denied; asking again in %s: %v", wait, err)
+		} else {
+			failed = 0
+		}
+		next = time.Now().Add(wait)
+	}
+	learn()
+	tick := time.NewTicker(retry)
+	defer tick.Stop()
 	for {
 		select {
 		case <-stop:
 			return
-		case <-timer.C:
+		case <-tick.C:
 		}
-		wait := every
-		if err := p.Learn(d); err != nil {
-			logf("keyd: the public address is unknown, so hairpin NAT is not denied yet; asking again in %s: %v", retry, err)
-			wait = retry
+		if !time.Now().Before(next) || gateway() != seen {
+			learn()
 		}
-		timer.Reset(wait)
 	}
 }
 
@@ -1255,7 +1375,8 @@ In `keyd/cmd/keyd/main.go`:
   ```
   and after `Config`:
   ```go
-  // The hairpin guard asks again every 5 minutes while it knows the address, every 30 s while not.
+  // The hairpin guard asks again every 5 minutes while it knows the address, every 30 s while not
+  // (for four rounds, then every 5 minutes), and at once when the default gateway changes.
   const (
   	hairpinEvery = 5 * time.Minute
   	hairpinRetry = 30 * time.Second
@@ -1315,8 +1436,9 @@ Add to the `## keyd` section of `README.md`, after its last sentence:
 keyd refuses to dial this network's public IPv4 address, where a router answers from inside the
 network (hairpin NAT). It asks the router for it first (NAT-PMP, `-natpmp on|off`), and only when
 the router has no public answer one STUN server (`-stun`, default Cloudflare's; `-stun off` never
-asks a third party). It asks again every 30 seconds while the address is unknown and every five
-minutes once it is known. `pnpm --filter @localdot/daemon run doctor` and the Keys sheet say whether
+asks a third party). It asks again every 30 seconds while the address is unknown (every five
+minutes after four failed tries), every five minutes once it is known, and at once when the
+default gateway changes. `pnpm --filter @localdot/daemon run doctor` and the Keys sheet say whether
 the guard is active. The tests pass `-natpmp off -stun off`.
 ```
 
@@ -1327,7 +1449,9 @@ Expected: no output from gofmt or vet. netguard and cmd/keyd are `ok` under `-ra
 - netguard: `TestParseBindingSuccess`, `TestParseBindingSuccessRefusesAnythingElse`,
   `TestLearnAsksTheRouterFirstAndNoThirdParty`, `TestLearnAsksSTUNOnlyWhenTheRouterHasNoPublicAnswer`,
   `TestLearnSaysUnknownWhenNothingAnswersAndKeepsWhatItHad`, `TestLearnIsOffWithBothSourcesOff`,
-  `TestKeepAsksAgainSoonWhileTheAddressIsUnknown`, `TestParseNATPMP` and `TestGatewayLookups`;
+  `TestKeepAsksAgainSoonWhileTheAddressIsUnknown`, `TestLearnKeepsAKnownGuardActiveForOneFailedRound`,
+  `TestKeepAsksLessOftenAfterAFewFailedRounds`, `TestKeepAsksAtOnceWhenTheGatewayChanges`,
+  `TestParseNATPMP` and `TestGatewayLookups`;
 - cmd/keyd: `TestStartLearnsThePublicAddressItDeniesAndReportsTheGuard` and
   `TestStartWithDiscoveryOffSaysTheGuardIsOff`.
 
@@ -1944,7 +2068,7 @@ export const KeydRecord = z.object({
 export type KeydRecord = z.infer<typeof KeydRecord>;
 
 // keyd's hairpin-NAT guard: whether it knows the public address it must deny like the Mac's own.
-// "unknown" while neither the router nor STUN has answered (keyd asks again every 30 s), "off"
+// "unknown" while neither the router nor STUN has answered (keyd keeps asking), "off"
 // when both are turned off. A state this code does not know reads as unknown.
 export const HairpinGuard = z.object({
   state: z.enum(["active", "unknown", "off"]).catch("unknown"),
@@ -3814,7 +3938,7 @@ describe("runDoctor's key layer checks", () => {
     const unknown = (await keydChecks()).checks["hairpin-guard"];
     expect(unknown).toMatchObject({ ok: false });
     expect(unknown?.detail).toMatch(
-      /^unknown: .*asks again every 30 s: nat-pmp 192\.168\.1\.1: timeout$/,
+      /^unknown: .*keeps asking: nat-pmp 192\.168\.1\.1: timeout$/,
     );
     await fake?.close();
     keyd.hairpin = { state: "off", addresses: 0 };
@@ -4128,7 +4252,7 @@ function hairpinCheck(guard: HairpinGuard): DoctorCheck {
   return {
     name,
     ok: false,
-    detail: `unknown: keyd has not learned this network's public address and asks again every 30 s${why}`,
+    detail: `unknown: keyd has not learned this network's public address and keeps asking${why}`,
   };
 }
 ```
@@ -9042,7 +9166,9 @@ The key form (Task 12b) is split from its logic, which this task builds and test
 - **The key layer's state.** `useKeys` polls `/api/keyd` every 5 s and reloads the list on a new
   boot or a change. `keyStatus` gives the top bar's label: `Keys`, `Key layer offline` (spec
   "Error handling"), `Keys on hold` while keyd cannot write its audit log, and the state `guard`
-  (label `Keys`) while the hairpin guard is anything but `active` (P4b-C2).
+  (label `Keys`) while the hairpin guard is anything but `active` (P4b-C2). In that state only a
+  hollow dot shows it, so `spoken` gives the button its accessible name, `Keys, hairpin guard
+  unknown` or `… off` (review 2, Minor 8).
 
 **Files:**
 - Create: `apps/web/src/keys/binding.ts`, `apps/web/src/keys/keys-api.ts`,
@@ -9062,7 +9188,7 @@ The key form (Task 12b) is split from its logic, which this task builds and test
     `loadKeys`, `saveKey(api, binding, value, seal?) → { key; restart }`, `deleteKey`,
     `problemText(err)`;
   - from `useKeys.ts`: `useKeys(api, everyMs = 5000) → KeysController { health; keys; loadError; save; remove }`,
-    `keyStatus(health) → { label; state: "unknown" | "ok" | "offline" | "audit" | "guard" }`.
+    `keyStatus(health) → { label; state: "unknown" | "ok" | "offline" | "audit" | "guard"; spoken? }`.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -9335,8 +9461,16 @@ describe("keyStatus", () => {
       state: "audit",
     });
     for (const hairpin of [{ state: "unknown" as const, addresses: 0 }, undefined]) {
-      expect(keyStatus({ online: true, audit: { ok: true }, hairpin }).state).toBe("guard");
+      expect(keyStatus({ online: true, audit: { ok: true }, hairpin })).toEqual({
+        label: "Keys",
+        state: "guard",
+        spoken: "Keys, hairpin guard unknown",
+      });
     }
+    const off = { state: "off" as const, addresses: 0 };
+    expect(keyStatus({ online: true, audit: { ok: true }, hairpin: off }).spoken).toBe(
+      "Keys, hairpin guard off",
+    );
     expect(keyStatus({ online: true, audit: { ok: true }, hairpin: active })).toEqual({
       label: "Keys",
       state: "ok",
@@ -9632,6 +9766,8 @@ export interface KeysController {
 export type KeyStatus = {
   label: string;
   state: "unknown" | "ok" | "offline" | "audit" | "guard";
+  // The button's accessible name when a hollow dot alone tells the state (the hairpin guard).
+  spoken?: string;
 };
 
 // The spec's "Key layer offline"; while keyd cannot write its audit log it swaps no key, which the
@@ -9641,7 +9777,10 @@ export function keyStatus(health: KeydHealth | null): KeyStatus {
   if (!health) return { label: "Keys", state: "unknown" };
   if (!health.online) return { label: "Key layer offline", state: "offline" };
   if (health.audit && !health.audit.ok) return { label: "Keys on hold", state: "audit" };
-  if (health.hairpin?.state !== "active") return { label: "Keys", state: "guard" };
+  if (health.hairpin?.state !== "active") {
+    const guard = health.hairpin?.state === "off" ? "off" : "unknown";
+    return { label: "Keys", state: "guard", spoken: `Keys, hairpin guard ${guard}` };
+  }
   return { label: "Keys", state: "ok" };
 }
 
@@ -9753,12 +9892,28 @@ edge. Focus rings are neutral grey: the browser's default blue would read as xen
 is a `<button>` and so answers on pointer-down with the theme's press (Part 2's `button:active`,
 none under reduced motion); nothing here sets a transform or a transition on a button.
 
+**On Part 2 as built** (`feat/core-part2` at `b02765f`, Tasks 13 and 14; review 2, I-2):
+- `Mascot()` takes no props (`.brand .mascot` sizes it in CSS), so the top bar renders `<Mascot />`.
+- The Theatre keeps Task 14's stage (`<Stage cell={cell} api={api} reconnects={reconnects} />`) and
+  `useCell`'s `reconnects`; this task only adds to `Theatre`.
+- Task 14's policy on `/` and its assets is `default-src 'self'; connect-src 'self'` with no
+  `style-src` or `script-src` exception, plus `form-action 'none'`. Nothing here has an inline
+  script, a `style` attribute or a cross-origin request; `KeyForm` calls `preventDefault()` before
+  anything else, so `form-action` never applies. The Permissions-Policy is the vendored client's,
+  and the sheet needs no permission (WebCrypto needs none).
+- Part 2's `App.test.tsx` counts and lists the Theatre's requests, so two of its tests change
+  (Step 1).
+- Part 2's web fix round lands after this was written, and changes `App`, `useCell`, `Hud` and the
+  socket (`frame-ancestors 'none'` on `/`, a persistent HUD button, a whoami probe that is one more
+  request on mount). This task's execution-time pre-flight re-verifies every UI edit here and in
+  Task 13, and the two `App.test.tsx` changes, against Part 2's final tip before Step 1.
+
 **Files:**
 - Create: `apps/web/src/keys/KeyForm.tsx`, `apps/web/src/keys/KeyList.tsx`,
   `apps/web/src/keys/KeysSheet.tsx`, `apps/web/src/keys/keys.css`,
   `apps/web/src/keys/KeysSheet.test.tsx`, `apps/web/e2e/keys.spec.ts`
 - Modify: `apps/web/src/shell/TopBar.tsx`, `apps/web/src/App.tsx` (Part 3's `Theatre`),
-  `apps/web/src/app.css`
+  `apps/web/src/App.test.tsx`, `apps/web/src/app.css`
 
 **Interfaces:**
 - Consumes: Task 12a's `bindingOf`, `valueProblem`, `describeKey`, `problemText`, `useKeys`,
@@ -9766,7 +9921,7 @@ none under reduced motion); nothing here sets a transform or a transition on a b
 - Produces:
   - `KeysSheet({ open, keys, onClose })`;
   - `TopBar` gains `keys: KeyStatus`, `keysOpen`, `onKeys()` and `keysRef?`, and
-    `data-testid="keys-button"`.
+    `data-testid="keys-button"`, whose accessible name is `keys.spoken` when it is set.
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -9775,9 +9930,10 @@ none under reduced motion); nothing here sets a transform or a transition on a b
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { TopBar } from "../shell/TopBar.tsx";
 import { KeysSheet } from "./KeysSheet.tsx";
 import type { KeyRecord } from "./keys-api.ts";
-import type { KeysController } from "./useKeys.ts";
+import { type KeysController, keyStatus } from "./useKeys.ts";
 
 afterEach(cleanup);
 
@@ -9919,9 +10075,20 @@ describe("KeysSheet", () => {
       },
     });
     rerender(<KeysSheet open keys={unknown} onClose={() => {}} />);
-    expect(screen.getByText(/^Hairpin guard: unknown/).textContent).toContain(
-      "asks again every 30 seconds",
+    expect(screen.getByText(/^Hairpin guard: unknown/).textContent).toContain("keeps asking");
+  });
+
+  it("names the hairpin guard's state on the Keys button, where only a hollow dot shows it", () => {
+    const health = {
+      online: true,
+      audit: { ok: true },
+      hairpin: { state: "unknown" as const, addresses: 0 },
+    };
+    render(
+      <TopBar title="t" live={false} keys={keyStatus(health)} keysOpen={false} onKeys={() => {}} />,
     );
+    const button = screen.getByRole("button", { name: "Keys, hairpin guard unknown" });
+    expect(button.textContent).toBe("Keys");
   });
 
   it("keeps Tab inside the open sheet", () => {
@@ -9948,6 +10115,32 @@ describe("KeysSheet", () => {
   });
 });
 ```
+
+Part 2's `apps/web/src/App.test.tsx` (as built at `b02765f`) changes in two tests, and only
+there: the Theatre now also polls `GET /api/keyd` (`useKeys`), so a test that counts or lists
+every request would see it. Both keep what they pin for the computer:
+- "forgets a rejected token and says so, without asking the daemon again": the stub takes the URL,
+  and each of the two paths is asked exactly once. Replace
+  `const fetchImpl = vi.fn(unauthorized);` with
+  ```tsx
+    const fetchImpl = vi.fn(async (_input: RequestInfo | URL) => unauthorized());
+  ```
+  and the last line, `expect(fetchImpl).toHaveBeenCalledTimes(1);`, with
+  ```tsx
+    // The cells list and the key layer's state (Part 4b's useKeys) are each asked once, never again.
+    const paths = fetchImpl.mock.calls.map(([input]) => new URL(String(input)).pathname);
+    expect(paths.toSorted()).toEqual(["/api/cells", "/api/keyd"]);
+  ```
+- "stops and restarts the computer from the HUD…": the call list leaves out the key layer's poll.
+  `expect(calls).toEqual([` becomes
+  ```tsx
+    // Only the computer's calls: Part 4b's useKeys also polls GET /api/keyd.
+    expect(calls.filter((call) => !call.endsWith(" /api/keyd"))).toEqual([
+  ```
+
+Every other `App.test.tsx` test passes unchanged: their stubs answer `/api/keyd` with a list
+(`[]` or the cells), which `keyStatus` reads as offline, and `useKeys` polls with `setInterval`,
+which the fake-timer tests (`toFake: ["setTimeout", "clearTimeout"]`) neither fake nor count.
 
 - [ ] **Step 2: Run them to see them fail**
 
@@ -10334,7 +10527,7 @@ function HairpinLine({ guard }: { guard: KeydHealth["hairpin"] }) {
   const why =
     guard?.state === "off"
       ? "keyd is set to ask neither your router nor STUN for this network's public address"
-      : "keyd hasn't learned this network's public address yet and asks again every 30 seconds";
+      : "keyd hasn't learned this network's public address yet and keeps asking";
   return (
     <p className="keys-note">
       Hairpin guard: {guard?.state === "off" ? "off" : "unknown"}. A computer could reach your
@@ -10663,7 +10856,7 @@ export function TopBar({ title, live, keys, keysOpen, onKeys, keysRef }: TopBarP
     <header className="bar">
       <div className="bar-l">
         <span className="brand">
-          <Mascot size={16} />
+          <Mascot />
           localDot
         </span>
         <span className="title">{title}</span>
@@ -10680,6 +10873,7 @@ export function TopBar({ title, live, keys, keysOpen, onKeys, keysRef }: TopBarP
           ref={keysRef}
           type="button"
           className={alert ? "keys-btn alert" : "keys-btn"}
+          aria-label={keys.spoken}
           aria-haspopup="dialog"
           aria-expanded={keysOpen}
           onClick={onKeys}
@@ -10878,8 +11072,8 @@ test("say the key layer is offline when keyd stops", async ({ page }) => {
 - [ ] **Step 4: Run the tests, and look at the sheet**
 
 Run: `pnpm exec vitest run apps/web/src && pnpm --filter @localdot/web typecheck`
-Expected: PASS. `KeysSheet.test.tsx` has 10 tests. `App.test.tsx` passes unchanged: its fetch stub
-answers `/api/keyd` with `[]`, which reads as offline.
+Expected: PASS. `KeysSheet.test.tsx` has 11 tests. `App.test.tsx` passes with the two changes of
+Step 1 (verified on Part 2 as built at `b02765f`: 12 files, 65 tests, typecheck clean).
 
 Run: `pnpm --filter @localdot/web build && pnpm --filter @localdot/web e2e keys.spec.ts`
 Expected: PASS, 2 tests, in about 10 s with keyd built.
@@ -10903,7 +11097,7 @@ Fix anything that is off before committing.
 
 ```bash
 pnpm format && pnpm lint
-git add apps/web/src/keys apps/web/src/shell/TopBar.tsx apps/web/src/App.tsx apps/web/src/app.css apps/web/e2e/keys.spec.ts
+git add apps/web/src/keys apps/web/src/shell/TopBar.tsx apps/web/src/App.tsx apps/web/src/App.test.tsx apps/web/src/app.css apps/web/e2e/keys.spec.ts
 git commit -m "feat(web): the key sheet seals keys in the page"
 ```
 
@@ -11275,14 +11469,16 @@ right after the state `switch` (before the stream's), add:
     );
   }
 ```
-In `apps/web/src/cells/useCell.ts`, add `resume(): void;` to `CellController`, and before the
-`return`:
+In `apps/web/src/cells/useCell.ts` (Part 2's as built at `b02765f`, which posts through `api` and
+has no `api$`), add `resume(): void;` to `CellController`, and before the `return`:
 ```ts
   const resume = useCallback(() => {
-    if (cellId) void run(() => api$.current.post(`/api/cells/${cellId}/resume`));
-  }, [cellId, run]);
+    if (cellId) void run(() => api.post(`/api/cells/${cellId}/resume`));
+  }, [api, cellId, run]);
 ```
-and return `{ cell, busy, error, start, stop, resume }`.
+and add `resume` to the returned object, which becomes
+`{ cell, busy: busy || !listed, error, reconnects, start, stop, resume }` (keep anything Part 3
+added).
 
 In `apps/web/src/shell/Hud.tsx` (Part 3's), add `onResume(): void;` to `HudProps`, destructure it,
 and replace the `hud.action === "stop"` button with these two:
@@ -12413,8 +12609,9 @@ git commit -m "ci(keyd): run the daemon's keyd suites against a real keyd; docum
 - `/v1/status` reports `hairpin`: `{ state: "active" | "unknown" | "off", source?: "nat-pmp" | "stun", addresses, checkedAt?, error? }`.
 - `-natpmp on|off` (default on) asks the default gateway first; `-stun host:port|off` (default
   Cloudflare's) is asked only when the router gives no public address. keyd asks again every 30 s
-  while the address is unknown and every 5 minutes once it is known. M9's LaunchAgent runs keyd
-  with the defaults and offers `-stun off`.
+  while the address is unknown (every 5 minutes after four failed rounds), every 5 minutes once it
+  is known, and at once when the default gateway changes; a known address survives one failed
+  round. M9's LaunchAgent runs keyd with the defaults and offers `-stun off`.
 
 **In the cell**
 - Files: `/etc/localdot/cell/{proxy-token,ca.pem,surrogates.sh}` (written before every start).
@@ -12591,7 +12788,9 @@ R20 and R22 follow; R28 to R31 are new.
      learns anything;
   2. only if the router gives no public address, one STUN server, Cloudflare's (`-stun off`
      turns it off, `-natpmp off` the router);
-  3. while the address is unknown it asks again every 30 s, and every 5 minutes once known;
+  3. while the address is unknown it asks again every 30 s (every 5 minutes after four failed
+     rounds in a row), every 5 minutes once known, and at once when the default gateway changes;
+     a known address survives one failed round (review 2, Minor 4);
   4. `/v1/status`, `doctor` and the Keys sheet say `active`, `unknown` or `off`, never silently.
 
   Start never waits for it. Old addresses are kept, up to 16. Tests pass `-natpmp off -stun off`.
