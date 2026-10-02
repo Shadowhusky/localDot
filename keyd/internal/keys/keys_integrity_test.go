@@ -1103,3 +1103,90 @@ func TestABasicCredentialIsSearchedHoweverAServerSplitsIt(t *testing.T) {
 		t.Fatalf("checked %d values", checked)
 	}
 }
+
+func TestApplySwapsRefusesAHeaderChangedSinceInspect(t *testing.T) {
+	f := newFixture(t)
+	values := map[string]string{"api": "real-bearer-value", "dd-api": "real-raw-value", "dd-app": "real-app-value", "pay": "real-user-value", "git": "real-password-value"}
+	r := NewRegistry()
+	user := mint(t, r, "c1", binding(t, vault.Record{ID: "pay", Kind: vault.KindHTTP, Hosts: []string{"basic.example.test"}, Header: "Authorization", Format: "basic-user"}))
+	pass := mint(t, r, "c1", binding(t, vault.Record{ID: "git", Kind: vault.KindHTTP, Hosts: []string{"basic.example.test"}, Header: "Authorization", Format: "basic-password"}))
+	for _, c := range []struct {
+		name   string
+		r      *Registry
+		d      Dest
+		h      http.Header
+		change func(http.Header)
+	}{
+		{"a bearer value replaced", f.r, https(integrityHost), hdr("Authorization", "Bearer "+f.bearer.Token), func(h http.Header) { h.Set("Authorization", "Bearer something-else") }},
+		{"a bearer value given a suffix", f.r, https(integrityHost), hdr("Authorization", "Bearer "+f.bearer.Token), func(h http.Header) { h.Set("Authorization", "Bearer "+f.bearer.Token+"x") }},
+		{"a bearer value under another scheme", f.r, https(integrityHost), hdr("Authorization", "Bearer "+f.bearer.Token), func(h http.Header) { h.Set("Authorization", "Token "+f.bearer.Token) }},
+		{"a raw header removed", f.r, https(integrityHost), hdr("Dd-Api-Key", f.raw.Token), func(h http.Header) { h.Del("Dd-Api-Key") }},
+		{"a raw header given a second value", f.r, https(integrityHost), hdr("Dd-Api-Key", f.raw.Token), func(h http.Header) { h.Add("Dd-Api-Key", "x") }},
+		{"a raw surrogate copied to another header", f.r, https(integrityHost), hdr("Dd-Api-Key", f.raw.Token), func(h http.Header) { h.Set("X-Copy", f.raw.Token) }},
+		{"the second of two raw headers replaced", f.r, https(integrityHost), hdr("Dd-Api-Key", f.raw.Token, "Dd-Application-Key", f.rawApp.Token), func(h http.Header) { h.Set("Dd-Application-Key", "x") }},
+		{"a basic header that no longer decodes", f.r, https("git.example.test"), hdr("Authorization", basicOf("x", f.pass.Token)), func(h http.Header) { h.Set("Authorization", "Basic !!!") }},
+		{"a basic password moved to the user half", f.r, https("git.example.test"), hdr("Authorization", basicOf("x", f.pass.Token)), func(h http.Header) { h.Set("Authorization", basicOf(f.pass.Token, "x")) }},
+		{"a basic password half replaced", f.r, https("git.example.test"), hdr("Authorization", basicOf("x", f.pass.Token)), func(h http.Header) { h.Set("Authorization", basicOf("x", "y")) }},
+		{"one half of a pair replaced", r, https("basic.example.test"), hdr("Authorization", basicOf(user, pass)), func(h http.Header) { h.Set("Authorization", basicOf(user, "x")) }},
+		{"a surrogate added to a basic header", f.r, https("pay.example.test"), hdr("Authorization", basicOf(f.user.Token, "pw")), func(h http.Header) { h.Set("Authorization", basicOf(f.user.Token, f.pass.Token)) }},
+	} {
+		v := c.r.Inspect(c.d, "GET", &url.URL{Path: "/"}, c.h)
+		if !v.Allow || len(v.Swaps) == 0 {
+			t.Fatalf("%s: %+v", c.name, v)
+		}
+		c.change(c.h)
+		before := c.h.Clone()
+		calls := 0
+		err := ApplySwaps(c.h, v.Swaps, func(id string) ([]byte, error) {
+			calls++
+			return []byte(values[id]), nil
+		})
+		if err == nil {
+			t.Errorf("%s: ApplySwaps wrote %v", c.name, c.h)
+			continue
+		}
+		if !maps.EqualFunc(c.h, before, slices.Equal[[]string]) || calls != 0 {
+			t.Errorf("%s: the headers became %v after %d reads; a refused swap reads no value and writes no header", c.name, c.h, calls)
+		}
+		for _, e := range v.Swaps {
+			if strings.Contains(err.Error(), e.Token) || strings.Contains(err.Error(), "ld_") {
+				t.Errorf("%s: the error carries a surrogate: %v", c.name, err)
+			}
+		}
+	}
+}
+
+func TestBasicHalvesAreSwappedFromTheOriginalHeader(t *testing.T) {
+	f := newFixture(t)
+	const colonUser, colonPass = "real-user:value", "real:password:value"
+	if err := ValidValueFor(f.pass.Binding, []byte(colonPass)); err != nil {
+		t.Fatalf("a password with colons is a valid value: %v", err)
+	}
+	if err := ValidValueFor(f.user.Binding, []byte(colonUser)); err == nil {
+		t.Fatal("ValidValueFor accepts a basic-auth user with a colon; the store must refuse it")
+	}
+	for _, c := range []struct{ name, user, pass string }{
+		{"a password with colons", "real-user-value", colonPass},
+		{"a user with a colon, which the store refuses but the swap must not cut", colonUser, "real-password-value"},
+		{"both with colons", colonUser, colonPass},
+	} {
+		values := map[string]string{"pay": c.user, "git": c.pass}
+		value := func(id string) ([]byte, error) { return []byte(values[id]), nil }
+		for _, order := range [][]Entry{{f.user, f.pass}, {f.pass, f.user}} {
+			h := hdr("Authorization", basicOf(f.user.Token, f.pass.Token))
+			if err := ApplySwaps(h, order, value); err != nil {
+				t.Fatal(err)
+			}
+			if got, want := h.Values("Authorization"), []string{basicOf(c.user, c.pass)}; !slices.Equal(got, want) {
+				t.Errorf("%s, %s swapped first: %q, want %q", c.name, order[0].Binding.Format, got, want)
+			}
+		}
+	}
+	h := hdr("Authorization", basicOf("bot", f.pass.Token))
+	if err := ApplySwaps(h, []Entry{f.pass}, func(string) ([]byte, error) { return []byte(colonPass), nil }); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := h.Get("Authorization"), basicOf("bot", colonPass); got != want {
+		t.Errorf("a password swap under a free user half: %q, want %q", got, want)
+	}
+}

@@ -2,6 +2,7 @@ package keys
 
 import (
 	"encoding/base64"
+	"errors"
 	"net/http"
 	"net/url"
 	"path"
@@ -298,10 +299,24 @@ func decodeBasic(value string) (user, pass string, ok bool) {
 	return strings.Cut(string(raw), ":")
 }
 
-// ApplySwaps rewrites each bound header with the real value, keeping its format. It reads every
-// value before it writes any header, so an error leaves h untouched.
+// ApplySwaps rewrites each bound header with the real value, keeping its format. It first checks
+// that every surrogate still sits where Inspect placed it and that the headers hold no other, then
+// reads every value before it writes any header, so an error leaves h untouched. A Basic header is
+// decoded once, from h, and encoded once with both halves swapped.
 func ApplySwaps(h http.Header, swaps []Entry, value func(secretID string) ([]byte, error)) error {
+	occ := scan(&url.URL{}, h)
+	for _, e := range swaps {
+		if !placed(e, occ, h) {
+			return errors.New("keys: surrogate:" + e.ID + " is no longer where Inspect found it")
+		}
+	}
+	for _, o := range occ {
+		if !slices.ContainsFunc(swaps, func(e Entry) bool { return e.Token == o.token }) {
+			return errors.New("keys: the headers hold surrogate:" + surrogate.ID(o.token) + ", which Inspect did not see")
+		}
+	}
 	set := map[string]string{}
+	halves := map[string][2]string{}
 	for _, e := range swaps {
 		real, err := value(e.Binding.SecretID)
 		if err != nil {
@@ -314,18 +329,20 @@ func ApplySwaps(h http.Header, swaps []Entry, value func(secretID string) ([]byt
 		case Bearer:
 			set[b.Header] = "Bearer " + string(real)
 		case BasicUser, BasicPassword:
-			current, ok := set[b.Header]
+			pair, ok := halves[b.Header]
 			if !ok {
-				current = h.Get(b.Header)
+				pair[0], pair[1], _ = decodeBasic(h.Get(b.Header))
 			}
-			user, pass, _ := decodeBasic(current)
 			if b.Format == BasicUser {
-				user = string(real)
+				pair[0] = string(real)
 			} else {
-				pass = string(real)
+				pair[1] = string(real)
 			}
-			set[b.Header] = "Basic " + base64.StdEncoding.EncodeToString([]byte(user+":"+pass))
+			halves[b.Header] = pair
 		}
+	}
+	for name, pair := range halves {
+		set[name] = "Basic " + base64.StdEncoding.EncodeToString([]byte(pair[0]+":"+pair[1]))
 	}
 	for name, v := range set {
 		h.Set(name, v)
