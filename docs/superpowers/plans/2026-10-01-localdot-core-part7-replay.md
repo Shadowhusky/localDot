@@ -2393,7 +2393,8 @@ export interface SessionRecorderDeps {
   backlog?: readonly LocalDotEvent[];                             // the session's events so far
   subscribe?(listener: (e: LocalDotEvent) => void): () => void;   // the session's later events
   gate?: FrameGate;
-  queueLimitBytes?: number;
+  queueLimitBytes?: number;   // default MAX_QUEUED_BYTES
+  sizeCapBytes?: number;      // default SESSION_CAP_BYTES (tests lower it)
 }
 
 export class SessionRecorder {
@@ -3224,7 +3225,8 @@ describe("replay routes: auth, ids and byte ranges", () => {
   });
 
   it("refuses an id or frame id that is not a ULID before touching the filesystem", async () => {
-    const bad = ["..%2F..%2Fetc%2Fpasswd", `${id}%2F..`, id.toLowerCase(), `${id}x`, "%2e%2e"];
+    // "%2e%2e" and "%2e." never get here: the URL parser resolves them as dot segments (asserted below).
+    const bad = ["..%2F..%2Fetc%2Fpasswd", `${id}%2F..`, id.toLowerCase(), `${id}x`, "%00"];
     for (const b of bad) {
       for (const path of [`/api/sessions/${b}/card`, `/api/sessions/${b}/events`, `/api/sessions/${b}/recording`, `/api/sessions/${b}/recording/video.mp4`, `/api/sessions/${id}/thumbs/${b}`]) {
         const res = await app.request(url(path), { headers: bearer });
@@ -3232,6 +3234,8 @@ describe("replay routes: auth, ids and byte ranges", () => {
       }
       expect((await app.request(url(`/api/sessions/${b}`), { method: "DELETE", headers: bearer })).status).toBe(400);
     }
+    const dotted = await app.request(url(`/api/sessions/${id}/thumbs/%2e%2e/%2e%2e/%2e%2e/events.jsonl`), { headers: bearer });
+    expect(dotted.status).toBe(404);
   });
 
   it("serves byte ranges inside the recording only", async () => {
@@ -3419,5 +3423,415 @@ git commit -m "feat(daemon): session index, NDJSON events, thumbnails, retention
 
 **Acceptance:** `pnpm exec vitest run apps/daemon/src` passes, including the long-log and route
 pins.
+
+---
+
+### Task 13: Web — replay in the render worker
+
+The render worker gains a replay mode. Its video comes from the recording through mediabunny and
+WebCodecs instead of the tapped live track. Its time comes from the closed-form replay clock
+instead of `sessionMsAt(wallNow())`. It presents the last frame at or before the replay time and
+draws `sceneAt(model, t, view)` over it, unchanged. So the overlays are the live overlays by
+construction, and the video is never ahead of them.
+
+Where a stretch has no video, the worker presents the `observe` screenshot in effect instead:
+- no recording at all (`none`, `failed`);
+- a recording removed by retention (`expired`);
+- before the first frame;
+- after a recording stopped early.
+
+That is "the typed fallback" for video: every session replays, at least step by step.
+
+**Review tier:** light.
+
+**Files:**
+- Create: `apps/web/src/replay/recording-source.ts`, `apps/web/src/replay/replay-video.ts`,
+  `apps/web/src/replay/decode-policy.ts`, `apps/web/src/replay/decode-policy.test.ts`,
+  `apps/web/src/replay/backdrop.ts`, `apps/web/src/replay/probe.ts`, `apps/web/e2e/seed.ts`,
+  `apps/web/e2e/replay-pins.spec.ts`
+- Modify: `apps/web/src/stage/worker-protocol.ts`, `apps/web/src/stage/render-worker.ts`,
+  `apps/web/src/stage/StageCanvas.tsx`, `apps/web/src/stage/Stage.tsx`, `apps/web/e2e/daemon.ts`
+  (`startDaemon(env, { home })`), `apps/web/package.json` (`@localdot/stage` already; mediabunny
+  from Task 3)
+
+**Interfaces** (exact):
+
+```ts
+// apps/web/src/stage/worker-protocol.ts — added
+import type { RecordingGap } from "@localdot/protocol";
+import type { PlaybackMap, ReplaySpeed } from "@localdot/stage";
+
+export interface ReplaySource {
+  sessionId: string;
+  origin: string;                         // the daemon's http origin
+  authorization: string;                  // "Bearer <token>": the worker fetches the recording and frames itself
+  video: { upto: number | null } | null;  // null: no video (none, failed, expired)
+  gaps: RecordingGap[];                   // session µs
+}
+export interface ReplayTransport {
+  playing: boolean;
+  speed: ReplaySpeed;
+  map: PlaybackMap;          // built on the page from busySpans (skip idle on or off)
+  atPlayMs: number;          // the playback position to anchor at, on the worker's own clock
+}
+export type ReplayStatus =
+  | { state: "loading" }
+  | { state: "ready"; firstMs: number | null; lastMs: number | null }
+  | { state: "no-video" }
+  | { state: "error"; message: string };
+export type ReplayProbeCommand =
+  | { id: number; op: "enable" }
+  | { id: number; op: "mb-luma"; widthMbs: number; heightMbs: number }   // per-macroblock mean luma of the presented video frame, or null
+  | { id: number; op: "overlay-hash"; tMs: number }                      // sha-256 hex of the overlays-only render at tMs
+  | { id: number; op: "stats" };                                        // ReplayVideoStats & { source: "video" | "backdrop" | "none" }
+
+// WorkerIn gains:
+//   | { type: "replay-open"; source: ReplaySource }       stops the live pump, enters replay mode
+//   | { type: "replay-transport"; transport: ReplayTransport }
+//   | { type: "replay-seek"; tMs: number; mode: "exact" | "preview" }   pauses at session ms tMs
+//   | { type: "replay-close" }                            back to live mode (the page re-attaches the live source)
+//   | { type: "replay-probe"; command: ReplayProbeCommand }   only honoured after the page sent "enable" under ?replayProbe=1
+// WorkerOut gains:
+//   | { type: "replay-time"; tMs: number; playing: boolean; idle: boolean }   ≤ 10 Hz while playing; once after each seek lands
+//   | { type: "replay-status"; status: ReplayStatus }
+//   | { type: "replay-ended" }                            playback reached the map's end
+//   | { type: "replay-probe-reply"; id: number; reply: unknown }
+
+// apps/web/src/replay/decode-policy.ts
+export const JUMP_AHEAD_MS = 1500;
+export type DecodeMode = "play" | "exact" | "preview";
+export type DecodeStep = "hold" | "advance" | "seek-exact" | "seek-key";
+export interface DecodeState {
+  targetMs: number;
+  mode: DecodeMode;
+  shownMs: number | null;      // timestamp of the frame on screen
+  shownKeyMs: number | null;   // the key frame it was decoded from
+  targetKeyMs: number | null;  // the last key frame at or before targetMs
+  nextMs: number | null;       // the running iterator's next sample, if one runs
+}
+export function nextDecodeStep(s: DecodeState): DecodeStep;
+export type FrameSource = "video" | "backdrop" | "hold";
+export function sourceAt(tMs: number, v: { hasVideo: boolean; firstMs: number | null; lastMs: number | null; gaps: RecordingGap[] }): FrameSource;
+
+// apps/web/src/replay/recording-source.ts
+export const RECORDING_CACHE_BYTES = 32 * 1024 * 1024;
+export function recordingUrl(src: ReplaySource): string;   // <origin>/api/sessions/<id>/recording/video.mp4[?upto=n]
+export function openRecording(src: ReplaySource): Input;    // mediabunny Input over UrlSource with the bearer header
+
+// apps/web/src/replay/replay-video.ts
+export interface ReplayVideoStats { openFrames: number; decodeQueue: number; seeks: number; decoded: number }
+export class ReplayVideo {
+  static open(src: ReplaySource): Promise<ReplayVideo>;   // rejects when the track can't be decoded here
+  readonly firstMs: number;
+  readonly lastMs: number;
+  // The frame on screen at tMs, as a VideoFrame the caller owns (it is presented, then closed), or
+  // null when a later call superseded this one, or before the first frame. The latest call wins.
+  want(tMs: number, mode: DecodeMode): Promise<VideoFrame | null>;
+  stats(): ReplayVideoStats;
+  close(): void;
+}
+
+// apps/web/src/replay/backdrop.ts
+export const BACKDROP_CACHE = 6;
+export class ObserveBackdrop {
+  constructor(src: ReplaySource);
+  // The observe frame in effect at tMs (observeAt), fetched with the header, as a VideoFrame the
+  // caller owns; null before the first observe.
+  frameAt(model: SessionModel, tMs: number): Promise<VideoFrame | null>;
+  close(): void;
+}
+
+// apps/web/src/stage/StageCanvas.tsx / Stage.tsx — the handle gains
+export interface ReplayHandle {
+  open(source: ReplaySource): void;
+  transport(t: ReplayTransport): void;
+  seek(tMs: number, mode: "exact" | "preview"): void;
+  close(): void;
+  onReplay(listener: (m: Extract<WorkerOut, { type: "replay-time" | "replay-status" | "replay-ended" }>) => void): () => void;
+  probe(command: Omit<ReplayProbeCommand, "id">): Promise<unknown>;
+}
+// StageHandle gains `replay: ReplayHandle`; Stage gains the prop `mode: "live" | "replay"` (default
+// "live"). In "replay" it mounts no Selkies iframe, so the cell has one viewer fewer and the
+// gateway may run Fast, and it detaches the live source.
+
+// Exposed only under ?replayProbe=1, for the e2e specs:
+declare global {
+  interface Window {
+    __localdot?: {
+      replay?: {
+        status(): ReplayStatus["state"];
+        seek(tMs: number, mode: "exact" | "preview"): Promise<void>;   // resolves on the replay-time that follows
+        transport(patch: { playing?: boolean; speed?: ReplaySpeed; skipIdle?: boolean }): void;
+        probe(command: Omit<ReplayProbeCommand, "id">): Promise<unknown>;
+      };
+    };
+  }
+}
+```
+
+**`nextDecodeStep`**, exactly (in order, first match wins):
+
+| mode | condition | step |
+|---|---|---|
+| preview | `shownKeyMs !== null && shownKeyMs === targetKeyMs` | hold |
+| preview | otherwise | seek-key |
+| exact | `shownMs !== null && shownKeyMs === targetKeyMs && shownMs <= targetMs && (nextMs === null \|\| nextMs > targetMs)` | hold |
+| exact | `nextMs !== null && shownKeyMs === targetKeyMs && nextMs <= targetMs` | advance |
+| exact | otherwise | seek-exact |
+| play | `nextMs === null \|\| (shownMs !== null && targetMs < shownMs)` | seek-exact |
+| play | `targetMs − nextMs > JUMP_AHEAD_MS` | seek-key |
+| play | `nextMs <= targetMs` | advance |
+| play | otherwise | hold |
+
+**`sourceAt`**:
+- no video, or `firstMs === null` → `backdrop`;
+- `tMs < firstMs` → `backdrop`;
+- `tMs` inside a gap (`from ≤ tMs×1000 < (to ?? ∞)`) whose reason is `user-control` → `hold` (the
+  last frame stays, and the page's card covers it);
+- inside any other gap, or `tMs > lastMs` while a gap with `to: null` exists → `backdrop`;
+- else `video`.
+
+**Tests:**
+- `decode-policy.test.ts`: one test per table row (`"preview holds within the same GOP"`, …,
+  `"play jumps to the key frame when 1.5 s behind"`). Plus:
+  - `"exact seek backwards always re-seeks"`;
+  - `"sourceAt: backdrop before the first frame, hold in a takeover gap, backdrop after a disk-full
+    stop, video otherwise"`.
+- `replay-pins.spec.ts`: **the browser pins**, complete code below. It runs in system Chrome
+  without Docker, against seeded sessions.
+- `render-worker` (no unit test: it needs WebCodecs and OffscreenCanvas). The e2e pins exercise it.
+  Part 2's and Part 3's `Stage.test.tsx` and `App.test.tsx` stay green: `mode` defaults to `"live"`.
+
+**Implementation notes:**
+- **Opening.**
+  - `new Input({ formats: [MP4], source: new UrlSource(recordingUrl(src), { requestInit: { headers: { authorization: src.authorization } }, maxCacheSize: RECORDING_CACHE_BYTES, parallelism: 2, getRetryDelay: (n, err) => (n < 3 && !is4xx(err) ? 0.5 * 2 ** n : null) }) })`.
+  - Then `getPrimaryVideoTrack()`; if `await track.canDecode()` is false, reject with
+    `This browser cannot decode the recording (<codec>).`
+  - `firstMs` is `getFirstPacket` ÷ 1000. `lastMs` is `getPacket(Infinity)`'s end, in ms.
+  - The `upto` snapshot is fixed for the Input's life. To see more of a live session, the page
+    reopens (Task 14's follow rule).
+- **Decoding.** One `VideoSampleSink` for `seek-exact` (`getSample(t / 1000)`: mediabunny decodes
+  from the preceding key frame) and for the running iterator (`samples(t / 1000)`). One
+  `EncodedPacketSink` for `targetKeyMs` (`getKeyPacket`). `seek-key` decodes just the key packet
+  (`getSample(key.timestamp)`).
+  - Every `VideoSample` becomes `toVideoFrame()` and is closed at once.
+  - `stats.openFrames` counts frames made minus frames closed (wrap `close`).
+  - The iterator holds at most one look-ahead sample (`nextMs`).
+  - Never keep a second decoded frame. A superseded frame (a newer `want` arrived) is closed
+    before the next step.
+- **Latest wins.** A generation number increments on every `want`. Each async step checks it, and
+  a stale result is closed, never presented. That keeps a fast drag (100 `preview` calls in a
+  burst) at ≤ 3 open frames: the pin checks.
+- **The worker's tick in replay mode:**
+  - `t` = `sessionAt(map, playMsAt(clock, wallNow()))` while playing, else the seek target;
+  - `sourceAt(t)` picks the source:
+    - `video`: `want(t, playing ? "play" : lastSeekMode)`, presenting the frame when it resolves
+      non-null;
+    - `backdrop`: `backdrop.frameAt(model, t)`;
+    - `hold`: nothing;
+  - `presenter.setScreen(model.screen)`, the camera at zoom 1 (the auto-camera is M8's), and
+    `presenter.draw(sceneAt(model, t, view))`;
+  - `replay-time` is posted at most every 100 ms, and once when a seek lands (`idle` =
+    `idleAt(map, t)`);
+  - while playing, at `playMs ≥ playDuration(map)`, the tick pauses and posts `replay-ended`.
+- **Determinism:** the scene depends only on `(model, t, view)`. `view.reducedMotion` comes from
+  the page, as live. The overlays never read the decoded frame.
+- **Presenting a backdrop frame:** `new VideoFrame(await createImageBitmap(blob), { timestamp: tMs * 1000 })`.
+  The 1280×800 observe frame is scaled into the session's screen by `videoPlacement`, like a 1×
+  cell. Part 3's mismatch warning fires once; the worker suppresses it for backdrop frames.
+- **The probe (`probe.ts`):**
+  - Off by default. After `enable` it keeps one `clone()` of the last presented *video* frame, and
+    closes the previous one (P3-C12's rule: nothing extra is held in production).
+  - `mb-luma` runs `frame.copyTo(buffer)`, reads plane 0 (Y for I420, I444 and NV12) with the
+    layout `copyTo` returns, and averages each 16×16 macroblock. It answers null when the presented
+    source is the backdrop.
+  - `overlay-hash` hashes
+    `presenter.extract({ x: 0, y: 0, w: viewport.w, h: viewport.h }, "overlays", cam, sceneAt(model, tMs, view))`
+    with `crypto.subtle.digest("SHA-256", …)`.
+- **The page side.** `StageCanvas` routes `replay-*` messages to `onReplay` listeners.
+  `Stage.mode === "replay"` unmounts `DesktopFrame` (no ticket minted) and detaches the live
+  source. Switching back remounts it, through Part 2's re-ticket path.
+
+**The browser pins, complete:**
+
+`apps/web/e2e/seed.ts`:
+```ts
+import { execFileSync } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import type { SeedResult } from "../../daemon/src/recorder/testing/seed-session.ts";
+
+const DAEMON = fileURLToPath(new URL("../../daemon", import.meta.url));
+
+export interface SeededHome {
+  home: string;
+  seed: SeedResult;
+}
+
+// A synthetic session with a synthetic recording, written by the daemon's seeder (Task 12): no
+// Docker, no cell. execFileSync throws on a non-zero exit, so a failed seed fails the spec.
+export function seedHome(opts: { home?: string; minutes: number; title?: string; marker?: string; takeover?: string; video?: boolean }): SeededHome {
+  const home = opts.home ?? join(mkdtempSync(join(tmpdir(), "local dot's replay-e2e-")), "home");
+  const args = ["--import", "tsx", "src/seed-main.ts", "--home", home, "--minutes", String(opts.minutes)];
+  if (opts.title) args.push("--title", opts.title);
+  if (opts.marker) args.push("--marker", opts.marker);
+  if (opts.takeover) args.push("--takeover", opts.takeover);
+  if (opts.video === false) args.push("--no-video");
+  const out = execFileSync(process.execPath, args, { cwd: DAEMON, encoding: "utf8" });
+  return { home, seed: JSON.parse(out) as SeedResult };
+}
+```
+
+`apps/web/e2e/replay-pins.spec.ts`:
+```ts
+import { expect, type Page, test } from "@playwright/test";
+import { frameOfLuma } from "@localdot/stage/testing";
+import { type RunningDaemon, startDaemon } from "./daemon.ts";
+import { type SeededHome, seedHome } from "./seed.ts";
+
+type Hook = NonNullable<NonNullable<Window["__localdot"]>["replay"]>;
+let daemon: RunningDaemon;
+let short: SeededHome;
+let long: SeededHome;
+
+test.use({ launchOptions: { args: ["--js-flags=--expose-gc"] } });
+
+test.beforeAll(async () => {
+  short = seedHome({ minutes: 2 });
+  long = seedHome({ home: short.home, minutes: 120, title: "Two hours" });
+  daemon = await startDaemon({}, { home: short.home });
+});
+
+test.afterAll(async () => {
+  await daemon?.stop();
+});
+
+async function openReplay(page: Page, sessionId: string): Promise<void> {
+  await page.goto(`${daemon.origin}/?replay=${sessionId}&replayProbe=1#token=${daemon.token}`);
+  await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready", undefined, { timeout: 60_000 });
+}
+
+const seek = (page: Page, tMs: number, mode: "exact" | "preview" = "exact") =>
+  page.evaluate(([t, m]) => (window.__localdot?.replay as Hook).seek(t as number, m as "exact" | "preview"), [tMs, mode] as const);
+const probe = (page: Page, command: Parameters<Hook["probe"]>[0]) => page.evaluate((c) => (window.__localdot?.replay as Hook).probe(c), command);
+
+test("shows the frame on screen at any scrubbed time (Review Focus 1)", async ({ page }) => {
+  await openReplay(page, short.seed.sessionId);
+  const { frames, synth } = short.seed;
+  const step = Math.max(1, Math.floor(frames.length / 60));
+  for (let i = 1; i < frames.length; i += step) {
+    const a = (frames[i] as { tMicros: number }).tMicros;
+    const prev = (frames[i - 1] as { tMicros: number }).tMicros;
+    for (const tMs of [a / 1000, (a + 1) / 1000, (prev + a) / 2000, (a - 1) / 1000]) {
+      await seek(page, tMs);
+      const luma = (await probe(page, { op: "mb-luma", widthMbs: synth.widthMbs, heightMbs: synth.heightMbs })) as number[];
+      const expected = frames.filter((f) => f.tMicros <= tMs * 1000).at(-1) as { index: number };
+      expect(frameOfLuma(synth, luma), `t = ${tMs} ms`).toBe(expected.index);
+    }
+  }
+});
+
+test("draws the same overlays at the same time in two separate loads (Review Focus 5)", async ({ page }) => {
+  const times = short.seed.steps.slice(0, 12).flatMap((s) => [s.startMs + 130, s.dispatchMs - 40, s.dispatchMs + 23, s.dispatchMs + 150, s.endMs + 600]);
+  const hashes = async () => {
+    await openReplay(page, short.seed.sessionId);
+    const out: string[] = [];
+    for (const tMs of times) {
+      await seek(page, tMs);
+      out.push((await probe(page, { op: "overlay-hash", tMs })) as string);
+    }
+    return out;
+  };
+  const first = await hashes();
+  await page.goto("about:blank");
+  const second = await hashes();
+  expect(new Set(first).size).toBeGreaterThan(times.length / 2);
+  expect(second).toEqual(first);
+});
+
+test("scrubs a 2-hour session in bounded memory (Review Focus 4, the browser)", async ({ page }) => {
+  await openReplay(page, long.seed.sessionId);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable");
+  const mainHeap = async () => {
+    await cdp.send("HeapProfiler.collectGarbage");
+    const { metrics } = await cdp.send("Performance.getMetrics");
+    return metrics.find((m) => m.name === "JSHeapUsedSize")?.value ?? 0;
+  };
+  const worker = page.workers().find((w) => w.url().includes("render-worker"));
+  const workerHeap = async () =>
+    (await worker?.evaluate(() => {
+      (globalThis as { gc?: () => void }).gc?.();
+      return (performance as unknown as { memory?: { usedJSHeapSize: number } }).memory?.usedJSHeapSize ?? null;
+    })) ?? null;
+  const stats = async () => (await probe(page, { op: "stats" })) as { openFrames: number; decodeQueue: number };
+  const baseMain = await mainHeap();
+  const baseWorker = await workerHeap();
+  const end = long.seed.steps.at(-1)?.endMs ?? 7_200_000;
+  let seed = 5;
+  const random = () => {
+    seed = (seed * 48_271) % 2_147_483_647;
+    return (seed / 2_147_483_647) * end;
+  };
+  const latencies: number[] = [];
+  for (let i = 0; i < 300; i++) {
+    const started = Date.now();
+    await seek(page, random());
+    latencies.push(Date.now() - started);
+    if (i % 25 === 0) {
+      const s = await stats();
+      expect(s.openFrames).toBeLessThanOrEqual(3);
+      expect(s.decodeQueue).toBeLessThanOrEqual(4);
+    }
+  }
+  // A drag: 100 previews in one burst, the latest wins.
+  await page.evaluate(async (e) => {
+    const hook = window.__localdot?.replay as Hook;
+    const all: Promise<void>[] = [];
+    for (let i = 0; i < 100; i++) all.push(hook.seek((i / 100) * e, "preview"));
+    await all.at(-1);
+  }, end);
+  expect((await stats()).openFrames).toBeLessThanOrEqual(3);
+  await page.evaluate(() => (window.__localdot?.replay as Hook).transport({ playing: true, speed: 8, skipIdle: true }));
+  for (let s = 0; s < 20; s++) {
+    await page.waitForTimeout(1000);
+    expect((await stats()).openFrames).toBeLessThanOrEqual(3);
+  }
+  latencies.sort((a, b) => a - b);
+  expect(latencies[Math.floor(latencies.length * 0.95)]).toBeLessThan(1000);
+  expect((await mainHeap()) - baseMain).toBeLessThan(32 * 1024 * 1024);
+  const afterWorker = await workerHeap();
+  if (baseWorker !== null && afterWorker !== null) expect(afterWorker - baseWorker).toBeLessThan(96 * 1024 * 1024);
+  else test.info().annotations.push({ type: "note", description: "the worker exposes no performance.memory: worker heap not measured" });
+});
+```
+
+`apps/web/e2e/daemon.ts` (Part 2's): `startDaemon(env = {}, opts: { home?: string } = {})` uses
+`opts.home` instead of a new temp home when given, so a seeded home is served. Nothing else
+changes.
+
+- [ ] **Step 1:** Write `decode-policy.test.ts`. Run
+  `pnpm exec vitest run apps/web/src/replay`.
+  Expected: FAIL.
+- [ ] **Step 2:** Implement `decode-policy.ts`. Run the same command.
+  Expected: PASS.
+- [ ] **Step 3:** Write `seed.ts` and `replay-pins.spec.ts`, and give `startDaemon` its `home`
+  option. Implement `recording-source.ts`, `replay-video.ts`, `backdrop.ts`, `probe.ts`, the worker's
+  replay mode, the protocol additions and the `StageCanvas`/`Stage` handle. Run
+  `pnpm --filter @localdot/web build && pnpm --filter @localdot/web e2e --grep "Review Focus"`.
+  Expected: three tests pass. The 2-hour pin takes about 2 minutes, including the seeding.
+- [ ] **Step 4:** Run `pnpm exec vitest run apps/web/src && pnpm --filter @localdot/web typecheck`.
+  Expected: PASS. Part 2's and Part 3's web suites are unchanged.
+- [ ] **Step 5: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/web
+git commit -m "feat(web): replay mode in the stage worker, decoding the recording with mediabunny"
+```
+
+**Acceptance:** the three browser pins pass in system Chrome with no Docker running.
 
 ---
