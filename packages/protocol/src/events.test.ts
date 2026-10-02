@@ -14,13 +14,51 @@ describe("parseEvent", () => {
     expect(e.type).toBe("action.intent");
   });
 
-  it("accepts a dispatch carrying a typed input", () => {
+  it("accepts a dispatch carrying input, raw press time and ring onset", () => {
     const e = parseEvent({
       ...base,
       type: "action.dispatch",
-      data: { input: { kind: "click", button: "left", count: 1, at: { x: 5, y: 6 } } },
+      data: {
+        input: { kind: "click", button: "left", count: 1, at: { x: 5, y: 6 } },
+        pressT: 1_000_000,
+        ringAt: 1_019_600,
+        injector: "xtest",
+      },
     });
     expect(e.type).toBe("action.dispatch");
+  });
+
+  it("rejects a dispatch without the press time", () => {
+    expect(() =>
+      parseEvent({
+        ...base,
+        type: "action.dispatch",
+        data: { input: { kind: "click", button: "left", count: 1, at: { x: 5, y: 6 } } },
+      }),
+    ).toThrow();
+  });
+
+  it("rejects an envelope id that is not a ULID", () => {
+    expect(() =>
+      parseEvent({ ...base, id: "invalid", type: "agent.state", data: { state: "idle" } }),
+    ).toThrow();
+  });
+
+  it("keeps observe frames out of the log", () => {
+    const frameId = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
+    const parsed = parseEvent({
+      ...base,
+      type: "observe",
+      data: { frameId, image: "data:image/png;base64,AAAA", width: 1280, height: 800 },
+    });
+    expect(parsed.data).toEqual({ frameId, width: 1280, height: 800 });
+    expect(() =>
+      parseEvent({
+        ...base,
+        type: "observe",
+        data: { frameId: "invalid", width: 1280, height: 800 },
+      }),
+    ).toThrow();
   });
 
   it("rejects an unknown event type", () => {

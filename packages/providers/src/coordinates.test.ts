@@ -67,7 +67,7 @@ describe("degenerate spaces and screens", () => {
   });
 
   it("rejects a model space with a NaN size", () => {
-    const nan: CoordSpace = { kind: "resizedPixels", width: Number.NaN, height: 640 };
+    const nan: CoordSpace = { kind: "pixels", width: Number.NaN, height: 640 };
     expect(() => toScreen(10, 10, nan, screen)).toThrow(RangeError);
   });
 

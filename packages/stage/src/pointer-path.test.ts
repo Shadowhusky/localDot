@@ -1,5 +1,6 @@
+import type { PointerPlan } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { type PointerPlan, pointerAt } from "./pointer-path.ts";
+import { OVERSHOOT_CAP_PX, pointerAt } from "./pointer-path.ts";
 
 const plan: PointerPlan = {
   from: { x: 0, y: 0 },
@@ -7,6 +8,7 @@ const plan: PointerPlan = {
   startsAt: 1000,
   durationMs: 500,
   seed: 7,
+  curve: "minjerk-bow-v1",
 };
 const samples = (p: PointerPlan) =>
   Array.from({ length: 501 }, (_, i) => pointerAt(p, p.startsAt + i));
@@ -19,10 +21,30 @@ describe("pointerAt", () => {
     expect(pointerAt(plan, 9999)).toEqual(plan.to);
   });
 
-  it("overshoots by at most 3% and corrects back", () => {
+  it("caps overshoot at 12 px even on long moves", () => {
     const xs = samples(plan).map((p) => p.x);
     expect(Math.max(...xs)).toBeGreaterThan(500);
-    expect(Math.max(...xs)).toBeLessThanOrEqual(500 * 1.03 + 1e-9);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(500 + OVERSHOOT_CAP_PX + 1e-9);
+    const long = { ...plan, to: { x: 2000, y: 0 }, durationMs: 700 };
+    const far = Array.from({ length: 701 }, (_, i) => pointerAt(long, long.startsAt + i).x);
+    expect(Math.max(...far)).toBeLessThanOrEqual(2000 + OVERSHOOT_CAP_PX + 1e-9);
+  });
+
+  it("falls back to a straight line for a future curve", () => {
+    const future = { ...plan, curve: "unknown-v9" as unknown as PointerPlan["curve"] };
+    const point = pointerAt(future, 1250);
+    expect(point.y).toBe(0);
+    expect(point.x).toBeGreaterThan(0);
+    expect(point.x).toBeLessThan(500);
+    expect(pointerAt(future, 1500)).toEqual(plan.to);
+  });
+
+  it("refuses non-finite plans and times", () => {
+    expect(() => pointerAt({ ...plan, to: { x: Number.NaN, y: 0 } }, 1200)).toThrow(RangeError);
+    expect(() => pointerAt({ ...plan, durationMs: Number.POSITIVE_INFINITY }, 1200)).toThrow(
+      RangeError,
+    );
+    expect(() => pointerAt(plan, Number.NaN)).toThrow(RangeError);
   });
 
   it("bows sideways by at most min(5% of distance, 36 px)", () => {

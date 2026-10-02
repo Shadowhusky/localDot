@@ -13,6 +13,12 @@ export function springValue(
   tSeconds: number,
   p: SpringParams,
 ): number {
+  if (![from, to, velocity, tSeconds, p.response, p.dampingRatio].every(Number.isFinite)) {
+    throw new RangeError("spring inputs must be finite");
+  }
+  if (p.response <= 0 || p.dampingRatio < 0) {
+    throw new RangeError("spring needs response > 0 and dampingRatio >= 0");
+  }
   const omega = (2 * Math.PI) / p.response;
   const zeta = p.dampingRatio;
   const x0 = from - to;

@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { dwellMs, INSTANT_LEAD_MS, travelDurationMs } from "./travel.ts";
+import {
+  dwellMs,
+  INSTANT_LEAD_MS,
+  intentLeadMs,
+  travelDurationMs,
+  typingPaceMs,
+} from "./travel.ts";
 
 describe("travelDurationMs", () => {
   it("follows 150 + 100·log2(D/W + 1) in watch mode", () => {
@@ -18,6 +24,24 @@ describe("travelDurationMs", () => {
 
   it("assumes a 24 px target when the width is unknown", () => {
     expect(travelDurationMs(300, undefined, "watch")).toBe(travelDurationMs(300, 24, "watch"));
+  });
+});
+
+describe("timing guards and pace", () => {
+  it("refuses invalid distances and target widths, including instant mode", () => {
+    expect(() => travelDurationMs(Number.NaN, 24, "watch")).toThrow(RangeError);
+    expect(() => travelDurationMs(-1, 24, "instant")).toThrow(RangeError);
+    expect(() => travelDurationMs(100, Number.NaN, "watch")).toThrow(RangeError);
+  });
+  it("leads the cursor and paces typing at each playback speed", () => {
+    expect(
+      ["watch", "fast", "instant"].map((s) => intentLeadMs(s as "watch" | "fast" | "instant")),
+    ).toEqual([120, 60, 0]);
+    expect(typingPaceMs("watch", 0)).toBe(35);
+    expect(typingPaceMs("watch", 59)).toBe(35);
+    expect(typingPaceMs("watch", 60)).toBe(6);
+    expect(typingPaceMs("fast", 0)).toBe(8);
+    expect(typingPaceMs("instant", 0)).toBe(0);
   });
 });
 

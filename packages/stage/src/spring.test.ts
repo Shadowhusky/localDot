@@ -5,6 +5,15 @@ const range = (end: number, step: number) =>
   Array.from({ length: Math.round(end / step) + 1 }, (_, i) => i * step);
 
 describe("springValue", () => {
+  it("refuses invalid physics parameters and non-finite inputs", () => {
+    for (const response of [0, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => springValue(0, 1, 0, 0.1, { dampingRatio: 1, response })).toThrow(RangeError);
+    }
+    for (const dampingRatio of [-0.1, Number.NaN, Number.POSITIVE_INFINITY]) {
+      expect(() => springValue(0, 1, 0, 0.1, { dampingRatio, response: 0.4 })).toThrow(RangeError);
+    }
+    expect(() => springValue(Number.NaN, 1, 0, 0.1, SPRING_DEFAULT)).toThrow(RangeError);
+  });
   it("starts at the current value", () => {
     expect(springValue(0, 1, 0, 0, SPRING_DEFAULT)).toBe(0);
   });

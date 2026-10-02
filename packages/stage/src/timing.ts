@@ -1,0 +1,23 @@
+// Overlay timing from the spec's "Timing" section and research §4.3 / §4.5. Milliseconds.
+export const INTENT_LEAD_MS = 120;
+export const PRESS_MS = 80;
+export const RING_SCALE_MS = 225;
+export const RING_FADE_MS = 300;
+export const RING_PX = 44;
+export const DOUBLE_CLICK_GAP_MS = 90;
+export const TARGET_HOLD_MS = 900;
+export const TARGET_FADE_MS = 300;
+export const TARGET_IN_MS = 120;
+export const TARGET_SPRING = { dampingRatio: 1, response: 0.31 } as const;
+export const CHIP_SHOW_MS = 2000;
+export const CHIP_FADE_MS = 400;
+export const KEYCAP_IN_MS = 200;
+export const KEYCAP_LINGER_MS = 1500;
+export const KEYCAP_FADE_MS = 300;
+export const CURSOR_DIM_AFTER_MS = 1200;
+export const CURSOR_HIDE_AFTER_MS = 60_000;
+export const CARET_PERIOD_MS = 1060;
+export const TYPING_HOLD_MS = 500;
+export const SETTLE_QUIET_MS = 250;
+export const SETTLE_CAP_MS = 3000;
+export const CANCEL_SHAKE_MS = 180;

@@ -10,7 +10,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -101,7 +101,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -163,7 +163,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -234,7 +234,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -297,7 +297,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -354,7 +354,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -438,7 +438,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -505,7 +505,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -573,7 +573,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -640,7 +640,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -802,7 +802,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -947,7 +947,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1016,7 +1016,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1305,10 +1305,30 @@
                   "additionalProperties": false
                 }
               ]
+            },
+            "pressT": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "ringAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "injector": {
+              "type": "string",
+              "enum": [
+                "xtest",
+                "driver"
+              ]
             }
           },
           "required": [
-            "input"
+            "input",
+            "pressT",
+            "ringAt",
+            "injector"
           ],
           "additionalProperties": false
         }
@@ -1333,7 +1353,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1394,7 +1414,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1486,7 +1506,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1579,7 +1599,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1607,10 +1627,8 @@
           "type": "object",
           "properties": {
             "frameId": {
-              "type": "string"
-            },
-            "image": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
             },
             "width": {
               "type": "integer",
@@ -1625,7 +1643,6 @@
           },
           "required": [
             "frameId",
-            "image",
             "width",
             "height"
           ],
@@ -1652,7 +1669,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1718,7 +1735,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1780,7 +1797,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1845,7 +1862,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1907,7 +1924,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -1976,7 +1993,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -2182,7 +2199,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -2260,7 +2277,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -2330,7 +2347,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -2391,7 +2408,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -2456,7 +2473,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",
@@ -2534,7 +2551,7 @@
         },
         "id": {
           "type": "string",
-          "minLength": 1
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
         },
         "seq": {
           "type": "integer",

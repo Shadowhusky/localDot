@@ -1,7 +1,4 @@
-export type CoordSpace =
-  | { kind: "pixels"; width: number; height: number }
-  | { kind: "per1000" }
-  | { kind: "resizedPixels"; width: number; height: number };
+export type CoordSpace = { kind: "pixels"; width: number; height: number } | { kind: "per1000" };
 
 export interface Screen {
   width: number;

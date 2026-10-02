@@ -1,11 +1,12 @@
 import { z } from "zod";
 import { Point, Rect } from "./geometry.ts";
+import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
 import { Target } from "./target.ts";
 
 const envelope = {
   v: z.literal(1),
-  id: z.string().min(1),
+  id: z.string().regex(ULID_PATTERN),
   seq: z.number().int().nonnegative(),
   t: z.number().int().nonnegative(),
   agent: z.string().min(1),
@@ -26,6 +27,9 @@ export const PointerPlan = z.object({
   seed: z.number().int().nonnegative(),
   curve: z.literal("minjerk-bow-v1"),
 });
+export type PointerPlan = z.infer<typeof PointerPlan>;
+export const Injector = z.enum(["xtest", "driver"]);
+export type Injector = z.infer<typeof Injector>;
 
 export const SessionStart = event(
   "session.start",
@@ -103,7 +107,16 @@ export const ActionCancel = event(
     detail: z.string().max(500).optional(),
   }),
 );
-export const ActionDispatch = event("action.dispatch", z.object({ input: Input }));
+// Session microseconds: raw press time and the measured onset of its delivery ring.
+export const ActionDispatch = event(
+  "action.dispatch",
+  z.object({
+    input: Input,
+    pressT: z.number().int().nonnegative(),
+    ringAt: z.number().int().nonnegative(),
+    injector: Injector,
+  }),
+);
 export const ActionResult = event(
   "action.result",
   z.object({ ok: z.boolean(), error: z.string().max(500).optional() }),
@@ -132,8 +145,7 @@ export const ScreenSettle = event(
 export const Observe = event(
   "observe",
   z.object({
-    frameId: z.string(),
-    image: z.string(),
+    frameId: z.string().regex(ULID_PATTERN),
     width: z.number().int().positive(),
     height: z.number().int().positive(),
   }),
