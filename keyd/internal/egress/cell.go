@@ -50,6 +50,9 @@ const (
 const (
 	internalHost = "keyd.ldot"
 	minTokenLen  = 32
+	// maxHeaderBytes caps a request's line and headers. API calls need a few KiB; the cap bounds
+	// what one request makes keyd search for surrogates (net/http's default is 1 MiB).
+	maxHeaderBytes = 64 << 10
 )
 
 var ErrPortInUse = errors.New("egress: listener port in use")
@@ -83,6 +86,7 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 	c.srv = &http.Server{
 		Handler:           c,
 		ReadHeaderTimeout: 10 * time.Second,
+		MaxHeaderBytes:    maxHeaderBytes,
 		IdleTimeout:       2 * time.Minute,
 		ErrorLog:          log.New(io.Discard, "", 0),
 		// Otherwise http.Server answers OPTIONS * itself, before the token check and the audit.
