@@ -18,21 +18,28 @@ func (m *Manager) PutSecret(rec vault.Record, value []byte) (int, error) {
 	if err := keys.ValidValueFor(b, value); err != nil {
 		return 0, badRequest("%s", err)
 	}
-	return m.changeSecret(rec.ID, func() error { return m.d.Vault.Put(rec, value) })
+	return m.changeSecret(rec.ID, rec.Kind, func() error { return m.d.Vault.Put(rec, value) })
 }
 
 func (m *Manager) DeleteSecret(id string) (int, error) {
-	return m.changeSecret(id, func() error { return m.d.Vault.Delete(id) })
+	return m.changeSecret(id, "", func() error { return m.d.Vault.Delete(id) })
 }
 
-func (m *Manager) changeSecret(id string, change func() error) (int, error) {
+func (m *Manager) changeSecret(id string, nextKind vault.Kind, change func() error) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.closed {
 		return 0, ErrManagerClosed
 	}
+	previous, _ := m.d.Vault.Record(id)
+	webBinding := nextKind == vault.KindHTTP || previous.Kind == vault.KindHTTP
 	revoked := 0
-	err := m.changePolicyLocked(func(cellID string, _ *managed) bool {
+	err := m.changePolicyLocked(func(cellID string, mc *managed) bool {
+		// A newly bound HTTP host changes the scrub set even in a cell that
+		// holds no surrogate. Its pre-existing streams/tunnels must end too.
+		if webBinding && mc.policy.Web {
+			return true
+		}
 		for _, entry := range m.d.Registry.ForCell(cellID) {
 			if entry.Binding.SecretID == id {
 				return true

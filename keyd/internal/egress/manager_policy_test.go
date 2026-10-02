@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -13,7 +14,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/shadowhusky/localdot/keyd/internal/audit"
+	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/llm"
+	"github.com/shadowhusky/localdot/keyd/internal/scrub"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 )
 
@@ -21,6 +25,51 @@ type blockedStore struct {
 	*vault.Memory
 	mu               sync.Mutex
 	entered, release chan struct{}
+}
+
+type observedTransport func(*http.Request) (*http.Response, error)
+
+func (f observedTransport) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
+
+func TestARequestInspectedBeforeKeyRotationNeverOffersTheReplacementKey(t *testing.T) {
+	m, _ := newManager(t)
+	o, err := m.Open(OpenRequest{CellID: "c1", Role: "desktop", Secrets: []string{"weather"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := m.cells["c1"].cell
+	old := cell.current()
+	var offered atomic.Int32
+	old.tr.RegisterProtocol("https", observedTransport(func(r *http.Request) (*http.Response, error) {
+		offered.Add(1)
+		return &http.Response{StatusCode: 200, Header: make(http.Header), Body: io.NopCloser(strings.NewReader("provider reached")), Request: r}, nil
+	}))
+	r := httptest.NewRequest("GET", "https://api.example.test/", nil)
+	r.Header.Set("Authorization", "Bearer "+o.Surrogates["weather"])
+	dest := keys.Dest{Cell: "c1", Scheme: "https", Host: "api.example.test"}
+	v := m.d.Registry.Inspect(dest, r.Method, r.URL, r.Header)
+	if !v.Allow || len(v.Swaps) != 1 {
+		t.Fatal("request was not initially admitted")
+	}
+	rec := vault.Record{ID: "weather", Kind: vault.KindHTTP, Hosts: []string{"new.example.test"}, Header: "Authorization", Format: "bearer"}
+	if _, err := m.PutSecret(rec, []byte("replacement-secret-value")); err != nil {
+		t.Fatal(err)
+	}
+	// Resume the request exactly between its original inspection and value read.
+	// The final admission gate must reject its old generation synchronously,
+	// before handing any headers to a transport, even if a callback has not run.
+	if _, reason := cell.swap(r.Header, v.Swaps); reason != "" {
+		t.Fatal(reason)
+	}
+	cleaner, err := scrub.New()
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	cell.relay(response, r, route{dest: dest, target: r.URL, gen: old}, cleaner, audit.Line{Kind: audit.KindRequest, Method: r.Method, Host: dest.Host})
+	if response.Code != 503 || response.Header().Get("X-Keyd-Reason") != ReasonRevoked || offered.Load() != 0 {
+		t.Fatalf("stale request reached the transport: status %d, offered %d", response.Code, offered.Load())
+	}
 }
 
 func TestModelChangesCancelRequestsWaitingForBudget(t *testing.T) {
@@ -189,5 +238,34 @@ func TestFailedPolicySaveKeepsTheOldPolicyAndFreshAdmission(t *testing.T) {
 	fresh := m.cells["c1"].cell.current()
 	if old.ctx.Err() == nil || fresh == old || fresh.ctx.Err() != nil {
 		t.Fatal("failed policy update left an old or unusable generation")
+	}
+}
+
+func TestANewHTTPBindingStopsStreamsInCellsWithoutItsSurrogate(t *testing.T) {
+	m, w := newManager(t)
+	stopped := make(chan struct{})
+	w.plainUpstream("stream.example.test", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		io.WriteString(rw, "already streaming\n")
+		rw.(http.Flusher).Flush()
+		<-r.Context().Done()
+		close(stopped)
+	}))
+	o, err := m.Open(OpenRequest{CellID: "c1", Role: "desktop"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := cellClient(w, o).Get("http://stream.example.test/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	rec := vault.Record{ID: "new-binding", Kind: vault.KindHTTP, Hosts: []string{"stream.example.test"}, Header: "Authorization", Format: "bearer"}
+	if _, err := m.PutSecret(rec, []byte(realValue)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("the newly bound host kept a stream with the old empty scrub set")
 	}
 }

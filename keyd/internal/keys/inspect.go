@@ -283,18 +283,25 @@ func order(occ []occurrence) []string {
 }
 
 // looseBasic decodes a Basic credential as the most lenient servers do: any whitespace after the
-// scheme, the scheme in any case, either base64 alphabet, any padding, stray bytes skipped and no
+// scheme (including a credential glued to the prefix), the scheme in any case, either base64 alphabet, any padding, stray bytes skipped and no
 // colon needed. A server may also split the credential where it likes, so it is decoded joined, field
 // by field (fields end at whitespace or commas) and chunk by chunk (chunks end at =), each at every
 // base64 alignment. Its results are only searched for surrogates; placed refuses every one found.
 func looseBasic(value string) []string {
 	f := strings.FieldsFunc(value, func(r rune) bool { return unicode.IsSpace(r) || r == ',' })
-	scheme := slices.IndexFunc(f, func(s string) bool { return strings.EqualFold(s, "Basic") })
-	if scheme < 0 || scheme == len(f)-1 {
+	scheme := slices.IndexFunc(f, func(s string) bool {
+		return strings.EqualFold(s, "Basic") || len(s) >= 5 && strings.EqualFold(s[:5], "Basic")
+	})
+	if scheme < 0 {
 		return nil
 	}
-	joined := strings.Join(f[scheme+1:], "")
-	pieces := append(append([]string{joined}, f[scheme+1:]...), strings.Split(joined, "=")...)
+	prefix := 5
+	if strings.EqualFold(f[scheme], "Basic") {
+		prefix = len(f[scheme])
+	}
+	credentials := append([]string{f[scheme][prefix:]}, f[scheme+1:]...)
+	joined := strings.Join(credentials, "")
+	pieces := append(append([]string{joined}, credentials...), strings.Split(joined, "=")...)
 	var out []string
 	for _, piece := range pieces {
 		letters := base64Letters(piece)

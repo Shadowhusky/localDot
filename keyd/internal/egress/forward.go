@@ -117,10 +117,20 @@ func (c *Cell) swap(h http.Header, swaps []keys.Entry) (int, string) {
 // no other proxy, no redirects followed. The response is scrubbed on its way back, and the audit
 // line is written once the body has been relayed or the attempt has failed.
 func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber *scrub.Scrubber, line audit.Line) {
+	// A binding update cancels this generation before publishing its new value.
+	// Inspection may have happened before that update; reject synchronously
+	// after the value read rather than relying on an asynchronously run callback.
+	if rt.gen.ctx.Err() != nil {
+		c.deny(w, line, http.StatusServiceUnavailable, ReasonRevoked)
+		return
+	}
 	start := time.Now()
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	defer context.AfterFunc(rt.gen.ctx, cancel)()
+	if rt.gen.ctx.Err() != nil {
+		cancel()
+	}
 	in := &counter{ReadCloser: r.Body}
 	r.Body = in
 	var once sync.Once
