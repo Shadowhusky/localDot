@@ -5,6 +5,8 @@ import (
 	"crypto/tls"
 	"net"
 	"net/http"
+	"net/netip"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,7 +24,9 @@ type generation struct {
 func newGeneration(d Deps) *generation {
 	ctx, cancel := context.WithCancel(context.Background())
 	tr := &http.Transport{
-		DialContext:           d.Dialer.DialContext,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			return d.Dialer.DialContext(ctx, network, absolute(address))
+		},
 		TLSClientConfig:       &tls.Config{RootCAs: d.RootCAs, MinVersion: tls.VersionTLS12},
 		ForceAttemptHTTP2:     true,
 		TLSHandshakeTimeout:   10 * time.Second,
@@ -60,4 +64,17 @@ func (g *generation) stop() {
 	g.conns = map[net.Conn]struct{}{}
 	g.mu.Unlock()
 	g.tr.CloseIdleConnections()
+}
+
+// absolute ends a name with a dot, so the resolver's search domains never apply; the policy has
+// already refused relative names. The request's Host and SNI keep the name without the dot.
+func absolute(address string) string {
+	host, port, err := net.SplitHostPort(address)
+	if err != nil || strings.HasSuffix(host, ".") {
+		return address
+	}
+	if _, err := netip.ParseAddr(host); err == nil {
+		return address
+	}
+	return net.JoinHostPort(host+".", port)
 }

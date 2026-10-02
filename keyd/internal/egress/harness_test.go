@@ -23,6 +23,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -141,6 +142,7 @@ func (w *world) publish(host, port, addr string, except bool) {
 }
 
 func (w *world) LookupNetIP(_ context.Context, _ string, host string) ([]netip.Addr, error) {
+	host = strings.TrimSuffix(host, ".")
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if a, ok := w.names[host]; ok {
@@ -153,6 +155,10 @@ func (w *world) LookupNetIP(_ context.Context, _ string, host string) ([]netip.A
 type portMap struct{ w *world }
 
 func (p portMap) DialContext(ctx context.Context, network, address string) (net.Conn, error) {
+	// keyd dials absolute names; the world knows them without the dot.
+	if host, port, err := net.SplitHostPort(address); err == nil {
+		address = net.JoinHostPort(strings.TrimSuffix(host, "."), port)
+	}
 	p.w.mu.Lock()
 	if mapped, ok := p.w.ports[address]; ok {
 		address = mapped
