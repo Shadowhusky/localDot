@@ -8,5 +8,7 @@ export default defineConfig({
     testTimeout: 600_000,
     hookTimeout: 600_000,
     fileParallelism: false,
+    // keyd is built once per run, and the build is removed afterwards.
+    globalSetup: ["apps/daemon/src/keyd/testing/keyd-build.ts"],
   },
 });

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { allocateKeydPort, KEYD_PORT_RANGE } from "./ports.ts";
+import { allocateKeydPort, KEYD_PORT_RANGE, parsePortRange } from "./ports.ts";
 
 describe("allocateKeydPort", () => {
   it("hands out the lowest free listener port in 4760-4789", () => {
@@ -30,5 +30,21 @@ describe("allocateKeydPort", () => {
       return port;
     };
     expect(await Promise.all([create(), create()])).toEqual([4761, 4762]);
+  });
+});
+
+describe("keyd port ranges other than keyd's own", () => {
+  it("allocates inside another range, such as a test keyd's", () => {
+    expect(allocateKeydPort([4791], { from: 4791, to: 4797 })).toBe(4792);
+    expect(() => allocateKeydPort([4791], { from: 4791, to: 4791 })).toThrow("4791-4791");
+  });
+
+  it("reads LOCALDOT_KEYD_PORTS and defaults to keyd's own range", () => {
+    expect(parsePortRange(undefined)).toEqual(KEYD_PORT_RANGE);
+    expect(parsePortRange("")).toEqual(KEYD_PORT_RANGE);
+    expect(parsePortRange("4791-4797")).toEqual({ from: 4791, to: 4797 });
+    for (const bad of ["4797-4791", "80-90", "4760", "4760-70000", " 4760-4789"]) {
+      expect(() => parsePortRange(bad), bad).toThrow(RangeError);
+    }
   });
 });

@@ -13,6 +13,6 @@ export default defineConfig({
       "cells/*/scripts/**/*.test.mjs",
       "scripts/**/*.test.mjs",
     ],
-    exclude: ["**/node_modules/**", "**/*.docker.test.ts"],
+    exclude: ["**/node_modules/**", "**/*.docker.test.ts", "**/*.keyd.test.ts"],
   },
 });

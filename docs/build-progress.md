@@ -19,7 +19,7 @@ Core branch: `feat/codex-complete`; credential integration: `codex/keyd-integrat
 
 M2: the worker overlays, live timeline, pixel oracle and production-path calibration are built; real-browser acceptance is being completed. The first browser run exposed compiled hex-alpha colours and Pixi CSP compatibility, both fixed before visual acceptance. Calibration measurements must use the finished production rendering path and include at least 500 trials per required group.
 
-M3: Part 4b connects the credential service to the daemon, cell boot/isolation and the Theatre key form. Its real-cell canary, Stop and recovery acceptance remain open. The host Keychain backend and Stop latency during a stalled Keychain operation also need integration verification.
+M3: Part 4b Tasks 1–3 are complete: address discovery/guards, protocol and browser sealing, and the private-socket daemon client. The current integration branch passes 666 host tests in 88 files and four real-keyd integration tests. Next are the daemon key routes, cell boot/isolation, Stop/resume and the Theatre key form. Its real-cell canary and recovery acceptance remain open. The host Keychain backend and Stop latency during a stalled Keychain operation also need integration verification. Detailed evidence is in `measurements/2026-10-keyd-integration.md`.
 
 The independent avatar harness is available on the user's private Tailscale network with Spine rendering, local typed speech and mouth tracks verified. Microphone mode remains experimental; the agent conversation is not connected. The remaining avatar Part 3 tasks and final app integration are still required.
 
