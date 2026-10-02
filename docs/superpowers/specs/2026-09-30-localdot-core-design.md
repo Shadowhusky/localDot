@@ -127,7 +127,7 @@ Assumptions (stated to the user and not contested):
 | desktop cell | container | Ubuntu 26.04 arm64 | nothing secret | The virtual computer: XFCE desktop, apps, `desktopd`, Selkies |
 | signed-in browser cell (M7) | container | Chromium | website cookies | Logged-in browsing, driven only through `browserd` |
 | gate, one per cell | container | socat | nothing | The cell's only door: the relay to keyd listens only on the gate's internal-network address, and the inbound relay is reachable only through the port published on 127.0.0.1 |
-| Codex harness (optional, M8) | macOS process in a Seatbelt sandbox | OpenAI's Codex app-server | the user's ChatGPT login, signed in separately for localDot and kept by Codex in `auth.json` inside a localDot-owned `CODEX_HOME` (S7 saw it only in the user's own `~/.codex`; M8 verifies a separate home) | Runs the agent loop on a ChatGPT plan; every tool it uses is localDot's |
+| Codex harness (optional, M4, Part 5c) | macOS process in a Seatbelt sandbox | OpenAI's Codex app-server | the user's ChatGPT login, signed in separately for localDot and kept by Codex in `auth.json` inside a localDot-owned `CODEX_HOME` (S7 saw it only in the user's own `~/.codex`; Part 5c verifies a separate home) | Runs the agent loop on a ChatGPT plan; every tool it uses is localDot's |
 | web UI | the user's browser | React 19 | the install token, in origin-scoped storage | Chat, stage, timeline, approvals, settings |
 
 ### Trust rules
@@ -338,6 +338,11 @@ Together, Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot (Kimi) an
 Add to that the OpenRouter and Ollama providers, and the generic OpenAI-compatible provider for
 anything else: LM Studio, vLLM, Zhipu, MiniMax, self-hosted gateways.
 
+**First-class providers (user, 2026-10-02).** Anthropic, OpenAI, Google Gemini, Azure OpenAI, xAI,
+Mistral, DeepSeek, Groq and OpenRouter each use their official AI SDK package and their own keyd
+route. Together, Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot and Alibaba reach
+their documented OpenAI-compatible endpoints through the OpenAI-compatible client (P5a-R4, narrowed).
+
 **Catalog.** The picker reads the models.dev catalog (about 225 providers, with context sizes,
 prices, vision and tool-calling flags), cached locally and refreshable, and marks what each model
 can do:
@@ -356,12 +361,12 @@ Local servers (LM Studio, Ollama) are reached through keyd's host-loopback route
 call them directly.
 
 **Subscription sign-in.**
-- **ChatGPT plan: supported (M8).** OpenAI documents the Codex app-server for "embedding Codex into
+- **ChatGPT plan: supported (M4, Part 5c; moved from M8 by the user, 2026-10-02).** OpenAI documents the Codex app-server for "embedding Codex into
   custom products", with "Sign in with ChatGPT for subscription access"; Codex keeps the login in
   its home and refreshes it itself (learn.chatgpt.com/docs/app-server and /docs/auth). The harness
   gets its own localDot-owned `CODEX_HOME`, which holds the login as `auth.json`, and its own
   sign-in (`account/login/start`), never the user's `~/.codex`. S7 saw `auth.json` only in the
-  user's own `~/.codex`, so M8 verifies that a separate home, its sign-in and its token refresh
+  user's own `~/.codex`, so Part 5c verifies that a separate home, its sign-in and its token refresh
   work. localDot runs the app-server as the Codex harness (trust rule 7). Codex runs the loop, and
   localDot supplies every tool through an MCP server that routes into the action gateway, so
   visualization, approvals and replay work the same. As on every measured route, Codex's tool calls
@@ -405,6 +410,7 @@ call them directly.
 - **Claude plan: not offered.** Anthropic's Agent SDK docs say: "Unless previously approved,
   Anthropic does not allow third party developers to offer claude.ai login or rate limits for their
   products, including agents built on the Claude Agent SDK." Claude is available with an API key.
+  The user asked for it again on 2026-10-02; it stays out unless Anthropic approves localDot.
 
 ## Action gateway and live view
 
@@ -717,7 +723,7 @@ localdot/
   cells/desktop/       image: theme, apps, desktopd, Selkies config
   cells/browser/       signed-in browser + browserd (M7)
   cells/gate/          forwarder image
-  harness/codex/       Codex app-server bridge and its sandbox profile (M8)
+  harness/codex/       Codex app-server bridge and its sandbox profile (M4, Part 5c)
   keyd/                Go
   packages/protocol/   event and tool schemas (zod, exported to JSON Schema)
   packages/providers/  provider registry, models.dev catalog cache, coordinate module
@@ -747,11 +753,11 @@ localdot/
 | M1 | Foundation | Monorepo, protocol package, daemon skeleton with token auth, desktop and gate images, internal networks; the live desktop appears in the UI |
 | M2 | Visual core | Theatre chrome built; gateway with the timing contract; `desktopd` observe, hitTest, input, type and settle; event log; P0 overlays driven by the puppet; pixel-oracle tests pass |
 | M3 | Key layer | keyd vault, surrogates, per-cell listeners, egress policy, SSRF guard, LLM gateway, budgets, audit, admin socket; key form; self-tests and canary test pass |
-| M4 | Agent | Brain image and loop; provider registry and picker for every API-key provider and local server, with the models.dev catalog; Anthropic's native computer tool and the generic `computer` tool; all v1 tools; chat, plan and step timeline; terminal and diff panels; memory files; skills loader; a first real multi-app task succeeds |
+| M4 | Agent | Brain image and loop; provider registry and picker for every API-key provider and local server, with the models.dev catalog; Anthropic's native computer tool and the generic `computer` tool; all v1 tools; chat, plan and step timeline; terminal and diff panels; memory files; skills loader; a first real multi-app task succeeds; the Codex harness for ChatGPT plans (Part 5c), with its own Codex home, sign-in and token refresh verified |
 | M5 | Control and safety | Autonomy levels, risk rules, approvals, takeover and hand-back, pause, Stop and the kill switch, guards, budget UI |
 | M6 | Replay | Recorder (fMP4 via mediabunny), thumbnails, session index, replay UI, MP4 export |
 | M7 | Signed-in browser | `browserd`, second screen, `switch_screen`, takeover logins, download quarantine; the desktop's Chromium stops keeping cookies |
-| M8 | Premium feel and more providers | Auto-camera, what-changed flash, agent vision, scroll and drag visuals, avatar host and default mascot, soft sounds; OpenAI and Google native computer tools; the Codex harness for ChatGPT plans, with its own Codex home, sign-in and token refresh verified; Bedrock and Vertex signing in keyd |
+| M8 | Premium feel and more providers | Auto-camera, what-changed flash, agent vision, scroll and drag visuals, avatar host and default mascot, soft sounds; OpenAI and Google native computer tools; Bedrock and Vertex signing in keyd |
 | M9 | Ship | `npx localdot`, onboarding, `doctor`, `update`, docs, arm64 CI, publishing hygiene |
 
 **Order (user, 2026-10-02):** M9 ships before M8. M8 (premium feel and more providers) follows the first release, so nothing in M5–M7 depends on it.
