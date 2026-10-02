@@ -1,14 +1,19 @@
 import { EventEmitter } from "node:events";
-import { createServer, type Server } from "node:http";
+import { createServer, type IncomingMessage, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { type WebSocket, WebSocketServer } from "ws";
 import { encodeAudioFrame } from "../wire.ts";
 import type { ChildLike } from "./supervisor.ts";
 
 export type FakeTtsMode = "speak" | "stall" | "unavailable" | "hang-up";
+export type FakeSttMode = "listen" | "fail";
 
 // voiced's /tts as far as the host can tell: a greeting, two audio frames, the end, the track.
-export async function startFakeVoiced(token: string, mode: () => FakeTtsMode = () => "speak") {
+export async function startFakeVoiced(
+  token: string,
+  mode: () => FakeTtsMode = () => "speak",
+  stt: () => FakeSttMode = () => "listen",
+) {
   const received: unknown[] = [];
   const server: Server = createServer();
   const wss = new WebSocketServer({
@@ -17,7 +22,8 @@ export async function startFakeVoiced(token: string, mode: () => FakeTtsMode = (
     // Real voiced turns a wrong token away at the handshake (HTTP 403), never with a close code.
     verifyClient: ({ req }, done) => done(req.headers.authorization === `Bearer ${token}`, 403),
   });
-  wss.on("connection", (socket: WebSocket) => {
+  wss.on("connection", (socket: WebSocket, request: IncomingMessage) => {
+    if (request.url === "/stt") return fakeStt(socket, received, stt);
     socket.send(JSON.stringify({ type: "ready", voice: "stock" }));
     socket.on("message", (data) => {
       const message = JSON.parse(data.toString()) as { type: string; id: number };
@@ -88,4 +94,31 @@ export class FakeChild extends EventEmitter implements ChildLike {
     this.exitCode = -2;
     this.emit("error", error);
   }
+}
+
+// voiced's /stt as far as the relay can tell: ready on listen, and the bytes it heard on release.
+// Failing, it reports the failure and then closes with 1011, as voiced does after anything unexpected.
+function fakeStt(socket: WebSocket, received: unknown[], mode: () => FakeSttMode): void {
+  let bytes = 0;
+  socket.on("message", (data, isBinary) => {
+    if (isBinary) {
+      bytes += (data as Buffer).length;
+      return;
+    }
+    const message = JSON.parse(data.toString()) as { type: string };
+    received.push(message);
+    if (message.type === "listen" && mode() === "fail") {
+      socket.send(
+        JSON.stringify({ type: "error", code: "recognition_failed", message: "detector broke" }),
+      );
+      socket.close(1011);
+      return;
+    }
+    if (message.type === "listen") socket.send(JSON.stringify({ type: "ready" }));
+    if (message.type === "release") {
+      socket.send(
+        JSON.stringify({ type: "end", utterance: 1, text: `${bytes} bytes`, lang: "en" }),
+      );
+    }
+  });
 }

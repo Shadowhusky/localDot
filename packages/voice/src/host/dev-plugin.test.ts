@@ -38,9 +38,9 @@ async function harness(env: NodeJS.ProcessEnv) {
   return { port, spawned, server };
 }
 
-const open = (port: number, origin: string) =>
+const open = (port: number, origin: string, path = "/voice/tts") =>
   new Promise<string>((resolve) => {
-    const socket = new WebSocket(`ws://127.0.0.1:${port}/voice/tts`, ["localdot.v1"], { origin });
+    const socket = new WebSocket(`ws://127.0.0.1:${port}${path}`, ["localdot.v1"], { origin });
     socket.once("open", () => {
       socket.terminate();
       resolve("open");
@@ -111,6 +111,15 @@ describe("voiceDevPlugin", () => {
     const { port, spawned } = await harness({ LOCALDOT_VOICE: "off", LOCALDOT_HOME: home() });
     expect(await open(port, `http://127.0.0.1:${port}`)).toMatch(/426/);
     expect(spawned).toHaveLength(0);
+  });
+
+  it("starts voiced for voice input even when voice output is off", async () => {
+    const { port, spawned } = await harness({
+      LOCALDOT_VOICE_OUTPUT: "off",
+      LOCALDOT_HOME: home(),
+    });
+    expect(await open(port, `http://127.0.0.1:${port}`, "/voice/stt")).toBe("open");
+    expect(spawned).toHaveLength(1);
   });
 
   it("starts nothing when voice output is off, and tells the page there is no voice", async () => {

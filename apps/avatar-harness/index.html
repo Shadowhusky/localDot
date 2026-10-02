@@ -13,7 +13,7 @@
 }
 html, body { height: 100%; margin: 0; background: var(--void); color: var(--text); font: 14px/1.5 -apple-system, "Inter", system-ui, sans-serif; }
 main { display: grid; grid-template-columns: 280px 1fr; height: 100%; }
-aside { border-right: 1px solid var(--line); padding: 20px; display: grid; align-content: start; gap: 14px; overflow-y: auto; }
+aside { border-right: 1px solid var(--line); padding: 20px; display: grid; grid-auto-rows: max-content; align-content: start; gap: 14px; overflow-y: auto; }
 #avatar { width: 200px; height: 200px; }
 #avatar[data-renderer="spine"] { width: 240px; height: 360px; }
 section { display: grid; place-items: center; padding: 24px; min-width: 0; }
@@ -30,6 +30,9 @@ button:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
 textarea { box-sizing: border-box; width: 100%; resize: vertical; background: var(--surface); color: var(--text); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; font: inherit; }
 textarea:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
 .note { margin: 0; min-height: 1.5em; color: var(--text-2); }
+#voice-input-panel:not([hidden]) { display: grid; gap: 10px; }
+#mic-note:empty { display: none; }
+#mic[data-held] { border-color: var(--xenon); color: var(--xenon); }
 </style>
 </head>
 <body>
@@ -49,6 +52,18 @@ textarea:focus-visible { outline: 2px solid var(--xenon); outline-offset: 2px; }
       <div class="row"><button type="submit">Speak</button><button id="stop" type="button">Stop</button><button id="speak" type="button">Sample mouth</button></div>
     </form>
     <p id="voice-note" class="note" aria-live="polite"></p>
+    <h2>Voice input</h2>
+    <label><input id="voice-input" type="checkbox"> Voice input</label>
+    <p id="mic-note" class="note" role="status"></p>
+    <div id="voice-input-panel" hidden>
+      <div class="row">
+        <label><input type="radio" name="voice-mode" value="ptt" checked> Push to talk</label>
+        <label><input type="radio" name="voice-mode" value="handsfree"> Hands-free</label>
+      </div>
+      <div class="row"><button id="mic" type="button">Hold to talk (or right ⌥)</button></div>
+      <label><input id="half-duplex" type="checkbox"> Pause listening while she speaks</label>
+      <p id="heard" class="note" aria-live="polite"></p>
+    </div>
     <label><input id="reduced" type="checkbox"> Reduced motion</label>
   </aside>
   <section>

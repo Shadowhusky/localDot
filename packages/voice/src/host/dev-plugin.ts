@@ -15,6 +15,7 @@ import {
   TtsRouter,
 } from "./router.ts";
 import { type VoiceSettings, voiceSettingsFromEnv } from "./settings.ts";
+import { relaySpeechInput } from "./stt-relay.ts";
 import { type SpawnLike, VoicedSupervisor } from "./supervisor.ts";
 
 // voiced imports its model libraries on start, so the first sentence may wait this long for it.
@@ -81,6 +82,10 @@ export function voiceDevPlugin(options: VoiceDevOptions) {
         tts: (out) => {
           if (settings.output !== "off") supervisor.start();
           return createTtsRouter(settings, endpoint, out, ledger);
+        },
+        stt: (browser) => {
+          supervisor.start();
+          relaySpeechInput(browser, endpoint);
         },
       });
       http.once("close", () => {

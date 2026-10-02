@@ -9,7 +9,7 @@ const CHROME = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
 const PORT = 9334;
 const USAGE = `usage: node capture.mjs --url <url> [--size 1280x800] [--wait "<js expression>"]
   [--run "<js async function body>"] [--screenshot <file.png>] [--full-page]
-  [--eval "<js expression>" --out <file.json>] [--timeout 60000] [--allow-errors] [--mute]`;
+  [--eval "<js expression>" --out <file.json>] [--timeout 60000] [--allow-errors] [--mute] [--chrome-flag=<flag> ...]`;
 
 function readOptions(argv) {
   let values;
@@ -28,6 +28,7 @@ function readOptions(argv) {
         timeout: { type: "string", default: "60000" },
         "allow-errors": { type: "boolean", default: false },
         mute: { type: "boolean", default: false },
+        "chrome-flag": { type: "string", multiple: true, default: [] },
       },
     }));
   } catch (error) {
@@ -295,7 +296,10 @@ async function main() {
     return 1;
   }
   const profile = mkdtempSync(join(tmpdir(), "localdot-capture-"));
-  const chrome = launchChrome(profile, options.mute ? ["--mute-audio"] : []);
+  const chrome = launchChrome(profile, [
+    ...(options.mute ? ["--mute-audio"] : []),
+    ...options["chrome-flag"],
+  ]);
   const cleanup = async () => {
     await closeChrome(chrome.chrome);
     rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });

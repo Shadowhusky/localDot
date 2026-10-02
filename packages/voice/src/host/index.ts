@@ -7,4 +7,5 @@ export * from "./local.ts";
 export * from "./pcm-stream.ts";
 export * from "./router.ts";
 export * from "./settings.ts";
+export * from "./stt-relay.ts";
 export * from "./supervisor.ts";
