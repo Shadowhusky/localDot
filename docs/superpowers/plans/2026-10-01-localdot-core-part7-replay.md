@@ -951,3 +951,471 @@ git commit -m "test(stage): synthetic H.264 that tells which frame was decoded"
 is clean.
 
 ---
+
+### Task 5: Stage — the replay model: observes, steps, plans, typed marks and an index for long sessions
+
+Part 3's model folds actions and agent states. Replay also needs four things:
+- the observe frames by time (thumbnails, before/after, the no-video backdrop);
+- the steps with their start and end (chapters, the rail as of t);
+- plan snapshots (the plan as of t);
+- typed marks for every agent and safety event that has no overlay. This is the "typed fallback"
+  for M4 and M5 producers that don't exist yet.
+
+Part 3 left two linear scans per frame (`model.actions.filter(...)` in `sceneAt`, and `current()`
+scanning back by step) and named them as M6's job ("index by step"). On a dense 2-hour log (12 000
+actions, 138 000 events), `sceneAt` measured **0.99 ms per call** with Part 3's code while this plan
+was written: 6 % of a 60 fps frame live, and 54 s of pure scene time in a 54 000-frame export.
+The index brings it to microseconds.
+
+**Review tier:** light (stage model).
+
+**Files:**
+- Create: `packages/stage/src/marks.ts`, `packages/stage/src/marks.test.ts`,
+  `packages/stage/src/long-session.test.ts`
+- Modify: `packages/stage/src/model.ts`, `packages/stage/src/scene.ts`, `packages/stage/src/index.ts`
+  (add `export * from "./marks.ts";`)
+- Test: Part 3's `model.test.ts`, `scene.test.ts` and `camera.test.ts` must pass unchanged.
+
+**Interfaces:**
+- Consumes: Part 3's `SessionModel`, `ActionState`, `foldEvents`, `sceneAt`, `restingPoint`,
+  `clipText`, `sessionMsOf`; Task 15's `SessionModel.frames` (Part 3 Task 15).
+- Produces (exact):
+
+```ts
+// packages/stage/src/model.ts — added to the model; every time is session ms
+export interface ObserveAt { t: number; frameId: string; step?: string }
+export interface StepState { id: string; kind: string; startT: number; endT?: number; status?: string; planItem?: string }
+export interface PlanItemState { id: string; text: string; status: string }
+export interface PlanSnapshot { t: number; items: PlanItemState[] }
+
+export interface SessionModel {
+  // … Part 3's fields, unchanged, plus:
+  observes: ObserveAt[];          // every observe, in log order
+  steps: StepState[];             // one per step.start, closed by its step.end
+  plans: PlanSnapshot[];          // after every plan.set and plan.update
+  marks: TimelineMark[];          // markOf(e) for every event Part 3's switch does not handle
+  byStep: Map<string, number>;    // step id → index of its latest action (current() is O(1))
+  stepIndex: Map<string, number>; // step id → index in steps
+}
+export function startedCount(model: SessionModel, t: number): number;   // actions with intentT ≤ t, binary search
+export function observeAt(model: SessionModel, t: number): ObserveAt | undefined;
+export function stepAt(model: SessionModel, t: number): StepState | undefined;
+export function planAt(model: SessionModel, t: number): PlanItemState[];
+
+// packages/stage/src/scene.ts
+export const RING_LOOKBACK = 8;
+export interface SceneOptions { ringLookback?: number }
+export function sceneAt(model: SessionModel, t: number, view: View, opts?: SceneOptions): Scene;  // same Scene as Part 3
+
+// packages/stage/src/marks.ts
+export type MarkKind = "approval" | "decision" | "takeover" | "handback" | "pause" | "resume" | "tool" | "tool-failed" | "file" | "memory" | "key" | "verify" | "event";
+export type MarkTone = "neutral" | "attention" | "failure" | "user";
+export interface TimelineMark { t: number; seq: number; kind: MarkKind; type: string; step?: string; label: string; tone: MarkTone }
+export function markOf(e: LocalDotEvent): TimelineMark | null;
+```
+
+**`markOf`**, exactly. Labels are clipped with `clipText`. "dot" is `CURSOR_NAME`.
+
+| Event | kind | label | tone |
+|---|---|---|---|
+| `approval.request` | approval | `Asked to approve: <title, 60>` | attention |
+| `approval.resolve` by `timeout` | decision | `Denied after 10 minutes` | failure |
+| `approval.resolve` approve / deny / take_control | decision | `Approved` / `Denied` / `You took control` | neutral / failure / user |
+| `control.change` holder `user` | takeover | `You took control` | user |
+| `control.change` holder `agent` | handback | `Handed back to dot` | neutral |
+| `pause.change` | pause / resume | `Paused` / `Resumed` | neutral |
+| `tool.start` | tool | `<title, 60>` | neutral |
+| `tool.end` with `ok: false` | tool-failed | `Command failed (exit <n>)`, or `Command failed` without a code | failure |
+| `tool.end` with `ok: true` | — | no mark | — |
+| `file.change` | file | `Created` / `Edited` / `Deleted` + ` <basename, 48>` | neutral |
+| `memory.change` | memory | `Updated USER.md` / `Updated MEMORY.md` | neutral |
+| `key.use` | key | `Used a key → <host, 48>`; on `deny`: `Blocked a key → <host, 48>` | neutral; failure on deny |
+| `step.verify` | verify | `Verified` / `Unexpected result` / `Check failed` | neutral / attention / failure |
+| `session.*`, `agent.state`, `heartbeat`, `thought.delta`, `plan.*`, `step.*`, `action.*`, `text.progress`, `screen.settle`, `observe`, `tool.output`, `camera.hint` | — | no mark (each has its own display, or would be noise) | — |
+| any other type (a later milestone's) | event | the event's `type` | neutral |
+
+**Tests:**
+- `marks.test.ts`:
+  - `"labels every agent and safety event as the table says"`: one event per table row, each
+    `toEqual` its mark; the `file.change` path `/config/Documents/Q3 report.ods` gives
+    `Edited Q3 report.ods`.
+  - `"ignores events that have their own display"`: every type in the no-mark row returns `null`.
+  - `"keeps an unknown future type as a neutral mark"`: an event cast with
+    `type: "browser.switch"` gives `{ kind: "event", label: "browser.switch", tone: "neutral" }`.
+- Part 3's `model.test.ts`: add `"keeps observes, steps and plans in order and indexes the current
+  action by step"`. Fold
+  `step.start s1`, an intent, an observe, `step.end s1 failed`, `plan.set` with two items and
+  `plan.update` of the second to `done`. Expect:
+  - `observes` `[{ t, frameId, step: "s1" }]`;
+  - `steps[0]` `{ id: "s1", status: "failed", endT }`;
+  - `planAt(m, t)` before and after the update;
+  - `stepAt(m, t)` at, before and after `startT`;
+  - `byStep.get("s1") === 0`.
+
+  Part 3's halves-equal-whole test still passes, because `toEqual` compares the new Maps by
+  content.
+- `long-session.test.ts`, **the Review Focus 4 pin (stage)**, complete. It was verified against
+  Part 3's model and scene as written in Part 3's plan, plus this task's changes:
+
+```ts
+import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
+import { describe, expect, it } from "vitest";
+import { emptyModel, foldEvents, startedCount } from "./model.ts";
+import { sceneAt } from "./scene.ts";
+
+// A dense 2-hour session as M4 will log it: a GUI step every ~500 ms, every fourth one typing with
+// per-character progress, thinking pauses, every tenth step cancelled: about 138 000 events.
+function twoHourLog(): LocalDotEvent[] {
+  let seed = 7;
+  const rnd = () => {
+    seed = (seed * 1_103_515_245 + 12_345) % 2_147_483_648;
+    return seed / 2_147_483_648;
+  };
+  const out: LocalDotEvent[] = [];
+  const ev = (type: string, tMs: number, data: Record<string, unknown>, step?: string) =>
+    out.push({ v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: out.length, t: msToMicros(tMs), agent: "main", ...(step ? { step } : {}), type, data } as LocalDotEvent);
+  ev("session.start", 0, { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title: "long" });
+  let t = 100;
+  let from = { x: 200, y: 200 };
+  for (let n = 0; t < 7_200_000; n++) {
+    const step = `s${n}`;
+    const to = { x: 100 + Math.floor(rnd() * 2300), y: 100 + Math.floor(rnd() * 1400) };
+    const typing = n % 4 === 0;
+    ev("agent.state", t, { state: "acting" });
+    ev("step.start", t, { kind: "gui" }, step);
+    ev("action.intent", t + 1, { verb: typing ? "type" : "click", label: typing ? 'Type "hello world"' : "Click A", point: to, risk: "none", pointer: { from, to, startsAt: t + 121, durationMs: 300, seed: n, curve: "minjerk-bow-v1" } }, step);
+    ev("action.target", t + 150, { target: { point: to, bbox: { x: to.x - 20, y: to.y - 10, w: 40, h: 20 }, source: "ax", role: "button", name: "A" } }, step);
+    if (n % 10 === 9) {
+      ev("action.cancel", t + 300, { reason: "stale" }, step);
+      ev("step.end", t + 301, { status: "failed" }, step);
+    } else {
+      const press = t + 520;
+      const input = typing ? { kind: "type", chars: 11, masked: false } : { kind: "click", button: "left", count: 1, at: to };
+      ev("action.dispatch", press + 2, { input, pressT: msToMicros(press), ringAt: msToMicros(press + 23), injector: "xtest" }, step);
+      if (typing) for (let c = 1; c <= 11; c++) ev("text.progress", press + c * 35, { count: c, chunk: "hello world"[c - 1], masked: false }, step);
+      ev("screen.settle", press + 300, { frameT: msToMicros(press + 30), changed: [], noVisibleChange: false }, step);
+      ev("observe", press + 330, { frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", width: 1280, height: 800 }, step);
+      ev("action.result", press + 340, { ok: true }, step);
+      ev("step.end", press + 341, { status: "ok" }, step);
+    }
+    from = to;
+    t += 450 + Math.floor(rnd() * 100);
+    if (n % 50 === 49) {
+      ev("agent.state", t, { state: "thinking" });
+      t += 5000;
+    }
+  }
+  ev("session.end", t, { reason: "done" });
+  return out;
+}
+
+describe("a 2-hour session (Review Focus 4, the stage)", () => {
+  const log = twoHourLog();
+
+  it("folds in under 2 s and indexes every action", () => {
+    const started = performance.now();
+    const model = foldEvents(emptyModel(), log);
+    expect(performance.now() - started).toBeLessThan(2000);
+    expect(log.length).toBeGreaterThan(100_000);
+    expect(model.actions.length).toBeGreaterThan(11_000);
+    for (const t of [0, 99, 100, 101, 3_600_000, 7_300_000]) {
+      expect(startedCount(model, t)).toBe(model.actions.filter((a) => a.intentT <= t).length);
+    }
+  });
+
+  it("a 2-hour session scene costs under 0.2 ms and equals the unbounded scene", () => {
+    const model = foldEvents(emptyModel(), log);
+    const end = model.ended?.t ?? 0;
+    const view = { reducedMotion: false };
+    let seed = 11;
+    const times = Array.from({ length: 10_000 }, () => {
+      seed = (seed * 48_271) % 2_147_483_647;
+      return (seed / 2_147_483_647) * end;
+    });
+    const started = performance.now();
+    for (const t of times) sceneAt(model, t, view);
+    expect((performance.now() - started) / times.length).toBeLessThan(0.2);
+    for (const t of times.slice(0, 2000)) {
+      expect(sceneAt(model, t, view)).toEqual(sceneAt(model, t, view, { ringLookback: Number.POSITIVE_INFINITY }));
+    }
+  });
+});
+```
+
+**Implementation notes:**
+- `startedCount` relies on `intentT` being sorted. It is: actions are pushed in log order, and
+  `EventLog.append` stamps `t = max(lastT, now)`, so `t` never decreases within a session.
+  `stepAt` and `observeAt` rely on the same property.
+- `sceneAt` takes `n = startedCount(model, t)` and `current = model.actions[n − 1]`, in place of
+  the `filter`.
+  - `cursorAt` scans back from `n − 1` for the first action with a position: the current action's
+    plan position, else `restingPoint`. That is the forward loop's "last defined wins", read
+    backwards.
+  - `ringsAt` looks at most `ringLookback` actions back. Actions go through the gateway one after
+    another. A ring lasts at most `RING_FADE_MS + 2 × DOUBLE_CLICK_GAP_MS = 480 ms` after
+    `ringAt`, while the next intent comes after the previous result, which itself waits at least
+    `SETTLE_QUIET_MS` after the press. So eight actions back is far beyond any visible ring. The pin
+    compares against `Infinity` on 2 000 random times.
+  - `cancelAt` takes the action before the current one, `model.actions[n − 2]`, in place of
+    `started.at(-2)`. Guard the case where it is `undefined`: Part 3's code would throw for a
+    first action cancelled without a plan.
+- `foldEvents`' `current(model, step)` reads `byStep` and falls back to the last action. `byStep`
+  is set on each `action.intent` that has a step.
+- Marks come from the `default:` branch of `foldEvents`' switch, so a type Part 3 already handles
+  never becomes a mark. Add explicit `case`s for `observe`, `step.start`, `step.end`, `plan.set`
+  and `plan.update`. Part 3 Task 15's `observe` case keeps setting `frames`.
+- The model stays plain data plus Maps, with no class instances, so it posts to the worker
+  unchanged (structured clone copies Maps).
+
+- [ ] **Step 1:** Write `marks.test.ts`, the new `model.test.ts` case and `long-session.test.ts`.
+  Run `pnpm exec vitest run packages/stage`.
+  Expected: FAIL. `markOf`, `startedCount` and the new fields do not exist.
+- [ ] **Step 2:** Implement as above. Run `pnpm exec vitest run packages/stage`.
+  Expected: PASS, including every Part 3 stage test, unchanged.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add packages/stage
+git commit -m "feat(stage): replay model with steps, observes, plans, typed marks and a scene index"
+```
+
+**Acceptance:** `pnpm exec vitest run packages/stage` passes, and the pin's measured per-scene
+cost is printed in the task report. On the planning machine it was 0.99 ms before this task, and
+under 0.01 ms after.
+
+---
+
+### Task 6: Stage — replay time: busy spans, the playback map, the replay clock, chapters and ticks
+
+Pure functions shared by the render worker, the replay UI and the export worker. With them, the
+three agree on what "skip idle" and "8×" mean.
+
+**Review tier:** light (pure math).
+
+**Files:**
+- Create: `packages/stage/src/replay/{playback-map.ts,clock.ts,busy.ts,timeline.ts,index.ts}` and
+  `packages/stage/src/replay/{playback-map.test.ts,busy.test.ts,timeline.test.ts}`
+- Modify: `packages/stage/src/index.ts` (`export * from "./replay/index.ts";`)
+
+**Interfaces** (exact):
+
+```ts
+// packages/stage/src/replay/busy.ts
+export const ACTIVITY_TAIL_MS = 100;  // video keeps a span busy this long after its last frame
+export const MARK_SHOW_MS = 1200;     // a mark's chip
+export const STEP_EDGE_MS = 600;      // a step's start and end
+export const START_SHOW_MS = 1000;    // the session's first second
+export function busySpans(model: SessionModel, activity: ActivitySpan[], endMs: number): Span[];
+
+// packages/stage/src/replay/timeline.ts
+export type ChapterStatus = "doing" | "ok" | "failed" | "blocked" | "cancelled";
+export interface Chapter { id: string; label: string; startT: number; endT: number; status: ChapterStatus }
+export type TickKind = "click" | "type" | "key" | "scroll" | "drag" | "wait" | "cancel" | MarkKind;
+export interface Tick { t: number; kind: TickKind; label: string; tone: MarkTone; step?: string }
+export const STEP_KIND_LABEL: Record<string, string>;  // gui "Working on screen", shell "Shell", file "Files", browser "Reading page", ask "Asking you", think "Thinking"
+export function chapters(model: SessionModel, endMs: number): Chapter[];
+export function ticks(model: SessionModel): Tick[];
+export function stepBounds(model: SessionModel, stepId: string): { startT: number; endT: number } | undefined;
+```
+
+`playback-map.ts` and `clock.ts`, complete (closed-form math; verified):
+
+```ts
+// packages/stage/src/replay/playback-map.ts
+// Replay time: session ms ↔ playback ms. Busy stretches play at real time; a quiet stretch of at
+// least IDLE_MIN_MS is compressed to IDLE_KEEP_MS when idle is skipped (research §4.9: real
+// timestamps with gap compression). Speed is applied separately, by the replay clock.
+
+export const IDLE_MIN_MS = 1500;
+export const IDLE_KEEP_MS = 400;
+
+export interface Span {
+  from: number;
+  to: number;
+}
+
+export interface PlaybackSegment {
+  s0: number;
+  s1: number;
+  p0: number;
+  p1: number;
+  idle: boolean;
+}
+
+export interface PlaybackMap {
+  startMs: number;
+  endMs: number;
+  skipIdle: boolean;
+  segments: PlaybackSegment[];
+}
+
+// Sorted, clipped to [lo, hi], overlapping or touching spans merged; empty spans dropped.
+export function mergeSpans(spans: Span[], lo: number, hi: number): Span[] {
+  const clipped = spans
+    .map((s) => ({ from: Math.max(lo, s.from), to: Math.min(hi, s.to) }))
+    .filter((s) => s.to > s.from)
+    .sort((a, b) => a.from - b.from);
+  const out: Span[] = [];
+  for (const s of clipped) {
+    const last = out.at(-1);
+    if (last && s.from <= last.to) last.to = Math.max(last.to, s.to);
+    else out.push({ ...s });
+  }
+  return out;
+}
+
+export function buildPlaybackMap(startMs: number, endMs: number, busy: Span[], skipIdle: boolean): PlaybackMap {
+  if (!(Number.isFinite(startMs) && Number.isFinite(endMs)) || endMs < startMs) {
+    throw new RangeError("a playback map needs finite start ≤ end");
+  }
+  const segments: PlaybackSegment[] = [];
+  let p = 0;
+  const push = (s0: number, s1: number, idle: boolean) => {
+    if (s1 <= s0) return;
+    const len = idle && skipIdle ? IDLE_KEEP_MS : s1 - s0;
+    segments.push({ s0, s1, p0: p, p1: p + len, idle: idle && skipIdle });
+    p += len;
+  };
+  let at = startMs;
+  for (const b of mergeSpans(busy, startMs, endMs)) {
+    push(at, b.from, b.from - at >= IDLE_MIN_MS);
+    push(b.from, b.to, false);
+    at = b.to;
+  }
+  push(at, endMs, endMs - at >= IDLE_MIN_MS);
+  return { startMs, endMs, skipIdle, segments };
+}
+
+export function playDuration(map: PlaybackMap): number {
+  return map.segments.at(-1)?.p1 ?? 0;
+}
+
+// Last segment whose start is ≤ v under `key`; segments are contiguous in both clocks.
+function find(map: PlaybackMap, v: number, k0: "p0" | "s0"): PlaybackSegment | undefined {
+  const segs = map.segments;
+  let lo = 0;
+  let hi = segs.length - 1;
+  let best: PlaybackSegment | undefined = segs[0];
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    const s = segs[mid] as PlaybackSegment;
+    if (s[k0] <= v) {
+      best = s;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return best;
+}
+
+export function sessionAt(map: PlaybackMap, playMs: number): number {
+  const seg = find(map, playMs, "p0");
+  if (!seg) return map.startMs;
+  const u = Math.min(1, Math.max(0, (playMs - seg.p0) / (seg.p1 - seg.p0)));
+  return seg.s0 + u * (seg.s1 - seg.s0);
+}
+
+export function playAt(map: PlaybackMap, sessionMs: number): number {
+  const seg = find(map, sessionMs, "s0");
+  if (!seg) return 0;
+  const u = Math.min(1, Math.max(0, (sessionMs - seg.s0) / (seg.s1 - seg.s0)));
+  return seg.p0 + u * (seg.p1 - seg.p0);
+}
+
+export function idleAt(map: PlaybackMap, sessionMs: number): boolean {
+  const seg = find(map, sessionMs, "s0");
+  return seg !== undefined && seg.idle && sessionMs < seg.s1;
+}
+```
+
+```ts
+// packages/stage/src/replay/clock.ts
+export const REPLAY_SPEEDS = [0.5, 1, 2, 4, 8] as const;
+export type ReplaySpeed = (typeof REPLAY_SPEEDS)[number];
+
+// The replay clock is closed-form: playback ms = anchor + elapsed wall ms × speed while playing.
+export interface ReplayClock {
+  playing: boolean;
+  speed: ReplaySpeed;
+  anchorWallMs: number;
+  anchorPlayMs: number;
+}
+
+export function playMsAt(c: ReplayClock, wallMs: number): number {
+  return c.playing ? c.anchorPlayMs + (wallMs - c.anchorWallMs) * c.speed : c.anchorPlayMs;
+}
+
+// Re-anchors at the current position, so a speed change or a pause never jumps.
+export function retime(c: ReplayClock, wallMs: number, patch: Partial<Pick<ReplayClock, "playing" | "speed" | "anchorPlayMs">>): ReplayClock {
+  const at = patch.anchorPlayMs ?? playMsAt(c, wallMs);
+  return { playing: patch.playing ?? c.playing, speed: patch.speed ?? c.speed, anchorWallMs: wallMs, anchorPlayMs: at };
+}
+```
+
+**Tests:**
+- `playback-map.test.ts` (verified):
+  - `"plays at real time when idle is not skipped"`: busy `[1000, 2000]` in `[0, 10 000]` without
+    skipping. The duration is 10 000, and `sessionAt(playAt(t)) = t` at 0, 999, 1500, 9999 and
+    10 000.
+  - `"compresses a quiet stretch of 1.5 s or more to 400 ms and keeps shorter ones"`: busy
+    `[0,1000]`, `[2000,3000]`, `[13000,14000]` in `[0, 20 000]`. The duration is
+    `3000 + 400 + 1000 + 400`, `playAt(13 000) = 3400`, `sessionAt(3200) = 8000`,
+    `idleAt(8000)` is true, and `idleAt(1500)` and `idleAt(13 000)` are false.
+  - `"is monotonic and round-trips inside busy stretches"`: 200 irregular busy spans. `sessionAt`
+    never decreases over playback time in 37 ms steps, and round-trips 1 ms into each busy span.
+  - `"refuses a reversed range"`: `RangeError`.
+  - `"advances by wall time × speed and never jumps on a speed change or pause"`: the clock's
+    `retime` cases.
+- `busy.test.ts` (verified):
+  - `"keeps an action busy from its intent to its target hold after the result, and thinking
+    idle"`. Input: a click intent at 10 000, its result at 11 000, `thinking` at 11 500, a
+    `control.change` to the user at 40 000, the end at 60 000, and activity
+    `[10.6 s, 10.9 s]` in µs. Expected busy spans: `[0,1000]`,
+    `[10 000, 11 000 + TARGET_HOLD_MS + TARGET_FADE_MS]` and `[40 000, 41 200]`. The map is
+    idle at 20 000 and not at 10 500.
+  - `"keeps a typing burst busy through its last progress line"`: a type action whose result
+    comes 3 s after its intent is one busy span.
+  - `"treats an action with no result as busy until the session ends"`: no result and no cancel.
+    The span runs to `ended.t + TARGET_HOLD_MS + TARGET_FADE_MS`, clipped to the end.
+- `timeline.test.ts`:
+  - `"makes one chapter per step, labelled by its last action"`: two steps. Labels `Click A` and
+    `Type "B2"`. Statuses `ok` and `doing`; the open step ends at `endMs`.
+  - `"labels a step without actions by its kind"`: a `shell` step gives `Shell`.
+  - `"ticks each dispatch by its input kind, each cancel as a failure, and each mark"`: a click, a
+    type, a key, a cancel (`tone: "failure"`) and an `approval.request` mark. Ticks are sorted by
+    `t`, and an action without a dispatch ticks at its `intentT`.
+  - `"bounds a step by its start and end, or the next step's start"`: `stepBounds`.
+
+**Implementation notes:**
+- `busySpans` (verified rules): `START_SHOW_MS` from the session start. Each activity span becomes
+  `[from µs → ms, to µs → ms + ACTIVITY_TAIL_MS]` (through `microsToMs`). Each action covers
+  `[intentT, (cancel.t ?? resultT ?? ended.t ?? intentT + SETTLE_CAP_MS) + TARGET_HOLD_MS + TARGET_FADE_MS]`.
+  Each mark covers `[t, t + MARK_SHOW_MS]`, and each step start and end `[t, t + STEP_EDGE_MS]`.
+  The result is `mergeSpans(…, startT, endMs)`. Thinking without video is idle **on purpose**, and
+  the HUD says "idle skipped" there (Task 14).
+- `chapters`: one per `model.steps` entry. The label is the label of the step's latest action
+  (`byStep`), else the plan item's text (`planAt` at `startT`), else `STEP_KIND_LABEL[kind]`.
+  `endT` is the step's `endT`, else the next step's `startT`, else `endMs`. Steps never overlap in
+  M2's runner; if a later runner overlaps them, the chapter ends at the next step's start.
+- `ticks`: each action gives one tick at `dispatch.t ?? intentT`, kind `dispatch.input.kind` (or
+  the intent's `verb`), and a `cancel` tick (tone `failure`) at `cancel.t`. Each mark becomes a tick
+  with its own kind, label and tone. Sort by `t`, then `seq`. A 2-hour session gives about 14 000
+  ticks. The scrubber buckets them by pixel (Task 14), never renders them one by one.
+- No function here reads a clock. The replay clock gets its wall time passed in.
+
+- [ ] **Step 1:** Write the three test files. Run `pnpm exec vitest run packages/stage/src/replay`.
+  Expected: FAIL (modules missing).
+- [ ] **Step 2:** Add `playback-map.ts` and `clock.ts` as above, and implement `busy.ts` and
+  `timeline.ts`. Run the same command.
+  Expected: PASS.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add packages/stage
+git commit -m "feat(stage): replay time with skip idle, a closed-form replay clock, chapters and ticks"
+```
+
+**Acceptance:** `pnpm exec vitest run packages/stage` passes.
+
+---
