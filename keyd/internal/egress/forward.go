@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shadowhusky/localdot/keyd/internal/audit"
@@ -118,7 +119,7 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 	var once sync.Once
 	finish := func(l audit.Line) {
 		once.Do(func() {
-			l.BytesIn, l.DurationMs = in.n, msSince(start)
+			l.BytesIn, l.DurationMs = in.n.Load(), msSince(start)
 			c.record(l)
 		})
 	}
@@ -330,14 +331,16 @@ func msSince(t time.Time) float64 {
 	return float64(time.Since(t).Microseconds()) / 1000
 }
 
+// counter counts the request body. The transport reads it on its own goroutine, which may still be
+// sending when the response is in and the audit line written, so the count is atomic.
 type counter struct {
 	io.ReadCloser
-	n int64
+	n atomic.Int64
 }
 
 func (c *counter) Read(p []byte) (int, error) {
 	n, err := c.ReadCloser.Read(p)
-	c.n += int64(n)
+	c.n.Add(int64(n))
 	return n, err
 }
 

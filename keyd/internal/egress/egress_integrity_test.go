@@ -703,3 +703,72 @@ func TestCloseEndsPooledUpstreamConnections(t *testing.T) {
 		t.Fatal("a pooled upstream connection outlived Close")
 	}
 }
+
+// The transport counts the request body on its own goroutine while the audit line may be written
+// first: when the upstream answers before the body has gone, with a 204 or an early answer to a
+// streaming POST. -race must stay quiet.
+func TestAnEarlyAnswerDoesNotRaceTheRequestBodyCount(t *testing.T) {
+	w := newWorld(t)
+	// The upstream answers as soon as it has read the request head, then drains the body.
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				req, err := http.ReadRequest(bufio.NewReader(conn))
+				if err != nil {
+					return
+				}
+				if req.URL.Path == "/204" {
+					io.WriteString(conn, "HTTP/1.1 204 No Content\r\n\r\n")
+				} else {
+					io.WriteString(conn, "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nearly")
+				}
+				io.Copy(io.Discard, req.Body)
+			}()
+		}
+	}()
+	w.publish("early.example.test", "80", ln.Addr().String(), true)
+	c := w.cell("c1", policy.Desktop)
+	client := w.client(c)
+	answered := 0
+	for i := range 20 {
+		pr, pw := io.Pipe()
+		// The body streams until the answer is in, past the transport's 50 ms wait for the write.
+		go func() {
+			chunk := bytes.Repeat([]byte("x"), 32<<10)
+			for {
+				if _, err := pw.Write(chunk); err != nil {
+					return
+				}
+				time.Sleep(time.Millisecond)
+			}
+		}()
+		path := "/204"
+		if i%2 == 1 {
+			path = "/early"
+		}
+		req, _ := http.NewRequest(http.MethodPost, "http://early.example.test"+path, pr)
+		resp, err := client.Do(req)
+		if err == nil {
+			io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusNoContent || resp.StatusCode == http.StatusOK {
+				answered++
+			}
+		}
+		pw.CloseWithError(errors.New("done"))
+	}
+	if answered == 0 {
+		t.Fatal("no request was answered")
+	}
+	w.waitLine(func(l audit.Line) bool { return l.Host == "early.example.test" && l.Status == http.StatusNoContent })
+}
