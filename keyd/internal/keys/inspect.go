@@ -11,6 +11,7 @@ import (
 	"strings"
 	"unicode"
 
+	"github.com/shadowhusky/localdot/keyd/internal/policy"
 	"github.com/shadowhusky/localdot/keyd/internal/surrogate"
 )
 
@@ -46,7 +47,8 @@ type occurrence struct {
 // Inspect finds every surrogate-shaped token in the request line, its host, user information and
 // opaque form included, and the headers. Each must be a surrogate of this cell, bound to this
 // destination, appear exactly once, and sit exactly in its bound header in its bound format;
-// otherwise the request is refused.
+// otherwise the request is refused. An absolute-form target must also name d.Host, as the policy
+// writes it: the limits are d's, so a request bound elsewhere is refused, with or without a surrogate.
 func (r *Registry) Inspect(d Dest, method string, u *url.URL, h http.Header) Verdict {
 	occ := scan(u, h)
 	var v Verdict
@@ -69,13 +71,29 @@ func (r *Registry) Inspect(d Dest, method string, u *url.URL, h http.Header) Ver
 			v.SecretID, v.SurrogateID = e.Binding.SecretID, e.ID
 		}
 	}
+	if !targets(u, d) {
+		reason := ReasonSurrogatePolicy
+		if len(v.Swaps) > 0 {
+			reason = ReasonMisplacedSurrogate
+		}
+		return Verdict{Reason: reason, SecretID: v.SecretID, SurrogateID: v.SurrogateID}
+	}
 	v.Allow = true
 	return v
 }
 
+// targets reports whether u, if it names a host, names d's once the policy has normalised it.
+func targets(u *url.URL, d Dest) bool {
+	if u.Host == "" {
+		return true
+	}
+	t, reason := policy.ParseHostPort(u.Host, 443)
+	return reason == "" && t.Host == d.Host
+}
+
 // permitted applies an HTTP binding's method and path limits. A limited binding matches only a path
 // every server reads the same way: decoded, clean (one trailing slash allowed), printable ASCII,
-// without ;, ?, # or a backslash, with no segment that starts with two dots, and with no encoded
+// without ;, ?, #, a space or a backslash, with no segment that starts with two dots, and with no encoded
 // dot, slash, backslash, percent or NUL in the raw path, as sent or as re-escaped. A method limit
 // also refuses the headers and the _method parameter that make a server treat a request as another
 // method.
@@ -97,7 +115,7 @@ func unambiguousPath(u *url.URL) bool {
 		return false
 	}
 	p := u.Path
-	if !strings.HasPrefix(p, "/") || !printable(p) || strings.ContainsAny(p, `;\?#`) || strings.Contains(p, "/..") {
+	if !strings.HasPrefix(p, "/") || !printable(p) || strings.ContainsAny(p, `;\?# `) || strings.Contains(p, "/..") {
 		return false
 	}
 	clean := path.Clean(p)

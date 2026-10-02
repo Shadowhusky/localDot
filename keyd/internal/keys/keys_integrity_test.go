@@ -1190,3 +1190,43 @@ func TestBasicHalvesAreSwappedFromTheOriginalHeader(t *testing.T) {
 		t.Errorf("a password swap under a free user half: %q, want %q", got, want)
 	}
 }
+
+func TestTheURLHostIsTheDestination(t *testing.T) {
+	f := newFixture(t)
+	bearer := hdr("Authorization", "Bearer "+f.bearer.Token)
+	d := https(integrityHost)
+	for _, target := range []string{"https://evil.example.test/v1/x", "http://evil.example.test/", "https://x.api.example.test/", "https://api.example.test.evil.test/", "https://127.0.0.1/", "https://[::1]/", "https://api.example.test:0443/", "https://api.example.test:99999/", "https://api.example.test%2e/"} {
+		u, err := url.Parse(target)
+		if err != nil {
+			continue
+		}
+		wantDeny(t, "a surrogate sent to "+target, f.r.Inspect(d, "GET", u, bearer.Clone()), ReasonMisplacedSurrogate)
+		if v := f.r.Inspect(d, "GET", u, http.Header{}); v.Allow || v.Reason != ReasonSurrogatePolicy {
+			t.Errorf("a request without a surrogate sent to %s: %+v, want deny %s", target, v, ReasonSurrogatePolicy)
+		}
+	}
+	for _, target := range []string{"https://api.example.test/v1/x", "https://API.Example.TEST/", "https://api.example.test./", "https://api.example.test:443/", "http://api.example.test/", "/v1/x", "*"} {
+		wantAllow(t, "a surrogate sent to "+target, at(t, f.r, d, "GET", target, bearer.Clone()), 1)
+	}
+	llm := hdr("X-Api-Key", f.llm.Token)
+	gw := Dest{Cell: "c1", Scheme: "gateway", Route: "anthropic"}
+	wantAllow(t, "an origin-form gateway request", at(t, f.r, gw, "POST", "/anthropic/messages", llm), 1)
+	// A gateway destination names no host, so no host, however unparsable, matches it.
+	for _, target := range []string{"https://api.anthropic.com/v1/messages", "https://127.0.0.1/anthropic/messages", "https://[::1]/anthropic/messages", "https://api.anthropic.com:0/anthropic/messages"} {
+		wantDeny(t, "an absolute-form gateway request to "+target, at(t, f.r, gw, "POST", target, llm), ReasonMisplacedSurrogate)
+	}
+}
+
+func TestALimitedPathRefusesSpaces(t *testing.T) {
+	r := NewRegistry()
+	tok := mint(t, r, "c1", binding(t, vault.Record{ID: "ro", Kind: vault.KindHTTP, Hosts: []string{"ro.example.test"}, Header: "Authorization", Format: "bearer", Paths: []string{"/v1/"}}))
+	free := mint(t, r, "c1", binding(t, vault.Record{ID: "free", Kind: vault.KindHTTP, Hosts: []string{"ro.example.test"}, Header: "X-Free-Key", Format: "raw"}))
+	d := https("ro.example.test")
+	for _, target := range []string{"/v1/%20../admin", "/v1/%20..", "/v1/a%20b", "/v1/%20", "/v1/x%20/", "/v1/%20x", "/v1/x/%20%20/y"} {
+		wantDeny(t, fmt.Sprintf("limited path %q", target), at(t, r, d, "GET", target, hdr("Authorization", "Bearer "+tok)), ReasonSurrogatePolicy)
+		wantAllow(t, fmt.Sprintf("unlimited path %q", target), at(t, r, d, "GET", target, hdr("X-Free-Key", free)), 1)
+	}
+	if u, err := url.Parse("/v1/a b"); err == nil {
+		wantDeny(t, "a limited path with a raw space", r.Inspect(d, "GET", u, hdr("Authorization", "Bearer "+tok)), ReasonSurrogatePolicy)
+	}
+}
