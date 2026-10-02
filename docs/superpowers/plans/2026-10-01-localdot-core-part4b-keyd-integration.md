@@ -22,11 +22,12 @@ which relays to keyd. So every program, Chromium included, uses one credential-f
 no token, CA or surrogate ever sits in the container's environment. `desktopd`'s `GET /selftest`
 proves there is no route, no DNS, no IPv6, no host, no LAN and no reachable gateway address, and
 that the gate answers with the cell's own keyd, which wants its token. It also proves the CA is
-installed, for TLS server auth only. The orchestrator marks a cell ready only when every one of the
+installed as a plain anchor every runtime reads, and in Chromium's NSS database; the certificate
+itself limits it to TLS server auth for the cell's bound hosts. The orchestrator marks a cell ready only when every one of the
 eleven checks passes, and stops it at once on an isolation failure. The key form seals each key
 with WebCrypto to keyd's per-boot key. The daemon relays only `{ binding, sealed }`. Stop aborts the
 session, revokes the cell in keyd and then pauses the desktop container; a desktop that cannot be
-paused loses its keyd listener instead. Resuming revokes again, thaws the desktop and hands out
+paused loses its keyd listener at once and is then stopped. Resuming revokes again, thaws the desktop and hands out
 fresh surrogates.
 
 **Tech Stack:** Everything Parts 2–4a pinned: host Node 25.6 (cells Node 24.21.0), pnpm 10.29.3,
@@ -168,8 +169,9 @@ the tests named after it.
      and keyd keeps asking, at once when the network changes.
 4. **Stop leaving a surrogate usable or a process running.**
    - Task 10: revoke comes before pause, the pause happens even with keyd down, and a desktop that
-     cannot be paused loses its keyd listener. A frozen cell stays frozen across a daemon restart, a
-     keyd restart and a gate restart. Resume revokes again before it mints, and keeps the computer
+     cannot be paused loses its keyd listener and is stopped, so no crash restart, keyd restart or
+     daemon restart reopens it. A frozen cell stays frozen across a daemon restart, a keyd restart
+     and a gate restart. Resume revokes again before it mints, and keeps the computer
      frozen while keyd is offline.
    - Task 15: while frozen, keyd sees no request at all. After resume, the old surrogate gets 403
      and a new shell's works.
@@ -5213,20 +5215,21 @@ A desktop cell gets its keyd material in two parts.
   environment, and none of them is a secret.
 
 The image wires them in as follows.
-- **The CA, for TLS server auth only** (Part 4a's carry C3). An s6 oneshot, `init-localdot-cell`,
-  runs before the desktop session. It installs `ca.pem` into the system store
-  (`update-ca-certificates`) as an OpenSSL `TRUSTED CERTIFICATE` whose trust settings name
-  serverAuth alone (`openssl x509 -addtrust serverAuth`): OpenSSL trusts a plain anchor for every
-  purpose, and its code-signing purpose ignores the CA's own serverAuth-only key usage. It installs
-  it into the desktop user's NSS database with trust `C,,` (TLS only): Chromium trusts a
-  name-constrained CA only through NSS (S4). Every old `localdot-cell` entry goes first, and a start
-  without the file removes the CA. Trust never outlives the cell's listener.
-  - OpenSSL's clients (curl, Python, apt) read the trusted form. Node reads `ca.pem` itself through
-    `NODE_EXTRA_CA_CERTS`, for TLS only.
-  - GnuTLS ignores a `TRUSTED CERTIFICATE`, so its clients (git's HTTPS transport, GLib
-    programs) do not trust the cell's CA at all. They still reach every host keyd passes through,
-    but a host bound to a key (which keyd intercepts) fails their certificate check: closed, never
-    open (recorded under "Not in Part 4b").
+- **The CA, as a plain trust anchor** (Part 4a's carry C3, controller ruling P4b-C4). What the CA
+  may vouch for lives in the certificate itself: keyd's cell CA carries `ExtKeyUsage: serverAuth`,
+  critical permitted DNS names (the hosts keyd intercepts for this cell), excluded subdomains of
+  them and every IP address excluded (`keyd/internal/cellca/cellca.go`, the template's lines
+  78–86 at `feat/core-part4a` `70a534e`). Its key never leaves keyd's memory, and keyd only ever
+  mints server leaves. An s6 oneshot, `init-localdot-cell`, runs before the desktop session. It
+  installs `ca.pem` into the system bundle as a plain `CERTIFICATE` (`update-ca-certificates`), the
+  one form every client reads: OpenSSL (curl, Python, apt), GnuTLS (git's HTTPS, GLib), Go
+  (`gh`), rustls and Java's keystore hook. It installs it into the desktop user's NSS database with
+  trust `C,,`: Chromium trusts a name-constrained CA only through NSS (S4). Every old
+  `localdot-cell` entry goes first, and a start without the file removes the CA. Trust never
+  outlives the cell's listener. Node reads `ca.pem` itself through `NODE_EXTRA_CA_CERTS`.
+  - No per-store purpose flag is used. Fix pass 1 installed OpenSSL's `TRUSTED CERTIFICATE` form
+    (`-addtrust serverAuth`), which Go, rustls, GnuTLS and Java skip, so those tools could not
+    use a key bound to a host (review 2, Minor 6). The cost of a plain anchor is recorded in R30.
 - **The forwarder.** It runs as `svc-forwarder`.
 - **The surrogates.** Login and interactive shells source `surrogates.sh` through
   `/etc/profile.d/localdot-cell.sh` and `/etc/bash.bashrc`.
@@ -5258,8 +5261,8 @@ otherwise try to use the forwarder.
   - in the image:
     - the folder `/etc/localdot/cell` (root, 755);
     - the services `init-localdot-cell` (oneshot) and `svc-forwarder` (longrun, user `abc`);
-    - the system copy of the CA, `/usr/local/share/ca-certificates/localdot-cell.crt`, as a
-      `TRUSTED CERTIFICATE` for serverAuth only, in `/etc/ssl/certs/ca-certificates.crt`;
+    - the system copy of the CA, `/usr/local/share/ca-certificates/localdot-cell.crt`, a plain
+      `CERTIFICATE`, and so a plain anchor in `/etc/ssl/certs/ca-certificates.crt`;
     - `/etc/profile.d/localdot-cell.sh`, `/etc/sudoers.d/localdot-proxy` and
       `/etc/apt/apt.conf.d/95localdot-proxy`;
     - the NSS nickname `localdot-cell`.
@@ -5297,8 +5300,9 @@ expected list, rename it, and add the no-secret check at its end:
 
 `apps/daemon/src/cells/desktop-keyd-files.docker.test.ts`:
 ```ts
+import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -5332,31 +5336,95 @@ function probeAs(user: string, status: number, ...cmd: string[]): string {
 
 const pemBody = (pem: string) => pem.replace(/-----[^-]+-----|\s/g, "");
 
-// How the system bundle holds a CA (argv[1]): "<plain> <server>", the count of plain anchors, which
-// OpenSSL trusts for every purpose, and of trusted certificates for TLS server auth only.
+// How the system bundle holds a CA (argv[1]): "<plain> <trusted>", the count of plain anchors (the
+// form every client reads) and of TRUSTED CERTIFICATE copies, which only OpenSSL reads.
 const ANCHORS_PY = `
 import base64, re, sys
 der = lambda body: base64.b64decode(re.sub(r"\\s+", "", body))
 blocks = re.findall(r"-----BEGIN ([A-Z ]+)-----([^-]*)-----END \\1-----", open("/etc/ssl/certs/ca-certificates.crt").read())
 ca = der(re.search(r"-----BEGIN CERTIFICATE-----([^-]*)-----END CERTIFICATE-----", sys.argv[1]).group(1))
 plain = sum(1 for label, body in blocks if label == "CERTIFICATE" and der(body) == ca)
-server = sum(1 for label, body in blocks if label == "TRUSTED CERTIFICATE" and der(body) == ca + bytes.fromhex("300c300a06082b06010505070301"))
-print(plain, server)
+trusted = sum(1 for label, body in blocks if label == "TRUSTED CERTIFICATE" and der(body).startswith(ca))
+print(plain, trusted)
 `;
 
-// A CA with its key, and a TLS server leaf and a code-signing leaf it signs, minted in the cell.
+// A CA with keyd's cell CA profile (keyd/internal/cellca/cellca.go: serverAuth only, the bound host
+// permitted, its subdomains and every IP address excluded), and server leaves it signs for the bound
+// host, for another host and for a subdomain of the bound one, minted in the cell.
+const BOUND = "bound.localdot.test";
 const MINT_SH = `
 set -e
 d=/root/localdot-test-ca; rm -rf "$d"; mkdir -p "$d"; cd "$d"
-openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout ca.key -out ca.pem -days 1 -subj /CN=localdot-test-ca -addext basicConstraints=critical,CA:TRUE,pathlen:0 -addext keyUsage=critical,keyCertSign -addext extendedKeyUsage=serverAuth 2>/dev/null
-for leaf in server:serverAuth code:codeSigning; do
-  name=\${leaf%%:*}; eku=\${leaf#*:}
-  openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$name.key" -out "$name.csr" -subj /CN=localhost 2>/dev/null
-  printf 'basicConstraints=critical,CA:FALSE\\nkeyUsage=critical,digitalSignature\\nextendedKeyUsage=%s\\nsubjectAltName=DNS:localhost\\n' "$eku" > "$name.ext"
+openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout ca.key -out ca.pem -days 1 -subj /CN=localdot-test-ca -addext basicConstraints=critical,CA:TRUE,pathlen:0 -addext keyUsage=critical,keyCertSign,cRLSign -addext extendedKeyUsage=serverAuth -addext 'nameConstraints=critical,permitted;DNS:${BOUND},excluded;DNS:.${BOUND},excluded;IP:0.0.0.0/0.0.0.0,excluded;IP:::/::' 2>/dev/null
+for host in ${BOUND} other.localdot.test api.${BOUND}; do
+  name=\${host%%.*}
+  openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -keyout "$name.key" -out "$name.csr" -subj "/CN=$host" 2>/dev/null
+  printf 'basicConstraints=critical,CA:FALSE\\nkeyUsage=critical,digitalSignature\\nextendedKeyUsage=serverAuth\\nsubjectAltName=DNS:%s\\n' "$host" > "$name.ext"
   openssl x509 -req -in "$name.csr" -CA ca.pem -CAkey ca.key -CAcreateserial -days 1 -extfile "$name.ext" -out "$name.pem" 2>/dev/null
 done
 cp ca.pem /etc/localdot/cell/ca.pem
+grep -q ' ${BOUND}$' /etc/hosts || echo '127.0.0.1 ${BOUND}' >> /etc/hosts
 `;
+
+// Go's side of the pin: a verifier built on the Mac for the engine's platform and copied in. It
+// checks a leaf for a host against the system's anchors as any Go program in the cell does (on
+// Linux, crypto/x509 reads /etc/ssl/certs/ca-certificates.crt).
+const VERIFY_GO = `package main
+
+import (
+	"crypto/x509"
+	"encoding/pem"
+	"fmt"
+	"os"
+)
+
+func main() {
+	raw, err := os.ReadFile(os.Args[2])
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(2)
+	}
+	block, _ := pem.Decode(raw)
+	if block == nil {
+		fmt.Println("no PEM block")
+		os.Exit(2)
+	}
+	leaf, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(2)
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(2)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{DNSName: os.Args[1], Roots: roots}); err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	fmt.Println("ok")
+}
+`;
+
+function buildGoVerifier(dir: string): string {
+  const src = join(dir, "verify-leaf");
+  mkdirSync(src);
+  writeFileSync(join(src, "go.mod"), "module verifyleaf\n\ngo 1.27\n\ntoolchain go1.27.1\n");
+  writeFileSync(join(src, "main.go"), VERIFY_GO);
+  const bin = join(dir, "verify-leaf.bin");
+  execFileSync(process.env.GO ?? "go", ["build", "-o", bin, "."], {
+    cwd: src,
+    env: {
+      ...process.env,
+      CGO_ENABLED: "0",
+      GOOS: "linux",
+      GOARCH: docker("version", "--format", "{{.Server.Arch}}"),
+    },
+    stdio: ["ignore", "ignore", "inherit"],
+  });
+  return bin;
+}
 
 describe.skipIf(!DOCKER_TESTS)("the desktop image installs what keyd gives a cell", () => {
   const dir = mkdtempSync(join(tmpdir(), "localdot-test-keydfiles-"));
@@ -5437,9 +5505,9 @@ describe.skipIf(!DOCKER_TESTS)("the desktop image installs what keyd gives a cel
 
   it("trusts the cell's CA in the system store and in Chromium's NSS database", () => {
     expect(probe(0, "head", "-n", "1", "/usr/local/share/ca-certificates/localdot-cell.crt")).toBe(
-      "-----BEGIN TRUSTED CERTIFICATE-----\n",
+      "-----BEGIN CERTIFICATE-----\n",
     );
-    expect(anchors(first)).toBe("0 1");
+    expect(anchors(first)).toBe("1 0");
     const listed = probeAs("abc", 0, "certutil", "-d", "sql:/config/.pki/nssdb", "-L");
     expect(listed).toMatch(/^localdot-cell\s+C,,\s*$/m);
     expect(nssCa()).toMatchObject({ status: 0 });
@@ -5490,7 +5558,7 @@ describe.skipIf(!DOCKER_TESTS)("the desktop image installs what keyd gives a cel
     const listed = probeAs("abc", 0, "certutil", "-d", "sql:/config/.pki/nssdb", "-L");
     expect(listed.match(/^localdot-cell\s/gm)).toHaveLength(1);
     expect(pemBody(nssCa().out)).toBe(pemBody(second));
-    expect(anchors(second)).toBe("0 1");
+    expect(anchors(second)).toBe("1 0");
     expect(anchors(first)).toBe("0 0");
 
     probe(0, "rm", "/etc/localdot/cell/ca.pem");
@@ -5502,25 +5570,41 @@ describe.skipIf(!DOCKER_TESTS)("the desktop image installs what keyd gives a cel
     expect(anchors(second)).toBe("0 0");
   }, 240_000);
 
-  it("trusts the cell's CA for TLS server auth only: curl and Python, never code signing", () => {
+  it("trusts the cell's CA as a plain anchor for its bound host only: OpenSSL, Go, curl and Python", () => {
     probe(0, "sh", "-c", MINT_SH);
     restart();
     const ca = "/root/localdot-test-ca";
     const bundle = "/etc/ssl/certs/ca-certificates.crt";
-    expect(
-      probe(0, "openssl", "verify", "-CAfile", bundle, "-purpose", "sslserver", `${ca}/server.pem`),
-    ).toContain("OK");
-    // OpenSSL's code-signing purpose ignores a CA's own key usage; only the trust settings stop it.
-    expect(
-      probe(2, "openssl", "verify", "-CAfile", bundle, "-purpose", "codesign", `${ca}/code.pem`),
-    ).toContain("certificate rejected");
+    const verify = (status: number, leaf: string) =>
+      probe(
+        status,
+        "openssl",
+        "verify",
+        "-CAfile",
+        bundle,
+        "-purpose",
+        "sslserver",
+        `${ca}/${leaf}.pem`,
+      );
+    expect(verify(0, "bound")).toContain("OK");
+    // The restriction is the certificate's own: OpenSSL refuses a leaf for a host it does not name.
+    expect(verify(2, "other")).toContain("permitted subtree violation");
+    expect(verify(2, "api")).toContain("excluded subtree violation");
+    docker("cp", buildGoVerifier(dir), `${NAME}:/usr/local/bin/localdot-test-verify-leaf`);
+    const goVerify = (status: number, host: string, leaf: string) =>
+      probe(status, "/usr/local/bin/localdot-test-verify-leaf", host, `${ca}/${leaf}.pem`);
+    expect(goVerify(0, BOUND, "bound")).toBe("ok\n");
+    expect(goVerify(1, "other.localdot.test", "other")).toContain(
+      "not permitted by any constraint",
+    );
+    expect(goVerify(1, `api.${BOUND}`, "api")).toContain(`excluded by constraint ".${BOUND}"`);
     probe(
       0,
       "sh",
       "-c",
-      `setsid openssl s_server -accept 127.0.0.1:8443 -cert ${ca}/server.pem -key ${ca}/server.key -www -quiet </dev/null >/dev/null 2>&1 & sleep 1`,
+      `setsid openssl s_server -accept 127.0.0.1:8443 -cert ${ca}/bound.pem -key ${ca}/bound.key -www -quiet </dev/null >/dev/null 2>&1 & sleep 1`,
     );
-    const url = "https://localhost:8443/";
+    const url = `https://${BOUND}:8443/`;
     expect(
       probeAs(
         "abc",
@@ -5593,16 +5677,16 @@ export function keydEnv(record: CellRecord): string[] {
 ```bash
 #!/usr/bin/with-contenv bash
 # Installs the cell's CA, which the daemon writes to /etc/localdot/cell/ca.pem before every start,
-# into the system store (OpenSSL's curl, Python and apt; Node through NODE_EXTRA_CA_CERTS) and into
-# abc's NSS database, which Chromium reads. Both trust it for TLS server auth only: the system copy
-# is an OpenSSL TRUSTED CERTIFICATE, since OpenSSL trusts a plain anchor for every purpose, code
-# signing included. A start without the file removes the previous CA.
+# as a plain trust anchor: into the system bundle (OpenSSL, GnuTLS, Go, rustls and Java read it;
+# Node reads ca.pem through NODE_EXTRA_CA_CERTS) and into abc's NSS database, which Chromium reads.
+# What it may vouch for is in the certificate: TLS server auth only, and only the hosts keyd
+# intercepts for this cell (P4b-C4). A start without the file removes the previous CA.
 set -euo pipefail
 cell=/etc/localdot/cell
 installed=/usr/local/share/ca-certificates/localdot-cell.crt
 nssdb=/config/.pki/nssdb
 if [[ -s $cell/ca.pem ]]; then
-  openssl x509 -in "$cell/ca.pem" -addtrust serverAuth -out "$installed"
+  openssl x509 -in "$cell/ca.pem" -out "$installed"
   chmod 0644 "$installed"
 else
   rm -f "$installed"
@@ -5691,14 +5775,17 @@ Expected: PASS, with one more test than before.
 
 Run: `LOCALDOT_DOCKER_TESTS=1 pnpm test:docker apps/daemon/src/cells/desktop-keyd-files.docker.test.ts`
 Expected: PASS, 5 tests in about 30 s:
-- the CA is in the system bundle once, as a `TRUSTED CERTIFICATE` for serverAuth and never as a
-  plain anchor, and in NSS as `localdot-cell C,,`;
+- the CA is in the system bundle once, as a plain anchor (and never in OpenSSL's `TRUSTED
+  CERTIFICATE` form), and in NSS as `localdot-cell C,,`;
 - the forwarder runs as `abc`, on 127.0.0.1:3129 only, and answers 503 `no-gate` without a gate;
 - the surrogates reach login and interactive shells, and sudo and apt keep the proxy;
 - a new CA replaces the old one at the next start, and no CA file means no trust;
-- with a CA the test mints in the cell, `openssl verify` accepts a TLS server leaf it signed and
-  refuses a code-signing leaf (`certificate rejected`, exit 2), and curl and Python trust it for a
-  TLS server on the cell's loopback.
+- with a CA the test mints in the cell with keyd's cell CA profile (serverAuth, the bound host
+  permitted, its subdomains and every IP excluded), OpenSSL and Go (a verifier built for the
+  engine's platform and copied in) accept a leaf for the bound host and refuse leaves for another
+  host and for a subdomain of the bound one (OpenSSL exit 2, `permitted subtree violation` and
+  `excluded subtree violation`; Go exit 1), and curl and Python trust the bound host's leaf on the
+  cell's loopback. The Go build needs the Go toolchain the keyd tests use (`GO` overrides `go`).
 
 Afterwards `docker ps -a --filter name=localdot-test-keydfiles` prints nothing.
 
@@ -5731,7 +5818,7 @@ conclusion fails (fail closed).
 | `keyd-token` | keyd | the gate's relay without the token gets 407: the listener is keyd's, and it wants a token |
 | `keyd` | keyd | the gate with the cell's token answers `http://keyd.ldot/health` with this cell's id |
 | `forwarder` | keyd | the same through the forwarder on 127.0.0.1:3129 |
-| `ca-system` | trust | the system bundle holds the cell's CA as a `TRUSTED CERTIFICATE` for serverAuth only (its DER followed by exactly that trust setting), and nowhere as a plain anchor, which OpenSSL would trust for code signing too |
+| `ca-system` | trust | the system bundle holds the cell's CA as a plain anchor (a `CERTIFICATE` block with its DER), the form OpenSSL, GnuTLS, Go, rustls and Java all read. OpenSSL's `TRUSTED CERTIFICATE` form alone fails: every other client skips it. What the CA may vouch for is in the certificate (P4b-C4, R30) |
 | `ca-nss` | trust | the desktop user's NSS database holds exactly that CA as `localdot-cell` with trust `C,,` |
 
 Results are cached for 2 s and run single-flight, because readiness asks every second.
@@ -5753,7 +5840,7 @@ get ready only with keyd: Task 9 wires keyd into the orchestrator, Task 11 into 
 **Interfaces:**
 - Consumes: Task 2's `SelfTestReport`, `SelfTestCheck`, `SELFTEST_CHECKS`, `SELFTEST_CHECK_IDS`
   and `selfTestPassed`; Task 6's forwarder; Task 7's environment (`LOCALDOT_CELL_ID`,
-  `LOCALDOT_GATE_ADDR`), files and TLS-only system copy of the CA; Part 2's `readiness.ts` as built
+  `LOCALDOT_GATE_ADDR`), files and system copy of the CA (a plain anchor); Part 2's `readiness.ts` as built
   (`MAX_HEALTH_BYTES`, `readCapped`, `isHealth`, `probeStream`).
 - Produces:
   - `runSelfTest(cfg, probes) → Promise<SelfTestReport>`, the `Probes` interface and `nodeProbes()`;
@@ -5788,9 +5875,13 @@ const pem = (label: string, der: Buffer) =>
   `-----BEGIN ${label}-----\n${der.toString("base64")}\n-----END ${label}-----\n`;
 const CA_DER = Buffer.from("the cell's CA, DER-encoded");
 const CA = pem("CERTIFICATE", CA_DER);
-// What `openssl x509 -addtrust serverAuth` writes: the DER, then trust settings for serverAuth only.
-const trusted = (aux = "300c300a06082b06010505070301") =>
-  pem("TRUSTED CERTIFICATE", Buffer.concat([CA_DER, Buffer.from(aux, "hex")]));
+// What `openssl x509 -addtrust serverAuth` writes: the DER, then trust settings for serverAuth
+// only, a form only OpenSSL reads.
+const trusted = () =>
+  pem(
+    "TRUSTED CERTIFICATE",
+    Buffer.concat([CA_DER, Buffer.from("300c300a06082b06010505070301", "hex")]),
+  );
 const OTHER = pem("CERTIFICATE", Buffer.from("another root"));
 const cfg: SelfTestConfig = {
   ...selfTestConfigFromEnv({ LOCALDOT_CELL_ID: CELL, LOCALDOT_GATE_ADDR: "172.24.0.10" }),
@@ -5809,7 +5900,7 @@ function sealedCell(over: Partial<Probes> = {}): Probes {
       "00000000000000000000000000000001 80 00000000000000000000000000000000 00 00000000000000000000000000000000 00000000 00000001 00000000 00200001       lo\n",
     [cfg.tokenFile]: `${TOKEN}\n`,
     [cfg.caFile]: CA,
-    [cfg.systemBundle]: `${OTHER}${trusted()}`,
+    [cfg.systemBundle]: `${OTHER}${CA}`,
   };
   const health = (cell = CELL): ProxyReply => ({
     status: 200,
@@ -5952,17 +6043,13 @@ describe("runSelfTest", () => {
     expect(await failed(without("/proc/net/route"))).toEqual(["route", "gateway"]);
   });
 
-  it("fails unless the system store trusts the cell's CA for TLS server auth only", async () => {
+  it("fails unless the system store holds the cell's CA as a plain anchor, which every client reads", async () => {
     const base = sealedCell();
     const bundle = (text: string) =>
       sealedCell({ readFile: async (p) => (p === cfg.systemBundle ? text : base.readFile(p)) });
-    // A plain copy is an anchor OpenSSL trusts for code signing too, even beside the trusted one.
-    expect(await failed(bundle(`${OTHER}${CA}`))).toEqual(["ca-system"]);
-    expect(await failed(bundle(`${OTHER}${CA}${trusted()}`))).toEqual(["ca-system"]);
-    // Trust settings for code signing (1.3.6.1.5.5.7.3.3) are not TLS server auth.
-    expect(await failed(bundle(`${OTHER}${trusted("300c300a06082b06010505070303")}`))).toEqual([
-      "ca-system",
-    ]);
+    expect(await failed(bundle(`${CA}${OTHER}`))).toEqual([]);
+    // OpenSSL's per-purpose form alone: Go, rustls, GnuTLS and Java skip it, so they trust nothing.
+    expect(await failed(bundle(`${OTHER}${trusted()}`))).toEqual(["ca-system"]);
     expect(await failed(bundle(OTHER))).toEqual(["ca-system"]);
   });
 
@@ -6237,9 +6324,6 @@ const HOST_PORTS = [1234, 11434];
 // engine ignores the mode, Docker Desktop's VM holds it and connects or refuses (trust rule 1).
 const GATEWAY_PORTS = [53, 80];
 const HEALTH_URL = "http://keyd.ldot/health";
-// The trust settings `openssl x509 -addtrust serverAuth` appends to a certificate's DER in a
-// TRUSTED CERTIFICATE: serverAuth and nothing else.
-const SERVER_AUTH_ONLY = Buffer.from("300c300a06082b06010505070301", "hex");
 
 export async function runSelfTest(cfg: SelfTestConfig, probes: Probes): Promise<SelfTestReport> {
   const started = Date.now();
@@ -6418,22 +6502,18 @@ function healthIs(id: string, cfg: SelfTestConfig, reply: ProxyReply | string): 
     : fail(id, "keyd", `keyd answered for cell ${String(body.cell)}, not ${cfg.cellId}`);
 }
 
-// The system store holds the cell's CA as a TRUSTED CERTIFICATE for TLS server auth only, and
-// never as a plain one: OpenSSL trusts a plain anchor for every purpose, code signing included,
-// whatever the CA's own key usage says (Part 4a carry C3).
+// The system store holds the cell's CA as a plain anchor, the one form every client reads
+// (OpenSSL, GnuTLS, Go, rustls and Java's hook). What it may vouch for lives in the certificate:
+// serverAuth only, and only the hosts keyd intercepts for this cell (Part 4a's cellca, P4b-C4).
+// OpenSSL's per-purpose TRUSTED CERTIFICATE form is skipped by every other client.
 async function caInSystemStore(cfg: SelfTestConfig, probes: Probes): Promise<SelfTestCheck> {
   const ca = derOf(await probes.readFile(cfg.caFile));
   if (!ca) return fail("ca-system", "trust", `no cell CA in ${cfg.caFile}`);
   const bundle = await probes.readFile(cfg.systemBundle);
   if (bundle === undefined) return fail("ca-system", "trust", `cannot read ${cfg.systemBundle}`);
-  const blocks = pemBlocks(bundle);
-  if (blocks.some((b) => b.label === "CERTIFICATE" && b.der.equals(ca))) {
-    return fail("ca-system", "trust", "the system store trusts the cell's CA for every purpose");
-  }
-  const serverOnly = Buffer.concat([ca, SERVER_AUTH_ONLY]);
-  return blocks.some((b) => b.label === "TRUSTED CERTIFICATE" && b.der.equals(serverOnly))
-    ? pass("ca-system", "trust", "the system store trusts the cell's CA for TLS server auth only")
-    : fail("ca-system", "trust", `the cell's CA is not in ${cfg.systemBundle} for TLS server auth`);
+  return pemBlocks(bundle).some((b) => b.label === "CERTIFICATE" && b.der.equals(ca))
+    ? pass("ca-system", "trust", "the system store trusts the cell's CA")
+    : fail("ca-system", "trust", `the cell's CA is not a plain anchor in ${cfg.systemBundle}`);
 }
 
 async function caInNss(cfg: SelfTestConfig, probes: Probes): Promise<SelfTestCheck> {
@@ -12313,8 +12393,8 @@ Minor 9):
   was read; what was mapped but unreadable counts for nothing.
 
 **Then Stop.** A loop in the cell calls the bound host every second with the surrogate. The kill
-switch must report `{ revoked: true, paused: true, closed: false }` and Docker must report the
-desktop paused.
+switch must report `{ revoked: true, paused: true, closed: false, stopped: false }` and Docker must
+report the desktop paused.
 keyd must see no request at all for 4 s. After Resume the loop's old surrogate must be refused
 (403) and never succeed again, and a new shell's surrogate must work.
 
@@ -12629,6 +12709,7 @@ describe.skipIf(!DOCKER_TESTS)("the canary never reaches a cell", () => {
       revoked: true,
       paused: true,
       closed: false,
+      stopped: false,
       errors: [],
     });
     expect(docker("inspect", "-f", "{{.State.Paused}}", desktop)).toBe("true");
@@ -12734,8 +12815,8 @@ Add keys with the Theatre's **Keys** button. The page seals each key to keyd's k
 (WebCrypto) and the daemon only relays the sealed copy. A computer never holds a key: its shells get
 stand-ins named `LOCALDOT_KEY_<NAME>`, which work only through keyd and only for the hosts and header
 the key is bound to, and its programs reach the web only through keyd. **Stop** revokes the
-computer's stand-ins and freezes it (a computer that cannot be frozen loses its way to keyd
-instead); **Resume computer** revokes again and thaws it with new ones, and needs keyd running.
+computer's stand-ins and freezes it (a computer that cannot be frozen loses its way to keyd at
+once and is stopped instead); **Resume computer** revokes again and thaws it with new ones, and needs keyd running.
 The Keys sheet and `pnpm --filter @localdot/daemon run doctor` say whether keyd knows this network's
 public address, which it refuses to dial (the hairpin guard).
 
@@ -12813,7 +12894,7 @@ git commit -m "ci(keyd): run the daemon's keyd suites against a real keyd; docum
   with role `desktop` and every `http` key. M4's brain cell opens with role `brain` and its `llm`
   keys, and takes keyd's gateway base URLs (`http://llm.ldot/<route>`, P4a), so it needs no CA.
   M7's signed-in browser cell opens with role `browser` and uses the same three files, NSS install
-  and TLS-server-only system copy of the CA. `refreshRunningCells` gives every running or booting,
+  and plain system anchor of the CA. `refreshRunningCells` gives every running or booting,
   unfrozen computer fresh surrogates. `revoke` of a cell keyd no longer knows revokes nothing.
 - `apps/daemon/src/keyd/monitor.ts` provides `KeydMonitor` and `cameUp`; `KeydHealth.hairpin` is
   never `active` unless keyd says so.
@@ -12827,14 +12908,15 @@ git commit -m "ci(keyd): run the daemon's keyd suites against a real keyd; docum
   `taskId` (not Stop, which ends the task in keyd: Part 4a review 2, N5).
 - `apps/daemon/src/gateway/kill-switch.ts` provides `KillSwitch.stopSession` and `resume`. M5's
   "stop everything" runs them over every cell of the task: brain, desktop and browser. It revokes
-  each, pauses the desktop and browser (closing in keyd any it cannot pause), and aborts the
+  each, pauses the desktop and browser (closing in keyd, then stopping, any it cannot pause), and
+  aborts the
   brain's loop through the session. `resume` revokes before it mints and throws
   `KeydUnavailableError`, the computer still frozen, while keyd is offline. M5's pause
   (`pause.change`) is a different, agent-level pause and does not freeze the cell.
 - Routes:
   - `GET /api/keyd`, `GET` and `POST /api/keys`, `DELETE /api/keys/:id`;
   - `POST /api/cells/:id/resume` (503 while the key layer is offline);
-  - `POST /api/sessions/:id/stop` → 202 `{ revoked, paused, closed, errors }`.
+  - `POST /api/sessions/:id/stop` → 202 `{ revoked, paused, closed, stopped, errors }`.
 
   `withReadyCell` refuses a paused computer with 409.
 - The cell store takes a keyd port range (`new CellStore(home, range)`): the daemon reads it from
@@ -12864,8 +12946,10 @@ git commit -m "ci(keyd): run the daemon's keyd suites against a real keyd; docum
   `ca-nss`. `SELFTEST_CHECKS` in `@localdot/protocol` is the list the daemon requires, each exactly
   once: a new check goes there and into desktopd in one change, and an image without it never gets
   ready.
-- The system copy of the CA is an OpenSSL `TRUSTED CERTIFICATE` for serverAuth only; NSS holds it
-  as `C,,`.
+- The system copy of the CA is a plain anchor in `/etc/ssl/certs/ca-certificates.crt`, which
+  OpenSSL, GnuTLS, Go, rustls and Java read; NSS holds it as `C,,`. The certificate (Part 4a's
+  `cellca`) limits it to serverAuth and the cell's bound hosts; no per-store purpose flag is used
+  (P4b-C4, R30).
 
 **UI**
 - `apps/web/src/keys/*`: `saveKey(api, binding, value)`, `bindingOf`, `valueProblem`, `useKeys`,
@@ -12893,12 +12977,9 @@ git commit -m "ci(keyd): run the daemon's keyd suites against a real keyd; docum
 - **A PCP-only router** answers NAT-PMP's request with a version error, and keyd falls back to STUN
   (or, with `-stun off`, stays unknown and says so). PCP's MAP request would create a mapping on the
   router, so keyd does not send it.
-- **GnuTLS clients do not trust the cell's CA.** GnuTLS ignores a `TRUSTED CERTIFICATE`, so git's
-  HTTPS transport and GLib programs reach every host keyd passes through, but a host bound to a key
-  (which keyd intercepts) fails their certificate check: closed, never open.
-- **A computer whose freeze failed** lost its keyd cell at Stop. It has no egress until it is
-  stopped and started, or until keyd restarts and `rewireIfLost` restarts it like any running
-  computer.
+- **A computer whose freeze failed** is stopped by Stop (its keyd cell closed first), so it loses
+  what it was running, as Stop computer would. It stays stopped through keyd, daemon and gate
+  restarts until the user starts it (review 2, I-1).
 - **keyd's `audit-rotated` alert** (Part 4a) is not shown: the health carries `audit.ok` only. M9's
   doctor shows it.
 
@@ -12906,7 +12987,9 @@ git commit -m "ci(keyd): run the daemon's keyd suites against a real keyd; docum
 
 Review 1's verdicts (`part4b-review-1.md`) and the controller's rulings P4b-C1 and P4b-C2 are
 applied: R1, R2, R17 and R18 stand; R15 stands with R14 scoped; R6, R7, R14 and R16 changed;
-R20 and R22 follow; R28 to R31 are new.
+R20 and R22 follow; R28 to R31 are new. Review 2 (`part4b-review-2.md`) and ruling P4b-C4 change
+R6 and R22 (a failed freeze stops the computer), R16 (the guard's freshness) and R30 (a plain
+anchor), and R20 follows.
 
 - **P4b-R1 One forwarder in each cell adds the proxy token.** The cell's programs use
   `http://127.0.0.1:3129` with no credentials. A forwarder on the cell's loopback adds
@@ -12944,15 +13027,20 @@ R20 and R22 follow; R28 to R31 are new.
   - Cost if wrong: a cell on an engine without isolated gateway mode never starts. That is the
     point, and `doctor` (M9) explains it.
 - **P4b-R6 Stop runs as abort → revoke → settle (≤ 4 s) → pause, and a pause that fails closes the
-  cell in keyd** (changed after review 1: C1, I2, M8, M9). Only the desktop is paused, and the gate
-  stays up.
+  cell in keyd and then stops the computer** (changed after review 1: C1, I2, M8, M9; and after
+  review 2: I-1). Only the desktop is paused, and the gate stays up.
+  - A computer whose freeze failed is stopped (Stop computer, queued), not left running with its
+    keyd cell closed: a closed cell alone was reopened by the next crash restart, keyd restart,
+    daemon restart or gate crash, which booted the desktop with fresh surrogates while the HUD said
+    `Live`. Stopped, it stays stopped through all of them, and the HUD says so.
   - A frozen computer refuses input, launches and puppet runs with 409.
   - Resume revokes the cell again before anything thaws, then writes fresh surrogates, or restarts
     the desktop if keyd lost the cell. With keyd offline it answers 503 and the computer stays
     frozen.
-  - A frozen computer stays frozen across a daemon restart, a keyd restart (R7) and a gate restart;
-    a frozen desktop that dies is not started again. Pausing and resuming each watch the cell
-    afresh.
+  - A frozen computer stays frozen across a daemon restart, a keyd restart (R7) and a gate restart
+    (it stays `paused` while its gate comes back, and Resume waits for it); a frozen desktop that
+    dies is not started again. Pausing and resuming each watch the cell afresh. A Start boots a
+    desktop Docker still holds frozen afresh.
   - Stop computer and Remove close the cell in keyd first and need no thaw: Docker stops a paused
     container itself (it signals it, then resumes it).
   - Why: Part 4a's revoke leaves the listener open (P4a-R20). The settle wait keeps a frozen
@@ -12960,8 +13048,8 @@ R20 and R22 follow; R28 to R31 are new.
   - Cost if wrong: the listener stays open for the whole settle window, so for up to 4 s every
     process keeps surrogate-free web egress (its surrogates are already revoked). If 4 s is too
     short for a slow action, that action lands after the resume; if it is too long, Stop takes up
-    to 4 s to freeze. A computer whose pause failed has no egress until it is stopped and started,
-    or until keyd restarts.
+    to 4 s to freeze. A computer whose pause failed loses what it was running (it is stopped, not
+    frozen): the user starts it again, with whatever it had saved in its home.
 - **P4b-R7 When keyd restarts, running desktops restart, frozen ones do not** (changed after
   review 1: C1). keyd's restart replaces every cell's listener, token and CA. A running Chromium
   cannot take a new CA, and the token file alone would leave old tunnels' trust. So `rewireIfLost`
@@ -13038,7 +13126,9 @@ R20 and R22 follow; R28 to R31 are new.
   - Cost if wrong: an outbound call the user did not want (STUN, only when the router has no
     answer), or a guard that stays unknown on a router without NAT-PMP when STUN is off: a hairpin
     to the router's public address then stays possible (its admin page would also need a name
-    resolving to that address), and the UI and `doctor` say so.
+    resolving to that address), and the UI and `doctor` say so. With `-natpmp off` keyd has no
+    gateway to watch, so a new network's address is learned at the next 5-minute round, while the
+    guard still says `active`; one failed round leaves a known guard `active` for up to 30 s more.
 - **P4b-R17 IPv6 is global unicast only** (controller residual). keyd dials nothing outside
   `2000::/3` except the well-known NAT64 prefix, whose embedded IPv4 address is checked. Named
   rules cover `2001:2::/48`, `2001:10::/28`, `2001:20::/28` and `3fff::/20`. Part 4a's integrity
@@ -13056,14 +13146,15 @@ R20 and R22 follow; R28 to R31 are new.
   (the forwarder) and `--disable-quic`. The desktop session waits for the CA oneshot, and Chromium
   trusts the cell's CA through NSS with `C,,`, since Chromium trusts a name-constrained CA only
   there (S4). Every old `localdot-cell` entry is deleted first, so trust never outlives the
-  listener. The system copy is for TLS server auth only too (R30).
+  listener. The system copy is a plain anchor (R30).
   - Cost if wrong: a Chromium launched outside the launcher uses no proxy and has no route out.
 - **P4b-R21 The forwarder never shows a 407.** A refused token becomes 502 with
   `X-Localdot-Reason: proxy-token-refused`.
   - Why: a 407 makes Chromium prompt for proxy credentials.
   - Cost if wrong: none.
-- **P4b-R22 Stop answers 202 with what happened**, `{ revoked, paused, closed, errors }` (`closed`:
-  keyd closed a cell that could not be paused). It stays 202 without a body when no kill switch is
+- **P4b-R22 Stop answers 202 with what happened**, `{ revoked, paused, closed, stopped, errors }`
+  (`closed`: keyd closed a cell that could not be paused; `stopped`: that computer was then
+  stopped). It stays 202 without a body when no kill switch is
   wired, as Part 3's tests expect.
   - Cost if wrong: none.
 - **P4b-R23 The kill switch freezes even when keyd is down**, and reports what failed.
@@ -13104,15 +13195,24 @@ R20 and R22 follow; R28 to R31 are new.
     Docker Desktop's VM listeners answer on the bridge gateway.
   - Cost if wrong: if something dropped both ports silently, the in-cell check would pass; the IPAM
     refusal and `doctor` still catch such an engine.
-- **P4b-R30 The cell's CA is trusted for TLS server auth only** (review I5, Part 4a carry C3). The
-  system copy is an OpenSSL `TRUSTED CERTIFICATE` whose trust settings name serverAuth alone; NSS
-  holds it as `C,,`; Node reads it for TLS only. The self-test fails a bundle that holds it as a
-  plain anchor.
-  - Why: OpenSSL trusts a plain anchor for every purpose, and its code-signing purpose ignores the
-    CA's own serverAuth-only key usage (verified with OpenSSL 3.6: a code-signing leaf the CA signed
-    verifies against a plain anchor and is rejected against the trusted one).
-  - Cost if wrong: GnuTLS clients (git's HTTPS, GLib programs) ignore the trusted form, so a host
-    bound to a key fails their certificate check (closed, never open).
+- **P4b-R30 The cell's CA is a plain trust anchor; the certificate carries its limits** (review I5,
+  Part 4a carry C3; changed after review 2 by controller ruling P4b-C4, which supersedes the
+  "server auth only through a trust-store purpose" reading of I5/C3). keyd's cell CA certificate
+  carries `ExtKeyUsage: serverAuth`, critical permitted DNS names (the cell's bound hosts),
+  excluded subdomains and every IP address excluded (`cellca.go`, the template's lines 78–86). The
+  cell installs it as a plain anchor in the system bundle (`update-ca-certificates`) and in NSS
+  with `C,,`, and uses no per-store purpose flag. The self-test requires the plain anchor, and
+  Task 7's Docker test pins that OpenSSL and Go in the image accept a leaf for a bound host and
+  refuse one for another host or a subdomain.
+  - Why: fix pass 1's OpenSSL `TRUSTED CERTIFICATE` (`-addtrust serverAuth`) is read by OpenSSL
+    alone. GnuTLS (git's HTTPS, GLib), Go (`gh` and other Go tools, which parse only `CERTIFICATE`
+    blocks even through `SSL_CERT_FILE`), rustls tools and Java's keystore hook skipped it, so none
+    of them could use a key bound to a host (review 2, Minor 6).
+  - Cost if wrong: a verifier that ignores the EKU on a CA would trust this name-constrained anchor
+    for non-server purposes. OpenSSL's code-signing purpose is one (fix pass 1 found OpenSSL 3.6
+    accepting a code-signing leaf the CA signed, against a plain anchor). The CA's key never leaves
+    keyd's memory, and keyd only ever mints server leaves for the cell's bound hosts, so no such
+    leaf exists outside a test.
 - **P4b-R31 A key name whose variable is taken is refused** (review M2). `a-b` and `a_b` share
   `LOCALDOT_KEY_A_B`, so the key routes answer 409 `name-taken` for the second.
   - Cost if wrong: a user who wanted both spellings renames one.
