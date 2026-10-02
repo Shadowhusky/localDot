@@ -2973,3 +2973,451 @@ git commit -m "feat(recorder): keep no frame while the user has control"
 task report), and the bypass hunt finds nothing open.
 
 ---
+
+### Task 12: Daemon — long logs, the session index, thumbnails, retention, the replay routes and the seeder
+
+Everything the replay reads from the daemon:
+- the event log, streamed as NDJSON in bounded memory;
+- the session index, one `SessionCard` per session with a cover thumbnail;
+- 320×200 thumbnails of `observe` frames;
+- the recording by byte range (a stable snapshot for a live session);
+- retention, so recordings cannot fill the disk.
+
+It also fixes the one 2-hour cost in Part 1's `EventLog`, measured while writing this plan. Every
+daemon start re-reads and re-indexes every session's whole log: 1.0 s per 2-hour log (150 000
+events, 55 MB), at **every** start, even when nothing changed. With tail recovery the reopen takes
+1 ms. Last, a seeder writes a synthetic session with a synthetic recording, which the browser
+suites replay without Docker.
+
+**Review tier:** light. The routes sit behind the existing token middleware, and their auth and
+path pins are written out below.
+
+**Files:**
+- Create: `apps/daemon/src/sessions/{ndjson.ts,summary.ts,index-store.ts,thumbs.ts,retention.ts,routes.ts}`,
+  `apps/daemon/src/recorder/testing/seed-session.ts`, `apps/daemon/src/seed-main.ts`
+- Modify: `apps/daemon/src/event-log.ts` (tail recovery, `logFile`, `forget`),
+  `apps/daemon/src/app.ts` (`replay` option), `apps/daemon/src/main.ts` (index, thumbnails,
+  retention, routes), `apps/daemon/package.json` (`"seed-session": "tsx src/seed-main.ts"`)
+- Test: `apps/daemon/src/sessions/{long-log.test.ts,summary.test.ts,index-store.test.ts,thumbs.test.ts,retention.test.ts,routes.test.ts,routes-security.test.ts}`,
+  `apps/daemon/src/recorder/testing/seed-session.test.ts`; Part 1's `event-log.test.ts` must pass
+  unchanged.
+
+**Interfaces** (exact):
+
+```ts
+// apps/daemon/src/event-log.ts — added to EventLog
+logFile(sessionId: string): string;   // <home>/sessions/<id>/events.jsonl; throws UnknownSessionError
+forget(sessionId: string): void;      // removes the session's folder, its index rows and its cached state
+
+// apps/daemon/src/sessions/ndjson.ts
+export const NDJSON_TYPE = "application/x-ndjson";
+// Complete lines inside the file's size at the call, each re-validated with parseEvent and
+// re-serialised (unknown fields dropped), from fromSeq on; read through a 64 KiB stream buffer.
+export function streamEventLines(file: string, fromSeq?: number): AsyncGenerator<string>;
+
+// apps/daemon/src/sessions/summary.ts
+export interface SessionSummaryFile extends SessionCard { logBytes: number }
+export function summarizeSession(home: string, sessionId: string, opts: { live: boolean }): Promise<SessionSummaryFile>;
+export function writeSummary(home: string, summary: SessionSummaryFile): void;          // <session>/summary.json, atomic
+export function readSummary(home: string, sessionId: string): SessionSummaryFile | null;
+
+// apps/daemon/src/sessions/index-store.ts
+export const INDEX_PAGE_MAX = 100;
+export class SessionIndex {
+  constructor(home: string, opts: { isLive(sessionId: string): boolean });   // its own connection to <home>/index.sqlite
+  page(opts: { before?: string; limit?: number }): Promise<SessionIndexPage>;  // newest first; cursor "<startedAt>~<id>"
+  card(sessionId: string): Promise<SessionCard>;                              // throws UnknownSessionError
+  invalidate(sessionId: string): void;
+  close(): void;
+}
+
+// apps/daemon/src/sessions/thumbs.ts
+export const THUMB_W = 320;
+export const THUMB_H = 200;
+export const THUMB_CONCURRENCY = 2;
+export class Thumbnails {
+  constructor(home: string, frames: FrameStore);
+  path(sessionId: string, frameId: string): Promise<string | undefined>;  // undefined: no such frame
+}
+
+// apps/daemon/src/sessions/retention.ts
+export interface RetentionPolicy { maxBytes: number; maxAgeDays: number }
+export function retentionFromEnv(env?: NodeJS.ProcessEnv): RetentionPolicy;   // LOCALDOT_RECORDINGS_MAX_GB (default 20), LOCALDOT_RECORDINGS_MAX_DAYS (default 30)
+export function sweepRecordings(o: { home: string; policy: RetentionPolicy; now: Date; isLive(id: string): boolean }): { expired: string[]; freedBytes: number };
+
+// apps/daemon/src/sessions/routes.ts
+export interface ReplayRoutesDeps {
+  home: string;
+  eventLog: EventLog;
+  recorder: Pick<Recorder, "info" | "isLive">;
+  index: SessionIndex;
+  thumbs: Thumbnails;
+}
+export function replayRoutes(app: Hono, deps: ReplayRoutesDeps): void;
+// app.ts: AppOptions gains `replay?: ReplayRoutesDeps`; createApp calls replayRoutes(app, replay)
+// inside the /api/* token middleware, after Part 3's gatewayRoutes.
+
+// apps/daemon/src/recorder/testing/seed-session.ts
+export interface SeedOptions {
+  home: string;
+  minutes: number;                         // session length
+  title?: string;                          // default "Seeded session"
+  marker?: string;                         // a unique string put in the title and a typed (unmasked) chunk: the privacy test looks for it
+  takeover?: { fromMs: number; toMs: number };  // a control.change pair; no frame is written inside
+  video?: boolean;                         // default true; false: manifest "none"
+  synth?: SynthOptions;                    // default { widthMbs: 20, heightMbs: 12, keyEvery: 24 } (320×192)
+}
+export interface SeedResult {
+  sessionId: string;
+  synth: SynthOptions;
+  frames: { tMicros: number; index: number }[];         // every recorded frame: its arrival and its synth index
+  steps: { id: string; startMs: number; endMs: number; dispatchMs: number; point: { x: number; y: number } }[];
+}
+export function seedSession(o: SeedOptions): Promise<SeedResult>;   // also writes <home>/seed-<sessionId>.json
+```
+
+**Routes** (all under `/api/*`, token required; every `:id` and `:frameId` must match
+`ULID_PATTERN`, else 400 before any filesystem access):
+
+| Route | Answer |
+|---|---|
+| `GET /api/session-index?before=<cursor>&limit=<1–100>` | `SessionIndexPage`. `limit` defaults to 50; out of range or not an integer gives 400; a malformed cursor gives 400 |
+| `GET /api/sessions/:id/card` | `SessionCard`; 404 for an unknown session |
+| `GET /api/sessions/:id/events` with `Accept: application/x-ndjson` | 200 `application/x-ndjson`, streamed from `streamEventLines(eventLog.logFile(id), fromSeq)`, with `cache-control: no-store`. Without that `Accept` header, Part 1's JSON array, unchanged |
+| `GET /api/sessions/:id/recording` | `RecordingInfo`. A session with no `recording/` folder answers `manifest: emptyManifest("none")`, `upto: 0`, `servedBytes: 0` |
+| `GET` and `HEAD /api/sessions/:id/recording/video.mp4?upto=<n>` | the view's bytes (`openRecordingView`; `complete` for the states `complete` and `recovered`). `upto` is required while live and ignored otherwise; above the committed count, or not an integer, it gives 400. Responses carry `content-type: video/mp4`, `accept-ranges: bytes` and `cache-control: no-store`. No `Range` gives 200 with `content-length`. One `bytes=a-b`, `bytes=a-` or `bytes=-n` range inside the size gives 206 with `content-range: bytes a-b/size`. Anything else gives 416 with `content-range: bytes */size`. No video (`none`, `failed`, `expired`) gives 404 |
+| `GET /api/sessions/:id/thumbs/:frameId` | 200 `image/webp` (`cache-control: private, max-age=31536000, immutable`), or 404 |
+| `DELETE /api/sessions/:id` | 204. 409 while the session is live (`recorder.isLive` or `LiveSessions.cellOf`); 404 if unknown. It calls `eventLog.forget(id)` and `index.invalidate(id)` |
+
+**Tests:**
+- `long-log.test.ts`: **the Review Focus 4 pins (daemon)**, complete. Verified against Part 1's
+  `EventLog` with the tail recovery described below: the reopen pin fails with the old `EventLog`
+  (1 008 ms) and passes with the new one (1 ms).
+
+```ts
+import { appendFileSync, createWriteStream, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
+import { describe, expect, it } from "vitest";
+import { EventLog } from "../event-log.ts";
+import { streamEventLines } from "./ndjson.ts";
+
+setFlagsFromString("--expose_gc");
+const gc = runInNewContext("gc") as () => void;
+const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
+
+// A 2-hour session's log as M4 will write it: 150 000 events, about 55 MB.
+async function longSession(): Promise<{ home: string; file: string; bytes: number }> {
+  const home = mkdtempSync(join(tmpdir(), "local dot's long-log-"));
+  const dir = join(home, "sessions", ID);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, "session.json"), JSON.stringify({ id: ID, title: "long", startedAt: "2026-10-02T10:00:00.000Z" }));
+  const file = join(dir, "events.jsonl");
+  const out = createWriteStream(file);
+  let bytes = 0;
+  for (let i = 0; i < 150_000; i++) {
+    const line = `${JSON.stringify({ v: 1, id: ID, seq: i, t: i * 48_000, agent: "main", step: `s${Math.floor(i / 12)}`, type: "text.progress", data: { count: i % 60, chunk: "x".repeat(200), masked: false } })}\n`;
+    bytes += line.length;
+    if (!out.write(line)) await new Promise<void>((r) => out.once("drain", () => r()));
+  }
+  await new Promise<void>((r) => out.end(() => r()));
+  return { home, file, bytes };
+}
+
+describe("a 2-hour log (Review Focus 4, the daemon)", () => {
+  it("reopens a home with a 2-hour log in under 200 ms, and recovers a torn tail without a full read", async () => {
+    const { home, file } = await longSession();
+    new EventLog(home).close(); // the first open builds the index once
+    const started = performance.now();
+    const log = new EventLog(home);
+    expect(performance.now() - started).toBeLessThan(200);
+    expect(log.append(ID, { type: "agent.state", agent: "main", data: { state: "idle" } }).seq).toBe(150_000);
+    log.close();
+    appendFileSync(file, '{"v":1,"id":"01J9ZQ3V8Y7X6W5T4S3R2Q1P0N","seq":150001,"t":');
+    const again = performance.now();
+    const reopened = new EventLog(home);
+    expect(performance.now() - again).toBeLessThan(200);
+    expect(reopened.append(ID, { type: "agent.state", agent: "main", data: { state: "acting" } }).seq).toBe(150_001);
+    reopened.close();
+  }, 120_000);
+
+  it("streams a 2-hour log in bounded memory", async () => {
+    const { file, bytes } = await longSession();
+    expect(bytes).toBeGreaterThan(40e6);
+    gc();
+    const base = process.memoryUsage().heapUsed;
+    let peak = 0;
+    let n = 0;
+    for await (const _line of streamEventLines(file)) {
+      if (++n % 10_000 === 0) {
+        gc();
+        peak = Math.max(peak, process.memoryUsage().heapUsed - base);
+      }
+    }
+    expect(n).toBe(150_000);
+    expect(peak).toBeLessThan(16e6);
+  }, 120_000);
+});
+```
+- `routes-security.test.ts`: **auth, paths and ranges**, complete:
+
+```ts
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { createApp } from "../app.ts";
+import { monotonicClock } from "../clock.ts";
+import { EventLog } from "../event-log.ts";
+import { FrameStore } from "../gateway/frames.ts";
+import { Recorder } from "../recorder/recorder.ts";
+import { seedSession } from "../recorder/testing/seed-session.ts";
+import { SessionIndex } from "./index-store.ts";
+import { Thumbnails } from "./thumbs.ts";
+
+const TOKEN = "p7-test-token-0123456789abcdefghijklmnopqrstu";
+const PORT = 4790;
+const url = (p: string) => `http://127.0.0.1:${PORT}${p}`;
+const bearer = { authorization: `Bearer ${TOKEN}` };
+let home: string;
+let id: string;
+let frameId: string;
+let app: ReturnType<typeof createApp>;
+let index: SessionIndex;
+
+beforeAll(async () => {
+  home = mkdtempSync(join(tmpdir(), "local dot's replay-routes-"));
+  const seeded = await seedSession({ home, minutes: 1 });
+  id = seeded.sessionId;
+  const eventLog = new EventLog(home);
+  const recorder = new Recorder({ home, eventLog, cells: { get: () => undefined, endpoints: () => undefined }, clock: monotonicClock() });
+  index = new SessionIndex(home, { isLive: () => false });
+  const frames = new FrameStore(home);
+  const observe = eventLog.read(id).find((e) => e.type === "observe");
+  frameId = observe?.type === "observe" ? observe.data.frameId : "";
+  app = createApp({ token: TOKEN, port: PORT, eventLog, replay: { home, eventLog, recorder, index, thumbs: new Thumbnails(home, frames) } });
+});
+afterAll(() => index.close());
+
+describe("replay routes: auth, ids and byte ranges", () => {
+  const routes = () =>
+    [
+      ["GET", "/api/session-index"],
+      ["GET", `/api/sessions/${id}/card`],
+      ["GET", `/api/sessions/${id}/events`],
+      ["GET", `/api/sessions/${id}/recording`],
+      ["GET", `/api/sessions/${id}/recording/video.mp4`],
+      ["HEAD", `/api/sessions/${id}/recording/video.mp4`],
+      ["GET", `/api/sessions/${id}/thumbs/${frameId}`],
+      ["DELETE", `/api/sessions/${id}`],
+    ] as const;
+
+  it("refuses every replay route without the install token or with a wrong one", async () => {
+    for (const [method, path] of routes()) {
+      for (const headers of [{}, { authorization: "Bearer wrong" }, { authorization: TOKEN }]) {
+        const res = await app.request(url(path), { method, headers: { accept: "application/x-ndjson", ...headers } });
+        expect(res.status, `${method} ${path}`).toBe(401);
+      }
+    }
+  });
+
+  it("refuses an id or frame id that is not a ULID before touching the filesystem", async () => {
+    const bad = ["..%2F..%2Fetc%2Fpasswd", `${id}%2F..`, id.toLowerCase(), `${id}x`, "%2e%2e"];
+    for (const b of bad) {
+      for (const path of [`/api/sessions/${b}/card`, `/api/sessions/${b}/events`, `/api/sessions/${b}/recording`, `/api/sessions/${b}/recording/video.mp4`, `/api/sessions/${id}/thumbs/${b}`]) {
+        const res = await app.request(url(path), { headers: bearer });
+        expect(res.status, path).toBe(400);
+      }
+      expect((await app.request(url(`/api/sessions/${b}`), { method: "DELETE", headers: bearer })).status).toBe(400);
+    }
+  });
+
+  it("serves byte ranges inside the recording only", async () => {
+    const full = await app.request(url(`/api/sessions/${id}/recording/video.mp4`), { headers: bearer });
+    expect(full.status).toBe(200);
+    expect(full.headers.get("content-type")).toBe("video/mp4");
+    expect(full.headers.get("accept-ranges")).toBe("bytes");
+    const bytes = new Uint8Array(await full.arrayBuffer());
+    const size = bytes.length;
+    expect(Number(full.headers.get("content-length"))).toBe(size);
+    const range = async (r: string) => app.request(url(`/api/sessions/${id}/recording/video.mp4`), { headers: { ...bearer, range: r } });
+    const head = await range("bytes=0-15");
+    expect(head.status).toBe(206);
+    expect(head.headers.get("content-range")).toBe(`bytes 0-15/${size}`);
+    expect(new Uint8Array(await head.arrayBuffer())).toEqual(bytes.subarray(0, 16));
+    const tail = await range("bytes=-16");
+    expect(tail.status).toBe(206);
+    expect(new Uint8Array(await tail.arrayBuffer())).toEqual(bytes.subarray(size - 16));
+    const open = await range(`bytes=${size - 10}-`);
+    expect(open.headers.get("content-range")).toBe(`bytes ${size - 10}-${size - 1}/${size}`);
+    for (const r of [`bytes=${size}-`, "bytes=5-2", "bytes=0-1,4-5", "items=0-1", "bytes=-0", "bytes=x-"]) {
+      const res = await range(r);
+      expect(res.status, r).toBe(416);
+      expect(res.headers.get("content-range")).toBe(`bytes */${size}`);
+    }
+    for (const q of ["upto=abc", "upto=-1", "upto=1.5"]) {
+      expect((await app.request(url(`/api/sessions/${id}/recording/video.mp4?${q}`), { headers: bearer })).status, q).toBe(400);
+    }
+  });
+
+  it("never names the session's title, home or token in an error body", async () => {
+    const res = await app.request(url("/api/sessions/01J9ZQ3V8Y7X6W5T4S3R2Q1P0N/card"), { headers: bearer });
+    expect(res.status).toBe(404);
+    const body = await res.text();
+    expect(body).not.toContain(home);
+    expect(body).not.toContain(TOKEN);
+  });
+});
+```
+- `summary.test.ts`:
+  - `"summarises a finished session: verdict, duration, steps, failures, cover, screen and
+    recording"`: a seeded session. Verdict `done`, `steps` = the seed's step count, `failedSteps`
+    = its failed steps, `coverFrameId` = the last observe, `screen` from `session.start`, and
+    `recording.state` `complete`.
+  - `"says interrupted for a log without session.end that is not live, and live for a live one"`.
+  - `"takes the title from session.start, else session.json"`.
+- `index-store.test.ts`:
+  - `"pages newest first with a stable cursor"`: 120 seeded summaries. Pages of 50, 50 and 20, no
+    duplicates, and `next` is null on the last.
+  - `"recomputes a card when the log grew or the manifest changed, and reuses it otherwise"`: a
+    spy on `summarizeSession` counts calls.
+  - `"rebuilds from the session folders when index.sqlite is deleted"`: the same pages after the
+    rebuild (the spec: the index can be rebuilt from the session folders).
+  - `"refuses a malformed cursor"`.
+- `thumbs.test.ts`:
+  - `"makes a 320×200 WebP from an observe frame once and serves it from the cache after"`
+    (`sharp(path).metadata()` is 320×200 webp, and the second call doesn't call sharp: check the
+    file mtime is unchanged);
+  - `"answers undefined for a missing frame"`;
+  - `"runs at most two conversions at once"`.
+- `retention.test.ts`:
+  - `"expires the oldest finished recordings until the total fits"`: three sessions of 1, 2 and
+    3 MB, `maxBytes` 4 MB. The oldest goes: its manifest is `expired` with `bytes: 0`, and its
+    activity and gaps are kept.
+  - `"expires recordings older than maxAgeDays"`.
+  - `"never touches a live session"`.
+  - `"keeps the event log, frames, thumbnails and summary of an expired session"`.
+- `routes.test.ts`:
+  - `"streams NDJSON when asked and keeps the JSON array otherwise"`;
+  - `"serves a live recording as a stable snapshot at upto"`: a live writer with 3 fragments, then
+    a 4th. `?upto=3` keeps returning the same bytes, and `?upto=4` serves more;
+  - `"refuses to delete a live session and deletes a finished one"`;
+  - `"answers a recording manifest of none for a session without a recording"`.
+- `seed-session.test.ts`:
+  - `"writes a session that replays: events, frames, a complete recording and seed.json"`;
+  - `"writes no frame inside the takeover span and logs the control changes"`;
+  - `"puts the marker in the title and in one typed chunk"`.
+
+**Implementation notes:**
+- **`EventLog` tail recovery** (verified against Part 1's tests: all 21 pass):
+  - `#stateOf` stops calling `readValid`. It calls `readTail(file)`, which:
+    1. reads the last 64 KiB with `readSync` (growing the window ×4 until a newline is found or the
+       window reaches the file start);
+    2. takes `validBytes` = through the last newline;
+    3. parses lines backwards until one parses, which gives `lastSeq` and `lastT`.
+  - It truncates to `validBytes` as before.
+  - The index is rebuilt only when it isn't current. Inside `#updateIndex`, query
+    `SELECT (SELECT COUNT(*) FROM sessions WHERE id = ?) AS has, (SELECT MAX(seq) FROM events WHERE session_id = ?) AS last`.
+    Rebuild through `readValid` only when `has !== 1` or `last !== lastSeq`.
+  - Two traps:
+    - an empty session (`lastSeq = -1`) still needs its `sessions` row, which the `has` check
+      gives;
+    - the check must run inside `#updateIndex`, so a locked index is logged and marked stale
+      exactly as before (Part 1's "index is locked" test).
+- **NDJSON:** `createReadStream(file, { start: 0, end: size − 1, highWaterMark: 64 * 1024 })`
+  piped through `readline` (`crlfDelay: Infinity`). The last line counts only when byte `size − 1`
+  is `\n`. The route wraps the generator in a `ReadableStream` whose `pull` takes the next line.
+  That is real backpressure: Hono writes as fast as the socket drains, never faster.
+- **Summaries:** `summarizeSession` streams the log with `streamEventLines`, folding only the
+  counters (never `foldEvents`):
+  - the title from `session.start.data.title`, else `session.json`;
+  - `steps` counts `step.start`; `failedSteps` counts `step.end` with a status other than `ok`;
+  - `coverFrameId` is the last `observe`;
+  - `durationMs` is `session.end.t − session.start.t` in ms, or the last `t` when there is no end.
+
+  `Recorder.stop` (afterRun) writes `summary.json`, then calls `index.invalidate`. `SessionIndex`:
+  - stores `session_cards(id TEXT PRIMARY KEY, started_at TEXT NOT NULL, card TEXT NOT NULL, log_bytes INTEGER NOT NULL, manifest_mtime_ms INTEGER NOT NULL)`
+    with an index on `(started_at DESC, id DESC)`;
+  - treats a row as fresh when `log_bytes` equals the size of `events.jsonl` and
+    `manifest_mtime_ms` equals the manifest's `mtimeMs` (0 when absent);
+  - computes a stale or missing row through `summary.json` when its `logBytes` matches, else
+    through `summarizeSession`;
+  - runs paging as `WHERE (started_at, id) < (?, ?) ORDER BY started_at DESC, id DESC LIMIT ?`
+    over the folders listed by `EventLog.listSessions()`;
+  - never returns a live session's cached card: those are recomputed with `live: true`.
+- **Thumbnails:**
+  `sharp(frame).resize(THUMB_W, THUMB_H, { fit: "fill" }).webp({ quality: 70 }).toFile(temp)`,
+  then rename to `<session>/thumbs/<frameId>.webp` (mode 0600). A promise per key de-duplicates
+  concurrent requests, and a two-slot semaphore bounds sharp. Observe frames are 1280×800 (16:10),
+  so `fill` keeps the aspect ratio.
+- **Retention:**
+  - runs in `main.ts` after `recoverAll()`, and after each `Recorder.stop`;
+  - the total is the sum of `video.mp4` sizes of non-live sessions, oldest first by `startedAt`;
+  - "expire" means removing `video.mp4`, `fragments.jsonl` and `journal/`, then writing the
+    manifest with `state: "expired"`, `bytes: 0`, and `fragments`, `activity`, `gaps`, codec and
+    size kept;
+  - the session stays in the index and replays over its `observe` frames (Task 13's backdrop).
+- **Range parsing:** one regex,
+  `^bytes=(\d*)-(\d*)$`:
+  - both parts empty is invalid;
+  - `-n` (suffix) with `n ≥ 1` serves the last `min(n, size)` bytes;
+  - `a-` serves from `a` to the end;
+  - `a-b` serves from `a` to `min(b, size − 1)`, and needs `a ≤ b`;
+  - `a ≥ size` is invalid.
+
+  An invalid range gives 416 with `bytes */size`, never 200. The body is a `ReadableStream` over
+  `view.read` in 256 KiB chunks. Close the view when the stream ends or the request aborts
+  (`c.req.raw.signal`).
+- **The seeder** builds sessions like M2's puppet:
+  - the events: `session.start` at 2560×1600 scale 2; per step `step.start`, `action.intent` with
+    a `minjerk-bow-v1` plan, `action.target`, `action.dispatch`, `text.progress` for typing
+    (every fifth typing step `masked`, with no chunks), `screen.settle`, `observe`,
+    `action.result` and `step.end`; every tenth step cancelled; an optional `control.change`
+    pair; and `session.end` with `done`;
+  - observe frames: 1280×800 WebP made with sharp from a flat colour per step;
+  - the recording: a `RecordingWriter` with synthetic frames at 320×192 (the stage scales the
+    video into the 2560×1600 session screen and warns once; P3's `videoPlacement`), a burst of
+    24 frames at 60 fps starting at each dispatch, `flushIdle` between bursts, and `finish` at the
+    end. Inside a takeover no frame is written, and the first frame after it is a key frame.
+
+  The time between steps is chosen so that `minutes` of session holds about `minutes × 12` steps.
+  `seed-main.ts` parses `--home <dir> --minutes <n> [--title <t>] [--marker <m>] [--takeover <fromMs>-<toMs>] [--no-video]`,
+  prints the `SeedResult` as JSON, and exits 2 on bad arguments.
+
+- [ ] **Step 1:** Write `long-log.test.ts` and run it against Part 1's `EventLog`:
+  `pnpm exec vitest run apps/daemon/src/sessions/long-log.test.ts`.
+  Expected: FAIL. The reopen takes about 1 s, and `ndjson.ts` is missing.
+- [ ] **Step 2:** Implement the `EventLog` tail recovery, `logFile`, `forget` and `ndjson.ts`. Run
+  `pnpm exec vitest run apps/daemon/src/sessions/long-log.test.ts apps/daemon/src/event-log.test.ts`.
+  Expected: PASS.
+- [ ] **Step 3:** Write the remaining tests. Implement `seed-session.ts`, `seed-main.ts`,
+  `summary.ts`, `index-store.ts`, `thumbs.ts`, `retention.ts`, `routes.ts`, the `app.ts` option and
+  the `main.ts` wiring. Run `pnpm exec vitest run apps/daemon/src`.
+  Expected: PASS.
+- [ ] **Step 4:** Smoke test:
+  ```bash
+  cd "/Volumes/Husky's SSD 4T/Projects/localdot/apps/daemon"
+  H=$(mktemp -d)/home
+  node --import tsx src/seed-main.ts --home "$H" --minutes 10
+  LOCALDOT_HOME="$H" node --import tsx src/main.ts &
+  T=$(cat "$H/daemon-token")
+  curl -s -H "Authorization: Bearer $T" http://127.0.0.1:4750/api/session-index
+  curl -s -o /dev/null -w '%{http_code} %{size_download}\n' -H "Authorization: Bearer $T" -H 'Range: bytes=0-99' \
+    "http://127.0.0.1:4750/api/sessions/<id>/recording/video.mp4"
+  kill %1
+  ```
+  Expected: a page with one card, and `206 100`.
+- [ ] **Step 5: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/daemon
+git commit -m "feat(daemon): session index, NDJSON events, thumbnails, retention and replay routes"
+```
+
+**Acceptance:** `pnpm exec vitest run apps/daemon/src` passes, including the long-log and route
+pins.
+
+---
