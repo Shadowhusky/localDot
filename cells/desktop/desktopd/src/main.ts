@@ -8,6 +8,7 @@ import { CuaDriver } from "./perception/driver.ts";
 import { driverInjector } from "./perception/find.ts";
 import type { PerceptionDeps } from "./perception/hit-test.ts";
 import { AtspiAccessibility } from "./perception/native.ts";
+import { cachedSelfTest, nodeProbes, runSelfTest, selfTestConfigFromEnv } from "./selftest.ts";
 import { startXHelper, type XHelper } from "./x/helper.ts";
 import { readScreen, readXsettings } from "./xsettings.ts";
 
@@ -68,6 +69,7 @@ const scaling = async () => {
   return settings === null ? scale : (settings.windowScalingFactor ?? 1);
 };
 const app = createDesktopdApp({
+  selfTest: cachedSelfTest(() => runSelfTest(selfTestConfigFromEnv(process.env), nodeProbes())),
   token,
   scale,
   display: process.env.DISPLAY ?? ":1",

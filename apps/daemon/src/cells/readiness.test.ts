@@ -1,7 +1,8 @@
 import { createServer, type RequestListener, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { SELFTEST_CHECKS } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { probeDesktopd, probeStream } from "./readiness.ts";
+import { probeDesktopd, probeStream, SELFTEST_TIMEOUT_MS } from "./readiness.ts";
 import type { DesktopdHealth } from "./types.ts";
 
 const notReady: DesktopdHealth = {
@@ -95,6 +96,86 @@ describe("probeDesktopd's limits", () => {
   });
 });
 
+describe("probeDesktopd and the boot self-test", () => {
+  const healthy: DesktopdHealth = { ...notReady, ok: true, screen: { w: 2560, h: 1600 } };
+  const passing = {
+    ok: true,
+    ms: 16,
+    checks: SELFTEST_CHECKS.map((c) => ({ ...c, ok: true, detail: "fine" })),
+  };
+  const answer =
+    (selftest: unknown, status = 200): RequestListener =>
+    (req, res) => {
+      const body = req.url === "/healthz" ? healthy : selftest;
+      res.writeHead(req.url === "/healthz" ? 200 : status, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+
+  it("is ready only when the self-test passes too", async () => {
+    const baseUrl = await serve(answer(passing));
+    expect(await probeDesktopd({ baseUrl, token: "t" })).toEqual({
+      ...healthy,
+      ok: true,
+      selftest: passing,
+    });
+  });
+
+  it("is not ready when a check fails, even if the report claims ok", async () => {
+    const lying = {
+      ...passing,
+      checks: passing.checks.map((c) =>
+        c.id === "dns" ? { ...c, ok: false, detail: "example.com resolved" } : c,
+      ),
+    };
+    const baseUrl = await serve(answer(lying));
+    expect(await probeDesktopd({ baseUrl, token: "t" })).toMatchObject({
+      ok: false,
+      selftest: lying,
+    });
+  });
+
+  it("is not ready when the report leaves a check out", async () => {
+    const withoutDns = { ...passing, checks: passing.checks.filter((c) => c.id !== "dns") };
+    const baseUrl = await serve(answer(withoutDns));
+    expect(await probeDesktopd({ baseUrl, token: "t" })).toMatchObject({
+      ok: false,
+      selftest: withoutDns,
+    });
+  });
+
+  it("reads the self-test like /healthz: past 64 KiB it counts as no report", async () => {
+    const padded = {
+      ...passing,
+      checks: passing.checks.map((c) => ({ ...c, detail: "x".repeat(450) })),
+      pad: "x".repeat(65 * 1024),
+    };
+    const baseUrl = await serve(answer(padded));
+    expect(await probeDesktopd({ baseUrl, token: "t" })).toMatchObject({
+      ok: false,
+      selftest: { checks: [{ id: "selftest", ok: false }] },
+    });
+  });
+
+  it("is not ready when desktopd has no self-test or answers something else", async () => {
+    for (const [body, status] of [
+      [{}, 404],
+      [{ ok: true }, 200],
+      [{ ok: true, checks: [], ms: 0 }, 200],
+    ] as const) {
+      const baseUrl = await serve(answer(body, status));
+      expect((await probeDesktopd({ baseUrl, token: "t" }))?.ok, JSON.stringify(body)).toBe(false);
+      server?.close();
+    }
+  });
+
+  it("gives the self-test its own, longer timeout", async () => {
+    const timeout = vi.spyOn(AbortSignal, "timeout");
+    const baseUrl = await serve(answer(passing));
+    await probeDesktopd({ baseUrl, token: "t" });
+    expect(timeout.mock.calls).toEqual([[3000], [SELFTEST_TIMEOUT_MS]]);
+  });
+});
+
 describe("probeStream", () => {
   it("asks Selkies' /api/health with the cell's basic credentials", async () => {
     const seen: { url?: string; authorization?: string }[] = [];
@@ -127,4 +208,39 @@ describe("probe timeouts", () => {
     await probeStream({ baseUrl, authorization: "Basic eA==" });
     expect(timeout.mock.calls).toEqual([[3000], [3000]]);
   });
+});
+
+describe("cell-controlled redirects", () => {
+  it.each(["/healthz", "/selftest", "/api/health"])(
+    "does not follow %s redirects",
+    async (path) => {
+      let redirected = 0;
+      const baseUrl = await serve((req, res) => {
+        if (req.url === path) {
+          res.writeHead(302, { location: "/unexpected" });
+          res.end();
+          return;
+        }
+        if (req.url === "/unexpected") redirected++;
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(
+          JSON.stringify(
+            req.url === "/healthz"
+              ? { ...notReady, ok: true }
+              : {
+                  ok: true,
+                  ms: 1,
+                  checks: SELFTEST_CHECKS.map((c) => ({ ...c, ok: true, detail: "fine" })),
+                },
+          ),
+        );
+      });
+      if (path === "/api/health") {
+        expect(await probeStream({ baseUrl, authorization: "Basic eA==" })).toBe(false);
+      } else {
+        expect((await probeDesktopd({ baseUrl, token: "secret" }))?.ok).not.toBe(true);
+      }
+      expect(redirected).toBe(0);
+    },
+  );
 });

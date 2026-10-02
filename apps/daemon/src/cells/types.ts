@@ -1,3 +1,5 @@
+import type { SelfTestReport } from "@localdot/protocol";
+
 export type Scale = 1 | 2;
 
 export type CellState = "starting" | "ready" | "stopping" | "stopped" | "failed" | "removed";
@@ -59,6 +61,7 @@ export interface CellEndpoints {
 
 // What desktopd's GET /healthz returns (cells/desktop/desktopd/src/app.ts).
 export interface DesktopdHealth {
+  selftest?: SelfTestReport;
   ok: boolean;
   scale: Scale;
   display: string;

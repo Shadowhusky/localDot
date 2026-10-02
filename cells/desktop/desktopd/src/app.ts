@@ -5,6 +5,7 @@ import {
   type InputResult,
   LaunchRequest,
   type LaunchResult,
+  type SelfTestReport,
   SettleRequest,
   TypeRequest,
   type TypeResult,
@@ -41,6 +42,7 @@ export interface DesktopdDeps {
   launch?: (req: LaunchRequest) => { pid: number };
   clockMono?: () => number;
   perception?: PerceptionDeps;
+  selfTest?: () => Promise<SelfTestReport>;
 }
 
 export interface HidpiReport {
@@ -95,6 +97,19 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     await next();
   });
   app.use("*", bodyLimit({ maxSize: 64 * 1024 }));
+
+  app.get("/selftest", async (c) => {
+    const report: SelfTestReport = deps.selfTest
+      ? await deps.selfTest()
+      : {
+          ok: false,
+          checks: [
+            { id: "selftest", kind: "keyd", ok: false, detail: "this desktopd has no self-test" },
+          ],
+          ms: 0,
+        };
+    return c.json(report);
+  });
 
   app.get("/healthz", async (c) => {
     const [xsettings, screen] = await Promise.all([deps.readXsettings(), deps.readScreen()]);

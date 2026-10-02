@@ -222,8 +222,43 @@ on restart. Persistent `--add-host` entries fix both without external networking
   `/tmp/localdot-part4b-task7-full-host.log`, and
   `/tmp/localdot-part4b-task7-mutation-run.log`.
 
+## Task 8: boot self-test and readiness gate
+
+The bearer-protected self-test runs all eleven isolation, credential-service and
+trust checks in parallel. Each check has a hard deadline, sequential work shares
+the same budget, and results are cached for two elapsed seconds with one run at
+a time. Readiness recomputes the verdict from all required check IDs and kinds.
+Missing, malformed, oversized or incomplete evidence cannot make a cell ready.
+
+Review reproduced local errors being mistaken for isolation, invalid route data
+passing, hung probes, truncated/oversized HTTP replies being accepted, duplicate
+NSS entries and cell-controlled readiness redirects. These are fixed. Connection
+refusals fail TCP isolation checks; unknown DNS errors remain inconclusive. The
+HTTP primitive uses Node's framing parser, a private agent, a whole-request
+deadline and a body cap. File reads reject non-regular and oversized files, and
+failed checks return static diagnostics without exception contents. A scoped
+review also covered partial DNS answers and cache expiry across clock changes.
+
+- All 760 host tests in 95 files, workspace types, lint, hygiene and desktopd
+  bundles pass. The desktop image was rebuilt with the new boot endpoint.
+- Seventeen mutations fail runtime assertions, covering isolation verdicts,
+  route evidence, token/cell identity, trust stores, deadlines, framing, body
+  limits, environment proxies, redirects, claimed readiness and cache expiry.
+- A network-none container using Node 24.21.0 exercises the real Linux route
+  parser, blocked IPv4/IPv6/DNS/host probes, local proxy authentication, and PEM
+  and NSS checks. The gateway check correctly fails because no cell network is
+  attached. The probe container is removed. A fully wired cell's boot acceptance
+  remains part of Tasks 9–14; this smoke run does not claim that acceptance.
+- Evidence: `/tmp/localdot-part4b-task8-review-red.log`,
+  `/tmp/localdot-part4b-task8-probes-red.log`,
+  `/tmp/localdot-part4b-task8-scoped-final.log`,
+  `/tmp/localdot-part4b-task8-full-host.log`,
+  `/tmp/localdot-part4b-task8-mutation-run.log`,
+  `/tmp/localdot-part4b-task8-image-build.log`, and
+  `/tmp/localdot-part4b-task8-node24.log`.
+
 ## Remaining integration
 
-Tasks 8–16: boot checks, orchestration, Stop/resume, event logging, key
+Tasks 9–16: orchestration, Stop/resume, event logging, key
 sheet, real-cell isolation/canary acceptance, documentation and CI. The system
 Keychain/Stop carry from Part 4a also remains.

@@ -1,22 +1,52 @@
+import { SelfTestReport, selfTestPassed } from "@localdot/protocol";
 import type { DesktopdEndpoint, DesktopdHealth, StreamEndpoint } from "./types.ts";
 
 // desktopd runs inside the cell, so its answer is read like any other input from the cell.
 const MAX_HEALTH_BYTES = 64 * 1024;
+// The self-test makes network checks with their own 2 s bounds; it gets more room than /healthz.
+export const SELFTEST_TIMEOUT_MS = 8000;
 
+// Ready means healthy and through the boot self-test (spec: "the boot self-test must pass before
+// the cell is marked ready"). An answer that is not a complete self-test report counts as a failure.
 export async function probeDesktopd(
   endpoint: DesktopdEndpoint,
   timeoutMs = 3000,
 ): Promise<DesktopdHealth | undefined> {
+  const health = await getJson(endpoint, "/healthz", timeoutMs);
+  if (!isHealth(health)) return undefined;
+  if (!health.ok) return health;
+  const parsed = SelfTestReport.safeParse(
+    await getJson(endpoint, "/selftest", SELFTEST_TIMEOUT_MS),
+  );
+  const selftest: SelfTestReport = parsed.success
+    ? parsed.data
+    : {
+        ok: false,
+        ms: 0,
+        checks: [
+          { id: "selftest", kind: "keyd", ok: false, detail: "desktopd gave no self-test report" },
+        ],
+      };
+  return { ...health, ok: selfTestPassed(selftest), selftest };
+}
+
+async function getJson(
+  endpoint: DesktopdEndpoint,
+  path: string,
+  timeoutMs: number,
+): Promise<unknown> {
   try {
-    const res = await fetch(`${endpoint.baseUrl}/healthz`, {
+    const res = await fetch(`${endpoint.baseUrl}${path}`, {
+      redirect: "error",
       headers: { authorization: `Bearer ${endpoint.token}` },
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) return undefined;
+    if (!res.ok) {
+      await res.body?.cancel();
+      return undefined;
+    }
     const text = await readCapped(res, MAX_HEALTH_BYTES);
-    if (text === undefined) return undefined;
-    const health: unknown = JSON.parse(text);
-    return isHealth(health) ? health : undefined;
+    return text === undefined ? undefined : JSON.parse(text);
   } catch {
     return undefined;
   }
@@ -45,9 +75,11 @@ function isHealth(value: unknown): value is DesktopdHealth {
 export async function probeStream(endpoint: StreamEndpoint, timeoutMs = 3000): Promise<boolean> {
   try {
     const res = await fetch(`${endpoint.baseUrl}/api/health`, {
+      redirect: "error",
       headers: { authorization: endpoint.authorization },
       signal: AbortSignal.timeout(timeoutMs),
     });
+    await res.body?.cancel();
     return res.ok;
   } catch {
     return false;

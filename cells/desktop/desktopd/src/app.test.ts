@@ -4,6 +4,29 @@ import type { XEvent, XHelper } from "./x/helper.ts";
 
 const TOKEN = "d".repeat(43);
 const bearer = { authorization: `Bearer ${TOKEN}` };
+describe("desktopd self-test route", () => {
+  it("serves the self-test behind the cell token, and fails without one wired", async () => {
+    const report = {
+      ok: true,
+      checks: [{ id: "route", kind: "isolation" as const, ok: true, detail: "no default route" }],
+      ms: 3,
+    };
+    const wired = createDesktopdApp({
+      token: TOKEN,
+      scale: 2,
+      display: ":1",
+      readXsettings: async () => ({ windowScalingFactor: 2, xftDpi: 96 }),
+      readScreen: async () => ({ w: 2560, h: 1600 }),
+      selfTest: async () => report,
+    });
+    expect((await wired.request("/selftest")).status).toBe(401);
+    expect(await (await wired.request("/selftest", { headers: bearer })).json()).toEqual(report);
+    const bare = app({ scale: 2, factor: 2, dpi: 96, screen: { w: 2560, h: 1600 } });
+    expect(await (await bare.request("/selftest", { headers: bearer })).json()).toMatchObject({
+      ok: false,
+    });
+  });
+});
 
 function app(opts: {
   scale: 1 | 2;
