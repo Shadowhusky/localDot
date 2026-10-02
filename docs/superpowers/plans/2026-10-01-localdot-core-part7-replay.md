@@ -2112,3 +2112,864 @@ git commit -m "feat(recorder): crash recovery from the GOP journal and a seekabl
 boundary, the five crash points, and ENOSPC.
 
 ---
+
+### Task 9: Daemon — the Selkies feed
+
+The recorder's own client on the cell's stream. It is passive: it never sends settings, input,
+acks or compression requests, so it cannot change what the user's viewer sees (S9 Q2). It parses
+Selkies' video messages, stamps each access unit with the daemon's monotonic clock on arrival, and
+asks for key frames when the session recorder wants one.
+
+**Review tier:** light. It reuses the per-cell stream credential exactly as the proxy does, and
+the credential appears only in the `Authorization` header (pinned below).
+
+**Files:**
+- Create: `apps/daemon/src/recorder/wire.ts`, `apps/daemon/src/recorder/annexb.ts`,
+  `apps/daemon/src/recorder/feed.ts`, `apps/daemon/src/recorder/testing/fake-selkies.ts`,
+  `apps/daemon/src/recorder/testing/fake-feed.ts`
+- Test: `apps/daemon/src/recorder/wire.test.ts`, `apps/daemon/src/recorder/feed.test.ts`
+
+**Interfaces** (exact):
+
+```ts
+// apps/daemon/src/recorder/feed.ts
+import type { Clock } from "../clock.ts";
+import type { StreamEndpoint } from "../cells/types.ts";
+
+export interface FeedFrame {
+  arrivalMicros: number;  // daemon monotonic clock (Clock.nowMicros) when the message arrived
+  key: boolean;           // the wire's key flag AND isRandomAccess(data)
+  width: number;          // Selkies' header
+  height: number;
+  data: Uint8Array;       // the Annex B access unit
+}
+export type FeedState = "connecting" | "live" | "lost" | "stopped";
+export interface FeedHandlers { onFrame(frame: FeedFrame): void; onState(state: FeedState, detail?: string): void }
+export interface FrameFeed { start(): void; requestKeyframe(): void; stop(): void }
+
+export type HandshakeStep = { await: string } | { send: string } | { waitMs: number };
+// S9 Q1 confirms or amends this; it is the vendored client's "#shared" sequence.
+export const RECORDER_HANDSHAKE: readonly HandshakeStep[] = [
+  { await: "MODE websockets" }, { send: "STOP_VIDEO" }, { waitMs: 250 }, { send: "START_VIDEO" },
+];
+export const KEY_REQUEST_MIN_GAP_MS = 250;
+export const FEED_BACKOFF_MS = [500, 1000, 2000, 4000] as const;  // then 4000 forever
+
+export interface SelkiesFeedOptions {
+  endpoint(): StreamEndpoint | undefined;  // re-read before every dial: ports change on restart (Part 2 RF 2)
+  clock: Clock;
+  handlers: FeedHandlers;
+  handshake?: readonly HandshakeStep[];    // default RECORDER_HANDSHAKE
+  dialTimeoutMs?: number;                  // default 10_000 (the proxy's UPSTREAM_TIMEOUT_MS)
+  pingEveryMs?: number;                    // default STREAM_PING_MS (500)
+  stallAfterMs?: number;                   // default STREAM_STALL_MS (1500)
+}
+export class SelkiesFeed implements FrameFeed {
+  constructor(opts: SelkiesFeedOptions);
+  start(): void;
+  requestKeyframe(): void;  // sends "REQUEST_KEYFRAME" while open, at most once per KEY_REQUEST_MIN_GAP_MS
+  stop(): void;             // closes, never reconnects, reports "stopped"
+}
+```
+
+`wire.ts` and `annexb.ts`, complete (the byte formats; verified against the synthetic stream):
+
+```ts
+// Selkies 2.0's WebSocket video message, as its client (apps/web/vendor/selkies, selkies-core)
+// parses it: byte 0 is the message type (4 = encoded video); byte 1 holds the codec in its high
+// nibble (1 = H.264) and 1 in its low nibble for a key frame; then u16 BE frame id, u16 BE region
+// index, u16 BE width, u16 BE height, u16 BE reserved, and the Annex B access unit.
+
+export const VIDEO_MESSAGE = 4;
+export const VIDEO_HEADER = 12;
+export const CODEC_H264 = 1;
+
+export type SelkiesMessage =
+  | { kind: "video"; key: boolean; codec: number; frameId: number; region: number; width: number; height: number; data: Uint8Array }
+  | { kind: "ignored"; type: number };
+
+export function parseSelkiesMessage(buf: Uint8Array): SelkiesMessage {
+  const type = buf[0] ?? -1;
+  if (type !== VIDEO_MESSAGE || buf.length <= VIDEO_HEADER) return { kind: "ignored", type };
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const flags = v.getUint8(1);
+  return {
+    kind: "video",
+    key: (flags & 0x0f) === 1,
+    codec: flags >> 4,
+    frameId: v.getUint16(2),
+    region: v.getUint16(4),
+    width: v.getUint16(6),
+    height: v.getUint16(8),
+    data: buf.subarray(VIDEO_HEADER),
+  };
+}
+```
+
+```ts
+// NAL unit types of an Annex B access unit (start codes 00 00 01 or 00 00 00 01).
+export function nalTypes(au: Uint8Array): number[] {
+  const out: number[] = [];
+  for (let i = 0; i + 3 < au.length; i++) {
+    if (au[i] === 0 && au[i + 1] === 0 && au[i + 2] === 1) {
+      out.push((au[i + 3] ?? 0) & 0x1f);
+      i += 2;
+    }
+  }
+  return out;
+}
+
+export const NAL_IDR = 5;
+export const NAL_SPS = 7;
+export const NAL_PPS = 8;
+
+// A recording may start only on a frame a decoder can start from: an IDR with its parameter sets.
+export function isRandomAccess(au: Uint8Array): boolean {
+  const t = nalTypes(au);
+  return t.includes(NAL_IDR) && t.includes(NAL_SPS) && t.includes(NAL_PPS);
+}
+
+// RFC 6381 avc1.PPCCLL from the first SPS: profile_idc, constraint flags, level_idc.
+export function avcCodecString(au: Uint8Array): string | null {
+  for (let i = 0; i + 6 < au.length; i++) {
+    if (au[i] === 0 && au[i + 1] === 0 && au[i + 2] === 1 && ((au[i + 3] ?? 0) & 0x1f) === NAL_SPS) {
+      const hex = (b: number | undefined) => (b ?? 0).toString(16).padStart(2, "0");
+      return `avc1.${hex(au[i + 4])}${hex(au[i + 5])}${hex(au[i + 6])}`;
+    }
+  }
+  return null;
+}
+```
+
+**Tests:**
+- `wire.test.ts` (verified):
+  - `"parses a key H.264 frame and its header"`: flags `0x11`, frame id 513, 2560×1600. The
+    payload is the same bytes.
+  - `"reads a delta frame, ignores other message types and empty video"`: flags `0x10` is a delta;
+    type 3 (JPEG), an empty video payload and an empty buffer are all `ignored`.
+  - `"finds parameter sets and the IDR, and the codec string"`: `nalTypes(key) = [7, 8, 5]`,
+    `isRandomAccess` is true only for the key frame, and `avcCodecString(key) = "avc1.42c01e"`.
+- `testing/fake-selkies.ts` exports
+  `startFakeSelkies(opts: { authorization: string; keyEvery?: number; fps?: number }): Promise<FakeSelkies>`,
+  with `FakeSelkies { baseUrl: string; requests: { url: string; headers: IncomingHttpHeaders }[]; texts: string[]; waitForText(text: string): Promise<void>; closeAll(): void; silence(): void; sendRaw(bytes: Uint8Array): void; close(): Promise<void> }`.
+- `testing/fake-feed.ts` exports `FakeFeed implements FrameFeed`, with
+  `attach(handlers): FrameFeed`, `frame(synth: SynthFrame, arrivalMicros, width, height)`,
+  `started`, `stopped` and `keyRequests: number[]`. The session recorder's tests (Tasks 10 and 11)
+  drive it. Its code is in Task 10.
+- `feed.test.ts`, against `testing/fake-selkies.ts`. That is a `ws` server on `127.0.0.1:0` (a
+  non-Docker test, so it may run on the test's thread). It requires the `Authorization` header it
+  was given, sends `MODE websockets` on connect, starts sending synthetic frames with the 12-byte
+  header after `START_VIDEO`, logs every text message received, and can close, go silent (stop
+  answering pings) or send a non-H.264 message on command.
+  - `"speaks the passive handshake and nothing else"`: the server's text log is exactly
+    `["STOP_VIDEO", "START_VIDEO"]`, with ≥ 250 ms between them, after `MODE websockets`. No
+    `SETTINGS`, `CLIENT_FRAME_ACK`, `_gz` or input message, ever, over 2 s of frames.
+  - `"stamps frames with the daemon clock and flags only real key frames"`: with a fake `Clock`,
+    `arrivalMicros` equals the clock at delivery. A message whose wire flag says key but whose
+    payload has no SPS gives `key: false`.
+  - `"asks for a key frame at most every 250 ms"`: 10 `requestKeyframe()` calls within 100 ms
+    send exactly one `REQUEST_KEYFRAME`.
+  - `"drops frames of another codec or region and reports it once"`: a VP8 message (flags `0x21`)
+    and a region-1 message give no `onFrame` and one `onState("live", "ignored a non-H.264 or
+    striped frame")`.
+  - `"redials with backoff after the cell closes the socket, re-reading the endpoint"`: the first
+    server closes. `endpoint()` then names a second server, and the feed reaches it after 500 ms.
+    The states go `connecting → live → lost → connecting → live`.
+  - `"treats 1.5 s without a message or pong as lost and redials"`: the server goes silent, and
+    the state is `lost` within 1.5–2.0 s.
+  - **`"sends the stream credential only in the Authorization header"`** (complete; the credential
+    is the cell's):
+
+```ts
+it("sends the stream credential only in the Authorization header", async () => {
+  const secret = "Basic bG9jYWxkb3Q6czktdGVzdC1ub3QtYS1zZWNyZXQ=";
+  const server = await startFakeSelkies({ authorization: secret });
+  const logs: string[] = [];
+  const spies = (["log", "info", "warn", "error"] as const).map((m) => vi.spyOn(console, m).mockImplementation((...a) => void logs.push(a.map(String).join(" "))));
+  const states: string[] = [];
+  const feed = new SelkiesFeed({ endpoint: () => ({ baseUrl: server.baseUrl, authorization: secret }), clock: monotonicClock(), handlers: { onFrame: () => {}, onState: (s, d) => void states.push(`${s} ${d ?? ""}`) } });
+  feed.start();
+  await server.waitForText("START_VIDEO");
+  server.closeAll();
+  await vi.waitFor(() => expect(states.some((s) => s.startsWith("lost"))).toBe(true));
+  feed.stop();
+  expect(server.requests.every((r) => r.headers.authorization === secret)).toBe(true);
+  expect(server.requests.every((r) => !r.url.includes("czktdGVzdC") && !r.url.includes("s9-test"))).toBe(true);
+  expect([...logs, ...states].some((l) => l.includes("czktdGVzdC") || l.includes("s9-test"))).toBe(false);
+  for (const s of spies) s.mockRestore();
+  await server.close();
+});
+```
+  - `"stop() closes and never redials"`: after `stop()`, the server sees no connection within 5 s,
+    and the last state is `stopped`.
+
+**Implementation notes:**
+- Dial `endpoint.baseUrl.replace(/^http/, "ws") + "/api/websockets"` with
+  `new WebSocket(url, { headers: { authorization }, perMessageDeflate: false })`, exactly as
+  `relay()` in `stream-proxy.ts` does. The same dial timeout applies: terminate a socket that
+  isn't open after 10 s.
+- The handshake runs on the socket's text messages: `await` waits for an exact text, `send` sends
+  one, `waitMs` sleeps. Text messages outside the handshake are ignored.
+- Binary messages go through `parseSelkiesMessage`. Keep `kind: "video"`, `codec === CODEC_H264`
+  and `region === 0`. The rest are counted and reported once per connection as above.
+- Liveness reuses Part 2's `StallWatchdog` (`apps/daemon/src/cells/watchdog.ts`) with
+  `STREAM_PING_MS`/`STREAM_STALL_MS`, touched on every message and pong.
+- Reconnect after `lost`: backoff `FEED_BACKOFF_MS`, then 4 s forever while `endpoint()` returns
+  one. A dial that finds no endpoint (the cell is restarting) waits for the next backoff step.
+- Never log the endpoint's authorization or the base URL's port pairing with it. Errors are logged
+  as `recorder feed for session <id>: <code>` by the session recorder, never with the URL.
+- **`FEED_MODE = tap-viewer` (only if S9 Q7 says so).** Then `ViewerTapFeed implements FrameFeed`
+  subscribes to the upstream messages of the first live relay of the cell. This needs a
+  `CellStreams.tap(cellId, listener): () => void` hook in `stream-proxy.ts`, called from
+  `relay()`'s `upstream.on("message")`. It dials its own `SelkiesFeed` only while the cell has no
+  relay. Switching sources requests a key frame, and the session recorder drops frames until it
+  arrives (its "drop until key" path, Task 10). Nothing else changes.
+
+- [ ] **Step 1:** Write `wire.test.ts`, `feed.test.ts` and the fakes. Run
+  `pnpm exec vitest run apps/daemon/src/recorder/wire.test.ts apps/daemon/src/recorder/feed.test.ts`.
+  Expected: FAIL.
+- [ ] **Step 2:** Add `wire.ts` and `annexb.ts` as above, and implement `feed.ts` with the
+  handshake, key requests, liveness and backoff. Use the S9 values. Run the same command.
+  Expected: PASS.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/daemon/src/recorder
+git commit -m "feat(recorder): passive Selkies client that stamps every access unit on arrival"
+```
+
+**Acceptance:** both suites pass. The handshake and constants match `spikes/s9-recorder/FINDINGS.md`.
+
+---
+
+### Task 10: Daemon — the session recorder and the Recorder service
+
+`SessionRecorder` runs one session's recording: feed → gate → writer, plus the policies around it
+(key frame cadence, idle flush, activity spans, disk floor, size cap, stream loss, format change,
+backlog, and the manifest). `Recorder` owns them for every live session. It hooks into
+`LiveSessions`, so recording starts before a session's first step and finalizes after its last.
+It recovers anything left mid-recording when the daemon starts, and finalizes on shutdown.
+
+**Review tier:** light. The privacy gate it calls is Task 11 (`full`).
+
+**Files:**
+- Create: `apps/daemon/src/recorder/session-recorder.ts`, `apps/daemon/src/recorder/recorder.ts`,
+  `apps/daemon/src/recorder/disk.ts`, `apps/daemon/src/recorder/manifest.ts`
+- Modify: `apps/daemon/src/gateway/live.ts` (hooks), `apps/daemon/src/main.ts` (wiring, startup
+  recovery, shutdown)
+- Test: `apps/daemon/src/recorder/session-recorder.test.ts`,
+  `apps/daemon/src/recorder/diskfull-session.test.ts`, `apps/daemon/src/recorder/recorder.test.ts`,
+  `apps/daemon/src/gateway/live.test.ts` (new cases)
+
+**Interfaces** (exact):
+
+```ts
+// apps/daemon/src/recorder/session-recorder.ts
+export const KEYFRAME_EVERY_MICROS = 2_000_000;   // ask for an IDR after 2 s of frames without one (S9 Q5/Q6 may set 0: never)
+export const IDLE_FLUSH_MICROS = 500_000;         // no frame for 500 ms: flush the pending frame, ask for one IDR
+export const MIN_FREE_START_BYTES = 2 * 1024 ** 3;
+export const MIN_FREE_RUN_BYTES = 1024 ** 3;
+export const SESSION_CAP_BYTES = 8 * 1024 ** 3;
+export const MAX_QUEUED_BYTES = 64 * 1024 ** 2;    // frames waiting for the writer
+export const TICK_MS = 100;                        // the service calls tick() this often
+export const DISK_CHECK_MICROS = 10_000_000;
+export const MANIFEST_WRITE_MICROS = 1_000_000;    // at most one manifest write a second while recording
+
+// Task 11 provides ControlGate; until then the default admits everything.
+export interface FrameGate {
+  observe(e: LocalDotEvent): "took" | "returned" | null;
+  admit(tMicros: number, key: boolean): boolean;
+  readonly gaps: RecordingGap[];
+}
+
+export interface SessionRecorderDeps {
+  sessionId: string;
+  dir: string;                                                    // <home>/sessions/<id>/recording
+  feed(handlers: FeedHandlers): FrameFeed;                        // a SelkiesFeed for the session's cell
+  toSessionT(daemonMicros: number): number;                       // EventLog.toSessionT, bound to the session
+  freeBytes(dir: string): number;                                 // disk.ts
+  fs?: RecordingFs;
+  backlog?: readonly LocalDotEvent[];                             // the session's events so far
+  subscribe?(listener: (e: LocalDotEvent) => void): () => void;   // the session's later events
+  gate?: FrameGate;
+  queueLimitBytes?: number;
+}
+
+export class SessionRecorder {
+  constructor(deps: SessionRecorderDeps);
+  start(): Promise<void>;          // free-space floor, manifest "recording", feed.start()
+  ready(): Promise<boolean>;       // true at the first key frame journaled; false if start declined or failed
+  drain(): Promise<void>;          // every frame handed in so far has been handled
+  tick(nowDaemonMicros: number): Promise<void>;  // idle flush, key cadence, disk floor, manifest write
+  stop(endDaemonMicros: number): Promise<RecordingManifest>;  // finish, final manifest; never throws
+  readonly manifest: RecordingManifest;           // own gaps and the gate's, merged and sorted by `from`
+  readonly entries: readonly FragmentEntry[];
+}
+
+// apps/daemon/src/recorder/recorder.ts
+export const RECORDER_START_TIMEOUT_MS = 3000;
+export const SHUTDOWN_FINALIZE_MS = 5000;
+export interface RecorderDeps {
+  home: string;
+  eventLog: EventLog;
+  cells: Pick<CellApi, "get" | "endpoints">;
+  clock: Clock;
+  enabled?: boolean;                                              // LOCALDOT_RECORDING !== "0"
+  freeBytes?(dir: string): number;
+  feedFor?(cellId: string, handlers: FeedHandlers): FrameFeed;    // default: a SelkiesFeed on cells.endpoints(cellId).stream
+  startTimeoutMs?: number;
+}
+export interface LiveRecording { manifest: RecordingManifest; live: boolean; entries: readonly FragmentEntry[] }
+export class Recorder {
+  constructor(deps: RecorderDeps);
+  recoverAll(): Promise<{ recovered: number; failed: number }>;   // before the daemon serves
+  start(cellId: string, sessionId: string): Promise<void>;        // LiveSessions.beforeRun; never throws
+  stop(sessionId: string): Promise<void>;                         // LiveSessions.afterRun; never throws
+  stopAll(timeoutMs?: number): Promise<void>;                     // SIGTERM
+  info(sessionId: string): LiveRecording | undefined;             // live: memory; else manifest.json and fragments.jsonl
+  isLive(sessionId: string): boolean;
+}
+
+// apps/daemon/src/recorder/disk.ts
+export function freeBytes(dir: string): number;   // statfsSync(dir): bavail × bsize; 0 when it throws
+
+// apps/daemon/src/recorder/manifest.ts
+export function writeManifest(dir: string, m: RecordingManifest): void;   // temp file + rename, mode 0600
+export function readManifest(dir: string): RecordingManifest | null;      // null when absent or invalid
+
+// apps/daemon/src/gateway/live.ts (Part 3's LiveSessions, extended)
+export interface LiveHooks {
+  beforeRun?(cellId: string, sessionId: string): Promise<void>;
+  afterRun?(cellId: string, sessionId: string): Promise<void>;
+}
+// LiveSessions gains:
+//   addHooks(hooks: LiveHooks): () => void;
+// start(cellId, sessionId, run) awaits every beforeRun, then run(signal), then every afterRun,
+// each hook's rejection logged and swallowed; get(cellId) names the session from the start call on.
+```
+
+**Frame path** (`#frame`, run strictly in order on a promise chain):
+1. `t = toSessionT(frame.arrivalMicros)`; `key = frame.key`.
+2. `gate.admit(t, key)`, else drop.
+3. Before the writer exists:
+   - drop delta frames, asking for a key frame at most every 500 ms;
+   - on the first key frame, take `codec = avcCodecString(data)`, `width` and `height`;
+   - write the manifest (`recording`, codec, size, `firstMicros: t`);
+   - only then create and start the `RecordingWriter`.
+
+   The manifest goes first so that recovery always knows the format.
+4. A later key frame whose codec or size differs ends the recording: `#end("recorder-error")`,
+   with note `the stream changed format`.
+5. `writer.push`. A rejection whose `code` is `ENOSPC` calls `#fail("disk-full")`; any other calls
+   `#fail("recorder-error")`.
+6. Activity: extend the last span if `t − last.to ≤ ACTIVITY_JOIN_MICROS`, else open
+   `{ from: t, to: t }`.
+7. Cadence: if `t − lastKeyT ≥ KEYFRAME_EVERY_MICROS` and no request was made in the last
+   `KEYFRAME_EVERY_MICROS / 2`, call `feed.requestKeyframe()`.
+
+**Policies:**
+- **Backlog.** Track the bytes of frames queued but not yet handled. Above `queueLimitBytes`:
+  - drop incoming frames;
+  - open a gap `recorder-error` at the first dropped frame;
+  - request a key frame;
+  - resume at the next admitted key frame, which closes the gap.
+- **Stream loss.**
+  - `onState("lost")` opens a `stream-lost` gap at the last frame's `t`.
+  - After `live` returns, drop until the next key frame (and request one), then close the gap at
+    that frame.
+  - A recording never resumes on a delta frame after a gap, of any kind.
+- **Idle** (`tick`). With the writer started and `now − lastT ≥ IDLE_FLUSH_MICROS`, once per idle
+  period, call `writer.flushIdle(now)` and `feed.requestKeyframe()`. If Selkies honours that on a
+  still screen (S9 Q5), the fragment holding the last change commits at once, and a reader of the
+  live session sees it.
+- **Disk** (`tick`, every `DISK_CHECK_MICROS`). If `freeBytes < MIN_FREE_RUN_BYTES`, call
+  `#end("disk-full", now)`. That is a clean finish: the state is `complete`, with a gap from `now`
+  to `null`.
+- **Size cap.** On a commit whose `endOffset ≥ SESSION_CAP_BYTES`, call
+  `#end("size-cap", entry.endMicros)`.
+- **`#end(reason, at)`:** stop the feed and the subscription, `writer.finish(at)`,
+  state `complete` (or `failed` when no writer existed), push the gap, write the manifest.
+- **`#fail(reason, at)`:** stop the feed and the subscription, `writer.close()`, then
+  `recoverRecording(dir, format)`. The state comes from its result. The gap `{ from: result.lastMicros ?? at, to: null, reason }`
+  is pushed, and the manifest written. Recovery's own failure (still ENOSPC) leaves the state
+  `recovered` with whatever `fragments.jsonl` covers: the view serves that prefix with a fresh
+  `mfra`.
+- **`stop(end)`:** drain the queue. If the recording is still running: `writer.finish(end)`, state
+  `complete`. Without a writer, state `failed`, note `no key frame arrived`. Write the manifest and
+  return it. Never throws.
+- **Errors never reach the session.** No `SessionRecorder` method rejects into `LiveSessions`, and
+  the session's run cannot see the recorder.
+
+**Recorder service:**
+- `start(cellId, sessionId)` does the following, never throwing:
+  - if recording is off (`LOCALDOT_RECORDING=0`), writes manifest `none` with note
+    `recording is off` and returns;
+  - otherwise creates the `SessionRecorder` with:
+    - `dir` = `<home>/sessions/<id>/recording`;
+    - `feed` = `feedFor(cellId, h)`, by default `new SelkiesFeed({ endpoint: () => cells.endpoints(cellId)?.stream, clock, handlers: h })`;
+    - `toSessionT` = `(us) => eventLog.toSessionT(sessionId, us)`;
+    - `backlog` = `eventLog.read(sessionId)`;
+    - `subscribe` = `eventLog.subscribe` filtered to the session;
+  - starts a `TICK_MS` interval that calls `tick(clock.nowMicros())`;
+  - awaits `ready()` for at most `startTimeoutMs`. Missing that deadline is not an error: video
+    may still arrive.
+- `stop(sessionId)` clears the interval and calls `stop(clock.nowMicros())`.
+- `recoverAll()`: for every `<home>/sessions/<ULID>/recording/manifest.json` in state `recording`,
+  run `recoverRecording(dir)`, then write the manifest as `recovered` (or `failed`, note
+  `the daemon stopped while recording`), keeping its activity and gaps. Add a gap
+  `{ from: result.lastMicros, to: null, reason: "recorder-error" }`. A recording dir without a
+  manifest (the daemon died before the first key frame) is removed.
+- `main.ts`:
+  - after building `EventLog`, the orchestrator and `LiveSessions`:
+    `const recorder = new Recorder({ home, eventLog, cells: orchestrator, clock, enabled: process.env.LOCALDOT_RECORDING !== "0" })`,
+    then `await recorder.recoverAll()` **before** `serve()`;
+  - `live.addHooks({ beforeRun: (c, s) => recorder.start(c, s), afterRun: (_c, s) => recorder.stop(s) })`;
+  - the existing SIGTERM and SIGINT path awaits `recorder.stopAll(SHUTDOWN_FINALIZE_MS)` before
+    closing the event log and releasing the lock;
+  - `createApp` receives `recorder` (Task 12's routes).
+- `LiveSessions.start` (Part 3's `live.ts`): the run becomes
+  `void (async () => { for (const h of hooks) await h.beforeRun?.(…).catch(log); try { await run(signal) } catch (err) { log } finally { for (const h of hooks) await h.afterRun?.(…).catch(log); delete if still ours } })()`.
+  `get(cellId)` holds the session from the synchronous part of `start`, so the puppet route's
+  202 + `/live` behaviour is unchanged.
+
+**Tests:**
+- `session-recorder.test.ts` (with `FakeFeed`, the synthetic stream, and `toSessionT: (us) => us`):
+  - `"writes the manifest with the format before the first frame is muxed"`: after the first key
+    frame, `manifest.json` names the codec `avc1.42c01e`, 64×64 and `firstMicros`, and the
+    `fragments.jsonl` file doesn't exist yet.
+  - `"drops delta frames until the first key frame and asks for one"`: three deltas, then a key.
+    One key request, and the recording starts at the key's `t`.
+  - `"asks for a key frame after 2 s of frames without one"`: 150 deltas after a key at 60 fps.
+    Exactly one request near 2 s, and another near 3 s (the `/ 2` limiter).
+  - `"flushes the pending frame and asks for a key frame once per idle period"`: frames stop, and
+    `tick` at +400 ms does nothing, while at +500 ms it flushes once and requests once. Further
+    ticks add nothing until frames resume.
+  - `"joins frames into activity spans 500 ms apart"`: bursts 300 ms and 800 ms apart give 2 spans.
+  - `"opens a stream-lost gap and resumes only at a key frame"`: `onState("lost")` at the 40th
+    frame, `live` at the 50th, deltas, then a key at the 60th. The gap is `{ from: t(39), to: t(60) }`,
+    and no packet lies in between.
+  - `"ends with recorder-error when the stream changes format"`: a second key frame at 128×128.
+  - `"drops frames over the backlog limit and resumes at a key frame"`: `queueLimitBytes: 50_000`.
+    200 frames are handed in synchronously before `drain`. There is a `recorder-error` gap with a
+    `to`, and the recording is valid (every packet decodable in order: a key at each fragment
+    start).
+  - `"stops at the size cap"`: with the cap overridden to 100 kB through a test-only option
+    (`sizeCapBytes`), the state is `complete` with a `size-cap` gap.
+  - `"never throws into the caller"`: a feed whose `start()` throws gives a manifest `failed` with
+    note `the stream could not be opened`, and `stop()` resolves.
+- `diskfull-session.test.ts`: **the Review Focus 3 pin (session)**, complete code below.
+- `recorder.test.ts` (a real `EventLog` in a temp home, a real `LiveSessions`, `feedFor` returning
+  a `FakeFeed` that a test timer drives):
+  - `"records a live session from its first step to its end"`: the manifest is `complete`, the
+    video holds every fed frame, and `info().live` is false after the run.
+  - `"waits for the first key frame at most startTimeoutMs, then runs the session anyway"`: a feed
+    that never sends. The run starts after `startTimeoutMs` (200 in the test), and the final
+    manifest is `failed`.
+  - `"runs the session when recording is off"`: `enabled: false` gives a manifest `none`, and the
+    run is unaffected.
+  - `"recovers a recording left in recording state at startup"`: a writer abandoned mid-session
+    and a manifest in `recording`. `recoverAll()` gives `recovered` with a `recorder-error` gap and
+    a playable file.
+  - `"removes a recording dir that never got its first key frame"`.
+  - `"finalizes live recordings on stopAll within the timeout"`.
+- `live.test.ts`:
+  - `"awaits beforeRun before the run and afterRun after it, even when the run throws"`;
+  - `"keeps get(cellId) for the session from start on, through the hooks"`;
+  - `"swallows a rejecting hook"`.
+
+**The Review Focus 3 pin (session), complete** (verified against a prototype):
+
+`apps/daemon/src/recorder/testing/fake-feed.ts`:
+```ts
+import type { SynthFrame } from "@localdot/stage/testing";
+import type { FeedHandlers, FrameFeed } from "../feed.ts";
+
+// A FrameFeed the test drives: frames go in with an arrival stamp, key requests and stops are counted.
+export class FakeFeed implements FrameFeed {
+  handlers: FeedHandlers | null = null;
+  started = false;
+  stopped = false;
+  keyRequests: number[] = [];
+  #lastArrival = 0;
+
+  attach(h: FeedHandlers): FrameFeed {
+    this.handlers = h;
+    return this;
+  }
+  start(): void {
+    this.started = true;
+  }
+  stop(): void {
+    this.stopped = true;
+  }
+  requestKeyframe(): void {
+    this.keyRequests.push(this.#lastArrival);
+  }
+  frame(f: SynthFrame, arrivalMicros: number, width: number, height: number): void {
+    this.#lastArrival = arrivalMicros;
+    if (!this.stopped) this.handlers?.onFrame({ arrivalMicros, key: f.key, width, height, data: f.data });
+  }
+}
+```
+
+`apps/daemon/src/recorder/diskfull-session.test.ts`:
+```ts
+import { existsSync, mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { synthFrame } from "@localdot/stage/testing";
+import { ALL_FORMATS, EncodedPacketSink, FilePathSource, Input } from "mediabunny";
+import { describe, expect, it } from "vitest";
+import { MIN_FREE_RUN_BYTES, MIN_FREE_START_BYTES, SessionRecorder } from "./session-recorder.ts";
+import { FakeFeed } from "./testing/fake-feed.ts";
+import { fullAfter } from "./testing/full-fs.ts";
+
+const o = { widthMbs: 4, heightMbs: 4, keyEvery: 10 };
+const GiB = 1024 ** 3;
+const at = (i: number) => 1_000_000 + i * 16_667;
+
+async function packetsIn(file: string): Promise<number[]> {
+  const input = new Input({ source: new FilePathSource(file), formats: ALL_FORMATS });
+  const sink = new EncodedPacketSink((await input.getPrimaryVideoTrack()) as never);
+  const t: number[] = [];
+  for await (const p of sink.packets()) t.push(p.microsecondTimestamp);
+  input.dispose();
+  return t;
+}
+
+describe("disk full (Review Focus 3), the session", () => {
+  it("stops the recording at ENOSPC, never the session, and keeps a playable prefix marked disk-full", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "local dot's full-session-")), "recording");
+    const feed = new FakeFeed();
+    const rec = new SessionRecorder({ sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", dir, feed: (h) => feed.attach(h), toSessionT: (us) => us, freeBytes: () => 50 * GiB, fs: fullAfter(400_000) });
+    await rec.start();
+    // Frames keep coming after the disk fills: none of them may throw into the feed.
+    for (let i = 0; i < 2000; i++) feed.frame(synthFrame(o, i), at(i), 64, 64);
+    await rec.drain();
+    const m = rec.manifest;
+    expect(m.state).toBe("recovered");
+    expect(feed.stopped).toBe(true);
+    const gap = m.gaps.find((g) => g.reason === "disk-full");
+    expect(gap).toMatchObject({ to: null });
+    const recorded = await packetsIn(join(dir, "video.mp4"));
+    expect(recorded.length).toBeGreaterThan(50);
+    expect(recorded.at(-1)).toBeLessThanOrEqual(gap?.from as number);
+    expect(recorded).toEqual(Array.from({ length: recorded.length }, (_, i) => at(i)));
+    // Ending the session afterwards reports the same manifest and does not throw.
+    expect((await rec.stop(at(2001))).state).toBe("recovered");
+  });
+
+  it("does not start below the free-space floor and says why", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "local dot's floor-")), "recording");
+    const feed = new FakeFeed();
+    const rec = new SessionRecorder({ sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", dir, feed: (h) => feed.attach(h), toSessionT: (us) => us, freeBytes: () => MIN_FREE_START_BYTES - 1 });
+    await rec.start();
+    expect(feed.started).toBe(false);
+    expect(rec.manifest).toMatchObject({ state: "none", note: "not enough free disk space" });
+    expect(existsSync(join(dir, "video.mp4"))).toBe(false);
+  });
+
+  it("finishes the recording cleanly when free space falls below the running floor", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "local dot's low-")), "recording");
+    const feed = new FakeFeed();
+    let free = 50 * GiB;
+    const rec = new SessionRecorder({ sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", dir, feed: (h) => feed.attach(h), toSessionT: (us) => us, freeBytes: () => free });
+    await rec.start();
+    for (let i = 0; i < 100; i++) feed.frame(synthFrame(o, i), at(i), 64, 64);
+    await rec.drain();
+    free = MIN_FREE_RUN_BYTES - 1;
+    await rec.tick(at(100));
+    expect(feed.stopped).toBe(true);
+    expect(rec.manifest.state).toBe("complete");
+    expect(rec.manifest.gaps).toEqual([{ from: at(100), to: null, reason: "disk-full" }]);
+    expect(await packetsIn(join(dir, "video.mp4"))).toHaveLength(100);
+  });
+});
+```
+
+- [ ] **Step 1:** Write the tests above and the `live.test.ts` cases. Run
+  `pnpm exec vitest run apps/daemon/src/recorder apps/daemon/src/gateway/live.test.ts`.
+  Expected: FAIL (the modules and `addHooks` are missing).
+- [ ] **Step 2:** Implement `disk.ts`, `manifest.ts`, `session-recorder.ts` (with an admit-all
+  default gate), `recorder.ts`, the `LiveSessions` hooks and the `main.ts` wiring. Run the same
+  command, then `pnpm exec vitest run apps/daemon/src`.
+  Expected: PASS. Every Part 2 and Part 3 daemon suite stays green.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/daemon
+git commit -m "feat(recorder): record every live session in the daemon, whoever watches"
+```
+
+**Acceptance:** the suites pass. Start the daemon with `node --import tsx src/main.ts`, run a
+puppet session on a ready cell **with no browser open**, then
+`ls ~/.localdot/sessions/<id>/recording`.
+Expected: `video.mp4 fragments.jsonl manifest.json` and no `journal/`. `manifest.json` says
+`complete`, with the codec S9 found. `ffprobe -v error -show_entries stream=codec_name,width,height recording/video.mp4`
+exits 0 and names `h264` and the cell's size.
+
+---
+
+### Task 11: Recording pauses while the user has control (privacy)
+
+Takeover exists for exactly the moments a recording must not keep: logins, 2FA codes, CAPTCHAs and
+payment fields (spec, "Safety and control"). The model receives no screenshot during takeover, and
+the recording keeps no frame either. The control changes come from M5 (`control.change`, whose
+schema already exists). This task makes the recorder honour them from M6 on. A frame is judged by
+its own session time, so a frame that waited in the recorder's queue behind a `control.change`
+cannot slip through. After control returns, recording resumes only at a key frame. The journal
+never sees a user-era frame, so a crash during a takeover leaves none on disk.
+
+**Review tier:** **full**. It is part of takeover (`jobs/PROCESS.md`): a missed frame here records a
+password field or a card number.
+
+**Files:**
+- Create: `apps/daemon/src/recorder/control-gate.ts`
+- Modify: `apps/daemon/src/recorder/session-recorder.ts` (`gate` defaults to `new ControlGate()`;
+  `observe` returning `"returned"` calls `feed.requestKeyframe()`), `apps/daemon/src/recorder/recorder.ts`
+  (passes the backlog and the subscription, already in Task 10)
+- Test: `apps/daemon/src/recorder/control-gate.test.ts`
+
+**Interfaces:** `ControlGate implements FrameGate` (Task 10's interface), exactly as below.
+
+**Production code, complete** (security boundary):
+
+`apps/daemon/src/recorder/control-gate.ts`:
+```ts
+import type { LocalDotEvent, RecordingGap } from "@localdot/protocol";
+
+interface UserSpan {
+  from: number;
+  to: number | null;
+  // The first frame recorded after `to`: a key frame, since deltas would need the dropped references.
+  resumedAt: number | null;
+}
+
+// Privacy (P7-R10): while the user has control (M5's takeover: logins, 2FA, CAPTCHAs, payment) the
+// recorder keeps no frame, not even in its journal. A frame is judged by its own session time
+// against the control changes in the log, so a frame that waited in the recorder's queue behind a
+// control.change is still judged correctly. Frames reach `admit` in arrival order; control changes
+// may be observed before frames older than them.
+export class ControlGate {
+  readonly #spans: UserSpan[] = [];
+
+  // Every event of the session, in log order: the backlog at start, then live appends.
+  // Returns "returned" when control came back, so the caller asks for a key frame.
+  observe(e: LocalDotEvent): "took" | "returned" | null {
+    if (e.type !== "control.change") return null;
+    const open = this.#spans.at(-1);
+    if (e.data.holder === "user") {
+      if (open && open.to === null) return null;
+      this.#spans.push({ from: e.t, to: null, resumedAt: null });
+      return "took";
+    }
+    if (!open || open.to !== null) return null;
+    open.to = e.t;
+    return "returned";
+  }
+
+  admit(tMicros: number, key: boolean): boolean {
+    let before: UserSpan | undefined;
+    for (const s of this.#spans) {
+      if (tMicros >= s.from && (s.to === null || tMicros < s.to)) return false;
+      if (s.to !== null && s.to <= tMicros) before = s;
+    }
+    if (before && before.resumedAt === null) {
+      if (!key) return false;
+      before.resumedAt = tMicros;
+    }
+    return true;
+  }
+
+  get userHasControl(): boolean {
+    return this.#spans.at(-1)?.to === null;
+  }
+
+  // No video from a takeover until the first frame recorded after it; takeovers whose video never
+  // came back in between are one gap.
+  get gaps(): RecordingGap[] {
+    const out: RecordingGap[] = [];
+    for (const s of this.#spans) {
+      const last = out.at(-1);
+      if (last && (last.to === null || s.from <= last.to)) last.to = s.resumedAt;
+      else out.push({ from: s.from, to: s.resumedAt, reason: "user-control" });
+    }
+    return out;
+  }
+}
+```
+
+**The pins, complete** (verified against the prototype of Task 10 with this gate):
+
+`apps/daemon/src/recorder/control-gate.test.ts`:
+```ts
+import * as fs from "node:fs";
+import { mkdtempSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { LocalDotEvent } from "@localdot/protocol";
+import { synthFrame } from "@localdot/stage/testing";
+import { ALL_FORMATS, EncodedPacketSink, FilePathSource, Input } from "mediabunny";
+import { describe, expect, it } from "vitest";
+import { ControlGate } from "./control-gate.ts";
+import { decodeJournal } from "./journal.ts";
+import { recoverRecording } from "./recover.ts";
+import { SessionRecorder } from "./session-recorder.ts";
+import { FakeFeed } from "./testing/fake-feed.ts";
+import type { RecordingFs } from "./writer.ts";
+
+const o = { widthMbs: 4, heightMbs: 4, keyEvery: 15 };
+const at = (i: number) => 500_000 + i * 16_667;
+const TAKE = 1_000_000;
+const GIVE = 2_000_000;
+let seq = 0;
+const control = (t: number, holder: "user" | "agent"): LocalDotEvent =>
+  ({ v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: seq++, t, agent: "main", type: "control.change", data: { holder, reason: holder === "user" ? "user_takeover" : "resume" } }) as LocalDotEvent;
+
+// Every byte the recorder appends to its journal, decoded: what a crash would leave behind.
+function journalSpy(): RecordingFs & { journaled: number[] } {
+  const journaled: number[] = [];
+  return {
+    ...fs,
+    journaled,
+    appendFileSync: ((file: fs.PathOrFileDescriptor, data: string | Uint8Array) => {
+      if (String(file).includes(`${join("recording", "journal")}`) && typeof data !== "string") for (const r of decodeJournal(data)) journaled.push(r.tMicros);
+      fs.appendFileSync(file, data);
+    }) as typeof fs.appendFileSync,
+  };
+}
+
+async function recordedTimes(file: string): Promise<number[]> {
+  const input = new Input({ source: new FilePathSource(file), formats: ALL_FORMATS });
+  const sink = new EncodedPacketSink((await input.getPrimaryVideoTrack()) as never);
+  const t: number[] = [];
+  for await (const p of sink.packets()) t.push(p.microsecondTimestamp);
+  input.dispose();
+  return t;
+}
+
+describe("the takeover privacy gate (Review Focus 6, full tier)", () => {
+  it("records nothing while the user has control, not even in the journal, and resumes at a key frame", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "local dot's gate-")), "recording");
+    const feed = new FakeFeed();
+    const spy = journalSpy();
+    const listeners: ((e: LocalDotEvent) => void)[] = [];
+    const rec = new SessionRecorder({ sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", dir, feed: (h) => feed.attach(h), toSessionT: (us) => us, freeBytes: () => 1024 ** 4, fs: spy, subscribe: (l) => { listeners.push(l); return () => {}; } });
+    await rec.start();
+    const frames = Array.from({ length: 150 }, (_, i) => i);
+    let took = false;
+    let requestsWhenGiven = -1;
+    for (const i of frames) {
+      // The control changes reach the log between frames, as M5's routes append them.
+      if (!took && at(i) >= TAKE) {
+        took = true;
+        for (const l of listeners) l(control(TAKE, "user"));
+      }
+      if (requestsWhenGiven < 0 && at(i) >= GIVE) {
+        requestsWhenGiven = feed.keyRequests.length;
+        for (const l of listeners) l(control(GIVE, "agent"));
+      }
+      feed.frame(synthFrame(o, i), at(i), 64, 64);
+    }
+    await rec.drain();
+    const firstKeyBack = frames.map(at).find((t, i) => t >= GIVE && i % o.keyEvery === 0) as number;
+    const userEra = (t: number) => t >= TAKE && t < firstKeyBack;
+    expect(spy.journaled.filter(userEra)).toEqual([]);
+    expect(feed.keyRequests.length).toBeGreaterThan(requestsWhenGiven);
+    await rec.stop(at(150));
+    const recorded = await recordedTimes(join(dir, "video.mp4"));
+    expect(recorded.filter(userEra)).toEqual([]);
+    expect(recorded).toEqual(frames.map(at).filter((t) => !userEra(t)));
+    expect(rec.manifest.gaps).toEqual([{ from: TAKE, to: firstKeyBack, reason: "user-control" }]);
+  });
+
+  it("leaves no user frame on disk when the daemon dies during a takeover", async () => {
+    const dir = join(mkdtempSync(join(tmpdir(), "local dot's gate-crash-")), "recording");
+    const feed = new FakeFeed();
+    const rec = new SessionRecorder({ sessionId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", dir, feed: (h) => feed.attach(h), toSessionT: (us) => us, freeBytes: () => 1024 ** 4, backlog: [control(TAKE, "user")] });
+    await rec.start();
+    for (let i = 0; i < 90; i++) feed.frame(synthFrame(o, i), at(i), 64, 64);
+    await rec.drain();
+    // No stop(): the process is gone. Recovery works from what is on disk.
+    await recoverRecording(dir);
+    const files = readdirSync(dir);
+    expect(files).not.toContain("journal");
+    expect((await recordedTimes(join(dir, "video.mp4"))).every((t) => t < TAKE)).toBe(true);
+  });
+
+  it("judges frames by their own time, whatever order they and the control change are processed in", () => {
+    const gate = new ControlGate();
+    expect(gate.admit(999_999, false)).toBe(true);
+    gate.observe(control(TAKE, "user"));
+    expect(gate.admit(999_999, false)).toBe(true);
+    expect(gate.admit(TAKE, true)).toBe(false);
+    gate.observe(control(GIVE, "agent"));
+    expect(gate.admit(GIVE - 1, true)).toBe(false);
+    expect(gate.admit(GIVE + 10, false)).toBe(false);
+    expect(gate.admit(GIVE + 20, true)).toBe(true);
+    expect(gate.admit(GIVE + 30, false)).toBe(true);
+    expect(gate.gaps).toEqual([{ from: TAKE, to: GIVE + 20, reason: "user-control" }]);
+  });
+
+  it("keeps one gap when control is taken again before the video came back", () => {
+    const gate = new ControlGate();
+    gate.observe(control(TAKE, "user"));
+    gate.observe(control(GIVE, "agent"));
+    expect(gate.admit(GIVE + 50, false)).toBe(false);
+    gate.observe(control(GIVE + 100, "user"));
+    gate.observe(control(GIVE + 500, "agent"));
+    expect(gate.admit(GIVE + 300, true)).toBe(false);
+    expect(gate.admit(GIVE + 600, true)).toBe(true);
+    expect(gate.gaps).toEqual([{ from: TAKE, to: GIVE + 600, reason: "user-control" }]);
+  });
+
+  it("keeps two gaps when a key frame came back between two takeovers", () => {
+    const gate = new ControlGate();
+    for (const e of [control(TAKE, "user"), control(GIVE, "agent"), control(GIVE + 100, "user"), control(GIVE + 500, "agent")]) gate.observe(e);
+    expect(gate.admit(GIVE + 50, true)).toBe(true);
+    expect(gate.admit(GIVE + 600, true)).toBe(true);
+    expect(gate.gaps).toEqual([
+      { from: TAKE, to: GIVE + 50, reason: "user-control" },
+      { from: GIVE + 100, to: GIVE + 600, reason: "user-control" },
+    ]);
+  });
+});
+```
+
+**Review checklist** (`full` tier: review, fix round, scoped re-review, mutation testing, bypass
+hunt). Each mutation below must fail at least one pin:
+- `admit` checks `t > s.from` instead of `t >= s.from`;
+- `admit` accepts a delta right after a span;
+- `observe` ignores a second takeover;
+- `gaps` drops the merge;
+- the session recorder calls `writer.push` before `gate.admit`;
+- the session recorder admits frames by processing order instead of by `t`;
+- the backlog isn't folded at start.
+
+Bypass hunt:
+- a frame stamped exactly at the `control.change`'s `t`;
+- a takeover appended while the queue holds older frames;
+- a takeover and a feed reconnect together;
+- `stopAll` during a takeover;
+- recovery after a crash during a takeover (pinned).
+
+- [ ] **Step 1:** Write `control-gate.test.ts`. Run
+  `pnpm exec vitest run apps/daemon/src/recorder/control-gate.test.ts`.
+  Expected: FAIL. `./control-gate.ts` does not exist.
+- [ ] **Step 2:** Add `control-gate.ts` as above, and make it the session recorder's default gate.
+  Run `pnpm exec vitest run apps/daemon/src/recorder`.
+  Expected: PASS.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/daemon/src/recorder
+git commit -m "feat(recorder): keep no frame while the user has control"
+```
+
+**Acceptance:** the pins pass, the mutation list is killed (record which test kills each in the
+task report), and the bypass hunt finds nothing open.
+
+---
