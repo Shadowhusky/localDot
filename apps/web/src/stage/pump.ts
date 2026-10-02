@@ -16,6 +16,9 @@ export interface PumpOptions {
   // The frame on screen when the track was tapped: the tap sees only later frames, and a still
   // screen sends none, so without it the stage stays empty until something moves.
   first?: VideoFrame;
+  // A frame the presenter could not paint ends the pump: the reader is cancelled and the error is
+  // handed here, so a lost canvas is reported instead of leaving the stage silently frozen.
+  onError?: (err: unknown) => void;
 }
 
 // One frame in, one upload out: the loop presents each decoded frame as it arrives and never
@@ -71,10 +74,16 @@ export function pumpFrames(
       show(frame);
     }
   };
-  const running = loop().catch(() => {});
+  let stopping = false;
+  const running = loop().catch(async (err: unknown) => {
+    if (stopping) return;
+    await reader.cancel(err).catch(() => {});
+    opts.onError?.(err);
+  });
 
   return {
     async stop() {
+      stopping = true;
       await reader.cancel().catch(() => {});
       await running;
     },

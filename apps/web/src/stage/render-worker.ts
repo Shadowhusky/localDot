@@ -40,11 +40,13 @@ async function handle(m: WorkerIn): Promise<void> {
       m.readable,
       presenter,
       (stats) => scope.postMessage({ type: "stats", stats }),
-      {
-        first: m.first,
-      },
+      { first: m.first, onError: report },
     );
   } catch (err) {
-    scope.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
+    report(err);
   }
+}
+
+function report(err: unknown): void {
+  scope.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
 }

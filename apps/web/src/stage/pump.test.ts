@@ -88,4 +88,34 @@ describe("pumpFrames", () => {
     expect(presented).toEqual([next]);
     expect(next.close).toHaveBeenCalledTimes(1);
   });
+
+  it("stops pumping and reports the error when presenting a frame throws", async () => {
+    const frames = [fakeFrame(), fakeFrame(), fakeFrame()];
+    let cancelled: unknown;
+    const source = new ReadableStream<VideoFrame>({
+      pull(controller) {
+        const next = frames.shift();
+        if (next) controller.enqueue(next);
+      },
+      cancel(reason) {
+        cancelled = reason;
+      },
+    });
+    const presented: VideoFrame[] = [];
+    const lost = new Error("canvas lost");
+    const presenter: Presenter = {
+      present(f) {
+        if (presented.length === 1) throw lost;
+        presented.push(f);
+      },
+    };
+    const errors: unknown[] = [];
+    const pump = pumpFrames(source, presenter, () => {}, { onError: (err) => errors.push(err) });
+    await new Promise((r) => setTimeout(r, 20));
+    expect(errors).toEqual([lost]);
+    expect(cancelled).toBe(lost);
+    expect(presented).toHaveLength(1);
+    await pump.stop();
+    expect(errors).toHaveLength(1);
+  });
 });

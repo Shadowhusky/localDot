@@ -98,7 +98,7 @@ export function App({ fetchImpl }: AppProps) {
 }
 
 function Theatre({ api }: { api: ApiClient }) {
-  const { cell, status, pending, error, reconnects, start, stop, retry } = useCell(api);
+  const { cell, status, pending, error, listed, reconnects, start, stop, retry } = useCell(api);
   const hud = hudFor({ cell, status, pending });
   useEffect(() => {
     document.title = `localDot — ${hud.label}`;
@@ -117,7 +117,7 @@ function Theatre({ api }: { api: ApiClient }) {
       <div className="house">
         <ConversationRail />
         <StageColumn hud={error ? { ...hud, caption: error } : hud} onAction={onAction}>
-          <Stage cell={cell} api={api} reconnects={reconnects} />
+          <Stage cell={cell} api={api} reconnects={reconnects} listed={listed} />
         </StageColumn>
         <PlanRail />
       </div>

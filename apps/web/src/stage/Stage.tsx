@@ -11,6 +11,8 @@ export interface StageProps {
   api: ApiClient;
   // Times the daemon's status socket has reopened: a daemon restart revokes every ticket.
   reconnects: number;
+  // Every cell id the daemon listed last: what the client stored for any other cell is dropped.
+  listed: readonly string[];
 }
 
 interface ClientPage {
@@ -18,11 +20,16 @@ interface ClientPage {
   key: string;
 }
 
-export function Stage({ cell, api, reconnects }: StageProps) {
+export function Stage({ cell, api, reconnects, listed }: StageProps) {
   const support = frameTapSupport();
   const canvas = useRef<StageCanvasHandle>(null);
   const [page, setPage] = useState<ClientPage | null>(null);
   const [stale, setStale] = useState(0);
+  // Read when a ticket arrives; a new list alone is no reason to mint again.
+  const listedRef = useRef(listed);
+  useEffect(() => {
+    listedRef.current = listed;
+  }, [listed]);
   const cellId = cell?.id ?? null;
   const ready = cell?.state === "ready";
 
@@ -40,7 +47,7 @@ export function Stage({ cell, api, reconnects }: StageProps) {
     api.post<{ path: string }>(`/api/cells/${cellId}/stream-ticket`).then(
       ({ path }) => {
         if (cancelled) return;
-        forgetOldTickets(cellId, path);
+        forgetOldTickets({ cellId, livePath: path, listed: listedRef.current });
         setPage({ src: path, key: `${path}#${attempt}` });
       },
       () => {},

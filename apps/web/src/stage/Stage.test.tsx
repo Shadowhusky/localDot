@@ -26,6 +26,7 @@ describe("Stage", () => {
         cell={ready}
         api={createApi("a".repeat(43), { origin: "http://127.0.0.1:4750" })}
         reconnects={0}
+        listed={[CELL]}
       />,
     );
     expect(screen.getByRole("alert").textContent).toBe(
@@ -59,7 +60,7 @@ describe("Stage in a Chromium browser", () => {
 
   it("loads the client, out of sight and inert, from the path of a ticket it mints", async () => {
     const { api, calls } = daemon();
-    render(<Stage cell={ready} api={api} reconnects={0} />);
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
     await waitFor(() => expect(client()?.getAttribute("src")).toBe(ticketPath(1)));
     expect(client()?.hasAttribute("inert")).toBe(true);
     expect(calls).toEqual([`POST /api/cells/${CELL}/stream-ticket`]);
@@ -73,18 +74,28 @@ describe("Stage in a Chromium browser", () => {
     window.localStorage.setItem(old, "webrtc");
     window.localStorage.setItem("localdot.token", "kept");
     const { api } = daemon();
-    render(<Stage cell={ready} api={api} reconnects={0} />);
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
     await waitFor(() => expect(client()).not.toBeNull());
     expect(window.localStorage.getItem(old)).toBeNull();
     expect(window.localStorage.getItem("localdot.token")).toBe("kept");
   });
 
+  it("drops what the client stored for a cell the daemon no longer lists", async () => {
+    const page = (path: string) => `${window.location.origin}${path}`.replace(/[^\w.-]/g, "_");
+    const gone = `${page(`/cells/01JXYZ0000000000000000GONE/desktop/${"O".repeat(22)}/`)}_stream_mode`;
+    window.localStorage.setItem(gone, "websockets");
+    const { api } = daemon();
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
+    await waitFor(() => expect(client()).not.toBeNull());
+    expect(window.localStorage.getItem(gone)).toBeNull();
+  });
+
   it("mints again and loads a fresh client when the daemon socket reconnects", async () => {
     const { api, calls } = daemon();
-    const view = render(<Stage cell={ready} api={api} reconnects={0} />);
+    const view = render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
     await waitFor(() => expect(client()).not.toBeNull());
     const before = client();
-    view.rerender(<Stage cell={ready} api={api} reconnects={1} />);
+    view.rerender(<Stage cell={ready} api={api} reconnects={1} listed={[CELL]} />);
     await waitFor(() => expect(client()?.getAttribute("src")).toBe(ticketPath(2)));
     expect(client()).not.toBe(before);
     expect(calls).toHaveLength(2);
@@ -93,7 +104,7 @@ describe("Stage in a Chromium browser", () => {
   it("mints again after 10 s without a video element in the client, and never while it has one", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
     const { api, calls } = daemon();
-    render(<Stage cell={ready} api={api} reconnects={0} />);
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
     await waitFor(() => expect(client()).not.toBeNull());
     const before = client() as HTMLIFrameElement;
     playInClient(before, "t1");
@@ -110,7 +121,7 @@ describe("Stage in a Chromium browser", () => {
   it("hands each new track of the client to the render worker once, seeded with its current frame", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
     const { api } = daemon();
-    render(<Stage cell={ready} api={api} reconnects={0} />);
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
     await waitFor(() => expect(client()).not.toBeNull());
     const frames = () => FakeWorker.instances[0]?.sent.filter((s) => s.message.type === "frames");
     playInClient(client() as HTMLIFrameElement, "t1");
@@ -128,9 +139,11 @@ describe("Stage in a Chromium browser", () => {
 
   it("removes the client and stops the frames when the cell leaves ready", async () => {
     const { api } = daemon();
-    const view = render(<Stage cell={ready} api={api} reconnects={0} />);
+    const view = render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
     await waitFor(() => expect(client()).not.toBeNull());
-    view.rerender(<Stage cell={{ ...ready, state: "stopping" }} api={api} reconnects={0} />);
+    view.rerender(
+      <Stage cell={{ ...ready, state: "stopping" }} api={api} reconnects={0} listed={[CELL]} />,
+    );
     expect(client()).toBeNull();
     expect(FakeWorker.instances[0]?.sent.at(-1)?.message.type).toBe("stop");
   });
@@ -138,10 +151,10 @@ describe("Stage in a Chromium browser", () => {
   it("veils the stage while the stream is stalled", () => {
     const { api } = daemon();
     const stalled = { ...ready, stream: { ...ready.stream, connection: "stalled" as const } };
-    const view = render(<Stage cell={stalled} api={api} reconnects={0} />);
+    const view = render(<Stage cell={stalled} api={api} reconnects={0} listed={[CELL]} />);
     expect(document.querySelector(".stage-veil.on")?.textContent).toBe("Reconnecting…");
     const live = { ...ready, stream: { ...ready.stream, connection: "live" as const } };
-    view.rerender(<Stage cell={live} api={api} reconnects={0} />);
+    view.rerender(<Stage cell={live} api={api} reconnects={0} listed={[CELL]} />);
     expect(document.querySelector(".stage-veil.on")).toBeNull();
   });
 });

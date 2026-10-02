@@ -4,6 +4,7 @@ import { forgetOldTickets } from "./client-storage.ts";
 const ORIGIN = "http://127.0.0.1:4750";
 const CELL = "01JXYZ0000000000000000ABCD";
 const OTHER_CELL = "01JXYZ0000000000000000WXYZ";
+const GONE_CELL = "01JXYZ0000000000000000GONE";
 const OLD = "AAAAAAAAAAAAAAAAAAAAAA";
 const LIVE = "B-B_BBBBBBBBBBBBBBBBBB";
 
@@ -39,8 +40,41 @@ describe("forgetOldTickets", () => {
       clientKey(CELL, OLD, "storage_key_migrated"),
       ...kept,
     ]);
-    forgetOldTickets(CELL, `/cells/${CELL}/desktop/${LIVE}/`, host);
+    forgetOldTickets(
+      { cellId: CELL, livePath: `/cells/${CELL}/desktop/${LIVE}/`, listed: [CELL, OTHER_CELL] },
+      host,
+    );
     expect(host.keys()).toEqual(kept);
+  });
+
+  it("removes every key of a cell the daemon no longer lists", () => {
+    const kept = [
+      clientKey(CELL, LIVE, "stream_mode"),
+      clientKey(OTHER_CELL, OLD, "stream_mode"),
+      // Not a cell's client page: left alone.
+      "http___127.0.0.1_4750_cells_not-a-cell_desktop_x__stream_mode",
+      "http___127.0.0.1_4751_cells_01JXYZ0000000000000000GONE_desktop_x__stream_mode",
+    ];
+    const host = memoryHost([
+      clientKey(GONE_CELL, OLD, "stream_mode"),
+      clientKey(GONE_CELL, LIVE, "settings"),
+      ...kept,
+    ]);
+    forgetOldTickets(
+      { cellId: CELL, livePath: `/cells/${CELL}/desktop/${LIVE}/`, listed: [CELL, OTHER_CELL] },
+      host,
+    );
+    expect(host.keys()).toEqual(kept);
+  });
+
+  it("keeps the current cell's live keys even when the list it was given predates the cell", () => {
+    const live = clientKey(CELL, LIVE, "stream_mode");
+    const host = memoryHost([live]);
+    forgetOldTickets(
+      { cellId: CELL, livePath: `/cells/${CELL}/desktop/${LIVE}/`, listed: [] },
+      host,
+    );
+    expect(host.keys()).toEqual([live]);
   });
 
   it("leaves storage alone when the browser refuses access to it", () => {
@@ -50,6 +84,11 @@ describe("forgetOldTickets", () => {
         throw new DOMException("denied", "SecurityError");
       },
     };
-    expect(() => forgetOldTickets(CELL, `/cells/${CELL}/desktop/${LIVE}/`, host)).not.toThrow();
+    expect(() =>
+      forgetOldTickets(
+        { cellId: CELL, livePath: `/cells/${CELL}/desktop/${LIVE}/`, listed: [CELL] },
+        host,
+      ),
+    ).not.toThrow();
   });
 });
