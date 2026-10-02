@@ -1419,3 +1419,696 @@ git commit -m "feat(stage): replay time with skip idle, a closed-form replay clo
 **Acceptance:** `pnpm exec vitest run packages/stage` passes.
 
 ---
+
+### Task 7: Daemon — the recording file: writer, GOP journal and fragment index
+
+`RecordingWriter` turns stamped H.264 access units into `recording/video.mp4` through mediabunny.
+Before a frame reaches the muxer, it is appended to a per-GOP journal. Each committed fragment is
+indexed in `fragments.jsonl`. These four facts, verified while writing this plan with mediabunny
+1.61.0 in Node 24, shape it:
+- **Timestamps are exact session µs.** `addVideoTrack(source, { frameRate: 1_000_000 })` makes the
+  track timescale 1 000 000 and snaps to whole µs. Verified: 40 packets at `t ≈ 7 199 s` read back
+  µs-exact, and `getPacket(t_{i+1} − 1 µs)` returns frame i in 156 of 156 probes. Without
+  `frameRate`, the timescale is 57 600 and seeks near a boundary drift by up to 17 µs.
+- **One GOP per fragment.** mediabunny's `trun` writer marks only a fragment's first sample as a
+  sync sample when the fragment's flags take exactly two values. So a second key frame inside one
+  fragment loses its key flag, and `getKeyPacket` returns the fragment's first key instead. Hence
+  `minimumFragmentDuration: 0`: every key frame starts a fragment, and every fragment has exactly
+  one key frame, at its start. Verified: with 1 s fragments and 12-frame GOPs, `getKeyPacket(1.5)`
+  returned the key at 1.0 s instead of the one at 1.4 s; with `0` it returned 1.4 s.
+- **Fragmented mode writes append-only.** Every `StreamTarget` chunk's `position` equals the bytes
+  written so far, until `finalize()` (verified). So the file is a prefix-consistent append log, and
+  a crash leaves a valid prefix plus at most one partial fragment.
+- **The muxer holds the open fragment in memory** until the next key frame arrives. Hence the
+  journal.
+
+**Review tier:** light (storage plumbing; the privacy gate that sits in front of it is Task 11).
+
+**Files:**
+- Create: `apps/daemon/src/recorder/boxes.ts`, `apps/daemon/src/recorder/journal.ts`,
+  `apps/daemon/src/recorder/writer.ts`
+- Test: `apps/daemon/src/recorder/boxes.test.ts`, `apps/daemon/src/recorder/writer.test.ts`
+- Modify: `apps/daemon/package.json` (`"@localdot/stage": "workspace:*"` is already a dependency
+  since Part 3, which gives the tests `@localdot/stage/testing`)
+
+**Interfaces** (exact):
+
+```ts
+// apps/daemon/src/recorder/writer.ts
+import type { FragmentEntry } from "@localdot/protocol";
+
+export const FRAGMENT_MIN_SECONDS = 0; // one GOP per fragment: see the trun note above
+
+export interface RecordedFrame {
+  tMicros: number;   // session µs of the frame's arrival at the daemon (EventLog.toSessionT)
+  key: boolean;      // an IDR with its SPS and PPS in-band (isRandomAccess, Task 9)
+  data: Uint8Array;  // one Annex B access unit, exactly as Selkies sent it
+}
+
+// The node:fs calls the writer makes; tests inject ENOSPC through it (Task 8).
+export type RecordingFs = Pick<typeof import("node:fs"), "openSync" | "writeSync" | "closeSync" | "appendFileSync" | "mkdirSync" | "rmSync">;
+
+export interface RecordingWriterOptions {
+  dir: string;        // <home>/sessions/<id>/recording
+  codec: string;      // avc1.PPCCLL from the first key frame's SPS (avcCodecString, Task 9)
+  width: number;      // Selkies' header width and height of the first key frame
+  height: number;
+  fs?: RecordingFs;
+  onCommit?(entry: FragmentEntry): void;
+}
+
+export class RecordingWriter {
+  constructor(opts: RecordingWriterOptions);
+  start(): Promise<void>;
+  // Resolves true once the frame is in the journal (and its predecessor in the muxer); false when
+  // it is a delta frame before the first key frame (dropped). Rejects with the fs error, and every
+  // later call rejects with the same error.
+  push(frame: RecordedFrame): Promise<boolean>;
+  // The screen went still: hand the pending frame to the muxer with duration now − t.
+  flushIdle(nowMicros: number): Promise<void>;
+  // Hands the pending frame over with duration end − t, finalizes (the muxer appends its own mfra),
+  // commits the last fragment and removes the journal.
+  finish(endMicros: number): Promise<void>;
+  close(): void;      // after an error or on abandon: closes the file, keeps every byte for recovery
+  readonly entries: readonly FragmentEntry[];
+  readonly committedBytes: number;
+  readonly lastMicros: number | null;
+  readonly failed: boolean;
+}
+```
+
+`boxes.ts` and `journal.ts`, complete (byte formats; verified):
+
+```ts
+// ISO BMFF pieces the recorder writes or walks itself: the top-level box walk used by recovery,
+// and the fragment random-access box (mfra) that makes a cut-off or still-growing recording
+// seekable without reading every moof. Times are MEDIA_TIMESCALE ticks: session µs.
+
+// mediabunny numbers the recording's only track 1.
+export const TRACK_ID = 1;
+
+export interface TopBox {
+  type: string;
+  start: number;
+  size: number;
+}
+
+// Complete top-level boxes from `from`; stops at the first box that is cut off or malformed.
+export function topLevelBoxes(buf: Uint8Array, from = 0): TopBox[] {
+  const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const boxes: TopBox[] = [];
+  let at = from;
+  while (at + 8 <= buf.length) {
+    let size = view.getUint32(at);
+    let header = 8;
+    if (size === 1) {
+      if (at + 16 > buf.length) break;
+      size = Number(view.getBigUint64(at + 8));
+      header = 16;
+    }
+    if (size < header || at + size > buf.length) break;
+    const type = String.fromCharCode(buf[at + 4] ?? 0, buf[at + 5] ?? 0, buf[at + 6] ?? 0, buf[at + 7] ?? 0);
+    boxes.push({ type, start: at, size });
+    at += size;
+  }
+  return boxes;
+}
+
+export interface RandomAccessEntry {
+  startMicros: number;
+  moofOffset: number;
+}
+
+// mfra { tfra v1 (64-bit time and offset, 32-bit traf/trun/sample numbers), mfro }, as mediabunny
+// writes it itself, so its demuxer finds every fragment from the file's last 16 bytes.
+export function mfraBox(entries: RandomAccessEntry[]): Uint8Array {
+  const tfraSize = 8 + 4 + 12 + entries.length * 28;
+  const mfroSize = 16;
+  const size = 8 + tfraSize + mfroSize;
+  const out = new Uint8Array(size);
+  const v = new DataView(out.buffer);
+  const tag = (at: number, s: string) => {
+    for (let i = 0; i < 4; i++) out[at + i] = s.charCodeAt(i);
+  };
+  v.setUint32(0, size);
+  tag(4, "mfra");
+  v.setUint32(8, tfraSize);
+  tag(12, "tfra");
+  v.setUint32(16, 1 << 24);
+  v.setUint32(20, TRACK_ID);
+  v.setUint32(24, 0b111111);
+  v.setUint32(28, entries.length);
+  let at = 32;
+  for (const e of entries) {
+    v.setBigUint64(at, BigInt(e.startMicros));
+    v.setBigUint64(at + 8, BigInt(e.moofOffset));
+    v.setUint32(at + 16, 1);
+    v.setUint32(at + 20, 1);
+    v.setUint32(at + 24, 1);
+    at += 28;
+  }
+  v.setUint32(at, mfroSize);
+  tag(at + 4, "mfro");
+  v.setUint32(at + 8, 0);
+  v.setUint32(at + 12, size);
+  return out;
+}
+```
+
+```ts
+// The open fragment's frames, written to disk as they arrive, because the muxer holds a fragment in
+// memory until the next key frame closes it. One file per GOP; a record is
+// u32 BE payload length | u8 flags (bit 0: key) | u64 BE session µs | payload (Annex B).
+
+export const JOURNAL_HEADER = 13;
+
+export interface JournalRecord {
+  tMicros: number;
+  key: boolean;
+  data: Uint8Array;
+}
+
+export function encodeJournalRecord(r: JournalRecord): Uint8Array {
+  const out = new Uint8Array(JOURNAL_HEADER + r.data.length);
+  const v = new DataView(out.buffer);
+  v.setUint32(0, r.data.length);
+  v.setUint8(4, r.key ? 1 : 0);
+  v.setBigUint64(5, BigInt(r.tMicros));
+  out.set(r.data, JOURNAL_HEADER);
+  return out;
+}
+
+// Whole records only: a record cut off by a crash, and anything after it, is dropped.
+export function decodeJournal(buf: Uint8Array): JournalRecord[] {
+  const v = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  const out: JournalRecord[] = [];
+  let at = 0;
+  while (at + JOURNAL_HEADER <= buf.length) {
+    const len = v.getUint32(at);
+    const flags = v.getUint8(at + 4);
+    if (flags > 1 || at + JOURNAL_HEADER + len > buf.length) break;
+    out.push({ key: flags === 1, tMicros: Number(v.getBigUint64(at + 5)), data: buf.slice(at + JOURNAL_HEADER, at + JOURNAL_HEADER + len) });
+    at += JOURNAL_HEADER + len;
+  }
+  return out;
+}
+
+// Files sort by name in time order.
+export function journalName(gopStartMicros: number): string {
+  return `${String(gopStartMicros).padStart(16, "0")}.bin`;
+}
+```
+
+**Tests:**
+- `boxes.test.ts` (verified):
+
+```ts
+import { describe, expect, it } from "vitest";
+import { mfraBox, topLevelBoxes } from "./boxes.ts";
+import { decodeJournal, encodeJournalRecord, journalName } from "./journal.ts";
+
+describe("boxes", () => {
+  it("walks complete top-level boxes and stops at a cut-off one", () => {
+    const box = (type: string, body: number) => { const b = new Uint8Array(8 + body); new DataView(b.buffer).setUint32(0, 8 + body); for (let i = 0; i < 4; i++) b[4 + i] = type.charCodeAt(i); return b; };
+    const whole = new Uint8Array([...box("ftyp", 4), ...box("moov", 20), ...box("moof", 10), ...box("mdat", 30)]);
+    expect(topLevelBoxes(whole).map((b) => b.type)).toEqual(["ftyp", "moov", "moof", "mdat"]);
+    expect(topLevelBoxes(whole.subarray(0, whole.length - 1)).map((b) => b.type)).toEqual(["ftyp", "moov", "moof"]);
+  });
+  it("writes an mfra whose mfro names its own size", () => {
+    const m = mfraBox([{ startMicros: 7_200_000_000, moofOffset: 5_000_000_000 }, { startMicros: 1, moofOffset: 2 }]);
+    const v = new DataView(m.buffer);
+    expect(m.length).toBe(8 + (8 + 4 + 12 + 2 * 28) + 16);
+    expect(v.getUint32(m.length - 4)).toBe(m.length);
+    expect(v.getBigUint64(32)).toBe(7_200_000_000n);
+    expect(v.getBigUint64(40)).toBe(5_000_000_000n);
+  });
+});
+
+describe("journal", () => {
+  it("round-trips records and drops a torn tail", () => {
+    const a = { tMicros: 1_000_000, key: true, data: Uint8Array.of(0, 0, 0, 1, 0x65, 9) };
+    const b = { tMicros: 1_016_667, key: false, data: Uint8Array.of(0, 0, 0, 1, 0x41, 7, 7) };
+    const bytes = new Uint8Array([...encodeJournalRecord(a), ...encodeJournalRecord(b)]);
+    expect(decodeJournal(bytes)).toEqual([a, b]);
+    expect(decodeJournal(bytes.subarray(0, bytes.length - 2))).toEqual([a]);
+    expect(journalName(1_000_000)).toBe("0000000001000000.bin");
+  });
+});
+```
+- `writer.test.ts`:
+  - `"writes one fragment per GOP, each starting with its key frame"`: 60 synthetic frames with
+    `keyEvery: 12`, then `finish`. mediabunny's `EncodedPacketSink` reads frames 0, 12, 24, 36 and
+    48 as `type: "key"` and every other frame as `delta`. `entries` has 5 fragments, and
+    `entries[i].startMicros` is the time of frame `12 × i`.
+  - `"keeps exact session microseconds two hours in"`: 40 frames from `t = 7 199 123 457 µs`. Every
+    packet's `microsecondTimestamp` equals the pushed `tMicros`.
+  - `"drops delta frames before the first key frame"`: `push` of a delta frame resolves `false`
+    and writes nothing; the next key frame resolves `true`.
+  - `"never lets time run backwards"`: frames pushed at `t`, `t` and `t − 5` are stored at
+    `t`, `t + 1` and `t + 2`.
+  - `"indexes a fragment only after its bytes are on disk, and deletes its journal then"`: after
+    the second key frame's successor is pushed, `fragments.jsonl` has one line,
+    `stat(video.mp4).size ≥ entries[0].endOffset`, and `journal/` holds only files named at or
+    after `entries[0].endMicros`.
+  - `"gives the last frame the duration up to finish or the idle flush"`: frames at 1.000 s and
+    1.010 s, `flushIdle(3_000_000)`, then `finish(5_000_000)`. The second packet's duration is
+    1 990 000 µs.
+  - `"removes the journal and leaves a file with mediabunny's own mfra after finish"`:
+    `journal/` is gone, and the file's last 16 bytes are an `mfro` box.
+
+**Implementation notes:**
+- Output:
+  `new Output({ target: new StreamTarget(sink), format: new Mp4OutputFormat({ fastStart: "fragmented", minimumFragmentDuration: FRAGMENT_MIN_SECONDS, onMoof, onMdat }) })`,
+  then `output.addVideoTrack(source, { frameRate: MEDIA_TIMESCALE })` with
+  `source = new EncodedVideoPacketSource("avc")`.
+- The first `source.add` carries
+  `{ decoderConfig: { codec, codedWidth: width, codedHeight: height } }` with **no
+  `description`**. mediabunny then treats the packets as Annex B: it builds the `avcC` from the
+  first packet's SPS and PPS and converts every packet to length-prefixed form, keeping in-band
+  parameter sets. The first packet must be a key frame (mediabunny throws
+  `First packet must be a key packet`).
+- The sink is a `WritableStream` whose `write({ data, position })` asserts
+  `position === written` (append-only; anything else is a bug, so throw), calls
+  `fs.writeSync(fd, data, 0, data.length, position)`, and advances `written`.
+- **Pending frame.** A frame's duration is only known when the next one arrives. `push(f)`:
+  1. normalises `t = max(f.tMicros, lastT + 1)`;
+  2. if `f.key`, starts a new journal file `journal/<journalName(t)>`;
+  3. appends `encodeJournalRecord` to the current GOP's journal (`fs.appendFileSync`);
+  4. if a frame is pending, adds it to the muxer with duration `t − pending.t`;
+  5. makes `f` the pending frame.
+- **Commit tracking.**
+  - `onMoof(_, position, ts)` records `{ moofOffset: position, startMicros: round(ts × 1e6) }`.
+  - `onMdat(data, position)` queues an entry ending at `position + data.length`, whose `endMicros`
+    is the time of the packet being added at that moment. That packet is the key frame that closed
+    the fragment, set in a field just before each `source.add`. In `finish` it is `endMicros`.
+  - After each `source.add` returns, every queued entry with `endOffset ≤ written` is committed, in
+    order:
+    1. append its JSON line to `fragments.jsonl` (`fs.appendFileSync`; after the bytes, never
+       before);
+    2. push it to `entries` and call `onCommit`;
+    3. delete every journal file whose GOP start is `< entry.endMicros`.
+- **Errors.** Any throw inside `push` (journal append, `source.add`, the sink) sets `failed`,
+  closes the file descriptor and rethrows. Later calls reject with the stored error. Nothing is
+  deleted. Recovery (Task 8) makes the files consistent.
+- **Memory:** one pending frame plus the muxer's open fragment (≤ one GOP: about 2 s of frames at
+  2×, 0.5–9 MB). The journal is on disk.
+- Measured cost: muxing 9 000 small frames took 400 ms in Node 24, which is about 44 µs per frame.
+  At 60 fps that is 0.3 % of a core.
+
+- [ ] **Step 1:** Write `boxes.test.ts` and `writer.test.ts`. Run
+  `pnpm exec vitest run apps/daemon/src/recorder`.
+  Expected: FAIL (modules missing).
+- [ ] **Step 2:** Add `boxes.ts` and `journal.ts` as above, and implement `writer.ts`. Run the same
+  command.
+  Expected: PASS.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/daemon
+git commit -m "feat(recorder): fragmented MP4 writer with a GOP journal and a fragment index"
+```
+
+**Acceptance:** `pnpm exec vitest run apps/daemon/src/recorder` passes.
+
+---
+
+### Task 8: Daemon — recovery and the served view (crash, disk full, seek accuracy)
+
+Recovery makes any recording directory consistent again: after a crash, after a writer error such
+as ENOSPC, or at daemon start for a session whose manifest still says `recording`. The view serves
+a recording to the browser. A finished one is served as is. A live or cut-off one is served as its
+committed fragments plus an `mfra` built from `fragments.jsonl`.
+
+Without the `mfra`, mediabunny finds a fragment by reading the whole file: verified with a
+synthetic 2-hour recording of 1 799 fragments, where one seek read all 5.9 MB. With it, the same
+seek takes 4 reads and 0.2 ms (`proof-perf`, see "Verification").
+
+**Review tier:** light.
+
+**Files:**
+- Create: `apps/daemon/src/recorder/recover.ts`, `apps/daemon/src/recorder/view.ts`,
+  `apps/daemon/src/recorder/testing/crash-child.ts`,
+  `apps/daemon/src/recorder/testing/crash-stream.ts`, `apps/daemon/src/recorder/testing/full-fs.ts`
+- Test: `apps/daemon/src/recorder/recover.test.ts`, `apps/daemon/src/recorder/seek.test.ts`,
+  `apps/daemon/src/recorder/crash.test.ts`, `apps/daemon/src/recorder/diskfull-writer.test.ts`
+
+**Interfaces** (exact):
+
+```ts
+// apps/daemon/src/recorder/recover.ts
+export interface StreamFormat { codec: string; width: number; height: number }
+export interface RecoveryResult {
+  state: "recovered" | "failed";   // failed: no fragment and no journaled key frame survived
+  fragments: number;
+  tailFrames: number;              // frames brought back from the journal
+  bytes: number;
+  firstMicros: number | null;
+  lastMicros: number | null;
+}
+export const NOMINAL_FRAME_MICROS = 16_667;  // the duration recovery gives the last journaled frame
+// The valid prefix of fragments.jsonl: lines that parse as FragmentEntry, seq 1, 2, 3…, each
+// starting at or after the previous end, each inside the file.
+export function readFragments(dir: string): FragmentEntry[];
+// format defaults to manifest.json's codec, width and height (written at the first key frame, Task 10).
+export function recoverRecording(dir: string, format?: StreamFormat): Promise<RecoveryResult>;
+
+// apps/daemon/src/recorder/view.ts
+export interface RecordingView { size: number; read(start: number, end: number): Uint8Array; close(): void }
+export interface ViewOptions {
+  complete: boolean;                    // the muxer finalized it, or recovery appended its mfra: serve the file as is
+  entries?: readonly FragmentEntry[];   // the live writer's entries; default readFragments(dir)
+  upto?: number;                        // serve the first `upto` fragments only (a stable snapshot)
+}
+export function openRecordingView(dir: string, opts: ViewOptions): RecordingView;
+```
+
+**Recovery, step by step** (verified):
+1. `entries = readFragments(dir)`, and `format` (the argument, else the manifest's).
+2. Gather the journal records: every `journal/*.bin` in name order, through `decodeJournal`
+   (torn tails dropped). Keep those with `tMicros ≥ entries.at(-1).endMicros` (all of them when
+   there are no entries), then drop everything before the first key record. Without a format,
+   keep none.
+3. With entries, truncate `video.mp4` to `entries.at(-1).endOffset`. With none, delete it.
+4. If any tail records remain, mux them with a fresh mediabunny `Output` into a `BufferTarget`
+   (`fastStart: "fragmented"`, `minimumFragmentDuration: Infinity`, `frameRate: MEDIA_TIMESCALE`;
+   each duration is the gap to the next record, `NOMINAL_FRAME_MICROS` for the last). Walk its
+   top-level boxes with `topLevelBoxes`.
+   - With entries: append its `moof` and `mdat` only. `trun`'s data offset is relative to the
+     `moof`, and `tfdt` carries absolute time, so the pair can move to any offset.
+   - Without entries: write its `ftyp moov moof mdat` as the new file.
+   - Append the new entry (`seq = entries.length + 1`) to `fragments.jsonl`.
+5. If the file has any fragment, append `mfraBox(all entries)`. Remove `journal/`.
+6. Return the result. Task 10 writes the manifest (`recovered` or `failed`) from it.
+
+**Tests:**
+- `recover.test.ts`:
+  - `"leaves a finished recording alone apart from its journal"`: no journal, a finished file.
+    `recoverRecording` doesn't truncate it (the size is unchanged, because `fragments.jsonl`
+    covers every fragment).
+
+    The caller doesn't run recovery on `complete` manifests (Task 10); this guards the idempotent
+    case.
+  - `"rebuilds a recording from the journal alone"`: the writer is killed before its first commit
+    (2 frames pushed). Recovery writes a new file with both frames.
+  - `"ignores a stale journal left between a commit and its journal delete"`: a journal file
+    whose records all lie before `entries.at(-1).endMicros`. No tail is added, and the frame count
+    is unchanged.
+  - `"stops reading fragments.jsonl at a torn or out-of-order line"`: a third line cut in half,
+    and a line whose `moofOffset` lies before the previous `endOffset`, both end the valid prefix.
+  - `"fails without a format and without fragments"`: `state: "failed"`, and `video.mp4` is
+    absent.
+- `seek.test.ts`, crash pin, disk-full pin: complete code below.
+
+**Implementation notes for the view:**
+- `complete`: `size = stat.size`, and reads come from the file.
+- Otherwise: `prefix = entries[upto − 1].endOffset` and `tail = mfraBox(entries[0..upto))`, with
+  `size = prefix + tail.length`. Reads spanning the boundary stitch file bytes and tail bytes.
+- `upto` makes a snapshot stable. The bytes of fragment `upto + 1` would otherwise later overwrite
+  the region where the snapshot's `mfra` sat, and a reader holding the old size would read moof
+  bytes as its mfra.
+- One `fd` per view, closed by `close()`. The route (Task 12) opens a view per request and closes
+  it when the response stream ends or aborts.
+
+**The Review Focus pins** (complete; verified against a prototype of this task while writing the
+plan, including a real SIGKILL of a child process at five points):
+
+`apps/daemon/src/recorder/testing/crash-stream.ts`:
+```ts
+import { SYNTH_CODEC } from "@localdot/stage/testing";
+
+export const CRASH_SYNTH = { widthMbs: 8, heightMbs: 8, keyEvery: 30 };
+export const CRASH_FORMAT = { codec: SYNTH_CODEC, width: 128, height: 128 };
+// 60 fps bursts of 45 frames with 700 ms of still screen between them, like Selkies' damage-driven
+// stream, starting a second into the session.
+export const crashArrival = (i: number): number => 1_000_000 + i * 16_667 + Math.floor(i / 45) * 700_000;
+```
+
+`apps/daemon/src/recorder/testing/crash-child.ts`:
+```ts
+// Records a synthetic stream into argv[2] and prints "<index> <µs>" after every push that resolved,
+// so a test can SIGKILL it at an arbitrary frame (Review Focus 2).
+import { synthFrame } from "@localdot/stage/testing";
+import { RecordingWriter } from "../writer.ts";
+import { CRASH_FORMAT, CRASH_SYNTH, crashArrival } from "./crash-stream.ts";
+
+const writer = new RecordingWriter({ dir: process.argv[2] as string, ...CRASH_FORMAT });
+await writer.start();
+for (let i = 0; ; i++) {
+  const f = synthFrame(CRASH_SYNTH, i);
+  const t = crashArrival(i);
+  await writer.push({ tMicros: t, key: f.key, data: f.data });
+  process.stdout.write(`${i} ${t}\n`);
+  if (i % 45 === 44) await writer.flushIdle(t + 500_000);
+}
+```
+
+`apps/daemon/src/recorder/crash.test.ts`:
+```ts
+import { spawn } from "node:child_process";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { synthFrame } from "@localdot/stage/testing";
+import { ALL_FORMATS, EncodedPacketSink, FilePathSource, Input } from "mediabunny";
+import { describe, expect, it } from "vitest";
+import { recoverRecording } from "./recover.ts";
+import { CRASH_FORMAT, CRASH_SYNTH } from "./testing/crash-stream.ts";
+
+const CHILD = fileURLToPath(new URL("./testing/crash-child.ts", import.meta.url));
+
+// Annex B start codes → NAL payloads (hex), and the same from MP4's 4-byte lengths.
+function nalsAnnexB(b: Uint8Array): string[] {
+  const out: string[] = [];
+  let s = -1;
+  for (let i = 0; i + 3 <= b.length; i++) {
+    if (b[i] === 0 && b[i + 1] === 0 && b[i + 2] === 1) {
+      if (s >= 0) out.push(Buffer.from(b.subarray(s, b[i - 1] === 0 ? i - 1 : i)).toString("hex"));
+      s = i + 3;
+      i += 2;
+    }
+  }
+  if (s >= 0) out.push(Buffer.from(b.subarray(s)).toString("hex"));
+  return out;
+}
+function nalsLengthPrefixed(b: Uint8Array): string[] {
+  const out: string[] = [];
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  for (let at = 0; at + 4 <= b.length; ) {
+    const n = v.getUint32(at);
+    out.push(Buffer.from(b.subarray(at + 4, at + 4 + n)).toString("hex"));
+    at += 4 + n;
+  }
+  return out;
+}
+
+async function recordAndKill(dir: string, killAfter: number): Promise<{ i: number; t: number }[]> {
+  const child = spawn(process.execPath, ["--import", "tsx", CHILD, dir], { stdio: ["ignore", "pipe", "inherit"] });
+  const pushed: { i: number; t: number }[] = [];
+  await new Promise<void>((resolve) => {
+    let buf = "";
+    child.stdout.on("data", (d: Buffer) => {
+      buf += d.toString();
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        const [i, t] = line.split(" ").map(Number);
+        pushed.push({ i: i as number, t: t as number });
+      }
+      if (pushed.length >= killAfter && child.exitCode === null) child.kill("SIGKILL");
+    });
+    child.on("exit", () => resolve());
+  });
+  return pushed;
+}
+
+describe("a crash mid-recording (Review Focus 2)", () => {
+  for (const killAfter of [3, 31, 97, 200, 333]) {
+    it(`keeps every frame whose push resolved when killed after ${killAfter} frames`, async () => {
+      const dir = mkdtempSync(join(tmpdir(), "local dot's crash-"));
+      const pushed = await recordAndKill(dir, killAfter);
+      expect(pushed.length).toBeGreaterThanOrEqual(killAfter);
+      const result = await recoverRecording(dir, CRASH_FORMAT);
+      expect(result.state).toBe("recovered");
+      const input = new Input({ source: new FilePathSource(join(dir, "video.mp4")), formats: ALL_FORMATS });
+      const sink = new EncodedPacketSink((await input.getPrimaryVideoTrack()) as never);
+      const got: { t: number; nals: string[] }[] = [];
+      for await (const p of sink.packets()) got.push({ t: p.microsecondTimestamp, nals: nalsLengthPrefixed(p.data) });
+      expect(got.length).toBeGreaterThanOrEqual(pushed.length);
+      for (const { i, t } of pushed) {
+        expect(got[i]?.t).toBe(t);
+        expect(got[i]?.nals).toEqual(nalsAnnexB(synthFrame(CRASH_SYNTH, i).data));
+      }
+      // Seekable without a walk: the recovered file ends with an mfra.
+      const last = pushed.at(-1) as { t: number };
+      expect((await sink.getPacket(last.t / 1e6))?.microsecondTimestamp).toBe(last.t);
+      input.dispose();
+    }, 60_000);
+  }
+});
+```
+
+`apps/daemon/src/recorder/seek.test.ts`:
+```ts
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SYNTH_CODEC, synthFrame } from "@localdot/stage/testing";
+import { ALL_FORMATS, EncodedPacketSink, Input, StreamSource } from "mediabunny";
+import { describe, expect, it } from "vitest";
+import { openRecordingView, type RecordingView } from "./view.ts";
+import { RecordingWriter } from "./writer.ts";
+
+const o = { widthMbs: 4, heightMbs: 4, keyEvery: 12 };
+
+// VFR arrival times: bursts at ~60 fps with jitter, separated by still stretches (Selkies sends
+// nothing for a still screen), starting well after session time 0.
+function arrivals(n: number): number[] {
+  const t: number[] = [];
+  let at = 2_345_678;
+  for (let i = 0; i < n; i++) {
+    t.push(at);
+    at += i % 30 === 29 ? 2_500_000 + i * 11 : 16_000 + ((i * 7919) % 1500);
+  }
+  return t;
+}
+
+function sinkOf(view: RecordingView) {
+  const input = new Input({ formats: ALL_FORMATS, source: new StreamSource({ getSize: () => view.size, read: (s, e) => view.read(s, e) }) });
+  return { input, sink: input.getPrimaryVideoTrack().then((track) => new EncodedPacketSink(track as never)) };
+}
+
+async function expectExactSeeks(sink: EncodedPacketSink, times: number[], upTo: number) {
+  for (let i = 0; i < upTo; i++) {
+    const a = times[i] as number;
+    const next = times[i + 1] ?? a + 16_667;
+    for (const q of [a, a + 1, Math.floor((a + next) / 2), next - 1]) {
+      expect((await sink.getPacket(q / 1e6))?.microsecondTimestamp).toBe(a);
+      expect((await sink.getKeyPacket(q / 1e6))?.microsecondTimestamp).toBe(times[Math.floor(i / o.keyEvery) * o.keyEvery]);
+    }
+  }
+  expect(await sink.getPacket(((times[0] as number) - 1) / 1e6)).toBeNull();
+}
+
+describe("seek accuracy (Review Focus 1)", () => {
+  it("returns, for any session time, the frame on screen then and the key frame to decode from — live and finished", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "local dot's seek-"));
+    const times = arrivals(150);
+    const w = new RecordingWriter({ dir, codec: SYNTH_CODEC, width: 64, height: 64 });
+    await w.start();
+    for (let i = 0; i < times.length; i++) {
+      const f = synthFrame(o, i);
+      await w.push({ tMicros: times[i] as number, key: f.key, data: f.data });
+    }
+    // Mid-recording: the committed fragments only, served with a fresh mfra.
+    const committed = w.entries.at(-1)?.endMicros ?? 0;
+    const upTo = times.filter((t) => t < committed).length - 1;
+    expect(upTo).toBeGreaterThan(90);
+    const liveView = openRecordingView(dir, { complete: false, entries: w.entries });
+    const live = sinkOf(liveView);
+    await expectExactSeeks(await live.sink, times, upTo);
+    live.input.dispose();
+    liveView.close();
+    await w.finish((times.at(-1) as number) + 16_667);
+    const doneView = openRecordingView(dir, { complete: true });
+    const done = sinkOf(doneView);
+    await expectExactSeeks(await done.sink, times, times.length);
+    done.input.dispose();
+    doneView.close();
+  });
+});
+```
+
+`apps/daemon/src/recorder/testing/full-fs.ts`:
+```ts
+import * as fs from "node:fs";
+import type { RecordingFs } from "../writer.ts";
+
+// A filesystem that runs out of space after `budget` bytes, as write(2) does with ENOSPC.
+export function fullAfter(budget: number): RecordingFs & { used(): number } {
+  let used = 0;
+  const spend = (n: number) => {
+    if (used + n > budget) throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+    used += n;
+  };
+  return {
+    ...fs,
+    used: () => used,
+    writeSync: ((fd: number, data: Uint8Array, offset?: number, length?: number, position?: number) => {
+      spend(length ?? data.length);
+      return fs.writeSync(fd, data, offset, length, position);
+    }) as typeof fs.writeSync,
+    appendFileSync: ((file: fs.PathOrFileDescriptor, data: string | Uint8Array) => {
+      spend(typeof data === "string" ? Buffer.byteLength(data) : data.length);
+      fs.appendFileSync(file, data);
+    }) as typeof fs.appendFileSync,
+  };
+}
+```
+
+`apps/daemon/src/recorder/diskfull-writer.test.ts`:
+```ts
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { SYNTH_CODEC, synthFrame } from "@localdot/stage/testing";
+import { ALL_FORMATS, EncodedPacketSink, FilePathSource, Input } from "mediabunny";
+import { describe, expect, it } from "vitest";
+import { recoverRecording } from "./recover.ts";
+import { fullAfter } from "./testing/full-fs.ts";
+import { RecordingWriter } from "./writer.ts";
+
+describe("disk full (Review Focus 3), the writer", () => {
+  it("fails the push with ENOSPC, stays failed, and recovery leaves every journaled frame playable", async () => {
+    const o = { widthMbs: 4, heightMbs: 4, keyEvery: 10 };
+    const format = { codec: SYNTH_CODEC, width: 64, height: 64 };
+    const dir = mkdtempSync(join(tmpdir(), "local dot's full-"));
+    const w = new RecordingWriter({ dir, ...format, fs: fullAfter(150_000) });
+    await w.start();
+    let pushed = 0;
+    let error: unknown;
+    try {
+      for (let i = 0; i < 1000; i++) {
+        const f = synthFrame(o, i);
+        await w.push({ tMicros: 500_000 + i * 16_667, key: f.key, data: f.data });
+        pushed = i + 1;
+      }
+    } catch (err) {
+      error = err;
+    }
+    expect((error as NodeJS.ErrnoException).code).toBe("ENOSPC");
+    expect(pushed).toBeGreaterThan(20);
+    expect(w.failed).toBe(true);
+    await expect(w.push({ tMicros: 99_000_000, key: true, data: synthFrame(o, 0).data })).rejects.toThrow(/ENOSPC/);
+    // Space comes back (the user frees some): recovery runs with the real filesystem.
+    await recoverRecording(dir, format);
+    const input = new Input({ source: new FilePathSource(join(dir, "video.mp4")), formats: ALL_FORMATS });
+    const sink = new EncodedPacketSink((await input.getPrimaryVideoTrack()) as never);
+    let n = 0;
+    for await (const _ of sink.packets()) n++;
+    input.dispose();
+    // Every pushed frame reached the journal or a fragment; the one that hit ENOSPC may too.
+    expect(n).toBeGreaterThanOrEqual(pushed);
+    expect(n).toBeLessThanOrEqual(pushed + 1);
+  });
+});
+```
+
+- [ ] **Step 1:** Write the tests and the testing helpers above. Run
+  `pnpm exec vitest run apps/daemon/src/recorder`.
+  Expected: FAIL (`recover.ts`, `view.ts` missing).
+- [ ] **Step 2:** Implement `recover.ts` and `view.ts`. Run the same command.
+  Expected: PASS. The crash pin runs five child processes, in about 2 s in total.
+- [ ] **Step 3: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/daemon/src/recorder
+git commit -m "feat(recorder): crash recovery from the GOP journal and a seekable served view"
+```
+
+**Acceptance:** `pnpm exec vitest run apps/daemon/src/recorder` passes: seek accuracy at every
+boundary, the five crash points, and ENOSPC.
+
+---
