@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/elazarl/goproxy"
 
@@ -123,8 +124,13 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 	finish(audit.Allow, "", nil)
 }
 
+// sameHost compares in ASCII only: strings.EqualFold also folds Unicode, which would take U+212A
+// (Kelvin) for a k. host comes from ParseHostPort, lower-case ASCII.
 func sameHost(sni, host string) bool {
-	return sni != "" && strings.EqualFold(strings.TrimSuffix(sni, "."), host)
+	if sni == "" || strings.ContainsFunc(sni, func(r rune) bool { return r > unicode.MaxASCII }) {
+		return false
+	}
+	return strings.ToLower(strings.TrimSuffix(sni, ".")) == host
 }
 
 // splice copies both ways until either side ends, then closes both.
