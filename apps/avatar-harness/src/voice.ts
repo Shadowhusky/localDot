@@ -1,8 +1,8 @@
 import type { AvatarController, SpeechTrack } from "@localdot/avatar";
 import {
   decodeAudioFrame,
-  detectLang,
   parseTtsServerMessage,
+  replyLang,
   Speaker,
   VoicePlayer,
   VoiceSocket,
@@ -80,7 +80,7 @@ export function mountVoice(controller: AvatarController): void {
     void player.unlock();
     replyStarting = true;
     // Kanji-only Japanese looks Chinese, so the language of the whole text settles it.
-    speaker.say(text, detectLang(text));
+    speaker.say(text, replyLang(text));
   };
   byId<HTMLFormElement>("say-form").addEventListener("submit", (event) => {
     event.preventDefault();

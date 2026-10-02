@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { detectLang } from "./lang.ts";
+import { detectLang, replyLang } from "./lang.ts";
 import { MAX_UNITS, SentenceSplitter, speechUnits } from "./sentences.ts";
 
 const split = (text: string) => {
@@ -93,5 +93,46 @@ describe("detectLang", () => {
   it("reads a katakana middle dot in a Chinese name as punctuation", () => {
     expect(detectLang("史蒂夫・乔布斯创立了苹果公司。")).toBe("zh");
     expect(detectLang("ジョン・スミスです。")).toBe("ja");
+  });
+
+  it("reads kanji-only text with a character only Chinese writes as Chinese, whatever the reply", () => {
+    expect(split("你好，我在这里。").map((s) => detectLang(s, "ja"))).toEqual(["zh", "zh"]);
+  });
+
+  it("never takes a Japanese kanji for a character only Chinese writes", () => {
+    // Every JIS X 0208 character, read back from its two EUC-JP bytes.
+    const eucJp = new TextDecoder("euc-jp");
+    const misread: string[] = [];
+    for (let row = 0xa1; row <= 0xfe; row++) {
+      for (let cell = 0xa1; cell <= 0xfe; cell++) {
+        const ch = eucJp.decode(new Uint8Array([row, cell]));
+        if (detectLang(ch, "ja") !== "ja") misread.push(ch);
+      }
+    }
+    expect(misread).toEqual([]);
+  });
+});
+
+describe("replyLang", () => {
+  it("keeps a Chinese reply's Chinese sentences Chinese when it names one title in kana", () => {
+    const reply =
+      "我昨天又看了一遍《となりのトトロ》。画面很美，色彩也很温柔。你小时候看过这部电影吗？";
+    const hint = replyLang(reply);
+    expect(hint).toBe("zh");
+    expect(split(reply).map((s) => detectLang(s, hint))).toEqual(["ja", "zh", "zh"]);
+  });
+
+  it("lets a Japanese reply settle its kanji-only sentences as Japanese", () => {
+    const reply = "東京に着いたよ。本日晴天。明日も晴れるといいね。";
+    const hint = replyLang(reply);
+    expect(hint).toBe("ja");
+    expect(split(reply).map((s) => detectLang(s, hint))).toEqual(["ja", "ja", "ja"]);
+  });
+
+  it("is Japanese once kana is a quarter of the reply's CJK characters, and English when Latin leads", () => {
+    expect(replyLang("東京都の")).toBe("ja");
+    expect(replyLang("你看过トトロ吗？我很喜欢那部动画片。")).toBe("zh");
+    expect(replyLang("Meet me at 東京駅 at noon.")).toBe("en");
+    expect(replyLang("42!")).toBe("en");
   });
 });
