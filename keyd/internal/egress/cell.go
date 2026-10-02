@@ -81,6 +81,8 @@ func Open(cfg Config, deps Deps) (*Cell, error) {
 		ReadHeaderTimeout: 10 * time.Second,
 		IdleTimeout:       2 * time.Minute,
 		ErrorLog:          log.New(io.Discard, "", 0),
+		// Otherwise http.Server answers OPTIONS * itself, before the token check and the audit.
+		DisableGeneralOptionsHandler: true,
 	}
 	go c.srv.Serve(ln)
 	return c, nil

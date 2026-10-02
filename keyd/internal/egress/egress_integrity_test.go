@@ -947,3 +947,21 @@ func TestASurrogateInAHeaderNameIsRefusedAndAlerted(t *testing.T) {
 		t.Fatalf("%d refusals", refusals)
 	}
 }
+
+// http.Server answers OPTIONS * itself unless told not to; keyd's token check and audit must see it.
+func TestOptionsStarNeedsTheToken(t *testing.T) {
+	w := newWorld(t)
+	c := w.cell("c1", policy.Desktop)
+	resp, _ := rawRequest(t, c, "OPTIONS * HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+	if resp.StatusCode != http.StatusProxyAuthRequired || resp.Header.Get("X-Keyd-Reason") != ReasonAuthMissing || !strings.HasPrefix(resp.Header.Get("Proxy-Authenticate"), "Basic") {
+		t.Fatalf("%d %v", resp.StatusCode, resp.Header)
+	}
+	l := w.waitLine(reasonIs(ReasonAuthMissing))
+	if l.Method != http.MethodOptions || l.Status != http.StatusProxyAuthRequired || l.Decision != audit.Deny {
+		t.Fatalf("audit %+v", l)
+	}
+	resp, _ = rawRequest(t, c, "OPTIONS * HTTP/1.1\r\nHost: x\r\nConnection: close\r\n"+proxyAuth()+"\r\n")
+	if resp.StatusCode != http.StatusBadRequest || resp.Header.Get("X-Keyd-Reason") != ReasonBadRequest {
+		t.Fatalf("with the token: %d %v", resp.StatusCode, resp.Header)
+	}
+}
