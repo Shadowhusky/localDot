@@ -497,6 +497,19 @@ export class CellOrchestrator {
     this.#detach(id, this.#watch(record));
   }
 
+  // Fresh surrogates after a key changed, in the cell's queue: a start, restart or rewire that
+  // reopens the cell in keyd finishes first, so a refresh never mints on a cell wire() is about to
+  // close and then writes those dead stand-ins over the new ones. Only a running or booting,
+  // unfrozen desktop gets them. Resolves the keys it can use only after it starts again.
+  refreshKeys(id: string): Promise<string[]> {
+    return this.#queued(id, async () => {
+      const live = this.#live.get(id);
+      const record = this.#record(id);
+      const running = (live?.state === "ready" || live?.state === "starting") && !live.paused;
+      return running && record && this.#keyd ? this.#keyd.refresh(record) : [];
+    });
+  }
+
   // A running desktop whose keyd cell was lost must boot with a new CA and token.
   async rewireIfLost(id: string): Promise<void> {
     await this.#queued(id, () => this.#rewireIfLost(id));

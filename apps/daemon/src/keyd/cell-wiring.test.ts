@@ -2,7 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DockerClient } from "../cells/docker.ts";
 import { type FakeDocker, startFakeDocker } from "../cells/testing/fake-docker.ts";
 import { sampleRecord } from "../cells/testing/sample-record.ts";
-import { CELL_FILES_DIR, CellKeydWiring, KeyLayerError, surrogatesFile } from "./cell-wiring.ts";
+import type { CellSummary } from "../cells/types.ts";
+import {
+  CELL_FILES_DIR,
+  CellKeydWiring,
+  KeyLayerError,
+  refreshRunningCells,
+  surrogatesFile,
+} from "./cell-wiring.ts";
 import { KeydClient } from "./client.ts";
 import { type FakeKeyd, fakeSurrogate, startFakeKeyd } from "./testing/fake-keyd.ts";
 
@@ -156,4 +163,63 @@ describe("CellKeydWiring.refresh", () => {
     expect(text).not.toContain("LOCALDOT_KEY_WEATHER");
     expect(text).toContain(`LOCALDOT_KEY_MAPS='${keyd.cells.get(record.id)?.surrogates.maps}'`);
   });
+});
+
+describe("refreshRunningCells", () => {
+  const summary = (id: string, state: CellSummary["state"], paused?: true): CellSummary => ({
+    id,
+    state,
+    scale: 2,
+    createdAt: "t",
+    stream: { connection: "none", viewers: 0, lastUpstreamAt: null },
+    ...(paused ? { paused } : {}),
+  });
+
+  it("refreshes running and booting computers, and says when one must restart to use the key", async () => {
+    const cells = [
+      summary("A", "ready"),
+      summary("B", "ready", true),
+      summary("C", "stopped"),
+      summary("D", "ready"),
+      summary("E", "starting"),
+    ];
+    const refreshed: string[] = [];
+    const out = await refreshRunningCells(
+      {
+        list: () => cells,
+        refreshKeys: async (id) => {
+          refreshed.push(id);
+          if (id === "D") throw new Error("keyd went away");
+          return id === "A" ? ["maps"] : [];
+        },
+      },
+      "maps",
+    );
+    expect(refreshed).toEqual(["A", "D", "E"]);
+    expect(out).toEqual({ restart: true });
+  });
+});
+
+it("reports a failed refresh as needing a restart without logging its exception", async () => {
+  const log = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const cells = {
+      list: () => [
+        {
+          id: "A",
+          state: "ready" as const,
+          scale: 2 as const,
+          createdAt: "t",
+          stream: { connection: "none" as const, viewers: 0, lastUpstreamAt: null },
+        },
+      ],
+      refreshKeys: async () => {
+        throw new Error("private-provider-key");
+      },
+    };
+    expect(await refreshRunningCells(cells, "weather")).toEqual({ restart: true });
+    expect(log.mock.calls.flat().map(String).join("\n")).not.toContain("private-provider-key");
+  } finally {
+    log.mockRestore();
+  }
 });

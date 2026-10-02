@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SELFTEST_CHECKS, type SelfTestReport } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { CELL_FILES_DIR, CellKeydWiring } from "../keyd/cell-wiring.ts";
+import { CELL_FILES_DIR, CellKeydWiring, refreshRunningCells } from "../keyd/cell-wiring.ts";
 import { KeydClient, KeydError } from "../keyd/client.ts";
 import { FAKE_CA_PEM, type FakeKeyd, startFakeKeyd } from "../keyd/testing/fake-keyd.ts";
 import { DockerClient } from "./docker.ts";
@@ -595,4 +595,66 @@ describe("CellOrchestrator's keyd ports and removals", () => {
     expect(states).not.toContain("failed");
     expect(states.at(-1)).toBe("removed");
   });
+  it("refreshes a computer's surrogates in its queue, after a start that is still wiring it", async () => {
+    const { orchestrator, store, stateOf, until } = await setup();
+    keyd.records.set("weather", { id: "weather", ...record, hosts: ["api.weather.example"] });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    await orchestrator.stop(cell.id);
+    const desktop = store.get(cell.id)?.docker.desktop ?? "";
+    let release = () => {};
+    docker.state.holds.set(
+      `POST /containers/${desktop}/start`,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const starting = orchestrator.start(cell.id);
+    await until(() => orchestrator.get(cell.id)?.state === "starting");
+    const minted = () =>
+      keyd.calls.filter((c) => c.path === `/v1/cells/${cell.id}/surrogates`).length;
+    const refreshed = refreshRunningCells(orchestrator, "weather");
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(minted()).toBe(0);
+    } finally {
+      release();
+      await starting;
+      await refreshed;
+    }
+    expect(await refreshed).toEqual({ restart: false });
+    expect(minted()).toBe(1);
+    const current = keyd.cells.get(cell.id)?.surrogates.weather ?? "";
+    expect(keyd.cells.get(cell.id)?.valid.has(current)).toBe(true);
+    const files = docker.state.containers.get(desktop)?.files;
+    expect(files?.get(`${CELL_FILES_DIR}/surrogates.sh`)?.toString()).toContain(`'${current}'`);
+  });
+
+  it.each(["pause", "stop"] as const)(
+    "does not refresh credentials after an earlier queued %s changes the computer",
+    async (operation) => {
+      const { orchestrator, stateOf } = await setup();
+      keyd.records.set("weather", { id: "weather", ...record, hosts: ["api.weather.example"] });
+      const cell = await orchestrator.create({ scale: 2 });
+      await stateOf(cell.id, "ready");
+      const entered = Promise.withResolvers<void>();
+      const release = Promise.withResolvers<void>();
+      const changed = orchestrator.withLifecycle(cell.id, async (controls) => {
+        entered.resolve();
+        await release.promise;
+        await controls[operation]();
+      });
+      await entered.promise;
+      // The initial list still says ready. Eligibility must be checked again
+      // inside the queue, after Stop has frozen or stopped the desktop.
+      const refreshed = refreshRunningCells(orchestrator, "weather");
+      release.resolve();
+      await changed;
+      expect(await refreshed).toEqual({ restart: false });
+      expect(keyd.calls.filter((c) => c.path === `/v1/cells/${cell.id}/surrogates`)).toEqual([]);
+      expect(orchestrator.get(cell.id)).toMatchObject(
+        operation === "pause" ? { state: "ready", paused: true } : { state: "stopped" },
+      );
+    },
+  );
 });

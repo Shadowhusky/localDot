@@ -1,5 +1,6 @@
 import { SECRET_ID_PATTERN, SURROGATE_PATTERN, surrogateEnvName } from "@localdot/protocol";
 import type { DockerClient } from "../cells/docker.ts";
+import type { CellOrchestrator } from "../cells/orchestrator.ts";
 import { type TarFile, tar } from "../cells/tar.ts";
 import type { CellRecord } from "../cells/types.ts";
 import { type KeydClient, KeydError, KeydUnavailableError } from "./client.ts";
@@ -123,6 +124,27 @@ export class CellKeydWiring implements CellKeyd {
   async #write(record: CellRecord, files: TarFile[]): Promise<void> {
     await this.deps.docker.putArchive(record.docker.desktop, CELL_FILES_DIR, tar(files));
   }
+}
+
+// After a key is saved or deleted (keyd revoked that key's surrogates everywhere), every running
+// or booting desktop gets fresh surrogates, each in its cell's queue (refreshKeys); a frozen one
+// gets them when it is resumed. `restart` says whether a running computer cannot use the saved key
+// until it starts again.
+export async function refreshRunningCells(
+  cells: Pick<CellOrchestrator, "list" | "refreshKeys">,
+  secretId: string,
+): Promise<{ restart: boolean }> {
+  let restart = false;
+  for (const cell of cells.list()) {
+    if ((cell.state !== "ready" && cell.state !== "starting") || cell.paused) continue;
+    try {
+      if ((await cells.refreshKeys(cell.id)).includes(secretId)) restart = true;
+    } catch {
+      restart = true;
+      console.error("keys saved, but a computer could not refresh its credentials");
+    }
+  }
+  return { restart };
 }
 
 // One `export NAME='surrogate'` line per web API key; ids and surrogates are checked again here

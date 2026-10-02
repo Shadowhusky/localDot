@@ -377,9 +377,46 @@ synchronous/reentrant callbacks safely and never logs exception contents.
   `/tmp/localdot-part4b-task10-kill-mutation-run.log`, and
   `/tmp/localdot-part4b-task10-stream-mutation-recheck{1,2}.log`.
 
+## Task 11: production daemon and credential events
+
+The production daemon shares one keyd client, Docker client and live-session
+registry across cell wiring, Stop/resume, key routes, health monitoring and the
+event stream. Startup reconciliation stays in the background. Shutdown closes
+subscriptions and local stores while preserving running/frozen computers. Bad
+listener ranges fail before home state is created. The browser harness now owns
+an in-memory keyd alongside its daemon and retains it across daemon restarts.
+
+Credential events attach only to the cell's current live session, with twenty
+events per second per cell. Text is cleaned and bounded in UTF-16 units without
+splitting emoji, including task IDs in budget events. Drop notices aggregate,
+shutdown flushes their counts, and stale stream callbacks cannot append after a
+restart. Refreshes run in the lifecycle queue and recheck readiness/pause there.
+A failed refresh reports that a restart is needed rather than claiming success.
+
+- All 858 host tests in 101 files, workspace types, lint, hygiene and the web
+  production build pass. Final test refinements pass 48 scoped tests.
+- The real daemon/keyd smoke verifies authenticated sealed save/list/delete,
+  daemon restart without losing keys, offline health and HTTP 503 while keyd is
+  down. Doctor identifies keyd correctly; its only failures are the deliberately
+  occupied daemon port and disabled hairpin discovery. Test homes/processes are
+  removed, with only fake in-memory keys and no external discovery.
+- The real Chrome/Docker desktop test passes in 24.4 seconds, including live
+  frames, Stop/Start, daemon restart, narrow layout, embedding/token isolation
+  and removal during a lost status connection.
+- Fifteen deliberate regressions are caught. One diagnostic-leak mutation
+  initially survived because JSON serialization hid an Error object's message;
+  the test now inspects console arguments as strings and catches that mutation.
+  Queue-test cleanup also releases its held operation after assertion failure.
+  These refinements do not change production code.
+- Evidence: `/tmp/localdot-part4b-task11-host.log`,
+  `/tmp/localdot-part4b-task11-scoped-final.log`,
+  `/tmp/localdot-part4b-task11-smoke.log`,
+  `/tmp/localdot-part4b-task11-e2e.log`,
+  `/tmp/localdot-part4b-task11-mutations.log`, and
+  `/tmp/localdot-part4b-task11-mutations-recheck.log`.
+
 ## Remaining integration
 
-Tasks 11–16: production daemon wiring and keyd event logging, key form and paused
-UI, real-cell isolation/canary acceptance, documentation and CI. The basic real
-Stop/resume path and system Keychain carry are verified above; the broader
-Task 15 canary scenarios remain.
+Tasks 12a–16: key form and paused UI, real-cell isolation/canary acceptance,
+documentation and CI. The basic real Stop/resume path and system Keychain carry
+are verified above; the broader Task 15 canary scenarios remain.
