@@ -38,7 +38,7 @@ the branch merges.
 
 The original brief is `avatar-part3-task-7-brief.md`. The review asked for seven changes:
 
-1. **Early final.** At about 250 ms of pause, decode the turn and send it as a `partial`. At 500 ms,
+1. **Done** (`a138209`). **Early final.** At about 250 ms of pause, decode the turn and send it as a `partial`. At 500 ms,
    if no speech resumed, send that same text as the `final` with no second decode. Speech resuming
    between 250 and 500 ms continues the turn. Each turn's final is still decoded once. Re-measure
    13–16 s turns against the 750 ms hands-free budget.
@@ -53,9 +53,7 @@ The original brief is `avatar-part3-task-7-brief.md`. The review asked for seven
    cough does not interrupt her.
 7. **Logging.** Call `log.exception` for non-cancellation errors in the reader task.
 
-State in `wip/avatar-part3`: `endpoint.py` and `test_stt.py` are mid-change for item 1. Ten tests
-fail by design: new and moved expectations whose code isn't finished. Finish items 1, 2, 5 and 7
-test-first, until `pnpm test:voiced` is fully green.
+State in `wip/avatar-part3` (2026-10-02, 16:45 UK time): items 1, 3, 4 and 6 are done, and `pnpm test:voiced` is green (104 passed). Items 2, 5 and 7 remain; do them test-first. No agent is working on this lane now: the Claude agents stopped and their leftover servers were shut down, so ports 4752 and 4753 are free.
 
 ### Task 9: optional voice input in the browser
 
