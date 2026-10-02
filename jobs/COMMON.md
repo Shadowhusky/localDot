@@ -8,8 +8,8 @@ You are one job in the localDot core build, a localhost AI assistant. The contro
   - Its `README.md` maps the original Mac paths (`/Volumes/Husky's SSD 4T/Projects/...`) to branch paths: `docs/superpowers/...` and `sdd/<plan>/...`. Translate every such path you meet.
   - Avatar-character names in the planning copies read `[avatar-name]`.
 - **Toolchain:**
-  - Node 24 or later, with `corepack enable` and pnpm 10.29.3 (the repo pins it), then `pnpm install --frozen-lockfile`.
-  - Go 1.27.1: if `go version` differs, download the linux tarball from https://go.dev/dl/ into `$HOME/sdk` and put it on PATH.
+  - **Node:** the repo wants Node 24+ (`.nvmrc`). If the installed Node is older, run `nvm install 24`, or report it if that's unavailable. Then `npm i -g pnpm@10.29.3` and `pnpm install --frozen-lockfile`.
+  - **Go:** `keyd/go.mod` names `toolchain go1.27.1`, so any Go ≥ 1.21 auto-fetches it through `proxy.golang.org` (`GOTOOLCHAIN=auto`; go.dev itself is not reachable here). Check that `go version` inside `keyd/` reports go1.27.1.
   - The repo pins TypeScript 7.0.2, Biome 2.5.15 and Vitest 5.0.3; use the repo's scripts.
 
 ## Hard rules
@@ -23,5 +23,6 @@ You are one job in the localDot core build, a localhost AI assistant. The contro
 8. If you're blocked, still push your report saying BLOCKED, with the specifics.
 
 ## Output
-- Your job file names your branches and your report path. The report is concise and written for the controller: status (DONE | DONE_WITH_CONCERNS | BLOCKED), commits, test results, concerns, and anything unverified.
+- **Cloud sessions can push only their current working branch, so each job pushes exactly ONE branch.** Your report (and any screenshots) go in the LAST commit on that branch, touching only `reports/…` paths. The controller keeps that commit out when it merges the code.
+- Your job file names your branch and your report path. The report is concise and written for the controller: status (DONE | DONE_WITH_CONCERNS | BLOCKED), commits, test results, concerns, and anything unverified.
 - Your final message, under 10 lines: the status, the branches pushed, and the top concerns.

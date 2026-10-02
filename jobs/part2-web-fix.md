@@ -2,7 +2,7 @@
 
 - **Base:** `origin/feat/core-part2` at `b02765f`.
 - **Code branch:** `git checkout -b claude/part2-web-fix b02765f`. Commit there and push it.
-- **Report:** commit `reports/part2-web-fix-report.md` plus your screenshots `reports/part2-web-fix/*.png` on a branch made from `origin/planning` named `claude/part2-web-fix-report`, and push it.
+- **Report:** commit `reports/part2-web-fix-report.md` plus your screenshots `reports/part2-web-fix/*.png` as the LAST commit on `claude/part2-web-fix`, touching only `reports/`.
 
 ## Context
 localDot's web UI, the Theatre (`apps/web`, React 19 + Vite), is served by the daemon (`apps/daemon`, Hono). Task 14 (`c879f59..b02765f`) added:

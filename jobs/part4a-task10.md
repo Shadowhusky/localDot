@@ -2,7 +2,7 @@
 
 - **Base:** `origin/feat/core-part4a` at `70a534e`.
 - **Code branch:** `git checkout -b claude/part4a-task10 70a534e`. Commit there and push it.
-- **Report:** commit `reports/part4a-task10-report.md` on a branch made from `origin/planning` named `claude/part4a-task10-report`, and push that too.
+- **Report:** commit `reports/part4a-task10-report.md` as the LAST commit on `claude/part4a-task10`, touching only that file.
 
 ## Read first
 `sdd/2026-10-01-localdot-core-part4a-keyd-core/` on planning:
