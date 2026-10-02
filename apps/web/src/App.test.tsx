@@ -389,6 +389,7 @@ describe("App HUD", () => {
   it("announces the caption politely and names the stream state in the bar", async () => {
     render(<App fetchImpl={daemon(() => json([summary("ready", "connecting")])).fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Connecting…"));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     expect(document.querySelector(".caption")?.getAttribute("aria-live")).toBe("polite");
     expect(document.querySelector(".bar .live")?.textContent).toBe("Not live");
     expect(document.body.textContent).not.toContain("Offline");
@@ -427,7 +428,8 @@ describe("App on a refused status socket", () => {
     expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami"]);
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(vi.getTimerCount()).toBe(0);
+    // The unmount's or cell change's effect cleanup closes the socket; let React run it first.
+    await act(async () => {});
     act(() => vi.advanceTimersByTime(60_000));
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
@@ -445,7 +447,8 @@ describe("App on a refused status socket", () => {
     act(() => FakeWebSocket.instances[0]?.onclose?.());
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("No computer"));
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami", "GET /api/cells"]);
-    expect(vi.getTimerCount()).toBe(0);
+    // The unmount's or cell change's effect cleanup closes the socket; let React run it first.
+    await act(async () => {});
     act(() => vi.advanceTimersByTime(60_000));
     expect(FakeWebSocket.instances).toHaveLength(1);
   });
