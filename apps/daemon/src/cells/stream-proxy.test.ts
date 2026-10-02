@@ -573,24 +573,31 @@ describe("desktop stream relay", () => {
     expect(d.stream()?.connection).toBe("none");
   });
 
-  it("closes every relay with 1012 when the cell leaves ready, and the old ticket opens nothing", async () => {
-    const selkies = await fakeSelkies();
-    const d = await daemon(selkies.baseUrl);
-    const viewers = [d.open(`${d.prefix}/api/websockets`), d.open(`${d.prefix}/api/websockets`)];
-    await Promise.all(viewers.map(opened));
-    await until("two live viewers", () => d.stream()?.viewers === 2);
-    const codes = Promise.all(
-      viewers.map((ws) => new Promise<number>((r) => ws.once("close", (code) => r(code)))),
-    );
-    const before = d.connections().length;
-    d.emitState("stopping");
-    expect(await within(codes, 1000, "the viewers' close")).toEqual([1012, 1012]);
-    expect(d.stream()).toMatchObject({ connection: "none", viewers: 0 });
-    expect(d.connections().slice(before)).toEqual(["none"]);
-    await until("the cell's side closed", () => selkies.state.sockets.size === 0);
-    expect(await refusal(d.open(`${d.prefix}/api/websockets`))).toContain("403");
-    expect((await d.fetch(`${d.prefix}/`)).status).toBe(403);
-  });
+  it.each(["stopping", "paused"] as const)(
+    "closes relays and old tickets when %s",
+    async (state) => {
+      const selkies = await fakeSelkies();
+      const d = await daemon(selkies.baseUrl);
+      const viewers = [d.open(`${d.prefix}/api/websockets`), d.open(`${d.prefix}/api/websockets`)];
+      await Promise.all(viewers.map(opened));
+      await until("two live viewers", () => d.stream()?.viewers === 2);
+      const codes = Promise.all(
+        viewers.map((ws) => new Promise<number>((r) => ws.once("close", (code) => r(code)))),
+      );
+      const before = d.connections().length;
+      if (state === "paused") {
+        const cell = d.cells.get(d.id);
+        if (!cell) throw new Error("no cell");
+        d.cells.emit({ ...cell, paused: true });
+      } else d.emitState(state);
+      expect(await within(codes, 1000, "the viewers' close")).toEqual([1012, 1012]);
+      expect(d.stream()).toMatchObject({ connection: "none", viewers: 0 });
+      expect(d.connections().slice(before)).toEqual(["none"]);
+      await until("the cell's side closed", () => selkies.state.sockets.size === 0);
+      expect(await refusal(d.open(`${d.prefix}/api/websockets`))).toContain("403");
+      expect((await d.fetch(`${d.prefix}/`)).status).toBe(403);
+    },
+  );
 
   it("cuts the cell's side at once when the cell leaves ready, even if a viewer never answers the close", async () => {
     const selkies = await fakeSelkies();
@@ -697,4 +704,15 @@ describe("desktop stream relay", () => {
     await d.fetch(`${d.prefix}/api/status`);
     for (const spy of spies) expect(spy).not.toHaveBeenCalled();
   });
+});
+
+it("refuses stream tickets while paused even if the state event was lost", async () => {
+  const selkies = await fakeSelkies();
+  const d = await daemon(selkies.baseUrl);
+  const cell = d.cells.get(d.id);
+  if (!cell) throw new Error("no cell");
+  d.cells.cells.set(d.id, { ...cell, paused: true });
+  expect(d.tickets.resolve(d.ticket)).toBe(d.id);
+  expect((await d.fetch(`${d.prefix}/`)).status).toBe(403);
+  expect(await refusal(d.open(`${d.prefix}/api/websockets`))).toContain("403");
 });

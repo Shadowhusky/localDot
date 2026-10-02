@@ -1,8 +1,10 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { SELFTEST_CHECK_IDS } from "@localdot/protocol";
+import { SELFTEST_CHECK_IDS, type SecretBinding, sealSecret } from "@localdot/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { KillSwitch } from "../gateway/kill-switch.ts";
+import { LiveSessions } from "../gateway/live.ts";
 import { CellKeydWiring } from "../keyd/cell-wiring.ts";
 import { KeydClient } from "../keyd/client.ts";
 import { type KeydProcess, startKeyd, TEST_KEYD_PORTS } from "../keyd/testing/keyd-process.ts";
@@ -43,17 +45,36 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
   let store: CellStore;
   let orchestrator: CellOrchestrator;
   let keyd: KeydProcess;
+  let keydClient: KeydClient;
+  let wiring: CellKeydWiring;
   const seen = new Set<string>();
   let cell: CellSummary | undefined;
 
   beforeAll(async () => {
     home = mkdtempSync(join(tmpdir(), "local dot's orch-docker-"));
     keyd = await startKeyd();
+    keydClient = new KeydClient(keyd.socketPath);
+    const binding: SecretBinding = {
+      id: "weather",
+      kind: "http",
+      hosts: ["api.example.test"],
+      header: "Authorization",
+      format: "bearer",
+    };
+    await keydClient.putSecret(
+      binding,
+      await sealSecret(
+        (await keydClient.status()).sealKey,
+        binding,
+        "fake-key-for-pause-resume-acceptance",
+      ),
+    );
     store = new CellStore(home, TEST_KEYD_PORTS);
     const client = new DockerClient();
+    wiring = new CellKeydWiring({ keyd: keydClient, docker: client });
     orchestrator = new CellOrchestrator({
       docker: client,
-      keyd: new CellKeydWiring({ keyd: new KeydClient(keyd.socketPath), docker: client }),
+      keyd: wiring,
       store,
       images: imagesFromEnv(),
       probeDesktopd,
@@ -275,6 +296,46 @@ describe.skipIf(!DOCKER_TESTS)("CellOrchestrator against Docker Desktop", () => 
     expect(states.at(-1)).toBe("ready");
     expect(orchestrator.endpoints(id)?.desktopd.baseUrl).not.toBe(before?.desktopd.baseUrl);
   }, 300_000);
+
+  it("revokes, freezes and resumes a real desktop with fresh surrogates", async () => {
+    if (!cell) throw new Error("no cell");
+    const id = cell.id;
+    const record = store.get(id);
+    if (!record) throw new Error("record missing");
+    const before = await keydClient.cell(id);
+    expect(before?.surrogates).toHaveLength(1);
+    const live = new LiveSessions();
+    const killSwitch = new KillSwitch({ cells: orchestrator, keyd: wiring, live });
+    const session = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
+    live.start(
+      id,
+      session,
+      (signal) => new Promise((resolve) => signal.addEventListener("abort", resolve)),
+    );
+    const started = performance.now();
+    expect(await killSwitch.stopSession(session)).toEqual({
+      revoked: true,
+      paused: true,
+      closed: false,
+      stopped: false,
+      errors: [],
+    });
+    const stopMs = performance.now() - started;
+    console.info(`real desktop Stop: ${Math.round(stopMs)} ms`);
+    expect(stopMs).toBeLessThan(5000);
+    expect(docker("inspect", "-f", "{{.State.Paused}}", record.docker.desktop)).toBe("true");
+    expect(docker("inspect", "-f", "{{.State.Running}}", record.docker.gate)).toBe("true");
+    expect((await keydClient.cell(id))?.surrogates).toEqual([]);
+    expect(orchestrator.endpoints(id)).toBeUndefined();
+    await killSwitch.resume(id);
+    expect(docker("inspect", "-f", "{{.State.Paused}}", record.docker.desktop)).toBe("false");
+    const after = await keydClient.cell(id);
+    expect(after?.surrogates).toHaveLength(1);
+    expect(after?.surrogates).not.toEqual(before?.surrogates);
+    const endpoint = orchestrator.endpoints(id)?.desktopd;
+    if (!endpoint) throw new Error("no resumed endpoint");
+    expect((await probeDesktopd(endpoint))?.ok).toBe(true);
+  }, 60_000);
 
   it("stops, starts with new ports, and removes everything but the home volume", async () => {
     if (!cell) throw new Error("no cell");

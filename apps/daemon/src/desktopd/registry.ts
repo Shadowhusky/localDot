@@ -20,11 +20,12 @@ export class DesktopdRegistry {
     private readonly fetchImpl: typeof fetch = fetch,
   ) {
     this.#unsubscribe = cells.subscribe((cell) => {
-      if (cell.state !== "ready") this.#forget(cell.id);
+      if (cell.state !== "ready" || cell.paused) this.#forget(cell.id);
     });
   }
 
   for(cellId: string): CellDesktopd | undefined {
+    if (this.cells.get(cellId)?.paused) return undefined;
     const endpoint = this.cells.endpoints(cellId)?.desktopd;
     if (!endpoint) return undefined;
     const key = `${cellId} ${endpoint.baseUrl}`;

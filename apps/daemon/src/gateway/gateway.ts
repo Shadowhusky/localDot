@@ -507,6 +507,7 @@ export class ActionGateway {
     const cell = this.deps.cells.get(ctx.cellId);
     if (cell?.state !== "ready")
       throw new Cancelled("preflight", `cell is ${cell?.state ?? "missing"}`);
+    if (cell.paused) throw new Cancelled("preflight", "the computer is paused");
   }
 
   #append(ctx: ActionContext, type: string, data: Record<string, unknown>): void {

@@ -326,3 +326,15 @@ describe("cell API", () => {
     }
   });
 });
+
+it("revokes tickets while paused and issues a fresh ticket after resume", async () => {
+  const { app, cells, tickets } = setup();
+  const cell = await readyCell(cells);
+  const { ticket } = (await (await mint(app, cell.id)).json()) as { ticket: string };
+  cells.emit({ ...cell, paused: true });
+  expect(tickets.resolve(ticket)).toBeUndefined();
+  expect((await mint(app, cell.id)).status).toBe(409);
+  cells.emit(cell);
+  const resumed = (await (await mint(app, cell.id)).json()) as { ticket: string };
+  expect(resumed.ticket).not.toBe(ticket);
+});

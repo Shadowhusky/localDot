@@ -335,9 +335,51 @@ the previous value instead of assuming that nothing changed.
   `/tmp/localdot-part4b-task10-storage-mutation-run.log`, and
   `/tmp/localdot-part4b-task10-paused-archive.json`.
 
+## Task 10: Stop/resume and frozen-cell recovery
+
+Stop aborts the live session and starts revocation immediately, even if an
+existing lifecycle operation is waiting on Docker. It queues the remaining
+work with Start/Stop/Remove and repeats revocation if earlier queued work could
+have issued new material. After bounded session settlement it freezes the whole
+desktop. Failed freezes close egress and stop the computer; outcomes distinguish
+revocation, pause, listener closure and stop without exposing exception contents.
+Duplicate pending Stops share one operation, and new input is refused meanwhile.
+
+Resume revokes again, refreshes credentials while frozen, then thaws. Lost keyd
+material causes a fresh boot without briefly unpausing old processes. Pause
+survives keyd/daemon restart and gate recovery; a dead frozen desktop never boots
+automatically. Docker's actual pause state is checked before treating a repeated
+pause as successful. Lifecycle transitions fence background crash watches.
+
+Review found that existing stream tickets, live relays, clock polling and actions
+waiting for target/clock lookup could outlive the new pause state. Regressions
+reproduce all five gaps before fixes. Pausing now drops those channels and checks
+pause again before action dispatch. The live-session registry also handles
+synchronous/reentrant callbacks safely and never logs exception contents.
+
+- All 841 host tests in 100 files, workspace types, lint and hygiene pass. The
+  focused gateway/cell/desktopd run passes 302 tests in 27 files.
+- Five tests pass against real Docker/keyd (46.74 seconds): isolation/boot checks,
+  crash recovery, concurrent Stop/Start, session freeze/resume with revoked and
+  freshly issued surrogates, and removal/home preservation. The session Stop
+  completes below its five-second bound. Only fake in-memory credentials are
+  used, external discovery is off, and all test containers are removed.
+- Twenty-five deliberate daemon regressions are caught. Two stream mutants also
+  encountered missing vendored assets in their scratch copies; after fixing that
+  harness, each fails only its intended pause regression. Production code is
+  unchanged by mutation testing.
+- Evidence: `/tmp/localdot-part4b-task10-kill-review-red.log`,
+  `/tmp/localdot-part4b-task10-pause-consumers-red.log`,
+  `/tmp/localdot-part4b-task10-revoke-queue-red.log`,
+  `/tmp/localdot-part4b-task10-scoped-kill-final.log`,
+  `/tmp/localdot-part4b-task10-full-host-final.log`,
+  `/tmp/localdot-part4b-task10-docker-final.log`,
+  `/tmp/localdot-part4b-task10-kill-mutation-run.log`, and
+  `/tmp/localdot-part4b-task10-stream-mutation-recheck{1,2}.log`.
+
 ## Remaining integration
 
-Tasks 10–16: Stop/resume, event logging, key
-sheet, real-cell isolation/canary acceptance, documentation and CI. End-to-end
-Stop latency and the daemon pause/resume flow still need acceptance; the system
-Keychain carry is verified above.
+Tasks 11–16: production daemon wiring and keyd event logging, key form and paused
+UI, real-cell isolation/canary acceptance, documentation and CI. The basic real
+Stop/resume path and system Keychain carry are verified above; the broader
+Task 15 canary scenarios remain.

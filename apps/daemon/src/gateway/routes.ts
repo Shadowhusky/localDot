@@ -4,15 +4,18 @@ import { InputRequest, LaunchRequest, ULID_PATTERN } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
-import type { CellApi } from "../cells/orchestrator.ts";
+import { type CellApi, CellControlConflict } from "../cells/orchestrator.ts";
 import type { Clock } from "../clock.ts";
 import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import type { EventLog } from "../event-log.ts";
+import { KeyLayerError } from "../keyd/cell-wiring.ts";
+import { KeydUnavailableError } from "../keyd/client.ts";
 import { runPuppet } from "../puppet/runner.ts";
 import { PuppetScript } from "../puppet/script.ts";
 import type { FrameStore } from "./frames.ts";
 import type { ActionGateway } from "./gateway.ts";
+import type { KillSwitch } from "./kill-switch.ts";
 import type { LiveSessions } from "./live.ts";
 
 export interface GatewayRoutesDeps {
@@ -22,6 +25,7 @@ export interface GatewayRoutesDeps {
   gateway?: ActionGateway;
   frames?: FrameStore;
   live?: LiveSessions;
+  killSwitch?: Pick<KillSwitch, "stopSession" | "resume"> & Partial<Pick<KillSwitch, "isBusy">>;
 }
 
 export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps): void {
@@ -41,7 +45,11 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     withReadyCell(c, cells, deps, async (d) => {
       const parsed = InputRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
+      const beforeClock = unavailable(c, cells, deps);
+      if (beforeClock) return beforeClock;
       if (!d.clocks.sample) await d.clocks.sync();
+      const beforeInput = unavailable(c, cells, deps);
+      if (beforeInput) return beforeInput;
       const result = await d.client.input(parsed.data);
       // Daemon-clock microseconds (the calibration tool maps the viewer's clock onto the same
       // base); action.dispatch.pressT is session time, which only the gateway produces.
@@ -57,7 +65,11 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     withReadyCell(c, cells, deps, async (d) => {
       const parsed = LaunchRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
+      const beforeClock = unavailable(c, cells, deps);
+      if (beforeClock) return beforeClock;
       if (!d.clocks.sample) await d.clocks.sync();
+      const beforeLaunch = unavailable(c, cells, deps);
+      if (beforeLaunch) return beforeLaunch;
       const result = await d.client.launch(parsed.data);
       return c.json({ ...result, armedDaemonMicros: d.clocks.toDaemonMicros(result.armedMono) });
     }),
@@ -70,6 +82,8 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
       const cellId = c.req.param("id") ?? "";
       const parsed = PuppetScript.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
+      const beforeSession = unavailable(c, cells, deps);
+      if (beforeSession) return beforeSession;
       if (live.get(cellId)) return c.text("a session is already live on this cell", 409);
       const sessionId = eventLog.createSession(parsed.data.title);
       live.start(cellId, sessionId, (signal) =>
@@ -95,10 +109,36 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     return sessionId ? c.json({ sessionId }) : c.text("no live session", 404);
   });
 
-  app.post("/api/sessions/:id/stop", (c) => {
+  app.post("/api/sessions/:id/stop", async (c) => {
     const id = c.req.param("id") ?? "";
     if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
+    if (deps.killSwitch) {
+      const outcome = await deps.killSwitch.stopSession(id);
+      return outcome ? c.json(outcome, 202) : c.text("no such live session", 404);
+    }
     return deps.live?.stop(id) ? c.body(null, 202) : c.text("no such live session", 404);
+  });
+
+  app.post("/api/cells/:id/resume", async (c) => {
+    const id = c.req.param("id") ?? "";
+    if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
+    const cell = cells.get(id);
+    if (!cell) return c.text("unknown cell", 404);
+    if (!cell.paused) return c.text("the computer is not paused", 409);
+    if (cell.state !== "ready")
+      return c.text("the computer is restarting: resume it once it is ready", 409);
+    if (!deps.killSwitch) return c.text("the kill switch is not available", 503);
+    if (deps.killSwitch.isBusy?.(id))
+      return c.text("the computer is changing state; try again", 409);
+    try {
+      await deps.killSwitch.resume(id);
+    } catch (err) {
+      if (err instanceof KeydUnavailableError || err instanceof KeyLayerError)
+        return c.text("the key layer is offline: start keyd, then resume the computer", 503);
+      if (err instanceof CellControlConflict) return c.text(err.message, 409);
+      return c.text("the computer could not resume; try again", 502);
+    }
+    return c.body(null, 204);
   });
 
   app.get("/api/sessions/:id/frames/:frameId", (c) => {
@@ -118,11 +158,9 @@ export async function withReadyCell(
   deps: GatewayRoutesDeps,
   fn: (d: NonNullable<ReturnType<DesktopdRegistry["for"]>>) => Promise<Response>,
 ): Promise<Response> {
+  const blocked = unavailable(c, cells, deps);
+  if (blocked) return blocked;
   const id = c.req.param("id") ?? "";
-  if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
-  const cell = cells.get(id);
-  if (!cell) return c.text("unknown cell", 404);
-  if (cell.state !== "ready") return c.text(`cell is ${cell.state}`, 409);
   const d = deps.registry.for(id);
   if (!d) return c.text("cell has no desktopd endpoint", 503);
   try {
@@ -136,4 +174,16 @@ export async function withReadyCell(
       );
     throw err;
   }
+}
+
+function unavailable(c: Context, cells: CellApi, deps: GatewayRoutesDeps): Response | undefined {
+  const id = c.req.param("id") ?? "";
+  if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
+  const cell = cells.get(id);
+  if (!cell) return c.text("unknown cell", 404);
+  if (cell.state !== "ready") return c.text(`cell is ${cell.state}`, 409);
+  if (cell.paused) return c.text("the computer is paused: resume it first", 409);
+  if (deps.killSwitch?.isBusy?.(id))
+    return c.text("the computer is changing state; try again", 409);
+  return undefined;
 }

@@ -90,7 +90,8 @@ export interface StreamProxyDeps {
 // ticket that still opens the stream of a cell that is failing or restarting.
 function cellFor(deps: StreamProxyDeps, id: string, ticket: string): string | undefined {
   if (!ULID_PATTERN.test(id) || deps.tickets.resolve(ticket) !== id) return undefined;
-  return deps.cells.get(id)?.state === "ready" ? id : undefined;
+  const cell = deps.cells.get(id);
+  return cell?.state === "ready" && !cell.paused ? id : undefined;
 }
 
 export function desktopRoutes(app: Hono, deps: StreamProxyDeps): void {
@@ -150,7 +151,7 @@ export function desktopStreamRoute(deps: StreamProxyDeps): UpgradeRoute {
   const streams = new CellStreams(deps.cells);
   // Leaving ready revokes the cell's ticket, and the streams it opened go with it.
   deps.cells.subscribe((cell) => {
-    if (cell.state !== "ready") streams.drop(cell.id);
+    if (cell.state !== "ready" || cell.paused) streams.drop(cell.id);
   });
   return {
     pattern: /^\/cells\/([^/]+)\/desktop\/([^/]+)\/api\/websockets$/,

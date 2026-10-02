@@ -67,6 +67,7 @@ interface Ports {
 }
 
 interface Live {
+  paused?: true;
   state: CellState;
   restarts: number;
   error?: string;
@@ -85,12 +86,23 @@ interface UndoStep {
 }
 
 interface ContainerInspect {
-  State: { Running: boolean; ExitCode: number; Error: string };
+  State: { Running: boolean; Paused?: boolean; ExitCode: number; Error: string };
   NetworkSettings: {
     Ports: Record<string, { HostIp: string; HostPort: string }[] | null>;
     Networks: Record<string, unknown>;
   };
 }
+
+export interface CellControls {
+  // A prior operation may replace credentials after Stop's immediate revoke.
+  waitedForOperation: boolean;
+  pause(): Promise<void>;
+  unpause(): Promise<void>;
+  start(): Promise<void>;
+  stop(): Promise<void>;
+}
+
+export class CellControlConflict extends Error {}
 
 export class UnknownCellError extends Error {
   constructor(readonly cellId: string) {
@@ -193,7 +205,7 @@ export class CellOrchestrator {
   // Only a ready cell's ports are its own: any other state may hold ports Docker has handed on.
   endpoints(id: string): CellEndpoints | undefined {
     const live = this.#live.get(id);
-    if (live?.state !== "ready" || !live.ports) return undefined;
+    if (live?.state !== "ready" || live.paused || !live.ports) return undefined;
     const record = this.#record(id);
     return record && endpointsFor(record, live.ports);
   }
@@ -232,7 +244,15 @@ export class CellOrchestrator {
     try {
       const desktop = await this.#inspect(record.docker.desktop);
       const gate = await this.#inspect(record.docker.gate);
-      if (desktop.State.Running && gate.State.Running) {
+      if (desktop.State.Running && desktop.State.Paused) {
+        if (gate.State.Running) {
+          const ports = await this.#readPorts(record.docker.gate);
+          this.#set(id, { state: "ready", restarts: 0, ports, stream: NO_STREAM, paused: true });
+          this.#detach(id, this.#watch(record));
+        } else if (await this.#startContainers(record, 0, undefined, true)) {
+          this.#detach(id, this.#watch(record));
+        }
+      } else if (desktop.State.Running && gate.State.Running) {
         const ports = await this.#readPorts(record.docker.gate);
         this.#set(id, { state: "starting", restarts: 0, ports, stream: NO_STREAM });
         if (!(await this.#rewireIfLost(id))) this.#detach(id, this.#waitReady(record));
@@ -409,6 +429,74 @@ export class CellOrchestrator {
     if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
   }
 
+  // Keep the entire kill switch or Resume in the lifecycle queue, including
+  // credential work. A concurrent Start cannot boot between revoke and freeze.
+  withLifecycle<T>(id: string, op: (controls: CellControls) => Promise<T>): Promise<T> {
+    const waitedForOperation = this.#queues.has(id);
+    return this.#queued(id, () =>
+      op({
+        waitedForOperation,
+        pause: () => this.#pause(id),
+        unpause: () => this.#unpause(id),
+        start: () => this.#start(id),
+        stop: () => this.#stop(id),
+      }),
+    );
+  }
+
+  pause(id: string): Promise<void> {
+    return this.#queued(id, () => this.#pause(id));
+  }
+
+  async #pause(id: string): Promise<void> {
+    const record = this.#require(id);
+    const live = this.#live.get(id);
+    if (live?.paused) {
+      const state = (await this.#inspect(record.docker.desktop)).State;
+      if (!state.Running || !state.Paused)
+        throw new CellControlConflict("the frozen desktop changed outside the daemon");
+      return;
+    }
+    if (live?.state !== "ready") {
+      throw new CellControlConflict(`cell is ${live?.state ?? "stopped"}, not ready`);
+    }
+    const state = (await this.#inspect(record.docker.desktop)).State;
+    if (!state.Running)
+      throw new CellControlConflict("the desktop stopped before it could be paused");
+    if (!state.Paused) {
+      await this.#docker.request({
+        method: "POST",
+        path: objectPath("containers", record.docker.desktop, "pause"),
+      });
+    }
+    this.#set(id, { ...live, paused: true, stream: NO_STREAM });
+    this.#detach(id, this.#watch(record));
+  }
+
+  unpause(id: string): Promise<void> {
+    return this.#queued(id, () => this.#unpause(id));
+  }
+
+  async #unpause(id: string): Promise<void> {
+    const record = this.#require(id);
+    const live = this.#live.get(id);
+    if (!live?.paused || live.state !== "ready") {
+      throw new CellControlConflict("the computer must be ready and paused before resuming");
+    }
+    const state = (await this.#inspect(record.docker.desktop)).State;
+    if (!state.Running) throw new CellControlConflict("the desktop stopped while it was paused");
+    // Docker 29 answers 500 for an already thawed container. Inspect instead of
+    // hiding arbitrary server errors, and leave the paused state on failure.
+    if (state.Paused) {
+      await this.#docker.request({
+        method: "POST",
+        path: objectPath("containers", record.docker.desktop, "unpause"),
+      });
+    }
+    this.#set(id, thawed(live));
+    this.#detach(id, this.#watch(record));
+  }
+
   // A running desktop whose keyd cell was lost must boot with a new CA and token.
   async rewireIfLost(id: string): Promise<void> {
     await this.#queued(id, () => this.#rewireIfLost(id));
@@ -416,6 +504,7 @@ export class CellOrchestrator {
 
   async #rewireIfLost(id: string): Promise<boolean> {
     const live = this.#live.get(id);
+    if (live?.paused) return false;
     const record = this.#record(id);
     if (!record || !this.#keyd || (live?.state !== "ready" && live?.state !== "starting"))
       return false;
@@ -521,24 +610,34 @@ export class CellOrchestrator {
   }
 
   // Resolves false when a stop, a remove or a newer start took the cell over while it ran.
-  async #startContainers(record: CellRecord, restarts: number, error?: string): Promise<boolean> {
+  async #startContainers(
+    record: CellRecord,
+    restarts: number,
+    error?: string,
+    frozen = false,
+  ): Promise<boolean> {
     const d = record.docker;
     const starting: Live = {
       state: "starting",
       restarts,
       stream: NO_STREAM,
       ...(error ? { error } : {}),
+      ...(frozen ? { paused: true as const } : {}),
     };
     this.#set(record.id, starting);
     try {
-      if (this.#keyd) {
-        let running = (await this.#inspect(d.desktop)).State.Running;
-        if (running && !(await this.#keyd.isWired(record))) {
+      const desktop = (await this.#inspect(d.desktop)).State;
+      if (frozen && (!desktop.Running || !desktop.Paused)) {
+        throw new Error("the frozen desktop changed; start the computer again");
+      }
+      if (!frozen) {
+        let running = desktop.Running;
+        if (running && (desktop.Paused || (this.#keyd && !(await this.#keyd.isWired(record))))) {
           await this.#stopContainer(d.desktop);
           running = false;
         }
         if (!this.#current(record.id, starting)) return false;
-        if (!running) await this.#keyd.wire(record);
+        if (!running) await this.#keyd?.wire(record);
         if (!this.#current(record.id, starting)) return false;
       }
       await this.#docker.request({
@@ -559,14 +658,21 @@ export class CellOrchestrator {
         });
       }
       if (!this.#current(record.id, starting)) return false;
-      await this.#docker.request({
-        method: "POST",
-        path: objectPath("containers", d.desktop, "start"),
-      });
+      if (!frozen) {
+        await this.#docker.request({
+          method: "POST",
+          path: objectPath("containers", d.desktop, "start"),
+        });
+      }
       // Every start publishes new host ports (Review Focus 2).
       const ports = await this.#readPorts(d.gate);
       if (!this.#current(record.id, starting)) return false;
-      this.#set(record.id, { ...starting, ports });
+      this.#set(
+        record.id,
+        frozen
+          ? { state: "ready", restarts, ports, stream: NO_STREAM, paused: true }
+          : { ...starting, ports },
+      );
       return true;
     } catch (err) {
       if (this.#current(record.id, starting)) {
@@ -674,29 +780,52 @@ export class CellOrchestrator {
       const exited = await this.#exitedContainer(record);
       if (!this.#current(record.id, live)) return;
       if (exited === undefined) continue;
-      if (exited.gone) {
-        this.#set(record.id, { ...live, state: "failed", error: exited.detail });
-        return;
-      }
-      const attempt = live.restarts + 1;
-      if (attempt > this.#restartBackoffMs.length) {
-        this.#set(record.id, {
+      // Claim the transition in the same queue as Stop/Resume. A watch that
+      // inspected before a freeze must not restart a now-frozen desktop.
+      const restarting = await this.#queued(record.id, async () => {
+        if (!this.#current(record.id, live)) return undefined;
+        if (exited.gone || (live.paused && exited.role === "desktop")) {
+          this.#set(record.id, {
+            ...thawed(live),
+            state: "failed",
+            error: exited.gone
+              ? exited.detail
+              : `${exited.detail} while it was frozen; start the computer again`,
+          });
+          return undefined;
+        }
+        const attempt = live.restarts + 1;
+        if (attempt > this.#restartBackoffMs.length) {
+          this.#set(record.id, {
+            ...live,
+            state: "failed",
+            error: `${exited.detail}; gave up after ${live.restarts} restarts`,
+          });
+          return undefined;
+        }
+        const next: Live = {
           ...live,
-          state: "failed",
-          error: `${exited.detail}; gave up after ${live.restarts} restarts`,
-        });
-        return;
-      }
-      const note = `${exited.detail}; restarting (attempt ${attempt} of ${this.#restartBackoffMs.length})`;
-      const restarting: Live = { ...live, state: "starting", restarts: attempt, error: note };
-      this.#set(record.id, restarting);
+          state: "starting",
+          restarts: attempt,
+          error: `${exited.detail}; restarting (attempt ${attempt} of ${this.#restartBackoffMs.length})`,
+        };
+        this.#set(record.id, next);
+        return next;
+      });
+      if (!restarting) return;
+      const attempt = restarting.restarts;
+      const note = restarting.error;
+      const frozen = live.paused === true;
       await this.#sleep(this.#restartBackoffMs[attempt - 1] ?? 0);
       if (!this.#current(record.id, restarting)) return;
       // Queued like a user's start: a Stop that lands during the restart runs after it.
       const restarted = await this.#queued(record.id, async () =>
-        this.#current(record.id, restarting) ? this.#startContainers(record, attempt, note) : false,
+        this.#current(record.id, restarting)
+          ? this.#startContainers(record, attempt, note, frozen)
+          : false,
       ).catch(() => false);
-      if (restarted) this.#detach(record.id, this.#waitReady(record));
+      if (restarted)
+        this.#detach(record.id, frozen ? this.#watch(record) : this.#waitReady(record));
       return;
     }
   }
@@ -738,7 +867,7 @@ export class CellOrchestrator {
   // it, so the container counts as running until an answer says otherwise.
   async #exitedContainer(
     record: CellRecord,
-  ): Promise<{ detail: string; gone: boolean } | undefined> {
+  ): Promise<{ role: "desktop" | "gate"; detail: string; gone: boolean } | undefined> {
     for (const [role, name] of [
       ["desktop", record.docker.desktop],
       ["gate", record.docker.gate],
@@ -747,11 +876,16 @@ export class CellOrchestrator {
         isStatus(err, 404) ? null : undefined,
       );
       if (info === null) {
-        return { detail: `${role} container is missing: removed outside localDot`, gone: true };
+        return {
+          role,
+          detail: `${role} container is missing: removed outside localDot`,
+          gone: true,
+        };
       }
       if (info && !info.State.Running) {
         const reason = info.State.Error ? `: ${clamp(info.State.Error)}` : "";
         return {
+          role,
           detail: `${role} container exited with ${info.State.ExitCode}${reason}`,
           gone: false,
         };
@@ -912,8 +1046,14 @@ export class CellOrchestrator {
       createdAt: record.createdAt,
       stream: live.stream,
       ...(live.error ? { error: live.error } : {}),
+      ...(live.paused ? { paused: true as const } : {}),
     };
   }
+}
+
+function thawed(live: Live): Live {
+  const { paused: _paused, ...rest } = live;
+  return rest;
 }
 
 function messageOf(err: unknown): string {

@@ -15,6 +15,8 @@ export interface StreamState {
 export const NO_STREAM: StreamState = { connection: "none", viewers: 0, lastUpstreamAt: null };
 
 export interface CellSummary {
+  // Stop freezes every desktop process until the user resumes or restarts it.
+  paused?: true;
   id: string;
   state: CellState;
   scale: Scale;

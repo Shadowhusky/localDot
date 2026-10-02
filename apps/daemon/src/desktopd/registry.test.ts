@@ -7,7 +7,7 @@ import { DesktopdRegistry } from "./registry.ts";
 import { FakeDesktopd } from "./testing/fake-desktopd.ts";
 
 describe("DesktopdRegistry", () => {
-  it("keeps one client per cell while it is ready and drops it, clock sync included, when it leaves", () => {
+  it.each(["stopped", "paused"] as const)("drops the client and clock sync when %s", (state) => {
     const cells = new FakeOrchestrator();
     const fake = new FakeDesktopd();
     const registry = new DesktopdRegistry(cells, monotonicClock(), fake.fetchImpl);
@@ -27,7 +27,7 @@ describe("DesktopdRegistry", () => {
     expect(first).toBeDefined();
     expect(registry.for(cell.id)).toBe(first);
     const stop = vi.spyOn(first?.clocks as NonNullable<typeof first>["clocks"], "stop");
-    cells.emit({ ...cell, state: "stopped" });
+    cells.emit(state === "paused" ? { ...cell, paused: true } : { ...cell, state });
     expect(stop).toHaveBeenCalled();
     expect(registry.for(cell.id)).not.toBe(first);
     registry.dispose();

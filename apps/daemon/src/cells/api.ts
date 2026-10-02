@@ -14,7 +14,7 @@ export function cellRoutes(app: Hono, { cells, tickets }: CellApiDeps): void {
   // A stream ticket lives only while its cell is ready (P2-R2): stopping, failing or removing the
   // cell revokes it, so no stream path stays open for a computer that is off.
   cells.subscribe((cell) => {
-    if (cell.state !== "ready") tickets.revoke(cell.id);
+    if (cell.state !== "ready" || cell.paused) tickets.revoke(cell.id);
   });
 
   app.get("/api/cells", (c) => c.json(cells.list()));
@@ -72,6 +72,7 @@ export function cellRoutes(app: Hono, { cells, tickets }: CellApiDeps): void {
       const cell = cells.get(id);
       if (!cell) return c.text("unknown cell", 404);
       if (cell.state !== "ready") return c.text(`cell is ${cell.state}`, 409);
+      if (cell.paused) return c.text("the computer is paused: resume it first", 409);
       // The registry hands back the cell's live ticket, so a second viewer shares the same path.
       const ticket = tickets.issue(id);
       return c.json({ ticket, path: `/cells/${id}/desktop/${ticket}/` });

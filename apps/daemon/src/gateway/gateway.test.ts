@@ -386,28 +386,32 @@ describe("ActionGateway type and key", () => {
     expect(s.fake.calls.find((c) => c.path === "/type")?.body).toMatchObject({ masked: true });
   });
 
-  it("refuses already cancelled actions and cells stopped during target lookup", async () => {
-    const s = setup({
-      find: () => {
-        const cell = s.cells.get(s.cellId);
-        if (cell) s.cells.emit({ ...cell, state: "stopped" });
-        return search();
-      },
-    });
-    const ac = new AbortController();
-    ac.abort();
-    const ctx = { sessionId: s.sessionId, cellId: s.cellId, signal: ac.signal };
-    expect((await s.gateway.run(ctx, { verb: "key", combo: ["Return"] })).ok).toBe(false);
-    expect(
-      (
-        await s.gateway.run(
-          { ...ctx, signal: undefined },
-          { verb: "click", find: { name: "Search" } },
-        )
-      ).ok,
-    ).toBe(false);
-    expect(s.fake.calls.some((c) => c.path === "/input")).toBe(false);
-  });
+  it.each(["stopped", "paused"] as const)(
+    "refuses actions when %s during target lookup",
+    async (state) => {
+      const s = setup({
+        find: () => {
+          const cell = s.cells.get(s.cellId);
+          if (cell)
+            s.cells.emit(state === "paused" ? { ...cell, paused: true } : { ...cell, state });
+          return search();
+        },
+      });
+      const ac = new AbortController();
+      ac.abort();
+      const ctx = { sessionId: s.sessionId, cellId: s.cellId, signal: ac.signal };
+      expect((await s.gateway.run(ctx, { verb: "key", combo: ["Return"] })).ok).toBe(false);
+      expect(
+        (
+          await s.gateway.run(
+            { ...ctx, signal: undefined },
+            { verb: "click", find: { name: "Search" } },
+          )
+        ).ok,
+      ).toBe(false);
+      expect(s.fake.calls.some((c) => c.path === "/input")).toBe(false);
+    },
+  );
 
   it("masks a secret field end to end", async () => {
     const s = setup({
