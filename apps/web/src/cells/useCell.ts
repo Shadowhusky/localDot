@@ -13,6 +13,8 @@ export interface CellController {
   stop(): void;
 }
 
+const CELLS = "/api/cells";
+
 // One computer per install in Part 2: the first cell the daemon lists, created on demand. Until the
 // daemon has answered the list, the hook reports busy, so Start never creates a second computer.
 export function useCell(api: ApiClient): CellController {
@@ -25,7 +27,7 @@ export function useCell(api: ApiClient): CellController {
 
   useEffect(() => {
     let cancelled = false;
-    api.get<CellSummary[]>("/api/cells").then(
+    api.get<CellSummary[]>(CELLS).then(
       (cells) => {
         if (cancelled) return;
         setCell(cells[0] ?? null);
@@ -43,6 +45,23 @@ export function useCell(api: ApiClient): CellController {
   useEffect(() => {
     if (!cellId) return;
     let opened = false;
+    let closed = false;
+    let probing = false;
+    // A refused socket: a 401 from whoami unmounts this Theatre (the api's onUnauthorized), which
+    // closes the socket; a good token means the cell may be gone, so the daemon's list decides.
+    const probe = async () => {
+      if (probing) return;
+      probing = true;
+      try {
+        await api.get("/api/whoami");
+        const cells = await api.get<CellSummary[]>(CELLS);
+        if (!closed) setCell(cells[0] ?? null);
+      } catch {
+        // A 401 is handled by the api; without an answer, the socket keeps retrying.
+      } finally {
+        probing = false;
+      }
+    };
     const socket = openSocket({
       url: api.socketUrl(`/api/cells/${cellId}/status`),
       protocols: api.socketProtocols(),
@@ -55,9 +74,13 @@ export function useCell(api: ApiClient): CellController {
           if (opened) setReconnects((n) => n + 1);
           opened = true;
         },
+        onRefused: () => void probe(),
       },
     });
-    return () => socket.close();
+    return () => {
+      closed = true;
+      socket.close();
+    };
   }, [api, cellId]);
 
   const run = useCallback(async (action: () => Promise<unknown>) => {

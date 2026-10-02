@@ -230,6 +230,84 @@ describe("App token states", () => {
   });
 });
 
+// The daemon refuses a status socket before the handshake: 403 for a revoked token, 404 for a cell
+// it no longer knows. The browser sees a close that never followed an open.
+describe("App on a refused status socket", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.history.replaceState(null, "", "/");
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+  afterEach(cleanup);
+
+  it("asks whoami once, and on a 401 shows the panel and stops reconnecting", async () => {
+    let revoked = false;
+    const d = daemon(({ path }) => {
+      if (revoked) return new Response("unauthorized", { status: 401 });
+      return path === "/api/cells" ? json([summary("stopped")]) : json({ ok: true });
+    });
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    revoked = true;
+    act(() => FakeWebSocket.instances[0]?.onclose?.());
+    expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
+    expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami"]);
+    expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("re-lists the cells when the token is still good, and adopts a list without the cell", async () => {
+    let removed = false;
+    const d = daemon(({ path }) => {
+      if (path === "/api/whoami") return json({ ok: true });
+      return json(removed ? [] : [summary("stopped")]);
+    });
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    expect(screen.getByTestId("hud-status").textContent).toBe("Stopped");
+    removed = true;
+    act(() => FakeWebSocket.instances[0]?.onclose?.());
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("No computer"));
+    expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami", "GET /api/cells"]);
+    expect(vi.getTimerCount()).toBe(0);
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(FakeWebSocket.instances).toHaveLength(1);
+  });
+
+  it("adopts the re-listed cell's state and keeps watching it when it is still listed", async () => {
+    let listed = summary("starting");
+    const d = daemon(({ path }) => (path === "/api/whoami" ? json({ ok: true }) : json([listed])));
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    listed = summary("stopped");
+    act(() => FakeWebSocket.instances[0]?.onclose?.());
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Stopped"));
+    act(() => vi.advanceTimersByTime(500));
+    expect(FakeWebSocket.instances).toHaveLength(2);
+  });
+
+  it("does not ask whoami when a socket that had opened drops", async () => {
+    const d = daemon(({ path }) =>
+      path === "/api/cells" ? json([summary("stopped")]) : json({ ok: true }),
+    );
+    render(<App fetchImpl={d.fetchImpl} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    act(() => FakeWebSocket.instances[0]?.onopen?.());
+    act(() => FakeWebSocket.instances[0]?.onclose?.());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(d.seen()).toEqual(["GET /api/cells"]);
+  });
+});
+
 describe("App token hardening", () => {
   beforeEach(() => {
     window.localStorage.clear();

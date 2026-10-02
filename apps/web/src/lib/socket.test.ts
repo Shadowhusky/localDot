@@ -37,4 +37,37 @@ describe("openSocket", () => {
     vi.advanceTimersByTime(5000);
     expect(FakeWebSocket.instances).toHaveLength(3);
   });
+
+  // The daemon refuses an upgrade (a revoked token's 403, an unknown cell's 404) before the
+  // handshake, and the browser reports only a close (1006) that never followed an open.
+  it("tells its owner each time a socket closes before it ever opened, and keeps retrying", () => {
+    const refused: number[] = [];
+    let closes = 0;
+    const handle = openSocket({
+      url: "ws://127.0.0.1:4750/api/cells/1/status",
+      protocols: ["localdot.v1"],
+      handlers: {
+        onMessage: () => {},
+        onClose: () => {
+          closes += 1;
+        },
+        onRefused: () => refused.push(FakeWebSocket.instances.length),
+      },
+      WebSocketImpl: FakeWebSocket as unknown as typeof WebSocket,
+      backoffMs: { min: 100, max: 400 },
+    });
+    FakeWebSocket.instances[0]?.onclose?.();
+    expect(refused).toEqual([1]);
+    vi.advanceTimersByTime(100);
+    const second = FakeWebSocket.instances[1];
+    second?.onopen?.();
+    second?.onclose?.();
+    expect(refused).toEqual([1]);
+    vi.advanceTimersByTime(100);
+    FakeWebSocket.instances[2]?.onclose?.();
+    expect(refused).toEqual([1, 3]);
+    expect(closes).toBe(3);
+    handle.close();
+    expect(refused).toEqual([1, 3]);
+  });
 });

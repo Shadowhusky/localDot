@@ -2,6 +2,10 @@ export interface SocketHandlers {
   onMessage(data: string): void;
   onOpen?(): void;
   onClose?(): void;
+  // A socket closed before it ever opened. The daemon refuses an upgrade before the handshake (a
+  // revoked token's 403, an unknown cell's 404), and the browser reports only a close (1006), so
+  // the owner has to ask the daemon why. It also follows a connection the daemon never answered.
+  onRefused?(): void;
 }
 
 export interface SocketOptions {
@@ -28,8 +32,10 @@ export function openSocket(opts: SocketOptions): SocketHandle {
 
   const connect = () => {
     if (closed) return;
+    let opened = false;
     ws = new Impl(opts.url, opts.protocols);
     ws.onopen = () => {
+      opened = true;
       delay = backoff.min;
       opts.handlers.onOpen?.();
     };
@@ -38,6 +44,8 @@ export function openSocket(opts: SocketOptions): SocketHandle {
     ws.onclose = () => {
       ws = null;
       opts.handlers.onClose?.();
+      if (closed) return;
+      if (!opened) opts.handlers.onRefused?.();
       if (closed) return;
       timer = setTimeout(connect, delay);
       delay = Math.min(backoff.max, delay * 2);
