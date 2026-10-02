@@ -26,7 +26,10 @@ import (
 
 const redacted = "keyd-redacted"
 
-var errEncoding = errors.New("egress: upstream used a content encoding keyd cannot scrub")
+var (
+	errEncoding = errors.New("egress: upstream used a content encoding keyd cannot scrub")
+	errSwitch   = errors.New("egress: upstream switched protocols on a host keyd must scrub")
+)
 
 // route is one request keyd forwards: where it goes and the audit line it will close.
 type route struct {
@@ -68,7 +71,8 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 		c.deny(w, line, http.StatusMethodNotAllowed, ReasonMethod)
 		return
 	}
-	if isUpgrade(r) && (rt.dest.Scheme != "http" || c.intercepted[rt.dest.Host]) {
+	if isUpgrade(r) && c.refusesSwitch(rt.dest) {
+		w.Header().Set("Connection", "close")
 		c.deny(w, line, http.StatusForbidden, ReasonUpgrade)
 		return
 	}
@@ -83,7 +87,7 @@ func (c *Cell) forward(w http.ResponseWriter, r *http.Request, rt route) {
 		return
 	}
 	line.Swapped = len(v.Swaps) > 0
-	scrubber, err := c.scrubberFor(rt.dest)
+	scrubber, err := c.scrubberFor(c.boundTo(rt.dest))
 	if err != nil {
 		c.deny(w, line, http.StatusBadGateway, ReasonSecret)
 		return
@@ -134,6 +138,10 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 		FlushInterval: -1,
 		ErrorLog:      log.New(io.Discard, "", 0),
 		ModifyResponse: func(resp *http.Response) error {
+			// A secret bound while the request was in flight is caught here, before the switch.
+			if resp.StatusCode == http.StatusSwitchingProtocols && c.refusesSwitch(rt.dest) {
+				return errSwitch
+			}
 			l := line
 			l.Decision, l.Status = audit.Allow, resp.StatusCode
 			if !bodyAllowed(r.Method, resp.StatusCode) {
@@ -171,6 +179,9 @@ func (c *Cell) relay(w http.ResponseWriter, r *http.Request, rt route, scrubber 
 			if reason == ReasonClientGone {
 				return
 			}
+			if reason == ReasonUpgrade {
+				rw.Header().Set("Connection", "close")
+			}
 			rw.Header().Set("X-Keyd-Reason", reason)
 			http.Error(rw, "keyd: "+reason, status)
 		},
@@ -194,23 +205,40 @@ func (w scrubbedWriter) WriteHeader(code int) {
 
 func (w scrubbedWriter) Unwrap() http.ResponseWriter { return w.ResponseWriter }
 
-// scrubberFor collects every secret bound to the destination; each is replaced by this cell's
-// surrogate for it, or by a marker when the cell holds none.
-func (c *Cell) scrubberFor(d keys.Dest) (*scrub.Scrubber, error) {
-	mine := map[string]string{}
-	for _, e := range c.deps.Registry.ForCell(c.cfg.CellID) {
-		mine[e.Binding.SecretID] = e.Token
-	}
-	var pairs []scrub.Pair
+// refusesSwitch reports whether a protocol switch to d must be refused. keyd scrubs HTTP messages
+// only, and nothing after a 101 is one: a switch is refused to a host keyd terminates, and to any
+// host a secret is bound to, whose echo of it would reach the cell unscrubbed. Tasks 11 and 12 may
+// lift the bound-host refusal for plain http once interception fills c.intercepted and a switched
+// stream is scrubbed; until then the cell gets 403 before any dial, or 502 at the 101 for a secret
+// bound while the request was in flight.
+func (c *Cell) refusesSwitch(d keys.Dest) bool {
+	return d.Scheme != "http" || c.intercepted[d.Host] || len(c.boundTo(d)) > 0
+}
+
+// boundTo lists the records whose secrets the destination holds: those scrubberFor scrubs.
+func (c *Cell) boundTo(d keys.Dest) []vault.Record {
+	var out []vault.Record
 	for _, rec := range c.deps.Vault.Records() {
 		b, err := keys.FromRecord(rec)
 		if err != nil {
 			continue
 		}
-		hit := (rec.Kind == vault.KindHTTP && slices.Contains(b.Hosts, d.Host)) || (d.Scheme == "gateway" && b.Route == d.Route)
-		if !hit {
-			continue
+		if (rec.Kind == vault.KindHTTP && slices.Contains(b.Hosts, d.Host)) || (d.Scheme == "gateway" && b.Route == d.Route) {
+			out = append(out, rec)
 		}
+	}
+	return out
+}
+
+// scrubberFor collects the secrets of the bound records; each is replaced by this cell's
+// surrogate for it, or by a marker when the cell holds none.
+func (c *Cell) scrubberFor(bound []vault.Record) (*scrub.Scrubber, error) {
+	mine := map[string]string{}
+	for _, e := range c.deps.Registry.ForCell(c.cfg.CellID) {
+		mine[e.Binding.SecretID] = e.Token
+	}
+	var pairs []scrub.Pair
+	for _, rec := range bound {
 		value, err := c.deps.Vault.Value(rec.ID)
 		if err != nil {
 			return nil, err
@@ -244,6 +272,9 @@ func (c *Cell) streamOutcome(l *audit.Line, eof bool, err error, reqCtx context.
 func (c *Cell) failure(err error, reqCtx context.Context, g *generation) (int, string, string) {
 	if errors.Is(err, errEncoding) {
 		return http.StatusBadGateway, audit.Error, ReasonEncoding
+	}
+	if errors.Is(err, errSwitch) {
+		return http.StatusBadGateway, audit.Deny, ReasonUpgrade
 	}
 	if decision, reason := dialOutcome(err); reason != ReasonUpstream {
 		status := http.StatusBadGateway

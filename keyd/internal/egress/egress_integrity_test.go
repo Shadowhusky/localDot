@@ -772,3 +772,133 @@ func TestAnEarlyAnswerDoesNotRaceTheRequestBodyCount(t *testing.T) {
 	}
 	w.waitLine(func(l audit.Line) bool { return l.Host == "early.example.test" && l.Status == http.StatusNoContent })
 }
+
+const switchReply = "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"
+
+// Upgrade spellings a client or server may accept; each must be refused for a bound host.
+var upgradeSpellings = []string{
+	"Connection: Upgrade\r\nUpgrade: websocket\r\n",
+	"Connection: upgrade\r\nUpgrade: websocket\r\n",
+	"Connection: UPGRADE\r\nUpgrade: WebSocket\r\n",
+	"Connection: keep-alive, Upgrade\r\nUpgrade: websocket\r\n",
+	"Connection: keep-alive,Upgrade\r\nUpgrade: websocket\r\n",
+	"Connection: keep-alive\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n",
+	"Connection: \tUpgrade\t \r\nUpgrade: websocket\r\n",
+	"Connection: Upgrade, Upgrade\r\nUpgrade: websocket\r\n",
+	"Connection: Upgrade\r\nUpgrade: websocket\r\nUpgrade: h2c\r\n",
+	"Connection: Upgrade, HTTP2-Settings\r\nUpgrade: h2c\r\nHTTP2-Settings: AAMAAABkAARAAAAAAAIAAAAA\r\n",
+	"connection: upgrade\r\nupgrade: websocket\r\n",
+	"Connection: keep-alive,\r\n Upgrade\r\nUpgrade: websocket\r\n",
+	"Connection:\r\n\tUpgrade\r\nUpgrade:\r\n websocket\r\n",
+	"Proxy-Connection: Upgrade\r\nUpgrade: websocket\r\n",
+	"Connection: Upgrade\r\n",
+	"Upgrade: websocket\r\n",
+}
+
+// keyd scrubs HTTP messages only: after a 101 nothing would be scrubbed, so an upgrade to a host a
+// secret is bound to is refused and audited before anything is dialled, however it is spelled.
+func TestAnUpgradeToABoundHostIsRefusedBeforeAnyDial(t *testing.T) {
+	w := newWorld(t)
+	var reached atomic.Int32
+	w.rawUpstream("api.example.test", func(*http.Request) string {
+		reached.Add(1)
+		return switchReply + "echo " + echoed
+	})
+	w.secret(vault.Record{ID: "weather", Kind: vault.KindHTTP, Hosts: []string{"api.example.test"}, Header: "Authorization", Format: "bearer"}, echoed)
+	c, rd := w.recordingCell("c1", policy.Desktop)
+	w.mint("c1", "weather")
+	requests := 0
+	for _, target := range []string{"http://api.example.test/ws", "http://API.Example.TEST.:80/ws"} {
+		for _, spelling := range upgradeSpellings {
+			raw := sendRaw(t, c, "GET "+target+" HTTP/1.1\r\nHost: free.example.test\r\n"+spelling+proxyAuth()+"\r\n")
+			if strings.Contains(raw, echoed) || !strings.HasPrefix(raw, "HTTP/1.1 403 ") || !strings.Contains(raw, "X-Keyd-Reason: "+ReasonUpgrade) {
+				t.Errorf("%s %q: %q", target, spelling, raw)
+			}
+			requests++
+		}
+	}
+	if a := rd.addresses(); len(a) != 0 || reached.Load() != 0 {
+		t.Fatalf("dialled %v, upstream reached %d times", a, reached.Load())
+	}
+	n := 0
+	for _, l := range w.lines() {
+		if l.Reason == ReasonUpgrade {
+			if l.Decision != audit.Deny || l.Status != http.StatusForbidden || l.Host != "api.example.test" {
+				t.Fatalf("audit %+v", l)
+			}
+			n++
+		}
+	}
+	if n != requests {
+		t.Fatalf("%d upgrade refusals audited for %d requests", n, requests)
+	}
+}
+
+// A secret bound to the host while the upgrade is in flight is caught at the 101: the switch is
+// refused, the upstream connection closed, and the echo never reaches the cell.
+func TestA101FromAHostBoundMidRequestIsRefused(t *testing.T) {
+	w := newWorld(t)
+	w.rawUpstream("api.example.test", func(*http.Request) string {
+		w.vault.Put(vault.Record{ID: "weather", Kind: vault.KindHTTP, Hosts: []string{"api.example.test"}, Header: "Authorization", Format: "bearer"}, []byte(echoed))
+		return switchReply + "echo " + echoed
+	})
+	c := w.cell("c1", policy.Desktop)
+	raw := sendRaw(t, c, "GET http://api.example.test/ws HTTP/1.1\r\nHost: api.example.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"+proxyAuth()+"\r\n")
+	if strings.Contains(raw, echoed) || !strings.HasPrefix(raw, "HTTP/1.1 502 ") || !strings.Contains(raw, "X-Keyd-Reason: "+ReasonUpgrade) {
+		t.Fatalf("%q", raw)
+	}
+	l := w.waitLine(reasonIs(ReasonUpgrade))
+	if l.Decision != audit.Deny || l.Status != http.StatusBadGateway || strings.Contains(w.auditText(), echoed) {
+		t.Fatalf("audit %+v", l)
+	}
+}
+
+// An upgrade to a host no secret is bound to is relayed both ways.
+func TestAnUpgradeToAnUnboundHostStillWorks(t *testing.T) {
+	w := newWorld(t)
+	ln, err := net.Listen("tcp4", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { ln.Close() })
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				br := bufio.NewReader(conn)
+				if _, err := http.ReadRequest(br); err != nil {
+					return
+				}
+				io.WriteString(conn, switchReply)
+				io.Copy(conn, br)
+			}()
+		}
+	}()
+	w.publish("ws.example.test", "80", ln.Addr().String(), true)
+	w.secret(vault.Record{ID: "weather", Kind: vault.KindHTTP, Hosts: []string{"api.example.test"}, Header: "Authorization", Format: "bearer"}, echoed)
+	c := w.cell("c1", policy.Desktop)
+	conn, err := dialListener(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	io.WriteString(conn, "GET http://ws.example.test/ws HTTP/1.1\r\nHost: ws.example.test\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n"+proxyAuth()+"\r\n")
+	br := bufio.NewReader(conn)
+	resp, err := http.ReadResponse(br, nil)
+	if err != nil || resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("%v %+v", err, resp)
+	}
+	io.WriteString(conn, "ping\n")
+	if line, err := br.ReadString('\n'); err != nil || line != "ping\n" {
+		t.Fatalf("%q %v", line, err)
+	}
+	l := w.waitLine(func(l audit.Line) bool { return l.Host == "ws.example.test" })
+	if l.Decision != audit.Allow || l.Status != http.StatusSwitchingProtocols {
+		t.Fatalf("audit %+v", l)
+	}
+}
