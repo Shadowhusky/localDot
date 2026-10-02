@@ -8465,7 +8465,7 @@ The gateway "enforces a model allowlist and budgets (defaults $5 per task and $2
 editable)", and "Budget reached | keyd refuses; the task stops; the UI offers to raise the budget."
 This task is the arithmetic, with no network: a meter that reads each provider's usage from a
 streamed or whole body — only where providers put it (`usage`, `message.usage`, `response.usage`,
-`usageMetadata`), so a tool call's arguments can never pose as usage; a price per model in dollars
+Groq's `x_groq.usage`, `usageMetadata`), so a tool call's arguments can never pose as usage; a price per model in dollars
 per million tokens (which is micro-dollars per token), cache tokens at the input price when they
 have none of their own; a byte estimate, about three bytes a token, of what a stream relayed; budgets
 per task (by cell) and per day (local midnight, persisted so a restart does not reset the day); and
@@ -8477,7 +8477,9 @@ ruling P4a-C5):
   other than 1, at the top level or in Gemini's generation config, in any letter case, with or
   without underscores, as Go and protobuf servers read them; and on the completions API a `prompt`
   list of more than one element, which the provider answers prompt by prompt (review 3, N-C; one
-  prompt's token ids go as a list of one list) — with a `ChoiceError` that names the field. It
+  prompt's token ids go as a list of one list); and a `models` list, OpenRouter's fallback models,
+  which can answer with a model off the allowlist at its own price (Part 5a's amendment,
+  P5a-R31) — with a `ChoiceError` that names the field. It
   takes the smallest output cap the body names in any of the providers' fields; only a whole number
   from 1 to a billion counts (0 too for Anthropic, which then writes nothing), so null, 0, strings
   and fractions are no cap. It prices the input as the provider bills it: text at three bytes a
@@ -8616,6 +8618,41 @@ func TestMeterSurvivesOversizedInput(t *testing.T) {
 	}
 	if got := meter(t, "application/json", strings.Repeat(" ", maxJSONBody+1)+`{"usage":{"prompt_tokens":1}}`, 1<<20); got.Reported {
 		t.Fatalf("a body over the cap was parsed: %+v", got)
+	}
+}
+
+// The first-class bearer providers of Part 5a's amendment (P5a-R31) stream their usage in their
+// own places: xAI's Responses API in response.completed, Mistral, DeepSeek and OpenRouter in the
+// last chunk's usage, Groq only in the last chunk's x_groq. The numbers are the brain's fixtures'
+// (cells/brain/src/testing/provider-streams.ts).
+func TestMeterReadsTheFirstClassBearerProviders(t *testing.T) {
+	last := func(extra string) string {
+		return "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{\"role\":\"assistant\",\"content\":\"ok\"},\"finish_reason\":null}]}\n\n" +
+			"data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]," + extra + "}\n\n" +
+			"data: [DONE]\n\n"
+	}
+	const usage = `{"prompt_tokens":1200,"completion_tokens":80,"total_tokens":1280}`
+	streams := map[string]string{
+		"xai": "event: response.created\ndata: {\"type\":\"response.created\",\"response\":{\"id\":\"resp_1\",\"status\":\"in_progress\",\"output\":[]}}\n\n" +
+			"event: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"item_id\":\"msg_1\",\"delta\":\"ok\"}\n\n" +
+			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_1\",\"status\":\"completed\",\"usage\":{\"input_tokens\":1200,\"output_tokens\":80,\"total_tokens\":1280,\"output_tokens_details\":{\"reasoning_tokens\":30}}}}\n\n",
+		"mistral":    last(`"usage":` + usage),
+		"deepseek":   last(`"usage":{"prompt_tokens":1200,"completion_tokens":80,"total_tokens":1280,"prompt_cache_hit_tokens":1000,"prompt_cache_miss_tokens":200}`),
+		"groq":       last(`"x_groq":{"id":"req_1","usage":` + usage + `}`),
+		"openrouter": last(`"usage":{"prompt_tokens":1200,"completion_tokens":80,"total_tokens":1280,"cost":0.0042}`),
+	}
+	want := Usage{Input: 1200, Output: 80, Reported: true}
+	for name, body := range streams {
+		for _, chunk := range []int{1, 7, 1 << 20} {
+			if got := meter(t, "text/event-stream", body, chunk); got != want {
+				t.Errorf("%s (chunks of %d): %+v, want %+v", name, chunk, got, want)
+			}
+		}
+	}
+	// Only a chunk's own x_groq counts, never one inside the answer.
+	nested := "data: {\"choices\":[{\"delta\":{\"x_groq\":{\"usage\":{\"prompt_tokens\":1}}}}]}\n\n"
+	if got := meter(t, "text/event-stream", nested, 1<<20); got.Reported {
+		t.Fatalf("a nested x_groq was read as usage: %+v", got)
 	}
 }
 
@@ -9083,6 +9120,21 @@ func TestReadRequest(t *testing.T) {
 	if _, err := ReadRequest(BodyChat, "m", []byte(`{"model":"m","prompt":["x","y"]}`)); err != nil {
 		t.Errorf("a prompt list outside completions: %v", err)
 	}
+	// OpenRouter's fallback models can answer in place of the allowlisted one, at their own price
+	// (P5a-R31).
+	for body, field := range map[string]string{
+		`{"model":"m","models":["m","pricier"],"messages":[]}`: "models",
+		`{"model":"m","Models":["pricier"]}`:                   "Models",
+		`{"model":"m","models":[]}`:                            "models",
+	} {
+		var many *ChoiceError
+		if _, err := ReadRequest(BodyChat, "m", []byte(body)); !errors.As(err, &many) || many.Field != field {
+			t.Errorf("%s: %v, want a refusal naming %s", body, err, field)
+		}
+	}
+	if _, err := ReadRequest(BodyChat, "m", []byte(`{"model":"m","models":null}`)); err != nil {
+		t.Errorf("a null models list: %v", err)
+	}
 	if req, _ := ReadRequest(BodyChat, "m", []byte(`{"messages":"`+strings.Repeat("x", 2985)+`"}`)); req.Input != 1000 {
 		t.Errorf("3,000 bytes of text: %d tokens, want 1,000", req.Input)
 	}
@@ -9320,6 +9372,8 @@ func (m *Meter) parse(data []byte) {
 		m.take(obj["usage"])
 		m.take(field(obj, "message", "usage"))
 		m.take(field(obj, "response", "usage"))
+		// Groq's streams report usage only here, in the last chunk (P5a-R31).
+		m.take(field(obj, "x_groq", "usage"))
 		if u, ok := obj["usageMetadata"].(map[string]any); ok {
 			m.set(&m.usage.Input, u["promptTokenCount"])
 			cand, okC := number(u["candidatesTokenCount"])
@@ -9916,10 +9970,13 @@ func ModelFromJSON(body []byte) (string, error) {
 }
 
 // ChoiceError refuses a request for more than one answer, which the provider bills in full for
-// each answer under a single output cap.
+// each answer under a single output cap, or for a choice of models (OpenRouter's `models`
+// fallbacks), which can answer with a model off the allowlist at its own price.
 type ChoiceError struct{ Field string }
 
-func (e *ChoiceError) Error() string { return "llm: " + e.Field + " asks for more than one answer" }
+func (e *ChoiceError) Error() string {
+	return "llm: " + e.Field + " asks for more than one answer or model"
+}
 
 // Request is what a gateway request's body can cost before keyd sets its output cap.
 type Request struct {
@@ -9941,7 +9998,7 @@ var (
 // ReadRequest reads the body of a request to a model through api (an op's Body). It refuses a
 // count of answers other than one, at the top level and in Gemini's generation config; a prompt
 // list of more than one element on the completions API, which answers each prompt under the one
-// cap; and a body naming the generation config twice. A cap is a whole number from 1 to a
+// cap; a list of models to fall back on; and a body naming the generation config twice. A cap is a whole number from 1 to a
 // billion, or 0 for Anthropic, which then writes nothing; null, strings and fractions are no cap.
 func ReadRequest(api, model string, body []byte) (Request, error) {
 	top, err := members(body)
@@ -9956,6 +10013,9 @@ func ReadRequest(api, model string, body []byte) (Request, error) {
 				return &ChoiceError{Field: m.key}
 			}
 			if api == BodyCompletions && k == "prompt" && several(m.raw) {
+				return &ChoiceError{Field: m.key}
+			}
+			if k == "models" && !isNull(m.raw) {
 				return &ChoiceError{Field: m.key}
 			}
 			if !slices.Contains(capFields, k) {
@@ -10391,7 +10451,9 @@ func list(v any) []any {
 - [ ] **Step 4: Run the tests**
 
 Run: `go test -race ./internal/llm/`
-Expected: `ok` (19 tests).
+Expected: `ok` (20 tests). Without the meter's `x_groq.usage`, `TestMeterReadsTheFirstClassBearerProviders`
+fails for Groq (nothing reported), and without the `models` check `TestReadRequest` fails for each
+list.
 
 - [ ] **Step 5: Format, vet, commit**
 
@@ -10437,11 +10499,22 @@ its secret replaced, is refused rather than swapped for the new value (review 2,
 local servers carry no secret; a desktop or browser cell does not reach the gateway at all
 (`llm.ldot` is on its deny list).
 
+Part 5a's amendment (P5a-R31, `…/2026-10-01-localdot-core-handoff/part4a-providers-amendment.md`):
+the spec's first-class providers xAI, Mistral, DeepSeek, Groq and OpenRouter get their own presets
+in `keys/binding.go`, beside Anthropic's, OpenAI's, Google's and Azure's. They share the bearer auth
+style; each has a fixed base URL, its own surrogate tag, and only the operation its official AI SDK
+package calls, with the cap field that package sends (xAI: `responses`, `max_output_tokens`; the
+others: `chat/completions`, `max_tokens`), plus the model listings. A key stored for one is its own
+route, with its own host, prices and audit lines, like every other preset. The upstream path is
+joined under `/`, so a base URL without a path (DeepSeek's `https://api.deepseek.com`, or a user's
+`https://api.perplexity.ai`) still sends an absolute path.
+
 **Files:**
 - Create: `keyd/internal/egress/gateway.go`
 - Modify: `keyd/internal/egress/deps.go` (replace), `keyd/internal/egress/generation.go` (replace),
-  `keyd/internal/egress/cell.go` (`ServeHTTP`, `alerts`), `keyd/internal/egress/forward.go` (`route`, `relay`)
-- Test: `keyd/internal/egress/gateway_test.go`
+  `keyd/internal/egress/cell.go` (`ServeHTTP`, `alerts`), `keyd/internal/egress/forward.go` (`route`, `relay`),
+  `keyd/internal/keys/binding.go` (the five first-class bearer presets)
+- Test: `keyd/internal/egress/gateway_test.go`, `keyd/internal/keys/presets_test.go`
 
 **Interfaces:**
 - Consumes: `llm.Budget` (`Check`, `Reserve`), `llm.Ask`, `llm.Hold` (`Settle`, `Release`, `Tokens`,
@@ -10450,7 +10523,9 @@ local servers carry no secret; a desktop or browser cell does not reach the gate
   `llm.ExceededError` (Task 13); `keys.LocalRoutes`, `keys.Binding.Op`, `Op.ModelFrom`, `Op.Body`,
   `Op.Cap`, `Op.Free` (Task 9); `relay`, `swap`, `scrubberFor`, `isUpgrade`, `current`,
   `(*Cell).Revoke` (Task 10).
-- Produces: `Deps.Budget`, `Deps.Settings`, `Deps.Local map[string]keys.Binding`, `Deps.LocalDialer Dialer`;
+- Produces: the LLM presets `xai`, `mistral`, `deepseek`, `groq` and `openrouter` (an `llm`
+  secret's `provider`; fixed base URLs; `Authorization: Bearer`; tags `xai`, `mis`, `dsk`, `grq`,
+  `orr`); `Deps.Budget`, `Deps.Settings`, `Deps.Local map[string]keys.Binding`, `Deps.LocalDialer Dialer`;
   `Pinned` (`map[string]bool` of `host:port`) with `DialContext`, `PinnedFor(map[string]keys.Binding) Pinned`;
   the reserved name `llm.ldot`; reasons `ReasonRouteUnknown`, `ReasonOpNotAllowed`,
   `ReasonSurrogateMissing`, `ReasonNoTask`, `ReasonBudgetTask`, `ReasonBudgetDay`,
@@ -11276,6 +11351,75 @@ func TestTheGatewayWritesTheCapInTheProvidersField(t *testing.T) {
 	}
 }
 
+// chatBody asks a chat-completions route for a streamed answer of at most 64 tokens.
+const chatBody = `{"model":"m","max_tokens":64,"messages":[],"stream":true}`
+
+// Part 5a's first-class bearer providers (P5a-R31): each preset sends the surrogate's real key as a
+// bearer token to its own fixed host and base path, lists only the operation its official package
+// calls, and has its usage, in its own dialect, charged to the task. DeepSeek's base URL has no
+// path, so the upstream path is joined under "/".
+func TestEachFirstClassBearerProviderHasItsOwnRoute(t *testing.T) {
+	chat := func(last string) string {
+		return "data: {\"choices\":[{\"index\":0,\"delta\":{\"content\":\"ok\"}}]}\n\n" +
+			"data: {\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]," + last + "}\n\ndata: [DONE]\n\n"
+	}
+	const usage = `{"prompt_tokens":1200,"completion_tokens":80}`
+	cases := []struct {
+		provider, host, op, upstreamPath, other, body, stream string
+	}{
+		{"xai", "api.x.ai", "responses", "/v1/responses", "chat/completions",
+			`{"model":"m","input":"hi","max_output_tokens":64,"stream":true}`,
+			"event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"usage\":{\"input_tokens\":1200,\"output_tokens\":80}}}\n\n"},
+		{"mistral", "api.mistral.ai", "chat/completions", "/v1/chat/completions", "responses", chatBody, chat(`"usage":` + usage)},
+		{"deepseek", "api.deepseek.com", "chat/completions", "/chat/completions", "responses", chatBody, chat(`"usage":` + usage)},
+		{"groq", "api.groq.com", "chat/completions", "/openai/v1/chat/completions", "responses", chatBody, chat(`"x_groq":{"id":"req_1","usage":` + usage + `}`)},
+		{"openrouter", "openrouter.ai", "chat/completions", "/api/v1/chat/completions", "completions", chatBody, chat(`"usage":` + usage)},
+	}
+	for _, c := range cases {
+		t.Run(c.provider, func(t *testing.T) {
+			seen := make(chan *http.Request, 4)
+			g := newGateway(t, nil, nil)
+			tok := g.llmRoute(c.provider, c.provider, "", c.host, "m", http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+				seen <- r.Clone(context.Background())
+				rw.Header().Set("Content-Type", "text/event-stream")
+				io.WriteString(rw, c.stream)
+			}), "c1")["c1"]
+			bearer := http.Header{"Authorization": {"Bearer " + tok}}
+			resp, body := g.post(t, "http://llm.ldot/"+c.provider+"/"+c.op, bearer, c.body)
+			if resp.StatusCode != 200 || !strings.Contains(body, "1200") {
+				t.Fatalf("%d %s", resp.StatusCode, body)
+			}
+			r := <-seen
+			if r.URL.Path != c.upstreamPath || r.Header.Get("Authorization") != "Bearer "+realValue {
+				t.Fatalf("upstream saw %s %v", r.URL.Path, r.Header)
+			}
+			l := g.waitLine(func(l audit.Line) bool {
+				return l.Mode == "gateway" && l.Decision == audit.Allow && l.Route == c.provider
+			})
+			if l.Host != c.host || l.Path != c.upstreamPath || l.SecretID != c.provider || !l.Swapped ||
+				l.Usage != "reported" || l.CostMicroUSD != 1200*3+80*15 {
+				t.Fatalf("audit %+v", l)
+			}
+			if info, _ := g.budget.Task("c1"); info.SpentUSD != 0.0048 {
+				t.Fatalf("task spent %v", info.SpentUSD)
+			}
+			if resp, _ := g.post(t, "http://llm.ldot/"+c.provider+"/"+c.other, bearer, chatBody); resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != ReasonOpNotAllowed {
+				t.Errorf("%s, which the package never calls: %d %q", c.other, resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
+			}
+			// OpenRouter's fallback list could answer with a model off the allowlist.
+			fallback := `{"model":"m","models":["m","pricier"],"messages":[]}`
+			if status, body := g.call(g.cell, "http://llm.ldot/"+c.provider+"/"+c.op, bearer, fallback); status != 400 || body != "keyd: "+ReasonChoiceCount+": models\n" {
+				t.Errorf("a models list: %d %q", status, body)
+			}
+			select {
+			case r := <-seen:
+				t.Fatalf("a refused request reached the provider at %s", r.URL.Path)
+			default:
+			}
+		})
+	}
+}
+
 // screenshot is a 1280x800 PNG padded to 450 KB, the size review 2 measured, in base64.
 func screenshot(t *testing.T) string {
 	t.Helper()
@@ -11412,12 +11556,123 @@ func TestASecretReplacedWhileARequestWaitsIsNotSent(t *testing.T) {
 }
 ```
 
+`keyd/internal/keys/presets_test.go`:
+```go
+package keys
+
+import (
+	"net/http"
+	"testing"
+
+	"github.com/shadowhusky/localdot/keyd/internal/vault"
+)
+
+// Part 5a's first-class bearer providers (P5a-R31): a fixed base URL, the surrogate as a bearer
+// token, their own tag, and only the operation their official AI SDK package calls, with the cap
+// field it sends.
+func TestTheFirstClassBearerPresets(t *testing.T) {
+	r := NewRegistry()
+	for _, c := range []struct {
+		provider, upstream, tag, op, body, cap string
+	}{
+		{"xai", "https://api.x.ai/v1", "xai", "responses", "responses", "max_output_tokens"},
+		{"mistral", "https://api.mistral.ai/v1", "mis", "chat/completions", "chat", "max_tokens"},
+		{"deepseek", "https://api.deepseek.com", "dsk", "chat/completions", "chat", "max_tokens"},
+		{"groq", "https://api.groq.com/openai/v1", "grq", "chat/completions", "chat", "max_tokens"},
+		{"openrouter", "https://openrouter.ai/api/v1", "orr", "chat/completions", "chat", "max_tokens"},
+	} {
+		b, err := FromRecord(vault.Record{ID: "my-" + c.provider, Kind: vault.KindLLM, Provider: c.provider})
+		if err != nil {
+			t.Fatalf("%s: %v", c.provider, err)
+		}
+		if b.Route != "my-"+c.provider || b.SecretID != "my-"+c.provider || b.Upstream.String() != c.upstream ||
+			b.Header != "Authorization" || b.Format != Bearer || b.Tag != c.tag || b.Local {
+			t.Errorf("%s binding %+v", c.provider, b)
+		}
+		if op, ok := b.Op("POST", c.op); !ok || op.Body != c.body || op.Cap != c.cap || op.Free || op.Model {
+			t.Errorf("%s POST %s: %+v %v", c.provider, c.op, op, ok)
+		}
+		for _, p := range []string{"models", "models/some-model", "models/vendor/some-model"} {
+			if _, ok := b.Op("GET", p); !ok {
+				t.Errorf("%s GET %s refused", c.provider, p)
+			}
+		}
+		for _, other := range []string{"chat/completions", "responses", "completions", "embeddings", "messages"} {
+			if _, ok := b.Op("POST", other); ok && other != c.op {
+				t.Errorf("%s lists POST %s, which its package never calls", c.provider, other)
+			}
+		}
+		if _, err := FromRecord(vault.Record{ID: "x", Kind: vault.KindLLM, Provider: c.provider, BaseURL: "https://llm.example.test/v1"}); err == nil {
+			t.Errorf("%s took a base URL; its preset fixes it", c.provider)
+		}
+		e, err := r.Mint("c1", b)
+		if err != nil {
+			t.Fatal(err)
+		}
+		d := Dest{Cell: "c1", Scheme: "gateway", Route: b.Route}
+		wantAllow(t, c.provider+" as a bearer token", at(t, r, d, "POST", "/x", hdr("Authorization", "Bearer "+e.Token)), 1)
+		wantDeny(t, c.provider+" in X-Api-Key", at(t, r, d, "POST", "/x", hdr("X-Api-Key", e.Token)), ReasonMisplacedSurrogate)
+		wantDeny(t, c.provider+" in the query", at(t, r, d, "POST", "/x?key="+e.Token, http.Header{}), ReasonMisplacedSurrogate)
+	}
+	tags := map[string]string{}
+	for name, p := range presets {
+		if other, dup := tags[p.tag]; dup {
+			t.Errorf("presets %s and %s share the tag %s", name, other, p.tag)
+		}
+		tags[p.tag] = name
+	}
+}
+```
+
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `go test ./internal/egress/`
-Expected: FAIL — `[build failed]`: `internal/egress/gateway_test.go:80:7: deps.Budget undefined (type Deps has no field or method Budget)`.
+Run: `go test ./internal/egress/ ./internal/keys/`
+Expected: FAIL — `[build failed]`: `internal/egress/gateway_test.go:80:7: deps.Budget undefined (type Deps has no field or method Budget)`;
+and in `keys`, `TestTheFirstClassBearerPresets` fails for each provider with `keys: unknown provider "xai"` (and the others).
 
-- [ ] **Step 3: The gateway's dependencies and its transport**
+- [ ] **Step 3: The first-class bearer presets, the gateway's dependencies and its transport**
+
+In `keyd/internal/keys/binding.go`, replace:
+```go
+// A preset without a base takes the record's BaseURL.
+var presets = map[string]preset{
+	"anthropic":         {"https://api.anthropic.com/v1", "X-Api-Key", Raw, "ant", anthropicOps},
+	"openai":            {"https://api.openai.com/v1", "Authorization", Bearer, "oai", openAIOps},
+	"google":            {"https://generativelanguage.googleapis.com/v1beta", "X-Goog-Api-Key", Raw, "gem", googleOps},
+	"openai-compatible": {"", "Authorization", Bearer, "llm", compatibleOps},
+	"azure":             {"", "Api-Key", Raw, "azr", openAIOps},
+}
+```
+with:
+```go
+// A preset without a base takes the record's BaseURL. The first-class bearer providers (Part 5a,
+// P5a-R31) have fixed bases and list only the operation their official AI SDK package calls.
+var presets = map[string]preset{
+	"anthropic":         {"https://api.anthropic.com/v1", "X-Api-Key", Raw, "ant", anthropicOps},
+	"openai":            {"https://api.openai.com/v1", "Authorization", Bearer, "oai", openAIOps},
+	"google":            {"https://generativelanguage.googleapis.com/v1beta", "X-Goog-Api-Key", Raw, "gem", googleOps},
+	"xai":               {"https://api.x.ai/v1", "Authorization", Bearer, "xai", xaiOps},
+	"mistral":           {"https://api.mistral.ai/v1", "Authorization", Bearer, "mis", chatOnlyOps},
+	"deepseek":          {"https://api.deepseek.com", "Authorization", Bearer, "dsk", chatOnlyOps},
+	"groq":              {"https://api.groq.com/openai/v1", "Authorization", Bearer, "grq", chatOnlyOps},
+	"openrouter":        {"https://openrouter.ai/api/v1", "Authorization", Bearer, "orr", chatOnlyOps},
+	"openai-compatible": {"", "Authorization", Bearer, "llm", compatibleOps},
+	"azure":             {"", "Api-Key", Raw, "azr", openAIOps},
+}
+
+// The first-class bearer providers' operations: the one their package calls, with the cap field it
+// sends, and the model listings as openAIStyle writes them. xAI's package speaks only its Responses
+// API; xAI's chat completions report reasoning tokens outside completion_tokens, which the meter
+// would undercharge, so the xAI route has no chat operation.
+var (
+	chatOnlyOps = withListings(Op{Method: "POST", Path: regexp.MustCompile(`^chat/completions$`), Body: "chat", Cap: "max_tokens"})
+	xaiOps      = withListings(Op{Method: "POST", Path: regexp.MustCompile(`^responses$`), Body: "responses", Cap: "max_output_tokens"})
+)
+
+func withListings(op Op) []Op {
+	return append([]Op{op}, slices.DeleteFunc(openAIStyle(""), func(o Op) bool { return o.Method != "GET" })...)
+}
+```
 
 Replace `keyd/internal/egress/deps.go` with:
 ```go
@@ -11714,7 +11969,8 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 		c.deny(w, line, http.StatusNotFound, ReasonRouteUnknown)
 		return
 	}
-	line.Host, line.Path = b.Upstream.Hostname(), path.Join(b.Upstream.Path, rest)
+	// Joined under "/": a base URL may have no path (DeepSeek's, or a user's https://host).
+	line.Host, line.Path = b.Upstream.Hostname(), path.Join("/", b.Upstream.Path, rest)
 	op, ok := b.Op(r.Method, rest)
 	if !ok || path.Clean(rest) != rest {
 		c.deny(w, line, http.StatusForbidden, ReasonOpNotAllowed)
@@ -11805,7 +12061,7 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	r.Body, r.ContentLength = io.NopCloser(bytes.NewReader(body)), int64(len(body))
 	target := *b.Upstream
-	target.Path, target.RawQuery = path.Join(b.Upstream.Path, rest), r.URL.RawQuery
+	target.Path, target.RawQuery = path.Join("/", b.Upstream.Path, rest), r.URL.RawQuery
 	if g.ctx.Err() != nil {
 		c.deny(w, line, http.StatusServiceUnavailable, ReasonRevoked)
 		return
@@ -12017,8 +12273,10 @@ func (p Pinned) DialContext(ctx context.Context, network, address string) (net.C
 
 - [ ] **Step 5: Run the tests**
 
-Run: `go test -race ./internal/egress/`
-Expected: `ok` (58 tests). Against the gateway of the first draft, the parallel tests spent $90 of
+Run: `go test -race ./internal/egress/ ./internal/keys/`
+Expected: `ok` for both (59 top-level tests in `egress`; `keys` gains `TestTheFirstClassBearerPresets`).
+Without the joined `/`, `TestEachFirstClassBearerProviderHasItsOwnRoute/deepseek` fails: the
+request goes out with the relative path `chat/completions`. Against the gateway of the first draft, the parallel tests spent $90 of
 a $5 task and $22.50 of a $10 day, and the Stop test's provider received the real key. Against the
 gateway of review 1's revision, each shape of `TestNoRequestShapeOvershootsTheBudget` spent past both
 limits, the screenshots were refused at once with $0.50 left, a refusal published no event,
@@ -12030,8 +12288,8 @@ headers was charged nothing.
 
 ```bash
 test -z "$(gofmt -l .)" && go vet ./...
-git add internal/egress
-git commit -m "feat(keyd): LLM gateway"
+git add internal/egress internal/keys
+git commit -m "feat(keyd): LLM gateway, with the first-class bearer providers' presets"
 ```
 
 ---
@@ -14190,7 +14448,7 @@ undici's `new Agent({ connect: { socketPath } })` with `fetch`.
 |---|---|---|
 | `GET /v1/status` | — | 200 `{"bootId","version","sealKey","cells":n,"secrets":n,"limits":{"perTaskUSD","perDayUSD"},"day":{"date","spentUSD"},"audit":{"ok","error"?}}`; `audit.ok` false means the last audit write failed and keyd swaps no secret until one succeeds |
 | `GET /v1/secrets` | — | 200 `{"secrets":[Record…]}` |
-| `PUT /v1/secrets/{id}` | LLM: `{"kind":"llm","provider":"anthropic"\|"openai"\|"google"\|"openai-compatible"\|"azure","baseURL"?,"sealed":Sealed}`; HTTP: `{"kind":"http","hosts":[…],"header":"…","format":"bearer"\|"raw"\|"basic-user"\|"basic-password","methods"?:[…],"paths"?:[…],"sealed":Sealed}` | 200 `Record`; revokes the secret's surrogates in every cell; 400 `bad-seal` unless `sealed` was sealed for exactly this id and binding |
+| `PUT /v1/secrets/{id}` | LLM: `{"kind":"llm","provider":"anthropic"\|"openai"\|"google"\|"xai"\|"mistral"\|"deepseek"\|"groq"\|"openrouter"\|"openai-compatible"\|"azure","baseURL"?,"sealed":Sealed}` (`baseURL` only for `openai-compatible` and `azure`); HTTP: `{"kind":"http","hosts":[…],"header":"…","format":"bearer"\|"raw"\|"basic-user"\|"basic-password","methods"?:[…],"paths"?:[…],"sealed":Sealed}` | 200 `Record`; revokes the secret's surrogates in every cell; 400 `bad-seal` unless `sealed` was sealed for exactly this id and binding |
 | `DELETE /v1/secrets/{id}` | — | 204 \| 404; revokes the secret's surrogates |
 | `GET /v1/cells` | — | 200 `{"cells":[CellInfo…]}` |
 | `POST /v1/cells` | `{"cellId","role":"brain"\|"desktop"\|"browser","port","secrets":[ids]}` | 201 `Opened` \| 400 \| 409 (open already, or the port is busy) |
@@ -14292,6 +14550,11 @@ SDK's `baseURL` becomes `http://llm.ldot/<route>`:
 | `anthropic` preset | `https://api.anthropic.com/v1` | `X-Api-Key` | `POST messages` (`max_tokens`), `POST messages/count_tokens` (free), `GET models`, `GET models/{id}` |
 | `openai` preset | `https://api.openai.com/v1` | `Authorization: Bearer` | `POST chat/completions` (`max_completion_tokens`), `completions` (`max_tokens`), `responses` (`max_output_tokens`), `embeddings`; `GET models`, `models/{id}` |
 | `google` preset | `https://generativelanguage.googleapis.com/v1beta` | `X-Goog-Api-Key` | `POST models/{model}:generateContent`, `:streamGenerateContent` (`generationConfig.maxOutputTokens`), `:countTokens` (free), `:embedContent`, `:batchEmbedContents`; `GET models`, `models/{id}` |
+| `xai` preset (Part 5a) | `https://api.x.ai/v1` | `Authorization: Bearer` | `POST responses` (`max_output_tokens`); `GET models`, `models/{id}` |
+| `mistral` preset (Part 5a) | `https://api.mistral.ai/v1` | `Authorization: Bearer` | `POST chat/completions` (`max_tokens`); `GET models`, `models/{id}` |
+| `deepseek` preset (Part 5a) | `https://api.deepseek.com` | `Authorization: Bearer` | as `mistral` |
+| `groq` preset (Part 5a) | `https://api.groq.com/openai/v1` | `Authorization: Bearer` | as `mistral`; usage read from `x_groq.usage` |
+| `openrouter` preset (Part 5a) | `https://openrouter.ai/api/v1` | `Authorization: Bearer` | as `mistral`; a `models` list is refused (`choice-count`) |
 | `openai-compatible` | the secret's `baseURL` (https) | `Authorization: Bearer` | as `openai`, but chat completions get `max_tokens` |
 | `azure` | the secret's `baseURL` (https) | `Api-Key` | as `openai` |
 | `lmstudio` (built in, no secret) | `http://127.0.0.1:1234/v1` | none (dropped) | as `openai-compatible` |
@@ -14309,8 +14572,8 @@ output price. The cap is the smallest the body names in any provider's cap field
 `maxOutputTokens`, lowered to what the room left pays for; keyd writes it into the provider's own
 field (the route table's operations name it) and removes every other cap, so the brain's own cap
 (the AI SDK's `maxOutputTokens`) is kept when it is the smaller. A body asking for more than one
-answer (`n`, `best_of`, `candidateCount`, or a `prompt` list on `completions`) gets 400
-`choice-count`. A request that does not fit beside
+answer (`n`, `best_of`, `candidateCount`, or a `prompt` list on `completions`), or a `models`
+list to fall back on, gets 400 `choice-count`. A request that does not fit beside
 the running ones waits for them; one whose input and a single output token do not fit in what is
 left gets 402; requests together never spend past a limit, but for what a provider bills beyond
 keyd's rules (P4a-R15). Screenshots should be PNG or JPEG, whose sizes keyd reads; an image in
@@ -14507,7 +14770,9 @@ added R27 (ruling P4a-C5). Review 3 changed R15 and R27's table (ruling P4a-C7).
   next one counting the rest: any container on the Mac can knock. Cost if wrong: a flood's exact
   count is approximate.
 - **P4a-R14 Gateway routes.** A route's name is its secret's id. `anthropic`, `openai` and `google`
-  have fixed base URLs; `openai-compatible` and `azure` take an https base URL from the user;
+  have fixed base URLs, and so do Part 5a's first-class bearer presets `xai`, `mistral`,
+  `deepseek`, `groq` and `openrouter`, which list only the operation their official package calls
+  (P5a-R31); `openai-compatible` and `azure` take an https base URL from the user;
   `lmstudio` and `ollama` are built in, carry no secret and reach `127.0.0.1:1234` and `:11434`
   through a dialer pinned to those two addresses. Each preset lists its operations; the daemon sets
   each route's models and prices, and a route without them refuses everything. The guard refuses

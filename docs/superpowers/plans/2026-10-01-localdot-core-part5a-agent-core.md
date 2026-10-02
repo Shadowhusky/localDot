@@ -38,10 +38,16 @@ summarized by the fast model past 60 % of the context window.
 
 **Tech Stack:** Everything Parts 2–4b pinned (host Node 25.6, cells Node 24.21.0, pnpm 10.29.3,
 TypeScript 7.0.2, Biome 2.5.15, Vitest 5.0.3, Hono 4.13.12, zod 4.6.5, ws 8.22.0, esbuild 0.28.2,
-sharp 0.35.5, Go 1.27.1 for keyd). New to the product, all already in the lockfile through
-`spikes/s5-models` and jsdom, so `pnpm install` downloads nothing new: `ai` 7.0.123,
-`@ai-sdk/anthropic` 4.0.69, `@ai-sdk/openai` 4.0.82, `@ai-sdk/google` 4.0.86,
-`@ai-sdk/openai-compatible` 3.0.60 (all Apache-2.0), `undici` 8.11.2 (MIT) in the brain. The brain
+sharp 0.35.5, Go 1.27.1 for keyd). New to the product, already in the lockfile through
+`spikes/s5-models` and jsdom: `ai` 7.0.123, `@ai-sdk/anthropic` 4.0.69, `@ai-sdk/openai` 4.0.82,
+`@ai-sdk/google` 4.0.86, `@ai-sdk/openai-compatible` 3.0.60 (all Apache-2.0), `undici` 8.11.2 (MIT)
+in the brain. New to the lockfile, the first-class providers' official packages (spec "First-class
+providers", P5a-R4), each pinned to the release built on the lockfile's `@ai-sdk/provider` 4.0.20
+and `@ai-sdk/provider-utils` 5.0.52, so `pnpm install` adds these five and nothing else:
+`@ai-sdk/xai` 5.0.13, `@ai-sdk/mistral` 4.0.55, `@ai-sdk/deepseek` 3.0.57, `@ai-sdk/groq` 4.0.53
+(Apache-2.0, Vercel's AI SDK repository) and `@openrouter/ai-sdk-provider` 3.1.0 (Apache-2.0,
+OpenRouter's; no dependencies, `ai` ^7 and `zod` as peers). Checked against the npm registry on
+2026-10-02. The brain
 image is `node:24.21.0-alpine3.23@sha256:9ec4a2e289874ed0d722e1772ec2de45d2801541db8612f3638b26f128c69ac2`
 (the multi-arch index digest, read from Docker Hub on 2026-10-02).
 
@@ -199,7 +205,7 @@ ordinary tests would exercise them. Each is pinned by the named tests.
 
 | Task | Creates | Modifies |
 |---|---|---|
-| 1 | `packages/protocol/src/{tools.ts,tool-api.ts,desktopd-tools.ts,patch.ts,tools.test.ts,patch.test.ts}` | `packages/protocol/src/{events.ts,keyd.ts,index.ts}`, `packages/protocol/schema/events.schema.json` (regenerated) |
+| 1 | `packages/protocol/src/{tools.ts,tool-api.ts,desktopd-tools.ts,patch.ts,tools.test.ts,patch.test.ts}` | `packages/protocol/src/{events.ts,keyd.ts,index.ts}`, `packages/protocol/schema/events.schema.json` (regenerated), `apps/web/src/keys/binding.ts` |
 | 2 | `packages/providers/src/{registry.ts,catalog.ts,capabilities.ts,model-point.ts,catalog.test.ts,model-point.test.ts,testing/models-dev-fixture.ts}` | `packages/providers/{package.json,src/index.ts}` |
 | 3 | `cells/desktop/desktopd/src/tools/{home.ts,shell.ts,home.test.ts,shell.test.ts}` | `cells/desktop/desktopd/package.json` |
 | 4 | `cells/desktop/desktopd/src/tools/{files.ts,browser.ts,routes.ts,files.test.ts,browser.test.ts,routes.test.ts}`, `cells/desktop/desktopd/src/testing/fake-cdp.ts` | `cells/desktop/desktopd/src/{app.ts,main.ts}` |
@@ -208,7 +214,7 @@ ordinary tests would exercise them. Each is pinned by the named tests.
 | 7 | `apps/daemon/src/agent/{memory.ts,skills.ts,catalog-store.ts,settings.ts,bindings.ts}` and their tests, `skills/office-files/SKILL.md` | — |
 | 8 | `apps/daemon/src/agent/{session.ts,redact.ts,untrusted.ts,policy.ts,transcript.ts,frame-png.ts,tool-api.ts,tool-api.test.ts,testing/harness.ts}`, `apps/daemon/src/agent/tools/{deps.ts,computer.ts,shell.ts,files.ts,browser.ts,plan.ts,ask.ts,remember.ts,done.ts,index.ts}` | — |
 | 9 | `apps/daemon/src/agent/{brain-spec.ts,brain-cell.ts,brain-cell.test.ts}` | `cells/gate/relay.sh` |
-| 10 | `cells/brain/{package.json,tsconfig.json}`, `cells/brain/src/{tool-client.ts,proxy-fetch.ts,models.ts,tools.ts,computer.ts,proxy-fetch.test.ts,computer.test.ts}`, `cells/brain/src/testing/scripted.ts` | `pnpm-workspace.yaml`, `vitest.config.ts` |
+| 10 | `cells/brain/{package.json,tsconfig.json}`, `cells/brain/src/{tool-client.ts,proxy-fetch.ts,models.ts,tools.ts,computer.ts,proxy-fetch.test.ts,computer.test.ts}`, `cells/brain/src/testing/{scripted.ts,provider-streams.ts}` | `pnpm-workspace.yaml`, `vitest.config.ts` |
 | 11 | `cells/brain/src/{context.ts,prompt.ts,events.ts,loop.ts,context.test.ts,loop.test.ts}` | — |
 | 12 | `cells/brain/{build.mjs,Dockerfile,build.sh,.dockerignore,THIRD-PARTY.md}`, `cells/brain/src/main.ts` | `.github/workflows/ci.yml` |
 | 13 | `apps/daemon/src/agent/{runner.ts,routes.ts,wiring.ts,runner.test.ts,routes.test.ts}` | `apps/daemon/src/gateway/live.ts`, `apps/daemon/src/{app.ts,main.ts}` |
@@ -235,12 +241,15 @@ Everything the brain, the daemon, `desktopd` and Part 5b's UI exchange about the
   (`model.usage`, `model.retry`). `memory.change` gains a `changeId` so the card can undo it.
 - **`unifiedDiff`:** a Myers line diff for the diff panel and the memory card. No new dependency.
 - **keyd's route-model and budget replies,** for Task 5's client calls.
+- **The first-class providers' keyd kinds:** `LLM_PROVIDERS` gains `xai`, `mistral`, `deepseek`,
+  `groq` and `openrouter` (P5a-R31), and the key sheet names them.
 
 **Files:**
 - Create: `packages/protocol/src/tools.ts`, `tool-api.ts`, `desktopd-tools.ts`, `patch.ts`,
   `tools.test.ts`, `patch.test.ts`
 - Modify: `packages/protocol/src/events.ts`, `keyd.ts`, `index.ts`;
-  `packages/protocol/schema/events.schema.json` (regenerated)
+  `packages/protocol/schema/events.schema.json` (regenerated); `apps/web/src/keys/binding.ts`
+  (`PROVIDER_NAMES`)
 
 **Interfaces:**
 - Consumes: Part 3's protocol (`ULID_PATTERN`, `Point`, `Rect`, `Target`, `Injector`, the envelope),
@@ -263,7 +272,8 @@ Everything the brain, the daemon, `desktopd` and Part 5b's UI exchange about the
   - **Events:** `MessageUser`, `MessageDelta`, `MessageAssistant`, `AskRequest`, `AskAnswer`,
     `TakeoverReason`, `TakeoverRequest`, `TakeoverEnd`, `TaskResult`, `ModelRole`, `ModelUsage`,
     `ModelRetry`. `MemoryChange` gains `changeId?` and `undoes?`.
-  - **keyd:** `KeydRouteModel`, `KeydRouteModels`, `KeydBudget`.
+  - **keyd:** `KeydRouteModel`, `KeydRouteModels`, `KeydBudget`; `LLM_PROVIDERS` with the five
+    first-class bearer providers.
 
 - [ ] **Step 1: Create the branch**
 
@@ -925,12 +935,18 @@ export type ComputerMode = z.infer<typeof ComputerMode>;
 export const CoordSpaceName = z.enum(["pixels", "per1000"]);
 export type CoordSpaceName = z.infer<typeof CoordSpaceName>;
 
-// The SDK client a route needs. Everything that is not a first-party API speaks OpenAI's chat
-// completions, so it goes through @ai-sdk/openai-compatible and keyd's openai-compatible kind.
+// The SDK client a route needs. The first-class providers each have their official AI SDK package
+// (spec "First-class providers"); every other provider speaks OpenAI's chat completions, so it goes
+// through @ai-sdk/openai-compatible and keyd's openai-compatible kind (P5a-R4).
 export const ClientKind = z.enum([
   "anthropic",
   "openai",
   "google",
+  "xai",
+  "mistral",
+  "deepseek",
+  "groq",
+  "openrouter",
   "openai-compatible",
   "azure",
   "lmstudio",
@@ -1301,6 +1317,53 @@ export const KeydBudget = z.object({
 export type KeydBudget = z.infer<typeof KeydBudget>;
 ```
 
+In the same file, replace Part 4b's provider list with keyd's, which gains the five first-class
+bearer providers (each a fixed-base preset in keyd, P5a-R31):
+```ts
+export const LLM_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "google",
+  "openai-compatible",
+  "azure",
+] as const;
+```
+with:
+```ts
+// keyd's LLM presets (Part 4a's route table, with Part 5a's amendment): each first-class provider
+// has its own, with a fixed base URL; openai-compatible and azure take the user's base URL.
+export const LLM_PROVIDERS = [
+  "anthropic",
+  "openai",
+  "google",
+  "xai",
+  "mistral",
+  "deepseek",
+  "groq",
+  "openrouter",
+  "openai-compatible",
+  "azure",
+] as const;
+```
+
+The key sheet names every provider (`Record<Provider, string>`), so in `apps/web/src/keys/binding.ts`
+(Part 4b's) replace:
+```ts
+  google: "Google Gemini",
+  "openai-compatible": "OpenAI-compatible",
+```
+with:
+```ts
+  google: "Google Gemini",
+  xai: "xAI",
+  mistral: "Mistral",
+  deepseek: "DeepSeek",
+  groq: "Groq",
+  openrouter: "OpenRouter",
+  "openai-compatible": "OpenAI-compatible",
+```
+`needsBaseURL` stays as it is: the five have fixed base URLs, so the sheet asks for none.
+
 In `packages/protocol/src/index.ts`, add (keeping the list sorted):
 ```ts
 export * from "./desktopd-tools.ts";
@@ -1311,8 +1374,8 @@ export * from "./tools.ts";
 
 - [ ] **Step 4: Run the tests and regenerate the schema keyd reads**
 
-Run: `pnpm exec vitest run packages/protocol && pnpm --filter @localdot/protocol typecheck && pnpm --filter @localdot/protocol schema && git diff --stat packages/protocol/schema`
-Expected: PASS. `patch.test.ts` has 6 tests and `tools.test.ts` has 7. The rest of the protocol
+Run: `pnpm exec vitest run packages/protocol && pnpm --filter @localdot/protocol typecheck && pnpm --filter @localdot/web typecheck && pnpm --filter @localdot/protocol schema && git diff --stat packages/protocol/schema`
+Expected: PASS (the web package typechecks with the five new providers named). `patch.test.ts` has 6 tests and `tools.test.ts` has 7. The rest of the protocol
 suite is unchanged. `events.schema.json` changes: ten new event types and `memory.change`'s
 `changeId` and `undoes`.
 
@@ -1320,7 +1383,7 @@ suite is unchanged. `events.schema.json` changes: ten new event types and `memor
 
 ```bash
 pnpm format && pnpm lint
-git add packages/protocol
+git add packages/protocol apps/web/src/keys/binding.ts
 git commit -m "feat(protocol): the v1 tool table, the brain's tool API, agent events and unified diffs"
 ```
 
@@ -1331,15 +1394,22 @@ git commit -m "feat(protocol): the v1 tool table, the brain's tool API, agent ev
 `@localdot/providers` (spec "Repository": "provider registry, models.dev catalog cache, coordinate
 module") gains:
 - **The registry.** Every API-key provider the spec names, and the local servers.
-  - Each provider has an SDK client and a keyd kind.
-  - The first-party APIs use their own AI SDK clients. Every other provider speaks OpenAI's chat
-    completions at its documented base URL, through keyd's `openai-compatible` kind (P5a-R4).
+  - Each provider has an SDK client and a keyd kind. Its id is models.dev's provider id, so the
+    catalog's models attach to it.
+  - The first-class providers (spec "First-class providers") use their official AI SDK packages
+    and their own keyd kinds: Anthropic, OpenAI, Google and Azure as before, and now xAI, Mistral,
+    DeepSeek, Groq and OpenRouter, whose keyd presets fix their base URLs (P5a-R31).
+  - The other eight (Together, Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot and
+    Alibaba) speak OpenAI's chat completions at their documented base URLs, through keyd's
+    `openai-compatible` kind (P5a-R4).
   - Bedrock and Vertex are listed as M8's.
 - **The catalog schema.** models.dev's `api.json` is normalized into localDot's own fixed schema.
   Parsing is tolerant: a malformed model or provider is skipped and counted.
-- **Capabilities.** Native computer use is Anthropic's toolset (Claude 5.x) or its older tool. A
-  model with vision and tool calling gets the generic tool, on the 0–1000 grid for Gemini and Qwen
-  (S5, D9). A model without vision is text-only. A model without tool calling cannot be the agent.
+- **Capabilities.** Native computer use is Anthropic's toolset (Claude 5.x) or its older tool, on
+  Anthropic's own API only. A model with vision and tool calling gets the generic tool, on the
+  0–1000 grid for Gemini and Qwen wherever they are served (Google, OpenRouter, Groq, a local
+  server; S5, D9). A model without vision is text-only. A model without tool calling cannot be the
+  agent.
 - **`keydRouteModel`.** keyd's route-model shape, with the maximum output keyd requires of a priced
   model (P4a-R15).
 - **`modelPoint`.** A provider's coordinate to model pixels. A coordinate outside its space is
@@ -1353,9 +1423,12 @@ The tests use a fixture in models.dev's own shape; nothing reads the real catalo
 - Modify: `packages/providers/package.json`, `packages/providers/src/index.ts`
 
 **Interfaces:**
-- Consumes: `ClientKind`, `ComputerMode`, `CoordSpaceName`, `MODEL_SCREEN` (Task 1).
+- Consumes: `ClientKind`, `ComputerMode`, `CoordSpaceName`, `MODEL_SCREEN`, `LLM_PROVIDERS`
+  (Task 1).
 - Produces:
-  - `ProviderSpec { id; name; client; keyd; baseURL?; local?; availableIn? }`, `PROVIDERS`,
+  - `KeydKind` (`LLM_PROVIDERS`' members), `LocalRoute`, `FIRST_CLASS_BEARER`
+    (`["xai", "mistral", "deepseek", "groq", "openrouter"]`),
+    `ProviderSpec { id; name; client; keyd; baseURL?; local?; availableIn? }`, `PROVIDERS`,
     `providerById(id)`, `routeFor(provider, keyId?)`, `gatewayBaseURL(route)`
     (`http://llm.ldot/<route>`);
   - `CatalogModel`, `Catalog { v: 1; source; fetchedAt; providers; skipped }`, `CATALOG_SOURCE`,
@@ -1507,6 +1580,75 @@ export const MODELS_DEV_FIXTURE = {
       },
     },
   },
+  xai: {
+    id: "xai",
+    name: "xAI",
+    npm: "@ai-sdk/xai",
+    models: {
+      "grok-4.3": {
+        id: "grok-4.3",
+        name: "Grok 4.3",
+        attachment: true,
+        reasoning: true,
+        tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        cost: { input: 3, output: 15, cache_read: 0.75 },
+        limit: { context: 256_000, output: 64_000 },
+      },
+    },
+  },
+  groq: {
+    id: "groq",
+    name: "Groq",
+    npm: "@ai-sdk/groq",
+    models: {
+      "meta-llama/llama-4-scout-17b-16e-instruct": {
+        id: "meta-llama/llama-4-scout-17b-16e-instruct",
+        name: "Llama 4 Scout",
+        attachment: true,
+        tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        cost: { input: 0.11, output: 0.34 },
+        limit: { context: 131_072, output: 8_192 },
+      },
+      "openai/gpt-oss-120b": {
+        id: "openai/gpt-oss-120b",
+        name: "GPT OSS 120B",
+        reasoning: true,
+        tool_call: true,
+        modalities: { input: ["text"], output: ["text"] },
+        cost: { input: 0.15, output: 0.75 },
+        limit: { context: 131_072, output: 65_536 },
+      },
+    },
+  },
+  openrouter: {
+    id: "openrouter",
+    name: "OpenRouter",
+    npm: "@openrouter/ai-sdk-provider",
+    models: {
+      "google/gemini-3.6-flash": {
+        id: "google/gemini-3.6-flash",
+        name: "Google: Gemini 3.6 Flash",
+        attachment: true,
+        reasoning: true,
+        tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        cost: { input: 0.5, output: 3 },
+        limit: { context: 1_048_576, output: 65_536 },
+      },
+      "anthropic/claude-sonnet-5.5": {
+        id: "anthropic/claude-sonnet-5.5",
+        name: "Anthropic: Claude Sonnet 5.5",
+        attachment: true,
+        reasoning: true,
+        tool_call: true,
+        modalities: { input: ["text", "image"], output: ["text"] },
+        cost: { input: 2, output: 10 },
+        limit: { context: 1_000_000, output: 64_000 },
+      },
+    },
+  },
   lmstudio: {
     id: "lmstudio",
     name: "LM Studio",
@@ -1547,7 +1689,7 @@ export const MODELS_DEV_FIXTURE = {
 import { describe, expect, it } from "vitest";
 import { capabilityOf, usableAs } from "./capabilities.ts";
 import { Catalog, findModel, keydRouteModel, localModel, normalizeCatalog } from "./catalog.ts";
-import { providerById } from "./registry.ts";
+import { FIRST_CLASS_BEARER, PROVIDERS, providerById } from "./registry.ts";
 import { MODELS_DEV_FIXTURE } from "./testing/models-dev-fixture.ts";
 
 const catalog = normalizeCatalog(MODELS_DEV_FIXTURE, "2026-10-02T00:00:00.000Z");
@@ -1632,6 +1774,59 @@ describe("capabilityOf", () => {
   });
 });
 
+describe("the first-class providers", () => {
+  it("give xAI, Mistral, DeepSeek, Groq and OpenRouter their own client and keyd kind, the rest the OpenAI-compatible one", () => {
+    expect(FIRST_CLASS_BEARER).toEqual(["xai", "mistral", "deepseek", "groq", "openrouter"]);
+    for (const id of FIRST_CLASS_BEARER) {
+      // keyd fixes their base URLs (P5a-R31): the registry names none for the key to match.
+      expect(providerById(id)).toEqual({ id, name: expect.any(String), client: id, keyd: id });
+    }
+    const compatible = PROVIDERS.filter((p) => p.client === "openai-compatible" && !p.availableIn);
+    expect(compatible.map((p) => p.id)).toEqual([
+      "togetherai",
+      "fireworks-ai",
+      "cerebras",
+      "perplexity",
+      "cohere",
+      "deepinfra",
+      "moonshotai",
+      "alibaba",
+      "openai-compatible",
+    ]);
+    for (const p of compatible.slice(0, 8)) {
+      expect(p.keyd).toBe("openai-compatible");
+      expect(p.baseURL).toMatch(/^https:\/\/[a-z0-9.-]+\//);
+    }
+  });
+
+  it("map their catalog models: the generic tool, Gemini on the grid wherever it is served, and text-only models", () => {
+    expect(cap("xai", "grok-4.3")).toMatchObject({
+      tier: "vision-tools",
+      computer: "generic",
+      coords: "pixels",
+    });
+    expect(cap("groq", "meta-llama/llama-4-scout-17b-16e-instruct")).toMatchObject({
+      computer: "generic",
+      coords: "pixels",
+    });
+    expect(cap("groq", "openai/gpt-oss-120b")).toMatchObject({ tier: "text-only" });
+    expect(cap("openrouter", "google/gemini-3.6-flash")).toMatchObject({
+      computer: "generic",
+      coords: "per1000",
+    });
+    // Anthropic's toolset needs Anthropic's own API; through OpenRouter Claude gets the generic tool.
+    expect(cap("openrouter", "anthropic/claude-sonnet-5.5")).toMatchObject({
+      tier: "vision-tools",
+      computer: "generic",
+      coords: "pixels",
+    });
+    // keyd's model ids (Part 4a's settings): OpenRouter's vendor/model form is one.
+    const m = findModel(catalog, "openrouter", "google/gemini-3.6-flash");
+    if (!m) throw new Error("missing");
+    expect(keydRouteModel(m).id).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/);
+  });
+});
+
 describe("keydRouteModel", () => {
   it("writes keyd's route-model shape with the maximum output keyd requires", () => {
     const m = findModel(catalog, "google", "gemini-3.1-flash-lite");
@@ -1701,11 +1896,16 @@ be resolved. Part 1's `coordinates.test.ts` still passes.
 
 `packages/providers/src/registry.ts`:
 ```ts
-import type { ClientKind } from "@localdot/protocol";
+import type { ClientKind, LLM_PROVIDERS } from "@localdot/protocol";
 
-// keyd's provider kinds (Part 4a's route table) plus its two built-in local routes.
-export type KeydKind = "anthropic" | "openai" | "google" | "openai-compatible" | "azure";
+// keyd's provider kinds (Part 4a's route table, with Part 5a's five first-class presets) plus its
+// two built-in local routes.
+export type KeydKind = (typeof LLM_PROVIDERS)[number];
 export type LocalRoute = "lmstudio" | "ollama";
+
+// The first-class providers that keyd reaches with a bearer token at a base URL it fixes: each has
+// its official AI SDK package, its own client kind and its own keyd kind (P5a-R4, P5a-R31).
+export const FIRST_CLASS_BEARER = ["xai", "mistral", "deepseek", "groq", "openrouter"] as const;
 
 export interface ProviderSpec {
   // models.dev's provider id, so the catalog's models attach to it.
@@ -1714,48 +1914,27 @@ export interface ProviderSpec {
   client: ClientKind;
   // How the key is stored in keyd: an `llm` secret of this kind, or a built-in local route.
   keyd: KeydKind | LocalRoute;
-  // The upstream an openai-compatible key is bound to (keyd's `baseURL`); the user gives Azure's.
+  // The upstream an openai-compatible key is bound to (keyd's `baseURL`); the user gives Azure's,
+  // and keyd's presets fix the first-class providers'.
   baseURL?: string;
   local?: boolean;
   // Spec "Providers and sign-in": Bedrock and Vertex need keyd's signing, which is M8's.
   availableIn?: "m8";
 }
 
-// Every API-key provider the spec names, and the local servers. The first-party APIs use their own
-// AI SDK clients; the rest speak OpenAI's chat completions at the documented base URL (P5a-R4).
+// Every API-key provider the spec names, and the local servers; each id is models.dev's provider
+// id. The first-class providers use their official AI SDK packages and their own keyd kinds; the
+// other eight speak OpenAI's chat completions at their documented base URLs (P5a-R4).
 export const PROVIDERS: readonly ProviderSpec[] = [
   { id: "anthropic", name: "Anthropic", client: "anthropic", keyd: "anthropic" },
   { id: "openai", name: "OpenAI", client: "openai", keyd: "openai" },
   { id: "google", name: "Google Gemini", client: "google", keyd: "google" },
   { id: "azure", name: "Azure OpenAI", client: "azure", keyd: "azure" },
-  {
-    id: "xai",
-    name: "xAI",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.x.ai/v1",
-  },
-  {
-    id: "mistral",
-    name: "Mistral",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.mistral.ai/v1",
-  },
-  {
-    id: "deepseek",
-    name: "DeepSeek",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.deepseek.com/v1",
-  },
-  {
-    id: "groq",
-    name: "Groq",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.groq.com/openai/v1",
-  },
+  { id: "xai", name: "xAI", client: "xai", keyd: "xai" },
+  { id: "mistral", name: "Mistral", client: "mistral", keyd: "mistral" },
+  { id: "deepseek", name: "DeepSeek", client: "deepseek", keyd: "deepseek" },
+  { id: "groq", name: "Groq", client: "groq", keyd: "groq" },
+  { id: "openrouter", name: "OpenRouter", client: "openrouter", keyd: "openrouter" },
   {
     id: "togetherai",
     name: "Together",
@@ -1811,13 +1990,6 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     client: "openai-compatible",
     keyd: "openai-compatible",
     baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-  },
-  {
-    id: "openrouter",
-    name: "OpenRouter",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://openrouter.ai/api/v1",
   },
   {
     id: "openai-compatible",
@@ -2055,9 +2227,10 @@ export interface Capability {
 // Fable 5 and 5.1 and Opus 4.8; Sonnet 5.5 is assumed to take it too (S5: unverified, no credit).
 const ANTHROPIC_TOOLSET = /^claude-(opus|sonnet|fable)-5(?:[-.]\d+)?(?:-\d{8})?$|^claude-opus-4-8/;
 const ANTHROPIC_LEGACY = /^claude-(haiku-4-5|sonnet-4|opus-4-[0-7]|3-7-sonnet)/;
-// S5 and D9: Gemini and Qwen answer on the 0–1000 grid even when told pixels.
+// S5 and D9: Gemini and Qwen answer on the 0–1000 grid even when told pixels, whoever serves them
+// (OpenRouter names them google/gemini-… and qwen/…).
 const PER1000 = (provider: ProviderSpec, model: CatalogModel) =>
-  provider.client === "google" || /qwen/i.test(model.id);
+  provider.client === "google" || /gemini|qwen/i.test(model.id);
 
 export function capabilityOf(provider: ProviderSpec, model: CatalogModel): Capability {
   if (!model.toolCall) {
@@ -2175,7 +2348,7 @@ export * from "./registry.ts";
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm exec vitest run packages/providers && pnpm --filter @localdot/providers typecheck`
-Expected: PASS. `catalog.test.ts` has 7 tests and `model-point.test.ts` has 4.
+Expected: PASS. `catalog.test.ts` has 9 tests and `model-point.test.ts` has 4.
 
 - [ ] **Step 5: Commit**
 
@@ -4606,8 +4779,9 @@ const catalog = normalizeCatalog(MODELS_DEV_FIXTURE, "2026-10-02T00:00:00.000Z")
 const at = "2026-10-02T00:00:00Z";
 const keys: KeydRecord[] = [
   { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: at, updatedAt: at },
+  { id: "deepseek", kind: "llm", provider: "deepseek", createdAt: at, updatedAt: at },
   {
-    id: "deepseek",
+    id: "deepseek-compat",
     kind: "llm",
     provider: "openai-compatible",
     baseURL: "https://api.deepseek.com/v1",
@@ -4692,21 +4866,30 @@ describe("resolveRole", () => {
       ),
     ).toThrow(/not a Anthropic key|not an? Anthropic key/);
     expect(() =>
+      resolveRole("main", { provider: "togetherai", model: "m", key: "other" }, catalog, keys),
+    ).toThrow(/bound to https:\/\/evil/);
+    // DeepSeek is first-class (P5a-R31): an OpenAI-compatible key, even at DeepSeek's address, is
+    // not a DeepSeek key, so the model never runs on a route without DeepSeek's preset.
+    expect(() =>
       resolveRole(
         "main",
-        { provider: "deepseek", model: "deepseek-chat", key: "other" },
+        { provider: "deepseek", model: "deepseek-chat", key: "deepseek-compat" },
         catalog,
         keys,
       ),
-    ).toThrow(/bound to https:\/\/evil/);
-    expect(
-      resolveRole(
-        "main",
-        { provider: "deepseek", model: "deepseek-chat", key: "deepseek" },
-        catalog,
-        keys,
-      ).capability.computer,
-    ).toBe("none");
+    ).toThrow(/not a DeepSeek key/);
+    const deepseek = resolveRole(
+      "main",
+      { provider: "deepseek", model: "deepseek-chat", key: "deepseek" },
+      catalog,
+      keys,
+    );
+    expect(deepseek.capability.computer).toBe("none");
+    expect(bindingOf(deepseek, { deepseek: SURROGATE })).toMatchObject({
+      route: "deepseek",
+      client: "deepseek",
+      surrogate: SURROGATE,
+    });
   });
 
   it("refuses an unknown model, a model without tools as main, and M8 providers", () => {
@@ -8060,7 +8243,12 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
   port 443) with `Proxy-Authorization: Basic brain:<token>`.
 - **`languageModel`.** One AI SDK client per `ClientKind`, with keyd's base URL
   (`http://llm.ldot/<route>`) and the surrogate in the provider's own header. Anthropic uses
-  `x-api-key`, Azure `api-key`, the rest a bearer token, and local routes none.
+  `x-api-key`, Azure `api-key`, the rest a bearer token, and local routes none. The first-class
+  providers use their official packages (P5a-R4): `@ai-sdk/xai` (xAI's Responses API, the
+  package's only language model), `@ai-sdk/mistral`, `@ai-sdk/deepseek`, `@ai-sdk/groq` and
+  `@openrouter/ai-sdk-provider` (its chat model, asked for usage in the stream so keyd can meter
+  it). Each sends exactly the operation and the output-cap field its keyd preset lists (P5a-R31),
+  and a fixture per provider pins that, the bearer header, and the usage the SDK reads.
 - **`toolSet`.** The ten v1 tools, none with an `execute`:
   - Anthropic 5.x gets `computerToolset_20260801`; older Claude models get `computer_20250124` at
     1280×800;
@@ -8078,7 +8266,7 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
 **Files:**
 - Create: `cells/brain/package.json`, `cells/brain/tsconfig.json`, `cells/brain/src/tool-client.ts`,
   `proxy-fetch.ts`, `models.ts`, `tools.ts`, `computer.ts`, `proxy-fetch.test.ts`,
-  `computer.test.ts`, `testing/scripted.ts`
+  `computer.test.ts`, `testing/scripted.ts`, `testing/provider-streams.ts`
 - Modify: `pnpm-workspace.yaml`, `vitest.config.ts`
 
 **Interfaces:**
@@ -8090,7 +8278,9 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
   `imagesInToolResults(binding)`; `toolSet(binding) → ToolSet`; `ProviderComputerInput`,
   `keyCombo(text)`, `toComputerAction(input, coords, basedOn) → ComputerAction | string`;
   `testing/scripted.ts`: `scriptedModel(turns)`, `call`, `calls`, `say`, `binding`, `bootConfig`,
-  `fakeApi`, `SURROGATE`, `PROXY_TOKEN`.
+  `fakeApi`, `SURROGATE`, `PROXY_TOKEN`; `testing/provider-streams.ts`: `FIRST_CLASS_STREAMS`
+  (each first-class bearer provider's model, operation, cap field and a streamed answer in its own
+  usage dialect).
 
 - [ ] **Step 1: The package**
 
@@ -8108,10 +8298,15 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
   },
   "dependencies": {
     "@ai-sdk/anthropic": "4.0.69",
+    "@ai-sdk/deepseek": "3.0.57",
     "@ai-sdk/google": "4.0.86",
+    "@ai-sdk/groq": "4.0.53",
+    "@ai-sdk/mistral": "4.0.55",
     "@ai-sdk/openai": "4.0.82",
     "@ai-sdk/openai-compatible": "3.0.60",
+    "@ai-sdk/xai": "5.0.13",
     "@localdot/protocol": "workspace:*",
+    "@openrouter/ai-sdk-provider": "3.1.0",
     "@localdot/providers": "workspace:*",
     "ai": "7.0.123",
     "undici": "8.11.2",
@@ -8130,7 +8325,10 @@ A new workspace package, `cells/brain` (`@localdot/brain`), holds the brain's co
 ```
 In `pnpm-workspace.yaml`, add `  - "cells/brain"` after `  - "cells/desktop/desktopd"`. In
 `vitest.config.ts`, add `"cells/brain/src/**/*.test.ts",` to `include` after the desktopd line.
-Run `pnpm install`: every package is already in the lockfile.
+Run `pnpm install`. The lockfile gains exactly the five first-class packages above, from the npm
+registry; each resolves to the lockfile's `@ai-sdk/provider` 4.0.20 and `@ai-sdk/provider-utils`
+5.0.52, and `@openrouter/ai-sdk-provider` has no dependencies of its own. Check with
+`pnpm why @ai-sdk/provider-utils`: one version, 5.0.52.
 
 - [ ] **Step 2: Write the test helpers and the failing tests**
 
@@ -8284,8 +8482,133 @@ export function fakeApi(
 }
 ```
 
+`cells/brain/src/testing/provider-streams.ts`:
+```ts
+import type { ClientKind } from "@localdot/protocol";
+
+// A streamed answer from each first-class bearer provider, in its own wire format and its own
+// usage dialect, as keyd's listener relays it (no network in a test). The same usage, 1,200 input
+// and 80 output tokens, sits where each provider puts it: xAI's Responses API in
+// `response.completed`, Mistral, DeepSeek and OpenRouter in the last chunk's `usage`, and Groq in
+// the last chunk's `x_groq.usage` (Part 4a's meter reads the same places, with this amendment).
+export interface ProviderStream {
+  client: Extract<ClientKind, "xai" | "mistral" | "deepseek" | "groq" | "openrouter">;
+  model: string;
+  // The operation under the route, and the output-cap field the official package sends: the one
+  // keyd's preset for the provider writes its cap into (P5a-R31).
+  path: string;
+  capField: string;
+  // Whether the package asks for usage in the stream (stream_options.include_usage); the others
+  // report it unasked.
+  asksForUsage: boolean;
+  sse: string;
+}
+
+export const STREAM_USAGE = { inputTokens: 1200, outputTokens: 80 } as const;
+
+const usage = { prompt_tokens: 1200, completion_tokens: 80, total_tokens: 1280 };
+
+function events(list: Record<string, unknown>[], named: boolean): string {
+  return list
+    .map((e) => `${named ? `event: ${String(e.type)}\n` : ""}data: ${JSON.stringify(e)}\n\n`)
+    .join("");
+}
+
+function chat(last: Record<string, unknown>): string {
+  const chunk = (delta: Record<string, unknown>, finish: string | null) => ({
+    id: "chatcmpl-1",
+    object: "chat.completion.chunk",
+    created: 1,
+    model: "m",
+    choices: [{ index: 0, delta, finish_reason: finish }],
+  });
+  return `${events(
+    [chunk({ role: "assistant", content: "ok" }, null), { ...chunk({}, "stop"), ...last }],
+    false,
+  )}data: [DONE]\n\n`;
+}
+
+const message = (status: string, text: string) => ({
+  type: "message",
+  id: "msg_1",
+  role: "assistant",
+  status,
+  content: text ? [{ type: "output_text", text, annotations: [] }] : [],
+});
+const response = { id: "resp_1", object: "response", created_at: 1, model: "grok-4.3", output: [] };
+
+export const FIRST_CLASS_STREAMS: readonly ProviderStream[] = [
+  {
+    client: "xai",
+    model: "grok-4.3",
+    path: "responses",
+    capField: "max_output_tokens",
+    asksForUsage: false,
+    sse: events(
+      [
+        { type: "response.created", response: { ...response, status: "in_progress" } },
+        { type: "response.output_item.added", output_index: 0, item: message("in_progress", "") },
+        {
+          type: "response.output_text.delta",
+          item_id: "msg_1",
+          output_index: 0,
+          content_index: 0,
+          delta: "ok",
+        },
+        { type: "response.output_item.done", output_index: 0, item: message("completed", "ok") },
+        {
+          type: "response.completed",
+          response: {
+            ...response,
+            status: "completed",
+            output: [message("completed", "ok")],
+            usage: { input_tokens: 1200, output_tokens: 80, total_tokens: 1280 },
+          },
+        },
+      ],
+      true,
+    ),
+  },
+  {
+    client: "mistral",
+    model: "mistral-medium-3",
+    path: "chat/completions",
+    capField: "max_tokens",
+    asksForUsage: false,
+    sse: chat({ usage }),
+  },
+  {
+    client: "deepseek",
+    model: "deepseek-chat",
+    path: "chat/completions",
+    capField: "max_tokens",
+    asksForUsage: true,
+    sse: chat({
+      usage: { ...usage, prompt_cache_hit_tokens: 1000, prompt_cache_miss_tokens: 200 },
+    }),
+  },
+  {
+    client: "groq",
+    model: "meta-llama/llama-4-scout-17b-16e-instruct",
+    path: "chat/completions",
+    capField: "max_tokens",
+    asksForUsage: false,
+    sse: chat({ x_groq: { id: "req_1", usage } }),
+  },
+  {
+    client: "openrouter",
+    model: "google/gemini-3.6-flash",
+    path: "chat/completions",
+    capField: "max_tokens",
+    asksForUsage: true,
+    sse: chat({ usage: { ...usage, cost: 0.0042 } }),
+  },
+];
+```
+
 `proxy-fetch.test.ts` stands in for keyd's listener with a real HTTP server. The real AI SDK
-providers send through it: Anthropic's (an SSE stream), the OpenAI-compatible one, and a 402.
+providers send through it: Anthropic's (an SSE stream), the OpenAI-compatible one, a 402, and each
+first-class bearer provider's official package with its fixture stream.
 
 `cells/brain/src/proxy-fetch.test.ts`:
 ```ts
@@ -8295,6 +8618,7 @@ import { APICallError, streamText } from "ai";
 import { afterEach, describe, expect, it } from "vitest";
 import { languageModel } from "./models.ts";
 import { proxyFetch } from "./proxy-fetch.ts";
+import { FIRST_CLASS_STREAMS, STREAM_USAGE } from "./testing/provider-streams.ts";
 import { binding, PROXY_TOKEN, SURROGATE } from "./testing/scripted.ts";
 
 const SSE = [
@@ -8395,7 +8719,7 @@ describe("the brain's way to a model", () => {
     const fetch = proxyFetch(listener.url, PROXY_TOKEN);
     await streamText({
       model: languageModel(
-        binding({ client: "openai-compatible", route: "deepseek", model: "deepseek-chat" }),
+        binding({ client: "openai-compatible", route: "together", model: "moonshotai/Kimi-K2.5" }),
         fetch,
       ),
       prompt: "hi",
@@ -8415,11 +8739,76 @@ describe("the brain's way to a model", () => {
       maxRetries: 0,
     }).text;
     expect(listener.seen.map((s) => s.line)).toEqual([
-      "POST http://llm.ldot/deepseek/chat/completions",
+      "POST http://llm.ldot/together/chat/completions",
       "POST http://llm.ldot/lmstudio/chat/completions",
     ]);
     expect(auths).toEqual([`Bearer ${SURROGATE}`, undefined]);
   });
+});
+
+// keyd's listener again, keeping each request's headers and body.
+async function recordingListener(sse: string) {
+  const seen: {
+    line: string;
+    proxyAuth?: string;
+    authorization?: string;
+    apiKey?: string;
+    body: Record<string, unknown>;
+  }[] = [];
+  const server = createServer((req, res) => {
+    let text = "";
+    req.setEncoding("utf8");
+    req.on("data", (chunk: string) => {
+      text += chunk;
+    });
+    req.on("end", () => {
+      seen.push({
+        line: `${req.method} ${req.url}`,
+        proxyAuth: req.headers["proxy-authorization"],
+        authorization: req.headers.authorization,
+        apiKey: req.headers["x-api-key"] as string | undefined,
+        body: JSON.parse(text) as Record<string, unknown>,
+      });
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.end(sse);
+    });
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  servers.push(server);
+  return { url: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, seen };
+}
+
+describe("the first-class bearer providers' official packages", () => {
+  for (const s of FIRST_CLASS_STREAMS) {
+    it(`${s.client}: its own keyd route, a bearer surrogate, keyd's cap field, and its usage counted`, async () => {
+      const listener = await recordingListener(s.sse);
+      const model = languageModel(
+        binding({ client: s.client, route: s.client, model: s.model, computer: "generic" }),
+        proxyFetch(listener.url, PROXY_TOKEN),
+      );
+      const result = streamText({ model, prompt: "hi", maxRetries: 0, maxOutputTokens: 4096 });
+      expect(await result.text).toBe("ok");
+      const usage = await result.usage;
+      expect({ inputTokens: usage.inputTokens, outputTokens: usage.outputTokens }).toEqual(
+        STREAM_USAGE,
+      );
+      expect(listener.seen).toHaveLength(1);
+      const [r] = listener.seen;
+      expect(r?.line).toBe(`POST http://llm.ldot/${s.client}/${s.path}`);
+      expect(r?.proxyAuth).toBe(`Basic ${Buffer.from(`brain:${PROXY_TOKEN}`).toString("base64")}`);
+      expect(r?.authorization).toBe(`Bearer ${SURROGATE}`);
+      expect(r?.apiKey).toBeUndefined();
+      expect(JSON.stringify(r?.body)).not.toContain(SURROGATE);
+      expect(r?.body.model).toBe(s.model);
+      // The one cap field keyd's preset writes its own cap into (Part 4a's WithCap).
+      expect(Object.keys(r?.body ?? {}).filter((k) => k.startsWith("max_"))).toEqual([s.capField]);
+      expect(r?.body[s.capField]).toBe(4096);
+      // Usage in the stream, so keyd charges what was used rather than the hold; and no fallback
+      // model list, which keyd refuses (P5a-R31).
+      expect(r?.body.stream_options).toEqual(s.asksForUsage ? { include_usage: true } : undefined);
+      expect(r?.body).not.toHaveProperty("models");
+    });
+  }
 });
 ```
 
@@ -8646,25 +9035,46 @@ export function proxyFetch(proxyUrl: string, proxyToken: string): typeof fetch {
 `cells/brain/src/models.ts`:
 ```ts
 import { createAnthropic } from "@ai-sdk/anthropic";
+import { createDeepSeek } from "@ai-sdk/deepseek";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createGroq } from "@ai-sdk/groq";
+import { createMistral } from "@ai-sdk/mistral";
 import { createOpenAI } from "@ai-sdk/openai";
 import { createOpenAICompatible } from "@ai-sdk/openai-compatible";
+import { createXai } from "@ai-sdk/xai";
 import type { ModelBinding } from "@localdot/protocol";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { gatewayBaseURL } from "@localdot/providers";
 import type { LanguageModel } from "ai";
 
 // Every model is reached at keyd's gateway with keyd's stand-in for the key in the provider's own
-// auth header (Part 4a's route table); keyd swaps in the real key outside the cell.
+// auth header (Part 4a's route table); keyd swaps in the real key outside the cell. The first-class
+// providers use their official packages (P5a-R4), each calling only the operation its keyd preset
+// lists (P5a-R31).
 export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): LanguageModel {
   const baseURL = gatewayBaseURL(b.route);
   const key = b.surrogate;
+  const apiKey = key ?? "missing";
   switch (b.client) {
     case "anthropic":
-      return createAnthropic({ baseURL, apiKey: key ?? "missing", fetch })(b.model);
+      return createAnthropic({ baseURL, apiKey, fetch })(b.model);
     case "openai":
-      return createOpenAI({ baseURL, apiKey: key ?? "missing", fetch }).responses(b.model);
+      return createOpenAI({ baseURL, apiKey, fetch }).responses(b.model);
     case "google":
-      return createGoogleGenerativeAI({ baseURL, apiKey: key ?? "missing", fetch })(b.model);
+      return createGoogleGenerativeAI({ baseURL, apiKey, fetch })(b.model);
+    case "xai":
+      // The package's language model is xAI's Responses API, which reports usage unasked.
+      return createXai({ baseURL, apiKey, fetch })(b.model);
+    case "mistral":
+      return createMistral({ baseURL, apiKey, fetch })(b.model);
+    case "deepseek":
+      return createDeepSeek({ baseURL, apiKey, fetch })(b.model);
+    case "groq":
+      return createGroq({ baseURL, apiKey, fetch })(b.model);
+    case "openrouter":
+      // "strict" asks for usage in the stream (stream_options.include_usage); the chat model
+      // always, never the completions API the package picks for one instruct model.
+      return createOpenRouter({ baseURL, apiKey, fetch, compatibility: "strict" }).chat(b.model);
     case "azure":
       // Azure's own header carries the stand-in; no Authorization header at all.
       return createOpenAICompatible({
@@ -8915,7 +9325,8 @@ export function toComputerAction(
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm exec vitest run cells/brain && pnpm --filter @localdot/brain typecheck`
-Expected: PASS. `proxy-fetch.test.ts` has 3 tests and `computer.test.ts` has 4.
+Expected: PASS. `proxy-fetch.test.ts` has 8 tests (three, and one per first-class bearer provider)
+and `computer.test.ts` has 4.
 
 - [ ] **Step 5: Commit**
 
@@ -12822,10 +13233,16 @@ and keyd's carry `agent: "keyd"`.
     `TakeoverRequest`, `TakeoverEnd`, `TaskResult`, `ModelUsage`, `ModelRetry`, `ModelRole`,
     `TakeoverReason`, and `EventOf<T>` for each;
   - the tool table: `TOOL_NAMES`, `ToolName`;
-  - bindings: `ComputerMode`, `CoordSpaceName`, `ClientKind`, `AgentLimits`;
+  - bindings: `ComputerMode`, `CoordSpaceName`, `ClientKind` (with `xai`, `mistral`, `deepseek`,
+    `groq` and `openrouter`, P5a-R4), `AgentLimits`;
+  - keyd: `LLM_PROVIDERS`, the key sheet's providers, with the five first-class bearer kinds, whose
+    keys take no base URL (P5a-R31);
   - diffs: `unifiedDiff` (to show a memory file's whole change, for example).
-- `@localdot/providers`: `PROVIDERS`, `ProviderSpec`, `Capability`, `CapabilityTier`,
-  `CatalogModel`, `capabilityOf`, `usableAs`.
+- `@localdot/providers`: `PROVIDERS`, `ProviderSpec`, `KeydKind`, `FIRST_CLASS_BEARER`,
+  `Capability`, `CapabilityTier`, `CatalogModel`, `capabilityOf`, `usableAs`. A provider's `keyd`
+  is the kind of key it needs: for the first-class providers it is their own name, so the picker
+  offers only keys stored as that provider; for the other eight it is `openai-compatible` with the
+  `baseURL` the key must be bound to.
 - Daemon (for the e2e harness): `AgentRunner`, `createAgent`, `SessionStatus`, `AgentSettings`,
   `RoleChoice`, `ToolPolicy` (M5 replaces `actPolicy` through `createAgent`'s `policy`).
 
@@ -12854,7 +13271,7 @@ and keyd's carry `agent: "keyd"`.
 - Changing the model of a running task. The settings apply to the next brain start (a follow-up,
   a restart).
 
-## Decisions taken by this plan (P5a-R1 to P5a-R30)
+## Decisions taken by this plan (P5a-R1 to P5a-R31)
 
 - **P5a-R1 The loop is ours, one model call per turn, and the SDK executes nothing.** Every v1 tool
   is declared without `execute`; each call goes to the daemon's tool API in order.
@@ -12877,16 +13294,25 @@ and keyd's carry `agent: "keyd"`.
     for the brain". Any container with egress reaches the Mac's 127.0.0.1, so the token is the
     access control. Refusing `Origin` stops a web page in the user's browser posting to it.
   - Cost if wrong: none found.
-- **P5a-R4 Four SDK clients serve every API-key provider.** Anthropic, OpenAI (Responses), Google
-  and OpenAI-compatible are the clients. xAI, Mistral, DeepSeek, Groq, Together, Fireworks,
-  Cerebras, Perplexity, Cohere, DeepInfra, Moonshot, Alibaba and OpenRouter use their documented
-  OpenAI-compatible endpoints through keyd's `openai-compatible` kind, and Azure uses the same
-  client with its `api-key` header.
-  - Why: keyd's route kinds are fixed (Part 4a), and those four packages are already pinned and
-    verified (S5). The spec names each provider's official package, which this decision departs
-    from.
-  - Cost if wrong: provider-specific extras those packages add (xAI's or Mistral's own options)
-    are not used. Adding one is a case in `languageModel` and a dependency.
+- **P5a-R4 The eight non-first-class providers use the OpenAI-compatible client (narrowed by the
+  user's ruling, 2026-10-02).** The first-class providers use their official AI SDK packages:
+  Anthropic, OpenAI (Responses), Google, and now xAI (`@ai-sdk/xai` 5.0.13), Mistral
+  (`@ai-sdk/mistral` 4.0.55), DeepSeek (`@ai-sdk/deepseek` 3.0.57), Groq (`@ai-sdk/groq` 4.0.53) and
+  OpenRouter (`@openrouter/ai-sdk-provider` 3.1.0), each with its own keyd kind (P5a-R31). Together,
+  Fireworks, Cerebras, Perplexity, Cohere, DeepInfra, Moonshot and Alibaba reach their documented
+  OpenAI-compatible endpoints through `@ai-sdk/openai-compatible` and keyd's `openai-compatible`
+  kind, with the base URL the registry names. Azure keeps its own keyd kind and `api-key` header
+  through the OpenAI-compatible client, as before.
+  - Why: the user rejected the wider form. For the eight, the spec's "First-class providers"
+    paragraph names the OpenAI-compatible client; their official packages (where one exists) wrap
+    the same chat-completions API, and each would add a dependency and a keyd preset for no
+    capability the agent uses. Azure's `@ai-sdk/azure` was not part of the ruling; the ruling counts
+    Azure first-class through its keyd kind and header, which it has.
+  - Cost if wrong: a provider-specific extra of the eight (Perplexity's citations, Cohere's
+    documents) is not used, and a quirk of one in the chat-completions dialect (a cap field it
+    ignores, usage it does not stream) costs a held budget rather than an error. Promoting one is
+    a client kind, a case in `languageModel`, a pinned dependency and a keyd preset, as the five
+    show. If the user wants `@ai-sdk/azure` too, it is one more case and one more dependency.
 - **P5a-R5 Local servers are LM Studio and Ollama on keyd's fixed routes.** vLLM or another
   server works when it listens on 1234 or 11434, or behind an https endpoint.
   - Why: Part 4a fixes the local routes (P4a-R14), and changing keyd is outside this part.
@@ -12899,9 +13325,10 @@ and keyd's carry `agent: "keyd"`.
   - Cost if wrong: a model whose real output limit is lower than 4,096 is capped by its provider
     instead.
 - **P5a-R7 Capability is decided by provider and model id.** "Native" means Anthropic's toolset
-  (Claude 5.x and Opus 4.8, Sonnet 5.5 assumed) or its older tool. OpenAI's and Google's native
-  tools are M8's, so their vision models use the generic tool. The 0–1000 grid applies to Google
-  and to any id containing "qwen".
+  (Claude 5.x and Opus 4.8, Sonnet 5.5 assumed) or its older tool, on Anthropic's own API only, so
+  Claude through OpenRouter gets the generic tool. OpenAI's and Google's native tools are M8's, so
+  their vision models use the generic tool. The 0–1000 grid applies to Google and to any id
+  containing "gemini" or "qwen", whoever serves it (OpenRouter's `google/gemini-…`).
   - Cost if wrong: a new Claude family name needs the regex; a Qwen served under another name
     needs it too.
 - **P5a-R8 A coordinate outside its space is refused, not clamped.**
@@ -13010,6 +13437,41 @@ and keyd's carry `agent: "keyd"`.
 - **P5a-R30 Files move both ways without the GUI.** Uploads go through `files/put` into
   `~/Downloads`, and `done`'s files are copied out through `files/fetch` (each ≤ 50 MB) into the
   session's `out/` folder, which serves them as downloads only.
+- **P5a-R31 The five first-class bearer providers are five rows in keyd's preset table, not a new
+  route kind (a Part 4a amendment:
+  `docs/superpowers/plans/2026-10-01-localdot-core-handoff/part4a-providers-amendment.md`).**
+  xAI, Mistral, DeepSeek, Groq and OpenRouter share one auth style, `Authorization: Bearer`, which
+  keyd already has. Each gets a preset in `keys/binding.go`: its own provider name (an `llm`
+  secret's `provider`), a fixed base URL (`https://api.x.ai/v1`, `https://api.mistral.ai/v1`,
+  `https://api.deepseek.com`, `https://api.groq.com/openai/v1`, `https://openrouter.ai/api/v1`), its
+  own surrogate tag, and only the operations its official package calls, with the cap field that
+  package sends: xAI `POST responses` (`max_output_tokens`), the other four
+  `POST chat/completions` (`max_tokens`), and `GET models` for all. Each key is still its own route
+  (a route's name is its secret's id), so each has its own host binding, its own models and prices
+  (`PUT /v1/llm/routes/{route}/models`) and its own audit and budget lines. keyd's meter learns
+  one more place where a provider reports usage, Groq's `x_groq.usage` (its streams report nowhere
+  else, so every Groq answer was charged its whole hold), and `ReadRequest` refuses a body with a
+  `models` list (OpenRouter's fallback models, which can answer with a model off the allowlist at
+  another price) as `choice-count`. No new Go type, `Body` API or code path.
+  - Why: the smallest change that gives each provider its own route. The alternative, one shared
+    "bearer" kind with a per-provider host, base path and usage parser chosen by a field, is the
+    same data with an extra indirection and an extra field in every secret. Fixed base URLs mean
+    the user cannot bind an xAI key to the wrong host, and the daemon refuses an OpenAI-compatible
+    key for a first-class provider (Task 7). Listing only the package's operations keeps every
+    route on the usage dialect keyd meters: xAI's chat completions report reasoning tokens outside
+    `completion_tokens` (the AI SDK's own xAI chat code added them back), which keyd would
+    undercharge, so the xAI route has no chat operation.
+  - Cost if wrong: an operation outside the package's (Mistral's embeddings or FIM, OpenRouter's
+    completions or Responses, xAI's chat) is refused with 403 until a line is added to its preset.
+    keyd prices images on these routes by OpenAI's rule (2,460 tokens for a 1280×800 screenshot);
+    Mistral's own rule bills about 4,000, so near a limit a Mistral request can cross it by the
+    difference, as P4a-R15 already allows for OpenAI-compatible servers. DeepSeek's and xAI's
+    cached input is charged at the input price (an overcharge). A provider that changes where it
+    reports usage is charged its holds in full until the meter learns the place. An OpenRouter
+    model the catalog prices at $0 costs nothing in keyd's budget, which is right for its `:free`
+    models but not for a router id (such as `openrouter/auto`) if the catalog lists one at $0
+    while OpenRouter bills the model it picks; the picker shows the $0, and M5's budget UI is the
+    place to warn.
 
 ## Verification
 
