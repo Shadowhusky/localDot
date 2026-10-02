@@ -152,10 +152,10 @@ the tests named after it.
    - Task 7 pins that the container's environment holds no surrogate and no certificate.
    - Part 2's image test already pins Selkies' clipboard: inbound is off, and the server enforces it.
 2. **The canary failing open.** A scan that cannot see a process, a file or an encoding would pass
-   with nothing found. Task 15 finds a planted marker in a file (raw and as base64), in an
-   environment and in memory, and the live surrogate; the canary's own scan must find the marker
-   again. It must also read more than 100 MB of memory (bytes actually read, not mapped), and cover
-   more than 20 processes and more than 100 files.
+   with nothing found. Task 15 finds a planted marker in a file (raw, and as base64 at each of
+   its three offsets), in an environment and in memory, and the live surrogate; the canary's own
+   scan must find the marker again. It must also read more than 100 MB of memory (bytes actually
+   read, not mapped), and cover more than 20 processes and more than 100 files.
 3. **A cell bypassing keyd**: direct egress, DNS, IPv6, the Mac, Docker Desktop's host, the LAN,
    a reachable bridge gateway, hairpin NAT, special-purpose IPv6.
    - Task 8's self-test checks each one and fails closed. The daemon, not desktopd, decides which
@@ -6740,8 +6740,9 @@ Three more fixes land here, from Part 2's latest review (controller, 2026-10-01)
 knows a cell by its port:
 - `create()` counts the ports of every record the orchestrator holds in memory as well as those on
   disk, so a running cell whose folder was deleted by hand keeps its port;
-- `SkippedCellsError` names the folder to fix or remove (`<LOCALDOT_HOME>/cells/<id>`) and the
-  containers to remove (`<prefix>*-<id>`);
+- `SkippedCellsError` names the folder to fix (`<LOCALDOT_HOME>/cells/<id>`), which starts the
+  computer again, and the containers to remove only together with that folder (`<prefix>*-<id>`).
+  Such a record is unreadable or outside this daemon's keyd ports (R15) (review 2, Minor 7);
 - a remove marks the cell `stopping` before its first await, so the watch and readiness loops let
   go of it and no `failed: desktop container is missing` shows before `removed`.
 
@@ -7272,8 +7273,10 @@ describe("CellOrchestrator's keyd ports and removals", () => {
     try {
       const err = await orchestrator.create({ scale: 2 }).catch((e: unknown) => e);
       expect(err).toMatchObject({ name: "SkippedCellsError" });
-      expect((err as Error).message).toContain(join(home, "cells", cell.id));
-      expect((err as Error).message).toContain(`localdot-*-${cell.id}`);
+      // A fixed record starts the computer again (P4b-R14): its containers go only with its folder.
+      expect((err as Error).message).toBe(
+        `cell records this daemon can't use (unreadable, or outside its keyd ports) may still hold keyd ports. Fix ${join(home, "cells", cell.id)} to start those computers again, or remove a folder and then its containers (localdot-*-${cell.id}), before creating another computer`,
+      );
     } finally {
       error.mockRestore();
     }
@@ -7511,7 +7514,7 @@ records and `SkippedCellsError`; keep anything Part 3 added):
       },
     ) {
       super(
-        `cell records that can't be read may still hold their keyd ports: fix or remove ${cellIds.map((id) => where.folder(id)).join(", ")}, and remove their containers (${cellIds.map((id) => where.containers(id)).join(", ")}), before creating another computer`,
+        `cell records this daemon can't use (unreadable, or outside its keyd ports) may still hold keyd ports. Fix ${cellIds.map((id) => where.folder(id)).join(", ")} to start those computers again, or remove a folder and then its containers (${cellIds.map((id) => where.containers(id)).join(", ")}), before creating another computer`,
       );
       this.name = "SkippedCellsError";
     }
@@ -7692,7 +7695,7 @@ records and `SkippedCellsError`; keep anything Part 3 added):
         });
       }
       console.error(
-        `cell ${id}: cell.json can't be read, so keyd closed the cell and its containers were stopped; fix or remove ${this.#store.folder(id)}`,
+        `cell ${id}: cell.json can't be used (unreadable, or outside this daemon's keyd ports), so keyd closed the cell and its containers were stopped; fix or remove ${this.#store.folder(id)}`,
       );
     }
   }
@@ -7817,8 +7820,13 @@ agent left running could keep using the web (P4a-R20). So Stop now runs in four 
 3. It waits up to 4 s for the session's run to finish the input already on its way. A frozen
    `desktopd` would hold that call until it timed out, and it could land after a resume.
 4. It pauses the desktop container (Docker's freezer). Every process in it stops, the gate stays.
-   If the pause fails (the cell is restarting, or Docker refuses), keyd closes the cell instead,
-   so no process in it keeps surrogate-free web egress through the listener (review I2).
+   If the pause fails (the cell is restarting, or Docker refuses), keyd closes the cell at once,
+   so no process in it keeps surrogate-free web egress through the listener (review I2), and then
+   the computer is stopped (Stop computer, in the cell's queue; review 2, I-1). A closed cell alone
+   did not hold: a crash restart queued behind Stop, a keyd restart (`rewireIfLost`), a daemon
+   restart (the reconcile) or a gate crash would reopen it in keyd and boot the desktop with fresh
+   surrogates, while the HUD still said `Live`. A stopped computer stays stopped through all of
+   them, and the HUD says `Stopped`.
 
 If keyd is down, Stop still freezes the desktop and reports what failed. A frozen computer refuses
 input, launches and puppet runs with 409 until it is resumed.
@@ -7838,8 +7846,13 @@ A frozen cell stays frozen:
   user starts it.
 
 Pausing and resuming each start a fresh watch of the cell, so a frozen cell's gate and a resumed
-cell's crash are still seen. Stop computer and Remove need no thaw: Task 9 closes the cell in keyd
-first, and Docker stops a paused container itself (it signals it, then resumes it).
+cell's crash are still seen. While a frozen cell's gate restarts, the cell stays `paused` (the HUD
+keeps Paused and Resume), and Resume waits until it is ready again: the route answers 409 until
+then, since a thaw then would strand the cell in `starting` (review 2, Minor 2). Stop computer and
+Remove need no thaw: Task 9 closes the cell in keyd first, and Docker stops a paused container
+itself (it signals it, then resumes it). Start boots a desktop Docker still holds frozen afresh
+(it stops it first): a frozen cell whose gate could not come back fails with its desktop still
+paused, and Docker refuses to start a paused container (review 2, Minor 1).
 
 **Files:**
 - Create: `apps/daemon/src/gateway/kill-switch.ts`, `apps/daemon/src/gateway/kill-switch.test.ts`,
@@ -7859,17 +7872,20 @@ first, and Docker stops a paused container itself (it signals it, then resumes i
   - `LiveSessions.settled(sessionId): Promise<void>`;
   - `KillSwitch({ live, keyd, cells, settleMs = 4000 })`, with
     `stopSession(sessionId) → Promise<StopOutcome | undefined>` (where
-    `StopOutcome = { revoked; paused; closed; errors: string[] }`, `closed` meaning keyd closed a
-    cell that could not be frozen) and `resume(cellId)`, which throws `KeydUnavailableError` and
-    leaves the computer frozen while keyd is offline;
-  - `CellOrchestrator.pause(id)` (only from ready) and `unpause(id)`, both queued and each
-    watching the cell afresh, and `CellSummary.paused?: true`;
+    `StopOutcome = { revoked; paused; closed; stopped; errors: string[] }`: `closed` means keyd
+    closed a cell that could not be frozen, and `stopped` that the computer was then stopped) and
+    `resume(cellId)`, which throws `KeydUnavailableError` and leaves the computer frozen while keyd
+    is offline, and does nothing until a frozen cell is ready;
+  - `CellOrchestrator.pause(id)` (only from ready; a frozen cell is left as it is) and
+    `unpause(id)` (only from ready), both queued and each watching the cell afresh, and
+    `CellSummary.paused?: true`, kept while a frozen cell's gate restarts;
   - `GatewayRoutesDeps.killSwitch?: Pick<KillSwitch, "stopSession" | "resume">`;
   - routes:
     - `POST /api/sessions/:id/stop` → 202 with the `StopOutcome` when a kill switch is wired (the
       body is empty without one, as before);
-    - `POST /api/cells/:id/resume` → 204, or 409 if the computer is not paused, 400 or 404, and 503
-      without a kill switch or while the key layer is offline (the computer stays frozen);
+    - `POST /api/cells/:id/resume` → 204, or 409 if the computer is not paused or its gate is
+      restarting, 400 or 404, and 503 without a kill switch or while the key layer is offline (the
+      computer stays frozen);
     - every `withReadyCell` route → 409 `the computer is paused: resume it first`.
 
 - [ ] **Step 1: Write the failing tests**
@@ -7881,7 +7897,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient } from "../cells/docker.ts";
-import { CellOrchestrator } from "../cells/orchestrator.ts";
+import { CellOrchestrator, type OrchestratorDeps } from "../cells/orchestrator.ts";
 import { CellStore } from "../cells/store.ts";
 import { type FakeDocker, startFakeDocker } from "../cells/testing/fake-docker.ts";
 import type { CellSummary, DesktopdHealth } from "../cells/types.ts";
@@ -7911,6 +7927,12 @@ const until = (pred: () => boolean) =>
     const check = () => (pred() || Date.now() > deadline ? resolve() : setTimeout(check, 5));
     check();
   });
+// For a crash restart whose backoff is real time, so a Stop can land inside it.
+const realTime: Partial<OrchestratorDeps> = {
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  watchEveryMs: 20,
+  restartBackoffMs: [300],
+};
 // A session that runs until Stop aborts it.
 const untilAborted = (signal: AbortSignal) =>
   new Promise<void>((resolve) => signal.addEventListener("abort", () => resolve()));
@@ -7922,7 +7944,7 @@ afterEach(async () => {
   for (const step of cleanup.splice(0).reverse()) await step();
 });
 
-async function readyCell(settleMs = 200) {
+async function readyCell(settleMs = 200, opts: Partial<OrchestratorDeps> = {}) {
   docker = await startFakeDocker();
   keyd = await startFakeKeyd();
   keyd.records.set("weather", { id: "weather", kind: "http", createdAt: "t", updatedAt: "t" });
@@ -7942,6 +7964,7 @@ async function readyCell(settleMs = 200) {
     sleep: async () => {},
     watchEveryMs: 60_000,
     keyd: wiring,
+    ...opts,
   });
   cleanup.push(
     () => docker.close(),
@@ -7973,7 +7996,13 @@ describe("KillSwitch.stopSession", () => {
       timeline.push(`run ended, paused ${desktop()?.paused}`);
     });
     const outcome = await killSwitch.stopSession(SESSION);
-    expect(outcome).toEqual({ revoked: true, paused: true, closed: false, errors: [] });
+    expect(outcome).toEqual({
+      revoked: true,
+      paused: true,
+      closed: false,
+      stopped: false,
+      errors: [],
+    });
     expect(timeline).toEqual(["aborted, keyd revoked 0", "run ended, paused false"]);
     expect(keyd.cells.get(id)).toMatchObject({ revoked: 1, surrogates: {} });
     expect(desktop()?.paused).toBe(true);
@@ -8000,15 +8029,61 @@ describe("KillSwitch.stopSession", () => {
     expect(desktop()?.paused).toBe(true);
   });
 
-  it("closes the cell in keyd when the desktop cannot be frozen, so nothing in it reaches the web", async () => {
-    const { live, killSwitch, id, desktop, store } = await readyCell();
+  it("closes the cell in keyd and stops the computer when the desktop cannot be frozen", async () => {
+    const { cells, live, killSwitch, id, desktop, store } = await readyCell();
     live.start(id, SESSION, untilAborted);
     docker.state.failRequests.add(`POST /containers/${store.get(id)?.docker.desktop}/pause`);
     const outcome = await killSwitch.stopSession(SESSION);
-    expect(outcome).toMatchObject({ revoked: true, paused: false, closed: true });
+    expect(outcome).toMatchObject({ revoked: true, paused: false, closed: true, stopped: true });
     expect(outcome?.errors.join()).toContain("pause");
     expect(keyd.cells.has(id)).toBe(false);
-    expect(desktop()?.paused).toBe(false);
+    expect(desktop()).toMatchObject({ running: false, paused: false });
+    expect(cells.get(id)?.state).toBe("stopped");
+  });
+
+  it("stops a computer Stop caught in a crash restart's backoff, so the queued restart never reopens it", async () => {
+    const { cells, live, killSwitch, id, desktop, store } = await readyCell(200, realTime);
+    const gate = docker.state.containers.get(store.get(id)?.docker.gate ?? "");
+    if (!gate) throw new Error("no gate");
+    live.start(id, SESSION, untilAborted);
+    gate.running = false;
+    gate.exitCode = 137;
+    await until(() => cells.get(id)?.state === "starting");
+    const outcome = await killSwitch.stopSession(SESSION);
+    expect(outcome).toMatchObject({ paused: false, closed: true, stopped: true });
+    // Past the 300 ms backoff: the restart it queued finds the cell stopped and does nothing.
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(cells.get(id)?.state).toBe("stopped");
+    expect(keyd.cells.has(id)).toBe(false);
+    expect(desktop()).toMatchObject({ running: false, starts: 1 });
+    expect(gate).toMatchObject({ running: false, starts: 1 });
+  });
+
+  it("keeps a computer it could not freeze stopped through a keyd and a daemon restart", async () => {
+    const { cells, live, killSwitch, id, desktop, store, client, wiring } = await readyCell();
+    live.start(id, SESSION, untilAborted);
+    docker.state.failRequests.add(`POST /containers/${store.get(id)?.docker.desktop}/pause`);
+    await killSwitch.stopSession(SESSION);
+    keyd.restart();
+    await cells.rewireIfLost(id);
+    expect(desktop()).toMatchObject({ running: false, starts: 1 });
+    expect(keyd.cells.has(id)).toBe(false);
+    cells.dispose();
+    const fresh = new CellOrchestrator({
+      docker: client,
+      store,
+      images: { desktop: "d", gate: "g" },
+      probeDesktopd: async () => healthy,
+      probeStream: async () => true,
+      sleep: async () => {},
+      watchEveryMs: 60_000,
+      keyd: wiring,
+    });
+    cleanup.push(() => fresh.dispose());
+    await fresh.reconcile();
+    expect(fresh.get(id)?.state).toBe("stopped");
+    expect(desktop()?.starts).toBe(1);
+    expect(keyd.cells.has(id)).toBe(false);
   });
 
   it("does nothing for a session that is not live", async () => {
@@ -8069,6 +8144,27 @@ describe("KillSwitch.resume", () => {
     expect(cells.get(id)?.paused).toBe(true);
   });
 
+  it("leaves a frozen computer frozen while its gate restarts, and resumes it once it is back", async () => {
+    const { cells, killSwitch, id, desktop, store, changes } = await readyCell(200, realTime);
+    await cells.pause(id);
+    const from = changes.length;
+    const gate = docker.state.containers.get(store.get(id)?.docker.gate ?? "");
+    if (!gate) throw new Error("no gate");
+    gate.running = false;
+    gate.exitCode = 137;
+    await until(() => cells.get(id)?.state === "starting");
+    await killSwitch.resume(id);
+    expect(desktop()?.paused).toBe(true);
+    await until(() => cells.get(id)?.state === "ready");
+    expect(cells.get(id)).toMatchObject({ state: "ready", paused: true });
+    expect(gate.starts).toBe(2);
+    // The HUD keeps Paused and Resume through the gate's restart.
+    expect(changes.slice(from).filter((c) => c.id === id && !c.paused)).toEqual([]);
+    await killSwitch.resume(id);
+    expect(desktop()).toMatchObject({ paused: false, starts: 1 });
+    expect(cells.get(id)?.paused).toBeUndefined();
+  });
+
   it("restarts the desktop when keyd lost the cell while it was frozen", async () => {
     const { live, killSwitch, id, desktop } = await readyCell();
     live.start(id, SESSION, untilAborted);
@@ -8090,6 +8186,16 @@ describe("CellOrchestrator pause", () => {
     expect(desktop()).toMatchObject({ paused: false, running: false });
     expect(keyd.cells.has(id)).toBe(false);
     await expect(cells.pause(id)).rejects.toThrow("not ready");
+  });
+
+  it("boots a desktop Docker still holds frozen afresh when the user starts the computer", async () => {
+    const { cells, id, desktop } = await readyCell();
+    await cells.pause(id);
+    await cells.start(id);
+    await until(() => cells.get(id)?.state === "ready");
+    expect(cells.get(id)).toMatchObject({ state: "ready" });
+    expect(cells.get(id)?.paused).toBeUndefined();
+    expect(desktop()).toMatchObject({ starts: 2, running: true, paused: false });
   });
 
   it("keeps a frozen computer frozen when keyd restarts", async () => {
@@ -8169,11 +8275,11 @@ const SESSION = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 const CELL = "01JXYZ0000000000000000ABCD";
 
 // Only the routes Part 4b changes: the registry and the clock are never reached here.
-function setup(paused = false, keydOffline = false) {
+function setup(paused = false, keydOffline = false, state: "ready" | "starting" = "ready") {
   const cells = new FakeOrchestrator();
   cells.emit({
     id: CELL,
-    state: "ready",
+    state,
     scale: 2,
     createdAt: "t",
     stream: NO_STREAM,
@@ -8185,7 +8291,7 @@ function setup(paused = false, keydOffline = false) {
     stopSession: async (id: string) => {
       calls.push(`stop ${id}`);
       return live.cellOf(id)
-        ? { revoked: true, paused: true, closed: false, errors: [] }
+        ? { revoked: true, paused: true, closed: false, stopped: false, errors: [] }
         : undefined;
     },
     resume: async (id: string) => {
@@ -8209,7 +8315,13 @@ describe("Stop, resume and a paused computer", () => {
     live.start(CELL, SESSION, (signal) => new Promise((r) => signal.addEventListener("abort", r)));
     const res = await app.request(`/api/sessions/${SESSION}/stop`, { method: "POST" });
     expect(res.status).toBe(202);
-    expect(await res.json()).toEqual({ revoked: true, paused: true, closed: false, errors: [] });
+    expect(await res.json()).toEqual({
+      revoked: true,
+      paused: true,
+      closed: false,
+      stopped: false,
+      errors: [],
+    });
     expect(calls).toEqual([`stop ${SESSION}`]);
     live.stop(SESSION);
     const other = await app.request("/api/sessions/01J9ZQ3V8Y7X6W5T4S3R2Q1P0Z/stop", {
@@ -8239,6 +8351,14 @@ describe("Stop, resume and a paused computer", () => {
     expect((await app.request(`/api/cells/${CELL}/resume`, { method: "POST" })).status).toBe(409);
     expect((await app.request("/api/cells/nope/resume", { method: "POST" })).status).toBe(400);
   });
+
+  it("waits to resume a frozen computer until its gate is back", async () => {
+    const { app, calls } = setup(true, false, "starting");
+    const res = await app.request(`/api/cells/${CELL}/resume`, { method: "POST" });
+    expect(res.status).toBe(409);
+    expect(await res.text()).toBe("the computer is restarting: resume it once it is ready");
+    expect(calls).toEqual([]);
+  });
 });
 ```
 
@@ -8251,7 +8371,11 @@ orchestrator, eight of `kill-switch.test.ts`'s 15 tests fail: the frozen compute
 restart reboots (C1), the failed freeze that keeps its listener and the Resume that leaves a
 first-generation surrogate valid (I2), the Resume that thaws while keyd is offline (M9), the gate
 restart and the dead frozen desktop (M8), the resumed cell nobody watches, and the outcome without
-`closed`.)
+`closed`. Against fix pass 1's kill switch and orchestrator, six of the 19 fail: the two outcomes
+without `stopped`, the crash restart queued behind Stop and the keyd and daemon restarts that
+reopen a computer whose freeze failed (review 2, I-1), the Resume during a frozen gate's restart
+that strands the cell in `starting` (Minor 2), and the Start that Docker refuses with 409 for a
+frozen desktop (Minor 1).)
 
 - [ ] **Step 3: Write the code**
 
@@ -8312,7 +8436,7 @@ import type { LiveSessions } from "./live.ts";
 export interface KillSwitchDeps {
   live: Pick<LiveSessions, "cellOf" | "stop" | "settled">;
   keyd: Pick<CellKeyd, "revoke" | "refresh" | "isWired" | "close">;
-  cells: Pick<CellOrchestrator, "get" | "record" | "pause" | "unpause" | "rewireIfLost">;
+  cells: Pick<CellOrchestrator, "get" | "record" | "pause" | "unpause" | "rewireIfLost" | "stop">;
   // How long the session gets to finish the input already on its way before the desktop freezes.
   settleMs?: number;
 }
@@ -8322,6 +8446,8 @@ export interface StopOutcome {
   paused: boolean;
   // The desktop could not be frozen, so keyd closed the cell: nothing in it reaches the web.
   closed: boolean;
+  // ...and the computer was stopped instead, so nothing reopens it behind the user's back.
+  stopped: boolean;
   errors: string[];
 }
 
@@ -8359,16 +8485,21 @@ export class KillSwitch {
     await Promise.race([settled, sleep(this.#settleMs)]);
     const paused = await attempt("pause", () => cells.pause(cellId));
     // A desktop that cannot be frozen (it is restarting, or Docker failed) loses its keyd listener
-    // instead, so no process the agent started keeps web egress through it.
+    // at once, so no process the agent started keeps web egress through it. Then the computer is
+    // stopped, in the cell's queue: a crash restart queued behind it finds the cell stopped, and no
+    // keyd, daemon or gate restart reopens a computer the user stopped (review 2, I-1).
     const closed = !paused && (await attempt("keyd close", () => keyd.close(cellId)));
-    return { revoked, paused, closed, errors };
+    const stopped = !paused && (await attempt("stop", () => cells.stop(cellId)));
+    return { revoked, paused, closed, stopped, errors };
   }
 
   // Resume after Stop: the desktop thaws (the programs it was running carry on) and gets fresh
   // surrogates; if keyd lost the cell meanwhile, the desktop restarts with new ones instead.
   async resume(cellId: string): Promise<void> {
     const { keyd, cells } = this.deps;
-    if (!cells.get(cellId)?.paused) return;
+    const cell = cells.get(cellId);
+    // A frozen computer whose gate is restarting is resumed once it is ready again.
+    if (!cell?.paused || cell.state !== "ready") return;
     const record = cells.record(cellId);
     if (!record) return;
     // Revoked again before anything thaws: if Stop's revoke failed, the surrogates the frozen
@@ -8405,6 +8536,10 @@ In `apps/daemon/src/gateway/routes.ts` (Part 3's):
     const cell = cells.get(id);
     if (!cell) return c.text("unknown cell", 404);
     if (!cell.paused) return c.text("the computer is not paused", 409);
+    // A frozen computer whose gate is restarting is resumed once it is back (review 2, Minor 2).
+    if (cell.state !== "ready") {
+      return c.text("the computer is restarting: resume it once it is ready", 409);
+    }
     if (!deps.killSwitch) return c.text("the kill switch is not available", 503);
     try {
       await deps.killSwitch.resume(id);
@@ -8462,10 +8597,11 @@ In `apps/daemon/src/cells/orchestrator.ts`:
   async #pause(id: string): Promise<void> {
     const record = this.#require(id);
     const live = this.#live.get(id);
+    // Frozen already, its gate perhaps restarting: there is nothing more to freeze.
+    if (live?.paused) return;
     if (live?.state !== "ready") {
       throw new Error(`cell ${id} is ${live?.state ?? "stopped"}, not ready`);
     }
-    if (live.paused) return;
     await this.#docker.request({
       method: "POST",
       path: objectPath("containers", record.docker.desktop, "pause"),
@@ -8483,7 +8619,9 @@ In `apps/daemon/src/cells/orchestrator.ts`:
   async #unpause(id: string): Promise<void> {
     const record = this.#require(id);
     const live = this.#live.get(id);
-    if (!live?.paused) return;
+    // Only from ready: a frozen computer whose gate is restarting is resumed once it is back, and
+    // thawing it now would strand it in "starting" (the restart it queued would be skipped).
+    if (!live?.paused || live.state !== "ready") return;
     await this.#unfreeze(record);
     if (!this.#current(id, live)) return;
     this.#set(id, thawed(live));
@@ -8511,7 +8649,30 @@ In `apps/daemon/src/cells/orchestrator.ts`:
     frozen = false,
   ): Promise<boolean> {
   ```
-  the keyd block starts `if (this.#keyd && !frozen) {`, the desktop's start becomes
+  its `starting` entry carries the freeze, so the HUD keeps Paused and Resume while the gate comes
+  back (review 2, Minor 2):
+  ```ts
+    const starting: Live = {
+      state: "starting",
+      restarts,
+      stream: NO_STREAM,
+      ...(error ? { error } : {}),
+      // A frozen cell stays Paused, with Resume offered, while its gate comes back.
+      ...(frozen ? { paused: true as const } : {}),
+    };
+  ```
+  the keyd block starts `if (this.#keyd && !frozen) {`, and its first lines (Task 9's) become, so
+  that a Start boots a desktop Docker still holds frozen afresh (review 2, Minor 1):
+  ```ts
+        // keyd first: a desktop boots with the CA, token and surrogates of its cell's listener. A
+        // running desktop keeps its own unless keyd lost the cell, and then it restarts. So does
+        // one Docker still holds frozen (a frozen cell that failed, or a Start sent to a frozen
+        // computer): the user asked for a start, and Docker refuses to start a paused container.
+        const desktop = (await this.#inspect(d.desktop)).State;
+        let running = desktop.Running;
+        if (running && (desktop.Paused || !(await this.#keyd.isWired(record)))) {
+  ```
+  (the block's other lines stay as Task 9 wrote them), the desktop's start becomes
   ```ts
       if (!frozen) {
         await this.#docker.request({
@@ -8578,7 +8739,7 @@ In `apps/daemon/src/cells/orchestrator.ts`:
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm exec vitest run apps/daemon/src/gateway apps/daemon/src/cells`
-Expected: PASS. `kill-switch.test.ts` has 15 tests and `kill-switch-routes.test.ts` 4. Part 3's
+Expected: PASS. `kill-switch.test.ts` has 19 tests and `kill-switch-routes.test.ts` 5. Part 3's
 route tests still pass: they wire no kill switch, so Stop answers 202 with no body, as before.
 
 - [ ] **Step 5: Commit**
@@ -8619,7 +8780,10 @@ session that is live on the event's cell:
 - the key routes. Their `afterChange` hands every running or booting, unfrozen computer fresh
   surrogates (`refreshRunningCells`): keyd revoked the changed key's surrogates everywhere, and a
   computer that is still starting may hold files written before the change (review M14). It says
-  whether a running computer can only use the saved key after it starts again.
+  whether a running computer can only use the saved key after it starts again. Each refresh runs in
+  the cell's queue (`refreshKeys`), so it never interleaves with a start that reopens the cell in
+  keyd: minting on the cell `wire()` is about to close and writing those stand-ins over the new
+  ones would boot the computer with dead surrogates (review 2, Minor 3).
 
 The e2e harness starts a keyd in the daemon's home, which is where the daemon looks for its
 socket. It is the same binary as the tests', on the e2e ports, with an in-memory vault and
@@ -8629,6 +8793,7 @@ the test process dies first (review M6).
 **Files:**
 - Create: `apps/daemon/src/keyd/event-router.ts`, `apps/daemon/src/keyd/event-router.test.ts`
 - Modify: `apps/daemon/src/keyd/cell-wiring.ts`, `apps/daemon/src/keyd/cell-wiring.test.ts`,
+  `apps/daemon/src/cells/orchestrator.ts`, `apps/daemon/src/cells/orchestrator-keyd.test.ts`,
   `apps/daemon/src/main.ts`, `apps/web/e2e/daemon.ts`
 
 **Interfaces:**
@@ -8642,7 +8807,8 @@ the test process dies first (review M6).
 - Produces:
   - `KeydEventRouter({ keyd, live, eventLog, perCellPerSecond = 20, retryMs = { min: 250, max: 5000 }, now? })`,
     with `start()`, `stop()` and `route(event)`;
-  - `refreshRunningCells(cells, keyd, secretId) → Promise<{ restart: boolean }>`;
+  - `CellOrchestrator.refreshKeys(id): Promise<string[]>`, queued like a start, and
+    `refreshRunningCells(cells, secretId) → Promise<{ restart: boolean }>`;
   - in the e2e harness, `RunningDaemon.keyd`, `startKeyd(home)` and `E2E_KEYD_PORTS = "4791-4797"`;
   - the daemon reads `LOCALDOT_KEYD_PORTS` and exits with `LOCALDOT_KEYD_PORTS: <reason>` on a bad
     range.
@@ -8814,30 +8980,63 @@ describe("refreshRunningCells", () => {
     ];
     const refreshed: string[] = [];
     const out = await refreshRunningCells(
-      { list: () => cells, record: (id) => sampleRecord(`01JXYZ000000000000000000${id}${id}`) },
       {
-        refresh: async (r) => {
-          refreshed.push(r.id);
-          if (r.id.endsWith("DD")) throw new Error("keyd went away");
-          return r.id.endsWith("AA") ? ["maps"] : [];
+        list: () => cells,
+        refreshKeys: async (id) => {
+          refreshed.push(id);
+          if (id === "D") throw new Error("keyd went away");
+          return id === "A" ? ["maps"] : [];
         },
       },
       "maps",
     );
-    expect(refreshed).toEqual([
-      "01JXYZ000000000000000000AA",
-      "01JXYZ000000000000000000DD",
-      "01JXYZ000000000000000000EE",
-    ]);
+    expect(refreshed).toEqual(["A", "D", "E"]);
     expect(out).toEqual({ restart: true });
   });
 });
 ```
 
+In `apps/daemon/src/cells/orchestrator-keyd.test.ts` (Task 9's), add `refreshRunningCells` to the
+import from `../keyd/cell-wiring.ts`, and append to its `describe` (review 2, Minor 3):
+```ts
+  it("refreshes a computer's surrogates in its queue, after a start that is still wiring it", async () => {
+    const { orchestrator, store, stateOf, until } = await setup();
+    keyd.records.set("weather", { id: "weather", ...record, hosts: ["api.weather.example"] });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    await orchestrator.stop(cell.id);
+    const desktop = store.get(cell.id)?.docker.desktop ?? "";
+    let release = () => {};
+    docker.state.holds.set(
+      `POST /containers/${desktop}/start`,
+      new Promise<void>((resolve) => {
+        release = resolve;
+      }),
+    );
+    const starting = orchestrator.start(cell.id);
+    await until(() => orchestrator.get(cell.id)?.state === "starting");
+    const minted = () =>
+      keyd.calls.filter((c) => c.path === `/v1/cells/${cell.id}/surrogates`).length;
+    const refreshed = refreshRunningCells(orchestrator, "weather");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(minted()).toBe(0);
+    release();
+    await starting;
+    expect(await refreshed).toEqual({ restart: false });
+    expect(minted()).toBe(1);
+    const current = keyd.cells.get(cell.id)?.surrogates.weather ?? "";
+    expect(keyd.cells.get(cell.id)?.valid.has(current)).toBe(true);
+    const files = docker.state.containers.get(desktop)?.files;
+    expect(files?.get(`${CELL_FILES_DIR}/surrogates.sh`)?.toString()).toContain(`'${current}'`);
+  });
+```
+
 - [ ] **Step 2: Run them to see them fail**
 
-Run: `pnpm exec vitest run apps/daemon/src/keyd/event-router.test.ts apps/daemon/src/keyd/cell-wiring.test.ts`
+Run: `pnpm exec vitest run apps/daemon/src/keyd/event-router.test.ts apps/daemon/src/keyd/cell-wiring.test.ts apps/daemon/src/cells/orchestrator-keyd.test.ts`
 Expected: FAIL. `./event-router.ts` cannot be resolved, and `refreshRunningCells` is not exported.
+(With fix pass 1's `refreshRunningCells(cells, keyd, id)`, which called `keyd.refresh` outside the
+cell's queue, the queue test fails: keyd is asked to mint while the start is still held.)
 
 - [ ] **Step 3: Write the code**
 
@@ -8950,20 +9149,18 @@ In `apps/daemon/src/keyd/cell-wiring.ts`, add `import type { CellOrchestrator } 
 and, before `surrogatesFile`:
 ```ts
 // After a key is saved or deleted (keyd revoked that key's surrogates everywhere), every running
-// or booting desktop gets fresh surrogates; a frozen one gets them when it is resumed. `restart`
-// says whether a running computer cannot use the saved key until it starts again.
+// or booting desktop gets fresh surrogates, each in its cell's queue (refreshKeys); a frozen one
+// gets them when it is resumed. `restart` says whether a running computer cannot use the saved key
+// until it starts again.
 export async function refreshRunningCells(
-  cells: Pick<CellOrchestrator, "list" | "record">,
-  keyd: Pick<CellKeyd, "refresh">,
+  cells: Pick<CellOrchestrator, "list" | "refreshKeys">,
   secretId: string,
 ): Promise<{ restart: boolean }> {
   let restart = false;
   for (const cell of cells.list()) {
-    const running = (cell.state === "ready" || cell.state === "starting") && !cell.paused;
-    const record = running ? cells.record(cell.id) : undefined;
-    if (!record) continue;
+    if ((cell.state !== "ready" && cell.state !== "starting") || cell.paused) continue;
     try {
-      if ((await keyd.refresh(record)).includes(secretId)) restart = true;
+      if ((await cells.refreshKeys(cell.id)).includes(secretId)) restart = true;
     } catch (err) {
       console.error(`keys: computer ${cell.id} keeps its old surrogates: ${String(err)}`);
     }
@@ -8971,6 +9168,22 @@ export async function refreshRunningCells(
   return { restart };
 }
 
+```
+
+In `apps/daemon/src/cells/orchestrator.ts`, before `rewireIfLost`:
+```ts
+  // Fresh surrogates after a key changed, in the cell's queue: a start, restart or rewire that
+  // reopens the cell in keyd finishes first, so a refresh never mints on a cell wire() is about to
+  // close and then writes those dead stand-ins over the new ones. Only a running or booting,
+  // unfrozen desktop gets them. Resolves the keys it can use only after it starts again.
+  refreshKeys(id: string): Promise<string[]> {
+    return this.#queued(id, async () => {
+      const live = this.#live.get(id);
+      const record = this.#record(id);
+      const running = (live?.state === "ready" || live?.state === "starting") && !live.paused;
+      return running && record && this.#keyd ? this.#keyd.refresh(record) : [];
+    });
+  }
 ```
 
 In `apps/daemon/src/main.ts` (Part 3's), keeping everything else:
@@ -9024,7 +9237,7 @@ In `apps/daemon/src/main.ts` (Part 3's), keeping everything else:
     keys: {
       keyd,
       monitor: keydMonitor,
-      afterChange: (id) => refreshRunningCells(orchestrator, keydWiring, id),
+      afterChange: (id) => refreshRunningCells(orchestrator, id),
     },
   ```
 - next to `portFromEnv`:
@@ -9117,7 +9330,8 @@ socket at about 92 bytes, under macOS's 104.
 - [ ] **Step 4: Run the tests**
 
 Run: `pnpm exec vitest run apps/daemon/src && pnpm typecheck`
-Expected: PASS. `event-router.test.ts` has 5 tests and `cell-wiring.test.ts` 5. Part 3's
+Expected: PASS. `event-router.test.ts` has 5 tests, `cell-wiring.test.ts` 5 and
+`orchestrator-keyd.test.ts` 17. Part 3's
 `main.test.ts` still gets `/healthz` while a wedged Docker holds the reconcile: nothing keyd adds
 to `main.ts` waits on keyd or Docker. The typecheck is clean, the web e2e folder included.
 
@@ -12077,7 +12291,10 @@ never appears in any cell's environment, files, process list or memory dump".
 scrubbed. What the cell got back goes to the X clipboard.
 
 **The scanner.** `canary-scan.py` runs inside the cell as root with `docker exec --privileged`. It
-searches for each needle, raw and in base64, base64url, hex and UTF-16LE:
+searches for each needle, raw and in base64, base64url, hex and UTF-16LE. Its base64 and base64url
+forms leave out the characters a needle's neighbours decide, so a needle is found inside a longer
+blob at each of the three offsets base64 can give it, not only when planted alone (review 2,
+Minor 9):
 - every process's environment, command line and readable memory (a crash dump is a copy of memory,
   and the clipboard is served from `xclip`'s memory);
 - every file the container wrote: its layer's changes from `docker diff`, its tmpfs mounts and its
@@ -12085,8 +12302,9 @@ searches for each needle, raw and in base64, base64url, hex and UTF-16LE:
 
 **The checks.**
 - Both containers' logs and keyd's own files are searched too.
-- A marker is planted where a leak would sit: in a file raw, in another file as base64, in a
-  process's environment and so in memory. A scan for the marker must find it in each of those
+- A marker is planted where a leak would sit: in a file raw, in other files as base64 alone and
+  inside longer base64 and base64url blobs at offsets 1 and 2, in a process's environment and so
+  in memory. A scan for the marker must find it in each of those
   places, and the live surrogate in an environment and in memory. The canary's own scan looks for
   the marker too and must find it there again, so "nothing found" for the canary means absence, not
   blindness, in the very run that says so (review M1).
@@ -12114,17 +12332,30 @@ keyd must see no request at all for 4 s. After Resume the loop's old surrogate m
 
 `apps/daemon/src/keyd/testing/canary-scan.py`:
 ```python
-# Looks for each needle, raw and in its base64, base64url, hex and UTF-16LE forms, in every
+# Looks for each needle, raw and in its base64 and base64url forms (at each of the three offsets a
+# longer blob can put it at), hex and UTF-16LE, in every
 # process's environment, command line and readable memory, and in every regular file under the
 # paths given after --files. Prints {"processes", "bytes", "files", "hits": ["needle|form|where"]}:
 # the processes whose memory it read, the bytes of memory it read, and the files it read.
 # Run as root with docker exec --privileged (reading other processes' memory needs ptrace rights).
 import base64, json, os, sys
 
+# The characters that stand for the needle's own bytes wherever it sits in a longer blob: base64
+# turns each 3 bytes into 4 characters, so the needle starts at offset 0, 1 or 2 of a group. The
+# group it shares with the bytes before it and its last partial group depend on its neighbours,
+# so they are left out.
+def b64_runs(needle: bytes, encode):
+    for shift in range(3):
+        encoded = encode(b"\0" * shift + needle)
+        start, end = (4 if shift else 0), (shift + len(needle)) // 3 * 4
+        yield ("" if shift == 0 else f"+{shift}"), encoded[start:end]
+
 def forms(needle: bytes):
     yield "raw", needle
-    yield "base64", base64.b64encode(needle).rstrip(b"=")
-    yield "base64url", base64.urlsafe_b64encode(needle).rstrip(b"=")
+    for suffix, run in b64_runs(needle, base64.b64encode):
+        yield "base64" + suffix, run
+    for suffix, run in b64_runs(needle, base64.urlsafe_b64encode):
+        yield "base64url" + suffix, run
     yield "hex", needle.hex().encode()
     yield "HEX", needle.hex().upper().encode()
     yield "utf16le", needle.decode().encode("utf-16-le")
@@ -12261,6 +12492,8 @@ describe.skipIf(!DOCKER_TESTS)("the canary never reaches a cell", () => {
   const markerHits = [
     `${marker}|raw|file /tmp/marker.txt`,
     `${marker}|base64|file /tmp/marker.b64`,
+    `${marker}|base64+1|file /tmp/marker-1.b64`,
+    `${marker}|base64url+2|file /tmp/marker-2.b64`,
     `${marker}|raw|environ`,
     `${marker}|raw|memory`,
   ];
@@ -12283,6 +12516,11 @@ describe.skipIf(!DOCKER_TESTS)("the canary never reaches a cell", () => {
     const encoded = Buffer.from(marker).toString("base64").replace(/=+$/, "");
     expect(cell.sh(`printf %s ${marker} > /tmp/marker.txt`).status).toBe(0);
     expect(cell.sh(`printf %s ${encoded} > /tmp/marker.b64`).status).toBe(0);
+    // Inside longer blobs too, at the two other offsets base64 can give it (review 2, Minor 9).
+    const inBlob = (before: string, encoding: "base64" | "base64url") =>
+      Buffer.from(`${before}${marker}tail`).toString(encoding);
+    expect(cell.sh(`printf %s ${inBlob("x", "base64")} > /tmp/marker-1.b64`).status).toBe(0);
+    expect(cell.sh(`printf %s ${inBlob("xy", "base64url")} > /tmp/marker-2.b64`).status).toBe(0);
     docker("exec", "-d", "-u", "abc", "-e", `LOCALDOT_MARKER=${marker}`, desktop, "sleep", "600");
   }, 600_000);
   afterAll(async () => {
@@ -12580,7 +12818,10 @@ git commit -m "ci(keyd): run the daemon's keyd suites against a real keyd; docum
 - `apps/daemon/src/keyd/monitor.ts` provides `KeydMonitor` and `cameUp`; `KeydHealth.hairpin` is
   never `active` unless keyd says so.
 - Part 2's `doctor` has the checks `keyd` and `hairpin-guard` (`DoctorDeps.keyd`). M9's doctor adds
-  keyd's `audit-rotated` alert and every cell's `GET /selftest`.
+  keyd's `audit-rotated` alert and every cell's `GET /selftest`. It also needs a warning level:
+  `hairpin-guard` fails on `off` and `unknown`, so a user who turned STUN off on a router without
+  NAT-PMP gets a doctor that exits 1 for good. M9 makes those two a warning that names the exposure
+  (and `-stun off`'s trade-off) without failing the run (review 2, Minor 5).
 - `apps/daemon/src/keyd/event-router.ts` appends `budget.exceeded` to the live session. M4 pauses
   the agent loop on it, and the UI offers to raise the budget with `PUT …/task` and the same
   `taskId` (not Stop, which ends the task in keyd: Part 4a review 2, N5).
