@@ -1420,3 +1420,93 @@ func TestASurrogateInAHeaderNameIsFoundInAnyCase(t *testing.T) {
 		wantDeny(t, "unknown in the name "+name, at(t, f.r, https(integrityHost), "GET", "/", http.Header{name: {"1"}}), ReasonUnknownSurrogate)
 	}
 }
+
+// Inspect's work grows linearly with the surrogate shapes a request carries, however many entries
+// the registry holds. A 64 KiB header block, the most the cell listener reads, full of distinct
+// shapes in values and in names costs at most three comparisons a shape, counted rather than timed.
+func TestInspectionWorkIsLinearInTheShapesARequestCarries(t *testing.T) {
+	f := newFixture(t)
+	for range 200 {
+		mint(t, f.r, "c1", binding(t, vault.Record{ID: "pad", Kind: vault.KindHTTP, Hosts: []string{integrityHost}, Header: "X-Pad-Key", Format: "raw"}))
+	}
+	h := hdr("Authorization", "Bearer "+f.bearer.Token)
+	shapes, names, size := 1, 0, len("Authorization: Bearer \r\n")+len(f.bearer.Token)
+	shape := func() string {
+		tok, err := surrogate.Mint("key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		shapes++
+		return tok
+	}
+	for i := 0; size < 48<<10; i++ {
+		var b strings.Builder
+		for b.Len() < 4<<10 {
+			b.WriteString(shape() + " ")
+		}
+		name := fmt.Sprintf("X-Shapes-%02d", i)
+		h[name] = []string{b.String()}
+		size += len(name+": \r\n") + b.Len()
+	}
+	for size < 64<<10-64 {
+		name := http.CanonicalHeaderKey(shape())
+		h[name] = []string{"1"}
+		names++
+		size += len(name + ": 1\r\n")
+	}
+	n := 0
+	steps = func(k int) { n += k }
+	t.Cleanup(func() { steps = nil })
+	v := at(t, f.r, https(integrityHost), "GET", "/", h)
+	steps = nil
+	wantDeny(t, "a request full of unknown shapes", v, ReasonUnknownSurrogate)
+	if size > 64<<10 || names < 300 || shapes < 1500 {
+		t.Fatalf("the request is %d bytes with %d shapes, %d of them in names", size, shapes, names)
+	}
+	t.Logf("%d shapes (%d in names, %d bytes) against %d entries: %d comparisons", shapes, names, size, len(f.r.byToken), n)
+	if n > 3*shapes {
+		t.Fatalf("inspecting %d shapes (%d in names, %d bytes) against %d entries took %d comparisons, want at most %d", shapes, names, size, len(f.r.byToken), n, 3*shapes)
+	}
+}
+
+// The folded index holds exactly the registered tokens, lower-cased, through mints and revokes, so
+// a header-name lookup never resolves a revoked surrogate and the index does not grow without end.
+func TestTheFoldedIndexFollowsTheRegistry(t *testing.T) {
+	f := newFixture(t)
+	consistent := func(when string) {
+		t.Helper()
+		f.r.mu.RLock()
+		defer f.r.mu.RUnlock()
+		if len(f.r.byFolded) != len(f.r.byToken) {
+			t.Fatalf("%s: %d folded forms for %d tokens", when, len(f.r.byFolded), len(f.r.byToken))
+		}
+		for token := range f.r.byToken {
+			if f.r.byFolded[strings.ToLower(token)] != token {
+				t.Fatalf("%s: surrogate:%s is not indexed under its lower-cased form", when, surrogate.ID(token))
+			}
+		}
+	}
+	consistent("after the fixture")
+	other := mint(t, f.r, "c2", binding(t, vault.Record{ID: "api", Kind: vault.KindHTTP, Hosts: []string{integrityHost}, Header: "Authorization", Format: "bearer"}))
+	consistent("after a mint")
+	if n := f.r.RevokeSecret("api"); n != 3 {
+		t.Fatalf("RevokeSecret revoked %d, want 3", n)
+	}
+	consistent("after RevokeSecret")
+	if _, ok := f.r.lookupFolded(strings.ToLower(f.bearer.Token)); ok {
+		t.Fatal("a revoked surrogate still resolves from a header name")
+	}
+	if _, ok := f.r.lookupFolded(strings.ToLower(other)); ok {
+		t.Fatal("a surrogate revoked in another cell still resolves from a header name")
+	}
+	if e, ok := f.r.lookupFolded(strings.ToLower(f.raw.Token)); !ok || e.Token != f.raw.Token {
+		t.Fatal("a live surrogate does not resolve from its lower-cased form")
+	}
+	if n := f.r.RevokeCell("c1"); n != 9 {
+		t.Fatalf("RevokeCell revoked %d, want 9", n)
+	}
+	consistent("after RevokeCell")
+	if len(f.r.byFolded) != 0 {
+		t.Fatalf("%d folded forms left in an empty registry", len(f.r.byFolded))
+	}
+}
