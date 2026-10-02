@@ -128,9 +128,38 @@ write. Deletion has already revoked the key in keyd before its refresh callback.
   `/tmp/localdot-part4b-task4-final-types.log`, and
   `/tmp/localdot-part4b-task4-mutation-run.log`.
 
+## Task 5: container files and pause support
+
+The Docker client uploads binary tar data directly to a stopped or running
+container. The flat regular-file writer preserves bytes and permission modes;
+it refuses path names, duplicate entries and invalid numeric headers. No
+credential data is placed in exec arguments or a host bind mount. The fake
+Docker now keeps extracted files and models paused state in inspect and actions.
+
+The real Docker test exposed a mismatch in the plan: Engine 29.2 returns 500
+when unpause targets a non-paused container, whether running or stopped. The
+fake matches that result. Pause on a stopped/already-paused container and start
+on a paused one return 409. A stop of a paused container does stop and unfreeze
+it. Task 10 must inspect paused state and must not assume every redundant
+unpause returns 409 or treat an arbitrary 500 as success.
+
+- All 698 host tests in 91 files pass, with workspace type checks, lint and
+  hygiene. System tar extracts binary, Unicode, empty and multi-block files.
+- Two real Docker API tests pass, including exact binary extraction and mode
+  `640:0:0`, a live replacement, pause/unpause and stop while paused. The probe
+  uses the existing gate image with no network and leaves no container behind.
+- Eight mutations fail runtime assertions: path/duplicate acceptance,
+  permission loss, binary corruption, wrong upload type/encoding, ignored
+  pause and the incorrect unpause status.
+- Evidence: `/tmp/localdot-part4b-task5-full-host.log`,
+  `/tmp/localdot-part4b-task5-docker.log`,
+  `/tmp/localdot-part4b-task5-docker-review.log`,
+  `/tmp/localdot-part4b-task5-docker-final.log`, and
+  `/tmp/localdot-part4b-task5-mutation-run.log`.
+
 ## Remaining integration
 
-Tasks 5–16: cell proxy/trust
+Tasks 6–16: cell proxy/trust
 installation and boot checks, orchestration, Stop/resume, event logging, key
 sheet, real-cell isolation/canary acceptance, documentation and CI. The system
 Keychain/Stop carry from Part 4a also remains.

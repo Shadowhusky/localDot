@@ -10,11 +10,13 @@ import {
   DockerError,
   dockerSocketPath,
 } from "./docker.ts";
+import { tar } from "./tar.ts";
 
 interface Seen {
   method: string;
   url: string;
   body: string;
+  raw: Buffer;
   contentType: string | undefined;
 }
 
@@ -38,15 +40,17 @@ async function fakeDocker(
 ): Promise<{ socketPath: string; seen: Seen[] }> {
   const seen: Seen[] = [];
   const socketPath = await listen((req, res) => {
-    let body = "";
-    req.on("data", (c) => {
-      body += c;
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => {
+      chunks.push(c);
     });
     req.on("end", () => {
+      const raw = Buffer.concat(chunks);
       const s = {
         method: req.method ?? "",
         url: req.url ?? "",
-        body,
+        body: raw.toString("utf8"),
+        raw,
         contentType: req.headers["content-type"],
       };
       seen.push(s);
@@ -71,6 +75,34 @@ async function fakeDocker(
 const missingSocket = () => join(tmpdir(), "ld-missing.sock");
 
 describe("DockerClient", () => {
+  it("uploads exact binary tar bytes with an encoded target directory and container", async () => {
+    const { socketPath, seen } = await fakeDocker(() => ({ status: 200 }));
+    const archive = tar([{ name: "proxy-token", data: Buffer.from([0, 255, 192, 10, 128]) }]);
+    await new DockerClient(socketPath).putArchive(
+      "localdot-desktop-a/b",
+      "/etc/local dot's/cell",
+      archive,
+    );
+    expect(seen[0]).toMatchObject({
+      method: "PUT",
+      url: `/${DOCKER_API}/containers/localdot-desktop-a%2Fb/archive?path=%2Fetc%2Flocal+dot%27s%2Fcell`,
+      contentType: "application/x-tar",
+    });
+    expect(seen[0]?.raw).toEqual(archive);
+  });
+
+  it("rejects a request with both JSON and raw data before sending it", async () => {
+    const { socketPath, seen } = await fakeDocker(() => ({ status: 200 }));
+    await expect(
+      new DockerClient(socketPath).request({
+        method: "PUT",
+        path: "/containers/c/archive",
+        body: { ignored: true },
+        raw: { contentType: "application/x-tar", data: Buffer.alloc(0) },
+      }),
+    ).rejects.toMatchObject({ name: "DockerError", status: 0 });
+    expect(seen).toHaveLength(0);
+  });
   it("gives up on a socket that never answers", async () => {
     const socketPath = await listen(() => {});
     const started = Date.now();

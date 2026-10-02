@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient, DockerError } from "../docker.ts";
+import { tar } from "../tar.ts";
 import { type FakeDocker, startFakeDocker } from "./fake-docker.ts";
 
 let fake: FakeDocker | undefined;
@@ -15,6 +16,63 @@ const statusOf = (p: Promise<unknown>) =>
   );
 
 describe("the fake Docker", () => {
+  it("pauses as Docker does: a running container only, stopped even while paused", async () => {
+    fake = await startFakeDocker();
+    const docker = new DockerClient(fake.socketPath);
+    const post = (path: string) => statusOf(docker.request({ method: "POST", path }));
+    await docker.request({
+      method: "POST",
+      path: "/containers/create",
+      query: { name: "c" },
+      body: { Image: "i", HostConfig: {} },
+    });
+    expect(await post("/containers/c/pause")).toBe(409);
+    expect(await post("/containers/c/start")).toBe("ok");
+    expect(await post("/containers/c/pause")).toBe("ok");
+    expect(await docker.request({ method: "GET", path: "/containers/c/json" })).toMatchObject({
+      State: { Running: true, Paused: true },
+    });
+    expect(await post("/containers/c/pause")).toBe(409);
+    expect(await post("/containers/c/start")).toBe(409);
+    expect(await post("/containers/c/unpause")).toBe("ok");
+    expect(await post("/containers/c/unpause")).toBe(500);
+    expect(await post("/containers/c/pause")).toBe("ok");
+    expect(await post("/containers/c/stop")).toBe("ok");
+    expect(fake.state.containers.get("c")).toMatchObject({ running: false, paused: false });
+    expect(await post("/containers/c/unpause")).toBe(500);
+  });
+
+  it("extracts exact archive bytes into stopped and running containers", async () => {
+    fake = await startFakeDocker();
+    const docker = new DockerClient(fake.socketPath);
+    await docker.request({
+      method: "POST",
+      path: "/containers/create",
+      query: { name: "c" },
+      body: { Image: "i", HostConfig: {} },
+    });
+    const value = Buffer.from([0, 255, 128, 1]);
+    await docker.putArchive("c", "/etc/localdot/cell", tar([{ name: "proxy-token", data: value }]));
+    expect(fake.state.containers.get("c")?.files.get("/etc/localdot/cell/proxy-token")).toEqual(
+      value,
+    );
+    await docker.request({ method: "POST", path: "/containers/c/start" });
+    await docker.putArchive(
+      "c",
+      "/etc/localdot/cell",
+      tar([
+        { name: "proxy-token", data: "new" },
+        { name: "empty", data: "" },
+      ]),
+    );
+    expect(
+      fake.state.containers.get("c")?.files.get("/etc/localdot/cell/proxy-token")?.toString(),
+    ).toBe("new");
+    expect(fake.state.containers.get("c")?.files.get("/etc/localdot/cell/empty")).toEqual(
+      Buffer.alloc(0),
+    );
+    expect(await statusOf(docker.putArchive("missing", "/tmp", tar([])))).toBe(404);
+  });
   it("refuses what Docker refuses, so an undo in the wrong order shows", async () => {
     fake = await startFakeDocker();
     const docker = new DockerClient(fake.socketPath);

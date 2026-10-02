@@ -16,11 +16,13 @@ export class DockerError extends Error {
 }
 
 export interface DockerRequest {
-  method: "GET" | "POST" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "DELETE";
   path: string;
   query?: Record<string, string>;
   body?: unknown;
   timeoutMs?: number;
+  // Binary archive uploads never pass through JSON or UTF-8 encoding.
+  raw?: { contentType: string; data: Buffer };
 }
 
 export interface DockerVersion {
@@ -77,11 +79,12 @@ export class DockerClient {
                 req.path,
               ),
         );
-      let body: string | undefined;
+      let body: string | Buffer | undefined;
       let r: ClientRequest;
       // An unserialisable body or a path Node refuses throws here, before anything is sent.
       try {
-        body = req.body === undefined ? undefined : JSON.stringify(req.body);
+        if (req.raw && req.body !== undefined) throw new TypeError("choose JSON or raw data");
+        body = req.raw?.data ?? (req.body === undefined ? undefined : JSON.stringify(req.body));
         r = httpRequest(
           {
             socketPath: this.socketPath,
@@ -93,7 +96,7 @@ export class DockerClient {
               ...(body === undefined
                 ? {}
                 : {
-                    "content-type": "application/json",
+                    "content-type": req.raw?.contentType ?? "application/json",
                     "content-length": Buffer.byteLength(body),
                   }),
             },
@@ -141,6 +144,16 @@ export class DockerClient {
 
   version(): Promise<DockerVersion> {
     return this.request<DockerVersion>({ method: "GET", path: "/version" });
+  }
+
+  // Docker extracts this into a stopped or running container, without a host mount or exec args.
+  putArchive(container: string, dir: string, archive: Buffer): Promise<void> {
+    return this.request({
+      method: "PUT",
+      path: `/containers/${encodeURIComponent(container)}/archive`,
+      query: { path: dir },
+      raw: { contentType: "application/x-tar", data: archive },
+    });
   }
 
   // Unversioned, so an engine that refuses DOCKER_API still says which API versions it serves.

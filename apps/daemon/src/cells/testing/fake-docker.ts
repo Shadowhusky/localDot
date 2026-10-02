@@ -12,6 +12,8 @@ export interface FakeContainer {
     NetworkingConfig?: { EndpointsConfig: Record<string, unknown> };
   };
   running: boolean;
+  paused: boolean;
+  files: Map<string, Buffer>;
   exitCode: number;
   starts: number;
   ports: Record<string, { HostIp: string; HostPort: string }[]>;
@@ -102,7 +104,7 @@ export async function startFakeDocker(
   const containerJson = (c: FakeContainer) => ({
     Id: `id-${c.name}`,
     Name: `/${c.name}`,
-    State: { Running: c.running, ExitCode: c.exitCode, Error: "" },
+    State: { Running: c.running, Paused: c.paused, ExitCode: c.exitCode, Error: "" },
     HostConfig: c.body.HostConfig,
     NetworkSettings: { Ports: c.running ? c.ports : {}, Networks: c.networks },
   });
@@ -125,6 +127,7 @@ export async function startFakeDocker(
     path: string,
     query: URLSearchParams,
     body: unknown,
+    raw: Buffer,
   ): { status: number; body?: unknown } {
     if (method === "GET" && path === "/version") return json(200, state.version);
     const image = /^\/images\/(.+)\/json$/.exec(path);
@@ -232,6 +235,8 @@ export async function startFakeDocker(
         name,
         body: spec,
         running: false,
+        paused: false,
+        files: new Map(),
         exitCode: 0,
         starts: 0,
         ports: {},
@@ -239,12 +244,32 @@ export async function startFakeDocker(
       });
       return json(201, { Id: `id-${name}`, Warnings: [] });
     }
-    const action = /^\/containers\/([^/]+)\/(json|start|stop)$/.exec(path);
+    const archive = /^\/containers\/([^/]+)\/archive$/.exec(path);
+    if (method === "PUT" && archive) {
+      const c = state.containers.get(segment(archive));
+      if (!c) return notFound("container");
+      for (const [name, data] of untar(raw)) c.files.set(`${query.get("path")}/${name}`, data);
+      return { status: 200 };
+    }
+    const action = /^\/containers\/([^/]+)\/(json|start|stop|pause|unpause)$/.exec(path);
     if (action) {
       const c = state.containers.get(segment(action));
       if (!c) return notFound("container");
       if (action[2] === "json") return json(200, containerJson(c));
+      if (action[2] === "pause" || action[2] === "unpause") {
+        const pausing = action[2] === "pause";
+        // Verified on Engine 29.2: unpause of a non-paused container is a 500, even if stopped.
+        if (!pausing && !c.paused)
+          return json(500, { message: `container ${c.name} is not paused` });
+        if (!c.running || c.paused === pausing) {
+          return json(409, { message: `container ${c.name} cannot ${action[2]} now` });
+        }
+        c.paused = pausing;
+        return { status: 204 };
+      }
       if (action[2] === "start") {
+        if (c.paused)
+          return json(409, { message: "cannot start a paused container, try unpause instead" });
         if (c.running) return { status: 304 };
         c.starts += 1;
         c.running = true;
@@ -257,6 +282,7 @@ export async function startFakeDocker(
       }
       if (!c.running) return { status: 304 };
       c.running = false;
+      c.paused = false;
       c.exitCode = 0;
       return { status: 204 };
     }
@@ -278,15 +304,17 @@ export async function startFakeDocker(
   const dir = mkdtempSync(join(tmpdir(), "ld-fake-docker-"));
   const socketPath = join(dir, "d.sock");
   const server: Server = createServer((req, res) => {
-    let text = "";
-    req.on("data", (c) => {
-      text += c;
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => {
+      chunks.push(c);
     });
     req.on("end", async () => {
       const url = new URL(req.url ?? "/", "http://docker");
       const api = /^\/v(\d+\.\d+)\//.exec(url.pathname)?.[1];
       const path = url.pathname.replace(/^\/v\d+\.\d+/, "");
-      const body = text ? JSON.parse(text) : undefined;
+      const raw = Buffer.concat(chunks);
+      const isJson = (req.headers["content-type"] ?? "").includes("application/json");
+      const body = isJson && raw.length > 0 ? JSON.parse(raw.toString("utf8")) : undefined;
       state.calls.push({ method: req.method ?? "", path, query: url.searchParams, body });
       await state.holds.get(`${req.method} ${path}`);
       const request = `${req.method} ${path}`;
@@ -294,7 +322,7 @@ export async function startFakeDocker(
       const out =
         (failed ? json(500, { message: `fake docker: refusing ${request}` }) : undefined) ??
         (api === undefined ? undefined : refusal(api, path)) ??
-        handle(req.method ?? "", path, url.searchParams, body);
+        handle(req.method ?? "", path, url.searchParams, body, raw);
       if (out.body === undefined) {
         res.writeHead(out.status);
         res.end();
@@ -316,4 +344,19 @@ export async function startFakeDocker(
         }),
       ),
   };
+}
+
+// Only the flat regular-file ustar archives produced by tar.ts are used by these tests.
+function untar(archive: Buffer): [string, Buffer][] {
+  const files: [string, Buffer][] = [];
+  for (let at = 0; at + 512 <= archive.length; ) {
+    const header = archive.subarray(at, at + 512);
+    if (header.every((b) => b === 0)) break;
+    const field = (from: number, to: number) =>
+      header.subarray(from, to).toString("ascii").replace(/\0.*$/s, "");
+    const size = Number.parseInt(field(124, 136), 8);
+    files.push([field(0, 100), Buffer.from(archive.subarray(at + 512, at + 512 + size))]);
+    at += 512 + Math.ceil(size / 512) * 512;
+  }
+  return files;
 }
