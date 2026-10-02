@@ -754,6 +754,8 @@ localdot/
 | M8 | Premium feel and more providers | Auto-camera, what-changed flash, agent vision, scroll and drag visuals, avatar host and default mascot, soft sounds; OpenAI and Google native computer tools; the Codex harness for ChatGPT plans, with its own Codex home, sign-in and token refresh verified; Bedrock and Vertex signing in keyd |
 | M9 | Ship | `npx localdot`, onboarding, `doctor`, `update`, docs, arm64 CI, publishing hygiene |
 
+**Order (user, 2026-10-02):** M9 ships before M8. M8 (premium feel and more providers) follows the first release, so nothing in M5–M7 depends on it.
+
 **Spikes (M0),** as briefed. They ran on 2026-09-30 and 2026-10-01, and each has a `FINDINGS.md`
 under `spikes/`. Where an outcome differs from its brief — S1's decoder in our own page, S2's
 xdotool fallback, S6's single compensation constant — the rest of this spec carries the outcome.

@@ -12,6 +12,9 @@ You are one job in the localDot core build, a localhost AI assistant. The contro
   - **Go:** `keyd/go.mod` names `toolchain go1.27.1`, so any Go ≥ 1.21 auto-fetches it through `proxy.golang.org` (`GOTOOLCHAIN=auto`; go.dev itself is not reachable here). Check that `go version` inside `keyd/` reports go1.27.1.
   - The repo pins TypeScript 7.0.2, Biome 2.5.15 and Vitest 5.0.3; use the repo's scripts.
 
+## Process
+- `jobs/PROCESS.md` sets each task's review tier (`full` or `light`) and the milestone order. Your job file still overrides it for your own job.
+
 ## Hard rules
 1. Commits are conventional (`type(scope): summary`), with **no `Co-Authored-By`, no "Generated with", no session link and no AI attribution of any kind**. If your git tooling adds one, amend it away before pushing.
 2. Push ONLY your own `claude/...` branches, named in your job file. Never push to `main`, `feat/*` or `planning`. Never force-push anyone else's branch.
