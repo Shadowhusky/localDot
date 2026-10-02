@@ -1,0 +1,116 @@
+import {
+  clipText,
+  type HairpinGuard,
+  type Sealed,
+  SecretBinding,
+  sealSecret,
+} from "@localdot/protocol";
+import { type ApiClient, ApiError } from "../lib/api.ts";
+import { valueProblem } from "./binding.ts";
+
+export interface KeydHealth {
+  online: boolean;
+  bootId?: string;
+  sealKey?: string;
+  audit?: { ok: boolean; error?: string };
+  hairpin?: HairpinGuard;
+  error?: string;
+}
+
+export interface KeyRecord {
+  id: string;
+  kind: "llm" | "http";
+  provider?: string;
+  baseURL?: string;
+  hosts?: string[] | null;
+  header?: string;
+  format?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type Seal = (publicKey: string, binding: SecretBinding, value: string) => Promise<Sealed>;
+
+export class KeyProblem extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "KeyProblem";
+  }
+}
+
+export const loadHealth = (api: ApiClient) => api.get<KeydHealth>("/api/keyd");
+
+export async function loadKeys(api: ApiClient): Promise<KeyRecord[]> {
+  return (await api.get<{ keys: KeyRecord[] }>("/api/keys")).keys;
+}
+
+// Seals the value to keyd's current boot key and hands the daemon only the binding and the
+// ciphertext. keyd answers 409 bad-seal when it restarted (new boot key) after the seal key was
+// read: the value is sealed once more to the new key.
+export async function saveKey(
+  api: ApiClient,
+  binding: SecretBinding,
+  value: string,
+  seal: Seal = sealSecret,
+): Promise<{ key: KeyRecord; restart: boolean }> {
+  // Snapshot the allowed fields before any await. The form may change while
+  // sealing, and TypeScript alone cannot keep extra runtime fields off the wire.
+  const checked = SecretBinding.safeParse(binding);
+  if (!checked.success) throw new KeyProblem("Check the key's name and where it can be used.");
+  const problem = valueProblem(value);
+  if (problem) throw new KeyProblem(problem);
+  const bound = checked.data;
+  const send = async () => {
+    const health = await loadHealth(api);
+    if (!health.online || !health.sealKey)
+      throw new KeyProblem("The key layer is offline: start keyd.");
+    const sealed = await seal(health.sealKey, bound, value);
+    return api.post<{ key: KeyRecord; restart: boolean }>("/api/keys", { binding: bound, sealed });
+  };
+  try {
+    return await send();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 409 && errorCode(err) === "bad-seal")
+      return send();
+    throw err;
+  }
+}
+
+export const deleteKey = (api: ApiClient, id: string) =>
+  api.del(`/api/keys/${encodeURIComponent(id)}`);
+
+// The daemon's refusals are `{ error, message }`; anything else becomes one plain sentence.
+export function problemText(err: unknown): string {
+  if (err instanceof KeyProblem) return err.message;
+  if (err instanceof ApiError) {
+    const body = parse(err.message);
+    if (body?.message) return sentence(body.message);
+    if (err.status === 503) return "The key layer is offline: start keyd.";
+  }
+  return "Something went wrong saving the key. Try again.";
+}
+
+function errorCode(err: unknown): string | undefined {
+  return err instanceof ApiError ? parse(err.message)?.error : undefined;
+}
+
+function parse(text: string): { error?: string; message?: string } | undefined {
+  try {
+    const body = JSON.parse(text) as unknown;
+    if (typeof body !== "object" || body === null || Array.isArray(body)) return undefined;
+    const fields = body as Record<string, unknown>;
+    return {
+      error: typeof fields.error === "string" ? fields.error : undefined,
+      message: typeof fields.message === "string" ? fields.message : undefined,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function sentence(text: string): string {
+  const t = clipText(text, 512)
+    .trim()
+    .replace(/^keys: /, "");
+  return `${t.charAt(0).toUpperCase()}${t.slice(1)}${/[.!?]$/.test(t) ? "" : "."}`;
+}

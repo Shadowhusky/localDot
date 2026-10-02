@@ -415,8 +415,41 @@ A failed refresh reports that a restart is needed rather than claiming success.
   `/tmp/localdot-part4b-task11-mutations.log`, and
   `/tmp/localdot-part4b-task11-mutations-recheck.log`.
 
+## Task 12a: key-form logic
+
+The form logic supports every provider already implemented by keyd, validates
+key values and bindings, and describes stored metadata. Save snapshots and
+strictly validates the binding before waiting for health or WebCrypto, so later
+form edits and extra runtime fields cannot change what is sent. Only HTTP 409
+`bad-seal` triggers one fresh seal/retry. Error messages are type-checked, bounded
+and cleaned; arbitrary exceptions are not echoed.
+
+The state hook serializes polls, retries transient list failures, clears stale
+keys offline, and reloads after a new boot or a successful save/delete. Requests
+from a replaced API or unmounted view cannot overwrite current state. The key's
+plaintext is never kept in hook state. Status distinguishes unknown, offline,
+audit hold and an inactive/unknown hairpin guard.
+
+- All 884 host tests in 104 files, workspace types, lint and hygiene pass.
+  Twenty-six focused form/controller checks pass; ten review regressions failed
+  against the initial handoff implementation before fixes.
+- The real WebCrypto client against the production daemon/keyd passes a forced
+  restart between sealing and saving: first POST 409, second POST 200. Both
+  contain only binding/ciphertext, listing exposes no value, extra plaintext
+  binding fields are rejected before any request, and deletion succeeds.
+  Fake in-memory credentials only; owned services and state are removed.
+- All thirteen deliberate regressions are caught, covering plaintext requests,
+  mutable/extra binding fields, value validation, offline sealing, retry bounds,
+  diagnostic handling, overlapping polls, failed-list retry, changed boots and
+  stale callbacks.
+- Evidence: `/tmp/localdot-part4b-task12a-review-red.log`,
+  `/tmp/localdot-part4b-task12a-scoped-final.log`,
+  `/tmp/localdot-part4b-task12a-host.log`,
+  `/tmp/localdot-part4b-task12a-smoke.log`, and
+  `/tmp/localdot-part4b-task12a-mutations.log`.
+
 ## Remaining integration
 
-Tasks 12a–16: key form and paused UI, real-cell isolation/canary acceptance,
+Tasks 12b–16: key sheet and paused UI, real-cell isolation/canary acceptance,
 documentation and CI. The basic real Stop/resume path and system Keychain carry
 are verified above; the broader Task 15 canary scenarios remain.
