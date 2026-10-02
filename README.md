@@ -55,7 +55,7 @@ enforces task and daily model budgets. Its admin API uses a private Unix socket.
 
 From `keyd/`, run `go test -race ./...` or build with
 `go build -o bin/keyd ./cmd/keyd`. For a local instance with an in-memory vault,
-run `bin/keyd -home /tmp/localdot-keyd-demo -vault memory`. The admin socket is
+run `bin/keyd -home /tmp/localdot-keyd-demo -vault memory -natpmp off -stun off`. The admin socket is
 `/tmp/localdot-keyd-demo/keyd/admin.sock`; cell listeners use ports 4760–4789.
 `bin/keyd verify-audit /tmp/localdot-keyd-demo/keyd/audit.jsonl` checks the audit
 chain. Use a short home path because macOS limits Unix socket path lengths.
@@ -65,3 +65,12 @@ make no paid model calls. The optional
 `KEYD_KEYCHAIN_TEST=1 go test ./internal/vault -run LoginKeychain` exercises the
 macOS login Keychain with disposable test entries. Daemon and UI integration is
 the next part of development.
+
+keyd learns and denies the network's public IPv4 address to block connections
+back through the router. It asks the router first (NAT-PMP); if the router has
+no public answer, it asks the configured STUN server (Cloudflare by default).
+`-stun off` disables that fallback; `-natpmp off -stun off` disables discovery.
+The admin status reports whether this guard is active, unknown or off. It retries
+unknown addresses every 30 seconds for four rounds, then every five minutes,
+refreshes known addresses every five minutes, and checks for a changed gateway
+every 30 seconds. Tests use local fake routers and STUN servers.

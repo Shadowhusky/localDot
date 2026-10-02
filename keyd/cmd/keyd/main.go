@@ -41,7 +41,14 @@ type Config struct {
 	Home  string
 	Vault string
 	Ports egress.PortRange
+	// The zero value asks nobody, as the tests do.
+	Discovery netguard.Discovery
 }
+
+const (
+	hairpinEvery = 5 * time.Minute
+	hairpinRetry = 30 * time.Second
+)
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stderr))
@@ -56,15 +63,24 @@ func run(args []string, stderr io.Writer) int {
 	home := fs.String("home", defaultHome(), "localDot home; keyd keeps its state in <home>/keyd")
 	store := fs.String("vault", "keychain", "where secret values live: keychain, or memory for tests")
 	ports := fs.String("ports", "4760-4789", "the listener ports the daemon may ask for")
+	natpmp := fs.String("natpmp", "on", "ask the router for the public address keyd denies: on or off")
+	stun := fs.String("stun", netguard.DefaultSTUN, "STUN server asked when the router gives no public address, or off")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
 	portRange, err := parsePorts(*ports)
-	if err != nil || (*store != "keychain" && *store != "memory") || fs.NArg() != 0 {
-		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX and -vault wants keychain or memory")
+	if err != nil || (*store != "keychain" && *store != "memory") || (*natpmp != "on" && *natpmp != "off") || fs.NArg() != 0 {
+		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault keychain or memory, -natpmp on or off")
 		return 2
 	}
-	d, err := start(Config{Home: *home, Vault: *store, Ports: portRange})
+	discovery := netguard.Discovery{Timeout: 3 * time.Second}
+	if *natpmp == "on" {
+		discovery.Router = netguard.DefaultGateway
+	}
+	if *stun != "off" {
+		discovery.STUN = *stun
+	}
+	d, err := start(Config{Home: *home, Vault: *store, Ports: portRange, Discovery: discovery})
 	if err != nil {
 		fmt.Fprintf(stderr, "keyd: %v\n", err)
 		return 1
@@ -78,17 +94,20 @@ func run(args []string, stderr io.Writer) int {
 }
 
 type Daemon struct {
-	BootID    string
-	Socket    string
-	lock      *os.File
-	log       *audit.Log
-	manager   *egress.Manager
-	server    *http.Server
-	closeOnce sync.Once
-	cancel    context.CancelFunc
-	handlerMu sync.Mutex
-	handlers  sync.WaitGroup
-	closing   bool
+	BootID       string
+	Socket       string
+	lock         *os.File
+	log          *audit.Log
+	manager      *egress.Manager
+	server       *http.Server
+	closeOnce    sync.Once
+	cancel       context.CancelFunc
+	handlerMu    sync.Mutex
+	handlers     sync.WaitGroup
+	closing      bool
+	public       *netguard.Public
+	stopLearning chan struct{}
+	learning     sync.WaitGroup
 }
 
 func start(cfg Config) (*Daemon, error) {
@@ -145,7 +164,8 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	hub := events.NewHub()
 	registry := keys.NewRegistry()
 	local := keys.LocalRoutes()
-	guard := netguard.New(netguard.InterfacePrefixes)
+	d.public = &netguard.Public{}
+	guard := netguard.New(netguard.WithPublic(netguard.InterfacePrefixes, d.public))
 	d.manager = egress.NewManager(egress.ManagerDeps{
 		Deps: egress.Deps{
 			Registry: registry, Vault: v, Audit: d.log, Events: hub,
@@ -160,7 +180,7 @@ func (d *Daemon) init(dir string, cfg Config) error {
 		return err
 	}
 	api := &admin.Server{Manager: d.manager, Vault: v, Registry: registry, Opener: opener, Settings: settings,
-		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version}
+		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version, Hairpin: d.public}
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	d.server = &http.Server{
@@ -168,6 +188,17 @@ func (d *Daemon) init(dir string, cfg Config) error {
 		ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
 		IdleTimeout: 60 * time.Second, MaxHeaderBytes: 16 << 10,
 		ErrorLog: log.New(io.Discard, "", 0),
+	}
+	if cfg.Discovery.Off() {
+		d.public.Learn(cfg.Discovery)
+	} else {
+		d.stopLearning = make(chan struct{})
+		logf := func(format string, args ...any) { fmt.Fprintf(os.Stderr, format+"\n", args...) }
+		d.learning.Add(1)
+		go func() {
+			defer d.learning.Done()
+			d.public.Keep(cfg.Discovery, hairpinEvery, hairpinRetry, d.stopLearning, logf)
+		}()
 	}
 	go d.server.Serve(ln)
 	_, err = d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "start", Detail: "boot " + d.BootID + ", version " + version})
@@ -177,6 +208,9 @@ func (d *Daemon) init(dir string, cfg Config) error {
 // Close stops serving, closes every cell, records the stop and releases the lock.
 func (d *Daemon) Close() {
 	d.closeOnce.Do(func() {
+		if d.stopLearning != nil {
+			close(d.stopLearning)
+		}
 		d.handlerMu.Lock()
 		d.closing = true
 		d.handlerMu.Unlock()
@@ -192,6 +226,7 @@ func (d *Daemon) Close() {
 		// Server.Close interrupts socket reads but does not wait for handlers.
 		// Keep the home lock until every admitted admin mutation has returned.
 		d.handlers.Wait()
+		d.learning.Wait()
 		if d.log != nil {
 			d.log.Write(audit.Line{Kind: audit.KindKeyd, Decision: audit.Allow, Reason: "stop", Detail: "boot " + d.BootID})
 			d.log.Close()

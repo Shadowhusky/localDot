@@ -20,6 +20,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/events"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/llm"
+	"github.com/shadowhusky/localdot/keyd/internal/netguard"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 )
 
@@ -38,6 +39,7 @@ type Server struct {
 	Events   *events.Hub
 	BootID   string
 	Version  string
+	Hairpin  *netguard.Public
 }
 
 func (s *Server) Handler() http.Handler {
@@ -101,7 +103,15 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 		"limits":  s.Settings.Limits(),
 		"day":     map[string]any{"date": date, "spentUSD": spent},
 		"audit":   auditState,
+		"hairpin": s.hairpin(),
 	})
+}
+
+func (s *Server) hairpin() any {
+	if s.Hairpin == nil {
+		return nil
+	}
+	return s.Hairpin.Status()
 }
 
 func (s *Server) listSecrets(w http.ResponseWriter, _ *http.Request) {

@@ -82,6 +82,33 @@ func TestEveryStaticRuleAndEmbeddedFormIsDenied(t *testing.T) {
 		"feff:ffff:ffff:ffff:ffff:ffff:ffff:ffff": "site-local fec0::/10",
 		"ff00:0:0:0:0:0:0:0":                      "multicast ff00::/8",
 		"ffff:ffff:ffff:ffff:ffff:ffff:ffff:ffff": "multicast ff00::/8",
+
+		"2001:2:0:0:0:0:0:0":                     "benchmarking 2001:2::/48",
+		"2001:2:0:ffff:ffff:ffff:ffff:ffff":      "benchmarking 2001:2::/48",
+		"2001:10:0:0:0:0:0:0":                    "orchid 2001:10::/28",
+		"2001:1f:ffff:ffff:ffff:ffff:ffff:ffff":  "orchid 2001:10::/28",
+		"2001:20:0:0:0:0:0:0":                    "orchid v2 2001:20::/28",
+		"2001:2f:ffff:ffff:ffff:ffff:ffff:ffff":  "orchid v2 2001:20::/28",
+		"3fff:0:0:0:0:0:0:0":                     "documentation 3fff::/20",
+		"3fff:fff:ffff:ffff:ffff:ffff:ffff:ffff": "documentation 3fff::/20",
+
+		// Outside 2000::/3 and in no named range: SIIT, the rest of 64:ff9b::/32 around the
+		// well-known and local-use NAT64 prefixes, the dummy prefix, SRv6 SIDs, unassigned space.
+		"::1:0:0":                                 "outside global unicast 2000::/3",
+		"::ffff:0:808:808":                        "outside global unicast 2000::/3",
+		"64:ff9b:0:ffff:ffff:ffff:ffff:ffff":      "outside global unicast 2000::/3",
+		"64:ff9b:2::":                             "outside global unicast 2000::/3",
+		"64:ff9b:ffff:ffff:ffff:ffff:ffff:ffff":   "outside global unicast 2000::/3",
+		"ff:ffff:ffff:ffff:ffff:ffff:ffff:ffff":   "outside global unicast 2000::/3",
+		"100:0:0:1::":                             "outside global unicast 2000::/3",
+		"100:0:0:1:ffff:ffff:ffff:ffff":           "outside global unicast 2000::/3",
+		"5f00::":                                  "outside global unicast 2000::/3",
+		"5f00:ffff:ffff:ffff:ffff:ffff:ffff:ffff": "outside global unicast 2000::/3",
+		"1fff:ffff:ffff:ffff:ffff:ffff:ffff:ffff": "outside global unicast 2000::/3",
+		"4000::": "outside global unicast 2000::/3",
+		"fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff": "outside global unicast 2000::/3",
+		"fe00::": "outside global unicast 2000::/3",
+		"fe7f:ffff:ffff:ffff:ffff:ffff:ffff:ffff": "outside global unicast 2000::/3",
 	}
 	for addr, rule := range denied {
 		err := check(g, addr)
@@ -97,10 +124,10 @@ func TestEveryStaticRuleAndEmbeddedFormIsDenied(t *testing.T) {
 		"191.255.255.255", "192.0.1.0", "192.0.1.255", "192.0.3.0", "192.167.255.255", "192.169.0.0",
 		"198.17.255.255", "198.20.0.0", "198.51.99.255", "198.51.101.0", "203.0.112.255",
 		"203.0.114.0", "223.255.255.255", "168.63.129.15", "168.63.129.17",
-		"::1:0:0", "64:ff9b:0:ffff:ffff:ffff:ffff:ffff", "64:ff9b:2::",
-		"ff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "100:0:0:1::", "2000:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
-		"2001:1::", "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", "2001:db9::",
-		"fbff:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "fe00::", "fe7f:ffff:ffff:ffff:ffff:ffff:ffff:ffff",
+		"2000::", "2000:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "2001:1::",
+		"2001:1:ffff:ffff:ffff:ffff:ffff:ffff", "2001:2:1::", "2001:f:ffff:ffff:ffff:ffff:ffff:ffff",
+		"2001:30::", "2001:db7:ffff:ffff:ffff:ffff:ffff:ffff", "2001:db9::",
+		"3ffe:ffff:ffff:ffff:ffff:ffff:ffff:ffff", "3fff:1000::", "64:ff9b::808:808",
 	} {
 		if err := check(g, addr); err != nil {
 			t.Errorf("%s: %v, want it to pass", addr, err)

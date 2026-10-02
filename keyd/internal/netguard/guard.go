@@ -41,7 +41,11 @@ var static = []rule{
 	r("64:ff9b:1::/48", "local nat64"),
 	r("100::/64", "discard"),
 	r("2001::/32", "teredo"),
+	r("2001:2::/48", "benchmarking"),
+	r("2001:10::/28", "orchid"),
+	r("2001:20::/28", "orchid v2"),
 	r("2001:db8::/32", "documentation"),
+	r("3fff::/20", "documentation"),
 	r("fc00::/7", "unique local"),
 	r("fe80::/10", "link-local"),
 	r("fec0::/10", "site-local"),
@@ -51,6 +55,8 @@ var static = []rule{
 var (
 	nat64     = netip.MustParsePrefix("64:ff9b::/96")
 	sixToFour = netip.MustParsePrefix("2002::/16")
+	// Other IPv6 space is special-purpose. NAT64's embedded IPv4 is checked below.
+	globalUnicast = netip.MustParsePrefix("2000::/3")
 )
 
 // DeniedError is returned for every refused address.
@@ -97,6 +103,9 @@ func (g *Guard) Check(ap netip.AddrPort) error {
 			if s.prefix.Contains(a) {
 				return &DeniedError{Target: addr.String(), Rule: s.name}
 			}
+		}
+		if a.Is6() && !globalUnicast.Contains(a) && !nat64.Contains(a) {
+			return &DeniedError{Target: addr.String(), Rule: "outside global unicast 2000::/3"}
 		}
 		for _, p := range own {
 			if p.Addr() == a {
