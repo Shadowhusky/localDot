@@ -143,9 +143,10 @@ Run it as a local agent in the worktree below.
   - Execution ledger with every ruling: `.superpowers/sdd/2026-10-01-localdot-avatar-part3/progress.md` in the worktree. Its rulings amend the briefs.
   - The same folder holds the task briefs (`task-N-brief.md`), `global-constraints.md` (including the private pack's path), the reports and `preflight.md`.
 
-### State (2026-10-02, about 16:30 UK time)
+### State (2026-10-02, about 16:45 UK time; `wip/avatar-part3` @ `ceb00b6`)
+The user handed this whole lane to the local agent. The Claude agents are stopped, their leftover servers are shut down, and ports 4752 and 4753 are free.
 - **Done:** Tasks 1–6 and 8.
-- **Task 7 review fix round:** items 3, 4 and 6 are done. Items 1, 2, 5 and 7 are in progress; a Claude agent was working on them at 16:29.
+- **Task 7 review fix round:** items 1, 3, 4 and 6 are done, and `pnpm test:voiced` is green (104 passed). Items 2, 5 and 7 remain.
 - **Task 9:** partly built. The language fix is committed; the mic, listener and STT relay are work in progress.
 - **Task 10:** not started. It is live runs on the Mac: latency acceptance, the demo clip with the private voice, and a check of how far the mouth lags the voice.
 - **Last:** one final review of the whole branch.
