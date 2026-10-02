@@ -17,3 +17,18 @@ jobs:
       - run: pnpm test
       - run: pnpm hygiene
       - run: pnpm --filter @localdot/protocol schema && git diff --exit-code packages/protocol/schema
+  keyd:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: keyd
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: keyd/go.mod
+          cache: false
+      - run: test -z "$(gofmt -l .)"
+      - run: go vet ./...
+      - run: GOOS=darwin go vet ./...
+      - run: go test -race ./...

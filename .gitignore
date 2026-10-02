@@ -12,3 +12,4 @@ apps/web/e2e/out/
 spikes/s8-hosted-client/client/
 test-results/
 apps/daemon/src/cells/testing/out/
+keyd/bin/

@@ -46,3 +46,22 @@ subprotocols `localdot.v1, localdot.token.<token>`.
 
 The token fragment is removed from the visible URL after loading. Browser history may retain
 the original install link, so treat that link as a credential.
+
+## keyd
+
+`keyd/` contains the Go key service. It holds real credentials, gives cells scoped
+surrogates, checks outbound destinations, scrubs credential reflections, and
+enforces task and daily model budgets. Its admin API uses a private Unix socket.
+
+From `keyd/`, run `go test -race ./...` or build with
+`go build -o bin/keyd ./cmd/keyd`. For a local instance with an in-memory vault,
+run `bin/keyd -home /tmp/localdot-keyd-demo -vault memory`. The admin socket is
+`/tmp/localdot-keyd-demo/keyd/admin.sock`; cell listeners use ports 4760–4789.
+`bin/keyd verify-audit /tmp/localdot-keyd-demo/keyd/audit.jsonl` checks the audit
+chain. Use a short home path because macOS limits Unix socket path lengths.
+
+The Go toolchain is pinned in `keyd/go.mod`. Tests use local fake providers and
+make no paid model calls. The optional
+`KEYD_KEYCHAIN_TEST=1 go test ./internal/vault -run LoginKeychain` exercises the
+macOS login Keychain with disposable test entries. Daemon and UI integration is
+the next part of development.
