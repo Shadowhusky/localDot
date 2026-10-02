@@ -1,4 +1,4 @@
-import { readFileSync, statSync } from "node:fs";
+import { readFileSync, realpathSync, statSync } from "node:fs";
 import { extname, resolve, sep } from "node:path";
 
 const TYPES: Record<string, string> = {
@@ -19,11 +19,13 @@ export interface StaticFile {
   type: string;
 }
 
+// rel is resolved under dir, and so is the file it names once every symlink on the way is followed:
+// a link inside dir that leads out of it is refused like "../".
 export function readStatic(dir: string, rel: string): StaticFile | undefined {
-  const root = resolve(dir);
-  const file = resolve(root, `.${rel.startsWith("/") ? rel : `/${rel}`}`);
-  if (file !== root && !file.startsWith(root + sep)) return undefined;
   try {
+    const root = realpathSync(dir);
+    const file = realpathSync(resolve(root, `.${rel.startsWith("/") ? rel : `/${rel}`}`));
+    if (!file.startsWith(root + sep)) return undefined;
     if (!statSync(file).isFile()) return undefined;
     return { body: readFileSync(file), type: TYPES[extname(file)] ?? "application/octet-stream" };
   } catch {
