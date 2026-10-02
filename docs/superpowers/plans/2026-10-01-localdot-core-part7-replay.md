@@ -3835,3 +3835,517 @@ git commit -m "feat(web): replay mode in the stage worker, decoding the recordin
 **Acceptance:** the three browser pins pass in system Chrome with no Docker running.
 
 ---
+
+### Task 14: Web — the Replay mode in the Theatre
+
+The Theatre's Replay mode, which Part 2's top bar has shown disabled until now. Its parts:
+- a sessions rail;
+- the stage in replay;
+- the HUD and caption as of t;
+- a scrubber with step chapters, typed ticks, idle bands, takeover and failure gaps, and hover
+  thumbnails;
+- play and pause, speeds from 0.5× to 8×, skip idle (on by default and labelled), step keys,
+  before/after compare;
+- plan and steps as of t, with future items dimmed;
+- "Jump to live" with the follow rule (research §4.9).
+
+**Review tier:** light (UI).
+
+**Files:**
+- Create: `apps/web/src/replay/{useReplay.ts,replay-view.ts,replay-view.test.ts,ReplayView.tsx,Scrubber.tsx,ReplayControls.tsx,CompareView.tsx,SessionsRail.tsx,GapCard.tsx}`,
+  `apps/web/e2e/replay-ui.spec.ts`
+- Modify: `apps/web/src/shell/TopBar.tsx` (live mode switch), `apps/web/src/shell/PlanRail.tsx`
+  and `apps/web/src/shell/StepRow.tsx` (`asOfMs`, `onSelect`, `thumb` source),
+  `apps/web/src/App.tsx` (mode state, URL), `apps/web/src/app.css`, `apps/web/src/theme.css`
+  (tokens below), `apps/web/src/App.test.tsx`
+
+**Interfaces** (exact):
+
+```ts
+// apps/web/src/replay/replay-view.ts — pure view models (unit-tested)
+export interface ChapterView { id: string; label: string; status: ChapterStatus; x0: number; x1: number; startT: number; endT: number }  // x in [0, 1] of the track
+export interface TickBucket { x: number; t: number; kinds: TickKind[]; tone: MarkTone; count: number; label: string }
+export interface IdleBand { x0: number; x1: number; skippedMs: number }
+export interface GapBand { x0: number; x1: number; reason: RecordingGapReason }
+export interface ScrubberModel { durationPlayMs: number; chapters: ChapterView[]; ticks: TickBucket[]; idle: IdleBand[]; gaps: GapBand[] }
+export const TICK_BUCKET_PX = 4;
+export function scrubberModel(i: { chapters: Chapter[]; ticks: Tick[]; map: PlaybackMap; gaps: RecordingGap[]; widthPx: number }): ScrubberModel;
+export function timeLabel(ms: number): string;                                  // "0:07", "12:03", "1:02:03"
+export function speedLabel(speed: ReplaySpeed, idleNow: boolean): string | null;
+export function gapCard(kind: RecordingGapReason | "none" | "expired" | "failed"): { title: string; body: string };
+export type ReplayCommand =
+  | { kind: "toggle-play" } | { kind: "pause" } | { kind: "step"; dir: -1 | 1 } | { kind: "jump"; ms: number }
+  | { kind: "speed"; dir: -1 | 1 } | { kind: "compare" } | { kind: "exit" };
+export function replayKey(e: { key: string; metaKey: boolean; ctrlKey: boolean; altKey: boolean; targetIsField: boolean }): ReplayCommand | null;
+export function compareFrames(model: SessionModel, stepId: string): { before: string | null; after: string | null };
+export type FollowAction = "stay" | "refresh" | "go-live";
+export const FOLLOW_EDGE_MS = 250;
+export const LIVE_EDGE_MS = 2000;
+export function followRule(o: { live: boolean; playing: boolean; tMs: number; lastMs: number | null; liveNowMs: number }): FollowAction;
+export function suggestedExportName(now: Date): string;                        // Task 15 uses it: "localdot-2026-10-02-1012.mp4"
+
+// apps/web/src/replay/useReplay.ts
+export interface ReplayState {
+  status: ReplayStatus["state"];
+  card: SessionCard | null;
+  info: RecordingInfo | null;
+  model: SessionModel;            // folded in place; `version` bumps ≤ 10 Hz
+  version: number;
+  tMs: number;
+  playing: boolean;
+  speed: ReplaySpeed;
+  skipIdle: boolean;
+  idleNow: boolean;
+  map: PlaybackMap | null;
+  compare: { before: string | null; after: string | null } | null;
+  run(command: ReplayCommand): void;
+  seek(tMs: number, mode: "exact" | "preview"): void;
+  setSpeed(speed: ReplaySpeed): void;
+  setSkipIdle(on: boolean): void;
+  selectStep(stepId: string): void;   // seek to its chapter start, exact
+}
+export function useReplay(api: ApiClient, sessionId: string | null, stage: RefObject<StageHandle | null>, opts: { onGoLive(): void }): ReplayState;
+```
+
+**Exact strings** (`gapCard`, `speedLabel`):
+
+| kind | title | body |
+|---|---|---|
+| `user-control` | You had control here | Nothing was recorded while you were in control. |
+| `stream-lost` | The picture dropped here | localDot lost the computer's stream. Steps are shown from screenshots. |
+| `disk-full` | Recording stopped: the disk was full | Steps are shown from screenshots. Free some space and new sessions record again. |
+| `size-cap` | Recording stopped at the size limit | Steps are shown from screenshots. |
+| `recorder-error` | Recording stopped | Steps are shown from screenshots. |
+| `expired` | The video was removed to save space | Steps are shown from screenshots. |
+| `none`, `failed` | No video for this session | Steps are shown from screenshots. |
+
+`speedLabel(speed, idleNow)` gives:
+- `null` at 1× when not idle;
+- `"Idle skipped"` at 1× when idle;
+- `"Playing at 4×"`, or `"Playing at 4× · idle skipped"` when idle;
+- 0.5× reads `"Playing at ½×"`.
+
+**Keys** (`replayKey`; `null` with ⌘, Ctrl or Alt held, or while a text field has focus):
+
+| Key | Command |
+|---|---|
+| Space | `toggle-play` |
+| K | `pause` |
+| ← / → | `step` −1 / +1 (previous or next chapter start) |
+| J / L | `jump` −10 000 / +10 000 ms |
+| `[` / `]` | `speed` −1 / +1 along `REPLAY_SPEEDS` |
+| B | `compare` |
+| Escape | `exit` (closes compare first; otherwise back to Watch) |
+
+**`followRule`:**
+- `live && playing && lastMs !== null && tMs ≥ lastMs − FOLLOW_EDGE_MS`:
+  - `liveNowMs − lastMs ≤ LIVE_EDGE_MS` → `"go-live"` (switch to Watch);
+  - otherwise → `"refresh"` (reopen the recording at the new `upto`; playback continues).
+- Otherwise `"stay"`. Stepping back always stays: research §4.9's follow rule, "stepping back
+  pins; reaching the end resumes live".
+
+**Theme tokens** (add to `theme.css`; no new hue: neutral whites at stated alphas):
+
+```css
+  --color-scrub-track: rgba(255, 255, 255, 0.1);
+  --color-scrub-played: rgba(255, 255, 255, 0.55);
+  --color-scrub-idle: rgba(255, 255, 255, 0.04);
+  --color-scrub-gap: rgba(255, 255, 255, 0.02);
+  --color-tick: rgba(255, 255, 255, 0.7);
+  --color-tick-quiet: rgba(255, 255, 255, 0.35);
+  --duration-scrub-settle: 120ms;
+```
+
+Tick tones are drawn with shapes, never colours:
+- neutral: a 3 px dot;
+- attention: a filled diamond;
+- failure: a 1.5 px cross;
+- user: a hollow ring.
+
+Kinds group under one tone, and the hover card names the kind in words.
+
+**Tests:**
+- `replay-view.test.ts`:
+  - `"places chapters on the playback track, idle skipped"`: two chapters around a 60 s idle gap.
+    With skip idle, `x1` of the first and `x0` of the second are 400 ms of track apart. Without
+    it, they are proportional.
+  - `"buckets 14 000 ticks into at most widthPx / 4 buckets, keeping the strongest tone"`:
+    failure > attention > user > neutral. The label reads `Click A and 12 more`.
+  - `"draws idle bands with the time they skip and gap bands by reason"`.
+  - `"formats time"`: 7 000 → `0:07`, 723 000 → `12:03`, 3 723 000 → `1:02:03`.
+  - `"labels honest speed"` and `"names every gap card"`: every row of the two tables above.
+  - `"maps keys and ignores them in fields and with modifiers"`.
+  - `"compares a step's screen before and after"`: `before` = the last observe before the step's
+    start (the session's first observe when none), `after` = the step's own observe;
+    `{ before: null, after: null }` without observes.
+  - `"follows to live only at the live edge, refreshes near it, stays when stepping back"`.
+  - `"suggests an export name with the date, never the title"`.
+- `App.test.tsx` (jsdom, scripted `fetchImpl` answering `/api/session-index`, `/card`,
+  `/recording` and the NDJSON events):
+  - `"enables Replay when a session exists and opens it from the top bar"`. The URL becomes
+    `?replay=<id>`, the sessions rail lists the card, the scrubber has one chapter per step, and
+    the stage area shows Part 2's Chromium-needed notice. jsdom has no frame tap, and the controls
+    still render.
+  - `"Space toggles play and Escape goes back to Watch"`.
+  - `"keeps Watch working when no session exists"`: Replay is disabled with the title
+    `No sessions yet`.
+- `replay-ui.spec.ts` (system Chrome, a seeded 10-minute session with a takeover, no Docker):
+  - `"plays, scrubs and steps through a seeded session"`:
+    1. Play at 4× for 3 s: `replay-time` advances by at least 8 s of session time, and the HUD
+       reads the step's label.
+    2. Pointer-down on the scrubber at 70 % seeks at once (the time readout changes before
+       pointer-up).
+    3. Drag to 30 % and release: an exact seek lands at the release point ± 1 px of track.
+    4. `→` twice lands on the start of the chapter after next.
+  - `"skips idle by default and says so"`: the speed label shows `idle skipped` inside an idle
+    band. Toggling skip idle lengthens the track duration.
+  - `"shows a takeover gap card and the backdrop over it"`: seeking into the takeover shows
+    `You had control here`.
+  - `"compares before and after"`: `B` shows the two frames with a wipe. Dragging the divider
+    tracks the pointer 1:1, and Escape closes it.
+  - `"reduced motion: the playhead jumps and the compare wipe does not animate"`
+    (`page.emulateMedia({ reducedMotion: "reduce" })`).
+  - Each case takes a screenshot to `apps/web/e2e/out/replay-*.png`.
+
+**Implementation notes:**
+- **Loading** (`useReplay`):
+  1. `GET /card`, then `GET /recording`.
+  2. `GET /events` with `Accept: application/x-ndjson`, read with `response.body.getReader()` and
+     a `TextDecoder`, split on `\n`. Each event is folded into the page's model and batched to the
+     worker every 1 000 events, through Part 3's `pushEvents`. The worker and the page fold the
+     same events.
+  3. `busySpans(model, info.manifest.activity, endMs)`, then `buildPlaybackMap(startT, endMs, busy, skipIdle)`.
+     `endMs` is `session.end`'s time, else the live session's last event time, refreshed with the
+     follow rule.
+  4. `stage.replay.open(source)`, then `transport({ playing: false, speed: 1, map, atPlayMs: 0 })`.
+  - React sees the model at most 10 times a second (Part 3's pattern), and `tMs` from
+    `replay-time` (≤ 10 Hz).
+- **Mode and URL.**
+  - `App` holds `mode: "watch" | "replay"` and the replay session id, and keeps `?replay=<id>`
+    (plus `&t=<ms>` when paused) in sync with `history.replaceState`, so a reload returns to the
+    same place. The `#token=` fragment logic is untouched.
+  - Opening Replay picks the URL's session, else the live session, else the newest card.
+  - Watch is Part 3's Theatre, unchanged. Switching to Replay sets `Stage mode="replay"`, which
+    drops the Selkies iframe (one viewer fewer: the gateway may run Fast).
+  - Glance stays disabled (not M6).
+- **Scrubber:**
+  - pointer-down seeks immediately with `preview`, then `setPointerCapture`; the drag tracks 1:1
+    in track pixels;
+  - every pointer-move sends a `preview` seek (the worker's latest-wins absorbs the burst);
+  - 120 ms without movement, and pointer-up, send an `exact` seek;
+  - the hover card shows the thumbnail of `observeAt(model, t)` (the thumbs route as a blob URL,
+    through Part 3's `thumbnailUrl` pattern with `/thumbs/`), the time and the chapter label;
+  - keyboard focus on the track gives ←/→ by 1 s, and Home/End;
+  - `aria-valuetext` reads `3:12 of 18:40, Clicking "Save"`.
+- **HUD in replay:** `sessionHud(model, tMs)` (Part 3) gives the label. The pill gains a `Replay`
+  tag and `3:12 / 18:40`. The neutral Stop is absent. A live session shows the `Jump to live`
+  pill (`role="button"`). The stage rim follows `scene.control` at t, so the rim is xenon exactly
+  where live was.
+- **Gap card:** while `tMs` lies in a gap, or the recording state is `none`, `failed` or
+  `expired`, a card from `gapCard` sits centred on the stage. It uses the solid HUD material under
+  reduced transparency.
+- **Before/after (`CompareView`):** two `<img>` (the frames route, full 1280×800 observe frames, as
+  blob URLs) clipped by a vertical wipe. The divider moves on pointer-down and tracks 1:1. It
+  starts at 50 %; under reduced motion there is no settle animation. It opens on the current
+  chapter's step.
+- **Plan and steps as of t:**
+  - `PlanRail` gets `asOfMs`. Rows whose chapter starts after t are dimmed (`data-future`), the
+    chapter containing t is current, and clicking a row calls `selectStep`;
+  - in replay the plan section shows `planAt(model, tMs)`;
+  - the rail's header reads `As of 3:12` instead of Part 3's `Following live`.
+- **Sessions rail:**
+  - it takes the left rail in Replay (the conversation rail returns in Watch) and lists
+    `/api/session-index` pages, loading the next page at the end of the scroll;
+  - each card shows its cover thumbnail, title (or `Untitled session`), start (`Today 10:12`,
+    `Yesterday 18:03`, else a date), duration, verdict word (`Done`, `Stopped`, `Failed`, `Live`,
+    `Interrupted`), and recording word (`Video`, `Screenshots only`, `Video removed`);
+  - Delete opens a confirm sheet (`Delete this session? Its video, screenshots and log are
+    removed from this Mac.`), then `DELETE /api/sessions/:id`.
+- **Follow rule:** while the replayed session is live, `useReplay` polls `GET /recording` every
+  2 s for `upto`. `refresh` reopens with the new `upto` at the current time, and `go-live` calls
+  `onGoLive` (App switches to Watch).
+
+- [ ] **Step 1:** Write `replay-view.test.ts` and the `App.test.tsx` cases. Run
+  `pnpm exec vitest run apps/web/src/replay apps/web/src/App.test.tsx`.
+  Expected: FAIL.
+- [ ] **Step 2:** Implement `replay-view.ts`, `useReplay.ts`, the components, the shell changes and
+  the tokens. Run the same command.
+  Expected: PASS.
+- [ ] **Step 3:** Write `replay-ui.spec.ts`. Run
+  `pnpm --filter @localdot/web build && pnpm --filter @localdot/web e2e --grep "seeded session|idle|takeover gap|before and after|reduced motion"`.
+  Expected: PASS.
+- [ ] **Step 4:** Screenshot check. Seed a home, start the daemon on it, then run
+  `pnpm --filter @localdot/web shot "http://127.0.0.1:4750/?replay=<id>#token=<token>" apps/web/e2e/out/replay.png 1440 900 8000`.
+  Look at it against the Theatre direction: near-black surround, a quiet scrubber, xenon only on
+  the rim and overlays where the agent had control, no purple, no gradient, no emoji.
+- [ ] **Step 5: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/web
+git commit -m "feat(web): the Theatre's Replay mode with chapters, ticks, speeds, skip idle and compare"
+```
+
+**Acceptance:** the unit, jsdom and e2e suites pass, and the screenshot matches the direction.
+
+---
+
+### Task 15: Web — MP4 export with the overlays burned in
+
+Export renders a range of a session frame by frame, at a fixed 30 fps, with the same
+`PixiPresenter` and `sceneAt` as the stage (research §3.1 §4: "Render it with the same Pixi
+compositor used live, so preview and export match"). It burns in an honest speed label and,
+optionally, step captions. Encoding is WebCodecs H.264 through mediabunny's `CanvasSource`, and
+the file is written straight into a file the user picks. Nothing about an export reaches the
+daemon or any network.
+
+**Review tier:** light. Its privacy pin is written out below.
+
+**Files:**
+- Create: `apps/web/src/export/{export-plan.ts,export-plan.test.ts,export-protocol.ts,export-worker.ts,burn-in.ts,exporter.ts,sink.ts,ExportSheet.tsx}`,
+  `apps/web/e2e/export.spec.ts`
+- Modify: `apps/web/src/replay/ReplayControls.tsx` (the Export button), `apps/web/src/app.css`
+
+**Interfaces** (exact):
+
+```ts
+// apps/web/src/export/export-plan.ts
+export const EXPORT_FPS = 30;
+export const EXPORT_SIZES = [{ w: 1280, h: 800 }, { w: 1920, h: 1200 }, { w: 2560, h: 1600 }] as const;
+export type ExportSpeed = 1 | 2 | 4 | 8;
+export interface ExportRequest {
+  sessionId: string;
+  fromMs: number;
+  toMs: number;
+  speed: ExportSpeed;
+  skipIdle: boolean;
+  size: { w: number; h: number };
+  captions: boolean;
+}
+export interface ExportPlan {
+  frames: number;
+  durationS: number;
+  sessionMsAt(frame: number): number;        // sessionAt(map, frame / EXPORT_FPS × 1000 × speed)
+  labelAt(frame: number): string | null;     // speedLabel(speed, idleAt(map, t)), "Idle skipped" included
+  captionAt(frame: number): string | null;   // the chapter label at t when captions are on
+  gapAt(frame: number): RecordingGapReason | null;
+}
+export function planExport(req: ExportRequest, model: SessionModel, activity: ActivitySpan[], gaps: RecordingGap[]): ExportPlan;
+export const PRIVACY_NOTE = "This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.";
+
+// apps/web/src/export/export-protocol.ts
+export type ExportIn =
+  | { type: "start"; request: ExportRequest; source: ReplaySource; model: SessionModel; activity: ActivitySpan[]; gaps: RecordingGap[]; theme: StageTheme; hashes: boolean }
+  | { type: "ack"; chunk: number }   // the page wrote chunk `chunk`
+  | { type: "cancel" };
+export type ExportOut =
+  | { type: "chunk"; chunk: number; position: number; data: ArrayBuffer }   // transferred
+  | { type: "progress"; done: number; total: number; openFrames: number; encodeQueue: number }
+  | { type: "done"; frames: number; bytes: number; hashes: string[] | null }
+  | { type: "error"; message: string }
+  | { type: "cancelled" };
+export const EXPORT_MAX_INFLIGHT_CHUNKS = 4;
+
+// apps/web/src/export/sink.ts
+export interface ExportSink { write(position: number, data: Uint8Array): Promise<void>; close(): Promise<void>; abort(): Promise<void> }
+export function pickFileSink(suggestedName: string): Promise<ExportSink | null>;   // showSaveFilePicker; null when the user cancels
+export function opfsSink(name: string): Promise<ExportSink>;                       // tests (?exportProbe=1)
+export function exportSupport(): { ok: true } | { ok: false; reason: string };     // needs showSaveFilePicker, VideoEncoder, OffscreenCanvas
+
+// apps/web/src/export/exporter.ts
+export interface ExportHandle { done: Promise<ExportOut & { type: "done" | "cancelled" | "error" }>; cancel(): void; onProgress(cb: (p: Extract<ExportOut, { type: "progress" }>) => void): void }
+export function startExport(o: { request: ExportRequest; source: ReplaySource; model: SessionModel; activity: ActivitySpan[]; gaps: RecordingGap[]; sink: ExportSink; hashes?: boolean }): ExportHandle;
+```
+
+**Tests:**
+- `export-plan.test.ts`:
+  - `"renders 30 frames per output second at the chosen speed"`: a 60 s busy range at 4× gives
+    `frames = 450` and `durationS = 15`, and `sessionMsAt(449)` is 59 866.7 ± 0.1.
+  - `"compresses idle stretches when skipping idle and labels them"`: a 5-minute session with
+    20 s of activity at 1×, skipping idle: `frames ≤ 30 × (20 + idle segments × 0.4) + 1`, and
+    `labelAt` reads `Idle skipped` inside the compressed segments and `null` elsewhere.
+  - `"is honest at every speed"`: 2× everywhere reads `Playing at 2×`.
+  - `"never maps two output frames backwards in session time"`.
+  - `"clips the range to the session and refuses an empty one"` (RangeError).
+  - `"gives the chapter caption and the gap at a frame"`.
+- `export.spec.ts` (system Chrome, seeded sessions, no Docker): **the pins**, complete below.
+
+**Implementation notes:**
+- **The sheet** (`ExportSheet`). It is anchored to the Export button and enters and exits along
+  the same path. Its options:
+  - range: whole session, current chapter, or the scrubber selection when one exists;
+  - speed: 1/2/4/8×, default 1×;
+  - skip idle: default on;
+  - size: default 1920×1200 for a 2× session and 1280×800 for 1×. Sizes the encoder refuses are
+    disabled with their reason, checked with mediabunny's `canEncodeVideo("avc", { width, height })`;
+  - step captions: default on.
+
+  It shows `PRIVACY_NOTE` verbatim. **Save…** calls
+  `pickFileSink(suggestedExportName(new Date()))`: the name carries the date only, never the title.
+  Then come a progress bar (`frames done / total`, elapsed, remaining) and **Cancel**. Esc cancels
+  before Save; after Save it asks first.
+- **The worker:**
+  - its own `OffscreenCanvas(size.w, size.h)` and `PixiPresenter.create(canvas, { width, height, dpr: size.w / 1280, theme, warn })`,
+    so chips and the cursor keep their stage proportions;
+  - the camera is `cameraFor({ stageW: w, stageH: h, desktopW: screen.w, desktopH: screen.h, zoom: 1 })`;
+  - the video comes from a `ReplayVideo` used only in `play` mode with increasing targets
+    (sequential decode, no seeks after the first);
+  - per frame i:
+    1. `t = plan.sessionMsAt(i)`;
+    2. `sourceAt(t)` → video, backdrop or hold;
+    3. present;
+    4. `presenter.draw(sceneAt(model, t, { reducedMotion: false }))`;
+    5. `burnIn.draw(plan.labelAt(i), plan.captionAt(i), plan.gapAt(i))`;
+    6. `presenter.render()`;
+    7. `await canvasSource.add(i / EXPORT_FPS, 1 / EXPORT_FPS)`, which awaits the encoder's queue.
+- **The output:**
+  - `new Output({ format: new Mp4OutputFormat({ fastStart: false }), target: new StreamTarget(writable, { chunked: true, chunkSize: 4 * 1024 * 1024 }) })`.
+    With `fastStart: false` the `moov` goes at the end and the `mdat` size is patched at the
+    start, so the writes are positioned; the sink supports that
+    (`FileSystemWritableFileStream.write({ type: "write", position, data })`).
+  - The track is `new CanvasSource(canvas, { codec: "avc", bitrate: QUALITY_HIGH, keyFrameInterval: 2, latencyMode: "quality" })`.
+  - **No metadata tags** are set. mediabunny writes no `udta` or `meta` by default (verified); its
+    handler name is the fixed string `MediabunnyVideoHandler`.
+  - `writable` posts each chunk to the page (its `ArrayBuffer` transferred) and resolves on the
+    page's `ack`, with at most `EXPORT_MAX_INFLIGHT_CHUNKS` in flight. That is the backpressure,
+    and the file never sits in memory.
+- **Burn-in** (`burn-in.ts`, a Pixi `Container` in the screen layer):
+  - the label chip sits bottom-left, 16 px in, in the HUD material;
+  - the caption is a lower third centred 64 px from the bottom, 60 characters max via
+    `clipText`;
+  - the gap card sits centred, with `gapCard`'s strings;
+  - every colour comes from the theme. There is no xenon in the burn-in.
+- **Determinism:** frame i depends only on `(model, plan, i)`. With `hashes: true` (only under
+  `?exportProbe=1`), the worker hashes each frame's RGBA (`presenter.app.renderer.extract.pixels`
+  of the full canvas, SHA-256), *before* encoding. The encoder may differ run to run; the
+  rendering may not.
+- **Cancel:** `output.cancel()`, the worker posts `cancelled`, and the page calls `sink.abort()`.
+  For a picked file, Chrome then discards its swap file, so no partial MP4 is left.
+- **Performance** (Review Focus 4): one decoded frame and one rendered frame at a time, the
+  encoder queue at most 4 (`CanvasSource.add` awaits it), and at most 4 chunks of 4 MiB in flight
+  to the page. `progress` carries `openFrames` and `encodeQueue` every 15 frames.
+
+**The pins, complete:**
+
+`apps/web/e2e/export.spec.ts`:
+```ts
+import { expect, type Page, test } from "@playwright/test";
+import { type RunningDaemon, startDaemon } from "./daemon.ts";
+import { type SeededHome, seedHome } from "./seed.ts";
+
+const MARKER = `p7-privacy-marker-${Date.now().toString(36)}`;
+let daemon: RunningDaemon;
+let privacy: SeededHome;
+let long: SeededHome;
+
+test.use({ launchOptions: { args: ["--js-flags=--expose-gc"] } });
+
+test.beforeAll(async () => {
+  privacy = seedHome({ minutes: 3, title: `Quarterly ${MARKER}`, marker: MARKER, takeover: "60000-90000" });
+  long = seedHome({ home: privacy.home, minutes: 120 });
+  daemon = await startDaemon({}, { home: privacy.home });
+});
+
+test.afterAll(async () => {
+  await daemon?.stop();
+});
+
+interface ExportResult { frames: number; bytes: number; hashes: string[] | null; peakOpenFrames: number; peakEncodeQueue: number; requests: string[] }
+
+// Exports through the real exporter into an OPFS file (the save picker cannot be scripted), and
+// returns what the e2e hook saw. The hook reads the file back itself for the checks below.
+async function exportSession(page: Page, sessionId: string, opts: { speed: 1 | 2 | 4 | 8; skipIdle: boolean; hashes: boolean; fromMs?: number; toMs?: number }): Promise<ExportResult> {
+  await page.goto(`${daemon.origin}/?replay=${sessionId}&replayProbe=1&exportProbe=1#token=${daemon.token}`);
+  await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready", undefined, { timeout: 60_000 });
+  return page.evaluate((o) => (window as unknown as { __localdot: { exportProbe: { run(o: unknown): Promise<ExportResult> } } }).__localdot.exportProbe.run(o), opts);
+}
+
+const fileScan = (page: Page, needles: string[]) =>
+  page.evaluate(async (n) => {
+    const file = await (await (await navigator.storage.getDirectory()).getFileHandle("localdot-export-probe.mp4")).getFile();
+    const text = new TextDecoder("latin1").decode(new Uint8Array(await file.arrayBuffer()));
+    return { size: file.size, found: n.filter((x) => text.includes(x)), boxes: ["udta", "meta", "ilst", "©nam", "©too"].filter((b) => text.includes(b)) };
+  }, needles);
+
+test("exports carry no identifying data and never leave the page (Review Focus 6)", async ({ page }) => {
+  const requests: { method: string; url: string }[] = [];
+  page.on("request", (r) => requests.push({ method: r.method(), url: r.url() }));
+  const before = requests.length;
+  const result = await exportSession(page, privacy.seed.sessionId, { speed: 2, skipIdle: true, hashes: false });
+  expect(result.frames).toBeGreaterThan(0);
+  const during = requests.slice(before).filter((r) => !r.url.includes("/assets/"));
+  // Only reads: the recording, the event log, card, recording info and observe frames.
+  for (const r of during) {
+    expect(r.method, r.url).toBe("GET");
+    expect(r.url, r.url).toMatch(/\/api\/(sessions\/[0-9A-HJKMNP-TV-Z]{26}\/(recording(\/video\.mp4)?|events|card|frames\/[0-9A-HJKMNP-TV-Z]{26}|thumbs\/[0-9A-HJKMNP-TV-Z]{26})|session-index|whoami|clock)(\?.*)?$/);
+  }
+  const scan = await fileScan(page, [MARKER, privacy.seed.sessionId, privacy.home, daemon.token, "Quarterly", "events.jsonl"]);
+  expect(scan.size).toBe(result.bytes);
+  expect(scan.found).toEqual([]);
+  expect(scan.boxes).toEqual([]);
+  // The takeover span is a card, never a recorded frame: the probe saw no video source inside it.
+  const inside = await page.evaluate(() => (window as unknown as { __localdot: { exportProbe: { sourcesBetween(fromMs: number, toMs: number): string[] } } }).__localdot.exportProbe.sourcesBetween(60_000, 90_000));
+  expect(inside.every((s) => s !== "video")).toBe(true);
+});
+
+test("renders identical frames in two exports (Review Focus 5)", async ({ page }) => {
+  const range = { fromMs: privacy.seed.steps[1]?.startMs ?? 0, toMs: privacy.seed.steps[6]?.endMs ?? 30_000 };
+  const a = await exportSession(page, privacy.seed.sessionId, { speed: 1, skipIdle: false, hashes: true, ...range });
+  const b = await exportSession(page, privacy.seed.sessionId, { speed: 1, skipIdle: false, hashes: true, ...range });
+  expect(a.hashes?.length).toBe(a.frames);
+  expect(new Set(a.hashes).size).toBeGreaterThan(a.frames / 4);
+  expect(b.hashes).toEqual(a.hashes);
+});
+
+test("exports a 2-hour session in bounded memory (Review Focus 4, export)", async ({ page }) => {
+  test.setTimeout(20 * 60_000);
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Performance.enable");
+  const mainHeap = async () => {
+    await cdp.send("HeapProfiler.collectGarbage");
+    return (await cdp.send("Performance.getMetrics")).metrics.find((m) => m.name === "JSHeapUsedSize")?.value ?? 0;
+  };
+  await page.goto(`${daemon.origin}/?replay=${long.seed.sessionId}&replayProbe=1&exportProbe=1#token=${daemon.token}`);
+  await page.waitForFunction(() => window.__localdot?.replay?.status() === "ready", undefined, { timeout: 120_000 });
+  const base = await mainHeap();
+  const started = Date.now();
+  const result = await exportSession(page, long.seed.sessionId, { speed: 8, skipIdle: true, hashes: false });
+  const seconds = (Date.now() - started) / 1000;
+  expect(result.peakOpenFrames).toBeLessThanOrEqual(3);
+  expect(result.peakEncodeQueue).toBeLessThanOrEqual(4);
+  expect((await mainHeap()) - base).toBeLessThan(48 * 1024 * 1024);
+  const scan = await fileScan(page, []);
+  expect(scan.size).toBe(result.bytes);
+  test.info().annotations.push({ type: "measure", description: `${result.frames} frames in ${seconds.toFixed(0)} s (${(result.frames / seconds).toFixed(1)} fps), ${(result.bytes / 1e6).toFixed(1)} MB` });
+});
+```
+
+The e2e hook `window.__localdot.exportProbe` exists only under `?exportProbe=1`:
+- `run(o)` exports the replayed session with `opfsSink("localdot-export-probe.mp4")`, `hashes`
+  as asked, and the range defaulting to the whole session. It returns
+  `{ frames, bytes, hashes, peakOpenFrames, peakEncodeQueue, requests: [] }`.
+- `sourcesBetween(fromMs, toMs)` returns the `sourceAt` result of every exported frame whose
+  session time lies in the range.
+
+- [ ] **Step 1:** Write `export-plan.test.ts`. Run `pnpm exec vitest run apps/web/src/export`.
+  Expected: FAIL.
+- [ ] **Step 2:** Implement `export-plan.ts`. Run the same command.
+  Expected: PASS.
+- [ ] **Step 3:** Write `export.spec.ts`. Implement the protocol, the worker, the burn-in, the
+  sinks, the exporter, the sheet and the e2e hook. Run
+  `pnpm --filter @localdot/web build && pnpm --filter @localdot/web e2e --grep "export"`.
+  Expected: three tests pass. The 2-hour export's measure is recorded in the task report.
+- [ ] **Step 4:** Screenshot check of the open sheet and of its progress state (`shot`), against
+  the Theatre direction.
+- [ ] **Step 5: Commit**
+
+```bash
+pnpm format && pnpm lint && pnpm typecheck
+git add apps/web
+git commit -m "feat(web): export a replay to MP4 with the overlays burned in, rendered by the stage"
+```
+
+**Acceptance:** the export pins pass. An export opened in QuickTime Player plays, with the burned-in
+label at the speeds above 1×.
+
+---
