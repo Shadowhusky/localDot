@@ -118,3 +118,81 @@ logs. Positive controls and coverage thresholds check that the scan can detect p
 The suite also checks that Stop freezes the
 cell and that Resume replaces revoked stand-ins. These Docker suites and browser e2e tests run
 locally; CI runs the host tests, Go checks and real-keyd integration suites.
+
+## The agent
+
+Build `localdot/brain:dev` with `cells/brain/build.sh`, alongside the gate and desktop images.
+The agent runs in a separate brain cell. Model traffic passes through keyd; tools pass through
+the daemon's authenticated tool API at `127.0.0.1:4751`. Computer actions use the same action
+gateway and event log as the live desktop. **Stop** revokes access and freezes the computer.
+During a requested login takeover, the agent cannot observe or act until explicit hand-back;
+a follow-up message does not hand control back.
+
+The chat and model picker are Part 5b work. The core API uses the existing install-token
+Authorization header and JSON request bodies:
+
+- `GET /api/agent/providers` lists providers, catalog models, capabilities and available key IDs.
+  `POST /api/agent/catalog/refresh` refreshes the models.dev catalog.
+- `GET` and `PUT /api/agent/settings` read or replace settings. `main` drives the task, optional
+  `fast` handles summaries, and optional `local` provides a fallback. A role choice contains
+  `provider`, `model`, and a stored `key` ID for remote providers. LM Studio and Ollama need no
+  key; keyd reaches them on `127.0.0.1:1234` and `:11434` respectively.
+- Remote models missing a catalog price need an explicit `price` object containing both
+  `inputUSDPerMTok` and `outputUSDPerMTok` (finite values from 0 to 10000, at least one positive).
+  Optional `taskBudgetUSD` sets the initial spending limit. Each task keeps its selected models
+  and immutable price table across brain restarts and follow-ups; editing settings affects new tasks.
+- `POST /api/cells/<id>/agent` with `{"task":"…"}` starts on a ready computer and returns a
+  `sessionId`. Follow-ups use `POST /api/agent/sessions/<id>/messages` with
+  `{"kind":"followup","text":"…"}`; use `"steer"` to redirect current work. Do not automatically
+  resend a mutation if its reply is lost: reconcile the session and event log first.
+- Questions and hand-back require the current `askId` or `requestId` from the session snapshot.
+  Completed files are downloaded from `/api/agent/sessions/<id>/files/<name>`, as attachments.
+
+Memory lives in `<home>/memory/USER.md` and `MEMORY.md` (normally under `~/.localdot`). Skills
+are `SKILL.md` directories under `<home>/skills/` and this repository's `skills/`; task startup
+copies them into the computer's `~/.skills/`. Memory is context, including assistant-written
+notes, rather than a source of new user instructions.
+
+`pnpm test` covers the model loop, transport fixtures and host Tool API integration without
+paid calls. With Docker Desktop and built images,
+`LOCALDOT_DOCKER_TESTS=1 pnpm test:docker apps/daemon/src/agent/brain-cell.docker.test.ts`
+runs the separate real-cell acceptance suite.
+
+### Optional live provider checks
+
+Live computer-use acceptance remains pending until explicitly run with a funded account or an
+already loaded local model. Ordinary host tests and `LOCALDOT_KEYD_TESTS=1 pnpm test:keyd`
+skip all live provider cases. To opt in, also set `LOCALDOT_LLM_TESTS` to a comma-separated subset
+of `anthropic,openai,google,lmstudio` and select just this file:
+
+```sh
+LOCALDOT_KEYD_TESTS=1 LOCALDOT_LLM_TESTS=google \
+  pnpm test:keyd apps/daemon/src/agent/providers.keyd.test.ts
+```
+
+Before that command, put the selected provider's key in the shell environment and set its two
+`*_CU_INPUT_USD_PER_MTOK` / `*_CU_OUTPUT_USD_PER_MTOK` variables to the model's current prices.
+Both values are required for remote models; zero is allowed on one side. The suite does not
+fetch prices or use guessed prices. The table's default model IDs are configurable test inputs,
+not claims of current model availability or successful live verification.
+
+| Case | Key environment variable | Model override | Price-variable prefix |
+| --- | --- | --- | --- |
+| `anthropic` | `ANTHROPIC_API_KEY` | `ANTHROPIC_CU_MODEL` (default `claude-sonnet-5-5`) | `ANTHROPIC` |
+| `openai` | `OPENAI_API_KEY` | `OPENAI_CU_MODEL` (default `gpt-6-luna`) | `OPENAI` |
+| `google` | `GEMINI_API_KEY` | `GEMINI_CU_MODEL` (default `gemini-3.1-flash-lite`) | `GEMINI` |
+| `lmstudio` | none | `LMSTUDIO_CU_MODEL` (default `qwen/qwen3.8-27b`) | none; local prices are zero |
+
+For example, Google's price variables are `GEMINI_CU_INPUT_USD_PER_MTOK` and
+`GEMINI_CU_OUTPUT_USD_PER_MTOK`. Each selected case seals its key into a disposable in-memory
+keyd vault, initializes a unique task with an immutable model/price snapshot and a $0.25 keyd
+budget calculated from those supplied rates, then makes one request with a 1024-token output
+cap and a 30-second deadline. It checks a returned click against a generated image; no click
+is sent to a real desktop. There are no model retries. Credentials and provider error bodies
+are not printed, and owned transports/cells/keys are closed or deleted afterward.
+
+A structured provider refusal for unavailable credit records a skipped case, leaving live
+acceptance pending. Missing configuration, authentication errors, keyd budget or unpriced-model
+refusals, invalid clicks and timeouts fail. The LM Studio case calls an existing model only when
+selected and never loads, unloads or reconfigures it. Test keyd listeners use the existing
+`LOCALDOT_TEST_KEYD_PORTS` range; choose a separate free range for concurrent acceptance work.
