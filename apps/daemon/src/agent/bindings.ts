@@ -20,6 +20,7 @@ import {
 import { immutable } from "./private-files.ts";
 import { RoleChoice } from "./settings.ts";
 export type Role = "main" | "fast" | "local";
+export const CHATGPT = "chatgpt";
 export class BindingError extends Error {
   constructor(
     readonly role: Role,
@@ -30,6 +31,13 @@ export class BindingError extends Error {
   }
 }
 export const OUTPUT_CAP_TOKENS = 16_000;
+export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
+  if (role !== "main") throw new BindingError(role, "the ChatGPT plan can only be the main model");
+  if (choice.key !== undefined) throw new BindingError(role, "the ChatGPT plan needs no key");
+  if (choice.price !== undefined) throw new BindingError(role, "the ChatGPT plan needs no price");
+  if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(choice.model))
+    throw new BindingError(role, "unknown ChatGPT model");
+}
 export function unpriced(m: CatalogModel): boolean {
   return m.inputUSDPerMTok === 0 && m.outputUSDPerMTok === 0;
 }

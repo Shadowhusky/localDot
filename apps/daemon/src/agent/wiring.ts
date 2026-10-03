@@ -2,6 +2,15 @@ import { dirname, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
+import {
+  CODEX_VERSION,
+  CodexInstallError,
+  type CodexInstaller,
+  type HarnessAvailability,
+  harnessAvailability,
+  type OwnedCodexRoots,
+  prepareOwnedCodexRoots,
+} from "@localdot/codex-harness";
 import { type SkillSummary, TOOL_API_PORT } from "@localdot/protocol";
 import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
@@ -17,6 +26,10 @@ import type { KeydClient } from "../keyd/client.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import { CodexAuthOwner } from "./codex/auth-owner.ts";
+import { CodexDriver } from "./codex/driver.ts";
+import { codexInstructions } from "./codex/instructions.ts";
+import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
 import { FramePng } from "./frame-png.ts";
 import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
@@ -28,6 +41,7 @@ import type { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
+import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
 export interface AgentWiringDeps {
@@ -49,7 +63,10 @@ export interface AgentWiringDeps {
   keydPorts: PortRange;
   policy?: ToolPolicy;
   toolPort?: number;
+  codex?: { realHome: string; user: string };
 }
+const CODEX_ACCEPTANCE_PENDING =
+  "The ChatGPT plan is awaiting pinned privacy and native safety checks.";
 export const BUILTIN_SKILLS = join(
   dirname(fileURLToPath(import.meta.url)),
   "..",
@@ -147,6 +164,137 @@ export function createAgent(d: AgentWiringDeps) {
     }
     return installed;
   };
+  let roots: OwnedCodexRoots | undefined;
+  if (d.codex) {
+    try {
+      roots = prepareOwnedCodexRoots(d.home, d.codex.realHome);
+    } catch {
+      /* Capability stays unavailable; no unvalidated roots are used or cleaned. */
+    }
+  }
+  const platform = (): HarnessAvailability => {
+    if (!d.codex)
+      return { available: false, reason: "The ChatGPT plan is not set up in this daemon." };
+    if (!roots) return { available: false, reason: "The ChatGPT storage could not be validated." };
+    if (closing) return { available: false, reason: "The ChatGPT account service is closed." };
+    return harnessAvailability();
+  };
+  const harness = (): HarnessAvailability => {
+    const availability = platform();
+    // Tasks13/14 must supply the pinned privacy/protocol and native acceptance evidence
+    // before this gate changes. Neither installation nor an environment flag opens it.
+    return availability.available
+      ? { available: false, reason: CODEX_ACCEPTANCE_PENDING }
+      : availability;
+  };
+  const auth = roots
+    ? new CodexAuthOwner({
+        roots,
+        sessions: () =>
+          [...runner.sessions.values()].filter((session) => runner.isChatgpt(session.id)),
+        taskDenyRead: (id) => runner.codexDenyReadOf(id),
+        pauseForAuth: (session, generation) => runner.pauseForAuth(session, generation),
+      })
+    : undefined;
+  const installWork = new Set<Promise<unknown>>();
+  const tracked = <T>(work: Promise<T>): Promise<T> => {
+    installWork.add(work);
+    void work.catch(() => {}).finally(() => installWork.delete(work));
+    return work;
+  };
+  const installer: CodexInstaller | undefined = auth
+    ? {
+        status: () => auth.installer.status(),
+        ensureInstalled: (signal) =>
+          closing
+            ? Promise.reject(new CodexInstallError("cancelled"))
+            : tracked(auth.installer.ensureInstalled(signal)),
+        verifiedInstallation: (signal) => tracked(auth.installer.verifiedInstallation(signal)),
+        cancel: () => auth.installer.cancel(),
+      }
+    : undefined;
+  const dispatch: DispatchDeps = {
+    policy: d.policy ?? actPolicy,
+    tools: {
+      gateway: d.gateway,
+      scaleOf: (id) => d.cells.get(id)?.scale,
+      desktop,
+      launcher: (id) => d.registry.for(id)?.client,
+      png,
+      memory,
+      saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
+      stopForUncertainty: (session, reason) => runner.contain(session, reason),
+      sleep: (ms, signal) => sleep(ms, undefined, { signal }),
+    },
+  };
+  const driver =
+    auth && roots
+      ? new CodexDriver({
+          auth,
+          transcripts,
+          openEndpoint: (input) =>
+            openMcpEndpoint({
+              ...input,
+              roots,
+              dispatch: (name, callId, args, context) =>
+                dispatchTool(
+                  dispatch,
+                  input.session,
+                  name,
+                  callId,
+                  args,
+                  forText(input.session),
+                  context.generation,
+                  context.signal,
+                ),
+            }),
+          observe: async (session, generation, signal) => {
+            const lease = session.admit(generation, signal);
+            const endpoint = d.cells.endpoints(session.cellId)?.desktopd;
+            const check = () => {
+              lease.check();
+              const cell = d.cells.get(session.cellId),
+                current = d.cells.endpoints(session.cellId)?.desktopd;
+              if (
+                !ready ||
+                closing ||
+                !d.monitor.health.online ||
+                cell?.state !== "ready" ||
+                cell.paused ||
+                d.killSwitch.isBusy(session.cellId) ||
+                !endpoint ||
+                current?.token !== endpoint.token ||
+                current.baseUrl !== endpoint.baseUrl
+              )
+                throw new AgentError(409, "The task computer changed during observation.");
+            };
+            try {
+              check();
+              const frame = await d.gateway.observe({
+                sessionId: session.id,
+                cellId: session.cellId,
+                signal: lease.signal,
+              });
+              check();
+              const full = await png.png(session.id, frame.frameId, undefined, lease.signal);
+              check();
+              session.tainted = true;
+              session.lastFrameId = frame.frameId;
+              return { frameId: frame.frameId, full: true, png: full };
+            } finally {
+              lease.finish();
+            }
+          },
+          instructions: (session) =>
+            codexInstructions({
+              memory: memory.readBoth(),
+              skills: runner.skillsOf(session.id),
+              today: new Date(),
+            }),
+          redactorFor: (session) => forText(session),
+          waitForAuthResume: (session) => runner.waitForAuthResume(session),
+        })
+      : undefined;
   const runner = new AgentRunner({
     eventLog: d.eventLog,
     live: d.live,
@@ -162,6 +310,22 @@ export function createAgent(d: AgentWiringDeps) {
     installSkills,
     waitForUploads: (id, signal) => transfers.wait(id, signal),
     stopSession: (id) => d.killSwitch.stopSession(id),
+    ...(driver && auth
+      ? {
+          codex: {
+            driver,
+            authGeneration: () => auth.authGeneration,
+            account: {
+              status: async (opts) => {
+                const availability = harness();
+                return availability.available
+                  ? auth.status(opts)
+                  : { ...availability, codexVersion: CODEX_VERSION, state: "unavailable" as const };
+              },
+            },
+          },
+        }
+      : {}),
   });
   const forText = (session?: AgentSession, cellId = session?.cellId) => {
     const record = cellId ? d.cells.record(cellId) : undefined;
@@ -235,22 +399,11 @@ export function createAgent(d: AgentWiringDeps) {
     };
   };
   const toolApp = createToolApi({
+    ...dispatch,
     sessions: () => runner.sessions.values(),
     transcripts,
     png,
-    policy: d.policy ?? actPolicy,
     redactorFor: (session) => forText(session),
-    tools: {
-      gateway: d.gateway,
-      scaleOf: (id) => d.cells.get(id)?.scale,
-      desktop,
-      launcher: (id) => d.registry.for(id)?.client,
-      png,
-      memory,
-      saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
-      stopForUncertainty: (session, reason) => runner.contain(session, reason),
-      sleep: (ms, signal) => sleep(ms, undefined, { signal }),
-    },
   });
   const routes: AgentRoutesDeps = {
     runner,
@@ -261,6 +414,8 @@ export function createAgent(d: AgentWiringDeps) {
     skills,
     desktop: upload,
     home: d.home,
+    harness,
+    ...(auth && installer ? { chatgpt: { account: auth, installer, availability: platform } } : {}),
     redactUserText: (text, id, cellId) =>
       forText(
         id ? runner.get(id) : undefined,
@@ -286,6 +441,14 @@ export function createAgent(d: AgentWiringDeps) {
       startPromise = (async () => {
         await brains.sweep();
         if (closing) throw new Error("agent is closed");
+        if (installer) {
+          try {
+            await installer.verifiedInstallation(new AbortController().signal);
+          } catch (error) {
+            if (!(error instanceof CodexInstallError)) throw error;
+          }
+          if (closing) throw new Error("agent is closed");
+        }
         await new Promise<void>((resolve, reject) => {
           server = serve(
             { fetch: toolApp.fetch, hostname: "127.0.0.1", port: d.toolPort ?? TOOL_API_PORT },
@@ -310,6 +473,8 @@ export function createAgent(d: AgentWiringDeps) {
       ready = false;
       unsubscribe();
       transfers.close();
+      installer?.cancel();
+      const authClosed = auth?.close();
       const containments = [...runner.sessions.values()].map((session) =>
         runner.contain(session, "shutdown"),
       );
@@ -327,6 +492,12 @@ export function createAgent(d: AgentWiringDeps) {
         const outcomes = await Promise.allSettled([
           closeListener(),
           transfers.settled(),
+          authClosed,
+          ...[...installWork].map((work) =>
+            work.catch((error) => {
+              if (!(error instanceof CodexInstallError && error.code === "cancelled")) throw error;
+            }),
+          ),
           ...containments,
           runner.close(),
           ...activeClients.map((tools) => tools.close()),

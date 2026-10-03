@@ -9,10 +9,13 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { CodexInstallState, InstalledCodex } from "@localdot/codex-harness";
 import type { KeydRecord } from "@localdot/protocol";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { createApp } from "../app.ts";
+import { EventLog } from "../event-log.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
 import { CatalogStore } from "./catalog-store.ts";
 import { TRANSFER_BYTES } from "./download.ts";
@@ -39,7 +42,7 @@ function deferred<T = void>() {
   });
   return { promise, resolve };
 }
-async function setup() {
+async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness"> = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-agent-routes-"));
   const events: { type: string; data: unknown }[] = [];
   const session = new AgentSession(SESSION, CELL, "task", {
@@ -88,6 +91,7 @@ async function setup() {
   const raise = vi.fn(async (_id: string, _budget: number) => {});
   const redact = vi.fn((text: string) => text.replaceAll("credential-fixture", "[redacted]"));
   const deps: AgentRoutesDeps = {
+    ...options,
     runner: { start, get: (id) => (id === SESSION ? session : undefined), raiseBudget: raise },
     settings,
     catalog,
@@ -370,6 +374,186 @@ describe("agent user routes", () => {
       data: { undoes: change.changeId },
     });
     expect((await f.send("POST", `/api/agent/memory/${change.changeId}/undo`)).status).toBe(409);
+  });
+});
+
+describe("ChatGPT settings and installation integration", () => {
+  it("saves a subscription with inactive paid choices intact and no paid key lookup", async () => {
+    const f = await setup();
+    const settings = {
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      fast: { provider: "anthropic", model: "stored-unavailable", key: "missing-key" },
+      local: { provider: "lmstudio", model: "stored-local" },
+      codexDenyRead: ["/Volumes/Private"],
+    };
+    const keys = f.deps.keyd.secrets as ReturnType<typeof vi.fn>;
+    keys.mockRejectedValueOnce(new Error("must not resolve inactive paid choices"));
+    const response = await f.send("PUT", "/api/agent/settings", settings);
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual(settings);
+    expect(f.settings.get()).toEqual(settings);
+    expect(keys).not.toHaveBeenCalled();
+  });
+  it("revalidates inactive keys and prices when the main selection switches back to API", async () => {
+    const f = await setup();
+    const inactive = { provider: "anthropic", model: "claude-sonnet-5-5", key: "missing-key" };
+    expect(
+      (
+        await f.send("PUT", "/api/agent/settings", {
+          main: { provider: "chatgpt", model: "gpt-6-astra" },
+          fast: inactive,
+        })
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await f.send("PUT", "/api/agent/settings", {
+          main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+          fast: inactive,
+        })
+      ).status,
+    ).toBe(400);
+    expect(f.settings.get().main?.provider).toBe("chatgpt");
+    expect(f.deps.keyd.secrets).toHaveBeenCalledTimes(1);
+  });
+  it.each([
+    { main: { provider: "chatgpt", model: "gpt-6-astra", key: "paid" } },
+    {
+      main: {
+        provider: "chatgpt",
+        model: "gpt-6-astra",
+        price: { inputUSDPerMTok: 1, outputUSDPerMTok: 2 },
+      },
+    },
+    {
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      fast: { provider: "chatgpt", model: "gpt-6-astra" },
+    },
+    {
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      local: { provider: "chatgpt", model: "gpt-6-astra" },
+    },
+    { main: { provider: "chatgpt", model: "openai/gpt-6" } },
+    { main: { provider: "chatgpt", model: "gpt-6-astra" }, codexDenyRead: ["relative"] },
+  ])("rejects a malformed subscription selection %j before resolving keys", async (settings) => {
+    const f = await setup();
+    expect((await f.send("PUT", "/api/agent/settings", settings)).status).toBe(400);
+    expect(f.deps.keyd.secrets).not.toHaveBeenCalled();
+    expect(f.settings.get()).toEqual({});
+  });
+  it("lists the subscription separately from the existing API provider rows", async () => {
+    const f = await setup({
+      harness: () => ({ available: false, reason: "Pinned privacy acceptance is pending." }),
+    });
+    const reply = (await (await f.send("GET", "/api/agent/providers")).json()) as {
+      subscriptions: unknown[];
+      providers: { id: string }[];
+    };
+    expect(reply.subscriptions).toEqual([
+      {
+        id: "chatgpt",
+        name: "ChatGPT plan",
+        available: false,
+        reason: "Pinned privacy acceptance is pending.",
+      },
+    ]);
+    expect(reply.providers.some((p: { id: string }) => p.id === "chatgpt")).toBe(false);
+    expect(reply.providers.some((p: { id: string }) => p.id === "anthropic")).toBe(true);
+  });
+  async function installedFixture() {
+    let install: CodexInstallState = { state: "not_installed" };
+    const gate = deferred<InstalledCodex>();
+    const status = { available: true, codexVersion: "0.154.0", state: "signed_out" as const };
+    const account = {
+      status: vi.fn(async () => status),
+      login: vi.fn(async () => ({ loginId: "fixture", method: "code" as const, startedAt: 0 })),
+      cancelLogin: vi.fn(async () => {}),
+      logout: vi.fn(async () => {}),
+      refresh: vi.fn(async () => status),
+    };
+    const installer = {
+      status: () => structuredClone(install),
+      ensureInstalled: vi.fn((_signal: AbortSignal) => {
+        install = { state: "downloading", receivedBytes: 0 };
+        return gate.promise;
+      }),
+      verifiedInstallation: vi.fn(async () => undefined),
+      cancel: vi.fn(() => {}),
+    };
+    let available = true;
+    const f = await setup({
+      chatgpt: { account, installer, availability: () => ({ available }) },
+      harness: () => ({ available }),
+    });
+    return {
+      ...f,
+      account,
+      installer,
+      gate,
+      setInstall(value: CodexInstallState) {
+        install = value;
+      },
+      setAvailable(value: boolean) {
+        available = value;
+      },
+    };
+  }
+  it("reads uninstalled status without spawn or download and refuses login with 409", async () => {
+    const f = await installedFixture();
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      install: { state: "not_installed" },
+      state: "unavailable",
+    });
+    expect((await f.send("POST", "/api/agent/chatgpt/login", {})).status).toBe(409);
+    expect(f.account.status).not.toHaveBeenCalled();
+    expect(f.account.login).not.toHaveBeenCalled();
+    expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
+  });
+  it("starts a shared install only through the explicit empty action", async () => {
+    const f = await installedFixture();
+    expect((await f.send("POST", "/api/agent/chatgpt/install", {})).status).toBe(400);
+    expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
+    expect((await f.send("POST", "/api/agent/chatgpt/install")).status).toBe(202);
+    expect((await f.send("POST", "/api/agent/chatgpt/install")).status).toBe(202);
+    expect(f.installer.ensureInstalled).toHaveBeenCalledTimes(1);
+    expect((await f.send("POST", "/api/agent/chatgpt/install/cancel")).status).toBe(204);
+    expect(f.installer.cancel).toHaveBeenCalledTimes(1);
+    f.gate.resolve({
+      version: "0.154.0",
+      platform: "darwin-arm64",
+      binDir: "/fixture",
+      codexBin: "/fixture/codex",
+      codeModeHostBin: "/fixture/host",
+    });
+  });
+  it("keeps installation separate from readiness and refuses unsupported installation", async () => {
+    const f = await installedFixture();
+    f.setInstall({ state: "ready", version: "0.154.0" });
+    f.setAvailable(false);
+    expect((await f.send("POST", "/api/agent/chatgpt/install")).status).toBe(503);
+    expect((await f.send("POST", "/api/agent/chatgpt/login", {})).status).toBe(503);
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: false,
+      state: "unavailable",
+      install: { state: "ready" },
+    });
+    expect(f.account.status).not.toHaveBeenCalled();
+    expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
+  });
+  it.each(["/install", "/install/cancel"])("requires the install token for %s", async (path) => {
+    const f = await installedFixture(),
+      log = new EventLog(f.home);
+    const app = createApp({ token: "i".repeat(43), port: 4750, eventLog: log, agent: f.deps });
+    try {
+      expect(
+        (await app.request(`http://127.0.0.1:4750/api/agent/chatgpt${path}`, { method: "POST" }))
+          .status,
+      ).toBe(401);
+      expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
+      expect(f.installer.cancel).not.toHaveBeenCalled();
+    } finally {
+      log.close();
+    }
   });
 });
 

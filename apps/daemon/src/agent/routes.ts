@@ -1,3 +1,8 @@
+import {
+  CODEX_VERSION,
+  type CodexInstaller,
+  type HarnessAvailability,
+} from "@localdot/codex-harness";
 import { type KeydRecord, ULID_PATTERN } from "@localdot/protocol";
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
 import type { Context, Hono } from "hono";
@@ -5,8 +10,10 @@ import { z } from "zod";
 import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
-import { BindingError, resolveRole } from "./bindings.ts";
+import { BindingError, CHATGPT, checkChatgptChoice, resolveRole } from "./bindings.ts";
 import type { CatalogStore } from "./catalog-store.ts";
+import { AccountError, type CodexAccount } from "./codex/account.ts";
+import { chatgptRoutes } from "./codex/routes.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
 import { AgentError, type AgentRunner } from "./runner.ts";
@@ -32,6 +39,12 @@ export interface AgentRoutesDeps {
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
   appendTo(sessionId: string, type: "memory.change", data: Record<string, unknown>): void;
   home: string;
+  harness?(): HarnessAvailability;
+  chatgpt?: {
+    account: CodexAccount;
+    installer: CodexInstaller;
+    availability(): HarnessAvailability;
+  };
 }
 
 const JSON_BYTES = 64 * 1024;
@@ -65,7 +78,7 @@ const Budget = z.strictObject({
 
 class RouteError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409 | 413 | 415 | 499,
+    readonly status: 400 | 404 | 409 | 413 | 415 | 499 | 503,
     message: string,
   ) {
     super(message);
@@ -79,6 +92,23 @@ function declaredLimit(request: Request, limit: number): void {
   if (length !== null && (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length))))
     throw new RouteError(400, "invalid request length");
   if (length !== null && Number(length) > limit) throw new RouteError(413, "request too large");
+}
+async function empty(request: Request): Promise<void> {
+  check(request.signal);
+  declaredLimit(request, 0);
+  const reader = request.body?.getReader();
+  if (!reader) return;
+  try {
+    for (;;) {
+      const part = await read(reader, request.signal);
+      check(request.signal);
+      if (part.done) return;
+      if (part.value.byteLength) throw new RouteError(400, "an empty request body is required");
+    }
+  } finally {
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 async function read(
   reader: ReadableStreamDefaultReader<Uint8Array>,
@@ -172,6 +202,89 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return fail(error);
     }
   };
+  const harness = () =>
+    deps.harness?.() ?? {
+      available: false,
+      reason: "The ChatGPT plan is not set up in this daemon.",
+    };
+  if (deps.chatgpt) {
+    const { account, installer } = deps.chatgpt;
+    const installed = () => {
+      if (installer.status().state !== "ready")
+        throw new AccountError(409, "Install the ChatGPT harness before signing in.");
+      const availability = harness();
+      if (!availability.available)
+        throw new AccountError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
+    };
+    chatgptRoutes(app, {
+      account: {
+        status: async (opts) => {
+          const availability = harness(),
+            install = installer.status();
+          if (!availability.available)
+            return {
+              ...availability,
+              codexVersion: CODEX_VERSION,
+              state: "unavailable" as const,
+              install,
+            };
+          if (install.state !== "ready")
+            return {
+              available: true,
+              reason: "Install the ChatGPT harness before signing in.",
+              codexVersion: CODEX_VERSION,
+              state: "unavailable" as const,
+              install,
+            };
+          return { ...(await account.status(opts)), install: installer.status() };
+        },
+        login: async (method) => {
+          installed();
+          return account.login(method);
+        },
+        cancelLogin: () => account.cancelLogin(),
+        logout: async () => {
+          installed();
+          return account.logout();
+        },
+        refresh: async () => {
+          installed();
+          return { ...(await account.refresh()), install: installer.status() };
+        },
+      },
+    });
+    let flight: Promise<unknown> | undefined;
+    app.post(
+      "/api/agent/chatgpt/install",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        if (!deps.chatgpt?.availability().available)
+          throw new RouteError(503, "The ChatGPT harness cannot be installed on this computer.");
+        // Installation is explicitly requested and daemon-owned; a disconnected HTTP caller
+        // does not cancel the shared flight. Its separate cancel action remains available.
+        if (!flight) {
+          const work = installer.ensureInstalled(new AbortController().signal);
+          flight = work;
+          void work
+            .catch(() => {})
+            .finally(() => {
+              if (flight === work) flight = undefined;
+            });
+        }
+        return c.json(installer.status(), 202);
+      }),
+    );
+    app.post(
+      "/api/agent/chatgpt/install/cancel",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        installer.cancel();
+        return c.body(null, 204);
+      }),
+    );
+  }
   const session = (id: string) => {
     const value = ULID_PATTERN.test(id) ? deps.runner.get(id) : undefined;
     if (!value) throw new RouteError(404, "no such live task");
@@ -204,6 +317,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({
         catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
         keyLayer,
+        subscriptions: [{ id: CHATGPT, name: "ChatGPT plan", ...harness() }],
         keys: keys
           .filter((key) => key.kind === "llm")
           .map((key) => ({
@@ -259,12 +373,18 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/settings",
     route(async (c) => {
       const parsed = await json(c.req.raw, AgentSettings);
-      const keys = await deps.keyd.secrets();
-      check(c.req.raw.signal);
-      const catalog = deps.catalog.get();
       for (const role of ["main", "fast", "local"] as const) {
         const choice = parsed[role];
-        if (choice) resolveRole(role, choice, catalog, keys);
+        if (choice?.provider === CHATGPT) checkChatgptChoice(role, choice);
+      }
+      if (parsed.main?.provider !== CHATGPT) {
+        const keys = await deps.keyd.secrets();
+        check(c.req.raw.signal);
+        const catalog = deps.catalog.get();
+        for (const role of ["main", "fast", "local"] as const) {
+          const choice = parsed[role];
+          if (choice) resolveRole(role, choice, catalog, keys);
+        }
       }
       check(c.req.raw.signal);
       return c.json(deps.settings.put(parsed));

@@ -27,7 +27,10 @@ afterEach(async () => {
   vi.restoreAllMocks();
   vi.useRealTimers();
 });
-function fixture(task = "Find the weather") {
+function fixture(
+  task = "Find the weather",
+  extra: Pick<CodexDriverDeps, "waitForAuthResume"> = {},
+) {
   const home = mkdtempSync("/tmp/ld10-"),
     transcript = new TranscriptStore(home),
     events: { type: string; data: Record<string, unknown> }[] = [];
@@ -60,6 +63,7 @@ function fixture(task = "Find the weather") {
     redactorFor: () => redactor(["fake-private-diagnostic"]),
     sleep,
     heartbeatMs: 10,
+    ...extra,
     openEndpoint: async (input) => {
       const record = {
         input,
@@ -1104,5 +1108,97 @@ describe("Codex startup, storage and failure containment", () => {
     expect(f.fake.maxLeases).toBe(1);
     f.done();
     expect(await run).toBe(CODEX_DONE);
+  });
+});
+
+describe("daemon-owned auth Resume handoff", () => {
+  it.each(["before lease", "after lease"])(
+    "Stop wakes an auth Resume dependency stalled %s",
+    async (stage) => {
+      const gate = deferred<void>();
+      let calls = 0;
+      const waiting = vi.fn(async () => {
+        calls++;
+        if (stage === "before lease" || calls === 2) await gate.promise;
+      });
+      const f = fixture("Fixture task", { waitForAuthResume: waiting }),
+        run = f.run();
+      try {
+        await until(() => calls === (stage === "before lease" ? 1 : 2));
+        expect(f.fake.activeLeases).toBe(stage === "before lease" ? 0 : 1);
+        f.session.stop();
+        const result = await Promise.race([
+          run,
+          new Promise<"stalled">((r) => setTimeout(() => r("stalled"), 50)),
+        ]);
+        expect(result).toBe(CODEX_DONE);
+        expect(f.fake.activeLeases).toBe(0);
+        expect(f.fake.launches).toHaveLength(0);
+        expect(f.endpoints).toHaveLength(0);
+        expect(f.observe).not.toHaveBeenCalled();
+      } finally {
+        gate.resolve();
+        await run.catch(() => {});
+      }
+    },
+  );
+  it("keeps launch and frame admission blocked until explicit auth Resume", async () => {
+    const gate = deferred<void>(),
+      entered = deferred<void>();
+    const f = fixture("Fixture task", {
+        waitForAuthResume: async () => {
+          entered.resolve();
+          await gate.promise;
+        },
+      }),
+      run = f.run();
+    try {
+      await entered.promise;
+      expect(f.fake.activeLeases).toBe(0);
+      expect(f.fake.launches).toHaveLength(0);
+      expect(f.observe).not.toHaveBeenCalled();
+      gate.resolve();
+      const c = await f.fake.nextLaunch(1);
+      await c.waitFor("turn/start");
+      f.done();
+      expect(await run).toBe(CODEX_DONE);
+    } finally {
+      gate.resolve();
+      f.session.stop();
+      await run.catch(() => {});
+    }
+  });
+  it("uses the owner's mutation cursor when Resume arrives while the old holder is closing", async () => {
+    let after: number | undefined;
+    const f = fixture("Fixture task", {
+        waitForAuthResume: async (s) => {
+          if (after === undefined) return;
+          await s.waitForResume(after);
+          after = undefined;
+        },
+      }),
+      run = f.run(),
+      c = await f.fake.nextLaunch(1);
+    await c.waitFor("turn/start");
+    const closed = deferred<void>();
+    c.stopGate = closed.promise;
+    try {
+      after = f.session.inboxSequence;
+      f.fake.changeAuth();
+      await until(() => c.stopped);
+      f.session.post("resume", "");
+      expect(f.fake.launches).toHaveLength(1);
+      closed.resolve();
+      const next = await f.fake.nextLaunch(2);
+      await next.waitFor("turn/start");
+      expect(f.endpoints[1]?.input.authGeneration).toBe(2);
+      expect(f.fake.maxLeases).toBe(1);
+      f.done();
+      expect(await run).toBe(CODEX_DONE);
+    } finally {
+      closed.resolve();
+      f.session.stop();
+      await run.catch(() => {});
+    }
   });
 });

@@ -132,6 +132,8 @@ export interface CodexDriverDeps {
   readonly redactorFor?: (session: AgentSession) => Redactor;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
   readonly heartbeatMs?: number;
+  // Daemon-owned mutation cursor preserves an explicit Resume posted during cleanup.
+  readonly waitForAuthResume?: (session: AgentSession) => Promise<void>;
 }
 type CycleResult =
   | { kind: "completed"; pending: boolean }
@@ -186,6 +188,7 @@ export class CodexDriver {
       while (!session.stopped) {
         await session.waitForControl();
         await session.waitForTools();
+        await this.#authResume(session);
         let lease: CodexDriverLease;
         const acquiring = d.auth.acquireTask(session.id, session.abort.signal);
         try {
@@ -209,6 +212,7 @@ export class CodexDriver {
         try {
           await session.waitForControl();
           await session.waitForTools();
+          await this.#authResume(session);
         } catch (cause) {
           await this.#release(session, lease);
           throw cause;
@@ -359,11 +363,17 @@ export class CodexDriver {
       throw new CodexCleanupError();
     }
   }
+  async #authResume(session: AgentSession): Promise<void> {
+    const waiting = this.#deps.waitForAuthResume;
+    if (waiting) await readonlyAwait(waiting(session), session.abort.signal);
+  }
   async #pause(session: AgentSession, reason: string): Promise<void> {
     await session.waitForControl();
     const after = session.inboxSequence;
     this.#state(session, "paused", reason);
-    await session.waitForResume(after);
+    if (reason === "chatgpt account changed" && this.#deps.waitForAuthResume)
+      await this.#authResume(session);
+    else await session.waitForResume(after);
     await session.waitForControl();
   }
   #recap(session: AgentSession, redact: Redactor, suffix: string): string {

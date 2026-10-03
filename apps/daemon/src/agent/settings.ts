@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { SECRET_ID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
 import { PrivateFiles } from "./private-files.ts";
@@ -22,6 +23,19 @@ export const AgentSettings = z.strictObject({
   main: RoleChoice.optional(),
   fast: RoleChoice.optional(),
   local: RoleChoice.optional(),
+  codexDenyRead: z
+    .array(
+      z
+        .string()
+        .min(1)
+        .max(1024)
+        .refine(
+          (path) => path.isWellFormed() && isAbsolute(path) && !/[\0\r\n*?[\]]/.test(path),
+          "Codex deny folders must be absolute literal paths",
+        ),
+    )
+    .max(32)
+    .optional(),
   taskBudgetUSD: z
     .number()
     .positive()

@@ -83,6 +83,7 @@ interface Entry {
   startup: Promise<void>;
   release?: Promise<void>;
   detach(): void;
+  readonly extraDenyRead: readonly string[];
 }
 interface Attempt {
   nonce: number;
@@ -96,8 +97,12 @@ interface Attempt {
 export interface CodexAuthOwnerDeps {
   readonly roots: OwnedCodexRoots;
   readonly extraDenyRead?: readonly string[];
+  // Trusted daemon settings snapshot for this task, never model-provided paths.
+  readonly taskDenyRead?: (sessionId: string) => readonly string[];
   // All ChatGPT sessions, including paused/idle ones. This is a notification target, not a lock.
   readonly sessions: () => readonly AgentSession[];
+  // Trusted synchronous runner admission state; independent of event-log/UI publication.
+  readonly pauseForAuth?: (session: AgentSession, generation: number) => void;
   readonly now?: () => number;
   readonly statusTtlMs?: number;
   readonly loginTimeoutMs?: number;
@@ -189,6 +194,7 @@ export class CodexAuthOwner {
     signal: AbortSignal,
     generation = this.#generation,
     mutation?: Mutation,
+    taskDenyRead: readonly string[] = [],
   ): Entry {
     this.#checkGeneration(generation, mutation);
     signal.throwIfAborted();
@@ -212,6 +218,7 @@ export class CodexAuthOwner {
       stops: new Map(),
       startup: Promise.resolve(),
       detach: () => signal.removeEventListener("abort", canceled),
+      extraDenyRead: Object.freeze([...(this.#deps.extraDenyRead ?? []), ...taskDenyRead]),
     };
     const canceled = () => {
       void this.#retire(entry).catch(() => {});
@@ -284,7 +291,7 @@ export class CodexAuthOwner {
     };
     try {
       const conn = await launchCodex(
-        { roots: this.#deps.roots, extraDenyRead: this.#deps.extraDenyRead },
+        { roots: this.#deps.roots, extraDenyRead: entry.extraDenyRead },
         {
           purpose,
           ...(task
@@ -361,7 +368,13 @@ export class CodexAuthOwner {
     return this.#serial(async () => {
       if (!ULID_PATTERN.test(sessionId))
         throw new AccountError(409, "The ChatGPT task is invalid.");
-      const entry = this.#reserve("task", signal);
+      const entry = this.#reserve(
+        "task",
+        signal,
+        this.#generation,
+        undefined,
+        this.#deps.taskDenyRead?.(sessionId),
+      );
       return Object.freeze({
         generation: entry.generation,
         signal: entry.signal,
@@ -501,6 +514,11 @@ export class CodexAuthOwner {
     try {
       for (const session of this.#deps.sessions()) {
         if (session.stopped) continue;
+        try {
+          this.#deps.pauseForAuth?.(session, mutation.generation);
+        } catch {
+          mutation.pauseFailed = true;
+        }
         try {
           if (session.generation) session.retireBrain(session.generation);
         } catch {

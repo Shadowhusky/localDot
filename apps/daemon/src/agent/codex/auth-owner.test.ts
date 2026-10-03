@@ -45,7 +45,12 @@ interface Holder {
   failStop?: boolean;
   notify(method: string, value: unknown): void;
 }
-function fixture() {
+function fixture(
+  extra: Pick<
+    import("./auth-owner.ts").CodexAuthOwnerDeps,
+    "taskDenyRead" | "extraDenyRead" | "pauseForAuth"
+  > = {},
+) {
   const top = mkdtempSync("/tmp/ld11-"),
     realHome = join(top, "user");
   mkdirSync(realHome, { mode: 0o700 });
@@ -166,7 +171,7 @@ function fixture() {
     input.signal.throwIfAborted();
     return conn;
   });
-  const owner = new CodexAuthOwner({ roots, sessions: () => sessions, now: () => now });
+  const owner = new CodexAuthOwner({ roots, sessions: () => sessions, now: () => now, ...extra });
   cleanup.push(async () => {
     for (const s of sessions) s.stop();
     await owner.close().catch(() => {});
@@ -820,4 +825,51 @@ describe("auth mutation journal failures", () => {
     await expect(mutation).rejects.toMatchObject({ status: 503 });
     expect(f.holders).toHaveLength(0);
   });
+});
+
+describe("per-task deny-read snapshots", () => {
+  it("copies the trusted task deny list when reserving rather than when launching", async () => {
+    const paths = ["/Volumes/TaskPrivate"],
+      taskDenyRead = vi.fn(() => paths);
+    const f = fixture({ taskDenyRead, extraDenyRead: ["/fixed-deny"] }),
+      s = f.session();
+    const lease = await f.owner.acquireTask(s.id, s.abort.signal);
+    paths.push("/later-settings-change");
+    await lease.launch(f.task(s));
+    expect(taskDenyRead).toHaveBeenCalledExactlyOnceWith(s.id);
+    expect(mocks.launch.mock.calls[0]?.[0].extraDenyRead).toEqual([
+      "/fixed-deny",
+      "/Volumes/TaskPrivate",
+    ]);
+    await lease.release();
+  });
+  it("does not consult task settings for a standalone account reader", async () => {
+    const taskDenyRead = vi.fn(() => ["/task-only"]),
+      f = fixture({ taskDenyRead });
+    await f.owner.status();
+    expect(taskDenyRead).not.toHaveBeenCalled();
+    expect(f.holder(0).input.purpose).toBe("account");
+    expect(mocks.launch.mock.calls[0]?.[0].extraDenyRead).toEqual([]);
+  });
+});
+
+it("installs every runner pause barrier before journal publication despite one callback failure", async () => {
+  const pauses = vi.fn((session: AgentSession, _generation: number) => {
+    if (session.task === "first") throw new Error("fixture pause notification failed");
+  });
+  const f = fixture({ pauseForAuth: pauses });
+  for (const task of ["first", "later", "idle"]) {
+    const session = new AgentSession(ulid(), ulid(), task, { append: () => ({}) as never });
+    if (task !== "idle") session.beginBrain();
+    f.sessions.push(session);
+  }
+  const generation = f.sessions[1]?.generation;
+  const work = f.owner.logout();
+  void work.catch(() => {});
+  expect(pauses.mock.calls.map(([s]) => s.task)).toEqual(["first", "later", "idle"]);
+  expect(pauses.mock.calls.map((args) => args[1])).toEqual([2, 2, 2]);
+  expect(generation?.signal.aborted).toBe(true);
+  expect(f.sessions.map((s) => s.status)).toEqual(["paused", "paused", "paused"]);
+  await expect(work).rejects.toMatchObject({ status: 503 });
+  expect(f.holders).toHaveLength(0);
 });

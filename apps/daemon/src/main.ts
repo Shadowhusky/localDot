@@ -1,5 +1,5 @@
 import type { Server } from "node:http";
-import { constants } from "node:os";
+import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
@@ -126,6 +126,7 @@ agent = createAgent({
   monitor: keydMonitor,
   killSwitch,
   keydPorts,
+  codex: { realHome: userInfo().homedir, user: userInfo().username },
 });
 void agent.start().catch(() => console.error("agent startup cleanup or tool listener failed"));
 const keydEvents = new KeydEventRouter({ keyd, live, eventLog });

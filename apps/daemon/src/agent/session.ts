@@ -207,11 +207,15 @@ export class AgentSession {
     this.#wake();
     return { ...item };
   }
-  async waitForUser(waitMs: number): Promise<boolean> {
+  async waitForUser(waitMs: number, signal?: AbortSignal): Promise<boolean> {
+    signal?.throwIfAborted();
+    const combined = AbortSignal.any([this.abort.signal, ...(signal ? [signal] : [])]);
     const unread = () => this.#inbox.some((i) => i.seq > this.#delivered && i.kind !== "resume");
     const deadline = Date.now() + waitMs;
-    while (!unread() && !this.stopped && Date.now() < deadline)
-      await this.#changed(deadline - Date.now(), this.abort.signal);
+    while (!unread() && !this.stopped && Date.now() < deadline) {
+      await this.#changed(deadline - Date.now(), combined);
+      signal?.throwIfAborted();
+    }
     return unread() && !this.stopped;
   }
   // A paused task may have no live brain after credential retirement. This daemon-owned wait

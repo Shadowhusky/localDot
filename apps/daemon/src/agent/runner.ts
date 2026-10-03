@@ -20,12 +20,16 @@ import type { KeydHealth } from "../keyd/monitor.ts";
 import {
   BindingError,
   bindingOf,
+  CHATGPT,
+  checkChatgptChoice,
   pricingOf,
   type ResolvedRole,
   type Role,
   resolveRole,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
+import type { CodexAccount } from "./codex/account.ts";
+import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { MemoryStore } from "./memory.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -63,17 +67,28 @@ export interface AgentRunnerDeps {
   limits?: AgentLimits;
   sleep?(ms: number, signal: AbortSignal): Promise<void>;
   idleMs?: number;
+  codex?: {
+    driver: Pick<CodexDriver, "run">;
+    account: Pick<CodexAccount, "status">;
+    ended?(sessionId: string): void | Promise<void>;
+    authGeneration?(): number;
+  };
 }
+type ModelSelection =
+  | { kind: "api"; roles: readonly ResolvedRole[]; pricing: TaskPricing; initialBudget?: number }
+  | { kind: "chatgpt"; model: string; denyRead: readonly string[] };
 interface Runtime {
   session: AgentSession;
-  roles: readonly ResolvedRole[];
-  pricing: TaskPricing;
-  initialBudget?: number;
+  selection: ModelSelection;
+  skills: SkillSummary[];
   epoch: number;
   brain?: BrainCell;
   initialized: boolean;
   serial: Promise<void>;
-  pause?: "budget" | "keyd" | "model";
+  pause?: "budget" | "keyd" | "model" | "auth";
+  authResumeAfter?: number;
+  authGeneration?: number;
+  idleWait?: AbortController;
   containment?: Promise<void>;
   backoff?: AbortController;
 }
@@ -81,6 +96,7 @@ class CleanupUncertain extends Error {}
 function uncertain(error: unknown): boolean {
   return (
     error instanceof BrainCleanupError ||
+    error instanceof CodexCleanupError ||
     error instanceof CleanupUncertain ||
     (error instanceof AggregateError && error.errors.some(uncertain))
   );
@@ -108,10 +124,22 @@ export class AgentRunner {
       if (event.type === "budget.exceeded") rt.pause = "budget";
       if (event.type !== "agent.state") return;
       if (event.data.state === "paused") {
-        rt.pause =
-          event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
-      } else if (["thinking", "acting", "observing"].includes(event.data.state))
+        if (rt.selection.kind === "chatgpt" && event.data.reason === "chatgpt account changed") {
+          const generation = this.deps.codex?.authGeneration?.();
+          if (generation !== undefined) this.pauseForAuth(rt.session, generation);
+          else {
+            if (rt.pause !== "auth") rt.authResumeAfter = rt.session.inboxSequence;
+            rt.pause = "auth";
+            rt.idleWait?.abort();
+          }
+        } else
+          rt.pause =
+            event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
+      } else if (["thinking", "acting", "observing"].includes(event.data.state)) {
         rt.pause = undefined;
+        if (rt.session.generation && rt.session.isCurrent(rt.session.generation))
+          rt.authResumeAfter = undefined;
+      }
     });
   }
   resolveRoles(keys: KeydRecord[], settings = this.deps.settings()): ResolvedRole[] {
@@ -161,10 +189,47 @@ export class AgentRunner {
       }
       // Capture settings before preflight awaits; later edits apply only to the next task.
       const settings = AgentSettings.parse(this.deps.settings());
-      const keys = await this.deps.keyd.secrets();
+      let selection: ModelSelection;
+      if (settings.main?.provider === CHATGPT) {
+        for (const role of ["main", "fast", "local"] as const) {
+          const choice = settings[role];
+          if (choice?.provider === CHATGPT) {
+            try {
+              checkChatgptChoice(role, choice);
+            } catch (error) {
+              if (error instanceof BindingError) throw new AgentError(400, error.message);
+              throw error;
+            }
+          }
+        }
+        const codex = this.deps.codex;
+        if (!codex) throw new AgentError(400, "The ChatGPT plan is not set up in this daemon.");
+        if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
+        const status = await codex.account.status();
+        signal?.throwIfAborted();
+        if (!status.available)
+          throw new AgentError(400, status.reason ?? "The ChatGPT plan is unavailable.");
+        if (status.state !== "signed_in")
+          throw new AgentError(400, "ChatGPT plan: sign in under Settings first.");
+        selection = {
+          kind: "chatgpt",
+          model: settings.main.model,
+          denyRead: Object.freeze([...(settings.codexDenyRead ?? [])]),
+        };
+      } else {
+        const keys = await this.deps.keyd.secrets();
+        signal?.throwIfAborted();
+        const roles = this.resolveRoles(keys, settings);
+        selection = {
+          kind: "api",
+          roles,
+          pricing: pricingOf(roles),
+          ...(settings.taskBudgetUSD === undefined
+            ? {}
+            : { initialBudget: settings.taskBudgetUSD }),
+        };
+      }
       signal?.throwIfAborted();
-      const roles = this.resolveRoles(keys, settings);
-      const pricing = pricingOf(roles);
       const cell = this.#ready(cellId);
       if (this.deps.live.get(cellId))
         throw new AgentError(409, "a task is already running on this computer");
@@ -172,12 +237,11 @@ export class AgentRunner {
       const session = new AgentSession(id, cellId, task, this.deps.eventLog);
       const rt: Runtime = {
         session,
-        roles,
-        pricing,
+        selection,
+        skills: [],
         epoch: 0,
         initialized: false,
         serial: Promise.resolve(),
-        ...(settings.taskBudgetUSD === undefined ? {} : { initialBudget: settings.taskBudgetUSD }),
       };
       this.sessions.set(id, session);
       this.#runtime.set(id, rt);
@@ -203,6 +267,46 @@ export class AgentRunner {
   get(id: string): AgentSession | undefined {
     return this.sessions.get(id);
   }
+  isChatgpt(id: string): boolean {
+    return this.#runtime.get(id)?.selection.kind === "chatgpt";
+  }
+  skillsOf(id: string): SkillSummary[] {
+    return structuredClone(this.#runtime.get(id)?.skills ?? []);
+  }
+  codexDenyReadOf(id: string): readonly string[] {
+    const selection = this.#runtime.get(id)?.selection;
+    return selection?.kind === "chatgpt" ? [...selection.denyRead] : [];
+  }
+  activeChatgptTasks(): number {
+    return [...this.#runtime.values()].filter(
+      (rt) =>
+        rt.selection.kind === "chatgpt" &&
+        !rt.session.stopped &&
+        ["starting", "running", "waiting_user"].includes(rt.session.status),
+    ).length;
+  }
+  // Auth owner calls this synchronously even when a journal fails or takeover is held.
+  // It installs admission state; publishing a UI event is a separate best-effort operation.
+  pauseForAuth(session: AgentSession, generation: number): void {
+    const rt = this.#runtime.get(session.id);
+    if (!rt || rt.session !== session || rt.selection.kind !== "chatgpt" || session.stopped) return;
+    if (!Number.isSafeInteger(generation) || generation < 1)
+      throw new AgentError(503, "The ChatGPT account generation is invalid.");
+    // Repeated notification of the same mutation preserves an already accepted Resume.
+    if (rt.authGeneration !== generation) rt.authResumeAfter = session.inboxSequence;
+    rt.authGeneration = generation;
+    rt.pause = "auth";
+    rt.idleWait?.abort();
+  }
+  async waitForAuthResume(session: AgentSession): Promise<void> {
+    const rt = this.#runtime.get(session.id);
+    session.abort.signal.throwIfAborted();
+    while (rt?.authResumeAfter !== undefined) {
+      const after = rt.authResumeAfter;
+      await session.waitForResume(after);
+      if (rt.authResumeAfter === after) rt.authResumeAfter = undefined;
+    }
+  }
   async raiseBudget(id: string, budgetUSD: number): Promise<void> {
     if (
       !Number.isFinite(budgetUSD) ||
@@ -213,6 +317,8 @@ export class AgentRunner {
       throw new AgentError(400, "invalid task budget");
     const rt = this.#runtime.get(id);
     if (!rt) throw new AgentError(404, "no such live task");
+    if (rt.selection.kind === "chatgpt")
+      throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
     await this.#exclusive(rt, async () => {
       const { session, brain } = rt;
       const generation = session.generation;
@@ -320,9 +426,15 @@ export class AgentRunner {
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
       const skills = await this.deps.installSkills(session.cellId, session.abort.signal);
       session.abort.signal.throwIfAborted();
+      rt.skills = structuredClone(skills);
       let resume = false,
         crashes = 0;
       while (!session.stopped) {
+        const authAfter = rt.authResumeAfter;
+        if (authAfter !== undefined) {
+          await this.waitForAuthResume(session);
+          resume = true;
+        }
         await session.waitForControl();
         await session.waitForTools();
         await this.deps.waitForUploads(session.cellId, session.abort.signal);
@@ -330,7 +442,10 @@ export class AgentRunner {
         const epoch = rt.epoch;
         let code: number | undefined;
         try {
-          code = await this.#brainRun(rt, skills, resume);
+          code =
+            rt.selection.kind === "chatgpt"
+              ? await this.deps.codex?.driver.run(session, { model: rt.selection.model, resume })
+              : await this.#brainRun(rt, skills, resume);
         } catch (error) {
           if (uncertain(error)) throw error;
           if (session.stopped) break;
@@ -353,7 +468,7 @@ export class AgentRunner {
         // A vanished caller still leaves the user in control; no idle/crash state may replace it.
         const heldOnExit = session.controlHeld;
         await session.waitForControl();
-        if (heldOnExit) continue;
+        if (heldOnExit || rt.authResumeAfter !== undefined) continue;
         if (code === BRAIN_DONE || code === BRAIN_GAVE_UP) {
           crashes = 0;
           session.append(
@@ -361,17 +476,34 @@ export class AgentRunner {
             code === BRAIN_DONE ? { state: "done" } : { state: "idle", reason: "gave up" },
           );
           session.setStatus("idle");
-          if (!(await session.waitForUser(this.deps.idleMs ?? IDLE_MS))) break;
+          const idleWait = new AbortController();
+          rt.idleWait = idleWait;
+          try {
+            if (!(await session.waitForUser(this.deps.idleMs ?? IDLE_MS, idleWait.signal))) break;
+          } catch (error) {
+            if (!idleWait.signal.aborted || rt.authResumeAfter === undefined) throw error;
+          } finally {
+            if (rt.idleWait === idleWait) rt.idleWait = undefined;
+          }
         } else {
           const backoff = RESTART_BACKOFF_MS[crashes++];
           if (backoff === undefined) {
             reason = "error";
-            session.append("agent.state", { state: "error", reason: "the brain kept crashing" });
+            session.append("agent.state", {
+              state: "error",
+              reason:
+                rt.selection.kind === "chatgpt"
+                  ? "The ChatGPT task kept stopping."
+                  : "the brain kept crashing",
+            });
             break;
           }
           session.append("agent.state", {
             state: "error",
-            reason: "the brain stopped; restarting from saved history",
+            reason:
+              rt.selection.kind === "chatgpt"
+                ? `Codex stopped (exit ${code ?? "unknown"}); restarting`
+                : "the brain stopped; restarting from saved history",
           });
           const interrupted = new AbortController();
           rt.backoff = interrupted;
@@ -402,6 +534,14 @@ export class AgentRunner {
       // Cleanup uncertainty launches containment above. Retain ownership even when closing the
       // brain failed and skipped its ordinary drain; containment independently bounds its wait.
       await session.toolsSettled();
+      if (rt.selection.kind === "chatgpt") {
+        try {
+          await this.deps.codex?.ended?.(session.id);
+        } catch {
+          reason = "error";
+          this.#blockedCells.add(session.cellId);
+        }
+      }
       if (session.stopped && reason === "done") reason = "stopped";
       try {
         session.append("session.end", { reason });
@@ -420,6 +560,8 @@ export class AgentRunner {
     resume: boolean,
   ): Promise<number | undefined> {
     const { session } = rt;
+    const selection = rt.selection;
+    if (selection.kind !== "api") throw new Error("The task model route changed.");
     const generation = session.beginBrain();
     session.setStatus("running");
     let brain: BrainCell | undefined;
@@ -432,9 +574,11 @@ export class AgentRunner {
         session.check(generation);
         brain = await this.deps.brains.open({
           sessionId: session.id,
-          secrets: [...new Set(rt.roles.flatMap((role) => (role.keyId ? [role.keyId] : [])))],
-          pricing: rt.pricing,
-          ...(rt.initialBudget === undefined ? {} : { budgetUSD: rt.initialBudget }),
+          secrets: [
+            ...new Set(selection.roles.flatMap((role) => (role.keyId ? [role.keyId] : []))),
+          ],
+          pricing: selection.pricing,
+          ...(selection.initialBudget === undefined ? {} : { budgetUSD: selection.initialBudget }),
           signal: generation.signal,
         });
         session.check(generation);
@@ -442,7 +586,7 @@ export class AgentRunner {
         rt.initialized = true;
         session.restoreDelivered(this.deps.transcripts);
         const models = Object.fromEntries(
-          rt.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
+          selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
         const boot = BootConfig.parse({
           sessionId: session.id,
