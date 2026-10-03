@@ -76,7 +76,7 @@ Browser calls have explicit deadlines and preserve same-URL reload behavior.
   `integration-{types,lint,hygiene}.log`, and
   `/tmp/localdot-m4-task4-review/scoped-rereview.md`.
 
-M4 is not complete. Memory/settings, brain loop, chat and optional ChatGPT remain.
+M4 is not complete. Brain loop, chat and optional ChatGPT remain.
 
 ## Immutable task pricing prerequisite
 
@@ -123,3 +123,24 @@ fixtures; no paid models or production credentials are used.
 Evidence: `/tmp/localdot-m4-task5-draft/integration-{tests,types,lint,hygiene}.log`,
 `fix-mutations/evidence.json`, and
 `/tmp/localdot-m4-task5-review/final-scoped-review.md`.
+
+## Task 7: memory, skills and model settings
+
+Private host stores now provide bounded memory/history with undo, validated skill
+folders, explicit bounded catalog refresh and strict model settings. Task roles
+resolve to immutable bindings and pricing snapshots. Custom compatible endpoints
+require explicit manual prices; public catalog namespaces cannot supply a price
+for an unrelated endpoint. Memory replacement validates Unicode and the complete
+journal before publishing any change.
+
+The 73-test baseline passed. Independent full review found two Important issues
+in malformed memory replacement and custom-endpoint pricing; both are fixed.
+Independent scoped review passes 35 affected cases with no remaining finding.
+Eight original and two corrective mutations fail at their intended assertions.
+Integrated daemon types, workspace lint and hygiene pass. The application owns
+these private directories; ancestor checks are not a same-UID hostile-process
+sandbox or a claimed power-loss transaction guarantee.
+
+Evidence: `/tmp/localdot-m4-task7-draft/manifest.json`, `review-notes.md`,
+`integration-{types,lint,hygiene}.log`, and
+`/tmp/localdot-m4-task7-review/scoped-review.md`.
