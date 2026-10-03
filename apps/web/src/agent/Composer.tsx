@@ -1,12 +1,14 @@
-import { ULID_PATTERN } from "@localdot/protocol";
+import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
+import { Attachments } from "./Attachments.tsx";
 import { DeliveryState } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
+import { useUploads } from "./useUploads.ts";
 import { DeliveryFailure, deliverText, type MessageMode, type TextDelivery } from "./write-api.ts";
 import "./composer.css";
 
@@ -26,6 +28,8 @@ export interface Delivery {
   readonly id: number;
   readonly request: TextDelivery;
   readonly revision: number;
+  readonly draftText: string;
+  readonly attachmentIDs: readonly number[];
   readonly phase: "sending" | "accepted" | "refused" | "uncertain";
   readonly explanation?: string;
 }
@@ -108,13 +112,26 @@ export function Composer(props: ComposerProps) {
     readyCell(props) && online && !props.keysOpen && (mode === "new" || props.agent.fresh);
   const uncertain = delivery?.phase === "uncertain";
   const sending = delivery?.phase === "sending";
-  const perform = async (request: TextDelivery, capturedRevision: number) => {
+  const uploads = useUploads({
+    api: props.api,
+    cellId: props.cell?.id ?? null,
+    ready: readyCell(props) && !props.agent.model.pendingTakeover,
+    enabled: permitted && !sending && !uncertain,
+  });
+  const perform = async (
+    request: TextDelivery,
+    capturedRevision: number,
+    draftText = request.text,
+    attachmentIDs: readonly number[] = [],
+  ) => {
     if (pending.current) return;
     const capturedApi = current.current.api;
     const record: Delivery = {
       id: ++nextId.current,
       request: Object.freeze(request),
       revision: capturedRevision,
+      draftText,
+      attachmentIDs,
       phase: "sending",
     };
     pending.current = record;
@@ -139,10 +156,11 @@ export function Composer(props: ComposerProps) {
         return;
       }
       setDelivery({ ...record, phase: "accepted" });
+      uploads.acknowledge(record.attachmentIDs);
       if (
         revision.current === capturedRevision &&
         field.current &&
-        field.current.value === request.text
+        field.current.value === draftText
       ) {
         field.current.value = "";
         setLength(0);
@@ -195,9 +213,23 @@ export function Composer(props: ComposerProps) {
       now.onSettings?.(input);
       return;
     }
+    const attached = uploads.forMessage();
+    if (!attached) {
+      setProblem("Finish or remove unconfirmed uploads before sending.");
+      return;
+    }
+    const sent = attached.length
+      ? `${text}\n\nAttached files on this computer:\n${attached.map((row) => `- ${row.path}`).join("\n")}`
+      : text;
+    if (sent.length > 8000 || keyLikePresent(sent)) {
+      setProblem("Shorten the message or attachment names before sending.");
+      return;
+    }
     void perform(
-      { cellId: now.cell?.id as string, sessionId: now.agent.sessionId, mode: chosen, text },
+      { cellId: now.cell?.id as string, sessionId: now.agent.sessionId, mode: chosen, text: sent },
       revision.current,
+      text,
+      attached.map((row) => row.id),
     );
   };
   const retry = () => {
@@ -218,7 +250,8 @@ export function Composer(props: ComposerProps) {
     if (previous.request.mode === "new" && now.configured === false) return;
     if (!field.current || !guardOwner.current.check(field.current)) return;
     pending.current = null;
-    void perform(previous.request, -1); // A retry never clears a newer ordinary draft.
+    // Reuse the confirmed attachment IDs, while preserving any newer ordinary draft.
+    void perform(previous.request, -1, previous.draftText, previous.attachmentIDs);
   };
   const dismiss = () => {
     if (pending.current?.phase !== "uncertain" || pending.current.id !== delivery?.id) return;
@@ -229,6 +262,13 @@ export function Composer(props: ComposerProps) {
   return (
     <div className="composer">
       <form
+        onDragOver={(event) => {
+          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          if (event.dataTransfer.files.length) uploads.select(event.dataTransfer.files);
+        }}
         aria-label="Message dot"
         onSubmit={(event) => {
           event.preventDefault();
@@ -318,9 +358,16 @@ export function Composer(props: ComposerProps) {
             }}
           />
         </label>
+        <Attachments
+          uploads={uploads}
+          disabled={!permitted || sending || uncertain || !!guard.notice}
+        />
         <div className="composer-actions">
           <span>{length}/8000</span>
-          <button type="submit" disabled={!permitted || sending || uncertain || !!guard.notice}>
+          <button
+            type="submit"
+            disabled={!permitted || sending || uncertain || !!guard.notice || uploads.blocked}
+          >
             {sending
               ? "Sending…"
               : mode === "new"

@@ -19,7 +19,9 @@ export function TerminalViewer({ step }: { step: AgentStep }) {
       <h3>{step.tool?.title ?? "Command output"}</h3>
       <p className="history-note">Output from this step. This viewer does not accept commands.</p>
       {step.tool?.exitCode !== undefined && <p>Exit code: {step.tool.exitCode}</p>}
-      {shortened && <p className="history-note">Output preview shortened. Showing recent text.</p>}
+      {shortened && (
+        <p className="history-note">Output preview shortened. Showing retained text.</p>
+      )}
       {display.terminal.controlsRemoved && (
         <p className="history-note">Terminal control sequences removed.</p>
       )}

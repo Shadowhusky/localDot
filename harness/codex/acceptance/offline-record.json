@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "aea0e2558c83a2b5a83ae6f0fae7cecfde7867ed00c3ac4f21c4d85084ad5593",
+  "inputSha256": "6da00d57b730a74f606dd9bbcd0382fad6a133eb8aa4e4f7e0fbd3de3f20e579",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -59,8 +59,8 @@
     "apps/daemon/src/agent/review-regressions.test.ts": "42e618b9e2028bc5a4de9dae12c5b5c1a3f89b5ab45d590e453fc795c8669757",
     "apps/daemon/src/agent/routes-boundaries.test.ts": "f4115e82d17a40f62e1b01d3b1bdacb413fd5ec3e9cdbce4c7a5c740f55db2a8",
     "apps/daemon/src/agent/routes.key-guard.test.ts": "fb22493ca536b5435820d9321534e3d04b686fad6d64fa7b67046ff699cd1991",
-    "apps/daemon/src/agent/routes.test.ts": "46daefc3e6cb034a2f22d044951470511a53d58a0cc43bef7ebf5154ecc177dd",
-    "apps/daemon/src/agent/routes.ts": "0e50be7e809d6f7d7182c7ef53837b7376af8827e7145d53f847ffcdd3a7c4ae",
+    "apps/daemon/src/agent/routes.test.ts": "ccb98043c4abebf2298477674595f5865fa2bd0116ef2cb5c02534a2aa893bc4",
+    "apps/daemon/src/agent/routes.ts": "c8ef2a8d512cfce7a7d3253bf01a3a6f21d3165ef2ccf58241c4c109b4d8742a",
     "apps/daemon/src/agent/runner-boundaries.test.ts": "e4093316091964f058d969d32e8191df796c0bc9cb75950fde5136d9d43d6515",
     "apps/daemon/src/agent/runner-independent.test.ts": "bd18730023dc932681300d770ec6e8937de8f9220e3e806081ffff57e3f86490",
     "apps/daemon/src/agent/runner.test.ts": "c61ed1c64ea63e7f60d97137746e1246dd9d67aa21c8ac0a746b1d1efbc2a42b",
@@ -155,8 +155,8 @@
     "apps/daemon/src/desktopd/registry.test.ts": "9adb24a61accd48ac9d201c987a8ee9f8863bfcd8a8efa74847fcfe9cdad78e4",
     "apps/daemon/src/desktopd/registry.ts": "f9c54b86035f8ee656168f95b3add2bb77ca0cb627ff3facccbdab7cf281149a",
     "apps/daemon/src/desktopd/testing/fake-desktopd.ts": "2595949a1ad9e288cbe3cfdddd1526173c93f2f90a4ca67b22bd0b754dc12344",
-    "apps/daemon/src/desktopd/tools-client.test.ts": "4b9239f893084264f9e7cf5505bfba78abd3a3258626ce981ad5a5c604d31fad",
-    "apps/daemon/src/desktopd/tools-client.ts": "55037be4b426a4ea8d6b6f6174879643239db062fe1aefbc35a85a26b7f0eae2",
+    "apps/daemon/src/desktopd/tools-client.test.ts": "06827e9070fcea170ca6f35f1be7dbc8cfcc9d7fd8f26e9a6383515d53e2e7dd",
+    "apps/daemon/src/desktopd/tools-client.ts": "4130082d520e6608061af1e0d263722e9a978f566410833bb77256650b1e6552",
     "apps/daemon/src/doctor-main.test.ts": "fa3b6315d1381cc11e3c3283d11abee36e39cd81607b1df2575ea369b53014e4",
     "apps/daemon/src/doctor-main.ts": "da07b1628bfbc14307033bfe034b253124a53e6d68e623eeeec63ea6f2379f85",
     "apps/daemon/src/doctor-socket.test.ts": "c29f24f3ea7ee3f11e06d831a1aad3b9531e6c8d9d2e3c987d11a8233915fd25",
@@ -372,7 +372,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "1cce6db22c525b4cfef929fb56ba4fb0453298ba0e5c6bf18f87b59e02176d9d",
+  "reportSha256": "569f03b67d6a309a7acd9855bbd5a9acb767ec01c9c1a1c7a17d16c8b264c289",
   "exit": {
     "code": 0,
     "signal": null

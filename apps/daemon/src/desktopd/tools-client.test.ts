@@ -102,6 +102,28 @@ describe("DesktopdTools real routes", () => {
       loaded: true,
     });
   });
+  it("carries create-only upload admission through the actual file route without replacing bytes", async () => {
+    const { tools } = setup();
+    expect(
+      await tools.putFile(
+        "Downloads/attachment.txt",
+        stream(bytes("original")),
+        undefined,
+        undefined,
+        true,
+      ),
+    ).toBe("~/Downloads/attachment.txt");
+    await expect(
+      tools.putFile(
+        "Downloads/attachment.txt",
+        stream(bytes("replacement")),
+        undefined,
+        undefined,
+        true,
+      ),
+    ).rejects.toMatchObject({ status: 409 });
+    expect((await tools.readFile("Downloads/attachment.txt")).content).toBe("original");
+  });
 });
 
 describe("tool transport ownership", () => {
@@ -277,6 +299,20 @@ describe("shell NDJSON boundary", () => {
 });
 
 describe("bounded streaming transfer", () => {
+  it("retains a finite response deadline when the peer cancels an unused upload body", async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    const tools = client(async (_url, init) => {
+      if (!(init?.body instanceof ReadableStream)) throw new Error("Owned upload stream missing");
+      await init.body.cancel();
+      return new Promise<Response>(() => {});
+    });
+    const call = tools.putFile("x", new ReadableStream<Uint8Array>({ cancel }));
+    const rejected = expect(call).rejects.toThrow("deadline exceeded");
+    await vi.advanceTimersByTimeAsync(120_000);
+    await rejected;
+    expect(cancel).toHaveBeenCalledOnce();
+  });
   it("enforces actual response bytes despite absent or false length", async () => {
     for (const headers of [{}, { "content-length": "1" }]) {
       const tools = client(

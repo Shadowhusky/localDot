@@ -310,13 +310,14 @@ export class DesktopdTools {
     source: ReadableStream<Uint8Array>,
     mode?: number,
     signal?: AbortSignal,
+    createOnly = false,
   ): Promise<string> {
     const scope = this.#scope(120_000, signal);
     let body: ReadableStream<Uint8Array> | undefined;
     const uploaded = { bytes: 0, complete: false };
     try {
       body = this.#boundedStream(source, scope, this.transferLimit, false, uploaded);
-      const query = `path=${encodeURIComponent(path)}${mode === undefined ? "" : `&mode=${mode.toString(8)}`}`;
+      const query = `path=${encodeURIComponent(path)}${mode === undefined ? "" : `&mode=${mode.toString(8)}`}${createOnly ? "&createOnly=1" : ""}`;
       const res = await this.#send(`/files/put?${query}`, scope, body, "application/octet-stream");
       const text = await textBody(res, scope.signal, 4096);
       if (!res.ok) throw new DesktopdError(res.status, "file upload refused", "/files/put");
@@ -390,7 +391,9 @@ export class DesktopdTools {
           ended = true;
           cleanup();
         }
-        scope.abort();
+        // A peer can cancel an unused upload body before returning a refusal. Keep its
+        // bounded response owner alive; external abort and the deadline still apply.
+        if (finishOnEnd) scope.abort();
       },
     });
   }

@@ -192,7 +192,7 @@ function fail(error: unknown): Response {
     return new Response("task control changed", { status: 409 });
   if (error instanceof DesktopdError)
     return new Response("the computer transfer failed", {
-      status: error.status === 413 ? 413 : 502,
+      status: error.status === 413 || error.status === 409 ? error.status : 502,
     });
   if (error instanceof Error && error.name === "AbortError")
     return new Response("request cancelled", { status: 499 });
@@ -525,6 +525,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (
         !ULID_PATTERN.test(cellId) ||
         !DOWNLOAD_NAME.test(name) ||
+        name.startsWith(".") ||
         name === "." ||
         name === ".." ||
         !name.isWellFormed()
@@ -536,6 +537,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!access) throw new RouteError(409, "the computer is not available for upload");
       let reader: ReadableStreamDefaultReader<Uint8Array> | undefined;
       let oversized = false;
+      let submitted = false;
       let size = 0;
       try {
         access.check();
@@ -579,11 +581,13 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           },
           { highWaterMark: 0 },
         );
+        submitted = true;
         const path = await access.tools.putFile(
           `Downloads/${name}`,
           body,
           undefined,
           access.signal,
+          true, // User attachments never replace an existing Downloads file.
         );
         access.check();
         check(access.signal);
@@ -592,6 +596,16 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         return c.json({ path }, 201);
       } catch (error) {
         if (oversized) throw new RouteError(413, "file too large");
+        // A control/readiness interruption after submission may follow durable
+        // publication. A verified desktop no-replace conflict remains a refusal.
+        if (
+          submitted &&
+          (error instanceof ControlHeldError ||
+            error instanceof SessionStoppedError ||
+            (error instanceof AgentError && error.status === 409) ||
+            (error instanceof RouteError && error.status === 409))
+        )
+          throw new RouteError(499, "upload completion could not be confirmed");
         throw error;
       } finally {
         if (reader) {

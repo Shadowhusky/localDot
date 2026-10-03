@@ -1,5 +1,6 @@
 import { ActivityDetails } from "../agent/ActivityDetails.tsx";
 import type { AgentModel } from "../agent/model.ts";
+import { ResultFiles } from "../agent/ResultFiles.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
@@ -53,6 +54,7 @@ export function PlanRail({ rows, sessionId, scale, api, title, agent }: PlanRail
           )}
         </section>
       ))}
+      {agent && <ResultFiles api={api} sessionId={sessionId} results={agent.results} />}
       <div className="rail-h">
         <span>Steps</span>
         {sessionId && <span>Following live</span>}

@@ -1,6 +1,7 @@
 import {
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -14,7 +15,9 @@ import type { KeydRecord } from "@localdot/protocol";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { addToolRoutes } from "../../../../cells/desktop/desktopd/src/tools/routes.ts";
 import { createApp } from "../app.ts";
+import { DesktopdTools } from "../desktopd/tools-client.ts";
 import { EventLog } from "../event-log.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
 import { CatalogStore } from "./catalog-store.ts";
@@ -71,6 +74,7 @@ async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness"> = {})
       source: ReadableStream<Uint8Array>,
       _mode?: number,
       signal?: AbortSignal,
+      _createOnly?: boolean,
     ) => {
       const reader = source.getReader();
       try {
@@ -692,6 +696,55 @@ describe("ChatGPT settings and installation integration", () => {
 });
 
 describe("bounded user file transfers", () => {
+  it("refuses a duplicate through actual desktop publication without overwriting or losing the 409", async () => {
+    const f = await setup(),
+      desktop = new Hono();
+    addToolRoutes(desktop, {
+      home: f.home,
+      env: {},
+      browser: {
+        read: async () => {
+          throw new Error("Unexpected fixture browser read");
+        },
+        navigate: async () => {
+          throw new Error("Unexpected fixture browser navigation");
+        },
+      },
+    });
+    const tools = new DesktopdTools(
+      { baseUrl: "http://owned-desktopd", token: "fixture" },
+      async (url, init) => desktop.fetch(new Request(url, init)),
+    );
+    f.deps.desktop = (_id, requestSignal) => {
+      const signal = AbortSignal.any([requestSignal, f.lifetime.signal, f.session.abort.signal]);
+      return { tools, signal, check: () => signal.throwIfAborted(), release: f.release };
+    };
+    try {
+      const path = `/api/cells/${CELL}/upload?name=report.txt`;
+      const first = await f.app.request(path, { method: "POST", body: "original" });
+      expect(first.status).toBe(201);
+      expect(await first.json()).toEqual({ path: "~/Downloads/report.txt" });
+      const second = await f.app.request(path, { method: "POST", body: "replacement" });
+      expect(second.status).toBe(409);
+      expect(readFileSync(join(f.home, "Downloads", "report.txt"), "utf8")).toBe("original");
+      expect(f.release).toHaveBeenCalledTimes(2);
+    } finally {
+      await tools.close();
+    }
+  });
+  it("refuses hidden and encoded traversal upload names before desktop admission", async () => {
+    const f = await setup();
+    for (const name of [".hidden", "..", "a/b", "a\\b", "nul\0name"]) {
+      const response = await f.app.request(
+        `/api/cells/${CELL}/upload?name=${encodeURIComponent(name)}`,
+        { method: "POST", body: "x" },
+      );
+      expect(response.status).toBe(400);
+    }
+    expect(f.put).not.toHaveBeenCalled();
+    expect(f.release).not.toHaveBeenCalled();
+  });
+
   it("streams an upload through the admitted lifetime and releases it after settlement", async () => {
     const f = await setup();
     const response = await f.app.request(`/api/cells/${CELL}/upload?name=report.pdf`, {
@@ -702,6 +755,7 @@ describe("bounded user file transfers", () => {
     expect(await response.json()).toEqual({ path: "~/Downloads/report.pdf" });
     expect(f.transferred).toBe(3);
     expect(f.put.mock.calls[0]?.[3]).toBeInstanceOf(AbortSignal);
+    expect(f.put.mock.calls[0]?.[4]).toBe(true);
     expect(f.release).toHaveBeenCalledTimes(1);
   });
   it.each([undefined, "1"])(

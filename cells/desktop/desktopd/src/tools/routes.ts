@@ -202,6 +202,9 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
   app.post("/files/put", async (c) => {
     const path = transferPath(c);
     if (path instanceof Response) return path;
+    const createOnly = c.req.query("createOnly");
+    if (createOnly !== undefined && createOnly !== "1")
+      return c.text("invalid create-only option", 400);
     const mode = c.req.query("mode");
     if (mode !== undefined && !/^0?[0-7]{3}$/.test(mode)) return c.text("mode must be octal", 400);
     const maxBytes = deps.maxPutBytes ?? MAX_TRANSFER_BYTES;
@@ -224,6 +227,7 @@ export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
           mode ? Number.parseInt(mode, 8) & 0o755 : undefined,
           maxBytes,
           c.req.raw.signal,
+          createOnly === "1",
         ),
       );
     } catch (error) {

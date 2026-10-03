@@ -4,6 +4,7 @@ import {
   constants,
   fchmodSync,
   fstatSync,
+  linkSync,
   lstatSync,
   mkdirSync,
   openSync,
@@ -188,11 +189,12 @@ function existingText(home: string, path: string): { content: string; stat: Stat
   }
 }
 
-function temporary(home: string, path: string, mode?: number) {
+function temporary(home: string, path: string, mode?: number, createOnly = false) {
   const real = inHome(home, path);
   mkdirSync(dirname(real), { recursive: true });
   checked(home, path, real);
   const before = lstatSync(real, { throwIfNoEntry: false });
+  if (before && createOnly) throw new FileToolError(409, "a file with this name already exists");
   if (before && !before.isFile()) throw new FileToolError(409, `${path} is not a regular file`);
   const parent = lstatSync(dirname(real));
   if (!parent.isDirectory()) throw new FileToolError(409, "the parent is not a directory");
@@ -223,7 +225,16 @@ function temporary(home: string, path: string, mode?: number) {
       if (!same(parent, nowParent) || (before ? !now || !same(before, now) : now !== undefined)) {
         throw new FileToolError(409, "the destination changed; try again");
       }
-      renameSync(temp, real);
+      if (createOnly) {
+        // Atomic no-replace publication: even a destination created after the check cannot be overwritten.
+        try {
+          linkSync(temp, real);
+        } catch (error) {
+          if (error && typeof error === "object" && "code" in error && error.code === "EEXIST")
+            throw new FileToolError(409, "a file with this name already exists");
+          throw error;
+        }
+      } else renameSync(temp, real);
     },
     dispose() {
       try {
@@ -393,6 +404,7 @@ export async function putFile(
   mode?: number,
   maxBytes = MAX_TRANSFER_BYTES,
   signal?: AbortSignal,
+  createOnly = false,
 ): Promise<{ path: string; bytes: number }> {
   limit(maxBytes);
   signal?.throwIfAborted();
@@ -401,7 +413,7 @@ export async function putFile(
   const reader = source.getReader();
   let temp: ReturnType<typeof temporary>;
   try {
-    temp = temporary(home, path, mode);
+    temp = temporary(home, path, mode, createOnly);
   } catch (error) {
     void reader.cancel(error).catch(() => undefined);
     reader.releaseLock();

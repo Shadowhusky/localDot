@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
@@ -387,5 +387,99 @@ describe("composer delivery ownership and draft handling", () => {
       path: `/api/agent/sessions/${sessionId}/messages`,
       body: { kind: "followup", text: "idle follow-up" },
     });
+  });
+});
+
+describe("explicit composer attachments", () => {
+  it("serializes picker and drop uploads, then cites only confirmed paths on explicit Send", async () => {
+    const first = Promise.withResolvers<Response>();
+    const calls: { path: string; body: unknown }[] = [];
+    const one = new File(["one"], "one.txt"),
+      two = new File(["two"], "two.txt");
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url, init) => {
+        const target = new URL(String(url));
+        calls.push({ path: target.pathname, body: init?.body });
+        if (target.pathname.endsWith("/upload"))
+          return target.searchParams.get("name") === "one.txt"
+            ? first.promise
+            : Response.json({ path: "~/Downloads/two.txt" }, { status: 201 });
+        return new Response(null, { status: 202 });
+      },
+    });
+    const f = setup(undefined, { api });
+    f.input("Read both sample files");
+    fireEvent.change(screen.getByLabelText("Add files"), { target: { files: [one] } });
+    fireEvent.drop(screen.getByRole("form", { name: "Message dot" }), {
+      dataTransfer: { files: [two], types: ["Files"] },
+    });
+    f.submit();
+    expect(calls.map((c) => c.body)).toEqual([one]);
+    await act(async () =>
+      first.resolve(Response.json({ path: "~/Downloads/one.txt" }, { status: 201 })),
+    );
+    await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(2));
+    expect(calls.map((c) => c.body)).toEqual([one, two]);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    await screen.findByText("Accepted by the daemon.");
+    expect(JSON.parse(String(calls[2]?.body))).toEqual({
+      kind: "steer",
+      text: "Read both sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
+    });
+    expect(f.field.value).toBe("");
+    expect(screen.queryByText("Uploaded to Downloads")).toBeNull();
+  });
+  it("cannot cite a forged upload acknowledgment or send an unconfirmed attachment", async () => {
+    const calls: string[] = [];
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url) => {
+        calls.push(new URL(String(url)).pathname);
+        return Response.json({ path: "~/Downloads/other.txt" }, { status: 201 });
+      },
+    });
+    const f = setup(undefined, { api });
+    f.input("Read the file");
+    fireEvent.change(screen.getByLabelText("Add files"), {
+      target: { files: [new File(["x"], "one.txt")] },
+    });
+    await screen.findByText("Upload unconfirmed");
+    f.submit();
+    expect(calls).toEqual([`/api/cells/${cellId}/upload`]);
+    expect(f.field.value).toBe("Read the file");
+    expect(screen.queryByLabelText("Message delivery")).toBeNull();
+    expect(screen.getByText(/Finish or remove unconfirmed uploads/)).toBeTruthy();
+  });
+  it("retains the original confirmed attachment references for an explicit uncertain-message retry", async () => {
+    const delivered: string[] = [];
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url, init) => {
+        if (new URL(String(url)).pathname.endsWith("/upload"))
+          return Response.json({ path: "~/Downloads/one.txt" }, { status: 201 });
+        delivered.push(String(init?.body));
+        if (delivered.length === 1) throw new Error("lost after admission");
+        return new Response(null, { status: 202 });
+      },
+    });
+    const f = setup(undefined, { api });
+    f.input("Original text");
+    fireEvent.change(screen.getByLabelText("Add files"), {
+      target: { files: [new File(["x"], "one.txt")] },
+    });
+    await screen.findByText("Uploaded to Downloads");
+    f.submit();
+    await screen.findByText(/reply was lost/);
+    f.input("New unsent draft");
+    f.submit();
+    expect(delivered).toHaveLength(1);
+    fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
+    await screen.findByText("Accepted by the daemon.");
+    expect(delivered).toHaveLength(2);
+    expect(delivered[1]).toBe(delivered[0]);
+    expect(JSON.parse(delivered[0] as string).text).toContain("~/Downloads/one.txt");
+    expect(f.field.value).toBe("New unsent draft");
+    expect(screen.queryByText("Uploaded to Downloads")).toBeNull();
   });
 });
