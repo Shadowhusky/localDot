@@ -13,7 +13,8 @@
     "@localdot/protocol": "workspace:*",
     "@modelcontextprotocol/sdk": "1.31.0",
     "hono": "4.13.12",
-    "ws": "8.22.0"
+    "ws": "8.22.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/ws": "8.18.2",

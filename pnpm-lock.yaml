@@ -118,6 +118,9 @@ importers:
       ws:
         specifier: 8.22.0
         version: 8.22.0
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
     devDependencies:
       '@types/ws':
         specifier: 8.18.2
@@ -139,7 +142,14 @@ importers:
         specifier: 4.23.15
         version: 4.23.15
 
-  packages/providers: {}
+  packages/providers:
+    dependencies:
+      '@localdot/protocol':
+        specifier: workspace:*
+        version: link:../protocol
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/stage:
     dependencies:
