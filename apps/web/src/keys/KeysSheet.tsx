@@ -9,11 +9,12 @@ export interface KeysSheetProps {
   open: boolean;
   keys: KeysController;
   onClose(): void;
+  stop?: { readonly label: string; readonly enabled: boolean; run(): void };
 }
 
 // A modal sheet that grows from the top bar's Keys button and returns to it. It stays mounted so
 // opening and closing are one interruptible transition; closed, it is inert.
-export function KeysSheet({ open, keys, onClose }: KeysSheetProps) {
+export function KeysSheet({ open, keys, onClose, stop }: KeysSheetProps) {
   const panel = useRef<HTMLDivElement>(null);
   const status = keyStatus(keys.health);
   const offline = status.state === "offline";
@@ -68,6 +69,21 @@ export function KeysSheet({ open, keys, onClose }: KeysSheetProps) {
             <span aria-hidden="true">×</span>
           </button>
         </header>
+        {stop && (
+          <div className="sheet-task-control">
+            <span>Computer controls</span>
+            <button
+              type="button"
+              className="sheet-stop"
+              aria-disabled={!stop.enabled || undefined}
+              onClick={() => {
+                if (stop.enabled) stop.run();
+              }}
+            >
+              {stop.label}
+            </button>
+          </div>
+        )}
         <p className="lede">
           Your keys stay on this Mac. Apps in your computer get temporary access without seeing the
           real keys.

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentSession } from "./agent/useAgentSession.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
@@ -10,6 +11,8 @@ import { mergeHud, sessionHud, stepRows } from "./session/session-view.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { ConversationRail } from "./shell/ConversationRail.tsx";
+import { Hud } from "./shell/Hud.tsx";
+import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
 import { PlanRail } from "./shell/PlanRail.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
@@ -119,9 +122,31 @@ function Theatre({ api }: { api: ApiClient }) {
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
   const session = useLiveSession(api, cell, stage);
+  const agent = useAgentSession(api, cell, session);
+  const [pane, setPane] = useState<TheatrePane>("computer");
+  const [narrow, setNarrow] = useState(
+    () => window.matchMedia?.("(width < 1180px)").matches ?? false,
+  );
+  useEffect(() => {
+    if (!window.matchMedia) return;
+    const media = window.matchMedia("(width < 1180px)");
+    const changed = () => setNarrow(media.matches);
+    changed();
+    media.addEventListener("change", changed);
+    return () => media.removeEventListener("change", changed);
+  }, []);
   const now = useNowMs(session.model, session.version);
   const sHud = session.sessionId ? sessionHud(session.model, now) : null;
-  const merged = mergeHud(error ? { ...hud, caption: error } : hud, sHud);
+  const sessionMerged = mergeHud(error ? { ...hud, caption: error } : hud, sHud);
+  const merged = {
+    ...sessionMerged,
+    control: Boolean(
+      sessionMerged.control &&
+        agent.fresh &&
+        !agent.model.pendingTakeover &&
+        !agent.snapshot?.pendingTakeover,
+    ),
+  };
   const rows = session.sessionId
     ? timelineRows(stepRows(session.model), session.model.keyUses)
     : [];
@@ -139,36 +164,117 @@ function Theatre({ api }: { api: ApiClient }) {
           onKeys={() => setKeysOpen((open) => !open)}
           keysRef={keysButton}
         />
-        <div className="house">
-          <ConversationRail />
-          <StageColumn
+        <div className="task-bar">
+          <Hud
             hud={merged}
-            control={merged.control}
             onStart={start}
             onStop={stop}
             onResume={resume}
             onStopSession={session.stop}
             onRetry={retry}
-          >
-            <Stage
-              ref={stage}
-              cell={cell}
-              api={api}
-              control={merged.control}
-              reconnects={reconnects}
-              listed={listed}
-            />
-          </StageColumn>
-          <PlanRail
-            rows={rows}
-            sessionId={session.sessionId}
-            scale={cell?.scale ?? 2}
-            api={api}
-            title={session.model.title}
           />
+          {session.sessionId && (
+            <span className="task-connection">
+              {agent.error
+                ? "Activity unavailable"
+                : agent.connection === "lost"
+                  ? "Connection lost"
+                  : agent.connection === "connecting"
+                    ? "Connecting…"
+                    : agent.snapshot?.status === "idle"
+                      ? "Ready for follow-up"
+                      : agent.model.pendingTakeover
+                        ? "Your turn"
+                        : agent.model.pendingAsk
+                          ? "Waiting for you"
+                          : "Task activity"}
+            </span>
+          )}
+        </div>
+        <PaneTabs
+          selected={pane}
+          onSelect={setPane}
+          waiting={Boolean(agent.model.pendingAsk || agent.model.pendingTakeover)}
+        />
+        <div className="house">
+          <div
+            className="pane pane-conversation"
+            id="pane-conversation"
+            role="tabpanel"
+            aria-label="Conversation"
+            data-selected={pane === "conversation"}
+            inert={narrow && pane !== "conversation"}
+            onFocusCapture={() => {
+              if (!narrow) setPane("conversation");
+            }}
+          >
+            <ConversationRail agent={agent} />
+          </div>
+          <div
+            className="pane pane-computer"
+            id="pane-computer"
+            role="tabpanel"
+            aria-label="Computer"
+            data-selected={pane === "computer"}
+            inert={narrow && pane !== "computer"}
+            onFocusCapture={() => {
+              if (!narrow) setPane("computer");
+            }}
+          >
+            <StageColumn
+              showHud={false}
+              hud={merged}
+              control={merged.control}
+              onStart={start}
+              onStop={stop}
+              onResume={resume}
+              onStopSession={session.stop}
+              onRetry={retry}
+            >
+              <Stage
+                ref={stage}
+                cell={cell}
+                api={api}
+                control={merged.control}
+                reconnects={reconnects}
+                listed={listed}
+              />
+            </StageColumn>
+          </div>
+          <div
+            className="pane pane-activity"
+            id="pane-activity"
+            role="tabpanel"
+            aria-label="Activity"
+            data-selected={pane === "activity"}
+            inert={narrow && pane !== "activity"}
+            onFocusCapture={() => {
+              if (!narrow) setPane("activity");
+            }}
+          >
+            <PlanRail
+              agent={agent.model}
+              rows={rows}
+              sessionId={session.sessionId}
+              scale={cell?.scale ?? 2}
+              api={api}
+              title={session.model.title}
+            />
+          </div>
         </div>
       </div>
-      <KeysSheet open={keysOpen} keys={keys} onClose={closeKeys} />
+      <KeysSheet
+        open={keysOpen}
+        keys={keys}
+        onClose={closeKeys}
+        stop={
+          merged.stop
+            ? { label: "Stop", enabled: true, run: session.stop }
+            : merged.action.kind === "stop" || merged.action.kind === "resume"
+              ? { label: "Stop computer", enabled: merged.action.enabled, run: stop }
+              : undefined
+        }
+      />
     </div>
   );
 }

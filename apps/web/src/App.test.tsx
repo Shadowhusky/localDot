@@ -114,6 +114,28 @@ describe("App token states", () => {
     expect(document.activeElement).toBe(trigger);
   });
 
+  it("keeps Stop computer reachable inside Keys while the Theatre is inert", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const { fetchImpl, calls } = daemon((call) => {
+      if (call.path === "/api/cells") return json([summary("ready")]);
+      if (call.path.endsWith("/live")) return json({}, 404);
+      if (call.path.endsWith("/stop"))
+        return json({ revoked: true, paused: true, closed: true, stopped: false, errors: [] }, 202);
+      return json({});
+    });
+    render(<App fetchImpl={fetchImpl} />);
+    await screen.findByRole("button", { name: "Stop computer" });
+    fireEvent.click(screen.getByTestId("keys-button"));
+    const sheet = screen.getByRole("dialog", { name: "Keys" });
+    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
+    fireEvent.click(within(sheet).getByRole("button", { name: "Stop computer" }));
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/stop"))).toBe(
+        true,
+      ),
+    );
+  });
+
   it("shows the Theatre with a Start computer control when the daemon has no cell", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const calls: string[] = [];

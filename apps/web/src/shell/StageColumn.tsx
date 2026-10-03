@@ -5,6 +5,7 @@ import { Hud, type HudProps } from "./Hud.tsx";
 export interface StageColumnProps extends HudProps {
   control: boolean;
   children?: ReactNode;
+  showHud?: boolean;
 }
 
 export function StageColumn({
@@ -16,6 +17,7 @@ export function StageColumn({
   onResume,
   onRetry,
   children,
+  showHud = true,
 }: StageColumnProps) {
   const classes = [
     "stage",
@@ -29,14 +31,16 @@ export function StageColumn({
     <main className="stage-col">
       <div className={classes}>
         {children}
-        <Hud
-          hud={hud}
-          onStart={onStart}
-          onStop={onStop}
-          onStopSession={onStopSession}
-          onResume={onResume}
-          onRetry={onRetry}
-        />
+        {showHud && (
+          <Hud
+            hud={hud}
+            onStart={onStart}
+            onStop={onStop}
+            onStopSession={onStopSession}
+            onResume={onResume}
+            onRetry={onRetry}
+          />
+        )}
       </div>
       <Caption text={hud.caption} />
     </main>
