@@ -107,6 +107,9 @@ export class AgentSession {
   get delivered(): number {
     return this.#delivered;
   }
+  get inboxSequence(): number {
+    return this.#seq;
+  }
   get generation(): BrainGeneration | undefined {
     return this.#brain?.generation;
   }
@@ -210,6 +213,18 @@ export class AgentSession {
     while (!unread() && !this.stopped && Date.now() < deadline)
       await this.#changed(deadline - Date.now(), this.abort.signal);
     return unread() && !this.stopped;
+  }
+  // A paused task may have no live brain after credential retirement. This daemon-owned wait
+  // observes explicit Resume without creating a generation, fetching content or acknowledging it.
+  async waitForResume(after: number, signal = this.abort.signal): Promise<void> {
+    if (!Number.isSafeInteger(after) || after < 0 || after > this.#seq)
+      throw new Error("invalid resume cursor");
+    const combined = AbortSignal.any([this.abort.signal, signal]);
+    while (!this.#inbox.some((item) => item.seq > after && item.kind === "resume")) {
+      combined.throwIfAborted();
+      await this.#changed(25_000, combined);
+    }
+    combined.throwIfAborted();
   }
   async inbox(
     after: number,
