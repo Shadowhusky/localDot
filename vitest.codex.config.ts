@@ -4,6 +4,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     include: ["apps/*/src/**/*.codex.test.ts", "harness/*/src/**/*.codex.test.ts"],
+    exclude: ["**/node_modules/**", "**/signin.codex.test.ts"],
     fileParallelism: false,
   },
 });

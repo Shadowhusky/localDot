@@ -10,6 +10,7 @@ import {
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CodexArgsError,
   codexArgs,
   DISABLED_FEATURES,
   MCP_BRIDGE,
@@ -60,7 +61,11 @@ afterEach(() => {
   for (const p of owned.splice(0)) rmSync(p, { recursive: true, force: true });
 });
 describe("fixed Codex command", () => {
-  it.each(["task", "account", "login-browser"] as const)(
+  it("refuses browser command construction before granting any sandbox capability", () => {
+    const { input } = fixture("login-browser");
+    expect(() => codexArgs(input)).toThrow(CodexArgsError);
+  });
+  it.each(["task", "account"] as const)(
     "disables both agent systems and other host tools for %s and forces file-backed ChatGPT authentication",
     (purpose) => {
       const { input } = fixture(purpose),

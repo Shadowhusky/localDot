@@ -163,7 +163,9 @@ export function sandboxSettings(input: SandboxInput): SrtSettings {
     const platform = input.platform ?? process.platform;
     if (platform !== "darwin" && platform !== "linux") return refuse();
     if (!["task", "account", "login-browser"].includes(input.purpose)) return refuse();
-    if (input.purpose === "login-browser" && platform !== "darwin") return refuse();
+    // Native acceptance found localhost also permits wildcard binding at1455. No browser
+    // profile is published until the exact loopback restriction can be enforced.
+    if (input.purpose === "login-browser") return refuse();
     assertOwnedCodexRoots(input.roots);
     for (const path of Object.values(input.roots)) literal(path);
     const realHome = literal(ownedCodexRealHome(input.roots));
@@ -186,7 +188,6 @@ export function sandboxSettings(input: SandboxInput): SrtSettings {
         strictAllowlist: true,
         allowLocalBinding: false,
         ...(input.mcp ? { allowUnixSockets: [join(input.mcp.path, "m.sock")] } : {}),
-        ...(input.purpose === "login-browser" ? { loopbackBindPorts: [1455] } : {}),
       },
       filesystem: {
         denyRead: both([

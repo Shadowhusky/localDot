@@ -26,6 +26,7 @@ function sourceTree() {
     "pnpm-workspace.yaml",
     "vitest.config.ts",
     "vitest.codex.config.ts",
+    "vitest.codex-signin.config.ts",
     "scripts/check-codex-release.mjs",
     "scripts/check-codex-release.test.mjs",
     ".github/workflows/ci.yml",
@@ -185,4 +186,14 @@ describe("pinned release gate", () => {
     expect(digest({ a: 1, b: 2 })).toBe(digest({ b: 2, a: 1 }));
     expect(digest([1, 2])).not.toBe(digest([2, 1]));
   });
+});
+
+it("binds the native C executable source to the release inventory", () => {
+  const root = sourceTree(),
+    relative = "harness/codex/src/testing/native-probe.c";
+  writeFileSync(join(root, relative), "int main(void) { return 0; }\n");
+  const first = releaseInputs(root);
+  expect(first[relative] ?? "").toMatch(/^[a-f0-9]{64}$/);
+  writeFileSync(join(root, relative), "int main(void) { return 1; }\n");
+  expect(releaseInputs(root)[relative]).not.toBe(first[relative]);
 });

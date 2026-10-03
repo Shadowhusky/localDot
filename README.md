@@ -215,3 +215,52 @@ acceptance pending. Missing configuration, authentication errors, keyd budget or
 refusals, invalid clicks and timeouts fail. The LM Studio case calls an existing model only when
 selected and never loads, unloads or reconfigures it. Test keyd listeners use the existing
 `LOCALDOT_TEST_KEYD_PORTS` range; choose a separate free range for concurrent acceptance work.
+
+### Optional ChatGPT plan harness
+
+The optional ChatGPT harness uses the independently measured Codex **0.154.0** release on
+Apple silicon macOS. Installation is explicit; reading account or installation status does
+not download it. Its credentials live in localDot's private Codex home, separate from the
+user's `~/.codex`. The ordinary API-key providers remain available separately.
+
+Sign-in uses an OpenAI device code. Browser callback sign-in is unavailable: the native
+macOS rule cannot restrict port 1455 to loopback without also allowing a wildcard bind.
+No broader callback profile is used. Canceling an attempt, signing out or refreshing the
+account retires existing account and task processes before changing authentication.
+An interrupted task requires explicit Resume after authentication changes.
+
+The release check and offline acceptance use inert credentials and owned local services:
+
+```sh
+pnpm check:codex-release
+LOCALDOT_CODEX_TESTS=1 LOCALDOT_CODEX_ARCHIVE=/absolute/path/to/darwin-arm64.tgz \
+  pnpm test:codex
+```
+
+The first command verifies the committed source-bound offline receipt. The second runs
+the 13 pinned protocol/tool probes and 10 native sandbox/encrypted-refresh probes on a
+supported Mac. The native cases require permission to create their own private temporary
+files, inert real-home canary and local listeners. They read no existing home credential
+contents. Compiler, sandbox, child-process, cleanup or unavailable-platform errors fail
+acceptance. The receipt describes offline acceptance only; real account acceptance and
+Linux runtime support remain unverified until separately demonstrated. The native socket
+rules and private filesystem permissions do not isolate arbitrary malicious processes
+already running as the same macOS user.
+
+Real account acceptance is a separate manual command, excluded from `pnpm test` and
+`pnpm test:codex`. Run it only when deliberately authorizing a real OpenAI sign-in:
+
+```sh
+LOCALDOT_CODEX_TESTS=1 LOCALDOT_CODEX_SIGNIN=1 \
+  LOCALDOT_CODEX_ARCHIVE=/absolute/path/to/darwin-arm64.tgz pnpm test:codex-signin
+```
+
+It first cancels an owned device-code attempt, then prints a fresh OpenAI verification
+URL and one-time code. Complete that sign-in within ten minutes. The suite checks private
+ChatGPT credentials and a forced token refresh in a disposable native home, compares
+metadata of the user's existing Codex directory/auth/config without reading their
+contents, retires its processes and removes its exact private home after success.
+A failed or uncertain cleanup retains that private home and fails the test. Keep manual
+terminal output private. This command sends no model turn, quota request or usage reset;
+it has not been run as part of offline acceptance. Live model acceptance still needs a
+separate explicit opt-in.

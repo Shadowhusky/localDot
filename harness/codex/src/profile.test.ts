@@ -107,21 +107,25 @@ describe("strict owned Codex profiles", () => {
       s.allowAppleEvents,
     ]).toEqual([false, false, false, false]);
   });
-  it("keeps account/device login isolated and reserves1455 only for the browser profile", () => {
+  it("keeps account/device login isolated without granting a callback listener", () => {
     const f = fixture();
-    for (const purpose of ["account", "login-browser"] as const) {
-      const s = sandboxSettings({ ...f.input, purpose, mcp: undefined });
-      expect(s.network.allowUnixSockets).toBeUndefined();
-      expect(s.network.allowLocalBinding).toBe(false);
-      expect(s.network.loopbackBindPorts).toEqual(purpose === "login-browser" ? [1455] : undefined);
-    }
+    const s = sandboxSettings({ ...f.input, purpose: "account", mcp: undefined });
+    expect(s.network.allowUnixSockets).toBeUndefined();
+    expect(s.network.allowLocalBinding).toBe(false);
+    expect(s.network.loopbackBindPorts).toBeUndefined();
     expect(() => sandboxSettings({ ...f.input, purpose: "account" })).toThrow();
     expect(() => sandboxSettings({ ...f.input, mcp: undefined })).toThrow();
-    expect(() =>
-      sandboxSettings({ ...f.input, purpose: "login-browser", mcp: undefined, platform: "linux" }),
-    ).toThrow();
   });
-  it.each(["task", "account", "login-browser"] as const)(
+  it.each(["darwin", "linux"] as const)(
+    "refuses an unverified browser callback profile on %s",
+    (platform) => {
+      const f = fixture();
+      expect(() =>
+        sandboxSettings({ ...f.input, purpose: "login-browser", mcp: undefined, platform }),
+      ).toThrow();
+    },
+  );
+  it.each(["task", "account"] as const)(
     "round-trips every %s key through the patched pinned runtime loader",
     (purpose) => {
       const f = fixture(),

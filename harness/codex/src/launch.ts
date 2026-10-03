@@ -45,7 +45,8 @@ export type CodexLaunchFailure =
 const MESSAGES: Record<CodexLaunchFailure, string> = {
   cancelled: "The Codex launch was cancelled.",
   unsupported_platform: "The ChatGPT harness is unavailable on this computer.",
-  browser_unavailable: "Browser sign-in is awaiting its bounded native callback check.",
+  browser_unavailable:
+    "Browser sign-in cannot safely restrict its callback to loopback. Use device-code sign-in.",
   install_required: "Install the ChatGPT harness before signing in.",
   integrity_failed: "The pinned Codex executable could not be verified.",
   invalid_request: "The Codex launch request is invalid.",

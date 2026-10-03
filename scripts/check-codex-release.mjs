@@ -42,11 +42,12 @@ const FILES = [
   "pnpm-workspace.yaml",
   "vitest.config.ts",
   "vitest.codex.config.ts",
+  "vitest.codex-signin.config.ts",
   "scripts/check-codex-release.mjs",
   "scripts/check-codex-release.test.mjs",
   ".github/workflows/ci.yml",
 ];
-const EXTENSION = /\.(?:[cm]?js|tsx?|json|ya?ml)$/;
+const EXTENSION = /\.(?:[cm]?js|tsx?|c|json|ya?ml)$/;
 const HEX = /^[a-f0-9]{64}$/;
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 function canonical(value) {
