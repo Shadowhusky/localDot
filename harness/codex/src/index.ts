@@ -31,6 +31,17 @@ export {
   createCodexInstaller,
   type InstalledCodex,
 } from "./install.ts";
+export {
+  type CodexConnection,
+  CodexLaunchError,
+  type CodexLaunchFailure,
+  type CodexLaunchOwner,
+  type HarnessAvailability,
+  harnessAvailability,
+  type LaunchDeps,
+  type LaunchInput,
+  launchCodex,
+} from "./launch.ts";
 export { type CodexProcess, CodexProcessError, type CodexProcessFailure } from "./process.ts";
 export {
   CODEX_HOME_DENY_WRITE,
