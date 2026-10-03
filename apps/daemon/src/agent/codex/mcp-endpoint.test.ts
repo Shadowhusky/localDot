@@ -434,9 +434,8 @@ describe("private Codex MCP capability", () => {
     const d = client(f.ep.socket);
     await d.ready();
     d.sock.write(Buffer.alloc(MAX_MCP_MESSAGE_BYTES + 1, 0x61));
-    await tick();
-    expect(d.sock.destroyed).toBe(true);
     await d.closed;
+    expect(d.sock.destroyed).toBe(true);
     expect(f.calls).toEqual([]);
   });
   it("close completes while a dispatcher ignores abort and caller remains alive", async () => {

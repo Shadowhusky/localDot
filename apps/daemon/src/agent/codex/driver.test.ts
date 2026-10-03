@@ -29,7 +29,7 @@ afterEach(async () => {
 });
 function fixture(
   task = "Find the weather",
-  extra: Pick<CodexDriverDeps, "waitForAuthResume"> = {},
+  extra: Pick<CodexDriverDeps, "waitForAuthResume" | "heartbeatMs"> = {},
 ) {
   const home = mkdtempSync("/tmp/ld10-"),
     transcript = new TranscriptStore(home),
@@ -551,13 +551,18 @@ describe("Codex authority, takeover and retirement", () => {
     expect(await run).toBe(CODEX_DONE);
   });
   it("preserves takeover across connection retirement and suppresses replacement, frames and stale events", async () => {
-    const f = fixture(),
+    const f = fixture("Find the weather", { heartbeatMs: 60_000 }),
       run = f.run(),
       first = await f.fake.nextLaunch(1);
     await first.waitFor("turn/start");
     const old = f.context(),
       waiter = f.session.takeover("login", "Enter it yourself");
     void waiter.catch(() => {});
+    // No timer or microtask may run before the model transport and tool epoch are fenced.
+    expect(first.stopped).toBe(true);
+    expect(old.signal.aborted).toBe(true);
+    expect(f.session.generation).toBeUndefined();
+    expect(f.endpoints[0]?.closed).toBe(true);
     await until(() => f.session.status === "waiting_user" && first.stopped);
     const requestId = f.session.pendingTakeover;
     expect(requestId).toBeDefined();
@@ -588,25 +593,50 @@ describe("Codex authority, takeover and retirement", () => {
     f.done();
     expect(await run).toBe(CODEX_DONE);
   });
-  it("waits for both hand-back and explicit Resume after auth changes under takeover", async () => {
-    const f = fixture(),
-      run = f.run(),
-      c = await f.fake.nextLaunch(1);
-    await c.waitFor("turn/start");
-    const waiter = f.session.takeover("login", "Your turn");
+  it.each(["during retirement", "after retirement"])(
+    "waits for both hand-back and explicit Resume after auth changes %s under takeover",
+    async (when) => {
+      const f = fixture(),
+        run = f.run(),
+        c = await f.fake.nextLaunch(1);
+      await c.waitFor("turn/start");
+      const waiter = f.session.takeover("login", "Your turn");
+      void waiter.catch(() => {});
+      if (when === "after retirement") await until(() => f.fake.activeLeases === 0);
+      f.fake.changeAuth();
+      await until(() => c.stopped && f.session.status === "waiting_user");
+      f.session.post("resume", "");
+      const id = f.session.pendingTakeover as string;
+      expect(f.fake.launches).toHaveLength(1);
+      expect(f.session.endTakeover(id, "New login ready")).toBe(true);
+      await until(() => f.session.status === "paused" || f.fake.launches.length > 1);
+      expect(f.fake.launches).toHaveLength(1);
+      expect(f.session.status).toBe("paused");
+      f.session.post("resume", "");
+      const second = await f.fake.nextLaunch(2);
+      await second.waitFor("turn/start");
+      f.done();
+      expect(await run).toBe(CODEX_DONE);
+    },
+  );
+  it("fences takeover during endpoint startup before any process or screenshot can be created", async () => {
+    const f = fixture("Find the weather", { heartbeatMs: 60_000 }),
+      opened = deferred<void>();
+    f.gates.endpoint = opened.promise;
+    cleanups.unshift(async () => opened.resolve());
+    const run = f.run();
+    await until(() => f.endpoints.length === 1);
+    const waiter = f.session.takeover("login", "Please wait");
     void waiter.catch(() => {});
-    f.fake.changeAuth();
-    await until(() => c.stopped && f.session.status === "waiting_user");
-    f.session.post("resume", "");
-    const id = f.session.pendingTakeover as string;
-    expect(f.fake.launches).toHaveLength(1);
-    expect(f.session.endTakeover(id, "New login ready")).toBe(true);
-    await until(() => f.session.status === "paused");
-    expect(f.fake.launches).toHaveLength(1);
-    f.session.post("resume", "");
-    const second = await f.fake.nextLaunch(2);
-    await second.waitFor("turn/start");
-    f.done();
+    expect(f.session.generation).toBeUndefined();
+    expect(f.fake.launches).toHaveLength(0);
+    opened.resolve();
+    await until(() => f.endpoints[0]?.closed === true && f.fake.activeLeases === 0);
+    await expect(waiter).rejects.toBeInstanceOf(Error);
+    expect(f.session.controlHeld).toBe(true);
+    expect(f.fake.launches).toHaveLength(0);
+    expect(f.observe).not.toHaveBeenCalled();
+    f.session.stop();
     expect(await run).toBe(CODEX_DONE);
   });
   it("Stops a running turn without waiting for its interrupt reply", async () => {

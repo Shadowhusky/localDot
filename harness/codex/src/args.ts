@@ -28,6 +28,9 @@ export const DISABLED_FEATURES = Object.freeze([
   "browser_use_external",
   "in_app_browser",
   "multi_agent",
+  // The 0.154.0 pin accepts forced collaboration calls unless V2 is explicitly disabled too.
+  // The real offline probe verifies rejection before a child thread or model request is created.
+  "multi_agent_v2",
   "goals",
   "image_generation",
   "hooks",
@@ -58,6 +61,7 @@ export function codexArgs(input: CodexArgsInput): readonly string[] {
         'history.persistence="none"',
         "project_doc_max_bytes=0",
         "skills.bundled.enabled=false",
+        "agents.enabled=false",
       ].flatMap((kv) => ["-c", kv]),
       ...DISABLED_FEATURES.flatMap((f) => ["--disable", f]),
       "--enable",

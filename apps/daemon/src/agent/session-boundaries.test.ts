@@ -2,7 +2,7 @@ import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AgentSession, ControlHeldError } from "./session.ts";
+import { AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { TranscriptStore } from "./transcript.ts";
 
 function required<T>(value: T | undefined): T {
@@ -73,6 +73,68 @@ describe("daemon-owned generations and control", () => {
     ]);
     expect(events.filter((e) => e.type === "takeover.request")).toHaveLength(1);
     expect(events.filter((e) => e.type === "takeover.end")).toHaveLength(1);
+  });
+  it("notifies control owners synchronously before canceling tools and preserves the daemon hold", async () => {
+    const { session, generation, events } = setup();
+    const lease = session.admit(generation);
+    const notified: string[] = [];
+    let heldAtNotification = false,
+      canceledAtNotification = true;
+    session.onControlRequested(generation, () => {
+      notified.push("first");
+      heldAtNotification = session.controlHeld;
+      canceledAtNotification = lease.signal.aborted;
+      session.retireBrain(generation);
+    });
+    session.onControlRequested(generation, () => notified.push("second"));
+    const outcome = session.takeover("login", "Please log in");
+    const rejected = expect(outcome).rejects.toBeInstanceOf(SessionStoppedError);
+    expect(notified).toEqual(["first", "second"]);
+    expect(heldAtNotification).toBe(true);
+    expect(canceledAtNotification).toBe(false);
+    expect(lease.signal.aborted).toBe(true);
+    expect(session.controlHeld).toBe(true);
+    await flush();
+    expect(events.some((event) => event.type === "takeover.request")).toBe(false);
+    lease.finish();
+    await flush();
+    expect(session.status).toBe("waiting_user");
+    expect(session.endTakeover(required(session.pendingTakeover), undefined)).toBe(true);
+    await rejected;
+  });
+  it("does not notify unsubscribed or retired owners and keeps other providers' takeover alive", async () => {
+    const { session, generation } = setup();
+    const stale = vi.fn();
+    session.onControlRequested(generation, stale);
+    session.retireBrain(generation);
+    expect(() => session.onControlRequested(generation, stale)).toThrow(SessionStoppedError);
+    const next = session.beginBrain();
+    const remove = session.onControlRequested(next, stale);
+    remove();
+    remove();
+    const outcome = session.takeover("login", "Please log in");
+    expect(stale).not.toHaveBeenCalled();
+    expect(session.isCurrent(next)).toBe(true);
+    await flush();
+    expect(session.endTakeover(required(session.pendingTakeover), "Ready")).toBe(true);
+    await expect(outcome).resolves.toEqual({ by: "user", note: "Ready" });
+  });
+  it("keeps control fenced and notifies remaining owners if an observer throws", async () => {
+    const { session, generation } = setup();
+    const lease = session.admit(generation);
+    session.onControlRequested(generation, () => {
+      throw new Error("private fixture diagnostic");
+    });
+    const notified = vi.fn();
+    session.onControlRequested(generation, notified);
+    const outcome = session.takeover("login", "Please log in");
+    expect(notified).toHaveBeenCalledOnce();
+    expect(lease.signal.aborted).toBe(true);
+    expect(() => session.admit(generation)).toThrow(ControlHeldError);
+    lease.finish();
+    await flush();
+    expect(session.endTakeover(required(session.pendingTakeover), undefined)).toBe(true);
+    await expect(outcome).resolves.toEqual({ by: "user" });
   });
   it("drains admitted tools before publishing control and keeps a hung tool fenced", async () => {
     const { session, generation, events } = setup();

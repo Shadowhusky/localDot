@@ -61,7 +61,7 @@ afterEach(() => {
 });
 describe("fixed Codex command", () => {
   it.each(["task", "account", "login-browser"] as const)(
-    "disables twenty features for %s and forces file-backed ChatGPT authentication",
+    "disables both agent systems and other host tools for %s and forces file-backed ChatGPT authentication",
     (purpose) => {
       const { input } = fixture(purpose),
         args = codexArgs(input),
@@ -80,6 +80,7 @@ describe("fixed Codex command", () => {
         "browser_use_external",
         "in_app_browser",
         "multi_agent",
+        "multi_agent_v2",
         "goals",
         "image_generation",
         "hooks",
@@ -103,6 +104,7 @@ describe("fixed Codex command", () => {
         "project_doc_max_bytes=0",
         "skills.bundled.enabled=false",
       ]);
+      expect(config).toContain("agents.enabled=false");
       const mcp = config.filter((x) => x.startsWith("mcp_servers."));
       if (purpose !== "task") expect(mcp).toEqual([]);
       else {

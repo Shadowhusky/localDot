@@ -249,6 +249,13 @@ export class CodexDriver {
           return CODEX_DONE;
         if (result.kind === "crashed") return CODEX_CRASHED;
         if (result.kind === "control") {
+          await session.waitForControl();
+          // Takeover now fences immediately. An account change while that retired cycle
+          // waits for hand-back still requires Resume under the replacement credentials.
+          if (!session.stopped && lease.generation !== d.auth.authGeneration) {
+            await this.#pause(session, "chatgpt account changed");
+            retries = 0;
+          }
           next = "Continue after the user's hand-back.";
           continue;
         }
@@ -612,6 +619,9 @@ export class CodexDriver {
       else if (value.final) finish({ kind: "done" });
     };
     signal.addEventListener("abort", loss, { once: true });
+    const removeControlObserver = session.onControlRequested(generation, () =>
+      finish({ kind: "control" }),
+    );
     publish({ finish, fence });
     const startupTimer = setTimeout(
       () => finish({ kind: "failed", message: "The ChatGPT task did not start in time." }),
@@ -875,6 +885,7 @@ export class CodexDriver {
     clearTimeout(startupTimer);
     clearInterval(heartbeat);
     signal.removeEventListener("abort", loss);
+    removeControlObserver();
     const cleanup = startup.then(async () => {
       closeEndpoint();
       for (const holder of holders) stopHolder(holder);

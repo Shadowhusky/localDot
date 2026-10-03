@@ -85,6 +85,10 @@ export class AgentSession {
   readonly #inbox: InboxItem[] = [];
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
+  readonly #controlObservers = new Set<{
+    generation: BrainGeneration;
+    notify(): void;
+  }>();
   readonly #fetched = new Map<number, InboxItem>();
   #seq = 0;
   #generationId = 0;
@@ -144,7 +148,19 @@ export class AgentSession {
     this.boot = undefined;
     this.brainCellId = undefined;
     this.#fetched.clear();
+    for (const observer of this.#controlObservers)
+      if (observer.generation === generation) this.#controlObservers.delete(observer);
     previous.abort.abort(new SessionStoppedError());
+  }
+  // Drivers must close model sampling before tool cancellation can return to the model.
+  // The subscription belongs to this generation; retiring it never releases held control.
+  onControlRequested(generation: BrainGeneration, notify: () => void): () => void {
+    this.check(generation);
+    const observer = { generation, notify };
+    this.#controlObservers.add(observer);
+    return () => {
+      this.#controlObservers.delete(observer);
+    };
   }
   publishBrain(
     generation: BrainGeneration,
@@ -404,6 +420,16 @@ export class AgentSession {
       step,
     };
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
+    const observers = [...this.#controlObservers].filter(
+      (observer) => observer.generation === generation,
+    );
+    for (const observer of observers) {
+      try {
+        observer.notify();
+      } catch {
+        // Keep control fenced and notify the other owners even if one observer fails.
+      }
+    }
     const draining: Promise<void>[] = [];
     for (const [other, call] of this.#active)
       if (other !== lease) {

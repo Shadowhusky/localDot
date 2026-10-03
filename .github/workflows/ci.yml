@@ -13,6 +13,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm lint
       - run: pnpm typecheck
+      - run: pnpm check:codex-release
       - run: pnpm --filter @localdot/brain build
       - run: pnpm --filter @localdot/web build
       - run: pnpm test
