@@ -110,6 +110,61 @@ importers:
         specifier: 8.3.1
         version: 8.3.1(@types/node@24.19.0)(esbuild@0.28.2)(tsx@4.23.15)
 
+  cells/brain:
+    dependencies:
+      '@ai-sdk/anthropic':
+        specifier: 4.0.69
+        version: 4.0.69(zod@4.6.5)
+      '@ai-sdk/azure':
+        specifier: 4.0.86
+        version: 4.0.86(zod@4.6.5)
+      '@ai-sdk/deepseek':
+        specifier: 3.0.57
+        version: 3.0.57(zod@4.6.5)
+      '@ai-sdk/google':
+        specifier: 4.0.86
+        version: 4.0.86(zod@4.6.5)
+      '@ai-sdk/groq':
+        specifier: 4.0.53
+        version: 4.0.53(zod@4.6.5)
+      '@ai-sdk/mistral':
+        specifier: 4.0.55
+        version: 4.0.55(zod@4.6.5)
+      '@ai-sdk/openai':
+        specifier: 4.0.82
+        version: 4.0.82(zod@4.6.5)
+      '@ai-sdk/openai-compatible':
+        specifier: 3.0.60
+        version: 3.0.60(zod@4.6.5)
+      '@ai-sdk/xai':
+        specifier: 5.0.13
+        version: 5.0.13(zod@4.6.5)
+      '@localdot/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      '@localdot/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
+      '@openrouter/ai-sdk-provider':
+        specifier: 3.1.0
+        version: 3.1.0(ai@7.0.123(zod@4.6.5))(zod@4.6.5)
+      ai:
+        specifier: 7.0.123
+        version: 7.0.123(zod@4.6.5)
+      undici:
+        specifier: 8.11.2
+        version: 8.11.2
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
+    devDependencies:
+      esbuild:
+        specifier: 0.28.2
+        version: 0.28.2
+      tsx:
+        specifier: 4.23.15
+        version: 4.23.15
+
   cells/desktop/desktopd:
     dependencies:
       '@hono/node-server':
@@ -231,6 +286,18 @@ packages:
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
 
+  '@ai-sdk/azure@4.0.86':
+    resolution: {integrity: sha512-SMDoGv0wunJ8L1UrauimWcSIZhL4eBFaStO97bB9tAxO3tgery8sIgYrPdJZhKZWP50GNbc10f/yP6NoXD8iXg==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/deepseek@3.0.57':
+    resolution: {integrity: sha512-bosHjVt+ej7KhGcRiOqX3xQEuFgh4yH67yKhcP1ca12IPzX3PhZ5gIcQ6u8WkvfxgLKp4LIkc+1l3M51HwxjxQ==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
   '@ai-sdk/gateway@4.0.101':
     resolution: {integrity: sha512-lBMXWbNSAb3eQD/F8ja9Egi32PsL9lLajC4DUvionnWO8V+X0nYw9hWJVBJdZ0SftfE/OyKySkoHRfIg/UafYg==}
     engines: {node: '>=22'}
@@ -239,6 +306,18 @@ packages:
 
   '@ai-sdk/google@4.0.86':
     resolution: {integrity: sha512-LfYXASE06h7u0WWI9G5Zb6/7HscVg3+V+0UHZUTgrD17lZi6R5LfsHHJiPRO9aiAd1DbbIvXRvHr/dL9eKbf4g==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/groq@4.0.53':
+    resolution: {integrity: sha512-Qld40FI8SYlgNmw468w7tP2Eb87Npuv1NXhIcyb48EIVe5V+hGo06pmhIcwqmDCPI5rL2ngQdu+klb4GKLuLhA==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
+
+  '@ai-sdk/mistral@4.0.55':
+    resolution: {integrity: sha512-5A9A4ojjKM9BccqS7JP/oZmTjLKc0l357p17tHgtTeJtq8vRqR53TwLYa1ifxie6tpLSCdl+Y7eUYB1II/vk5w==}
     engines: {node: '>=22'}
     peerDependencies:
       zod: ^3.25.76 || ^4.1.8
@@ -264,6 +343,12 @@ packages:
   '@ai-sdk/provider@4.0.20':
     resolution: {integrity: sha512-daWW1Jxnvcn6+VhUuPqR7i5DtbdontcPCC5pH3QYU2r/x0hl31AIGiejWThGU499pJYA9DzwnBm+tc3EMKQeLQ==}
     engines: {node: '>=22'}
+
+  '@ai-sdk/xai@5.0.13':
+    resolution: {integrity: sha512-W/MB0Yyq3qosWxnXoigIYvcDx/SSnvxEzO7q++BFVHt5wfL62bJXAd+ueJn5I8+v1XhueJES7lU1yx3wA+qh4g==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      zod: ^3.25.76 || ^4.1.8
 
   '@anthropic-ai/sandbox-runtime@0.0.78':
     resolution: {integrity: sha512-YAIcybXTp7MZkBjasnkR1E3yxnf7u6kUkyW0vZrtsAZ9tyJGMaugWETmquPZs0YvW0sR0VnZeMfS0gsN/wQiVQ==}
@@ -742,6 +827,13 @@ packages:
     peerDependenciesMeta:
       '@cfworker/json-schema':
         optional: true
+
+  '@openrouter/ai-sdk-provider@3.1.0':
+    resolution: {integrity: sha512-BQy1TA9fKrh47s9ivsO6FY5QimN7GUF0i8Qon3pkxQclEgShso0dClpcWn8OIyPLEZZPFaFKgI8TW4S/O0p0Dw==}
+    engines: {node: '>=22'}
+    peerDependencies:
+      ai: ^7.0.0
+      zod: ^3.25.76 || ^4.1.8
 
   '@oxc-project/types@0.152.0':
     resolution: {integrity: sha512-oM/5rLBm2tPkg0iBgkH/FOeR3PCDpY19GTgAZjMFM8h9WI9VW7cLgzp6nwtarYKmovavIQZ+Fe/RKX/8C8O/Rw==}
@@ -1949,6 +2041,20 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
       zod: 4.6.5
 
+  '@ai-sdk/azure@4.0.86(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/deepseek': 3.0.57(zod@4.6.5)
+      '@ai-sdk/openai': 4.0.82(zod@4.6.5)
+      '@ai-sdk/provider': 4.0.20
+      '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
+      zod: 4.6.5
+
+  '@ai-sdk/deepseek@3.0.57(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.20
+      '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
+      zod: 4.6.5
+
   '@ai-sdk/gateway@4.0.101(zod@4.6.5)':
     dependencies:
       '@ai-sdk/provider': 4.0.20
@@ -1957,6 +2063,18 @@ snapshots:
       zod: 4.6.5
 
   '@ai-sdk/google@4.0.86(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.20
+      '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
+      zod: 4.6.5
+
+  '@ai-sdk/groq@4.0.53(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.20
+      '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
+      zod: 4.6.5
+
+  '@ai-sdk/mistral@4.0.55(zod@4.6.5)':
     dependencies:
       '@ai-sdk/provider': 4.0.20
       '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
@@ -1986,6 +2104,12 @@ snapshots:
   '@ai-sdk/provider@4.0.20':
     dependencies:
       json-schema: 0.4.0
+
+  '@ai-sdk/xai@5.0.13(zod@4.6.5)':
+    dependencies:
+      '@ai-sdk/provider': 4.0.20
+      '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
+      zod: 4.6.5
 
   '@anthropic-ai/sandbox-runtime@0.0.78':
     dependencies:
@@ -2307,6 +2431,11 @@ snapshots:
       zod-to-json-schema: 3.25.2(zod@4.6.5)
     transitivePeerDependencies:
       - supports-color
+
+  '@openrouter/ai-sdk-provider@3.1.0(ai@7.0.123(zod@4.6.5))(zod@4.6.5)':
+    dependencies:
+      ai: 7.0.123(zod@4.6.5)
+      zod: 4.6.5
 
   '@oxc-project/types@0.152.0': {}
 

@@ -1,0 +1,32 @@
+{
+  "name": "@localdot/brain",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node build.mjs",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@ai-sdk/anthropic": "4.0.69",
+    "@ai-sdk/azure": "4.0.86",
+    "@ai-sdk/deepseek": "3.0.57",
+    "@ai-sdk/google": "4.0.86",
+    "@ai-sdk/groq": "4.0.53",
+    "@ai-sdk/mistral": "4.0.55",
+    "@ai-sdk/openai": "4.0.82",
+    "@ai-sdk/openai-compatible": "3.0.60",
+    "@ai-sdk/xai": "5.0.13",
+    "@localdot/protocol": "workspace:*",
+    "@openrouter/ai-sdk-provider": "3.1.0",
+    "@localdot/providers": "workspace:*",
+    "ai": "7.0.123",
+    "undici": "8.11.2",
+    "zod": "4.6.5"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15"
+  }
+}
