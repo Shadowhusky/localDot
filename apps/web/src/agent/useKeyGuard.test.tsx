@@ -42,7 +42,13 @@ function fixture(
       const path = new URL(String(url)).pathname;
       calls.push({ path, body: String(init?.body ?? "") });
       if (path === "/api/keyd") return Response.json({ online: true, sealKey: publicKey });
-      if (path === "/api/keys") return Response.json({ key: { id: "provider" }, restart: false });
+      if (path === "/api/keys") {
+        const { binding } = JSON.parse(String(init?.body)) as { binding: Record<string, unknown> };
+        return Response.json({
+          key: { ...binding, createdAt: "2026-10-03T00:00:00Z", updatedAt: "2026-10-03T00:00:00Z" },
+          restart: false,
+        });
+      }
       return Response.json({ sessionId: "fixture" });
     },
   });

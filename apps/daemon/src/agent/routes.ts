@@ -10,7 +10,14 @@ import { z } from "zod";
 import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
-import { BindingError, CHATGPT, checkChatgptChoice, resolveRole } from "./bindings.ts";
+import {
+  BindingError,
+  CHATGPT,
+  checkChatgptChoice,
+  pricingOf,
+  type ResolvedRole,
+  resolveRole,
+} from "./bindings.ts";
 import type { CatalogStore } from "./catalog-store.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
@@ -31,7 +38,7 @@ export interface AgentRoutesDeps {
   runner: Pick<AgentRunner, "start" | "get" | "raiseBudget">;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
-  keyd: Pick<KeydClient, "secrets">;
+  keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
   memory: Pick<MemoryStore, "readBoth" | "undo">;
   skills(): SkillInfo[];
   // Root owns admission, control/cell lifetime and drain registration. No task is required.
@@ -309,9 +316,19 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     route(async (c) => {
       const catalog = deps.catalog.get();
       let keys: KeydRecord[] = [];
+      let defaultTaskBudgetUSD: number | null = null;
       let keyLayer: "online" | "offline" = "online";
       try {
         keys = await deps.keyd.secrets();
+        if (deps.keyd.budget) {
+          try {
+            const budget = await deps.keyd.budget();
+            const checked = AgentSettings.shape.taskBudgetUSD.unwrap().safeParse(budget.perTaskUSD);
+            if (checked.success) defaultTaskBudgetUSD = checked.data;
+          } catch (error) {
+            if (!(error instanceof KeydUnavailableError)) throw error;
+          }
+        }
       } catch (error) {
         if (!(error instanceof KeydUnavailableError)) throw error;
         keyLayer = "offline";
@@ -320,6 +337,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({
         catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
         keyLayer,
+        defaultTaskBudgetUSD,
         subscriptions: [{ id: CHATGPT, name: "ChatGPT plan", ...harness() }],
         keys: keys
           .filter((key) => key.kind === "llm")
@@ -384,10 +402,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         const keys = await deps.keyd.secrets();
         check(c.req.raw.signal);
         const catalog = deps.catalog.get();
+        const active: ResolvedRole[] = [];
         for (const role of ["main", "fast", "local"] as const) {
           const choice = parsed[role];
-          if (choice) resolveRole(role, choice, catalog, keys);
+          if (choice) active.push(resolveRole(role, choice, catalog, keys));
         }
+        if (active.length) pricingOf(active);
       }
       check(c.req.raw.signal);
       return c.json(deps.settings.put(parsed));

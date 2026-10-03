@@ -18,6 +18,9 @@ export interface ComposerProps {
   agent: AgentSessionView;
   keysOpen: boolean;
   receiveKey: KeyIntake["receive"];
+  configured?: boolean;
+  modelSummary?: string;
+  onSettings?(trigger: HTMLTextAreaElement): void;
 }
 export interface Delivery {
   readonly id: number;
@@ -188,6 +191,10 @@ export function Composer(props: ComposerProps) {
       setProblem("Write a message of 1–8000 characters.");
       return;
     }
+    if (chosen === "new" && now.configured === false) {
+      now.onSettings?.(input);
+      return;
+    }
     void perform(
       { cellId: now.cell?.id as string, sessionId: now.agent.sessionId, mode: chosen, text },
       revision.current,
@@ -208,6 +215,7 @@ export function Composer(props: ComposerProps) {
       (previous.request.mode !== "new" && !now.agent.fresh)
     )
       return;
+    if (previous.request.mode === "new" && now.configured === false) return;
     if (!field.current || !guardOwner.current.check(field.current)) return;
     pending.current = null;
     void perform(previous.request, -1); // A retry never clears a newer ordinary draft.
@@ -227,6 +235,9 @@ export function Composer(props: ComposerProps) {
           submit();
         }}
       >
+        {mode === "new" && props.modelSummary && (
+          <p className="composer-model">{props.modelSummary}</p>
+        )}
         {mode !== "new" && props.agent.snapshot?.status !== "idle" && (
           <fieldset className="delivery-mode" disabled={sending || uncertain}>
             <legend>When to send</legend>
@@ -313,7 +324,9 @@ export function Composer(props: ComposerProps) {
             {sending
               ? "Sending…"
               : mode === "new"
-                ? "Start task"
+                ? props.configured === false
+                  ? "Set up models"
+                  : "Start task"
                 : mode === "followup"
                   ? "Send follow-up"
                   : "Send now"}

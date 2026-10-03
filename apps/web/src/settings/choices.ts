@@ -1,13 +1,10 @@
+import type { AgentRoleChoice } from "@localdot/protocol";
 import { type Capability, PROVIDERS, type ProviderSpec, usableAs } from "@localdot/providers";
 import type { KeyRecord } from "../keys/keys-api.ts";
 
 export type ModelRole = "main" | "fast" | "local";
-export interface RoleChoice {
-  provider: string;
-  model: string;
-  key?: string;
-  price?: { inputUSDPerMTok: number; outputUSDPerMTok: number };
-}
+export type RoleChoice = AgentRoleChoice;
+export type PickerKey = Pick<KeyRecord, "id" | "kind" | "provider" | "baseURL">;
 export interface PickerModel extends Capability {
   id: string;
   name: string;
@@ -64,8 +61,8 @@ function endpoint(raw: string | undefined): string | undefined {
 // Metadata only. Compatible presets share a key kind, so their bound endpoint must also match.
 export function matchingKeys(
   provider: ProviderSpec,
-  keys: readonly KeyRecord[],
-): readonly KeyRecord[] {
+  keys: readonly PickerKey[],
+): readonly PickerKey[] {
   if (provider.local || provider.availableIn) return [];
   const bound = endpoint(provider.baseURL);
   return keys.filter(

@@ -1,3 +1,4 @@
+export * from "./agent-settings.ts";
 export * from "./desktopd.ts";
 export * from "./desktopd-tools.ts";
 export * from "./events.ts";

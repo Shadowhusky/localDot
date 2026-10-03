@@ -45,6 +45,52 @@ const field = (name: string) => screen.getByLabelText(name) as HTMLInputElement;
 const type = (name: string, value: string) => fireEvent.change(field(name), { target: { value } });
 
 describe("KeysSheet", () => {
+  it("does not clear a later preset or select its key from an older sealed save", async () => {
+    const held = Promise.withResolvers<{ restart: boolean; key: KeyRecord }>();
+    const save = vi.fn(() => held.promise),
+      onSaved = vi.fn();
+    const keys = controller({ save });
+    const old = {
+      requestId: 1,
+      provider: "openai-compatible" as const,
+      baseURL: "https://example.test/v1",
+    };
+    const next = { requestId: 2, provider: "openai" as const };
+    const view = render(
+      <KeysSheet open keys={keys} onClose={() => {}} preset={old} onSaved={onSaved} />,
+    );
+    expect(field("Base URL").value).toBe(old.baseURL);
+    type("Name", "old-key");
+    type("Key", "fixture-private-value");
+    fireEvent.submit(screen.getByRole("form"));
+    expect(field("Key").value).toBe("");
+    view.rerender(
+      <KeysSheet open={false} keys={keys} onClose={() => {}} preset={old} onSaved={onSaved} />,
+    );
+    view.rerender(
+      <KeysSheet open keys={keys} onClose={() => {}} preset={next} onSaved={onSaved} />,
+    );
+    type("Name", "new-key");
+    await act(async () => {
+      held.resolve({
+        restart: false,
+        key: {
+          id: "old-key",
+          kind: "llm",
+          provider: "openai-compatible",
+          baseURL: old.baseURL,
+          createdAt: "t",
+          updatedAt: "t",
+        },
+      });
+    });
+    expect(field("Name").value).toBe("new-key");
+    expect(field("Provider").value).toBe("openai");
+    expect(field("Key").value).toBe("");
+    expect(onSaved).not.toHaveBeenCalled();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(save).toHaveBeenCalledOnce();
+  });
   it("refuses a closed form submit even when script refills the disabled key field", async () => {
     const save = vi.fn(async () => ({ restart: false }));
     const { rerender } = render(<KeyForm active disabled={false} save={save} />);
@@ -240,7 +286,9 @@ describe("KeysSheet", () => {
       saving.resolve({ restart: false });
     });
     expect(field("Name").matches(":disabled")).toBe(false);
-    expect(screen.getByRole("status").textContent).toBe("Saved weather.");
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(field("Name").value).toBe("weather");
+    expect(field("Key").value).toBe("");
   });
 
   it("expires deletion confirmation and clears it on close or offline transition", () => {

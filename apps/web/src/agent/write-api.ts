@@ -52,6 +52,7 @@ export async function deliverText(api: ApiClient, request: TextDelivery): Promis
       ),
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),
     });
+    if (response.status === 401) api.rejectUnauthorized?.();
     if (response.status !== 202) {
       await response.body?.cancel();
       // Server errors, timeout statuses and unexpected successes may follow a persisted action.

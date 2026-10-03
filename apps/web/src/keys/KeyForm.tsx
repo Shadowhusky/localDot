@@ -3,6 +3,7 @@ import {
   type FormEvent,
   type Ref,
   useEffect,
+  useId,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
@@ -27,6 +28,12 @@ export interface KeyFormProps {
   disabled: boolean;
   save(binding: SecretBinding, value: string): Promise<{ restart: boolean }>;
   intakeRef?: Ref<KeyIntake>;
+  preset?: KeyFormPreset;
+}
+export interface KeyFormPreset {
+  readonly requestId: number;
+  readonly provider: Provider;
+  readonly baseURL?: string;
 }
 export interface KeyIntake {
   // A synchronous one-shot DOM handoff, never a secret string prop or deferred queue.
@@ -37,7 +44,8 @@ type Problem = { field: DraftField | "form"; message: string };
 
 // The key itself lives only in the key field's DOM value (never in React state): it is read
 // on submit, the field is cleared at once, and the page sends keyd's sealed copy.
-export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
+export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormProps) {
+  const labels = useId();
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -47,6 +55,37 @@ export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
   const savingRef = useRef(false);
   const intakeBlocked = useRef(false);
   const intakeAllowed = useRef(false);
+  const revision = useRef(0);
+  const lifetime = useRef(0);
+  const mounted = useRef(false);
+  const previousActive = useRef(active);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      lifetime.current++;
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (previousActive.current !== active) {
+      lifetime.current++;
+      previousActive.current = active;
+    }
+  }, [active]);
+  useLayoutEffect(() => {
+    if (!preset || !Object.hasOwn(PROVIDER_NAMES, preset.provider)) return;
+    if (valueRef.current) valueRef.current.value = "";
+    revision.current++;
+    setDraft({
+      ...EMPTY_DRAFT,
+      kind: "llm",
+      provider: preset.provider,
+      baseURL: preset.baseURL ?? "",
+    });
+    setProblem(null);
+    setSaved(null);
+    setTried(false);
+  }, [preset]);
   useLayoutEffect(() => {
     if ((!active || disabled) && valueRef.current) valueRef.current.value = "";
     intakeAllowed.current = active && !disabled;
@@ -72,7 +111,10 @@ export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
           )
             return false;
           if (provider && !Object.hasOwn(PROVIDER_NAMES, provider)) return false;
-          if (provider) setDraft((draft) => ({ ...draft, kind: "llm", provider, baseURL: "" }));
+          if (provider) {
+            revision.current++;
+            setDraft((draft) => ({ ...draft, kind: "llm", provider, baseURL: "" }));
+          }
           setProblem(null);
           setSaved(null);
           target.value = value;
@@ -102,6 +144,7 @@ export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
     const clear = () => {
       if (input) input.value = "";
       intakeBlocked.current = true;
+      lifetime.current++;
     };
     const onVisibility = () => {
       if (document.hidden) clear();
@@ -120,6 +163,7 @@ export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
   const check = bindingOf(draft);
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
+    revision.current++;
     setDraft((d) => ({ ...d, ...patch }));
     setProblem(null);
     setSaved(null);
@@ -161,18 +205,29 @@ export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
       return;
     }
     savingRef.current = true;
+    const capturedRevision = revision.current,
+      capturedLifetime = lifetime.current;
+    const current = () =>
+      mounted.current &&
+      active &&
+      !intakeBlocked.current &&
+      !document.hidden &&
+      revision.current === capturedRevision &&
+      lifetime.current === capturedLifetime;
     setBusy(true);
     try {
       const { restart } = await save(check.binding, value);
+      if (!current()) return;
       const id = check.binding.id;
       setDraft((d) => ({ ...d, id: "", baseURL: "", hosts: "" }));
       setTried(false);
       setSaved(restart ? `Saved ${id}. Restart your computer to use it there.` : `Saved ${id}.`);
     } catch (err) {
+      if (!current()) return;
       setProblem({ field: "form", message: `${problemText(err)} Paste the key again to retry.` });
     } finally {
       savingRef.current = false;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
 
@@ -222,8 +277,9 @@ export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
         {draft.kind === "llm" ? (
           <>
             <label>
-              <span>Provider</span>
+              <span id={`${labels}-provider`}>Provider</span>
               <select
+                aria-labelledby={`${labels}-provider`}
                 value={draft.provider}
                 onChange={(e) => set({ provider: e.target.value as Provider })}
               >
@@ -278,8 +334,9 @@ export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
                 />
               </label>
               <label>
-                <span>Sent as</span>
+                <span id={`${labels}-format`}>Sent as</span>
                 <select
+                  aria-labelledby={`${labels}-format`}
                   value={draft.format}
                   onChange={(e) => set({ format: e.target.value as HttpFormat })}
                 >

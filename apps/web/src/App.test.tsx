@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
+import { providerFixture } from "./settings/testing.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
@@ -53,6 +54,8 @@ const DOCKER_DOWN_CAPTION =
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const keyReply = (path: string): Response | undefined => {
+  if (path === "/api/agent/settings") return json({});
+  if (path === "/api/agent/providers") return json(providerFixture());
   if (path === "/api/keyd")
     return json({
       online: true,
@@ -204,7 +207,7 @@ describe("App token states", () => {
     expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl).toHaveBeenCalledTimes(4);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
@@ -657,24 +660,37 @@ describe("App token hardening", () => {
     expect(d.seen()).toEqual(["GET /api/whoami"]);
   });
 
-  it("does not let a late 401 for an older token erase the newer one", async () => {
-    window.localStorage.setItem(TOKEN_KEY, TOKEN);
-    const oldList = deferred<Response>();
-    const d = daemon(({ token, path }) => {
-      if (token === TOKEN && path === "/api/cells") return oldList.promise;
-      return path === "/api/whoami" ? json({ ok: true }) : json([]);
-    });
-    render(<App fetchImpl={d.fetchImpl} />);
-    await waitFor(() => expect(d.seen()).toEqual(["GET /api/cells"]));
-    window.location.hash = `#token=${NEWER}`;
-    await waitFor(() => expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER));
-    await screen.findByRole("button", { name: "Start computer" });
-    oldList.resolve(new Response("unauthorized", { status: 401 }));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-    expect(screen.queryByText("No access token")).toBeNull();
-    expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
-  });
+  it.each(["/api/cells", "/api/agent/settings"])(
+    "does not let a late 401 from %s for an older token erase the newer one",
+    async (heldPath) => {
+      window.localStorage.setItem(TOKEN_KEY, TOKEN);
+      const oldList = deferred<Response>();
+      const calls: Call[] = [];
+      const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+        const token = (new Headers(init?.headers).get("authorization") ?? "").replace(
+            /^Bearer /,
+            "",
+          ),
+          path = new URL(String(input)).pathname;
+        calls.push({ method: init?.method ?? "GET", path, token });
+        if (token === TOKEN && path === heldPath) return oldList.promise;
+        return keyReply(path) ?? (path === "/api/whoami" ? json({ ok: true }) : json([]));
+      }) as typeof fetch;
+      render(<App fetchImpl={fetchImpl} />);
+      await waitFor(() =>
+        expect(calls).toContainEqual({ method: "GET", path: heldPath, token: TOKEN }),
+      );
+      window.location.hash = `#token=${NEWER}`;
+      await waitFor(() => expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER));
+      await screen.findByRole("button", { name: "Start computer" });
+      oldList.resolve(new Response("unauthorized", { status: 401 }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
+      expect(screen.queryByText("No access token")).toBeNull();
+      expect(screen.queryByText(/rejected the stored token/)).toBeNull();
+      expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
+    },
+  );
 
   it("checks the link's token again when the daemon did not answer", async () => {
     let answers = 0;

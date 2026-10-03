@@ -15,7 +15,8 @@ export interface KeysController {
   health: KeydHealth | null;
   keys: KeyRecord[];
   loadError: string | null;
-  save(binding: SecretBinding, value: string): Promise<{ restart: boolean }>;
+  metadataReady?: boolean;
+  save(binding: SecretBinding, value: string): Promise<{ restart: boolean; key?: KeyRecord }>;
   remove(id: string): Promise<void>;
 }
 
@@ -45,6 +46,7 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
   const [keys, setKeys] = useState<KeyRecord[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [version, setVersion] = useState(0);
+  const [metadataReady, setMetadataReady] = useState(false);
   const previousApi = useRef(api);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: saving/deleting starts a fresh poll and invalidates the previous list request
@@ -53,6 +55,7 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let listed = false;
     let bootId: string | undefined;
+    setMetadataReady(false);
     if (previousApi.current !== api) {
       previousApi.current = api;
       setHealth(null);
@@ -66,16 +69,19 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
       if (cancelled) return;
       setHealth(next);
       if (!next.online) {
+        setMetadataReady(false);
         listed = false;
         setKeys([]);
         setLoadError(null);
       } else if (!listed || next.bootId !== bootId) {
+        setMetadataReady(false);
         if (listed) setKeys([]);
         bootId = next.bootId;
         try {
           const list = await loadKeys(api);
           if (cancelled) return;
           setKeys(list);
+          setMetadataReady(true);
           setLoadError(null);
           listed = true;
         } catch (err) {
@@ -95,9 +101,9 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
 
   const save = useCallback(
     async (binding: SecretBinding, value: string) => {
-      const { restart } = await saveKey(api, binding, value);
+      const { restart, key } = await saveKey(api, binding, value);
       setVersion((v) => v + 1);
-      return { restart };
+      return { restart, key };
     },
     [api],
   );
@@ -110,5 +116,5 @@ export function useKeys(api: ApiClient, everyMs = 5000): KeysController {
     [api],
   );
 
-  return { health, keys, loadError, save, remove };
+  return { health, keys, loadError, metadataReady, save, remove };
 }

@@ -26,6 +26,7 @@ function fakeApi(replies: ((path: string, body?: unknown) => unknown)[]) {
     authorization: () => "Bearer test-token",
     get: <T>(path: string) => next("GET", path) as Promise<T>,
     post: <T>(path: string, body?: unknown) => next("POST", path, body) as Promise<T>,
+    put: <T>(path: string, body: unknown) => next("PUT", path, body) as Promise<T>,
     del: async (path: string) => {
       await next("DELETE", path);
     },

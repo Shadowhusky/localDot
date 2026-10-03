@@ -11,6 +11,7 @@ import {
   CatalogModel,
   capabilityOf,
   findModel,
+  isOpenRouterRouterId,
   keydRouteModel,
   localModel,
   providerById,
@@ -66,6 +67,8 @@ export function resolveRole(
   const choice = parsed.data;
   const provider = providerById(choice.provider);
   if (!provider) throw new BindingError(role, `unknown provider ${choice.provider}`);
+  if (role === "local" && !provider.local)
+    throw new BindingError(role, "the local role requires LM Studio or Ollama");
   if (provider.availableIn)
     throw new BindingError(
       role,
@@ -113,7 +116,7 @@ export function resolveRole(
     delete model.cacheReadUSDPerMTok;
     delete model.cacheWriteUSDPerMTok;
   } else {
-    if (provider.id === "openrouter" && /^openrouter\//i.test(model.id))
+    if (isOpenRouterRouterId(provider.id, model.id))
       throw new BindingError(
         role,
         `${model.id} picks a model at that model's price, which keyd cannot hold; pick the model itself`,

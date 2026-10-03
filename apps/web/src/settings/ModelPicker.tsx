@@ -1,5 +1,5 @@
 import { isOpenRouterRouterId, providerById } from "@localdot/providers";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   customModelAllowed,
   type ModelRole,
@@ -23,6 +23,7 @@ export function ModelPicker({
   disabled?: boolean;
   onChange(id: string): void;
 }) {
+  const modelLabel = useId();
   const [search, setSearch] = useState("");
   const provider = providerById(providerId);
   const custom = !!provider && customModelAllowed(provider);
@@ -48,8 +49,9 @@ export function ModelPicker({
         />
       </label>
       <label>
-        <span>{role} model</span>
+        <span id={modelLabel}>{role} model</span>
         <select
+          aria-labelledby={modelLabel}
           value={value}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}

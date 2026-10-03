@@ -10,6 +10,18 @@ const reply = (status: number, body?: unknown) =>
   });
 
 describe("createApi", () => {
+  it("provides PUT with the same bearer and JSON handling as other protected requests", async () => {
+    const fetchImpl = vi.fn(async () => reply(200, { taskBudgetUSD: 2 }));
+    const api = createApi(TOKEN, { fetchImpl, origin: "http://fixture" });
+    expect(await api.put("/api/agent/settings", { taskBudgetUSD: 2 })).toEqual({
+      taskBudgetUSD: 2,
+    });
+    const [url, init] = fetchImpl.mock.calls[0] as unknown as [string, RequestInit];
+    expect(url).toBe("http://fixture/api/agent/settings");
+    expect(init.method).toBe("PUT");
+    expect(new Headers(init.headers).get("authorization")).toBe(`Bearer ${TOKEN}`);
+    expect(init.body).toBe('{"taskBudgetUSD":2}');
+  });
   it("sends the bearer token, JSON bodies, and parses replies", async () => {
     const fetchImpl = vi.fn(async () => reply(202, { id: "x" }));
     const api = createApi(TOKEN, { fetchImpl, origin: "http://127.0.0.1:4750" });

@@ -1,8 +1,9 @@
 import { providerById } from "@localdot/providers";
-import type { KeyRecord } from "../keys/keys-api.ts";
+import { useId } from "react";
 import {
   type ModelRole,
   matchingKeys,
+  type PickerKey,
   type PickerModel,
   type ProviderModels,
   type RoleChoice,
@@ -25,17 +26,24 @@ export function RoleEditor({
   disabled,
   onChange,
   onKeys,
+  manualPrice,
+  onPrice,
+  inactive,
 }: {
   modelRole: ModelRole;
   value?: RoleChoice;
   providers: readonly ProviderModels[];
-  keys: readonly KeyRecord[];
+  keys: readonly PickerKey[];
   keyLayer: "online" | "offline" | "unknown";
   subscriptionModels?: readonly PickerModel[];
   disabled?: boolean;
   onChange(value: RoleChoice | undefined): void;
   onKeys(role: ModelRole, provider: string, trigger: HTMLButtonElement): void;
+  manualPrice?: { input: string; output: string };
+  onPrice?(value: { input: string; output: string }): void;
+  inactive?: boolean;
 }) {
+  const keyLabel = useId();
   const provider = value && providerById(value.provider);
   const availableKeys = provider ? matchingKeys(provider, keys) : [];
   const models =
@@ -44,12 +52,13 @@ export function RoleEditor({
       : (providers.find((p) => p.id === value?.provider)?.models ?? []);
   const missingKey = !!value?.key && !availableKeys.some((key) => key.id === value.key);
   return (
-    <fieldset className="role-editor" disabled={disabled}>
+    <fieldset className="role-editor" disabled={disabled || inactive}>
       <legend>
         {role[0]?.toUpperCase()}
         {role.slice(1)}
       </legend>
       <p>{ROLE_HELP[role]}</p>
+      {inactive && <p>This stored choice is inactive while main uses the ChatGPT plan.</p>}
       {role !== "main" && (
         <label className="role-enabled">
           <input
@@ -84,8 +93,9 @@ export function RoleEditor({
           {provider && !provider.local && !provider.availableIn && (
             <div className="role-key">
               <label>
-                <span>{role} key</span>
+                <span id={keyLabel}>{role} key</span>
                 <select
+                  aria-labelledby={keyLabel}
                   value={value?.key ?? ""}
                   disabled={disabled || keyLayer !== "online"}
                   onChange={(event) =>
@@ -126,6 +136,38 @@ export function RoleEditor({
           )}
           {value?.provider === "chatgpt" && (
             <p>The ChatGPT plan uses account sign-in and requires no API key or per-token price.</p>
+          )}
+          {manualPrice && (
+            <div className="manual-price">
+              <p>Input / Output — USD per million tokens</p>
+              <p>
+                Your supplied accounting rate is used to reserve task spending. It is not a provider
+                invoice.
+              </p>
+              <label>
+                <span>{role} Input — USD per million tokens</span>
+                <input
+                  inputMode="decimal"
+                  required
+                  maxLength={64}
+                  value={manualPrice.input}
+                  onChange={(event) => onPrice?.({ ...manualPrice, input: event.target.value })}
+                />
+              </label>
+              <label>
+                <span>{role} Output — USD per million tokens</span>
+                <input
+                  inputMode="decimal"
+                  required
+                  maxLength={64}
+                  value={manualPrice.output}
+                  onChange={(event) => onPrice?.({ ...manualPrice, output: event.target.value })}
+                />
+              </label>
+              <p>
+                Enter both prices from 0 to 10000. One may be zero; at least one must be positive.
+              </p>
+            </div>
           )}
         </>
       )}

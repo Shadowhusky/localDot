@@ -134,7 +134,7 @@ describe("useKeys", () => {
     await act(async () => {
       expect(
         await result.current.save({ ...binding, hosts: [...binding.hosts] }, "fake-private-value"),
-      ).toEqual({ restart: true });
+      ).toEqual({ restart: true, key: record });
     });
     expect(saved).toHaveBeenCalledOnce();
     expect(JSON.stringify(result.current)).not.toContain("fake-private-value");

@@ -1,7 +1,7 @@
-import { type Ref, useEffect, useRef, useState } from "react";
-import { KeyForm, type KeyIntake } from "./KeyForm.tsx";
+import { type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
-import { type KeydHealth, KeyProblem } from "./keys-api.ts";
+import { type KeydHealth, KeyProblem, type KeyRecord } from "./keys-api.ts";
 import { type KeysController, keyStatus } from "./useKeys.ts";
 import "./keys.css";
 
@@ -11,16 +11,40 @@ export interface KeysSheetProps {
   onClose(): void;
   stop?: { readonly label: string; readonly enabled: boolean; run(): void };
   intakeRef?: Ref<KeyIntake>;
+  preset?: KeyFormPreset;
+  onSaved?(key: KeyRecord, requestId: number): void;
 }
 
 // A modal sheet that grows from the top bar's Keys button and returns to it. It stays mounted so
 // opening and closing are one interruptible transition; closed, it is inert.
-export function KeysSheet({ open, keys, onClose, stop, intakeRef }: KeysSheetProps) {
+export function KeysSheet({
+  open,
+  keys,
+  onClose,
+  stop,
+  intakeRef,
+  preset,
+  onSaved,
+}: KeysSheetProps) {
   const panel = useRef<HTMLDivElement>(null);
   const status = keyStatus(keys.health);
   const offline = status.state === "offline";
   const changing = useRef(false);
   const [busy, setBusy] = useState(false);
+  const owner = useRef({ open, preset, onSaved, generation: 0 });
+  const mounted = useRef(false);
+  useLayoutEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      owner.current.open = false;
+      owner.current.generation++;
+    };
+  }, []);
+  useLayoutEffect(() => {
+    if (owner.current.open !== open || owner.current.preset !== preset) owner.current.generation++;
+    Object.assign(owner.current, { open, preset, onSaved });
+  }, [open, preset, onSaved]);
   // Lock before health lookup or sealing starts. A later Delete must not reach
   // keyd before an earlier Save and then have that Save recreate the key.
   const mutate = async <T,>(operation: () => Promise<T>): Promise<T> => {
@@ -31,7 +55,7 @@ export function KeysSheet({ open, keys, onClose, stop, intakeRef }: KeysSheetPro
       return await operation();
     } finally {
       changing.current = false;
-      setBusy(false);
+      if (mounted.current) setBusy(false);
     }
   };
   const disabled = !keys.health?.online || busy;
@@ -116,7 +140,23 @@ export function KeysSheet({ open, keys, onClose, stop, intakeRef }: KeysSheetPro
           intakeRef={intakeRef}
           active={open}
           disabled={disabled}
-          save={(binding, value) => mutate(() => keys.save(binding, value))}
+          preset={preset}
+          save={(binding, value) => {
+            const generation = owner.current.generation,
+              request = owner.current.preset?.requestId;
+            return mutate(async () => {
+              const result = await keys.save(binding, value);
+              if (
+                result.key &&
+                request !== undefined &&
+                owner.current.open &&
+                owner.current.generation === generation &&
+                owner.current.preset?.requestId === request
+              )
+                owner.current.onSaved?.(result.key, request);
+              return result;
+            });
+          }}
         />
       </div>
     </>

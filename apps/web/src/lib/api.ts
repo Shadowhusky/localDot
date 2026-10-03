@@ -16,6 +16,8 @@ export interface ApiClient {
   authorization(): string;
   get<T>(path: string, options?: { signal?: AbortSignal }): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
+  put<T>(path: string, body: unknown): Promise<T>;
+  rejectUnauthorized?(): void;
   del(path: string): Promise<void>;
   socketUrl(path: string): string;
   socketProtocols(): string[];
@@ -63,6 +65,8 @@ export function createApi(token: string, opts: ApiOptions = {}): ApiClient {
     authorization: () => `Bearer ${token}`,
     get: (path, options) => call("GET", path, undefined, options?.signal),
     post: (path, body) => call("POST", path, body),
+    put: (path, body) => call("PUT", path, body),
+    rejectUnauthorized: () => opts.onUnauthorized?.(),
     del: async (path) => {
       await call("DELETE", path);
     },

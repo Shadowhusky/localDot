@@ -1,11 +1,21 @@
+.settings-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 29;
+  background: var(--color-shade-hud);
+}
+.settings-backdrop[hidden] {
+  display: none;
+}
 .settings-sheet {
   position: fixed;
   inset: var(--spacing-edge) auto var(--spacing-edge) 50%;
   transform: translateX(-50%);
   width: min(680px, calc(100% - 2 * var(--spacing-edge)));
-  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   z-index: 30;
-  padding: var(--spacing-gutter);
   background: var(--color-surface);
   border: 1px solid var(--color-line);
   border-radius: var(--radius-stage);
@@ -24,6 +34,21 @@
 .settings-sheet h2 {
   font-size: 17px;
   font-weight: 600;
+}
+.settings-heading {
+  flex: none;
+  padding: var(--spacing-gutter);
+  padding-bottom: 12px;
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-line);
+}
+.settings-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 8px var(--spacing-gutter) var(--spacing-gutter);
+}
+.settings-actions {
+  margin-top: 8px;
 }
 .settings-sheet p {
   color: var(--color-text-2);

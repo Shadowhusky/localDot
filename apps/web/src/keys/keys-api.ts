@@ -1,10 +1,13 @@
 import {
   clipText,
   type HairpinGuard,
+  KeydRecord,
+  SECRET_ID_PATTERN,
   type Sealed,
   SecretBinding,
   sealSecret,
 } from "@localdot/protocol";
+import { z } from "zod";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { valueProblem } from "./binding.ts";
 
@@ -65,7 +68,29 @@ export async function saveKey(
     if (!health.online || !health.sealKey)
       throw new KeyProblem("The key layer is offline: start keyd.");
     const sealed = await seal(health.sealKey, bound, value);
-    return api.post<{ key: KeyRecord; restart: boolean }>("/api/keys", { binding: bound, sealed });
+    const raw = await api.post<unknown>("/api/keys", { binding: bound, sealed });
+    const parsed = z
+      .object({
+        restart: z.boolean(),
+        key: KeydRecord.extend({
+          id: z.string().regex(SECRET_ID_PATTERN),
+          provider: z.string().max(64).optional(),
+          baseURL: z.string().max(2048).optional(),
+          createdAt: z.string().max(64),
+          updatedAt: z.string().max(64),
+        }),
+      })
+      .safeParse(raw);
+    if (
+      !parsed.success ||
+      parsed.data.key.id !== bound.id ||
+      parsed.data.key.kind !== bound.kind ||
+      (bound.kind === "llm" && parsed.data.key.provider !== bound.provider)
+    )
+      throw new KeyProblem(
+        "The saved key reply could not be verified. Reload Keys before retrying.",
+      );
+    return parsed.data;
   };
   try {
     return await send();

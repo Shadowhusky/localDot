@@ -9,9 +9,10 @@ export interface TopBarProps {
   keysOpen: boolean;
   onKeys(): void;
   keysRef?: Ref<HTMLButtonElement>;
+  settings?: { open: boolean; run(trigger: HTMLButtonElement): void; ref?: Ref<HTMLButtonElement> };
 }
 
-export function TopBar({ title, live, keys, keysOpen, onKeys, keysRef }: TopBarProps) {
+export function TopBar({ title, live, keys, keysOpen, onKeys, keysRef, settings }: TopBarProps) {
   const alert = keys.state === "offline" || keys.state === "audit" || keys.state === "guard";
   return (
     <header className="bar">
@@ -30,6 +31,19 @@ export function TopBar({ title, live, keys, keysOpen, onKeys, keysRef }: TopBarP
         <span aria-disabled="true">Replay</span>
       </nav>
       <div className="bar-r">
+        {settings && (
+          <button
+            ref={settings.ref}
+            type="button"
+            className="keys-btn"
+            aria-haspopup="dialog"
+            aria-expanded={settings.open}
+            aria-controls="settings-sheet"
+            onClick={(event) => settings.run(event.currentTarget)}
+          >
+            Settings
+          </button>
+        )}
         <button
           ref={keysRef}
           type="button"

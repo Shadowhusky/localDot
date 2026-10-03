@@ -1,5 +1,5 @@
 import { providerById } from "@localdot/providers";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   groupOf,
   type ModelRole,
@@ -19,6 +19,7 @@ export function ProviderPicker({
   disabled?: boolean;
   onChange(id: string): void;
 }) {
+  const providerLabel = useId();
   const [search, setSearch] = useState("");
   const shown = [...matchingProviders(search)];
   const selected = providerById(value);
@@ -41,8 +42,9 @@ export function ProviderPicker({
         />
       </label>
       <label>
-        <span>{role} provider</span>
+        <span id={providerLabel}>{role} provider</span>
         <select
+          aria-labelledby={providerLabel}
           value={value}
           disabled={disabled}
           onChange={(event) => onChange(event.target.value)}

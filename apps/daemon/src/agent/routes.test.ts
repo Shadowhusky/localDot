@@ -157,6 +157,140 @@ async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness"> = {})
 const endpoint = (name: string) => `/api/agent/sessions/${SESSION}/${name}`;
 
 describe("agent user routes", () => {
+  it("rejects a forged remote local-role selection before persisting or starting a task", async () => {
+    const f = await setup();
+    const document = {
+      main: { provider: "ollama", model: "local" },
+      local: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+    };
+    expect((await f.send("PUT", "/api/agent/settings", document)).status).toBe(400);
+    expect(f.settings.get()).toEqual({});
+    expect(f.start).not.toHaveBeenCalled();
+  });
+  it("returns the actual configured default ceiling or unknown without mutating budgets or reading an account", async () => {
+    const f = await setup();
+    const get = async () =>
+      (await (await f.send("GET", "/api/agent/providers")).json()) as {
+        defaultTaskBudgetUSD: number | null;
+        keyLayer: string;
+      };
+    expect((await get()).defaultTaskBudgetUSD).toBeNull();
+    const budget = vi.fn(async () => ({
+      perTaskUSD: 3.25,
+      perDayUSD: 20,
+      day: { date: "2026-10-03", spentUSD: 1 },
+    }));
+    f.deps.keyd.budget = budget;
+    expect((await get()).defaultTaskBudgetUSD).toBe(3.25);
+    expect(budget).toHaveBeenCalledOnce();
+    budget.mockRejectedValueOnce(new KeydUnavailableError("private-sentinel", "/private"));
+    expect(await get()).toMatchObject({ defaultTaskBudgetUSD: null, keyLayer: "online" });
+    budget.mockResolvedValueOnce({
+      perTaskUSD: 10_001,
+      perDayUSD: 20,
+      day: { date: "2026-10-03", spentUSD: 1 },
+    });
+    expect((await get()).defaultTaskBudgetUSD).toBeNull();
+    expect(f.start).not.toHaveBeenCalled();
+    expect(f.raise).not.toHaveBeenCalled();
+  });
+  it("requires both explicit finite remote prices at the real settings route and preserves accepted settings on every refusal", async () => {
+    const f = await setup();
+    const keys = [
+      {
+        id: "gateway",
+        kind: "llm" as const,
+        provider: "openai-compatible",
+        baseURL: "https://example.test/v1",
+        createdAt: at,
+        updatedAt: at,
+      },
+    ];
+    (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValue(keys);
+    const initial = {
+      main: { provider: "ollama", model: "local" },
+      codexDenyRead: ["/private/fixture"],
+      taskBudgetUSD: 2,
+    };
+    expect((await f.send("PUT", "/api/agent/settings", initial)).status).toBe(200);
+    const choice = { provider: "openai-compatible", model: "custom", key: "gateway" };
+    for (const price of [
+      undefined,
+      {},
+      { inputUSDPerMTok: 1 },
+      { outputUSDPerMTok: 1 },
+      { inputUSDPerMTok: "0", outputUSDPerMTok: 1 },
+      { inputUSDPerMTok: NaN, outputUSDPerMTok: 1 },
+      { inputUSDPerMTok: Infinity, outputUSDPerMTok: 1 },
+      { inputUSDPerMTok: -1, outputUSDPerMTok: 1 },
+      { inputUSDPerMTok: 10_001, outputUSDPerMTok: 1 },
+      { inputUSDPerMTok: 0, outputUSDPerMTok: 0 },
+    ]) {
+      const response = await f.send("PUT", "/api/agent/settings", {
+        ...initial,
+        main: { ...choice, ...(price === undefined ? {} : { price }) },
+      });
+      expect(response.status, JSON.stringify(price)).toBe(400);
+      expect(f.settings.get()).toEqual(initial);
+    }
+    const overflow = await f.app.request("http://fixture/api/agent/settings", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: '{"main":{"provider":"openai-compatible","model":"custom","key":"gateway","price":{"inputUSDPerMTok":1e999,"outputUSDPerMTok":1}}}',
+    });
+    expect(overflow.status).toBe(400);
+    expect(f.settings.get()).toEqual(initial);
+    for (const price of [
+      { inputUSDPerMTok: 0, outputUSDPerMTok: 2 },
+      { inputUSDPerMTok: 1, outputUSDPerMTok: 0 },
+    ]) {
+      const next = { ...initial, main: { ...choice, price } };
+      const response = await f.send("PUT", "/api/agent/settings", next);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual(next);
+      expect(f.settings.get()).toEqual(next);
+    }
+    const before = f.settings.get();
+    (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValueOnce([]);
+    expect((await f.send("PUT", "/api/agent/settings", before)).status).toBe(400);
+    (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+      { ...keys[0], provider: "openai" },
+    ]);
+    expect((await f.send("PUT", "/api/agent/settings", before)).status).toBe(400);
+    expect(f.settings.get()).toEqual(before);
+    expect(f.start).not.toHaveBeenCalled();
+  });
+  it("refuses conflicting rates for the same active route/model before persisting settings", async () => {
+    const f = await setup();
+    (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValue([
+      {
+        id: "gateway",
+        kind: "llm",
+        provider: "openai-compatible",
+        baseURL: "https://example.test/v1",
+        createdAt: at,
+        updatedAt: at,
+      },
+    ]);
+    const main = {
+      provider: "openai-compatible",
+      model: "custom",
+      key: "gateway",
+      price: { inputUSDPerMTok: 1, outputUSDPerMTok: 2 },
+    };
+    const accepted = { main, fast: main };
+    expect((await f.send("PUT", "/api/agent/settings", accepted)).status).toBe(200);
+    expect(
+      (
+        await f.send("PUT", "/api/agent/settings", {
+          main,
+          fast: { ...main, price: { inputUSDPerMTok: 3, outputUSDPerMTok: 2 } },
+        })
+      ).status,
+    ).toBe(400);
+    expect(f.settings.get()).toEqual(accepted);
+    expect(f.start).not.toHaveBeenCalled();
+  });
   it("lists only LLM key metadata and reports keyd offline without changing the provider list", async () => {
     const f = await setup();
     const res = await f.send("GET", "/api/agent/providers");
