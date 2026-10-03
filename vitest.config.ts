@@ -7,6 +7,7 @@ export default defineConfig({
     css: { include: [/theme\.css/] },
     include: [
       "packages/*/src/**/*.test.ts",
+      "harness/*/src/**/*.test.ts",
       "apps/*/src/**/*.test.ts",
       "apps/*/src/**/*.test.tsx",
       "cells/*/desktopd/src/**/*.test.ts",
@@ -14,6 +15,11 @@ export default defineConfig({
       "cells/*/scripts/**/*.test.mjs",
       "scripts/**/*.test.mjs",
     ],
-    exclude: ["**/node_modules/**", "**/*.docker.test.ts", "**/*.keyd.test.ts"],
+    exclude: [
+      "**/node_modules/**",
+      "**/*.docker.test.ts",
+      "**/*.keyd.test.ts",
+      "**/*.codex.test.ts",
+    ],
   },
 });

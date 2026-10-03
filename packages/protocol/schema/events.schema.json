@@ -3507,6 +3507,109 @@
         "data"
       ],
       "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "subscription.usage"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "const": "chatgpt"
+            },
+            "plan": {
+              "type": "string",
+              "maxLength": 64
+            },
+            "windows": {
+              "maxItems": 2,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "window": {
+                    "type": "string",
+                    "enum": [
+                      "primary",
+                      "secondary"
+                    ]
+                  },
+                  "usedPercent": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 100
+                  },
+                  "windowMinutes": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "resetsAt": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "window",
+                  "usedPercent"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "limitReached": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "provider",
+            "windows",
+            "limitReached"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
     }
   ]
 }

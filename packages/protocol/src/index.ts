@@ -8,6 +8,7 @@ export * from "./keyd.ts";
 export * from "./patch.ts";
 export * from "./seal.ts";
 export * from "./selftest.ts";
+export * from "./subscription.ts";
 export * from "./target.ts";
 export * from "./text.ts";
 export * from "./time.ts";

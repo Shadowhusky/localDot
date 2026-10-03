@@ -29,6 +29,9 @@ importers:
       '@hono/node-server':
         specifier: 2.1.3
         version: 2.1.3(hono@4.13.12)
+      '@localdot/codex-harness':
+        specifier: workspace:*
+        version: link:../../harness/codex
       '@localdot/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -38,6 +41,9 @@ importers:
       '@localdot/stage':
         specifier: workspace:*
         version: link:../../packages/stage
+      '@modelcontextprotocol/sdk':
+        specifier: 1.31.0
+        version: 1.31.0(zod@4.6.5)
       hono:
         specifier: 4.13.12
         version: 4.13.12
@@ -195,6 +201,18 @@ importers:
       tsx:
         specifier: 4.23.15
         version: 4.23.15
+
+  harness/codex:
+    dependencies:
+      '@anthropic-ai/sandbox-runtime':
+        specifier: 0.0.78
+        version: 0.0.78
+      '@localdot/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
+      zod:
+        specifier: 4.6.5
+        version: 4.6.5
 
   packages/protocol:
     dependencies:

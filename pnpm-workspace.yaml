@@ -4,3 +4,4 @@ packages:
   - "spikes/*"
   - "cells/desktop/desktopd"
   - "cells/brain"
+  - "harness/*"

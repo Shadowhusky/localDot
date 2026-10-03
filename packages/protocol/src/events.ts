@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
+import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
 
@@ -363,6 +364,8 @@ export const ModelRetry = event(
   }),
 );
 
+export const SubscriptionUsage = event("subscription.usage", SubscriptionUsageData);
+
 export const LocalDotEvent = z.discriminatedUnion("type", [
   SessionStart,
   SessionEnd,
@@ -404,6 +407,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   TaskResult,
   ModelUsage,
   ModelRetry,
+  SubscriptionUsage,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
 export type EventType = LocalDotEvent["type"];

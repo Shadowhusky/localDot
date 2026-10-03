@@ -1,0 +1,17 @@
+{
+  "name": "@localdot/codex-harness",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p ."
+  },
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.78",
+    "@localdot/protocol": "workspace:*",
+    "zod": "4.6.5"
+  }
+}

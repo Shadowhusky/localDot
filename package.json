@@ -14,7 +14,8 @@
     "test:docker": "vitest run --config vitest.docker.config.ts",
     "hygiene": "node scripts/check-hygiene.mjs",
     "test:keyd": "vitest run --config vitest.keyd.config.ts",
-    "keyd": "cd keyd && go build -o bin/keyd ./cmd/keyd && exec ./bin/keyd"
+    "keyd": "cd keyd && go build -o bin/keyd ./cmd/keyd && exec ./bin/keyd",
+    "test:codex": "vitest run --config vitest.codex.config.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15",
