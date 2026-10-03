@@ -9,6 +9,7 @@ import { driverInjector } from "./perception/find.ts";
 import type { PerceptionDeps } from "./perception/hit-test.ts";
 import { AtspiAccessibility } from "./perception/native.ts";
 import { cachedSelfTest, nodeProbes, runSelfTest, selfTestConfigFromEnv } from "./selftest.ts";
+import { PageBrowser } from "./tools/browser.ts";
 import { startXHelper, type XHelper } from "./x/helper.ts";
 import { readScreen, readXsettings } from "./xsettings.ts";
 
@@ -69,6 +70,11 @@ const scaling = async () => {
   return settings === null ? scale : (settings.windowScalingFactor ?? 1);
 };
 const app = createDesktopdApp({
+  tools: {
+    home: process.env.LOCALDOT_HOME_DIR ?? "/config",
+    env: process.env,
+    browser: new PageBrowser(),
+  },
   selfTest: cachedSelfTest(() => runSelfTest(selfTestConfigFromEnv(process.env), nodeProbes())),
   token,
   scale,

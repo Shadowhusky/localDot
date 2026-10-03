@@ -16,7 +16,7 @@ export const ShellRequest = z.object({
 });
 export type ShellRequest = z.input<typeof ShellRequest>;
 
-// NDJSON lines on /shell: output chunks in order, then one ShellDone.
+// NDJSON lines on /shell: output chunks in order, then one ShellDone or ShellFailure.
 export const ShellChunk = z.object({
   stream: z.enum(["stdout", "stderr"]),
   chunk: z.string(),
@@ -31,6 +31,16 @@ export const ShellDone = z.object({
   ms: z.number().nonnegative(),
 });
 export type ShellDone = z.infer<typeof ShellDone>;
+
+// The caller must stop/revoke/freeze the session; this is never a retryable shell completion.
+export const ShellFailure = z
+  .object({
+    error: z.string(),
+    status: z.literal(500),
+    code: z.literal("shell_cleanup_uncertain"),
+  })
+  .strict();
+export type ShellFailure = z.infer<typeof ShellFailure>;
 
 export const FileReadRequest = z.object({
   path: z.string().min(1).max(1024),

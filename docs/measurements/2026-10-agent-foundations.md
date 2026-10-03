@@ -12,15 +12,15 @@
   models are excluded. Model-point conversion rejects out-of-range coordinates.
 - Shell runs a login shell with stripped inbound desktop credentials, shared
   byte caps, streamed UTF-8, deadline and active-call cancellation. Successful
-  foreground completion drains inherited pipes for at most250ms and preserves
+  foreground completion drains inherited pipes for at most 250ms and preserves
   background applications. Failed group cleanup produces a typed error for the
   later daemon/runner Stop path, never ordinary success.
 - Process-group termination has the desktop user's authority. Elevated or detached
   descendants require global Stop's whole-cell freeze; real-container acceptance
   of that integration remains required. Home resolution is a current path check,
   not race-free descriptor confinement or a shell sandbox.
-- Integrated acceptance: 142/142 tests in16files, workspace types, lint/hygiene
-  pass under Node24.19.0. Shell's five seeded regressions and provider's price,
+- Integrated acceptance: 142/142 tests in 16 files, workspace types, lint/hygiene
+  pass under Node 24.19.0. Shell's five seeded regressions and provider's price,
   clamp and saved-catalog lookup regressions are caught. Independent shell review
   plus scoped finalization checks are complete.
 - Commits: `8cc5c81` protocol; `bee337e` providers; `631ff8a` shell and the combined
@@ -30,9 +30,9 @@
 
 Known changed targets cancel before desktop input and return the newest full
 frame. A small peripheral animation may be tolerated only after a second frame
-100ms later: center24×24 and complete accessibility target bounds agree pairwise;
-only exact dynamic pixels are masked; static change is≤2% and union≤20% of the
-96×96 region at24-luma tolerance. No blanket animated-target exception exists.
+100ms later: center 24×24 and complete accessibility target bounds agree pairwise;
+only exact dynamic pixels are masked; static change is ≤2% and union ≤20% of the
+96×96 region at 24-luma tolerance. No blanket animated-target exception exists.
 Both device scales map bounds back to model pixels.
 
 The existing optional best-effort basis contract is retained for unknown basis
@@ -46,12 +46,35 @@ then compares again against the original model frame after recovery.
   intended pixel/dispatch assertions, including four tests that fail when the
   final stream-hold check is omitted. Full independent review found that race;
   its fix passed independent scoped review with no remaining Important finding.
-- Integrated daemon typecheck, lint and hygiene pass; the pinned sharp0.35.5
+- Integrated daemon typecheck, lint and hygiene pass; the pinned sharp 0.35.5
   dependency is declared explicitly. Existing calls without a model basis keep
-  their normal path. Task8/runner will own generation and takeover enforcement.
+  their normal path. Task 8/runner will own generation and takeover enforcement.
 - Evidence: `/tmp/localdot-m4-task6-draft/fix-tests.log`,
   `mutations/evidence.json`, `stream-mutation-evidence.json`, and
   `/tmp/localdot-m4-task6-scoped-review/evidence.json`.
 
-M4 is not complete. File/browser routes, client transport, memory/settings,
+## Task 4: desktop file and browser routes
+
+The desktop now exposes authenticated text read/write/edit/list, raw file transfer
+and Chromium read/navigation routes. Text reads inspect only the requested prefix
+and any necessary UTF-8 continuation bytes, so a large log remains readable without
+loading the complete file. Writes and exact single-match edits publish atomically;
+raw transfers enforce actual byte counts, cancellation and partial-file cleanup.
+Browser calls have explicit deadlines and preserve same-URL reload behavior.
+
+- The 282-test, 33-file baseline passed. Independent full review found a large-file
+  prefix regression; its fix passed 41 affected checks under independent scoped
+  review with no remaining Critical or Important finding. Nine baseline and two
+  prefix-fix seeded regressions were caught by their intended assertions.
+- Protocol/desktop types and the actual desktop bundle pass. Integrated workspace
+  types, lint and hygiene pass after installing the final 14 reviewed source files.
+- Shell cleanup uncertainty crosses NDJSON as a strict typed failure, never normal
+  completion. The later runner must invoke whole-cell Stop before retrying an
+  interrupted or ambiguous command. Descriptor-level ancestor confinement is not
+  claimed; home-path resolution retains its documented race limitation.
+- Evidence: `/tmp/localdot-m4-task4-draft/manifest.json`, `checks/`,
+  `integration-{types,lint,hygiene}.log`, and
+  `/tmp/localdot-m4-task4-review/scoped-rereview.md`.
+
+M4 is not complete. Client transport, memory/settings,
 immutable per-task keyd pricing, brain loop, chat and optional ChatGPT remain.

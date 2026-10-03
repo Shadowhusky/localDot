@@ -25,6 +25,7 @@ import {
 import { findTarget, focusedTarget, hitTest, type PerceptionDeps } from "./perception/hit-test.ts";
 import { observe } from "./perception/observe.ts";
 import { settle } from "./settle.ts";
+import { addToolRoutes, type ToolRouteDeps } from "./tools/routes.ts";
 import type { XHelper } from "./x/helper.ts";
 import type { Screen, Xsettings } from "./xsettings.ts";
 
@@ -43,6 +44,7 @@ export interface DesktopdDeps {
   clockMono?: () => number;
   perception?: PerceptionDeps;
   selfTest?: () => Promise<SelfTestReport>;
+  tools?: ToolRouteDeps;
 }
 
 export interface HidpiReport {
@@ -96,7 +98,28 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     }
     await next();
   });
-  app.use("*", bodyLimit({ maxSize: 64 * 1024 }));
+  const standardBodyLimit = bodyLimit({ maxSize: 64 * 1024 });
+  app.use("*", (c, next) => {
+    // Tool routes consume their own abort-aware, incrementally bounded request bodies. Only
+    // write/edit/put have larger limits; all original routes retain the standard 64 KiB limit.
+    if (
+      deps.tools &&
+      c.req.method === "POST" &&
+      [
+        "/shell",
+        "/files/read",
+        "/files/write",
+        "/files/edit",
+        "/files/list",
+        "/files/put",
+        "/browser/read",
+        "/browser/navigate",
+      ].includes(c.req.path)
+    )
+      return next();
+    return standardBodyLimit(c, next);
+  });
+  if (deps.tools) addToolRoutes(app, deps.tools);
 
   app.get("/selftest", async (c) => {
     const report: SelfTestReport = deps.selfTest
