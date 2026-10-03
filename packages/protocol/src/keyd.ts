@@ -140,6 +140,28 @@ export const KeydErrorBody = z.object({
   error: z.object({ code: z.string(), message: z.string() }),
 });
 
+// keyd's per-route model list (Part 4a): prices in USD per million tokens, and the maximum output
+// keyd bounds every request's cap by.
+export const KeydRouteModel = z.object({
+  id: z.string().min(1).max(128),
+  inputUSDPerMTok: z.number().nonnegative().max(10_000),
+  outputUSDPerMTok: z.number().nonnegative().max(10_000),
+  cacheReadUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
+  cacheWriteUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
+  maxOutputTokens: z.number().int().min(1).max(100_000_000).optional(),
+});
+export type KeydRouteModel = z.infer<typeof KeydRouteModel>;
+export const KeydRouteModels = z.object({
+  route: z.string(),
+  models: z.array(KeydRouteModel).nullish(),
+});
+export const KeydBudget = z.object({
+  perTaskUSD: z.number(),
+  perDayUSD: z.number(),
+  day: z.object({ date: z.string(), spentUSD: z.number() }),
+});
+export type KeydBudget = z.infer<typeof KeydBudget>;
+
 export const KeyUseData = z.object({
   secretId: z.string(),
   host: z.string(),

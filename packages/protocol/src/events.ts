@@ -223,9 +223,15 @@ export const PauseChange = event(
   "pause.change",
   z.object({ paused: z.boolean(), atStepBoundary: z.boolean() }),
 );
+// changeId names the change so the UI can undo it; undoes names the change an undo reverted.
 export const MemoryChange = event(
   "memory.change",
-  z.object({ file: z.enum(["USER.md", "MEMORY.md"]), patch: z.string() }),
+  z.object({
+    file: z.enum(["USER.md", "MEMORY.md"]),
+    patch: z.string(),
+    changeId: z.string().regex(ULID_PATTERN).optional(),
+    undoes: z.string().regex(ULID_PATTERN).optional(),
+  }),
 );
 // From keyd's audit: host, method and path are text the cell's request chose, cut to these
 // limits by the daemon and shown as plain text, never markup.
@@ -255,6 +261,105 @@ export const CameraHint = event(
     focus: Rect,
     zoom: z.number().positive().optional(),
     reason: z.enum(["typing", "small-target", "approval"]),
+  }),
+);
+
+// The agent (Part 5a): the conversation, the brain's questions and hand-offs, its result and what
+// its models used. Message text is the user's or the model's own; nothing here carries a secret.
+const MessageId = z.string().regex(ULID_PATTERN);
+export const MessageUser = event(
+  "message.user",
+  z.object({
+    messageId: MessageId,
+    text: z.string().min(1).max(8000),
+    kind: z.enum(["task", "steer", "followup"]),
+    files: z.array(z.string().max(255)).max(16).optional(),
+  }),
+);
+export const MessageDelta = event(
+  "message.delta",
+  z.object({ messageId: MessageId, text: z.string().max(4000) }),
+);
+export const MessageAssistant = event(
+  "message.assistant",
+  z.object({ messageId: MessageId, text: z.string().max(20_000) }),
+);
+export const AskRequest = event(
+  "ask.request",
+  z.object({
+    askId: z.string().regex(ULID_PATTERN),
+    question: z.string().min(1).max(1000),
+    options: z
+      .array(z.object({ key: z.string().regex(/^[A-F]$/), text: z.string().min(1).max(200) }))
+      .max(6),
+    allowText: z.boolean(),
+  }),
+);
+export const AskAnswer = event(
+  "ask.answer",
+  z.object({
+    askId: z.string().regex(ULID_PATTERN),
+    option: z
+      .string()
+      .regex(/^[A-F]$/)
+      .optional(),
+    text: z.string().max(2000).optional(),
+    by: z.enum(["user", "timeout", "stop"]),
+  }),
+);
+export const TakeoverReason = z.enum(["login", "2fa", "captcha", "payment", "other"]);
+export const TakeoverRequest = event(
+  "takeover.request",
+  z.object({
+    requestId: z.string().regex(ULID_PATTERN),
+    reason: TakeoverReason,
+    note: z.string().max(500),
+  }),
+);
+export const TakeoverEnd = event(
+  "takeover.end",
+  z.object({
+    requestId: z.string().regex(ULID_PATTERN),
+    note: z.string().max(1000).optional(),
+    by: z.enum(["user", "stop"]),
+  }),
+);
+export const TaskResult = event(
+  "task.result",
+  z.object({
+    summary: z.string().max(8000),
+    files: z
+      .array(
+        z.object({
+          name: z.string().min(1).max(255),
+          path: z.string().max(1024),
+          bytes: z.number().int().nonnegative(),
+        }),
+      )
+      .max(32),
+  }),
+);
+export const ModelRole = z.enum(["main", "fast", "local"]);
+export const ModelUsage = event(
+  "model.usage",
+  z.object({
+    role: ModelRole,
+    route: z.string().max(64),
+    model: z.string().max(128),
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    reasoningTokens: z.number().int().nonnegative().optional(),
+  }),
+);
+export const ModelRetry = event(
+  "model.retry",
+  z.object({
+    role: ModelRole,
+    attempt: z.number().int().positive(),
+    waitMs: z.number().int().nonnegative(),
+    status: z.number().int().optional(),
+    message: z.string().max(200),
+    fallback: z.string().max(128).optional(),
   }),
 );
 
@@ -289,6 +394,16 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   KeyUse,
   BudgetExceeded,
   CameraHint,
+  MessageUser,
+  MessageDelta,
+  MessageAssistant,
+  AskRequest,
+  AskAnswer,
+  TakeoverRequest,
+  TakeoverEnd,
+  TaskResult,
+  ModelUsage,
+  ModelRetry,
 ]);
 export type LocalDotEvent = z.infer<typeof LocalDotEvent>;
 export type EventType = LocalDotEvent["type"];
