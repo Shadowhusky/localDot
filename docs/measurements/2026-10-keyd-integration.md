@@ -521,9 +521,58 @@ interspersed uses preserve the current step highlight.
 - Paused/Resume screenshot delivered to Richard's private Telegram as message
   12066, receipt `~/.openclaw/media/outbound/receipts/20261003T002221.965039Z.json`.
 
+## Task 14: real-cell egress acceptance
+
+The acceptance suite now boots a real desktop through the production orchestrator,
+forwarder, gate and keyd listener, using the in-memory vault and fake keys. Sixteen
+checks cover the full path rather than only isolated proxy handlers.
+
+- All eleven boot checks pass, including real isolation and certificate trust.
+  Direct IPv4/IPv6, DNS, host and gate relay access are blocked. The production
+  self-test distinguishes unreachable addresses from a reachable host refusing a port.
+- Missing, random and another cell's valid proxy token are refused. That second
+  token succeeds against its own listener as an independent positive control.
+- A public Basic-auth fixture rejects the literal surrogate but accepts the
+  documented fake credential. The cell's surrogate succeeds only after keyd
+  substitutes it. Echoed values are scrubbed back to surrogates. The unbound
+  subdomain echoes its surrogate unchanged through an audited TLS passthrough.
+- Unknown, misplaced, authority-mismatched and policy-denied requests return the
+  expected status/reason and a fresh matching audit record. HTTP and CONNECT
+  private-DNS targets are denied. The whole raw audit is checked for attribution
+  and leaks before any per-cell filtering.
+- Chromium with fresh profiles, Node fetch, Python urllib and sudo Node all reach
+  bound hosts through the proxy with the injected CA. Both apt proxy schemes are
+  configured. Unbound TLS retains its verified upstream certificate.
+- A targeted equivalent of the planned pre-Task-7 image check removes the owned
+  cell's NSS certificate, observes production readiness fail specifically at
+  `ca-nss` with other checks healthy, restores it and observes readiness recover.
+  Only the current desktop image was available; no historical-image run is claimed.
+- Docker commands and readiness have deadlines. Cleanup removes only owned IDs,
+  surfaces removal errors and retains cell ownership state on cleanup failure.
+- Final real Docker run: 16/16 pass in 25.31 seconds; owned containers/networks
+  are removed. An initial Python failure was reproduced directly against the
+  public fixture: its edge rejects Python's default User-Agent. The test now uses
+  the same explicit test User-Agent as its unbound probe. Readiness checks poll
+  boundedly through idle-connection closure and the self-test cache.
+- Full review and scoped fix review tightened independent substitution proof,
+  per-request denial audit evidence, cross-cell authentication, trust, cleanup and
+  runtime coverage. All eight deliberate Go regressions are caught by their
+  intended assertions: missing substitution, attribution and refusal audits; raw
+  surrogate audit leakage; refused public passthrough; cross-cell token acceptance;
+  and denial with HTTP 200. The eight-case unmodified baseline passes. Every JSON
+  report has no suite/hook error, and no unrelated failure is counted as a kill.
+  Evidence: `/tmp/localdot-part4b-task14-mutations/reports/20261003-013531/evidence.json`.
+- All 932 host tests in 109 files, workspace types, lint and hygiene pass.
+  The full host suite and types separately pass with the bundled Node 24.19.0.
+  Evidence: `/tmp/localdot-part4b-task14-docker4.log`,
+  `/tmp/localdot-part4b-task14-host-final.log`,
+  `/tmp/localdot-part4b-task14-node24-host.log`, and
+  `/tmp/localdot-part4b-task14-node24-types.log`.
+
 ## Remaining integration
 
-Tasks 14–16: real-cell isolation/canary acceptance, documentation and CI. The
+Tasks 15–16: real-cell canary acceptance, documentation and CI. The
 real Stop/resume path and system Keychain carry are verified above; the broader
-Task 15 canary scenarios remain. Full workspace validation on Node 24 is pending
-(the actual desktop bundles have already passed under Node 24.21.0).
+Task 15 canary scenarios remain. The full host suite and workspace types now pass under Node 24.19.0; the actual
+desktop bundles have also passed under Node 24.21.0. Final branch-wide keyd,
+Docker and browser acceptance remains part of Task 16.
