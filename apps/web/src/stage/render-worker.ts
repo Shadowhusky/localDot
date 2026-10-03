@@ -1,3 +1,4 @@
+import "@localdot/protocol/csp";
 import {
   type Camera,
   cameraFor,

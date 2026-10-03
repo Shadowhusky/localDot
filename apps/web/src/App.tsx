@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
+import { KeysSheet } from "./keys/KeysSheet.tsx";
+import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
 import { forgetToken, keepToken, storedToken, takeFragmentToken } from "./lib/token.ts";
 import { mergeHud, sessionHud, stepRows } from "./session/session-view.ts";
@@ -102,6 +104,16 @@ export function App({ fetchImpl }: AppProps) {
 
 function Theatre({ api }: { api: ApiClient }) {
   const { cell, status, pending, error, listed, reconnects, start, stop, retry } = useCell(api);
+  const keys = useKeys(api);
+  const [keysOpen, setKeysOpen] = useState(false);
+  const keysButton = useRef<HTMLButtonElement>(null);
+  const wasOpen = useRef(false);
+  const closeKeys = useCallback(() => setKeysOpen(false), []);
+  useEffect(() => {
+    // Restore only after the render has removed inert from the Theatre.
+    if (wasOpen.current && !keysOpen) keysButton.current?.focus();
+    wasOpen.current = keysOpen;
+  }, [keysOpen]);
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
   const session = useLiveSession(api, cell, stage);
@@ -114,34 +126,44 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [merged.label]);
   return (
     <div className={merged.control ? "app control" : "app"}>
-      <TopBar title={session.model.title ?? "Your computer"} live={hud.live} />
-      <div className="house">
-        <ConversationRail />
-        <StageColumn
-          hud={merged}
-          control={merged.control}
-          onStart={start}
-          onStop={stop}
-          onStopSession={session.stop}
-          onRetry={retry}
-        >
-          <Stage
-            ref={stage}
-            cell={cell}
-            api={api}
-            control={merged.control}
-            reconnects={reconnects}
-            listed={listed}
-          />
-        </StageColumn>
-        <PlanRail
-          rows={rows}
-          sessionId={session.sessionId}
-          scale={cell?.scale ?? 2}
-          api={api}
-          title={session.model.title}
+      <div className="theatre-content" inert={keysOpen}>
+        <TopBar
+          title={session.model.title ?? "Your computer"}
+          live={hud.live}
+          keys={keyStatus(keys.health)}
+          keysOpen={keysOpen}
+          onKeys={() => setKeysOpen((open) => !open)}
+          keysRef={keysButton}
         />
+        <div className="house">
+          <ConversationRail />
+          <StageColumn
+            hud={merged}
+            control={merged.control}
+            onStart={start}
+            onStop={stop}
+            onStopSession={session.stop}
+            onRetry={retry}
+          >
+            <Stage
+              ref={stage}
+              cell={cell}
+              api={api}
+              control={merged.control}
+              reconnects={reconnects}
+              listed={listed}
+            />
+          </StageColumn>
+          <PlanRail
+            rows={rows}
+            sessionId={session.sessionId}
+            scale={cell?.scale ?? 2}
+            api={api}
+            title={session.model.title}
+          />
+        </div>
       </div>
+      <KeysSheet open={keysOpen} keys={keys} onClose={closeKeys} />
     </div>
   );
 }

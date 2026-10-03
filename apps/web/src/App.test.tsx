@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
@@ -29,9 +29,10 @@ function daemon(answer: (call: Call) => Response | Promise<Response>) {
       token: auth.replace(/^Bearer /, ""),
     };
     calls.push(call);
-    return answer(call);
+    return keyReply(call.path) ?? answer(call);
   }) as typeof fetch;
-  const seen = () => calls.map((c) => `${c.method} ${c.path}`);
+  // These assertions cover cell/token traffic; the key hook has its own suite.
+  const seen = () => calls.filter((c) => !keyReply(c.path)).map((c) => `${c.method} ${c.path}`);
   return { fetchImpl, calls, seen };
 }
 
@@ -51,7 +52,22 @@ const DOCKER_DOWN_CAPTION =
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
-const noCells = async () => json([]);
+const keyReply = (path: string): Response | undefined => {
+  if (path === "/api/keyd")
+    return json({
+      online: true,
+      bootId: "test",
+      sealKey: "test",
+      audit: { ok: true },
+      hairpin: { state: "active", addresses: 1 },
+    });
+  if (path === "/api/keys") return json({ keys: [] });
+  return undefined;
+};
+const hudButton = () =>
+  within(screen.getByTestId("hud-status").closest(".hud") as HTMLElement).getByRole("button");
+const noCells = async (input: RequestInfo | URL) =>
+  keyReply(new URL(String(input)).pathname) ?? json([]);
 const unauthorized = async () => new Response("unauthorized", { status: 401 });
 const summary = (
   state: CellSummary["state"],
@@ -85,11 +101,26 @@ describe("App token states", () => {
     expect(screen.getByRole("alert").textContent).toContain("No access token");
   });
 
+  it("makes the Theatre inert while keys are open and restores the trigger after closing", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    render(<App fetchImpl={noCells as typeof fetch} />);
+    await screen.findByRole("button", { name: "Start computer" });
+    const trigger = screen.getByTestId("keys-button");
+    fireEvent.click(trigger);
+    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(false);
+    expect(document.activeElement).toBe(trigger);
+  });
+
   it("shows the Theatre with a Start computer control when the daemon has no cell", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
+      const key = keyReply(new URL(url).pathname);
+      if (key) return key;
       calls.push(`${init?.method ?? "GET"} ${new URL(url).pathname}`);
       if (url.endsWith("/api/cells") && init?.method === "POST") {
         return json(
@@ -108,8 +139,8 @@ describe("App token states", () => {
     render(<App fetchImpl={fetchImpl} />);
     // Until the daemon has listed its cells, Start can't create a second computer.
     expect(screen.getByTestId("hud-status").textContent).toBe("Checking…");
-    expect(screen.getByRole("button").getAttribute("aria-disabled")).toBe("true");
-    screen.getByRole("button").click();
+    expect(hudButton().getAttribute("aria-disabled")).toBe("true");
+    hudButton().click();
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("No computer"));
     const start = screen.getByRole("button", { name: "Start computer" });
     expect(start.getAttribute("aria-disabled")).toBeNull();
@@ -126,7 +157,7 @@ describe("App token states", () => {
     expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
@@ -147,7 +178,8 @@ describe("App token states", () => {
   it("follows the cell over its status socket and closes it, and any pending retry, on unmount", async () => {
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"], shouldAdvanceTime: true });
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
-    const fetchImpl = (async () => json([summary("starting")])) as typeof fetch;
+    const fetchImpl = (async (input: RequestInfo | URL) =>
+      keyReply(new URL(String(input)).pathname) ?? json([summary("starting")])) as typeof fetch;
 
     const watching = render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
@@ -164,7 +196,7 @@ describe("App token states", () => {
     const retrying = render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     act(() => FakeWebSocket.instances[1]?.onclose?.());
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
     retrying.unmount();
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(60_000);
@@ -176,6 +208,8 @@ describe("App token states", () => {
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const path = new URL(String(input)).pathname;
+      const key = keyReply(path);
+      if (key) return key;
       calls.push(`${init?.method ?? "GET"} ${path}`);
       if (path.endsWith("/stop")) return new Response(null, { status: 202 });
       if (path.endsWith("/start")) return new Response(DOCKER_DOWN, { status: 502 });
@@ -188,9 +222,7 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("stopped")) }),
     );
-    await waitFor(() =>
-      expect(screen.getByRole("button").getAttribute("aria-disabled")).toBeNull(),
-    );
+    await waitFor(() => expect(hudButton().getAttribute("aria-disabled")).toBeNull());
     screen.getByRole("button", { name: "Start computer" }).click();
     expect(await screen.findByText(DOCKER_DOWN_CAPTION)).toBeTruthy();
     expect(document.body.textContent).not.toContain("ENOENT");
@@ -260,7 +292,7 @@ describe("App HUD", () => {
   afterEach(cleanup);
 
   const status = () => screen.getByTestId("hud-status").textContent;
-  const button = () => screen.getByRole("button");
+  const button = () => hudButton();
   const caption = () => document.querySelector(".caption")?.textContent ?? "";
   const pushState = (cell: CellSummary) =>
     act(() => FakeWebSocket.instances.at(-1)?.onmessage?.({ data: JSON.stringify(cell) }));

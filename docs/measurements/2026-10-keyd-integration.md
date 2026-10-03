@@ -448,8 +448,42 @@ audit hold and an inactive/unknown hairpin guard.
   `/tmp/localdot-part4b-task12a-smoke.log`, and
   `/tmp/localdot-part4b-task12a-mutations.log`.
 
+## Task 12b: Theatre key sheet
+
+The top-bar Keys control opens an anchored modal sheet with provider and web API
+forms, metadata-only records, guarded deletion and service health. The underlying
+Theatre is inert; keyboard focus stays inside and returns to the trigger on close.
+The layout supports 375px, long IDs and reduced motion.
+
+The secret remains an uncontrolled DOM value. It clears before validation/save,
+on close, page hiding and unmount; failures require pasting it again. Synchronous
+guards prevent duplicate submissions/deletions, and a shared lock covers sealing
+through completion so Delete cannot overtake Save. Confirmation expires by both
+timer and monotonic clock and resets after close, offline state or list replacement.
+
+- All 907 host tests in 105 files, types, lint, hygiene and production build pass.
+  The sheet has 22 focused tests, including same-render repeated actions.
+- Three real Chrome checks pass (4.2 seconds) against the isolated production
+  daemon/keyd: WebCrypto save/list/delete, ciphertext-only requests and no plaintext
+  browser storage; narrow/long-name/reduced-motion layout; keyd offline focus and
+  disabled controls. Only fake in-memory keys were used; owned services cleaned up.
+- Browser acceptance exposed Zod's caught Function probe as a CSP violation.
+  Both browser entry points now configure interpreted validation before schema
+  imports. The existing CSP is unchanged; all three checks report zero violations.
+- Full review and scoped re-review found and closed mutation ordering and secret
+  lifecycle gaps. Fifteen deliberate regressions are caught. Seven initially
+  survived the existing suite, so the committed tests now exercise them directly.
+  One callback assertion moved outside the caught callback to prevent false passes.
+- Evidence: `/tmp/localdot-part4b-task12b-host-final.log`,
+  `/tmp/localdot-part4b-task12b-e2e-final.log`,
+  `/tmp/localdot-part4b-task12b-e2e-diagnostic.log`, and
+  `/tmp/localdot-key-mutations-1p034vw1/upgraded-mutation-results.json`.
+  Screenshots are in `apps/web/e2e/out/keys-{sheet,narrow,offline}.png`.
+- Representative screenshot delivered to Richard's private Telegram, message
+  12064; verified receipt under `~/.openclaw/media/outbound/receipts/20261003T001047.110047Z.json`.
+
 ## Remaining integration
 
-Tasks 12b–16: key sheet and paused UI, real-cell isolation/canary acceptance,
+Tasks 13–16: paused UI and key-use history, real-cell isolation/canary acceptance,
 documentation and CI. The basic real Stop/resume path and system Keychain carry
 are verified above; the broader Task 15 canary scenarios remain.
