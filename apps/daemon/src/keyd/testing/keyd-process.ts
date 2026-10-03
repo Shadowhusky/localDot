@@ -1,7 +1,21 @@
 import { type ChildProcess, execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  copyFileSync,
+  cpSync,
+  fstatSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  openSync,
+  realpathSync,
+  rmSync,
+  writeSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, dirname, join, sep } from "node:path";
+import { StringDecoder } from "node:string_decoder";
 import { fileURLToPath } from "node:url";
 import { parsePortRange } from "../../cells/ports.ts";
 import { keydSocketPath } from "../client.ts";
@@ -38,7 +52,12 @@ export interface KeydProcess {
   socketPath: string;
   bootId: string;
   stderr(): string;
-  stop(): Promise<void>;
+  // Complete raw stderr received since spawn, while this helper is alive. Throws
+  // if capture failed or the artifact changed. stop() removes the owned artifact.
+  stderrPath(): string;
+  // Optionally preserve a final snapshot after close drains every stderr byte.
+  // artifactsTo must be a new directory; its parent must already exist.
+  stop(opts?: { artifactsTo?: string }): Promise<void>;
 }
 
 export interface StartKeydOptions {
@@ -55,27 +74,78 @@ export async function startKeyd(opts: StartKeydOptions = {}): Promise<KeydProces
   const home = opts.home ?? mkdtempSync(`/tmp/ld-keyd-${process.pid}-`);
   const socketPath = keydSocketPath(home);
   if (Buffer.byteLength(socketPath) > MAX_SOCKET_PATH) {
+    if (ownHome) rmSync(home, { recursive: true, force: true });
     throw new Error(`keyd's socket path is too long for macOS (${socketPath})`);
   }
+  let captureDirectory: string | undefined;
+  let captureFd: number | undefined;
+  let captureFailure: Error | undefined;
+  let capturedBytes = 0;
+  const clean = () => {
+    if (captureFd !== undefined) {
+      try {
+        closeSync(captureFd);
+      } catch {
+        captureFailure ??= new Error("keyd stderr capture could not close");
+      }
+      captureFd = undefined;
+    }
+    try {
+      if (captureDirectory) rmSync(captureDirectory, { recursive: true, force: true });
+    } finally {
+      if (ownHome) rmSync(home, { recursive: true, force: true });
+    }
+  };
+  let capturePath: string;
+  try {
+    captureDirectory = mkdtempSync(`/tmp/ld-keyd-stderr-${process.pid}-`);
+    capturePath = join(captureDirectory, "stderr.log");
+    captureFd = openSync(capturePath, "wx", 0o600);
+  } catch (error) {
+    clean();
+    throw error;
+  }
   const ports = opts.ports ?? TEST_KEYD_PORTS;
-  const child: ChildProcess = spawn(
-    binary,
-    [
-      "-home",
-      home,
-      "-vault",
-      "memory",
-      "-ports",
-      `${ports.from}-${ports.to}`,
-      // Tests ask neither the router nor STUN for the public address: nothing leaves the Mac.
-      "-natpmp",
-      "off",
-      "-stun",
-      "off",
-    ],
-    { stdio: ["ignore", "ignore", "pipe"] },
-  );
+  let child: ChildProcess;
+  try {
+    child = spawn(
+      binary,
+      [
+        "-home",
+        home,
+        "-vault",
+        "memory",
+        "-ports",
+        `${ports.from}-${ports.to}`,
+        // Tests ask neither the router nor STUN for the public address: nothing leaves the Mac.
+        "-natpmp",
+        "off",
+        "-stun",
+        "off",
+      ],
+      { stdio: ["ignore", "ignore", "pipe"] },
+    );
+  } catch (error) {
+    clean();
+    throw error;
+  }
   let stderr = "";
+  const decoder = new StringDecoder("utf8");
+  const stderrPath = () => {
+    if (captureFailure) throw captureFailure;
+    if (captureFd === undefined) throw new Error("keyd stderr capture is closed");
+    const descriptor = fstatSync(captureFd);
+    const artifact = lstatSync(capturePath);
+    if (
+      !artifact.isFile() ||
+      artifact.dev !== descriptor.dev ||
+      artifact.ino !== descriptor.ino ||
+      artifact.size !== capturedBytes
+    ) {
+      throw new Error("keyd stderr capture artifact changed");
+    }
+    return capturePath;
+  };
   const exited = new Promise<void>((resolve) => child.once("close", () => resolve()));
   // A test process that dies takes its keyd with it.
   const killOnExit = () => child.kill("SIGKILL");
@@ -85,15 +155,12 @@ export async function startKeyd(opts: StartKeydOptions = {}): Promise<KeydProces
       child.kill("SIGKILL");
       reject(new Error(`keyd did not get ready within 15 s:\n${stderr}`));
     }, 15_000);
-    child.stderr?.setEncoding("utf8");
-    child.stderr?.on("data", (chunk: string) => {
-      stderr = (stderr + chunk).slice(-64 * 1024);
-      const ready = /^keyd ready socket=(.+) boot=([0-9a-f]{16})$/m.exec(stderr);
-      if (ready?.[2]) {
-        clearTimeout(timer);
-        resolve(ready[2]);
-      }
-    });
+    const captureFailed = () => {
+      captureFailure ??= new Error("keyd stderr capture failed");
+      clearTimeout(timer);
+      child.kill("SIGKILL");
+      reject(captureFailure);
+    };
     child.once("exit", (code) => {
       clearTimeout(timer);
       reject(new Error(`keyd exited with ${code} before it was ready:\n${stderr}`));
@@ -102,22 +169,86 @@ export async function startKeyd(opts: StartKeydOptions = {}): Promise<KeydProces
       clearTimeout(timer);
       reject(new Error(`keyd could not start: ${error.message}`));
     });
+    if (!child.stderr) {
+      captureFailed();
+      return;
+    }
+    child.stderr.on("error", captureFailed);
+    child.stderr.on("data", (chunk: Buffer) => {
+      try {
+        if (captureFailure || captureFd === undefined) throw new Error("capture unavailable");
+        let offset = 0;
+        while (offset < chunk.length) {
+          const written = writeSync(captureFd, chunk, offset, chunk.length - offset);
+          if (written <= 0) throw new Error("capture made no progress");
+          offset += written;
+          capturedBytes += written;
+        }
+      } catch {
+        captureFailed();
+        return;
+      }
+      stderr = (stderr + decoder.write(chunk)).slice(-64 * 1024);
+      const ready = /^keyd ready socket=(.+) boot=([0-9a-f]{16})$/m.exec(stderr);
+      if (ready?.[2]) {
+        clearTimeout(timer);
+        resolve(ready[2]);
+      }
+    });
   }).catch(async (error: unknown) => {
     process.removeListener("exit", killOnExit);
     child.kill("SIGKILL");
     await exited;
-    if (ownHome) rmSync(home, { recursive: true, force: true });
+    clean();
     throw error;
   });
-  const stop = async () => {
+  const preserve = (artifactsTo: string) => {
+    const source = stderrPath();
+    const destination = join(realpathSync(dirname(artifactsTo)), basename(artifactsTo));
+    for (const directory of [home, captureDirectory]) {
+      if (!directory) continue;
+      const original = realpathSync(directory);
+      if (destination === original || destination.startsWith(`${original}${sep}`)) {
+        throw new Error("keyd artifacts destination must be outside its source directories");
+      }
+    }
+    // Nonrecursive mkdir is exclusive: an existing path is never reused or removed.
+    mkdirSync(destination, { mode: 0o700 });
+    try {
+      copyFileSync(source, join(destination, "stderr.log"), constants.COPYFILE_EXCL);
+      cpSync(home, join(destination, "keyd-home"), {
+        recursive: true,
+        force: false,
+        errorOnExist: true,
+        verbatimSymlinks: true,
+      });
+      stderrPath();
+    } catch (error) {
+      // A partial snapshot must not look like complete acceptance evidence.
+      rmSync(destination, { recursive: true, force: true });
+      throw error;
+    }
+  };
+  const stop = async (options: { artifactsTo?: string } = {}) => {
     process.removeListener("exit", killOnExit);
     if (child.exitCode === null && child.signalCode === null) {
       child.kill("SIGTERM");
       const force = setTimeout(() => child.kill("SIGKILL"), 5000);
-      await exited;
-      clearTimeout(force);
+      try {
+        await exited;
+      } finally {
+        clearTimeout(force);
+      }
     }
-    if (ownHome) rmSync(home, { recursive: true, force: true });
+    try {
+      // exit can precede close: final bytes and the home are immutable only after
+      // the child and its stderr pipe have both closed.
+      await exited;
+      if (options.artifactsTo !== undefined) preserve(options.artifactsTo);
+    } finally {
+      clean();
+    }
+    if (captureFailure) throw captureFailure;
   };
-  return { home, socketPath, bootId, stderr: () => stderr, stop };
+  return { home, socketPath, bootId, stderr: () => stderr, stderrPath, stop };
 }

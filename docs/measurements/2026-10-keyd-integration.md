@@ -569,10 +569,62 @@ checks cover the full path rather than only isolated proxy handlers.
   `/tmp/localdot-part4b-task14-node24-host.log`, and
   `/tmp/localdot-part4b-task14-node24-types.log`.
 
+## Task 15: real-cell canary and Stop acceptance
+
+Five checks use the real desktop, gate, keyd and production kill switch with a
+random fake credential in the memory vault. The public echo response is scrubbed
+back to its surrogate before reaching the cell and X clipboard. Independent
+markers prove the scanner reads the actual clipboard owner's process memory,
+other process memory/environment/arguments, and every requested encoding in files.
+
+- The final real Docker run passes 5/5 in 101.77 seconds. The same scan that finds
+  no canary reads 69 processes, 8,574,533,632 memory bytes, 91,706 files and
+  4,640,463,973 file bytes, with zero persistent process or file errors. This is
+  bounded evidence for the scanned readable surfaces, not a universal guarantee.
+- File scanning streams whole regular files with chunk overlap and deduplicates
+  hardlinks/overlapping roots. Structured Engine change paths retain newlines;
+  tmpfs coverage includes regular files under /dev. Positive controls in /dev
+  and a root filename containing a newline prevent silent omissions. Symlinks,
+  FIFOs and kernel pseudo-mappings are excluded deliberately.
+- Every non-vanished process read error fails coverage, including partial memory
+  reads. Diagnostics retain the readable prefix and count bytes actually read.
+  Fifteen Python fixture tests cover encodings, boundaries, large sparse files,
+  deduplication, permission errors, disappearing processes and partial reads.
+- The request loop succeeds before Stop. Stop revokes and freezes the desktop;
+  an authenticated host-side probe receives unknown-surrogate while the desktop
+  is still paused, before Resume can mask missing revocation. Four seconds of
+  frozen audit stays quiet. After Resume, three newly begun old-surrogate calls
+  fail, while a fresh shell receives a different working surrogate.
+- Final log capture follows Stop/Resume and container shutdown. Separate markers
+  prove both stdout and stderr from each container reach the scanned artifacts.
+  keyd stderr is captured raw without truncation, then preserved with its full
+  home only after child close drains the pipe. Eleven mocked-process tests cover
+  late stderr/home writes, exclusive destination creation and cleanup on failure.
+- Full review and scoped rereview pass. Review fixes closed the Stop/Resume
+  masking gap, newline and /dev omissions, clipboard coverage, persistent read
+  errors and final-log timing. No credential service or image behavior changed.
+- Mutation acceptance: all ten real-container regressions are caught by their
+  intended assertions: planted raw/encoded leaks, omitted clipboard memory,
+  omitted /dev files, lossy newline paths, omitted log stderr, missing Stop
+  revocation, missing pause, missing fresh surrogates, bypassed response scrubbing,
+  and hidden persistent memory errors. Every selected companion test passes;
+  no hook or unrelated suite failure is counted. Six file-scanner and seven
+  process-diagnostic mutations also fail their fixture assertions. Evidence:
+  `/tmp/localdot-part4b-task15-mutations/verified-evidence.json`,
+  `/tmp/localdot-part4b-task15-draft/scanner-mutations.json`, and
+  `/tmp/localdot-scanner-diagnostics-y_6r_xsf/evidence.json`.
+  The report collector was corrected for Vitest 5's skipped-test status and
+  abbreviated assertion values; raw reports were preserved and reclassified.
+- All 943 host tests in 110 files, workspace types, lint and hygiene pass under
+  Node 24.19.0. Python fixtures pass independently. Evidence:
+  `/tmp/localdot-part4b-task15-docker4.log`,
+  `/tmp/localdot-part4b-task15-host-final.log`,
+  `/tmp/localdot-part4b-task15-types-final.log`, and
+  `/tmp/localdot-part4b-task15-python-final.log`.
+
 ## Remaining integration
 
-Tasks 15–16: real-cell canary acceptance, documentation and CI. The
-real Stop/resume path and system Keychain carry are verified above; the broader
-Task 15 canary scenarios remain. The full host suite and workspace types now pass under Node 24.19.0; the actual
-desktop bundles have also passed under Node 24.21.0. Final branch-wide keyd,
-Docker and browser acceptance remains part of Task 16.
+Task 16: CI/documentation and final branch-wide acceptance. The canary and
+Stop/resume checks above pass; final real-keyd, image, Docker and browser checks
+remain. The full host suite and workspace types pass under Node 24.19.0; desktop
+bundles have passed under Node 24.21.0.

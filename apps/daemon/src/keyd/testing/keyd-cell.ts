@@ -26,7 +26,7 @@ export interface KeydCell {
   // A login shell as the desktop's user, as the agent's terminal runs: the cell's proxy settings
   // and its surrogates (sourced from /etc/localdot/cell/surrogates.sh) are in its environment.
   sh(script: string): { status: number; out: string };
-  close(): Promise<void>;
+  close(opts?: { artifactsTo?: string }): Promise<void>;
 }
 
 // A real keyd (in-memory vault, test ports) holding the given keys, and a ready desktop cell wired
@@ -50,20 +50,25 @@ export async function startKeydCell(
     keyd: wiring,
   });
   let id: string | undefined;
-  const close = async () => {
-    orchestrator.dispose();
-    const errors: unknown[] = [];
-    for (const owned of new Set([...(id ? [id] : []), ...store.list().map((r) => r.id)])) {
-      try {
-        await orchestrator.remove(owned, { purgeHome: true });
-      } catch (error) {
-        errors.push(error);
+  let closing: Promise<void> | undefined;
+  const close = (opts: { artifactsTo?: string } = {}) => {
+    if (closing) return closing;
+    closing = (async () => {
+      orchestrator.dispose();
+      const errors: unknown[] = [];
+      for (const owned of new Set([...(id ? [id] : []), ...store.list().map((r) => r.id)])) {
+        try {
+          await orchestrator.remove(owned, { purgeHome: true });
+        } catch (error) {
+          errors.push(error);
+        }
       }
-    }
-    await keyd.stop();
-    if (errors.length)
-      throw new AggregateError(errors, `test cleanup failed; retained state at ${home}`);
-    rmSync(home, { recursive: true, force: true });
+      await keyd.stop(opts);
+      if (errors.length)
+        throw new AggregateError(errors, `test cleanup failed; retained state at ${home}`);
+      rmSync(home, { recursive: true, force: true });
+    })();
+    return closing;
   };
   try {
     const { sealKey } = await client.status();
