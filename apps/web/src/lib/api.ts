@@ -14,7 +14,7 @@ export interface ApiClient {
   readonly token: string;
   fetch: typeof fetch;
   authorization(): string;
-  get<T>(path: string): Promise<T>;
+  get<T>(path: string, options?: { signal?: AbortSignal }): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   del(path: string): Promise<void>;
   socketUrl(path: string): string;
@@ -31,7 +31,12 @@ export function createApi(token: string, opts: ApiOptions = {}): ApiClient {
   const fetchImpl = opts.fetchImpl ?? fetch.bind(globalThis);
   const origin = opts.origin ?? window.location.origin;
 
-  async function call<T>(method: string, path: string, body?: unknown): Promise<T> {
+  async function call<T>(
+    method: string,
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+  ): Promise<T> {
     const res = await fetchImpl(`${origin}${path}`, {
       method,
       headers: {
@@ -39,7 +44,9 @@ export function createApi(token: string, opts: ApiOptions = {}): ApiClient {
         ...(body === undefined ? {} : { "content-type": "application/json" }),
       },
       body: body === undefined ? undefined : JSON.stringify(body),
-      signal: AbortSignal.timeout(15_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(15_000)])
+        : AbortSignal.timeout(15_000),
     });
     if (res.status === 401) {
       opts.onUnauthorized?.();
@@ -54,7 +61,7 @@ export function createApi(token: string, opts: ApiOptions = {}): ApiClient {
     token,
     fetch: fetchImpl,
     authorization: () => `Bearer ${token}`,
-    get: (path) => call("GET", path),
+    get: (path, options) => call("GET", path, undefined, options?.signal),
     post: (path, body) => call("POST", path, body),
     del: async (path) => {
       await call("DELETE", path);

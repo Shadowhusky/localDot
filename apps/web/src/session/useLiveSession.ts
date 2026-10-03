@@ -1,6 +1,8 @@
-import { LocalDotEvent, ULID_PATTERN } from "@localdot/protocol";
+import { ULID_PATTERN } from "@localdot/protocol";
 import { emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
 import { type RefObject, useCallback, useEffect, useRef, useState } from "react";
+import type { AgentFeed } from "../agent/model.ts";
+import { createAgentFeed } from "../agent/reducer.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { openSocket, type SocketHandle } from "../lib/socket.ts";
@@ -9,6 +11,7 @@ import { syncClock } from "./clock-sync.ts";
 
 export interface LiveSession {
   sessionId: string | null;
+  agentFeed: AgentFeed;
   model: SessionModel;
   version: number;
   ended: boolean;
@@ -25,13 +28,15 @@ export function useLiveSession(
   cell: CellSummary | null,
   stage: RefObject<StageHandle | null>,
 ): LiveSession {
-  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [identity, setIdentity] = useState<{ cellId: string; sessionId: string } | null>(null);
+  const [agentFeed] = useState(createAgentFeed);
   const [version, setVersion] = useState(0);
   const [ended, setEnded] = useState(false);
   const modelRef = useRef<SessionModel>(emptyModel());
   const dirty = useRef(false);
   const cellId = cell?.id ?? null;
   const ready = cell?.state === "ready";
+  const sessionId = identity?.cellId === cellId ? (identity?.sessionId ?? null) : null;
   const previousCell = useRef(cellId);
 
   useEffect(() => {
@@ -40,7 +45,7 @@ export function useLiveSession(
     modelRef.current = emptyModel();
     dirty.current = false;
     stage.current?.resetSession();
-    setSessionId(null);
+    setIdentity(null);
     setEnded(false);
     setVersion((v) => v + 1);
   }, [cellId, stage]);
@@ -62,7 +67,7 @@ export function useLiveSession(
           ULID_PATTERN.test(live.sessionId) &&
           live.sessionId !== sessionId
         )
-          setSessionId(live.sessionId);
+          setIdentity({ cellId, sessionId: live.sessionId });
       } catch {
       } finally {
         polling = false;
@@ -77,11 +82,17 @@ export function useLiveSession(
   }, [api, cellId, ready, sessionId, ended]);
 
   useEffect(() => {
+    const prior = agentFeed.read();
+    if (prior.cellId !== cellId || prior.sessionId !== sessionId) {
+      agentFeed.reset(cellId, sessionId);
+      modelRef.current = emptyModel();
+      stage.current?.resetSession();
+      setEnded(false);
+      setVersion((v) => v + 1);
+    }
     if (!sessionId) return;
-    modelRef.current = emptyModel();
-    stage.current?.resetSession();
-    setEnded(false);
-    setVersion((v) => v + 1);
+    // Same-session history survives API replacement; transport readiness never does.
+    agentFeed.connection("connecting");
     let socket: SocketHandle | undefined;
     let closed = false;
     let disposed = false;
@@ -121,21 +132,22 @@ export function useLiveSession(
       url: api.socketUrl(`/api/sessions/${sessionId}/stream`),
       protocols: api.socketProtocols(),
       handlers: {
+        onOpen: () => {
+          if (!disposed) agentFeed.connection("live");
+        },
+        onClose: () => {
+          if (!disposed && !closed) agentFeed.connection("lost");
+        },
         onMessage: (data) => {
           if (disposed) return;
-          let event: LocalDotEvent;
-          try {
-            const parsed = LocalDotEvent.safeParse(JSON.parse(data));
-            if (!parsed.success) return;
-            event = parsed.data;
-          } catch {
-            return;
-          }
+          const event = agentFeed.accept(data);
+          if (!event) return;
           foldEvents(modelRef.current, [event]);
           stage.current?.pushEvents([event]);
           dirty.current = true;
           if (event.type === "session.end") {
             closed = true;
+            agentFeed.connection("ended");
             socket?.close();
             setEnded(true);
           }
@@ -148,11 +160,11 @@ export function useLiveSession(
       clearInterval(flush);
       if (!closed) socket?.close();
     };
-  }, [api, sessionId, stage]);
+  }, [api, cellId, sessionId, stage, agentFeed]);
 
   const stop = useCallback(() => {
     if (sessionId) void api.post(`/api/sessions/${sessionId}/stop`).catch(() => {});
   }, [api, sessionId]);
 
-  return { sessionId, model: modelRef.current, version, ended, stop };
+  return { sessionId, agentFeed, model: modelRef.current, version, ended, stop };
 }
