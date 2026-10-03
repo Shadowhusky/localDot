@@ -622,9 +622,37 @@ other process memory/environment/arguments, and every requested encoding in file
   `/tmp/localdot-part4b-task15-types-final.log`, and
   `/tmp/localdot-part4b-task15-python-final.log`.
 
-## Remaining integration
+## Task 16: CI, documentation and combined acceptance
 
-Task 16: CI/documentation and final branch-wide acceptance. The canary and
-Stop/resume checks above pass; final real-keyd, image, Docker and browser checks
-remain. The full host suite and workspace types pass under Node 24.19.0; desktop
-bundles have passed under Node 24.21.0.
+- CI now runs the real keyd client/route suite and Python scanner fixtures on
+  Ubuntu with the pinned Go toolchain and Node 24. Docker/browser acceptance
+  remains a local opt-in. README documents startup, scoped credentials,
+  ciphertext-only saving, Stop/Resume and credential-service restart recovery.
+- Final real-keyd client/route run: 6/6 in 1.90 seconds. The desktop image builds
+  successfully (cached, 3.13 seconds) and contains Node 24.21.0.
+- Combined real-container acceptance: 31/31 across certificate/proxy image,
+  orchestrator, egress and canary suites in 195.19 seconds. Real Stop completes
+  in 49 ms. The canary scan covers 69 processes, 8,561,528,832 memory bytes,
+  91,706 files and 4,640,463,969 file bytes with zero persistent scan errors.
+- Combined Chrome acceptance: 7 pass, 1 opt-in measurement skipped, 149.86 seconds.
+  This covers sealed keys, phone layout, offline keyd, live desktop restart,
+  Stop/Resume, two-viewer isolation and the spreadsheet/browser Theatre demo.
+  During six viewer freezes, the other viewer delivers 16.0–20.4 fps; the largest
+  observed cell send queue is 4,201,576 bytes. The skipped compositor measurement
+  has prior results in `2026-10-compositor.md`; M2 timing and pixel acceptance
+  remain separate pending work, not part of this passing count.
+- The embedded video-only desktop client logs expected CSP rejections of inline
+  styles and playback AudioWorklet. Its existing stream-proxy policy deliberately
+  refuses these features. No policy widening was made; this is separate from
+  the independent avatar voice service.
+- Web production build, workspace lint/hygiene and Go format/vet/Darwin-vet/race
+  checks pass. The unchanged runtime source retains Task 15's 943 passing host
+  tests and workspace type checks. A light review's documentation clarifications
+  were incorporated: only Web/API keys are exported as stand-ins, and resumed
+  existing processes retain revoked values until a new shell reloads them.
+- Evidence: `/tmp/localdot-part4b-task16-checks/results.json` and its four logs;
+  `/tmp/localdot-part4b-task16-web.log`, `-go.log`, `-lint.log`, `-hygiene.log`.
+  Fresh screenshots are under `apps/web/e2e/out/` and remain ignored.
+
+Part 4b is complete. The agent loop and remaining app milestones are not yet
+implemented; see `../build-progress.md` for the remaining scope.

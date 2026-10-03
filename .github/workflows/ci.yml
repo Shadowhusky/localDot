@@ -32,3 +32,19 @@ jobs:
       - run: go vet ./...
       - run: GOOS=darwin go vet ./...
       - run: go test -race ./...
+  keyd-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: keyd/go.mod
+          cache: false
+      - run: pnpm install --frozen-lockfile
+      - run: python3 apps/daemon/src/keyd/testing/test_canary_scan.py
+      - run: LOCALDOT_KEYD_TESTS=1 pnpm test:keyd
