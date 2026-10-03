@@ -1,12 +1,14 @@
 // Keep the settlement promise so Stop can drain work before freezing desktopd.
 export class LiveSessions {
+  readonly #aliases = new Map<string, string>();
   readonly #byCell = new Map<
     string,
     { sessionId: string; controller: AbortController; done: Promise<void> }
   >();
 
   start(cellId: string, sessionId: string, run: (signal: AbortSignal) => Promise<unknown>): void {
-    if (this.#byCell.has(cellId)) throw new Error(`cell ${cellId} already has a live session`);
+    if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
+      throw new Error(`cell ${cellId} already has a live session`);
     if (this.cellOf(sessionId)) throw new Error("session is already live");
     const controller = new AbortController();
     let settle!: () => void;
@@ -30,12 +32,24 @@ export class LiveSessions {
       })
       .finally(() => {
         if (this.#byCell.get(cellId) === entry) this.#byCell.delete(cellId);
+        for (const [alias, id] of this.#aliases) if (id === sessionId) this.#aliases.delete(alias);
         settle();
       });
   }
 
   get(cellId: string): string | undefined {
-    return this.#byCell.get(cellId)?.sessionId;
+    return this.#byCell.get(cellId)?.sessionId ?? this.#aliases.get(cellId);
+  }
+
+  alias(cellId: string, sessionId: string): void {
+    if (!this.cellOf(sessionId)) throw new Error("session is not live");
+    if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
+      throw new Error("cell identity is already assigned");
+    this.#aliases.set(cellId, sessionId);
+  }
+
+  unalias(cellId: string, sessionId: string): void {
+    if (this.#aliases.get(cellId) === sessionId) this.#aliases.delete(cellId);
   }
 
   cellOf(sessionId: string): string | undefined {

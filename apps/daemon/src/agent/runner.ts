@@ -1,0 +1,492 @@
+import { setTimeout as delay } from "node:timers/promises";
+import {
+  type AgentLimits,
+  BootConfig,
+  DEFAULT_AGENT_LIMITS,
+  type KeydRecord,
+  type ModelBinding,
+  type SkillSummary,
+  type TaskPricing,
+  ULID_PATTERN,
+  ulid,
+} from "@localdot/protocol";
+import type { Catalog } from "@localdot/providers";
+import type { CellSummary } from "../cells/types.ts";
+import type { EventLog } from "../event-log.ts";
+import type { StopOutcome } from "../gateway/kill-switch.ts";
+import type { LiveSessions } from "../gateway/live.ts";
+import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
+import type { KeydHealth } from "../keyd/monitor.ts";
+import {
+  BindingError,
+  bindingOf,
+  pricingOf,
+  type ResolvedRole,
+  type Role,
+  resolveRole,
+} from "./bindings.ts";
+import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
+import type { MemoryStore } from "./memory.ts";
+import { AgentSession, abortable } from "./session.ts";
+import { AgentSettings } from "./settings.ts";
+import type { TranscriptStore } from "./transcript.ts";
+
+export const BRAIN_DONE = 0;
+export const BRAIN_GAVE_UP = 3;
+const RESTART_BACKOFF_MS = [2000, 4000, 8000];
+const IDLE_MS = 30 * 60 * 1000;
+export class AgentError extends Error {
+  constructor(
+    readonly status: 400 | 404 | 409 | 503,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AgentError";
+  }
+}
+export interface AgentRunnerDeps {
+  eventLog: Pick<EventLog, "createSession" | "append" | "subscribe">;
+  live: Pick<LiveSessions, "start" | "get" | "alias" | "unalias" | "settled" | "stop">;
+  cell(cellId: string): CellSummary | undefined;
+  cellBusy?(cellId: string): boolean;
+  brains: Pick<BrainCells, "open" | "start" | "exited" | "close">;
+  keyd: Pick<KeydClient, "secrets" | "beginTask">;
+  keydHealth?(): KeydHealth;
+  settings(): AgentSettings;
+  catalog(): Catalog | undefined;
+  memory: Pick<MemoryStore, "readBoth">;
+  transcripts: TranscriptStore;
+  installSkills(cellId: string, signal: AbortSignal): Promise<SkillSummary[]>;
+  waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
+  // Must invoke M3's revoke/drain/freeze/fallback path, even if session.stop() already ran.
+  stopSession(sessionId: string): Promise<StopOutcome | undefined>;
+  limits?: AgentLimits;
+  sleep?(ms: number, signal: AbortSignal): Promise<void>;
+  idleMs?: number;
+}
+interface Runtime {
+  session: AgentSession;
+  roles: readonly ResolvedRole[];
+  pricing: TaskPricing;
+  initialBudget?: number;
+  epoch: number;
+  brain?: BrainCell;
+  initialized: boolean;
+  serial: Promise<void>;
+  pause?: "budget" | "keyd" | "model";
+  containment?: Promise<void>;
+  backoff?: AbortController;
+}
+class CleanupUncertain extends Error {}
+function uncertain(error: unknown): boolean {
+  return (
+    error instanceof BrainCleanupError ||
+    error instanceof CleanupUncertain ||
+    (error instanceof AggregateError && error.errors.some(uncertain))
+  );
+}
+const sleep = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal });
+
+// One serialized lifecycle owns each task. Generation retirement is synchronous; Docker and
+// keyd settlement happen afterward, before a replacement can be admitted.
+export class AgentRunner {
+  readonly sessions = new Map<string, AgentSession>();
+  readonly #runtime = new Map<string, Runtime>();
+  readonly #starting = new Set<string>();
+  readonly #blockedCells = new Set<string>();
+  readonly #wake = new Set<() => void>();
+  readonly #unsubscribe: () => void;
+  #health: KeydHealth;
+  #lastBoot: string | undefined;
+  #closing = false;
+  constructor(private readonly deps: AgentRunnerDeps) {
+    this.#health = deps.keydHealth?.() ?? { online: true };
+    this.#lastBoot = this.#health.bootId;
+    this.#unsubscribe = deps.eventLog.subscribe((id, event) => {
+      const rt = this.#runtime.get(id);
+      if (!rt || rt.session.stopped) return;
+      if (event.type === "budget.exceeded") rt.pause = "budget";
+      if (event.type !== "agent.state") return;
+      if (event.data.state === "paused") {
+        rt.pause =
+          event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
+      } else if (["thinking", "acting", "observing"].includes(event.data.state))
+        rt.pause = undefined;
+    });
+  }
+  resolveRoles(keys: KeydRecord[], settings = this.deps.settings()): ResolvedRole[] {
+    const snapshot = AgentSettings.parse(settings);
+    if (!snapshot.main) throw new AgentError(400, "choose a main model first");
+    const catalog = this.deps.catalog();
+    const roles: ResolvedRole[] = [];
+    for (const role of ["main", "fast", "local"] as const satisfies readonly Role[]) {
+      const choice = snapshot[role];
+      if (!choice) continue;
+      try {
+        roles.push(resolveRole(role, choice, catalog, keys));
+      } catch (error) {
+        if (error instanceof BindingError) throw new AgentError(400, error.message);
+        throw error;
+      }
+    }
+    return roles;
+  }
+  #ready(cellId: string): CellSummary {
+    if (this.#closing) throw new AgentError(503, "the agent is shutting down");
+    if (this.#blockedCells.has(cellId))
+      throw new AgentError(409, "computer cleanup needs attention before another task");
+    const cell = this.deps.cell(cellId);
+    if (cell?.state !== "ready") throw new AgentError(409, "the computer is not ready");
+    if (cell.paused || this.deps.cellBusy?.(cellId))
+      throw new AgentError(409, "the computer is paused or changing state");
+    return cell;
+  }
+  async start(cellId: string, task: string, signal?: AbortSignal): Promise<AgentSession> {
+    if (!ULID_PATTERN.test(cellId) || !task.trim() || task.length > 8000)
+      throw new AgentError(400, "invalid task");
+    this.#ready(cellId);
+    signal?.throwIfAborted();
+    if (this.#starting.has(cellId)) throw new AgentError(409, "a task is already starting");
+    this.#starting.add(cellId);
+    try {
+      const current = this.deps.live.get(cellId);
+      if (current) {
+        const old = this.sessions.get(current);
+        if (old?.status !== "idle" || old.controlHeld)
+          throw new AgentError(409, "a task is already running on this computer");
+        old.stop();
+        await (signal
+          ? abortable(this.deps.live.settled(current), signal)
+          : this.deps.live.settled(current));
+      }
+      // Capture settings before preflight awaits; later edits apply only to the next task.
+      const settings = AgentSettings.parse(this.deps.settings());
+      const keys = await this.deps.keyd.secrets();
+      signal?.throwIfAborted();
+      const roles = this.resolveRoles(keys, settings);
+      const pricing = pricingOf(roles);
+      const cell = this.#ready(cellId);
+      if (this.deps.live.get(cellId))
+        throw new AgentError(409, "a task is already running on this computer");
+      const id = this.deps.eventLog.createSession(task.slice(0, 200));
+      const session = new AgentSession(id, cellId, task, this.deps.eventLog);
+      const rt: Runtime = {
+        session,
+        roles,
+        pricing,
+        epoch: 0,
+        initialized: false,
+        serial: Promise.resolve(),
+        ...(settings.taskBudgetUSD === undefined ? {} : { initialBudget: settings.taskBudgetUSD }),
+      };
+      this.sessions.set(id, session);
+      this.#runtime.set(id, rt);
+      try {
+        session.append("session.start", {
+          screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
+          os: "linux",
+          title: task.slice(0, 200),
+        });
+        session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        this.deps.live.start(cellId, id, (stop) => this.#run(rt, stop));
+      } catch (error) {
+        session.stop();
+        this.sessions.delete(id);
+        this.#runtime.delete(id);
+        throw error;
+      }
+      return session;
+    } finally {
+      this.#starting.delete(cellId);
+    }
+  }
+  get(id: string): AgentSession | undefined {
+    return this.sessions.get(id);
+  }
+  async raiseBudget(id: string, budgetUSD: number): Promise<void> {
+    if (
+      !Number.isFinite(budgetUSD) ||
+      budgetUSD <= 0 ||
+      budgetUSD > 10_000 ||
+      Math.round(budgetUSD * 1e6) < 1
+    )
+      throw new AgentError(400, "invalid task budget");
+    const rt = this.#runtime.get(id);
+    if (!rt) throw new AgentError(404, "no such live task");
+    await this.#exclusive(rt, async () => {
+      const { session, brain } = rt;
+      const generation = session.generation;
+      if (!rt.initialized || !brain || !generation || !session.isCurrent(generation))
+        throw new AgentError(409, "the task is not ready to change its budget");
+      await this.deps.keyd.beginTask(brain.id, id, budgetUSD);
+      // An in-flight raise can finish after Stop/recovery; it must never resume obsolete work.
+      if (!session.isCurrent(generation))
+        throw new AgentError(409, "the task changed while updating its budget");
+      if (!session.controlHeld) session.post("resume", "");
+    });
+  }
+  async keydChanged(now: KeydHealth, _before: KeydHealth): Promise<void> {
+    const changedBoot =
+      now.online &&
+      this.#lastBoot !== undefined &&
+      now.bootId !== undefined &&
+      now.bootId !== this.#lastBoot;
+    this.#health = { ...now };
+    if (now.online && now.bootId !== undefined) this.#lastBoot = now.bootId;
+    for (const rt of this.#runtime.values()) {
+      const session = rt.session;
+      if (session.stopped) continue;
+      if (changedBoot && (session.generation || session.status !== "idle")) {
+        rt.epoch += 1;
+        if (session.generation) session.retireBrain(session.generation); // Fence before yielding.
+        rt.backoff?.abort();
+      } else if (
+        now.online &&
+        rt.pause === "keyd" &&
+        session.status === "paused" &&
+        !session.controlHeld
+      ) {
+        rt.pause = undefined;
+        session.post("resume", "");
+      } else if (!now.online && rt.pause === "model") rt.pause = "keyd";
+    }
+    this.#changed();
+  }
+  // Handler uncertainty cannot skip containment merely because it already fenced the session.
+  contain(session: AgentSession, _reason: string): Promise<void> {
+    const rt = this.#runtime.get(session.id);
+    session.stop();
+    this.#blockedCells.add(session.cellId);
+    if (rt?.containment) return rt.containment;
+    const work = Promise.resolve()
+      .then(() => this.deps.stopSession(session.id))
+      .then((outcome) => {
+        if (!outcome?.revoked || !(outcome.paused || (outcome.closed && outcome.stopped)))
+          throw new CleanupUncertain("computer containment could not be confirmed");
+      });
+    if (rt) rt.containment = work;
+    return work;
+  }
+  async close(): Promise<void> {
+    if (!this.#closing) {
+      this.#closing = true;
+      this.#unsubscribe();
+      for (const rt of this.#runtime.values()) {
+        rt.session.stop();
+        this.deps.live.stop(rt.session.id);
+      }
+      this.#changed();
+    }
+    await Promise.all([...this.#runtime.keys()].map((id) => this.deps.live.settled(id)));
+  }
+  async #exclusive<T>(rt: Runtime, work: () => Promise<T>): Promise<T> {
+    const current = rt.serial.then(work);
+    rt.serial = current.then(
+      () => {},
+      () => {},
+    );
+    return current;
+  }
+  async #online(session: AgentSession): Promise<void> {
+    while (!this.#health.online) {
+      session.setStatus("paused");
+      await new Promise<void>((resolve, reject) => {
+        const done = () => {
+          this.#wake.delete(done);
+          session.abort.signal.removeEventListener("abort", aborted);
+          resolve();
+        };
+        const aborted = () => {
+          this.#wake.delete(done);
+          reject(session.abort.signal.reason);
+        };
+        this.#wake.add(done);
+        session.abort.signal.addEventListener("abort", aborted, { once: true });
+        if (session.stopped) aborted();
+      });
+    }
+    session.abort.signal.throwIfAborted();
+  }
+  #changed(): void {
+    for (const wake of [...this.#wake]) wake();
+  }
+  async #run(rt: Runtime, liveSignal: AbortSignal): Promise<void> {
+    const { session } = rt;
+    const stop = () => session.stop();
+    liveSignal.addEventListener("abort", stop, { once: true });
+    if (liveSignal.aborted) stop();
+    let reason: "done" | "stopped" | "error" = "done";
+    try {
+      await this.deps.waitForUploads(session.cellId, session.abort.signal);
+      const skills = await this.deps.installSkills(session.cellId, session.abort.signal);
+      session.abort.signal.throwIfAborted();
+      let resume = false,
+        crashes = 0;
+      while (!session.stopped) {
+        await session.waitForControl();
+        await session.waitForTools();
+        await this.deps.waitForUploads(session.cellId, session.abort.signal);
+        await this.#online(session);
+        const epoch = rt.epoch;
+        let code: number | undefined;
+        try {
+          code = await this.#brainRun(rt, skills, resume);
+        } catch (error) {
+          if (uncertain(error)) throw error;
+          if (session.stopped) break;
+          if (rt.epoch !== epoch) {
+            resume = true;
+            continue;
+          }
+          if (error instanceof KeydUnavailableError) {
+            rt.pause = "keyd";
+            this.#health = { online: false };
+            session.setStatus("paused");
+            session.append("agent.state", { state: "paused", reason: "keyd unavailable" });
+            continue;
+          }
+          code = undefined;
+        }
+        resume = true;
+        if (session.stopped) break;
+        if (rt.epoch !== epoch) continue;
+        // A vanished caller still leaves the user in control; no idle/crash state may replace it.
+        const heldOnExit = session.controlHeld;
+        await session.waitForControl();
+        if (heldOnExit) continue;
+        if (code === BRAIN_DONE || code === BRAIN_GAVE_UP) {
+          crashes = 0;
+          session.append(
+            "agent.state",
+            code === BRAIN_DONE ? { state: "done" } : { state: "idle", reason: "gave up" },
+          );
+          session.setStatus("idle");
+          if (!(await session.waitForUser(this.deps.idleMs ?? IDLE_MS))) break;
+        } else {
+          const backoff = RESTART_BACKOFF_MS[crashes++];
+          if (backoff === undefined) {
+            reason = "error";
+            session.append("agent.state", { state: "error", reason: "the brain kept crashing" });
+            break;
+          }
+          session.append("agent.state", {
+            state: "error",
+            reason: "the brain stopped; restarting from saved history",
+          });
+          const interrupted = new AbortController();
+          rt.backoff = interrupted;
+          try {
+            await (this.deps.sleep ?? sleep)(
+              backoff,
+              AbortSignal.any([session.abort.signal, interrupted.signal]),
+            );
+          } catch (error) {
+            if (session.stopped || !interrupted.signal.aborted) throw error;
+          } finally {
+            if (rt.backoff === interrupted) rt.backoff = undefined;
+          }
+        }
+      }
+    } catch (error) {
+      reason = session.stopped && !uncertain(error) ? "stopped" : "error";
+      if (uncertain(error)) await this.contain(session, "brain_cleanup_uncertain").catch(() => {});
+      if (!session.stopped) {
+        try {
+          session.append("agent.state", { state: "error", reason: "the task could not continue" });
+        } catch {
+          /* Still stop below. */
+        }
+      }
+    } finally {
+      await this.deps.waitForUploads(session.cellId);
+      // Cleanup uncertainty launches containment above. Retain ownership even when closing the
+      // brain failed and skipped its ordinary drain; containment independently bounds its wait.
+      await session.toolsSettled();
+      if (session.stopped && reason === "done") reason = "stopped";
+      try {
+        session.append("session.end", { reason });
+      } catch {
+        console.error("agent session end could not be recorded");
+      }
+      session.stop();
+      liveSignal.removeEventListener("abort", stop);
+      this.sessions.delete(session.id);
+      this.#runtime.delete(session.id);
+    }
+  }
+  async #brainRun(
+    rt: Runtime,
+    skills: SkillSummary[],
+    resume: boolean,
+  ): Promise<number | undefined> {
+    const { session } = rt;
+    const generation = session.beginBrain();
+    session.setStatus("running");
+    let brain: BrainCell | undefined;
+    let aliased = false;
+    try {
+      // beginBrain synchronously moves new uploads onto generation-owned ToolLeases. Drain any
+      // idle upload admitted after the earlier wait before opening the replacement brain.
+      await this.deps.waitForUploads(session.cellId, generation.signal);
+      await this.#exclusive(rt, async () => {
+        session.check(generation);
+        brain = await this.deps.brains.open({
+          sessionId: session.id,
+          secrets: [...new Set(rt.roles.flatMap((role) => (role.keyId ? [role.keyId] : [])))],
+          pricing: rt.pricing,
+          ...(rt.initialBudget === undefined ? {} : { budgetUSD: rt.initialBudget }),
+          signal: generation.signal,
+        });
+        session.check(generation);
+        rt.brain = brain;
+        rt.initialized = true;
+        session.restoreDelivered(this.deps.transcripts);
+        const models = Object.fromEntries(
+          rt.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
+        ) as Record<Role, ModelBinding>;
+        const boot = BootConfig.parse({
+          sessionId: session.id,
+          task: session.task,
+          models: {
+            main: models.main,
+            ...(models.fast ? { fast: models.fast } : {}),
+            ...(models.local ? { local: models.local } : {}),
+          },
+          proxy: { url: brain.proxyUrl, token: brain.proxyToken },
+          memory: this.deps.memory.readBoth(),
+          skills,
+          limits: this.deps.limits ?? DEFAULT_AGENT_LIMITS,
+          resume,
+          inboxAfter: session.delivered,
+        });
+        session.publishBrain(generation, {
+          toolToken: brain.toolToken,
+          boot,
+          brainCellId: brain.id,
+        });
+        this.deps.live.alias(brain.id, session.id);
+        aliased = true;
+        await this.deps.brains.start(brain, generation.signal);
+        session.check(generation);
+      });
+      if (!brain) throw new Error("brain did not open");
+      return await this.deps.brains.exited(brain, generation.signal);
+    } finally {
+      session.retireBrain(generation);
+      const owned = brain;
+      if (owned) {
+        await this.#exclusive(rt, async () => {
+          try {
+            await this.deps.brains.close(owned);
+          } catch {
+            throw new CleanupUncertain("brain cleanup could not be confirmed");
+          } finally {
+            if (aliased) this.deps.live.unalias(owned.id, session.id);
+            if (rt.brain === owned) rt.brain = undefined;
+          }
+        });
+      }
+      await session.toolsSettled();
+    }
+  }
+}

@@ -32,6 +32,7 @@ import {
 
 export interface OrchestratorDeps {
   keyd?: CellKeyd;
+  externalKeydPorts?(): Iterable<number>;
   docker: DockerClient;
   store: CellStore;
   images: Images;
@@ -171,6 +172,7 @@ export class CellOrchestrator {
   readonly #unclosedKeyd = new Set<string>();
   readonly #listeners = new Set<CellListener>();
   readonly #reservedKeydPorts = new Set<number>();
+  readonly #externalKeydPorts: (() => Iterable<number>) | undefined;
   readonly #queues = new Map<string, Promise<void>>();
   #disposed = false;
 
@@ -182,6 +184,7 @@ export class CellOrchestrator {
     this.#streamFullcolor = deps.streamFullcolor ?? true;
     this.#probeDesktopd = deps.probeDesktopd;
     this.#probeStream = deps.probeStream;
+    this.#externalKeydPorts = deps.externalKeydPorts;
     this.#namePrefix = deps.namePrefix ?? NAME_PREFIX;
     this.#sleep = deps.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms)));
     this.#readyTimeoutMs = deps.readyTimeoutMs ?? 180_000;
@@ -196,6 +199,19 @@ export class CellOrchestrator {
   get(id: string): CellSummary | undefined {
     const record = this.#record(id);
     return record && this.#summary(record);
+  }
+
+  reservedKeydPorts(): number[] {
+    const { records, skipped } = this.#store.inventory();
+    if (skipped.length)
+      throw new CellControlConflict("unreadable cell records may retain keyd ports");
+    return [
+      ...new Set([
+        ...records.map((r) => r.keydPort),
+        ...[...this.#records.values()].map((r) => r.keydPort),
+        ...this.#reservedKeydPorts,
+      ]),
+    ];
   }
 
   record(id: string): CellRecord | undefined {
@@ -291,6 +307,7 @@ export class CellOrchestrator {
         ...records.map((r) => r.keydPort),
         ...[...this.#records.values()].map((r) => r.keydPort),
         ...this.#reservedKeydPorts,
+        ...(this.#externalKeydPorts?.() ?? []),
       ],
       this.#store.keydPorts,
     );

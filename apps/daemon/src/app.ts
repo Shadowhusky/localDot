@@ -2,6 +2,7 @@ import { ULID_PATTERN } from "@localdot/protocol";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { routePath } from "hono/route";
+import { type AgentRoutesDeps, agentRoutes } from "./agent/routes.ts";
 import { type CellApiDeps, cellRoutes } from "./cells/api.ts";
 import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
 import { errorCode } from "./error-code.ts";
@@ -21,6 +22,7 @@ export interface AppOptions {
   ui?: { dir: string };
   gateway?: GatewayRoutesDeps;
   keys?: KeyRoutesDeps;
+  agent?: AgentRoutesDeps;
 }
 
 export function createApp({
@@ -32,6 +34,7 @@ export function createApp({
   ui,
   gateway,
   keys,
+  agent,
 }: AppOptions): Hono {
   const app = new Hono();
 
@@ -84,6 +87,7 @@ export function createApp({
 
   if (cells) cellRoutes(app, cells);
   if (keys) keyRoutes(app, keys);
+  if (agent) agentRoutes(app, agent);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   return app;
 }

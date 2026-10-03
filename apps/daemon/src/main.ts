@@ -3,6 +3,7 @@ import { constants } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
+import { createAgent } from "./agent/wiring.ts";
 import { createApp } from "./app.ts";
 import { DockerClient } from "./cells/docker.ts";
 import { imagesFromEnv } from "./cells/images.ts";
@@ -40,17 +41,28 @@ const keydPorts = keydPortsFromEnv();
 const home = localdotHome();
 const releaseLock = lockHome(join(home, "daemon.lock"));
 process.on("exit", releaseLock);
-const shutdown: (() => void)[] = [];
+const shutdown: (() => void | Promise<void>)[] = [];
+let shuttingDown = false;
 for (const signal of ["SIGINT", "SIGTERM", "SIGHUP"] as const) {
   process.on(signal, () => {
-    for (const stop of shutdown) {
-      try {
-        stop();
-      } catch {
-        console.error("daemon cleanup did not complete");
+    if (shuttingDown) return;
+    shuttingDown = true;
+    const code = 128 + constants.signals[signal];
+    const deadline = setTimeout(() => {
+      console.error("daemon shutdown deadline exceeded");
+      process.exit(code);
+    }, 15_000);
+    void (async () => {
+      for (const stop of shutdown) {
+        try {
+          await stop();
+        } catch {
+          console.error("daemon cleanup did not complete");
+        }
       }
-    }
-    process.exit(128 + constants.signals[signal]);
+      clearTimeout(deadline);
+      process.exit(code);
+    })();
   });
 }
 const tokenFile = join(home, "daemon-token");
@@ -61,7 +73,9 @@ const tickets = new TicketRegistry();
 const docker = new DockerClient(findDockerSocket().path);
 const keyd = new KeydClient(keydSocketPath(home));
 const keydWiring = new CellKeydWiring({ keyd, docker });
+let agent: ReturnType<typeof createAgent> | undefined;
 const orchestrator = new CellOrchestrator({
+  externalKeydPorts: () => agent?.reservedPorts() ?? [],
   docker,
   keyd: keydWiring,
   store: new CellStore(home, keydPorts),
@@ -90,6 +104,7 @@ const live = new LiveSessions();
 const killSwitch = new KillSwitch({ live, keyd: keydWiring, cells: orchestrator });
 const keydMonitor = new KeydMonitor(keyd);
 keydMonitor.subscribe((now, before) => {
+  void agent?.runner.keydChanged(now, before).catch(() => console.error("agent recovery failed"));
   if (!cameUp(now, before)) return;
   for (const cell of orchestrator.list()) {
     void orchestrator
@@ -97,10 +112,27 @@ keydMonitor.subscribe((now, before) => {
       .catch(() => console.error("keyd: a computer could not reconnect"));
   }
 });
+agent = createAgent({
+  home,
+  installToken: token,
+  eventLog,
+  live,
+  cells: orchestrator,
+  registry,
+  gateway,
+  frames,
+  docker,
+  keyd,
+  monitor: keydMonitor,
+  killSwitch,
+  keydPorts,
+});
+void agent.start().catch(() => console.error("agent startup cleanup or tool listener failed"));
 const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
+  () => agent?.close(),
   () => orchestrator.dispose(),
   () => registry.dispose(),
   () => eventLog.close(),
@@ -111,6 +143,7 @@ const app = createApp({
   token,
   port,
   eventLog,
+  agent: agent.routes,
   cells: { cells: orchestrator, tickets },
   desktop,
   ui: { dir: webDir("dist") },
@@ -128,6 +161,9 @@ attachUpgradeRouter(server as Server, { port, token }, [
   cellStatusRoute(orchestrator),
   desktopStreamRoute(desktop),
 ]);
+shutdown.unshift(() => {
+  server.close();
+});
 server.on("error", (err: NodeJS.ErrnoException) => {
   fail(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);
 });

@@ -86,6 +86,7 @@ async function setup(
     restartBackoffMs?: number[];
     sleep?: (ms: number) => Promise<void>;
     makeStore?: (home: string) => CellStore;
+    externalKeydPorts?: () => Iterable<number>;
   } = {},
 ) {
   fake = await startFakeDocker();
@@ -104,6 +105,7 @@ async function setup(
     readyTimeoutMs: opts.readyTimeoutMs ?? 5000,
     watchEveryMs: 0,
     restartBackoffMs: opts.restartBackoffMs ?? [0, 0],
+    ...(opts.externalKeydPorts ? { externalKeydPorts: opts.externalKeydPorts } : {}),
   });
   made.push(orchestrator);
   orchestrator.subscribe((cell) => changes.push(cell));
@@ -1056,5 +1058,30 @@ describe("CellOrchestrator.reconcile", () => {
       error: expect.stringContaining("removed outside localDot"),
     });
     expect(fresh.list()).toHaveLength(3);
+  });
+});
+
+describe("shared desktop and brain keyd allocation", () => {
+  it("skips brain-owned ports and exposes desktop reservations before provisioning yields", async () => {
+    let brainPorts: number[] = [];
+    const h = await setup({ externalKeydPorts: () => brainPorts });
+    brainPorts = [h.store.keydPorts.from];
+    const first = h.orchestrator.create({ scale: 1 });
+    expect(h.orchestrator.reservedKeydPorts()).toContain(h.store.keydPorts.from + 1);
+    const second = h.orchestrator.create({ scale: 1 });
+    expect(h.orchestrator.reservedKeydPorts()).toContain(h.store.keydPorts.from + 2);
+    const [a, b] = await Promise.all([first, second]);
+    expect(h.store.get(a.id)?.keydPort).toBe(h.store.keydPorts.from + 1);
+    expect(h.store.get(b.id)?.keydPort).toBe(h.store.keydPorts.from + 2);
+  });
+  it("refuses desktop allocation while agent cleanup has no trustworthy inventory", async () => {
+    const h = await setup({
+      externalKeydPorts: () => {
+        throw new Error("cleanup pending");
+      },
+    });
+    await expect(h.orchestrator.create({ scale: 1 })).rejects.toThrow("cleanup pending");
+    expect(h.store.list()).toEqual([]);
+    expect(fake.state.calls).toEqual([]);
   });
 });

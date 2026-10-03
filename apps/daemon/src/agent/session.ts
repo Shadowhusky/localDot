@@ -431,6 +431,12 @@ export class AgentSession {
     this.#wake();
     return true;
   }
+  // Cleanup retains the live owner until calls actually settle, including after Stop. The kill
+  // switch independently bounds its wait and freezes/stops the desktop if a dependency hangs.
+  async toolsSettled(): Promise<void> {
+    while (this.#active.size)
+      await Promise.all([...this.#active.values()].map((call) => call.settled));
+  }
   async waitForTools(signal?: AbortSignal): Promise<void> {
     const combined = AbortSignal.any([this.abort.signal, ...(signal ? [signal] : [])]);
     while (this.#active.size) {
@@ -468,6 +474,9 @@ export class AgentSession {
       try {
         if (record.held)
           this.append("takeover.end", { requestId: record.requestId, by: "stop" }, record.step);
+      } catch {
+        // Stop and abort callbacks must still contain the desktop if the journal cannot write.
+        console.error("agent takeover end could not be recorded");
       } finally {
         this.#control = undefined;
         record.resolve({ by: "stop" });
