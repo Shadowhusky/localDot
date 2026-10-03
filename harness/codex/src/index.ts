@@ -1,5 +1,16 @@
 export { CodexInstallFailure, CodexInstallState } from "@localdot/protocol";
 export {
+  type ApprovalBrainGeneration,
+  type ApprovalContext,
+  type ApprovalIdentity,
+  type BlockedStep,
+  type CodexTurnEpoch,
+  decideServerRequest,
+  explicitDefaults,
+  isApprovalCurrent,
+  type ServerRequestDecision,
+} from "./approvals.ts";
+export {
   CodexArgsError,
   type CodexArgsInput,
   codexArgs,
