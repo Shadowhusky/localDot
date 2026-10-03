@@ -234,6 +234,28 @@ export function assertOwnedCodexRoots(roots: OwnedCodexRoots): void {
   }
 }
 
+export function ownedCodexRealHome(roots: OwnedCodexRoots): string {
+  assertOwnedCodexRoots(roots);
+  const owner = owners.get(roots);
+  if (!owner) return refuse();
+  return owner.realHome;
+}
+
+export function assertOwnedCodexDirectory(
+  roots: OwnedCodexRoots,
+  directory: OwnedCodexDirectory,
+  area: Area,
+): void {
+  assertOwnedCodexRoots(roots);
+  const owner = directories.get(directory);
+  if (!owner || owner.roots !== roots || owner.area !== area) refuse();
+  if (dirname(directory.path) !== roots[area]) refuse();
+  const info = lstatSync(directory.path);
+  if (info.dev !== owner.identity.dev || info.ino !== owner.identity.ino) refuse();
+  canonicalInput(directory.path);
+  checkPrivate(directory.path);
+}
+
 export function createOwnedCodexDirectory(roots: OwnedCodexRoots, area: Area): OwnedCodexDirectory {
   assertOwnedCodexRoots(roots);
   const path = mkdtempSync(join(roots[area], ".owned-"));

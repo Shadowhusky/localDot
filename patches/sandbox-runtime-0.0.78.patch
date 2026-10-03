@@ -1,0 +1,280 @@
+diff --git a/dist/sandbox/loopback-bind.d.ts b/dist/sandbox/loopback-bind.d.ts
+new file mode 100644
+index 0000000..d276bf9
+--- /dev/null
++++ b/dist/sandbox/loopback-bind.d.ts
+@@ -0,0 +1,7 @@
++export declare function assertLoopbackBindPorts(network: {
++    loopbackBindPorts?: number[];
++    allowLocalBinding?: boolean;
++    allowAllUnixSockets?: boolean;
++    strictAllowlist?: boolean;
++    allowedDomains?: string[];
++} | undefined, platform: string): void;
+diff --git a/dist/sandbox/loopback-bind.js b/dist/sandbox/loopback-bind.js
+new file mode 100644
+index 0000000..e3a8140
+--- /dev/null
++++ b/dist/sandbox/loopback-bind.js
+@@ -0,0 +1,11 @@
++// localDot's narrow macOS callback-listener extension. It never grants egress.
++export function assertLoopbackBindPorts(network, platform) {
++    const ports = network?.loopbackBindPorts;
++    if (ports === undefined) return;
++    if (platform !== 'macos' || !Array.isArray(ports) || ports.length === 0 || ports.length > 32 ||
++        new Set(ports).size !== ports.length || ports.some(port => !Number.isInteger(port) || port < 1 || port > 65535) ||
++        network.allowLocalBinding !== false || network.allowAllUnixSockets === true ||
++        network.strictAllowlist !== true || !Array.isArray(network.allowedDomains)) {
++        throw new Error('Restricted loopback listeners require macOS, exact ports and strict network isolation.');
++    }
++}
+diff --git a/dist/sandbox/macos-sandbox-utils.d.ts b/dist/sandbox/macos-sandbox-utils.d.ts
+index cc0fbf1..c26c012 100644
+--- a/dist/sandbox/macos-sandbox-utils.d.ts
++++ b/dist/sandbox/macos-sandbox-utils.d.ts
+@@ -23,6 +23,7 @@ export interface MacOSSandboxParams {
+     allowUnixSockets?: string[];
+     allowAllUnixSockets?: boolean;
+     allowLocalBinding?: boolean;
++    loopbackBindPorts?: number[];
+     allowMachLookup?: string[];
+     readConfig: FsReadRestrictionConfig | undefined;
+     writeConfig: FsWriteRestrictionConfig | undefined;
+diff --git a/dist/sandbox/macos-sandbox-utils.js b/dist/sandbox/macos-sandbox-utils.js
+index d880278..00f435c 100644
+--- a/dist/sandbox/macos-sandbox-utils.js
++++ b/dist/sandbox/macos-sandbox-utils.js
+@@ -1,3 +1,4 @@
++import { assertLoopbackBindPorts } from './loopback-bind.js';
+ import { quote } from '../utils/shell-quote.js';
+ import { spawn } from 'child_process';
+ import * as path from 'path';
+@@ -671,7 +672,7 @@ function generateWriteRules(config, logTag, allowGitConfig = false) {
+ /**
+  * Generate complete sandbox profile
+  */
+-function generateSandboxProfile({ readConfig, libraryDenyEntries, writeConfig, httpProxyPort, socksProxyPort, needsNetworkRestriction, allowUnixSockets, allowAllUnixSockets, allowLocalBinding, allowMachLookup, allowPty, allowGitConfig = false, enableWeakerNetworkIsolation = false, allowAppleEvents = false, logTag, }) {
++function generateSandboxProfile({ readConfig, libraryDenyEntries, writeConfig, httpProxyPort, socksProxyPort, needsNetworkRestriction, allowUnixSockets, allowAllUnixSockets, allowLocalBinding, loopbackBindPorts, allowMachLookup, allowPty, allowGitConfig = false, enableWeakerNetworkIsolation = false, allowAppleEvents = false, logTag, }) {
+     const profile = [
+         '(version 1)',
+         `(deny default (with message "${logTag}"))`,
+@@ -869,6 +870,10 @@ function generateSandboxProfile({ readConfig, libraryDenyEntries, writeConfig, h
+         // "localhost:*") matches connect() to 127.0.0.1 and ::1 but not
+         // ::ffff:127.0.0.1; runtimes that connect to loopback via dual-stack
+         // sockets need to use AF_INET (see JAVA_TOOL_OPTIONS injection below).
++        for (const port of loopbackBindPorts ?? []) {
++            profile.push(`(allow network-bind (local ip "localhost:${port}"))`);
++            profile.push(`(allow network-inbound (local ip "localhost:${port}"))`);
++        }
+         if (allowLocalBinding) {
+             profile.push('(allow network-bind (local ip "*:*"))');
+             profile.push('(allow network-inbound (local ip "*:*"))');
+@@ -964,7 +969,12 @@ function escapePath(pathStr) {
+  * Wrap command with macOS sandbox
+  */
+ export function wrapCommandWithSandboxMacOS(params) {
+-    const { command, commandId, needsNetworkRestriction, httpProxyPort, socksProxyPort, proxyAuthToken, caCertPath, javaAgentJarPath, allowUnixSockets, allowAllUnixSockets, allowLocalBinding, allowMachLookup, readConfig, writeConfig, unsetEnvVars, setEnvVars, maskedFileBinds, degradeToDenyPaths, allowPty, allowGitConfig = false, gitSafeDirectories, enableWeakerNetworkIsolation = false, allowAppleEvents = false, binShell, } = params;
++    const { command, commandId, needsNetworkRestriction, httpProxyPort, socksProxyPort, proxyAuthToken, caCertPath, javaAgentJarPath, allowUnixSockets, allowAllUnixSockets, allowLocalBinding, loopbackBindPorts, allowMachLookup, readConfig, writeConfig, unsetEnvVars, setEnvVars, maskedFileBinds, degradeToDenyPaths, allowPty, allowGitConfig = false, gitSafeDirectories, enableWeakerNetworkIsolation = false, allowAppleEvents = false, binShell, } = params;
++    assertLoopbackBindPorts({ loopbackBindPorts, allowLocalBinding, allowAllUnixSockets,
++        strictAllowlist: needsNetworkRestriction, allowedDomains: needsNetworkRestriction ? [] : undefined }, 'macos');
++    if (loopbackBindPorts !== undefined && enableWeakerNetworkIsolation) {
++        throw new Error('Restricted loopback listeners require strict network isolation.');
++    }
+     // SBPL cannot redirect a read to different bytes, so whole-file masking
+     // degrades to read-deny on macOS: the sandboxed process gets EPERM
+     // instead of the sentinel. The DYLD interposer (a later step) lifts
+@@ -1014,6 +1024,7 @@ export function wrapCommandWithSandboxMacOS(params) {
+         allowUnixSockets,
+         allowAllUnixSockets,
+         allowLocalBinding,
++        loopbackBindPorts,
+         allowMachLookup,
+         allowPty,
+         allowGitConfig,
+diff --git a/dist/sandbox/sandbox-config.d.ts b/dist/sandbox/sandbox-config.d.ts
+index 7eb00bf..9a45d28 100644
+--- a/dist/sandbox/sandbox-config.d.ts
++++ b/dist/sandbox/sandbox-config.d.ts
+@@ -597,6 +597,7 @@ export declare const NetworkConfigSchema: z.ZodObject<{
+     deniedResolvedAddresses: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
+     allowUnixSockets: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+     allowAllUnixSockets: z.ZodOptional<z.ZodBoolean>;
++    loopbackBindPorts: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
+     allowLocalBinding: z.ZodOptional<z.ZodBoolean>;
+     allowMachLookup: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
+     httpProxyPort: z.ZodOptional<z.ZodNumber>;
+@@ -659,6 +660,7 @@ export declare const NetworkConfigSchema: z.ZodObject<{
+     deniedResolvedAddresses?: string[] | undefined;
+     allowUnixSockets?: string[] | undefined;
+     allowAllUnixSockets?: boolean | undefined;
++    loopbackBindPorts?: number[] | undefined;
+     allowLocalBinding?: boolean | undefined;
+     allowMachLookup?: string[] | undefined;
+     httpProxyPort?: number | undefined;
+@@ -687,6 +689,7 @@ export declare const NetworkConfigSchema: z.ZodObject<{
+     deniedResolvedAddresses?: string[] | undefined;
+     allowUnixSockets?: string[] | undefined;
+     allowAllUnixSockets?: boolean | undefined;
++    loopbackBindPorts?: number[] | undefined;
+     allowLocalBinding?: boolean | undefined;
+     allowMachLookup?: string[] | undefined;
+     httpProxyPort?: number | undefined;
+@@ -849,7 +852,8 @@ export declare const SandboxRuntimeConfigSchema: z.ZodEffects<z.ZodObject<{
+         deniedResolvedAddresses: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
+         allowUnixSockets: z.ZodOptional<z.ZodArray<z.ZodString, "many">>;
+         allowAllUnixSockets: z.ZodOptional<z.ZodBoolean>;
+-        allowLocalBinding: z.ZodOptional<z.ZodBoolean>;
++        loopbackBindPorts: z.ZodOptional<z.ZodArray<z.ZodNumber, "many">>;
++    allowLocalBinding: z.ZodOptional<z.ZodBoolean>;
+         allowMachLookup: z.ZodOptional<z.ZodArray<z.ZodEffects<z.ZodString, string, string>, "many">>;
+         httpProxyPort: z.ZodOptional<z.ZodNumber>;
+         socksProxyPort: z.ZodOptional<z.ZodNumber>;
+@@ -911,7 +915,8 @@ export declare const SandboxRuntimeConfigSchema: z.ZodEffects<z.ZodObject<{
+         deniedResolvedAddresses?: string[] | undefined;
+         allowUnixSockets?: string[] | undefined;
+         allowAllUnixSockets?: boolean | undefined;
+-        allowLocalBinding?: boolean | undefined;
++        loopbackBindPorts?: number[] | undefined;
++    allowLocalBinding?: boolean | undefined;
+         allowMachLookup?: string[] | undefined;
+         httpProxyPort?: number | undefined;
+         socksProxyPort?: number | undefined;
+@@ -939,7 +944,8 @@ export declare const SandboxRuntimeConfigSchema: z.ZodEffects<z.ZodObject<{
+         deniedResolvedAddresses?: string[] | undefined;
+         allowUnixSockets?: string[] | undefined;
+         allowAllUnixSockets?: boolean | undefined;
+-        allowLocalBinding?: boolean | undefined;
++        loopbackBindPorts?: number[] | undefined;
++    allowLocalBinding?: boolean | undefined;
+         allowMachLookup?: string[] | undefined;
+         httpProxyPort?: number | undefined;
+         socksProxyPort?: number | undefined;
+@@ -1278,7 +1284,8 @@ export declare const SandboxRuntimeConfigSchema: z.ZodEffects<z.ZodObject<{
+         deniedResolvedAddresses?: string[] | undefined;
+         allowUnixSockets?: string[] | undefined;
+         allowAllUnixSockets?: boolean | undefined;
+-        allowLocalBinding?: boolean | undefined;
++        loopbackBindPorts?: number[] | undefined;
++    allowLocalBinding?: boolean | undefined;
+         allowMachLookup?: string[] | undefined;
+         httpProxyPort?: number | undefined;
+         socksProxyPort?: number | undefined;
+@@ -1378,7 +1385,8 @@ export declare const SandboxRuntimeConfigSchema: z.ZodEffects<z.ZodObject<{
+         deniedResolvedAddresses?: string[] | undefined;
+         allowUnixSockets?: string[] | undefined;
+         allowAllUnixSockets?: boolean | undefined;
+-        allowLocalBinding?: boolean | undefined;
++        loopbackBindPorts?: number[] | undefined;
++    allowLocalBinding?: boolean | undefined;
+         allowMachLookup?: string[] | undefined;
+         httpProxyPort?: number | undefined;
+         socksProxyPort?: number | undefined;
+@@ -1478,7 +1486,8 @@ export declare const SandboxRuntimeConfigSchema: z.ZodEffects<z.ZodObject<{
+         deniedResolvedAddresses?: string[] | undefined;
+         allowUnixSockets?: string[] | undefined;
+         allowAllUnixSockets?: boolean | undefined;
+-        allowLocalBinding?: boolean | undefined;
++        loopbackBindPorts?: number[] | undefined;
++    allowLocalBinding?: boolean | undefined;
+         allowMachLookup?: string[] | undefined;
+         httpProxyPort?: number | undefined;
+         socksProxyPort?: number | undefined;
+@@ -1578,7 +1587,8 @@ export declare const SandboxRuntimeConfigSchema: z.ZodEffects<z.ZodObject<{
+         deniedResolvedAddresses?: string[] | undefined;
+         allowUnixSockets?: string[] | undefined;
+         allowAllUnixSockets?: boolean | undefined;
+-        allowLocalBinding?: boolean | undefined;
++        loopbackBindPorts?: number[] | undefined;
++    allowLocalBinding?: boolean | undefined;
+         allowMachLookup?: string[] | undefined;
+         httpProxyPort?: number | undefined;
+         socksProxyPort?: number | undefined;
+diff --git a/dist/sandbox/sandbox-config.js b/dist/sandbox/sandbox-config.js
+index 42a49a7..dfcdb1f 100644
+--- a/dist/sandbox/sandbox-config.js
++++ b/dist/sandbox/sandbox-config.js
+@@ -13,6 +13,7 @@ import { isInjectHostCoveredByAllowedDomains, splitDomainPatternPort, stripDomai
+ import { parseAddressRange } from './address.js';
+ import { containsGlobCharsForPlatform } from './sandbox-utils.js';
+ import { getPlatform } from '../utils/platform.js';
++import { assertLoopbackBindPorts } from './loopback-bind.js';
+ /**
+  * Host-only pattern check (e.g., "example.com", "*.npmjs.org"). Rejects
+  * protocols, paths, ports, and overly broad wildcards.
+@@ -656,6 +657,8 @@ export const NetworkConfigSchema = z.object({
+         .boolean()
+         .optional()
+         .describe('If true, allow all Unix sockets (disables blocking on both platforms).'),
++    loopbackBindPorts: z.array(z.number().int().min(1).max(65535)).min(1).max(32).optional()
++        .describe('macOS only: exact native-loopback listener ports; grants bind/inbound only, never outbound.'),
+     allowLocalBinding: z
+         .boolean()
+         .optional()
+@@ -996,6 +999,12 @@ export const SandboxRuntimeConfigSchema = z
+         '`safe.directory` without adding them to `filesystem.allowWrite`.'),
+ })
+     .superRefine((cfg, ctx) => {
++    try {
++        assertLoopbackBindPorts(cfg.network, getPlatform());
++    } catch {
++        ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['network', 'loopbackBindPorts'],
++            message: 'Restricted loopback listeners require macOS, exact ports and strict network isolation.' });
++    }
+     // filesystem.disabled drops every filesystem rule, the credential file
+     // denies included (getFsReadConfig, getFsWriteConfig and
+     // computeWindowsFsAccessSet all short-circuit on it), so an inert deny
+diff --git a/dist/sandbox/sandbox-manager.js b/dist/sandbox/sandbox-manager.js
+index a1180f0..5f6090e 100644
+--- a/dist/sandbox/sandbox-manager.js
++++ b/dist/sandbox/sandbox-manager.js
+@@ -14,6 +14,7 @@ import * as fs from 'fs';
+ import { randomBytes } from 'node:crypto';
+ import { wrapCommandWithSandboxLinux, initializeLinuxNetworkBridge, checkLinuxDependencies, cleanupBwrapMountPoints, linuxGetCwdMandatoryDenyPaths, } from './linux-sandbox-utils.js';
+ import { expandReadDenyGlobLinux } from './read-deny-glob.js';
++import { assertLoopbackBindPorts } from './loopback-bind.js';
+ import { wrapCommandWithSandboxMacOS, startMacOSSandboxLogMonitor, } from './macos-sandbox-utils.js';
+ import { startLinuxSandboxViolationMonitor, } from './linux-violation-monitor.js';
+ import { checkWindowsDependencies, checkWindowsDependenciesAsync, wrapCommandWithSandboxWindows, parseWindowsBinShell, expandWindowsFsPaths, stampWindowsAcl, restoreWindowsAcl, grantWindowsAcl, revokeWindowsAcl, getWindowsSandboxUserStatusAsync, getWindowsSandboxCaCert, ensurePersistentWindowsCa, verifyWindowsWfpEgress, resolveSrtWin, WindowsSandboxError, DEFAULT_WINDOWS_PROXY_PORT_RANGE, } from './windows-sandbox-utils.js';
+@@ -443,6 +444,7 @@ async function startMuxProxyServer(sandboxAskCallback, portRange) {
+ // Public Module Functions (will be exported via namespace)
+ // ============================================================================
+ async function initialize(runtimeConfig, sandboxAskCallback, enableLogMonitor = false) {
++    assertLoopbackBindPorts(runtimeConfig.network, getPlatform());
+     // Return if already initializing
+     if (initializationPromise) {
+         await initializationPromise;
+@@ -1244,6 +1246,8 @@ async function waitForNetworkInitialization() {
+ }
+ async function wrapWithSandbox(command, binShell, customConfig, abortSignal, options) {
+     const platform = getPlatform();
++    const listenerNetwork = { ...config?.network, ...customConfig?.network };
++    assertLoopbackBindPorts(listenerNetwork, platform);
+     const commandId = options?.commandId;
+     registerCommandText(command, options);
+     // filesystem.disabled bypasses ALL filesystem rule generation. Both
+@@ -1354,7 +1358,8 @@ async function wrapWithSandbox(command, binShell, customConfig, abortSignal, opt
+                 degradeToDenyPaths: credentialRestrictions.degradeToDenyPaths,
+                 allowUnixSockets: getAllowUnixSockets(),
+                 allowAllUnixSockets: getAllowAllUnixSockets(),
+-                allowLocalBinding: getAllowLocalBinding(),
++                allowLocalBinding: listenerNetwork.allowLocalBinding,
++                loopbackBindPorts: listenerNetwork.loopbackBindPorts,
+                 allowMachLookup: getAllowMachLookup(),
+                 ignoreViolations: getIgnoreViolations(),
+                 allowPty,
+@@ -1440,6 +1445,7 @@ async function wrapWithSandbox(command, binShell, customConfig, abortSignal, opt
+  */
+ async function wrapWithSandboxArgv(command, binShell, customConfig, abortSignal, cwd, options) {
+     const platform = getPlatform();
++    assertLoopbackBindPorts({ ...config?.network, ...customConfig?.network }, platform);
+     if (platform === 'windows') {
+         const hasNetworkConfig = customConfig?.network?.allowedDomains !== undefined ||
+             config?.network?.allowedDomains !== undefined;
+@@ -1566,6 +1572,7 @@ function getConfig() {
+  * @param newConfig - The new configuration to use
+  */
+ function updateConfig(newConfig) {
++    assertLoopbackBindPorts(newConfig.network, getPlatform());
+     if (getPlatform() === 'windows' &&
+         config &&
+         !sameWindowsStampSet(newConfig)) {

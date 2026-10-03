@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  '@anthropic-ai/sandbox-runtime@0.0.78':
+    hash: ca43296255c0b8e728e47f90639bae5b51f8eb26b032aec00a2df48364ac4e66
+    path: patches/sandbox-runtime-0.0.78.patch
+
 importers:
 
   .:
@@ -206,7 +211,7 @@ importers:
     dependencies:
       '@anthropic-ai/sandbox-runtime':
         specifier: 0.0.78
-        version: 0.0.78
+        version: 0.0.78(patch_hash=ca43296255c0b8e728e47f90639bae5b51f8eb26b032aec00a2df48364ac4e66)
       '@localdot/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
@@ -282,7 +287,7 @@ importers:
     dependencies:
       '@anthropic-ai/sandbox-runtime':
         specifier: 0.0.78
-        version: 0.0.78
+        version: 0.0.78(patch_hash=ca43296255c0b8e728e47f90639bae5b51f8eb26b032aec00a2df48364ac4e66)
       '@modelcontextprotocol/sdk':
         specifier: 1.31.0
         version: 1.31.0(zod@4.6.5)
@@ -2129,7 +2134,7 @@ snapshots:
       '@ai-sdk/provider-utils': 5.0.52(zod@4.6.5)
       zod: 4.6.5
 
-  '@anthropic-ai/sandbox-runtime@0.0.78':
+  '@anthropic-ai/sandbox-runtime@0.0.78(patch_hash=ca43296255c0b8e728e47f90639bae5b51f8eb26b032aec00a2df48364ac4e66)':
     dependencies:
       '@pondwader/socks5-server': 1.0.10
       commander: 12.1.0

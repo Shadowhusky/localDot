@@ -5,3 +5,6 @@ packages:
   - "cells/desktop/desktopd"
   - "cells/brain"
   - "harness/*"
+
+patchedDependencies:
+  '@anthropic-ai/sandbox-runtime@0.0.78': patches/sandbox-runtime-0.0.78.patch
