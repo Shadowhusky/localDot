@@ -154,9 +154,28 @@ copies them into the computer's `~/.skills/`. Memory is context, including assis
 notes, rather than a source of new user instructions.
 
 `pnpm test` covers the model loop, transport fixtures and host Tool API integration without
-paid calls. With Docker Desktop and built images,
-`LOCALDOT_DOCKER_TESTS=1 pnpm test:docker apps/daemon/src/agent/brain-cell.docker.test.ts`
-runs the separate real-cell acceptance suite.
+paid calls. The separate agent real-cell suites require both `LOCALDOT_DOCKER_TESTS=1` and
+`LOCALDOT_TASK15_TESTS=1`. They use a build-tag-only keyd with an owned loopback TLS provider and
+a public fake canary; no external provider or real key is used. Ordinary Docker suites skip
+these cases. Build the brain and gate images first, then run:
+
+```sh
+go -C keyd build -tags localdot_acceptance -o /tmp/localdot-agent-keyd-fixture ./internal/acceptancefixture
+LOCALDOT_DOCKER_TESTS=1 LOCALDOT_TASK15_TESTS=1 \
+  LOCALDOT_KEYD_BIN=/tmp/localdot-agent-keyd-fixture \
+  LOCALDOT_TASK15_BRAIN_IMAGE=localdot/brain:dev \
+  LOCALDOT_TASK15_GATE_IMAGE=localdot/gate:dev \
+  pnpm test:docker apps/daemon/src/agent/brain-cell.docker.test.ts \
+    apps/daemon/src/agent/containment.docker.test.ts \
+    apps/daemon/src/agent/task-pricing.docker.test.ts
+```
+
+All ten cases must pass. These suites reserve ports 4792–4796 and create uniquely owned
+containers, networks and temporary homes. They cover the standard bundled brain loop,
+isolation and Stop containment, plus immutable spending across brain replacement and a keyd
+process restart. The pricing case uses a bounded real-image request worker to fit its initial
+$5 reservation; it does not replace the standard-loop acceptance. Missing explicit fixture
+configuration fails once both flags are enabled.
 
 ### Optional live provider checks
 
