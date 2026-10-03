@@ -17,11 +17,13 @@
     "@localdot/stage": "workspace:*",
     "hono": "4.13.12",
     "sharp": "0.35.5",
+    "undici": "8.11.2",
     "ws": "8.22.0",
     "zod": "4.6.5"
   },
   "devDependencies": {
     "@types/ws": "8.18.2",
+    "ai": "7.0.123",
     "tsx": "4.23.15"
   }
 }

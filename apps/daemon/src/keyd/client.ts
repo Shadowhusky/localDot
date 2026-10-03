@@ -2,6 +2,7 @@ import { lstatSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { dirname, join } from "node:path";
 import {
+  KeydBudget,
   KeydCellInfo,
   KeydErrorBody,
   KeydEvent,
@@ -9,10 +10,13 @@ import {
   KeydOpened,
   KeydRecord,
   KeydRevoked,
+  type KeydRouteModel,
+  KeydRouteModels,
   KeydSecrets,
   KeydStatus,
   type Sealed,
   type SecretBinding,
+  type TaskPricing,
 } from "@localdot/protocol";
 
 export function keydSocketPath(home: string): string {
@@ -141,6 +145,73 @@ export class KeydClient {
   async mint(id: string, secrets: string[]): Promise<Record<string, string>> {
     const path = `/v1/cells/${segment(id)}/surrogates`;
     return (await this.#json("POST", path, { secrets }, KeydMinted)).surrogates ?? {};
+  }
+
+  async beginTask(cellId: string, taskId: string, budgetUSD?: number): Promise<void> {
+    checkTask(taskId, budgetUSD);
+    const path = `/v1/cells/${segment(cellId)}/task`;
+    this.#check(
+      await this.#send("PUT", path, { taskId, ...(budgetUSD === undefined ? {} : { budgetUSD }) }),
+      path,
+    );
+  }
+
+  // New agent sessions must initialize immutable pricing; legacy beginTask remains available
+  // only for explicit legacy/admin callers. Equal retries retain the server's raised ceiling.
+  async beginPricedTask(
+    cellId: string,
+    taskId: string,
+    pricing: TaskPricing,
+    budgetUSD?: number,
+  ): Promise<void> {
+    checkTask(taskId, budgetUSD);
+    const path = `/v1/cells/${segment(cellId)}/task`;
+    this.#check(
+      await this.#send("PUT", path, {
+        taskId,
+        pricing,
+        ...(budgetUSD === undefined ? {} : { budgetUSD }),
+      }),
+      path,
+    );
+  }
+
+  async endTask(cellId: string): Promise<void> {
+    const path = `/v1/cells/${segment(cellId)}/task`;
+    const reply = await this.#send("DELETE", path);
+    if (reply.status !== 404) this.#check(reply, path);
+  }
+
+  async routeModels(route: string): Promise<KeydRouteModel[]> {
+    const path = `/v1/llm/routes/${segment(route)}/models`;
+    const result = await this.#json("GET", path, undefined, KeydRouteModels);
+    if (result.route !== route)
+      throw new KeydError(200, "bad-reply", "route identity mismatch", path);
+    return result.models ?? [];
+  }
+
+  async setRouteModels(route: string, models: KeydRouteModel[]): Promise<KeydRouteModel[]> {
+    const path = `/v1/llm/routes/${segment(route)}/models`;
+    const result = await this.#json("PUT", path, { models }, KeydRouteModels);
+    if (result.route !== route)
+      throw new KeydError(200, "bad-reply", "route identity mismatch", path);
+    return result.models ?? [];
+  }
+
+  budget(): Promise<KeydBudget> {
+    return this.#json("GET", "/v1/budget", undefined, KeydBudget);
+  }
+
+  setBudget(perTaskUSD: number, perDayUSD: number): Promise<KeydBudget> {
+    if (
+      !Number.isFinite(perTaskUSD) ||
+      !Number.isFinite(perDayUSD) ||
+      perTaskUSD <= 0 ||
+      perTaskUSD > perDayUSD ||
+      perDayUSD > 10_000
+    )
+      throw new RangeError("budget limits must be positive, ordered and at most10000");
+    return this.#json("PUT", "/v1/budget", { perTaskUSD, perDayUSD }, KeydBudget);
   }
 
   // Resolves when the stream ends (keyd stopped, or the signal aborted it). A line that is not a
@@ -299,4 +370,13 @@ function safeJson(text: string): unknown {
   } catch {
     return undefined;
   }
+}
+
+function checkTask(taskId: string, budgetUSD?: number): void {
+  if (!taskId || Buffer.byteLength(taskId) > 128) throw new RangeError("invalid task identity");
+  if (
+    budgetUSD !== undefined &&
+    (!Number.isFinite(budgetUSD) || budgetUSD < 0 || budgetUSD > 10_000)
+  )
+    throw new RangeError("invalid task budget");
 }

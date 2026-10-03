@@ -76,8 +76,7 @@ Browser calls have explicit deadlines and preserve same-URL reload behavior.
   `integration-{types,lint,hygiene}.log`, and
   `/tmp/localdot-m4-task4-review/scoped-rereview.md`.
 
-M4 is not complete. Client transport, memory/settings,
-immutable per-task keyd pricing, brain loop, chat and optional ChatGPT remain.
+M4 is not complete. Memory/settings, brain loop, chat and optional ChatGPT remain.
 
 ## Immutable task pricing prerequisite
 
@@ -98,3 +97,29 @@ is not claimed. No real model/provider calls were needed.
 
 Evidence: `/tmp/localdot-m4-task-price-snapshot-draft/integration-race.log`,
 `/tmp/localdot-m4-task-price-snapshot-review/review.md` and its `mutations/` reports.
+
+## Task 5: daemon desktop-tool client
+
+The daemon owns a dedicated transport with explicit operation deadlines through
+body completion. Shell output has strict bounded NDJSON and exactly one terminal
+result. Lost/interrupted responses and consumer failures preserve execution
+uncertainty; confirmed cleanup failure has a separate typed error. The runner
+must perform Stop containment before any automatic retry or replacement.
+
+Raw transfers stream within actual-byte caps, retain cancellation/deadlines after
+headers and require complete source EOF plus an exact upload acknowledgement.
+Keyd adapters preserve omitted/zero budgets, stable task identity and distinct
+immutable initialization versus explicit ceiling updates. Client-owned dispatchers
+close with their lifecycle.
+
+Full review found output-consumer error misclassification and premature upload
+success. Both fixes and the strict-record/late-body corrections pass final scoped
+review, including the undefined-rejection edge and retained independent repros.
+Seven targeted regression mutations fail at their intended assertions. Integrated
+acceptance passes 61 tests in four client/protocol files, frozen offline install,
+workspace types, lint and hygiene. This includes actual owned TCP and Unix-socket
+fixtures; no paid models or production credentials are used.
+
+Evidence: `/tmp/localdot-m4-task5-draft/integration-{tests,types,lint,hygiene}.log`,
+`fix-mutations/evidence.json`, and
+`/tmp/localdot-m4-task5-review/final-scoped-review.md`.
