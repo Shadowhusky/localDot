@@ -1,0 +1,88 @@
+.settings-sheet {
+  position: fixed;
+  inset: var(--spacing-edge) auto var(--spacing-edge) 50%;
+  transform: translateX(-50%);
+  width: min(680px, calc(100% - 2 * var(--spacing-edge)));
+  overflow: auto;
+  z-index: 30;
+  padding: var(--spacing-gutter);
+  background: var(--color-surface);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-stage);
+}
+.settings-sheet[hidden] {
+  display: none;
+}
+.settings-sheet header,
+.settings-actions,
+.settings-catalog {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-sheet h2 {
+  font-size: 17px;
+  font-weight: 600;
+}
+.settings-sheet p {
+  color: var(--color-text-2);
+  margin: 8px 0;
+}
+.settings-sheet label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 10px 0;
+}
+.settings-sheet input,
+.settings-sheet select,
+.settings-sheet button {
+  min-height: 44px;
+  min-width: 44px;
+  max-width: 100%;
+  font: inherit;
+  color: var(--color-text);
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  background: var(--color-surface-2);
+}
+.settings-sheet input:disabled,
+.settings-sheet select:disabled,
+.settings-sheet button:disabled {
+  opacity: 0.6;
+}
+.role-editor {
+  margin: 20px 0;
+  padding: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  min-width: 0;
+}
+.role-editor legend {
+  padding: 0 6px;
+  font-weight: 600;
+}
+.settings-sheet .role-enabled {
+  flex-direction: row;
+  align-items: center;
+}
+.settings-sheet .role-enabled input {
+  min-width: 24px;
+}
+.settings-sheet .model-capability {
+  color: var(--color-text);
+}
+@media (width < 600px) {
+  .settings-sheet {
+    inset: 0;
+    width: 100%;
+    transform: none;
+    border-radius: 0;
+  }
+  .settings-actions,
+  .settings-catalog {
+    flex-wrap: wrap;
+  }
+}

@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "@localdot/protocol": "workspace:*",
+    "@localdot/providers": "workspace:*",
     "@localdot/stage": "workspace:*",
     "pixi.js": "8.21.0",
     "react": "19.3.0",

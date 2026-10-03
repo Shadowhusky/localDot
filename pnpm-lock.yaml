@@ -80,6 +80,9 @@ importers:
       '@localdot/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
+      '@localdot/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       '@localdot/stage':
         specifier: workspace:*
         version: link:../../packages/stage

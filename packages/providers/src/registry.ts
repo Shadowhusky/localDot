@@ -121,6 +121,11 @@ export function providerById(id: string): ProviderSpec | undefined {
   return PROVIDERS.find((p) => p.id === id);
 }
 
+// A router chooses a different priced model later, so it cannot reserve a known model hold.
+export function isOpenRouterRouterId(providerId: string, modelId: string): boolean {
+  return providerId === "openrouter" && /^openrouter\//i.test(modelId);
+}
+
 // The keyd route a model is called through: a local server's built-in route, else the id of the
 // `llm` key the user stored for that provider (keyd: "a secret's route name is its id").
 export function routeFor(provider: ProviderSpec, keyId?: string): string | undefined {
