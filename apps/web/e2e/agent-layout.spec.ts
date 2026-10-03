@@ -132,13 +132,22 @@ test.afterAll(async () => {
   expect(server.listening).toBe(false);
 });
 
-async function load(page: Page) {
+async function load(page: Page, activeComposer = false) {
+  const shownCell = activeComposer ? { ...pausedCell, paused: false } : pausedCell;
+  if (activeComposer)
+    await page.route(`${origin}/api/cells`, (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify([shownCell]),
+      }),
+    );
   const errors: string[] = [],
     external: string[] = [];
   const sockets: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
   await page.route("**/*", (route) => {
-    if (new URL(route.request().url()).origin === origin) return route.continue();
+    if (new URL(route.request().url()).origin === origin) return route.fallback();
     external.push(route.request().url());
     return route.abort();
   });
@@ -146,7 +155,7 @@ async function load(page: Page) {
     const url = new URL(ws.url());
     expect(url.host).toBe(new URL(origin).host);
     sockets.push(url.pathname);
-    if (url.pathname === `/api/cells/${CELL}/status`) ws.send(JSON.stringify(pausedCell));
+    if (url.pathname === `/api/cells/${CELL}/status`) ws.send(JSON.stringify(shownCell));
     else if (url.pathname === `/api/sessions/${SESSION}/stream`)
       for (const sample of samples) ws.send(sample);
     else throw new Error("unexpected layout socket");
@@ -310,6 +319,61 @@ test("Keys keeps keyboard focus, an accessible Stop and reduced-preference rende
   await expect(dialog).toBeHidden();
   expect(proof.external).toEqual([]);
   expect(proof.errors).toEqual([]);
+  expect(
+    await page.evaluate(() => (window as unknown as { layoutCsp: unknown }).layoutCsp),
+  ).toEqual([]);
+});
+
+test("composer submits once and moves a recognised key without a task request", async ({
+  page,
+}, info) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  const proof = await load(page, true);
+  const bodies: string[] = [];
+  const accepted = Promise.withResolvers<void>();
+  await page.route(`${origin}/api/agent/sessions/${SESSION}/messages`, async (route) => {
+    bodies.push(route.request().postData() ?? "");
+    await accepted.promise;
+    await route.fulfill({ status: 202, body: "" });
+  });
+  await page.getByRole("tab", { name: "Conversation" }).click();
+  const draft = page.getByLabel("Message", { exact: true });
+  await expect(page.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
+  await draft.fill("请继续 the sample report");
+  await draft.press("Enter");
+  await expect.poll(() => bodies.length).toBe(1);
+  await page.getByRole("form", { name: "Message dot" }).evaluate((element) => {
+    (element as HTMLFormElement).requestSubmit();
+    (element as HTMLFormElement).requestSubmit();
+  });
+  expect(bodies).toEqual([JSON.stringify({ kind: "followup", text: "请继续 the sample report" })]);
+  accepted.resolve();
+  await expect(draft).toHaveValue("");
+  await expect(page.getByText("Accepted by the daemon.")).toBeVisible();
+  const key = `sk-proj-${"a".repeat(156)}`;
+  await draft.fill(`before ${key} after`);
+  await expect(draft).toHaveValue("before  after");
+  await expect(page.getByRole("button", { name: "Send follow-up" })).toBeDisabled();
+  await page.getByRole("button", { name: "Move to Keys" }).click();
+  const keys = page.getByRole("dialog", { name: "Keys" });
+  await expect(keys).toBeVisible();
+  await expect(keys.getByLabel("Key", { exact: true })).toHaveValue(key);
+  await expect(keys.getByRole("combobox", { name: "Provider", exact: true })).toHaveValue("openai");
+  await page.keyboard.press("Escape");
+  await expect(draft).toHaveValue("before  after");
+  await page.getByTestId("keys-button").click();
+  await expect(keys.getByLabel("Key", { exact: true })).toHaveValue("");
+  await page.keyboard.press("Escape");
+  expect(bodies).toHaveLength(1);
+  expect(JSON.stringify(bodies)).not.toContain(key);
+  expect(await page.evaluate(() => document.body.innerHTML)).not.toContain(key);
+  expect(proof.sockets).toEqual([`/api/cells/${CELL}/status`, `/api/sessions/${SESSION}/stream`]);
+  expect(
+    await page.evaluate(() => (window as unknown as { layoutWorkers: unknown }).layoutWorkers),
+  ).toEqual({ created: 1, retired: 0 });
+  await page.screenshot({ path: info.outputPath("composer-phone-sample.png") });
+  expect(proof.errors).toEqual([]);
+  expect(proof.external).toEqual([]);
   expect(
     await page.evaluate(() => (window as unknown as { layoutCsp: unknown }).layoutCsp),
   ).toEqual([]);

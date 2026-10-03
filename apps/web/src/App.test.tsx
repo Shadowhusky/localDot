@@ -136,6 +136,31 @@ describe("App token states", () => {
     );
   });
 
+  it("moves a detected composer key into the opened Keys field without a plaintext request", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const { fetchImpl, calls } = daemon((call) => {
+      if (call.path === "/api/cells") return json([summary("ready")]);
+      if (call.path.endsWith("/live")) return json({}, 404);
+      return json({});
+    });
+    render(<App fetchImpl={fetchImpl} />);
+    await screen.findByRole("button", { name: "Stop computer" });
+    const field = screen.getByLabelText("New task") as HTMLTextAreaElement;
+    const key = `sk-proj-${"a".repeat(156)}`;
+    fireEvent.input(field, { target: { value: `before ${key} after` } });
+    expect(field.value).toBe("before  after");
+    fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe(key);
+    expect((screen.getByLabelText("Provider") as HTMLSelectElement).value).toBe("openai");
+    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
+    expect(calls.some((call) => call.method === "POST")).toBe(false);
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByTestId("keys-button"));
+    expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
+    expect(field.value).toBe("before  after");
+  });
+
   it("shows the Theatre with a Start computer control when the daemon has no cell", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const calls: string[] = [];

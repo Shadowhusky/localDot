@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
+import { Composer } from "./agent/Composer.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
+import type { KeyIntake } from "./keys/KeyForm.tsx";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
@@ -112,6 +115,11 @@ function Theatre({ api }: { api: ApiClient }) {
   const keys = useKeys(api);
   const [keysOpen, setKeysOpen] = useState(false);
   const keysButton = useRef<HTMLButtonElement>(null);
+  const keysIntake = useRef<KeyIntake>(null);
+  const receiveKey = useCallback<KeyIntake["receive"]>((source, provider) => {
+    flushSync(() => setKeysOpen(true));
+    return keysIntake.current?.receive(source, provider) ?? false;
+  }, []);
   const wasOpen = useRef(false);
   const closeKeys = useCallback(() => setKeysOpen(false), []);
   useEffect(() => {
@@ -208,7 +216,21 @@ function Theatre({ api }: { api: ApiClient }) {
               if (!narrow) setPane("conversation");
             }}
           >
-            <ConversationRail agent={agent} />
+            <ConversationRail
+              visible={!narrow || pane === "conversation"}
+              agent={agent}
+              composer={
+                <Composer
+                  api={api}
+                  cell={cell}
+                  known={status === "known"}
+                  pending={pending !== null}
+                  agent={agent}
+                  keysOpen={keysOpen}
+                  receiveKey={receiveKey}
+                />
+              }
+            />
           </div>
           <div
             className="pane pane-computer"
@@ -264,6 +286,7 @@ function Theatre({ api }: { api: ApiClient }) {
         </div>
       </div>
       <KeysSheet
+        intakeRef={keysIntake}
         open={keysOpen}
         keys={keys}
         onClose={closeKeys}
