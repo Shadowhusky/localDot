@@ -46,6 +46,17 @@ export interface AgentStateAt {
   t: number;
 }
 
+// Audit history for the step rail; never drawn on the stage. Request fields stay plain text.
+export interface KeyUseState {
+  id: string;
+  t: number;
+  secretId: string;
+  host: string;
+  method: string;
+  path: string;
+  decision: "allow" | "deny" | "ask";
+}
+
 export interface SessionModel {
   screen: { w: number; h: number; scale: number } | null;
   title: string | null;
@@ -55,6 +66,7 @@ export interface SessionModel {
   agentStates: AgentStateAt[];
   ended: { t: number; reason: string } | null;
   actions: ActionState[];
+  keyUses: KeyUseState[];
   lastSeq: number;
   frames: Map<string, string>;
 }
@@ -67,6 +79,7 @@ export function emptyModel(): SessionModel {
     agentStates: [],
     ended: null,
     actions: [],
+    keyUses: [],
     lastSeq: -1,
     frames: new Map(),
   };
@@ -101,6 +114,9 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
         break;
       case "agent.state":
         model.agentStates.push({ state: e.data.state, t });
+        break;
+      case "key.use":
+        model.keyUses.push({ id: e.id, t, ...e.data });
         break;
       case "action.intent":
         model.actions.push({

@@ -86,6 +86,21 @@ describe("cursor", () => {
     expect(motion(log, 1700).cursor).toMatchObject({ x: 300, y: 400 });
   });
 
+  it("can stop a first action with no pointer position without crashing the HUD or worker", () => {
+    const log = [
+      ...base(),
+      ev("action.intent", 1000, { verb: "wait", label: "Wait", risk: "none" }, "s1"),
+      ev("action.cancel", 1300, { reason: "user" }, "s1"),
+      ev("session.end", 1301, { reason: "stopped" }),
+    ];
+    for (const reducedMotion of [false, true]) {
+      const scene = sceneAt(fold(log), 1400, { reducedMotion });
+      expect(scene.cancel).toMatchObject({ x: 0, y: 0, reason: "user" });
+      expect(scene.hud.state).toBe("stopped");
+      expect(scene.control).toBe(false);
+    }
+  });
+
   it("stays where it was when an action is cancelled mid-travel", () => {
     const log = [...base(), intent, ev("action.cancel", 1300, { reason: "user" }, "s1")];
     const at = pointerAt(plan, 1300);

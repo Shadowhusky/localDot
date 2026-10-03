@@ -57,7 +57,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   const [src, setSrc] = useState<string | null>(null);
   const [generation, setGeneration] = useState(0);
   const cellId = cell?.id ?? null;
-  const ready = cell?.state === "ready";
+  const ready = cell?.state === "ready" && !cell.paused;
   const flips = useRef<Flip[]>([]);
   const params = useMemo(() => new URLSearchParams(window.location.search), []);
   const listedRef = useRef(listed);
@@ -91,8 +91,10 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }, [api, cellId, ready, support.ok, generation, reconnects]);
 
   // Overlays freeze while the stream is not live (spec, error handling); zoom comes from ?zoom= for tests.
-  const paused =
-    cell?.stream.connection === "stalled" || cell?.stream.connection === "disconnected";
+  const reconnecting =
+    !cell?.paused &&
+    (cell?.stream.connection === "stalled" || cell?.stream.connection === "disconnected");
+  const paused = !!cell?.paused || reconnecting;
   useEffect(() => {
     canvas.current?.setView({ freeze: paused, zoom: Number(params.get("zoom") ?? 1) || 1 });
   }, [paused, params]);
@@ -190,7 +192,7 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
           lastPresentedAt={lastPresentedAt}
         />
       )}
-      <div className={paused ? "stage-veil on" : "stage-veil"} aria-hidden={!paused}>
+      <div className={reconnecting ? "stage-veil on" : "stage-veil"} aria-hidden={!reconnecting}>
         <p>Reconnecting…</p>
       </div>
       {control && <div className="rim" aria-hidden="true" />}

@@ -17,4 +17,6 @@ export interface CellSummary {
   createdAt: string;
   stream: StreamState;
   error?: string;
+  // Frozen by Stop until Resume refreshes credentials and thaws the desktop.
+  paused?: true;
 }

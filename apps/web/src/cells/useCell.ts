@@ -14,6 +14,7 @@ export interface CellController extends CellView {
   reconnects: number;
   start(): void;
   stop(): void;
+  resume(): void;
   retry(): void;
 }
 
@@ -32,6 +33,7 @@ export function useCell(api: ApiClient): CellController {
   // Read by callbacks that must see the latest value, not the one of their render.
   const pendingRef = useRef<Pending | null>("list");
   const stateRef = useRef<CellState | null>(null);
+  const pausedRef = useRef(false);
   const mounted = useRef(true);
 
   useEffect(() => {
@@ -48,6 +50,7 @@ export function useCell(api: ApiClient): CellController {
 
   const show = useCallback((next: CellSummary | null) => {
     stateRef.current = next?.state ?? null;
+    pausedRef.current = !!next?.paused;
     setCell(next);
   }, []);
 
@@ -107,7 +110,8 @@ export function useCell(api: ApiClient): CellController {
         onMessage: (data) => {
           const next = JSON.parse(data) as CellSummary;
           // A refused request's message lasts until the state it was about moves on.
-          if (next.state !== stateRef.current) setError(null);
+          if (next.state !== stateRef.current || !!next.paused !== pausedRef.current)
+            setError(null);
           show(next.state === "removed" ? null : next);
         },
         onOpen: () => {
@@ -132,7 +136,7 @@ export function useCell(api: ApiClient): CellController {
         await action();
       } catch (err) {
         if (!mounted.current) return;
-        setError(describeRequestError(err));
+        setError(describeRequestError(err, kind === "resume" ? "resume" : undefined));
         // No answer: the daemon may have acted (a create may have saved its record). A 404: the
         // computer is gone. Either way the daemon's list says what is there now.
         if (!(err instanceof ApiError) || err.status === 404) {
@@ -166,10 +170,17 @@ export function useCell(api: ApiClient): CellController {
     });
   }, [api, cellId, run]);
 
+  const resume = useCallback(() => {
+    if (!cellId || !cell?.paused) return;
+    void run("resume", async () => {
+      await api.post(`${CELLS}/${cellId}/resume`);
+    });
+  }, [api, cellId, cell?.paused, run]);
+
   // relist() settles every failure itself: a list that gets no answer leaves the state unknown.
   const retry = useCallback(() => {
     void run("list", relist);
   }, [relist, run]);
 
-  return { cell, status, pending, error, listed, reconnects, start, stop, retry };
+  return { cell, status, pending, error, listed, reconnects, start, stop, resume, retry };
 }

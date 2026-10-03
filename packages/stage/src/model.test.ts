@@ -81,6 +81,68 @@ const click = (startMs: number, step: string): LocalDotEvent[] => [
 ];
 
 describe("foldEvents", () => {
+  it("folds keyd use in milliseconds beside actions without retaining event data aliases", () => {
+    const first = ev("key.use", 1500, {
+      secretId: "weather",
+      host: "api.weather.example",
+      method: "GET",
+      path: "/now",
+      decision: "allow",
+    });
+    const second = ev("key.use", 2500, {
+      secretId: "weather",
+      host: "api.weather.example",
+      method: "POST",
+      path: "/later",
+      decision: "deny",
+    });
+    const m = foldEvents(emptyModel(), [first]);
+    expect(m.actions).toEqual([]);
+    expect(m.keyUses).toEqual([
+      {
+        id: first.id,
+        t: 1500,
+        secretId: "weather",
+        host: "api.weather.example",
+        method: "GET",
+        path: "/now",
+        decision: "allow",
+      },
+    ]);
+    const previousUse = structuredClone(m.keyUses[0]);
+    expect(foldEvents(m, [first, second])).toBe(m);
+    expect(m.keyUses).toHaveLength(2);
+    expect(m.keyUses[0]).toEqual(previousUse);
+    expect(m.keyUses[1]).toMatchObject({ t: 2500, decision: "deny" });
+    if (first.type === "key.use") first.data.path = "/mutated-source-event";
+    expect(m.keyUses[0]?.path).toBe("/now");
+  });
+
+  it("keeps key history independent across models and incremental folds", () => {
+    const events = [
+      ev("key.use", 100, {
+        secretId: "one",
+        host: "a.example",
+        method: "GET",
+        path: "/",
+        decision: "allow",
+      }),
+      ev("key.use", 200, {
+        secretId: "two",
+        host: "b.example",
+        method: "GET",
+        path: "/",
+        decision: "ask",
+      }),
+    ];
+    const whole = foldEvents(emptyModel(), events);
+    const halves = foldEvents(foldEvents(emptyModel(), events.slice(0, 1)), events.slice(1));
+    expect(halves).toEqual(whole);
+    expect(halves.keyUses).not.toBe(whole.keyUses);
+    expect(halves.keyUses[0]).not.toBe(whole.keyUses[0]);
+    expect(emptyModel().keyUses).toEqual([]);
+  });
+
   it("builds one action per intent and attaches the rest by step, converting times to ms", () => {
     const m = foldEvents(emptyModel(), [
       ev("session.start", 0, { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux", title: "t" }),

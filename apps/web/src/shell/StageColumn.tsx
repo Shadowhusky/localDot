@@ -13,10 +13,16 @@ export function StageColumn({
   onStart,
   onStop,
   onStopSession,
+  onResume,
   onRetry,
   children,
 }: StageColumnProps) {
-  const classes = ["stage", hud.live ? "lit" : "", control ? "control" : ""]
+  const classes = [
+    "stage",
+    hud.live ? "lit" : "",
+    hud.paused ? "frozen" : "",
+    control ? "control" : "",
+  ]
     .filter(Boolean)
     .join(" ");
   return (
@@ -28,6 +34,7 @@ export function StageColumn({
           onStart={onStart}
           onStop={onStop}
           onStopSession={onStopSession}
+          onResume={onResume}
           onRetry={onRetry}
         />
       </div>

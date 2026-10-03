@@ -482,8 +482,48 @@ timer and monotonic clock and resets after close, offline state or list replacem
 - Representative screenshot delivered to Richard's private Telegram, message
   12064; verified receipt under `~/.openclaw/media/outbound/receipts/20261003T001047.110047Z.json`.
 
+## Task 13: Paused/Resume and key-use history
+
+Frozen computers now show Paused, Resume and Stop, with an explanation that
+Resume continues existing programs. The last desktop frame remains dimmed.
+Controls fit at 375px; pending changes preserve focus and reject duplicate actions.
+Pause is an explicit fact independent of action selection, so recovery listing,
+gate restart and delayed session events cannot restore agent controls. Safe
+Resume errors explain an offline key layer without echoing arbitrary internals.
+
+The viewer drops its paused stream, suppresses reconnect attempts, rejects late
+pre-pause tickets and mints a fresh ticket after the daemon reports Resume. Key
+uses fold beside actions and render as plain text in chronological order. Only
+consecutive uses with the same actual key, host and decision share a count;
+interspersed uses preserve the current step highlight.
+
+- All 932 host tests in 109 files, types, lint, hygiene and production build pass.
+- The real Chrome/Docker acceptance passes in 20.8 seconds (17.8 seconds test body):
+  a fake web API key is sealed in Chrome, a terminal uses its surrogate against
+  the planned public echo endpoint, and keyd's audit appears in the step history.
+  Stop confirms Docker's paused state, Resume gets a new stream ticket and fresh
+  frames, and a later Stop plus offline Resume stays frozen with a useful error.
+  Owned cells/services/home are cleaned up; no real credentials or LLM calls.
+- Initial acceptance found a first-action Wait cancellation crash: the renderer
+  expected a previous pointer action. A focused test reproduced it, the optional
+  previous action is now handled safely, and final Chrome reports no page errors.
+- Full boundary review found the stale-session pause-priority gap above; the fix
+  and scoped re-review pass. Twelve deliberate regressions are caught. The exact
+  installed late-ticket test also catches its isolated mutation (12 pass/1 fail).
+  Timeline display had one light review and no unresolved Important/Critical.
+- Evidence: `/tmp/localdot-part4b-task13-red.log`,
+  `/tmp/localdot-part4b-task13-cancel-red.log`,
+  `/tmp/localdot-part4b-task13-host-final.log`,
+  `/tmp/localdot-part4b-task13-e2e3.log`,
+  `/tmp/localdot-paused-mutations-l9w7fd06/verified-mutation-evidence.json`, and
+  `/tmp/localdot-paused-mutations-l9w7fd06/installed-late-ticket-verification.json`.
+  Screenshots: `apps/web/e2e/out/key-use.png`, `paused.png`, `paused-narrow.png`.
+- Paused/Resume screenshot delivered to Richard's private Telegram as message
+  12066, receipt `~/.openclaw/media/outbound/receipts/20261003T002221.965039Z.json`.
+
 ## Remaining integration
 
-Tasks 13–16: paused UI and key-use history, real-cell isolation/canary acceptance,
-documentation and CI. The basic real Stop/resume path and system Keychain carry
-are verified above; the broader Task 15 canary scenarios remain.
+Tasks 14–16: real-cell isolation/canary acceptance, documentation and CI. The
+real Stop/resume path and system Keychain carry are verified above; the broader
+Task 15 canary scenarios remain. Full workspace validation on Node 24 is pending
+(the actual desktop bundles have already passed under Node 24.21.0).

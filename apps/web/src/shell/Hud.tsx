@@ -5,13 +5,18 @@ export interface HudProps {
   hud: HudState & { control?: boolean; elapsedS?: number | null; stop?: boolean };
   onStart(): void;
   onStop(): void;
+  onResume(): void;
   onStopSession(): void;
   onRetry(): void;
 }
 
-export function Hud({ hud, onStart, onStop, onStopSession, onRetry }: HudProps) {
+export function Hud({ hud, onStart, onStop, onStopSession, onResume, onRetry }: HudProps) {
   return (
-    <div className="hud" role="status" aria-live="polite">
+    <div
+      className={hud.action.kind === "resume" && !hud.stop ? "hud paused" : "hud"}
+      role="status"
+      aria-live="polite"
+    >
       <span className="st">
         <Mascot />
         <span data-testid="hud-status">{hud.label}</span>
@@ -31,6 +36,7 @@ export function Hud({ hud, onStart, onStop, onStopSession, onRetry }: HudProps) 
           else if (hud.action.enabled) {
             if (hud.action.kind === "start") onStart();
             else if (hud.action.kind === "stop") onStop();
+            else if (hud.action.kind === "resume") onResume();
             else onRetry();
           }
         }}
@@ -42,8 +48,23 @@ export function Hud({ hud, onStart, onStop, onStopSession, onRetry }: HudProps) 
             ? "Start computer"
             : hud.action.kind === "stop"
               ? "Stop computer"
-              : "Try again"}
+              : hud.action.kind === "resume"
+                ? "Resume computer"
+                : "Try again"}
       </button>
+      {!hud.stop && hud.action.kind === "resume" && (
+        <button
+          type="button"
+          className="a"
+          aria-disabled={!hud.action.enabled ? true : undefined}
+          onClick={() => {
+            if (hud.action.enabled) onStop();
+          }}
+        >
+          <span className="sq" aria-hidden="true" />
+          Stop computer
+        </button>
+      )}
     </div>
   );
 }

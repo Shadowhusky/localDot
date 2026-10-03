@@ -6,7 +6,7 @@ import type { CellSummary } from "./types.ts";
 export type CellStatus = "listing" | "unknown" | "known";
 
 // The request useCell is waiting on, if any.
-export type Pending = "list" | "create" | "start" | "stop";
+export type Pending = "list" | "create" | "start" | "stop" | "resume";
 
 export interface CellView {
   cell: CellSummary | null;
@@ -14,15 +14,16 @@ export interface CellView {
   pending: Pending | null;
 }
 
-export type HudActionKind = "start" | "stop" | "retry";
+export type HudActionKind = "start" | "stop" | "retry" | "resume";
 
 export interface HudState {
   label: string;
   caption: string;
-  // The HUD's one button: always present, so focus is never dropped; disabled while a request is
-  // out or while the action makes no sense yet.
+  // The primary control remains focusable while pending. A paused computer also offers Stop.
   action: { kind: HudActionKind; enabled: boolean };
   live: boolean;
+  // Independent of the currently offered action, including recovery/list requests.
+  paused?: true;
 }
 
 // The orchestrator marks a crash restart with this note on a starting cell; the spec shows a
@@ -38,14 +39,22 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
     kind: HudActionKind,
     enabled = true,
     live = false,
-  ): HudState => ({ label, caption, action: { kind, enabled: enabled && idle }, live });
+  ): HudState => ({
+    label,
+    caption,
+    action: { kind, enabled: enabled && idle },
+    live,
+    ...(cell?.paused ? { paused: true as const } : {}),
+  });
 
   if (status === "listing") return hud("Checking…", "Looking for your computer.", "start", false);
   if (status === "unknown") {
     return hud("Unavailable", "localDot can't tell whether your computer is running.", "retry");
   }
   if (pending === "list")
-    return hud("Checking…", "Looking for your computer.", cell ? "stop" : "start");
+    return cell?.paused
+      ? hud("Paused", "Checking your paused computer.", "resume", false)
+      : hud("Checking…", "Looking for your computer.", cell ? "stop" : "start");
   if (!cell) {
     // The create's answer brings the cell id that Stop needs.
     if (pending === "create") return hud("Starting…", STARTING, "stop", false);
@@ -53,6 +62,12 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
   }
   switch (cell.state) {
     case "starting": {
+      if (cell.paused)
+        return hud(
+          "Paused",
+          "Your computer is frozen while its connection recovers. Stop it for a clean start.",
+          "stop",
+        );
       const restart = cell.error ? RESTART_NOTE.exec(cell.error) : null;
       if (restart) {
         return hud(
@@ -78,6 +93,13 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
       );
     case "ready":
       break;
+  }
+  if (cell.paused) {
+    return hud(
+      "Paused",
+      "Stopped. Your computer is frozen. Resume it to use it again: programs dot started carry on. Stop it for a clean start.",
+      "resume",
+    );
   }
   switch (cell.stream.connection) {
     case "live":

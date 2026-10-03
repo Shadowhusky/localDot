@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
@@ -190,5 +190,59 @@ describe("Stage in a Chromium browser", () => {
     const live = { ...ready, stream: { ...ready.stream, connection: "live" as const } };
     view.rerender(<Stage cell={live} api={api} reconnects={0} listed={[CELL]} />);
     expect(document.querySelector(".stage-veil.on")).toBeNull();
+  });
+
+  it("detaches a frozen computer, suppresses reconnects, and mints a new ticket only after Resume", async () => {
+    const { api, calls } = daemon();
+    const view = render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
+    await waitFor(() => expect(client()).not.toBeNull());
+    const paused = {
+      ...ready,
+      paused: true as const,
+      stream: { ...ready.stream, connection: "stalled" as const },
+    };
+    view.rerender(<Stage cell={paused} api={api} reconnects={0} listed={[CELL]} />);
+    expect(client()).toBeNull();
+    expect(document.querySelector(".stage-veil.on")).toBeNull();
+    expect(
+      FakeWorker.instances[0]?.sent
+        .filter((s) => s.message.type === "view")
+        .map((s) => s.message.view),
+    ).toContainEqual({ freeze: true, zoom: 1 });
+    view.rerender(<Stage cell={paused} api={api} reconnects={1} listed={[CELL]} />);
+    fireEvent(document, new Event("resume"));
+    expect(calls).toHaveLength(1);
+    view.rerender(<Stage cell={ready} api={api} reconnects={1} listed={[CELL]} />);
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
+    expect(calls).toHaveLength(2);
+  });
+  it("cancels a late ticket arriving after pause and mints a fresh one on resume", async () => {
+    const paused = { ...ready, paused: true as const };
+    const json = (body: unknown) => new Response(JSON.stringify(body));
+    const late = Promise.withResolvers<Response>();
+    let tickets = 0;
+    const api = createApi("fake-token", {
+      fetchImpl: async () => {
+        tickets++;
+        return tickets === 1 ? late.promise : json({ path: ticketPath(tickets) });
+      },
+    });
+    const view = render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
+    try {
+      await waitFor(() => expect(tickets).toBe(1));
+      view.rerender(<Stage cell={paused} api={api} reconnects={0} listed={[CELL]} />);
+      await act(async () => late.resolve(json({ path: ticketPath(1) })));
+      expect(client()).toBeNull();
+      expect(FakeWorker.instances[0]?.sent.some((s) => s.message.type === "stop")).toBe(true);
+      view.rerender(<Stage cell={paused} api={api} reconnects={1} listed={[CELL]} />);
+      fireEvent(document, new Event("resume"));
+      fireEvent(document, new Event("visibilitychange"));
+      expect(tickets).toBe(1);
+      view.rerender(<Stage cell={ready} api={api} reconnects={1} listed={[CELL]} />);
+      await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
+      expect(tickets).toBe(2);
+    } finally {
+      view.unmount();
+    }
   });
 });

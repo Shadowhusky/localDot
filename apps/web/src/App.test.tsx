@@ -233,6 +233,54 @@ describe("App token states", () => {
     ]);
   });
 
+  it("resumes a paused computer once, blocks Stop meanwhile, and waits for daemon state", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const pending = deferred<Response>();
+    const paused = { ...summary("ready", "stalled"), paused: true as const };
+    const d = daemon(({ path }) => (path.endsWith("/resume") ? pending.promise : json([paused])));
+    render(<App fetchImpl={d.fetchImpl} />);
+    const resume = await screen.findByRole("button", { name: "Resume computer" });
+    const stop = screen.getByRole("button", { name: "Stop computer" });
+    act(() => {
+      fireEvent.click(resume);
+      fireEvent.click(resume);
+      fireEvent.click(stop);
+    });
+    expect(d.seen().filter((c) => c.startsWith("POST"))).toEqual([
+      `POST /api/cells/${CELL_ID}/resume`,
+    ]);
+    expect(resume.getAttribute("aria-disabled")).toBe("true");
+    expect(stop.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
+    await act(async () => pending.resolve(new Response(null, { status: 204 })));
+    expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
+    act(() =>
+      FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
+    );
+    expect(screen.getByTestId("hud-status").textContent).toBe("Live");
+    expect(screen.queryByRole("button", { name: "Resume computer" })).toBeNull();
+  });
+
+  it("leaves a refused Resume paused and shows keyd's safe offline answer until pause changes", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const paused = { ...summary("ready", "stalled"), paused: true as const };
+    const offline = "the key layer is offline: start keyd, then resume the computer";
+    const d = daemon(({ path }) =>
+      path.endsWith("/resume") ? new Response(offline, { status: 503 }) : json([paused]),
+    );
+    render(<App fetchImpl={d.fetchImpl} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Resume computer" }));
+    expect(await screen.findByText(offline)).toBeTruthy();
+    expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
+    expect(d.seen().some((c) => c.endsWith("/start"))).toBe(false);
+    act(() => FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(paused) }));
+    expect(screen.getByText(offline)).toBeTruthy();
+    act(() =>
+      FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
+    );
+    expect(screen.queryByText(offline)).toBeNull();
+  });
+
   it("mints a fresh stream ticket each time the status socket reopens, not on its first open", async () => {
     const restore = fakeChromium();
     try {

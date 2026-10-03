@@ -13,6 +13,7 @@ export interface SessionHud {
 export interface StepRowView {
   id: string;
   label: string;
+  startT: number;
   status: "doing" | "ok" | "failed" | "cancelled";
   frameId?: string;
   target?: Rect;
@@ -68,7 +69,8 @@ export function mergeHud(
   hud: HudState,
   session: SessionHud | null,
 ): HudState & { control: boolean; elapsedS?: number | null; stop?: boolean } {
-  if (!session) return { ...hud, control: false };
+  // Pause is authoritative even when the session-end event arrives after cell status.
+  if (!session || hud.paused) return { ...hud, control: false };
   if (session.state === "done" || session.state === "stopped" || session.state === "error") {
     // A finished session keeps its verdict while the computer is live; the computer's controls return.
     return {
@@ -105,6 +107,7 @@ export function stepRows(model: SessionModel): StepRowView[] {
           : "failed";
     rows.set(id, {
       id,
+      startT: rows.get(id)?.startT ?? a.intentT,
       label: done === undefined ? tense(a.label, PROGRESSIVE) : tense(a.label, PAST),
       status,
       ...(a.target?.bbox ? { target: a.target.bbox } : {}),

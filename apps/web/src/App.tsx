@@ -5,6 +5,7 @@ import { KeysSheet } from "./keys/KeysSheet.tsx";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
 import { forgetToken, keepToken, storedToken, takeFragmentToken } from "./lib/token.ts";
+import { timelineRows } from "./session/key-uses.ts";
 import { mergeHud, sessionHud, stepRows } from "./session/session-view.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
@@ -103,7 +104,8 @@ export function App({ fetchImpl }: AppProps) {
 }
 
 function Theatre({ api }: { api: ApiClient }) {
-  const { cell, status, pending, error, listed, reconnects, start, stop, retry } = useCell(api);
+  const { cell, status, pending, error, listed, reconnects, start, stop, resume, retry } =
+    useCell(api);
   const keys = useKeys(api);
   const [keysOpen, setKeysOpen] = useState(false);
   const keysButton = useRef<HTMLButtonElement>(null);
@@ -120,7 +122,9 @@ function Theatre({ api }: { api: ApiClient }) {
   const now = useNowMs(session.model, session.version);
   const sHud = session.sessionId ? sessionHud(session.model, now) : null;
   const merged = mergeHud(error ? { ...hud, caption: error } : hud, sHud);
-  const rows = session.sessionId ? stepRows(session.model) : [];
+  const rows = session.sessionId
+    ? timelineRows(stepRows(session.model), session.model.keyUses)
+    : [];
   useEffect(() => {
     document.title = `localDot — ${merged.label}`;
   }, [merged.label]);
@@ -142,6 +146,7 @@ function Theatre({ api }: { api: ApiClient }) {
             control={merged.control}
             onStart={start}
             onStop={stop}
+            onResume={resume}
             onStopSession={session.stop}
             onRetry={retry}
           >

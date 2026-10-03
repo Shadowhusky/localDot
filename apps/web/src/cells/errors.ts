@@ -5,9 +5,23 @@ export const GONE = "This computer no longer exists.";
 
 // A refused request in plain words, by status: the daemon's and Docker's own text (paths, errno
 // codes, cell ids) stays out of the caption.
-export function describeRequestError(err: unknown): string {
+export function describeRequestError(err: unknown, action?: "resume"): string {
   if (!(err instanceof ApiError))
     return "localDot's daemon isn't answering. Check that it's running.";
+  if (action === "resume" && [409, 502, 503].includes(err.status)) {
+    // Only the route's fixed, user-facing answers may pass through; never echo internals.
+    const known: Record<number, readonly string[]> = {
+      409: [
+        "the computer is not paused",
+        "the computer is restarting: resume it once it is ready",
+        "the computer is changing state; try again",
+      ],
+      503: ["the key layer is offline: start keyd, then resume the computer"],
+    };
+    return known[err.status]?.includes(err.message)
+      ? err.message
+      : "The computer could not resume. Try again.";
+  }
   switch (err.status) {
     case 502:
       return `${DOCKER_DOWN}, then try again.`;

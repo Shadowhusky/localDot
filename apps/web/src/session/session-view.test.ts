@@ -76,6 +76,56 @@ const cell = {
 };
 
 describe("sessionHud", () => {
+  it("keeps paused controls and caption even if session end is delayed or an old verdict remains", () => {
+    const frozen = hudFor({ cell: { ...cell, paused: true }, status: "known", pending: null });
+    const working = sessionHud(foldEvents(emptyModel(), log), 1200);
+    for (const state of ["working", "idle", "done", "stopped", "error"] as const) {
+      const merged = mergeHud(frozen, { ...working, state });
+      expect(merged).toMatchObject({
+        label: "Paused",
+        caption: frozen.caption,
+        control: false,
+        live: false,
+        action: { kind: "resume" },
+      });
+      expect(merged.stop).toBeUndefined();
+    }
+    expect(
+      mergeHud(
+        { ...frozen, caption: "The key layer is offline." },
+        { ...working, state: "stopped" },
+      ).caption,
+    ).toBe("The key layer is offline.");
+  });
+
+  it("keeps pause authoritative while relisting after a lost Resume response and during gate recovery", () => {
+    const working = sessionHud(foldEvents(emptyModel(), log), 1200);
+    const paused = { ...cell, paused: true as const };
+    for (const view of [
+      { cell: paused, status: "known" as const, pending: "list" as const },
+      { cell: { ...paused, state: "starting" as const }, status: "known" as const, pending: null },
+    ]) {
+      const hud = hudFor(view);
+      expect(hud.paused).toBe(true);
+      const merged = mergeHud(hud, working);
+      expect(merged).toMatchObject({ label: "Paused", control: false, live: false });
+      expect(merged.stop).toBeUndefined();
+      expect(merged.caption).toBe(hud.caption);
+    }
+    expect(hudFor({ cell: paused, status: "known", pending: "list" }).action.enabled).toBe(false);
+  });
+
+  it("keeps a step's earliest action time for interleaved key uses", () => {
+    const model = foldEvents(emptyModel(), [
+      ...log,
+      ev("action.intent", 1500, { verb: "key", label: "Press Return", risk: "none" }, "s2"),
+    ]);
+    expect(stepRows(model).map(({ id, startT }) => ({ id, startT }))).toEqual([
+      { id: "s1", startT: 20 },
+      { id: "s2", startT: 1110 },
+    ]);
+  });
+
   it("labels the current action in the present progressive with the elapsed time after 5 s", () => {
     const m = foldEvents(emptyModel(), log);
     expect(sessionHud(m, 1200)).toMatchObject({

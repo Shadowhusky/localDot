@@ -1,9 +1,11 @@
 import type { ApiClient } from "../lib/api.ts";
+import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
+import { KeyUseRow } from "./KeyUseRow.tsx";
 import { StepRow } from "./StepRow.tsx";
 
 export interface PlanRailProps {
-  rows: StepRowView[];
+  rows: TimelineRow<StepRowView>[];
   sessionId: string | null;
   scale: number;
   api: ApiClient;
@@ -11,6 +13,7 @@ export interface PlanRailProps {
 }
 
 export function PlanRail({ rows, sessionId, scale, api, title }: PlanRailProps) {
+  const lastStep = rows.findLastIndex((row) => row.kind === "step");
   return (
     <aside className="rail r" aria-label="Plan and steps">
       <div className="rail-h">
@@ -23,16 +26,20 @@ export function PlanRail({ rows, sessionId, scale, api, title }: PlanRailProps) 
       </div>
       {sessionId && rows.length > 0 ? (
         <div className="steps">
-          {rows.map((row, i) => (
-            <StepRow
-              key={row.id}
-              row={row}
-              sessionId={sessionId}
-              scale={scale}
-              api={api}
-              current={i === rows.length - 1 && row.status === "doing"}
-            />
-          ))}
+          {rows.map((row, i) =>
+            row.kind === "key" ? (
+              <KeyUseRow key={`key-${row.id}`} row={row} />
+            ) : (
+              <StepRow
+                key={`step-${row.id}`}
+                row={row}
+                sessionId={sessionId}
+                scale={scale}
+                api={api}
+                current={i === lastStep && row.status === "doing"}
+              />
+            ),
+          )}
         </div>
       ) : (
         <p className="say empty">Steps appear here as dot works.</p>

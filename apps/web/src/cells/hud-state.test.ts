@@ -26,6 +26,21 @@ const DOCKER_DOWN = "docker unreachable on /networks/create: ENOENT; is Docker D
 const RESTART_NOTE = "desktop container exited with 137; restarting (attempt 2 of 5)";
 
 describe("hudFor", () => {
+  it("keeps frozen computers paused regardless of stream state, with pending controls disabled", () => {
+    for (const connection of ["none", "connecting", "live", "stalled", "disconnected"] as const) {
+      const paused = { ...cell("ready", connection), paused: true as const };
+      const hud = hudFor(known(paused));
+      expect(hud).toMatchObject({
+        label: "Paused",
+        action: { kind: "resume", enabled: true },
+        live: false,
+      });
+      expect(hud.caption).toContain("programs dot started carry on");
+      expect(hudFor(known(paused, "resume")).action).toEqual({ kind: "resume", enabled: false });
+      expect(hudFor(known(paused, "stop")).action.enabled).toBe(false);
+    }
+  });
+
   it("offers to start when there is no computer or it is stopped", () => {
     expect(hudFor(known(null))).toMatchObject({
       label: "No computer",

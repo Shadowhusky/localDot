@@ -167,9 +167,9 @@ function controlAt(model: SessionModel, t: number): boolean {
 }
 
 // Where the cursor rests after an action: its dispatch point, or where a cancel froze it.
-function restingPoint(a: ActionState): Point | undefined {
-  if (a.plan) return a.cancel ? pointerAt(a.plan, a.cancel.t) : a.plan.to;
-  return a.point;
+function restingPoint(a: ActionState | undefined): Point | undefined {
+  if (a?.plan) return a.cancel ? pointerAt(a.plan, a.cancel.t) : a.plan.to;
+  return a?.point;
 }
 
 function cursorAt(
@@ -372,7 +372,7 @@ function cancelAt(
 ): CancelScene | null {
   if (!a.cancel || t < a.cancel.t || t > a.cancel.t + CANCEL_CHIP_MS) return null;
   const since = t - a.cancel.t;
-  const pos = restingPoint(a) ?? restingPoint(started.at(-2) as ActionState) ?? { x: 0, y: 0 };
+  const pos = restingPoint(a) ?? restingPoint(started.at(-2)) ?? { x: 0, y: 0 };
   const dx =
     view.reducedMotion || since > CANCEL_SHAKE_MS
       ? 0
