@@ -1,0 +1,51 @@
+{
+  "version": "0.154.0",
+  "releases": [
+    {
+      "version": "0.154.0",
+      "platform": "darwin-arm64",
+      "archive": {
+        "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.154.0-darwin-arm64.tgz",
+        "sha512": "HP/vJCH/t2hB9Kg6hotN9UglClJ6/z584fal5lEP14C9gNAgAQS4/kTQC7l5V+BA3TqwDPwINSjul28cX8AYXg==",
+        "compressedBytes": 116501639
+      },
+      "binaries": [
+        {
+          "member": "package/vendor/aarch64-apple-darwin/bin/codex",
+          "installedName": "codex",
+          "sha256": "4f85982624b3898c8991cb80c0981b2aa71070e3537046c9a95950318a95afcc",
+          "bytes": 222655232
+        },
+        {
+          "member": "package/vendor/aarch64-apple-darwin/bin/codex-code-mode-host",
+          "installedName": "codex-code-mode-host",
+          "sha256": "426d73aaeb2aeef45e98b5add99e8ef9594a31673d281489bb2cb06b38c27423",
+          "bytes": 62786144
+        }
+      ]
+    },
+    {
+      "version": "0.154.0",
+      "platform": "linux-x64",
+      "archive": {
+        "url": "https://registry.npmjs.org/@openai/codex/-/codex-0.154.0-linux-x64.tgz",
+        "sha512": "a4FI3A8sGtwGrOqltrPbrS2hajrHQG591EwmRfiRoLMb10VxdBtUGW4gu6IJVYENiYGA7k3P4jlRHEoCZU/s9Q==",
+        "compressedBytes": 129654638
+      },
+      "binaries": [
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex",
+          "installedName": "codex",
+          "sha256": "3188814c35471432d4123203e0eb38e5bddc60226e3d7ddf0e59e649ea140022",
+          "bytes": 262858016
+        },
+        {
+          "member": "package/vendor/x86_64-unknown-linux-musl/bin/codex-code-mode-host",
+          "installedName": "codex-code-mode-host",
+          "sha256": "0c57be435e73b70d9106c850d751cd259a7f04da958a453d7ef59090d82b70f1",
+          "bytes": 69431360
+        }
+      ]
+    }
+  ]
+}
