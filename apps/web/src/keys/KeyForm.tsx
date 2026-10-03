@@ -1,5 +1,13 @@
 import type { SecretBinding } from "@localdot/protocol";
-import { type FormEvent, useEffect, useLayoutEffect, useRef, useState } from "react";
+import {
+  type FormEvent,
+  type Ref,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import {
   bindingOf,
   type DraftField,
@@ -18,13 +26,18 @@ export interface KeyFormProps {
   active: boolean;
   disabled: boolean;
   save(binding: SecretBinding, value: string): Promise<{ restart: boolean }>;
+  intakeRef?: Ref<KeyIntake>;
+}
+export interface KeyIntake {
+  // A synchronous one-shot DOM handoff, never a secret string prop or deferred queue.
+  receive(source: HTMLInputElement, provider?: Provider): boolean;
 }
 
 type Problem = { field: DraftField | "form"; message: string };
 
 // The key itself lives only in the key field's DOM value (never in React state): it is read
 // on submit, the field is cleared at once, and the page sends keyd's sealed copy.
-export function KeyForm({ active, disabled, save }: KeyFormProps) {
+export function KeyForm({ active, disabled, save, intakeRef }: KeyFormProps) {
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -32,22 +45,75 @@ export function KeyForm({ active, disabled, save }: KeyFormProps) {
   const [saved, setSaved] = useState<string | null>(null);
   const valueRef = useRef<HTMLInputElement>(null);
   const savingRef = useRef(false);
+  const intakeBlocked = useRef(false);
+  const intakeAllowed = useRef(false);
   useLayoutEffect(() => {
-    if (!active && valueRef.current) valueRef.current.value = "";
-  }, [active]);
+    if ((!active || disabled) && valueRef.current) valueRef.current.value = "";
+    intakeAllowed.current = active && !disabled;
+    intakeBlocked.current = !active || document.hidden;
+  }, [active, disabled]);
+  useImperativeHandle(
+    intakeRef,
+    () => ({
+      receive(source, provider) {
+        const target = valueRef.current;
+        let value = source.value;
+        let received = false;
+        source.value = "";
+        try {
+          if (target) target.value = "";
+          if (
+            !target?.isConnected ||
+            !intakeAllowed.current ||
+            savingRef.current ||
+            intakeBlocked.current ||
+            document.hidden ||
+            valueProblem(value)
+          )
+            return false;
+          if (provider && !Object.hasOwn(PROVIDER_NAMES, provider)) return false;
+          if (provider) setDraft((draft) => ({ ...draft, kind: "llm", provider, baseURL: "" }));
+          setProblem(null);
+          setSaved(null);
+          target.value = value;
+          target.focus();
+          // Focus handlers may synchronously close or hide the form during the handoff.
+          if (
+            !intakeAllowed.current ||
+            intakeBlocked.current ||
+            document.hidden ||
+            !target.isConnected ||
+            target.value !== value
+          )
+            return false;
+          received = true;
+          return true;
+        } finally {
+          value = "";
+          source.value = "";
+          if (!received && target) target.value = "";
+        }
+      },
+    }),
+    [],
+  );
   useEffect(() => {
     const input = valueRef.current;
     const clear = () => {
       if (input) input.value = "";
+      intakeBlocked.current = true;
     };
     const onVisibility = () => {
       if (document.hidden) clear();
+      else intakeBlocked.current = false;
     };
     window.addEventListener("pagehide", clear);
+    window.addEventListener("pageshow", onVisibility);
     document.addEventListener("visibilitychange", onVisibility);
     return () => {
       clear();
       window.removeEventListener("pagehide", clear);
+      window.removeEventListener("pageshow", onVisibility);
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
@@ -71,11 +137,14 @@ export function KeyForm({ active, disabled, save }: KeyFormProps) {
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!active || disabled || savingRef.current) return;
-    setTried(true);
-    setSaved(null);
     const input = valueRef.current;
     if (!input) return;
+    if (!intakeAllowed.current || savingRef.current || intakeBlocked.current || document.hidden) {
+      input.value = "";
+      return;
+    }
+    setTried(true);
+    setSaved(null);
     const value = input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";

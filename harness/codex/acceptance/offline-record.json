@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "53e3d5ce9779e5d2813f74dc4b153f5953d881fe65a32f64b38d8f17dba47fe1",
+  "inputSha256": "25e648b45d0ee377034c3754bd5cef313a0354d79dba6ab3ebf538b054206989",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -58,8 +58,9 @@
     "apps/daemon/src/agent/redact.ts": "3395897678e7160c1f528d5f061582bc2de5ae36a690abab9847f6760f99dc4b",
     "apps/daemon/src/agent/review-regressions.test.ts": "42e618b9e2028bc5a4de9dae12c5b5c1a3f89b5ab45d590e453fc795c8669757",
     "apps/daemon/src/agent/routes-boundaries.test.ts": "f4115e82d17a40f62e1b01d3b1bdacb413fd5ec3e9cdbce4c7a5c740f55db2a8",
+    "apps/daemon/src/agent/routes.key-guard.test.ts": "fb22493ca536b5435820d9321534e3d04b686fad6d64fa7b67046ff699cd1991",
     "apps/daemon/src/agent/routes.test.ts": "914866a0c65524085d871eab3984220019b8e7d1ce94e355245f378b302833f1",
-    "apps/daemon/src/agent/routes.ts": "f3430e46b173a385bd2b9b6824db876dcc6e4ac2447af608c62eb2caf8e16e7c",
+    "apps/daemon/src/agent/routes.ts": "1bc82c35ac630ee2185a5d5377a147ed1aec3f9180ea87c3d96caa8eec1a0606",
     "apps/daemon/src/agent/runner-boundaries.test.ts": "e4093316091964f058d969d32e8191df796c0bc9cb75950fde5136d9d43d6515",
     "apps/daemon/src/agent/runner-independent.test.ts": "bd18730023dc932681300d770ec6e8937de8f9220e3e806081ffff57e3f86490",
     "apps/daemon/src/agent/runner.test.ts": "c61ed1c64ea63e7f60d97137746e1246dd9d67aa21c8ac0a746b1d1efbc2a42b",
@@ -286,8 +287,10 @@
     "packages/protocol/src/geometry.ts": "e052bfe8b03d286aba2cdd8c67da6dc0a5ac690bbd7d71b46197c2c6191ac346",
     "packages/protocol/src/ids.test.ts": "dcb71161e312f986c03c90a7996521073ed3d0acb178eb29e3ffb211854a2ef1",
     "packages/protocol/src/ids.ts": "24b6b36d6a808271777faf88ae202e79ee8257b0d818f7680af637614641dc60",
-    "packages/protocol/src/index.ts": "7d1cca02686638bf21728e07df8c64c12adc74ee47c7d8a598d92efa4aba01bc",
+    "packages/protocol/src/index.ts": "88c14fa52ddfb40c169ac81f14169262ffce5cddee149e0f7916cad18513a06d",
     "packages/protocol/src/input.ts": "11fba806528d33acd4839a69e77b03998dde5d4ec02506e34153f1e1fafb2724",
+    "packages/protocol/src/key-like.test.ts": "162e6b91ad6edc8e59243bccc23212038ac14f3ae4e50e93e1eebaf6d957245d",
+    "packages/protocol/src/key-like.ts": "9fd454d095d380d2912a836544f0ac4aac085b1ad0ea7eeaa84be22ce4ab8109",
     "packages/protocol/src/keyd.test.ts": "b3aca9573bb4f5e6b5d187a8660db4ee7950bad919260ae130a551e8b9f8622b",
     "packages/protocol/src/keyd.ts": "d415b3d6246f55ebc5833f8d845df506e59441112b05453659bac72dab91f9fa",
     "packages/protocol/src/patch.test.ts": "ba06284c75bd044ea4acba44d1df8868e356f808429bdbd1bd7a10a5e2bcbf1b",
@@ -367,7 +370,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "500c510831a9fe2472f90392daf83be0d58fa373ad13a96f8926c7481fd6a05b",
+  "reportSha256": "5cd29f69c0244d0340713d3337f2997e31da136e8e7f027bb97dee69147b0e38",
   "exit": {
     "code": 0,
     "signal": null

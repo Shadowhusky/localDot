@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { KeyForm } from "./KeyForm.tsx";
+import { type Ref, useEffect, useRef, useState } from "react";
+import { KeyForm, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { type KeydHealth, KeyProblem } from "./keys-api.ts";
 import { type KeysController, keyStatus } from "./useKeys.ts";
@@ -10,11 +10,12 @@ export interface KeysSheetProps {
   keys: KeysController;
   onClose(): void;
   stop?: { readonly label: string; readonly enabled: boolean; run(): void };
+  intakeRef?: Ref<KeyIntake>;
 }
 
 // A modal sheet that grows from the top bar's Keys button and returns to it. It stays mounted so
 // opening and closing are one interruptible transition; closed, it is inert.
-export function KeysSheet({ open, keys, onClose, stop }: KeysSheetProps) {
+export function KeysSheet({ open, keys, onClose, stop, intakeRef }: KeysSheetProps) {
   const panel = useRef<HTMLDivElement>(null);
   const status = keyStatus(keys.health);
   const offline = status.state === "offline";
@@ -112,6 +113,7 @@ export function KeysSheet({ open, keys, onClose, stop }: KeysSheetProps) {
           remove={(id) => mutate(() => keys.remove(id))}
         />
         <KeyForm
+          intakeRef={intakeRef}
           active={open}
           disabled={disabled}
           save={(binding, value) => mutate(() => keys.save(binding, value))}

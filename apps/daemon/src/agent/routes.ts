@@ -3,7 +3,7 @@ import {
   type CodexInstaller,
   type HarnessAvailability,
 } from "@localdot/codex-harness";
-import { type KeydRecord, ULID_PATTERN } from "@localdot/protocol";
+import { type KeydRecord, keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
@@ -296,6 +296,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     return value;
   };
   const redact = (value: string, sessionId?: string, cellId?: string, max = 8000) => {
+    // Refuse before redaction, allocation, event/inbox dispatch or model-bound persistence.
+    if (keyLikePresent(value))
+      throw new RouteError(400, "Recognised API keys belong in Keys, not task text.");
     const clean = deps.redactUserText(value, sessionId, cellId);
     if (!text(max).safeParse(clean).success) throw new RouteError(400, "invalid user text");
     return clean;

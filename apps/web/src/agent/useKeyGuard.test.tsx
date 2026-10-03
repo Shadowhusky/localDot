@@ -1,0 +1,346 @@
+// @vitest-environment jsdom
+/// <reference types="node" />
+import { webcrypto } from "node:crypto";
+import { toBase64url } from "@localdot/protocol";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createRef, useRef } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { KeyForm, type KeyIntake } from "../keys/KeyForm.tsx";
+import { type Seal, saveKey } from "../keys/keys-api.ts";
+import { createApi } from "../lib/api.ts";
+import { KeyFound } from "./KeyFound.tsx";
+import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
+
+const keys = [
+  `sk-ant-api03-${"a".repeat(95)}`,
+  `sk-ant-admin01-${"b".repeat(95)}`,
+  `sk-proj-${"c".repeat(156)}`,
+  `sk-svcacct-${"d".repeat(156)}`,
+  `sk-admin-${"e".repeat(156)}`,
+  `AIza${"f".repeat(35)}`,
+  `AQ.${"g".repeat(128)}`,
+  `gsk_${"h".repeat(52)}`,
+  `sk-or-v1-${"i".repeat(64)}`,
+  `xai-${"j".repeat(64)}`,
+  `pplx-${"k".repeat(48)}`,
+  `sk-${"a".repeat(32)}`,
+];
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
+
+function fixture(
+  options: { active?: boolean; keyActive?: boolean; disabled?: boolean; seal?: Seal } = {},
+) {
+  const calls: { path: string; body: string }[] = [];
+  let publicKey = "invalid-key";
+  const api = createApi("fixture", {
+    origin: "http://127.0.0.1:4790",
+    fetchImpl: async (url, init) => {
+      const path = new URL(String(url)).pathname;
+      calls.push({ path, body: String(init?.body ?? "") });
+      if (path === "/api/keyd") return Response.json({ online: true, sealKey: publicKey });
+      if (path === "/api/keys") return Response.json({ key: { id: "provider" }, restart: false });
+      return Response.json({ sessionId: "fixture" });
+    },
+  });
+  const metadata: string[] = [];
+  let current!: KeyGuard;
+  function Harness({ active = true, keyActive = true, disabled = false }: typeof options) {
+    const guard = useKeyGuard(active);
+    current = guard;
+    metadata.push(JSON.stringify(guard.notice));
+    const intake = useRef<KeyIntake>(null);
+    return (
+      <>
+        <form
+          aria-label="Task composer"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const field = event.currentTarget.querySelector("textarea");
+            if (field && guard.check(field))
+              void api.post("/api/cells/fixture/agent", { task: field.value });
+          }}
+        >
+          <label>
+            Task
+            <textarea onInput={(event) => guard.check(event.currentTarget)} />
+          </label>
+          <button type="submit">Send task</button>
+        </form>
+        <KeyFound
+          guard={guard}
+          receive={(source, provider) => intake.current?.receive(source, provider) ?? false}
+        />
+        <KeyForm
+          active={keyActive}
+          disabled={disabled}
+          intakeRef={intake}
+          save={async (binding, value) => saveKey(api, binding, value, options.seal)}
+        />
+      </>
+    );
+  }
+  const view = render(<Harness {...options} />);
+  const task = screen.getByLabelText("Task") as HTMLTextAreaElement;
+  const keyField = screen.getByLabelText("Key") as HTMLInputElement;
+  const submit = () => fireEvent.submit(screen.getByRole("form", { name: "Task composer" }));
+  return {
+    ...view,
+    task,
+    keyField,
+    calls,
+    metadata,
+    submit,
+    get guard() {
+      return current;
+    },
+    rerenderOptions: (next: typeof options) => view.rerender(<Harness {...next} />),
+    setPublic: (value: string) => {
+      publicKey = value;
+    },
+  };
+}
+function absent(f: ReturnType<typeof fixture>) {
+  const ordinary = JSON.stringify({
+    calls: f.calls,
+    metadata: f.metadata,
+    local: { ...localStorage },
+    session: { ...sessionStorage },
+    url: location.href,
+    markup: document.body.innerHTML,
+    text: document.body.textContent,
+    draft: f.task.value,
+  });
+  for (const key of keys) expect(ordinary).not.toContain(key);
+}
+
+describe("key guard at the composer and sealed form boundary", () => {
+  it.each(keys.map((key, index) => ({ key, index })))(
+    "blocks synthetic shape $index on input and at submit without an input handler",
+    async ({ key }) => {
+      const f = fixture();
+      // A script, IME or missed paste handler still passes through submit's final check.
+      f.task.value = `请处理 '${key}.example' please`;
+      f.submit();
+      expect(f.calls).toEqual([]);
+      expect(f.task.value).not.toContain(key);
+      expect(screen.getByRole("alert").textContent).toContain("removed");
+      absent(f);
+      fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+      expect(document.activeElement).toBe(f.task);
+      f.submit();
+      expect(f.calls).toEqual([]); // Edit is never a send-anyway acknowledgement.
+      fireEvent.click(screen.getByRole("button", { name: "Discard detected keys" }));
+      f.submit();
+      await act(async () => {});
+      expect(f.calls).toEqual([
+        { path: "/api/cells/fixture/agent", body: JSON.stringify({ task: f.task.value }) },
+      ]);
+      expect(f.task.value).toContain("请处理");
+      fireEvent.input(f.task, { target: { value: key } });
+      expect(f.task.value).toBe("");
+      expect(f.guard.notice?.kind).toBe("found");
+      absent(f);
+    },
+  );
+  it("erases an unadmitted field when a forged submit arrives after close", () => {
+    const f = fixture({ active: false, keyActive: false });
+    f.task.value = keys[0] ?? "";
+    f.submit();
+    expect(f.calls).toEqual([]);
+    expect(f.task.value).toBe("");
+    expect(f.guard.notice).toBeNull();
+    absent(f);
+  });
+  it("moves exactly the selected DOM-owned candidate, discards the others, then seals before network", async () => {
+    vi.stubGlobal("crypto", webcrypto);
+    const pair = await webcrypto.subtle.generateKey({ name: "ECDH", namedCurve: "P-256" }, true, [
+      "deriveBits",
+    ]);
+    const f = fixture();
+    f.setPublic(
+      toBase64url(new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey))),
+    );
+    fireEvent.input(f.task, { target: { value: `before ${keys[0]} then ${keys[7]} after` } });
+    fireEvent.change(screen.getByLabelText("Key to move"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
+    expect(f.task.value).toBe("before  then  after");
+    expect(f.keyField.value).toBe(keys[7]);
+    expect((screen.getByLabelText("Provider") as HTMLSelectElement).value).toBe("groq");
+    expect(f.guard.notice).toBeNull();
+    expect(f.calls).toEqual([]);
+    absent(f); // DOM.value is the sole allowed remaining plaintext owner, not attributes/markup.
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "provider" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Add a key" }));
+    expect(f.keyField.value).toBe("");
+    await screen.findByText("Saved provider.");
+    expect(f.calls.map((c) => c.path)).toEqual(["/api/keyd", "/api/keys"]);
+    const saved = JSON.parse(f.calls[1]?.body ?? "{}");
+    expect(saved.binding).toEqual({ kind: "llm", id: "provider", provider: "groq" });
+    expect(saved.sealed).toMatchObject({
+      v: 1,
+      epk: expect.any(String),
+      nonce: expect.any(String),
+      ct: expect.any(String),
+    });
+    expect(saved.sealed.ct.length).toBeGreaterThan(20);
+    expect(saved).not.toHaveProperty("value");
+    absent(f);
+  });
+  it("clears on a synchronous sealing error and requires repaste without a plaintext request", async () => {
+    const f = fixture({
+      seal: () => {
+        throw new Error(keys[0]);
+      },
+    });
+    fireEvent.input(f.task, { target: { value: keys[0] } });
+    fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "provider" } });
+    fireEvent.submit(screen.getByRole("form", { name: "Add a key" }));
+    await screen.findByRole("alert");
+    expect(f.keyField.value).toBe("");
+    expect(document.body.textContent).toContain("Paste the key again");
+    expect(f.calls.map((c) => c.path)).toEqual(["/api/keyd"]);
+    absent(f);
+  });
+  it.each(["offline", "close", "pagehide", "hidden", "unmount"] as const)(
+    "clears both possible owners on %s and never restores the chat draft",
+    (action) => {
+      const f = fixture();
+      fireEvent.input(f.task, { target: { value: keys[0] } });
+      fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
+      expect(f.keyField.value).toBe(keys[0]);
+      if (action === "offline") f.rerenderOptions({ disabled: true });
+      else if (action === "close") f.rerenderOptions({ active: false, keyActive: false });
+      else if (action === "pagehide") fireEvent(window, new Event("pagehide"));
+      else if (action === "hidden") {
+        vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+        fireEvent(document, new Event("visibilitychange"));
+      } else f.unmount();
+      expect(f.keyField.value).toBe("");
+      expect(f.task.value).toBe("");
+      expect(f.calls).toEqual([]);
+      absent(f);
+    },
+  );
+  it.each(["cancel", "close", "pagehide", "hidden", "unmount"] as const)(
+    "discards a held candidate on %s so a retained Move callback cannot deliver it",
+    (action) => {
+      const f = fixture();
+      fireEvent.input(f.task, { target: { value: keys[0] } });
+      const retained = f.guard;
+      if (action === "cancel") act(() => retained.cancel());
+      else if (action === "close") f.rerenderOptions({ active: false, keyActive: false });
+      else if (action === "pagehide") fireEvent(window, new Event("pagehide"));
+      else if (action === "hidden") {
+        vi.spyOn(document, "hidden", "get").mockReturnValue(true);
+        fireEvent(document, new Event("visibilitychange"));
+      } else f.unmount();
+      const receive = vi.fn(() => true);
+      act(() => {
+        expect(retained.move(0, receive)).toBe(false);
+      });
+      expect(receive).not.toHaveBeenCalled();
+      expect(f.task.value).toBe("");
+      expect(f.keyField.value).toBe("");
+      absent(f);
+    },
+  );
+  it("fails closed at finite character and candidate limits, and Remove does not restore overflow text", () => {
+    const f = fixture();
+    for (const text of ["x".repeat(8001), Array(17).fill(keys[5]).join(" ")]) {
+      f.task.value = text;
+      f.submit();
+      expect(f.guard.notice?.kind).toBe("overflow");
+      expect(f.task.value).toBe("");
+      expect(f.calls).toEqual([]);
+      expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Review message" }));
+      expect(f.task.value).toBe("");
+    }
+  });
+  it("clears the one-shot source in finally even when the receiver throws before touching it", () => {
+    const f = fixture();
+    fireEvent.input(f.task, { target: { value: keys[0] } });
+    let source!: HTMLInputElement;
+    act(() => {
+      expect(
+        f.guard.move(0, (input) => {
+          source = input;
+          expect(input.value).toBe(keys[0]);
+          throw new Error("synchronous intake failure");
+        }),
+      ).toBe(false);
+    });
+    expect(source.value).toBe("");
+    expect(f.task.value).toBe("");
+    expect(f.guard.notice).toEqual({ kind: "transfer_failed", candidates: [] });
+    absent(f);
+  });
+  it("discards a failed or throwing one-shot transfer and guards reentrant Move", () => {
+    const f = fixture();
+    fireEvent.input(f.task, { target: { value: keys[0] } });
+    let source!: HTMLInputElement;
+    const nested = vi.fn(() => true);
+    act(() => {
+      expect(
+        f.guard.move(0, (input) => {
+          source = input;
+          expect(f.guard.move(0, nested)).toBe(false);
+          throw new Error("private failure");
+        }),
+      ).toBe(false);
+    });
+    expect(nested).not.toHaveBeenCalled();
+    expect(source.value).toBe("");
+    expect(f.guard.notice).toEqual({ kind: "transfer_failed", candidates: [] });
+    expect(f.calls).toEqual([]);
+    absent(f);
+  });
+  it("cancels a transfer when focus hides the page during handoff", () => {
+    const f = fixture();
+    fireEvent.input(f.task, { target: { value: keys[0] } });
+    f.keyField.addEventListener("focus", () => window.dispatchEvent(new Event("pagehide")), {
+      once: true,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
+    expect(f.keyField.value).toBe("");
+    expect(f.task.value).toBe("");
+    expect(f.guard.notice?.kind).toBe("transfer_failed");
+    absent(f);
+  });
+  it("does not let a retained intake handle bypass offline/closed/busy state", async () => {
+    const intake = createRef<KeyIntake>();
+    const pending = Promise.withResolvers<{ restart: boolean }>();
+    const save = vi.fn(() => pending.promise);
+    const view = render(<KeyForm active disabled={false} save={save} intakeRef={intake} />);
+    const receive = intake.current?.receive;
+    expect(receive).toBeTypeOf("function");
+    const source = document.createElement("input");
+    for (const props of [
+      { active: true, disabled: true },
+      { active: false, disabled: false },
+    ]) {
+      view.rerender(<KeyForm {...props} save={save} intakeRef={intake} />);
+      source.value = keys[0] ?? "";
+      expect(receive?.(source, "anthropic")).toBe(false);
+      expect(source.value).toBe("");
+      expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
+    }
+    view.rerender(<KeyForm active disabled={false} save={save} intakeRef={intake} />);
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "provider" } });
+    fireEvent.change(screen.getByLabelText("Key"), { target: { value: keys[0] } });
+    fireEvent.submit(screen.getByRole("form"));
+    source.value = keys[0] ?? "";
+    expect(receive?.(source, "anthropic")).toBe(false);
+    expect(source.value).toBe("");
+    await act(async () => pending.resolve({ restart: false }));
+    view.unmount();
+    source.value = keys[0] ?? "";
+    expect(receive?.(source, "anthropic")).toBe(false);
+    expect(source.value).toBe("");
+  });
+});
