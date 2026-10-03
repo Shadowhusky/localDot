@@ -22,6 +22,7 @@ export {
   srtArgv,
   srtCli,
 } from "./args.ts";
+export * from "./contract.ts";
 export { CA_BUNDLE, CodexEnvError, type CodexEnvInput, codexEnv } from "./env.ts";
 export { CODEX_CONFIG_TOML, CodexHomeError, prepareCodexHome } from "./home.ts";
 export {
@@ -42,6 +43,7 @@ export {
   sandboxSettings,
   writeSettingsFile,
 } from "./profile.ts";
+export * from "./protocol.ts";
 export {
   createOwnedCodexDirectory,
   type OwnedCodexDirectory,
@@ -49,6 +51,7 @@ export {
   prepareOwnedCodexRoots,
   removeOwnedCodexDirectory,
 } from "./roots.ts";
+export * from "./rpc.ts";
 export {
   CODEX_BUILDS,
   CODEX_VERSION,
