@@ -1,16 +1,19 @@
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { DiffViewer } from "./DiffViewer.tsx";
 import type { AgentModel } from "./model.ts";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 import "./output.css";
 
 type Choice = { owner: string; kind: "terminal" | "diff"; id: string };
+export type InspectOutput = (kind: Choice["kind"], id: string, trigger: HTMLButtonElement) => void;
 export function ActivityDetails({
   model,
   sessionId,
+  children,
 }: {
   model: AgentModel;
   sessionId: string | null;
+  children?: (inspect: InspectOutput) => ReactNode;
 }) {
   const [choice, setChoice] = useState<Choice | null>(null);
   const origin = useRef<HTMLButtonElement | null>(null),
@@ -42,7 +45,8 @@ export function ActivityDetails({
           <p>{model.activity}</p>
         </details>
       )}
-      {!!tools.length && (
+      {children?.(show)}
+      {!children && !!tools.length && (
         <section aria-label="Output previews">
           <h3>Command output</h3>
           {tools.map((row) => (
@@ -56,7 +60,7 @@ export function ActivityDetails({
           ))}
         </section>
       )}
-      {!!model.changes.length && (
+      {!children && !!model.changes.length && (
         <section aria-label="Change previews">
           <h3>Changes</h3>
           {model.changes.map((row) => (

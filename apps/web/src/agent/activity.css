@@ -1,0 +1,81 @@
+.plan-view {
+  min-width: 0;
+}
+.activity-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+.activity-heading h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+}
+.activity-heading > span {
+  color: var(--color-text-2);
+  font-size: 11px;
+}
+.activity-filters {
+  border: 0;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 0 14px;
+}
+.activity-filters button[aria-pressed="true"] {
+  border-color: var(--color-text-2);
+  background: var(--color-surface);
+}
+.tool-row,
+.memory-card,
+.question-card,
+.skills-view {
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 12px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tool-row p,
+.memory-card p,
+.question-card p {
+  margin: 8px 0;
+  white-space: pre-wrap;
+}
+.tool-title {
+  font-weight: 500;
+}
+.step-reason,
+.tool-outcome,
+.input-delivery {
+  color: var(--color-text-2);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.activity-changes,
+.question-history {
+  display: grid;
+  gap: 12px;
+  margin-top: 18px;
+}
+.result-summary {
+  white-space: pre-wrap;
+}
+.result-preview {
+  white-space: normal;
+}
+.skills-view ul {
+  list-style: none;
+  padding: 0;
+}
+.skills-view li {
+  margin-top: 12px;
+  overflow-wrap: anywhere;
+}
+.activity-details button {
+  margin-right: 6px;
+}

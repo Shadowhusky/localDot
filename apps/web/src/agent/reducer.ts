@@ -166,7 +166,8 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "tool.output":
     case "tool.end": {
       if (!e.step) break;
-      let row = step(model, e.step);
+      const old = step(model, e.step);
+      let row: AgentStep = { ...old, firstSeenAt: old.firstSeenAt ?? e.t };
       if (e.type === "step.start")
         row = { ...row, kind: e.data.kind, planItem: e.data.planItem, startedAt: e.t };
       else if (e.type === "step.end")
@@ -242,6 +243,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         e.type === "file.change"
           ? {
               id: e.id,
+              ...(e.step ? { step: e.step } : {}),
               type: "file" as const,
               path: e.data.path.slice(0, 1024),
               op: e.data.op,
@@ -250,6 +252,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             }
           : {
               id: e.id,
+              ...(e.step ? { step: e.step } : {}),
               type: "memory" as const,
               path: e.data.file,
               patch: patch?.slice(0, L.patchText),

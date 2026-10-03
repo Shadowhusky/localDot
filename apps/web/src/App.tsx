@@ -344,6 +344,7 @@ function Theatre({ api }: { api: ApiClient }) {
             <PlanRail
               agent={agent.model}
               rows={rows}
+              keyUses={session.model.keyUses}
               sessionId={session.sessionId}
               scale={cell?.scale ?? 2}
               api={api}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
@@ -28,10 +28,12 @@ export function ResultFiles({
   api,
   sessionId,
   results,
+  renderResult,
 }: {
   api: ApiClient;
   sessionId: string | null;
   results: readonly AgentResult[];
+  renderResult?: (result: AgentResult, files: ReactNode) => ReactNode;
 }) {
   const [pending, setPending] = useState(false),
     [message, setMessage] = useState<string | null>(null);
@@ -153,42 +155,50 @@ export function ResultFiles({
       }
     }
   };
-  if (!results.some((result) => result.files.length)) return null;
+  if (!results.length || (!renderResult && !results.some((result) => result.files.length)))
+    return null;
   return (
     <section className="result-files" aria-label="Result files">
-      <h3>Result files</h3>
+      <h3>{renderResult ? "Results" : "Result files"}</h3>
       <p className="history-note">
         Download files to inspect them. Files are not opened automatically.
       </p>
-      {results.map((result) => (
-        <ul key={result.id} aria-label={`Files in result ${result.id}`}>
-          {result.files.map((file) => {
-            const valid =
-              safeTransferName(file.name) &&
-              Number.isSafeInteger(file.bytes) &&
-              file.bytes >= 0 &&
-              file.bytes <= FILE_LIMITS.bytes;
-            return (
-              <li key={file.name}>
-                <span>{valid ? file.name : "Unavailable file name"}</span>
-                <span>
-                  {valid
-                    ? `${file.bytes.toLocaleString()} bytes`
-                    : "This file cannot be downloaded."}
-                </span>
-                <button
-                  type="button"
-                  disabled={!valid || !sessionId || pending}
-                  onClick={() => void request(result.id, file)}
-                  aria-label={valid ? `Download ${file.name}` : "Unavailable file"}
-                >
-                  Download
-                </button>
-              </li>
-            );
-          })}
-        </ul>
-      ))}
+      {results.map((result) => {
+        const files = (
+          <ul key={result.id} aria-label={`Files in result ${result.id}`}>
+            {result.files.map((file) => {
+              const valid =
+                safeTransferName(file.name) &&
+                Number.isSafeInteger(file.bytes) &&
+                file.bytes >= 0 &&
+                file.bytes <= FILE_LIMITS.bytes;
+              return (
+                <li key={file.name}>
+                  <span>{valid ? file.name : "Unavailable file name"}</span>
+                  <span>
+                    {valid
+                      ? `${file.bytes.toLocaleString()} bytes`
+                      : "This file cannot be downloaded."}
+                  </span>
+                  <button
+                    type="button"
+                    disabled={!valid || !sessionId || pending}
+                    onClick={() => void request(result.id, file)}
+                    aria-label={valid ? `Download ${file.name}` : "Unavailable file"}
+                  >
+                    Download
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        );
+        return (
+          <div key={result.id}>
+            {renderResult ? renderResult(result, result.files.length ? files : null) : files}
+          </div>
+        );
+      })}
       {pending && (
         <button
           type="button"

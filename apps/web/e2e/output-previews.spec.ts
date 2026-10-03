@@ -279,7 +279,9 @@ for (const width of [1280, 390]) {
     await page.screenshot({ path: info.outputPath(`output-${width}-sample.png`) });
     await detail.getByRole("button", { name: "Close output" }).click();
     await expect(trigger).toBeFocused();
-    await page.getByRole("button", { name: "modify: monthly-summary.txt", exact: true }).click();
+    await page
+      .getByRole("button", { name: "Inspect modify: monthly-summary.txt", exact: true })
+      .click();
     const diff = page.getByRole("region", { name: "Unified text diff", exact: true });
     await expect(diff).toContainText("Monthly total: 12,480");
     await expect(diff).toContainText("\\ No newline at end of file");

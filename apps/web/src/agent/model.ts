@@ -24,6 +24,7 @@ export interface AgentMessage {
 }
 export interface AgentStep {
   readonly id: string;
+  readonly firstSeenAt?: number;
   readonly kind?: EventOf<"step.start">["data"]["kind"];
   readonly planItem?: string;
   readonly startedAt?: number;
@@ -48,6 +49,7 @@ export type AgentTakeover = EventOf<"takeover.request">["data"] & {
 };
 export interface AgentChange {
   readonly id: string;
+  readonly step?: string;
   readonly type: "file" | "memory";
   readonly path: string;
   readonly op?: EventOf<"file.change">["data"]["op"];

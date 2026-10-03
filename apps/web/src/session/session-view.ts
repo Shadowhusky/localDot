@@ -18,6 +18,8 @@ export interface StepRowView {
   frameId?: string;
   target?: Rect;
   durationMs: number | null;
+  delivery?: "proposed" | "delivered";
+  reason?: string;
 }
 
 const PROGRESSIVE: [RegExp, string][] = [
@@ -108,10 +110,29 @@ export function stepRows(model: SessionModel): StepRowView[] {
     rows.set(id, {
       id,
       startT: rows.get(id)?.startT ?? a.intentT,
-      label: done === undefined ? tense(a.label, PROGRESSIVE) : tense(a.label, PAST),
+      label:
+        done === undefined
+          ? tense(a.label, PROGRESSIVE)
+          : a.dispatch || (a.verb === "wait" && a.resultT !== undefined && a.ok && !a.cancel)
+            ? tense(a.label, PAST)
+            : a.label,
       status,
       ...(a.target?.bbox ? { target: a.target.bbox } : {}),
       durationMs: done === undefined ? null : Math.round(done - a.intentT),
+      delivery: a.dispatch ? "delivered" : "proposed",
+      ...(a.cancel
+        ? {
+            reason:
+              {
+                preflight: "The action was refused before input.",
+                policy: "The action was blocked by policy.",
+                user: "Cancelled by you.",
+                model: "Cancelled by the agent.",
+                timeout: "The action timed out.",
+                stale: "The target changed before input.",
+              }[a.cancel.reason] ?? "The action was cancelled.",
+          }
+        : {}),
     });
   }
   // The frame a step ends with is the observe appended inside it; the model keeps observes by

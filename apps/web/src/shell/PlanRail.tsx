@@ -1,85 +1,213 @@
-import { ActivityDetails } from "../agent/ActivityDetails.tsx";
-import type { AgentModel } from "../agent/model.ts";
+import type { KeyUseState } from "@localdot/stage";
+import { useState } from "react";
+import { ActivityDetails, type InspectOutput } from "../agent/ActivityDetails.tsx";
+import { type ActivityFilter, activityRows, matchesFilter, stepStatus } from "../agent/activity.ts";
+import { MemoryCard, type UndoStatus } from "../agent/MemoryCard.tsx";
+import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
+import { PlanView } from "../agent/PlanView.tsx";
+import { QuestionCard } from "../agent/QuestionCard.tsx";
+import { ResultCard } from "../agent/ResultCard.tsx";
 import { ResultFiles } from "../agent/ResultFiles.tsx";
+import { type SkillSummary, SkillsView } from "../agent/SkillsView.tsx";
+import { ToolRow } from "../agent/ToolRow.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { KeyUseRow } from "./KeyUseRow.tsx";
 import { StepRow } from "./StepRow.tsx";
+import "../agent/activity.css";
 
 export interface PlanRailProps {
   rows: TimelineRow<StepRowView>[];
+  keyUses?: readonly KeyUseState[];
   sessionId: string | null;
   scale: number;
   api: ApiClient;
   title: string | null;
   agent?: AgentModel;
+  skills?: readonly SkillSummary[];
+  memoryAction?: (change: AgentChange) => {
+    status?: UndoStatus;
+    onUndo?: (changeId: string) => void;
+    onReread?: () => void;
+  };
 }
 
-export function PlanRail({ rows, sessionId, scale, api, title, agent }: PlanRailProps) {
-  const lastStep = rows.findLastIndex((row) => row.kind === "step");
+export function PlanRail({
+  rows,
+  keyUses,
+  sessionId,
+  scale,
+  api,
+  title,
+  agent,
+  skills,
+  memoryAction,
+}: PlanRailProps) {
+  const [filter, setFilter] = useState<ActivityFilter>("all");
+  const model = agent ?? emptyAgentModel();
+  const timeline = activityRows(rows, agent, keyUses);
+  const lastStep = timeline.findLastIndex((row) => row.kind === "step");
+  const selected = timeline.filter((row) => matchesFilter(row, filter));
+  const inspectChanges = (changes: readonly AgentChange[], inspect: InspectOutput) =>
+    changes.map((change) => (
+      <button
+        type="button"
+        key={change.id}
+        onClick={(event) => inspect("diff", change.id, event.currentTarget)}
+      >
+        Inspect {change.op ?? "change"}: {change.path}
+      </button>
+    ));
   return (
     <aside className="rail r" aria-label="Plan and steps">
       <div className="rail-h">
         <h2>Activity</h2>
       </div>
-      {agent?.plan.length ? (
-        <ol className="task-plan" aria-label="Task plan">
-          {agent.plan.map((item) => (
-            <li key={item.id} className={`plan-${item.status}`}>
-              <span className="plan-state">
-                {item.status === "doing"
-                  ? "In progress"
-                  : item.status === "done"
-                    ? "Done"
-                    : item.status === "skipped"
-                      ? "Skipped"
-                      : "Next"}
-              </span>
-              <span>{item.text}</span>
-            </li>
-          ))}
-        </ol>
+      {model.plan.length ? (
+        <PlanView plan={model.plan} />
       ) : (
         <p className="say empty">{title ?? "No plan yet."}</p>
       )}
-      {agent?.results.map((result) => (
-        <section key={result.id} className="result-preview" aria-label="Task result">
-          <h3>Result</h3>
-          <p>{result.summary}</p>
-          {result.files.length > 0 && (
-            <p className="history-note">
-              {result.files.length} {result.files.length === 1 ? "file" : "files"} in this result.
-            </p>
+      {agent && (
+        <ResultFiles
+          api={api}
+          sessionId={sessionId}
+          results={model.results}
+          renderResult={(result, files) => (
+            <ResultCard
+              result={result}
+              latest={result.id === model.results.at(-1)?.id}
+              ended={!!model.ended}
+              idle={model.state?.state === "idle"}
+            >
+              {files}
+            </ResultCard>
           )}
-        </section>
-      ))}
-      {agent && <ResultFiles api={api} sessionId={sessionId} results={agent.results} />}
-      <div className="rail-h">
-        <span>Steps</span>
-        {sessionId && <span>Following live</span>}
-      </div>
-      {sessionId && rows.length > 0 ? (
-        <div className="steps">
-          {rows.map((row, i) =>
-            row.kind === "key" ? (
-              <KeyUseRow key={`key-${row.id}`} row={row} />
-            ) : (
-              <StepRow
-                key={`step-${row.id}`}
-                row={row}
-                sessionId={sessionId}
-                scale={scale}
-                api={api}
-                current={i === lastStep && row.status === "doing"}
-              />
-            ),
-          )}
-        </div>
-      ) : (
-        <p className="say empty">Steps appear here as dot works.</p>
+        />
       )}
-      {agent && <ActivityDetails model={agent} sessionId={sessionId} />}
+      <ActivityDetails model={model} sessionId={sessionId}>
+        {(inspect) => (
+          <>
+            <div className="activity-heading">
+              <h3>Steps</h3>
+              {sessionId && <span>Recorded activity</span>}
+            </div>
+            <fieldset className="activity-filters" aria-label="Activity filter">
+              {(
+                [
+                  ["all", "All"],
+                  ["computer", "Computer"],
+                  ["tools", "Tools"],
+                ] as const
+              ).map(([value, label]) => (
+                <button
+                  type="button"
+                  key={value}
+                  aria-pressed={filter === value}
+                  onClick={() => setFilter(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </fieldset>
+            {sessionId && selected.length ? (
+              <section className="steps" aria-label="Recorded steps">
+                {selected.map((row) => {
+                  if (row.kind === "key") return <KeyUseRow key={`key-${row.id}`} row={row} />;
+                  const step = row.agent;
+                  const changes = model.changes.filter(
+                    (change) => change.type === "file" && change.step === row.id,
+                  );
+                  const controls = (
+                    <>
+                      {step && (step.tool || step.terminal || step.outputTruncated) && (
+                        <button
+                          type="button"
+                          onClick={(event) => inspect("terminal", step.id, event.currentTarget)}
+                        >
+                          Inspect {step.tool?.title ?? "command output"}
+                        </button>
+                      )}
+                      {inspectChanges(changes, inspect)}
+                    </>
+                  );
+                  return row.computer ? (
+                    <StepRow
+                      key={`step-${row.id}`}
+                      row={row.computer}
+                      sessionId={sessionId}
+                      scale={scale}
+                      api={api}
+                      current={timeline[lastStep]?.id === row.id && row.computer.status === "doing"}
+                    >
+                      {step && (
+                        <p className="step-reason">
+                          Step: {stepStatus(step, !!model.ended)}
+                          {step.note ? ` · ${step.note}` : ""}
+                        </p>
+                      )}
+                      {controls}
+                    </StepRow>
+                  ) : step ? (
+                    <ToolRow key={`step-${row.id}`} step={step} ended={!!model.ended}>
+                      {controls}
+                    </ToolRow>
+                  ) : null;
+                })}
+              </section>
+            ) : (
+              <p className="say empty">
+                {!sessionId || !timeline.length
+                  ? "Steps appear here as dot works."
+                  : "No steps match this filter."}
+              </p>
+            )}
+            {!!model.changes.length && (
+              <section className="activity-changes" aria-label="Change previews">
+                <h3>Changes</h3>
+                {model.changes
+                  .filter(
+                    (change) =>
+                      change.type === "memory" ||
+                      !change.step ||
+                      !timeline.some((row) => row.kind === "step" && row.id === change.step),
+                  )
+                  .map((change) =>
+                    change.type === "memory" ? (
+                      <MemoryCard
+                        key={change.id}
+                        change={change}
+                        changes={model.changes}
+                        onInspect={(trigger) => inspect("diff", change.id, trigger)}
+                        {...memoryAction?.(change)}
+                      />
+                    ) : (
+                      inspectChanges([change], inspect)
+                    ),
+                  )}
+              </section>
+            )}
+            {!!model.questions.size && (
+              <section className="question-history" aria-label="Question history">
+                {[...model.questions.values()].map((question) => (
+                  <QuestionCard
+                    key={question.askId}
+                    question={question}
+                    pending={model.pendingAsk === question.askId && !model.ended}
+                  />
+                ))}
+              </section>
+            )}
+            {model.historyTruncated && (
+              <p className="history-note">
+                Showing retained activity. Earlier entries remain in the task log.
+              </p>
+            )}
+          </>
+        )}
+      </ActivityDetails>
+      {skills && <SkillsView skills={skills} />}
     </aside>
   );
 }

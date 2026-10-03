@@ -189,3 +189,20 @@ describe("sessionHud", () => {
     expect(rows[1]).toMatchObject({ id: "s2", label: 'Typing "B2"', status: "doing" });
   });
 });
+
+it("completes a successful wait without claiming input, while cancelled waits remain proposed", () => {
+  for (const cancelled of [false, true]) {
+    const events = [ev("action.intent", 0, { verb: "wait", label: "Wait 500 ms", risk: "none" })];
+    events.push(
+      cancelled
+        ? ev("action.cancel", 500, { reason: "user" })
+        : ev("action.result", 500, { ok: true }),
+    );
+    const row = stepRows(foldEvents(emptyModel(), events))[0];
+    expect(row).toMatchObject({
+      label: cancelled ? "Wait 500 ms" : "Waited 500 ms",
+      delivery: "proposed",
+      status: cancelled ? "cancelled" : "ok",
+    });
+  }
+});

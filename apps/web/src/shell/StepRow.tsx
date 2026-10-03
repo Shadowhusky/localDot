@@ -1,5 +1,5 @@
 import { msToSeconds } from "@localdot/protocol";
-import { useEffect, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { releaseThumbnail, thumbnailUrl } from "../session/thumbnails.ts";
@@ -12,12 +12,14 @@ export function StepRow({
   scale,
   api,
   current,
+  children,
 }: {
   row: StepRowView;
   sessionId: string;
   scale: number;
   api: ApiClient;
   current: boolean;
+  children?: ReactNode;
 }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
@@ -49,6 +51,12 @@ export function StepRow({
   return (
     <div className={current ? "step now" : "step"} data-testid="step-row" data-status={row.status}>
       <div className="step-cap">{row.label}</div>
+      {row.delivery && (
+        <p className="input-delivery">
+          {row.delivery === "delivered" ? "Input delivered" : "Input not delivered"}
+        </p>
+      )}
+      {row.reason && <p className="step-reason">{row.reason}</p>}
       <div className="step-row">
         <div className="thumb">
           {url && (
@@ -58,7 +66,7 @@ export function StepRow({
               style={{ width: 1280 * z, left: 80 - cx * z, top: 50 - cy * z }}
             />
           )}
-          {t && url && (
+          {t && url && row.delivery === "delivered" && (
             <span
               className="tb"
               style={{
@@ -81,6 +89,7 @@ export function StepRow({
           </span>
         </div>
       </div>
+      {children}
     </div>
   );
 }
