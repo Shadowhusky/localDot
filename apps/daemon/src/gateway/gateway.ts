@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import {
   clipText,
   type Input,
@@ -23,6 +24,7 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { CellDesktopd, DesktopdRegistry } from "../desktopd/registry.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "./frames.ts";
+import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.ts";
 import { type OnsetTable, onsetKind } from "./onset-table.ts";
 import type { RingOnsetPolicy } from "./ring-onset.ts";
 import { clickLabel, clipTarget, keyLabel, scrollLabel, typeLabel } from "./text.ts";
@@ -42,10 +44,19 @@ export type GuiAction =
       button?: "left" | "right" | "middle";
       count?: 1 | 2 | 3;
       speed?: Speed | "auto";
+      basedOn?: string;
     }
   | { verb: "type"; label?: string; text: string; masked?: boolean; speed?: Speed | "auto" }
   | { verb: "key"; label?: string; combo: string[]; speed?: Speed | "auto" }
-  | { verb: "scroll"; label?: string; point: Point; dx: number; dy: number; speed?: Speed | "auto" }
+  | {
+      verb: "scroll";
+      label?: string;
+      point: Point;
+      dx: number;
+      dy: number;
+      speed?: Speed | "auto";
+      basedOn?: string;
+    }
   | { verb: "wait"; label?: string; ms: number };
 
 export interface ActionContext {
@@ -61,7 +72,7 @@ export interface ActionOutcome {
   frameId?: string;
   target?: Target;
   error?: string;
-  cancelled?: "preflight" | "user" | "timeout";
+  cancelled?: "preflight" | "user" | "timeout" | "stale";
 }
 
 export interface GatewayDeps {
@@ -78,8 +89,9 @@ export interface GatewayDeps {
 
 class Cancelled extends Error {
   constructor(
-    readonly reason: "preflight" | "user" | "timeout",
+    readonly reason: "preflight" | "user" | "timeout" | "stale",
     message: string,
+    readonly frameId?: string,
   ) {
     super(message);
     this.name = "Cancelled";
@@ -245,7 +257,17 @@ export class ActionGateway {
       const pressAtMs =
         speed === "instant" ? startsAt + INSTANT_LEAD_MS : startsAt + durationMs + dwellMs(speed);
       await this.#sleepUntil(ctx, pressAtMs);
-      await this.#waitForStream(ctx);
+      for (;;) {
+        await this.#waitForStream(ctx);
+        // A stream can stall during the asynchronous comparison. After recovery, compare again
+        // with the same model basis: an earlier allow cannot authorize a delayed press.
+        if (action.basedOn) {
+          await this.#checkFresh(ctx, action.basedOn, point, scale, d, targetKnown);
+        }
+        this.#check(ctx);
+        const stream = this.deps.cells.get(ctx.cellId)?.stream;
+        if (!stream || !holding(stream)) break;
+      }
       const input: Input =
         action.verb === "click"
           ? { kind: "click", button: action.button ?? "left", count: action.count ?? 1, at: point }
@@ -427,7 +449,71 @@ export class ActionGateway {
             ? "user"
             : "preflight";
     this.#append(ctx, "action.cancel", { reason, detail: message.slice(0, 500) });
-    return { ok: false, error: message, cancelled: reason };
+    return {
+      ok: false,
+      error: message,
+      cancelled: reason,
+      ...(err instanceof Cancelled && err.frameId ? { frameId: err.frameId } : {}),
+    };
+  }
+
+  async #checkFresh(
+    ctx: ActionContext,
+    basedOn: string,
+    devicePoint: Point,
+    scale: 1 | 2,
+    desktop: CellDesktopd,
+    firstTarget: Promise<{ target: Target | null; window: number | null }>,
+  ): Promise<void> {
+    const basisPath = this.deps.frames.path(ctx.sessionId, basedOn);
+    if (!basisPath) return; // Preserve the original optional, best-effort basis contract.
+    const point = { x: devicePoint.x / scale, y: devicePoint.y / scale };
+    let basis: Buffer;
+    let first: Buffer;
+    let freshId: string | undefined;
+    try {
+      this.#check(ctx);
+      const observed = await this.observe(ctx);
+      freshId = observed.frameId;
+      const firstPath = this.deps.frames.path(ctx.sessionId, freshId);
+      if (!firstPath) return;
+      [basis, first] = await Promise.all([
+        readFile(basisPath).then(frameLuma),
+        readFile(firstPath).then(frameLuma),
+      ]);
+      this.#check(ctx);
+      if (!lumaRegionChanged(basis, first, point).changed) return;
+    } catch (error) {
+      this.#check(ctx); // Stop is never converted into a best-effort allow.
+      if (error instanceof Cancelled) throw error;
+      return;
+    }
+    // Once change is established, a missing/error/aborted second observation cannot authorize
+    // an animation exception. The model receives the newest successfully stored full frame.
+    try {
+      const initialTarget = await firstTarget;
+      this.#check(ctx);
+      await this.deps.sleep(100, ctx.signal);
+      this.#check(ctx);
+      const observed = await this.observe(ctx);
+      freshId = observed.frameId;
+      const secondPath = this.deps.frames.path(ctx.sessionId, freshId);
+      if (!secondPath) throw new Error("missing second freshness frame");
+      const second = await readFile(secondPath).then(frameLuma);
+      this.#check(ctx);
+      const nextTarget = await desktop.client.hitTest(devicePoint);
+      this.#check(ctx);
+      if (!sameTarget(initialTarget, nextTarget)) throw new Error("the target changed");
+      const bounds = initialTarget.target?.bbox;
+      const modelBounds = bounds
+        ? { x: bounds.x / scale, y: bounds.y / scale, w: bounds.w / scale, h: bounds.h / scale }
+        : undefined;
+      if (animationKeepsTarget(basis, first, second, point, modelBounds)) return;
+    } catch (error) {
+      this.#check(ctx);
+      if (error instanceof Cancelled) throw error;
+    }
+    throw new Cancelled("stale", "the target changed since the model's screenshot", freshId);
   }
 
   #desktopd(cellId: string): CellDesktopd {
@@ -528,4 +614,19 @@ function roundRect(r: Rect): Rect {
 // timeout must not advance the presentation clock.
 function timeoutAfter<T>(ms: number, value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms).unref());
+}
+
+// Target identity is the desktop's own accessibility result, not an untrusted model label.
+function sameTarget(
+  a: { target: Target | null; window: number | null },
+  b: { target: Target | null; window: number | null },
+): boolean {
+  if (!a.target || !b.target) return a.target === b.target && a.window === b.window;
+  return (
+    a.window === b.window &&
+    ["source", "role", "name", "app", "window", "url", "secret"].every(
+      (key) => a.target?.[key as keyof Target] === b.target?.[key as keyof Target],
+    ) &&
+    JSON.stringify(a.target.bbox) === JSON.stringify(b.target.bbox)
+  );
 }
