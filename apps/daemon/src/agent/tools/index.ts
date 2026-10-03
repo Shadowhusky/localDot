@@ -72,6 +72,7 @@ export async function dispatchTool(
 ): Promise<DispatchOutcome> {
   let lease: ToolLease | undefined;
   let ctx: ToolCallContext | undefined;
+  let result: ToolResult | undefined;
   try {
     if (!generation) throw new Error("No active brain generation");
     lease = session.admit(generation, requestSignal);
@@ -137,7 +138,6 @@ export async function dispatchTool(
     }
     const t = deps.tools,
       input = parsed.data as never;
-    let result: ToolResult;
     switch (name) {
       case "computer":
         append(ctx, "step.start", { kind: "gui" });
@@ -206,7 +206,11 @@ export async function dispatchTool(
     }
     return {
       status: 200,
-      result: { ...fail(message), ...(session.stopped ? { final: true } : {}) },
+      result: {
+        ...fail(message),
+        ...(result?.cancelled === "stale" ? { cancelled: "stale" as const } : {}),
+        ...(session.stopped ? { final: true } : {}),
+      },
     };
   } finally {
     lease?.finish();

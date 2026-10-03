@@ -12,9 +12,10 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  assertOwnedCodexDirectory,
   assertOwnedCodexRoots,
   CodexRootsError,
   codexInstallDirectory,
@@ -192,4 +193,21 @@ describe("canonical owned Codex roots", () => {
     expect(existsSync(staging.path)).toBe(false);
     await expect(removeOwnedCodexDirectory({ path: target })).rejects.toThrow(CodexRootsError);
   });
+});
+
+it("gives run capabilities 128 random bits while preserving opaque ownership and exact cleanup", async () => {
+  const f = fixture(),
+    roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+    first = createOwnedCodexDirectory(roots, "runRoot"),
+    second = createOwnedCodexDirectory(roots, "runRoot");
+  expect(basename(first.path)).toMatch(/^[a-f0-9]{32}$/);
+  expect(basename(second.path)).toMatch(/^[a-f0-9]{32}$/);
+  expect(second.path).not.toBe(first.path);
+  expect(lstatSync(first.path).mode & 0o777).toBe(0o700);
+  assertOwnedCodexDirectory(roots, first, "runRoot");
+  expect(() => assertOwnedCodexDirectory(roots, { ...first }, "runRoot")).toThrow(CodexRootsError);
+  await removeOwnedCodexDirectory(first);
+  expect(existsSync(second.path)).toBe(true);
+  expect(existsSync(roots.home)).toBe(true);
+  await removeOwnedCodexDirectory(second);
 });

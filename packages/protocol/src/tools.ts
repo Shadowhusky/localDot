@@ -190,6 +190,8 @@ export const ToolResult = z.object({
   content: z.array(ToolContent),
   // The task is over (done) or the user stopped it: the brain ends its loop.
   final: z.boolean().optional(),
+  // Trusted gateway cancellation metadata; text or a result image cannot establish this cause.
+  cancelled: z.literal("stale").optional(),
 });
 export type ToolResult = z.infer<typeof ToolResult>;
 

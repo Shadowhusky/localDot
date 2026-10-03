@@ -45,6 +45,7 @@ export {
 } from "./profile.ts";
 export * from "./protocol.ts";
 export {
+  assertOwnedCodexDirectory,
   createOwnedCodexDirectory,
   type OwnedCodexDirectory,
   type OwnedCodexRoots,

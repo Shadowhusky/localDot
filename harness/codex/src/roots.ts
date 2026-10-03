@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { constants, lstatSync, mkdirSync, mkdtempSync, realpathSync, type Stats } from "node:fs";
 import { lstat, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
@@ -258,7 +259,13 @@ export function assertOwnedCodexDirectory(
 
 export function createOwnedCodexDirectory(roots: OwnedCodexRoots, area: Area): OwnedCodexDirectory {
   assertOwnedCodexRoots(roots);
-  const path = mkdtempSync(join(roots[area], ".owned-"));
+  // The run directory name is the MCP capability. Keep 128 random bits while preserving the
+  // existing opaque ownership receipt consumed by profiles and cleanup.
+  const path =
+    area === "runRoot"
+      ? join(roots.runRoot, randomBytes(16).toString("hex"))
+      : mkdtempSync(join(roots[area], ".owned-"));
+  if (area === "runRoot") mkdirSync(path, { mode: 0o700 });
   checkPrivate(path);
   const info = lstatSync(path);
   const directory = Object.freeze({ path });

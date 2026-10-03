@@ -114,9 +114,19 @@ export async function computerTool(
       text(ctx.redact(`Failed: ${outcome.error ?? outcome.cancelled ?? "unknown error"}`)),
     );
   }
-  if (outcome.frameId) content.push(await frame(deps, ctx, outcome.frameId));
+  if (outcome.frameId) {
+    try {
+      content.push(await frame(deps, ctx, outcome.frameId));
+    } catch (error) {
+      ctx.check();
+      if (outcome.cancelled !== "stale") throw error;
+      // A failed screenshot read must not erase the gateway's trusted cancellation cause.
+      content.push(text("The new screenshot could not be read. Look again before acting."));
+    }
+  }
   return {
     ok: outcome.ok,
+    ...(outcome.cancelled === "stale" ? { cancelled: "stale" as const } : {}),
     content: content.length ? content : [text(outcome.ok ? "Done." : "Failed.")],
   };
 }
