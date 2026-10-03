@@ -1,4 +1,5 @@
 import type { EventOf } from "@localdot/protocol";
+import type { TerminalText } from "./terminal-text.ts";
 
 export const AGENT_LIMITS = Object.freeze({
   messages: 512,
@@ -37,6 +38,7 @@ export interface AgentStep {
   };
   readonly output: readonly { readonly stream: "stdout" | "stderr"; readonly text: string }[];
   readonly outputTruncated: boolean;
+  readonly terminal?: TerminalText;
 }
 export type AgentQuestion = EventOf<"ask.request">["data"] & {
   readonly answer?: EventOf<"ask.answer">["data"];
@@ -80,6 +82,7 @@ export interface AgentModel {
   // Older material can be fetched from the event log by the later history UI. Never imply that
   // a bounded projection is the complete transcript.
   readonly historyTruncated: boolean;
+  readonly activity?: string;
 }
 export function emptyAgentModel(): AgentModel {
   return {

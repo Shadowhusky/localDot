@@ -1,6 +1,7 @@
 import { keyLikePresent } from "@localdot/protocol";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { AgentMessage } from "./model.ts";
+import { SafeMarkdown } from "./SafeMarkdown.tsx";
 
 export function Conversation({
   messages,
@@ -63,7 +64,11 @@ export function Conversation({
                 {message.role === "user" ? "You" : "dot"}
                 {!message.final && <span> · writing</span>}
               </p>
-              <p className="say message-text">{message.text}</p>
+              {message.role === "assistant" ? (
+                <SafeMarkdown text={message.text} />
+              ) : (
+                <p className="say message-text">{message.text}</p>
+              )}
               {message.truncated && <p className="history-note">Message preview shortened.</p>}
               <button
                 type="button"

@@ -8,6 +8,7 @@ import {
   emptyAgentModel,
   AGENT_LIMITS as L,
 } from "./model.ts";
+import { appendTerminal, emptyTerminal, finishTerminal } from "./terminal-text.ts";
 
 const STREAM_ERROR = "Activity could not be verified. Reconnect to load it again.";
 const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
@@ -59,7 +60,12 @@ function output(row: AgentStep, stream: "stdout" | "stderr", chunk: string): Age
   entries = entries.filter((entry) => entry.text.length > 0);
   const nodesTruncated = entries.length > 512;
   if (nodesTruncated) entries = entries.slice(-512);
-  return { ...row, output: entries, outputTruncated: truncated || nodesTruncated };
+  return {
+    ...row,
+    output: entries,
+    outputTruncated: truncated || nodesTruncated,
+    terminal: appendTerminal(row.terminal ?? emptyTerminal(), stream, chunk),
+  };
 }
 
 // Pure projection of already schema-checked events. Identity is messageId, request ID or envelope
@@ -69,6 +75,9 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
   let next: AgentModel = { ...model, lastSeq: event.seq };
   const e = event;
   switch (e.type) {
+    case "thought.delta":
+      next = { ...next, activity: ((model.activity ?? "") + e.data.text).slice(0, L.messageText) };
+      break;
     case "agent.state":
       next = { ...next, state: { ...e.data } };
       break;
@@ -163,10 +172,18 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       else if (e.type === "step.end")
         row = { ...row, status: e.data.status, note: e.data.note, endedAt: e.t };
       else if (e.type === "tool.start")
-        row = { ...row, tool: { name: e.data.tool, title: e.data.title } };
+        row = {
+          ...row,
+          tool: { name: e.data.tool, title: e.data.title },
+          terminal: row.terminal ?? emptyTerminal(),
+        };
       else if (e.type === "tool.output") row = output(row, e.data.stream, e.data.chunk);
       else if (row.tool)
-        row = { ...row, tool: { ...row.tool, ok: e.data.ok, exitCode: e.data.exitCode } };
+        row = {
+          ...row,
+          tool: { ...row.tool, ok: e.data.ok, exitCode: e.data.exitCode },
+          ...(row.terminal ? { terminal: finishTerminal(row.terminal) } : {}),
+        };
       next = {
         ...next,
         steps: put(model.steps, e.step, row, L.steps),

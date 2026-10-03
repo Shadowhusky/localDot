@@ -1,3 +1,4 @@
+import { ActivityDetails } from "../agent/ActivityDetails.tsx";
 import type { AgentModel } from "../agent/model.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
@@ -76,6 +77,7 @@ export function PlanRail({ rows, sessionId, scale, api, title, agent }: PlanRail
       ) : (
         <p className="say empty">Steps appear here as dot works.</p>
       )}
+      {agent && <ActivityDetails model={agent} sessionId={sessionId} />}
     </aside>
   );
 }
