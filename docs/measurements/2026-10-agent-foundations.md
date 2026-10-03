@@ -144,3 +144,10 @@ sandbox or a claimed power-loss transaction guarantee.
 Evidence: `/tmp/localdot-m4-task7-draft/manifest.json`, `review-notes.md`,
 `integration-{types,lint,hygiene}.log`, and
 `/tmp/localdot-m4-task7-review/scoped-review.md`.
+
+
+## Task 9: brain-container lifecycle
+
+Five files integrate the isolated brain/gate network and lifecycle, with immutable task pricing and the captured original budget on every setup attempt. Cancellation fences publication; active Docker operations use captured object IDs. Cleanup revokes keyd first and retains owned labels and listener reservations when cleanup is uncertain. The internal tool relay stays on 4751 even with a different host backend port.
+
+Independent full review found two Important issues (a final continuation cancellation gap and name-based active object targeting). Both are fixed and scoped re-review passes, including both retained counterexamples and two correction mutations. Integrated acceptance: 23 tests in two files, all workspace type checks, lint and hygiene pass. Evidence: `/tmp/localdot-m4-task9-draft/integration-{tests,types,lint,hygiene}.log` and `/tmp/localdot-m4-task9-review/scoped-review.md`. No real-container acceptance is implied by these local fixtures. Reciprocal desktop/brain listener reservations, runner Stop/recovery wiring and real bridge/relay/containment acceptance remain Tasks 13 and 15.

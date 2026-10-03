@@ -1,9 +1,21 @@
 #!/bin/sh
-# Each relay binds one address: the keyd relay exists only on the cell's internal network, the
+# Each relay binds one address: the relays out of a cell exist only on its internal network, the
 # inbound relays only on the egress network, where Docker delivers the ports it publishes.
+# A desktop's gate relays keyd out and desktopd and the stream in; a brain's gate (LD_ROLE=brain,
+# Part 5a) relays keyd and the daemon's tool API out, and nothing in.
 set -eu
-: "${LD_INTERNAL_ADDR:?}" "${LD_EGRESS_ADDR:?}" "${LD_DESKTOP_ADDR:?}" "${LD_KEYD_PORT:?}"
+: "${LD_ROLE:=desktop}" "${LD_INTERNAL_ADDR:?}" "${LD_KEYD_PORT:?}"
 # PID 1 ignores signals it doesn't trap; exiting takes the relays down with the container.
+case "$LD_ROLE" in
+  brain) : "${LD_TOOL_PORT:?}" ;;
+  desktop) : "${LD_EGRESS_ADDR:?}" "${LD_DESKTOP_ADDR:?}" ;;
+  *) echo "gate: unknown role" >&2; exit 1 ;;
+esac
+relays=""
+cleanup() {
+  for pid in $relays; do kill "$pid" 2>/dev/null || true; done
+}
+trap cleanup EXIT
 trap 'exit 0' TERM INT
 
 has_addr() { ip -4 -o addr show | grep -q " inet $1/"; }
@@ -21,12 +33,36 @@ done
 
 socat "TCP4-LISTEN:3128,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "TCP4:host.docker.internal:$LD_KEYD_PORT" &
 keyd=$!
-socat "TCP4-LISTEN:8081,bind=$LD_EGRESS_ADDR,fork,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:7700" &
-desktopd=$!
-socat "TCP4-LISTEN:8082,bind=$LD_EGRESS_ADDR,fork,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:3000" &
-stream=$!
-echo "gate: keyd $LD_INTERNAL_ADDR:3128 -> host.docker.internal:$LD_KEYD_PORT; inbound $LD_EGRESS_ADDR:8081 -> $LD_DESKTOP_ADDR:7700, $LD_EGRESS_ADDR:8082 -> $LD_DESKTOP_ADDR:3000"
+case "$LD_ROLE" in
+  brain)
+    : "${LD_TOOL_PORT:?}"
+    socat "TCP4-LISTEN:4751,bind=$LD_INTERNAL_ADDR,fork,reuseaddr" "TCP4:host.docker.internal:$LD_TOOL_PORT" &
+    tool=$!
+    echo "gate (brain): keyd $LD_INTERNAL_ADDR:3128 -> host.docker.internal:$LD_KEYD_PORT; tool API $LD_INTERNAL_ADDR:4751 -> host.docker.internal:$LD_TOOL_PORT"
+    relays="$keyd $tool"
+    ;;
+  desktop)
+    : "${LD_EGRESS_ADDR:?}" "${LD_DESKTOP_ADDR:?}"
+    socat "TCP4-LISTEN:8081,bind=$LD_EGRESS_ADDR,fork,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:7700" &
+    desktopd=$!
+    socat "TCP4-LISTEN:8082,bind=$LD_EGRESS_ADDR,fork,reuseaddr" "TCP4:$LD_DESKTOP_ADDR:3000" &
+    stream=$!
+    echo "gate: keyd $LD_INTERNAL_ADDR:3128 -> host.docker.internal:$LD_KEYD_PORT; inbound $LD_EGRESS_ADDR:8081 -> $LD_DESKTOP_ADDR:7700, $LD_EGRESS_ADDR:8082 -> $LD_DESKTOP_ADDR:3000"
+    relays="$keyd $desktopd $stream"
+    ;;
+  *)
+    echo "gate: unknown LD_ROLE $LD_ROLE" >&2
+    exit 1
+    ;;
+esac
 
-while kill -0 "$keyd" "$desktopd" "$stream" 2>/dev/null; do sleep 1; done
-echo "gate: a relay exited" >&2
-exit 1
+# shellcheck disable=SC2086 # the pids are meant to split
+while :; do
+  for pid in $relays; do
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "gate: a relay exited" >&2
+      exit 1
+    fi
+  done
+  sleep 1
+done
