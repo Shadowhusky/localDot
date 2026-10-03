@@ -78,3 +78,23 @@ Browser calls have explicit deadlines and preserve same-URL reload behavior.
 
 M4 is not complete. Client transport, memory/settings,
 immutable per-task keyd pricing, brain loop, chat and optional ChatGPT remain.
+
+## Immutable task pricing prerequisite
+
+The existing keyd task account now owns a frozen route/model/price/output-cap
+snapshot. Reopening the same task preserves its spend and any later explicit
+budget increase. Settings changes cannot replace that policy through shared model
+tables. Requests capture their task attachment before reading a body and retain
+that identity through budget waits and final admission. Retargeted key bindings
+are rejected; changing only the secret value can recover with fresh credentials.
+Ledger v2 retains snapshot metadata and reads valid legacy v0/v1 accounts.
+
+Independent full review passed with no Critical or Important finding. Its 103
+llm/keys tests and nine gateway/admin tests pass, and five targeted mutations are
+caught. Integrated `go test -race ./... -count=1 -timeout=150s` passes all 13 Go
+packages. Shared TypeScript integration checks also pass. Persistence retains the
+existing process-restart guarantee; parent-directory fsync/power-loss durability
+is not claimed. No real model/provider calls were needed.
+
+Evidence: `/tmp/localdot-m4-task-price-snapshot-draft/integration-race.log`,
+`/tmp/localdot-m4-task-price-snapshot-review/review.md` and its `mutations/` reports.

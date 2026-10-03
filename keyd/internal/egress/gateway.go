@@ -95,8 +95,13 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 		c.deny(w, line, http.StatusServiceUnavailable, ReasonBudgetUnavailable)
 		return
 	}
-	if err := c.deps.Budget.Check(c.cfg.CellID); err != nil {
+	lease, err := c.deps.Budget.Capture(c.cfg.CellID)
+	if err != nil {
 		c.refuseBudget(w, line, err)
+		return
+	}
+	if !lease.AllowsRoute(name, keys.BindingIdentity(b)) {
+		c.deny(w, line, http.StatusForbidden, ReasonModelNotAllowed)
 		return
 	}
 	// A stopped generation must also interrupt a client that has not finished uploading.
@@ -142,7 +147,12 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 	line.Model = model
 	var price llm.Price
 	if model != "" {
-		if price, ok = c.deps.Settings.Price(name, model); !ok {
+		if lease.Snapshot() {
+			price, ok = lease.Price(name, model)
+		} else {
+			price, ok = c.deps.Settings.Price(name, model)
+		}
+		if !ok {
 			c.deny(w, line, http.StatusForbidden, ReasonModelNotAllowed)
 			return
 		}
@@ -155,12 +165,12 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 	}
 	var hold *llm.Hold
 	if model != "" && !op.Free {
-		if hold, body, ok = c.reserve(w, r, g, line, op, price, model, body); !ok {
+		if hold, body, ok = c.reserve(w, r, g, line, op, price, model, body, lease); !ok {
 			return
 		}
 		defer hold.Release()
 	}
-	if g.ctx.Err() != nil {
+	if g.ctx.Err() != nil || !c.deps.Budget.Current(lease) {
 		c.deny(w, line, http.StatusServiceUnavailable, ReasonRevoked)
 		return
 	}
@@ -199,7 +209,7 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 // requests already running hold the room, and returns the body with the output cap it was
 // admitted with in the provider's own field. The cap is the smallest the body names, else the
 // model's maximum, lowered to what the room left can pay for; more than one answer is refused.
-func (c *Cell) reserve(w http.ResponseWriter, r *http.Request, g *generation, line audit.Line, op keys.Op, price llm.Price, model string, body []byte) (*llm.Hold, []byte, bool) {
+func (c *Cell) reserve(w http.ResponseWriter, r *http.Request, g *generation, line audit.Line, op keys.Op, price llm.Price, model string, body []byte, lease *llm.TaskLease) (*llm.Hold, []byte, bool) {
 	req, err := llm.ReadRequest(op.Body, model, body)
 	var many *llm.ChoiceError
 	switch {
@@ -210,7 +220,7 @@ func (c *Cell) reserve(w http.ResponseWriter, r *http.Request, g *generation, li
 		c.deny(w, line, http.StatusBadRequest, ReasonBadJSON)
 		return nil, nil, false
 	}
-	capped := op.Cap != "" && price.Output > 0
+	capped := op.Cap != "" && (price.Output > 0 || lease.Snapshot())
 	ask := llm.Ask{Fixed: price.Ceiling(req.Input, 0), PerToken: price.Output}
 	if capped {
 		ask.Tokens = price.MaxOutput
@@ -221,7 +231,7 @@ func (c *Cell) reserve(w http.ResponseWriter, r *http.Request, g *generation, li
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 	defer context.AfterFunc(g.ctx, cancel)()
-	hold, err := c.deps.Budget.Reserve(ctx, c.cfg.CellID, ask)
+	hold, err := c.deps.Budget.ReserveFor(ctx, lease, ask)
 	switch {
 	case err == nil:
 	case g.ctx.Err() != nil:

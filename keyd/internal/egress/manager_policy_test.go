@@ -221,6 +221,9 @@ func TestFailedPolicySaveKeepsTheOldPolicyAndFreshAdmission(t *testing.T) {
 	if _, err := m.Open(OpenRequest{CellID: "c1", Role: "brain"}); err != nil {
 		t.Fatal(err)
 	}
+	if err := m.BeginTask("c1", "legacy-task", 5); err != nil {
+		t.Fatal(err)
+	}
 	old := m.cells["c1"].cell.current()
 	// Removing the private parent forces an atomic-save failure after validation.
 	if err := os.RemoveAll(filepath.Dir(settingsPath)); err != nil {

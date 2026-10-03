@@ -212,3 +212,47 @@ export function surrogateEnvClash(
   }
   return undefined;
 }
+
+// Immutable task policy for the LLM gateway. Bindings are derived by keyd and
+// never accepted in this wire object; the route remains its existing secret ID.
+export const TaskPricingModel = KeydRouteModel.extend({
+  id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/),
+  maxOutputTokens: z.number().int().min(1).max(100_000_000),
+}).strict();
+export type TaskPricingModel = z.infer<typeof TaskPricingModel>;
+export const TaskPricingRoute = z
+  .object({
+    route: z.string().regex(SECRET_ID_PATTERN),
+    models: z.array(TaskPricingModel).min(1).max(64),
+  })
+  .strict()
+  .refine(
+    (r) => new Set(r.models.map((m) => m.id)).size === r.models.length,
+    "duplicate task model",
+  );
+export type TaskPricingRoute = z.infer<typeof TaskPricingRoute>;
+export const TaskPricing = z
+  .object({
+    v: z.literal(1),
+    routes: z.array(TaskPricingRoute).min(1).max(8),
+  })
+  .strict()
+  .refine(
+    (p) => new Set(p.routes.map((r) => r.route)).size === p.routes.length,
+    "duplicate task route",
+  )
+  .refine((p) => p.routes.reduce((n, r) => n + r.models.length, 0) <= 64, "at most 64 task models");
+export type TaskPricing = z.infer<typeof TaskPricing>;
+export const KeydTaskRequest = z
+  .object({
+    taskId: z.string().min(1).max(128),
+    budgetUSD: z
+      .number()
+      .nonnegative()
+      .max(10_000)
+      .refine((v) => v === 0 || Math.floor(v * 1e6 + 0.5) >= 1)
+      .optional(),
+    pricing: TaskPricing.optional(),
+  })
+  .strict();
+export type KeydTaskRequest = z.infer<typeof KeydTaskRequest>;

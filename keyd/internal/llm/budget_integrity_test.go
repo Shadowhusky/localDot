@@ -31,7 +31,7 @@ func TestInvalidTaskLimitsCannotCreateOrRaiseAnAccount(t *testing.T) {
 
 func TestCorruptSpendLedgersCannotBecomeSpendable(t *testing.T) {
 	for _, data := range []string{
-		`{"v":2,"date":"2026-10-02","microUSD":0}`,
+		`{"v":3,"date":"2026-10-02","microUSD":0}`,
 		`{"v":1,"date":"invalid","microUSD":0}`,
 		`{"v":1,"date":"2026-10-02","microUSD":-1}`,
 		`{"v":1,"date":"2026-10-02","microUSD":0,"pendingMicroUSD":1}`,

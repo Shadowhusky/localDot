@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -49,15 +50,20 @@ type TaskInfo struct {
 }
 
 type task struct {
-	id    string
-	limit int64
-	spent int64
-	held  int64
+	id           string
+	limit        int64
+	spent        int64
+	held         int64
+	pricing      *TaskSnapshot
+	initialLimit int64
 }
 
 type savedTask struct {
-	Limit int64 `json:"limitMicroUSD"`
-	Spent int64 `json:"spentMicroUSD"`
+	Limit        int64         `json:"limitMicroUSD"`
+	Spent        int64         `json:"spentMicroUSD"`
+	Mode         string        `json:"pricingMode,omitempty"`
+	Pricing      *TaskSnapshot `json:"pricing,omitempty"`
+	InitialLimit int64         `json:"initialLimitMicroUSD,omitempty"`
 }
 
 type spendFile struct {
@@ -80,12 +86,13 @@ type Budget struct {
 	dayHeld        int64
 	tasks          map[string]*task
 	records        map[string]*task
+	attachments    map[string]*TaskLease
 	persistenceErr error
 	changed        chan struct{}
 }
 
 func OpenBudget(path string, limits func() Limits, now func() time.Time) (*Budget, error) {
-	b := &Budget{path: path, limits: limits, now: now, tasks: map[string]*task{}, records: map[string]*task{}, changed: make(chan struct{})}
+	b := &Budget{path: path, limits: limits, now: now, tasks: map[string]*task{}, records: map[string]*task{}, attachments: map[string]*TaskLease{}, changed: make(chan struct{})}
 	data, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -95,7 +102,16 @@ func OpenBudget(path string, limits func() Limits, now func() time.Time) (*Budge
 		if err := json.Unmarshal(data, &b.day); err != nil {
 			return nil, fmt.Errorf("budget %s: %w", path, err)
 		}
-		if b.day.V < 0 || b.day.V > 1 || b.day.MicroUSD < 0 || b.day.Pending < 0 || b.day.Pending > b.day.MicroUSD {
+		// Version 2 must not silently drop immutable policy metadata it cannot read.
+		// Older ledgers keep their existing permissive read for compatibility.
+		if b.day.V == 2 {
+			dec := json.NewDecoder(bytes.NewReader(data))
+			dec.DisallowUnknownFields()
+			if err := dec.Decode(&b.day); err != nil {
+				return nil, fmt.Errorf("llm: invalid version 2 budget ledger: %w", err)
+			}
+		}
+		if b.day.V < 0 || b.day.V > 2 || b.day.MicroUSD < 0 || b.day.Pending < 0 || b.day.Pending > b.day.MicroUSD {
 			return nil, errors.New("llm: invalid budget ledger")
 		}
 		if _, err := time.Parse("2006-01-02", b.day.Date); err != nil {
@@ -105,7 +121,31 @@ func OpenBudget(path string, limits func() Limits, now func() time.Time) (*Budge
 			if id == "" || len(id) > 256 || saved.Limit <= 0 || saved.Limit > micros(10_000) || saved.Spent < 0 {
 				return nil, errors.New("llm: invalid persisted task budget")
 			}
-			b.records[id] = &task{id: id, limit: saved.Limit, spent: saved.Spent}
+			var snapshot *TaskSnapshot
+			if b.day.V < 2 {
+				if saved.Mode != "" || saved.Pricing != nil || saved.InitialLimit != 0 {
+					return nil, errors.New("llm: pricing in legacy ledger")
+				}
+			} else {
+				switch saved.Mode {
+				case "legacy":
+					if saved.Pricing != nil || saved.InitialLimit != 0 {
+						return nil, errors.New("llm: invalid legacy task policy")
+					}
+				case "snapshot":
+					if saved.Pricing == nil || saved.InitialLimit <= 0 || saved.InitialLimit > micros(10_000) {
+						return nil, errors.New("llm: missing immutable task policy")
+					}
+					var err error
+					snapshot, err = NewTaskSnapshot(saved.Pricing.Pricing, saved.Pricing.Bindings)
+					if err != nil {
+						return nil, err
+					}
+				default:
+					return nil, errors.New("llm: invalid task pricing mode")
+				}
+			}
+			b.records[id] = &task{id: id, limit: saved.Limit, spent: saved.Spent, pricing: snapshot, initialLimit: saved.InitialLimit}
 		}
 		b.day.Tasks = nil
 	}
@@ -118,6 +158,21 @@ func OpenBudget(path string, limits func() Limits, now func() time.Time) (*Budge
 // ending its cell, or reopening keyd keeps that account's spend and explicit limit.
 // A zero budget uses the existing task's limit, or the default for a new task.
 func (b *Budget) Begin(cell, taskID string, budgetUSD float64) error {
+	return b.begin(cell, taskID, budgetUSD, nil)
+}
+
+func (b *Budget) BeginPriced(cell, taskID string, budgetUSD float64, snapshot *TaskSnapshot) error {
+	if snapshot == nil {
+		return errors.New("llm: task pricing is required")
+	}
+	copied, err := NewTaskSnapshot(snapshot.Pricing, snapshot.Bindings)
+	if err != nil {
+		return err
+	}
+	return b.begin(cell, taskID, budgetUSD, copied)
+}
+
+func (b *Budget) begin(cell, taskID string, budgetUSD float64, pricing *TaskSnapshot) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	defer b.notifyLocked()
@@ -130,6 +185,12 @@ func (b *Budget) Begin(cell, taskID string, budgetUSD float64) error {
 	}
 	t := b.records[taskID]
 	created := t == nil
+	if t != nil && pricing != nil && (!t.pricing.equal(pricing) || budgetUSD > 0 && micros(budgetUSD) != t.initialLimit) {
+		return ErrTaskPricingConflict
+	}
+	if previous := b.tasks[cell]; previous != nil && previous != t && (previous.pricing != nil || pricing != nil || t != nil && t.pricing != nil) {
+		return ErrTaskChanged
+	}
 	var previousLimit int64
 	if t != nil {
 		previousLimit = t.limit
@@ -142,9 +203,12 @@ func (b *Budget) Begin(cell, taskID string, budgetUSD float64) error {
 		if math.IsNaN(budgetUSD) || math.IsInf(budgetUSD, 0) || budgetUSD <= 0 || budgetUSD > 10_000 || micros(budgetUSD) < 1 {
 			return errors.New("llm: invalid default task budget")
 		}
-		t = &task{id: taskID, limit: micros(budgetUSD)}
+		t = &task{id: taskID, limit: micros(budgetUSD), pricing: pricing}
+		if pricing != nil {
+			t.initialLimit = t.limit
+		}
 		b.records[taskID] = t
-	} else if budgetUSD > 0 {
+	} else if budgetUSD > 0 && pricing == nil {
 		t.limit = micros(budgetUSD)
 	}
 	b.tasks[cell] = t
@@ -161,6 +225,9 @@ func (b *Budget) Begin(cell, taskID string, budgetUSD float64) error {
 		}
 		return err
 	}
+	if l := b.attachments[cell]; l == nil || l.t != t {
+		b.attachments[cell] = &TaskLease{b: b, cell: cell, t: t}
+	}
 	return nil
 }
 
@@ -168,6 +235,7 @@ func (b *Budget) End(cell string) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	delete(b.tasks, cell)
+	delete(b.attachments, cell)
 	b.notifyLocked()
 }
 
@@ -202,6 +270,10 @@ func (b *Budget) Check(cell string) error {
 // running requests waits for them; one whose input and a single output token do not fit in the
 // room left is refused, as is every request once a limit is spent.
 func (b *Budget) Reserve(ctx context.Context, cell string, ask Ask) (*Hold, error) {
+	return b.reserve(ctx, cell, ask, nil)
+}
+
+func (b *Budget) reserve(ctx context.Context, cell string, ask Ask, lease *TaskLease) (*Hold, error) {
 	if ask.Fixed < 0 || ask.Tokens < 0 || ask.Tokens > 1_000_000_000 || ask.PerToken < 0 || ask.PerToken > maxPrice || math.IsNaN(ask.PerToken) || math.IsInf(ask.PerToken, 0) {
 		return nil, errors.New("llm: invalid request cost")
 	}
@@ -210,6 +282,10 @@ func (b *Budget) Reserve(ctx context.Context, cell string, ask Ask) (*Hold, erro
 		if err := ctx.Err(); err != nil {
 			b.mu.Unlock()
 			return nil, err
+		}
+		if lease != nil && b.attachments[cell] != lease {
+			b.mu.Unlock()
+			return nil, ErrTaskChanged
 		}
 		b.rollLocked()
 		h, err := b.reserveLocked(cell, ask)
@@ -366,9 +442,13 @@ func (b *Budget) rollLocked() {
 func (b *Budget) saveLocked() error {
 	accounts := make(map[string]savedTask, len(b.records))
 	for id, t := range b.records {
-		accounts[id] = savedTask{Limit: t.limit, Spent: addMicro(t.spent, t.held)}
+		mode := "legacy"
+		if t.pricing != nil {
+			mode = "snapshot"
+		}
+		accounts[id] = savedTask{Limit: t.limit, Spent: addMicro(t.spent, t.held), Mode: mode, Pricing: t.pricing, InitialLimit: t.initialLimit}
 	}
-	data, err := json.Marshal(spendFile{V: 1, Date: b.day.Date, MicroUSD: addMicro(b.day.MicroUSD, b.dayHeld), Pending: b.dayHeld, Tasks: accounts})
+	data, err := json.Marshal(spendFile{V: 2, Date: b.day.Date, MicroUSD: addMicro(b.day.MicroUSD, b.dayHeld), Pending: b.dayHeld, Tasks: accounts})
 	if err == nil {
 		err = writeAtomic(b.path, data)
 	}

@@ -245,6 +245,14 @@ func (m *Manager) Mint(cellID string, secrets []string) (map[string]string, erro
 }
 
 func (m *Manager) BeginTask(cellID, taskID string, budgetUSD float64) error {
+	return m.beginTask(cellID, taskID, budgetUSD, nil)
+}
+
+func (m *Manager) BeginPricedTask(cellID, taskID string, budgetUSD float64, pricing llm.TaskPricing) error {
+	return m.beginTask(cellID, taskID, budgetUSD, &pricing)
+}
+
+func (m *Manager) beginTask(cellID, taskID string, budgetUSD float64, pricing *llm.TaskPricing) error {
 	mc, revision, err := m.snapshot(cellID)
 	if err != nil {
 		return err
@@ -262,7 +270,45 @@ func (m *Manager) BeginTask(cellID, taskID string, budgetUSD float64) error {
 	if m.cells[cellID] != mc || mc.revision != revision {
 		return ErrCellChanged
 	}
-	if err := m.d.Budget.Begin(cellID, taskID, budgetUSD); err != nil {
+	var snapshot *llm.TaskSnapshot
+	if pricing != nil {
+		if !mc.policy.Gateway {
+			return badRequest("task pricing requires a gateway cell")
+		}
+		canonical, err := llm.CanonicalTaskPricing(*pricing)
+		if err != nil {
+			return badRequest("invalid task pricing: %s", err)
+		}
+		identities := make(map[string]string, len(canonical.Routes))
+		entries := m.d.Registry.ForCell(cellID)
+		for _, r := range canonical.Routes {
+			binding, ok := mc.cell.gatewayRoute(r.Route)
+			if !ok {
+				return badRequest("task pricing route is unavailable")
+			}
+			if !binding.Local && !slices.ContainsFunc(entries, func(e keys.Entry) bool {
+				return e.Binding.Route == r.Route && keys.BindingIdentity(e.Binding) == keys.BindingIdentity(binding)
+			}) {
+				return badRequest("task pricing route has no current cell credential")
+			}
+			for _, model := range r.Models {
+				if !binding.Local && model.Input == 0 && model.Output == 0 {
+					return badRequest("remote task models require a price")
+				}
+			}
+			identities[r.Route] = keys.BindingIdentity(binding)
+		}
+		snapshot, err = llm.NewTaskSnapshot(canonical, identities)
+		if err != nil {
+			return badRequest("invalid task pricing")
+		}
+	}
+	if snapshot != nil {
+		err = m.d.Budget.BeginPriced(cellID, taskID, budgetUSD, snapshot)
+	} else {
+		err = m.d.Budget.Begin(cellID, taskID, budgetUSD)
+	}
+	if err != nil {
 		return err
 	}
 	m.admin(cellID, mc.cell.Port(), "task-begin", taskID)
@@ -288,7 +334,9 @@ func (m *Manager) EndTask(cellID string) error {
 	if !ok {
 		return ErrUnknownCell
 	}
+	mc.revision++
 	m.d.Budget.End(cellID)
+	mc.cell.Revoke()
 	m.admin(cellID, mc.cell.Port(), "task-end", "")
 	return nil
 }

@@ -50,16 +50,16 @@ func (m *Manager) changeSecret(id string, nextKind vault.Kind, change func() err
 	return revoked, err
 }
 
-// Model and limit changes cancel old reservations/streams before they become
-// visible. New requests cannot take a fresh generation until publication ends.
-// Task accounts and other credentials remain attached; only pending work ends.
+// Global model changes cancel legacy attachments; priced tasks keep their frozen
+// table and active streams. Limit changes still cancel every gateway generation.
+// New affected requests wait for publication; accounts and credentials stay attached.
 func (m *Manager) SetModels(route string, models []llm.Price) error {
 	if err := llm.ValidateModels(models); err != nil {
 		return badRequest("%s", err)
 	}
 	m.policyMu.Lock()
 	defer m.policyMu.Unlock()
-	return m.changePolicyLocked(gatewayCell, func() error { return m.d.Settings.SetModels(route, models) })
+	return m.changePolicyLocked(func(id string, mc *managed) bool { return mc.policy.Gateway && m.d.Budget.IsLegacy(id) }, func() error { return m.d.Settings.SetModels(route, models) })
 }
 
 func (m *Manager) SetLimits(limits llm.Limits) error {

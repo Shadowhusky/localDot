@@ -245,13 +245,30 @@ func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) beginTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		TaskID    string  `json:"taskId"`
-		BudgetUSD float64 `json:"budgetUSD"`
+		TaskID    string          `json:"taskId"`
+		BudgetUSD json.RawMessage `json:"budgetUSD"`
+		Pricing   json.RawMessage `json:"pricing"`
 	}
 	if !decode(w, r, &body) {
 		return
 	}
-	if err := s.Manager.BeginTask(r.PathValue("id"), body.TaskID, body.BudgetUSD); err != nil {
+	budgetUSD := 0.0
+	if body.BudgetUSD != nil && (bytes.Equal(bytes.TrimSpace(body.BudgetUSD), []byte("null")) || json.Unmarshal(body.BudgetUSD, &budgetUSD) != nil) {
+		fail(w, http.StatusBadRequest, "bad-request", "invalid task budget")
+		return
+	}
+	var err error
+	if body.Pricing != nil {
+		var pricing llm.TaskPricing
+		if json.Unmarshal(body.Pricing, &pricing) != nil {
+			fail(w, http.StatusBadRequest, "bad-request", "invalid task pricing")
+			return
+		}
+		err = s.Manager.BeginPricedTask(r.PathValue("id"), body.TaskID, budgetUSD, pricing)
+	} else {
+		err = s.Manager.BeginTask(r.PathValue("id"), body.TaskID, budgetUSD)
+	}
+	if err != nil {
 		managerFailure(w, err)
 		return
 	}
@@ -359,6 +376,10 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 func managerFailure(w http.ResponseWriter, err error) {
 	var bad *egress.RequestError
 	switch {
+	case errors.Is(err, llm.ErrTaskPricingConflict):
+		fail(w, http.StatusConflict, "task-pricing-conflict", "task pricing is immutable")
+	case errors.Is(err, llm.ErrTaskChanged):
+		fail(w, http.StatusConflict, "conflict", "task attachment changed")
 	case errors.Is(err, egress.ErrUnknownCell):
 		fail(w, http.StatusNotFound, "not-found", err.Error())
 	case errors.Is(err, egress.ErrCellExists), errors.Is(err, egress.ErrPortInUse), errors.Is(err, egress.ErrCellChanged):
