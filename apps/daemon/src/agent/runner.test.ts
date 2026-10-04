@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CodexLaunchError, prepareOwnedCodexRoots } from "@localdot/codex-harness";
-import { type KeydRecord, ulid } from "@localdot/protocol";
+import { DEFAULT_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -353,6 +353,31 @@ describe("ChatGPT runner lifecycle", () => {
     s.post("resume", "");
     await until(() => f.run.mock.calls.length === 2 && s.status === "idle");
   });
+  it("freezes autonomy before account preflight and preserves it through an idle follow-up", async () => {
+    const f = setup(),
+      gate = deferred<ChatgptStatus>();
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      autonomy: DEFAULT_AUTONOMY,
+    });
+    f.account.status.mockReturnValueOnce(gate.promise);
+    const pending = f.runner.start(f.cellId, "Synthetic policy task");
+    await until(() => f.account.status.mock.calls.length === 1);
+    f.setSettings({
+      main: { provider: "chatgpt", model: "gpt-6-astra" },
+      autonomy: { ...DEFAULT_AUTONOMY, send: "act" },
+    });
+    gate.resolve({ available: true, state: "signed_in", codexVersion: "0.154.0" });
+    const session = await pending;
+    await until(() => session.status === "idle");
+    expect(session.autonomy.send).toBe("ask");
+    expect(Object.isFrozen(session.autonomy)).toBe(true);
+    session.post("followup", "Continue synthetic work");
+    await until(() => f.run.mock.calls.length === 2 && session.status === "idle");
+    expect(session.autonomy.send).toBe("ask");
+    expect(f.secrets).not.toHaveBeenCalled();
+  });
+
   it("does not start after the request is canceled during account preflight", async () => {
     const f = setup(),
       gate = deferred<ChatgptStatus>(),

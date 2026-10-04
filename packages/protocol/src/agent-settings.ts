@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { SECRET_ID_PATTERN } from "./keyd.ts";
+import { AutonomyPolicy } from "./safety.ts";
 
 export const AgentModelPrice = z
   .strictObject({
@@ -30,6 +31,7 @@ export const AgentDenyFolder = z
   );
 // The daemon additionally validates the path against its actual host's isAbsolute semantics.
 export const AgentSettingsDocument = z.strictObject({
+  autonomy: AutonomyPolicy.optional(),
   main: AgentRoleChoice.optional(),
   fast: AgentRoleChoice.optional(),
   local: AgentRoleChoice.optional(),

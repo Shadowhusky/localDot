@@ -1,6 +1,8 @@
 import {
+  type AutonomyPolicy,
   type BootConfig,
   type EventDraft,
+  freezeAutonomy,
   InboxItem,
   type InboxReply,
   type TranscriptAppend,
@@ -82,6 +84,7 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 // Daemon-owned state outlives any brain or HTTP request. In particular, retirement cancels the
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
+  readonly #autonomy: Readonly<AutonomyPolicy>;
   status: SessionStatus = "starting";
   brainCellId: string | undefined;
   boot: BootConfig | undefined;
@@ -114,7 +117,13 @@ export class AgentSession {
     readonly cellId: string,
     readonly task: string,
     private readonly eventLog: Pick<EventLog, "append">,
-  ) {}
+    autonomy?: AutonomyPolicy,
+  ) {
+    this.#autonomy = freezeAutonomy(autonomy);
+  }
+  get autonomy(): Readonly<AutonomyPolicy> {
+    return this.#autonomy;
+  }
   get stopped(): boolean {
     return this.abort.signal.aborted;
   }

@@ -191,6 +191,8 @@ export class AgentRunner {
     if (this.#starting.has(cellId)) throw new AgentError(409, "a task is already starting");
     this.#starting.add(cellId);
     try {
+      // Capture at request admission, before prior-task retirement or preflight can await.
+      const settings = AgentSettings.parse(this.deps.settings());
       const current = this.deps.live.get(cellId);
       if (current) {
         const old = this.sessions.get(current);
@@ -201,8 +203,6 @@ export class AgentRunner {
           ? abortable(this.deps.live.settled(current), signal)
           : this.deps.live.settled(current));
       }
-      // Capture settings before preflight awaits; later edits apply only to the next task.
-      const settings = AgentSettings.parse(this.deps.settings());
       let selection: ModelSelection;
       if (settings.main?.provider === CHATGPT) {
         for (const role of ["main", "fast", "local"] as const) {
@@ -248,7 +248,7 @@ export class AgentRunner {
       if (this.deps.live.get(cellId))
         throw new AgentError(409, "a task is already running on this computer");
       const id = this.deps.eventLog.createSession(task.slice(0, 200));
-      const session = new AgentSession(id, cellId, task, this.deps.eventLog);
+      const session = new AgentSession(id, cellId, task, this.deps.eventLog, settings.autonomy);
       const rt: Runtime = {
         session,
         selection,

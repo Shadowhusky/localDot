@@ -10,6 +10,7 @@ export * from "./key-like.ts";
 export * from "./keyd.ts";
 export * from "./manual-input.ts";
 export * from "./patch.ts";
+export * from "./safety.ts";
 export * from "./seal.ts";
 export * from "./selftest.ts";
 export * from "./subscription.ts";
