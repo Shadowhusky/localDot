@@ -11,6 +11,7 @@ import { KeydClient } from "../keyd/client.ts";
 import { type KeydProcess, startKeyd } from "../keyd/testing/keyd-process.ts";
 import { type BrainCell, BrainCells, homeLabel } from "./brain-cell.ts";
 import { toolHarness } from "./testing/harness.ts";
+import { openFixtureBrainGate } from "./testing/model-admission.ts";
 
 const enabled =
   process.env.LOCALDOT_DOCKER_TESTS === "1" && process.env.LOCALDOT_TASK15_TESTS === "1";
@@ -225,6 +226,7 @@ describe.skipIf(!enabled)("durable task pricing through real brain-image replace
       const open = async (spent: number, limit: number) => {
         if (!brains || !client) throw new Error("fixture not ready");
         const cell = await brains.open({
+          initialModelAdmission: "paused",
           sessionId: h.session.id,
           secrets: ["fixture"],
           pricing: PRICING,
@@ -273,6 +275,8 @@ describe.skipIf(!enabled)("durable task pricing through real brain-image replace
       ): Promise<WorkerReply> => {
         if (!brains || !h.session.boot) throw new Error("fixture not ready");
         h.session.boot.task = task;
+        if (!client) throw new Error("fixture client is absent");
+        await openFixtureBrainGate(client, cell, h.session.id);
         await brains.start(cell);
         expect(await brains.exited(cell, AbortSignal.timeout(20000))).toBe(0);
         const inspect = (

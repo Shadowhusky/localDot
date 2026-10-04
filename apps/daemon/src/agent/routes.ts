@@ -9,7 +9,9 @@ import {
   HandbackRequest,
   type KeydRecord,
   keyLikePresent,
+  PauseRequest,
   QuestionAnswerRequest,
+  ResumeSafetyRequest,
   TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -46,7 +48,7 @@ export interface UploadAccess {
 }
 export interface AgentRoutesDeps {
   runner: Pick<AgentRunner, "start" | "get" | "raiseBudget"> &
-    Partial<Pick<AgentRunner, "selectionOf" | "terminalOf">>;
+    Partial<Pick<AgentRunner, "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety">>;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
@@ -445,6 +447,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         toolCalls: s.toolCalls,
         autonomy: s.autonomy,
         ...(s.pendingApproval ? { approval: s.pendingApproval } : {}),
+        ...(s.safetyPause ? { pause: s.safetyPause } : {}),
         ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),
         ...(s.brainCellId ? { brainCellId: s.brainCellId } : {}),
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
@@ -530,9 +533,26 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     }),
   );
   app.post(
+    "/api/agent/sessions/:id/pause",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const input = await json(c.req.raw, PauseRequest);
+      check(c.req.raw.signal);
+      if (!deps.runner.pauseTask) throw new RouteError(503, "Pause is unavailable");
+      return c.json(deps.runner.pauseTask(s.id, input.requestId), 202);
+    }),
+  );
+  app.post(
     "/api/agent/sessions/:id/resume",
     route(async (c) => {
       const s = active(c.req.param("id") ?? "");
+      if (s.safetyPause) {
+        const input = await json(c.req.raw, ResumeSafetyRequest);
+        check(c.req.raw.signal);
+        if (!deps.runner.resumeSafety) throw new RouteError(503, "Safety Resume is unavailable");
+        await deps.runner.resumeSafety(s.id, input.requestId, input.revision);
+        return c.body(null, 204);
+      }
       await empty(c.req.raw);
       check(c.req.raw.signal);
       if (

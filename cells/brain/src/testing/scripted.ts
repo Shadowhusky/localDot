@@ -9,6 +9,7 @@ import type {
 import { DEFAULT_AGENT_LIMITS, TranscriptAppend, ulid } from "@localdot/protocol";
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
+import type { ToolClient } from "../tool-client.ts";
 
 type Chunk = Record<string, unknown>;
 export type Turn = Chunk[] | Error | (() => Chunk[] | Error);
@@ -167,6 +168,7 @@ export function fakeApi(
       for (const item of items) fetched.add(item.seq);
       return { items: structuredClone(items), stopped };
     },
+    control: (async () => ({ revision: 0 })) as ToolClient["control"],
     appendTranscript: async (
       messages: TranscriptMessage[],
       inboxAfter?: number,

@@ -9,6 +9,7 @@ import {
 import type { ToolPolicy } from "../policy.ts";
 import type { Redactor } from "../redact.ts";
 import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
+import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
 import { browserNavigateTool, browserReadTool } from "./browser.ts";
@@ -69,6 +70,63 @@ export async function dispatchTool(
   rawInput: unknown,
   redact: Redactor,
   generation: BrainGeneration | undefined = session.generation,
+  requestSignal?: AbortSignal,
+): Promise<DispatchOutcome> {
+  if (!generation) return { status: 200, result: fail("No active brain generation.") };
+  let queuedInput = rawInput;
+  if (isToolName(name)) {
+    const parsed = TOOL_INPUTS[name].safeParse(rawInput);
+    if (!parsed.success)
+      return {
+        status: 400,
+        result: fail(`Invalid ${name} input: ${redact(clipText(parsed.error.message, 1000))}`),
+      };
+    queuedInput = freezeExecutionInput(parsed.data);
+  }
+  try {
+    // Takeover is a control interrupt. It must be able to cancel an approval or
+    // policy wait and drain it through the existing ToolLease owner.
+    const invoke = () =>
+      dispatchAdmitted(deps, session, name, callId, queuedInput, redact, generation, requestSignal);
+    const outcome =
+      name === "request_takeover"
+        ? await invoke()
+        : await session.runAtomic(generation, requestSignal, invoke);
+    return session.safetyPause && !outcome.result.final
+      ? { ...outcome, result: { ...outcome.result, pause: true } }
+      : outcome;
+  } catch (error) {
+    if (error instanceof PausedStepError && !session.stopped)
+      return {
+        status: 200,
+        result: {
+          ok: false,
+          pause: true,
+          content: [
+            {
+              type: "text",
+              text: "The task is paused. Wait for an explicit Resume; do not retry.",
+            },
+          ],
+        },
+      };
+    return {
+      status: 200,
+      result: {
+        ...fail(redact(error instanceof Error ? error.message : String(error))),
+        ...(session.stopped ? { final: true } : {}),
+      },
+    };
+  }
+}
+async function dispatchAdmitted(
+  deps: DispatchDeps,
+  session: AgentSession,
+  name: string,
+  callId: string,
+  rawInput: unknown,
+  redact: Redactor,
+  generation: BrainGeneration,
   requestSignal?: AbortSignal,
 ): Promise<DispatchOutcome> {
   let lease: ToolLease | undefined;

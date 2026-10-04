@@ -53,6 +53,7 @@ export interface BrainCell extends BrainLayout {
   readonly toolToken: string;
 }
 export interface OpenBrain {
+  initialModelAdmission: "paused";
   sessionId: string;
   secrets: string[];
   pricing: TaskPricing;
@@ -161,6 +162,8 @@ export class BrainCells {
     throw new Error(`no free keyd listener port in ${this.deps.range.from}-${this.deps.range.to}`);
   }
   async open(opts: OpenBrain): Promise<BrainCell> {
+    if (opts.initialModelAdmission !== "paused")
+      throw new BrainStateError("brain model admission must start paused");
     const signal = opts.signal;
     checkAbort(signal);
     if (!ULID_PATTERN.test(opts.sessionId)) throw new TypeError("invalid brain session id");

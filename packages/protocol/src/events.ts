@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
-import { ApprovalCard } from "./safety.ts";
+import { ApprovalCard, PauseSnapshot } from "./safety.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
@@ -294,6 +294,11 @@ export const AskRequest = event(
     allowText: z.boolean(),
   }),
 );
+export const SafetyPause = event(
+  "safety.pause",
+  z.object({ revision: z.number().int().nonnegative(), pause: PauseSnapshot.optional() }).strict(),
+);
+
 export const AskAnswer = event(
   "ask.answer",
   z.object({
@@ -303,7 +308,7 @@ export const AskAnswer = event(
       .regex(/^[A-F]$/)
       .optional(),
     text: z.string().max(2000).optional(),
-    by: z.enum(["user", "timeout", "stop"]),
+    by: z.enum(["user", "timeout", "stop", "pause"]),
   }),
 );
 export const TakeoverReason = z.enum(["login", "2fa", "captcha", "payment", "other"]);
@@ -400,6 +405,7 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   MessageAssistant,
   AskRequest,
   AskAnswer,
+  SafetyPause,
   TakeoverRequest,
   TakeoverEnd,
   TaskResult,

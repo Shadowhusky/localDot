@@ -14,6 +14,7 @@ import (
 // generation is what the kill switch replaces: the context every upstream request and tunnel
 // hangs off, the transport whose pooled connections it closes, and the tunnels it tracks.
 type generation struct {
+	model  *ModelAdmission
 	ctx    context.Context
 	cancel context.CancelFunc
 	tr     *http.Transport
@@ -42,7 +43,7 @@ func newGeneration(d Deps) *generation {
 		localDial = d.LocalDialer.DialContext
 	}
 	local := &http.Transport{DialContext: localDial, IdleConnTimeout: 90 * time.Second, DisableCompression: true}
-	return &generation{ctx: ctx, cancel: cancel, tr: tr, local: local, conns: map[net.Conn]struct{}{}}
+	return &generation{model: NewModelAdmission(), ctx: ctx, cancel: cancel, tr: tr, local: local, conns: map[net.Conn]struct{}{}}
 }
 
 // track registers a connection for the kill switch; one opened after the switch is closed at once.
@@ -62,6 +63,7 @@ func (g *generation) track(conn net.Conn) func() {
 }
 
 func (g *generation) stop() {
+	g.model.Retire()
 	g.cancel()
 	g.mu.Lock()
 	for conn := range g.conns {

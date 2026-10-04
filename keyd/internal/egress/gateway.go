@@ -100,6 +100,12 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 		c.refuseBudget(w, line, err)
 		return
 	}
+	modelLease, admissionErr := g.model.Prepare()
+	if admissionErr != nil {
+		c.refuseModelAdmission(w, line)
+		return
+	}
+	defer modelLease.Release()
 	if !lease.AllowsRoute(name, keys.BindingIdentity(b)) {
 		c.deny(w, line, http.StatusForbidden, ReasonModelNotAllowed)
 		return
@@ -199,6 +205,12 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 	target.Path, target.RawQuery = path.Join("/", b.Upstream.Path, rest), r.URL.RawQuery
 	if g.ctx.Err() != nil {
 		c.deny(w, line, http.StatusServiceUnavailable, ReasonRevoked)
+		return
+	}
+	// Start is the final non-cancelling admission boundary, after the body and reservation.
+	// Pause invalidates uploaded/prepared leases; already started responses keep draining.
+	if err := modelLease.Start(); err != nil {
+		c.refuseModelAdmission(w, line)
 		return
 	}
 	meter := &gatewayMeter{c: c, price: price, hold: hold}

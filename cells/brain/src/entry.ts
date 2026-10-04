@@ -14,7 +14,15 @@ export const BRAIN_GAVE_UP = 3;
 type StopSignal = "SIGTERM" | "SIGINT";
 type BrainApi = Pick<
   ToolClient,
-  "boot" | "transcript" | "frame" | "events" | "tool" | "inbox" | "appendTranscript" | "close"
+  | "boot"
+  | "transcript"
+  | "frame"
+  | "events"
+  | "tool"
+  | "inbox"
+  | "appendTranscript"
+  | "control"
+  | "close"
 >;
 
 export interface BrainEntryDeps {

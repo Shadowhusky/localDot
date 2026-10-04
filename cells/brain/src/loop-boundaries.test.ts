@@ -548,3 +548,181 @@ describe("tool lifetime cancellation", () => {
     expect(t.f.toolCalls).toEqual([]);
   });
 });
+
+describe("daemon safety Pause directives", () => {
+  const pause = () => ({
+    requestId: ulid(),
+    revision: 1,
+    phase: "paused" as const,
+    reason: "user" as const,
+    atStepBoundary: true,
+    resumeAvailable: true,
+  });
+  async function spin(predicate: () => boolean) {
+    for (let n = 0; n < 500; n++) {
+      if (predicate()) return;
+      await new Promise<void>((r) => setImmediate(r));
+    }
+    throw new Error("safety boundary not reached");
+  }
+  it("persists the actual paused batch, skips subsequent effects and waits for authenticated control", async () => {
+    const resumed = defer<{ revision: number }>();
+    let isPaused = false,
+      waiting = false;
+    const metadata = pause();
+    const f = fakeApi((name) => {
+      if (name === "shell") {
+        isPaused = true;
+        return {
+          ok: true,
+          pause: true,
+          content: [{ type: "text", text: "Current shell finished" }],
+        };
+      }
+    });
+    f.api.control = async (_after, waitMs) => {
+      if (!isPaused) return { revision: 0 };
+      if (waitMs) {
+        waiting = true;
+        return resumed.promise;
+      }
+      return { revision: 1, pause: metadata };
+    };
+    const t = setup(
+      [
+        calls(
+          ["shell", { command: "echo current" }],
+          ["files", { op: "write", path: "queued", content: "forbidden" }],
+        ),
+        done(),
+      ],
+      {
+        f,
+        hooks: {
+          afterToolCall: async (info) =>
+            info.name === "shell"
+              ? { ok: true, content: [{ type: "text", text: "Adjusted" }] }
+              : undefined,
+        },
+      },
+    );
+    const running = t.run();
+    await spin(() => waiting);
+    expect(t.main.prompts).toHaveLength(1);
+    expect(f.toolCalls.map((c) => c.name)).toEqual(["shell"]);
+    expect(JSON.stringify(f.transcript)).toContain("Skipped: the task was paused");
+    expect(JSON.stringify(f.transcript)).toContain("Adjusted");
+    f.inbox.push(item(1, "steer", "Continue"), item(2, "resume", ""));
+    await new Promise<void>((r) => setImmediate(r));
+    expect(t.main.prompts).toHaveLength(1);
+    isPaused = false;
+    resumed.resolve({ revision: 2 });
+    expect(await running).toBe("done");
+    expect(f.toolCalls.map((c) => c.name)).toEqual(["shell", "done"]);
+  });
+  it("treats a keyd task_paused reply as a control wait with zero ordinary retries", async () => {
+    const resumed = defer<{ revision: number }>();
+    let isPaused = false,
+      waiting = false;
+    const metadata = pause(),
+      f = fakeApi();
+    f.api.control = async (_after, waitMs) => {
+      if (!isPaused) return { revision: 0 };
+      if (waitMs) {
+        waiting = true;
+        return resumed.promise;
+      }
+      return { revision: 1, pause: metadata };
+    };
+    const down = new APICallError({
+      message: "paused",
+      url: "fixture",
+      requestBodyValues: {},
+      statusCode: 409,
+      responseBody: JSON.stringify({ code: "task_paused" }),
+      isRetryable: false,
+    });
+    const sleep = vi.fn(async () => {});
+    const t = setup(
+      [
+        () => {
+          isPaused = true;
+          return down;
+        },
+        done(),
+      ],
+      { f, sleep },
+    );
+    const running = t.run();
+    await spin(() => waiting);
+    expect(t.main.prompts).toHaveLength(1);
+    expect(sleep).not.toHaveBeenCalled();
+    expect(t.events.some((e) => JSON.stringify(e).includes("model_error"))).toBe(false);
+    isPaused = false;
+    resumed.resolve({ revision: 2 });
+    expect(await running).toBe("done");
+    expect(t.main.prompts).toHaveLength(2);
+    expect(sleep).not.toHaveBeenCalled();
+  });
+  it("keeps heartbeat during an active tool then stops it at the settled Pause", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
+    const active = defer<ToolResult>(),
+      resumed = defer<{ revision: number }>();
+    let acting = false,
+      waiting = false,
+      isPaused = false;
+    const metadata = pause(),
+      f = fakeApi();
+    const ordinary = f.api.tool;
+    f.api.tool = async (...args) => {
+      if (args[0] === "shell") {
+        acting = true;
+        return active.promise;
+      }
+      return ordinary(...args);
+    };
+    f.api.control = async (_after, waitMs) => {
+      if (!isPaused) return { revision: 0 };
+      if (waitMs) {
+        waiting = true;
+        return resumed.promise;
+      }
+      return { revision: 1, pause: metadata };
+    };
+    const delivered: import("@localdot/protocol").BrainEvent[] = [];
+    const sink = new EventSink({
+      send: async (events) => {
+        delivered.push(...events);
+      },
+      heartbeatMs: 1000,
+      flushMs: 100,
+    });
+    sinks.push(sink);
+    const main = scriptedModel([call("shell", { command: "echo current" }), done()]);
+    const controller = new AbortController();
+    const agent = new Agent({
+      boot: bootConfig({ resume: true }),
+      api: f.api,
+      sink,
+      models: { main: main.model },
+      history: [],
+    });
+    const running = agent.run(controller.signal);
+    await spin(() => acting);
+    isPaused = true;
+    await vi.advanceTimersByTimeAsync(1000);
+    await sink.flush();
+    expect(delivered.some((e) => e.type === "heartbeat" && e.data.ongoing)).toBe(true);
+    active.resolve({ ok: true, pause: true, content: [{ type: "text", text: "Settled" }] });
+    await spin(() => waiting);
+    await sink.flush();
+    const ongoing = delivered.filter((e) => e.type === "heartbeat" && e.data.ongoing).length;
+    await vi.advanceTimersByTimeAsync(2000);
+    await sink.flush();
+    expect(delivered.filter((e) => e.type === "heartbeat" && e.data.ongoing)).toHaveLength(ongoing);
+    expect(delivered.some((e) => e.type === "heartbeat" && !e.data.ongoing)).toBe(true);
+    isPaused = false;
+    resumed.resolve({ revision: 2 });
+    expect(await running).toBe("done");
+  });
+});

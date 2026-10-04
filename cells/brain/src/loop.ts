@@ -54,7 +54,7 @@ export interface AgentHooks {
 
 export interface AgentOptions {
   boot: BootConfig;
-  api: Pick<ToolClient, "tool" | "inbox" | "appendTranscript">;
+  api: Pick<ToolClient, "tool" | "inbox" | "appendTranscript" | "control">;
   sink: EventSink;
   models: { main: LanguageModel; fast?: LanguageModel; local?: LanguageModel };
   history: ModelMessage[];
@@ -176,6 +176,16 @@ export class Agent {
     return outcome;
   }
 
+  async #waitSafety(signal: AbortSignal): Promise<void> {
+    let state = await this.#o.api.control(0, 0, signal);
+    signal.throwIfAborted();
+    while (state.pause) {
+      this.#o.sink.busy(false);
+      this.#o.sink.state("paused", "Waiting for explicit Resume");
+      state = await this.#o.api.control(state.revision, 25000, signal);
+      signal.throwIfAborted();
+    }
+  }
   async #loop(signal: AbortSignal): Promise<RunOutcome> {
     const { boot, sink } = this.#o;
     signal.throwIfAborted();
@@ -211,6 +221,9 @@ export class Agent {
       if (signal.aborted) return "stopped";
       const inbox = await this.#drain(0, signal);
       if (inbox === "stopped") return "stopped";
+      // A safety hold precedes guard questions, retry limits and model work.
+      // Paused skipped calls are not a decision from the user to end the task.
+      await this.#waitSafety(signal);
       const limits = boot.limits;
       if (this.#turns >= limits.maxTurns) {
         if (
@@ -228,6 +241,7 @@ export class Agent {
       }
       this.#turns += 1;
       this.#o.onEvent?.({ type: "turn_start", turn: this.#turns });
+      await this.#waitSafety(signal);
       sink.state("thinking");
       sink.busy(true);
       const step = await this.#callModel(signal).finally(() => sink.busy(false));
@@ -356,15 +370,24 @@ export class Agent {
   }
 
   async #keepGoing(question: string, signal: AbortSignal): Promise<boolean> {
-    const r = await this.#o.api.tool(
-      "ask_user",
-      callId("guard"),
-      { question, options: ["Keep going", "Stop here"] },
-      signal,
-    );
-    signal.throwIfAborted();
-    const answer = r.content.map((c) => (c.type === "text" ? c.text : "")).join(" ");
-    return r.ok && /chose A/.test(answer);
+    for (;;) {
+      await this.#waitSafety(signal);
+      const r = await this.#o.api.tool(
+        "ask_user",
+        callId("guard"),
+        { question, options: ["Keep going", "Stop here"] },
+        signal,
+      );
+      signal.throwIfAborted();
+      // Pause can arrive while this question is being admitted or awaiting its answer.
+      // Only an actual nonpaused user answer may decide this guard.
+      if (r.pause === true) {
+        await this.#waitSafety(signal);
+        continue;
+      }
+      const answer = r.content.map((c) => (c.type === "text" ? c.text : "")).join(" ");
+      return r.ok && /chose A/.test(answer);
+    }
   }
 
   async #callModel(signal: AbortSignal): Promise<ModelStep | "stopped" | "gave_up"> {
@@ -429,6 +452,19 @@ export class Agent {
         sink.endText();
         const status = APICallError.isInstance(err) ? err.statusCode : undefined;
         const message = (err instanceof Error ? err.message : String(err)).slice(0, 200);
+        if (status === 409 && APICallError.isInstance(err) && err.responseBody) {
+          let paused = false;
+          try {
+            paused = JSON.parse(err.responseBody).code === "task_paused";
+          } catch {
+            /* Ordinary conflict is handled below. */
+          }
+          if (paused) {
+            await this.#waitSafety(signal);
+            sink.busy(true);
+            continue;
+          }
+        }
         // keyd's budget refusal (Part 4a): the task pauses until the user raises the budget.
         if (status === 402) {
           if (!(await this.#waitForResume("budget", signal))) return "stopped";
@@ -477,6 +513,7 @@ export class Agent {
     const parts: ReturnType<typeof resultParts>["part"][] = [];
     const images: ReturnType<typeof resultParts>["images"] = [];
     let batchFailed = false;
+    let batchPaused = false;
     let final: RunOutcome | undefined;
     for (const call of calls) {
       signal.throwIfAborted();
@@ -488,6 +525,14 @@ export class Agent {
       this.#o.onEvent?.({ type: "tool_execution_start", callId: info.callId, name: info.name });
       let result: ToolResult;
       if (signal.aborted) result = { ok: false, content: [{ type: "text", text: "Stopped." }] };
+      else if (batchPaused)
+        result = {
+          ok: false,
+          pause: true,
+          content: [
+            { type: "text", text: "Skipped: the task was paused before this call executed." },
+          ],
+        };
       else if (final)
         result = {
           ok: false,
@@ -510,10 +555,11 @@ export class Agent {
         };
       else result = await this.#execute(call, info, binding, basedOn, signal);
       signal.throwIfAborted();
-      if (!result.ok) {
+      if (!result.ok && result.pause !== true) {
         this.#failed += 1;
         if (call.toolName === "computer") batchFailed = true;
-      } else this.#failed = 0;
+      } else if (result.ok) this.#failed = 0;
+      if (result.pause === true) batchPaused = true;
       if (result.final) final = result.ok && call.toolName === "done" ? "done" : "stopped";
       const r = resultParts(call.toolCallId, call.toolName, result, imagesInToolResults(binding));
       parts.push(r.part);
@@ -572,7 +618,7 @@ export class Agent {
       this.#plan = (call.input as UpdatePlanInput).items;
     const adjusted = await this.#o.hooks?.afterToolCall?.(info, result);
     signal.throwIfAborted();
-    return adjusted ?? result;
+    return result.pause === true ? { ...(adjusted ?? result), pause: true } : (adjusted ?? result);
   }
 
   #cursorPer1000(result: ToolResult): ToolResult {
@@ -591,6 +637,7 @@ export class Agent {
   // Older turns become one summary, written by the fast model when there is one, once the
   // context passes 60 % of the model's window.
   async #compactIfNeeded(signal: AbortSignal): Promise<void> {
+    await this.#waitSafety(signal);
     const binding = this.#binding();
     if (estimateTokens(this.#history) < binding.contextTokens * COMPACT_AT) return;
     const cut = safeCut(this.#history, Math.floor(this.#history.length / 2));

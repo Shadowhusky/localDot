@@ -15,6 +15,7 @@ const OTHER = "01JXYZ0000000000000000SES2";
 const SURROGATE = "ld_ant_0123456789abcdefghijkl_abcdef";
 function options(): OpenBrain {
   return {
+    initialModelAdmission: "paused",
     sessionId: SESSION,
     secrets: ["provider"],
     budgetUSD: 5,

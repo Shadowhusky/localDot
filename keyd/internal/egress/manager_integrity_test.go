@@ -200,6 +200,7 @@ func TestRevokeStopsKeylessLocalGatewayRequests(t *testing.T) {
 	if err := m.BeginTask("c1", "session", 5); err != nil {
 		t.Fatal(err)
 	}
+	openFixtureAdmission(t, m, "c1")
 	client := cellClient(w, o)
 	post := func() *http.Response {
 		resp, err := client.Post("http://llm.ldot/lmstudio/chat/completions", "application/json", strings.NewReader(`{"model":"local"}`))

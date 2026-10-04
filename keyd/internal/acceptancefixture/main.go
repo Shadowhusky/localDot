@@ -111,6 +111,20 @@ func main() {
 			assembled.respond(w, r, request, body)
 			return
 		}
+		// Safety acceptance records only a count marker, never credentials or request text.
+		if request["model"] == "fixture-safety-pause" {
+			f, err := os.OpenFile(filepath.Join(dir, "safety-provider-count.jsonl"), os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+			if err != nil {
+				http.Error(w, "fixture counter unavailable", 500)
+				return
+			}
+			_, err = f.WriteString("{\"providerRequest\":true}\n")
+			closeErr := f.Close()
+			if err != nil || closeErr != nil {
+				http.Error(w, "fixture counter unavailable", 500)
+				return
+			}
+		}
 		input := 5
 		if request["model"] == "fixture-priced" {
 			input = 400

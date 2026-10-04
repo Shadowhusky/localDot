@@ -1,4 +1,4 @@
-import type { ApprovalCardDraft } from "@localdot/protocol";
+import type { ApprovalCardDraft, PauseSnapshot } from "@localdot/protocol";
 import {
   type ApprovalCard,
   type AutonomyPolicy,
@@ -17,6 +17,7 @@ import {
   type ApprovalChecks,
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
+import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const AGENT = "main";
@@ -24,7 +25,7 @@ export type SessionStatus = "starting" | "running" | "waiting_user" | "paused" |
 export interface AskAnswer {
   option?: string;
   text?: string;
-  by: "user" | "timeout" | "stop";
+  by: "user" | "timeout" | "stop" | "pause";
 }
 export interface TakeoverOutcome {
   note?: string;
@@ -94,6 +95,11 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
   readonly #approvals: ApprovalBroker;
+  readonly #steps = new StepBarrier(() => {
+    if (this.stopped) throw new SessionStoppedError();
+  });
+  #safetyRevision = 0;
+  #safetyResuming = false;
   status: SessionStatus = "starting";
   brainCellId: string | undefined;
   boot: BootConfig | undefined;
@@ -204,6 +210,107 @@ export class AgentSession {
   }
   get generation(): BrainGeneration | undefined {
     return this.#brain?.generation;
+  }
+  get safetyPause(): PauseSnapshot | undefined {
+    const pause = this.#steps.pause;
+    return pause
+      ? {
+          ...pause,
+          ...(this.#safetyResuming ? { phase: "resuming" as const } : {}),
+          atStepBoundary: this.#steps.active === 0,
+          resumeAvailable:
+            !this.#safetyResuming &&
+            pause.phase === "paused" &&
+            this.#steps.active === 0 &&
+            !this.stopped &&
+            !this.controlHeld,
+        }
+      : undefined;
+  }
+  get safetyControlRevision(): number {
+    return this.#safetyRevision;
+  }
+  runAtomic<T>(
+    generation: BrainGeneration,
+    signal: AbortSignal | undefined,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const combined = AbortSignal.any([
+      this.abort.signal,
+      generation.signal,
+      ...(signal ? [signal] : []),
+    ]);
+    this.check(generation, combined);
+    return this.#steps.run(() => {
+      this.check(generation, combined);
+      return work();
+    }, combined);
+  }
+  requestSafetyPause(
+    requestId: string,
+    reason: "user" | "repeated_action" = "user",
+  ): PauseSnapshot {
+    if (this.stopped) throw new SessionStoppedError();
+    if (this.controlHeld) throw new ControlHeldError();
+    const prior = this.#steps.pause;
+    this.#steps.requestPause(requestId, reason);
+    this.#approvals.cancel(this.id);
+    this.#ask?.finish({ by: "pause" });
+    this.setStatus("paused");
+    if (!prior) this.#safetyChanged();
+    const pause = this.safetyPause;
+    if (!pause) throw new PausedStepError();
+    return pause;
+  }
+  async safetyBoundary(signal = this.abort.signal): Promise<void> {
+    await this.#steps.waitAtBoundary(signal);
+  }
+  confirmSafetyPause(requestId: string, revision: number): void {
+    this.#steps.confirmPaused(requestId, revision);
+    this.#safetyChanged();
+  }
+  uncertainSafetyPause(requestId: string, revision: number): void {
+    this.#safetyResuming = false;
+    this.#steps.uncertain(requestId, revision);
+    this.#safetyChanged();
+  }
+  beginSafetyResume(requestId: string, revision: number): void {
+    const pause = this.safetyPause;
+    if (!pause?.resumeAvailable || pause.requestId !== requestId || pause.revision !== revision)
+      throw new Error("pause owner not resumable");
+    this.#safetyResuming = true;
+    this.#safetyChanged();
+  }
+  resumeSafety(requestId: string, revision: number): void {
+    if (this.controlHeld) throw new ControlHeldError();
+    this.#steps.resume(requestId, revision);
+    this.#safetyResuming = false;
+    this.#safetyChanged();
+    this.setStatus("running");
+  }
+  async waitForSafety(signal = this.abort.signal): Promise<void> {
+    while (this.safetyPause && !this.stopped) await this.#changed(25000, signal);
+    signal.throwIfAborted();
+    if (this.stopped) throw new SessionStoppedError();
+  }
+  async waitSafetyControl(after: number, waitMs: number, signal: AbortSignal): Promise<void> {
+    if (after < this.#safetyRevision) return;
+    await this.#changed(Math.min(Math.max(waitMs, 0), 25000), signal);
+    signal.throwIfAborted();
+  }
+  #safetyChanged(): void {
+    this.#safetyRevision++;
+    this.#wake();
+    // Publication cannot interrupt private admission transitions or exact-owner containment.
+    // GET/control reads retain the authoritative snapshot even if a journal append fails.
+    try {
+      this.append("safety.pause", {
+        revision: this.#safetyRevision,
+        ...(this.safetyPause ? { pause: this.safetyPause } : {}),
+      });
+    } catch {
+      /* The private revision and wakeup have already committed. */
+    }
   }
   get pendingAsk(): string | undefined {
     return this.#ask?.askId;
@@ -510,7 +617,8 @@ export class AgentSession {
           return false;
         }
         if (answer.by === "user") this.tainted = false;
-        if (this.isCurrent(generation) && !this.#control) this.status = "running";
+        if (this.isCurrent(generation) && !this.#control && !this.safetyPause)
+          this.status = "running";
         resolve(answer);
         return true;
       };
@@ -700,6 +808,7 @@ export class AgentSession {
     combined.throwIfAborted();
   }
   setStatus(status: SessionStatus): void {
+    if (this.safetyPause && status !== "paused" && status !== "ended") return;
     if (this.stopped) {
       this.status = "ended";
       return;
@@ -715,6 +824,7 @@ export class AgentSession {
     this.status = status;
   }
   stop(): void {
+    this.#steps.stop();
     if (this.stopped) return;
     this.status = "ended";
     this.#approvals.cancel(this.id);

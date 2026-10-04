@@ -231,6 +231,35 @@ async function until(predicate: () => boolean) {
 it("real idle-upload admission cannot pass a completed drain and overlap the replacement brain", async () => {
   const h = setup();
   h.deps.keyd.secrets = async () => [];
+  const gates = new Map<string, import("@localdot/protocol").ModelAdmissionSnapshot>();
+  h.deps.keyd.modelAdmission = async (id) => {
+    let gate = gates.get(id);
+    if (!gate) {
+      const owner = required(mocks.opens.find((b) => b.id === id));
+      gate = {
+        taskId: owner.sessionId,
+        generationId: "a".repeat(32),
+        epoch: 1,
+        paused: true,
+        active: 0,
+        retired: false,
+      };
+      gates.set(id, gate);
+    }
+    return { ...gate };
+  };
+  h.deps.keyd.setModelAdmission = async (id, write) => {
+    const gate = await h.deps.keyd.modelAdmission(id);
+    if (
+      gate.taskId !== write.taskId ||
+      gate.generationId !== write.generationId ||
+      (write.state === "open" && (!gate.paused || gate.epoch !== write.expectedEpoch))
+    )
+      throw new Error("stale fixture model owner");
+    const next = { ...gate, epoch: gate.epoch + 1, paused: write.state === "paused" };
+    gates.set(id, next);
+    return { ...next };
+  };
   h.deps.killSwitch.stopSession = async () => ({
     revoked: true,
     paused: true,

@@ -39,6 +39,7 @@ function fixture() {
     tool: vi.fn(async () => ({ ok: true, content: [] })),
     inbox: vi.fn(async () => ({ items: [], stopped: false })),
     appendTranscript: vi.fn(async () => {}),
+    control: vi.fn(async () => ({ revision: 0 })),
     close: vi.fn(async () => {
       order.push("api closed");
     }),

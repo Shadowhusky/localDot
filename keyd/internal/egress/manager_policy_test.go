@@ -89,6 +89,7 @@ func TestModelChangesCancelRequestsWaitingForBudget(t *testing.T) {
 	if err := m.BeginTask("c1", "session", 5); err != nil {
 		t.Fatal(err)
 	}
+	openFixtureAdmission(t, m, "c1")
 	hold, err := m.d.Budget.Reserve(context.Background(), "c1", llm.Ask{Fixed: 5_000_000})
 	if err != nil {
 		t.Fatal(err)

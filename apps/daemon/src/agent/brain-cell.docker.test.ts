@@ -11,6 +11,7 @@ import { type KeydProcess, startKeyd } from "../keyd/testing/keyd-process.ts";
 import { type BrainCell, BrainCells, BrainCleanupError, homeLabel } from "./brain-cell.ts";
 import { cleanupAcceptance } from "./testing/acceptance-cleanup.ts";
 import { toolHarness } from "./testing/harness.ts";
+import { openFixtureBrainGate } from "./testing/model-admission.ts";
 
 const execute = promisify(execFile);
 const enabled =
@@ -172,6 +173,7 @@ describe.skipIf(!enabled)("reviewed brain and gate in real Docker", () => {
     let cell: BrainCell | undefined;
     try {
       cell = await brains.open({
+        initialModelAdmission: "paused",
         sessionId: h.session.id,
         secrets: ["fixture"],
         pricing: PRICING,
@@ -202,6 +204,7 @@ describe.skipIf(!enabled)("reviewed brain and gate in real Docker", () => {
         resume: false,
         inboxAfter: 0,
       };
+      await openFixtureBrainGate(client, cell, h.session.id);
       await brains.start(cell);
       const code = await brains.exited(cell, AbortSignal.timeout(20000));
       expect(code, await command("logs", cell.names.brain)).toBe(0);
@@ -238,6 +241,7 @@ describe.skipIf(!enabled)("reviewed brain and gate in real Docker", () => {
     let cell: BrainCell | undefined;
     try {
       cell = await brains.open({
+        initialModelAdmission: "paused",
         sessionId: h.session.id,
         secrets: ["fixture"],
         pricing: PRICING,
@@ -313,13 +317,16 @@ describe.skipIf(!enabled)("reviewed brain and gate in real Docker", () => {
       server.listen(TOOL_PORT, "127.0.0.1", resolve);
     });
     let cell: BrainCell | undefined;
+    const taskId = ulid();
     try {
       cell = await brains.open({
-        sessionId: ulid(),
+        initialModelAdmission: "paused",
+        sessionId: taskId,
         secrets: ["fixture"],
         pricing: PRICING,
         budgetUSD: 5,
       });
+      await openFixtureBrainGate(client, cell, taskId);
       await brains.start(cell);
       await Promise.race([
         seen,
@@ -354,9 +361,11 @@ describe.skipIf(!enabled)("reviewed brain and gate in real Docker", () => {
     };
     const brains = manager(home, request);
     let cell: BrainCell | undefined;
+    const taskId = ulid();
     try {
       cell = await brains.open({
-        sessionId: ulid(),
+        initialModelAdmission: "paused",
+        sessionId: taskId,
         secrets: ["fixture"],
         pricing: PRICING,
         budgetUSD: 5,
@@ -367,7 +376,12 @@ describe.skipIf(!enabled)("reviewed brain and gate in real Docker", () => {
       expect(await client.cell(cell.id)).toBeUndefined();
       await expect(brains.start(cell)).rejects.toThrow("current state");
       await expect(
-        brains.open({ sessionId: ulid(), secrets: ["fixture"], pricing: PRICING }),
+        brains.open({
+          initialModelAdmission: "paused",
+          sessionId: ulid(),
+          secrets: ["fixture"],
+          pricing: PRICING,
+        }),
       ).rejects.toThrow("no free");
       const info = JSON.parse(await command("inspect", cell.names.gate))[0];
       expect(info.Config.Labels["localdot.home"]).toBe(homeLabel(home));

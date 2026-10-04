@@ -56,6 +56,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /v1/cells/{id}/surrogates", s.mint)
 	mux.HandleFunc("PUT /v1/cells/{id}/task", s.beginTask)
 	mux.HandleFunc("DELETE /v1/cells/{id}/task", s.endTask)
+	mux.HandleFunc("GET /v1/cells/{id}/model-admission", s.getModelAdmission)
+	mux.HandleFunc("PUT /v1/cells/{id}/model-admission", s.setModelAdmission)
 	mux.HandleFunc("GET /v1/budget", s.getBudget)
 	mux.HandleFunc("PUT /v1/budget", s.setBudget)
 	mux.HandleFunc("GET /v1/llm/routes/{route}/models", s.getModels)
@@ -376,6 +378,8 @@ func decode(w http.ResponseWriter, r *http.Request, v any) bool {
 func managerFailure(w http.ResponseWriter, err error) {
 	var bad *egress.RequestError
 	switch {
+	case errors.Is(err, egress.ErrAdmissionStale), errors.Is(err, egress.ErrAdmissionBusy), errors.Is(err, egress.ErrAdmissionClosed):
+		fail(w, http.StatusConflict, "model-admission-conflict", "model admission owner unavailable")
 	case errors.Is(err, llm.ErrTaskPricingConflict):
 		fail(w, http.StatusConflict, "task-pricing-conflict", "task pricing is immutable")
 	case errors.Is(err, llm.ErrTaskChanged):

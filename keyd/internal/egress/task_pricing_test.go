@@ -30,6 +30,13 @@ func pricedCell(t *testing.T, m *Manager, id, task string, rate float64) Opened 
 	if err := m.BeginPricedTask(id, task, 5, taskPrices(rate)); err != nil {
 		t.Fatal(err)
 	}
+	// Legacy pricing fixtures use historical non-ULID task names. This opens only
+	// their owned private transport gate; public-control acceptance uses real ULIDs.
+	gate := m.cells[id].cell.current().model
+	snapshot := gate.Snapshot()
+	if _, err := gate.Resume(snapshot.GenerationID, snapshot.Epoch); err != nil {
+		t.Fatal(err)
+	}
 	return o
 }
 func TestTaskPricingIsolatedFromOtherTasksAndGlobalTables(t *testing.T) {
@@ -161,6 +168,7 @@ func TestTaskPricingBindingChangesRefuseRecovery(t *testing.T) {
 	if err := m.BeginTask("new", "session", 0); err != nil {
 		t.Fatal(err)
 	}
+	openFixtureAdmission(t, m, "new")
 	req := httptest.NewRequest("POST", "http://llm.ldot/anthropic/chat/completions", strings.NewReader(sonnet))
 	req.Header.Set("Authorization", "Bearer "+opened.Surrogates["anthropic"])
 	response := httptest.NewRecorder()
@@ -268,6 +276,7 @@ func TestTaskPricingKeepsOutputCapsForFreeOutputAndLocalModels(t *testing.T) {
 			if err := m.BeginPricedTask("a", "session", 5, pricing); err != nil {
 				t.Fatal(err)
 			}
+			openFixtureAdmission(t, m, "a")
 			price.MaxOutput = 1000
 			if err := m.SetModels(route, []llm.Price{price}); err != nil {
 				t.Fatal(err)

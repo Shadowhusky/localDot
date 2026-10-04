@@ -17,6 +17,12 @@ export async function askUserTool(
     ctx.signal,
   );
   ctx.check();
+  if (answer.by === "pause")
+    return {
+      ok: false,
+      pause: true,
+      content: [text("The task was paused while waiting for an answer.")],
+    };
   if (answer.by === "timeout")
     return { ok: false, content: [text("The user did not answer within 30 minutes.")] };
   if (answer.by === "stop") return { ok: false, content: [text("The question was cancelled.")] };

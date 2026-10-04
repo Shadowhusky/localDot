@@ -32,6 +32,8 @@ import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell
 import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { MemoryStore } from "./memory.ts";
+import { SafetyController } from "./safety/controller.ts";
+import { SafetyIntentStore } from "./safety/store.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import type { TranscriptStore } from "./transcript.ts";
@@ -58,6 +60,7 @@ export class AgentError extends Error {
   }
 }
 export interface AgentRunnerDeps {
+  home: string;
   eventLog: Pick<EventLog, "createSession" | "append" | "subscribe">;
   live: Pick<
     LiveSessions,
@@ -66,7 +69,7 @@ export interface AgentRunnerDeps {
   cell(cellId: string): CellSummary | undefined;
   cellBusy?(cellId: string): boolean;
   brains: Pick<BrainCells, "open" | "start" | "exited" | "close">;
-  keyd: Pick<KeydClient, "secrets" | "beginTask">;
+  keyd: Pick<KeydClient, "secrets" | "beginTask" | "modelAdmission" | "setModelAdmission">;
   keydHealth?(): KeydHealth;
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
@@ -95,6 +98,7 @@ interface Runtime {
   skills: SkillSummary[];
   epoch: number;
   brain?: BrainCell;
+  brainOpening?: Promise<void>;
   initialized: boolean;
   serial: Promise<void>;
   pause?: "budget" | "keyd" | "model" | "auth";
@@ -102,6 +106,7 @@ interface Runtime {
   authGeneration?: number;
   idleWait?: AbortController;
   containment?: Promise<void>;
+  safety?: SafetyController;
   backoff?: AbortController;
 }
 class CleanupUncertain extends Error {}
@@ -285,6 +290,53 @@ export class AgentRunner {
     const snapshot = this.#terminal.get(id);
     return snapshot ? structuredClone(snapshot) : undefined;
   }
+  pauseTask(id: string, requestId: string): import("@localdot/protocol").PauseSnapshot {
+    const rt = this.#runtime.get(id);
+    if (!rt || rt.session.stopped) throw new AgentError(409, "task not available");
+    return this.#safety(rt).request(requestId);
+  }
+  async resumeSafety(id: string, requestId: string, revision: number): Promise<void> {
+    const rt = this.#runtime.get(id);
+    if (!rt || rt.session.stopped) throw new AgentError(409, "task not available");
+    try {
+      await this.#safety(rt).resume(requestId, revision);
+    } catch {
+      throw new AgentError(
+        rt.session.safetyPause?.phase === "uncertain" ? 503 : 409,
+        "Pause could not be resumed",
+      );
+    }
+  }
+  #safety(rt: Runtime): SafetyController {
+    if (rt.safety) return rt.safety;
+    rt.safety = new SafetyController(rt.session, {
+      owner: () => (rt.brain ? { cellId: rt.brain.id, taskId: rt.session.id } : undefined),
+      ownerBoundary: () => rt.brainOpening ?? Promise.resolve(),
+      ready: () => {
+        if (
+          rt.session.stopped ||
+          rt.session.controlHeld ||
+          !this.#health.online ||
+          rt.pause === "auth" ||
+          rt.pause === "keyd" ||
+          rt.pause === "budget"
+        )
+          throw new Error("task readiness changed");
+      },
+      modelAdmission: (id) => this.deps.keyd.modelAdmission(id),
+      setModelAdmission: (id, write) => this.deps.keyd.setModelAdmission(id, write),
+      persist: (pause) =>
+        new SafetyIntentStore(this.deps.home).write(
+          rt.session.id,
+          rt.session.cellId,
+          rt.session.autonomy,
+          pause,
+        ),
+      sleep: this.deps.sleep ?? sleep,
+      mode: rt.selection.kind === "api" ? "api" : "native",
+    });
+    return rt.safety;
+  }
   isChatgpt(id: string): boolean {
     return this.#runtime.get(id)?.selection.kind === "chatgpt";
   }
@@ -386,6 +438,7 @@ export class AgentRunner {
     for (const rt of this.#runtime.values()) {
       const session = rt.session;
       if (session.stopped) continue;
+      if (session.safetyPause && (!now.online || changedBoot)) rt.safety?.invalidate();
       if (changedBoot && (session.generation || session.status !== "idle")) {
         rt.epoch += 1;
         if (session.generation) session.retireBrain(session.generation); // Fence before yielding.
@@ -479,6 +532,7 @@ export class AgentRunner {
           await this.waitForAuthResume(session);
           resume = true;
         }
+        await session.waitForSafety();
         await session.waitForControl();
         await session.waitForTools();
         await this.deps.waitForUploads(session.cellId, session.abort.signal);
@@ -624,6 +678,15 @@ export class AgentRunner {
     session.setStatus("running");
     let brain: BrainCell | undefined;
     let aliased = false;
+    let publishOwner!: () => void;
+    const opening = new Promise<void>((resolve) => {
+      publishOwner = resolve;
+    });
+    rt.brainOpening = opening;
+    const settledOwner = () => {
+      publishOwner();
+      if (rt.brainOpening === opening) rt.brainOpening = undefined;
+    };
     try {
       // beginBrain synchronously moves new uploads onto generation-owned ToolLeases. Drain any
       // idle upload admitted after the earlier wait before opening the replacement brain.
@@ -636,6 +699,7 @@ export class AgentRunner {
             ...new Set(selection.roles.flatMap((role) => (role.keyId ? [role.keyId] : []))),
           ],
           pricing: selection.pricing,
+          initialModelAdmission: "paused",
           ...(selection.initialBudget === undefined ? {} : { budgetUSD: selection.initialBudget }),
           signal: generation.signal,
         });
@@ -668,14 +732,53 @@ export class AgentRunner {
         });
         this.deps.live.alias(brain.id, session.id);
         aliased = true;
+        // BrainCells creates a closed generation. Publish ownership before opening it, so
+        // any concurrent Pause closes this exact owner and the process cannot sample early.
+        const gate = await this.deps.keyd.modelAdmission(brain.id);
+        session.check(generation);
+        if (gate.taskId !== session.id || gate.retired || !gate.paused || gate.active !== 0)
+          throw new Error("brain model admission unavailable");
+        if (!session.safetyPause) {
+          try {
+            const opened = await this.deps.keyd.setModelAdmission(brain.id, {
+              taskId: session.id,
+              generationId: gate.generationId,
+              state: "open",
+              expectedEpoch: gate.epoch,
+            });
+            session.check(generation);
+            if (
+              opened.taskId !== session.id ||
+              opened.generationId !== gate.generationId ||
+              opened.paused ||
+              opened.retired
+            )
+              throw new Error("brain admission was not opened");
+          } catch (error) {
+            if (!session.safetyPause) throw error;
+          }
+        }
+        if (session.safetyPause) {
+          const closed = await this.deps.keyd.setModelAdmission(brain.id, {
+            taskId: session.id,
+            generationId: gate.generationId,
+            state: "paused",
+          });
+          session.check(generation);
+          if (!closed.paused || closed.retired || closed.generationId !== gate.generationId)
+            throw new Error("brain pause was not confirmed");
+        }
+        settledOwner();
         await this.deps.brains.start(brain, generation.signal);
         session.check(generation);
       });
       if (!brain) throw new Error("brain did not open");
       return await this.deps.brains.exited(brain, generation.signal);
     } finally {
+      settledOwner();
       session.retireBrain(generation);
       const owned = brain;
+      if (owned && session.safetyPause && !session.stopped) rt.safety?.invalidate();
       if (owned) {
         await this.#exclusive(rt, async () => {
           try {

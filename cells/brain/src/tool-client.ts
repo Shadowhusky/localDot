@@ -4,6 +4,7 @@ import {
   BrainEvents,
   InboxReply,
   MODEL_SCREEN,
+  PauseSnapshot,
   ShellInput,
   ToolCallRequest,
   ToolResult,
@@ -163,6 +164,29 @@ export class ToolClient {
     await this.#request("POST", "/v1/transcript", body, () => undefined, BASE_TIMEOUT_MS, signal);
   }
 
+  control(
+    after: number,
+    waitMs: number,
+    signal?: AbortSignal,
+  ): Promise<{ revision: number; pause?: import("@localdot/protocol").PauseSnapshot }> {
+    z.number().int().nonnegative().safe().parse(after);
+    z.number().int().min(0).max(25000).parse(waitMs);
+    return this.#json(
+      "GET",
+      `/v1/control?after=${after}&waitMs=${waitMs}`,
+      undefined,
+      (value) =>
+        z
+          .object({
+            revision: z.number().int().nonnegative().safe(),
+            pause: PauseSnapshot.optional(),
+          })
+          .strict()
+          .parse(value),
+      waitMs + 10000,
+      signal,
+    );
+  }
   inbox(after: number, waitMs: number, signal?: AbortSignal): Promise<InboxReply> {
     z.number().int().nonnegative().parse(after);
     z.number().int().min(0).max(30_000).parse(waitMs);

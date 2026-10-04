@@ -255,3 +255,14 @@ func TestTasksAndListing(t *testing.T) {
 		t.Fatalf("Cells = %+v", m.Cells())
 	}
 }
+
+// Legacy transport fixtures explicitly open their owned test generation; the
+// production admin API requires an immutable priced ULID task owner.
+func openFixtureAdmission(t *testing.T, m *Manager, id string) {
+	t.Helper()
+	gate := m.cells[id].cell.current().model
+	snapshot := gate.Snapshot()
+	if _, err := gate.Resume(snapshot.GenerationID, snapshot.Epoch); err != nil {
+		t.Fatal(err)
+	}
+}

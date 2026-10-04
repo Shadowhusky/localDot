@@ -14,6 +14,7 @@ import { agentRoutes } from "./routes.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import type { AgentSettings } from "./settings.ts";
 import { SettingsStore } from "./settings.ts";
+import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
 function required<T>(value: T | undefined): T {
@@ -132,7 +133,9 @@ function setup(options: { settings?: AgentSettings } = {}) {
       if (state.failClose) throw new Error("fixture uncertain cleanup");
     },
   };
+  const admission = fixtureModelAdmission(brains);
   const deps: AgentRunnerDeps = {
+    home,
     eventLog: log,
     live,
     cell: (id) =>
@@ -149,6 +152,7 @@ function setup(options: { settings?: AgentSettings } = {}) {
     cellBusy: () => state.busy,
     brains,
     keyd: {
+      ...admission,
       secrets: async () => {
         if (state.secretsGate) await state.secretsGate;
         return keys;

@@ -118,6 +118,30 @@ export function createToolApi(deps: ToolApiDeps): Hono<{ Variables: Variables }>
     c.set("generation", match.generation);
     await next();
   });
+  app.get("/v1/control", async (c) => {
+    const { session, generation } = c.var;
+    const after = Number(c.req.query("after") ?? "0"),
+      waitMs = Number(c.req.query("waitMs") ?? "0");
+    if (
+      !Number.isSafeInteger(after) ||
+      after < 0 ||
+      !Number.isSafeInteger(waitMs) ||
+      waitMs < 0 ||
+      waitMs > 25000
+    )
+      return c.text("invalid control cursor", 400);
+    session.check(generation, c.req.raw.signal, true);
+    await session.waitSafetyControl(
+      after,
+      waitMs,
+      AbortSignal.any([generation.signal, c.req.raw.signal]),
+    );
+    session.check(generation, c.req.raw.signal, true);
+    return c.json({
+      revision: session.safetyControlRevision,
+      ...(session.safetyPause ? { pause: session.safetyPause } : {}),
+    });
+  });
   app.get("/v1/boot", (c) => {
     c.var.session.check(c.var.generation, c.req.raw.signal);
     return c.var.session.boot ? c.json(c.var.session.boot) : c.text("no boot config", 404);

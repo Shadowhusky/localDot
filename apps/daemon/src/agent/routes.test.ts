@@ -11,7 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CodexInstallState, InstalledCodex } from "@localdot/codex-harness";
-import type { KeydRecord } from "@localdot/protocol";
+import { type KeydRecord, ulid } from "@localdot/protocol";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -962,4 +962,47 @@ it("requires an empty resume/undo body and rechecks paused ownership and memory 
   });
   expect((await f.send("POST", endpoint("resume"))).status).toBe(204);
   expect(f.session.inboxSequence).toBe(1);
+});
+
+it("safety Pause and Resume require the exact DTO owner and refuse a missing control adapter", async () => {
+  const f = await setup(),
+    requestId = ulid();
+  const pausePath = `/api/agent/sessions/${SESSION}/pause`,
+    resumePath = `/api/agent/sessions/${SESSION}/resume`;
+  expect((await f.send("POST", pausePath, { requestId })).status).toBe(503);
+  const pause = vi.fn((_sessionId: string, id: string) => {
+    const state = f.session.requestSafetyPause(id);
+    f.session.confirmSafetyPause(id, state.revision);
+    return f.session.safetyPause;
+  });
+  const resume = vi.fn(async (_sessionId: string, id: string, revision: number) => {
+    try {
+      f.session.resumeSafety(id, revision);
+    } catch {
+      throw new AgentError(409, "stale Pause owner");
+    }
+  });
+  f.deps.runner.pauseTask = pause as NonNullable<AgentRoutesDeps["runner"]["pauseTask"]>;
+  f.deps.runner.resumeSafety = resume;
+  for (const body of [{ requestId, extra: true }, { requestId: "bad" }, {}])
+    expect((await f.send("POST", pausePath, body)).status).toBe(400);
+  expect(pause).not.toHaveBeenCalled();
+  const response = await f.send("POST", pausePath, { requestId });
+  expect(response.status).toBe(202);
+  const state = (await response.json()) as { revision: number };
+  expect(f.session.safetyPause?.requestId).toBe(requestId);
+  expect((await f.send("POST", resumePath)).status).toBe(400);
+  expect(
+    (await f.send("POST", resumePath, { requestId, revision: state.revision, approve: true }))
+      .status,
+  ).toBe(400);
+  expect(resume).not.toHaveBeenCalled();
+  expect(
+    (await f.send("POST", resumePath, { requestId, revision: state.revision + 1 })).status,
+  ).toBe(409);
+  expect(f.session.safetyPause?.phase).toBe("paused");
+  expect((await f.send("POST", resumePath, { requestId, revision: state.revision })).status).toBe(
+    204,
+  );
+  expect(f.session.safetyPause).toBeUndefined();
 });

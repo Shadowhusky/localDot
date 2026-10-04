@@ -297,6 +297,7 @@ export function createAgent(d: AgentWiringDeps) {
         })
       : undefined;
   const runner = new AgentRunner({
+    home: d.home,
     eventLog: d.eventLog,
     live: d.live,
     cell: (id) => d.cells.get(id),

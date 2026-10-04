@@ -155,7 +155,7 @@ describe("handler generation and control fences", () => {
       h.session.generation,
       abort.signal,
     );
-    await turns();
+    await until(() => write.mock.calls.length > 0);
     expect(write.mock.calls[0]?.[2]).toBeInstanceOf(AbortSignal);
     abort.abort();
     const n = h.events().length;
@@ -282,7 +282,7 @@ describe("taint and containment", () => {
     const desktop = required(h.tools.desktop(h.session.cellId));
     h.tools.desktop = () => desktop;
     let reject!: (error: unknown) => void;
-    vi.spyOn(desktop, "shell").mockReturnValue(
+    const running = vi.spyOn(desktop, "shell").mockReturnValue(
       new Promise((_r, j) => {
         reject = j;
       }),
@@ -292,7 +292,7 @@ describe("taint and containment", () => {
       expect(session.stopped).toBe(true);
     });
     const call = h.call("shell", { command: "echo x" }, h.session.generation, abort.signal);
-    await turns();
+    await until(() => running.mock.calls.length > 0);
     if (cancellation === "generation") h.session.retireBrain(required(h.session.generation));
     else abort.abort();
     expect(h.session.stopped).toBe(false);

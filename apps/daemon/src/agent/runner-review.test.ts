@@ -13,6 +13,7 @@ import { MemoryStore } from "./memory.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import type { AgentSession } from "./session.ts";
 import type { AgentSettings } from "./settings.ts";
+import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
 const accountMocks = vi.hoisted(() => ({ launch: vi.fn(), installer: vi.fn() }));
@@ -107,7 +108,15 @@ function setup(idleMs = 60_000) {
   const sleep = vi.fn(async (_ms: number, signal: AbortSignal) => {
     signal.throwIfAborted();
   });
+  const brains = {
+    open,
+    start: vi.fn(async () => {}),
+    exited: vi.fn(async () => 0),
+    close: vi.fn(async () => {}),
+  };
+  const admission = fixtureModelAdmission(brains);
   const deps: AgentRunnerDeps = {
+    home,
     eventLog: log,
     live,
     cell: (id) =>
@@ -122,13 +131,8 @@ function setup(idleMs = 60_000) {
           }
         : undefined,
     cellBusy: () => state.busy,
-    brains: {
-      open,
-      start: vi.fn(async () => {}),
-      exited: vi.fn(async () => 0),
-      close: vi.fn(async () => {}),
-    },
-    keyd: { secrets, beginTask },
+    brains,
+    keyd: { secrets, beginTask, ...admission },
     keydHealth: () => ({ online: state.online, bootId: "fixture-boot" }),
     settings: () => settings,
     catalog: () => normalizeCatalog(MODELS_DEV_FIXTURE, "2026-10-03T00:00:00Z"),

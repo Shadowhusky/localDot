@@ -239,6 +239,7 @@ function runnerFor(h: ReturnType<typeof toolHarness>, f: Awaited<ReturnType<type
     throw new Error("containment fixture must not start a brain");
   };
   return new AgentRunner({
+    home: h.home,
     eventLog: h.eventLog,
     live: f.live,
     cell: (id) => ({

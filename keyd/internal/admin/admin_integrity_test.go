@@ -3,6 +3,7 @@ package admin
 import (
 	"bytes"
 	"errors"
+	"github.com/shadowhusky/localdot/keyd/internal/llm"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -112,6 +113,25 @@ func TestChangingModelsOrLimitsCancelsActiveGatewayRequests(t *testing.T) {
 			if code != 201 {
 				t.Fatal(code)
 			}
+			// This retained legacy cancellation fixture first opens a valid priced
+			// owner, then uses its private test ledger to simulate an old attachment.
+			// Production model-control routes never grant unpriced admission.
+			pricing := llm.TaskPricing{V: 1, Routes: []llm.TaskPricingRoute{{Route: "lmstudio", Models: []llm.Price{{Model: "local", MaxOutput: 1}}}}}
+			if err := f.s.Manager.BeginPricedTask("brain", admissionTask, 5, pricing); err != nil {
+				t.Fatal(err)
+			}
+			snapshot, err := f.s.Manager.ModelAdmission("brain")
+			if err != nil {
+				t.Fatal(err)
+			}
+			epoch := snapshot.Epoch
+			if _, err = f.s.Manager.SetModelAdmission("brain", egress.ModelAdmissionWrite{TaskID: admissionTask, GenerationID: snapshot.GenerationID, State: "open", ExpectedEpoch: &epoch}); err != nil {
+				t.Fatal(err)
+			}
+			f.s.Budget.End("brain")
+			if err = f.s.Budget.Begin("brain", "session", 5); err != nil {
+				t.Fatal(err)
+			}
 			if code, _ := f.call(t, "PUT", "/v1/cells/brain/task", map[string]any{"taskId": "session"}); code != 204 {
 				t.Fatal(code)
 			}
@@ -145,8 +165,8 @@ func TestChangingModelsOrLimitsCancelsActiveGatewayRequests(t *testing.T) {
 					t.Fatal(err)
 				}
 				defer next.Body.Close()
-				if next.StatusCode != 403 {
-					t.Fatalf("removed model accepted: %d", next.StatusCode)
+				if next.StatusCode != 409 || next.Header.Get("X-Keyd-Reason") != "task_paused" {
+					t.Fatalf("fresh model gate after policy publication was not closed: %d", next.StatusCode)
 				}
 			}
 		})

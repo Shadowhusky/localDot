@@ -84,6 +84,12 @@ func (g *gatewayWorld) open(id string, role policy.Role) *Cell {
 		g.t.Fatal(err)
 	}
 	g.t.Cleanup(func() { c.Close() })
+	// Legacy transport tests explicitly open their fixture's fresh closed gate.
+	gate := c.current().model
+	snap := gate.Snapshot()
+	if _, err := gate.Resume(snap.GenerationID, snap.Epoch); err != nil {
+		g.t.Fatal(err)
+	}
 	return c
 }
 

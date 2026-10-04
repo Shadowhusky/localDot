@@ -11,6 +11,7 @@ import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { MemoryStore } from "./memory.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import type { AgentSettings } from "./settings.ts";
+import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
 function required<T>(value: T | undefined): T {
@@ -129,7 +130,9 @@ function setup(options: { settings?: AgentSettings } = {}) {
       if (state.failClose) throw new Error("fixture uncertain cleanup");
     },
   };
+  const admission = fixtureModelAdmission(brains);
   const deps: AgentRunnerDeps = {
+    home,
     eventLog: log,
     live,
     cell: (id) =>
@@ -146,6 +149,7 @@ function setup(options: { settings?: AgentSettings } = {}) {
     cellBusy: () => state.busy,
     brains,
     keyd: {
+      ...admission,
       secrets: async () => {
         if (state.secretsGate) await state.secretsGate;
         return keys;
@@ -538,4 +542,71 @@ it("a takeover arriving during a budget acknowledgement never enqueues Resume or
   h.live.stop(session.id);
   await takingFailure;
   await h.live.settled(session.id);
+});
+
+it("the current runner preserves a user Pause across steering, followup, budget and reconnect signals", async () => {
+  const h = setup();
+  const writes = vi.spyOn(h.deps.keyd, "setModelAdmission");
+  const session = await h.runner.start(h.cellId, "Safety task");
+  const brain = await h.ready();
+  const pricing = structuredClone(required(h.ledger.get(session.id)).pricing);
+  const pause = h.runner.pauseTask(session.id, ulid());
+  await until(() => session.safetyPause?.phase === "paused");
+  expect((await h.deps.keyd.modelAdmission(brain.id)).paused).toBe(true);
+  const opens = () => writes.mock.calls.filter(([, input]) => input.state === "open").length;
+  const before = opens();
+  session.post("steer", "Continue");
+  session.post("followup", "More");
+  session.post("resume", "");
+  await h.runner.raiseBudget(session.id, 8);
+  await h.health({ ...h.state.health });
+  expect(opens()).toBe(before);
+  expect(session.safetyPause?.phase).toBe("paused");
+  expect(h.starts).toHaveLength(1);
+  expect(required(h.ledger.get(session.id)).pricing).toEqual(pricing);
+  expect(required(h.ledger.get(session.id)).spent).toBe(0);
+  await expect(
+    h.runner.resumeSafety(session.id, pause.requestId, pause.revision + 1),
+  ).rejects.toThrow();
+  expect(opens()).toBe(before);
+  await h.runner.resumeSafety(session.id, pause.requestId, pause.revision);
+  expect(session.safetyPause).toBeUndefined();
+  expect(opens()).toBe(before + 1);
+  expect((await h.deps.keyd.modelAdmission(brain.id)).paused).toBe(false);
+  expect(required(h.ledger.get(session.id)).pricing).toEqual(pricing);
+});
+it("Pause during brain allocation waits for its closed current model owner before offering Resume", async () => {
+  const h = setup(),
+    gate = deferred<void>();
+  h.state.openGate = gate.promise;
+  const session = await h.runner.start(h.cellId, "Startup Pause");
+  await until(() => h.opens.length === 1);
+  const pause = h.runner.pauseTask(session.id, ulid());
+  await new Promise<void>((r) => setImmediate(r));
+  expect(session.safetyPause?.phase).toBe("pausing");
+  expect(session.safetyPause?.resumeAvailable).toBe(false);
+  gate.resolve();
+  const brain = await h.ready();
+  await until(() => session.safetyPause?.phase === "paused");
+  expect((await h.deps.keyd.modelAdmission(brain.id)).paused).toBe(true);
+  await h.runner.resumeSafety(session.id, pause.requestId, pause.revision);
+  expect((await h.deps.keyd.modelAdmission(brain.id)).paused).toBe(false);
+});
+
+it("a keyd boot change cannot reopen a saved user Pause or claim an old model owner is resumable", async () => {
+  const h = setup();
+  const writes = vi.spyOn(h.deps.keyd, "setModelAdmission");
+  const session = await h.runner.start(h.cellId, "Pause across restart");
+  await h.ready();
+  const pause = h.runner.pauseTask(session.id, ulid());
+  await until(() => session.safetyPause?.phase === "paused");
+  const before = writes.mock.calls.filter(([, input]) => input.state === "open").length;
+  await h.health({ online: true, bootId: "boot-restarted" });
+  await until(() => session.safetyPause?.phase === "uncertain");
+  expect(session.safetyPause?.resumeAvailable).toBe(false);
+  expect(writes.mock.calls.filter(([, input]) => input.state === "open")).toHaveLength(before);
+  await expect(
+    h.runner.resumeSafety(session.id, pause.requestId, pause.revision),
+  ).rejects.toMatchObject({ status: 503 });
+  expect(writes.mock.calls.filter(([, input]) => input.state === "open")).toHaveLength(before);
 });

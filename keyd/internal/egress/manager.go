@@ -303,6 +303,9 @@ func (m *Manager) beginTask(cellID, taskID string, budgetUSD float64, pricing *l
 			return badRequest("invalid task pricing")
 		}
 	}
+	// A listener previously opened for another task cannot transfer its open
+	// admission or delayed control grants to the replacement budget owner.
+	prior, hadPrior := m.d.Budget.Task(cellID)
 	if snapshot != nil {
 		err = m.d.Budget.BeginPriced(cellID, taskID, budgetUSD, snapshot)
 	} else {
@@ -310,6 +313,9 @@ func (m *Manager) beginTask(cellID, taskID string, budgetUSD float64, pricing *l
 	}
 	if err != nil {
 		return err
+	}
+	if hadPrior && prior.ID != taskID {
+		mc.cell.current().model.Retire()
 	}
 	m.admin(cellID, mc.cell.Port(), "task-begin", taskID)
 	return nil
@@ -335,6 +341,7 @@ func (m *Manager) EndTask(cellID string) error {
 		return ErrUnknownCell
 	}
 	mc.revision++
+	m.cells[cellID].cell.current().model.Retire()
 	m.d.Budget.End(cellID)
 	mc.cell.Revoke()
 	m.admin(cellID, mc.cell.Port(), "task-end", "")

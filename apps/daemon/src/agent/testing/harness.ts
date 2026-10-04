@@ -177,6 +177,7 @@ export function toolHarness(
       body: (await res.json()) as {
         ok: boolean;
         final?: boolean;
+        pause?: boolean;
         content: { type: string; text?: string; frameId?: string; data?: string }[];
       },
     };

@@ -71,6 +71,7 @@ export async function fixture(
       throw new Error("Unexpected real-lifecycle fixture boundary");
     };
     realRunner = new AgentRunner({
+      home,
       eventLog: log,
       live,
       cell: (key) => cells.get(key),
@@ -80,7 +81,12 @@ export async function fixture(
         exited: async () => inert(),
         close: async () => inert(),
       },
-      keyd: { secrets: async () => inert(), beginTask: async () => inert() },
+      keyd: {
+        secrets: async () => inert(),
+        beginTask: async () => inert(),
+        modelAdmission: async () => inert(),
+        setModelAdmission: async () => inert(),
+      },
       settings: () => ({ main: { provider: CHATGPT, model: "owned-plan-model" } }),
       catalog: () => undefined,
       memory: new MemoryStore(home),

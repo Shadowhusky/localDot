@@ -14,6 +14,8 @@ import {
   KeydRouteModels,
   KeydSecrets,
   KeydStatus,
+  ModelAdmissionSnapshot,
+  ModelAdmissionWrite,
   type Sealed,
   type SecretBinding,
   type TaskPricing,
@@ -176,6 +178,25 @@ export class KeydClient {
     );
   }
 
+  async modelAdmission(cellId: string): Promise<ModelAdmissionSnapshot> {
+    return this.#json(
+      "GET",
+      `/v1/cells/${segment(cellId)}/model-admission`,
+      undefined,
+      ModelAdmissionSnapshot,
+    );
+  }
+  async setModelAdmission(
+    cellId: string,
+    write: ModelAdmissionWrite,
+  ): Promise<ModelAdmissionSnapshot> {
+    return this.#json(
+      "PUT",
+      `/v1/cells/${segment(cellId)}/model-admission`,
+      ModelAdmissionWrite.parse(write),
+      ModelAdmissionSnapshot,
+    );
+  }
   async endTask(cellId: string): Promise<void> {
     const path = `/v1/cells/${segment(cellId)}/task`;
     const reply = await this.#send("DELETE", path);
