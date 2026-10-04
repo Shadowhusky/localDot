@@ -26,6 +26,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -81,6 +82,13 @@ func main() {
 	must(err)
 	cert, err := x509.ParseCertificate(der)
 	must(err)
+	var assembled *assembledScenario
+	var assembledOnce sync.Once
+	defer func() {
+		if assembled != nil {
+			assembled.Close()
+		}
+	}()
 	upstream := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" || r.URL.Path != "/v1/chat/completions" || r.Header.Get("Authorization") != "Bearer "+canary {
 			http.Error(w, "fixture authentication refused", 401)
@@ -94,6 +102,13 @@ func main() {
 		var request map[string]any
 		if json.Unmarshal(body, &request) != nil {
 			http.Error(w, "invalid fixture request", 400)
+			return
+		}
+		if request["model"] == "fixture-assembled-v1" {
+			assembledOnce.Do(func() {
+				assembled = newAssembledScenario(filepath.Join(dir, "provider-requests.jsonl"))
+			})
+			assembled.respond(w, r, request, body)
 			return
 		}
 		input := 5

@@ -233,6 +233,27 @@ describe("composer delivery ownership and draft handling", () => {
         .hasAttribute("disabled"),
     ).toBe(true);
   });
+  it("retains a refused new task when polling retires the stopped owner, but clears it on another task", async () => {
+    const f = setup(() => new Response("refused", { status: 409 }), {
+      agent: { ...agent, model: { ...emptyAgentModel(), ended: { reason: "stopped" } } },
+    });
+    f.input("explicit new task after Stop");
+    f.submit();
+    await screen.findByText(/The daemon refused this message/);
+    f.update({ agent: { ...agent, sessionId: null, snapshot: null, fresh: false } });
+    expect(screen.getByText(/The daemon refused this message/)).toBeTruthy();
+    expect(f.field.value).toBe("explicit new task after Stop");
+    expect(f.requests).toHaveLength(1);
+    f.update({
+      agent: {
+        ...agent,
+        sessionId: otherSession,
+        snapshot: { ...snapshot, sessionId: otherSession },
+      },
+    });
+    expect(screen.queryByText(/The daemon refused this message/)).toBeNull();
+    expect(f.requests).toHaveLength(1);
+  });
   it("retains the start gate when live polling adopts its session before the confirmed reply", async () => {
     const pending = Promise.withResolvers<Response>();
     const f = setup(() => pending.promise, {

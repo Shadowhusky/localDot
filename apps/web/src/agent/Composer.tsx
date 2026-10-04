@@ -88,12 +88,24 @@ export function Composer(props: ComposerProps) {
       pending.current?.request.mode === "new"
     )
       return; // Live polling can discover the new session before its HTTP reply arrives.
+    // Polling may retire the stopped task after a refused attempt to start its
+    // replacement. Keep that refusal on this computer until another request or
+    // a different task takes ownership; it grants no authority to retry.
+    if (
+      previous.api === props.api &&
+      previous.cellId === props.cell?.id &&
+      props.agent.sessionId === null &&
+      delivery?.phase === "refused" &&
+      delivery.request.mode === "new" &&
+      delivery.request.sessionId === previous.sessionId
+    )
+      return;
     pending.current = null;
     setDelivery(null);
     setProblem(null);
     // A different task does not inherit an uncertain request. Preserve ordinary unsent text.
     revision.current += 1;
-  }, [props.api, props.cell?.id, props.agent.sessionId]);
+  }, [props.api, props.cell?.id, props.agent.sessionId, delivery]);
   useLayoutEffect(() => {
     if (wasKeysOpen.current && !props.keysOpen) guardOwner.current.cancel();
     wasKeysOpen.current = props.keysOpen;

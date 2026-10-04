@@ -2,6 +2,7 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "e2e",
+  testIgnore: "**/*.docker.spec.ts",
   timeout: 420_000,
   retries: 0,
   workers: 1,

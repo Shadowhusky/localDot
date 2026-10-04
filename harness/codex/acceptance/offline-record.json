@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "c9ece2086704b70677213cc95de7800cc7cb4c3422750f785a3b890b06d5c1f9",
+  "inputSha256": "f35f33ab3585261ff5318f9be2e509e2c55dd4755c419a89e6ef394b3d8e4369",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -80,6 +80,7 @@
     "apps/daemon/src/agent/task8-review-regressions.test.ts": "cae2b07e79a509a5e11002ba833196f334495aff8a33cce8cd94de3b8cba83a8",
     "apps/daemon/src/agent/terminal-memory-review.test.ts": "d72a97388d73cfc0b97342cce082d41028c1921bd1032bda15371b29eded2249",
     "apps/daemon/src/agent/testing/acceptance-cleanup.ts": "a7c54fa29c7954cb958dcd9c5905c40b4361e32a4b2b25010da475da907b8210",
+    "apps/daemon/src/agent/testing/assembled-worker.ts": "cd8910f3811f664974a735dc5a321f4da2df7e1c258acd553bd0d565ee53c9dc",
     "apps/daemon/src/agent/testing/brain-flow.ts": "c2232a4484e137b54ef8b945a9aeba17233bcf205a78e0627cccd100302cd029",
     "apps/daemon/src/agent/testing/harness.ts": "0cbf79355bc5e716e848c5d73d6bb1b07f20a734e0cc73e125738cea6321b6da",
     "apps/daemon/src/agent/testing/provider-probe.test.ts": "483b55e93e6c872187a72b9bcf6396b43a3bf100d4c44afd60512e876ecb1a7c",
@@ -382,7 +383,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "c48997048014c22d6e813e0014b7200ad424af152b49ef76328c171726c06d0e",
+  "reportSha256": "9eb34f7e6cfceae3c8f45f0cc838fa2f52c03e03ad970a222396782eff48aefa",
   "exit": {
     "code": 0,
     "signal": null
