@@ -131,7 +131,9 @@ export function useAgentSession(
   const matches = current.cellId === cellId && current.sessionId === sessionId;
   const ownershipAligned =
     (snapshot?.pendingAsk ?? null) === current.model.pendingAsk &&
-    (snapshot?.pendingTakeover ?? null) === current.model.pendingTakeover;
+    (snapshot?.pendingTakeover ?? null) === current.model.pendingTakeover &&
+    JSON.stringify(snapshot?.approval ?? null) === JSON.stringify(current.model.approval ?? null) &&
+    JSON.stringify(snapshot?.pause ?? null) === JSON.stringify(current.model.safetyPause ?? null);
   const readFresh = Boolean(
     matches &&
       owned &&
@@ -165,7 +167,9 @@ export function useAgentSession(
         !current.streamError &&
         !current.model.ended &&
         cell?.state === "ready" &&
-        !cell.paused,
+        !cell.paused &&
+        !cell.fenced &&
+        !cell.replacementPending,
     ),
     connection: matches ? current.connection : "connecting",
     reconcile,

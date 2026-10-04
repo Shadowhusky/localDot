@@ -11,6 +11,8 @@ export interface StreamState {
 }
 
 export interface CellSummary {
+  fenced?: { revision: number };
+  replacementPending?: true;
   id: string;
   state: CellState;
   scale: Scale;

@@ -40,7 +40,7 @@ async function owned<T>(
     if (signal.aborted) abort();
   });
 }
-async function mutation<T>(
+export async function controlRequest<T>(
   api: ApiClient,
   path: string,
   body: unknown,
@@ -137,27 +137,34 @@ export function raiseTaskBudget(
 ) {
   const parsed = BudgetRaiseRequest.safeParse({ budgetUSD });
   if (!parsed.success) throw new ControlFailure(false);
-  return mutation(api, `${sessionPath(sessionId)}/budget`, parsed.data, 204, signal, empty);
+  return controlRequest(api, `${sessionPath(sessionId)}/budget`, parsed.data, 204, signal, empty);
 }
 export function resumeTask(api: ApiClient, sessionId: string, signal: AbortSignal) {
-  return mutation(api, `${sessionPath(sessionId)}/resume`, undefined, 204, signal, empty);
+  return controlRequest(api, `${sessionPath(sessionId)}/resume`, undefined, 204, signal, empty);
 }
 export function undoMemory(api: ApiClient, changeId: string, signal: AbortSignal) {
   if (!ULID_PATTERN.test(changeId)) throw new ControlFailure(false);
-  return mutation(api, `/api/agent/memory/${changeId}/undo`, undefined, 200, signal, (text) => {
-    const value: unknown = JSON.parse(text);
-    if (
-      !value ||
-      typeof value !== "object" ||
-      Array.isArray(value) ||
-      Object.keys(value).length !== 1 ||
-      !("changeId" in value) ||
-      typeof value.changeId !== "string" ||
-      !ULID_PATTERN.test(value.changeId)
-    )
-      throw new ControlFailure(true);
-    return value.changeId;
-  });
+  return controlRequest(
+    api,
+    `/api/agent/memory/${changeId}/undo`,
+    undefined,
+    200,
+    signal,
+    (text) => {
+      const value: unknown = JSON.parse(text);
+      if (
+        !value ||
+        typeof value !== "object" ||
+        Array.isArray(value) ||
+        Object.keys(value).length !== 1 ||
+        !("changeId" in value) ||
+        typeof value.changeId !== "string" ||
+        !ULID_PATTERN.test(value.changeId)
+      )
+        throw new ControlFailure(true);
+      return value.changeId;
+    },
+  );
 }
 export function loadKnowledge<T>(
   api: ApiClient,
@@ -165,7 +172,7 @@ export function loadKnowledge<T>(
   signal: AbortSignal,
   parse: (value: unknown) => T,
 ) {
-  return mutation(
+  return controlRequest(
     api,
     path,
     undefined,
@@ -185,7 +192,7 @@ export function answerQuestion(
   const value = QuestionAnswerRequest.safeParse(body);
   if (!value.success || (value.data.text && keyLikePresent(value.data.text)))
     throw new ControlFailure(false);
-  return mutation(api, `${sessionPath(sessionId)}/answer`, value.data, 204, signal, empty);
+  return controlRequest(api, `${sessionPath(sessionId)}/answer`, value.data, 204, signal, empty);
 }
 export function returnControl(
   api: ApiClient,
@@ -196,7 +203,14 @@ export function returnControl(
   const value = HandbackRequest.safeParse(body);
   if (!value.success || (value.data.note && keyLikePresent(value.data.note)))
     throw new ControlFailure(false);
-  return mutation(api, `${sessionPath(sessionId)}/takeover/done`, value.data, 204, signal, empty);
+  return controlRequest(
+    api,
+    `${sessionPath(sessionId)}/takeover/done`,
+    value.data,
+    204,
+    signal,
+    empty,
+  );
 }
 export function manualInput(
   api: ApiClient,
@@ -206,7 +220,14 @@ export function manualInput(
 ): Promise<void> {
   const value = TakeoverInputRequest.safeParse(body);
   if (!value.success) throw new ControlFailure(false);
-  return mutation(api, `${sessionPath(sessionId)}/takeover/input`, value.data, 204, signal, empty);
+  return controlRequest(
+    api,
+    `${sessionPath(sessionId)}/takeover/input`,
+    value.data,
+    204,
+    signal,
+    empty,
+  );
 }
 export function stopTask(
   api: ApiClient,
@@ -214,7 +235,7 @@ export function stopTask(
   signal: AbortSignal,
 ): Promise<StopOutcome> {
   if (!ULID_PATTERN.test(sessionId)) throw new ControlFailure(false);
-  return mutation(api, `/api/sessions/${sessionId}/stop`, undefined, 202, signal, (text) =>
+  return controlRequest(api, `/api/sessions/${sessionId}/stop`, undefined, 202, signal, (text) =>
     StopOutcome.parse(JSON.parse(text)),
   );
 }

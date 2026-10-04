@@ -1,4 +1,9 @@
-import { AgentModelPrice, AgentSettingsDocument } from "@localdot/protocol";
+import {
+  AgentModelPrice,
+  AgentSettingsDocument,
+  AutonomyPolicy,
+  DEFAULT_AUTONOMY,
+} from "@localdot/protocol";
 import { isOpenRouterRouterId, providerById, routeFor } from "@localdot/providers";
 import {
   type ModelRole,
@@ -20,6 +25,7 @@ export interface SettingsDraft {
   prices: Partial<Record<ModelRole, PriceDraft>>;
   budget: string;
   defaultBudget: boolean;
+  autonomy?: AutonomyPolicy;
 }
 export const roles = ["main", "fast", "local"] as const;
 export function formOf(settings: AgentSettingsDocument): SettingsDraft {
@@ -38,6 +44,7 @@ export function formOf(settings: AgentSettingsDocument): SettingsDraft {
   return {
     choices,
     prices,
+    autonomy: settings.autonomy ?? DEFAULT_AUTONOMY,
     budget: settings.taskBudgetUSD === undefined ? "" : String(settings.taskBudgetUSD),
     defaultBudget: settings.taskBudgetUSD === undefined,
   };
@@ -175,6 +182,12 @@ export function validateForm(
     if (budget === undefined) return fail("Enter an explicit task ceiling in USD.");
     document.taskBudgetUSD = budget;
   }
+  if (
+    draft.autonomy !== undefined &&
+    (saved.autonomy !== undefined ||
+      JSON.stringify(draft.autonomy) !== JSON.stringify(DEFAULT_AUTONOMY))
+  )
+    document.autonomy = AutonomyPolicy.parse(draft.autonomy);
   const checked = AgentSettingsDocument.safeParse(document);
   return checked.success
     ? { ok: true, document: checked.data }

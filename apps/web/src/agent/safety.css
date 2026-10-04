@@ -1,0 +1,183 @@
+.safety-controls {
+  display: grid;
+  gap: 12px;
+  max-width: 1040px;
+  width: calc(100% - 32px);
+  margin: 8px auto 16px;
+  color: var(--text, #e6e9ef);
+}
+.safety-controls:empty {
+  display: none;
+}
+.fenced-recovery {
+  background: var(--surface, #19212b);
+  border: 1px solid #526875;
+  border-radius: 16px;
+  padding: 20px;
+}
+.safety-controls h2,
+.approval-card h2 {
+  font-size: 18px;
+  margin: 0 0 16px;
+  overflow-wrap: anywhere;
+}
+.safety-eyebrow {
+  font-size: 12px;
+  color: #b7c8d8;
+  margin: 0 0 8px;
+}
+.approval-overlay {
+  position: fixed;
+  inset: calc(112px + env(safe-area-inset-top, 0px)) 0 env(safe-area-inset-bottom, 0px);
+  z-index: 24;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 16px 16px;
+  background: rgb(3 7 11 / 40%);
+  pointer-events: none;
+}
+.approval-overlay[hidden] {
+  display: none;
+}
+.approval-card {
+  display: flex;
+  flex-direction: column;
+  width: min(760px, 100%);
+  max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--surface, #19212b);
+  color: var(--text, #e6e9ef);
+  border: 1px solid #526875;
+  border-radius: 16px;
+  box-shadow: 0 24px 80px rgb(0 0 0 / 50%);
+  pointer-events: auto;
+}
+.approval-content {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 20px;
+}
+.approval-footer {
+  flex: none;
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px 20px;
+  border-top: 1px solid #344654;
+}
+.approval-footer p {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.safety-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+.safety-actions button {
+  min-width: 0;
+}
+.approval-card dl {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.approval-card dl div {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(0, 3fr);
+  gap: 12px;
+}
+.approval-card dt {
+  color: #b7c8d8;
+}
+.approval-card dd {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.safety-task-controls,
+.notification-control {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+.approval-card .notification-control {
+  margin-top: 20px;
+}
+.safety-task-controls p {
+  flex: 1 1 280px;
+  margin: 0;
+}
+.safety-controls button,
+.approval-card button {
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1px solid #7894a5;
+  background: #263747;
+  color: #f1f5fa;
+  font: inherit;
+  cursor: pointer;
+}
+.safety-controls button:hover:not(:disabled),
+.approval-card button:hover:not(:disabled) {
+  background: #344c61;
+}
+.safety-controls button:active:not(:disabled),
+.approval-card button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.safety-controls button:disabled,
+.approval-card button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.safety-controls button:focus-visible,
+.approval-card button:focus-visible,
+.approval-card h2:focus-visible {
+  outline: 2px solid #afdfff;
+  outline-offset: 4px;
+}
+.stop-hint {
+  color: #b7c8d8;
+  font-size: 12px;
+}
+.safety-settings select {
+  min-height: 44px;
+  max-width: 100%;
+}
+.safety-settings label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0;
+}
+@media (width < 600px) {
+  .safety-controls {
+    width: calc(100% - 20px);
+  }
+  .fenced-recovery {
+    padding: 16px;
+  }
+  .approval-content,
+  .approval-footer {
+    padding: 16px;
+  }
+  .safety-actions button {
+    padding: 10px 6px;
+    font-size: 14px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .safety-controls button:active:not(:disabled),
+  .approval-card button:active:not(:disabled) {
+    transform: none;
+  }
+}

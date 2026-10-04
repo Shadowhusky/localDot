@@ -377,11 +377,11 @@ it.each(["paused", "stopped"])(
       async () =>
         Response.json(
           {
-            revoked: false,
+            revoked: field === "paused",
             paused: field === "paused",
             stopped: field === "stopped",
-            closed: false,
-            errors: ["keyd: could not confirm completion"],
+            closed: field === "stopped",
+            errors: [],
           },
           { status: 202 },
         ),
@@ -683,3 +683,19 @@ it("a verified terminal snapshot retires an acknowledged budget action without e
   expect(f.result.current.canInput).toBe(false);
   expect(fetchImpl).toHaveBeenCalledOnce();
 });
+
+it.each([
+  { revoked: false, paused: true, closed: false, stopped: false, errors: [] },
+  { revoked: false, paused: false, closed: false, stopped: true, errors: [] },
+])(
+  "incomplete physical/revocation Stop proof remains unconfirmed and keeps input closed",
+  async (outcome) => {
+    const f = fixture(async () => Response.json(outcome, { status: 202 }), true);
+    await act(async () => {
+      await f.result.current.stop();
+    });
+    expect(f.result.current.stopStatus.phase).toBe("unconfirmed");
+    expect(f.result.current.canInput).toBe(false);
+    expect(f.result.current.fenced).toBe(true);
+  },
+);

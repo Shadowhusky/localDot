@@ -1,4 +1,10 @@
-import { TaskModelSelection, ULID_PATTERN } from "@localdot/protocol";
+import {
+  ApprovalCard,
+  AutonomyPolicy,
+  PauseSnapshot,
+  TaskModelSelection,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 
 export type TaskStatus = "starting" | "running" | "waiting_user" | "paused" | "idle" | "ended";
@@ -12,6 +18,9 @@ export interface AgentSnapshot {
   readonly pendingTakeover?: string;
   readonly manualControl?: "waiting" | "ready" | "busy" | "returning" | "unconfirmed";
   readonly models?: TaskModelSelection;
+  readonly autonomy?: AutonomyPolicy;
+  readonly approval?: ApprovalCard;
+  readonly pause?: PauseSnapshot;
 }
 const statuses = new Set<string>([
   "starting",
@@ -31,6 +40,9 @@ const fields = new Set([
   "pendingTakeover",
   "manualControl",
   "models",
+  "autonomy",
+  "approval",
+  "pause",
 ]);
 export class AgentResponseError extends Error {
   constructor() {
@@ -80,6 +92,15 @@ export function parseAgentSnapshot(
       !["waiting", "ready", "busy", "returning", "unconfirmed"].includes(v.manualControl))
   )
     return fail();
+  const autonomy = Object.hasOwn(v, "autonomy") ? AutonomyPolicy.safeParse(v.autonomy) : null;
+  const approval = Object.hasOwn(v, "approval") ? ApprovalCard.safeParse(v.approval) : null;
+  const pause = Object.hasOwn(v, "pause") ? PauseSnapshot.safeParse(v.pause) : null;
+  if (
+    (autonomy && !autonomy.success) ||
+    (approval && !approval.success) ||
+    (pause && !pause.success)
+  )
+    return fail();
   const models = Object.hasOwn(v, "models") ? TaskModelSelection.safeParse(v.models) : null;
   if (models && !models.success) return fail();
   return Object.freeze({
@@ -88,6 +109,9 @@ export function parseAgentSnapshot(
     status: v.status as TaskStatus,
     toolCalls: v.toolCalls as number,
     ...(models?.success ? { models: models.data } : {}),
+    ...(autonomy?.success ? { autonomy: autonomy.data } : {}),
+    ...(approval?.success ? { approval: approval.data } : {}),
+    ...(pause?.success ? { pause: pause.data } : {}),
     ...(Object.hasOwn(v, "brainCellId") ? { brainCellId: v.brainCellId as string } : {}),
     ...(Object.hasOwn(v, "pendingAsk") ? { pendingAsk: v.pendingAsk as string } : {}),
     ...(Object.hasOwn(v, "pendingTakeover")

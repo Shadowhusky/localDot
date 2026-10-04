@@ -5,11 +5,14 @@ import { flushSync } from "react-dom";
 import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
 import { KnowledgeView } from "./agent/KnowledgeView.tsx";
+import { SafetyControls } from "./agent/SafetyControls.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
+import { useSafety } from "./agent/useSafety.ts";
+import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
@@ -127,8 +130,19 @@ export function App({ fetchImpl }: AppProps) {
 }
 
 function Theatre({ api }: { api: ApiClient }) {
-  const { cell, status, pending, error, listed, reconnects, start, stop, resume, retry } =
-    useCell(api);
+  const {
+    cell,
+    status,
+    pending,
+    error,
+    listed,
+    reconnects,
+    start,
+    stop,
+    resume,
+    retry,
+    selectReady,
+  } = useCell(api);
   const keys = useKeys(api);
   const [keysOpen, setKeysOpen] = useState(false);
   const settings = useSettings(api, [], !keysOpen);
@@ -221,6 +235,17 @@ function Theatre({ api }: { api: ApiClient }) {
     manualVisible: !narrow || pane === "computer",
     refreshCell: retry,
   });
+  const safety = useSafety({
+    api,
+    cell,
+    agent,
+    feed: session.agentFeed,
+    blocked: controls.stopping || controls.fenced,
+    replaceBlocked: controls.stopping,
+    visible: !keysOpen && !settings.open,
+    selectReady,
+  });
+  useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");
   const knowledge = useKnowledge(
     api,
@@ -338,36 +363,44 @@ function Theatre({ api }: { api: ApiClient }) {
           keysRef={keysButton}
           settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
         />
-        <div className="task-bar">
-          <Hud
-            hud={merged}
-            onStart={guardStart}
-            onStop={guardComputerStop}
-            onResume={guardResume}
-            onStopSession={taskStop}
-            stopping={controls.stopping}
-            stopEnabled={controls.canStop}
-            onRetry={retry}
+        <div className="task-controls-area">
+          <div className="task-bar">
+            <Hud
+              hud={merged}
+              onStart={guardStart}
+              onStop={guardComputerStop}
+              onResume={guardResume}
+              onStopSession={taskStop}
+              stopping={controls.stopping}
+              stopEnabled={controls.canStop}
+              onRetry={retry}
+            />
+            {session.sessionId && (
+              <span className="task-connection">
+                {agent.error
+                  ? "Activity unavailable"
+                  : agent.connection === "lost"
+                    ? "Connection lost"
+                    : agent.connection === "connecting"
+                      ? "Connecting…"
+                      : agent.snapshot?.status === "idle"
+                        ? "Ready for follow-up"
+                        : agent.model.pendingTakeover
+                          ? "Your turn"
+                          : agent.model.pendingAsk
+                            ? "Waiting for you"
+                            : "Task activity"}
+              </span>
+            )}
+          </div>
+          <StopControl controls={controls} />
+          <SafetyControls
+            safety={safety}
+            agent={agent}
+            cell={cell}
+            visible={!keysOpen && !settings.open}
           />
-          {session.sessionId && (
-            <span className="task-connection">
-              {agent.error
-                ? "Activity unavailable"
-                : agent.connection === "lost"
-                  ? "Connection lost"
-                  : agent.connection === "connecting"
-                    ? "Connecting…"
-                    : agent.snapshot?.status === "idle"
-                      ? "Ready for follow-up"
-                      : agent.model.pendingTakeover
-                        ? "Your turn"
-                        : agent.model.pendingAsk
-                          ? "Waiting for you"
-                          : "Task activity"}
-            </span>
-          )}
         </div>
-        <StopControl controls={controls} />
         <PaneTabs
           selected={pane}
           onSelect={setPane}
@@ -405,7 +438,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     cell={cell}
                     known={status === "known"}
                     pending={pending !== null}
-                    controlBlocked={controls.fenced || controls.stopping}
+                    controlBlocked={
+                      controls.fenced ||
+                      controls.stopping ||
+                      !!cell?.fenced ||
+                      !!cell?.replacementPending ||
+                      !!safety.approval
+                    }
                     agent={agent}
                     keysOpen={keysOpen || settings.open}
                     receiveKey={receiveKey}
@@ -597,6 +636,8 @@ function Theatre({ api }: { api: ApiClient }) {
             .map((role) => [role, settings.draft?.prices[role] ?? { input: "", output: "" }]),
         )}
         onPrice={settings.changePrice}
+        autonomy={settings.draft?.autonomy}
+        onAutonomy={settings.changeAutonomy}
         budget={
           settings.draft
             ? {

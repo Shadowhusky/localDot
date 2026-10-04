@@ -60,6 +60,20 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
     if (pending === "create") return hud("Starting…", STARTING, "stop", false);
     return hud("No computer", "Start your computer to see it here.", "start");
   }
+  if (cell.fenced)
+    return hud(
+      "Unavailable",
+      "Use Replace computer to recover on a verified fresh computer. Old files are retained.",
+      "retry",
+      false,
+    );
+  if (cell.replacementPending)
+    return hud(
+      "Verifying…",
+      "The fresh computer is held until replacement verification completes.",
+      "retry",
+      false,
+    );
   switch (cell.state) {
     case "starting": {
       if (cell.paused)

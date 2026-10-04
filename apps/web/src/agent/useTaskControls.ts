@@ -118,7 +118,9 @@ export function useTaskControls(props: Props) {
     navigator.onLine &&
     now.cellPending === null &&
     now.cell?.state === "ready" &&
-    !now.cell.paused;
+    !now.cell.paused &&
+    !now.cell.fenced &&
+    !now.cell.replacementPending;
   const cancelManual = useCallback(() => {
     if (operation.current?.kind === "input") operation.current.abort.abort();
   }, []);
@@ -365,7 +367,12 @@ export function useTaskControls(props: Props) {
       );
       if (!owned(record)) return;
       setStopStatus({
-        phase: outcome.paused ? "paused" : outcome.stopped ? "stopped" : "unconfirmed",
+        phase:
+          outcome.revoked && outcome.paused
+            ? "paused"
+            : outcome.closed && outcome.stopped
+              ? "stopped"
+              : "unconfirmed",
         errors: outcome.errors,
       });
     } catch {
@@ -380,6 +387,8 @@ export function useTaskControls(props: Props) {
   };
   const recoverable = (now = current.current) =>
     available(now) &&
+    !now.agent.snapshot?.pause &&
+    !now.agent.snapshot?.approval &&
     !operation.current &&
     !now.agent.model.pendingAsk &&
     !now.agent.model.pendingTakeover &&

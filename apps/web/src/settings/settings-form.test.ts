@@ -1,3 +1,4 @@
+import { DEFAULT_AUTONOMY } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { formOf, needsPrice, priceOf, validateForm } from "./settings-form.ts";
 import { providerFixture } from "./testing.ts";
@@ -192,4 +193,19 @@ describe("configuration validation before explicit save", () => {
       document: { main: { provider: "ollama", model: "custom" }, taskBudgetUSD: 3.5 },
     });
   });
+});
+
+it("explicit autonomy save preserves fixed protected-input rules and applies only the next-task document", () => {
+  const saved = {
+      main: { provider: "openai-compatible", model: "custom", key: "gateway" },
+      autonomy: DEFAULT_AUTONOMY,
+    },
+    draft = formOf(saved);
+  draft.prices.main = { input: "1", output: "1" };
+  draft.autonomy = { ...DEFAULT_AUTONOMY, send: "handoff" };
+  const result = validateForm(draft, saved, providerFixture());
+  expect(result.ok).toBe(true);
+  if (!result.ok) throw new Error("valid future-task settings required");
+  expect(result.document.autonomy).toEqual({ ...DEFAULT_AUTONOMY, send: "handoff" });
+  expect(saved.autonomy).toEqual(DEFAULT_AUTONOMY);
 });

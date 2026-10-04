@@ -1,8 +1,10 @@
+import { ULID_PATTERN } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { type ApiClient, ApiError } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
 import { describeRequestError } from "./errors.ts";
 import type { CellStatus, CellView, Pending } from "./hud-state.ts";
+import { parseCell, parseCells } from "./parse.ts";
 import type { CellState, CellSummary } from "./types.ts";
 
 export interface CellController extends CellView {
@@ -16,6 +18,7 @@ export interface CellController extends CellView {
   stop(): void;
   resume(): void;
   retry(): void;
+  selectReady(id: string): Promise<boolean>;
 }
 
 const CELLS = "/api/cells";
@@ -30,6 +33,7 @@ export function useCell(api: ApiClient): CellController {
   const [error, setError] = useState<string | null>(null);
   const [reconnects, setReconnects] = useState(0);
   const cellId = cell?.id ?? null;
+  const selectedId = useRef<string | null>(null);
   // Read by callbacks that must see the latest value, not the one of their render.
   const pendingRef = useRef<Pending | null>("list");
   const stateRef = useRef<CellState | null>(null);
@@ -56,7 +60,12 @@ export function useCell(api: ApiClient): CellController {
 
   const adopt = useCallback(
     (cells: CellSummary[]) => {
-      show(cells[0] ?? null);
+      const next =
+        cells.find((row) => row.id === selectedId.current) ??
+        cells.find((row) => !row.fenced && !row.replacementPending && row.state !== "removed") ??
+        cells[0];
+      selectedId.current = next?.id ?? null;
+      show(next ?? null);
       setListed(cells.map((c) => c.id));
       setStatus("known");
     },
@@ -66,7 +75,7 @@ export function useCell(api: ApiClient): CellController {
   // Lists the cells and adopts the answer; when no answer comes, the computer's state is unknown.
   const relist = useCallback(async () => {
     try {
-      const cells = await api.get<CellSummary[]>(CELLS);
+      const cells = parseCells(await api.get<unknown>(CELLS));
       if (mounted.current) adopt(cells);
     } catch (err) {
       if (!mounted.current) return;
@@ -95,7 +104,7 @@ export function useCell(api: ApiClient): CellController {
       probing = true;
       try {
         await api.get("/api/whoami");
-        const cells = await api.get<CellSummary[]>(CELLS);
+        const cells = parseCells(await api.get<unknown>(CELLS));
         if (!closed) adopt(cells);
       } catch {
         // A 401 is handled by the api; without an answer, the socket keeps retrying.
@@ -108,11 +117,21 @@ export function useCell(api: ApiClient): CellController {
       protocols: api.socketProtocols(),
       handlers: {
         onMessage: (data) => {
-          const next = JSON.parse(data) as CellSummary;
+          if (closed || !mounted.current || selectedId.current !== cellId) return;
+          let next: CellSummary;
+          try {
+            next = parseCell(JSON.parse(data), cellId);
+          } catch {
+            setError("Computer status could not be verified.");
+            setStatus("unknown");
+            return;
+          }
           // A refused request's message lasts until the state it was about moves on.
           if (next.state !== stateRef.current || !!next.paused !== pausedRef.current)
             setError(null);
-          show(next.state === "removed" ? null : next);
+          // Retirement removes native resources, but a permanent fence still owns recovery.
+          // Keep that public identity until the replacement receipt selects a verified Ready owner.
+          show(next.state === "removed" && !next.fenced && !next.replacementPending ? null : next);
         },
         onOpen: () => {
           if (opened) setReconnects((n) => n + 1);
@@ -151,6 +170,7 @@ export function useCell(api: ApiClient): CellController {
   );
 
   const start = useCallback(() => {
+    if (cell?.fenced || cell?.replacementPending) return;
     if (cellId) {
       void run("start", async () => {
         await api.post(`${CELLS}/${cellId}/start`);
@@ -158,10 +178,14 @@ export function useCell(api: ApiClient): CellController {
     } else {
       void run("create", async () => {
         const created = await api.post<CellSummary>(CELLS, { scale: 2 });
-        if (mounted.current) show(created);
+        if (mounted.current) {
+          const next = parseCell(created);
+          selectedId.current = next.id;
+          show(next);
+        }
       });
     }
-  }, [api, cellId, run, show]);
+  }, [api, cellId, cell?.fenced, cell?.replacementPending, run, show]);
 
   const stop = useCallback(() => {
     if (!cellId) return;
@@ -171,16 +195,54 @@ export function useCell(api: ApiClient): CellController {
   }, [api, cellId, run]);
 
   const resume = useCallback(() => {
-    if (!cellId || !cell?.paused) return;
+    if (!cellId || !cell?.paused || cell.fenced || cell.replacementPending) return;
     void run("resume", async () => {
       await api.post(`${CELLS}/${cellId}/resume`);
     });
-  }, [api, cellId, cell?.paused, run]);
+  }, [api, cellId, cell?.paused, cell?.fenced, cell?.replacementPending, run]);
 
   // relist() settles every failure itself: a list that gets no answer leaves the state unknown.
   const retry = useCallback(() => {
     void run("list", relist);
   }, [relist, run]);
 
-  return { cell, status, pending, error, listed, reconnects, start, stop, resume, retry };
+  const selectReady = useCallback(
+    async (id: string) => {
+      if (!ULID_PATTERN.test(id)) return false;
+      const owner = selectedId.current;
+      try {
+        const next = parseCell(await api.get<unknown>(`${CELLS}/${id}`), id);
+        if (
+          !mounted.current ||
+          selectedId.current !== owner ||
+          next.state !== "ready" ||
+          next.paused ||
+          next.fenced ||
+          next.replacementPending
+        )
+          return false;
+        selectedId.current = id;
+        show(next);
+        setStatus("known");
+        setError(null);
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [api, show],
+  );
+  return {
+    cell,
+    status,
+    pending,
+    error,
+    listed,
+    reconnects,
+    start,
+    stop,
+    resume,
+    retry,
+    selectReady,
+  };
 }

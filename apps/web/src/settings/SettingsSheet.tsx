@@ -1,3 +1,4 @@
+import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import type {
@@ -8,6 +9,7 @@ import type {
   SubscriptionModel,
 } from "./choices.ts";
 import { RoleEditor } from "./RoleEditor.tsx";
+import { SafetySettings } from "./SafetySettings.tsx";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import "./settings.css";
 
@@ -31,6 +33,8 @@ export interface SettingsSheetProps {
   save?: { enabled: boolean; run(): void };
   stop?: { label: string; enabled: boolean; run(): void };
   taskControls?: ReactNode;
+  autonomy?: AutonomyPolicy;
+  onAutonomy?(value: AutonomyPolicy): void;
   manualPrices?: Partial<Record<ModelRole, { input: string; output: string }>>;
   onPrice?(role: ModelRole, value: { input: string; output: string }): void;
   budget?: {
@@ -168,6 +172,13 @@ export function SettingsSheet(props: SettingsSheetProps) {
               inactive={role !== "main" && props.choices.main?.provider === "chatgpt"}
             />
           ))}
+          {props.autonomy && props.onAutonomy && (
+            <SafetySettings
+              value={props.autonomy}
+              disabled={props.busy || props.loading}
+              onChange={props.onAutonomy}
+            />
+          )}
           {props.budget && props.choices.main?.provider !== "chatgpt" && (
             <fieldset className="role-editor" disabled={props.busy || props.loading}>
               <legend>Task spending ceiling</legend>

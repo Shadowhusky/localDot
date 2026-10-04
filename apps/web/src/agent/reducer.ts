@@ -1,4 +1,4 @@
-import { LocalDotEvent as EventSchema, type LocalDotEvent } from "@localdot/protocol";
+import { ApprovalCard, LocalDotEvent as EventSchema, type LocalDotEvent } from "@localdot/protocol";
 import {
   type AgentConnection,
   type AgentFeed,
@@ -21,6 +21,9 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "session.end",
   "control.change",
   "pause.change",
+  "safety.pause",
+  "approval.request",
+  "approval.resolve",
   "budget.exceeded",
   "subscription.usage",
 ]);
@@ -84,6 +87,20 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       break;
     case "session.end":
       next = { ...next, ended: { ...e.data }, pendingAsk: null, pendingTakeover: null };
+      break;
+    case "approval.request": {
+      const { kind: _kind, target: _target, preview, ...card } = e.data;
+      next = { ...next, approval: ApprovalCard.parse({ ...card, fields: preview.fields }) };
+      break;
+    }
+    case "approval.resolve":
+      if (model.approval?.approvalId === e.data.approvalId) next = { ...next, approval: null };
+      break;
+    case "pause.change":
+      next = { ...next, safetyPaused: { ...e.data } };
+      break;
+    case "safety.pause":
+      next = { ...next, safetyPause: e.data.pause };
       break;
     case "heartbeat":
       next = { ...next, lastHeartbeat: { t: e.t, ...e.data } };
@@ -351,7 +368,7 @@ export interface AgentFeedOwner extends AgentFeed {
   connection(value: AgentConnection): void;
   accept(data: string): LocalDotEvent | null;
 }
-export function createAgentFeed(): AgentFeedOwner {
+export function createAgentFeed(now: () => number = () => performance.now()): AgentFeedOwner {
   let value: AgentFeedState = {
     cellId: null,
     sessionId: null,
@@ -423,6 +440,14 @@ export function createAgentFeed(): AgentFeedOwner {
         return null;
       }
       value = { ...value, model: projectAgentEvent(value.model, event) };
+      if (event.type === "heartbeat" && value.model.lastHeartbeat)
+        value = {
+          ...value,
+          model: {
+            ...value.model,
+            lastHeartbeat: { ...value.model.lastHeartbeat, receivedAt: now() },
+          },
+        };
       const recovered =
         !invalidPayload && value.streamError === GAP_ERROR && event.seq >= missingThrough;
       if (recovered) {

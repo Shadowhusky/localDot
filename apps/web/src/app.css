@@ -4,7 +4,7 @@
 
 .app {
   display: grid;
-  grid-template-rows: var(--spacing-bar) auto minmax(0, 1fr);
+  grid-template-rows: var(--spacing-bar) auto auto minmax(0, 1fr);
   height: 100dvh;
   min-height: 0;
   overflow: hidden;
@@ -12,6 +12,13 @@
 
 .theatre-content {
   display: contents;
+}
+
+.task-controls-area {
+  min-height: 0;
+  max-height: 50dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .mascot {

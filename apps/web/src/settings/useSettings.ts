@@ -1,4 +1,5 @@
 import type { AgentSettingsDocument } from "@localdot/protocol";
+import { AutonomyPolicy } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyRecord } from "../keys/keys-api.ts";
@@ -428,6 +429,11 @@ export function useSettings(
     subscriptionModels,
     change,
     changePrice,
+    changeAutonomy: (value: unknown) => {
+      const parsed = AutonomyPolicy.safeParse(value),
+        d = current.current.draft;
+      if (parsed.success && d) edit({ ...d, autonomy: parsed.data });
+    },
     budget,
     save,
     refresh,

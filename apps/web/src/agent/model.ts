@@ -1,4 +1,4 @@
-import type { EventOf } from "@localdot/protocol";
+import type { ApprovalCard, EventOf } from "@localdot/protocol";
 import type { TerminalText } from "./terminal-text.ts";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -80,12 +80,16 @@ export interface AgentModel {
     readonly t: number;
     readonly everyMs: number;
     readonly ongoing: boolean;
+    readonly receivedAt?: number;
   } | null;
   readonly messages: ReadonlyMap<string, AgentMessage>;
   readonly steps: ReadonlyMap<string, AgentStep>;
   readonly plan: readonly EventOf<"plan.set">["data"]["items"][number][];
   readonly questions: ReadonlyMap<string, AgentQuestion>;
   readonly takeovers: ReadonlyMap<string, AgentTakeover>;
+  readonly approval?: ApprovalCard | null;
+  readonly safetyPaused?: { readonly paused: boolean; readonly atStepBoundary: boolean };
+  readonly safetyPause?: EventOf<"safety.pause">["data"]["pause"];
   readonly pendingAsk: string | null;
   readonly pendingTakeover: string | null;
   readonly changes: readonly AgentChange[];

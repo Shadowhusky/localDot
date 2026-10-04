@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "9b31f278dca70de25aae5d5fefc27248598c55817d0a476afefa4f384e166255",
+  "inputSha256": "cebcbb5ee5eb63bd33e80b71dcbee3631b725f3d253e74196c96dc71d67eea55",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -91,6 +91,7 @@
     "apps/daemon/src/agent/safety/replacement-effects-review.test.ts": "4167eb5790f08e0b73585fc0a4f83bdbe3b3b3f1cd029c01b186e799ea626fe0",
     "apps/daemon/src/agent/safety/replacement-owner.test.ts": "4496bbd46ddce603c8b198ecb1572aa406977cc90949f49d8d7fc2ca54f2991d",
     "apps/daemon/src/agent/safety/replacement-request-review.test.ts": "4f72d0a600d17e76accca2e08bf8c63914b344cb50aa7e8d1da337d6b89e919d",
+    "apps/daemon/src/agent/safety/replacement-retry-review.test.ts": "3170ab6c40be627499a6cf4de2ccfe803ae9e3b21360a5c1e6f3458ccddfbd38",
     "apps/daemon/src/agent/safety/replacement-review.test.ts": "bbf5a20513c5fc76e40c949760db165581ba44bc7244df0c543da0ecd584ee3d",
     "apps/daemon/src/agent/safety/replacement-scoped-review.test.ts": "453bb368d49fb33dc66af30047a7047df99d163dba37df7558bdff12fe02cbcc",
     "apps/daemon/src/agent/safety/replacement-store.test.ts": "3668ec1bbf279a0e23d22e88362e241d87f6ec4d27fa058cf7315ec9a04d230f",
@@ -275,6 +276,10 @@
     "apps/daemon/src/static-files.ts": "ca4c5ae924b84defe23f2dc0640e7b3dffb588dfa697389fa8b95bd910445412",
     "apps/daemon/src/static-ui.test.ts": "c8d948df3d8591764048cffe275c53300e1707ded0c767c3316cab708226547b",
     "apps/daemon/src/static-ui.ts": "52be2a6d1d90471a47aced31f85138a9e5a267574742f9985a66dd663b931798",
+    "apps/daemon/src/stop-main.ts": "0ed2bf2539f27c1c117f660df5c5742c3a98b81f1060474a57cc766765b2f1e5",
+    "apps/daemon/src/stop-review.test.ts": "5ad7fad0e7b0e148b49a8414acacadbfd271ef3b3140942e20dab8502b90189d",
+    "apps/daemon/src/stop.test.ts": "f8c913bfd46706957d51fe449b28415c326522d1ae63994733ef3e4291d4309b",
+    "apps/daemon/src/stop.ts": "6909e6c0e82cc3e4782f9bdaf649c8e5ea89969fc64c3ab04d6b5eb1547989f7",
     "apps/daemon/src/token.test.ts": "830a0ccfed7d89fca6c8adbd6873d0a6aa6b07ba01d00e9b80668b219747c860",
     "apps/daemon/src/token.ts": "ddcc4bd8bd7c246dce358be773ad70f70c72e24e1747d2bec2e8b65c15f01189",
     "apps/daemon/src/upgrade-router.test.ts": "441aa686a969f9495da4bdb6eecc40c728ab709e3b6fd8b9303bc09361170d17",
@@ -424,7 +429,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "be23fddf0e8d097d622e07a453c91cea2bb900a9791057e8526a6be6dd59cdd7",
+  "reportSha256": "0350db97dfff0167dcceba317ea7a6621bdcfeb0c36267b0e1875395a3d95f23",
   "exit": {
     "code": 0,
     "signal": null

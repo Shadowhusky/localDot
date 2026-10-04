@@ -35,6 +35,7 @@ export function TaskRecovery({
   const state = agent.model.state;
   if (
     controls.fenced ||
+    agent.snapshot?.pause ||
     !agent.sessionId ||
     agent.model.ended ||
     !state ||
