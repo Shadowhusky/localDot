@@ -73,6 +73,9 @@ export function fakeCodex() {
       get authGeneration() {
         return authGeneration;
       },
+      canResume(generation: number) {
+        return generation === authGeneration && signedIn;
+      },
       markSignedOut(generation: number) {
         if (generation === authGeneration) fixture.signedOut.push(generation);
       },

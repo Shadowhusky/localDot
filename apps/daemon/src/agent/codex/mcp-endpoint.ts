@@ -9,7 +9,7 @@ import {
   type OwnedCodexRoots,
   removeOwnedCodexDirectory,
 } from "@localdot/codex-harness";
-import { type ToolResult, ULID_PATTERN, ulid } from "@localdot/protocol";
+import { type PauseSnapshot, type ToolResult, ULID_PATTERN, ulid } from "@localdot/protocol";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import {
@@ -63,12 +63,27 @@ export interface McpEndpointInput {
   readonly onResult?: (tool: string, result: ToolResult, context: McpCallContext) => void;
   readonly onRetire?: (reason: "stale" | "done" | "cancelled" | "failure") => void;
 }
+export interface McpPauseReceipt {
+  readonly generation: BrainGeneration;
+  readonly authGeneration: number;
+  readonly epoch: CodexTurnEpoch | undefined;
+  readonly requestId: string;
+  readonly revision: number;
+  readonly callsSettled: true;
+  readonly resultOwnershipConfirmed: true;
+  readonly completedCalls: number;
+}
 export interface McpEndpoint {
   readonly dir: string;
   readonly directory: OwnedCodexDirectory;
   readonly socket: string;
   setTurn(epoch: CodexTurnEpoch): void;
   retireTurn(epoch: CodexTurnEpoch): void;
+  pauseAtBoundary(
+    epoch: CodexTurnEpoch | undefined,
+    pause: Pick<PauseSnapshot, "requestId" | "revision">,
+  ): Promise<McpPauseReceipt>;
+  validatePauseReceipt(receipt: McpPauseReceipt): boolean;
   connections(): number;
   close(): Promise<void>;
 }
@@ -237,12 +252,37 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
     pending = 0;
   const connections = new Set<Connection>();
   const owners = new WeakMap<object, Connection>();
-  const callOwnership = new WeakMap<McpCallContext, { started: boolean; released: boolean }>();
+  const callOwnership = new WeakMap<
+    McpCallContext,
+    {
+      started: boolean;
+      released: boolean;
+      dispatched: boolean;
+      resultOwned: boolean;
+      replied: boolean;
+    }
+  >();
+  const captures = new Set<McpCallContext>();
+  let pausedAdmission = false,
+    uncertain = false,
+    completedCalls = 0;
+  let pauseReceipt: McpPauseReceipt | undefined;
+  const wakes = new Set<() => void>();
+  const wake = () => {
+    for (const notify of [...wakes]) notify();
+  };
+  const forget = (capture: McpCallContext) => {
+    const record = callOwnership.get(capture);
+    if (record?.released && (record.replied || !record.dispatched)) captures.delete(capture);
+    wake();
+  };
   const release = (capture: McpCallContext) => {
     const record = callOwnership.get(capture);
     if (!record || record.released) return;
     record.released = true;
     pending--;
+    if (record.dispatched && !record.resultOwned) uncertain = true;
+    forget(capture);
   };
   const validOwner = () => {
     try {
@@ -282,8 +322,12 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
     if (connection.closed) return;
     connection.closed = true;
     connection.abort.abort();
-    for (const capture of connection.calls.values())
-      if (!callOwnership.get(capture)?.started) release(capture);
+    for (const capture of connection.calls.values()) {
+      const record = callOwnership.get(capture);
+      if (record?.dispatched && !record.replied) uncertain = true;
+      if (!record?.started) release(capture);
+    }
+    wake();
     connections.delete(connection);
     connection.socket.destroy();
     void connection.mcp?.close().catch(() => {});
@@ -331,6 +375,14 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
       const operation = queue
         .then(async () => {
           if (!current(capture)) return failResult();
+          // Wire-admitted queued work owns no tool lease. A safety hold cannot start it.
+          if (pausedAdmission || input.session.safetyPause)
+            return toCallToolResult({
+              ok: false,
+              pause: true,
+              content: [{ type: "text", text: "Task paused before this call started." }],
+            });
+          if (record) record.dispatched = true;
           let toolInput = args;
           if (
             name === "computer" &&
@@ -360,12 +412,15 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
             return failResult();
           }
           if (!current(capture)) return failResult();
-          if (out.result.final) {
+          if (out.result.final && !input.session.safetyPause) {
             retireTurn(capture.turnEpoch);
             notifyRetire("done");
             return failResult();
           }
-          return toCallToolResult(out.result);
+          const result = toCallToolResult(out.result);
+          if (record) record.resultOwned = true;
+          completedCalls++;
+          return result;
         })
         .catch(() => {
           retireTurn(capture.turnEpoch);
@@ -440,7 +495,14 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
           }
           connection.requests.add(message.id);
           if (message.method !== "tools/call") return true;
-          if (!turn || turn.signal.aborted || !turnSnapshot || pending >= MAX_PENDING) {
+          if (
+            pausedAdmission ||
+            input.session.safetyPause ||
+            !turn ||
+            turn.signal.aborted ||
+            !turnSnapshot ||
+            pending >= MAX_PENDING
+          ) {
             transport.refuse(message.id);
             return false;
           }
@@ -459,7 +521,14 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
             requestId: message.id,
             signal: captureSignal,
           });
-          callOwnership.set(capture, { started: false, released: false });
+          callOwnership.set(capture, {
+            started: false,
+            released: false,
+            dispatched: false,
+            resultOwned: false,
+            replied: false,
+          });
+          captures.add(capture);
           connection.calls.set(message.id, capture);
           pending++;
           return true;
@@ -467,7 +536,10 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
         current,
         () => retireConnection(connection),
         (capture) => {
-          if (!callOwnership.get(capture)?.started) release(capture);
+          const record = callOwnership.get(capture);
+          if (record) record.replied = true;
+          if (!record?.started) release(capture);
+          forget(capture);
         },
       );
       connection.transport = transport;
@@ -511,6 +583,56 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
     const entry = lstatSync(socket);
     if (!entry.isSocket() || entry.uid !== process.getuid?.()) throw new McpEndpointError();
     chmodSync(socket, 0o600);
+    const pauseCurrent = (
+      epoch: CodexTurnEpoch | undefined,
+      pause: Pick<PauseSnapshot, "requestId" | "revision">,
+    ) =>
+      validOwner() &&
+      turn === epoch &&
+      input.session.safetyPause?.requestId === pause.requestId &&
+      input.session.safetyPause.revision === pause.revision;
+    const validatePauseReceipt = (receipt: McpPauseReceipt): boolean =>
+      receipt === pauseReceipt &&
+      pausedAdmission &&
+      !uncertain &&
+      pending === 0 &&
+      captures.size === 0 &&
+      pauseCurrent(receipt.epoch, receipt);
+    const pauseAtBoundary = async (
+      epoch: CodexTurnEpoch | undefined,
+      pause: Pick<PauseSnapshot, "requestId" | "revision">,
+    ): Promise<McpPauseReceipt> => {
+      // This private marker is synchronous; future wire requests are refused without cancelling active dispatch.
+      if (!pauseCurrent(epoch, pause)) throw new McpEndpointError();
+      pausedAdmission = true;
+      await input.session.safetyBoundary(signal);
+      const deadline = Date.now() + 2000;
+      while (pending || captures.size) {
+        if (!pauseCurrent(epoch, pause) || uncertain || Date.now() >= deadline)
+          throw new McpEndpointError();
+        await new Promise<void>((resolve) => {
+          const done = () => {
+            clearTimeout(timer);
+            wakes.delete(done);
+            resolve();
+          };
+          const timer = setTimeout(done, 10);
+          wakes.add(done);
+        });
+      }
+      if (!pauseCurrent(epoch, pause) || uncertain) throw new McpEndpointError();
+      pauseReceipt = Object.freeze({
+        generation: input.generation,
+        authGeneration: input.authGeneration,
+        epoch,
+        requestId: pause.requestId,
+        revision: pause.revision,
+        callsSettled: true as const,
+        resultOwnershipConfirmed: true as const,
+        completedCalls,
+      });
+      return pauseReceipt;
+    };
     return Object.freeze({
       dir: directory.path,
       directory,
@@ -518,6 +640,8 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
       connections: () => connections.size,
       close: () => close().finally(() => signal.removeEventListener("abort", aborted)),
       retireTurn,
+      pauseAtBoundary,
+      validatePauseReceipt,
       setTurn: (epoch: CodexTurnEpoch) => {
         if (
           !validOwner() ||

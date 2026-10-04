@@ -83,7 +83,8 @@ export interface AgentRunnerDeps {
   sleep?(ms: number, signal: AbortSignal): Promise<void>;
   idleMs?: number;
   codex?: {
-    driver: Pick<CodexDriver, "run">;
+    driver: Pick<CodexDriver, "run"> &
+      Partial<Pick<CodexDriver, "pauseAtBoundary" | "resumeAtBoundary">>;
     account: Pick<CodexAccount, "status">;
     ended?(sessionId: string): void | Promise<void>;
     authGeneration?(): number;
@@ -271,6 +272,7 @@ export class AgentRunner {
           title: task.slice(0, 200),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
+        this.#safety(rt);
         this.deps.live.start(cellId, id, (stop) => this.#run(rt, stop));
       } catch (error) {
         session.stop();
@@ -313,7 +315,12 @@ export class AgentRunner {
       owner: () => (rt.brain ? { cellId: rt.brain.id, taskId: rt.session.id } : undefined),
       ownerBoundary: () => rt.brainOpening ?? Promise.resolve(),
       ready: () => {
+        const cell = this.deps.cell(rt.session.cellId);
         if (
+          cell?.state !== "ready" ||
+          cell.paused ||
+          this.#blockedCells.has(rt.session.cellId) ||
+          this.deps.live.get(rt.session.cellId) !== rt.session.id ||
           rt.session.stopped ||
           rt.session.controlHeld ||
           !this.#health.online ||
@@ -334,6 +341,30 @@ export class AgentRunner {
         ),
       sleep: this.deps.sleep ?? sleep,
       mode: rt.selection.kind === "api" ? "api" : "native",
+      ...(rt.selection.kind === "chatgpt"
+        ? {
+            native: {
+              pause: (
+                pause: Pick<import("@localdot/protocol").PauseSnapshot, "requestId" | "revision">,
+              ) => {
+                const driver = this.deps.codex?.driver;
+                if (!driver?.pauseAtBoundary)
+                  throw new Error("native Pause receipt is unavailable");
+                return driver.pauseAtBoundary(rt.session, pause);
+              },
+              resume: (
+                pause: Pick<import("@localdot/protocol").PauseSnapshot, "requestId" | "revision">,
+                receipt: import("./codex/native-pause.ts").NativePauseReceipt,
+              ) => {
+                const driver = this.deps.codex?.driver;
+                if (!driver?.resumeAtBoundary)
+                  throw new Error("native Resume receipt is unavailable");
+                return driver.resumeAtBoundary(rt.session, pause, receipt);
+              },
+              contain: () => this.contain(rt.session, "native_pause_uncertain"),
+            },
+          }
+        : {}),
     });
     return rt.safety;
   }
@@ -380,6 +411,7 @@ export class AgentRunner {
     if (rt.authGeneration !== generation) rt.authResumeAfter = session.inboxSequence;
     rt.authGeneration = generation;
     rt.pause = "auth";
+    rt.safety?.invalidate();
     rt.idleWait?.abort();
   }
   async waitForAuthResume(session: AgentSession): Promise<void> {

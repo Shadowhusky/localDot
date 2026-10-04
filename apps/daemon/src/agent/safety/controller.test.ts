@@ -21,7 +21,7 @@ async function until(check: () => boolean) {
   }
   throw new Error("boundary not reached");
 }
-function fixture(autoApprove = true) {
+function fixture(autoApprove = true, mode: "api" | "native" = "api") {
   const h = toolHarness({ autoApprove });
   fixtures.push(h);
   let owner: ModelOwner | undefined = { cellId: ulid(), taskId: h.session.id };
@@ -67,7 +67,7 @@ function fixture(autoApprove = true) {
     setModelAdmission: write,
     persist,
     sleep,
-    mode: "api" as const,
+    mode,
   };
   const controller = new SafetyController(h.session, deps);
   return {
@@ -232,8 +232,8 @@ it("lost open acknowledgement closes the exact old model owner and never release
   expect(f.desktop.files.has("lost.txt")).toBe(false);
 });
 it("native receipt uncertainty is not presented as a confirmed Pause", async () => {
-  const f = fixture();
-  const control = new SafetyController(f.session, { ...f.deps, mode: "native" });
+  const f = fixture(true, "native");
+  const control = f.controller;
   const pause = control.request(ulid());
   await control.settled();
   expect(f.session.safetyPause?.resumeAvailable).toBe(false);

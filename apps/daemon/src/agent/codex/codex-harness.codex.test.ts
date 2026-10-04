@@ -12,8 +12,10 @@ import {
   TurnCompleted,
   threadStartParams,
 } from "@localdot/codex-harness";
+import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { preparePinnedFixture } from "../../../../../harness/codex/src/testing/pinned-fixture.ts";
+import { SafetyController } from "../safety/controller.ts";
 import { SessionStoppedError } from "../session.ts";
 import { CODEX_CRASHED, CODEX_DONE } from "./driver.ts";
 import { type Answer, fakeAuthJson, startOpenAiMock } from "./testing/openai-mock.ts";
@@ -522,6 +524,142 @@ describe(`actual pinned Codex ${CODEX_VERSION} offline acceptance`, { timeout: 6
         .read(h.session.id)
         .filter((row) => row.sourceInbox && row.content === "Owned hand-back note"),
     ).toHaveLength(1);
+    expect(h.failures).toEqual([]);
+  });
+  it("matching native Pause drains a real MCP call and resumes once without replaying its effect", async () => {
+    const fixture = await prepare();
+    const h = await pinnedDriver(fixture, (_body, index) =>
+      index === 0
+        ? exec(
+            'await tools.mcp__localdot__computer({ action: "type", text: "Finite inert offline typing" });',
+          )
+        : done(index + 1),
+    );
+    cleanup.push(() => h.close());
+    let release!: () => void,
+      replies = 0,
+      contained = 0;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.beforeReply(() => (++replies === 1 ? held : undefined));
+    const control = new SafetyController(h.session, {
+      mode: "native",
+      owner: () => undefined,
+      ready: () => {},
+      persist: () => {},
+      sleep: async () => {},
+      modelAdmission: async () => {
+        throw new Error("native has no API model gate");
+      },
+      setModelAdmission: async () => {
+        throw new Error("native has no API model gate");
+      },
+      native: {
+        pause: (pause) => h.driver.pauseAtBoundary(h.session, pause),
+        resume: (pause, receipt) => h.driver.resumeAtBoundary(h.session, pause, receipt),
+        contain: async () => {
+          contained++;
+          h.session.stop();
+        },
+      },
+    });
+    const run = h.run();
+    await until(fixture.signal, () => h.calls.length === 1);
+    const first = h.calls[0];
+    assert.ok(first);
+    const pause = control.request(ulid());
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(first.completed).toBe(false);
+    expect(first.context.signal.aborted).toBe(false);
+    expect(h.session.safetyPause?.resumeAvailable).toBe(false);
+    expect(h.connections).toHaveLength(1);
+    h.session.post("followup", "Continue after Pause");
+    release();
+    await control.settled();
+    expect(h.session.safetyPause).toMatchObject({
+      requestId: pause.requestId,
+      phase: "paused",
+      atStepBoundary: true,
+      resumeAvailable: true,
+    });
+    expect(first.completed).toBe(true);
+    expect(first.context.signal.aborted).toBe(true);
+    await h.connections[0]?.closed;
+    groupGone(fixture.processes[0]?.pid);
+    expect(h.endpoints[0]?.connections()).toBe(0);
+    expect(h.connections).toHaveLength(1);
+    expect(contained).toBe(0);
+    expect(
+      h.calls.filter((call) => (call.input as { action?: string }).action === "type"),
+    ).toHaveLength(1);
+    await expect(control.resume(ulid(), pause.revision)).rejects.toThrow();
+    expect(h.connections).toHaveLength(1);
+    await control.resume(pause.requestId, pause.revision);
+    await expect(control.resume(pause.requestId, pause.revision)).rejects.toThrow();
+    expect(await run).toBe(CODEX_DONE);
+    expect(h.connections).toHaveLength(2);
+    expect(h.calls.map((call) => call.tool)).toEqual(["computer", "done"]);
+    expect(h.calls[1]?.context.generation.id).not.toBe(first.context.generation.id);
+    expect(h.calls[1]?.context.basisFrameId).not.toBe(first.context.basisFrameId);
+    expect(JSON.stringify(h.mock.responses.at(-1)?.input)).toContain(
+      "Do not replay any previous tool call",
+    );
+    expect(h.failures).toEqual([]);
+  });
+  it("uncertain real MCP result ownership contains native Pause and refuses Resume", async () => {
+    const fixture = await prepare();
+    const h = await pinnedDriver(fixture, (_body, index) =>
+      index === 0
+        ? exec('await tools.mcp__localdot__computer({ action: "screenshot" });')
+        : done(index + 1),
+    );
+    cleanup.push(() => h.close());
+    let release!: () => void,
+      contained = 0;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    h.beforeReply(() => held);
+    const control = new SafetyController(h.session, {
+      mode: "native",
+      owner: () => undefined,
+      ready: () => {},
+      persist: () => {},
+      sleep: async () => {},
+      modelAdmission: async () => {
+        throw new Error("native has no API model gate");
+      },
+      setModelAdmission: async () => {
+        throw new Error("native has no API model gate");
+      },
+      native: {
+        pause: (pause) => h.driver.pauseAtBoundary(h.session, pause),
+        resume: (pause, receipt) => h.driver.resumeAtBoundary(h.session, pause, receipt),
+        contain: async () => {
+          contained++;
+          h.session.stop();
+        },
+      },
+    });
+    const run = h.run();
+    await until(fixture.signal, () => h.calls.length === 1);
+    const pause = control.request(ulid());
+    const endpoint = h.endpoints[0];
+    assert.ok(endpoint);
+    const closed = endpoint.close();
+    release();
+    await closed;
+    await control.settled();
+    expect(contained).toBe(1);
+    expect(h.session.safetyPause?.resumeAvailable).toBe(false);
+    await expect(control.resume(pause.requestId, pause.revision)).rejects.toThrow();
+    expect(await run).toBe(CODEX_DONE);
+    expect(h.calls[0]?.completed).toBe(false);
+    expect(h.connections).toHaveLength(1);
+    expect(h.observedFrames).toHaveLength(1);
+    expect(h.endpoints[0]?.connections()).toBe(0);
+    groupGone(fixture.processes[0]?.pid);
     expect(h.failures).toEqual([]);
   });
   it("pauses a failed fake refresh without daemon retry, replacement, fallback or new frames until Stop", async () => {

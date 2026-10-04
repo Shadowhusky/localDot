@@ -145,6 +145,9 @@ export async function pinnedDriver(fixture: PinnedFixture, answer?: Answer) {
         get authGeneration() {
           return generation;
         },
+        canResume(current) {
+          return current === generation && signedOut.length === 0 && !active;
+        },
         async acquireTask(_id, signal) {
           signal.throwIfAborted();
           assert.equal(active, false);
@@ -196,36 +199,38 @@ export async function pinnedDriver(fixture: PinnedFixture, answer?: Answer) {
             assert.ok(calls.length < 128);
             const record = { tool, input, context, completed: false, resultFrameId: ulid() };
             calls.push(record);
-            const lease = session.admit(context.generation, context.signal);
-            try {
-              await abortable(Promise.resolve(beforeReply?.()), lease.signal);
-              lease.check();
-              record.completed = true;
-              return {
-                status: 200,
-                result:
-                  reply?.(tool, input, context) ??
-                  (tool === "done"
-                    ? {
-                        ok: true,
-                        final: true,
-                        content: [{ type: "text", text: "Offline fixture finished." }],
-                      }
-                    : {
-                        ok: true,
-                        content: [
-                          {
-                            type: "image",
-                            frameId: record.resultFrameId,
-                            mediaType: "image/png",
-                            data: PINNED_PNG.toString("base64"),
-                          },
-                        ],
-                      }),
-              };
-            } finally {
-              lease.finish();
-            }
+            return session.runAtomic(context.generation, context.signal, async () => {
+              const lease = session.admit(context.generation, context.signal);
+              try {
+                await abortable(Promise.resolve(beforeReply?.()), lease.signal);
+                lease.check();
+                record.completed = true;
+                return {
+                  status: 200,
+                  result:
+                    reply?.(tool, input, context) ??
+                    (tool === "done"
+                      ? {
+                          ok: true,
+                          final: true,
+                          content: [{ type: "text", text: "Offline fixture finished." }],
+                        }
+                      : {
+                          ok: true,
+                          content: [
+                            {
+                              type: "image",
+                              frameId: record.resultFrameId,
+                              mediaType: "image/png",
+                              data: PINNED_PNG.toString("base64"),
+                            },
+                          ],
+                        }),
+                };
+              } finally {
+                lease.finish();
+              }
+            });
           },
         });
         endpoints.push(endpoint);

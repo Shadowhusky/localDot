@@ -103,6 +103,7 @@ export async function computerTool(
     step: ctx.step,
     signal: ctx.signal,
     source: "agent",
+    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();

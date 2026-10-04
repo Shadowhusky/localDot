@@ -525,3 +525,24 @@ describe("synchronous account mutation pause", () => {
     },
   );
 });
+
+it("native Pause receipt uncertainty runs the existing revoke and computer containment path", async () => {
+  const f = setup();
+  const nativePause = vi.fn(async () => {
+    throw new CodexCleanupError();
+  });
+  const nativeResume = vi.fn(async () => {});
+  const codex = f.deps.codex;
+  if (!codex) throw new Error("native fixture missing");
+  codex.driver.pauseAtBoundary = nativePause;
+  codex.driver.resumeAtBoundary = nativeResume;
+  const session = await f.runner.start(f.cellId, "Inert native safety boundary");
+  await until(() => f.run.mock.calls.length === 1 && session.status === "idle");
+  f.runner.pauseTask(session.id, ulid());
+  await until(() => session.stopped);
+  expect(nativePause).toHaveBeenCalledTimes(1);
+  expect(nativeResume).not.toHaveBeenCalled();
+  await until(() => f.containment.mock.calls.length === 1);
+  expect(f.containment).toHaveBeenCalledWith(session.id);
+  expect(session.safetyPause?.resumeAvailable).toBe(false);
+});

@@ -13,13 +13,25 @@ import {
   threadStartParams,
   turnOutcome,
 } from "@localdot/codex-harness";
-import { type InboxItem, type ToolResult, ULID_PATTERN, ulid } from "@localdot/protocol";
+import {
+  type InboxItem,
+  type PauseSnapshot,
+  type ToolResult,
+  ULID_PATTERN,
+  ulid,
+} from "@localdot/protocol";
 import { z } from "zod";
 import { type Redactor, redactor } from "../redact.ts";
 import type { AgentSession, BrainGeneration } from "../session.ts";
 import type { TranscriptStore } from "../transcript.ts";
 import { CodexEventMapper, type Violation } from "./events.ts";
-import type { McpCallContext, McpEndpoint, McpEndpointInput } from "./mcp-endpoint.ts";
+import type {
+  McpCallContext,
+  McpEndpoint,
+  McpEndpointInput,
+  McpPauseReceipt,
+} from "./mcp-endpoint.ts";
+import type { NativePauseReceipt } from "./native-pause.ts";
 
 export const CODEX_DONE = 0;
 export const CODEX_GAVE_UP = 3;
@@ -118,6 +130,7 @@ export type DriverEndpointInput = Pick<
 export interface CodexDriverDeps {
   readonly auth: {
     readonly authGeneration: number;
+    canResume?(generation: number): boolean;
     acquireTask(sessionId: string, signal: AbortSignal): Promise<CodexDriverLease>;
     markSignedOut(generation: number): void;
   };
@@ -147,13 +160,23 @@ type CycleResult =
         | "input"
         | "crashed"
         | "signed_out"
-        | "plan_limit";
+        | "plan_limit"
+        | "safety";
     }
   | { kind: "violation"; what: Violation }
   | { kind: "retry" | "failed"; message: string };
 interface ActiveCycle {
   finish(result: CycleResult): void;
   fence(): void;
+  pauseAtBoundary(
+    pause: Pick<PauseSnapshot, "requestId" | "revision">,
+  ): Promise<{ generationId: number; completedCalls: number }>;
+}
+interface DriverOwner {
+  readonly session: AgentSession;
+  admission: Promise<void>;
+  lease?: CodexDriverLease;
+  active?: ActiveCycle;
 }
 
 // Until Tasks13/14 prove a no-late-request boundary, every explicit turn uses a fresh process,
@@ -162,8 +185,91 @@ export class CodexDriver {
   readonly #deps: CodexDriverDeps;
   readonly #running = new Set<string>();
   readonly #blocked = new Set<string>();
+  readonly #owners = new Map<string, DriverOwner>();
+  readonly #pauseReceipts = new WeakMap<AgentSession, NativePauseReceipt>();
+  readonly #resumeNotes = new WeakMap<AgentSession, string>();
   constructor(deps: CodexDriverDeps) {
     this.#deps = Object.freeze({ ...deps });
+  }
+  async pauseAtBoundary(
+    session: AgentSession,
+    pause: Pick<PauseSnapshot, "requestId" | "revision">,
+  ): Promise<NativePauseReceipt> {
+    const authGeneration = this.#deps.auth.authGeneration;
+    const check = () => {
+      if (
+        session.stopped ||
+        session.controlHeld ||
+        this.#blocked.has(session.id) ||
+        session.safetyPause?.requestId !== pause.requestId ||
+        session.safetyPause.revision !== pause.revision ||
+        this.#deps.auth.authGeneration !== authGeneration
+      )
+        throw new CodexCleanupError();
+    };
+    check();
+    const previous = this.#pauseReceipts.get(session);
+    if (previous) {
+      if (
+        previous.requestId !== pause.requestId ||
+        previous.revision !== pause.revision ||
+        previous.authGeneration !== authGeneration
+      )
+        throw new CodexCleanupError();
+      return previous;
+    }
+    const owner = this.#owners.get(session.id);
+    if (owner && owner.session !== session) throw new CodexCleanupError();
+    if (owner) await readonlyAwait(owner.admission, session.abort.signal);
+    check();
+    const facts = owner?.active ? await owner.active.pauseAtBoundary(pause) : undefined;
+    check();
+    // No native credential owner or admitted generation may remain after the physical retirement receipt.
+    if (owner?.lease || owner?.active || session.generation) throw new CodexCleanupError();
+    const receipt: NativePauseReceipt = Object.freeze({
+      sessionId: session.id,
+      requestId: pause.requestId,
+      revision: pause.revision,
+      authGeneration,
+      generationId: facts?.generationId ?? null,
+      turnRetired: true,
+      callsSettled: true,
+      resultOwnershipConfirmed: true,
+      completedCalls: facts?.completedCalls ?? 0,
+    });
+    this.#pauseReceipts.set(session, receipt);
+    return receipt;
+  }
+  async resumeAtBoundary(
+    session: AgentSession,
+    pause: Pick<PauseSnapshot, "requestId" | "revision">,
+    receipt: NativePauseReceipt,
+  ): Promise<void> {
+    const owner = this.#owners.get(session.id);
+    if (
+      this.#pauseReceipts.get(session) !== receipt ||
+      receipt.sessionId !== session.id ||
+      receipt.requestId !== pause.requestId ||
+      receipt.revision !== pause.revision ||
+      session.stopped ||
+      session.controlHeld ||
+      session.safetyPause?.phase !== "resuming" ||
+      !session.safetyPause.atStepBoundary ||
+      session.safetyPause.requestId !== pause.requestId ||
+      session.safetyPause.revision !== pause.revision ||
+      this.#deps.auth.authGeneration !== receipt.authGeneration ||
+      this.#deps.auth.canResume?.(receipt.authGeneration) !== true ||
+      this.#blocked.has(session.id) ||
+      owner?.active ||
+      owner?.lease ||
+      session.generation
+    )
+      throw new CodexCleanupError();
+    this.#pauseReceipts.delete(session);
+    this.#resumeNotes.set(
+      session,
+      `The previous native turn and all its calls were retired before Pause. ${receipt.completedCalls} call results were confirmed under that owner. Do not replay any previous tool call. Choose fresh work from the current full screenshot.`,
+    );
   }
   async run(session: AgentSession, input: { model: string; resume: boolean }): Promise<number> {
     if (this.#blocked.has(session.id)) throw new CodexCleanupError();
@@ -174,6 +280,9 @@ export class CodexDriver {
       return CODEX_GAVE_UP;
     }
     this.#running.add(session.id);
+    const owner: DriverOwner = { session, admission: Promise.resolve() };
+    this.#owners.set(session.id, owner);
+    let admission: ReturnType<typeof deferred<void>> | undefined;
     const d = this.#deps,
       redact = d.redactorFor?.(session) ?? redactor([]);
     let active: ActiveCycle | undefined,
@@ -186,10 +295,13 @@ export class CodexDriver {
     session.abort.signal.addEventListener("abort", stopped, { once: true });
     try {
       while (!session.stopped) {
+        await session.waitForSafety();
         await session.waitForControl();
         await session.waitForTools();
         await this.#authResume(session);
         let lease: CodexDriverLease;
+        admission = deferred<void>();
+        owner.admission = admission.promise;
         const acquiring = d.auth.acquireTask(session.id, session.abort.signal);
         try {
           lease = await readonlyAwait(acquiring, session.abort.signal);
@@ -205,20 +317,34 @@ export class CodexDriver {
             });
           return CODEX_DONE;
         }
+        owner.lease = lease;
         if (session.stopped) {
           await this.#release(session, lease);
+          owner.lease = undefined;
+          admission.resolve();
           return CODEX_DONE;
         }
         try {
           await session.waitForControl();
           await session.waitForTools();
           await this.#authResume(session);
+          if (session.safetyPause) {
+            await this.#release(session, lease);
+            owner.lease = undefined;
+            admission.resolve();
+            await session.waitForSafety();
+            continue;
+          }
         } catch (cause) {
           await this.#release(session, lease);
+          owner.lease = undefined;
+          admission.resolve();
           throw cause;
         }
         if (lease.signal.aborted || lease.generation !== d.auth.authGeneration) {
           await this.#release(session, lease);
+          owner.lease = undefined;
+          admission.resolve();
           await this.#pause(session, "chatgpt account changed");
           recap = true;
           continue;
@@ -241,10 +367,20 @@ export class CodexDriver {
           redact,
           (cycle) => {
             active = cycle;
+            owner.active = cycle;
+            admission?.resolve();
           },
         );
         active = undefined;
+        owner.active = undefined;
+        owner.lease = undefined;
+        admission.resolve();
         recap = true;
+        if (result.kind === "safety") {
+          await session.waitForSafety();
+          next = "Continue after explicit safety Resume. Do not replay a completed call.";
+          continue;
+        }
         if (session.stopped || result.kind === "done" || result.kind === "retired")
           return CODEX_DONE;
         if (result.kind === "crashed") return CODEX_CRASHED;
@@ -354,6 +490,8 @@ export class CodexDriver {
     } finally {
       active?.fence();
       session.abort.signal.removeEventListener("abort", stopped);
+      admission?.resolve();
+      this.#owners.delete(session.id);
       this.#running.delete(session.id);
     }
   }
@@ -391,7 +529,7 @@ export class CodexDriver {
         .at(-1)?.content;
     const marks = { done: "x", doing: ">", skipped: "-", todo: " " };
     const text = redact(
-      `localDot restarted you, so the earlier conversation is gone.\nThe task: ${session.task}\nThe plan so far:\n${session.plan.length ? session.plan.map((item) => `[${marks[item.status]}] ${item.text}`).join("\n") : "(no plan yet)"}${user.length ? `\nWhat the user said since the task:\n${user.map((m) => m.content).join("\n")}` : ""}${last ? `\nYour last message to the user: ${last}` : ""}\nUse the full screenshot in this turn to see where things stand, then continue.${suffix ? `\n${suffix}` : ""}`,
+      `localDot restarted you, so the earlier conversation is gone.\nThe task: ${session.task}\nThe plan so far:\n${session.plan.length ? session.plan.map((item) => `[${marks[item.status]}] ${item.text}`).join("\n") : "(no plan yet)"}${user.length ? `\nWhat the user said since the task:\n${user.map((m) => m.content).join("\n")}` : ""}${last ? `\nYour last message to the user: ${last}` : ""}\nUse the full screenshot in this turn to see where things stand, then continue.${suffix ? `\n${suffix}` : ""}${this.#resumeNotes.get(session) ? `\n${this.#resumeNotes.get(session)}` : ""}`,
     );
     if (Buffer.byteLength(text) > MAX_PROMPT_BYTES) throw new Error("The task recap is too large.");
     return text;
@@ -408,7 +546,8 @@ export class CodexDriver {
   ): Promise<CycleResult> {
     const d = this.#deps,
       lifetime = new AbortController(),
-      completion = deferred<CycleResult>();
+      completion = deferred<CycleResult>(),
+      retired = deferred<void>();
     const signal = AbortSignal.any([
       session.abort.signal,
       generation.signal,
@@ -428,7 +567,10 @@ export class CodexDriver {
       wireTurn: string | undefined,
       result: CycleResult | undefined,
       savedAssistant: string | undefined,
-      fenced = false;
+      fenced = false,
+      nativeUncertain = false;
+    let pauseInterruptOwner: Pick<PauseSnapshot, "requestId" | "revision"> | undefined;
+    let pauseWork: Promise<{ generationId: number; completedCalls: number }> | undefined;
     const current = () =>
       !fenced &&
       !signal.aborted &&
@@ -486,6 +628,15 @@ export class CodexDriver {
     };
     const finish = (candidate: CycleResult) => {
       if (result) return;
+      if (
+        session.safetyPause &&
+        !["safety", "retired", "control", "auth", "crashed", "signed_out", "plan_limit"].includes(
+          candidate.kind,
+        )
+      ) {
+        if (candidate.kind !== "done" && candidate.kind !== "completed") nativeUncertain = true;
+        return;
+      }
       result = candidate;
       try {
         saveAssistant();
@@ -592,6 +743,15 @@ export class CodexDriver {
           finish({ kind: "violation", what: item.what });
         } else if (item.kind === "turn_completed") {
           const outcome = turnOutcome(item.turn);
+          // The interrupt issued only after MCP result ownership and step drain is expected.
+          // An unsolicited interruption, an owner change, or an unacknowledged RPC remains uncertain.
+          if (
+            outcome.kind === "interrupted" &&
+            pauseInterruptOwner &&
+            session.safetyPause?.requestId === pauseInterruptOwner.requestId &&
+            session.safetyPause.revision === pauseInterruptOwner.revision
+          )
+            continue;
           if (outcome.kind === "completed")
             finish({ kind: "completed", pending: pending.size > 0 });
           else if (outcome.kind === "signed_out") {
@@ -615,6 +775,7 @@ export class CodexDriver {
         context.signal.aborted
       )
         return;
+      if (session.safetyPause) return;
       if (tool === "done" && value.ok) finish(done());
       else if (value.final) finish({ kind: "done" });
     };
@@ -622,7 +783,53 @@ export class CodexDriver {
     const removeControlObserver = session.onControlRequested(generation, () =>
       finish({ kind: "control" }),
     );
-    publish({ finish, fence });
+    const pauseAtBoundary: ActiveCycle["pauseAtBoundary"] = (pause) => {
+      if (pauseWork) return pauseWork;
+      pauseWork = (async () => {
+        const pauseCurrent = () => {
+          check();
+          if (
+            session.safetyPause?.requestId !== pause.requestId ||
+            session.safetyPause.revision !== pause.revision ||
+            nativeUncertain
+          )
+            throw new CodexCleanupError();
+        };
+        pauseCurrent();
+        await session.safetyBoundary(signal);
+        pauseCurrent();
+        const heldEndpoint = endpoint;
+        let receipt: McpPauseReceipt | undefined;
+        if (heldEndpoint) receipt = await heldEndpoint.pauseAtBoundary(epoch, pause);
+        pauseCurrent();
+        if (mainThread && wireTurn && conn) {
+          pauseInterruptOwner = Object.freeze({
+            requestId: pause.requestId,
+            revision: pause.revision,
+          });
+          await readonlyAwait(
+            conn.rpc.request(
+              "turn/interrupt",
+              { threadId: mainThread, turnId: wireTurn },
+              { signal, validateResult: opaqueObject },
+            ),
+            signal,
+          );
+          pauseCurrent();
+        }
+        if (heldEndpoint && (!receipt || !heldEndpoint.validatePauseReceipt(receipt)))
+          throw new CodexCleanupError();
+        // Interrupt acknowledgement alone is insufficient. Resolve only after process, pipes,
+        // MCP capability and the credential lease are physically closed by normal cleanup.
+        finish({ kind: "safety" });
+        await retired.promise;
+        if (result?.kind !== "safety" || nativeUncertain) throw new CodexCleanupError();
+        return { generationId: generation.id, completedCalls: receipt?.completedCalls ?? 0 };
+      })();
+      void pauseWork.catch(() => {});
+      return pauseWork;
+    };
+    publish({ finish, fence, pauseAtBoundary });
     const startupTimer = setTimeout(
       () => finish({ kind: "failed", message: "The ChatGPT task did not start in time." }),
       20000,
@@ -634,7 +841,7 @@ export class CodexDriver {
         loss();
         return;
       }
-      if (session.status === "running") {
+      if (session.status === "running" || session.safetyPause?.phase === "pausing") {
         try {
           guardedAppend("heartbeat", { ongoing: true, everyMs: heartbeatMs });
         } catch {
@@ -677,6 +884,8 @@ export class CodexDriver {
       validateResult: RpcRequestOptions<T>["validateResult"],
     ): Promise<T> => {
       check();
+      if (session.safetyPause)
+        return Promise.reject(new Error("Native startup is fenced by Pause."));
       if (!conn) return Promise.reject(new Error("Missing Codex connection."));
       return readonlyAwait(
         conn.rpc.request(method, params, { signal, validateResult }),
@@ -695,7 +904,7 @@ export class CodexDriver {
         }
         for (const item of persist(batch.items)) {
           check();
-          if (item.kind !== "steer" || !wireTurn) continue;
+          if (item.kind !== "steer" || !wireTurn || session.safetyPause) continue;
           const expected = wireTurn;
           try {
             await request(
@@ -723,6 +932,7 @@ export class CodexDriver {
     };
     const startup = (async () => {
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       endpoint = await d.openEndpoint({
         session,
         generation,
@@ -744,6 +954,7 @@ export class CodexDriver {
       });
       if (fenced) closeEndpoint();
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       const launched = await lease.launch({
         sessionId: session.id,
         endpoint,
@@ -763,14 +974,17 @@ export class CodexDriver {
       });
       register(launched);
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       await request(
         "initialize",
         { clientInfo: { name: "localdot", title: "localDot", version: "0.0.0" } },
         opaqueObject,
       );
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       conn?.rpc.notify("initialized", {});
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       const account = await request("account/read", { refreshToken: false }, AccountRead.parse);
       if (account.account?.type !== "chatgpt") {
         d.auth.markSignedOut(lease.generation);
@@ -791,6 +1005,7 @@ export class CodexDriver {
       mainThread = thread.thread.id;
       session.restoreDelivered(d.transcripts);
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       if (redact(session.task) !== session.task)
         throw new Error("Protected task input cannot be persisted.");
       if (
@@ -805,8 +1020,10 @@ export class CodexDriver {
           signal,
         );
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       const unread = await session.inbox(session.delivered, 0, signal, generation);
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       const initial = persist(unread.items);
       const text = recap
         ? this.#recap(session, redact, suffix)
@@ -814,8 +1031,10 @@ export class CodexDriver {
       if (Buffer.byteLength(text) > MAX_PROMPT_BYTES)
         throw new Error("The task input is too large.");
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       const observation = await d.observe(session, generation, signal);
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       if (
         observation.full !== true ||
         !ULID_PATTERN.test(observation.frameId) ||
@@ -833,6 +1052,7 @@ export class CodexDriver {
       });
       endpoint.setTurn(epoch);
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       mapper = new CodexEventMapper({
         session,
         generation,
@@ -849,6 +1069,7 @@ export class CodexDriver {
           finish({ kind: "failed", message: "The ChatGPT event stream could not be processed." }),
       });
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       session.tainted = true;
       const started = await request(
         "turn/start",
@@ -866,6 +1087,7 @@ export class CodexDriver {
       if (!wireTurn)
         notification("turn/started", { threadId: mainThread, turn: started.turn }, { signal });
       check();
+      if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       for (const item of initial) pending.delete(item.messageId);
       clearTimeout(startupTimer);
       void inboxLoop().catch(() => {
@@ -874,6 +1096,7 @@ export class CodexDriver {
       });
     })().catch((cause) => {
       if (result) return;
+      if (current() && session.safetyPause) return;
       if (!current()) {
         loss();
         if (!result) finish({ kind: "failed", message: "The ChatGPT connection was retired." });
@@ -898,7 +1121,15 @@ export class CodexDriver {
     });
     try {
       await retirementDeadline(cleanup);
+      // Remove only this exact cycle after cleanup, before publishing a resumable receipt.
+      const owner = this.#owners.get(session.id);
+      if (owner?.active?.pauseAtBoundary === pauseAtBoundary) {
+        owner.active = undefined;
+        owner.lease = undefined;
+      }
+      retired.resolve();
     } catch {
+      retired.reject(new CodexCleanupError());
       this.#blocked.add(session.id);
       throw new CodexCleanupError();
     }

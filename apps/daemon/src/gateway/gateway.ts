@@ -77,6 +77,8 @@ export interface ActionContext {
   source?: "manual" | "agent";
   redact?(value: string): string;
   authorizeAgent?(request: NativeActionRequest): Promise<NativeActionPermit | undefined>;
+  // Private daemon callback at the last synchronous boundary before physical input.
+  beforeEffect?(action: GuiAction, identity: NativeActionIdentity): boolean;
   sessionId: string;
   cellId: string;
   agent?: string;
@@ -534,6 +536,11 @@ export class ActionGateway {
       throw new Cancelled(
         "stale",
         "the approved action or target changed; look again before acting",
+      );
+    if (ctx.beforeEffect?.(action, fresh) !== true)
+      throw new Cancelled(
+        "user",
+        "this input was paused before dispatch; wait for explicit Resume",
       );
   }
 

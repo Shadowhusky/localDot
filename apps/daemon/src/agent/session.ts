@@ -11,12 +11,14 @@ import {
   ulid,
 } from "@localdot/protocol";
 import type { EventLog } from "../event-log.ts";
+import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
 import {
   type ActionBinding,
   ApprovalBroker,
   type ApprovalChecks,
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
+import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
@@ -100,6 +102,9 @@ export class AgentSession {
   });
   #safetyRevision = 0;
   #safetyResuming = false;
+  readonly #repeatGuard = new RepeatGuard();
+  #repeatPauseHandler: ((requestId: string) => PauseSnapshot) | undefined;
+  #repeatAsk: { askId: string; requestId: string; revision: number } | undefined;
   status: SessionStatus = "starting";
   brainCellId: string | undefined;
   boot: BootConfig | undefined;
@@ -262,6 +267,58 @@ export class AgentSession {
     if (!pause) throw new PausedStepError();
     return pause;
   }
+  installRepeatPauseHandler(handler: (requestId: string) => PauseSnapshot): void {
+    if (this.#repeatPauseHandler) throw new Error("task safety controller already installed");
+    this.#repeatPauseHandler = handler;
+  }
+  admitNativeEffect(action: GuiAction, identity: NativeActionIdentity): boolean {
+    if (this.stopped || this.controlHeld || this.safetyPause) return false;
+    if (this.#repeatGuard.admit(action, identity)) return true;
+    const requestId = ulid();
+    let pause: PauseSnapshot;
+    if (this.#repeatPauseHandler) pause = this.#repeatPauseHandler(requestId);
+    else {
+      // An unwired caller cannot advertise a confirmed Resume boundary.
+      pause = this.requestSafetyPause(requestId, "repeated_action");
+      this.uncertainSafetyPause(pause.requestId, pause.revision);
+    }
+    const question = this.#question(
+      "I repeated the same action twice. What should I change before continuing? Resume is a separate control.",
+      ["I will change the instructions", "I want to take control"],
+      true,
+      0,
+      undefined,
+      this.abort.signal,
+      () =>
+        this.safetyPause?.requestId === pause.requestId &&
+        this.safetyPause?.revision === pause.revision,
+      (answer) => {
+        if (answer.by !== "user") return;
+        const options = ["I will change the instructions", "I want to take control"];
+        const selected = answer.option ? options[answer.option.charCodeAt(0) - 65] : undefined;
+        const text = answer.text
+          ? selected
+            ? `${answer.text}\nSelected option: ${selected}`
+            : answer.text
+          : selected;
+        if (!text) throw new Error("repeat answer has no instruction");
+        // post() journals the redacted user message before publishing its durable inbox identity.
+        // The private question/Pause owner is checked synchronously before this callback.
+        this.post("followup", text);
+      },
+    );
+    if (this.#ask)
+      this.#repeatAsk = {
+        askId: this.#ask.askId,
+        requestId: pause.requestId,
+        revision: pause.revision,
+      };
+    void question.catch(() => {
+      if (!this.stopped && this.safetyPause?.requestId === pause.requestId)
+        this.uncertainSafetyPause(pause.requestId, pause.revision);
+    });
+    return false;
+  }
   async safetyBoundary(signal = this.abort.signal): Promise<void> {
     await this.#steps.waitAtBoundary(signal);
   }
@@ -284,6 +341,11 @@ export class AgentSession {
   resumeSafety(requestId: string, revision: number): void {
     if (this.controlHeld) throw new ControlHeldError();
     this.#steps.resume(requestId, revision);
+    this.#repeatGuard.reset();
+    if (this.#repeatAsk?.requestId === requestId && this.#repeatAsk.revision === revision) {
+      if (this.#ask?.askId === this.#repeatAsk.askId) this.#ask.finish({ by: "pause" });
+      this.#repeatAsk = undefined;
+    }
     this.#safetyResuming = false;
     this.#safetyChanged();
     this.setStatus("running");
@@ -591,13 +653,29 @@ export class AgentSession {
   ): Promise<AskAnswer> {
     if (!generation) throw new SessionStoppedError();
     this.check(generation, signal);
-    if (this.#ask) throw new Error("a question is already waiting for the user");
-    const askId = ulid();
     const combined = AbortSignal.any([
       this.abort.signal,
       generation.signal,
       ...(signal ? [signal] : []),
     ]);
+    return this.#question(question, options, allowText, timeoutMs, step, combined, () =>
+      this.isCurrent(generation),
+    );
+  }
+  #question(
+    question: string,
+    options: string[],
+    allowText: boolean,
+    timeoutMs: number,
+    step: string | undefined,
+    combined: AbortSignal,
+    ownerCurrent: () => boolean,
+    beforeAnswer?: (answer: AskAnswer) => void,
+  ): Promise<AskAnswer> {
+    if (this.#ask) throw new Error("a question is already waiting for the user");
+    combined.throwIfAborted();
+    if (!ownerCurrent()) throw new SessionStoppedError();
+    const askId = ulid();
     const keys = options.map((_, i) => String.fromCharCode(65 + i));
     return new Promise<AskAnswer>((resolve, reject) => {
       let settled = false;
@@ -605,11 +683,14 @@ export class AgentSession {
       const aborted = () => finish({ by: "stop" });
       const finish = (answer: AskAnswer) => {
         if (settled) return false;
+        if (answer.by === "user" && (combined.aborted || this.stopped || !ownerCurrent()))
+          return false;
         settled = true;
         if (timer) clearTimeout(timer);
         combined.removeEventListener("abort", aborted);
         if (this.#ask?.askId === askId) this.#ask = undefined;
         try {
+          beforeAnswer?.(answer);
           this.append("ask.answer", { askId, ...answer }, step);
         } catch (error) {
           // Abort listeners cannot throw into the event loop or leave a tool waiting forever.
@@ -617,8 +698,7 @@ export class AgentSession {
           return false;
         }
         if (answer.by === "user") this.tainted = false;
-        if (this.isCurrent(generation) && !this.#control && !this.safetyPause)
-          this.status = "running";
+        if (ownerCurrent() && !this.#control && !this.safetyPause) this.status = "running";
         resolve(answer);
         return true;
       };
@@ -633,13 +713,16 @@ export class AgentSession {
           },
           step,
         );
-        this.append("agent.state", { state: "waiting_user", reason: "question" });
+        this.append("agent.state", {
+          state: this.safetyPause ? "paused" : "waiting_user",
+          reason: "question",
+        });
       } catch (error) {
         reject(error);
         return;
       }
       this.#ask = { askId, options: keys, allowText, finish };
-      this.status = "waiting_user";
+      if (!this.safetyPause) this.status = "waiting_user";
       if (timeoutMs > 0) timer = setTimeout(() => finish({ by: "timeout" }), timeoutMs);
       combined.addEventListener("abort", aborted, { once: true });
       if (combined.aborted) aborted();

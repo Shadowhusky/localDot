@@ -83,6 +83,10 @@ function fixture(
           if (record.epoch === epoch) record.epoch = undefined;
         },
         connections: () => 0,
+        pauseAtBoundary: async () => {
+          throw new Error("This legacy fixture has no native Pause receipt.");
+        },
+        validatePauseReceipt: () => false,
         close: async () => {
           record.closed = true;
           record.epoch = undefined;

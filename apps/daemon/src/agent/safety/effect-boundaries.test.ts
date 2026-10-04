@@ -28,6 +28,7 @@ import { filesTool } from "../tools/files.ts";
 import { dispatchTool } from "../tools/index.ts";
 import { rememberTool } from "../tools/remember.ts";
 import { shellTool } from "../tools/shell.ts";
+import { SafetyController } from "./controller.ts";
 
 const UI_TOKEN = "i".repeat(43);
 function deferred<T = void>() {
@@ -622,5 +623,104 @@ describe("immediate effect ownership", () => {
     } finally {
       lease.finish();
     }
+  });
+});
+
+function repeatController(f: ReturnType<typeof setup>) {
+  return new SafetyController(f.session, {
+    mode: "api",
+    owner: () => undefined,
+    ready: () => {},
+    persist: () => {},
+    modelAdmission: async () => {
+      throw new Error("no model owner in repeat fixture");
+    },
+    setModelAdmission: async () => {
+      throw new Error("no model owner in repeat fixture");
+    },
+    sleep: async (_ms, signal) => {
+      signal.throwIfAborted();
+    },
+  });
+}
+const repeatedKey = { action: "key", keys: ["ARROWDOWN"] };
+async function approvedClick(f: ReturnType<typeof setup>, label: string) {
+  const pending = f.call("computer", {
+    ...click,
+    label,
+    ...(f.session.lastFrameId ? { basedOn: f.session.lastFrameId } : {}),
+  });
+  await until(() => !!f.session.pendingApproval);
+  expect((await f.post(f.answer())).status).toBe(204);
+  return pending;
+}
+describe("repeat safety at actual native dispatch", () => {
+  it("third identical key inside one tool batch pauses after exactly two physical effects", async () => {
+    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const controller = repeatController(f);
+    const out = await f.call("computer", { ...repeatedKey, repeat: 3 });
+    expect(f.effects()).toHaveLength(2);
+    expect(out.body).toMatchObject({ ok: false, pause: true });
+    await controller.settled();
+    expect(f.session.safetyPause).toMatchObject({
+      reason: "repeated_action",
+      phase: "paused",
+      resumeAvailable: true,
+    });
+  });
+  it("third click still pauses when model labels, call IDs and frame IDs change", async () => {
+    const f = setup();
+    const controller = repeatController(f);
+    expect((await approvedClick(f, "first label")).body.ok).toBe(true);
+    expect((await approvedClick(f, "different label")).body.ok).toBe(true);
+    const third = await approvedClick(f, "another invented label");
+    expect(f.effects()).toHaveLength(2);
+    expect(third.body).toMatchObject({ ok: false, pause: true });
+    await controller.settled();
+    expect(f.session.safetyPause?.reason).toBe("repeated_action");
+  });
+  it("a different actual native window resets the consecutive input identity", async () => {
+    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    repeatController(f);
+    expect((await f.call("computer", { ...repeatedKey, repeat: 2 })).body.ok).toBe(true);
+    f.target.value = { ...f.target.value, window: 78 };
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(3);
+    expect(f.session.safetyPause).toBeUndefined();
+  });
+  it("screenshot observations cannot conceal the third identical input", async () => {
+    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const controller = repeatController(f);
+    await f.call("computer", repeatedKey);
+    await f.call("computer", { action: "screenshot" });
+    await f.call("computer", repeatedKey);
+    await f.call("computer", { action: "screenshot" });
+    const third = await f.call("computer", repeatedKey);
+    expect({ effects: f.effects().length, ok: third.body.ok, pause: third.body.pause }).toEqual({
+      effects: 2,
+      ok: false,
+      pause: true,
+    });
+    await controller.settled();
+  });
+  it("answering the daemon repeat question cannot Resume and explicit Resume resets the streak", async () => {
+    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const controller = repeatController(f);
+    await f.call("computer", { ...repeatedKey, repeat: 3 });
+    await controller.settled();
+    const pause = f.session.safetyPause,
+      ask = f.session.pendingAsk;
+    expect(pause?.reason).toBe("repeated_action");
+    expect(typeof ask).toBe("string");
+    if (!pause || !ask) throw new Error("repeat control owner missing");
+    expect(f.session.answer(ask, "A", undefined)).toBe(true);
+    expect(f.session.safetyPause?.requestId).toBe(pause.requestId);
+    const blocked = await f.call("computer", repeatedKey);
+    expect(blocked.body.pause).toBe(true);
+    expect(f.effects()).toHaveLength(2);
+    await controller.resume(pause.requestId, pause.revision);
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(3);
+    expect(f.session.safetyPause).toBeUndefined();
   });
 });

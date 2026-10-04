@@ -136,6 +136,20 @@ export class CodexAuthOwner {
   get authGeneration(): number {
     return this.#generation;
   }
+  // Private readiness only: safety Resume must not start an account or usage polling process.
+  canResume(generation: number): boolean {
+    return (
+      generation === this.#generation &&
+      !this.#closed &&
+      !this.#blocked &&
+      !this.#expired &&
+      !this.#mutation &&
+      !this.#attempt &&
+      !this.#reservation &&
+      this.#cache?.state === "signed_in" &&
+      this.#reason() === undefined
+    );
+  }
   #now(): number {
     const n = (this.#deps.now ?? Date.now)();
     if (!Number.isFinite(n) || n < 0) throw new Error("Invalid account clock.");

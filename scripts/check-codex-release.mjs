@@ -29,6 +29,8 @@ export const REQUIRED_PROBES = Object.freeze([
   "cancels the remaining click and its image after a stale batch action, then submits a fresh full-frame turn",
   "Stop fences a pending real MCP call and closes Codex, nc and all pipes without a late image",
   "preserves held takeover after a pending MCP call is canceled and only resumes after matching hand-back",
+  "matching native Pause drains a real MCP call and resumes once without replaying its effect",
+  "uncertain real MCP result ownership contains native Pause and refuses Resume",
   "pauses a failed fake refresh without daemon retry, replacement, fallback or new frames until Stop",
   "refuses a forced alternate-model sub-agent without creating a child thread or granting tools",
   "exposes no connector, plugin, foreign MCP or web tool and sends only allowed fixture HTTP requests",

@@ -3,6 +3,7 @@ import {
   type ModelAdmissionWrite,
   type PauseSnapshot,
 } from "@localdot/protocol";
+import type { NativePauseReceipt } from "../codex/native-pause.ts";
 import type { AgentSession } from "../session.ts";
 
 export interface ModelOwner {
@@ -17,21 +18,33 @@ export interface SafetyControllerDeps {
   setModelAdmission(cellId: string, write: ModelAdmissionWrite): Promise<ModelAdmissionSnapshot>;
   persist(pause: PauseSnapshot | undefined): void;
   sleep(ms: number, signal: AbortSignal): Promise<void>;
-  // Native readiness is a separate pinned-turn receipt boundary, supplied in Task4.
   mode: "api" | "native";
+  native?: {
+    pause(pause: Pick<PauseSnapshot, "requestId" | "revision">): Promise<NativePauseReceipt>;
+    resume(
+      pause: Pick<PauseSnapshot, "requestId" | "revision">,
+      receipt: NativePauseReceipt,
+    ): Promise<void>;
+    contain(): Promise<void>;
+  };
 }
 function same(a: ModelOwner | undefined, b: ModelOwner | undefined): boolean {
   return a?.cellId === b?.cellId && a?.taskId === b?.taskId;
 }
 export class SafetyController {
   #pausing: Promise<void> | undefined;
+  #native: NativePauseReceipt | undefined;
   #model: (ModelOwner & { generationId: string; epoch: number }) | undefined;
   constructor(
     readonly session: AgentSession,
     readonly deps: SafetyControllerDeps,
-  ) {}
-  request(requestId: string): PauseSnapshot {
-    const pause = this.session.requestSafetyPause(requestId);
+  ) {
+    this.session.installRepeatPauseHandler((requestId) =>
+      this.request(requestId, "repeated_action"),
+    );
+  }
+  request(requestId: string, reason: "user" | "repeated_action" = "user"): PauseSnapshot {
+    const pause = this.session.requestSafetyPause(requestId, reason);
     if (!this.#pausing && pause.phase === "pausing") {
       this.#pausing = this.#settle(pause)
         .catch(() => this.invalidate())
@@ -85,8 +98,22 @@ export class SafetyController {
       await this.deps.ownerBoundary?.();
       const owner = this.deps.owner();
       this.#current(pause, owner);
-      if (this.deps.mode === "native") throw new Error("native pause receipts are not confirmed");
-      if (owner) {
+      if (this.deps.mode === "native") {
+        if (!this.deps.native) throw new Error("native pause receipt boundary is unavailable");
+        const receipt = await this.deps.native.pause(pause);
+        this.#current(pause, owner);
+        if (
+          receipt.sessionId !== this.session.id ||
+          receipt.requestId !== pause.requestId ||
+          receipt.revision !== pause.revision ||
+          receipt.turnRetired !== true ||
+          receipt.callsSettled !== true ||
+          receipt.resultOwnershipConfirmed !== true
+        )
+          throw new Error("native pause receipt is not confirmed");
+        this.#native = receipt;
+        this.#model = undefined;
+      } else if (owner) {
         let snap = this.#read(await this.deps.modelAdmission(owner.cellId), owner);
         this.#current(pause, owner);
         snap = this.#read(
@@ -126,6 +153,7 @@ export class SafetyController {
       } catch {
         /* Admission remains closed. */
       }
+      if (this.deps.mode === "native") await this.deps.native?.contain().catch(() => {});
     }
   }
   async resume(requestId: string, revision: number): Promise<void> {
@@ -139,7 +167,13 @@ export class SafetyController {
     this.session.beginSafetyResume(requestId, revision);
     try {
       this.deps.persist(this.session.safetyPause);
-      if (owner && this.#model) {
+      if (this.deps.mode === "native") {
+        if (!this.#native || !this.deps.native)
+          throw new Error("native pause owner is unavailable");
+        await this.deps.native.resume(pause, this.#native);
+        this.#current(pause, owner);
+        this.deps.ready();
+      } else if (owner && this.#model) {
         const snap = this.#read(
           await this.deps.modelAdmission(owner.cellId),
           owner,
@@ -168,6 +202,7 @@ export class SafetyController {
       this.#current(pause, owner);
       this.session.resumeSafety(requestId, revision);
       this.#model = undefined;
+      this.#native = undefined;
     } catch (error) {
       if (!this.session.stopped) {
         // An uncertain open acknowledgement never releases tool admission or invites retry.
@@ -193,6 +228,7 @@ export class SafetyController {
           /* Intent remains fenced. */
         }
       }
+      if (this.deps.mode === "native") await this.deps.native?.contain().catch(() => {});
       throw error;
     }
   }
