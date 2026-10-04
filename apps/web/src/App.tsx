@@ -2,8 +2,12 @@ import { LLM_PROVIDERS } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
+import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
+import { StopControl } from "./agent/StopControl.tsx";
+import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
+import { useTaskControls } from "./agent/useTaskControls.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
@@ -197,13 +201,100 @@ function Theatre({ api }: { api: ApiClient }) {
     media.addEventListener("change", changed);
     return () => media.removeEventListener("change", changed);
   }, []);
+  const controls = useTaskControls({
+    api,
+    cell,
+    cellPending: pending,
+    agent,
+    feed: session.agentFeed,
+    suspended: keysOpen || settings.open,
+    manualVisible: !narrow || pane === "computer",
+    refreshCell: retry,
+  });
+  const [pointerMode, setPointerMode] = useState<PointerMode>("click");
+  useEffect(() => {
+    if (agent.model.pendingTakeover) setPointerMode("click");
+  }, [agent.model.pendingTakeover]);
+  const question =
+    !controls.fenced &&
+    !agent.model.ended &&
+    agent.model.pendingAsk &&
+    (!agent.fresh || agent.snapshot?.pendingAsk === agent.model.pendingAsk)
+      ? agent.model.questions.get(agent.model.pendingAsk)
+      : undefined;
+  const takeover =
+    !controls.fenced &&
+    !agent.model.ended &&
+    agent.model.pendingTakeover &&
+    (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
+      ? agent.model.takeovers.get(agent.model.pendingTakeover)
+      : undefined;
+  const guardStart = () => {
+    if (
+      !controls.stopping &&
+      !controls.busy &&
+      controls.stopStatus.phase !== "unconfirmed" &&
+      (controls.stopStatus.phase !== "stopped" || hud.action.kind === "start") &&
+      !agent.model.pendingTakeover
+    )
+      start();
+  };
+  const guardResume = () => {
+    if (
+      !controls.stopping &&
+      !controls.busy &&
+      controls.stopStatus.phase !== "unconfirmed" &&
+      cell?.state === "ready" &&
+      cell.paused &&
+      !agent.model.pendingTakeover
+    )
+      resume();
+  };
+  const guardComputerStop = () => {
+    if (!controls.stopping && !controls.busy) stop();
+  };
+  const taskStop = () => {
+    void controls.stop();
+  };
+  const stageCell =
+    cell && controls.stopStatus.phase === "paused"
+      ? { ...cell, paused: true as const }
+      : cell && controls.stopStatus.phase === "stopped"
+        ? { ...cell, state: "stopped" as const }
+        : cell;
+  const containedHud =
+    controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
+      ? hudFor({ cell: stageCell, status, pending })
+      : hud;
   const now = useNowMs(session.model, session.version);
   const sHud = session.sessionId ? sessionHud(session.model, now) : null;
-  const sessionMerged = mergeHud(error ? { ...hud, caption: error } : hud, sHud);
+  const sessionMerged = mergeHud(
+    error ? { ...containedHud, caption: error } : containedHud,
+    controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped" ? null : sHud,
+  );
   const merged = {
     ...sessionMerged,
+    ...(controls.stopping
+      ? { label: "Stopping…", stop: true }
+      : controls.stopStatus.phase === "unconfirmed"
+        ? { label: "Stop unconfirmed", stop: true }
+        : {}),
+    action: {
+      ...sessionMerged.action,
+      enabled:
+        sessionMerged.action.enabled &&
+        !controls.stopping &&
+        !controls.busy &&
+        controls.stopStatus.phase !== "unconfirmed" &&
+        (sessionMerged.action.kind !== "resume" ||
+          (cell?.state === "ready" && cell.paused === true && !agent.model.pendingTakeover)) &&
+        (sessionMerged.action.kind !== "start" ||
+          controls.stopStatus.phase !== "stopped" ||
+          hud.action.kind === "start"),
+    },
     control: Boolean(
       sessionMerged.control &&
+        !controls.fenced &&
         agent.fresh &&
         !agent.model.pendingTakeover &&
         !agent.snapshot?.pendingTakeover,
@@ -235,10 +326,12 @@ function Theatre({ api }: { api: ApiClient }) {
         <div className="task-bar">
           <Hud
             hud={merged}
-            onStart={start}
-            onStop={stop}
-            onResume={resume}
-            onStopSession={session.stop}
+            onStart={guardStart}
+            onStop={guardComputerStop}
+            onResume={guardResume}
+            onStopSession={taskStop}
+            stopping={controls.stopping}
+            stopEnabled={controls.canStop}
             onRetry={retry}
           />
           {session.sessionId && (
@@ -259,6 +352,7 @@ function Theatre({ api }: { api: ApiClient }) {
             </span>
           )}
         </div>
+        <StopControl controls={controls} />
         <PaneTabs
           selected={pane}
           onSelect={setPane}
@@ -280,27 +374,43 @@ function Theatre({ api }: { api: ApiClient }) {
               visible={!narrow || pane === "conversation"}
               agent={agent}
               composer={
-                <Composer
-                  api={api}
-                  cell={cell}
-                  known={status === "known"}
-                  pending={pending !== null}
-                  agent={agent}
-                  keysOpen={keysOpen || settings.open}
-                  receiveKey={receiveKey}
-                  configured={mainReady}
-                  onSettings={showSettings}
-                  modelSummary={
-                    settings.saved?.main
-                      ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`
-                      : "Choose a main model in Settings before starting a task."
-                  }
-                />
+                <>
+                  {question && !agent.model.ended && (
+                    <AskForm
+                      key={question.askId}
+                      question={question}
+                      controls={controls}
+                      visible={(!narrow || pane === "conversation") && !keysOpen && !settings.open}
+                      receiveKey={receiveKey}
+                    />
+                  )}
+                  <Composer
+                    api={api}
+                    cell={cell}
+                    known={status === "known"}
+                    pending={pending !== null}
+                    controlBlocked={controls.fenced || controls.stopping}
+                    agent={agent}
+                    keysOpen={keysOpen || settings.open}
+                    receiveKey={receiveKey}
+                    configured={mainReady}
+                    onSettings={showSettings}
+                    modelSummary={
+                      settings.saved?.main
+                        ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`
+                        : "Choose a main model in Settings before starting a task."
+                    }
+                  />
+                </>
               }
             />
           </div>
           <div
-            className="pane pane-computer"
+            className={
+              takeover && !agent.model.ended
+                ? "pane pane-computer manual-pane"
+                : "pane pane-computer"
+            }
             id="pane-computer"
             role="tabpanel"
             aria-label="Computer"
@@ -311,22 +421,49 @@ function Theatre({ api }: { api: ApiClient }) {
             }}
           >
             <StageColumn
+              before={
+                takeover && !agent.model.ended ? (
+                  <TakeoverPanel
+                    key={takeover.requestId}
+                    takeover={takeover}
+                    controls={controls}
+                    visible={(!narrow || pane === "computer") && !keysOpen && !settings.open}
+                    manualStatus={agent.snapshot?.manualControl}
+                    receiveKey={receiveKey}
+                    screen={session.model.screen}
+                    pointerMode={pointerMode}
+                    onPointerMode={setPointerMode}
+                  />
+                ) : undefined
+              }
               showHud={false}
               hud={merged}
               control={merged.control}
-              onStart={start}
-              onStop={stop}
-              onResume={resume}
-              onStopSession={session.stop}
+              onStart={guardStart}
+              onStop={guardComputerStop}
+              onResume={guardResume}
+              onStopSession={taskStop}
               onRetry={retry}
             >
               <Stage
                 ref={stage}
-                cell={cell}
+                cell={stageCell}
                 api={api}
                 control={merged.control}
                 reconnects={reconnects}
                 listed={listed}
+                manual={
+                  takeover && session.model.screen && !agent.model.ended
+                    ? {
+                        requestId: takeover.requestId,
+                        enabled: controls.canInput,
+                        screen: session.model.screen,
+                        button: pointerMode === "right" ? "right" : "left",
+                        count: pointerMode === "double" ? 2 : 1,
+                        input: controls.input,
+                      }
+                    : undefined
+                }
               />
             </StageColumn>
           </div>
@@ -354,6 +491,7 @@ function Theatre({ api }: { api: ApiClient }) {
         </div>
       </div>
       <SettingsSheet
+        taskControls={<StopControl controls={controls} />}
         open={settings.open}
         suspended={keysOpen}
         choices={settings.draft?.choices ?? {}}
@@ -426,13 +564,18 @@ function Theatre({ api }: { api: ApiClient }) {
         }
         stop={
           merged.stop
-            ? { label: "Stop", enabled: true, run: session.stop }
+            ? {
+                label: controls.stopping ? "Stopping…" : "Stop",
+                enabled: controls.canStop && !controls.stopping,
+                run: taskStop,
+              }
             : merged.action.kind === "stop" || merged.action.kind === "resume"
-              ? { label: "Stop computer", enabled: merged.action.enabled, run: stop }
+              ? { label: "Stop computer", enabled: merged.action.enabled, run: guardComputerStop }
               : undefined
         }
       />
       <KeysSheet
+        taskControls={<StopControl controls={controls} />}
         intakeRef={keysIntake}
         open={keysOpen}
         keys={keys}
@@ -444,9 +587,13 @@ function Theatre({ api }: { api: ApiClient }) {
         }}
         stop={
           merged.stop
-            ? { label: "Stop", enabled: true, run: session.stop }
+            ? {
+                label: controls.stopping ? "Stopping…" : "Stop",
+                enabled: controls.canStop && !controls.stopping,
+                run: taskStop,
+              }
             : merged.action.kind === "stop" || merged.action.kind === "resume"
-              ? { label: "Stop computer", enabled: merged.action.enabled, run: stop }
+              ? { label: "Stop computer", enabled: merged.action.enabled, run: guardComputerStop }
               : undefined
         }
       />

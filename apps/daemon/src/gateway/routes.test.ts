@@ -41,12 +41,13 @@ function setup() {
     now: () => clock.nowMicros(),
     sleep: (ms, signal) => sleep(ms, undefined, { signal }),
   });
+  const live = new LiveSessions();
   const app = createApp({
     token: TOKEN,
     port: PORT,
     eventLog,
     cells: { cells, tickets: new TicketRegistry() },
-    gateway: { registry, clock, eventLog, gateway, frames, live: new LiveSessions() },
+    gateway: { registry, clock, eventLog, gateway, frames, live },
   });
   const id = ulid();
   cells.emit({
@@ -60,10 +61,77 @@ function setup() {
     desktopd: { baseUrl: "http://127.0.0.1:1", token: fake.token },
     stream: { baseUrl: "http://127.0.0.1:2", authorization: "Basic x" },
   });
-  return { app, cells, fake, id, registry, eventLog };
+  return { app, cells, fake, id, registry, eventLog, live };
 }
 
 describe("raw desktopd routes", () => {
+  it("refuses every legacy mutation while an agent owns the desktop, including after raw clock preflight", async () => {
+    const h = setup(),
+      sessionId = ulid();
+    let finish!: () => void;
+    h.live.start(
+      h.id,
+      sessionId,
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    try {
+      for (const name of ["input", "launch", "puppet"]) {
+        const response = await h.app.request(url(`/api/cells/${h.id}/${name}`), {
+          method: "POST",
+          headers: { ...bearer, "content-type": "application/json" },
+          body: "{}",
+        });
+        expect(response.status).toBe(409);
+      }
+      expect(h.fake.calls).toEqual([]);
+    } finally {
+      finish();
+      await h.live.settled(sessionId);
+      h.registry.dispose();
+      h.eventLog.close();
+    }
+  });
+
+  it("holds idle admission while a legacy input waits for clock synchronization", async () => {
+    const h = setup(),
+      sessionId = ulid(),
+      gate = Promise.withResolvers<void>(),
+      entered = Promise.withResolvers<void>();
+    // The registry is already constructed; gate its actual clock method, keeping its real input client.
+    const desktop = h.registry.for(h.id);
+    if (!desktop) throw new Error("missing desktop fixture");
+    const original = desktop.client.clock.bind(desktop.client);
+    desktop.client.clock = async () => {
+      entered.resolve();
+      await gate.promise;
+      return original();
+    };
+    let finish!: () => void;
+    const work = h.app.request(url(`/api/cells/${h.id}/input`), {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["tab"] } }),
+    });
+    try {
+      await entered.promise;
+      expect(() => h.live.start(h.id, sessionId, async () => {})).toThrow("still settling");
+      expect(h.live.get(h.id)).toBeUndefined();
+      gate.resolve();
+      expect((await work).status).toBe(200);
+      expect(h.fake.calls).toHaveLength(1);
+      expect(h.live.idleOperationPending(h.id)).toBe(false);
+    } finally {
+      gate.resolve();
+      if (finish) finish();
+      await work;
+      await h.live.settled(sessionId);
+      h.registry.dispose();
+      h.eventLog.close();
+    }
+  });
   it("serves the daemon clock in microseconds", async () => {
     const { app } = setup();
     const a = (await (await app.request(url("/api/clock"), { headers: bearer })).json()) as {

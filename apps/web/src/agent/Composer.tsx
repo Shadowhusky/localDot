@@ -17,6 +17,7 @@ export interface ComposerProps {
   cell: CellSummary | null;
   known: boolean;
   pending: boolean;
+  controlBlocked?: boolean;
   agent: AgentSessionView;
   keysOpen: boolean;
   receiveKey: KeyIntake["receive"];
@@ -36,6 +37,7 @@ export interface Delivery {
 const readyCell = (props: ComposerProps) =>
   props.known &&
   !props.pending &&
+  !props.controlBlocked &&
   props.cell?.state === "ready" &&
   !props.cell.paused &&
   ULID_PATTERN.test(props.cell.id);
@@ -312,7 +314,7 @@ export function Composer(props: ComposerProps) {
           <textarea
             ref={field}
             rows={3}
-            disabled={props.keysOpen}
+            disabled={props.keysOpen || props.controlBlocked}
             placeholder={mode === "new" ? "What would you like done?" : "Message dot…"}
             autoComplete="off"
             onCompositionStart={() => {

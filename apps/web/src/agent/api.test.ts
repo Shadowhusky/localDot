@@ -27,6 +27,8 @@ for (const [label, value] of [
   ["null pending", { ...valid, pendingAsk: null }],
   ["invalid pending", { ...valid, pendingTakeover: "not-a-request" }],
   ["invalid brain", { ...valid, brainCellId: "unsafe" }],
+  ["manual state without ownership", { ...valid, manualControl: "ready" }],
+  ["unknown manual state", { ...valid, pendingTakeover: cellId, manualControl: "safe" }],
   ["unknown fields", { ...valid, credential: "inert-do-not-echo" }],
   ["inherited fields", Object.create(valid)],
 ] as const) {

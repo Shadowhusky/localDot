@@ -31,6 +31,7 @@ import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
 import { openMcpEndpoint } from "./codex/mcp-endpoint.ts";
 import { FramePng } from "./frame-png.ts";
+import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
 import { actPolicy, type ToolPolicy } from "./policy.ts";
@@ -398,6 +399,49 @@ export function createAgent(d: AgentWiringDeps) {
       },
     };
   };
+  const manual = (session: AgentSession): ManualDesktop | undefined => {
+    const cell = d.cells.get(session.cellId);
+    if (!cell) throw new AgentError(404, "the computer is unavailable");
+    const target = d.registry.for(session.cellId);
+    if (!target) return undefined;
+    const endpoint = target.client.endpoint;
+    const check = () => {
+      const current = d.cells.get(session.cellId);
+      const now = d.cells.endpoints(session.cellId)?.desktopd;
+      if (
+        closing ||
+        !ready ||
+        session.stopped ||
+        runner.get(session.id) !== session ||
+        d.live.get(session.cellId) !== session.id ||
+        current?.state !== "ready" ||
+        current.paused ||
+        current.scale !== cell.scale ||
+        d.killSwitch.isBusy(session.cellId) ||
+        now?.baseUrl !== endpoint.baseUrl ||
+        now.token !== endpoint.token
+      )
+        throw new AgentError(409, "manual control changed");
+    };
+    check();
+    const unsubscribe = d.cells.subscribe((next) => {
+      if (next.id !== session.cellId) return;
+      try {
+        check();
+      } catch {
+        session.cancelManual();
+      }
+    });
+    return {
+      screen: { w: 1280 * cell.scale, h: 800 * cell.scale },
+      client: target.client,
+      check,
+      prepare: async () => {
+        if (!target.clocks.sample) await target.clocks.sync();
+      },
+      release: unsubscribe,
+    };
+  };
   const toolApp = createToolApi({
     ...dispatch,
     sessions: () => runner.sessions.values(),
@@ -413,6 +457,7 @@ export function createAgent(d: AgentWiringDeps) {
     memory,
     skills,
     desktop: upload,
+    manual,
     home: d.home,
     harness,
     ...(auth && installer ? { chatgpt: { account: auth, installer, availability: platform } } : {}),

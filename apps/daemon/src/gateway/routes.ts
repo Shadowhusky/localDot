@@ -45,19 +45,31 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     withReadyCell(c, cells, deps, async (d) => {
       const parsed = InputRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      const beforeClock = unavailable(c, cells, deps);
-      if (beforeClock) return beforeClock;
-      if (!d.clocks.sample) await d.clocks.sync();
-      const beforeInput = unavailable(c, cells, deps);
-      if (beforeInput) return beforeInput;
-      const result = await d.client.input(parsed.data);
-      // Daemon-clock microseconds (the calibration tool maps the viewer's clock onto the same
-      // base); action.dispatch.pressT is session time, which only the gateway produces.
-      return c.json({
-        ...result,
-        pressDaemonMicros: d.clocks.toDaemonMicros(result.pressMono),
-        armedDaemonMicros: d.clocks.toDaemonMicros(result.armedMono),
-      });
+      const lease = deps.live?.admitIdleOperation(c.req.param("id") ?? "");
+      if (deps.live && !lease) return c.text("the computer has an operation in progress", 409);
+      let dispatched = false;
+      let completed = false;
+      try {
+        const beforeClock = unavailable(c, cells, deps);
+        if (beforeClock) return beforeClock;
+        if (!d.clocks.sample) await d.clocks.sync();
+        const beforeInput = unavailable(c, cells, deps);
+        if (beforeInput) return beforeInput;
+        dispatched = true;
+        const result = await d.client.input(parsed.data);
+        completed = true;
+        // Daemon-clock microseconds (the calibration tool maps the viewer's clock onto the same
+        // base); action.dispatch.pressT is session time, which only the gateway produces.
+        return c.json({
+          ...result,
+          pressDaemonMicros: d.clocks.toDaemonMicros(result.pressMono),
+          armedDaemonMicros: d.clocks.toDaemonMicros(result.armedMono),
+        });
+      } finally {
+        // A timeout or lost reply cannot prove the native command finished. Keep that
+        // computer unavailable to replacement tasks; a fresh computer has a new identity.
+        if (!dispatched || completed) lease?.release();
+      }
     }),
   );
 
@@ -65,13 +77,25 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     withReadyCell(c, cells, deps, async (d) => {
       const parsed = LaunchRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      const beforeClock = unavailable(c, cells, deps);
-      if (beforeClock) return beforeClock;
-      if (!d.clocks.sample) await d.clocks.sync();
-      const beforeLaunch = unavailable(c, cells, deps);
-      if (beforeLaunch) return beforeLaunch;
-      const result = await d.client.launch(parsed.data);
-      return c.json({ ...result, armedDaemonMicros: d.clocks.toDaemonMicros(result.armedMono) });
+      const lease = deps.live?.admitIdleOperation(c.req.param("id") ?? "");
+      if (deps.live && !lease) return c.text("the computer has an operation in progress", 409);
+      let dispatched = false;
+      let completed = false;
+      try {
+        const beforeClock = unavailable(c, cells, deps);
+        if (beforeClock) return beforeClock;
+        if (!d.clocks.sample) await d.clocks.sync();
+        const beforeLaunch = unavailable(c, cells, deps);
+        if (beforeLaunch) return beforeLaunch;
+        dispatched = true;
+        const result = await d.client.launch(parsed.data);
+        completed = true;
+        return c.json({ ...result, armedDaemonMicros: d.clocks.toDaemonMicros(result.armedMono) });
+      } finally {
+        // A timeout or lost reply cannot prove the native command finished. Keep that
+        // computer unavailable to replacement tasks; a fresh computer has a new identity.
+        if (!dispatched || completed) lease?.release();
+      }
     }),
   );
 
@@ -85,6 +109,8 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
       const beforeSession = unavailable(c, cells, deps);
       if (beforeSession) return beforeSession;
       if (live.get(cellId)) return c.text("a session is already live on this cell", 409);
+      if (live.idleOperationPending(cellId))
+        return c.text("the computer has an operation in progress", 409);
       const sessionId = eventLog.createSession(parsed.data.title);
       live.start(cellId, sessionId, (signal) =>
         runPuppet(
@@ -185,5 +211,6 @@ function unavailable(c: Context, cells: CellApi, deps: GatewayRoutesDeps): Respo
   if (cell.paused) return c.text("the computer is paused: resume it first", 409);
   if (deps.killSwitch?.isBusy?.(id))
     return c.text("the computer is changing state; try again", 409);
+  if (deps.live?.get(id)) return c.text("a session is already live on this cell", 409);
   return undefined;
 }

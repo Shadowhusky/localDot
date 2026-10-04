@@ -50,7 +50,10 @@ export class AgentError extends Error {
 }
 export interface AgentRunnerDeps {
   eventLog: Pick<EventLog, "createSession" | "append" | "subscribe">;
-  live: Pick<LiveSessions, "start" | "get" | "alias" | "unalias" | "settled" | "stop">;
+  live: Pick<
+    LiveSessions,
+    "start" | "get" | "alias" | "unalias" | "settled" | "stop" | "idleOperationPending"
+  >;
   cell(cellId: string): CellSummary | undefined;
   cellBusy?(cellId: string): boolean;
   brains: Pick<BrainCells, "open" | "start" | "exited" | "close">;
@@ -165,7 +168,7 @@ export class AgentRunner {
       throw new AgentError(409, "computer cleanup needs attention before another task");
     const cell = this.deps.cell(cellId);
     if (cell?.state !== "ready") throw new AgentError(409, "the computer is not ready");
-    if (cell.paused || this.deps.cellBusy?.(cellId))
+    if (cell.paused || this.deps.cellBusy?.(cellId) || this.deps.live.idleOperationPending(cellId))
       throw new AgentError(409, "the computer is paused or changing state");
     return cell;
   }

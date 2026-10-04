@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef } from "react";
+import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
 import type { ModelRole, PickerKey, PickerModel, ProviderModels, RoleChoice } from "./choices.ts";
 import { RoleEditor } from "./RoleEditor.tsx";
 import "./settings.css";
@@ -21,6 +21,7 @@ export interface SettingsSheetProps {
   onRefresh?(): void;
   save?: { enabled: boolean; run(): void };
   stop?: { label: string; enabled: boolean; run(): void };
+  taskControls?: ReactNode;
   manualPrices?: Partial<Record<ModelRole, { input: string; output: string }>>;
   onPrice?(role: ModelRole, value: { input: string; output: string }): void;
   budget?: {
@@ -121,6 +122,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
             </div>
           )}
         </div>
+        {active && props.taskControls}
         <div className="settings-body">
           <p>Saved settings apply to future tasks. The current task keeps its models.</p>
           <p role="status">{props.dirty ? "Unsaved choices" : "Saved choices"}</p>

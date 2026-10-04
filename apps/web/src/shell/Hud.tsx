@@ -8,9 +8,20 @@ export interface HudProps {
   onResume(): void;
   onStopSession(): void;
   onRetry(): void;
+  stopping?: boolean;
+  stopEnabled?: boolean;
 }
 
-export function Hud({ hud, onStart, onStop, onStopSession, onResume, onRetry }: HudProps) {
+export function Hud({
+  hud,
+  onStart,
+  onStop,
+  onStopSession,
+  onResume,
+  onRetry,
+  stopping = false,
+  stopEnabled = true,
+}: HudProps) {
   return (
     <div
       className={hud.action.kind === "resume" && !hud.stop ? "hud paused" : "hud"}
@@ -29,11 +40,15 @@ export function Hud({ hud, onStart, onStop, onStopSession, onResume, onRetry }: 
       <button
         type="button"
         className="a"
-        aria-disabled={!hud.stop && !hud.action.enabled ? true : undefined}
+        aria-disabled={
+          (hud.stop ? !stopEnabled || stopping : !hud.action.enabled) ? true : undefined
+        }
+        aria-busy={stopping || undefined}
         data-testid={hud.stop ? "hud-stop-session" : undefined}
         onClick={() => {
-          if (hud.stop) onStopSession();
-          else if (hud.action.enabled) {
+          if (hud.stop) {
+            if (stopEnabled && !stopping) onStopSession();
+          } else if (hud.action.enabled) {
             if (hud.action.kind === "start") onStart();
             else if (hud.action.kind === "stop") onStop();
             else if (hud.action.kind === "resume") onResume();
@@ -43,7 +58,9 @@ export function Hud({ hud, onStart, onStop, onStopSession, onResume, onRetry }: 
       >
         {(hud.stop || hud.action.kind === "stop") && <span className="sq" aria-hidden="true" />}
         {hud.stop
-          ? "Stop"
+          ? stopping
+            ? "Stopping…"
+            : "Stop"
           : hud.action.kind === "start"
             ? "Start computer"
             : hud.action.kind === "stop"

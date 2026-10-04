@@ -42,7 +42,9 @@ export const TypePace = z.object({
   restMs: z.number().nonnegative(),
 });
 export const TypeRequest = z.object({
-  text: z.string().min(1).max(4000),
+  text: boundedText(4000)
+    .min(1)
+    .refine((text) => text.isWellFormed() && !text.includes("\0")),
   masked: z.boolean(),
   pace: TypePace,
   window: z.number().int().nonnegative().optional(),

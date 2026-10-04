@@ -6,6 +6,7 @@ export interface StageColumnProps extends HudProps {
   control: boolean;
   children?: ReactNode;
   showHud?: boolean;
+  before?: ReactNode;
 }
 
 export function StageColumn({
@@ -18,6 +19,7 @@ export function StageColumn({
   onRetry,
   children,
   showHud = true,
+  before,
 }: StageColumnProps) {
   const classes = [
     "stage",
@@ -28,7 +30,8 @@ export function StageColumn({
     .filter(Boolean)
     .join(" ");
   return (
-    <main className="stage-col">
+    <main className={before ? "stage-col manual-column" : "stage-col"}>
+      {before}
       <div className={classes}>
         {children}
         {showHud && (

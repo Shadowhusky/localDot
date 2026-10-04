@@ -25,6 +25,7 @@ export interface AgentSessionView {
   // Consumers must require this in addition to their action-specific and cell ownership gates.
   // A displayed last-known status is never permission to submit or send desktop input.
   readonly fresh: boolean;
+  readonly authorityEpoch?: number | null;
   readonly connection: ReturnType<LiveSession["agentFeed"]["read"]>["connection"];
   reconcile(): void;
 }
@@ -133,6 +134,7 @@ export function useAgentSession(
     snapshot,
     availability: owned ? view.availability : "loading",
     error: current.streamError ?? (owned ? view.error : null),
+    authorityEpoch: owned ? view.epoch : null,
     fresh: Boolean(
       matches &&
         owned &&

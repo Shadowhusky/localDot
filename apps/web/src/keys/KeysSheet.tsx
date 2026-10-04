@@ -1,4 +1,4 @@
-import { type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { type ReactNode, type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { type KeydHealth, KeyProblem, type KeyRecord } from "./keys-api.ts";
@@ -13,6 +13,7 @@ export interface KeysSheetProps {
   intakeRef?: Ref<KeyIntake>;
   preset?: KeyFormPreset;
   onSaved?(key: KeyRecord, requestId: number): void;
+  taskControls?: ReactNode;
 }
 
 // A modal sheet that grows from the top bar's Keys button and returns to it. It stays mounted so
@@ -25,6 +26,7 @@ export function KeysSheet({
   intakeRef,
   preset,
   onSaved,
+  taskControls,
 }: KeysSheetProps) {
   const panel = useRef<HTMLDivElement>(null);
   const status = keyStatus(keys.health);
@@ -109,6 +111,7 @@ export function KeysSheet({
             </button>
           </div>
         )}
+        {open && taskControls}
         <p className="lede">
           Your keys stay on this Mac. Apps in your computer get temporary access without seeing the
           real keys.

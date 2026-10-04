@@ -1,0 +1,120 @@
+.control-status {
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin: 8px var(--spacing-gutter);
+  overflow-wrap: anywhere;
+}
+.control-status p {
+  margin: 4px 0 8px;
+}
+.control-field {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  min-width: 0;
+}
+.control-field input,
+.control-field textarea {
+  width: 100%;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  padding: 10px;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  resize: vertical;
+}
+.takeover-panel button,
+.question-card form button,
+.control-status button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  min-width: 44px;
+  box-sizing: border-box;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.takeover-panel button:disabled,
+.question-card form button:disabled,
+.control-status button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.answer-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+}
+.answer-option input {
+  flex: none;
+}
+.takeover-panel {
+  width: 100%;
+  max-width: 720px;
+  box-sizing: border-box;
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 12px;
+}
+.takeover-panel h3 {
+  margin: 0;
+  font-size: 15px;
+}
+.takeover-panel p {
+  white-space: pre-wrap;
+}
+.pointer-modes,
+.manual-keys {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 6px 0;
+  border: 0;
+}
+.pointer-modes button[aria-pressed="true"] {
+  border-color: var(--color-text-2);
+  background: var(--color-surface);
+}
+.stage > .manual-surface {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: var(--radius-stage);
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  cursor: crosshair;
+  z-index: 2;
+}
+.stage > .manual-surface:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: -4px;
+}
+.stage > .manual-surface:disabled {
+  cursor: default;
+}
+.pane-computer.manual-pane {
+  overflow-y: auto;
+}
+.pane > .stage-col.manual-column {
+  height: auto;
+  min-height: 100%;
+  justify-content: flex-start;
+}
+.manual-column .stage {
+  flex: none;
+}

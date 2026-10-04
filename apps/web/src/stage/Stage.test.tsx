@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import type { ManualInput } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
@@ -57,6 +59,107 @@ describe("Stage in a Chromium browser", () => {
     }) as typeof fetch;
     return { api: createApi("a".repeat(43), { fetchImpl }), calls };
   }
+
+  it("commits atomic input on click against the current takeover and real backing viewport without another worker", async () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    vi.spyOn(HTMLCanvasElement.prototype, "getBoundingClientRect").mockReturnValue({
+      left: 20,
+      top: 30,
+      width: 640,
+      height: 600,
+      right: 660,
+      bottom: 630,
+      x: 20,
+      y: 30,
+      toJSON: () => ({}),
+    });
+    const { api, calls } = daemon();
+    const input = vi.fn<(id: string, input: ManualInput) => Promise<boolean>>(async () => true);
+    const manual = {
+      requestId: "old-takeover",
+      enabled: true,
+      screen: { w: 2560, h: 1600 },
+      button: "left" as const,
+      count: 1 as const,
+      input,
+    };
+    const view = render(
+      <Stage cell={ready} api={api} reconnects={0} listed={[CELL]} manual={manual} />,
+    );
+    const surface = screen.getByRole<HTMLButtonElement>("button", {
+      name: "Click on the computer",
+    });
+    await waitFor(() => expect(client()).not.toBeNull());
+    playInClient(client() as HTMLIFrameElement, "owned-input-track");
+    await waitFor(() =>
+      expect(FakeWorker.instances[0]?.sent.some((row) => row.message.type === "frames")).toBe(true),
+    );
+    const sourceId = FakeWorker.instances[0]?.sent.findLast((row) => row.message.type === "frames")
+      ?.message.sourceId;
+    act(() =>
+      FakeWorker.instances[0]?.onmessage?.({
+        data: {
+          type: "stats",
+          sourceId,
+          stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 2560, height: 1600 },
+        },
+      }),
+    );
+    await waitFor(() => expect(surface.disabled).toBe(false));
+    fireEvent.pointerDown(surface, { clientX: 340, clientY: 330 });
+    fireEvent.pointerUp(surface, { clientX: 340, clientY: 330 });
+    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 50 }); // Letterboxing.
+    fireEvent.click(surface, { detail: 0, clientX: 340, clientY: 330 }); // Keyboard activation.
+    expect(input).not.toHaveBeenCalled();
+    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 330 });
+    expect(input).toHaveBeenLastCalledWith("old-takeover", {
+      kind: "click",
+      at: { x: 1280, y: 800 },
+      button: "left",
+      count: 1,
+    });
+    view.rerender(
+      <Stage
+        cell={ready}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+        manual={{ ...manual, requestId: "current-takeover", button: "right" }}
+      />,
+    );
+    fireEvent.keyDown(surface, { key: "a" });
+    fireEvent.keyDown(surface, { key: "Tab" });
+    fireEvent.keyDown(surface, { key: "Process", isComposing: true });
+    expect(input).toHaveBeenCalledTimes(1);
+    fireEvent.keyDown(surface, { key: "ArrowLeft" });
+    expect(input).toHaveBeenLastCalledWith("current-takeover", { kind: "key", combo: ["left"] });
+    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 330 });
+    expect(input).toHaveBeenLastCalledWith("current-takeover", {
+      kind: "click",
+      at: { x: 1280, y: 800 },
+      button: "right",
+      count: 1,
+    });
+    view.rerender(
+      <Stage
+        cell={{ ...ready, paused: true }}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+        manual={manual}
+      />,
+    );
+    expect(surface.disabled).toBe(true);
+    fireEvent.click(surface, { detail: 1, clientX: 340, clientY: 330 });
+    fireEvent.keyDown(surface, { key: "Enter" });
+    expect(input).toHaveBeenCalledTimes(3);
+    expect(client()).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(FakeWorker.instances).toHaveLength(1);
+    view.unmount();
+    expect(FakeWorker.instances[0]?.terminated).toBe(true);
+    vi.restoreAllMocks();
+  });
 
   it("loads the client, out of sight and inert, from the path of a ticket it mints", async () => {
     const { api, calls } = daemon();
@@ -150,6 +253,18 @@ describe("Stage in a Chromium browser", () => {
       value: () => ({ totalVideoFrames: decoded }),
     });
     await act(async () => vi.advanceTimersByTime(1_000));
+    const worker = FakeWorker.instances[0];
+    const sourceId = worker?.sent.findLast((row) => row.message.type === "frames")?.message
+      .sourceId;
+    act(() =>
+      worker?.onmessage?.({
+        data: {
+          type: "stats",
+          sourceId,
+          stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 1280, height: 800 },
+        },
+      }),
+    );
     await act(async () => vi.advanceTimersByTime(30_000));
     expect(calls).toHaveLength(1); // A still desktop has no new frames to present.
     decoded += 1;

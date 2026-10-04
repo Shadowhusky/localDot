@@ -10,6 +10,7 @@ export interface AgentSnapshot {
   readonly brainCellId?: string;
   readonly pendingAsk?: string;
   readonly pendingTakeover?: string;
+  readonly manualControl?: "waiting" | "ready" | "busy" | "returning" | "unconfirmed";
 }
 const statuses = new Set<string>([
   "starting",
@@ -27,6 +28,7 @@ const fields = new Set([
   "brainCellId",
   "pendingAsk",
   "pendingTakeover",
+  "manualControl",
 ]);
 export class AgentResponseError extends Error {
   constructor() {
@@ -69,6 +71,13 @@ export function parseAgentSnapshot(
     if (Object.hasOwn(v, key) && (typeof v[key] !== "string" || !ULID_PATTERN.test(v[key])))
       return fail();
   }
+  if (
+    Object.hasOwn(v, "manualControl") &&
+    (!Object.hasOwn(v, "pendingTakeover") ||
+      typeof v.manualControl !== "string" ||
+      !["waiting", "ready", "busy", "returning", "unconfirmed"].includes(v.manualControl))
+  )
+    return fail();
   return Object.freeze({
     sessionId,
     cellId,
@@ -78,6 +87,9 @@ export function parseAgentSnapshot(
     ...(Object.hasOwn(v, "pendingAsk") ? { pendingAsk: v.pendingAsk as string } : {}),
     ...(Object.hasOwn(v, "pendingTakeover")
       ? { pendingTakeover: v.pendingTakeover as string }
+      : {}),
+    ...(Object.hasOwn(v, "manualControl")
+      ? { manualControl: v.manualControl as AgentSnapshot["manualControl"] }
       : {}),
   });
 }

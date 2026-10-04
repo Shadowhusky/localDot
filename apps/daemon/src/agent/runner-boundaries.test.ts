@@ -213,6 +213,32 @@ function setup(options: { settings?: AgentSettings } = {}) {
 }
 
 describe("serialized agent lifecycle", () => {
+  it.each([false, true])(
+    "refuses task admission during an idle desktop mutation (late=%s)",
+    async (late) => {
+      const h = setup();
+      const preflight = deferred<void>();
+      let starting: Promise<unknown> | undefined;
+      if (late) {
+        h.state.secretsGate = preflight.promise;
+        starting = h.runner.start(h.cellId, "Task");
+        await Promise.resolve();
+      }
+      const lease = required(h.live.admitIdleOperation(h.cellId));
+      const denied = expect(starting ?? h.runner.start(h.cellId, "Task")).rejects.toMatchObject({
+        status: 409,
+      });
+      preflight.resolve();
+      await denied;
+      expect(h.runner.sessions.size).toBe(0);
+      expect(h.opens).toEqual([]);
+      expect(h.live.get(h.cellId)).toBeUndefined();
+      lease.release();
+      const session = await h.runner.start(h.cellId, "Task after native settlement");
+      await h.ready();
+      expect(h.live.get(h.cellId)).toBe(session.id);
+    },
+  );
   it("freezes task roles, prices and original budget across crashes and follow-ups", async () => {
     const h = setup();
     const session = await h.runner.start(h.cellId, "Task");

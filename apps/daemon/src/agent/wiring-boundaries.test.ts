@@ -2,10 +2,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { type CellRecord, type CellSummary, NO_STREAM } from "../cells/types.ts";
+import { DesktopdClient } from "../desktopd/client.ts";
+import { ClockMap } from "../desktopd/clock-map.ts";
+import { FakeDesktopd } from "../desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "../gateway/frames.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import type { BrainCellsDeps } from "./brain-cell.ts";
+import { sendManualInput } from "./manual-input.ts";
 import { AgentSession } from "./session.ts";
 import { type AgentWiringDeps, createAgent } from "./wiring.ts";
 
@@ -142,6 +146,73 @@ function setup() {
 }
 
 describe("production agent ownership wiring", () => {
+  it.each(["rotation", "pause", "busy", "replacement", "scale"])(
+    "rechecks the actual manual desktop owner after preflight %s",
+    async (change) => {
+      const h = setup();
+      await h.agent.start();
+      const id = h.log.createSession("manual sample"),
+        session = new AgentSession(id, h.cellId, "manual sample", h.log);
+      h.agent.runner.sessions.set(id, session);
+      session.beginBrain();
+      let finish!: () => void;
+      h.live.start(
+        h.cellId,
+        id,
+        () =>
+          new Promise<void>((resolve) => {
+            finish = resolve;
+          }),
+      );
+      const outcome = session
+        .takeover("login", "Synthetic login")
+        .catch(() => ({ by: "stop" as const }));
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+      const requestId = required(session.pendingTakeover),
+        gate = Promise.withResolvers<void>(),
+        entered = Promise.withResolvers<void>(),
+        fake = new FakeDesktopd();
+      const endpoint = required(h.deps.cells.endpoints(h.cellId)).desktopd;
+      const client = new DesktopdClient(endpoint, fake.fetchImpl);
+      const clocks = new ClockMap(
+        async () => {
+          entered.resolve();
+          await gate.promise;
+          return 1;
+        },
+        () => 1000,
+      );
+      h.deps.registry.for = () => ({ client, clocks });
+      const work = sendManualInput(
+        session,
+        { requestId, input: { kind: "key", combo: ["tab"] } },
+        new AbortController().signal,
+        h.agent.routes.manual,
+      ).catch((error: unknown) => error);
+      try {
+        await entered.promise;
+        if (change === "rotation") h.change({}, "r".repeat(43));
+        else if (change === "pause") h.change({ paused: true });
+        else if (change === "scale") h.change({ scale: 2 });
+        else if (change === "busy") h.setBusy(true);
+        else h.agent.runner.sessions.delete(id);
+        gate.resolve();
+        expect(await work).toBeInstanceOf(Error);
+        expect(fake.calls).toEqual([]);
+        expect(session.controlHeld).toBe(true);
+        expect(h.log.read(id).some((event) => event.type === "takeover.end")).toBe(false);
+      } finally {
+        gate.resolve();
+        await work;
+        session.stop();
+        await outcome;
+        h.agent.runner.sessions.delete(id);
+        finish();
+        await h.live.settled(id);
+        clocks.stop();
+      }
+    },
+  );
   it("blocks allocation before successful startup sweep and includes pending desktop ports", async () => {
     const h = setup();
     expect(() => h.agent.reservedPorts()).toThrow("cleanup");

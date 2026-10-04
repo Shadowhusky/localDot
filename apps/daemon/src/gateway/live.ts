@@ -1,12 +1,31 @@
 // Keep the settlement promise so Stop can drain work before freezing desktopd.
 export class LiveSessions {
   readonly #aliases = new Map<string, string>();
+  readonly #idleOperations = new Map<string, object>();
+
+  // Hold idle native mutation admission through its actual completion. Cancelling a caller
+  // cannot release it: the desktop operation must finish before any new task can own the cell.
+  admitIdleOperation(cellId: string): { release(): void } | undefined {
+    if (this.get(cellId) || this.#idleOperations.has(cellId)) return undefined;
+    const owner = {};
+    this.#idleOperations.set(cellId, owner);
+    return {
+      release: () => {
+        if (this.#idleOperations.get(cellId) === owner) this.#idleOperations.delete(cellId);
+      },
+    };
+  }
+
+  idleOperationPending(cellId: string): boolean {
+    return this.#idleOperations.has(cellId);
+  }
   readonly #byCell = new Map<
     string,
     { sessionId: string; controller: AbortController; done: Promise<void> }
   >();
 
   start(cellId: string, sessionId: string, run: (signal: AbortSignal) => Promise<unknown>): void {
+    if (this.#idleOperations.has(cellId)) throw new Error("computer operation is still settling");
     if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
       throw new Error(`cell ${cellId} already has a live session`);
     if (this.cellOf(sessionId)) throw new Error("session is already live");
@@ -43,6 +62,7 @@ export class LiveSessions {
 
   alias(cellId: string, sessionId: string): void {
     if (!this.cellOf(sessionId)) throw new Error("session is not live");
+    if (this.#idleOperations.has(cellId)) throw new Error("computer operation is still settling");
     if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
       throw new Error("cell identity is already assigned");
     this.#aliases.set(cellId, sessionId);

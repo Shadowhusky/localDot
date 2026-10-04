@@ -13,7 +13,7 @@ import { sessionMsAt } from "../session/clock-sync.ts";
 import { OracleCapture } from "./oracle.ts";
 import { PixiPresenter } from "./pixi-presenter.ts";
 import { meanLuma, type ProbeRect, wallNow } from "./probe.ts";
-import { type Presenter, pumpFrames } from "./pump.ts";
+import { type Presenter, type PumpStats, pumpFrames } from "./pump.ts";
 import type { StageClock, WorkerIn, WorkerOut } from "./worker-protocol.ts";
 
 const scope = self as unknown as {
@@ -23,6 +23,8 @@ const scope = self as unknown as {
 
 let presenter: PixiPresenter | undefined;
 let pump: { stop(): Promise<void> } | undefined;
+let sourceGeneration = 0;
+let pendingStats: { generation: number; sourceId?: number; stats: PumpStats } | undefined;
 let probe: { rect: ProbeRect; threshold: number; last: boolean | null } | null = null;
 let model: SessionModel = emptyModel();
 let view: View = { reducedMotion: false };
@@ -101,9 +103,23 @@ function tick(): void {
     const scene = t === null ? null : sceneAt(model, t, view);
     lastScene = scene;
     presenter.draw(scene);
-    presenter.render();
-    if (oracle.enabled && t !== null)
-      oracle.onTick(presenter, model, t, scene, cam, viewport, screen);
+    try {
+      presenter.render();
+      // Uploading a texture does not make it visible. Manual admission acknowledges only
+      // a successful canvas render, and a retired pump cannot publish its pending stats.
+      if (pendingStats?.generation === sourceGeneration) {
+        scope.postMessage({
+          type: "stats",
+          sourceId: pendingStats.sourceId,
+          stats: pendingStats.stats,
+        });
+        pendingStats = undefined;
+      }
+      if (oracle.enabled && t !== null)
+        oracle.onTick(presenter, model, t, scene, cam, viewport, screen);
+    } catch (err) {
+      report(err);
+    }
   }
   animationFrame = requestAnimationFrame(tick);
 }
@@ -172,6 +188,8 @@ async function handle(m: WorkerIn): Promise<void> {
       }
       case "stop":
       case "frames": {
+        const generation = ++sourceGeneration;
+        pendingStats = undefined;
         await pump?.stop();
         pump = undefined;
         oracle.dispose();
@@ -184,13 +202,16 @@ async function handle(m: WorkerIn): Promise<void> {
           pump = pumpFrames(
             m.readable,
             probing(presenter),
-            (stats) =>
-              scope.postMessage({
-                type: "stats",
+            (stats) => {
+              if (generation !== sourceGeneration) return;
+              pendingStats = {
+                generation,
+                sourceId: m.sourceId,
                 // The stage outlives its taps. Keep its delivered-frame counter monotonic
                 // when a reconnect starts a fresh pump with its own local counter.
                 stats: { ...stats, presented: presenter?.presented ?? stats.presented },
-              }),
+              };
+            },
             { first: m.first, onError: report },
           );
         }

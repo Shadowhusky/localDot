@@ -1,6 +1,7 @@
-import type { LocalDotEvent } from "@localdot/protocol";
+import type { LocalDotEvent, Point } from "@localdot/protocol";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import type { FrameSource } from "./frame-source.ts";
+import { manualPoint } from "./manual-point.ts";
 import type { Flip, ProbeRect } from "./probe.ts";
 import type { PumpStats } from "./pump.ts";
 import { readTheme, type StageTheme } from "./theme.ts";
@@ -22,6 +23,7 @@ export interface StageCanvasHandle {
   setClock(clock: StageClock): void;
   setView(view: StageViewPatch): void;
   setTheme(theme: StageTheme): void;
+  manualPoint(point: Point, screen: { w: number; h: number }): Point | null;
   oracle(command: OracleRequest): Promise<unknown>;
 }
 
@@ -39,6 +41,8 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const workerRef = useRef<Worker | null>(null);
   const sourceRef = useRef<FrameSource | null>(null);
+  const sourceId = useRef(0);
+  const viewport = useRef({ w: 1, h: 1 });
   const onStatsRef = useRef(onStats);
   onStatsRef.current = onStats;
   const onFlipRef = useRef(onFlip);
@@ -65,6 +69,10 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     const motion = reducedMotionQuery();
     const worker = new Worker(new URL("./render-worker.ts", import.meta.url), { type: "module" });
     const offscreen = canvas.transferControlToOffscreen();
+    viewport.current = {
+      w: Math.max(1, Math.round(rect.width * dpr)),
+      h: Math.max(1, Math.round(rect.height * dpr)),
+    };
     worker.postMessage(
       {
         type: "init",
@@ -80,6 +88,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     worker.onmessage = (e: MessageEvent<WorkerOut>) => {
       const m = e.data;
       if (m.type === "stats") {
+        if (!sourceRef.current || m.sourceId !== sourceId.current) return;
         setStats(m.stats);
         onStatsRef.current?.(m.stats);
       } else if (m.type === "flip") onFlipRef.current?.(m.flip);
@@ -105,8 +114,10 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
       // describes native display pixels and can disagree with the page's devicePixelRatio.
       const width = Math.round((entry?.contentRect.width ?? 0) * dpr);
       const height = Math.round((entry?.contentRect.height ?? 0) * dpr);
-      if (width > 0 && height > 0)
+      if (width > 0 && height > 0) {
+        viewport.current = { w: width, h: height };
         worker.postMessage({ type: "resize", width, height } satisfies WorkerIn);
+      }
     });
     observer.observe(canvas);
     workerRef.current = worker;
@@ -127,6 +138,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
 
   useImperativeHandle(ref, () => ({
     attach(source) {
+      const id = ++sourceId.current;
       sourceRef.current?.stop();
       sourceRef.current = source;
       const worker = workerRef.current;
@@ -141,7 +153,12 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
         : [source.readable];
       try {
         worker.postMessage(
-          { type: "frames", readable: source.readable, first: source.first } satisfies WorkerIn,
+          {
+            type: "frames",
+            sourceId: id,
+            readable: source.readable,
+            first: source.first,
+          } satisfies WorkerIn,
           transfer,
         );
       } catch (err) {
@@ -152,6 +169,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
       }
     },
     detach() {
+      sourceId.current += 1;
       sourceRef.current?.stop();
       sourceRef.current = null;
       workerRef.current?.postMessage({ type: "stop" } satisfies WorkerIn);
@@ -174,6 +192,10 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     // A theme pack restyles the stage by sending its parsed tokens (the stage reads theme.css once).
     setTheme(theme) {
       workerRef.current?.postMessage({ type: "theme", theme } satisfies WorkerIn);
+    },
+    manualPoint(point, screen) {
+      const rect = canvasRef.current?.getBoundingClientRect();
+      return rect ? manualPoint(rect, screen, point, viewport.current) : null;
     },
     oracle(command) {
       const worker = workerRef.current;

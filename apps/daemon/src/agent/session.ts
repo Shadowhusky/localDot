@@ -35,6 +35,13 @@ export interface ToolLease {
   check(): void;
   finish(): void;
 }
+export interface ManualLease {
+  readonly requestId: string;
+  readonly signal: AbortSignal;
+  check(): void;
+  // A lost dispatch acknowledgment keeps the control fence until Stop contains the desktop.
+  finish(uncertain?: boolean): void;
+}
 interface ActiveCall {
   abort: AbortController;
   settled: Promise<void>;
@@ -44,6 +51,8 @@ interface ControlRecord {
   requestId: string;
   startedByGeneration: number;
   held: boolean;
+  returning: boolean;
+  manualUnconfirmed: boolean;
   released: Promise<TakeoverOutcome>;
   resolve(outcome: TakeoverOutcome): void;
   step?: string;
@@ -85,6 +94,7 @@ export class AgentSession {
   readonly #inbox: InboxItem[] = [];
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
+  readonly #manual = new Map<ManualLease, ActiveCall>();
   readonly #controlObservers = new Set<{
     generation: BrainGeneration;
     notify(): void;
@@ -125,6 +135,20 @@ export class AgentSession {
   }
   get controlHeld(): boolean {
     return this.#control !== undefined;
+  }
+  get manualControl(): "waiting" | "ready" | "busy" | "returning" | "unconfirmed" | undefined {
+    const record = this.#control;
+    return !record
+      ? undefined
+      : record.manualUnconfirmed
+        ? "unconfirmed"
+        : record.returning
+          ? "returning"
+          : !record.held
+            ? "waiting"
+            : this.#manual.size
+              ? "busy"
+              : "ready";
   }
 
   beginBrain(): BrainGeneration {
@@ -202,6 +226,54 @@ export class AgentSession {
     };
     this.#active.set(lease, { abort, settled, finish: lease.finish });
     return lease;
+  }
+  admitManual(requestId: string, requestSignal: AbortSignal): ManualLease {
+    const record = this.#control;
+    if (
+      !record ||
+      record.requestId !== requestId ||
+      !record.held ||
+      record.returning ||
+      record.manualUnconfirmed ||
+      this.stopped ||
+      requestSignal.aborted ||
+      this.#manual.size
+    )
+      throw new ControlHeldError();
+    const abort = new AbortController();
+    const signal = AbortSignal.any([this.abort.signal, requestSignal, abort.signal]);
+    let resolve!: () => void;
+    const settled = new Promise<void>((r) => {
+      resolve = r;
+    });
+    let finished = false;
+    const lease: ManualLease = {
+      requestId,
+      signal,
+      check: () => {
+        if (
+          signal.aborted ||
+          this.stopped ||
+          this.#control !== record ||
+          !record.held ||
+          record.returning ||
+          record.manualUnconfirmed
+        )
+          throw new ControlHeldError();
+      },
+      finish: (uncertain = false) => {
+        if (finished) return;
+        finished = true;
+        if (uncertain) record.manualUnconfirmed = true;
+        this.#manual.delete(lease);
+        resolve();
+      },
+    };
+    this.#manual.set(lease, { abort, settled, finish: () => lease.finish() });
+    return lease;
+  }
+  cancelManual(): void {
+    for (const call of this.#manual.values()) call.abort.abort(new ControlHeldError());
   }
   append(type: string, data: Record<string, unknown>, step?: string): void {
     this.eventLog.append(this.id, {
@@ -415,6 +487,8 @@ export class AgentSession {
       requestId: ulid(),
       startedByGeneration: generation.id,
       held: false,
+      returning: false,
+      manualUnconfirmed: false,
       released,
       resolve,
       step,
@@ -462,13 +536,59 @@ export class AgentSession {
       !record ||
       record.requestId !== requestId ||
       !record.held ||
+      record.returning ||
+      record.manualUnconfirmed ||
+      this.#manual.size > 0 ||
       this.stopped ||
       (note?.length ?? 0) > 8000
     )
       return false;
+    record.returning = true;
+    return this.#endControl(record, note);
+  }
+  async handback(
+    requestId: string,
+    note: string | undefined,
+    signal?: AbortSignal,
+  ): Promise<boolean> {
+    const record = this.#control;
+    if (
+      !record ||
+      record.requestId !== requestId ||
+      !record.held ||
+      record.returning ||
+      this.stopped ||
+      (note?.length ?? 0) > 8000 ||
+      signal?.aborted
+    )
+      return false;
+    record.returning = true; // Close admission synchronously before cancelling or awaiting input.
+    const draining = [...this.#manual.values()].map((call) => call.settled);
+    this.cancelManual();
+    try {
+      await abortable(
+        Promise.all(draining),
+        AbortSignal.any([
+          this.abort.signal,
+          AbortSignal.timeout(5000),
+          ...(signal ? [signal] : []),
+        ]),
+      );
+    } catch {
+      return false;
+    }
+    if (this.#control !== record || this.stopped || this.#manual.size || record.manualUnconfirmed)
+      return false;
+    return this.#endControl(record, note);
+  }
+  #endControl(record: ControlRecord, note: string | undefined): boolean {
     // Persist the user's hand-back note before waking any replacement brain.
     if (note) this.post("steer", note);
-    this.append("takeover.end", { requestId, ...(note ? { note } : {}), by: "user" }, record.step);
+    this.append(
+      "takeover.end",
+      { requestId: record.requestId, ...(note ? { note } : {}), by: "user" },
+      record.step,
+    );
     this.#control = undefined;
     this.tainted = false;
     this.status = "running";
@@ -479,8 +599,10 @@ export class AgentSession {
   // Cleanup retains the live owner until calls actually settle, including after Stop. The kill
   // switch independently bounds its wait and freezes/stops the desktop if a dependency hangs.
   async toolsSettled(): Promise<void> {
-    while (this.#active.size)
-      await Promise.all([...this.#active.values()].map((call) => call.settled));
+    while (this.#active.size || this.#manual.size)
+      await Promise.all(
+        [...this.#active.values(), ...this.#manual.values()].map((call) => call.settled),
+      );
   }
   async waitForTools(signal?: AbortSignal): Promise<void> {
     const combined = AbortSignal.any([this.abort.signal, ...(signal ? [signal] : [])]);

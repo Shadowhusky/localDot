@@ -3,7 +3,14 @@ import {
   type CodexInstaller,
   type HarnessAvailability,
 } from "@localdot/codex-harness";
-import { type KeydRecord, keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
+import {
+  HandbackRequest,
+  type KeydRecord,
+  keyLikePresent,
+  QuestionAnswerRequest,
+  TakeoverInputRequest,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
@@ -22,9 +29,10 @@ import type { CatalogStore } from "./catalog-store.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
+import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
 import { AgentError, type AgentRunner } from "./runner.ts";
-import { ControlHeldError, SessionStoppedError } from "./session.ts";
+import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
 
@@ -43,6 +51,7 @@ export interface AgentRoutesDeps {
   skills(): SkillInfo[];
   // Root owns admission, control/cell lifetime and drain registration. No task is required.
   desktop(cellId: string, requestSignal: AbortSignal): UploadAccess | undefined;
+  manual?(session: AgentSession): ManualDesktop | undefined;
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
   appendTo(sessionId: string, type: "memory.change", data: Record<string, unknown>): void;
   home: string;
@@ -61,20 +70,8 @@ const text = (max: number) =>
     .max(max)
     .refine((s) => s.isWellFormed() && !s.includes("\0"));
 const nonempty = (max: number) => text(max).refine((s) => s.trim().length > 0);
-const Id = z.string().regex(ULID_PATTERN);
 const Task = z.strictObject({ task: nonempty(8000) });
 const Message = z.strictObject({ text: nonempty(8000), kind: z.enum(["steer", "followup"]) });
-const Answer = z
-  .strictObject({
-    askId: Id,
-    option: z
-      .string()
-      .regex(/^[A-F]$/)
-      .optional(),
-    text: nonempty(2000).optional(),
-  })
-  .refine((answer) => answer.option !== undefined || answer.text !== undefined);
-const Handback = z.strictObject({ requestId: Id, note: text(1000).optional() });
 const Budget = z.strictObject({
   budgetUSD: z
     .number()
@@ -173,6 +170,10 @@ async function json<T extends z.ZodType>(request: Request, schema: T): Promise<z
   }
 }
 function fail(error: unknown): Response {
+  if (error instanceof ManualInputUncertain)
+    return new Response("manual input completion could not be confirmed; use Stop", {
+      status: 499,
+    });
   if (error instanceof RouteError || error instanceof DownloadError)
     return new Response(error.message, { status: error.status });
   if (error instanceof KeydUnavailableError)
@@ -441,6 +442,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(s.brainCellId ? { brainCellId: s.brainCellId } : {}),
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
         ...(s.pendingTakeover ? { pendingTakeover: s.pendingTakeover } : {}),
+        ...(s.manualControl ? { manualControl: s.manualControl } : {}),
       });
     }),
   );
@@ -459,7 +461,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/sessions/:id/answer",
     route(async (c) => {
       const s = active(c.req.param("id") ?? "");
-      const parsed = await json(c.req.raw, Answer);
+      const parsed = await json(c.req.raw, QuestionAnswerRequest);
       check(c.req.raw.signal);
       const ok = s.answer(
         parsed.askId,
@@ -473,13 +475,25 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/sessions/:id/takeover/done",
     route(async (c) => {
       const s = active(c.req.param("id") ?? "");
-      const parsed = await json(c.req.raw, Handback);
+      const parsed = await json(c.req.raw, HandbackRequest);
       check(c.req.raw.signal);
-      const ok = s.endTakeover(
+      const ok = await s.handback(
         parsed.requestId,
         parsed.note === undefined ? undefined : redact(parsed.note, s.id, s.cellId, 1000),
+        c.req.raw.signal,
       );
       return ok ? c.body(null, 204) : c.text("the screen is not handed over", 409);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/takeover/input",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const parsed = await json(c.req.raw, TakeoverInputRequest);
+      check(c.req.raw.signal);
+      await sendManualInput(s, parsed, c.req.raw.signal, deps.manual);
+      check(c.req.raw.signal);
+      return c.body(null, 204);
     }),
   );
   app.post(
