@@ -384,3 +384,29 @@ it("holds controls until snapshot pending ownership and replayed request details
   await flush();
   expect(result.current.agent.fresh).toBe(true);
 });
+
+it("requires a fresh terminal snapshot for memory history, then stops automatic polling", async () => {
+  const terminal = Promise.withResolvers<void>();
+  let ended = false;
+  const { api, calls } = server(() =>
+    ended ? terminal.promise.then(() => json(snapshot(SESSION, CELL, "ended"))) : json(snapshot()),
+  );
+  const { result } = hook(api);
+  await flush();
+  open();
+  await flush();
+  expect(result.current.agent.readFresh).toBe(true);
+  ended = true;
+  send(ev(0, "session.end", { reason: "done" }));
+  expect(result.current.agent.fresh).toBe(false);
+  expect(result.current.agent.readFresh).toBe(false);
+  await act(async () => terminal.resolve());
+  expect(result.current.agent.readFresh).toBe(true);
+  expect(result.current.agent.fresh).toBe(false);
+  const count = calls.filter((path) => path.startsWith("/api/agent/sessions/")).length;
+  await advance(3000);
+  expect(calls.filter((path) => path.startsWith("/api/agent/sessions/"))).toHaveLength(count);
+  act(() => result.current.agent.reconcile());
+  await flush();
+  expect(calls.filter((path) => path.startsWith("/api/agent/sessions/"))).toHaveLength(count + 1);
+});

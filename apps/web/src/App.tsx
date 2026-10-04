@@ -4,9 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
+import { KnowledgeView } from "./agent/KnowledgeView.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
+import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { useAgentSession } from "./agent/useAgentSession.ts";
+import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useCell } from "./cells/useCell.ts";
@@ -212,6 +215,11 @@ function Theatre({ api }: { api: ApiClient }) {
     refreshCell: retry,
   });
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");
+  const knowledge = useKnowledge(
+    api,
+    agent.sessionId,
+    !!agent.sessionId && (!narrow || pane === "activity") && !keysOpen && !settings.open,
+  );
   useEffect(() => {
     if (agent.model.pendingTakeover) setPointerMode("click");
   }, [agent.model.pendingTakeover]);
@@ -375,6 +383,7 @@ function Theatre({ api }: { api: ApiClient }) {
               agent={agent}
               composer={
                 <>
+                  <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
                   {question && !agent.model.ended && (
                     <AskForm
                       key={question.askId}
@@ -479,6 +488,33 @@ function Theatre({ api }: { api: ApiClient }) {
             }}
           >
             <PlanRail
+              models={agent.snapshot?.models}
+              knowledge={<KnowledgeView knowledge={knowledge} />}
+              memoryAction={(change) => {
+                const status =
+                  controls.status?.kind === "memory" && controls.status.target === change.changeId
+                    ? controls.status
+                    : null;
+                return {
+                  status:
+                    change.changeId && controls.memoryUndone.has(change.changeId)
+                      ? "undone"
+                      : status?.phase === "sending" || status?.phase === "checking"
+                        ? "pending"
+                        : status?.phase === "uncertain"
+                          ? "uncertain"
+                          : status?.phase === "refused"
+                            ? status.code === 409
+                              ? "conflict"
+                              : "failed"
+                            : "ready",
+                  onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
+                  onReread: () => {
+                    controls.recheck();
+                    knowledge.rereadMemory();
+                  },
+                };
+              }}
               agent={agent.model}
               rows={rows}
               keyUses={session.model.keyUses}

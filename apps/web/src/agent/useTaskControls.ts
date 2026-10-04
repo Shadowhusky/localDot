@@ -1,23 +1,33 @@
-import type { ManualInput, QuestionAnswerRequest, StopOutcome } from "@localdot/protocol";
+import {
+  BudgetRaiseRequest,
+  type ManualInput,
+  type QuestionAnswerRequest,
+  type StopOutcome,
+} from "@localdot/protocol";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Pending } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { memoryUndoEligible } from "./activity.ts";
 import {
   answerQuestion,
   ControlFailure,
   manualInput,
+  raiseTaskBudget,
+  resumeTask,
   returnControl,
   stopTask,
+  undoMemory,
 } from "./control-api.ts";
 import type { AgentFeed } from "./model.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 export interface ControlStatus {
-  readonly kind: "answer" | "input" | "handback";
+  readonly kind: "answer" | "input" | "handback" | "budget" | "resume" | "memory";
   readonly target: string;
   readonly phase: "sending" | "checking" | "refused" | "uncertain";
   readonly message: string;
+  readonly code?: number;
 }
 export interface StopStatus {
   readonly phase: "idle" | "sending" | "paused" | "stopped" | "unconfirmed";
@@ -48,6 +58,8 @@ export function useTaskControls(props: Props) {
   const current = useRef(props);
   const operation = useRef<Operation | null>(null);
   const fence = useRef(false);
+  const confirmedUndos = useRef(new Set<string>());
+  const [memoryUndone, setMemoryUndone] = useState<ReadonlySet<string>>(new Set());
   const [status, setStatus] = useState<ControlStatus | null>(null);
   const [stopStatus, setStopStatus] = useState<StopStatus>(idleStop);
   const mounted = useRef(true);
@@ -68,6 +80,8 @@ export function useTaskControls(props: Props) {
     operation.current = null;
     fence.current = false;
     containedCell.current = false;
+    confirmedUndos.current.clear();
+    setMemoryUndone(new Set());
     stopScope.current = null;
     setStatus(null);
     setStopStatus(idleStop);
@@ -81,23 +95,23 @@ export function useTaskControls(props: Props) {
         (!current.current.agent.sessionId || current.current.agent.sessionId === record.sessionId)
       : current.current.cell?.id === record.cellId &&
         current.current.agent.sessionId === record.sessionId);
-  const authoritative = useCallback((now = current.current) => {
+  const authoritative = useCallback((now = current.current, allowEnded = false) => {
     const feed = now.feed.read();
     return (
-      now.agent.fresh &&
+      (allowEnded ? (now.agent.readFresh ?? now.agent.fresh) : now.agent.fresh) &&
       now.agent.authorityEpoch === feed.epoch &&
       feed.cellId === now.cell?.id &&
       feed.sessionId === now.agent.sessionId &&
-      feed.connection === "live" &&
+      (feed.connection === "live" || (allowEnded && feed.connection === "ended")) &&
       feed.replayed &&
       !feed.streamError &&
-      !feed.model.ended &&
+      (!feed.model.ended || allowEnded) &&
       feed.model.pendingAsk === (now.agent.snapshot?.pendingAsk ?? null) &&
       feed.model.pendingTakeover === (now.agent.snapshot?.pendingTakeover ?? null)
     );
   }, []);
-  const available = (now = current.current) =>
-    authoritative(now) &&
+  const available = (now = current.current, allowEnded = false) =>
+    authoritative(now, allowEnded) &&
     !fence.current &&
     !now.suspended &&
     !document.hidden &&
@@ -112,17 +126,21 @@ export function useTaskControls(props: Props) {
     mounted.current = true;
     const check = () => {
       const record = operation.current;
-      if (record?.kind !== "input") return;
+      if (!record || !["input", "budget", "resume", "memory"].includes(record.kind)) return;
       const feed = current.current.feed.read();
       if (
         document.hidden ||
         !navigator.onLine ||
         current.current.suspended ||
-        !current.current.manualVisible ||
-        feed.model.pendingTakeover !== record.target ||
-        feed.connection !== "live" ||
+        (record.kind === "input" &&
+          (!current.current.manualVisible || feed.model.pendingTakeover !== record.target)) ||
+        (record.kind !== "input" && !!(feed.model.pendingTakeover || feed.model.pendingAsk)) ||
+        feed.sessionId !== record.sessionId ||
+        feed.cellId !== record.cellId ||
+        (feed.connection !== "live" &&
+          !(record.kind === "memory" && feed.connection === "ended")) ||
         !feed.replayed ||
-        feed.model.ended
+        (feed.model.ended && record.kind !== "memory")
       )
         record.abort.abort();
     };
@@ -152,17 +170,33 @@ export function useTaskControls(props: Props) {
   }, [props.suspended, props.manualVisible, props.cell?.state, props.cell?.paused, cancelManual]);
   useEffect(() => {
     const record = operation.current;
-    if (record && record.kind !== "stop" && record.settled && authoritative()) {
+    if (
+      record &&
+      record.kind !== "stop" &&
+      record.settled &&
+      (authoritative(current.current, record.kind === "memory") ||
+        (!!props.agent.model.ended && authoritative(current.current, true)))
+    ) {
       const absent =
-        record.kind === "answer"
+        !!props.agent.model.ended ||
+        (record.kind === "answer"
           ? props.agent.model.pendingAsk !== record.target
           : record.kind === "handback"
             ? props.agent.model.pendingTakeover !== record.target
-            : false;
+            : record.kind === "memory"
+              ? props.agent.model.changes.some((change) => change.undoes === record.target)
+              : record.kind === "budget" || record.kind === "resume"
+                ? props.agent.snapshot?.status !== "paused"
+                : false);
       const reread = record.recheck !== undefined && record.recheck !== props.agent.snapshot;
       if (
         absent ||
-        (reread && (record.kind === "answer" || props.agent.snapshot?.manualControl === "ready"))
+        (reread &&
+          (record.kind === "answer" ||
+            record.kind === "budget" ||
+            record.kind === "resume" ||
+            record.kind === "memory" ||
+            props.agent.snapshot?.manualControl === "ready"))
       ) {
         operation.current = null;
         setStatus(null);
@@ -199,7 +233,7 @@ export function useTaskControls(props: Props) {
   const perform = async (
     kind: ControlStatus["kind"],
     target: string,
-    request: (record: Operation) => Promise<void>,
+    request: (record: Operation) => Promise<void | string>,
   ) => {
     const record = begin(kind, target);
     if (!record) return false;
@@ -210,10 +244,14 @@ export function useTaskControls(props: Props) {
       message: kind === "input" ? "Sending input…" : "Sending request…",
     });
     try {
-      await request(record);
+      const acknowledgement = await request(record);
       if (!owned(record)) return false;
       record.settled = true;
-      if (kind === "input") {
+      if (kind === "input" || (kind === "memory" && typeof acknowledgement === "string")) {
+        if (kind === "memory") {
+          confirmedUndos.current.add(target);
+          setMemoryUndone(new Set(confirmedUndos.current));
+        }
         operation.current = null;
         setStatus(null);
       } else
@@ -233,6 +271,9 @@ export function useTaskControls(props: Props) {
         kind,
         target,
         phase: uncertain ? "uncertain" : "refused",
+        ...(error instanceof ControlFailure && error.status !== undefined
+          ? { code: error.status }
+          : {}),
         message:
           kind === "input" && uncertain
             ? "Input completion not confirmed. Check task state; use Stop if input is still uncertain."
@@ -337,6 +378,57 @@ export function useTaskControls(props: Props) {
       }
     }
   };
+  const recoverable = (now = current.current) =>
+    available(now) &&
+    !operation.current &&
+    !now.agent.model.pendingAsk &&
+    !now.agent.model.pendingTakeover &&
+    !now.agent.snapshot?.pendingAsk &&
+    !now.agent.snapshot?.pendingTakeover &&
+    now.agent.snapshot?.status === "paused" &&
+    now.agent.model.state?.state === "paused";
+  const budgetReady = (now = current.current) =>
+    recoverable(now) &&
+    now.agent.snapshot?.models?.kind !== "chatgpt" &&
+    !now.agent.model.subscription &&
+    now.agent.model.budget?.data.scope === "task" &&
+    now.agent.model.budget.data.taskId === now.agent.sessionId;
+  const raiseBudget = (budgetUSD: number) => {
+    if (!budgetReady() || !BudgetRaiseRequest.safeParse({ budgetUSD }).success)
+      return Promise.resolve(false);
+    return perform("budget", current.current.agent.model.budget?.id ?? "", (record) =>
+      raiseTaskBudget(record.api, record.sessionId, budgetUSD, record.abort.signal),
+    );
+  };
+  const resume = () => {
+    if (!recoverable()) return Promise.resolve(false);
+    return perform("resume", "", (record) =>
+      resumeTask(record.api, record.sessionId, record.abort.signal),
+    );
+  };
+  const memoryReady = (now = current.current) =>
+    available(now, true) &&
+    !operation.current &&
+    !now.agent.model.pendingAsk &&
+    !now.agent.model.pendingTakeover &&
+    !now.agent.snapshot?.pendingAsk &&
+    !now.agent.snapshot?.pendingTakeover;
+  const undo = (changeId: string) => {
+    const now = current.current;
+    const change = now.agent.model.changes.find(
+      (row) => row.type === "memory" && row.changeId === changeId,
+    );
+    if (
+      !memoryReady(now) ||
+      confirmedUndos.current.has(changeId) ||
+      !change ||
+      !memoryUndoEligible(change, now.agent.model.changes)
+    )
+      return Promise.resolve(false);
+    return perform("memory", changeId, (record) =>
+      undoMemory(record.api, changeId, record.abort.signal),
+    );
+  };
   const recheck = () => {
     const record = operation.current;
     if (record?.settled && record.kind !== "stop") record.recheck = current.current.agent.snapshot;
@@ -349,12 +441,19 @@ export function useTaskControls(props: Props) {
     answer,
     input,
     handback,
+    raiseBudget,
+    resume,
+    undo,
     stop,
     cancelManual,
     recheck,
     busy: !!operation.current,
     fenced: fence.current,
     stopping: stopStatus.phase === "sending",
+    canRaiseBudget: budgetReady(props),
+    canResumeTask: recoverable(props),
+    canUndoMemory: memoryReady(props),
+    memoryUndone,
     canStop:
       operation.current?.kind !== "stop"
         ? props.cellPending === null &&

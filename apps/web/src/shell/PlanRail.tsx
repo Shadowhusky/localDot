@@ -1,5 +1,6 @@
+import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState } from "@localdot/stage";
-import { useState } from "react";
+import { type ReactNode, useState } from "react";
 import { ActivityDetails, type InspectOutput } from "../agent/ActivityDetails.tsx";
 import { type ActivityFilter, activityRows, matchesFilter, stepStatus } from "../agent/activity.ts";
 import { MemoryCard, type UndoStatus } from "../agent/MemoryCard.tsx";
@@ -10,6 +11,7 @@ import { ResultCard } from "../agent/ResultCard.tsx";
 import { ResultFiles } from "../agent/ResultFiles.tsx";
 import { type SkillSummary, SkillsView } from "../agent/SkillsView.tsx";
 import { ToolRow } from "../agent/ToolRow.tsx";
+import { UsageView } from "../agent/UsageView.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
@@ -26,6 +28,8 @@ export interface PlanRailProps {
   title: string | null;
   agent?: AgentModel;
   skills?: readonly SkillSummary[];
+  models?: TaskModelSelection;
+  knowledge?: ReactNode;
   memoryAction?: (change: AgentChange) => {
     status?: UndoStatus;
     onUndo?: (changeId: string) => void;
@@ -43,6 +47,8 @@ export function PlanRail({
   agent,
   skills,
   memoryAction,
+  models,
+  knowledge,
 }: PlanRailProps) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const model = agent ?? emptyAgentModel();
@@ -69,6 +75,7 @@ export function PlanRail({
       ) : (
         <p className="say empty">{title ?? "No plan yet."}</p>
       )}
+      {agent && <UsageView model={model} selection={models} />}
       {agent && (
         <ResultFiles
           api={api}
@@ -208,6 +215,7 @@ export function PlanRail({
         )}
       </ActivityDetails>
       {skills && <SkillsView skills={skills} />}
+      {knowledge}
     </aside>
   );
 }

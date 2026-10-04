@@ -63,6 +63,15 @@ export interface AgentResult {
   readonly summary: string;
   readonly files: readonly EventOf<"task.result">["data"]["files"][number][];
 }
+export type UsageRow = EventOf<"model.usage">["data"] & {
+  readonly calls: number;
+  readonly reasoningPartial: boolean;
+};
+export interface Reported<T> {
+  readonly id: string;
+  readonly at: number;
+  readonly data: T;
+}
 export interface AgentModel {
   readonly lastSeq: number;
   readonly state: EventOf<"agent.state">["data"] | null;
@@ -81,6 +90,11 @@ export interface AgentModel {
   readonly pendingTakeover: string | null;
   readonly changes: readonly AgentChange[];
   readonly results: readonly AgentResult[];
+  readonly usage: readonly UsageRow[];
+  readonly usagePartial: boolean;
+  readonly retry: Reported<EventOf<"model.retry">["data"]> | null;
+  readonly subscription: Reported<EventOf<"subscription.usage">["data"]> | null;
+  readonly budget: Reported<EventOf<"budget.exceeded">["data"]> | null;
   // Older material can be fetched from the event log by the later history UI. Never imply that
   // a bounded projection is the complete transcript.
   readonly historyTruncated: boolean;
@@ -101,6 +115,11 @@ export function emptyAgentModel(): AgentModel {
     pendingTakeover: null,
     changes: [],
     results: [],
+    usage: [],
+    usagePartial: false,
+    retry: null,
+    subscription: null,
+    budget: null,
     historyTruncated: false,
   };
 }

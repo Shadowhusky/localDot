@@ -67,3 +67,22 @@ it("refuses malformed identity before any network request", async () => {
   );
   expect(calls).toBe(0);
 });
+
+it("accepts only the daemon's frozen public selection and rejects key/price/provider activation metadata", () => {
+  const selection = { kind: "chatgpt", model: "fixture-model" };
+  const value = {
+    sessionId: sessionId,
+    cellId: cellId,
+    status: "paused",
+    toolCalls: 0,
+    models: selection,
+  };
+  expect(parseAgentSnapshot(value, sessionId, cellId).models).toEqual(selection);
+  for (const models of [
+    { ...selection, key: "fixture" },
+    { kind: "api", roles: [] },
+  ])
+    expect(() => parseAgentSnapshot({ ...value, models }, sessionId, cellId)).toThrow(
+      AgentResponseError,
+    );
+});

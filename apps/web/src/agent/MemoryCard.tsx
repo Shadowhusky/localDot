@@ -1,7 +1,7 @@
 import { memoryUndoEligible } from "./activity.ts";
 import type { AgentChange } from "./model.ts";
 
-export type UndoStatus = "ready" | "pending" | "conflict" | "uncertain" | "failed";
+export type UndoStatus = "ready" | "pending" | "conflict" | "uncertain" | "failed" | "undone";
 // Mutation ownership lives in the controller; these callbacks always name this durable change.
 export function MemoryCard({
   change,
@@ -18,7 +18,7 @@ export function MemoryCard({
   onReread?: () => void;
   status?: UndoStatus;
 }) {
-  const eligible = memoryUndoEligible(change, changes);
+  const eligible = status !== "undone" && memoryUndoEligible(change, changes);
   return (
     <section className="memory-card" aria-label="Memory change">
       <div className="activity-heading">

@@ -1,4 +1,4 @@
-import { ULID_PATTERN } from "@localdot/protocol";
+import { TaskModelSelection, ULID_PATTERN } from "@localdot/protocol";
 import type { ApiClient } from "../lib/api.ts";
 
 export type TaskStatus = "starting" | "running" | "waiting_user" | "paused" | "idle" | "ended";
@@ -11,6 +11,7 @@ export interface AgentSnapshot {
   readonly pendingAsk?: string;
   readonly pendingTakeover?: string;
   readonly manualControl?: "waiting" | "ready" | "busy" | "returning" | "unconfirmed";
+  readonly models?: TaskModelSelection;
 }
 const statuses = new Set<string>([
   "starting",
@@ -29,6 +30,7 @@ const fields = new Set([
   "pendingAsk",
   "pendingTakeover",
   "manualControl",
+  "models",
 ]);
 export class AgentResponseError extends Error {
   constructor() {
@@ -78,11 +80,14 @@ export function parseAgentSnapshot(
       !["waiting", "ready", "busy", "returning", "unconfirmed"].includes(v.manualControl))
   )
     return fail();
+  const models = Object.hasOwn(v, "models") ? TaskModelSelection.safeParse(v.models) : null;
+  if (models && !models.success) return fail();
   return Object.freeze({
     sessionId,
     cellId,
     status: v.status as TaskStatus,
     toolCalls: v.toolCalls as number,
+    ...(models?.success ? { models: models.data } : {}),
     ...(Object.hasOwn(v, "brainCellId") ? { brainCellId: v.brainCellId as string } : {}),
     ...(Object.hasOwn(v, "pendingAsk") ? { pendingAsk: v.pendingAsk as string } : {}),
     ...(Object.hasOwn(v, "pendingTakeover")

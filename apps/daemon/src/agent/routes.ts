@@ -4,6 +4,7 @@ import {
   type HarnessAvailability,
 } from "@localdot/codex-harness";
 import {
+  BudgetRaiseRequest,
   HandbackRequest,
   type KeydRecord,
   keyLikePresent,
@@ -43,12 +44,15 @@ export interface UploadAccess {
   release(): void;
 }
 export interface AgentRoutesDeps {
-  runner: Pick<AgentRunner, "start" | "get" | "raiseBudget">;
+  runner: Pick<AgentRunner, "start" | "get" | "raiseBudget"> &
+    Partial<Pick<AgentRunner, "selectionOf" | "terminalOf">>;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
   memory: Pick<MemoryStore, "readBoth" | "undo">;
   skills(): SkillInfo[];
+  canChangeMemory?(): boolean;
+  taskMutationReady?(session: AgentSession): boolean;
   // Root owns admission, control/cell lifetime and drain registration. No task is required.
   desktop(cellId: string, requestSignal: AbortSignal): UploadAccess | undefined;
   manual?(session: AgentSession): ManualDesktop | undefined;
@@ -72,13 +76,7 @@ const text = (max: number) =>
 const nonempty = (max: number) => text(max).refine((s) => s.trim().length > 0);
 const Task = z.strictObject({ task: nonempty(8000) });
 const Message = z.strictObject({ text: nonempty(8000), kind: z.enum(["steer", "followup"]) });
-const Budget = z.strictObject({
-  budgetUSD: z
-    .number()
-    .positive()
-    .max(10_000)
-    .refine((usd) => Math.floor(usd * 1e6 + 0.5) >= 1),
-});
+const Budget = BudgetRaiseRequest;
 
 class RouteError extends Error {
   constructor(
@@ -433,12 +431,18 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   app.get(
     "/api/agent/sessions/:id",
     route((c) => {
-      const s = session(c.req.param("id") ?? "");
+      const id = c.req.param("id") ?? "";
+      if (ULID_PATTERN.test(id)) {
+        const terminal = deps.runner.terminalOf?.(id);
+        if (terminal) return c.json(terminal);
+      }
+      const s = session(id);
       return c.json({
         sessionId: s.id,
         cellId: s.cellId,
         status: s.status,
         toolCalls: s.toolCalls,
+        ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),
         ...(s.brainCellId ? { brainCellId: s.brainCellId } : {}),
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
         ...(s.pendingTakeover ? { pendingTakeover: s.pendingTakeover } : {}),
@@ -502,7 +506,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       const parsed = await json(c.req.raw, Budget);
       check(c.req.raw.signal);
-      if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (s.stopped || s.controlHeld || s.pendingAsk || deps.taskMutationReady?.(s) === false)
+        throw new RouteError(409, "task is not available to change its budget");
       await deps.runner.raiseBudget(s.id, parsed.budgetUSD);
       check(c.req.raw.signal);
       return c.body(null, 204);
@@ -510,9 +515,17 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   );
   app.post(
     "/api/agent/sessions/:id/resume",
-    route((c) => {
+    route(async (c) => {
       const s = active(c.req.param("id") ?? "");
-      if (s.controlHeld || s.status !== "paused")
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (
+        s.stopped ||
+        s.controlHeld ||
+        s.pendingAsk ||
+        s.status !== "paused" ||
+        deps.taskMutationReady?.(s) === false
+      )
         throw new RouteError(409, "task is not available to resume");
       s.post("resume", "");
       return c.body(null, 204);
@@ -636,9 +649,13 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   );
   app.post(
     "/api/agent/memory/:changeId/undo",
-    route((c) => {
+    route(async (c) => {
       const changeId = c.req.param("changeId") ?? "";
       if (!ULID_PATTERN.test(changeId)) throw new RouteError(400, "invalid memory change id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (deps.canChangeMemory?.() === false)
+        throw new RouteError(409, "memory is not available to change");
       const change = deps.memory.undo(changeId);
       deps.appendTo(change.sessionId, "memory.change", {
         file: change.file,

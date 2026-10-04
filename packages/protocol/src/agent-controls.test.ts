@@ -1,5 +1,11 @@
 import { expect, it } from "vitest";
-import { HandbackRequest, QuestionAnswerRequest, StopOutcome } from "./agent-controls.ts";
+import {
+  BudgetRaiseRequest,
+  HandbackRequest,
+  QuestionAnswerRequest,
+  StopOutcome,
+  TaskModelSelection,
+} from "./agent-controls.ts";
 import { AskAnswer, TakeoverEnd } from "./events.ts";
 
 const id = "01JXYZ00000000000000000001";
@@ -37,4 +43,30 @@ it("requires explicit typed containment facts and safe bounded cleanup errors, n
     { ...stopped, errors: ["raw private diagnostic"] },
   ])
     expect(StopOutcome.safeParse(bad).success).toBe(false);
+});
+
+it("rejects invalid ceilings and exposes only a strict frozen model identity without keys or price", () => {
+  for (const budgetUSD of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 10_001, 0.0000001])
+    expect(BudgetRaiseRequest.safeParse({ budgetUSD }).success).toBe(false);
+  expect(BudgetRaiseRequest.parse({ budgetUSD: 0.000001 })).toEqual({ budgetUSD: 0.000001 });
+  expect(BudgetRaiseRequest.safeParse({ budgetUSD: 8, spentUSD: 0 }).success).toBe(false);
+  expect(
+    TaskModelSelection.parse({
+      kind: "api",
+      roles: [{ role: "main", provider: "anthropic", model: "fixture-model" }],
+    }).kind,
+  ).toBe("api");
+  for (const value of [
+    { kind: "chatgpt", model: "fixture", key: "surrogate" },
+    { kind: "api", roles: [{ role: "main", provider: "anthropic", model: "fixture", price: 1 }] },
+    { kind: "api", roles: [{ role: "fast", provider: "anthropic", model: "fixture" }] },
+    {
+      kind: "api",
+      roles: [
+        { role: "main", provider: "anthropic", model: "fixture" },
+        { role: "main", provider: "ollama", model: "other" },
+      ],
+    },
+  ])
+    expect(TaskModelSelection.safeParse(value).success).toBe(false);
 });

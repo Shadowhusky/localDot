@@ -484,3 +484,58 @@ it("retains Stop ownership for late uncertainty until the actual tool settles", 
   await h.live.settled(session.id);
   expect(h.runner.get(session.id)).toBeUndefined();
 });
+
+it("rejects a held takeover and a paused/busy cell before durable budget raise, then preserves task spend and frozen model identity", async () => {
+  const h = setup();
+  const session = await h.runner.start(h.cellId, "Task");
+  await h.ready();
+  const account = required(h.ledger.get(session.id));
+  account.spent = 4;
+  const selection = h.runner.selectionOf(session.id);
+  expect(selection).toEqual({
+    kind: "api",
+    roles: [{ role: "main", provider: "anthropic", model: "claude-sonnet-5-5" }],
+  });
+  h.setSettings({ main: { provider: "ollama", model: "changed" }, taskBudgetUSD: 99 });
+  expect(h.runner.selectionOf(session.id)).toEqual(selection);
+  h.state.busy = true;
+  await expect(h.runner.raiseBudget(session.id, 8)).rejects.toMatchObject({ status: 409 });
+  h.state.busy = false;
+  h.state.paused = true;
+  await expect(h.runner.raiseBudget(session.id, 8)).rejects.toMatchObject({ status: 409 });
+  h.state.paused = undefined;
+  const taking = session.takeover("login", "Synthetic owned login");
+  const failure = taking.catch(() => {});
+  await until(() => session.controlHeld);
+  await expect(h.runner.raiseBudget(session.id, 8)).rejects.toMatchObject({ status: 409 });
+  expect(h.raiseCalls, "takeover/paused cell may not mutate its budget account").toHaveLength(0);
+  h.live.stop(session.id);
+  await failure;
+  await h.live.settled(session.id);
+  expect(account).toMatchObject({ limit: 5, spent: 4 });
+});
+it("a takeover arriving during a budget acknowledgement never enqueues Resume or resets spent", async () => {
+  const h = setup();
+  const session = await h.runner.start(h.cellId, "Task");
+  await h.ready();
+  const account = required(h.ledger.get(session.id));
+  account.spent = 4;
+  const gate = deferred<void>();
+  h.state.raiseGate = gate.promise;
+  const raise = h.runner.raiseBudget(session.id, 8);
+  const failure = expect(raise).rejects.toMatchObject({ status: 409 });
+  await until(() => h.raiseCalls.length === 1);
+  const before = session.inboxSequence;
+  const taking = session.takeover("login", "Synthetic owned login");
+  const takingFailure = taking.catch(() => {});
+  await until(() => session.controlHeld);
+  gate.resolve();
+  await failure;
+  expect(session.inboxSequence, "late budget acknowledgement must not Resume during takeover").toBe(
+    before,
+  );
+  expect(account.spent).toBe(4);
+  h.live.stop(session.id);
+  await takingFailure;
+  await h.live.settled(session.id);
+});

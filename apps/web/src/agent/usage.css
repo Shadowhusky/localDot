@@ -1,0 +1,85 @@
+.usage-view,
+.task-recovery,
+.knowledge-view {
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  padding: 12px;
+  margin: 10px 14px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.task-recovery {
+  margin: 8px var(--spacing-gutter);
+  flex: 0 1 auto;
+  min-height: 100px;
+  max-height: 55%;
+  overflow-y: auto;
+}
+.usage-view h3,
+.task-recovery h3,
+.knowledge-view h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.usage-view p,
+.task-recovery p,
+.knowledge-view p {
+  margin: 6px 0;
+}
+.usage-view ul {
+  padding-left: 20px;
+}
+.usage-tokens li {
+  margin: 12px 0;
+}
+.usage-tokens span {
+  display: block;
+}
+.usage-view meter {
+  width: 100%;
+  max-width: 280px;
+}
+.plan-usage,
+.retry-note {
+  border-top: 1px solid var(--color-line);
+  margin-top: 12px;
+  padding-top: 6px;
+}
+.task-recovery button,
+.knowledge-view button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  color: var(--color-text);
+  background: var(--color-surface-2);
+  font: inherit;
+  cursor: pointer;
+}
+.task-recovery button:disabled,
+.knowledge-view button:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.knowledge-view pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.recovery-options summary {
+  min-height: 44px;
+  padding: 12px 0;
+  cursor: pointer;
+}
+.task-recovery form > button {
+  margin: 8px 0;
+}

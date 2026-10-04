@@ -25,6 +25,8 @@ export interface AgentSessionView {
   // Consumers must require this in addition to their action-specific and cell ownership gates.
   // A displayed last-known status is never permission to submit or send desktop input.
   readonly fresh: boolean;
+  // A verified terminal snapshot permits memory history actions, never task or desktop input.
+  readonly readFresh?: boolean;
   readonly authorityEpoch?: number | null;
   readonly connection: ReturnType<LiveSession["agentFeed"]["read"]>["connection"];
   reconcile(): void;
@@ -57,7 +59,7 @@ export function useAgentSession(
       return !disposed && current.cellId === cellId && current.sessionId === sessionId;
     };
     const poll = async () => {
-      if (!matches() || feed.read().model.ended) return;
+      if (!matches()) return;
       if (busy) {
         queued = true;
         return;
@@ -111,7 +113,9 @@ export function useAgentSession(
     const unsubscribe = feed.subscribe(invalidate);
     refresh.current = invalidate;
     void poll();
-    const timer = setInterval(() => void poll(), 1000);
+    const timer = setInterval(() => {
+      if (!feed.read().model.ended) void poll();
+    }, 1000);
     return () => {
       disposed = true;
       abort.abort();
@@ -128,6 +132,19 @@ export function useAgentSession(
   const ownershipAligned =
     (snapshot?.pendingAsk ?? null) === current.model.pendingAsk &&
     (snapshot?.pendingTakeover ?? null) === current.model.pendingTakeover;
+  const readFresh = Boolean(
+    matches &&
+      owned &&
+      view.availability === "ready" &&
+      view.epoch === current.epoch &&
+      current.replayed &&
+      ownershipAligned &&
+      !current.streamError &&
+      cell?.state === "ready" &&
+      !cell.paused &&
+      (current.connection === "live" ||
+        (current.connection === "ended" && current.model.ended && snapshot?.status === "ended")),
+  );
   return {
     sessionId,
     model: matches ? current.model : EMPTY_AGENT_MODEL,
@@ -135,6 +152,7 @@ export function useAgentSession(
     availability: owned ? view.availability : "loading",
     error: current.streamError ?? (owned ? view.error : null),
     authorityEpoch: owned ? view.epoch : null,
+    readFresh,
     fresh: Boolean(
       matches &&
         owned &&

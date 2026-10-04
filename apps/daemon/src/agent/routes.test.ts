@@ -909,3 +909,57 @@ describe("bounded user file transfers", () => {
     expect((await f.send("GET", endpoint("files/report.bin"))).status).toBe(413);
   });
 });
+
+it("rejects budget mutation after a streamed body loses takeover/readiness ownership", async () => {
+  for (const loss of ["takeover", "stopped", "busy"] as const) {
+    const f = await setup();
+    let ready = true;
+    f.deps.taskMutationReady = () => ready;
+    let body!: ReadableStreamDefaultController<Uint8Array>;
+    const work = f.stream(
+      endpoint("budget"),
+      new ReadableStream({
+        start(c) {
+          body = c;
+        },
+      }),
+      undefined,
+      { "content-type": "application/json" },
+    );
+    await Promise.resolve();
+    if (loss === "takeover") {
+      const taking = f.session.takeover("login", "Owned fake login");
+      void taking.catch(() => {});
+      await Promise.resolve();
+    } else if (loss === "stopped") f.session.stop();
+    else ready = false;
+    body.enqueue(new TextEncoder().encode(JSON.stringify({ budgetUSD: 8 })));
+    body.close();
+    expect((await work).status).toBe(409);
+    expect(f.raise, "no lost-owner ceiling mutation may reach keyd").not.toHaveBeenCalled();
+  }
+});
+it("requires an empty resume/undo body and rechecks paused ownership and memory conflict without overwriting a later change", async () => {
+  const f = await setup();
+  f.session.status = "paused";
+  expect((await f.send("POST", endpoint("resume"), { budgetUSD: 99 })).status).toBe(400);
+  expect(f.session.inboxSequence).toBe(0);
+  const change = f.memory.apply(SESSION, "MEMORY.md", "append", "First remembered fact");
+  const undoPath = `/api/agent/memory/${change.changeId}/undo`;
+  f.deps.canChangeMemory = () => false;
+  expect((await f.send("POST", undoPath)).status).toBe(409);
+  expect(f.memory.readBoth().memory).toContain("First remembered fact");
+  f.deps.canChangeMemory = () => true;
+  expect((await f.send("POST", undoPath, { changeId: SESSION })).status).toBe(400);
+  f.memory.apply(SESSION, "MEMORY.md", "append", "Later remembered fact");
+  expect((await f.send("POST", undoPath)).status).toBe(409);
+  expect(f.memory.readBoth().memory).toContain("Later remembered fact");
+  const current = f.memory.apply(SESSION, "USER.md", "append", "A current fact");
+  expect((await f.send("POST", `/api/agent/memory/${current.changeId}/undo`)).status).toBe(200);
+  expect(f.events.at(-1)).toMatchObject({
+    type: "memory.change",
+    data: { undoes: current.changeId },
+  });
+  expect((await f.send("POST", endpoint("resume"))).status).toBe(204);
+  expect(f.session.inboxSequence).toBe(1);
+});

@@ -22,6 +22,7 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "control.change",
   "pause.change",
   "budget.exceeded",
+  "subscription.usage",
 ]);
 function put<T>(
   old: ReadonlyMap<string, T>,
@@ -86,6 +87,51 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       break;
     case "heartbeat":
       next = { ...next, lastHeartbeat: { t: e.t, ...e.data } };
+      break;
+    case "model.usage": {
+      const old = model.usage.find(
+        (row) =>
+          row.role === e.data.role && row.route === e.data.route && row.model === e.data.model,
+      );
+      const add = (a: number, b: number) => Math.min(Number.MAX_SAFE_INTEGER, a + b);
+      const row = {
+        ...e.data,
+        inputTokens: add(old?.inputTokens ?? 0, e.data.inputTokens),
+        outputTokens: add(old?.outputTokens ?? 0, e.data.outputTokens),
+        ...(old?.reasoningTokens !== undefined || e.data.reasoningTokens !== undefined
+          ? { reasoningTokens: add(old?.reasoningTokens ?? 0, e.data.reasoningTokens ?? 0) }
+          : {}),
+        calls: add(old?.calls ?? 0, 1),
+        reasoningPartial: (old?.reasoningPartial ?? false) || e.data.reasoningTokens === undefined,
+      };
+      const rows = [...model.usage.filter((value) => value !== old), row];
+      next = {
+        ...next,
+        usage: rows.slice(-12),
+        usagePartial:
+          model.usagePartial ||
+          rows.length > 12 ||
+          [row.inputTokens, row.outputTokens, row.reasoningTokens, row.calls].some(
+            (value) => value === Number.MAX_SAFE_INTEGER,
+          ),
+      };
+      break;
+    }
+    case "model.retry":
+      next = { ...next, retry: { id: e.id, at: e.t, data: { ...e.data } } };
+      break;
+    case "subscription.usage":
+      next = {
+        ...next,
+        subscription: {
+          id: e.id,
+          at: e.t,
+          data: { ...e.data, windows: e.data.windows.map((window) => ({ ...window })) },
+        },
+      };
+      break;
+    case "budget.exceeded":
+      next = { ...next, budget: { id: e.id, at: e.t, data: { ...e.data } } };
       break;
     case "message.user":
       next = {
@@ -346,7 +392,11 @@ export function createAgentFeed(): AgentFeedOwner {
     },
     connection(connection) {
       if (value.connection === connection) return;
-      value = { ...value, connection, replayed: false };
+      value = {
+        ...value,
+        connection,
+        replayed: connection === "ended" && value.model.ended ? value.replayed : false,
+      };
       invalidate();
     },
     accept(data) {

@@ -6,6 +6,7 @@ import {
   type KeydRecord,
   type ModelBinding,
   type SkillSummary,
+  type TaskModelSelection,
   type TaskPricing,
   ULID_PATTERN,
   ulid,
@@ -39,6 +40,14 @@ export const BRAIN_DONE = 0;
 export const BRAIN_GAVE_UP = 3;
 const RESTART_BACKOFF_MS = [2000, 4000, 8000];
 const IDLE_MS = 30 * 60 * 1000;
+const TERMINAL_SNAPSHOTS = 256;
+export interface TerminalTaskSnapshot {
+  readonly sessionId: string;
+  readonly cellId: string;
+  readonly status: "ended";
+  readonly toolCalls: number;
+  readonly models?: TaskModelSelection;
+}
 export class AgentError extends Error {
   constructor(
     readonly status: 400 | 404 | 409 | 503,
@@ -111,6 +120,8 @@ const sleep = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal
 export class AgentRunner {
   readonly sessions = new Map<string, AgentSession>();
   readonly #runtime = new Map<string, Runtime>();
+  // Bounded daemon-lifetime history only: never keep AgentSession, leases, brain IDs or keys.
+  readonly #terminal = new Map<string, TerminalTaskSnapshot>();
   readonly #starting = new Set<string>();
   readonly #blockedCells = new Set<string>();
   readonly #wake = new Set<() => void>();
@@ -270,6 +281,10 @@ export class AgentRunner {
   get(id: string): AgentSession | undefined {
     return this.sessions.get(id);
   }
+  terminalOf(id: string): TerminalTaskSnapshot | undefined {
+    const snapshot = this.#terminal.get(id);
+    return snapshot ? structuredClone(snapshot) : undefined;
+  }
   isChatgpt(id: string): boolean {
     return this.#runtime.get(id)?.selection.kind === "chatgpt";
   }
@@ -279,6 +294,20 @@ export class AgentRunner {
   codexDenyReadOf(id: string): readonly string[] {
     const selection = this.#runtime.get(id)?.selection;
     return selection?.kind === "chatgpt" ? [...selection.denyRead] : [];
+  }
+  selectionOf(id: string) {
+    const selection = this.#runtime.get(id)?.selection;
+    if (!selection) return undefined;
+    return selection.kind === "chatgpt"
+      ? { kind: "chatgpt" as const, model: selection.model }
+      : {
+          kind: "api" as const,
+          roles: selection.roles.map((role) => ({
+            role: role.role,
+            provider: role.providerId,
+            model: role.model.id,
+          })),
+        };
   }
   activeChatgptTasks(): number {
     return [...this.#runtime.values()].filter(
@@ -325,11 +354,23 @@ export class AgentRunner {
     await this.#exclusive(rt, async () => {
       const { session, brain } = rt;
       const generation = session.generation;
-      if (!rt.initialized || !brain || !generation || !session.isCurrent(generation))
+      const ready = () =>
+        this.deps.cell(session.cellId)?.state === "ready" &&
+        !this.deps.cell(session.cellId)?.paused &&
+        !this.deps.cellBusy?.(session.cellId);
+      if (
+        !rt.initialized ||
+        !brain ||
+        !generation ||
+        !session.isCurrent(generation) ||
+        session.controlHeld ||
+        session.pendingAsk ||
+        !ready()
+      )
         throw new AgentError(409, "the task is not ready to change its budget");
       await this.deps.keyd.beginTask(brain.id, id, budgetUSD);
       // An in-flight raise can finish after Stop/recovery; it must never resume obsolete work.
-      if (!session.isCurrent(generation))
+      if (!session.isCurrent(generation) || session.controlHeld || session.pendingAsk || !ready())
         throw new AgentError(409, "the task changed while updating its budget");
       if (!session.controlHeld) session.post("resume", "");
     });
@@ -548,6 +589,20 @@ export class AgentRunner {
       if (session.stopped && reason === "done") reason = "stopped";
       try {
         session.append("session.end", { reason });
+        const models = this.selectionOf(session.id);
+        // Only a successfully recorded terminal event permits history authority. The public
+        // selection has no key/pricing/credential fields and is copied away from the runtime.
+        this.#terminal.set(session.id, {
+          sessionId: session.id,
+          cellId: session.cellId,
+          status: "ended",
+          toolCalls: session.toolCalls,
+          ...(models ? { models: structuredClone(models) } : {}),
+        });
+        if (this.#terminal.size > TERMINAL_SNAPSHOTS) {
+          const oldest = this.#terminal.keys().next().value;
+          if (oldest) this.#terminal.delete(oldest);
+        }
       } catch {
         console.error("agent session end could not be recorded");
       }

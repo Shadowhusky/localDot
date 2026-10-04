@@ -24,6 +24,40 @@ export const QuestionAnswerRequest = z
 export type QuestionAnswerRequest = z.infer<typeof QuestionAnswerRequest>;
 export const HandbackRequest = z.strictObject({ requestId: Id, note: Text(1000).optional() });
 export type HandbackRequest = z.infer<typeof HandbackRequest>;
+export const BudgetRaiseRequest = z.strictObject({
+  budgetUSD: z
+    .number()
+    .positive()
+    .max(10_000)
+    .refine((usd) => Math.floor(usd * 1e6 + 0.5) >= 1),
+});
+export type BudgetRaiseRequest = z.infer<typeof BudgetRaiseRequest>;
+// Only the frozen public model identity is exposed: no key IDs, routes, prices or credentials.
+export const TaskModelSelection = z.discriminatedUnion("kind", [
+  z.strictObject({
+    kind: z.literal("chatgpt"),
+    model: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
+  }),
+  z.strictObject({
+    kind: z.literal("api"),
+    roles: z
+      .array(
+        z.strictObject({
+          role: z.enum(["main", "fast", "local"]),
+          provider: z.string().regex(/^[a-z0-9][a-z0-9._-]{0,63}$/),
+          model: z.string().min(1).max(128),
+        }),
+      )
+      .min(1)
+      .max(3)
+      .refine(
+        (roles) =>
+          roles.some((role) => role.role === "main") &&
+          new Set(roles.map((role) => role.role)).size === roles.length,
+      ),
+  }),
+]);
+export type TaskModelSelection = z.infer<typeof TaskModelSelection>;
 export const StopOutcome = z.strictObject({
   revoked: z.boolean(),
   paused: z.boolean(),

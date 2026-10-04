@@ -252,7 +252,7 @@ it("does not submit a replacement question while the old answer is pending or re
     await old;
   });
   f.update({
-    agent: { ...f.props.agent, snapshot: { ...f.props.agent.snapshot!, pendingAsk: OTHER } },
+    agent: { ...f.props.agent, snapshot: { ...snapshotOf(f), pendingAsk: OTHER } },
   });
   await waitFor(() => expect(f.result.current.canAnswer).toBe(true));
   expect(fetchImpl).toHaveBeenCalledOnce();
@@ -400,3 +400,286 @@ it.each(["paused", "stopped"])(
     await waitFor(() => expect(f.result.current.stopStatus.phase).toBe("idle"));
   },
 );
+
+function pauseFixture(f: ReturnType<typeof fixture>, subscription = false) {
+  const model = {
+    ...f.props.agent.model,
+    pendingAsk: null,
+    pendingTakeover: null,
+    state: {
+      state: "paused" as const,
+      reason: subscription ? "chatgpt plan limit reached" : "budget",
+    },
+    budget: {
+      id: ID,
+      at: 1,
+      data: { scope: "task" as const, taskId: SESSION, limitUSD: 5, spentUSD: 4 },
+    },
+    subscription: subscription
+      ? {
+          id: OTHER,
+          at: 2,
+          data: { provider: "chatgpt" as const, windows: [], limitReached: true },
+        }
+      : null,
+  };
+  act(() => f.invalidate({ model }));
+  f.update({
+    agent: {
+      ...f.props.agent,
+      model,
+      snapshot: {
+        sessionId: SESSION,
+        cellId: CELL,
+        status: "paused",
+        toolCalls: 0,
+        models: subscription
+          ? { kind: "chatgpt", model: "fixture" }
+          : { kind: "api", roles: [{ role: "main", provider: "openai", model: "fixture" }] },
+      },
+    },
+  });
+}
+it("validates ceilings before dispatch and shares the same mutation exclusion with Resume and Stop", async () => {
+  const late = Promise.withResolvers<Response>();
+  const fetchImpl = vi.fn<typeof fetch>(async (url) =>
+    String(url).endsWith("/stop")
+      ? Response.json(
+          { revoked: true, paused: true, closed: false, stopped: false, errors: [] },
+          { status: 202 },
+        )
+      : late.promise,
+  );
+  const f = fixture(fetchImpl);
+  pauseFixture(f);
+  expect(f.result.current.canRaiseBudget).toBe(true);
+  await act(async () => {
+    for (const value of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, 10001, 0.0000001])
+      await f.result.current.raiseBudget(value);
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  let raising: Promise<boolean> | undefined;
+  act(() => {
+    raising = f.result.current.raiseBudget(8);
+    void f.result.current.raiseBudget(9);
+    void f.result.current.resume();
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ budgetUSD: 8 }));
+  const raiseSignal = fetchImpl.mock.calls[0]?.[1]?.signal;
+  await act(async () => {
+    await f.result.current.stop();
+  });
+  expect(raiseSignal?.aborted).toBe(true);
+  expect(f.result.current.fenced).toBe(true);
+  await act(async () => {
+    late.resolve(new Response(null, { status: 204 }));
+    await raising;
+  });
+  expect(f.result.current.status).toBeNull();
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+});
+it("lost budget delivery never retries or implies a fresh ceiling; explicit reread is required", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => {
+    throw new TypeError("lost private diagnostic");
+  });
+  const f = fixture(fetchImpl);
+  pauseFixture(f);
+  await act(async () => {
+    await f.result.current.raiseBudget(8);
+  });
+  expect(f.result.current.status?.phase).toBe("uncertain");
+  await act(async () => {
+    await f.result.current.raiseBudget(8);
+    await f.result.current.resume();
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(f.props.agent.model.budget?.data.spentUSD).toBe(4);
+  f.update({ agent: { ...f.props.agent, snapshot: { ...snapshotOf(f), toolCalls: 1 } } });
+  expect(f.result.current.canRaiseBudget).toBe(false);
+  act(() => f.result.current.recheck());
+  f.update({ agent: { ...f.props.agent, snapshot: { ...snapshotOf(f), toolCalls: 2 } } });
+  await waitFor(() => expect(f.result.current.canRaiseBudget).toBe(true));
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});
+it("subscription tasks expose explicit Resume without a USD raise even if an unrelated key budget refusal is reported", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+  const f = fixture(fetchImpl);
+  pauseFixture(f, true);
+  expect(f.result.current.canRaiseBudget).toBe(false);
+  await act(async () => {
+    await f.result.current.raiseBudget(8);
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  await act(async () => {
+    await f.result.current.resume();
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+    `https://owned.invalid/api/agent/sessions/${SESSION}/resume`,
+  );
+  expect(fetchImpl.mock.calls[0]?.[1]?.body).toBeUndefined();
+});
+it("budget/resume cannot run during takeover or lost feed, and a replacement session ignores an old reply", async () => {
+  const late = Promise.withResolvers<Response>();
+  const fetchImpl = vi.fn<typeof fetch>(async () => late.promise);
+  const f = fixture(fetchImpl);
+  pauseFixture(f);
+  act(() => f.invalidate({ connection: "lost" }));
+  await act(async () => {
+    await f.result.current.raiseBudget(8);
+    await f.result.current.resume();
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  act(() => f.invalidate({ connection: "live" }));
+  let raising: Promise<boolean> | undefined;
+  act(() => {
+    raising = f.result.current.raiseBudget(8);
+  });
+  f.update({
+    agent: {
+      ...f.props.agent,
+      sessionId: OTHER,
+      snapshot: { ...snapshotOf(f), sessionId: OTHER },
+    },
+  });
+  expect(fetchImpl.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+  await act(async () => {
+    late.resolve(new Response(null, { status: 204 }));
+    await raising;
+  });
+  expect(f.result.current.status).toBeNull();
+  const held = fixture(fetchImpl, true);
+  await act(async () => {
+    await held.result.current.raiseBudget(8);
+    await held.result.current.resume();
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});
+it("memory Undo names the durable eligible change, preserves conflict without overwriting, and remains fenced against Stop", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response("private backend detail", { status: 409 }),
+  );
+  const f = fixture(fetchImpl);
+  pauseFixture(f);
+  const change = {
+    id: OTHER,
+    type: "memory" as const,
+    path: "MEMORY.md",
+    changeId: ID,
+    patch: "remembered",
+    truncated: false,
+  };
+  const model = { ...f.props.agent.model, changes: [change] };
+  act(() => f.invalidate({ model }));
+  f.update({ agent: { ...f.props.agent, model } });
+  await act(async () => {
+    await f.result.current.undo(OTHER);
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  await act(async () => {
+    await f.result.current.undo(ID);
+    void f.result.current.undo(ID);
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+    `https://owned.invalid/api/agent/memory/${ID}/undo`,
+  );
+  expect(fetchImpl.mock.calls[0]?.[1]?.body).toBeUndefined();
+  expect(f.result.current.status).toMatchObject({
+    kind: "memory",
+    target: ID,
+    phase: "refused",
+    code: 409,
+  });
+  expect(f.result.current.status?.message).not.toContain("private backend detail");
+  const undone = {
+    ...model,
+    changes: [...model.changes, { ...change, id: ID, changeId: OTHER, undoes: ID }],
+  };
+  act(() => f.invalidate({ model: undone }));
+  f.update({ agent: { ...f.props.agent, model: undone } });
+  await waitFor(() => expect(f.result.current.status).toBeNull());
+  await act(async () => {
+    await f.result.current.undo(ID);
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});
+
+function snapshotOf(f: ReturnType<typeof fixture>) {
+  const snapshot = f.props.agent.snapshot;
+  if (!snapshot) throw new Error("fixture snapshot missing");
+  return snapshot;
+}
+
+it("allows a verified completed-task memory Undo, records only the exact durable acknowledgement and never resumes ended work", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ changeId: OTHER }));
+  const f = fixture(fetchImpl);
+  pauseFixture(f);
+  const change = {
+    id: OTHER,
+    type: "memory" as const,
+    path: "MEMORY.md",
+    changeId: ID,
+    patch: "old",
+    truncated: false,
+  };
+  const model = { ...f.props.agent.model, ended: { reason: "done" as const }, changes: [change] };
+  act(() => f.invalidate({ model, connection: "ended" }));
+  f.update({
+    agent: {
+      ...f.props.agent,
+      model,
+      fresh: false,
+      readFresh: false,
+      connection: "ended",
+      snapshot: { ...snapshotOf(f), status: "ended" },
+    },
+  });
+  await act(async () => {
+    await f.result.current.undo(ID);
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  f.update({ agent: { ...f.props.agent, readFresh: true } });
+  expect(f.result.current.canUndoMemory).toBe(true);
+  expect(f.result.current.canResumeTask).toBe(false);
+  expect(f.result.current.canAnswer).toBe(false);
+  await act(async () => {
+    await f.result.current.undo(ID);
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(f.result.current.memoryUndone.has(ID)).toBe(true);
+  expect(f.result.current.status).toBeNull();
+  await act(async () => {
+    await f.result.current.undo(ID);
+    await f.result.current.resume();
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});
+
+it("a verified terminal snapshot retires an acknowledged budget action without enabling task input", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+  const f = fixture(fetchImpl);
+  pauseFixture(f);
+  await act(async () => {
+    await f.result.current.raiseBudget(8);
+  });
+  expect(f.result.current.status?.phase).toBe("checking");
+  const model = { ...f.props.agent.model, ended: { reason: "done" as const } };
+  act(() => f.invalidate({ model, connection: "ended" }));
+  f.update({
+    agent: {
+      ...f.props.agent,
+      model,
+      fresh: false,
+      readFresh: true,
+      connection: "ended",
+      snapshot: { ...snapshotOf(f), status: "ended" },
+    },
+  });
+  await waitFor(() => expect(f.result.current.status).toBeNull());
+  expect(f.result.current.canUndoMemory).toBe(true);
+  expect(f.result.current.canRaiseBudget).toBe(false);
+  expect(f.result.current.canInput).toBe(false);
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});

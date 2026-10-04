@@ -1,4 +1,5 @@
 import {
+  BudgetRaiseRequest,
   HandbackRequest,
   keyLikePresent,
   QuestionAnswerRequest,
@@ -46,6 +47,8 @@ async function mutation<T>(
   status: number,
   signal: AbortSignal,
   parse: (body: string) => T,
+  method: "GET" | "POST" = "POST",
+  maxBytes = 4096,
 ): Promise<T> {
   if (signal.aborted) throw new ControlFailure(false);
   const lifetime = new AbortController();
@@ -59,7 +62,7 @@ async function mutation<T>(
   try {
     const response = await owned(
       api.fetch(endpoint(api, path), {
-        method: "POST",
+        method,
         headers: {
           authorization: api.authorization(),
           ...(body === undefined ? {} : { "content-type": "application/json" }),
@@ -86,7 +89,7 @@ async function mutation<T>(
     const length = response.headers.get("content-length");
     if (
       length !== null &&
-      (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)) || Number(length) > 4096)
+      (!/^\d+$/.test(length) || !Number.isSafeInteger(Number(length)) || Number(length) > maxBytes)
     ) {
       void response.body?.cancel().catch(() => {});
       throw new ControlFailure(true);
@@ -101,7 +104,7 @@ async function mutation<T>(
         owner.throwIfAborted();
         if (part.done) break;
         bytes += part.value.byteLength;
-        if (bytes > 4096) throw new ControlFailure(true);
+        if (bytes > maxBytes) throw new ControlFailure(true);
         text += decoder.decode(part.value, { stream: true });
       }
     text += decoder.decode();
@@ -126,6 +129,53 @@ const sessionPath = (sessionId: string) => {
   if (!ULID_PATTERN.test(sessionId)) throw new ControlFailure(false);
   return `/api/agent/sessions/${sessionId}`;
 };
+export function raiseTaskBudget(
+  api: ApiClient,
+  sessionId: string,
+  budgetUSD: number,
+  signal: AbortSignal,
+) {
+  const parsed = BudgetRaiseRequest.safeParse({ budgetUSD });
+  if (!parsed.success) throw new ControlFailure(false);
+  return mutation(api, `${sessionPath(sessionId)}/budget`, parsed.data, 204, signal, empty);
+}
+export function resumeTask(api: ApiClient, sessionId: string, signal: AbortSignal) {
+  return mutation(api, `${sessionPath(sessionId)}/resume`, undefined, 204, signal, empty);
+}
+export function undoMemory(api: ApiClient, changeId: string, signal: AbortSignal) {
+  if (!ULID_PATTERN.test(changeId)) throw new ControlFailure(false);
+  return mutation(api, `/api/agent/memory/${changeId}/undo`, undefined, 200, signal, (text) => {
+    const value: unknown = JSON.parse(text);
+    if (
+      !value ||
+      typeof value !== "object" ||
+      Array.isArray(value) ||
+      Object.keys(value).length !== 1 ||
+      !("changeId" in value) ||
+      typeof value.changeId !== "string" ||
+      !ULID_PATTERN.test(value.changeId)
+    )
+      throw new ControlFailure(true);
+    return value.changeId;
+  });
+}
+export function loadKnowledge<T>(
+  api: ApiClient,
+  path: "/api/agent/memory" | "/api/agent/skills",
+  signal: AbortSignal,
+  parse: (value: unknown) => T,
+) {
+  return mutation(
+    api,
+    path,
+    undefined,
+    200,
+    signal,
+    (text) => parse(JSON.parse(text)),
+    "GET",
+    196_608,
+  );
+}
 export function answerQuestion(
   api: ApiClient,
   sessionId: string,

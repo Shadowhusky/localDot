@@ -456,6 +456,15 @@ export function createAgent(d: AgentWiringDeps) {
     keyd: d.keyd,
     memory,
     skills,
+    canChangeMemory: () =>
+      [...runner.sessions.values()].every(
+        (session) => !session.controlHeld && !d.killSwitch.isBusy(session.cellId),
+      ),
+    taskMutationReady: (session) =>
+      runner.sessions.get(session.id) === session &&
+      d.cells.get(session.cellId)?.state === "ready" &&
+      !d.cells.get(session.cellId)?.paused &&
+      !d.killSwitch.isBusy(session.cellId),
     desktop: upload,
     manual,
     home: d.home,
