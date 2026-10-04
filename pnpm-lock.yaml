@@ -307,6 +307,12 @@ importers:
         specifier: 8.22.0
         version: 8.22.0
 
+  spikes/s9-recorder:
+    dependencies:
+      ws:
+        specifier: 8.22.0
+        version: 8.22.0
+
 packages:
 
   '@ai-sdk/anthropic@4.0.69':
