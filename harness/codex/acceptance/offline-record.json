@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "2191944d558973e8ce9647051c65c4d8e88280d23954d910273d244994a08119",
+  "inputSha256": "9f2ccbc289f2658cc024a2dda1b14a6762b207dc7821e363b48aeb1262191e42",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -343,7 +343,7 @@
     "packages/protocol/src/geometry.ts": "e052bfe8b03d286aba2cdd8c67da6dc0a5ac690bbd7d71b46197c2c6191ac346",
     "packages/protocol/src/ids.test.ts": "dcb71161e312f986c03c90a7996521073ed3d0acb178eb29e3ffb211854a2ef1",
     "packages/protocol/src/ids.ts": "24b6b36d6a808271777faf88ae202e79ee8257b0d818f7680af637614641dc60",
-    "packages/protocol/src/index.ts": "4df42afab7c25c474c93e691d092436f2bf9d18a8c65301dc290e9d2f2f8c861",
+    "packages/protocol/src/index.ts": "3930f3908a08ec9c266b8048979a1548a25eb410af537c26ca6dc68ba3f82e4e",
     "packages/protocol/src/input.ts": "11fba806528d33acd4839a69e77b03998dde5d4ec02506e34153f1e1fafb2724",
     "packages/protocol/src/key-like.test.ts": "162e6b91ad6edc8e59243bccc23212038ac14f3ae4e50e93e1eebaf6d957245d",
     "packages/protocol/src/key-like.ts": "9fd454d095d380d2912a836544f0ac4aac085b1ad0ea7eeaa84be22ce4ab8109",
@@ -353,6 +353,8 @@
     "packages/protocol/src/manual-input.ts": "09cf5904fe97e3e905496db0730c527060045d8dd8932ae0f3a96921cdadf48c",
     "packages/protocol/src/patch.test.ts": "ba06284c75bd044ea4acba44d1df8868e356f808429bdbd1bd7a10a5e2bcbf1b",
     "packages/protocol/src/patch.ts": "f6e91aca81fdc424367341eff2210a0d776d4d52e5d641c632089f3d812e300a",
+    "packages/protocol/src/recording.test.ts": "cf7c3637c40fc0d0a74700e9f53c2023020c2d40ff2e91f60963bc553386e568",
+    "packages/protocol/src/recording.ts": "7677e5062bd4533654d0f41012a044e42a7112c7e696c68adbc0d25f82a66973",
     "packages/protocol/src/safety.test.ts": "01cf54ed315c47f3b2950e0aa4f4fb96d290aa791a6c343e73e20f60702434cc",
     "packages/protocol/src/safety.ts": "e280aa5c8bdd04d802f2d3eaa8892f9ca6c6b39bc32a03dd221525617e6acd0c",
     "packages/protocol/src/seal.test.ts": "661ed2540de169a4acad3efeb16ec084081d6255d438f15f57290038e1c36695",
@@ -430,7 +432,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "c708aa1dc924bc018d8d0a48599fc400c5f97745d4ad4151529300b8fc856427",
+  "reportSha256": "be77feb51b8374ac18ce8f2195236be81dd8290f94a72c91b7c259a5386a4cba",
   "exit": {
     "code": 0,
     "signal": null
