@@ -32,6 +32,15 @@ export function clipTarget(t: Target): Target {
     ...(t.name !== undefined ? { name: clipText(t.name, 64) } : {}),
     ...(t.app !== undefined ? { app: clipText(t.app, 128) } : {}),
     ...(t.window !== undefined ? { window: clipText(t.window, 256) } : {}),
-    ...(t.url !== undefined ? { url: clipText(t.url, 2048) } : {}),
+    ...(t.url !== undefined ? { url: clipText(publicLocation(t.url), 2048) } : {}),
   };
+}
+
+function publicLocation(value: string): string {
+  try {
+    const url = new URL(value);
+    return ["https:", "http:"].includes(url.protocol) ? `${url.origin}${url.pathname}` : "";
+  } catch {
+    return "";
+  }
 }

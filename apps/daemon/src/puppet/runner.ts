@@ -120,7 +120,10 @@ export async function runPuppet(
         ok = true;
       } else {
         const action = actionOf(step) as GuiAction;
-        const outcome = await deps.gateway.run({ sessionId, cellId, step: id, signal }, action);
+        const outcome = await deps.gateway.run(
+          { sessionId, cellId, step: id, signal, source: "manual" },
+          action,
+        );
         ok = outcome.ok;
         if (!ok && outcome.cancelled === "user") reason = "stopped";
       }

@@ -1,4 +1,6 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DEFAULT_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
@@ -43,7 +45,7 @@ async function until(predicate: () => boolean) {
   throw new Error("fixture did not reach its state");
 }
 function setup(idleMs = 60_000) {
-  const home = mkdtempSync("/private/tmp/localdot-m5-safety-task1-fixpass/fixtures/runner-");
+  const home = mkdtempSync(join(tmpdir(), "localdot-admission-regression-"));
   const log = new EventLog(home),
     live = new LiveSessions(),
     cellId = ulid();

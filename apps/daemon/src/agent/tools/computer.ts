@@ -1,5 +1,7 @@
 import type { ComputerAction, ToolResult } from "@localdot/protocol";
-import type { GuiAction } from "../../gateway/gateway.ts";
+import type { ActionContext, GuiAction } from "../../gateway/gateway.ts";
+import { authorizePrepared } from "../safety/authorize.ts";
+import type { RiskFacts } from "../safety/risk.ts";
 import { frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
@@ -62,7 +64,11 @@ export async function computerTool(
 ): Promise<ToolResult> {
   ctx.check();
   const { session } = ctx;
-  if (a.action === "screenshot") return screenshot(deps, ctx);
+  if (a.action === "screenshot") {
+    if (!ctx.permit?.consume(a, null))
+      return { ok: false, content: [text("This screenshot was not authorized.")] };
+    return screenshot(deps, ctx);
+  }
   if (a.action === "cursor_position") {
     const device = deps.gateway.cursorOf(session.cellId);
     const scale = deps.scaleOf(session.cellId) ?? 1;
@@ -72,6 +78,8 @@ export async function computerTool(
     return { ok: true, content: [text(`The cursor is at (${p.x}, ${p.y}).`)] };
   }
   if (a.action === "zoom") {
+    if (!ctx.permit?.consume(a, null))
+      return { ok: false, content: [text("This screenshot was not authorized.")] };
     if (!a.region) return { ok: false, content: [text("zoom needs a region")] };
     const frameId =
       session.lastFrameId ??
@@ -89,16 +97,54 @@ export async function computerTool(
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
   const repeat = a.action === "key" ? (a.repeat ?? 1) : 1;
-  let outcome = await deps.gateway.run(
-    { sessionId: session.id, cellId: session.cellId, step: ctx.step, signal: ctx.signal },
-    action,
-  );
+  const nativeContext: ActionContext = {
+    sessionId: session.id,
+    cellId: session.cellId,
+    step: ctx.step,
+    signal: ctx.signal,
+    source: "agent",
+    redact: ctx.redact,
+    authorizeAgent: async (request) => {
+      ctx.check();
+      const target = request.identity.target;
+      // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
+      const facts: RiskFacts =
+        request.action.verb === "wait" || request.action.verb === "scroll"
+          ? { operation: request.action.verb }
+          : {
+              operation: request.action.verb,
+              ...(target
+                ? {
+                    target: {
+                      source: target.source,
+                      fresh: true,
+                      role: target.role,
+                      name: target.name,
+                      url: target.url,
+                      secret: target.secret === true,
+                    },
+                  }
+                : {}),
+            };
+      const boundInput = { toolInput: a, action: request.action };
+      const permit = await authorizePrepared(ctx, {
+        tool: "computer",
+        input: boundInput,
+        target: request.identity,
+        facts,
+        revalidate: request.revalidate,
+      });
+      ctx.check();
+      if (!permit) return undefined;
+      return {
+        consume: (current, identity) => permit.consume({ toolInput: a, action: current }, identity),
+      };
+    },
+  };
+  let outcome = await deps.gateway.run(nativeContext, action);
   ctx.check();
   for (let i = 1; i < repeat && outcome.ok; i++) {
-    outcome = await deps.gateway.run(
-      { sessionId: session.id, cellId: session.cellId, step: ctx.step, signal: ctx.signal },
-      action,
-    );
+    outcome = await deps.gateway.run(nativeContext, action);
     ctx.check();
   }
   if (action.verb === "wait" && outcome.ok) return screenshot(deps, ctx);

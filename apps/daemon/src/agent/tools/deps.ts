@@ -5,6 +5,7 @@ import type { ActionGateway } from "../../gateway/gateway.ts";
 import type { FramePng } from "../frame-png.ts";
 import type { MemoryStore } from "../memory.ts";
 import type { Redactor } from "../redact.ts";
+import type { EffectPermit } from "../safety/authorize.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 
 export interface ToolDeps {
@@ -54,6 +55,7 @@ export interface ToolCallContext {
   step: string;
   redact: Redactor;
   signal: AbortSignal;
+  permit?: EffectPermit;
 }
 
 export function text(t: string): ToolResult["content"][number] {

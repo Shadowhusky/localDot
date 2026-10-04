@@ -2019,8 +2019,50 @@
         "data": {
           "type": "object",
           "properties": {
+            "actionClass": {
+              "type": "string",
+              "enum": [
+                "reading",
+                "browsing",
+                "purchase",
+                "send",
+                "post",
+                "delete",
+                "download_execute",
+                "system_settings",
+                "credentials",
+                "unknown"
+              ]
+            },
+            "risk": {
+              "type": "string",
+              "enum": [
+                "medium",
+                "high"
+              ]
+            },
+            "title": {
+              "type": "string",
+              "maxLength": 200
+            },
             "approvalId": {
-              "type": "string"
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "generation": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            },
+            "expiresAt": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             },
             "kind": {
               "type": "string",
@@ -2037,32 +2079,28 @@
                 "other"
               ]
             },
-            "title": {
-              "type": "string",
-              "maxLength": 200
-            },
             "preview": {
               "type": "object",
               "properties": {
                 "fields": {
+                  "maxItems": 16,
                   "type": "array",
                   "items": {
                     "type": "array",
                     "prefixItems": [
                       {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 80
                       },
                       {
-                        "type": "string"
+                        "type": "string",
+                        "maxLength": 512
                       }
                     ],
                     "items": false,
                     "minItems": 2,
                     "maxItems": 2
                   }
-                },
-                "image": {
-                  "type": "string"
                 }
               },
               "required": [
@@ -2160,20 +2198,18 @@
                 "source"
               ],
               "additionalProperties": false
-            },
-            "risk": {
-              "type": "string",
-              "enum": [
-                "medium",
-                "high"
-              ]
             }
           },
           "required": [
-            "approvalId",
-            "kind",
+            "actionClass",
+            "risk",
             "title",
-            "risk"
+            "approvalId",
+            "generation",
+            "revision",
+            "expiresAt",
+            "kind",
+            "preview"
           ],
           "additionalProperties": false
         }

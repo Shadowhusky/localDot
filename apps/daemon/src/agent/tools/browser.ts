@@ -13,6 +13,7 @@ export async function browserReadTool(
   input: BrowserReadInput,
 ): Promise<ToolResult> {
   ctx.check();
+  if (!ctx.permit?.consume(input, null)) return fail("Reading is not authorized.");
   const desktop = deps.desktop(ctx.session.cellId);
   if (!desktop) return fail("The computer is not running.");
   append(ctx, "step.start", { kind: "browser" });
@@ -42,6 +43,8 @@ export async function browserNavigateTool(
   input: BrowserNavigateInput,
 ): Promise<ToolResult> {
   ctx.check();
+  if (!ctx.permit?.consume(input, null))
+    return fail("Execution approval is unavailable or already used. Do not retry automatically.");
   const session = ctx.session;
   const desktop = deps.desktop(session.cellId);
   const url = webUrl(input.url);

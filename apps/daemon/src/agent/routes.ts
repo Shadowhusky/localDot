@@ -4,6 +4,7 @@ import {
   type HarnessAvailability,
 } from "@localdot/codex-harness";
 import {
+  ApprovalAnswer,
   BudgetRaiseRequest,
   HandbackRequest,
   type KeydRecord,
@@ -442,6 +443,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         cellId: s.cellId,
         status: s.status,
         toolCalls: s.toolCalls,
+        autonomy: s.autonomy,
+        ...(s.pendingApproval ? { approval: s.pendingApproval } : {}),
         ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),
         ...(s.brainCellId ? { brainCellId: s.brainCellId } : {}),
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
@@ -459,6 +462,19 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (s.stopped) throw new RouteError(409, "task has stopped");
       s.post(parsed.kind, redact(parsed.text, s.id, s.cellId));
       return c.body(null, 202);
+    }),
+  );
+  app.post(
+    "/api/agent/sessions/:id/approvals/answer",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const generation = s.generation;
+      if (!generation || s.controlHeld) throw new RouteError(409, "approval is not waiting");
+      const parsed = await json(c.req.raw, ApprovalAnswer);
+      check(c.req.raw.signal);
+      if (!s.isCurrent(generation) || s.controlHeld)
+        throw new RouteError(409, "approval owner changed");
+      return s.answerApproval(parsed) ? c.body(null, 204) : c.text("approval is not waiting", 409);
     }),
   );
   app.post(

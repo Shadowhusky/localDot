@@ -34,7 +34,7 @@ import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
-import { actPolicy, type ToolPolicy } from "./policy.ts";
+import type { ToolPolicy } from "./policy.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
@@ -215,7 +215,7 @@ export function createAgent(d: AgentWiringDeps) {
       }
     : undefined;
   const dispatch: DispatchDeps = {
-    policy: d.policy ?? actPolicy,
+    ...(d.policy ? { policy: d.policy } : {}),
     tools: {
       gateway: d.gateway,
       scaleOf: (id) => d.cells.get(id)?.scale,

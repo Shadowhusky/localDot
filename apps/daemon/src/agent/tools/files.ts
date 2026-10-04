@@ -9,6 +9,8 @@ export async function filesTool(
   input: FilesInput,
 ): Promise<ToolResult> {
   ctx.check();
+  if (!ctx.permit?.consume(input, null))
+    return fail("Execution approval is unavailable or already used. Do not retry automatically.");
   const desktop = deps.desktop(ctx.session.cellId);
   if (!desktop) return fail("The computer is not running.");
   append(ctx, "step.start", { kind: "file" });

@@ -37,7 +37,7 @@ describe("gateway labels", () => {
       name: "n".repeat(100),
       app: "a".repeat(200),
       window: "w".repeat(300),
-      url: "u".repeat(3000),
+      url: `https://example.test/${"u".repeat(3000)}?private=secret#private`,
     });
     expect([
       t.role?.length,
@@ -46,5 +46,15 @@ describe("gateway labels", () => {
       t.window?.length,
       t.url?.length,
     ]).toEqual([64, 64, 128, 256, 2048]);
+  });
+
+  it("removes user info, query and fragments from public target URLs", () => {
+    const target = { point: { x: 0, y: 0 }, source: "ax" as const };
+    expect(
+      clipTarget({ ...target, url: "https://user:secret@example.test/path?token=secret#private" })
+        .url,
+    ).toBe("https://example.test/path");
+    expect(clipTarget({ ...target, url: "not a URL" }).url).toBe("");
+    expect(clipTarget({ ...target, url: "file:///private/secret" }).url).toBe("");
   });
 });

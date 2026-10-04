@@ -44,6 +44,13 @@ function setup() {
 const turns = async () => {
   for (let i = 0; i < 6; i++) await Promise.resolve();
 };
+const until = async (predicate: () => boolean) => {
+  for (let i = 0; i < 500; i++) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+  }
+  throw new Error("fixture did not reach its boundary");
+};
 
 describe("handler generation and control fences", () => {
   it("drains an ignored policy abort before publishing takeover and never invokes a stale handler", async () => {
@@ -78,7 +85,7 @@ describe("handler generation and control fences", () => {
     const desktop = vi.spyOn(h.tools, "desktop"),
       memory = vi.spyOn(h.tools.memory, "apply"),
       png = vi.spyOn(h.tools.png, "png"),
-      policy = vi.spyOn(h.deps.policy, "decide");
+      policy = vi.spyOn(required(h.deps.policy), "decide");
     const before = policy.mock.calls.length;
     for (const [name, input] of Object.entries({
       computer: { action: "screenshot" },
@@ -252,7 +259,7 @@ describe("taint and containment", () => {
           await gate.promise;
         });
       const call = h.call("shell", { command: "echo x" });
-      await turns();
+      await until(() => containment.mock.calls.length === 1);
       expect(containment).toHaveBeenCalledTimes(1);
       const observe = vi.spyOn(h.tools.gateway, "observe");
       expect((await h.call("computer", { action: "screenshot" })).result.ok).toBe(false);
@@ -373,7 +380,16 @@ describe("bounded redaction and final publication", () => {
   it("redacts plan, file metadata, error and final-summary events", async () => {
     const h = setup();
     await h.call("update_plan", { items: [{ text: PROXY_TOKEN, status: "todo" }] });
-    await h.call("files", { op: "write", path: PROXY_TOKEN, content: PROXY_TOKEN });
+    const protectedWrite = h.call("files", {
+      op: "write",
+      path: PROXY_TOKEN,
+      content: PROXY_TOKEN,
+    });
+    await until(() => h.events().some((event) => event.type === "takeover.request"));
+    expect(h.session.controlHeld).toBe(true);
+    expect(h.session.endTakeover(required(h.session.pendingTakeover), "Ready")).toBe(true);
+    expect((await protectedWrite).result.ok).toBe(false);
+    expect(h.desktop.files.has(PROXY_TOKEN)).toBe(false);
     await h.call("done", { summary: PROXY_TOKEN });
     expect(JSON.stringify(h.events())).not.toContain(PROXY_TOKEN);
   });
@@ -383,7 +399,7 @@ describe("bounded redaction and final publication", () => {
     const gate = deferred<{ path: string; bytes: number }>();
     const save = vi.spyOn(h.tools, "saveOutput").mockReturnValue(gate.promise);
     const call = h.call("done", { summary: "done", files: ["out.txt"] });
-    await turns();
+    await until(() => save.mock.calls.length === 1);
     expect(save.mock.calls[0]?.[2]).toBeInstanceOf(ReadableStream);
     h.session.retireBrain(required(h.session.generation));
     gate.resolve({ path: "host", bytes: 7 });

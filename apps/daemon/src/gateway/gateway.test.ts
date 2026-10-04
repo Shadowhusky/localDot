@@ -118,7 +118,7 @@ describe("ActionGateway click", () => {
       }),
     });
     const outcome = await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId, step: "s1" },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId, step: "s1" },
       { verb: "click", point: { x: 150, y: 200 }, label: "Click the search box" },
     );
     expect(outcome.ok).toBe(true);
@@ -190,7 +190,7 @@ describe("ActionGateway click", () => {
     };
     const s = setup({ find: () => long });
     await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "click", find: { name: "n".repeat(300) } },
     );
     const [intent] = s.ofType("action.intent");
@@ -203,7 +203,7 @@ describe("ActionGateway click", () => {
 
     const byPoint = setup({ hitTest: () => long });
     await byPoint.gateway.run(
-      { sessionId: byPoint.sessionId, cellId: byPoint.cellId },
+      { source: "manual" as const, sessionId: byPoint.sessionId, cellId: byPoint.cellId },
       { verb: "click", point: { x: 1, y: 1 } },
     );
     expect(byPoint.ofType("action.intent")[0]?.data.label).toBe("Click at (2, 2)");
@@ -211,7 +211,7 @@ describe("ActionGateway click", () => {
 
     const empty = setup({ hitTest: () => ({ target: null, window: null, ms: 3 }) });
     await empty.gateway.run(
-      { sessionId: empty.sessionId, cellId: empty.cellId },
+      { source: "manual" as const, sessionId: empty.sessionId, cellId: empty.cellId },
       { verb: "click", point: { x: 10, y: 20 } },
     );
     expect(empty.ofType("action.target")).toHaveLength(0);
@@ -224,7 +224,7 @@ describe("ActionGateway click", () => {
     // A tab that closed while its stream was down leaves `disconnected` behind with no viewer.
     s.cells.updateStream(s.cellId, { connection: "disconnected" });
     const outcome = await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "click", point: { x: 150, y: 200 } },
     );
     expect(outcome.ok).toBe(true);
@@ -238,7 +238,7 @@ describe("ActionGateway click", () => {
   it("instant: no travel, dispatch after 60 ms", async () => {
     const s = setup({ hitTest: () => search() });
     await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "click", point: { x: 150, y: 200 }, speed: "instant" },
     );
     expect(s.ofType("action.intent")[0]?.data.pointer?.durationMs).toBe(0);
@@ -249,7 +249,7 @@ describe("ActionGateway click", () => {
     const s = setup({ hitTest: () => search() });
     s.cells.updateStream(s.cellId, { connection: "stalled" });
     const running = s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "click", point: { x: 150, y: 200 } },
     );
     await new Promise((r) => setTimeout(r, 20));
@@ -264,7 +264,7 @@ describe("ActionGateway click", () => {
   it("finds a named target first and clicks its centre", async () => {
     const s = setup({ find: () => search({ x: 700, y: 468 }) });
     await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "click", find: { name: "Page two", role: "link" } },
     );
     expect(s.fake.calls[0]).toMatchObject({
@@ -294,7 +294,7 @@ describe("ActionGateway click", () => {
     };
     const s = setup({ find: () => close });
     await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "click", find: { name: "Close" } },
     );
     const plan = s.ofType("action.intent")[0]?.data.pointer;
@@ -312,7 +312,7 @@ describe("ActionGateway click", () => {
       input: () => ({ status: 504, body: "no raw press observed" }),
     });
     const outcome = await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "click", point: { x: 1, y: 1 } },
     );
     expect(outcome).toMatchObject({ ok: false, cancelled: "timeout" });
@@ -326,7 +326,7 @@ describe("ActionGateway click", () => {
 
     const missing = setup({ find: () => ({ target: null, window: null, ms: 1 }) });
     const out2 = await missing.gateway.run(
-      { sessionId: missing.sessionId, cellId: missing.cellId },
+      { source: "manual" as const, sessionId: missing.sessionId, cellId: missing.cellId },
       { verb: "click", find: { name: "Nope" } },
     );
     expect(out2).toMatchObject({ ok: false, cancelled: "preflight" });
@@ -337,7 +337,7 @@ describe("ActionGateway click", () => {
     const s = setup({ hitTest: () => search() });
     const ac = new AbortController();
     const running = s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId, signal: ac.signal },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId, signal: ac.signal },
       { verb: "click", point: { x: 1, y: 1 } },
     );
     ac.abort();
@@ -368,7 +368,7 @@ describe("ActionGateway type and key", () => {
       }),
     });
     const result = await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "type", text: "hunter2", label: "Type hunter2" },
     );
     expect(result.ok).toBe(true);
@@ -379,7 +379,7 @@ describe("ActionGateway type and key", () => {
   it("masks text when keyboard focus cannot be classified", async () => {
     const s = setup({ focused: () => ({ target: null, window: null, ms: 1 }) });
     await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "type", text: "private-value", label: "private-value" },
     );
     expect(JSON.stringify(s.events())).not.toContain("private-value");
@@ -399,7 +399,12 @@ describe("ActionGateway type and key", () => {
       });
       const ac = new AbortController();
       ac.abort();
-      const ctx = { sessionId: s.sessionId, cellId: s.cellId, signal: ac.signal };
+      const ctx = {
+        source: "manual" as const,
+        sessionId: s.sessionId,
+        cellId: s.cellId,
+        signal: ac.signal,
+      };
       expect((await s.gateway.run(ctx, { verb: "key", combo: ["Return"] })).ok).toBe(false);
       expect(
         (
@@ -442,7 +447,7 @@ describe("ActionGateway type and key", () => {
       }),
     });
     const outcome = await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "type", text: "hunter2" },
     );
     expect(outcome.ok).toBe(true);
@@ -494,7 +499,10 @@ describe("ActionGateway type and key", () => {
       },
       { viewers: 0 },
     );
-    await s.gateway.run({ sessionId: s.sessionId, cellId: s.cellId }, { verb: "type", text: "hi" });
+    await s.gateway.run(
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
+      { verb: "type", text: "hi" },
+    );
     expect(s.ofType("text.progress").map((e) => e.data)).toEqual([
       { count: 1, chunk: "h", masked: false },
       { count: 2, chunk: "i", masked: false },
@@ -523,7 +531,7 @@ describe("ActionGateway type and key", () => {
     });
     const stop = new AbortController();
     const running = s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId, signal: stop.signal },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId, signal: stop.signal },
       { verb: "type", text: "h".repeat(40) },
     );
     await vi.waitFor(() => expect(s.ofType("text.progress")).toHaveLength(1));
@@ -541,7 +549,7 @@ describe("ActionGateway type and key", () => {
   it("presses a key combo with a readable label and a key onset", async () => {
     const s = setup();
     await s.gateway.run(
-      { sessionId: s.sessionId, cellId: s.cellId },
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
       { verb: "key", combo: ["ctrl", "l"] },
     );
     expect(s.ofType("action.intent")[0]?.data).toMatchObject({
@@ -559,7 +567,10 @@ describe("ActionGateway type and key", () => {
 
   it("waits without touching the desktop", async () => {
     const s = setup();
-    await s.gateway.run({ sessionId: s.sessionId, cellId: s.cellId }, { verb: "wait", ms: 500 });
+    await s.gateway.run(
+      { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId },
+      { verb: "wait", ms: 500 },
+    );
     expect(s.events().map((e) => e.type)).toEqual(["action.intent", "action.result"]);
     expect(s.sleeps).toEqual([500]);
     expect(s.fake.calls).toEqual([]);

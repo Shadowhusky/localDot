@@ -1,4 +1,6 @@
+import type { ApprovalCardDraft } from "@localdot/protocol";
 import {
+  type ApprovalCard,
   type AutonomyPolicy,
   type BootConfig,
   type EventDraft,
@@ -9,6 +11,12 @@ import {
   ulid,
 } from "@localdot/protocol";
 import type { EventLog } from "../event-log.ts";
+import {
+  type ActionBinding,
+  ApprovalBroker,
+  type ApprovalChecks,
+  type ApprovalOutcome,
+} from "./safety/approvals.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const AGENT = "main";
@@ -85,6 +93,7 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
+  readonly #approvals: ApprovalBroker;
   status: SessionStatus = "starting";
   brainCellId: string | undefined;
   boot: BootConfig | undefined;
@@ -120,9 +129,69 @@ export class AgentSession {
     autonomy?: AutonomyPolicy,
   ) {
     this.#autonomy = freezeAutonomy(autonomy);
+    this.#approvals = new ApprovalBroker(
+      Date.now,
+      (card) => {
+        this.setStatus("waiting_user");
+        const kind =
+          card.actionClass === "download_execute"
+            ? "install"
+            : card.actionClass === "system_settings"
+              ? "permission"
+              : ["purchase", "send", "post", "delete"].includes(card.actionClass)
+                ? card.actionClass
+                : "other";
+        const { fields, ...data } = card;
+        this.append("approval.request", { ...data, kind, preview: { fields } });
+      },
+      (resolution) => {
+        if (this.status === "waiting_user" && !this.stopped && !this.controlHeld)
+          this.setStatus("running");
+        this.append("approval.resolve", { ...resolution });
+      },
+    );
   }
   get autonomy(): Readonly<AutonomyPolicy> {
     return this.#autonomy;
+  }
+  get pendingApproval(): ApprovalCard | undefined {
+    return this.#approvals.pending(this.id);
+  }
+  requestApproval(
+    binding: ActionBinding,
+    draft: ApprovalCardDraft,
+    checks: ApprovalChecks,
+  ): Promise<ApprovalOutcome> {
+    const generation = this.generation;
+    if (
+      !generation ||
+      binding.sessionId !== this.id ||
+      binding.cellId !== this.cellId ||
+      binding.generation !== generation.id
+    )
+      return Promise.reject(new SessionStoppedError());
+    const check = (value: ActionBinding) => {
+      this.check(generation, checks.signal);
+      if (
+        value.sessionId !== this.id ||
+        value.cellId !== this.cellId ||
+        value.generation !== generation.id
+      )
+        throw new SessionStoppedError();
+      checks.check(value);
+    };
+    return this.#approvals.request(binding, draft, { ...checks, check });
+  }
+  answerApproval(value: unknown): boolean {
+    const generation = this.generation;
+    if (
+      !generation ||
+      !this.isCurrent(generation) ||
+      this.controlHeld ||
+      this.pendingApproval?.generation !== generation.id
+    )
+      return false;
+    return this.#approvals.answer(this.id, value);
   }
   get stopped(): boolean {
     return this.abort.signal.aborted;
@@ -176,6 +245,7 @@ export class AgentSession {
   retireBrain(generation: BrainGeneration): void {
     if (this.#brain?.generation !== generation) return;
     const previous = this.#brain;
+    this.#approvals.cancel(this.id);
     this.#brain = undefined;
     this.toolToken = undefined;
     this.boot = undefined;
@@ -502,6 +572,7 @@ export class AgentSession {
       resolve,
       step,
     };
+    this.#approvals.cancel(this.id);
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
     const observers = [...this.#controlObservers].filter(
       (observer) => observer.generation === generation,
@@ -637,11 +708,16 @@ export class AgentSession {
       if (this.#control.held) this.status = "waiting_user";
       return;
     }
+    if (this.pendingApproval) {
+      this.status = "waiting_user";
+      return;
+    }
     this.status = status;
   }
   stop(): void {
     if (this.stopped) return;
     this.status = "ended";
+    this.#approvals.cancel(this.id);
     const generation = this.generation;
     if (generation) this.retireBrain(generation);
     this.abort.abort(new SessionStoppedError());

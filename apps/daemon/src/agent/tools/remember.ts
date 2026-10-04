@@ -7,6 +7,8 @@ export async function rememberTool(
   input: RememberInput,
 ): Promise<ToolResult> {
   ctx.check();
+  if (!ctx.permit?.consume(input, null))
+    return fail("Execution approval is unavailable or already used. Do not retry automatically.");
   if (ctx.session.tainted)
     return fail(
       "Memory can only be saved from the user's own request or reply. Ask the user to confirm the fact first.",

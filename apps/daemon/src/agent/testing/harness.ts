@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
+  AutonomyPolicy,
   BrowserReadResult,
   FileChangeResult,
   ShellChunk,
@@ -33,15 +34,39 @@ export interface FakeDesktop {
 // A tool API over fakes: the gateway records its actions and makes up frames, the desktop keeps
 // files in a map and replays scripted shell output, PNGs are tiny placeholders.
 export function toolHarness(
-  opts: { policy?: ToolPolicy; maxToolCalls?: number; askTimeoutMs?: number } = {},
+  opts: {
+    policy?: ToolPolicy;
+    maxToolCalls?: number;
+    askTimeoutMs?: number;
+    autoApprove?: boolean;
+    autonomy?: AutonomyPolicy;
+  } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), "local dot's tool api-"));
   const eventLog = new EventLog(home);
   const sessionId = eventLog.createSession("task");
-  const session = new AgentSession(sessionId, ulid(), "Find the weather", eventLog);
+  const session = new AgentSession(sessionId, ulid(), "Find the weather", eventLog, opts.autonomy);
   session.beginBrain();
   session.toolToken = TOOL_TOKEN;
   session.status = "running";
+  // Legacy transport/handler fixtures simulate an explicit user answer. Security suites opt out.
+  const unapprove =
+    opts.autoApprove === false
+      ? () => {}
+      : eventLog.subscribe((id, event) => {
+          if (id !== session.id || event.type !== "approval.request") return;
+          queueMicrotask(() => {
+            const card = session.pendingApproval;
+            if (card?.approvalId === event.data.approvalId)
+              session.answerApproval({
+                approvalId: card.approvalId,
+                generation: card.generation,
+                revision: card.revision,
+                decision: "approve",
+              });
+          });
+        });
+
   const actions: { ctx: ActionContext; action: GuiAction }[] = [];
   let nextOutcome: (a: GuiAction) => ActionOutcome = () => ({ ok: true, frameId: ulid() });
   const desktop: FakeDesktop = {
@@ -160,6 +185,7 @@ export function toolHarness(
   return {
     home,
     close: () => {
+      unapprove();
       session.stop();
       eventLog.close();
       rmSync(home, { recursive: true, force: true });

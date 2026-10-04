@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
+import { ApprovalCard } from "./safety.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
@@ -193,16 +194,13 @@ export const ApprovalKind = z.enum([
 ]);
 export const ApprovalRequest = event(
   "approval.request",
-  z.object({
-    approvalId: z.string(),
-    kind: ApprovalKind,
-    title: z.string().max(200),
-    preview: z
-      .object({ fields: z.array(z.tuple([z.string(), z.string()])), image: z.string().optional() })
-      .optional(),
-    target: Target.optional(),
-    risk: z.enum(["medium", "high"]),
-  }),
+  ApprovalCard.omit({ fields: true })
+    .extend({
+      kind: ApprovalKind,
+      preview: z.strictObject({ fields: ApprovalCard.shape.fields }),
+      target: Target.optional(),
+    })
+    .strict(),
 );
 export const ApprovalResolve = event(
   "approval.resolve",

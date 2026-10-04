@@ -144,7 +144,7 @@ async function setup(scale: 1 | 2 = 1) {
     },
   });
   const sessionId = log.createSession("freshness");
-  const ctx = { sessionId, cellId, signal: abort.signal };
+  const ctx = { source: "manual" as const, sessionId, cellId, signal: abort.signal };
   const setFrames = (...images: (Buffer | Error)[]) => {
     let index = 0;
     fake.script.observe = () => {

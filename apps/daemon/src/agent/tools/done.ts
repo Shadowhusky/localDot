@@ -1,12 +1,14 @@
 import { basename } from "node:path";
 import type { DoneInput, ToolResult } from "@localdot/protocol";
-import { append, cut, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { append, cut, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 export async function doneTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
   input: DoneInput,
 ): Promise<ToolResult> {
   ctx.check();
+  if (!ctx.permit?.consume(input, null))
+    return fail("Execution approval is unavailable or already used. Do not retry automatically.");
   const desktop = deps.desktop(ctx.session.cellId);
   const files: { name: string; path: string; bytes: number }[] = [];
   const problems: string[] = [];

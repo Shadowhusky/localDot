@@ -8,6 +8,7 @@ import {
 } from "@localdot/protocol";
 import type { ToolPolicy } from "../policy.ts";
 import type { Redactor } from "../redact.ts";
+import { authorizePrepared, freezeExecutionInput, toolRisk } from "../safety/authorize.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
 import { browserNavigateTool, browserReadTool } from "./browser.ts";
@@ -25,7 +26,7 @@ export const MAX_TOOL_CALLS = 400;
 
 export interface DispatchDeps {
   tools: ToolDeps;
-  policy: ToolPolicy;
+  policy?: ToolPolicy; // An extra restriction can refuse; it cannot grant execution authority.
   maxToolCalls?: number;
 }
 
@@ -122,22 +123,49 @@ export async function dispatchTool(
         },
       };
     }
-    const decision = await deps.policy.decide({
+    const frozen = freezeExecutionInput(parsed.data);
+    const decision = await deps.policy?.decide({
       sessionId: session.id,
       tool: name,
-      input: parsed.data,
+      input: frozen,
       tainted: session.tainted,
     });
     ctx.check();
-    if (decision.kind !== "act") {
+    if (decision && decision.kind !== "act") {
       const note = redact(
         decision.kind === "ask" ? `needs approval: ${decision.reason}` : decision.reason,
       );
       blocked(session, name, STEP_KIND[name], `Refused ${name}`, note);
       return { status: 200, result: fail(`Refused by localDot's rules: ${note}`) };
     }
+    if (name === "remember" && session.tainted)
+      return {
+        status: 200,
+        result: fail(
+          "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
+        ),
+      };
+    const facts = toolRisk(name, frozen);
+    if (facts) {
+      ctx.permit = await authorizePrepared(ctx, {
+        tool: name,
+        input: frozen,
+        target: null,
+        facts,
+        revalidate: async () => {
+          ctx?.check();
+          return true;
+        },
+      });
+      ctx.check();
+      if (!ctx.permit)
+        return {
+          status: 200,
+          result: fail("This action was not authorized. Do not retry it automatically."),
+        };
+    }
     const t = deps.tools,
-      input = parsed.data as never;
+      input = frozen as never;
     switch (name) {
       case "computer":
         append(ctx, "step.start", { kind: "gui" });

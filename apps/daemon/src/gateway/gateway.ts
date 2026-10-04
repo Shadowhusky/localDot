@@ -59,7 +59,24 @@ export type GuiAction =
     }
   | { verb: "wait"; label?: string; ms: number };
 
+export interface NativeActionIdentity {
+  readonly target: Target | null;
+  readonly window: number | null;
+  readonly point: Point | null;
+}
+export interface NativeActionPermit {
+  consume(action: GuiAction, identity: NativeActionIdentity): boolean;
+}
+export interface NativeActionRequest {
+  readonly action: GuiAction;
+  readonly identity: NativeActionIdentity;
+  revalidate(): Promise<boolean>;
+}
 export interface ActionContext {
+  // Constructed by the daemon caller; model tool bodies cannot select their authority.
+  source?: "manual" | "agent";
+  redact?(value: string): string;
+  authorizeAgent?(request: NativeActionRequest): Promise<NativeActionPermit | undefined>;
   sessionId: string;
   cellId: string;
   agent?: string;
@@ -126,8 +143,10 @@ export class ActionGateway {
   }
 
   async run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {
+    const owner = Object.freeze({ ...ctx });
+    const input = frozenSnapshot(action);
     const before = this.#queues.get(ctx.cellId) ?? Promise.resolve();
-    const task = before.catch(() => {}).then(() => this.#run(ctx, action));
+    const task = before.catch(() => {}).then(() => this.#run(owner, input));
     this.#queues.set(ctx.cellId, task);
     try {
       return await task;
@@ -149,8 +168,13 @@ export class ActionGateway {
     let dispatched = false;
     try {
       this.#check(ctx);
+      if (ctx.source !== "manual" && (ctx.source !== "agent" || !ctx.authorizeAgent))
+        throw new Cancelled("preflight", "this native action has no admitted owner");
       switch (action.verb) {
         case "wait": {
+          const identity = frozenSnapshot({ target: null, window: null, point: null });
+          const permit = await this.#authorize(ctx, action, identity, async () => identity);
+          await this.#consume(ctx, action, identity, permit, async () => identity);
           this.#append(ctx, "action.intent", {
             verb: "wait",
             label: clipText(action.label ?? `Wait ${action.ms} ms`, 80),
@@ -187,7 +211,6 @@ export class ActionGateway {
     mark: (v: boolean) => void,
   ): Promise<ActionOutcome> {
     const d = await this.#ready(ctx);
-    const t0 = this.deps.now();
     let found: { target: Target | null; window: number | null } | undefined;
     let point: Point;
     if (action.verb === "click" && action.find) {
@@ -199,6 +222,16 @@ export class ActionGateway {
       point = toDevice(action.point, { ...MODEL_SCREEN, scale });
     } else throw new Cancelled("preflight", "click needs a point or a find");
 
+    const readIdentity = async (): Promise<NativeActionIdentity> => {
+      const hit = await this.#lookup(ctx, d, point);
+      return frozenSnapshot({ ...hit, point });
+    };
+    const identity = ctx.source === "agent" ? await readIdentity() : undefined;
+    const permit = identity
+      ? await this.#authorize(ctx, action, identity, readIdentity)
+      : undefined;
+    if (identity) found = { target: identity.target, window: identity.window };
+    const t0 = this.deps.now();
     const from = this.#cursor.get(ctx.cellId) ?? {
       x: (MODEL_SCREEN.width * scale) / 2,
       y: (MODEL_SCREEN.height * scale) / 2,
@@ -273,12 +306,14 @@ export class ActionGateway {
           ? { kind: "click", button: action.button ?? "left", count: action.count ?? 1, at: point }
           : { kind: "scroll", at: point, dx: action.dx, dy: action.dy };
       this.#check(ctx);
+      if (identity) await this.#consume(ctx, action, identity, permit, readIdentity);
+      this.#check(ctx);
       const res = await d.client.input(
         {
           input,
           injector: "xtest",
           holdMs: 0,
-          ...(known?.window ? { window: known.window } : {}),
+          ...(known?.window !== undefined && known.window !== null ? { window: known.window } : {}),
         },
         ctx.signal,
       );
@@ -321,6 +356,16 @@ export class ActionGateway {
       ),
     ]);
     this.#check(ctx);
+    const readIdentity = async (): Promise<NativeActionIdentity> => {
+      const fresh = await this.#lookup(ctx, d);
+      return frozenSnapshot({ ...fresh, point: fresh.target?.point ?? null });
+    };
+    const identity = frozenSnapshot({
+      target: hit.target,
+      window: hit.window,
+      point: hit.target?.point ?? null,
+    });
+    const permit = await this.#authorize(ctx, action, identity, readIdentity);
     const masked = action.masked === true || hit.target === null || hit.target.secret === true;
     if (hit.target) at = hit.target.point;
     const chars = [...action.text].length;
@@ -349,6 +394,8 @@ export class ActionGateway {
       injector: "xtest" as const,
       ...(hit.window ? { window: hit.window } : {}),
     };
+    await this.#consume(ctx, action, identity, permit, readIdentity);
+    this.#check(ctx);
     const result = await d.client.type(
       typing,
       async (p) => {
@@ -390,6 +437,14 @@ export class ActionGateway {
     mark: (v: boolean) => void,
   ): Promise<ActionOutcome> {
     const d = await this.#ready(ctx);
+    const readIdentity = async (): Promise<NativeActionIdentity> => {
+      const hit = await this.#lookup(ctx, d);
+      return frozenSnapshot({ ...hit, point: hit.target?.point ?? null });
+    };
+    const identity = ctx.source === "agent" ? await readIdentity() : undefined;
+    const permit = identity
+      ? await this.#authorize(ctx, action, identity, readIdentity)
+      : undefined;
     this.#append(ctx, "action.intent", {
       verb: "key",
       label: clipText(action.label ?? keyLabel(action.combo), 80),
@@ -398,7 +453,19 @@ export class ActionGateway {
     await this.deps.sleep(dwellMs(speed), ctx.signal);
     await this.#waitForStream(ctx);
     const input: Input = { kind: "key", combo: action.combo };
-    const res = await d.client.input({ input, injector: "xtest", holdMs: 0 }, ctx.signal);
+    if (identity) await this.#consume(ctx, action, identity, permit, readIdentity);
+    this.#check(ctx);
+    const res = await d.client.input(
+      {
+        input,
+        injector: "xtest",
+        holdMs: 0,
+        ...(identity?.window !== undefined && identity.window !== null
+          ? { window: identity.window }
+          : {}),
+      },
+      ctx.signal,
+    );
     mark(true);
     const pressT = this.#pressT(ctx, d, res.pressMono);
     const ringAt = await this.deps.ringOnset.onset({
@@ -410,6 +477,64 @@ export class ActionGateway {
     this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
     const frameId = await this.#finish(ctx, d);
     return { ok: true, frameId };
+  }
+
+  async #lookup(ctx: ActionContext, d: CellDesktopd, point?: Point) {
+    const hit = await Promise.race([
+      (point ? d.client.hitTest(point) : d.client.focused()).catch(() => ({
+        target: null,
+        window: null,
+      })),
+      timeoutAfter<{ target: Target | null; window: number | null }>(
+        this.deps.hitTestTimeoutMs ?? 2500,
+        { target: null, window: null },
+      ),
+    ]);
+    this.#check(ctx);
+    return { target: hit.target, window: hit.window };
+  }
+
+  async #authorize(
+    ctx: ActionContext,
+    action: GuiAction,
+    identity: NativeActionIdentity,
+    read: () => Promise<NativeActionIdentity>,
+  ): Promise<NativeActionPermit | undefined> {
+    this.#check(ctx);
+    if (ctx.source === "manual") return undefined;
+    if (ctx.source !== "agent" || !ctx.authorizeAgent)
+      throw new Cancelled("preflight", "this native action has no admitted owner");
+    const permit = await ctx.authorizeAgent({
+      action,
+      identity,
+      revalidate: async () => {
+        const fresh = await read();
+        this.#check(ctx);
+        return sameNativeIdentity(identity, fresh);
+      },
+    });
+    this.#check(ctx);
+    if (!permit)
+      throw new Cancelled("user", "this action was not authorized; do not retry automatically");
+    return permit;
+  }
+
+  async #consume(
+    ctx: ActionContext,
+    action: GuiAction,
+    identity: NativeActionIdentity,
+    permit: NativeActionPermit | undefined,
+    read: () => Promise<NativeActionIdentity>,
+  ): Promise<void> {
+    this.#check(ctx);
+    if (ctx.source === "manual") return;
+    const fresh = await read();
+    this.#check(ctx);
+    if (!sameNativeIdentity(identity, fresh) || !permit?.consume(action, fresh))
+      throw new Cancelled(
+        "stale",
+        "the approved action or target changed; look again before acting",
+      );
   }
 
   // settle → observe → result; returns this action's own frame, never a concurrent action's.
@@ -431,7 +556,8 @@ export class ActionGateway {
   }
 
   #fail(ctx: ActionContext, err: unknown, dispatched: boolean): ActionOutcome {
-    const message = err instanceof Error ? err.message : String(err);
+    const rawMessage = err instanceof Error ? err.message : String(err);
+    const message = ctx.redact ? ctx.redact(rawMessage) : rawMessage;
     if (dispatched) {
       this.#append(ctx, "action.result", { ok: false, error: message.slice(0, 500) });
       return {
@@ -597,11 +723,21 @@ export class ActionGateway {
   }
 
   #append(ctx: ActionContext, type: string, data: Record<string, unknown>): void {
+    const clean = (value: unknown): unknown =>
+      typeof value === "string"
+        ? ctx.redact
+          ? ctx.redact(value)
+          : value
+        : Array.isArray(value)
+          ? value.map(clean)
+          : value && typeof value === "object"
+            ? Object.fromEntries(Object.entries(value).map(([key, item]) => [key, clean(item)]))
+            : value;
     this.deps.eventLog.append(ctx.sessionId, {
       type,
       agent: ctx.agent ?? DEFAULT_AGENT,
       ...(ctx.step ? { step: ctx.step } : {}),
-      data,
+      data: clean(data),
     } as never);
   }
 }
@@ -629,4 +765,20 @@ function sameTarget(
     ) &&
     JSON.stringify(a.target.bbox) === JSON.stringify(b.target.bbox)
   );
+}
+
+function frozenSnapshot<T>(value: T): T {
+  const copy = structuredClone(value);
+  const freeze = (item: unknown): void => {
+    if (item && typeof item === "object") {
+      for (const child of Object.values(item)) freeze(child);
+      Object.freeze(item);
+    }
+  };
+  freeze(copy);
+  return copy;
+}
+function sameNativeIdentity(a: NativeActionIdentity, b: NativeActionIdentity): boolean {
+  // Target.parse constructs a fixed schema order; every native field, mark and coordinate binds.
+  return JSON.stringify(a) === JSON.stringify(b);
 }
