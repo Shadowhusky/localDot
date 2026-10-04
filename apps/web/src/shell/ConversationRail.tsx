@@ -20,6 +20,7 @@ export function ConversationRail({
       </div>
       <Conversation
         visible={visible}
+        ownerKey={agent?.sessionId ?? ""}
         messages={messages}
         truncated={agent?.model.historyTruncated ?? false}
       />
@@ -28,7 +29,7 @@ export function ConversationRail({
           {agent.error}
         </p>
       )}
-      {composer ?? <MascotDock />}
+      <div className="conversation-controls">{composer ?? <MascotDock />}</div>
     </aside>
   );
 }

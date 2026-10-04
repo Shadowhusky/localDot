@@ -723,6 +723,20 @@
   justify-content: flex-start;
   padding: 4px 4px 12px 0;
 }
+.conversation-rail > .msgs {
+  min-height: min(180px, 26vh);
+}
+.conversation-controls {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 58%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.conversation-controls > .composer {
+  max-height: none;
+  overflow: visible;
+}
 .message {
   flex: none;
   padding: 12px 0;

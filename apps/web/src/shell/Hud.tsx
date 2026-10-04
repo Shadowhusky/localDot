@@ -23,16 +23,14 @@ export function Hud({
   stopEnabled = true,
 }: HudProps) {
   return (
-    <div
-      className={hud.action.kind === "resume" && !hud.stop ? "hud paused" : "hud"}
-      role="status"
-      aria-live="polite"
-    >
+    <div className={hud.action.kind === "resume" && !hud.stop ? "hud paused" : "hud"}>
       <span className="st">
         <Mascot />
-        <span data-testid="hud-status">{hud.label}</span>
+        <span data-testid="hud-status" role="status" aria-live="polite" aria-atomic="true">
+          {hud.label}
+        </span>
         {hud.elapsedS != null && (
-          <span className="t num" data-testid="hud-elapsed">
+          <span className="t num" data-testid="hud-elapsed" aria-live="off">
             {hud.elapsedS} s
           </span>
         )}

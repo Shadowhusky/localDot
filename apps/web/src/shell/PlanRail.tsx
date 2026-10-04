@@ -1,8 +1,15 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState } from "@localdot/stage";
-import { type ReactNode, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ActivityDetails, type InspectOutput } from "../agent/ActivityDetails.tsx";
-import { type ActivityFilter, activityRows, matchesFilter, stepStatus } from "../agent/activity.ts";
+import {
+  type ActivityFilter,
+  type ActivityStep,
+  activityRows,
+  matchesFilter,
+  stepStatus,
+} from "../agent/activity.ts";
+import { HistoryPages } from "../agent/HistoryPages.tsx";
 import { MemoryCard, type UndoStatus } from "../agent/MemoryCard.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
 import { PlanView } from "../agent/PlanView.tsx";
@@ -12,6 +19,7 @@ import { ResultFiles } from "../agent/ResultFiles.tsx";
 import { type SkillSummary, SkillsView } from "../agent/SkillsView.tsx";
 import { ToolRow } from "../agent/ToolRow.tsx";
 import { UsageView } from "../agent/UsageView.tsx";
+import { usePagedRows } from "../agent/usePagedRows.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
@@ -37,6 +45,8 @@ export interface PlanRailProps {
   };
 }
 
+const timelineKey = (row: TimelineRow<ActivityStep>) => `${row.kind}-${row.id}`;
+
 export function PlanRail({
   rows,
   keyUses,
@@ -55,6 +65,18 @@ export function PlanRail({
   const timeline = activityRows(rows, agent, keyUses);
   const lastStep = timeline.findLastIndex((row) => row.kind === "step");
   const selected = timeline.filter((row) => matchesFilter(row, filter));
+  const page = usePagedRows(selected, timelineKey, `${sessionId ?? ""}:${filter}`);
+  const stepPane = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const preserveSelection = () => {
+      const selection = window.getSelection(),
+        pane = stepPane.current;
+      if (!pane || !selection || selection.isCollapsed || !selection.rangeCount) return;
+      if (selection.getRangeAt(0).intersectsNode(pane)) page.freeze();
+    };
+    document.addEventListener("selectionchange", preserveSelection);
+    return () => document.removeEventListener("selectionchange", preserveSelection);
+  }, [page.freeze]);
   const inspectChanges = (changes: readonly AgentChange[], inspect: InspectOutput) =>
     changes.map((change) => (
       <button
@@ -66,7 +88,14 @@ export function PlanRail({
       </button>
     ));
   return (
-    <aside className="rail r" aria-label="Plan and steps">
+    <aside
+      className="rail r"
+      aria-label="Plan and steps"
+      onScroll={(event) => {
+        const pane = event.currentTarget;
+        if (pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32) page.freeze();
+      }}
+    >
       <div className="rail-h">
         <h2>Activity</h2>
       </div>
@@ -119,8 +148,13 @@ export function PlanRail({
               ))}
             </fieldset>
             {sessionId && selected.length ? (
-              <section className="steps" aria-label="Recorded steps">
-                {selected.map((row) => {
+              <section
+                ref={stepPane}
+                className="steps"
+                aria-label="Recorded steps"
+                onPointerDownCapture={() => page.freeze()}
+              >
+                {page.rows.map((row) => {
                   if (row.kind === "key") return <KeyUseRow key={`key-${row.id}`} row={row} />;
                   const step = row.agent;
                   const changes = model.changes.filter(
@@ -162,6 +196,18 @@ export function PlanRail({
                     </ToolRow>
                   ) : null;
                 })}
+                <HistoryPages
+                  label="steps"
+                  older={page.hasOlder}
+                  newer={page.hasNewer}
+                  onOlder={page.older}
+                  onNewer={page.newer}
+                />
+                {page.retained && (
+                  <p className="history-note">
+                    This page is retained while live activity advances.
+                  </p>
+                )}
               </section>
             ) : (
               <p className="say empty">

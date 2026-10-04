@@ -120,3 +120,64 @@ describe("conversation ownership and scrolling", () => {
     expect(screen.getByText(/Earlier history is kept/)).toBeTruthy();
   });
 });
+
+it("mounts only a bounded page of 10,000 messages and keeps reading/copy identity through a live addition", () => {
+  const data = Array.from({ length: 10_000 }, (_, n) => message(`message-${n}`, `Content ${n}`));
+  const v = render(<Conversation messages={data} truncated={false} ownerKey="large-task" />);
+  const history = screen.getByRole("region", { name: "Conversation history" });
+  expect(history.querySelectorAll("article.message")).toHaveLength(100);
+  fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
+  const retained = screen.getByText("Content 9800").closest("article");
+  v.rerender(
+    <Conversation
+      messages={[...data, message("new", "Newest content")]}
+      truncated={false}
+      ownerKey="large-task"
+    />,
+  );
+  expect(screen.getByText("Content 9800").closest("article")).toBe(retained);
+  expect(history.querySelectorAll("article.message")).toHaveLength(100);
+  expect(screen.queryByText("Newest content")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "New messages" }));
+  expect(screen.getByText("Newest content")).toBeTruthy();
+  expect(history.querySelectorAll("article.message")).toHaveLength(100);
+});
+
+it("announces completed replies without reading each streaming delta", async () => {
+  const reply = (text: string, final: boolean): AgentMessage => ({
+    id: "reply",
+    role: "assistant",
+    text,
+    final,
+  });
+  const v = render(<Conversation messages={[reply("First", false)]} truncated={false} />);
+  const live = screen.getByRole("status");
+  expect(live.textContent).toBe("");
+  v.rerender(<Conversation messages={[reply("First second", false)]} truncated={false} />);
+  expect(live.textContent).toBe("");
+  v.rerender(<Conversation messages={[reply("First second complete", true)]} truncated={false} />);
+  expect(live.textContent).toBe("dot replied: First second complete");
+  v.rerender(
+    <Conversation
+      messages={[
+        reply("First second complete", true),
+        { ...reply("New streaming text", false), id: "next" },
+      ]}
+      truncated={false}
+    />,
+  );
+  expect(live.textContent).toBe("dot replied: First second complete");
+});
+
+it("retires the previous task's reply announcement when the conversation owner changes", () => {
+  const reply: AgentMessage = {
+    id: "previous-reply",
+    role: "assistant",
+    text: "Previous task result",
+    final: true,
+  };
+  const v = render(<Conversation messages={[reply]} truncated={false} ownerKey="first-task" />);
+  expect(screen.getByRole("status").textContent).toBe("dot replied: Previous task result");
+  v.rerender(<Conversation messages={[]} truncated={false} ownerKey="second-task" />);
+  expect(screen.getByRole("status").textContent).toBe("");
+});
