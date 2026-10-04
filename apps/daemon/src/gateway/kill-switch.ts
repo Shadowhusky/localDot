@@ -78,6 +78,10 @@ export class KillSwitch {
       cells.withLifecycle(cellId, async (controls) => {
         const cell = cells.get(cellId);
         const record = cells.record(cellId);
+        if (cell?.fenced || cell?.replacementPending)
+          throw new CellControlConflict(
+            "the computer is fenced or awaiting replacement confirmation",
+          );
         if (!cell?.paused || cell.state !== "ready" || !record) {
           throw new CellControlConflict("the computer must be ready and paused before resuming");
         }

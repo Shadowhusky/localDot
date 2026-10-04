@@ -33,6 +33,7 @@ import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { MemoryStore } from "./memory.ts";
 import { SafetyController } from "./safety/controller.ts";
+import type { ComputerFences } from "./safety/fences.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -61,6 +62,7 @@ export class AgentError extends Error {
 }
 export interface AgentRunnerDeps {
   home: string;
+  fences?: ComputerFences;
   eventLog: Pick<EventLog, "createSession" | "append" | "subscribe">;
   live: Pick<
     LiveSessions,
@@ -68,7 +70,8 @@ export interface AgentRunnerDeps {
   >;
   cell(cellId: string): CellSummary | undefined;
   cellBusy?(cellId: string): boolean;
-  brains: Pick<BrainCells, "open" | "start" | "exited" | "close">;
+  brains: Pick<BrainCells, "open" | "start" | "exited" | "close"> &
+    Partial<Pick<BrainCells, "retireSession">>;
   keyd: Pick<KeydClient, "secrets" | "beginTask" | "modelAdmission" | "setModelAdmission">;
   keydHealth?(): KeydHealth;
   settings(): AgentSettings;
@@ -84,7 +87,7 @@ export interface AgentRunnerDeps {
   idleMs?: number;
   codex?: {
     driver: Pick<CodexDriver, "run"> &
-      Partial<Pick<CodexDriver, "pauseAtBoundary" | "resumeAtBoundary">>;
+      Partial<Pick<CodexDriver, "pauseAtBoundary" | "resumeAtBoundary" | "retirementConfirmed">>;
     account: Pick<CodexAccount, "status">;
     ended?(sessionId: string): void | Promise<void>;
     authGeneration?(): number;
@@ -181,11 +184,16 @@ export class AgentRunner {
   }
   #ready(cellId: string): CellSummary {
     if (this.#closing) throw new AgentError(503, "the agent is shutting down");
-    if (this.#blockedCells.has(cellId))
+    if (this.#blockedCells.has(cellId) || this.deps.fences?.isFenced(cellId))
       throw new AgentError(409, "computer cleanup needs attention before another task");
     const cell = this.deps.cell(cellId);
     if (cell?.state !== "ready") throw new AgentError(409, "the computer is not ready");
-    if (cell.paused || this.deps.cellBusy?.(cellId) || this.deps.live.idleOperationPending(cellId))
+    if (
+      cell.replacementPending ||
+      cell.paused ||
+      this.deps.cellBusy?.(cellId) ||
+      this.deps.live.idleOperationPending(cellId)
+    )
       throw new AgentError(409, "the computer is paused or changing state");
     return cell;
   }
@@ -338,6 +346,7 @@ export class AgentRunner {
           rt.session.cellId,
           rt.session.autonomy,
           pause,
+          rt.selection.kind === "api" ? "api" : "native",
         ),
       sleep: this.deps.sleep ?? sleep,
       mode: rt.selection.kind === "api" ? "api" : "native",
@@ -492,6 +501,11 @@ export class AgentRunner {
     const rt = this.#runtime.get(session.id);
     session.stop();
     this.#blockedCells.add(session.cellId);
+    this.deps.fences?.capture(
+      session.cellId,
+      session.id,
+      rt?.selection.kind === "chatgpt" ? "native" : "api",
+    );
     if (rt?.containment) return rt.containment;
     const work = Promise.resolve()
       .then(() => this.deps.stopSession(session.id))
@@ -501,6 +515,37 @@ export class AgentRunner {
       });
     if (rt) rt.containment = work;
     return work;
+  }
+  replacementOwner(cellId: string): {
+    cellId: string;
+    revision: number;
+    fenced: boolean;
+    taskEnded: boolean;
+  } {
+    const record = this.deps.fences?.record(cellId);
+    return {
+      cellId,
+      revision: record?.revision ?? 0,
+      fenced: !!record,
+      taskEnded:
+        !!record &&
+        !this.#starting.has(cellId) &&
+        !this.deps.live.get(cellId) &&
+        !this.deps.live.idleOperationPending(cellId) &&
+        ![...this.#runtime.values()].some((rt) => rt.session.cellId === cellId) &&
+        (record.executor !== "native" || record.nativeRetired),
+    };
+  }
+  async retireForReplacement(cellId: string): Promise<boolean> {
+    const record = this.deps.fences?.record(cellId);
+    if (!record || !this.replacementOwner(cellId).taskEnded) return false;
+    if (!this.deps.brains.retireSession) return false;
+    try {
+      await this.deps.brains.retireSession(record.sessionId);
+    } catch {
+      return false;
+    }
+    return this.replacementOwner(cellId).taskEnded;
   }
   async close(): Promise<void> {
     if (!this.#closing) {
@@ -670,8 +715,14 @@ export class AgentRunner {
         } catch {
           reason = "error";
           this.#blockedCells.add(session.cellId);
+          this.deps.fences?.capture(session.cellId, session.id, "native");
         }
       }
+      if (
+        rt.selection.kind === "chatgpt" &&
+        this.deps.codex?.driver.retirementConfirmed?.(session.id) === true
+      )
+        this.deps.fences?.confirmNativeRetirement(session.cellId, session.id);
       if (session.stopped && reason === "done") reason = "stopped";
       try {
         session.append("session.end", { reason });

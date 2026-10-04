@@ -726,6 +726,11 @@ export class ActionGateway {
     const cell = this.deps.cells.get(ctx.cellId);
     if (cell?.state !== "ready")
       throw new Cancelled("preflight", `cell is ${cell?.state ?? "missing"}`);
+    if (cell.fenced || cell.replacementPending)
+      throw new Cancelled(
+        "preflight",
+        "the computer is fenced or awaiting replacement confirmation",
+      );
     if (cell.paused) throw new Cancelled("preflight", "the computer is paused");
   }
 

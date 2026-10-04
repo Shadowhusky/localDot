@@ -44,7 +44,7 @@ const isOwnName = (value: unknown, id: string) =>
 // keyd's port table, so a record counts only in the shape the daemon writes.
 function isCellRecord(value: unknown, id: string, ports: PortRange): value is CellRecord {
   if (!isObject(value) || value.v !== 1 || value.id !== id) return false;
-  const { createdAt, scale, keydPort, tokens, docker } = value;
+  const { createdAt, scale, keydPort, tokens, docker, ownership } = value;
   return (
     typeof createdAt === "string" &&
     (scale === 1 || scale === 2) &&
@@ -55,6 +55,12 @@ function isCellRecord(value: unknown, id: string, ports: PortRange): value is Ce
     isObject(tokens) &&
     matches(TOKEN_PATTERN, tokens.desktopd) &&
     matches(TOKEN_PATTERN, tokens.stream) &&
+    (ownership === undefined ||
+      (isObject(ownership) &&
+        Object.keys(ownership).length === 4 &&
+        ["desktop", "gate", "internalNetwork", "egressNetwork"].every((field) =>
+          matches(/^[a-zA-Z0-9_-]{1,200}$/, ownership[field]),
+        ))) &&
     isObject(docker) &&
     DOCKER_FIELDS.every(([field, kind]) =>
       kind === "name" ? isOwnName(docker[field], id) : matches(DOTTED_QUAD, docker[field]),

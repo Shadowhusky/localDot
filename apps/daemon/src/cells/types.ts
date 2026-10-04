@@ -15,6 +15,8 @@ export interface StreamState {
 export const NO_STREAM: StreamState = { connection: "none", viewers: 0, lastUpstreamAt: null };
 
 export interface CellSummary {
+  fenced?: { revision: number };
+  replacementPending?: true;
   // Stop freezes every desktop process until the user resumes or restarts it.
   paused?: true;
   id: string;
@@ -36,7 +38,15 @@ export interface CellDocker {
   desktopIp: string;
 }
 
+export interface CellOwnership {
+  desktop: string;
+  gate: string;
+  internalNetwork: string;
+  egressNetwork: string;
+}
+
 export interface CellRecord {
+  ownership?: CellOwnership;
   v: 1;
   id: string;
   createdAt: string;

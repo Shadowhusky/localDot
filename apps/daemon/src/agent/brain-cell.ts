@@ -372,6 +372,23 @@ export class BrainCells {
     }
     return undefined;
   }
+  async retireSession(sessionId: string): Promise<void> {
+    if (!ULID_PATTERN.test(sessionId)) throw new BrainStateError("invalid historical session");
+    for (const owned of this.#owned.values())
+      if (owned.layout.sessionId === sessionId) await this.#cleanup(owned);
+    const filters = JSON.stringify({
+      label: [`localdot.home=${this.#home}`, `localdot.session=${sessionId}`, "localdot.brain"],
+    });
+    for (const path of ["/containers/json", "/networks"]) {
+      const objects = await this.deps.docker.request<unknown>({
+        method: "GET",
+        path,
+        query: { all: "true", filters },
+      });
+      if (!Array.isArray(objects) || objects.length)
+        throw new BrainStateError("historical brain retirement cannot be confirmed");
+    }
+  }
   async close(cell: BrainCell): Promise<void> {
     if (this.#closed.has(cell)) return Promise.resolve();
     return this.#cleanup(this.#record(cell));

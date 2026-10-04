@@ -30,6 +30,10 @@ export class TicketRegistry {
     return undefined;
   }
 
+  hasLiveTicket(cellId: string): boolean {
+    return this.#byCell.has(cellId);
+  }
+
   revoke(cellId: string): void {
     this.#byCell.delete(cellId);
   }

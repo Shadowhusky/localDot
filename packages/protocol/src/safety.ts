@@ -144,3 +144,25 @@ export const ReplacementRequest = z.strictObject({
   home: z.literal("fresh"),
 });
 export type ReplacementRequest = z.infer<typeof ReplacementRequest>;
+
+export const ReplacementRecord = z
+  .strictObject({
+    requestId: Id,
+    oldCellId: Id,
+    revision: Counter,
+    phase: z.enum(["fenced", "retiring", "retired", "allocating", "ready", "blocked"]),
+    newCellId: Id.optional(),
+    reason: z.enum(["old_retirement", "new_creation", "record_unavailable"]).optional(),
+  })
+  .refine((value) => value.oldCellId !== value.newCellId, "replacement requires a fresh identity")
+  .refine(
+    (value) => !["allocating", "ready"].includes(value.phase) || !!value.newCellId,
+    "candidate required",
+  )
+  .refine(
+    (value) => (value.phase === "blocked") === (value.reason !== undefined),
+    "blocked reason required",
+  );
+export type ReplacementRecord = z.infer<typeof ReplacementRecord>;
+export const ComputerFence = z.strictObject({ revision: Counter });
+export type ComputerFence = z.infer<typeof ComputerFence>;

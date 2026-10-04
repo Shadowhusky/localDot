@@ -150,6 +150,8 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
     const cell = cells.get(id);
     if (!cell) return c.text("unknown cell", 404);
+    if (cell.fenced || cell.replacementPending)
+      return c.text("the computer is fenced or awaiting replacement confirmation", 409);
     if (!cell.paused) return c.text("the computer is not paused", 409);
     if (cell.state !== "ready")
       return c.text("the computer is restarting: resume it once it is ready", 409);
@@ -208,6 +210,8 @@ function unavailable(c: Context, cells: CellApi, deps: GatewayRoutesDeps): Respo
   const cell = cells.get(id);
   if (!cell) return c.text("unknown cell", 404);
   if (cell.state !== "ready") return c.text(`cell is ${cell.state}`, 409);
+  if (cell.fenced || cell.replacementPending)
+    return c.text("the computer is fenced or awaiting replacement confirmation", 409);
   if (cell.paused) return c.text("the computer is paused: resume it first", 409);
   if (deps.killSwitch?.isBusy?.(id))
     return c.text("the computer is changing state; try again", 409);

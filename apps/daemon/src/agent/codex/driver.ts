@@ -191,6 +191,11 @@ export class CodexDriver {
   constructor(deps: CodexDriverDeps) {
     this.#deps = Object.freeze({ ...deps });
   }
+  retirementConfirmed(sessionId: string): boolean {
+    return (
+      !this.#running.has(sessionId) && !this.#owners.has(sessionId) && !this.#blocked.has(sessionId)
+    );
+  }
   async pauseAtBoundary(
     session: AgentSession,
     pause: Pick<PauseSnapshot, "requestId" | "revision">,

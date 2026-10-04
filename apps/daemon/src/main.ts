@@ -3,6 +3,8 @@ import { constants, userInfo } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
+import { ComputerFences } from "./agent/safety/fences.ts";
+import { createReplacementController } from "./agent/safety/replacement-controller.ts";
 import { createAgent } from "./agent/wiring.ts";
 import { createApp } from "./app.ts";
 import { DockerClient } from "./cells/docker.ts";
@@ -70,12 +72,15 @@ const token = loadOrCreateToken(tokenFile);
 const clock = monotonicClock();
 const eventLog = new EventLog(home, clock);
 const tickets = new TicketRegistry();
+const fences = new ComputerFences(home);
 const docker = new DockerClient(findDockerSocket().path);
 const keyd = new KeydClient(keydSocketPath(home));
 const keydWiring = new CellKeydWiring({ keyd, docker });
 let agent: ReturnType<typeof createAgent> | undefined;
 const orchestrator = new CellOrchestrator({
   externalKeydPorts: () => agent?.reservedPorts() ?? [],
+  permanentFence: (id) =>
+    fences.record(id) ? { revision: fences.record(id)?.revision ?? 1 } : fences.isFenced(id),
   docker,
   keyd: keydWiring,
   store: new CellStore(home, keydPorts),
@@ -85,7 +90,7 @@ const orchestrator = new CellOrchestrator({
   probeStream,
 });
 // The UI remains available while Docker is unavailable or its startup reconcile is waiting.
-void orchestrator.reconcile().catch(() => console.error("cell reconcile failed"));
+// Replacement recovery installs candidate holds before ordinary startup reconciliation.
 const desktop = { cells: orchestrator, tickets, vendorDir: webDir("vendor/selkies") };
 const registry = new DesktopdRegistry(orchestrator, clock);
 const onset = loadOnsetTable(home);
@@ -114,6 +119,7 @@ keydMonitor.subscribe((now, before) => {
 });
 agent = createAgent({
   home,
+  fences,
   installToken: token,
   eventLog,
   live,
@@ -128,7 +134,22 @@ agent = createAgent({
   keydPorts,
   codex: { realHome: userInfo().homedir, user: userInfo().username },
 });
-void agent.start().catch(() => console.error("agent startup cleanup or tool listener failed"));
+const replacement = createReplacementController({
+  home,
+  fences,
+  runner: agent.runner,
+  cells: orchestrator,
+  tickets,
+});
+void (async () => {
+  await orchestrator.containFenced();
+  await agent.start();
+  try {
+    await replacement.owner.start();
+  } finally {
+    await orchestrator.reconcile();
+  }
+})().catch(() => console.error("startup cleanup, replacement recovery or cell reconcile failed"));
 const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(
   () => keydEvents.stop(),
@@ -145,7 +166,7 @@ const app = createApp({
   port,
   eventLog,
   agent: agent.routes,
-  cells: { cells: orchestrator, tickets },
+  cells: { cells: orchestrator, tickets, replacement },
   desktop,
   ui: { dir: webDir("dist") },
   gateway: { registry, clock, eventLog, gateway, frames, live, killSwitch },

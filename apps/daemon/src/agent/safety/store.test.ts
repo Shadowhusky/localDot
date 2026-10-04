@@ -12,6 +12,7 @@ import {
 import { join } from "node:path";
 import { DEFAULT_AUTONOMY, ulid } from "@localdot/protocol";
 import { afterEach, expect, it } from "vitest";
+import { ComputerFences } from "./fences.ts";
 import { SafetyIntentStore } from "./store.ts";
 
 const roots: string[] = [];
@@ -93,3 +94,63 @@ it("refuses a session-directory symlink and invalid owners before writing", () =
   expect(readdirSync(outside)).toEqual([]);
   expect(() => f.store.write("../escape", f.cellId, DEFAULT_AUTONOMY, f.pause)).toThrow();
 });
+
+it("reads typed bounded private intent but never restores a permit or live generation", () => {
+  const f = fixture();
+  f.store.write(f.sessionId, f.cellId, DEFAULT_AUTONOMY, f.pause, "api");
+  expect(f.store.read(f.sessionId)).toMatchObject({
+    sessionId: f.sessionId,
+    cellId: f.cellId,
+    executor: "api",
+    pause: f.pause,
+  });
+  expect(f.store.list()).toHaveLength(1);
+  expect(new ComputerFences(f.home).isFenced(f.cellId)).toBe(false);
+  writeFileSync(
+    f.path,
+    JSON.stringify({ ...JSON.parse(readFileSync(f.path, "utf8")), permit: "injected" }) + "\n",
+  );
+  expect(() => f.store.read(f.sessionId)).toThrow();
+  expect(new ComputerFences(f.home).isFenced(ulid())).toBe(true);
+});
+it("a crashed uncertain API pause becomes a permanent deny before startup effects", () => {
+  const f = fixture();
+  f.store.write(
+    f.sessionId,
+    f.cellId,
+    DEFAULT_AUTONOMY,
+    { ...f.pause, phase: "uncertain", resumeAvailable: false },
+    "api",
+  );
+  const recovered = new ComputerFences(f.home);
+  expect(recovered.record(f.cellId)).toMatchObject({
+    cellId: f.cellId,
+    sessionId: f.sessionId,
+    nativeRetired: true,
+  });
+  f.store.write(f.sessionId, f.cellId, DEFAULT_AUTONOMY, undefined, "api");
+  expect(new ComputerFences(f.home).isFenced(f.cellId)).toBe(true);
+});
+it.each(["symlink", "oversize", "public", "wrong-owner"])(
+  "a %s intent read refuses recovery without rewriting it",
+  (kind) => {
+    const f = fixture();
+    f.store.write(f.sessionId, f.cellId, DEFAULT_AUTONOMY, f.pause);
+    if (kind === "symlink") {
+      rmSync(f.path);
+      const outside = join(f.home, "unchanged");
+      writeFileSync(outside, "untouched");
+      symlinkSync(outside, f.path);
+    } else if (kind === "oversize") writeFileSync(f.path, "x".repeat(8193));
+    else if (kind === "public") chmodSync(f.path, 0o644);
+    else
+      writeFileSync(
+        f.path,
+        JSON.stringify({ ...JSON.parse(readFileSync(f.path, "utf8")), sessionId: ulid() }) + "\n",
+      );
+    const before = lstatSync(f.path);
+    expect(() => f.store.read(f.sessionId)).toThrow();
+    expect(lstatSync(f.path).ino).toBe(before.ino);
+    expect(new ComputerFences(f.home).isFenced(ulid())).toBe(true);
+  },
+);

@@ -40,16 +40,27 @@ export function isolatedNetworkSpec(name: string) {
   };
 }
 
-export function internalNetworkSpec(name: string) {
-  return { ...isolatedNetworkSpec(name), Labels: LABELS };
+export function internalNetworkSpec(name: string, cellId?: string) {
+  return {
+    ...isolatedNetworkSpec(name),
+    Labels: cellId ? { "localdot.cell": cellId, "localdot.role": "internal" } : LABELS,
+  };
 }
 
-export function egressNetworkSpec(name: string) {
-  return { Name: name, Driver: "bridge", EnableIPv6: false, Labels: LABELS };
+export function egressNetworkSpec(name: string, cellId?: string) {
+  return {
+    Name: name,
+    Driver: "bridge",
+    EnableIPv6: false,
+    Labels: cellId ? { "localdot.cell": cellId, "localdot.role": "egress" } : LABELS,
+  };
 }
 
-export function homeVolumeSpec(name: string) {
-  return { Name: name, Labels: LABELS };
+export function homeVolumeSpec(name: string, cellId?: string) {
+  return {
+    Name: name,
+    Labels: cellId ? { "localdot.cell": cellId, "localdot.role": "home" } : LABELS,
+  };
 }
 
 export function gateSpec(record: CellRecord, image: string) {

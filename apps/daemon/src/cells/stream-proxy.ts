@@ -91,7 +91,9 @@ export interface StreamProxyDeps {
 function cellFor(deps: StreamProxyDeps, id: string, ticket: string): string | undefined {
   if (!ULID_PATTERN.test(id) || deps.tickets.resolve(ticket) !== id) return undefined;
   const cell = deps.cells.get(id);
-  return cell?.state === "ready" && !cell.paused ? id : undefined;
+  return cell?.state === "ready" && !cell.paused && !cell.fenced && !cell.replacementPending
+    ? id
+    : undefined;
 }
 
 export function desktopRoutes(app: Hono, deps: StreamProxyDeps): void {
@@ -151,7 +153,8 @@ export function desktopStreamRoute(deps: StreamProxyDeps): UpgradeRoute {
   const streams = new CellStreams(deps.cells);
   // Leaving ready revokes the cell's ticket, and the streams it opened go with it.
   deps.cells.subscribe((cell) => {
-    if (cell.state !== "ready" || cell.paused) streams.drop(cell.id);
+    if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
+      streams.drop(cell.id);
   });
   return {
     pattern: /^\/cells\/([^/]+)\/desktop\/([^/]+)\/api\/websockets$/,

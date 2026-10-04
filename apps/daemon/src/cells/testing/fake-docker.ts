@@ -8,6 +8,7 @@ export interface FakeContainer {
   name: string;
   body: {
     Image: string;
+    Labels?: Record<string, string>;
     HostConfig: Record<string, unknown>;
     NetworkingConfig?: { EndpointsConfig: Record<string, unknown> };
   };
@@ -27,6 +28,7 @@ export interface FakeNetwork {
   Options: Record<string, string>;
   subnet: string;
   created: string;
+  Labels?: Record<string, string>;
 }
 
 export interface FakeDockerState {
@@ -34,6 +36,7 @@ export interface FakeDockerState {
   images: Set<string>;
   networks: Map<string, FakeNetwork>;
   volumes: Set<string>;
+  volumeLabels: Map<string, Record<string, string>>;
   containers: Map<string, FakeContainer>;
   calls: { method: string; path: string; query: URLSearchParams; body: unknown }[];
   nextPort: number;
@@ -83,6 +86,7 @@ export async function startFakeDocker(
     images: new Set(["localdot/desktop:dev", "localdot/gate:dev"]),
     networks: new Map(),
     volumes: new Set(),
+    volumeLabels: new Map(),
     containers: new Map(),
     calls: [],
     nextPort: 50000,
@@ -106,6 +110,7 @@ export async function startFakeDocker(
     Name: `/${c.name}`,
     State: { Running: c.running, Paused: c.paused, ExitCode: c.exitCode, Error: "" },
     HostConfig: c.body.HostConfig,
+    Config: { Labels: c.body.Labels ?? {} },
     NetworkSettings: { Ports: c.running ? c.ports : {}, Networks: c.networks },
   });
 
@@ -135,7 +140,12 @@ export async function startFakeDocker(
       return state.images.has(segment(image)) ? json(200, { Id: "sha256:img" }) : notFound("image");
     }
     if (method === "POST" && path === "/networks/create") {
-      const spec = body as { Name: string; Internal?: boolean; Options?: Record<string, string> };
+      const spec = body as {
+        Name: string;
+        Internal?: boolean;
+        Options?: Record<string, string>;
+        Labels?: Record<string, string>;
+      };
       if (failsCreate(spec.Name)) return json(500, { message: `refusing to create ${spec.Name}` });
       if (state.networks.has(spec.Name)) {
         return json(409, { message: `network with name ${spec.Name} already exists` });
@@ -144,6 +154,7 @@ export async function startFakeDocker(
       const net: FakeNetwork = {
         Id: `net-${networkSeq}`,
         Name: spec.Name,
+        Labels: spec.Labels,
         Internal: spec.Internal ?? false,
         Options: spec.Options ?? {},
         subnet: `172.${networkSeq}.0.0/16`,
@@ -154,9 +165,19 @@ export async function startFakeDocker(
     }
     if (method === "GET" && path === "/networks") {
       // Docker's name filter matches any part of the name.
-      const names: string[] = JSON.parse(query.get("filters") ?? "{}").name ?? [];
+      const filters = JSON.parse(query.get("filters") ?? "{}"),
+        names: string[] = filters.name ?? [];
       const listed = [...state.networks.values()].filter(
-        (n) => names.length === 0 || names.some((name) => n.Name.includes(name)),
+        (n) =>
+          (names.length === 0 || names.some((name) => n.Name.includes(name))) &&
+          (!filters.label?.length ||
+            filters.label.every((label: string) => {
+              const [key, value] = label.split("=");
+              return (
+                !!key &&
+                (value === undefined ? n.Labels?.[key] !== undefined : n.Labels?.[key] === value)
+              );
+            })),
       );
       return json(
         200,
@@ -186,6 +207,7 @@ export async function startFakeDocker(
       const reply = {
         Id: net.Id,
         Name: net.Name,
+        Labels: net.Labels,
         Created: net.created,
         Internal: net.Internal,
         Options: net.Options,
@@ -204,10 +226,20 @@ export async function startFakeDocker(
       return { status: 200 };
     }
     if (method === "POST" && path === "/volumes/create") {
-      state.volumes.add((body as { Name: string }).Name);
-      return json(201, { Name: (body as { Name: string }).Name });
+      const spec = body as { Name: string; Labels?: Record<string, string> };
+      if (!state.volumes.has(spec.Name)) {
+        state.volumes.add(spec.Name);
+        state.volumeLabels.set(spec.Name, spec.Labels ?? {});
+      }
+      return json(201, { Name: spec.Name, Labels: state.volumeLabels.get(spec.Name) });
     }
     const volume = /^\/volumes\/([^/]+)$/.exec(path);
+    if (method === "GET" && volume) {
+      const name = segment(volume);
+      return state.volumes.has(name)
+        ? json(200, { Name: name, Labels: state.volumeLabels.get(name) ?? {} })
+        : notFound("volume");
+    }
     if (method === "DELETE" && volume) {
       const name = segment(volume);
       if (!state.volumes.has(name)) return notFound("volume");
@@ -217,6 +249,32 @@ export async function startFakeDocker(
         return json(409, { message: `remove ${name}: volume is in use - [id-${user.name}]` });
       state.volumes.delete(name);
       return { status: 204 };
+    }
+    if (method === "GET" && path === "/containers/json") {
+      const filters = JSON.parse(query.get("filters") ?? "{}");
+      const containers = [...state.containers.values()].filter(
+        (c) =>
+          (!filters.volume?.length ||
+            filters.volume.some((name: string) => mounts(c).includes(name))) &&
+          (!filters.label?.length ||
+            filters.label.every((label: string) => {
+              const [key, value] = label.split("=");
+              return (
+                !!key &&
+                (value === undefined
+                  ? c.body.Labels?.[key] !== undefined
+                  : c.body.Labels?.[key] === value)
+              );
+            })),
+      );
+      return json(
+        200,
+        containers.map((c) => ({
+          Id: `id-${c.name}`,
+          Names: [`/${c.name}`],
+          Labels: c.body.Labels ?? {},
+        })),
+      );
     }
     if (method === "POST" && path === "/containers/create") {
       const name = query.get("name") ?? "";
@@ -251,9 +309,12 @@ export async function startFakeDocker(
       for (const [name, data] of untar(raw)) c.files.set(`${query.get("path")}/${name}`, data);
       return { status: 200 };
     }
+    const findContainer = (ref: string) =>
+      state.containers.get(ref) ??
+      [...state.containers.values()].find((c) => `id-${c.name}` === ref);
     const action = /^\/containers\/([^/]+)\/(json|start|stop|pause|unpause)$/.exec(path);
     if (action) {
-      const c = state.containers.get(segment(action));
+      const c = findContainer(segment(action));
       if (!c) return notFound("container");
       if (action[2] === "json") return json(200, containerJson(c));
       if (action[2] === "pause" || action[2] === "unpause") {
@@ -288,7 +349,7 @@ export async function startFakeDocker(
     }
     const container = /^\/containers\/([^/]+)$/.exec(path);
     if (method === "DELETE" && container) {
-      const c = state.containers.get(segment(container));
+      const c = findContainer(segment(container));
       if (!c) return notFound("container");
       if (c.running && query.get("force") !== "true") {
         return json(409, {

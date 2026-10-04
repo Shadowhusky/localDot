@@ -183,12 +183,32 @@ export function toolHarness(
     };
   };
   const events = () => eventLog.read(sessionId);
+  let resourcesClosed = false;
+  let resourceCleanupError: AggregateError | undefined;
+  const closeResources = () => {
+    if (resourcesClosed) {
+      if (resourceCleanupError) throw resourceCleanupError;
+      return;
+    }
+    resourcesClosed = true;
+    const errors: unknown[] = [];
+    for (const close of [unapprove, () => session.stop(), () => eventLog.close()]) {
+      try {
+        close();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
+    if (errors.length) {
+      resourceCleanupError = new AggregateError(errors, "fixture resource cleanup uncertain");
+      throw resourceCleanupError;
+    }
+  };
   return {
     home,
+    closeResources,
     close: () => {
-      unapprove();
-      session.stop();
-      eventLog.close();
+      closeResources();
       rmSync(home, { recursive: true, force: true });
     },
     tools,

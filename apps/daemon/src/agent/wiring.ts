@@ -46,6 +46,7 @@ import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
 export interface AgentWiringDeps {
+  fences?: import("./safety/fences.ts").ComputerFences;
   home: string;
   installToken: string;
   eventLog: EventLog;
@@ -298,6 +299,7 @@ export function createAgent(d: AgentWiringDeps) {
       : undefined;
   const runner = new AgentRunner({
     home: d.home,
+    fences: d.fences,
     eventLog: d.eventLog,
     live: d.live,
     cell: (id) => d.cells.get(id),

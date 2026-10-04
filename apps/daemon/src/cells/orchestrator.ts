@@ -2,6 +2,7 @@ import { SELFTEST_CHECK_IDS, type SelfTestCheck, selfTestPassed, ulid } from "@l
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
+import { inspectOwnedCell, requireFreshNames, retireExactCell } from "./exact-retirement.ts";
 import type { Images } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
@@ -33,6 +34,7 @@ import {
 export interface OrchestratorDeps {
   keyd?: CellKeyd;
   externalKeydPorts?(): Iterable<number>;
+  permanentFence?(id: string): { revision: number } | boolean | undefined;
   docker: DockerClient;
   store: CellStore;
   images: Images;
@@ -162,10 +164,14 @@ export class CellOrchestrator {
   readonly #probeStream: OrchestratorDeps["probeStream"];
   readonly #namePrefix: string;
   readonly #sleep: (ms: number) => Promise<void>;
+  readonly #candidateHolds = new Set<string>();
+  readonly #reservedIds = new Set<string>();
+  readonly #retiredPortOwners = new Set<string>();
   readonly #readyTimeoutMs: number;
   readonly #watchEveryMs: number;
   readonly #restartBackoffMs: number[];
   readonly #live = new Map<string, Live>();
+  readonly #watchOwners = new Map<string, Live>();
   // Records never change once created, so each is read from disk once, not per request or event.
   readonly #records = new Map<string, CellRecord>();
   readonly #invalidRecords = new Set<string>();
@@ -176,7 +182,7 @@ export class CellOrchestrator {
   readonly #queues = new Map<string, Promise<void>>();
   #disposed = false;
 
-  constructor(deps: OrchestratorDeps) {
+  constructor(private readonly deps: OrchestratorDeps) {
     this.#keyd = deps.keyd;
     this.#docker = deps.docker;
     this.#store = deps.store;
@@ -207,8 +213,10 @@ export class CellOrchestrator {
       throw new CellControlConflict("unreadable cell records may retain keyd ports");
     return [
       ...new Set([
-        ...records.map((r) => r.keydPort),
-        ...[...this.#records.values()].map((r) => r.keydPort),
+        ...records.filter((r) => !this.#retiredPortOwners.has(r.id)).map((r) => r.keydPort),
+        ...[...this.#records.values()]
+          .filter((r) => !this.#retiredPortOwners.has(r.id))
+          .map((r) => r.keydPort),
         ...this.#reservedKeydPorts,
       ]),
     ];
@@ -221,7 +229,7 @@ export class CellOrchestrator {
   // Only a ready cell's ports are its own: any other state may hold ports Docker has handed on.
   endpoints(id: string): CellEndpoints | undefined {
     const live = this.#live.get(id);
-    if (live?.state !== "ready" || live.paused || !live.ports) return undefined;
+    if (this.#held(id) || live?.state !== "ready" || live.paused || !live.ports) return undefined;
     const record = this.#record(id);
     return record && endpointsFor(record, live.ports);
   }
@@ -257,6 +265,17 @@ export class CellOrchestrator {
   async #reconcile(id: string): Promise<void> {
     const record = this.#record(id);
     if (!record) return;
+    if (this.#held(id)) {
+      if (this.deps.permanentFence?.(id)) await this.#containFenced(record);
+      else
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          stream: NO_STREAM,
+          error: "Replacement recovery has not confirmed this computer.",
+        });
+      return;
+    }
     try {
       const desktop = await this.#inspect(record.docker.desktop);
       const gate = await this.#inspect(record.docker.gate);
@@ -291,31 +310,45 @@ export class CellOrchestrator {
     }
   }
 
-  async create(opts: { scale: Scale }): Promise<CellSummary> {
-    const id = ulid();
-    const { records, skipped } = this.#store.inventory();
-    if (skipped.length > 0) {
-      throw new SkippedCellsError(skipped, {
-        folder: (cell) => this.#store.folder(cell),
-        containers: (cell) => `${this.#namePrefix}*-${cell}`,
-      });
-    }
-    // keyd tells cells apart by their listener port (M3), so the port is reserved before the first
-    // await: two concurrent creates never get the same one.
-    const keydPort = allocateKeydPort(
-      [
-        ...records.map((r) => r.keydPort),
-        ...[...this.#records.values()].map((r) => r.keydPort),
-        ...this.#reservedKeydPorts,
-        ...(this.#externalKeydPorts?.() ?? []),
-      ],
-      this.#store.keydPorts,
-    );
-    this.#reservedKeydPorts.add(keydPort);
+  async create(opts: { scale: Scale; id?: string }): Promise<CellSummary> {
+    const id = opts.id ?? ulid();
+    if (
+      !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(id) ||
+      this.#record(id) ||
+      this.#queues.has(id) ||
+      this.#reservedIds.has(id) ||
+      this.deps.permanentFence?.(id)
+    )
+      throw new CellControlConflict("computer identity is unavailable");
+    this.#reservedIds.add(id);
+    let keydPort: number | undefined;
     try {
-      return await this.#queued(id, () => this.#provision(id, keydPort, opts.scale));
+      const { records, skipped } = this.#store.inventory();
+      if (skipped.length)
+        throw new SkippedCellsError(skipped, {
+          folder: (cell) => this.#store.folder(cell),
+          containers: (cell) => `${this.#namePrefix}*-${cell}`,
+        });
+      if (opts.id) await requireFreshNames(this.#docker, cellNames(id, this.#namePrefix));
+      keydPort = allocateKeydPort(
+        [
+          ...records
+            .filter((record) => !this.#retiredPortOwners.has(record.id))
+            .map((record) => record.keydPort),
+          ...[...this.#records.values()]
+            .filter((record) => !this.#retiredPortOwners.has(record.id))
+            .map((record) => record.keydPort),
+          ...this.#reservedKeydPorts,
+          ...(this.#externalKeydPorts?.() ?? []),
+        ],
+        this.#store.keydPorts,
+      );
+      this.#reservedKeydPorts.add(keydPort);
+      const port = keydPort;
+      return await this.#queued(id, () => this.#provision(id, port, opts.scale));
     } finally {
-      this.#reservedKeydPorts.delete(keydPort);
+      this.#reservedIds.delete(id);
+      if (keydPort !== undefined) this.#reservedKeydPorts.delete(keydPort);
     }
   }
 
@@ -326,7 +359,7 @@ export class CellOrchestrator {
       const internal = await this.#docker.request<{ Id: string }>({
         method: "POST",
         path: "/networks/create",
-        body: internalNetworkSpec(names.internalNetwork),
+        body: internalNetworkSpec(names.internalNetwork, id),
       });
       undo.push({
         what: `network ${names.internalNetwork}`,
@@ -336,7 +369,7 @@ export class CellOrchestrator {
       const egress = await this.#docker.request<{ Id: string }>({
         method: "POST",
         path: "/networks/create",
-        body: egressNetworkSpec(names.egressNetwork),
+        body: egressNetworkSpec(names.egressNetwork, id),
       });
       undo.push({
         what: `network ${names.egressNetwork}`,
@@ -345,11 +378,17 @@ export class CellOrchestrator {
       });
       const internalSubnet = await this.#subnet(internal.Id, { isolated: true });
       const egressSubnet = await this.#subnet(egress.Id);
-      await this.#docker.request({
+      const volume = await this.#docker.request<{ Name: string; Labels?: Record<string, string> }>({
         method: "POST",
         path: "/volumes/create",
-        body: homeVolumeSpec(names.homeVolume),
+        body: homeVolumeSpec(names.homeVolume, id),
       });
+      if (
+        volume.Name !== names.homeVolume ||
+        volume.Labels?.["localdot.cell"] !== id ||
+        volume.Labels?.["localdot.role"] !== "home"
+      )
+        throw new Error("fresh home ownership unavailable");
       undo.push({
         what: `volume ${names.homeVolume}`,
         run: () =>
@@ -361,6 +400,12 @@ export class CellOrchestrator {
       });
       const record: CellRecord = {
         v: 1,
+        ownership: {
+          internalNetwork: internal.Id,
+          egressNetwork: egress.Id,
+          gate: "",
+          desktop: "",
+        },
         id,
         createdAt: new Date().toISOString(),
         scale,
@@ -380,13 +425,16 @@ export class CellOrchestrator {
           desktopSpec(record, this.#images.desktop, { fullcolor: this.#streamFullcolor }),
         ],
       ] as const) {
-        await this.#docker.request({
+        const made = await this.#docker.request<{ Id: string }>({
           method: "POST",
           path: "/containers/create",
           query: { name },
           body: spec,
         });
-        undo.push({ what: `container ${name}`, run: () => this.#removeContainer(name) });
+        if (!made.Id || typeof made.Id !== "string")
+          throw new Error("container identity unavailable");
+        if (record.ownership) record.ownership[name === names.gate ? "gate" : "desktop"] = made.Id;
+        undo.push({ what: `container ${name}`, run: () => this.#removeContainer(made.Id) });
       }
       // Before the save, so a save that fails part-way leaves no folder behind either.
       undo.push({
@@ -436,6 +484,10 @@ export class CellOrchestrator {
   }
 
   async #start(id: string): Promise<void> {
+    if (this.#held(id))
+      throw new CellControlConflict(
+        "the computer is permanently fenced or awaiting replacement confirmation",
+      );
     if (this.#invalidRecords.has(id)) {
       const repaired = this.#store.get(id);
       if (!repaired) throw new Error("fix the cell record before starting the computer");
@@ -495,6 +547,10 @@ export class CellOrchestrator {
   }
 
   async #unpause(id: string): Promise<void> {
+    if (this.#held(id))
+      throw new CellControlConflict(
+        "the computer is permanently fenced or awaiting replacement confirmation",
+      );
     const record = this.#require(id);
     const live = this.#live.get(id);
     if (!live?.paused || live.state !== "ready") {
@@ -533,6 +589,7 @@ export class CellOrchestrator {
   }
 
   async #rewireIfLost(id: string): Promise<boolean> {
+    if (this.#held(id)) return false;
     const live = this.#live.get(id);
     if (live?.paused) return false;
     const record = this.#record(id);
@@ -646,6 +703,8 @@ export class CellOrchestrator {
     error?: string,
     frozen = false,
   ): Promise<boolean> {
+    if (this.deps.permanentFence?.(record.id))
+      throw new CellControlConflict("the computer is permanently fenced");
     const d = record.docker;
     const starting: Live = {
       state: "starting",
@@ -803,17 +862,27 @@ export class CellOrchestrator {
   // keeps dying is marked failed once the backoff list is exhausted.
   async #watch(record: CellRecord): Promise<void> {
     const live = this.#live.get(record.id);
-    if (live?.state !== "ready") return;
+    if (live?.state !== "ready" || this.#held(record.id) || !this.#current(record.id, live)) return;
+    if (this.#watchOwners.get(record.id) === live) return;
+    this.#watchOwners.set(record.id, live);
+    try {
+      await this.#watchLoop(record, live);
+    } finally {
+      if (this.#watchOwners.get(record.id) === live) this.#watchOwners.delete(record.id);
+    }
+  }
+
+  async #watchLoop(record: CellRecord, live: Live): Promise<void> {
     for (;;) {
       await this.#sleep(this.#watchEveryMs);
-      if (!this.#current(record.id, live)) return;
+      if (this.#held(record.id) || !this.#current(record.id, live)) return;
       const exited = await this.#exitedContainer(record);
       if (!this.#current(record.id, live)) return;
       if (exited === undefined) continue;
       // Claim the transition in the same queue as Stop/Resume. A watch that
       // inspected before a freeze must not restart a now-frozen desktop.
       const restarting = await this.#queued(record.id, async () => {
-        if (!this.#current(record.id, live)) return undefined;
+        if (this.#held(record.id) || !this.#current(record.id, live)) return undefined;
         if (exited.gone || (live.paused && exited.role === "desktop")) {
           this.#set(record.id, {
             ...thawed(live),
@@ -1063,6 +1132,120 @@ export class CellOrchestrator {
     }
   }
 
+  async containFenced(): Promise<void> {
+    for (const record of this.#store.inventory().records) {
+      if (this.deps.permanentFence?.(record.id))
+        await this.#queued(record.id, () => this.#containFenced(record));
+    }
+  }
+  async #containFenced(record: CellRecord): Promise<void> {
+    this.#set(record.id, { state: "stopping", restarts: 0, stream: NO_STREAM });
+    let confirmed = !!this.#keyd && (await this.#closeInKeyd(record.id));
+    try {
+      // Inspect every label and captured identity before touching any executable object.
+      const objects = await inspectOwnedCell(
+        this.#docker,
+        record.id,
+        record.docker,
+        record.ownership,
+      );
+      if (confirmed && objects.every((object) => object.kind === "volumes"))
+        this.#retiredPortOwners.add(record.id);
+      for (const object of objects.filter((o) => o.kind === "containers" && o.running)) {
+        try {
+          await this.#docker.request({
+            method: "POST",
+            path: objectPath("containers", object.id, "stop"),
+            query: { t: "2" },
+          });
+          const after = await this.#docker.request<ContainerInspect>({
+            method: "GET",
+            path: objectPath("containers", object.id, "json"),
+          });
+          if (after.State.Running) confirmed = false;
+        } catch (error) {
+          if (!isStatus(error, 404)) confirmed = false;
+        }
+      }
+    } catch {
+      confirmed = false;
+    }
+    this.#set(record.id, {
+      state: "failed",
+      restarts: 0,
+      stream: NO_STREAM,
+      error: confirmed
+        ? "This computer is fenced; use explicit replacement after retirement."
+        : "This fenced computer needs cleanup attention before replacement.",
+    });
+  }
+  #held(id: string): boolean {
+    return !!this.deps.permanentFence?.(id) || this.#candidateHolds.has(id);
+  }
+  holdReplacement(id: string): void {
+    this.#candidateHolds.add(id);
+    this.#emit(id);
+  }
+  publishReplacement(id: string): void {
+    this.#candidateHolds.delete(id);
+    const record = this.#record(id);
+    if (record) this.#detach(id, this.#watch(record));
+    this.#emit(id);
+  }
+  async inspectReplacement(id: string): Promise<"ready" | "owned" | "absent" | "foreign"> {
+    const record = this.#record(id);
+    try {
+      const objects = await inspectOwnedCell(
+        this.#docker,
+        id,
+        record?.docker ?? cellNames(id, this.#namePrefix),
+        record?.ownership,
+      );
+      if (!objects.length) return "absent";
+      if (
+        record &&
+        objects.length === 5 &&
+        objects.filter((o) => o.kind === "containers").every((o) => o.running && !o.paused)
+      ) {
+        const ports = await this.#readPorts(record.docker.gate),
+          endpoints = endpointsFor(record, ports);
+        const health = await this.#probeDesktopd(endpoints.desktopd);
+        if (
+          health?.ok &&
+          this.#keyd &&
+          health.selftest &&
+          selfTestPassed(health.selftest) &&
+          (await this.#keyd.isWired(record)) &&
+          (await this.#probeStream(endpoints.stream))
+        ) {
+          // Public input remains held until the durable owner republishes Ready.
+          this.#set(id, { state: "ready", restarts: 0, ports, stream: NO_STREAM });
+          return "ready";
+        }
+      }
+      return "owned";
+    } catch {
+      return "foreign";
+    }
+  }
+  retireReplacement(id: string, purgeHome = false): Promise<{ absent: boolean; revoked: boolean }> {
+    return this.#queued(id, async () => {
+      const record = this.#record(id),
+        names = record?.docker ?? cellNames(id, this.#namePrefix);
+      this.#set(id, { state: "stopping", restarts: 0, stream: NO_STREAM });
+      const revoked = !!this.#keyd && (await this.#closeInKeyd(id));
+      if (!revoked) return { absent: false, revoked: false };
+      await retireExactCell(this.#docker, id, names, record?.ownership, purgeHome);
+      this.#retiredPortOwners.add(id);
+      this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });
+      if (purgeHome && record) {
+        this.#store.remove(id);
+        this.#records.delete(id);
+        this.#live.delete(id);
+      }
+      return { absent: true, revoked };
+    });
+  }
   #summary(record: CellRecord): CellSummary {
     const live = this.#live.get(record.id) ?? {
       state: "stopped" as const,
@@ -1071,6 +1254,15 @@ export class CellOrchestrator {
     };
     return {
       id: record.id,
+      ...(this.deps.permanentFence?.(record.id)
+        ? {
+            fenced:
+              typeof this.deps.permanentFence(record.id) === "object"
+                ? (this.deps.permanentFence(record.id) as { revision: number })
+                : { revision: 1 },
+          }
+        : {}),
+      ...(this.#candidateHolds.has(record.id) ? { replacementPending: true as const } : {}),
       state: live.state,
       scale: record.scale,
       createdAt: record.createdAt,
