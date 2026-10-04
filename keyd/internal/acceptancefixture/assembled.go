@@ -15,16 +15,18 @@ import (
 // This deterministic script is compiled only into the acceptance binary. It never
 // changes keyd routing, DNS restrictions, authentication, pricing, or lease checks.
 type assembledScenario struct {
-	mu    sync.Mutex
-	next  int
-	log   *os.File
-	shell bool
+	mu       sync.Mutex
+	next     int
+	log      *os.File
+	shell    bool
+	safety   bool
+	recovery bool
 }
 
 func newAssembledScenario(path string) *assembledScenario {
 	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	must(err)
-	return &assembledScenario{log: f, shell: os.Getenv("LOCALDOT_ASSEMBLED_PENDING") == "shell"}
+	return &assembledScenario{log: f, shell: os.Getenv("LOCALDOT_ASSEMBLED_PENDING") == "shell", safety: os.Getenv("LOCALDOT_ASSEMBLED_SCENARIO") == "safety", recovery: os.Getenv("LOCALDOT_ASSEMBLED_SCENARIO") == "recovery"}
 }
 func (s *assembledScenario) Close() { _ = s.log.Close() }
 func (s *assembledScenario) respond(w http.ResponseWriter, r *http.Request, request map[string]any, body []byte) {
@@ -36,14 +38,33 @@ func (s *assembledScenario) respond(w http.ResponseWriter, r *http.Request, requ
 		args any
 	}{
 		{"update_plan", map[string]any{"items": []any{map[string]any{"text": "Check the local synthetic task", "status": "doing"}, map[string]any{"text": "Export the sample table", "status": "todo"}}}},
-		{"files", map[string]any{"op": "write", "path": "~/Downloads/fixture-login.html", "content": "<!doctype html><meta charset=utf-8><title>Local synthetic sign-in</title><style>body{font:28px sans-serif;padding:80px;background:#f2f4f8}input{font:28px sans-serif}h1{font-size:36px}</style><h1>Local synthetic sign-in</h1><p>This file does not connect to any account.</p><label>Fake password <input type=password autofocus autocomplete=off></label>"}},
-		{"shell", map[string]any{"command": "/usr/local/bin/localdot-chromium \"file://$HOME/Downloads/fixture-login.html\" >/tmp/task14-browser.log 2>&1 &", "timeout_sec": 10}},
+		{"files", map[string]any{"op": "write", "path": "~/Downloads/fixture-demo.html", "content": "<!doctype html><meta charset=utf-8><title>Local synthetic sign-in</title><style>body{font:28px sans-serif;padding:80px;background:#f2f4f8}input{font:28px sans-serif}h1{font-size:36px}</style><h1>Local synthetic sign-in</h1><p>This file does not connect to any account.</p><label>Fake password <input type=password autofocus autocomplete=off></label>"}},
+		{"shell", map[string]any{"command": "/usr/local/bin/localdot-chromium \"file://$HOME/Downloads/fixture-demo.html\" >/tmp/task14-browser.log 2>&1 &", "timeout_sec": 10}},
 		{"computer", map[string]any{"action": "screenshot"}},
 		{"ask_user", map[string]any{"question": "Which synthetic table should I export?", "options": []string{"The sample table"}, "allow_text": true}},
 		{"request_takeover", map[string]any{"reason": "login", "note": "Type only the fake acceptance password in the local synthetic sign-in field, then return control."}},
 		{"shell", map[string]any{"command": "printf 'task14 pending tool %0128d\n' 0; sleep 0.3; printf 'task14 waiting %0128d\n' 0; sleep 30; printf 'late effect' > \"$HOME/Downloads/late-effect.txt\"", "timeout_sec": 60}},
 		{"files", map[string]any{"op": "write", "path": "~/Downloads/assembled.csv", "content": "item,quantity,unit_price,total\nAlpha,3,4.50,13.50\nBeta,2,6.25,12.50\nTOTAL,,,26.00\n"}},
 		{"done", map[string]any{"summary": "The synthetic table is ready. This verifies local integration only.", "files": []string{"~/Downloads/assembled.csv"}}},
+	}
+	if s.safety {
+		calls[1].args = map[string]any{"op": "write", "path": "~/Downloads/fixture-demo.html", "content": "<!doctype html><meta charset=utf-8><title>Local safety test</title><style>body{font:28px sans-serif;padding:80px;background:#f2f4f8}input,button{font:28px sans-serif}h1{font-size:36px}</style><h1>Local safety test</h1><p>Only synthetic data. No accounts or network submissions.</p><button>Send sample</button> <button>Buy sample</button><p><label>Fake password <input type=password autofocus autocomplete=off></label></p>"}
+		calls[2].args = map[string]any{"command": "/usr/local/bin/localdot-chromium \"file://$HOME/Downloads/fixture-demo.html\" >/tmp/task14-browser.log 2>&1 &", "timeout_sec": 10}
+		calls[6].args = map[string]any{"command": "printf 'task14 pending tool %0128d\\n' 0; sleep 0.3; printf 'task14 waiting %0128d\\n' 0; sleep 30; printf 'atomic output complete\\n'; printf 'late effect' > \"$HOME/Downloads/late-effect.txt\"; xdotool key Tab", "timeout_sec": 60}
+		// A high-risk simulated Send uses an actual finite local file effect.
+		// Native repeat stays in one unchanged focus identity and must stop before dispatch three.
+		calls = append(calls[:2], append([]struct {
+			name string
+			args any
+		}{
+			{"shell", map[string]any{"command": "printf 'Send sample\\n' >> \"$HOME/Downloads/safety-send-count.txt\"", "timeout_sec": 10}},
+		}, calls[2:]...)...)
+		calls = append(calls[:8], append([]struct {
+			name string
+			args any
+		}{
+			{"computer", map[string]any{"action": "key", "text": "Down", "repeat": 3}},
+		}, calls[8:]...)...)
 	}
 	if !s.shell {
 		calls[6].name = "computer"
@@ -56,7 +77,17 @@ func (s *assembledScenario) respond(w http.ResponseWriter, r *http.Request, requ
 		name string
 		args any
 	}{"done", map[string]any{"summary": "Follow-up updated Alpha quantity to 4; total 30.50.", "files": []string{"~/Downloads/assembled.csv"}}})
-	if stage >= 9 && !strings.Contains(string(body), "task14 follow-up") {
+	if s.recovery {
+		calls = []struct {
+			name string
+			args any
+		}{
+			{"shell", map[string]any{"command": "mkdir -p \"$HOME/Downloads\"; printf 'Send sample\\n' >> \"$HOME/Downloads/safety-send-count.txt\"; printf 'task14 pending tool %0128d\\n' 0; sleep 0.3; printf 'task14 waiting %0128d\\n' 0; sleep 30; printf 'late effect' > \"$HOME/Downloads/late-effect.txt\"", "timeout_sec": 60}},
+			{"files", map[string]any{"op": "write", "path": "~/Downloads/queued-after-stop.txt", "content": "This must not run after Stop."}},
+			{"done", map[string]any{"summary": "Synthetic recovery script completed."}},
+		}
+	}
+	if stage >= 9 && !s.safety && !s.recovery && !strings.Contains(string(body), "task14 follow-up") {
 		http.Error(w, "explicit synthetic follow-up marker required", 409)
 		return
 	}

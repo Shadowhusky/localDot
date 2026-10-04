@@ -2,13 +2,14 @@ import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { assembledProcess } from "./fixtures/assembled-process.ts";
+import { approveCurrent, fixtureRequest } from "./fixtures/safety-flow.ts";
 
 const CANARY = "task15-local-canary-never-real";
 for (const pending of ["wait", "shell"] as const)
   test(`sealed key, live desktop and ${pending} Stop with fenced recovery`, async ({
     page,
   }, info) => {
-    const f = await assembledProcess(info, { pending });
+    const f = await assembledProcess(info, { pending, failRetirement: pending === "shell" });
     const errors: string[] = [],
       external: string[] = [],
       csp: { surface: string; directive: string; blockedURI: string }[] = [],
@@ -64,7 +65,7 @@ for (const pending of ["wait", "shell"] as const)
       );
       const phone = (page.viewportSize()?.width ?? 1440) < 1100;
       const showPane = async (name: "Computer" | "Conversation" | "Activity") => {
-        const tab = page.getByRole("tab", { name, exact: true });
+        const tab = page.getByRole("tab", { name: new RegExp(`^${name}(?:,|$)`) });
         if (await tab.isVisible()) await tab.click();
       };
       const ticketHash = (value: string) => createHash("sha256").update(value).digest("hex");
@@ -138,6 +139,8 @@ for (const pending of ["wait", "shell"] as const)
       expect(started.status()).toBe(202);
       owner = (await started.json()).sessionId;
       expect(owner).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+      await approveCurrent(page, f); // current synthetic HTML write
+      await approveCurrent(page, f); // current local browser launch
       await expect(
         page.getByText("Which synthetic table should I export?", { exact: true }).first(),
       ).toBeVisible({ timeout: 25_000 });
@@ -183,6 +186,7 @@ for (const pending of ["wait", "shell"] as const)
         .getByLabel("Optional note for dot", { exact: true })
         .fill("The fake local sign-in interaction is complete.");
       await manual.getByRole("button", { name: "Return control to dot", exact: true }).click();
+      if (pending === "shell") await approveCurrent(page, f);
       await expect
         .poll(
           async () => {
@@ -233,6 +237,16 @@ for (const pending of ["wait", "shell"] as const)
           info.outputPath("stop-uncertainty-proof.json"),
           JSON.stringify({ intercepted, uncertain, optimisticStop: false }, null, 2),
         );
+        const queued = await fixtureRequest(page, f)(
+          `/api/agent/sessions/${owner}/messages`,
+          "POST",
+          {
+            kind: "followup",
+            text: "task14 old queued action must never execute after Stop",
+          },
+        );
+        expect(queued.status()).toBe(202);
+        expect((await f.state(owner))[0]?.provider).toHaveLength(7);
         await page.unroute(stopPath);
         await expect(stopButton).toBeEnabled();
       }
@@ -247,6 +261,7 @@ for (const pending of ["wait", "shell"] as const)
         )
         .toBe(true);
       const stopped = (await f.state(owner))[0];
+      expect(stopped?.provider).toHaveLength(7);
       expect(stopped?.cell.state).toBe("ready");
       expect(stopped?.cell.paused).toBe(true);
       await expect(page.locator('iframe[title="Desktop stream client"]')).toHaveCount(0);
@@ -254,26 +269,120 @@ for (const pending of ["wait", "shell"] as const)
       await page
         .getByRole("button", { name: phone ? "Close keys" : "Close settings", exact: true })
         .click();
-      await showPane("Computer");
-      await expect(
-        page.getByRole("button", { name: "Resume computer", exact: true }),
-      ).toBeVisible();
-      await page.screenshot({
-        path: info.outputPath("assembled-paused-desktop.png"),
-        fullPage: true,
-      });
-      await page.getByRole("button", { name: "Resume computer", exact: true }).click();
-      await expect
-        .poll(
-          async () => {
-            const s = (await f.state(owner))[0];
-            return !!s && !s.cell.paused && s.cell.state === "ready";
-          },
-          { timeout: 30_000 },
-        )
-        .toBe(true);
+      const retiredOwner = owner;
+      const request = fixtureRequest(page, f);
+      expect(
+        stopped?.events.some((e) => e.type === "session.end" && e.data.reason === "stopped"),
+      ).toBe(true);
+      let resumed = stopped;
+      let recoveryProof: unknown = null;
+      if (pending === "shell") {
+        await showPane("Conversation");
+        const recovery = page.getByRole("region", { name: "Computer recovery", exact: true });
+        await expect(recovery).toBeVisible({ timeout: 30000 });
+        const oldId = stopped?.cell.id;
+        if (!oldId || !stopped?.cell.fenced)
+          throw new Error("The pending shell must retain its real containment fence.");
+        expect((await request(`/api/cells/${oldId}/start`, "POST")).status()).toBe(409);
+        expect(
+          (
+            await request(`/api/cells/${oldId}/agent`, "POST", {
+              task: "task14 old fenced owner stays refused",
+            })
+          ).status(),
+        ).toBe(409);
+        const replacementPosts: { requestId: string; oldRevision: number; home: string }[] = [];
+        page.on("request", (r) => {
+          if (
+            r.method() === "POST" &&
+            new URL(r.url()).pathname === `/api/cells/${oldId}/replacement`
+          )
+            replacementPosts.push(r.postDataJSON());
+        });
+        const replace = recovery.getByRole("button", { name: "Replace computer", exact: true });
+        await replace.click();
+        await expect(recovery).toContainText("Replacement could not be verified.", {
+          timeout: 30000,
+        });
+        await expect(replace).toBeEnabled({ timeout: 15000 });
+        expect(replacementPosts).toHaveLength(1);
+        const blockedResponse = await request(
+          `/api/cells/${oldId}/replacement/${replacementPosts[0]?.requestId}`,
+        );
+        expect(blockedResponse.status()).toBe(200);
+        const blocked = await blockedResponse.json();
+        expect(blocked).toMatchObject({ phase: "blocked", reason: "old_retirement" });
+        expect(blocked.newCellId).toBeUndefined();
+        expect(await f.state()).toHaveLength(1);
+        expect((await page.request.get(origin + oldTicketPath)).status()).toBe(403);
+        // Let the second explicit POST reach the real server, then drop only its response.
+        // Read reconciliation must select its Ready computer without a third creation POST.
+        let lostReplies = 0;
+        await page.route(`${origin}/api/cells/${oldId}/replacement`, async (route) => {
+          const actual = await route.fetch();
+          expect(actual.status()).toBe(200);
+          lostReplies++;
+          await route.abort("failed");
+        });
+        await replace.click();
+        await expect(page.getByRole("textbox", { name: "New task", exact: true })).toBeEnabled({
+          timeout: 90000,
+        });
+        await page.unroute(`${origin}/api/cells/${oldId}/replacement`);
+        expect(lostReplies).toBe(1);
+        expect(replacementPosts).toHaveLength(2);
+        expect(replacementPosts[1]?.requestId).not.toBe(replacementPosts[0]?.requestId);
+        const readyResponse = await request(
+          `/api/cells/${oldId}/replacement/${replacementPosts[1]?.requestId}`,
+        );
+        expect(readyResponse.status()).toBe(200);
+        const ready = await readyResponse.json();
+        expect(ready.phase).toBe("ready");
+        expect(ready.newCellId).not.toBe(oldId);
+        const rows = await f.state();
+        expect(rows).toHaveLength(2);
+        resumed = rows.find((r) => r.cell.id === ready.newCellId);
+        expect(resumed?.homeVolume).not.toBe(stopped?.homeVolume);
+        expect(resumed?.cell).toMatchObject({ state: "ready" });
+        expect(resumed?.cell.fenced).toBeUndefined();
+        expect(resumed?.cell.replacementPending).toBeUndefined();
+        expect(resumed?.sessionId).toBeNull();
+        expect((await f.effects()).find((e) => e.cellId === ready.newCellId)).toMatchObject({
+          sendCount: 0,
+          atomicWritten: false,
+        });
+        recoveryProof = {
+          blocked,
+          ready,
+          replacementPosts,
+          lostReplies,
+          oldOwnerRefused: true,
+          freshHome: true,
+          noAutomaticTask: true,
+        };
+      } else {
+        await showPane("Computer");
+        await expect(
+          page.getByRole("button", { name: "Resume computer", exact: true }),
+        ).toBeVisible();
+        await page.screenshot({
+          path: info.outputPath("assembled-paused-desktop.png"),
+          fullPage: true,
+        });
+        await page.getByRole("button", { name: "Resume computer", exact: true }).click();
+        await expect
+          .poll(
+            async () => {
+              const current = (await f.state(retiredOwner))[0];
+              return !!current && !current.cell.paused && current.cell.state === "ready";
+            },
+            { timeout: 30000 },
+          )
+          .toBe(true);
+        resumed = (await f.state(retiredOwner))[0];
+      }
       checkpoint("task-resume");
-      const resumed = (await f.state(owner))[0];
+      await showPane("Computer");
       await expect(page.locator('iframe[title="Desktop stream client"]')).toHaveCount(1);
       const newTicketSrc = await page
         .locator('iframe[title="Desktop stream client"]')
@@ -283,70 +392,27 @@ for (const pending of ["wait", "shell"] as const)
       await expect(page.getByLabel("The virtual computer", { exact: true })).toHaveAttribute(
         "data-frames",
         /^[1-9][0-9]*$/,
-        { timeout: 30_000 },
+        { timeout: 30000 },
       );
       await showPane("Conversation");
-      // Stop retires the task. Resuming the desktop must not re-authorize its old
-      // generation. Complete the export only after an explicit new task through UI.
       await expect(page.getByRole("region", { name: "Task recovery", exact: true })).toHaveCount(0);
       await expect(page.getByRole("textbox", { name: "New task", exact: true })).toBeEnabled();
       await page
         .getByRole("textbox", { name: "New task", exact: true })
         .fill("task14 explicitly continue after confirmed Stop: export the sample table.");
       const nextReply = page.waitForResponse(
-        (response) =>
-          response.request().method() === "POST" &&
-          /^\/api\/cells\/[^/]+\/agent$/.test(new URL(response.url()).pathname),
+        (r) =>
+          r.request().method() === "POST" &&
+          /^\/api\/cells\/[^/]+\/agent$/.test(new URL(r.url()).pathname),
       );
       await page.getByRole("button", { name: "Start task", exact: true }).click();
       const next = await nextReply;
-      if (pending === "shell") {
-        expect(next.status()).toBe(409);
-        const cellId = (await f.state(owner))[0]?.cell.id;
-        const refusalReply = await page.request.post(`${origin}/api/cells/${cellId}/agent`, {
-          headers: {
-            authorization: `Bearer ${new URL(f.url).hash.slice("#token=".length)}`,
-            origin,
-          },
-          data: { task: "task14 explicit blocked-cell negative probe" },
-        });
-        expect(refusalReply.status()).toBe(409);
-        const refusal = await refusalReply.text();
-        expect(refusal).toContain("task or computer is not ready for this request");
-        await expect(page.getByText(/The daemon refused this message/)).toBeVisible();
-        const fenced = (await f.state(owner))[0];
-        expect(fenced?.provider).toHaveLength(7);
-        expect(
-          fenced?.events.some((e) => e.type === "session.end" && e.data.reason === "stopped"),
-        ).toBe(true);
-        writeFileSync(
-          info.outputPath("shell-containment-proof.json"),
-          JSON.stringify(
-            {
-              syntheticModel: true,
-              expectedRefusal: refusal,
-              beforeStop,
-              stopped,
-              resumed,
-              fenced,
-              futureRecovery:
-                "An explicitly replaced computer is required before further authority; no old shell is automatically re-authorized.",
-            },
-            null,
-            2,
-          ),
-        );
-        complete = true;
-        return;
-      }
       expect(next.status(), await next.text()).toBe(202);
       const nextOwner = (await next.json()).sessionId;
-      expect(nextOwner).not.toBe(owner);
-      const retired = (await f.state(owner))[0];
-      expect(
-        retired?.events.some((e) => e.type === "session.end" && e.data.reason === "stopped"),
-      ).toBe(true);
+      expect(nextOwner).not.toBe(retiredOwner);
       owner = nextOwner;
+      await approveCurrent(page, f); // only the new task's current CSV write
+      await approveCurrent(page, f); // explicitly collect the new task's current output file
       await showPane("Activity");
       await expect(
         page.getByRole("button", { name: "Download assembled.csv", exact: true }),
@@ -397,6 +463,8 @@ for (const pending of ["wait", "shell"] as const)
         .getByRole("textbox", { name: "Message", exact: true })
         .fill("task14 follow-up: change Alpha quantity to 4 and export the updated table.");
       await page.getByRole("button", { name: "Send follow-up", exact: true }).click();
+      await approveCurrent(page, f); // explicit follow-up CSV update
+      await approveCurrent(page, f); // explicitly collect the updated output file
       await showPane("Activity");
       await expect(
         page.getByText("Follow-up updated Alpha quantity to 4; total 30.50.", { exact: true }),
@@ -460,6 +528,7 @@ for (const pending of ["wait", "shell"] as const)
             beforeStop,
             stopped,
             resumed,
+            recoveryProof,
             streamTickets: {
               beforeSHA256: ticketHash(oldTicketSrc as string),
               afterSHA256: ticketHash(newTicketSrc as string),

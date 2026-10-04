@@ -2,16 +2,31 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { TestInfo } from "@playwright/test";
+import type { ApprovalCard, PauseSnapshot } from "@localdot/protocol";
+
+interface AssemblyArtifacts {
+  outputPath(...segments: string[]): string;
+}
 
 export interface AssemblyState {
-  cell: { id: string; state: string; paused?: boolean; stream: { connection: string } };
+  cell: {
+    id: string;
+    state: string;
+    paused?: boolean;
+    fenced?: { revision: number };
+    replacementPending?: true;
+    stream: { connection: string };
+  };
   sessionId: string | null;
   status: string | null;
   generation: number | null;
+  brainCellId: string | null;
   proxyHash: string | null;
   desktopTokenHash: string | null;
   streamTokenHash: string | null;
+  homeVolume: string | null;
+  pause: PauseSnapshot | null;
+  approval: ApprovalCard | null;
   events: { type: string; data: Record<string, unknown> }[];
   provider: {
     stage: number;
@@ -22,8 +37,12 @@ export interface AssemblyState {
   }[];
 }
 export async function assembledProcess(
-  info: TestInfo,
-  options: { pending: "wait" | "shell" } = { pending: "wait" },
+  info: AssemblyArtifacts,
+  options: {
+    pending: "wait" | "shell";
+    scenario?: "safety" | "recovery";
+    failRetirement?: boolean;
+  } = { pending: "wait" },
 ) {
   if (process.env.LOCALDOT_ASSEMBLED_TESTS !== "1")
     throw new Error("Explicit Docker acceptance opt-in required");
@@ -46,6 +65,8 @@ export async function assembledProcess(
     LANG: "en_US.UTF-8",
     LOCALDOT_ASSEMBLED_TESTS: "1",
     LOCALDOT_ASSEMBLED_PENDING: options.pending,
+    ...(options.scenario ? { LOCALDOT_ASSEMBLED_SCENARIO: options.scenario } : {}),
+    ...(options.failRetirement ? { LOCALDOT_ASSEMBLED_FAIL_RETIREMENT: "1" } : {}),
     LOCALDOT_ACCEPTANCE_HOME: home,
     LOCALDOT_ACCEPTANCE_ARTIFACTS: artifacts,
     LOCALDOT_ACCEPTANCE_UI: fileURLToPath(new URL("../../dist", import.meta.url)),
@@ -57,6 +78,8 @@ export async function assembledProcess(
     "LOCALDOT_KEYD_BIN",
     "LOCALDOT_ACCEPTANCE_PORT",
     "LOCALDOT_ACCEPTANCE_TOOL_PORT",
+    "DOCKER_HOST",
+    "DOCKER_CONFIG",
   ])
     if (process.env[name]) env[name] = process.env[name];
   const child = spawn(process.execPath, ["--experimental-transform-types", worker], {
@@ -230,6 +253,10 @@ export async function assembledProcess(
       artifacts,
       state: (sessionId?: string) => rpc("state", 5000, sessionId) as Promise<AssemblyState[]>,
       close,
+      effects: () =>
+        rpc("effects", 15000) as Promise<
+          { cellId: string; sendCount: number; atomicWritten: boolean }[]
+        >,
       readProvider: () => readFileSync(join(home, "keyd/provider-requests.jsonl"), "utf8"),
     };
   } catch (error) {

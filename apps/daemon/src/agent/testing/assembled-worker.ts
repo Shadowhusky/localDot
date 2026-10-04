@@ -1,10 +1,12 @@
 // Opt-in local acceptance process: production components, isolated home and Docker
 // identities. Only the upstream model is synthetic. No real account is initialized.
+import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import type { Server } from "node:http";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import { promisify } from "node:util";
 import { serve } from "@hono/node-server";
 import { homeLabel } from "../../agent/brain-cell.ts";
 import { createAgent } from "../../agent/wiring.ts";
@@ -33,6 +35,8 @@ import { KeydEventRouter } from "../../keyd/event-router.ts";
 import { KeydMonitor } from "../../keyd/monitor.ts";
 import { startKeyd } from "../../keyd/testing/keyd-process.ts";
 import { attachUpgradeRouter } from "../../upgrade-router.ts";
+import { ComputerFences } from "../safety/fences.ts";
+import { createReplacementController } from "../safety/replacement-controller.ts";
 
 const required = (name: string): string => {
   const value = process.env[name];
@@ -114,6 +118,7 @@ async function main() {
   const keyd = new KeydClient(keydProcess.socketPath),
     keydWiring = new CellKeydWiring({ keyd, docker });
   const range = { from: 4791, to: 4794 };
+  const fences = new ComputerFences(home);
   let agent: ReturnType<typeof createAgent> | undefined;
   const cells = new CellOrchestrator({
     docker,
@@ -122,26 +127,36 @@ async function main() {
     images: { desktop: desktopImage, gate: gateImage },
     namePrefix: `localdot-test-ui14-${process.pid}-`,
     externalKeydPorts: () => agent?.reservedPorts() ?? [],
+    permanentFence: (id) =>
+      fences.record(id) ? { revision: fences.record(id)?.revision ?? 1 } : fences.isFenced(id),
     probeDesktopd,
     probeStream,
     watchEveryMs: 1000,
   });
+  const ownedIds = new Set<string>();
+  const own = cells.subscribe((cell) => ownedIds.add(cell.id));
+  cleanup.push({ phase: 60, run: () => own() });
   cleanup.push(
     {
       phase: 40,
       run: async () => {
         const failures: unknown[] = [];
-        for (const cell of cells.list())
+        try {
+          for (const cell of cells.list()) ownedIds.add(cell.id);
+        } catch (error) {
+          failures.push(error);
+        }
+        for (const id of ownedIds)
           try {
-            const record = cells.record(cell.id);
+            const record = cells.record(id);
             if (!record) throw new Error("Owned cell record disappeared during cleanup");
             removed.push({
-              cellId: cell.id,
+              cellId: id,
               containers: [record.docker.desktop, record.docker.gate],
               networks: [record.docker.internalNetwork, record.docker.egressNetwork],
               volume: record.docker.homeVolume,
             });
-            await cells.remove(cell.id, { purgeHome: true });
+            await cells.remove(id, { purgeHome: true });
           } catch (error) {
             failures.push(error);
           }
@@ -175,6 +190,7 @@ async function main() {
   cleanup.push({ phase: 60, run: () => unsubscribe() });
   agent = createAgent({
     home,
+    fences,
     installToken: token,
     eventLog: log,
     live,
@@ -226,9 +242,44 @@ async function main() {
   cleanup.push({ phase: 10, run: () => events.stop() });
   monitor.start();
   events.start();
-  await cells.reconcile();
-  checkStartup();
+  let retirementFaultUsed = false;
+  const replacementCells = {
+    record: (id: string) => cells.record(id),
+    get: (id: string) => cells.get(id),
+    endpoints: (id: string) => cells.endpoints(id),
+    create: (input: Parameters<CellOrchestrator["create"]>[0]) => cells.create(input),
+    holdReplacement: (id: string) => cells.holdReplacement(id),
+    publishReplacement: (id: string) => cells.publishReplacement(id),
+    inspectReplacement: (id: string) => cells.inspectReplacement(id),
+    updateStream: (id: string, value: Parameters<CellOrchestrator["updateStream"]>[1]) =>
+      cells.updateStream(id, value),
+    retireReplacement: async (id: string, purgeHome?: boolean) => {
+      if (
+        process.env.LOCALDOT_ASSEMBLED_FAIL_RETIREMENT === "1" &&
+        !retirementFaultUsed &&
+        fences.record(id)
+      ) {
+        retirementFaultUsed = true;
+        return { absent: false, revoked: false };
+      }
+      return cells.retireReplacement(id, purgeHome);
+    },
+  };
+  const replacement = createReplacementController({
+    home,
+    fences,
+    runner: agent.runner,
+    cells: replacementCells,
+    tickets,
+    readyTimeoutMs: 60000,
+  });
+  await cells.containFenced();
   await agent.start();
+  try {
+    await replacement.owner.start();
+  } finally {
+    await cells.reconcile();
+  }
   checkStartup();
   for (let i = 0; !monitor.health.online && i < 50; i++) await sleep(100);
   checkStartup();
@@ -238,7 +289,7 @@ async function main() {
     port,
     eventLog: log,
     agent: agent.routes,
-    cells: { cells, tickets },
+    cells: { cells, tickets, replacement },
     desktop,
     ui: { dir: ui },
     gateway: { registry, clock, eventLog: log, gateway, frames, live, killSwitch },
@@ -336,14 +387,40 @@ async function main() {
             sessionId: id ?? null,
             status: s?.status ?? null,
             generation: s?.generation?.id ?? null,
+            brainCellId: s?.brainCellId ?? null,
             proxyHash: hash(s?.boot?.proxy.token),
             desktopTokenHash: hash(cells.record(c.id)?.tokens.desktopd),
             streamTokenHash: hash(cells.record(c.id)?.tokens.stream),
+            homeVolume: cells.record(c.id)?.docker.homeVolume ?? null,
+            pause: s?.safetyPause ?? null,
+            approval: s?.pendingApproval ?? null,
             events: id ? log.read(id) : [],
             provider: records(),
           };
         });
         process.send?.({ id: message.id, ok: true, value: sessions });
+      } else if (message.kind === "effects") {
+        const observed = [];
+        for (const cell of cells.list()) {
+          const record = cells.record(cell.id);
+          if (!record || cell.state !== "ready" || cell.paused || cell.fenced) continue;
+          const { stdout } = await promisify(execFile)(
+            "docker",
+            [
+              "exec",
+              record.docker.desktop,
+              "sh",
+              "-c",
+              'if [ -f "$HOME/Downloads/safety-send-count.txt" ]; then wc -l < "$HOME/Downloads/safety-send-count.txt"; else printf "0\\n"; fi; if [ -f "$HOME/Downloads/late-effect.txt" ]; then printf "1\\n"; else printf "0\\n"; fi',
+            ],
+            { timeout: 10000, maxBuffer: 4096 },
+          );
+          const lines = stdout.trim().split(/\s+/).map(Number);
+          if (lines.length !== 2 || lines.some((n) => !Number.isSafeInteger(n) || n < 0))
+            throw new Error("Owned effect observation unavailable");
+          observed.push({ cellId: cell.id, sendCount: lines[0], atomicWritten: lines[1] === 1 });
+        }
+        process.send?.({ id: message.id, ok: true, value: observed });
       } else if (message.kind === "close") {
         await close();
         process.send?.({ id: message.id, ok: true, value: { clean: true } });

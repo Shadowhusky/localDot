@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "cebcbb5ee5eb63bd33e80b71dcbee3631b725f3d253e74196c96dc71d67eea55",
+  "inputSha256": "abffb68350415dea29e7a53c3187db61844e65c29da023cc5695b430369af033",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -71,6 +71,7 @@
     "apps/daemon/src/agent/runner-review.test.ts": "496b15050684e8c9e82c5d2061b0322c44a48375f363fc54554804fdc4eeefbf",
     "apps/daemon/src/agent/runner.test.ts": "0bb98f4dc69bce765323619b56e5454c7e26d58a10e5dbbf8b388c3f5a83a9b0",
     "apps/daemon/src/agent/runner.ts": "2e75c81be7f6a7dc01d8c1527772b2f31e4615792b9fd58d5574017d45514626",
+    "apps/daemon/src/agent/safety/acceptance.docker.test.ts": "d86ac6c61604bf677b426d04e9abfb17790a2021649bcd02771a4675fc26bfe7",
     "apps/daemon/src/agent/safety/approvals.test.ts": "1246aa5c70ffa8c4bcbadb81f95e8c211274247e2ae13f55c193fe6fdda31dcb",
     "apps/daemon/src/agent/safety/approvals.ts": "e02771a488384a00e38b4c14adec3a7f58dac77dddc6168b4e5918a890c67f71",
     "apps/daemon/src/agent/safety/authorize.ts": "04a47d8ec0ed216da20a36ea708354d388a91c539e9e634a1f65ed355fff4406",
@@ -118,7 +119,7 @@
     "apps/daemon/src/agent/task8-review-regressions.test.ts": "cae2b07e79a509a5e11002ba833196f334495aff8a33cce8cd94de3b8cba83a8",
     "apps/daemon/src/agent/terminal-memory-review.test.ts": "cf13b867d7be5f34ce1eaeee842ed60dd013732d69629847f8aba47b2e6e761a",
     "apps/daemon/src/agent/testing/acceptance-cleanup.ts": "a7c54fa29c7954cb958dcd9c5905c40b4361e32a4b2b25010da475da907b8210",
-    "apps/daemon/src/agent/testing/assembled-worker.ts": "cd8910f3811f664974a735dc5a321f4da2df7e1c258acd553bd0d565ee53c9dc",
+    "apps/daemon/src/agent/testing/assembled-worker.ts": "331803d47c32f1a44446df0e5b8a2bea3521398e6d829714e3ac3fbef56cce84",
     "apps/daemon/src/agent/testing/brain-flow.ts": "c2232a4484e137b54ef8b945a9aeba17233bcf205a78e0627cccd100302cd029",
     "apps/daemon/src/agent/testing/harness.ts": "ec505f8d685ba5e38d8a1363a311010ab006d1f37de071b382435645720b3873",
     "apps/daemon/src/agent/testing/model-admission.ts": "86b116a0b34f4228306df181ea998d5b3d226f1111e9ea9c09710934bfdfef9e",
@@ -429,7 +430,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "0350db97dfff0167dcceba317ea7a6621bdcfeb0c36267b0e1875395a3d95f23",
+  "reportSha256": "2325ed8fdfd18a5b8d39783e604d3ecad5be2c97306d5b90d6836e4908291e33",
   "exit": {
     "code": 0,
     "signal": null
