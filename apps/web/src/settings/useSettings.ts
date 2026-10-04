@@ -3,7 +3,12 @@ import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { KeyRecord } from "../keys/keys-api.ts";
 import type { ApiClient } from "../lib/api.ts";
-import { type ModelRole, matchingKeys, type PickerModel, type RoleChoice } from "./choices.ts";
+import {
+  type ModelRole,
+  matchingKeys,
+  type RoleChoice,
+  type SubscriptionModel,
+} from "./choices.ts";
 import {
   loadProviderIndex,
   loadSettings,
@@ -20,13 +25,23 @@ import {
   sameDraft,
   validateForm,
 } from "./settings-form.ts";
+import { useChatgpt } from "./useChatgpt.ts";
 
 type Phase = "loading" | "ready" | "refreshing" | "error";
-export function useSettings(api: ApiClient, subscriptionModels: readonly PickerModel[] = []) {
+export function useSettings(
+  api: ApiClient,
+  providedModels: readonly SubscriptionModel[] = [],
+  accountVisible = true,
+) {
   const [open, setOpen] = useState(false);
   const [saved, setSaved] = useState<AgentSettingsDocument | null>(null);
   const [index, setIndex] = useState<ProviderIndex | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  const chatgpt = useChatgpt(
+    api,
+    open && accountVisible && draft?.choices.main?.provider === "chatgpt",
+  );
+  const subscriptionModels = providedModels.length ? providedModels : chatgpt.models;
   const [phase, setPhase] = useState<Phase>("loading");
   const [error, setError] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
@@ -207,6 +222,7 @@ export function useSettings(api: ApiClient, subscriptionModels: readonly PickerM
       previous = owner.saved;
     if (
       !owner.open ||
+      chatgpt.isMutating() ||
       !captured ||
       !previous ||
       mutating.current ||
@@ -407,7 +423,9 @@ export function useSettings(api: ApiClient, subscriptionModels: readonly PickerM
     phase,
     error,
     uncertain,
-    busy,
+    busy: busy || !!chatgpt.busy,
+    chatgpt,
+    subscriptionModels,
     change,
     changePrice,
     budget,
@@ -421,13 +439,15 @@ export function useSettings(api: ApiClient, subscriptionModels: readonly PickerM
     saveEnabled:
       validation?.ok === true &&
       !busy &&
+      !chatgpt.busy &&
       !uncertain &&
       phase === "ready" &&
       loadedFor.current === api,
     mainReady:
+      (saved?.main?.provider !== "chatgpt" ||
+        (chatgpt.canStart && chatgpt.models.some((model) => model.id === saved.main?.model))) &&
       accepted?.ok === true &&
       !uncertain &&
-      saved?.main?.provider !== "chatgpt" &&
       phase === "ready" &&
       loadedFor.current === api,
   };

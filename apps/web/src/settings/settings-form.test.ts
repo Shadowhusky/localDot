@@ -158,6 +158,24 @@ describe("configuration validation before explicit save", () => {
       ),
     ).toMatchObject({ ok: false });
   });
+  it("accepts a reported subscription model without invented capability or pricing metadata", () => {
+    const index = providerFixture();
+    index.keyLayer = "offline";
+    index.keys = [];
+    index.defaultTaskBudgetUSD = null;
+    const saved = {
+      main: { provider: "chatgpt", model: "older-model" },
+      fast: { provider: "openai", model: "stored-paid", key: "deleted" },
+      taskBudgetUSD: 8,
+    };
+    const draft = formOf(saved);
+    draft.choices.main = { provider: "chatgpt", model: "reported-model" };
+    expect(validateForm(draft, saved, index, [{ id: "reported-model", name: "Reported" }])).toEqual(
+      { ok: true, document: { ...saved, main: { provider: "chatgpt", model: "reported-model" } } },
+    );
+    draft.choices.main = { provider: "ollama", model: "local" };
+    expect(validateForm(draft, saved, index)).toMatchObject({ ok: false });
+  });
   it("requires a known default or an explicit valid ceiling, with no guessed budget", () => {
     const index = providerFixture();
     index.defaultTaskBudgetUSD = null;

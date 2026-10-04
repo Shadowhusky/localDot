@@ -4,12 +4,13 @@ import {
   type ModelRole,
   matchingKeys,
   type PickerKey,
-  type PickerModel,
   type ProviderModels,
   type RoleChoice,
+  type SubscriptionModel,
 } from "./choices.ts";
 import { ModelPicker } from "./ModelPicker.tsx";
 import { ProviderPicker } from "./ProviderPicker.tsx";
+import { SubscriptionPicker } from "./SubscriptionPicker.tsx";
 
 const ROLE_HELP: Record<ModelRole, string> = {
   main: "Main carries out the task. A model with tools is required; text-only models can use files and the shell.",
@@ -35,7 +36,7 @@ export function RoleEditor({
   providers: readonly ProviderModels[];
   keys: readonly PickerKey[];
   keyLayer: "online" | "offline" | "unknown";
-  subscriptionModels?: readonly PickerModel[];
+  subscriptionModels?: readonly SubscriptionModel[];
   disabled?: boolean;
   onChange(value: RoleChoice | undefined): void;
   onKeys(role: ModelRole, provider: string, trigger: HTMLButtonElement): void;
@@ -44,12 +45,22 @@ export function RoleEditor({
   inactive?: boolean;
 }) {
   const keyLabel = useId();
+  if (inactive)
+    return (
+      <fieldset className="role-editor" disabled>
+        <legend>
+          {role[0]?.toUpperCase()}
+          {role.slice(1)}
+        </legend>
+        <p>This stored choice is inactive while main uses the ChatGPT plan.</p>
+        <p>
+          {value ? `${value.provider} · ${value.model || "No model selected"}` : "No stored choice"}
+        </p>
+      </fieldset>
+    );
   const provider = value && providerById(value.provider);
   const availableKeys = provider ? matchingKeys(provider, keys) : [];
-  const models =
-    value?.provider === "chatgpt"
-      ? subscriptionModels
-      : (providers.find((p) => p.id === value?.provider)?.models ?? []);
+  const models = providers.find((p) => p.id === value?.provider)?.models ?? [];
   const missingKey = !!value?.key && !availableKeys.some((key) => key.id === value.key);
   return (
     <fieldset className="role-editor" disabled={disabled || inactive}>
@@ -79,7 +90,14 @@ export function RoleEditor({
             disabled={disabled}
             onChange={(id) => onChange({ provider: id, model: "" })}
           />
-          {value?.provider && (
+          {value?.provider === "chatgpt" ? (
+            <SubscriptionPicker
+              models={subscriptionModels}
+              value={value.model}
+              disabled={disabled}
+              onChange={(model) => onChange({ provider: "chatgpt", model })}
+            />
+          ) : value?.provider ? (
             <ModelPicker
               key={value.provider}
               modelRole={role}
@@ -89,7 +107,7 @@ export function RoleEditor({
               disabled={disabled}
               onChange={(model) => onChange({ ...value, model, price: undefined })}
             />
-          )}
+          ) : null}
           {provider && !provider.local && !provider.availableIn && (
             <div className="role-key">
               <label>
@@ -137,7 +155,7 @@ export function RoleEditor({
           {value?.provider === "chatgpt" && (
             <p>The ChatGPT plan uses account sign-in and requires no API key or per-token price.</p>
           )}
-          {manualPrice && (
+          {manualPrice && value?.provider !== "chatgpt" && (
             <div className="manual-price">
               <p>Input / Output — USD per million tokens</p>
               <p>

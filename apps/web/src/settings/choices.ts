@@ -5,6 +5,10 @@ import type { KeyRecord } from "../keys/keys-api.ts";
 export type ModelRole = "main" | "fast" | "local";
 export type RoleChoice = AgentRoleChoice;
 export type PickerKey = Pick<KeyRecord, "id" | "kind" | "provider" | "baseURL">;
+export interface SubscriptionModel {
+  id: string;
+  name: string;
+}
 export interface PickerModel extends Capability {
   id: string;
   name: string;

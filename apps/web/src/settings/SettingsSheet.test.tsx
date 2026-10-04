@@ -91,4 +91,30 @@ describe("settings sheet presentation ownership", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(run).toHaveBeenCalledOnce();
   });
+  it("shows account models without prices, USD ceilings or inactive paid editors", () => {
+    const p = props();
+    render(
+      <SettingsSheet
+        {...p}
+        choices={{
+          main: { provider: "chatgpt", model: "account-model" },
+          fast: {
+            provider: "openai",
+            model: "stored-paid",
+            key: "deleted",
+            price: { inputUSDPerMTok: 2, outputUSDPerMTok: 3 },
+          },
+        }}
+        subscriptionModels={[{ id: "account-model", name: "Reported account model" }]}
+        manualPrices={{ fast: { input: "2", output: "3" } }}
+        budget={{ value: "8", useDefault: false, defaultUSD: 2, change: vi.fn() }}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "main model" })).toBeTruthy();
+    expect(screen.getByText("openai · stored-paid")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "fast key" })).toBeNull();
+    expect(screen.queryByLabelText(/USD|fast provider|fast model/)).toBeNull();
+    expect(screen.queryByRole("group", { name: "Task spending ceiling" })).toBeNull();
+    expect(screen.queryByText(/million tokens/)).toBeNull();
+  });
 });

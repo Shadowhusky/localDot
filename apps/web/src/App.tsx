@@ -130,16 +130,23 @@ function Theatre({ api }: { api: ApiClient }) {
   const { cell, status, pending, error, listed, reconnects, start, stop, resume, retry } =
     useCell(api);
   const keys = useKeys(api);
-  const settings = useSettings(api);
-  const mainProvider = settings.saved?.main && providerById(settings.saved.main.provider);
+  const [keysOpen, setKeysOpen] = useState(false);
+  const settings = useSettings(api, [], !keysOpen);
+  const mainChoice = settings.saved?.main;
+  const mainProvider =
+    mainChoice?.provider !== "chatgpt" && mainChoice
+      ? providerById(mainChoice.provider)
+      : undefined;
   const mainReady =
     settings.mainReady &&
-    !!mainProvider &&
-    (mainProvider.local === true ||
-      (keys.metadataReady === true &&
-        keys.health?.online === true &&
-        matchingKeys(mainProvider, keys.keys).some((key) => key.id === settings.saved?.main?.key)));
-  const [keysOpen, setKeysOpen] = useState(false);
+    (mainChoice?.provider === "chatgpt"
+      ? settings.chatgpt.canStart &&
+        settings.chatgpt.models.some((model) => model.id === mainChoice.model)
+      : !!mainProvider &&
+        (mainProvider.local === true ||
+          (keys.metadataReady === true &&
+            keys.health?.online === true &&
+            matchingKeys(mainProvider, keys.keys).some((key) => key.id === mainChoice?.key))));
   const keysButton = useRef<HTMLButtonElement>(null);
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
@@ -531,6 +538,8 @@ function Theatre({ api }: { api: ApiClient }) {
         open={settings.open}
         suspended={keysOpen}
         choices={settings.draft?.choices ?? {}}
+        chatgpt={settings.chatgpt}
+        subscriptionModels={settings.subscriptionModels}
         providers={settings.index?.providers ?? []}
         keys={settings.index ? pickerKeys(settings.index) : []}
         keyLayer={settings.index?.keyLayer ?? "unknown"}

@@ -1,6 +1,14 @@
 import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
-import type { ModelRole, PickerKey, PickerModel, ProviderModels, RoleChoice } from "./choices.ts";
+import { ChatgptPanel } from "./ChatgptPanel.tsx";
+import type {
+  ModelRole,
+  PickerKey,
+  ProviderModels,
+  RoleChoice,
+  SubscriptionModel,
+} from "./choices.ts";
 import { RoleEditor } from "./RoleEditor.tsx";
+import type { ChatgptControls } from "./useChatgpt.ts";
 import "./settings.css";
 
 export interface SettingsSheetProps {
@@ -10,7 +18,8 @@ export interface SettingsSheetProps {
   providers: readonly ProviderModels[];
   keys: readonly PickerKey[];
   keyLayer: "online" | "offline" | "unknown";
-  subscriptionModels?: readonly PickerModel[];
+  subscriptionModels?: readonly SubscriptionModel[];
+  chatgpt?: ChatgptControls;
   catalog: "loading" | "ready" | "empty" | "stale" | "refreshing" | "offline";
   dirty: boolean;
   busy?: boolean;
@@ -60,9 +69,9 @@ export function SettingsSheet(props: SettingsSheetProps) {
       if (event.key !== "Tab" || !panel.current) return;
       const items = [
         ...panel.current.querySelectorAll<HTMLElement>(
-          "button:enabled, input:enabled, select:enabled",
+          "button:enabled, input:enabled, select:enabled, a[href]",
         ),
-      ];
+      ].filter((item) => !item.closest("[hidden], [inert]"));
       const first = items[0],
         last = items.at(-1);
       if (
@@ -139,6 +148,9 @@ export function SettingsSheet(props: SettingsSheetProps) {
               </button>
             )}
           </div>
+          {active && props.choices.main?.provider === "chatgpt" && props.chatgpt && (
+            <ChatgptPanel account={props.chatgpt} />
+          )}
           {(["main", "fast", "local"] as const).map((role) => (
             <RoleEditor
               key={role}
@@ -156,7 +168,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
               inactive={role !== "main" && props.choices.main?.provider === "chatgpt"}
             />
           ))}
-          {props.budget && (
+          {props.budget && props.choices.main?.provider !== "chatgpt" && (
             <fieldset className="role-editor" disabled={props.busy || props.loading}>
               <legend>Task spending ceiling</legend>
               <p>

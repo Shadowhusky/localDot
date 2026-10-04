@@ -6,8 +6,8 @@ import {
   modelAllowed,
   modelIdProblem,
   type PickerKey,
-  type PickerModel,
   type RoleChoice,
+  type SubscriptionModel,
 } from "./choices.ts";
 import type { ProviderIndex } from "./settings-api.ts";
 
@@ -77,7 +77,7 @@ export function validateForm(
   draft: SettingsDraft,
   saved: AgentSettingsDocument,
   index: ProviderIndex | null,
-  subscriptionModels: readonly PickerModel[] = [],
+  subscriptionModels: readonly SubscriptionModel[] = [],
 ): FormResult {
   const fail = (message: string): FormResult => ({ ok: false, message });
   if (!index) return fail("Load current model and key metadata before saving.");
@@ -106,7 +106,7 @@ export function validateForm(
         return fail("ChatGPT is available for main only, without an API key or manual price.");
       const model = subscriptionModels.find((m) => m.id === value.model);
       const unchanged = saved.main?.provider === "chatgpt" && saved.main.model === value.model;
-      if ((!model && !unchanged) || (model && !modelAllowed(role, model)))
+      if (!model && !unchanged)
         return fail("Set up the ChatGPT plan and choose one of its available account models.");
       document[role] = { provider: value.provider, model: value.model };
       continue;
