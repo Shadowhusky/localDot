@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "9f2ccbc289f2658cc024a2dda1b14a6762b207dc7821e363b48aeb1262191e42",
+  "inputSha256": "12e73e7bf814e2b288e2fe48d283b63091c402f4e13cb8726e6add0d8f735944",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -372,13 +372,13 @@
     "packages/protocol/src/tool-api.ts": "ea197d31468f32482f68c1af5a29d202a11ea493a67193743244627dea63b8d9",
     "packages/protocol/src/tools.test.ts": "58fb86ce1db7684ea281cb2ba46d5dd0c2d916c0519ea2e33353417b8a475903",
     "packages/protocol/src/tools.ts": "9cbe905ccd6aca1bd8a9bd2c9da9357e69f92e953eb26d0e8d3598024085c28b",
-    "pnpm-lock.yaml": "bdef7926f070c84ab476cd954412473fa87099475525592ee8f668d0258e9917",
+    "pnpm-lock.yaml": "fe9468ce503b368d9e44c5f31b782de05719d1a3eb406364f140998a7f11b191",
     "pnpm-workspace.yaml": "e8a2cff2cbf632a3338f8a2064ceb4433776d69cf29b201df00881dca0b7faeb",
     "scripts/check-codex-release.mjs": "a130ea78e2bd0a6c00aa63c71a10f64006743ff6c61c8575f5bda3dfc0aa4cb7",
     "scripts/check-codex-release.test.mjs": "e0854f195dfd6bac6d889897e576fbb7db8c7c3b03b7e5207b20093652fe7cff",
     "vitest.codex-signin.config.ts": "bfd0b18169a8c3ec68c6fb8010492c9e74a2e2d04853c8f49f628dd964568606",
     "vitest.codex.config.ts": "f71b4a2d58b66941f3a310f61aee317977af404468d5b57dbf782ac28624c134",
-    "vitest.config.ts": "17af131b618fe09f392dcb7a835086e91b3bc56ed7e00cc0275a83b615fe06b3"
+    "vitest.config.ts": "894e0d8d50ba79f9bcc2652d53fcf5e055460b4a91158d8633fe59e01dbc5a77"
   },
   "generatedSchema": {
     "codexVersion": "0.154.0",
@@ -432,7 +432,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "be77feb51b8374ac18ce8f2195236be81dd8290f94a72c91b7c259a5386a4cba",
+  "reportSha256": "f474d5596519fc6b727397183dc6d4e3880787e6b53f9585bf2ada8ca22cb23e",
   "exit": {
     "code": 0,
     "signal": null
