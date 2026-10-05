@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "9d3dc0333365a9e29cb8f5c0f93b09160c2c0a332fd309fa4a5148d81d28d097",
+  "inputSha256": "16adeb5d31384ea4f692101fc0a426589617d5c97bc8cfd6fe7aebb1953b74cb",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -274,7 +274,16 @@
     "apps/daemon/src/puppet/script.ts": "a888de10fa7a84621598d9a238a79d0f57fad47290b046db465d50c45355401f",
     "apps/daemon/src/recorder/boxes.test.ts": "7ab7642e69185c218513b499c0ef42710148fed583effcfe7945ab402394b032",
     "apps/daemon/src/recorder/boxes.ts": "c6d55e014638ad4a109a0370212596c0f8eaee8154a78580de5eb9c32e11512a",
+    "apps/daemon/src/recorder/crash.test.ts": "a864c05d05a8b58028f14e008c0a99d64df55047db5ad391ac4bde224d970fac",
+    "apps/daemon/src/recorder/diskfull-writer.test.ts": "5bc847d6ad4fe28a33516952e419ce052b0ee6be76e292fe40ab1c0066391d36",
     "apps/daemon/src/recorder/journal.ts": "655ad2116b51bbcd395b82d14bf34af2be7ab90d60c65383e586585ca34139b9",
+    "apps/daemon/src/recorder/recover.test.ts": "c874cf8c3df602f261521f434a0785e649d381947b2164b76ae0ab375f5e83e9",
+    "apps/daemon/src/recorder/recover.ts": "acdb06fbea6e8821e399ea34ad446ead6c874434c84c7c3a9d401fb60d6277a8",
+    "apps/daemon/src/recorder/seek.test.ts": "0c27503a8a406a9c84a9535bc8684d9cf7a6ce053fcd0b9f736eb8ceca649832",
+    "apps/daemon/src/recorder/testing/crash-child.ts": "9b2a77038dc5497f139c2dd2d889544c69678373112aaae8a9507ec4a514f598",
+    "apps/daemon/src/recorder/testing/crash-stream.ts": "58ebc33d5045995a9a77c2a9741bacfc9073b797bd61332a2caca49988068905",
+    "apps/daemon/src/recorder/testing/full-fs.ts": "f0f95c42e02134284d215658f7f302b8fa89d7576e53b3cd5a61f2bf3b72dba3",
+    "apps/daemon/src/recorder/view.ts": "8dad114a442b274e2a2a809ff4a30efda2e697a5e2d5126d6f86d9bd227a7c10",
     "apps/daemon/src/recorder/writer.test.ts": "a707cde431409bfbd65453e019abe58ca24fe2c99b7ffe0a961381d83f47e1a3",
     "apps/daemon/src/recorder/writer.ts": "c26146a80a2291d10ea489e6f7b473df4b30670d48fa0a377065cc0cbf532cd8",
     "apps/daemon/src/sqlite.ts": "3fcf37269e8904b8cd4543e003eee5d3b1446a0b4569418ad85637cfed79db46",
@@ -437,7 +446,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "c3175875d39b1a223fac81dc5da08bfde2ed77a286555b417f61a48a98976857",
+  "reportSha256": "af57fd11a9ee3c3ec11cc78278b2ff3d5d131fe6b102dcff10192e66a429bd54",
   "exit": {
     "code": 0,
     "signal": null
