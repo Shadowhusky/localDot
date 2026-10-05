@@ -1,6 +1,6 @@
 import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { emptyModel, foldEvents } from "./model.ts";
+import { emptyModel, foldEvents, observeAt, planAt, startedCount, stepAt } from "./model.ts";
 
 let seq = 0;
 const ev = (
@@ -187,5 +187,119 @@ describe("foldEvents", () => {
       ev("action.cancel", 50, { reason: "timeout", detail: "no press" }),
     ]);
     expect(m.actions[0]?.cancel).toEqual({ t: 50, reason: "timeout" });
+  });
+});
+
+describe("replay model indexes", () => {
+  it("keeps observes, steps and plans in order and indexes the current action by step", () => {
+    const events = [
+      ev("step.start", 10, { kind: "gui", planItem: "p1" }, "s1"),
+      ev("action.intent", 20, { verb: "click", label: "A", risk: "none" }, "s1"),
+      ev("observe", 30, { frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", width: 1280, height: 800 }, "s1"),
+      ev("step.end", 40, { status: "failed" }, "s1"),
+      ev("plan.set", 50, {
+        items: [
+          { id: "p1", text: "First", status: "todo" },
+          { id: "p2", text: "Second", status: "doing" },
+        ],
+      }),
+      ev("plan.update", 60, { id: "p2", status: "done" }),
+    ];
+    const m = foldEvents(emptyModel(), events);
+    expect(m.observes).toEqual([{ t: 30, frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", step: "s1" }]);
+    expect(m.steps[0]).toEqual({
+      id: "s1",
+      kind: "gui",
+      startT: 10,
+      endT: 40,
+      status: "failed",
+      planItem: "p1",
+    });
+    expect(m.byStep.get("s1")).toBe(0);
+    expect(m.stepIndex.get("s1")).toBe(0);
+    expect(stepAt(m, 9)).toBeUndefined();
+    expect(stepAt(m, 10)).toBe(m.steps[0]);
+    expect(stepAt(m, 70)).toBe(m.steps[0]);
+    expect(observeAt(m, 29)).toBeUndefined();
+    expect(observeAt(m, 30)).toBe(m.observes[0]);
+    expect(planAt(m, 49)).toEqual([]);
+    expect(planAt(m, 50)[1]?.status).toBe("doing");
+    expect(planAt(m, 59)[1]?.status).toBe("doing");
+    expect(planAt(m, 60)[1]?.status).toBe("done");
+    expect(startedCount(m, 19)).toBe(0);
+    expect(startedCount(m, 20)).toBe(1);
+    expect(foldEvents(foldEvents(emptyModel(), events.slice(0, 4)), events.slice(4))).toEqual(m);
+    expect(structuredClone(m)).toEqual(m);
+    expect(m.frames.get("s1")).toBe(m.observes[0]?.frameId);
+  });
+  it("preserves each plan snapshot and the input event's data independently", () => {
+    const set = ev("plan.set", 10, { items: [{ id: "p", text: "Original", status: "todo" }] });
+    const m = foldEvents(emptyModel(), [
+      set,
+      ev("plan.update", 20, { id: "p", status: "done" }),
+      ev("plan.update", 30, { id: "missing", status: "done" }),
+    ]);
+    if (set.type === "plan.set") {
+      const item = set.data.items[0];
+      if (item) item.text = "Changed";
+    }
+    expect(planAt(m, 10)).toEqual([{ id: "p", text: "Original", status: "todo" }]);
+    expect(planAt(m, 20)).toEqual([{ id: "p", text: "Original", status: "done" }]);
+    expect(m.plans).toHaveLength(3);
+  });
+  it("attaches late step-specific results to the indexed action, retains key history and mark", () => {
+    const m = foldEvents(emptyModel(), [
+      ev("action.intent", 10, { verb: "wait", label: "First", risk: "none" }, "s1"),
+      ev("action.intent", 20, { verb: "wait", label: "Second", risk: "none" }, "s2"),
+      ev("action.result", 30, { ok: false }, "s1"),
+      ev("action.result", 40, { ok: true }, "unknown"),
+      ev("key.use", 50, {
+        secretId: "k",
+        host: "api.example.com",
+        method: "GET",
+        path: "/",
+        decision: "ask",
+      }),
+    ]);
+    expect(m.actions[0]?.ok).toBe(false);
+    expect(m.actions[1]?.ok).toBe(true);
+    expect(m.keyUses).toHaveLength(1);
+    expect(m.marks).toMatchObject([{ kind: "key", tone: "attention", t: 50 }]);
+  });
+  it("binary-searches equal timestamps, empty models and nearest earlier observations", () => {
+    const m = foldEvents(emptyModel(), [
+      ev("action.intent", 10, { verb: "wait", label: "A", risk: "none" }),
+      ev("action.intent", 10, { verb: "wait", label: "B", risk: "none" }),
+      ev("observe", 10, { frameId: "a", width: 1, height: 1 }),
+      ev("observe", 10, { frameId: "b", width: 1, height: 1 }),
+      ev("observe", 20, { frameId: "c", width: 1, height: 1 }),
+    ]);
+    expect(startedCount(emptyModel(), 0)).toBe(0);
+    expect(startedCount(m, 9)).toBe(0);
+    expect(startedCount(m, 10)).toBe(2);
+    expect(observeAt(m, 10)?.frameId).toBe("b");
+    expect(observeAt(m, 19)?.frameId).toBe("b");
+    expect(observeAt(m, 20)?.frameId).toBe("c");
+  });
+});
+
+it("retains event sequence numbers for equal-time action and marker ordering", () => {
+  const intent = ev("action.intent", 10, { verb: "click", label: "A", risk: "none" }, "s1");
+  const dispatch = ev(
+    "action.dispatch",
+    10,
+    {
+      input: { kind: "click", button: "left", count: 1, at: { x: 1, y: 1 } },
+      pressT: msToMicros(10),
+      ringAt: msToMicros(10),
+    },
+    "s1",
+  );
+  const cancel = ev("action.cancel", 10, { reason: "stale" }, "s1");
+  const m = foldEvents(emptyModel(), [intent, dispatch, cancel]);
+  expect(m.actions[0]).toMatchObject({
+    intentSeq: intent.seq,
+    dispatchSeq: dispatch.seq,
+    cancelSeq: cancel.seq,
   });
 });

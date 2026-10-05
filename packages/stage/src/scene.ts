@@ -12,6 +12,7 @@ import {
   emptyModel,
   foldEvents,
   type SessionModel,
+  startedCount,
 } from "./model.ts";
 import { pointerAt } from "./pointer-path.ts";
 import { springValue } from "./spring.ts";
@@ -36,6 +37,10 @@ import {
 } from "./timing.ts";
 
 export const CURSOR_NAME = "dot";
+export const RING_LOOKBACK = 8;
+export interface SceneOptions {
+  ringLookback?: number;
+}
 const CROSSHAIR_PX = 36;
 const FADE_MS = 180;
 const RELEASE_MS = 150;
@@ -143,19 +148,27 @@ export function render(log: LocalDotEvent[], tMs: number, view: View): Scene {
   return sceneAt(foldEvents(emptyModel(), log), tMs, view);
 }
 
-export function sceneAt(model: SessionModel, t: number, view: View): Scene {
+export function sceneAt(
+  model: SessionModel,
+  t: number,
+  view: View,
+  opts: SceneOptions = {},
+): Scene {
   if (!Number.isFinite(t)) throw new RangeError("scene time must be finite");
-  const started = model.actions.filter((a) => a.intentT <= t);
-  const current = started.at(-1);
+  const n = startedCount(model, t);
+  const current = model.actions[n - 1];
+  const lookback = opts.ringLookback ?? RING_LOOKBACK;
+  if (lookback !== Number.POSITIVE_INFINITY && !(Number.isInteger(lookback) && lookback >= 0))
+    throw new RangeError("ring lookback must be a nonnegative integer or Infinity");
   const control = controlAt(model, t);
   return {
     control,
-    cursor: cursorAt(model, started, current, t, view, control),
+    cursor: cursorAt(model, n, current, t, view, control),
     target: current ? targetAt(current, t, view) : null,
-    rings: ringsAt(started, t),
+    rings: ringsAt(model, n, t, lookback),
     typing: current ? typingAt(current, t, view) : null,
     keycaps: current ? keycapsAt(current, t, view) : null,
-    cancel: current ? cancelAt(current, started, t, view) : null,
+    cancel: current ? cancelAt(current, model.actions[n - 2], t, view) : null,
     hud: hudAt(model, current, t, control),
   };
 }
@@ -174,7 +187,7 @@ function restingPoint(a: ActionState | undefined): Point | undefined {
 
 function cursorAt(
   model: SessionModel,
-  started: ActionState[],
+  n: number,
   current: ActionState | undefined,
   t: number,
   view: View,
@@ -183,9 +196,10 @@ function cursorAt(
   if (!current) return null;
   let pos: Point | undefined;
   let floating = false;
-  for (const a of started) {
-    const p = a === current && a.plan ? positionOnPlan(a, t, view) : restingPoint(a);
-    if (p) pos = p;
+  for (let i = n - 1; i >= 0 && !pos; i--) {
+    const a = model.actions[i];
+    if (!a) continue;
+    pos = a === current && a.plan ? positionOnPlan(a, t, view) : restingPoint(a);
   }
   if (!pos) return null;
   const idleSince = current.cancel?.t ?? current.resultT;
@@ -305,9 +319,11 @@ function targetAt(a: ActionState, t: number, view: View): TargetScene | null {
   return { style: "acting", rect, point, alpha, ...(chip ? { chip } : {}) };
 }
 
-function ringsAt(started: ActionState[], t: number): RingScene[] {
+function ringsAt(model: SessionModel, n: number, t: number, lookback: number): RingScene[] {
   const rings: RingScene[] = [];
-  for (const a of started) {
+  for (let i = Math.max(0, n - lookback); i < n; i++) {
+    const a = model.actions[i];
+    if (!a) continue;
     const d = a.dispatch;
     if (d?.input.kind !== "click") continue;
     const style = d.input.button === "right" ? "right" : "left";
@@ -366,13 +382,13 @@ function keycapsAt(a: ActionState, t: number, view: View): KeycapsScene | null {
 
 function cancelAt(
   a: ActionState,
-  started: ActionState[],
+  previous: ActionState | undefined,
   t: number,
   view: View,
 ): CancelScene | null {
   if (!a.cancel || t < a.cancel.t || t > a.cancel.t + CANCEL_CHIP_MS) return null;
   const since = t - a.cancel.t;
-  const pos = restingPoint(a) ?? restingPoint(started.at(-2)) ?? { x: 0, y: 0 };
+  const pos = restingPoint(a) ?? restingPoint(previous) ?? { x: 0, y: 0 };
   const dx =
     view.reducedMotion || since > CANCEL_SHAKE_MS
       ? 0

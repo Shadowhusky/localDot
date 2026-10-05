@@ -371,3 +371,15 @@ describe("determinism", () => {
       expect(render(inOrder(log), t, view)).toEqual(render(inOrder(log), t, view));
   });
 });
+
+it("renders the first cancelled action without a pointer plan at a safe resting point", () => {
+  const log = [
+    ev("action.intent", 0, { verb: "wait", label: "Wait", risk: "none" }),
+    ev("action.cancel", 10, { reason: "stale" }),
+  ];
+  expect(render(log, 11, { reducedMotion: false }).cancel).toMatchObject({
+    x: 0,
+    y: 0,
+    reason: "stale",
+  });
+});

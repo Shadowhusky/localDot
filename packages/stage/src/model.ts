@@ -8,6 +8,7 @@ import {
   sessionMsOf,
   type Target,
 } from "@localdot/protocol";
+import { markOf, type TimelineMark } from "./marks.ts";
 
 export interface Progress {
   t: number;
@@ -29,6 +30,10 @@ export interface ActionState {
   verb: EventOf<"action.intent">["data"]["verb"];
   label: string;
   intentT: number;
+  // Kept for stable timeline ordering when events share a timestamp. Optional for old fixtures.
+  intentSeq?: number;
+  dispatchSeq?: number;
+  cancelSeq?: number;
   point?: Point;
   plan?: PointerPlan;
   target?: Target;
@@ -57,6 +62,29 @@ export interface KeyUseState {
   decision: "allow" | "deny" | "ask";
 }
 
+export interface ObserveAt {
+  t: number;
+  frameId: string;
+  step?: string;
+}
+export interface StepState {
+  id: string;
+  kind: string;
+  startT: number;
+  endT?: number;
+  status?: string;
+  planItem?: string;
+}
+export interface PlanItemState {
+  id: string;
+  text: string;
+  status: string;
+}
+export interface PlanSnapshot {
+  t: number;
+  items: PlanItemState[];
+}
+
 export interface SessionModel {
   screen: { w: number; h: number; scale: number } | null;
   title: string | null;
@@ -69,6 +97,12 @@ export interface SessionModel {
   keyUses: KeyUseState[];
   lastSeq: number;
   frames: Map<string, string>;
+  observes: ObserveAt[];
+  steps: StepState[];
+  plans: PlanSnapshot[];
+  marks: TimelineMark[];
+  byStep: Map<string, number>;
+  stepIndex: Map<string, number>;
 }
 
 export function emptyModel(): SessionModel {
@@ -82,15 +116,45 @@ export function emptyModel(): SessionModel {
     keyUses: [],
     lastSeq: -1,
     frames: new Map(),
+    observes: [],
+    steps: [],
+    plans: [],
+    marks: [],
+    byStep: new Map(),
+    stepIndex: new Map(),
   };
 }
 
-export function agentStateAt(model: SessionModel, t: number): AgentStateAt | undefined {
-  for (let i = model.agentStates.length - 1; i >= 0; i--) {
-    const s = model.agentStates[i];
-    if (s && s.t <= t) return s;
+// EventLog stamps nondecreasing session times; equal times resolve to the last entry.
+function upperBound<T>(items: T[], t: number, time: (item: T) => number): number {
+  let lo = 0,
+    hi = items.length;
+  while (lo < hi) {
+    const mid = lo + Math.floor((hi - lo) / 2);
+    const item = items[mid];
+    if (item === undefined) throw new RangeError("sparse replay index");
+    if (time(item) <= t) lo = mid + 1;
+    else hi = mid;
   }
-  return undefined;
+  return lo;
+}
+const intentTime = (a: ActionState) => a.intentT;
+const atTime = (a: { t: number }) => a.t;
+const stepTime = (s: StepState) => s.startT;
+export function startedCount(model: SessionModel, t: number): number {
+  return upperBound(model.actions, t, intentTime);
+}
+export function observeAt(model: SessionModel, t: number): ObserveAt | undefined {
+  return model.observes[upperBound(model.observes, t, atTime) - 1];
+}
+export function stepAt(model: SessionModel, t: number): StepState | undefined {
+  return model.steps[upperBound(model.steps, t, stepTime) - 1];
+}
+export function planAt(model: SessionModel, t: number): PlanItemState[] {
+  return model.plans[upperBound(model.plans, t, atTime) - 1]?.items ?? [];
+}
+export function agentStateAt(model: SessionModel, t: number): AgentStateAt | undefined {
+  return model.agentStates[upperBound(model.agentStates, t, atTime) - 1];
 }
 
 // Mutates and returns `model`; events already folded (seq ≤ lastSeq) are skipped, so a stream
@@ -102,7 +166,40 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
     const t = sessionMsOf(e);
     switch (e.type) {
       case "observe":
+        model.observes.push({ t, frameId: e.data.frameId, ...(e.step ? { step: e.step } : {}) });
         if (e.step) model.frames.set(e.step, e.data.frameId);
+        break;
+      case "step.start":
+        if (e.step) {
+          model.stepIndex.set(e.step, model.steps.length);
+          model.steps.push({
+            id: e.step,
+            kind: e.data.kind,
+            startT: t,
+            ...(e.data.planItem !== undefined ? { planItem: e.data.planItem } : {}),
+          });
+        }
+        break;
+      case "step.end": {
+        const index = e.step ? model.stepIndex.get(e.step) : undefined;
+        const step = index === undefined ? undefined : model.steps[index];
+        if (step) {
+          step.endT = t;
+          step.status = e.data.status;
+        }
+        break;
+      }
+      case "plan.set":
+        model.plans.push({ t, items: e.data.items.map((item) => ({ ...item })) });
+        break;
+      case "plan.update":
+        model.plans.push({
+          t,
+          items: (model.plans.at(-1)?.items ?? []).map((item) => ({
+            ...item,
+            ...(item.id === e.data.id ? { status: e.data.status } : {}),
+          })),
+        });
         break;
       case "session.start":
         model.screen = e.data.screen;
@@ -115,16 +212,22 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
       case "agent.state":
         model.agentStates.push({ state: e.data.state, t });
         break;
-      case "key.use":
+      case "key.use": {
         model.keyUses.push({ id: e.id, t, ...e.data });
+        // Existing audit history is retained, and replay needs its timeline marker as well.
+        const mark = markOf(e);
+        if (mark) model.marks.push(mark);
         break;
+      }
       case "action.intent":
+        if (e.step) model.byStep.set(e.step, model.actions.length);
         model.actions.push({
           id: e.id,
           ...(e.step ? { step: e.step } : {}),
           verb: e.data.verb,
           label: e.data.label,
           intentT: t,
+          intentSeq: e.seq,
           ...(e.data.point ? { point: e.data.point } : {}),
           ...(e.data.pointer ? { plan: e.data.pointer } : {}),
           progress: [],
@@ -140,13 +243,15 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
       }
       case "action.dispatch": {
         const a = current(model, e.step);
-        if (a)
+        if (a) {
+          a.dispatchSeq = e.seq;
           a.dispatch = {
             t,
             input: e.data.input,
             pressT: microsToMs(e.data.pressT),
             ringAt: microsToMs(e.data.ringAt),
           };
+        }
         break;
       }
       case "text.progress": {
@@ -175,22 +280,23 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
       }
       case "action.cancel": {
         const a = current(model, e.step);
-        if (a) a.cancel = { t, reason: e.data.reason };
+        if (a) {
+          a.cancelSeq = e.seq;
+          a.cancel = { t, reason: e.data.reason };
+        }
         break;
       }
-      default:
+      default: {
+        const mark = markOf(e);
+        if (mark) model.marks.push(mark);
         break;
+      }
     }
   }
   return model;
 }
 
 function current(model: SessionModel, step: string | undefined): ActionState | undefined {
-  if (step) {
-    for (let i = model.actions.length - 1; i >= 0; i--) {
-      const a = model.actions[i];
-      if (a?.step === step) return a;
-    }
-  }
-  return model.actions.at(-1);
+  const index = step ? model.byStep.get(step) : undefined;
+  return index === undefined ? model.actions.at(-1) : model.actions[index];
 }
