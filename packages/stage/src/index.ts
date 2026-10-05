@@ -3,6 +3,7 @@ export * from "./marks.ts";
 export * from "./model.ts";
 export * from "./pointer-path.ts";
 export * from "./random.ts";
+export * from "./replay/index.ts";
 export * from "./scene.ts";
 export * from "./spring.ts";
 export * from "./timing.ts";
