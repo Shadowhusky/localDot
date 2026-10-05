@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "12e73e7bf814e2b288e2fe48d283b63091c402f4e13cb8726e6add0d8f735944",
+  "inputSha256": "9d3dc0333365a9e29cb8f5c0f93b09160c2c0a332fd309fa4a5148d81d28d097",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -272,6 +272,11 @@
     "apps/daemon/src/puppet/runner.ts": "02362919b33028d955806fc90e58f002d93d6d4095090c079549cd2b332e936b",
     "apps/daemon/src/puppet/script.test.ts": "f94430d1815464473e82d8d335bb7ddd7931a514067b3cd72a6fe5241ece8392",
     "apps/daemon/src/puppet/script.ts": "a888de10fa7a84621598d9a238a79d0f57fad47290b046db465d50c45355401f",
+    "apps/daemon/src/recorder/boxes.test.ts": "7ab7642e69185c218513b499c0ef42710148fed583effcfe7945ab402394b032",
+    "apps/daemon/src/recorder/boxes.ts": "c6d55e014638ad4a109a0370212596c0f8eaee8154a78580de5eb9c32e11512a",
+    "apps/daemon/src/recorder/journal.ts": "655ad2116b51bbcd395b82d14bf34af2be7ab90d60c65383e586585ca34139b9",
+    "apps/daemon/src/recorder/writer.test.ts": "a707cde431409bfbd65453e019abe58ca24fe2c99b7ffe0a961381d83f47e1a3",
+    "apps/daemon/src/recorder/writer.ts": "c26146a80a2291d10ea489e6f7b473df4b30670d48fa0a377065cc0cbf532cd8",
     "apps/daemon/src/sqlite.ts": "3fcf37269e8904b8cd4543e003eee5d3b1446a0b4569418ad85637cfed79db46",
     "apps/daemon/src/static-files.test.ts": "dd5a8a8ce47c37682e21e4043b43fad5495fdcbd4952873eaa3c06a05885e6ed",
     "apps/daemon/src/static-files.ts": "ca4c5ae924b84defe23f2dc0640e7b3dffb588dfa697389fa8b95bd910445412",
@@ -432,7 +437,7 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "f474d5596519fc6b727397183dc6d4e3880787e6b53f9585bf2ada8ca22cb23e",
+  "reportSha256": "c3175875d39b1a223fac81dc5da08bfde2ed77a286555b417f61a48a98976857",
   "exit": {
     "code": 0,
     "signal": null
