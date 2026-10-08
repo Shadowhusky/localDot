@@ -1,5 +1,6 @@
 import {
   existsSync,
+  lstatSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -174,6 +175,31 @@ describe("saved Always allow rules", () => {
     expect(store.matches("upload", { site: MAIL })).toBe(false);
     expect(() => store.add("send", onMail, ulid())).toThrow(RuleError);
     expect(readFileSync(join(dir, "rules.json"), "utf8")).toBe(text);
+  });
+
+  it("sets an unreadable rules.json aside, keeps it and starts empty", () => {
+    const dir = home();
+    writeFileSync(join(dir, "rules.json"), "{", { mode: 0o600 });
+    const store = new RulesStore(dir);
+    const kept = store.setAside();
+    expect(kept).toMatch(/^rules\.json\.unreadable-[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(readFileSync(join(dir, kept), "utf8")).toBe("{");
+    expect(existsSync(join(dir, "rules.json"))).toBe(false);
+    expect(store.list()).toEqual({ rules: [] });
+    expect(store.add("send", onMail, ulid())).toMatchObject({ site: MAIL });
+    expect(() => store.setAside()).toThrow(RuleError);
+    expect(store.list().rules).toHaveLength(1);
+  });
+
+  it("sets a linked rules.json aside without touching what it points to", () => {
+    const dir = home();
+    const elsewhere = join(home(), "rules.json");
+    writeFileSync(elsewhere, JSON.stringify({ version: 1, rules: [] }), { mode: 0o600 });
+    symlinkSync(elsewhere, join(dir, "rules.json"));
+    const kept = new RulesStore(dir).setAside();
+    expect(lstatSync(join(dir, kept)).isSymbolicLink()).toBe(true);
+    expect(readFileSync(elsewhere, "utf8")).toBe(JSON.stringify({ version: 1, rules: [] }));
+    expect(new RulesStore(dir).list()).toEqual({ rules: [] });
   });
 
   it("treats a linked rules.json as unreadable", () => {

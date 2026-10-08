@@ -1,4 +1,4 @@
-import { lstatSync } from "node:fs";
+import { lstatSync, renameSync } from "node:fs";
 import {
   type ActionClass,
   type AlwaysOption,
@@ -125,6 +125,14 @@ export class RulesStore {
     });
     this.#write([...rules, rule]);
     return rule;
+  }
+  // Keeps an unreadable file under another name, never deleting it, so new choices can be saved.
+  setAside(): string {
+    if (!this.list().error) throw new RuleError(409, "Saved Always allow choices can be read.");
+    this.#files ??= new PrivateFiles(this.home);
+    const kept = `${FILE}.unreadable-${ulid()}`;
+    renameSync(this.#files.path(FILE), this.#files.path(kept));
+    return kept;
   }
   remove(id: string): AutonomyRule | undefined {
     const rules = this.#current();

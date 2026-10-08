@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AlwaysOption, type AutonomyRule, DEFAULT_AUTONOMY, ulid } from "@localdot/protocol";
@@ -114,6 +114,16 @@ describe("Always allow routes", () => {
     expect((await f.send("DELETE", `/api/agent/rules/${ulid()}`)).status).toBe(409);
   });
 
+  it("sets an unreadable rules.json aside so new choices can be saved", async () => {
+    const f = setup();
+    writeFileSync(join(f.home, "rules.json"), "{", { mode: 0o600 });
+    expect((await f.send("POST", "/api/agent/rules/reset")).status).toBe(204);
+    expect(await (await f.send("GET", "/api/agent/rules")).json()).toEqual({ rules: [] });
+    expect(readdirSync(f.home).filter((name) => name.startsWith("rules.json."))).toHaveLength(1);
+    expect((await f.send("POST", "/api/agent/rules/reset")).status).toBe(409);
+    expect(saved(f.rules.add("send", onMail, ulid()))).toMatchObject({ site: MAIL });
+  });
+
   it("saves only a scope the card offered and lets the answer name nothing else", async () => {
     const f = setup();
     const generation = f.session.generation;
@@ -201,6 +211,7 @@ describe("Always allow routes", () => {
       for (const [method, path] of [
         ["GET", "/api/agent/rules"],
         ["DELETE", `/api/agent/rules/${rule.id}`],
+        ["POST", "/api/agent/rules/reset"],
         ["DELETE", allowance],
       ] as const) {
         expect((await call(method, path)).status).toBe(401);
@@ -220,6 +231,7 @@ describe("Always allow routes", () => {
       expect(f.sendDecision()).toBe("act");
       const auth = { authorization: `Bearer ${TOKEN}`, origin: "http://127.0.0.1:4783" };
       expect((await call("GET", "/api/agent/rules", auth)).status).toBe(200);
+      expect((await call("POST", "/api/agent/rules/reset", auth)).status).toBe(409);
       expect((await call("DELETE", `/api/agent/rules/${rule.id}`, auth)).status).toBe(204);
       expect((await call("DELETE", allowance, auth)).status).toBe(204);
       expect(f.sendDecision()).toBe("ask");

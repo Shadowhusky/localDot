@@ -495,6 +495,15 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/rules",
     route((c) => c.json(rules.list())),
   );
+  app.post(
+    "/api/agent/rules/reset",
+    route(async (c) => {
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      rules.setAside();
+      return c.body(null, 204);
+    }),
+  );
   app.delete(
     "/api/agent/rules/:id",
     route(async (c) => {
