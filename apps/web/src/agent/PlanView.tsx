@@ -15,8 +15,6 @@ const STATES: Record<string, [GlyphState, string]> = {
 };
 const stateOf = (status: string): [GlyphState, string] => STATES[status] ?? ["todo", "Next"];
 
-// The header sticks to the top of the panel's scroller. Once the list has scrolled under it, it shows
-// the plan as a strip of segments, so progress stays in view however long the steps run.
 export function PlanView({
   plan,
   label = "Task plan",

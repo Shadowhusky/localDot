@@ -6,7 +6,7 @@ export interface SkillSummary {
   readonly source: string;
 }
 
-// Read-only: what dot can draw on. Descriptions are plain text, never markup.
+// Descriptions are plain text, never markup.
 export function SkillsView({ skills }: { skills: readonly SkillSummary[] }) {
   if (!skills.length) return <p className="activity-detail-note">No skills yet.</p>;
   return (

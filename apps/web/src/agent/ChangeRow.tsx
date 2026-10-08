@@ -13,7 +13,6 @@ const STATUS: Partial<Record<UndoStatus, string>> = {
   failed: "This change couldn't be undone. Read memory to check it.",
 };
 
-// A change no step row holds: a memory update (with Undo) or a file changed outside a step.
 // Mutation ownership lives in the controller; these callbacks always name this durable change.
 export function ChangeRow({
   id,

@@ -16,7 +16,6 @@ export interface ScrollAreaProps extends ComponentProps<"div"> {
   fade?: "both" | "bottom";
 }
 
-// The one scroller of a panel: themed thin bar, a fade only at an edge with more content past it.
 // The edge marks are written straight onto the element, so scrolling never re-renders the panel.
 export function ScrollArea({ ref, fade = "both", className, onScroll, ...props }: ScrollAreaProps) {
   const observer = useRef<ResizeObserver | null>(null);
