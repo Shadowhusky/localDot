@@ -2,6 +2,10 @@
   "src/agent/ActivityRow.tsx": {
     "native-control": 1
   },
+  "src/agent/AlwaysAllow.tsx": {
+    "native-control": 3,
+    "native-disabled": 3
+  },
   "src/agent/ApprovalCard.tsx": {
     "native-control": 5,
     "native-disabled": 4
@@ -103,7 +107,7 @@
     "type-literal": 1
   },
   "src/agent/safety.css": {
-    "control-selector": 9,
+    "control-selector": 10,
     "half-pixel": 1,
     "radius-literal": 6,
     "raw-colour": 29,
@@ -252,7 +256,7 @@
     "native-disabled": 5
   },
   "src/settings/SafetySettings.tsx": {
-    "native-control": 1,
+    "native-control": 5,
     "native-disabled": 1
   },
   "src/settings/SettingsSheet.tsx": {
@@ -267,7 +271,7 @@
     "banned-copy": 1
   },
   "src/settings/settings.css": {
-    "control-selector": 12,
+    "control-selector": 18,
     "radius-literal": 4,
     "spacing-literal": 31,
     "stray-stylesheet": 1,

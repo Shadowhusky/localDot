@@ -180,17 +180,17 @@
 .safety-presets {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 8px;
-  margin: 12px 0 0;
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 3) 0 0;
 }
 .settings-sheet .safety-presets button {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(var(--spacing) * 3);
   min-height: 44px;
-  padding: 0 14px;
-  border-radius: 8px;
+  padding: 0 calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-md);
   background: transparent;
   color: var(--color-text-2);
   text-align: left;
@@ -204,7 +204,7 @@
   flex: none;
   width: 5px;
   height: 10px;
-  margin: -3px 2px 0 0;
+  margin: calc(var(--spacing) * -0.75) 2px 0 0;
   border: solid currentColor;
   border-width: 0 2px 2px 0;
   transform: rotate(45deg);
@@ -226,13 +226,13 @@
   }
 }
 .settings-sheet .safety-preset-note {
-  margin: 8px 0 12px;
+  margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 3);
 }
 .safety-locked {
   display: grid;
-  gap: 8px;
-  margin: 12px 0 0;
-  padding: 12px 0 0;
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 3) 0 0;
+  padding: calc(var(--spacing) * 3) 0 0;
   list-style: none;
   border-top: 1px solid var(--color-line);
 }
@@ -240,7 +240,7 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: calc(var(--spacing) * 3);
   min-height: 36px;
 }
 .settings-sheet .safety-locked li span:last-child {
@@ -249,12 +249,13 @@
   text-align: right;
 }
 .settings-sheet .safety-hint {
-  margin: 8px 0 0;
+  margin: calc(var(--spacing) * 2) 0 0;
   color: var(--color-text-3);
-  font-size: 12.5px;
+  font-size: var(--text-footnote);
+  line-height: var(--text-footnote--line-height);
 }
 .safety-rules ul {
-  margin: 8px 0 0;
+  margin: calc(var(--spacing) * 2) 0 0;
   padding: 0;
   list-style: none;
 }
@@ -262,8 +263,8 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 4px 12px;
-  padding: 10px 0;
+  gap: var(--spacing) calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 2.5) 0;
 }
 .settings-sheet .safety-rules li + li {
   border-top: 1px solid var(--color-line);
@@ -275,20 +276,22 @@
 }
 .safety-rule-where {
   color: var(--color-text-2);
-  font-size: 12.5px;
+  font-size: var(--text-footnote);
+  line-height: var(--text-footnote--line-height);
 }
 .settings-sheet .safety-rules li p {
   grid-column: 1 / -1;
   margin: 0;
   color: var(--color-text);
-  font-size: 12.5px;
+  font-size: var(--text-footnote);
+  line-height: var(--text-footnote--line-height);
 }
 .safety-rules-problem {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin: 8px 0;
+  gap: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  margin: calc(var(--spacing) * 2) 0;
 }
 .settings-sheet .safety-rules-message {
   flex: 1 1 240px;

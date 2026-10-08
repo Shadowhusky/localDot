@@ -41,7 +41,7 @@
 }
 @media (min-height: 600px) {
   .approval-overlay {
-    padding-top: clamp(12px, 10vh, 96px);
+    padding-top: clamp(calc(var(--spacing) * 3), 10vh, calc(var(--spacing) * 24));
   }
 }
 .approval-overlay[hidden] {
@@ -279,15 +279,15 @@
 .always-allow {
   display: grid;
   justify-items: start;
-  gap: 8px;
-  margin-top: 20px;
+  gap: calc(var(--spacing) * 2);
+  margin-top: calc(var(--spacing) * 5);
 }
 .approval-card .always-allow-toggle {
   display: inline-flex;
   align-items: center;
   gap: var(--spacing-button-glyph-gap);
-  margin-left: -12px;
-  padding: 10px 12px;
+  margin-left: calc(var(--spacing) * -3);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
   border-color: transparent;
   background: transparent;
   color: var(--color-text);
@@ -314,7 +314,7 @@
   width: 100%;
   min-width: 0;
   margin: 0;
-  padding: 14px;
+  padding: calc(var(--spacing) * 3.5);
   border: 0;
   border-radius: var(--radius-stage);
   background: var(--color-hud-button);
@@ -325,17 +325,17 @@
 .always-allow-options legend {
   float: left;
   width: 100%;
-  margin: 0 0 12px;
+  margin: 0 0 calc(var(--spacing) * 3);
   padding: 0;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
   color: var(--color-text-2);
 }
 .always-allow-choices {
   clear: both;
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: calc(var(--spacing) * 2);
 }
 .approval-card .always-allow-options button {
   flex: 1 1 160px;
@@ -349,10 +349,11 @@
   bottom: calc(var(--spacing-edge) + env(safe-area-inset-bottom, 0px));
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: calc(var(--spacing) * 3);
   width: max-content;
   max-width: calc(100% - 2 * var(--spacing-edge));
-  padding: 6px 6px 6px 16px;
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 1.5) calc(var(--spacing) * 1.5)
+    calc(var(--spacing) * 4);
   border-radius: var(--radius-stage);
   /* Opaque: WebKit shows the page's text through a translucent line, even under a blur. */
   background: var(--color-surface);
@@ -362,8 +363,8 @@
   animation: always-notice-in var(--duration-veil) var(--ease-veil);
 }
 .always-notice:not(:has(.always-notice-undo)) {
-  padding-block: 12px;
-  padding-right: 16px;
+  padding-block: calc(var(--spacing) * 3);
+  padding-right: calc(var(--spacing) * 4);
 }
 .always-notice.leaving {
   opacity: 0;
@@ -376,13 +377,13 @@
   flex: 1 1 auto;
   min-width: 0;
   margin: 0;
-  line-height: 1.4;
+  line-height: var(--text-body--line-height);
 }
 .always-notice-undo {
   flex: none;
   min-height: 36px;
-  padding: 0 14px;
-  border-radius: 8px;
+  padding: 0 calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-md);
   background: var(--color-hud-button);
   font-weight: 600;
 }
