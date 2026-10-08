@@ -13,6 +13,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { formatKeys, Kbd } from "./Kbd.tsx";
+import { pushLayer } from "./LayerStack.tsx";
 import { joinIds, mergeHandlers } from "./merge.ts";
 
 const DELAY = 500;
@@ -132,10 +133,15 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
     const away = (event: Event) => {
       if (!control.trigger?.contains(event.target as Node)) control.close();
     };
-    // Escape on a focused trigger is handled, and kept from the page, by the trigger itself.
-    const dismiss = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") control.close();
-    };
+    // The topmost layer while open, so Escape closes the tooltip and nothing under it. Escape on a
+    // focused trigger is handled, and kept from the page, by the trigger itself.
+    const remove = pushLayer({
+      root: () => popup.current,
+      panel: () => null,
+      trap: false,
+      modal: false,
+      escape: control.close,
+    });
     // Only a scroll that can move the trigger closes it: a rail streaming lines beside it does not.
     const scrolled = (event: Event) => {
       const { target } = event;
@@ -146,13 +152,12 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
     window.addEventListener("scroll", scrolled, { capture: true, passive: true });
     window.addEventListener("resize", control.hide);
     document.addEventListener("pointerdown", away, true);
-    document.addEventListener("keydown", dismiss);
     return () => {
+      remove();
       window.clearTimeout(hold);
       window.removeEventListener("scroll", scrolled, { capture: true });
       window.removeEventListener("resize", control.hide);
       document.removeEventListener("pointerdown", away, true);
-      document.removeEventListener("keydown", dismiss);
     };
   }, [view.phase, control]);
 
