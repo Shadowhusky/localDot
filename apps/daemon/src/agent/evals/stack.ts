@@ -77,6 +77,7 @@ export interface AgentRun {
 }
 
 const MODEL_SCREEN = { width: 1280, height: 800 } as const;
+const HUMAN_PAUSE_MS = 150;
 const DENIED: ReadonlySet<ActionClass> = new Set([
   "purchase",
   "send",
@@ -90,7 +91,6 @@ const DENIED: ReadonlySet<ActionClass> = new Set([
 // past the throwaway desktop: in model mode a real model drives it with open internet.
 export const simulatedAnswer = (actionClass: ActionClass): "approve" | "deny" =>
   DENIED.has(actionClass) ? "deny" : "approve";
-const HUMAN_PAUSE_MS = 150;
 
 // What a person does for the input the product handed over: typed text with Return and Tab
 // pressed as keys, like someone at the keyboard, rather than as one burst.
