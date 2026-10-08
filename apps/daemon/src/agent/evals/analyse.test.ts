@@ -68,6 +68,28 @@ describe("analyseEvents", () => {
     expect(report.phases.totalExclApproval?.median).toBe(3);
   });
 
+  it("adds up every approval in a step and consumes from the last freshness observe", () => {
+    const report = analyseEvents([
+      at(0, "step.start", { kind: "gui" }),
+      at(1, "approval.request"),
+      at(3, "approval.resolve", { by: "user" }),
+      at(3.5, "approval.request"),
+      at(6.5, "approval.resolve", { by: "user" }),
+      at(7, "action.intent", { verb: "click" }),
+      at(7.5, "observe"),
+      at(8, "observe"),
+      at(8.25, "action.dispatch"),
+      at(8.5, "screen.settle"),
+      at(9, "action.result", { ok: true }),
+    ]);
+    expect(report.approvals).toBe(2);
+    expect(report.phases.approvalWait?.median).toBe(5);
+    expect(report.phases.revalidate?.median).toBe(0.5);
+    expect(report.phases.travelFreshness?.median).toBe(0.5);
+    expect(report.phases.consume?.median).toBe(0.25);
+    expect(report.phases.totalExclApproval?.median).toBe(4);
+  });
+
   it("starts the identity phase at the intent when no approval was asked", () => {
     const report = analyseEvents([
       at(0, "step.start", { kind: "gui" }),
