@@ -49,3 +49,10 @@ it("keeps the live task's Pause and Stop guidance out of Replay", () => {
     "The live task's heartbeat is late. Switch to Watch if you want to stop it.",
   );
 });
+
+it("drops Pause and the Stop shortcut once the task has finished", () => {
+  const idle = { ...agent, snapshot: { sessionId, cellId, status: "idle" as const, toolCalls: 0 } };
+  render(<SafetyControls safety={{ ...safety, canPause: false }} agent={idle} cell={null} />);
+  expect(screen.queryByRole("button", { name: "Pause after this step" })).toBeNull();
+  expect(screen.queryByText("Stop: Ctrl/Cmd + Shift + .")).toBeNull();
+});

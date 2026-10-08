@@ -41,6 +41,7 @@ test("a finished task says Done, with no clock and the computer's own control", 
   await expect(hudButton(page)).toHaveText("Stop computer");
   await expect(page.getByTestId("hud-stop-session")).toHaveCount(0);
   await expect(page.locator(".task-connection")).toHaveText("Ready for follow-up");
+  await expect(page.getByRole("button", { name: "Pause after this step" })).toHaveCount(0);
   await page.waitForTimeout(2500);
   await expect(status(page)).toHaveText("Done");
   await expect(page.getByTestId("hud-elapsed")).toHaveCount(0);

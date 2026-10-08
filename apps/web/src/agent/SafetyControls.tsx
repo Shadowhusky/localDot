@@ -65,6 +65,8 @@ export function SafetyControls({
     }
   };
   const pause = safety.pause;
+  const status = agent.snapshot?.status;
+  const taskOpen = !replaying && !!agent.sessionId && status !== "ended" && status !== "idle";
   return (
     <div className="safety-controls">
       {safety.approval && (
@@ -88,7 +90,7 @@ export function SafetyControls({
           </div>
         </ApprovalCard>
       )}
-      {!replaying && !!agent.sessionId && agent.snapshot?.status !== "ended" && (
+      {taskOpen && (
         <div className="safety-task-controls">
           {pause ? (
             <>
