@@ -161,6 +161,17 @@ describe("consequential steps still stop under Balanced", () => {
     expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
   });
 
+  it("saving to its memory asks", async () => {
+    const h = harness(DEFAULT_AUTONOMY);
+    await run(h.ctx, {
+      id: "m",
+      kind: "tool",
+      tool: "remember",
+      input: { file: "MEMORY.md", op: "append", text: "Prefers the soft brush." },
+    });
+    expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+  });
+
   it("an upload asks", async () => {
     const h = harness(DEFAULT_AUTONOMY);
     await authorizePrepared(h.ctx, {
@@ -193,6 +204,30 @@ describe("consequential steps still stop under Balanced", () => {
     );
     expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 1]);
   });
+
+  it.each(["Protected field", "Passwort"])(
+    "a field the page marks secret hands off even when named %s",
+    async (name) => {
+      const h = harness(DEFAULT_AUTONOMY);
+      await native(
+        h.ctx,
+        { action: "type", text: "hunter" },
+        {
+          target: {
+            point: { x: 1, y: 1 },
+            source: "dom",
+            role: "textbox",
+            name,
+            url: "https://login.example.test/",
+            secret: true,
+          },
+          window: 2,
+          point: { x: 1, y: 1 },
+        },
+      );
+      expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 1]);
+    },
+  );
 
   it("a known secret in the typed text hands off", async () => {
     const h = harness(DEFAULT_AUTONOMY);

