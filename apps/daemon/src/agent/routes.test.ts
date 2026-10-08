@@ -318,6 +318,43 @@ describe("agent user routes", () => {
     expect(offline.keys).toEqual([]);
     expect(offline.providers).toEqual(body.providers);
   });
+  it("marks plans, their rule and the plans not offered, which list no models", async () => {
+    const f = await setup();
+    const body = (await (await f.send("GET", "/api/agent/providers")).json()) as {
+      providers: {
+        id: string;
+        baseURL?: string;
+        plan?: true;
+        rule?: string;
+        notOffered?: string;
+        models: { id: string }[];
+      }[];
+    };
+    const row = (id: string) => body.providers.find((p) => p.id === id);
+    expect(row("minimax-coding-plan")).toMatchObject({
+      plan: true,
+      baseURL: "https://api.minimax.io/v1",
+      models: [{ id: "MiniMax-M3" }],
+    });
+    expect(row("minimax-coding-plan")).not.toHaveProperty("rule");
+    expect(row("alibaba-coding-plan")).toMatchObject({
+      plan: true,
+      rule: "Alibaba allows this plan only for tasks you start and watch.",
+    });
+    expect(row("zai")).not.toHaveProperty("plan");
+    expect(row("zai")?.models.map((m) => m.id)).toEqual(["glm-5v-turbo", "glm-4.6v"]);
+    const refused = body.providers.filter((p) => p.notOffered);
+    expect(refused.map((p) => p.id)).toEqual([
+      "zai-coding-plan",
+      "kimi-code-plan-global",
+      "volcengine-coding-plan",
+    ]);
+    for (const p of refused) {
+      expect(p.notOffered).toMatch(/ API key here instead\.$/);
+      expect(p.models).toEqual([]);
+      expect(p).not.toHaveProperty("baseURL");
+    }
+  });
   it("validates all settings roles and refuses writes after cancellation during key lookup", async () => {
     const f = await setup();
     const choice = {

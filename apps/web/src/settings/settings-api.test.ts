@@ -1,7 +1,12 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { loadProviderIndex, loadSettings, saveSettings } from "./settings-api.ts";
+import {
+  loadProviderIndex,
+  loadSettings,
+  type ProviderIndex,
+  saveSettings,
+} from "./settings-api.ts";
 import { providerFixture } from "./testing.ts";
 
 const apiFor = (fetchImpl: typeof fetch, onUnauthorized?: () => void) =>
@@ -25,6 +30,40 @@ describe("bounded authenticated settings wire", () => {
     await expect(
       loadProviderIndex(apiFor(async () => Response.json(duplicate))),
     ).rejects.toMatchObject({ uncertain: false });
+  });
+  it("takes plan, rule and not-offered metadata only as the registry states it", async () => {
+    const index = await loadProviderIndex(apiFor(async () => Response.json(providerFixture())));
+    const row = (id: string) => index.providers.find((p) => p.id === id);
+    expect(row("minimax-coding-plan")).toMatchObject({ plan: true });
+    expect(row("alibaba-coding-plan")?.rule).toBe(
+      "Alibaba allows this plan only for tasks you start and watch.",
+    );
+    expect(row("zai-coding-plan")).toMatchObject({
+      notOffered: expect.stringMatching(/^Z\.ai lets this plan run only/),
+      models: [],
+    });
+    const forged = (id: string, change: (row: ProviderIndex["providers"][number]) => void) => {
+      const index = providerFixture();
+      const row = index.providers.find((p) => p.id === id);
+      if (row) change(row);
+      return loadProviderIndex(apiFor(async () => Response.json(index)));
+    };
+    const zaiModels = row("zai")?.models ?? [];
+    for (const attempt of [
+      forged("zai", (p) => {
+        p.plan = true;
+      }),
+      forged("alibaba-coding-plan", (p) => {
+        p.rule = "Use it anywhere.";
+      }),
+      forged("zai-coding-plan", (p) => {
+        delete p.notOffered;
+      }),
+      forged("zai-coding-plan", (p) => {
+        p.models = zaiModels;
+      }),
+    ])
+      await expect(attempt).rejects.toMatchObject({ uncertain: false });
   });
   it("sends a snapshotted PUT once, with the bearer header and no unknown fields", async () => {
     const data = {

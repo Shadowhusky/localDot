@@ -53,6 +53,9 @@ export const ProviderIndex = z
           local: z.boolean(),
           baseURL: z.string().max(2048).optional(),
           availableIn: z.literal("m8").optional(),
+          plan: z.literal(true).optional(),
+          rule: z.string().max(512).optional(),
+          notOffered: z.string().max(512).optional(),
           models: z.array(model).max(10_000),
         }),
       )
@@ -73,6 +76,10 @@ export const ProviderIndex = z
         p.local !== (expected.local === true) ||
         p.baseURL !== expected.baseURL ||
         p.availableIn !== expected.availableIn ||
+        p.plan !== expected.plan ||
+        p.rule !== expected.rule ||
+        p.notOffered !== expected.notOffered ||
+        (p.notOffered !== undefined && p.models.length > 0) ||
         new Set(p.models.map((m) => m.id)).size !== p.models.length
       )
         ctx.addIssue({ code: "custom", message: "provider metadata mismatch" });

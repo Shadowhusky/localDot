@@ -360,8 +360,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           local: provider.local === true,
           ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
           ...(provider.availableIn ? { availableIn: provider.availableIn } : {}),
+          ...(provider.plan ? { plan: true } : {}),
+          ...(provider.rule ? { rule: provider.rule } : {}),
+          ...(provider.notOffered ? { notOffered: provider.notOffered } : {}),
           models: Object.values(
-            catalog && Object.hasOwn(catalog.providers, provider.id)
+            catalog && !provider.notOffered && Object.hasOwn(catalog.providers, provider.id)
               ? (catalog.providers[provider.id]?.models ?? {})
               : {},
           ).map((model) => ({
