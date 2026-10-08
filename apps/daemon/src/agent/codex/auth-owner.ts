@@ -18,7 +18,7 @@ import {
   RateLimitsRead,
   type RpcRequestOptions,
 } from "@localdot/codex-harness";
-import { ULID_PATTERN } from "@localdot/protocol";
+import { CHATGPT_DEVICE_CODE_OFF, ULID_PATTERN } from "@localdot/protocol";
 import type { AgentSession } from "../session.ts";
 import {
   AccountError,
@@ -35,8 +35,6 @@ const BUSY = "The ChatGPT account is busy.";
 const RETIRE_FAILED = "Account process could not be stopped.";
 const SUPERSEDED = "The ChatGPT account operation was superseded.";
 const BROWSER_GATE = "Browser sign-in is awaiting its bounded native callback check.";
-// ChatGPT ships device code sign-in switched off for personal accounts.
-const DEVICE_CODE_OFF = "Turn on device code sign-in in ChatGPT under Settings → Security first.";
 const opaque = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid account response.");
@@ -621,7 +619,7 @@ export class CodexAuthOwner {
         if (entry) await this.#retire(entry);
         if (this.#generation === mutation.generation && this.#mutation === mutation) {
           this.#invalidateAttempt();
-          this.#cache = { ...this.#base(), lastError: DEVICE_CODE_OFF };
+          this.#cache = { ...this.#base(), lastError: CHATGPT_DEVICE_CODE_OFF };
         }
         if (cause instanceof AccountError) throw cause;
         if (
@@ -629,7 +627,7 @@ export class CodexAuthOwner {
           ["install_required", "integrity_failed", "browser_unavailable"].includes(cause.code)
         )
           throw new AccountError(503, cause.message);
-        throw new AccountError(503, DEVICE_CODE_OFF);
+        throw new AccountError(503, CHATGPT_DEVICE_CODE_OFF);
       } finally {
         this.#endMutation(mutation);
       }

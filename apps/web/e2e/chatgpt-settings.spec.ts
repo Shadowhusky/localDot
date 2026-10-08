@@ -444,7 +444,7 @@ test.describe("ChatGPT plan states on the fixture daemon", () => {
     await daemon?.stop();
   });
   async function each(
-    state: "unavailable" | "not_installed" | "signed_in",
+    state: "unavailable" | "not_installed" | "signed_out" | "signed_in",
     check: (panel: Locator, page: Page, view: (typeof VIEWS)[number]) => Promise<void>,
   ) {
     for (const view of VIEWS) {
@@ -501,6 +501,40 @@ test.describe("ChatGPT plan states on the fixture daemon", () => {
       if ("phone" in view) expect(button?.height).toBeGreaterThanOrEqual(44);
       await expect(page.getByText(/daemon|harness/i)).toHaveCount(0);
     });
+  });
+  test("a code start that fails asks for device code sign-in and a retry works", async () => {
+    const deviceCode = async (mode: "on" | "off") =>
+      expect(
+        (await fetch(`${daemon.origin}/__qa/chatgpt/device-code/${mode}`, { method: "POST" }))
+          .status,
+      ).toBe(200);
+    try {
+      await each("signed_out", async (panel, page, view) => {
+        await deviceCode("off");
+        const signIn = panel.getByRole("button", { name: "Sign in with code", exact: true });
+        const press = async () => ("phone" in view ? signIn.tap() : signIn.click());
+        await expect(signIn).toBeEnabled();
+        await press();
+        await expect(panel.getByRole("alert")).toHaveText(DEVICE_HINT);
+        await expect(panel.getByText(DEVICE_HINT)).toHaveCount(1);
+        await expect(signIn).toBeEnabled();
+        await expect(panel.getByRole("button", { name: "Cancel sign-in" })).toHaveCount(0);
+        if ("phone" in view)
+          expect((await signIn.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+        await expect(panel.getByText(/blocked|could not be safely/i)).toHaveCount(0);
+        await expect(page.getByText(/daemon|harness/i)).toHaveCount(0);
+        await panel.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: test.info().outputPath(`chatgpt-code-refused-${view.name}.png`),
+        });
+        await deviceCode("on");
+        await press();
+        await expect(panel.getByLabel("Sign-in code")).toHaveValue("TEST-ONLY");
+        await expect(panel.getByRole("alert")).toHaveCount(0);
+      });
+    } finally {
+      await deviceCode("on");
+    }
   });
   test("a signed-in plan shows the account and its usage", async () => {
     await each("signed_in", async (panel) => {

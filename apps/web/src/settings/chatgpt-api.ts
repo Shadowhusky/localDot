@@ -1,4 +1,8 @@
-import { CodexInstallState, SubscriptionUsageData } from "@localdot/protocol";
+import {
+  CHATGPT_DEVICE_CODE_OFF,
+  CodexInstallState,
+  SubscriptionUsageData,
+} from "@localdot/protocol";
 import { z } from "zod";
 import type { ApiClient } from "../lib/api.ts";
 
@@ -88,13 +92,15 @@ export class ChatgptFailure extends Error {
   constructor(
     readonly uncertain: boolean,
     readonly status?: number,
+    readonly refusal?: string,
   ) {
     super(
-      status === 503
-        ? "ChatGPT account changes could not be safely completed. New ChatGPT tasks are blocked; check account status before continuing."
-        : uncertain
-          ? "The reply could not be verified. Check account status before another action."
-          : "ChatGPT status or the requested action is unavailable. Check the connection and try again.",
+      refusal ??
+        (status === 503
+          ? "ChatGPT account changes could not be safely completed. New ChatGPT tasks are blocked; check account status before continuing."
+          : uncertain
+            ? "The reply could not be verified. Check account status before another action."
+            : "ChatGPT status or the requested action is unavailable. Check the connection and try again."),
     );
     this.name = "ChatgptFailure";
   }
@@ -117,6 +123,38 @@ function bounded<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
     if (signal.aborted) abort();
   });
 }
+async function readText(
+  response: Response,
+  limit: number,
+  deadline: AbortSignal,
+  mutation: boolean,
+): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) return "";
+  let raw = "",
+    size = 0;
+  const decoder = new TextDecoder("utf-8", { fatal: true });
+  const abort = () => {
+    void reader.cancel().catch(() => {});
+  };
+  deadline.addEventListener("abort", abort, { once: true });
+  try {
+    for (;;) {
+      deadline.throwIfAborted();
+      const chunk = await bounded(reader.read(), deadline);
+      deadline.throwIfAborted();
+      if (chunk.done) break;
+      size += chunk.value.byteLength;
+      if (size > limit) throw new ChatgptFailure(mutation);
+      raw += decoder.decode(chunk.value, { stream: true });
+    }
+    return raw + decoder.decode();
+  } finally {
+    deadline.removeEventListener("abort", abort);
+    void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
+}
 async function request(
   api: ApiClient,
   method: "GET" | "POST",
@@ -124,6 +162,7 @@ async function request(
   expected: number,
   signal: AbortSignal,
   body?: unknown,
+  refusal?: string,
 ): Promise<unknown> {
   const cancel = new AbortController();
   const deadline = AbortSignal.any([
@@ -152,41 +191,25 @@ async function request(
     const response = await bounded(fetching, deadline);
     if (response.status === 401) api.rejectUnauthorized?.();
     if (response.status !== expected) {
+      // Only this exact sentence is shown; any other refusal body stays hidden.
+      if (
+        refusal &&
+        response.status === 503 &&
+        (await readText(response, 1024, deadline, mutation).catch(() => "")) === refusal
+      )
+        throw new ChatgptFailure(false, 503, refusal);
       void response.body?.cancel().catch(() => {});
       throw new ChatgptFailure(
         mutation && ![400, 401, 403, 404, 409, 413, 415, 422, 429].includes(response.status),
         response.status,
       );
     }
-    const reader = response.body?.getReader();
-    if (!reader) {
+    if (!response.body) {
       if (expected === 204) return undefined;
       throw new ChatgptFailure(mutation);
     }
-    let raw = "",
-      size = 0;
-    const decoder = new TextDecoder("utf-8", { fatal: true });
-    const abort = () => {
-      void reader.cancel().catch(() => {});
-    };
-    deadline.addEventListener("abort", abort, { once: true });
-    try {
-      for (;;) {
-        deadline.throwIfAborted();
-        const chunk = await bounded(reader.read(), deadline);
-        deadline.throwIfAborted();
-        if (chunk.done) break;
-        size += chunk.value.byteLength;
-        if (size > (expected === 204 ? 0 : 64 * 1024)) throw new ChatgptFailure(mutation);
-        raw += decoder.decode(chunk.value, { stream: true });
-      }
-      raw += decoder.decode();
-      return expected === 204 ? undefined : JSON.parse(raw);
-    } finally {
-      deadline.removeEventListener("abort", abort);
-      void reader.cancel().catch(() => {});
-      reader.releaseLock();
-    }
+    const raw = await readText(response, expected === 204 ? 0 : 64 * 1024, deadline, mutation);
+    return expected === 204 ? undefined : JSON.parse(raw);
   } catch (failure) {
     if (failure instanceof ChatgptFailure) throw failure;
     throw new ChatgptFailure(mutation);
@@ -218,7 +241,15 @@ export async function loginChatgpt(
 ): Promise<ChatgptLoginMaterial> {
   return checked(
     login,
-    await request(api, "POST", "/api/agent/chatgpt/login", 202, signal, { method: "code" }),
+    await request(
+      api,
+      "POST",
+      "/api/agent/chatgpt/login",
+      202,
+      signal,
+      { method: "code" },
+      CHATGPT_DEVICE_CODE_OFF,
+    ),
     true,
   );
 }

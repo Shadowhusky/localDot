@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { type KeydRecord, toBase64url, ulid } from "@localdot/protocol";
+import { CHATGPT_DEVICE_CODE_OFF, type KeydRecord, toBase64url, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import {
@@ -14,7 +14,12 @@ import {
   type CodexInstaller,
   type InstalledCodex,
 } from "../../../../harness/codex/src/index.ts";
-import type { ChatgptStatus, CodexAccount } from "../../../daemon/src/agent/codex/account.ts";
+import {
+  AccountError,
+  type ChatgptLogin,
+  type ChatgptStatus,
+  type CodexAccount,
+} from "../../../daemon/src/agent/codex/account.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { AgentSession } from "../../../daemon/src/agent/session.ts";
@@ -71,6 +76,8 @@ let chatgptState = (env.QA_CHATGPT || undefined) as
   | "not_installed"
   | "unavailable"
   | undefined;
+let deviceCodeOff = false,
+  signingIn: ChatgptLogin | undefined;
 let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
 const replays = Number(env.QA_REPLAYS ?? 2);
 
@@ -590,7 +597,10 @@ const account = {
           ? "signed_in"
           : chatgptState === "unavailable"
             ? "unavailable"
-            : "signed_out",
+            : signingIn
+              ? "signing_in"
+              : "signed_out",
+      ...(signingIn ? { login: signingIn } : {}),
       ...(chatgptState === "signed_in"
         ? {
             account: { email: "preview@example.test", plan: "plus" },
@@ -610,14 +620,20 @@ const account = {
           }
         : {}),
     }) as ChatgptStatus,
-  login: async () => ({
-    loginId: "owned-1",
-    method: "code",
-    verificationUrl: "https://auth.openai.com/codex/device",
-    userCode: "TEST-ONLY",
-    startedAt: Date.now(),
-  }),
-  cancelLogin: async () => {},
+  login: async () => {
+    if (deviceCodeOff) throw new AccountError(503, CHATGPT_DEVICE_CODE_OFF);
+    signingIn = {
+      loginId: "owned-1",
+      method: "code",
+      verificationUrl: "https://auth.openai.com/codex/device",
+      userCode: "TEST-ONLY",
+      startedAt: Date.now(),
+    };
+    return signingIn;
+  },
+  cancelLogin: async () => {
+    signingIn = undefined;
+  },
   logout: async () => {
     chatgptState = "signed_out";
   },
@@ -921,6 +937,13 @@ app.post("/__qa/chatgpt/:state", (c) => {
   if (!["signed_in", "signed_out", "not_installed", "unavailable"].includes(state))
     return c.text("unknown ChatGPT state", 400);
   chatgptState = state as NonNullable<typeof chatgptState>;
+  signingIn = undefined;
+  return c.json({ ok: true });
+});
+app.post("/__qa/chatgpt/device-code/:mode", (c) => {
+  const mode = c.req.param("mode");
+  if (mode !== "on" && mode !== "off") return c.text("device code is on or off", 400);
+  deviceCodeOff = mode === "off";
   return c.json({ ok: true });
 });
 app.post("/__qa/keyd/:mode", (c) => {

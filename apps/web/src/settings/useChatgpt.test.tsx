@@ -129,6 +129,59 @@ describe("owned explicit ChatGPT setup", () => {
     const button = screen.getByRole("button", { name: "Sign in with code" });
     expect(hint.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
+  it("asks for device code sign-in when a code cannot start, rereads status and allows a retry", async () => {
+    const off = "Turn on device code sign-in in ChatGPT under Settings → Security first.";
+    const f = fixture(),
+      v = await opened(f);
+    const reads = () => f.state.calls.filter((row) => row.method === "GET").length,
+      before = reads();
+    f.state.post = () => new Response(off, { status: 503 });
+    await act(async () => {
+      await v.current().login();
+    });
+    expect(reads()).toBe(before + 1);
+    expect(screen.getAllByText(off)).toEqual([screen.getByRole("alert")]);
+    expect(document.body.textContent).not.toContain("blocked");
+    expect(v.current()).toMatchObject({ verified: true, uncertain: false, canCancelLogin: false });
+    expect(screen.queryByRole("button", { name: "Cancel sign-in" })).toBeNull();
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Sign in with code" }).disabled,
+    ).toBe(false);
+    f.state.post = undefined;
+    await act(async () => {
+      await v.current().login();
+    });
+    expect(screen.getByLabelText<HTMLInputElement>("Sign-in code").value).toBe("TEST-CODE-A");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+  it("offers no stale Cancel sign-in when the reread after a refused code start fails", async () => {
+    const f = fixture(),
+      v = await opened(f);
+    f.state.post = () =>
+      new Response("Turn on device code sign-in in ChatGPT under Settings → Security first.", {
+        status: 503,
+      });
+    f.state.read = async () => {
+      throw new Error("inert failed reread");
+    };
+    await act(async () => {
+      await v.current().login();
+    });
+    expect(v.current()).toMatchObject({ verified: false, canCancelLogin: false });
+    expect(screen.queryByRole("button", { name: "Cancel sign-in" })).toBeNull();
+    expect(screen.getByRole("alert").textContent).toContain("Check the connection");
+  });
+  it("keeps the cautious message when a code start fails for another reason", async () => {
+    const f = fixture(),
+      v = await opened(f);
+    f.state.post = () => new Response("TEST-PRIVATE-PAUSE", { status: 503 });
+    await act(async () => {
+      await v.current().login();
+    });
+    expect(v.current().uncertain).toBe(true);
+    expect(screen.getByRole("alert").textContent).toContain("blocked");
+    expect(document.body.textContent).not.toContain("TEST-PRIVATE-PAUSE");
+  });
   it("shares one explicit installation and explicit cancellation across duplicate clicks", async () => {
     const f = fixture({
       available: true,

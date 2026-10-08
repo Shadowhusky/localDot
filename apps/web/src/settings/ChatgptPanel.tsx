@@ -1,3 +1,4 @@
+import { CHATGPT_DEVICE_CODE_OFF } from "@localdot/protocol";
 import { useState } from "react";
 import type { ChatgptControls } from "./useChatgpt.ts";
 
@@ -77,8 +78,8 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
               ? "Your account sign-in expired. Sign in again, then explicitly resume the paused task."
               : "Sign in with your ChatGPT account using a device code."}
           </p>
-          {status.state === "signed_out" && (
-            <p>Turn on device code sign-in in ChatGPT under Settings → Security first.</p>
+          {status.state === "signed_out" && account.error !== CHATGPT_DEVICE_CODE_OFF && (
+            <p>{CHATGPT_DEVICE_CODE_OFF}</p>
           )}
           <button type="button" disabled={disabled} onClick={() => void account.login()}>
             {status.state === "expired" ? "Sign in again" : "Sign in with code"}
