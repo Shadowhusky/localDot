@@ -39,11 +39,11 @@ for (const engine of ["chrome", "webkit"] as const)
       await expect(send).toBeDisabled();
       await expect(
         page.getByRole("region", { name: "Key safeguard" }).getByRole("alert"),
-      ).toContainText("Discard it or move it to Keys");
+      ).toContainText("Move it to Keys to keep it safe, or discard it.");
       await expect(page.getByRole("button", { name: "Edit message" })).toHaveCount(0);
       await box.pressSequentially(" continue");
       await expect(send).toBeDisabled();
-      await page.getByRole("button", { name: "Discard key and edit" }).tap();
+      await page.getByRole("button", { name: "Discard key" }).tap();
       await expect(page.getByRole("region", { name: "Key safeguard" })).toHaveCount(0);
       await expect(box).toBeFocused();
       await expect(send).toBeEnabled();
