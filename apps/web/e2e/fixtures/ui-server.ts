@@ -657,6 +657,9 @@ const agent: AgentRoutesDeps = {
     !killSwitch.isBusy(cellId),
   runner: {
     get: (key) => (session && key === session.id ? session : undefined),
+    get sessions() {
+      return new Map(session ? [[session.id, session]] : []);
+    },
     start: async (key, task) => {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
