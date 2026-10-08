@@ -26,12 +26,13 @@ No `tw-animate-css` and no `lucide-react`: motion is our own CSS and icons will 
 - `apps/web/vite.config.ts` runs the Tailwind plugin and resolves the `@/` alias from `tsconfig.json`
   (`"@/*": ["./src/*"]`). The root `vitest.config.ts` resolves it the same way.
 - `src/ui/stack.css` is the first stylesheet `main.tsx` imports. It declares
-  `@layer theme, base, components, utilities` and brings in Tailwind's theme and utilities.
+  `@layer theme, base, components, kit, utilities` and brings in Tailwind's theme and utilities. The
+  `kit` layer (T06) holds the kit's own component rules; see "Kit atoms" below.
 - Every stylesheet outside `src/ui/` (the legacy CSS) is wrapped in `@layer components` at build time by
   the `localdot:legacy-layer` plugin in `vite.config.ts`, so kit utilities override legacy rules and a
   reset stays beneath them. The plugin keeps `@custom-media` at the top level and restates the layer
   order in each file, so import order cannot change it. It goes when T29 deletes the legacy CSS.
-- Tailwind scans only `src/ui/`, without tests and `_spike` (`source(none)` plus `@source` in
+- Tailwind scans only `src/ui/`, without tests, `_spike` and `gallery` (`source(none)` plus `@source` in
   `stack.css`). Scanning all of `src/` minted about 20 utilities from legacy prose and identifiers
   (`.hidden`, `.fixed`, `.table`, `.shadow`, …), and its `.sr-only` outranked the legacy rules of the
   same name. A folder is added to `stack.css` when it moves onto the kit; the build test fails if any
@@ -147,6 +148,12 @@ earlier is redone if the choice is option 3. A failed T02 gate is a user decisio
 Appendix B, item 4), and T02 stays not accepted until it is made. T03 (tokens and base layer) ships no
 kit code and can go ahead.
 
+**What T06 did while the decision is open.** T06 ships no Base UI code and no tailwind-merge, so it holds
+under every option: its atoms (Tooltip included) are zero-dependency and use `clsx` directly, not `cn`.
+App JS is unchanged, because no screen uses the kit yet, and the build test's "no kit libraries" check
+still holds. Owning Tooltip is option 2's "about 21 kB" first paint; if option 1 is chosen, Tooltip can
+move onto Base UI behind the same `Tooltip`/`useTooltip` API. See "Kit atoms" below.
+
 ### Decision table
 
 | Component | Gates 2–3 | Plan |
@@ -155,7 +162,7 @@ kit code and can go ahead.
 | Combobox | pass | Base UI |
 | Popover | pass | Base UI |
 | Menu | pass | Base UI |
-| Tooltip | pass | Base UI, unless the gate 4 decision makes it own |
+| Tooltip | pass | own since T06 (zero-dependency, first paint); Base UI remains possible behind the same API |
 | Dialog / Sheet | pass | Base UI Dialog |
 | Drawer (bottom sheet) | pass | own drag over Dialog, so the budget can hold |
 | Toast | pass | own, so the budget can hold |
@@ -223,6 +230,44 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
 - **Stage.** `stage/theme.ts` reads the label font (`--font-ui`) with the colours, so canvas labels use
   the same stack as the page.
 
+## Kit atoms
+
+T06 (UI plan §4.2). Files in `src/ui/`: `Button`, `IconButton`, `Icon` with `icons.ts`, `Kbd`, `Badge`,
+`Tooltip` (`useTooltip`), `Spinner`, `Separator`, `VisuallyHidden`, plus `press.ts`, `merge.ts` and
+`actions.css`. Unit tests sit beside them; `e2e/ui-atoms.spec.ts` drives the gallery in Chrome and WebKit
+under the production CSP.
+
+- **The kit layer.** `actions.css` puts the kit's rules in `@layer kit`, above the legacy `components`
+  and below `utilities`. A kit control inside an older screen keeps its look whatever that screen's
+  element selectors (`.composer button`, `.settings-sheet button`, …) say, and a caller can still place it
+  with a utility. Legacy properties the kit does not set still reach it; the screen tasks remove those
+  selectors as they move a screen onto the kit (T04 guard rule 5). The legacy global
+  `button:active{transform:scale(.97)}` is overridden because the kit owns `transform`, but under reduced
+  motion its `opacity: .6` still dims a kit button while pressed until T29 deletes it.
+- **Gallery.** `src/ui/gallery/` is its own Vite root (`vite.gallery.config.ts`, output
+  `e2e/out/gallery`), like the spike, and never reaches `dist`. `?appearance=midnight` switches the
+  appearance. It shows every state: rest, hover, pressed, focus-visible, unavailable with a reason, busy,
+  touch, reduced motion and forced colours.
+- **Press.** `press.ts` writes `data-pressed` onto the element on pointer-down (and Space), so feedback is
+  in the frame the pointer lands, without a render. It lets go when the pointer slides off and returns
+  if it comes back. A control up to 120×44 px squeezes (`scale(.97)`); a wider one only darkens. The
+  plan says 40 px tall; 44 keeps the squeeze on coarse pointers, where buttons grow to 44.
+- **Unavailable.** `disabledReason` makes a control `aria-disabled` (never native `disabled`), keeps it
+  focusable, suppresses its click (and form submission), describes it through a hidden node, and shows
+  the reason as a tooltip on hover, keyboard focus, a mouse press or a tap.
+- **Tooltip.** Own, about 250 lines: 500 ms delay, then instant for 300 ms after one closes; closes on
+  leave, blur, a press elsewhere, scroll, resize and Escape (Escape on a focused trigger is consumed so a
+  parent layer stays open). The popup is `aria-hidden`: the trigger's name or `aria-describedby` already
+  carries the text. Positioned with inline styles set through the CSSOM, so the CSP holds. Grows from the
+  trigger on `--ease-spring`; opacity only under reduced motion.
+- **Targets.** Buttons reach 6 px past their edge on fine pointers and grow to 44 px on coarse ones;
+  icon buttons keep their visual size and reach to 44 px through `::after` at every size.
+- **Icons.** 35 Lucide 1.31.0 outlines (the plan's list), drawn at 16 px with a 1.5 px stroke at any
+  size. The licence is in `vendor/lucide/LICENSE`.
+- **Utilities minted by accident.** Words in kit sources mint `.grid`, `.hidden` and `.resize` into the
+  app's utilities. No legacy class uses those names (the build test checks), so they are inert.
+- **Cost.** App CSS grows 63.1 → 71.8 kB (13.1 → 14.7 kB gz); app JS is unchanged.
+
 ## Notes for the tasks that build on this
 
 - **Generator:** shadcn 4.21.0 writes `import { cn } from "cn"` and installs the unrelated npm package
@@ -257,5 +302,5 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   the CSP reports. Collect violations before any screenshot, or keep CSP checks in screenshot-free tests.
   Quick scripted typing right after a tap can also race WebKit's delayed click; wait for the popup first.
 - **Notices:** Tailwind's MIT banner ships in the built stylesheet. When kit code first ships in `dist`
-  (T06), extend `scripts/notices.mjs` to ship the MIT notices of Base UI and Floating UI (and
-  tailwind-merge if kept).
+  (the first screen moved onto the kit; T06 ships none), extend `scripts/notices.mjs` to ship Lucide's
+  licence (`vendor/lucide/LICENSE`) and, if Base UI is used, the MIT notices of Base UI and Floating UI.
