@@ -75,3 +75,19 @@ it("still pauses when the paused state cannot be journaled", () => {
   expect(pause.phase).toBe("pausing");
   expect(session.status).toBe("paused");
 });
+
+it("publishes a Pause once per pause, even across a takeover", async () => {
+  const { session, states } = setup();
+  session.setStatus("running");
+  const requestId = ulid();
+  session.requestSafetyPause(requestId);
+  void session.takeover("login", "Sign in").catch(() => {});
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(session.endTakeover(session.pendingTakeover ?? "", undefined)).toBe(true);
+  session.requestSafetyPause(requestId);
+  expect(states()).toEqual([
+    { state: "paused", reason: "user" },
+    { state: "waiting_user", reason: "takeover" },
+  ]);
+});
