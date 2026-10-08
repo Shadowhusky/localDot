@@ -1,0 +1,210 @@
+// @vitest-environment jsdom
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useRef, useState } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { Collapse, Disclosure } from "./Disclosure.tsx";
+import { Meter } from "./Meter.tsx";
+import { Popover } from "./Popover.tsx";
+import { ScrollArea } from "./ScrollArea.tsx";
+import { SegmentedControl } from "./SegmentedControl.tsx";
+import { StatusGlyph } from "./StatusGlyph.tsx";
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
+
+describe("StatusGlyph", () => {
+  it("names every state and draws the turning arc only while in progress", () => {
+    render(
+      <>
+        {(["todo", "doing", "done", "failed", "skipped"] as const).map((state) => (
+          <StatusGlyph key={state} state={state} />
+        ))}
+        <StatusGlyph state="todo" label="Not confirmed" />
+      </>,
+    );
+    expect(screen.getAllByRole("img").map((glyph) => glyph.getAttribute("aria-label"))).toEqual([
+      "Not started",
+      "In progress",
+      "Done",
+      "Failed",
+      "Skipped",
+      "Not confirmed",
+    ]);
+    expect(document.querySelectorAll(".ui-status-arc")).toHaveLength(1);
+    expect(document.querySelectorAll(".ui-status-check")).toHaveLength(1);
+  });
+});
+
+describe("Disclosure", () => {
+  it("mounts its content when opened, keeps it while folding, and folds on Escape", () => {
+    vi.useFakeTimers();
+    const changes: boolean[] = [];
+    render(
+      <Disclosure
+        summary="Earlier steps"
+        meta="12 steps"
+        onOpenChange={(open) => changes.push(open)}
+      >
+        <p>Inside</p>
+      </Disclosure>,
+    );
+    const trigger = screen.getByRole("button", { name: "Earlier steps 12 steps" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("Inside")).toBeNull();
+    fireEvent.click(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    const panel = document.getElementById(trigger.getAttribute("aria-controls") ?? "");
+    expect(panel?.hasAttribute("inert")).toBe(false);
+    const inside = screen.getByText("Inside");
+    fireEvent.keyDown(trigger, { key: "Escape" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    expect(panel?.hasAttribute("inert")).toBe(true);
+    expect(screen.getByText("Inside")).toBe(inside);
+    act(() => {
+      vi.advanceTimersByTime(400);
+    });
+    expect(screen.queryByText("Inside")).toBeNull();
+    expect(changes).toEqual([true, false]);
+  });
+
+  it("lets focus rings reach past its edge only once fully open", () => {
+    const { rerender } = render(<Collapse open={false}>content</Collapse>);
+    const collapse = document.querySelector(".ui-collapse") as HTMLElement;
+    rerender(<Collapse open>content</Collapse>);
+    expect(collapse.hasAttribute("data-settled")).toBe(false);
+    fireEvent.transitionEnd(collapse);
+    expect(collapse.hasAttribute("data-settled")).toBe(true);
+    rerender(<Collapse open={false}>content</Collapse>);
+    expect(collapse.hasAttribute("data-settled")).toBe(false);
+  });
+});
+
+function Segments() {
+  const [value, setValue] = useState<"all" | "screen" | "tools">("all");
+  return (
+    <SegmentedControl
+      label="Filter"
+      value={value}
+      onChange={setValue}
+      items={[
+        { value: "all", label: "All" },
+        { value: "screen", label: "Screen" },
+        { value: "tools", label: "Tools" },
+      ]}
+    />
+  );
+}
+
+describe("SegmentedControl", () => {
+  it("is one tab stop whose arrows, Home and End move the choice and focus together", () => {
+    render(<Segments />);
+    const [all, screenItem, tools] = screen.getAllByRole("radio") as HTMLElement[];
+    expect([all, screenItem, tools].map((item) => item?.tabIndex)).toEqual([0, -1, -1]);
+    all?.focus();
+    fireEvent.keyDown(all as HTMLElement, { key: "ArrowRight" });
+    expect(screenItem?.getAttribute("aria-checked")).toBe("true");
+    expect(document.activeElement).toBe(screenItem);
+    fireEvent.keyDown(screenItem as HTMLElement, { key: "End" });
+    expect(document.activeElement).toBe(tools);
+    fireEvent.keyDown(tools as HTMLElement, { key: "ArrowRight" });
+    expect(all?.getAttribute("aria-checked")).toBe("true");
+    const group = screen.getByRole("radiogroup", { name: "Filter" });
+    expect(group.style.getPropertyValue("--_index")).toBe("0");
+    fireEvent.click(tools as HTMLElement);
+    expect(group.style.getPropertyValue("--_index")).toBe("2");
+  });
+});
+
+function Anchored() {
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLButtonElement>(null);
+  return (
+    <>
+      <button ref={anchor} type="button" onClick={() => setOpen((shown) => !shown)}>
+        Usage
+      </button>
+      <button type="button">Elsewhere</button>
+      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} label="Usage details">
+        <button type="button">Inside</button>
+      </Popover>
+    </>
+  );
+}
+
+describe("Popover", () => {
+  it("takes focus, gives it back on Escape, and stays until its exit has played", () => {
+    vi.useFakeTimers();
+    render(<Anchored />);
+    const trigger = screen.getByRole("button", { name: "Usage" });
+    fireEvent.click(trigger);
+    const dialog = screen.getByRole("dialog", { name: "Usage details" });
+    expect(document.activeElement).toBe(dialog);
+    const pressEscape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
+    const outer = vi.fn();
+    document.body.addEventListener("keydown", outer);
+    act(() => {
+      dialog.dispatchEvent(pressEscape);
+    });
+    expect(outer).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(trigger);
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("closes on a press outside it, but not on its own trigger's press", () => {
+    render(<Anchored />);
+    const trigger = screen.getByRole("button", { name: "Usage" });
+    fireEvent.click(trigger);
+    fireEvent.pointerDown(trigger);
+    expect(screen.getByRole("dialog").hasAttribute("data-closing")).toBe(false);
+    fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }));
+    expect(screen.getByRole("dialog").hasAttribute("data-closing")).toBe(true);
+  });
+});
+
+describe("Meter", () => {
+  it("reports its value and marks the last tenth", () => {
+    render(
+      <>
+        <Meter value={40} label="Window used" />
+        <Meter value={95} label="Week used" />
+      </>,
+    );
+    const [low, high] = screen.getAllByRole("meter");
+    expect(low?.getAttribute("aria-valuenow")).toBe("40");
+    expect(low?.hasAttribute("data-high")).toBe(false);
+    expect(high?.hasAttribute("data-high")).toBe(true);
+  });
+});
+
+describe("ScrollArea", () => {
+  it("marks an edge only while content lies past it", () => {
+    render(
+      <ScrollArea aria-label="List">
+        <div>rows</div>
+      </ScrollArea>,
+    );
+    const area = screen.getByLabelText("List");
+    Object.defineProperties(area, {
+      scrollHeight: { configurable: true, value: 1000 },
+      clientHeight: { configurable: true, value: 200 },
+    });
+    area.scrollTop = 0;
+    fireEvent.scroll(area);
+    expect([area.hasAttribute("data-edge-top"), area.hasAttribute("data-edge-bottom")]).toEqual([
+      false,
+      true,
+    ]);
+    area.scrollTop = 800;
+    fireEvent.scroll(area);
+    expect([area.hasAttribute("data-edge-top"), area.hasAttribute("data-edge-bottom")]).toEqual([
+      true,
+      false,
+    ]);
+  });
+});
