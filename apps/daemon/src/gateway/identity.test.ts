@@ -68,7 +68,6 @@ describe("sameNativeIdentity", () => {
     expect(sameNativeIdentity(read(), read({ windowFrame: { ...FRAME, x: 40 } }))).toBe(false);
     expect(sameNativeIdentity(read(), read({ windowFrame: { ...FRAME, h: 700 } }))).toBe(false);
     expect(sameNativeIdentity(read(), read({ target: null }))).toBe(false);
-    expect(sameNativeIdentity(read({ target: null }), read())).toBe(false);
   });
 
   it("never confirms an approved element with a read that ran out of time", () => {
@@ -83,6 +82,17 @@ describe("sameNativeIdentity", () => {
     expect(sameNativeIdentity(late(), late({ window: 11 }))).toBe(false);
     expect(sameNativeIdentity(late(), read({ window: 11 }))).toBe(false);
     expect(sameNativeIdentity(late(), late({ windowFrame: { ...FRAME, y: 200 } }))).toBe(false);
+  });
+
+  it("binds only the window when focus was on no element at approval", () => {
+    // A window that has just opened takes focus a moment later: keys go to that window still.
+    const before = read({ target: null, point: null });
+    expect(sameNativeIdentity(before, read())).toBe(true);
+    expect(sameNativeIdentity(before, read({ window: 11 }))).toBe(false);
+    expect(sameNativeIdentity(before, read({ windowFrame: { ...FRAME, y: 200 } }))).toBe(false);
+    // No window under the point binds that there is none.
+    const nowhere = read({ target: null, window: null, windowFrame: undefined });
+    expect(sameNativeIdentity(nowhere, read())).toBe(false);
   });
 
   it("binds no window when the approved lookup never answered, and refuses one that appears", () => {

@@ -40,16 +40,16 @@ export function sameTarget(a: Target | null, b: Target | null): boolean {
 }
 
 // `approved` is the read an approval (or a freshness basis) was made on, `fresh` a later read of
-// the same action. Window and frame always bind. An approval made on a read that ran out of time
-// knew only the window, so that is all it binds; one made on an element is never confirmed by a
-// read that ran out of time.
+// the same action. Window and frame always bind. An approval made on a read that ran out of time,
+// or on keyboard focus that was on no element yet, knew only the window, so that is all it binds;
+// one made on an element is never confirmed by a read that ran out of time.
 export function sameNativeIdentity(
   approved: NativeActionIdentity,
   fresh: NativeActionIdentity,
 ): boolean {
   if (approved.window !== fresh.window || !sameRect(approved.windowFrame, fresh.windowFrame))
     return false;
-  if (approved.unknown) return true;
+  if (approved.unknown || approved.target === null) return true;
   if (fresh.unknown) return false;
   return samePoint(approved.point, fresh.point) && sameTarget(approved.target, fresh.target);
 }
