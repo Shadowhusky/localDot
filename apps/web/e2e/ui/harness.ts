@@ -48,7 +48,9 @@ export const test = base.extend<{ ui: Harness }>({
     await page.exposeFunction("recordCspViolation", (text: string) => probe.csp.push(text));
     await page.addInitScript(() => {
       document.addEventListener("securitypolicyviolation", (event) => {
-        // WebKit reports the stylesheet Playwright adds to take a screenshot, with no source file.
+        // WebKit reports the stylesheet Playwright adds to take a screenshot with no source file,
+        // as it does an inline <style> in the served HTML. Chrome names the document for the
+        // latter, so the Chrome projects are the ones that catch it.
         if (event.violatedDirective === "style-src-elem" && !event.sourceFile) return;
         void window.recordCspViolation(
           `${event.violatedDirective} ${event.blockedURI} ${event.sourceFile}:${event.lineNumber}`,
