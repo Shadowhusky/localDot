@@ -66,36 +66,41 @@ export function SafetyControls({
     }
   };
   const pause = safety.pause;
+  const approval = safety.approval;
   const status = agent.snapshot?.status;
   const taskOpen = !replaying && !!agent.sessionId && status !== "ended" && status !== "idle";
   return (
     <div className="safety-controls">
-      {safety.approval && (
+      {approval && (
         <ApprovalCard
-          key={`${safety.approval.approvalId}:${safety.approval.generation}:${safety.approval.revision}`}
-          card={safety.approval}
+          key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
+          card={approval}
           enabled={visible && safety.canApprove}
           visible={visible}
           pending={safety.pending === "approval"}
           onDecision={safety.answerApproval}
         >
-          <AlwaysAllow
-            card={safety.approval}
-            enabled={visible && safety.canApprove}
-            visible={visible}
-            pending={safety.pending === "approval"}
-            onDecision={safety.answerApproval}
-          />
-          <div className="notification-control">
-            <button
-              type="button"
-              disabled={permission === "granted" || permission === "unsupported" || !visible}
-              onClick={() => void enable()}
-            >
-              {permission === "granted" ? "Notifications enabled" : "Enable decision notifications"}
-            </button>
-            {notificationError && <p role="status">{notificationError}</p>}
-          </div>
+          {(canApprove) => (
+            <>
+              <AlwaysAllow
+                card={approval}
+                canApprove={canApprove}
+                onDecision={safety.answerApproval}
+              />
+              <div className="notification-control">
+                <button
+                  type="button"
+                  disabled={permission === "granted" || permission === "unsupported" || !visible}
+                  onClick={() => void enable()}
+                >
+                  {permission === "granted"
+                    ? "Notifications enabled"
+                    : "Enable decision notifications"}
+                </button>
+                {notificationError && <p role="status">{notificationError}</p>}
+              </div>
+            </>
+          )}
         </ApprovalCard>
       )}
       {safety.allowed && visible && !safety.approval && (

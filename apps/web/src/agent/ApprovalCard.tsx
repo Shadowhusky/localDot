@@ -18,7 +18,7 @@ export function ApprovalCard({
   pending: boolean;
   enabled?: boolean;
   visible?: boolean;
-  children?: ReactNode;
+  children?: ReactNode | ((canApprove: boolean) => ReactNode);
 }) {
   const value = CardSchema.safeParse(card);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -34,6 +34,7 @@ export function ApprovalCard({
   if (!value.success)
     return <p role="alert">This decision could not be verified. Check task status again.</p>;
   const expired = now >= value.data.expiresAt;
+  const canApprove = visible && enabled && !pending && !expired;
   const decide = (decision: ApprovalAnswer["decision"]) => {
     if (!visible || !enabled || pending || Date.now() >= value.data.expiresAt) return;
     void onDecision({
@@ -104,7 +105,7 @@ export function ApprovalCard({
               </ul>
             </section>
           )}
-          {children}
+          {typeof children === "function" ? children(canApprove) : children}
         </div>
         <div className="approval-footer">
           <p role="status">
@@ -115,11 +116,7 @@ export function ApprovalCard({
                 : "Approve this action once, decline it, or take control yourself."}
           </p>
           <div className="safety-actions">
-            <button
-              type="button"
-              disabled={!visible || !enabled || pending || expired}
-              onClick={() => decide("approve")}
-            >
+            <button type="button" disabled={!canApprove} onClick={() => decide("approve")}>
               Approve once
             </button>
             <button

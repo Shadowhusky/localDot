@@ -11,16 +11,12 @@ import type { AllowedChoice } from "./useSafety.ts";
 
 export function AlwaysAllow({
   card,
+  canApprove,
   onDecision,
-  pending,
-  enabled,
-  visible = true,
 }: {
   card: Card;
+  canApprove: boolean;
   onDecision(value: ApprovalAnswer): Promise<boolean> | boolean | undefined;
-  pending: boolean;
-  enabled: boolean;
-  visible?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const toggle = useRef<HTMLButtonElement>(null);
@@ -34,9 +30,8 @@ export function AlwaysAllow({
   const value = CardSchema.safeParse(card);
   if (!value.success || !value.data.always?.length) return null;
   const { always, ...decided } = value.data;
-  const blocked = !visible || !enabled || pending || Date.now() >= decided.expiresAt;
   const choose = (scope: (typeof always)[number]["scope"]) => {
-    if (!visible || !enabled || pending || Date.now() >= decided.expiresAt) return;
+    if (!canApprove || Date.now() >= decided.expiresAt) return;
     void onDecision({
       approvalId: decided.approvalId,
       generation: decided.generation,
@@ -53,7 +48,7 @@ export function AlwaysAllow({
         className="always-allow-toggle"
         aria-expanded={open}
         aria-controls={list}
-        disabled={blocked}
+        disabled={!canApprove}
         onClick={() => setOpen((old) => !old)}
       >
         Always allow…
@@ -65,7 +60,7 @@ export function AlwaysAllow({
             <button
               key={option.scope}
               type="button"
-              disabled={blocked}
+              disabled={!canApprove}
               onClick={() => choose(option.scope)}
               onKeyDown={(event) => {
                 if (event.key !== "Escape") return;

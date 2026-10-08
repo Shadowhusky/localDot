@@ -30,7 +30,7 @@ const card: ApprovalCard = {
 const open = () => fireEvent.click(screen.getByRole("button", { name: "Always allow…" }));
 
 it("lists exactly the options the card offers", () => {
-  render(<AlwaysAllow card={card} enabled pending={false} onDecision={vi.fn()} />);
+  render(<AlwaysAllow card={card} canApprove onDecision={vi.fn()} />);
   const toggle = screen.getByRole("button", { name: "Always allow…" });
   expect(toggle.getAttribute("aria-expanded")).toBe("false");
   expect(screen.queryByRole("button", { name: "For this task" })).toBeNull();
@@ -49,14 +49,14 @@ it.each([
   ["an empty list", []],
 ])("shows nothing for a card with %s", (_name, always) => {
   const { container } = render(
-    <AlwaysAllow card={{ ...card, always }} enabled pending={false} onDecision={vi.fn()} />,
+    <AlwaysAllow card={{ ...card, always }} canApprove onDecision={vi.fn()} />,
   );
   expect(container.innerHTML).toBe("");
 });
 
 it("approves with the chosen scope and nothing else", () => {
   const onDecision = vi.fn(async () => true);
-  render(<AlwaysAllow card={card} enabled pending={false} onDecision={onDecision} />);
+  render(<AlwaysAllow card={card} canApprove onDecision={onDecision} />);
   open();
   fireEvent.click(screen.getByRole("button", { name: "On mail.example.test" }));
   expect(onDecision).toHaveBeenCalledOnce();
@@ -69,28 +69,36 @@ it("approves with the chosen scope and nothing else", () => {
   });
 });
 
-it.each([
-  ["not enabled", { enabled: false }],
-  ["pending", { pending: true }],
-  ["hidden", { visible: false }],
-  ["expired", { card: { ...card, expiresAt: Date.now() - 1 } }],
-])("is disabled like the card's buttons when %s", (_name, over) => {
+it("is disabled while the card cannot approve", () => {
   const onDecision = vi.fn();
-  const props = { card, enabled: true, pending: false, onDecision, ...over };
-  const view = render(<AlwaysAllow {...props} />);
+  const view = render(<AlwaysAllow card={card} canApprove={false} onDecision={onDecision} />);
   const toggle = screen.getByRole("button", { name: "Always allow…" }) as HTMLButtonElement;
   expect(toggle.disabled).toBe(true);
-  view.rerender(<AlwaysAllow {...props} card={card} enabled pending={false} visible />);
+  view.rerender(<AlwaysAllow card={card} canApprove onDecision={onDecision} />);
   open();
-  view.rerender(<AlwaysAllow {...props} />);
+  view.rerender(<AlwaysAllow card={card} canApprove={false} onDecision={onDecision} />);
   const option = screen.getByRole("button", { name: "For this task" }) as HTMLButtonElement;
   expect(option.disabled).toBe(true);
   fireEvent.click(option);
   expect(onDecision).not.toHaveBeenCalled();
 });
 
+it("checks the card has not expired at the moment you choose", () => {
+  const onDecision = vi.fn();
+  render(
+    <AlwaysAllow
+      card={{ ...card, expiresAt: Date.now() - 1 }}
+      canApprove
+      onDecision={onDecision}
+    />,
+  );
+  open();
+  fireEvent.click(screen.getByRole("button", { name: "For this task" }));
+  expect(onDecision).not.toHaveBeenCalled();
+});
+
 it("closes with Escape and returns focus to its button", () => {
-  render(<AlwaysAllow card={card} enabled pending={false} onDecision={vi.fn()} />);
+  render(<AlwaysAllow card={card} canApprove onDecision={vi.fn()} />);
   open();
   const option = screen.getByRole("button", { name: "For this task" });
   option.focus();

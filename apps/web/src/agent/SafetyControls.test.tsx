@@ -116,3 +116,31 @@ it("puts Always allow in the approval card and confirms the choice after it", ()
   view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} visible={false} />);
   expect(screen.queryByText("Allowed for this task: sending messages.")).toBeNull();
 });
+
+it.each([
+  ["ready", {}, {}, true],
+  ["the task cannot take a decision", { canApprove: false }, {}, false],
+  ["a decision is being sent", { pending: "approval" }, {}, false],
+  ["Settings or Keys is open", {}, { visible: false }, false],
+  ["the card has expired", { approval: { ...card, expiresAt: Date.now() - 1 } }, {}, false],
+])("lets Always allow approve only while Approve once can, when %s", (_name, over, props, can) => {
+  const answerApproval = vi.fn(async () => true);
+  const deciding = {
+    ...safety,
+    approval: card,
+    canApprove: true,
+    pending: null,
+    answerApproval,
+    allowed: null,
+    ...over,
+  } as unknown as SafetyView;
+  render(<SafetyControls safety={deciding} agent={agent} cell={null} {...props} />);
+  const button = (name: string) =>
+    screen.getByRole("button", { name, hidden: true }) as HTMLButtonElement;
+  expect(button("Approve once").disabled).toBe(!can);
+  expect(button("Always allow…").disabled).toBe(!can);
+  const option = button("For this task");
+  expect(option.disabled).toBe(!can);
+  fireEvent.click(option);
+  expect(answerApproval).toHaveBeenCalledTimes(can ? 1 : 0);
+});
