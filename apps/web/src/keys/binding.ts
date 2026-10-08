@@ -112,9 +112,20 @@ export function bindingOf(d: KeyDraft): DraftCheck {
   return { ok: true, binding: { id, kind: "http", hosts, header, format: d.format } };
 }
 
+export const CLAUDE_PLAN_REFUSAL =
+  "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+
+// A Claude plan's sign-in token. Anthropic lets no other app store or send one, for any provider.
+export const claudePlanToken = (value: string) => value.trimStart().startsWith("sk-ant-oat");
+
+// What the key field's value starts with, where one provider's keys all share a prefix.
+export const valueHint = (d: KeyDraft) =>
+  d.kind === "llm" && d.provider === "anthropic" ? "sk-ant-api" : undefined;
+
 // keyd stores 8 to 8,192 printable ASCII characters with no space at either end; a paste's stray
 // spaces are trimmed first.
 export function valueProblem(value: string): string | undefined {
+  if (claudePlanToken(value)) return CLAUDE_PLAN_REFUSAL;
   if (value.length < 8 || value.length > 8192 || !PRINTABLE_ASCII.test(value)) {
     return "A key is 8 to 8,192 characters of printable ASCII.";
   }

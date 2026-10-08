@@ -7,6 +7,7 @@ import {
   type KeyDraft,
   needsBaseURL,
   PROVIDER_NAMES,
+  valueHint,
   valueProblem,
 } from "./binding.ts";
 
@@ -156,6 +157,22 @@ describe("valueProblem", () => {
     ]) {
       expect(valueProblem(bad)).toBeDefined();
     }
+  });
+});
+
+describe("Claude plan tokens", () => {
+  const SENTENCE =
+    "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+  it("refuses a pasted plan token with the sentence, whatever the key is for", () => {
+    for (const value of [`sk-ant-oat01-${"a".repeat(95)}`, `sk-ant-oat02-${"b".repeat(40)}`])
+      expect(valueProblem(value)).toBe(SENTENCE);
+    expect(valueProblem(`sk-ant-api03-${"a".repeat(95)}`)).toBeUndefined();
+    expect(valueProblem(`sk-ant-admin01-${"a".repeat(95)}`)).toBeUndefined();
+  });
+  it("says what an Anthropic key starts with, and nothing for other keys", () => {
+    expect(valueHint(draft({ provider: "anthropic" }))).toBe("sk-ant-api");
+    expect(valueHint(draft({ provider: "openai" }))).toBeUndefined();
+    expect(valueHint(draft({ kind: "http", provider: "anthropic" }))).toBeUndefined();
   });
 });
 

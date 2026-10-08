@@ -11,6 +11,8 @@ import {
 } from "react";
 import {
   bindingOf,
+  CLAUDE_PLAN_REFUSAL,
+  claudePlanToken,
   type DraftField,
   EMPTY_DRAFT,
   FORMAT_NAMES,
@@ -19,6 +21,7 @@ import {
   needsBaseURL,
   PROVIDER_NAMES,
   type Provider,
+  valueHint,
   valueProblem,
 } from "./binding.ts";
 import { problemText } from "./keys-api.ts";
@@ -174,6 +177,7 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     };
   }, []);
   const check = bindingOf(draft);
+  const hint = valueHint(draft);
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
     revision.current++;
@@ -205,6 +209,11 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     const value = input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";
+    // Refused for itself first: fixing another field would not make a plan token usable.
+    if (claudePlanToken(value)) {
+      setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+      return;
+    }
     if (!check.ok) {
       setProblem({
         ...check,
@@ -386,10 +395,25 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
             spellCheck={false}
             data-1p-ignore="true"
             data-lpignore="true"
-            onChange={() => problem?.field === "value" && setProblem(null)}
-            {...invalid("value")}
+            onChange={(e) => {
+              if (claudePlanToken(e.currentTarget.value)) {
+                e.currentTarget.value = "";
+                setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+              } else if (problem?.field === "value") setProblem(null);
+            }}
+            aria-invalid={shown?.field === "value" || undefined}
+            aria-describedby={
+              [shown?.field === "value" && "key-value-error", hint && "key-value-hint"]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
           />
         </label>
+        {hint && (
+          <p className="field-hint" id="key-value-hint">
+            Starts with <code>{hint}</code>
+          </p>
+        )}
         {errorFor("value")}
         {shown?.field === "form" && (
           <p className="field-error" role="alert">
