@@ -127,3 +127,27 @@ it("says what a delivered step tried, not that it finished, when it stopped part
     status: "failed",
   });
 });
+
+it("says plainly that a drag cancelled after its press dropped nothing", () => {
+  for (const [reason, status, text] of [
+    ["user", "cancelled", "Stopped before the drop. The drag was cancelled."],
+    ["stale", "failed", "Another window was at the drop point. The drag was cancelled."],
+  ] as const) {
+    const events = [
+      ev("action.intent", 0, { verb: "drag", label: 'Drag "report.txt" to "Trash"', risk: "none" }),
+      ev("action.dispatch", 100, {
+        input: { kind: "drag", from: { x: 1, y: 1 }, to: { x: 9, y: 9 }, button: "left" },
+        pressT: 90_000,
+        ringAt: 120_000,
+        injector: "xtest",
+      }),
+      ev("action.cancel", 900, { reason }),
+    ];
+    expect(stepRows(foldEvents(emptyModel(), events))[0]).toMatchObject({
+      label: 'Drag "report.txt" to "Trash"',
+      delivery: "delivered",
+      status,
+      reason: text,
+    });
+  }
+});

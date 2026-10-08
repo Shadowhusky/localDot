@@ -849,6 +849,20 @@ const DRAG_CARD = {
     ["Button", "left"],
   ],
 };
+// The release of a button held between actions (?kind=held): a drag from where it went down.
+const HELD_CARD = {
+  actionClass: "delete",
+  risk: "high",
+  title: "Delete item",
+  fields: [
+    ["Target", "report.txt"],
+    ["Drop target", "Trash"],
+    ["Tool", "computer"],
+    ["Action", "release a mouse button"],
+    ["Drag", "(214, 180) to (1180, 640)"],
+    ["Button", "left"],
+  ],
+};
 app.post("/__qa/approval", (c) => {
   if (!session?.generation) return c.text("no brain", 409);
   const risk = (c.req.query("risk") ?? "high") as "medium" | "high";
@@ -868,18 +882,20 @@ app.post("/__qa/approval", (c) => {
       } as never,
       (kind === "drag"
         ? DRAG_CARD
-        : keys
-          ? { actionClass: "unknown", risk: "medium", title: "Review action", fields: keys }
-          : {
-              actionClass: "send",
-              risk,
-              title: "Send the monthly report to team@example.test",
-              fields: [
-                ["To", "team@example.test"],
-                ["Subject", "Monthly report (sample)"],
-                ["Attachment", "summary.md"],
-              ],
-            }) as never,
+        : kind === "held"
+          ? HELD_CARD
+          : keys
+            ? { actionClass: "unknown", risk: "medium", title: "Review action", fields: keys }
+            : {
+                actionClass: "send",
+                risk,
+                title: "Send the monthly report to team@example.test",
+                fields: [
+                  ["To", "team@example.test"],
+                  ["Subject", "Monthly report (sample)"],
+                  ["Attachment", "summary.md"],
+                ],
+              }) as never,
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
@@ -912,47 +928,79 @@ app.post("/__qa/keys", (c) => {
   }
   return c.json({ ok: true });
 });
-// Pointer steps with the gateway's own labels: a file dragged onto Trash, a hover, a button held
-// down and released, and a drag stopped before its drop (delivered, then failed).
+// Pointer steps with the gateway's own labels (model pixels): a file dragged onto Trash, a hover,
+// a button held down and released, a drag stopped by you and one whose drop window changed (both
+// delivered, then cancelled before the drop), and a held button let go of when the task stopped.
 app.post("/__qa/pointer", (c) => {
   if (!session) return c.text("no session", 409);
   const report = { point: { x: 428, y: 360 }, source: "ax" as const, name: "report.txt" };
   const trash = { point: { x: 2360, y: 1280 }, source: "ax" as const, name: "Trash" };
   const at = (x: number, y: number) => ({ x, y });
-  for (const [verb, label, input, error] of [
+  const model = (p: { x: number; y: number }) => at(p.x / 2, p.y / 2);
+  for (const [verb, label, input, cancel] of [
     [
       "drag",
-      dragLabel({ target: report, point: report.point }, { target: trash, point: trash.point }),
+      dragLabel(
+        { target: report, point: model(report.point) },
+        { target: trash, point: model(trash.point) },
+      ),
       { kind: "drag", from: report.point, to: trash.point, button: "left", durationMs: 600 },
       undefined,
     ],
-    ["move", moveLabel(null, at(1280, 640)), { kind: "move", to: at(1280, 640) }, undefined],
+    ["move", moveLabel(null, at(640, 320)), { kind: "move", to: at(1280, 640) }, undefined],
     [
       "click",
-      buttonLabel("down", "left", null, at(1280, 640)),
+      buttonLabel("down", "left", null, at(640, 320)),
       { kind: "down", button: "left", at: at(1280, 640) },
       undefined,
     ],
     [
       "click",
-      buttonLabel("up", "left", null, at(1800, 840)),
+      buttonLabel("up", "left", null, at(900, 420)),
       { kind: "up", button: "left", at: at(1800, 840) },
       undefined,
     ],
     [
       "drag",
-      dragLabel({ target: null, point: at(300, 900) }, { target: null, point: at(1900, 300) }),
+      dragLabel({ target: null, point: at(150, 450) }, { target: null, point: at(950, 150) }),
       { kind: "drag", from: at(300, 900), to: at(1900, 300), button: "left", durationMs: 900 },
-      "another window is at the drop point now; the drag let go where it started",
+      "user",
+    ],
+    [
+      "drag",
+      dragLabel(
+        { target: report, point: model(report.point) },
+        { target: null, point: at(950, 150) },
+      ),
+      { kind: "drag", from: report.point, to: at(1900, 300), button: "left", durationMs: 900 },
+      "stale",
     ],
   ] as const) {
     const step = ulid();
     session.append("step.start", { kind: "gui", planItem: "calc" }, step);
     session.append("action.intent", { verb, label, risk: "none" }, step);
     session.append("action.dispatch", { input, pressT: 0, ringAt: 0, injector: "xtest" }, step);
-    session.append("action.result", error ? { ok: false, error } : { ok: true }, step);
-    session.append("step.end", { status: error ? "failed" : "ok" }, step);
+    if (cancel) session.append("action.cancel", { reason: cancel }, step);
+    else session.append("action.result", { ok: true }, step);
+    session.append(
+      "step.end",
+      { status: cancel === "user" ? "cancelled" : cancel ? "failed" : "ok" },
+      step,
+    );
   }
+  session.append("action.intent", {
+    verb: "click",
+    label: "Release the left button, cancelling the drag",
+    point: at(1800, 840),
+    risk: "none",
+  });
+  session.append("action.dispatch", {
+    input: { kind: "up", button: "left", at: at(1800, 840) },
+    pressT: 0,
+    ringAt: 0,
+    injector: "xtest",
+  });
+  session.append("action.result", { ok: true });
   return c.json({ ok: true });
 });
 app.post("/__qa/ask", (c) => {

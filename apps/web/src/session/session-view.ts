@@ -14,6 +14,20 @@ export interface StepRowView {
   reason?: string;
 }
 
+const CANCEL_REASONS: Record<string, string> = {
+  preflight: "The action was refused before input.",
+  policy: "The action was blocked by policy.",
+  user: "Cancelled by you.",
+  model: "Cancelled by the agent.",
+  timeout: "The action timed out.",
+  stale: "The target changed before input.",
+};
+// A cancel after the input was delivered: a drag that pressed, then was cancelled before its drop.
+const DROP_CANCEL_REASONS: Record<string, string> = {
+  user: "Stopped before the drop. The drag was cancelled.",
+  stale: "Another window was at the drop point. The drag was cancelled.",
+};
+
 export function stepRows(model: SessionModel): StepRowView[] {
   const rows = new Map<string, StepRowView>();
   const stepOf = (a: ActionState) => a.step ?? a.id;
@@ -47,14 +61,9 @@ export function stepRows(model: SessionModel): StepRowView[] {
       ...(a.cancel
         ? {
             reason:
-              {
-                preflight: "The action was refused before input.",
-                policy: "The action was blocked by policy.",
-                user: "Cancelled by you.",
-                model: "Cancelled by the agent.",
-                timeout: "The action timed out.",
-                stale: "The target changed before input.",
-              }[a.cancel.reason] ?? "The action was cancelled.",
+              (a.dispatch ? DROP_CANCEL_REASONS[a.cancel.reason] : undefined) ??
+              CANCEL_REASONS[a.cancel.reason] ??
+              "The action was cancelled.",
           }
         : {}),
     });
