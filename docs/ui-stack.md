@@ -158,8 +158,8 @@ move onto Base UI behind the same `Tooltip`/`useTooltip` API. See "Kit atoms" be
 
 | Component | Gates 2–3 | Plan |
 | --- | --- | --- |
-| Select | pass | Base UI (needs `KitProvider`) |
-| Combobox | pass | Base UI |
+| Select | pass | own for now (T07, zero-dependency), pending gate 4; Base UI remains possible behind the same API |
+| Combobox | pass | own for now (T07, zero-dependency), pending gate 4; Base UI remains possible behind the same API |
 | Popover | pass | Base UI |
 | Menu | pass | Base UI |
 | Tooltip | pass | own for now (T06, zero-dependency, first paint), pending gate 4; Base UI remains possible behind the same API |
@@ -167,7 +167,7 @@ move onto Base UI behind the same `Tooltip`/`useTooltip` API. See "Kit atoms" be
 | Drawer (bottom sheet) | pass | own drag over Dialog, so the budget can hold |
 | Toast | pass | own, so the budget can hold |
 | ScrollArea | not in the spike | Base UI (needs `KitProvider`); T09 adds it to the CSP check |
-| Checkbox, Switch, RadioGroup, Tabs | not in the spike | Base UI (§4.2); they render no `<style>` |
+| Checkbox, Switch, RadioGroup, Tabs | not in the spike | own (T07): native inputs and buttons carry the semantics, so Base UI would add first-paint JS for no accessibility gain |
 
 No component failed the CSP or touch gates, so none is "own" for those reasons. Only `Select.Popup`,
 `Select.List` and `ScrollArea` (root and viewport) render a `<style>` element in Base UI 1.8.0.
@@ -278,12 +278,67 @@ under the production CSP.
   control); a sticky bar or panel that can cover kit controls in the same stacking context needs
   `z-index: 2` or its own stacking context. Today that is the Keys sheet's sticky `.keys-discard` bar,
   for T20.
-- **Icons.** 35 Lucide 1.31.0 outlines (the plan's list), drawn at 16 px with a 1.5 px stroke at any
-  size. The licence is in `vendor/lucide/LICENSE`.
+- **Icons.** 36 Lucide 1.31.0 outlines (the plan's list, and `search` for T07's Combobox), drawn at
+  16 px with a 1.5 px stroke at any size. The licence is in `vendor/lucide/LICENSE`.
 - **Utilities minted by accident.** Words in kit sources mint `.grid`, `.hidden` and `.resize` into the
   app's utilities. No legacy class uses those names (the build test checks), so they are inert.
 - **Cost.** App CSS grows 63.1 → 72.4 kB (13.1 → 14.9 kB gzip, as Vite reports it); app JS is
   unchanged.
+
+## Fields and choices
+
+T07 (UI plan §4.2), with T08's Select and Combobox brought forward because the provider and model
+pickers need them. Files in `src/ui/`: `Field`, `TextField`, `TextArea`, `MoneyField`, `Checkbox`,
+`Switch` (sharing `choice.tsx`), `RadioCards`, `SegmentedControl`, `Tabs`, `Select`, `Combobox`, and
+their parts `listbox.ts` (search, highlight, typeahead), `Listbox`, `PickerPopup` and `picker.ts`;
+styles in `fields.css` and `pickers.css`, in the kit layer. Unit tests sit beside them;
+`e2e/ui-fields.spec.ts` drives the gallery's Fields page (`?page=fields`) in Chrome and WebKit, on a
+desktop and on a touch phone, under the production CSP. No screen uses them yet; T19 moves Settings.
+
+- **Zero-dependency, like the atoms.** Gate 4 is still open, so nothing here ships Base UI. Checkbox,
+  Switch and radio cards are native inputs under a drawn control (the input lies over the drawing, so
+  touch exploration finds it where it shows); segments and tabs are buttons with roving focus. Select
+  and Combobox follow the ARIA combobox pattern with `aria-activedescendant`, so focus stays on the
+  trigger or the search field. If gate 4 goes to Base UI, Select and Combobox can move onto it behind
+  the same props; the drawn controls have nothing to gain.
+- **Field.** Label above (footnote 500, fg-2), and one message cell below: the description, an error
+  (with an alert glyph, never colour alone) and an unavailable reason share it, so swapping one for
+  another moves nothing under the field. The control takes its id, description, `aria-invalid` and
+  availability from the Field. A click on the label focuses the control and never opens a picker.
+- **Unavailable** follows the atoms: `aria-disabled`, focusable, a reason in place of the description
+  (text fields become read-only; a segment gives its reason as a tooltip). React still reports the
+  change of a checkbox whose click was cancelled, so the choice hook drops it.
+- **Sizes.** Fields are 32 px, 36 in a sheet (`size="lg"`), and 44 on a coarse pointer, where text is
+  17 px (the system reading size, which also keeps iOS from zooming a focused field). Choice rows,
+  radio cards, segments and picker triggers reach 44 on touch; sheet rows are 48.
+- **Motion.** The switch knob springs and stretches toward its side while held; the check draws in;
+  the segmented thumb slides on `--ease-spring` and, being a CSS transition, an interruption sets off
+  from where it is (the spec samples it every frame and finds no step over half a segment). A popover
+  grows out of its trigger and shrinks back faster; a sheet rises from the bottom and leaves the same
+  way. Under reduced motion every one of these is an opacity change or a cut.
+- **Pickers.** A mouse opens the list on press, so press, drag and release on a row chooses it, as a
+  desktop pop-up menu does; a tap opens it on release, so a scroll that starts on the trigger never
+  does. A row is chosen on release (or on a click from assistive technology), and the closing surface
+  keeps taking taps until it is gone, so the click a touch sends afterwards never reaches the page.
+  Escape and a press outside close only the list and are kept from whatever is beneath it (a sheet that
+  closes on Escape stays open). On a phone (`width < 760px` and a coarse pointer) the list is a bottom
+  sheet with a grabber and a close button; its head follows a drag 1:1 and a release projected past a
+  third of its height (deceleration .998) closes it, while a finger that stopped before lifting carries
+  no speed. The Combobox adds a search field (every word must match the label, keywords or value;
+  matches are marked), can offer the typed text as a value of its own, pinned last, and never moves
+  the search field while the list filters: a popover below its trigger is anchored at the top, one above
+  it holds its height, and the phone sheet is full height. Focus returns to the trigger after React's
+  commit, which would otherwise hand it back to a search field it saw focused.
+- **Legacy press rule.** `theme.css` scales any pressed `<button>` to .97. The picker trigger and the
+  segments hold `transform: none`: in WebKit the rule shrank the trigger just as the list measured it
+  to open, and the popover came out 3 % narrower than its trigger.
+- **Gallery.** The stand-in gallery has a page switch (Atoms, Fields); `parts.tsx` holds the shared
+  section and specimen frames. The Fields page has a stand-in settings panel that closes on Escape, to
+  show the list keeping Escape from it, and RadioCards stands in for the theme picker.
+- **Utilities minted by accident.** Kit sources now also mint `.fixed`, `.block` and `.transition`. No
+  legacy class or markup uses those names, so they stay inert.
+- **Cost.** App CSS grows 74.2 → 93.2 kB (15.3 → 18.0 kB gzip -9); app JS is unchanged, since no screen
+  imports the kit yet.
 
 ## Notes for the tasks that build on this
 
@@ -307,10 +362,10 @@ under the production CSP.
 
   When porting, replace the `lucide-react` imports with the vendored icons and `cn` from `@/ui/cn.ts`.
 - **Kit stylesheet:** the `.base-ui-disable-scrollbar` rule lives only in `spike.css` today. The app's
-  kit CSS must carry it from the task that first ships Select (T08) or ScrollArea (T09), and that task
-  adds the part to the CSP check.
-- **Every React root inside `KitProvider`:** without it, Select and ScrollArea render a `<style>` the
-  CSP blocks. T04's guard can check that each `createRoot(…).render` is wrapped.
+  kit CSS must carry it from the task that first ships a Base UI Select (T07's own Select needs none) or
+  ScrollArea (T09), and that task adds the part to the CSP check.
+- **Every React root inside `KitProvider`:** without it, Base UI's Select and ScrollArea render a
+  `<style>` the CSP blocks. T04's guard can check that each `createRoot(…).render` is wrapped.
 - **Motion:** the generated `animate-in`/`zoom-in-95` classes need `tw-animate-css`. The spike replaced
   them with transitions on Base UI's `data-starting-style`/`data-ending-style`.
 - **Touch targets:** the spike's controls use `pointer-coarse:min-h-11`; text inputs use 16 px type on
