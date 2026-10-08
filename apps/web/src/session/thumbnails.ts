@@ -41,6 +41,10 @@ export function thumbnailUrl(api: ApiClient, sessionId: string, frameId: string)
     .then(async (res) => {
       if (!res.ok) throw new Error(`frame ${frameId}: ${res.status}`);
       const url = URL.createObjectURL(await res.blob());
+      if (cache.get(key) !== entry) {
+        URL.revokeObjectURL(url);
+        throw new Error(`frame ${frameId}: let go while loading`);
+      }
       entry.url = url;
       return decoded(url);
     });
@@ -51,7 +55,6 @@ export function thumbnailUrl(api: ApiClient, sessionId: string, frameId: string)
   return entry.promise;
 }
 
-// A loaded frame's URL at once, or undefined while it loads or when it was never asked for.
 export function cachedThumbnail(
   api: ApiClient,
   sessionId: string,
