@@ -7,6 +7,18 @@ import { Composer, type ComposerProps } from "./Composer.tsx";
 import { emptyAgentModel } from "./model.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
+// Lets one test pass a key-shaped name through the upload's own guards to reach Send's check.
+const transfer = vi.hoisted(() => ({ trustNames: false }));
+vi.mock("./file-transfer.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./file-transfer.ts")>();
+  return {
+    ...actual,
+    safeTransferName: (name: string) => transfer.trustNames || actual.safeTransferName(name),
+    uploadFile: async (...args: Parameters<typeof actual.uploadFile>) =>
+      transfer.trustNames ? `~/Downloads/${args[2].name}` : actual.uploadFile(...args),
+  };
+});
+
 const cellId = "01JXYZ0000000000000000CE11";
 const sessionId = "01JXYZ0000000000000000SESS";
 const otherSession = "01JXYZ00000000000000000002";
@@ -31,6 +43,7 @@ const agent: AgentSessionView = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  transfer.trustNames = false;
 });
 function setup(
   response: () => Response | Promise<Response> = () => new Response(null, { status: 202 }),
@@ -521,6 +534,24 @@ describe("explicit composer attachments", () => {
     expect(f.field.value).toBe("Read the file");
     expect(screen.queryByLabelText("Message delivery")).toBeNull();
     expect(screen.getByText(/Finish or remove unconfirmed uploads/)).toBeTruthy();
+  });
+  it("refuses to cite a confirmed attachment whose name looks like a key", async () => {
+    transfer.trustNames = true;
+    const key = `sk-ant-api03-${"x".repeat(40)}`;
+    const f = setup();
+    f.input("Read the file");
+    fireEvent.change(screen.getByLabelText("Add files"), {
+      target: { files: [new File(["x"], `${key}.txt`)] },
+    });
+    await screen.findByText("Uploaded to Downloads");
+    f.submit();
+    await act(async () => {});
+    expect(f.requests).toEqual([]);
+    expect(f.field.value).toBe("Read the file");
+    expect(screen.queryByLabelText("Message delivery")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Shorten the message or attachment names before sending.",
+    );
   });
   it("retains the original confirmed attachment references for an explicit uncertain-message retry", async () => {
     const delivered: string[] = [];
