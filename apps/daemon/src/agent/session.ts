@@ -21,6 +21,7 @@ import {
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
+import type { RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import type { TranscriptStore } from "./transcript.ts";
@@ -99,7 +100,7 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
-  readonly taskAutonomy = new TaskAutonomy();
+  readonly taskAutonomy: TaskAutonomy;
   readonly #approvals: ApprovalBroker;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();
@@ -150,8 +151,10 @@ export class AgentSession {
     readonly task: string,
     private readonly eventLog: Pick<EventLog, "append">,
     autonomy?: AutonomyPolicy,
+    rules?: Pick<RulesStore, "matches" | "add">,
   ) {
     this.#autonomy = freezeAutonomy(autonomy);
+    this.taskAutonomy = new TaskAutonomy(rules);
     this.#approvals = new ApprovalBroker(
       Date.now,
       (card) => {
@@ -170,10 +173,14 @@ export class AgentSession {
         this.append("approval.request", { ...data, kind, preview: { fields } });
         this.#publishState(this.safetyPause ? "paused" : "waiting_user", "approval");
       },
-      (resolution) => {
+      ({ always, ...resolution }) => {
         if (this.status === "waiting_user" && !this.stopped && !this.controlHeld)
           this.setStatus("running");
         this.append("approval.resolve", { ...resolution });
+        const change =
+          always &&
+          this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+        if (change) this.append("rule.created", change);
       },
     );
   }

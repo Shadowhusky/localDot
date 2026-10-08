@@ -4,6 +4,7 @@ import {
   type HarnessAvailability,
 } from "@localdot/codex-harness";
 import {
+  ActionClass,
   ApprovalAnswer,
   BudgetRaiseRequest,
   HandbackRequest,
@@ -38,6 +39,7 @@ import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./do
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
 import { AgentError, type AgentRunner } from "./runner.ts";
+import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
@@ -50,7 +52,9 @@ export interface UploadAccess {
 }
 export interface AgentRoutesDeps {
   runner: Pick<AgentRunner, "start" | "get" | "raiseBudget"> &
-    Partial<Pick<AgentRunner, "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety">>;
+    Partial<
+      Pick<AgentRunner, "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety" | "sessions">
+    >;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
@@ -191,6 +195,7 @@ function fail(error: unknown): Response {
     return new Response("memory change is unavailable", { status: error.status });
   if (error instanceof SettingsError)
     return new Response("agent settings are unavailable", { status: error.status });
+  if (error instanceof RuleError) return new Response(error.message, { status: error.status });
   if (error instanceof BindingError)
     return new Response("the selected models or keys are unavailable", { status: 400 });
   if (error instanceof SessionStoppedError || error instanceof ControlHeldError)
@@ -483,6 +488,39 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!s.isCurrent(generation) || s.controlHeld)
         throw new RouteError(409, "approval owner changed");
       return s.answerApproval(parsed) ? c.body(null, 204) : c.text("approval is not waiting", 409);
+    }),
+  );
+  const rules = new RulesStore(deps.home);
+  app.get(
+    "/api/agent/rules",
+    route((c) => c.json(rules.list())),
+  );
+  app.delete(
+    "/api/agent/rules/:id",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid rule id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      const rule = rules.remove(id);
+      if (!rule) throw new RouteError(404, "no such rule");
+      for (const s of deps.runner.sessions?.values() ?? [])
+        if (!s.stopped) s.append("rule.removed", ruleChange(rule));
+      return c.body(null, 204);
+    }),
+  );
+  app.delete(
+    "/api/agent/sessions/:id/allowances/:actionClass",
+    route(async (c) => {
+      const s = session(c.req.param("id") ?? "");
+      const actionClass = ActionClass.safeParse(c.req.param("actionClass"));
+      if (!actionClass.success) throw new RouteError(400, "invalid action class");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      const change = s.taskAutonomy.revoke(actionClass.data);
+      if (!change) throw new RouteError(404, "nothing is allowed for that in this task");
+      s.append("rule.removed", change);
+      return c.body(null, 204);
     }),
   );
   app.post(

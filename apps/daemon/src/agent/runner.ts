@@ -35,6 +35,7 @@ import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { MemoryStore } from "./memory.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
+import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -266,7 +267,14 @@ export class AgentRunner {
       if (this.deps.live.get(cellId))
         throw new AgentError(409, "a task is already running on this computer");
       const id = this.deps.eventLog.createSession(task.slice(0, 200));
-      const session = new AgentSession(id, cellId, task, this.deps.eventLog, settings.autonomy);
+      const session = new AgentSession(
+        id,
+        cellId,
+        task,
+        this.deps.eventLog,
+        settings.autonomy,
+        new RulesStore(this.deps.home),
+      );
       const rt: Runtime = {
         session,
         selection,

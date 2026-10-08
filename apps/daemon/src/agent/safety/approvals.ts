@@ -1,4 +1,6 @@
 import {
+  type ActionClass,
+  type AlwaysOption,
   APPROVAL_TIMEOUT_MS,
   ApprovalAnswer,
   type ApprovalCard,
@@ -27,6 +29,8 @@ export interface ApprovalResolution {
   decision: "approve" | "deny" | "take_control";
   by: "user" | "timeout";
   note?: string;
+  // The card's own option the user chose, never one the answer described.
+  always?: { readonly actionClass: ActionClass; readonly option: AlwaysOption };
 }
 interface Pending {
   readonly binding: ActionBinding;
@@ -34,7 +38,7 @@ interface Pending {
   readonly signal: AbortSignal;
   readonly timer: ReturnType<typeof setTimeout>;
   abort(): void;
-  finish(outcome: ApprovalOutcome, by: ApprovalResolution["by"]): void;
+  finish(outcome: ApprovalOutcome, by: ApprovalResolution["by"], always?: AlwaysOption): void;
 }
 
 // Authority lives only in this daemon owner. Cards never contain permits or execution inputs.
@@ -68,7 +72,11 @@ export class ApprovalBroker {
       expiresAt: this.now() + APPROVAL_TIMEOUT_MS,
     });
     const outcome = await new Promise<ApprovalOutcome>((resolve) => {
-      const finish = (result: ApprovalOutcome, by: ApprovalResolution["by"]) => {
+      const finish = (
+        result: ApprovalOutcome,
+        by: ApprovalResolution["by"],
+        always?: AlwaysOption,
+      ) => {
         const pending = this.#pending.get(binding.sessionId);
         if (pending?.binding !== privateBinding) return;
         this.#pending.delete(binding.sessionId);
@@ -82,6 +90,9 @@ export class ApprovalBroker {
             decision: result === "stale" ? "deny" : result,
             by,
             ...(result === "stale" ? { note: "Approval cancelled." } : {}),
+            ...(always && result === "approve"
+              ? { always: { actionClass: card.actionClass, option: always } }
+              : {}),
           });
         } catch {
           // A missing completion event cannot revive a consumed card.
@@ -125,11 +136,14 @@ export class ApprovalBroker {
       answer.data.revision !== pending.card.revision
     )
       return false;
+    const scope = answer.data.always;
+    const always = pending.card.always?.find((option) => option.scope === scope);
+    if (scope !== undefined && !always) return false;
     if (this.now() >= pending.card.expiresAt) {
       pending.finish("deny", "timeout");
       return false;
     }
-    pending.finish(answer.data.decision, "user");
+    pending.finish(answer.data.decision, "user", always);
     return true;
   }
   cancel(sessionId: string): void {

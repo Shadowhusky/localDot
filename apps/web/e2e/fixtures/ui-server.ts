@@ -15,6 +15,7 @@ import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { authorizePrepared } from "../../../daemon/src/agent/safety/authorize.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
@@ -253,7 +254,14 @@ function attachLive(owned: AgentSession) {
   );
 }
 function newSession(title: string, task: string): AgentSession {
-  const s = new AgentSession(log.createSession(title), cellId, task, log, autonomy);
+  const s = new AgentSession(
+    log.createSession(title),
+    cellId,
+    task,
+    log,
+    autonomy,
+    new RulesStore(HOME),
+  );
   s.beginBrain();
   log.append(s.id, {
     agent: "main",
@@ -819,29 +827,51 @@ app.post("/__qa/approval", (c) => {
   const controller = new AbortController();
   pendingApprovals.push(controller);
   const repeat = Number(c.req.query("repeat") ?? 1);
+  const ctx = {
+    session,
+    generation: session.generation,
+    check() {},
+    callId: ulid(),
+    step: ulid(),
+    redact: (value: string) => value,
+    signal: controller.signal,
+  } as never;
+  if (c.req.query("always") === "1") {
+    // A Send button on a mail page through the real authorization, so the card carries the
+    // daemon's own Always allow options: this task and https://mail.example.test.
+    const target = {
+      point: { x: 1180, y: 96 },
+      source: "dom" as const,
+      role: "button",
+      name: "Send",
+      url: "https://mail.example.test/compose",
+    };
+    const action = { verb: "click" as const, find: { name: "Send" }, speed: "auto" as const };
+    void authorizePrepared(ctx, {
+      tool: "computer",
+      input: { toolInput: { action: "click", target: "Send" }, action },
+      target: { target, window: 9, point: target.point },
+      facts: nativeActionFacts(action, target),
+      revalidate: async () => true,
+    })
+      .then((permit) =>
+        effects.push(`approval:${permit ? (permit.approved ? "approve" : "act") : "refused"}`),
+      )
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return c.json({ ok: true });
+  }
   if (repeat > 1) {
     // The card a repeated key press gets under QA_AUTONOMY=careful, from the real authorization.
     const keys = ["bracketright"];
     const action = { verb: "key" as const, combo: keys, speed: "auto" as const };
-    void authorizePrepared(
-      {
-        session,
-        generation: session.generation,
-        check() {},
-        callId: ulid(),
-        step: ulid(),
-        redact: (value: string) => value,
-        signal: controller.signal,
-      } as never,
-      {
-        tool: "computer",
-        input: { toolInput: { action: "key", keys, repeat }, action },
-        target: { target: null, window: 9, point: null },
-        facts: nativeActionFacts(action, null),
-        revalidate: async () => true,
-        count: repeat,
-      },
-    )
+    void authorizePrepared(ctx, {
+      tool: "computer",
+      input: { toolInput: { action: "key", keys, repeat }, action },
+      target: { target: null, window: 9, point: null },
+      facts: nativeActionFacts(action, null),
+      revalidate: async () => true,
+      count: repeat,
+    })
       .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
       .catch((e) => effects.push(`approval-error:${String(e)}`));
     return c.json({ ok: true });
