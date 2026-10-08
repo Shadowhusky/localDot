@@ -4,6 +4,7 @@
 @import "./base.css";
 @import "./motion.css";
 @import "./actions.css";
+@import "./overlays.css";
 /* Only the kit is scanned, so words in legacy files cannot mint utilities that outrank legacy rules
    of the same name. Add a folder here when it moves onto the kit. */
 @import "tailwindcss/utilities.css" layer(utilities) source(none);
@@ -11,3 +12,5 @@
 @source not "./**/*.test.*";
 @source not "./_spike";
 @source not "./gallery";
+/* Words in the kit's prose and code that would otherwise mint utilities nothing uses. */
+@source not inline("{container,fixed,visible,inline,transition}");
