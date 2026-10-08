@@ -198,6 +198,17 @@ describe("Always allow routes", () => {
     );
   });
 
+  it("leaves a stopped task's allowances and log alone", async () => {
+    const f = setup();
+    f.session.taskAutonomy.grant("send", { scope: "task", label: "For this task" }, ulid());
+    f.session.stop();
+    const before = f.events.length;
+    expect(
+      (await f.send("DELETE", `/api/agent/sessions/${f.session.id}/allowances/send`)).status,
+    ).toBe(409);
+    expect(f.events.slice(before).map((event) => event.type)).not.toContain("rule.removed");
+  });
+
   it("sits behind the install token and the Origin check", async () => {
     const f = setup();
     const rule = saved(f.rules.add("send", onMail, ulid()));

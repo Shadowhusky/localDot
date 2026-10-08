@@ -521,7 +521,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   app.delete(
     "/api/agent/sessions/:id/allowances/:actionClass",
     route(async (c) => {
-      const s = session(c.req.param("id") ?? "");
+      const s = active(c.req.param("id") ?? "");
       const actionClass = ActionClass.safeParse(c.req.param("actionClass"));
       if (!actionClass.success) throw new RouteError(400, "invalid action class");
       await empty(c.req.raw);
