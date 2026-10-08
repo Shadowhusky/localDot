@@ -979,7 +979,7 @@ export class AgentSession {
     );
     this.#control = undefined;
     this.tainted = false;
-    this.status = "running";
+    this.status = this.safetyPause ? "paused" : "running";
     record.resolve({ ...(note ? { note } : {}), by: "user" });
     this.#wake();
     return true;

@@ -91,3 +91,22 @@ it("publishes a Pause once per pause, even across a takeover", async () => {
     { state: "waiting_user", reason: "takeover" },
   ]);
 });
+
+it("reports a held Pause as paused once control is handed back, and a plain hand-back as running", async () => {
+  const { session } = setup();
+  session.setStatus("running");
+  const handBack = async () => {
+    void session.takeover("other", "Finish this step").catch(() => {});
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(session.status).toBe("waiting_user");
+    expect(session.endTakeover(session.pendingTakeover ?? "", undefined)).toBe(true);
+  };
+  await handBack();
+  expect(session.status).toBe("running");
+  const requestId = ulid();
+  session.confirmSafetyPause(requestId, session.requestSafetyPause(requestId).revision);
+  await handBack();
+  expect(session.safetyPause?.phase).toBe("paused");
+  expect(session.status).toBe("paused");
+});
