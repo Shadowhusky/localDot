@@ -247,7 +247,7 @@ describe("Always allow precedence", () => {
       field("Password"),
       BALANCED_AUTONOMY,
       (task) => {
-        task.grant("credentials", TASK, ulid());
+        expect(task.grant("credentials", TASK, ulid())).toBeUndefined();
         task.grant("unknown", TASK, ulid());
       },
       "credentials",
@@ -258,7 +258,7 @@ describe("Always allow precedence", () => {
       button("Buy now"),
       BALANCED_AUTONOMY,
       (task, rules) => {
-        task.grant("purchase", TASK, ulid());
+        expect(task.grant("purchase", TASK, ulid())).toBeUndefined();
         task.grant("send", TASK, ulid());
         expect(() => rules.add("purchase", site(MAIL), ulid())).toThrow();
       },

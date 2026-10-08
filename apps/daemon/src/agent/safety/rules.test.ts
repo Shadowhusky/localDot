@@ -166,6 +166,25 @@ describe("saved Always allow rules", () => {
       }),
     ],
     ["too large", JSON.stringify({ version: 1, rules: [], pad: "x".repeat(300 * 1024) })],
+    [
+      "two rules with one id",
+      (() => {
+        const rule = {
+          id: ulid(),
+          behavior: "act",
+          actionClass: "send",
+          scope: "site",
+          site: MAIL,
+          label: "On mail.example.test",
+          createdAt: 1,
+          createdFrom: ulid(),
+        };
+        return JSON.stringify({
+          version: 1,
+          rules: [rule, { ...rule, site: "https://other.example.test" }],
+        });
+      })(),
+    ],
   ])("an unreadable rules.json (%s) relaxes nothing, blocks nothing and says so", (_, text) => {
     const dir = home();
     writeFileSync(join(dir, "rules.json"), text, { mode: 0o600 });
