@@ -222,6 +222,9 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await press(trigger);
         const menu = page.getByRole("menu", { name: "Recording actions" });
         await settled(menu);
+        // Shortcuts show only where there is a keyboard to press them.
+        if (touch) await expect(menu.locator(".ui-menu-kbd").first()).toBeHidden();
+        else await expect(menu.locator(".ui-menu-kbd").first()).toBeVisible();
         const beneath = await box(under);
         const point = { x: beneath.x + 12, y: beneath.y + beneath.height / 2 };
         // The menu is drawn over the counter, so a press that went through would count.

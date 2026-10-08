@@ -215,6 +215,13 @@
     white-space: nowrap;
   }
 
+  /* A touch screen has no keyboard to press, as with Kbd. */
+  @media (hover: none) and (pointer: coarse) {
+    .ui-menu-kbd {
+      display: none;
+    }
+  }
+
   .ui-menu-separator {
     flex-shrink: 0;
     height: 1px;
