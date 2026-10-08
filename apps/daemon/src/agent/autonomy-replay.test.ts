@@ -21,8 +21,8 @@ afterEach(() => {
   for (const close of owned.splice(0)) close();
 });
 
-// The drawing task's calls in order. Rows 30–32 were one key call with repeat 5 (the old code
-// showed a card per press); H4 was the model's own request for help, not a policy decision.
+// The drawing task's calls in order. Rows 30–32 are one key call with repeat 5; H4 is the model's
+// own request for help, not a policy decision.
 const CALLS: Call[] = MANUAL_DRAWING_TASK.flatMap((row: EvidenceRow): Call[] => {
   if (row.kind === "model" || row.id === "31" || row.id === "32") return [];
   if (row.kind === "tool") return [{ id: row.id, tool: row.tool, input: row.input }];
@@ -131,7 +131,8 @@ describe("the manual drawing task replayed through the tool dispatcher", () => {
     expect(ids(rows.filter((row) => !row.ok))).toEqual([]);
     expect(h.session.safetyPause).toBeUndefined();
     expect(h.desktop.shellCalls).toEqual(COMMANDS);
-    expect(h.desktop.files.get("sketch.py")).toBe("x");
+    expect(h.desktop.files.has("sketch.py")).toBe(true);
+    expect(h.desktop.editCalls).toEqual(["sketch.py", "sketch.py"]);
     expect(dispatched).toHaveLength(PRESSES);
   });
 
@@ -147,6 +148,7 @@ describe("the manual drawing task replayed through the tool dispatcher", () => {
     const repeated = rows.find((row) => row.id === "30")?.cards[0];
     expect(repeated?.preview.fields).toContainEqual(["Repeat", "× 5"]);
     expect(h.desktop.shellCalls).toEqual(COMMANDS);
+    expect(h.desktop.editCalls).toEqual(["sketch.py", "sketch.py"]);
     expect(dispatched).toHaveLength(PRESSES);
   });
 

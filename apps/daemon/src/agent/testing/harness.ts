@@ -25,6 +25,7 @@ export const SURROGATE = "ld_web_0123456789abcdefghijkl_abcdef";
 
 export interface FakeDesktop {
   shellCalls: string[];
+  editCalls: string[];
   shellOutput: ShellChunk[];
   shellDone: Partial<ShellDone>;
   files: Map<string, string>;
@@ -78,6 +79,7 @@ export function toolHarness(
   let nextOutcome: (a: GuiAction) => ActionOutcome = () => ({ ok: true, frameId: ulid() });
   const desktop: FakeDesktop = {
     shellCalls: [],
+    editCalls: [],
     shellOutput: [],
     shellDone: {},
     files: new Map(),
@@ -131,7 +133,10 @@ export function toolHarness(
         desktop.files.set(path, content);
         return { path: `~/${path}`, op, patch: `+${content}`, bytes: content.length };
       },
-      editFile: async (path) => ({ path: `~/${path}`, op: "modify", patch: "", bytes: 0 }),
+      editFile: async (path) => {
+        desktop.editCalls.push(path);
+        return { path: `~/${path}`, op: "modify", patch: "", bytes: 0 };
+      },
       listDir: async (path) => ({ path: `~/${path}`, entries: [], truncated: false }),
       fetchFile: async (path) =>
         new ReadableStream({
