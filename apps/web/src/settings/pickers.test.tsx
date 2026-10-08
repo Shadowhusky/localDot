@@ -149,6 +149,19 @@ describe("provider/model/role presentation", () => {
       cleanup();
     }
   });
+  it("leaves out provider groups a search leaves empty", () => {
+    render(<ProviderPicker modelRole="main" value="" onChange={vi.fn()} />);
+    const groups = () => screen.getAllByRole("group").map((group) => group.getAttribute("label"));
+    expect(groups()).toContain("Plans");
+    fireEvent.change(screen.getByLabelText("Search main providers"), {
+      target: { value: "claude" },
+    });
+    expect(groups()).toEqual(["API providers", "Subscription"]);
+    fireEvent.change(screen.getByLabelText("Search main providers"), {
+      target: { value: "groq" },
+    });
+    expect(groups()).toEqual(["API providers"]);
+  });
   it("retains the canonical selected provider through filtered searches", () => {
     const change = vi.fn();
     render(<ProviderPicker modelRole="main" value="google" onChange={change} />);

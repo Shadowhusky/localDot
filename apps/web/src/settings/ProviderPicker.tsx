@@ -70,23 +70,26 @@ export function ProviderPicker({
               {value} — unavailable
             </option>
           )}
-          {PROVIDER_GROUPS.map((group) => (
-            <optgroup key={group} label={group}>
-              {shown
-                .filter((provider) => groupOf(provider) === group)
-                .map((provider) => (
-                  <option
-                    key={provider.id}
-                    value={provider.id}
-                    disabled={!providerPickable(role, provider)}
-                  >
-                    {provider.name}
-                    {provider.availableIn ? " — available in a later release" : ""}
-                    {provider.notOffered ? " — not available here" : ""}
-                  </option>
-                ))}
-            </optgroup>
-          ))}
+          {PROVIDER_GROUPS.map((group) => {
+            const members = shown.filter((provider) => groupOf(provider) === group);
+            return (
+              members.length > 0 && (
+                <optgroup key={group} label={group}>
+                  {members.map((provider) => (
+                    <option
+                      key={provider.id}
+                      value={provider.id}
+                      disabled={!providerPickable(role, provider)}
+                    >
+                      {provider.name}
+                      {provider.availableIn ? " — available in a later release" : ""}
+                      {provider.notOffered ? " — not available here" : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              )
+            );
+          })}
           {(chatgptShown || value === "chatgpt" || claudePlanShown) && (
             <optgroup label="Subscription">
               {(chatgptShown || value === "chatgpt") && (
