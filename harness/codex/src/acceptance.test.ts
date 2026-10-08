@@ -1,6 +1,20 @@
+import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CODEX_MANIFEST_SHA256, canonicalDigest, codexAccepted } from "./acceptance.ts";
 import { CODEX_RELEASE_BUNDLE, CODEX_VERSION } from "./version.ts";
+
+// A committed record that names another manifest must not move the digest the gate expects.
+const m = vi.hoisted(() => ({
+  record: {
+    format: 1,
+    codexVersion: "0.154.0",
+    platform: "darwin-arm64",
+    manifestSha256: "0".repeat(64),
+    nativeSandbox: { passed: true },
+    realAccount: { passed: true },
+  },
+}));
+vi.mock("../acceptance/record.json", () => ({ default: m.record }));
 
 const complete = () => ({
   format: 1,
@@ -23,6 +37,8 @@ describe("ChatGPT plan acceptance gate", () => {
   it("binds the record to the canonical digest of the bundled release manifest", () => {
     expect(CODEX_MANIFEST_SHA256).toBe(canonicalDigest(CODEX_RELEASE_BUNDLE));
     expect(CODEX_MANIFEST_SHA256).toMatch(/^[a-f0-9]{64}$/);
+    expect(codexAccepted(undefined, "darwin", "arm64")).toBe(false);
+    expect(accepted({ ...m.record, manifestSha256: CODEX_MANIFEST_SHA256 })).toBe(true);
   });
   it.each([
     ["a missing record", undefined],
@@ -52,5 +68,9 @@ describe("ChatGPT plan acceptance gate", () => {
     vi.stubEnv("LOCALDOT_CODEX_ARCHIVE", "/tmp/codex.tgz");
     expect(accepted({ ...complete(), realAccount: { passed: false } })).toBe(false);
     expect(accepted(undefined)).toBe(false);
+  });
+  it("never reads the environment", () => {
+    const source = readFileSync(new URL("./acceptance.ts", import.meta.url), "utf8");
+    expect(source).not.toMatch(/\benv\b|getenv/i);
   });
 });
