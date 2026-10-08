@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { Attachments } from "./Attachments.tsx";
 import { FILE_LIMITS } from "./file-transfer.ts";
 import { useUploads } from "./useUploads.ts";
 
@@ -152,24 +151,5 @@ describe("removed attachments notice", () => {
     expect(f.result.current.problem).toBeNull();
     act(() => f.result.current.select([file("two.txt")]));
     expect(f.result.current.notice).toBeNull();
-  });
-  it("announces the removal politely rather than as an alert", async () => {
-    const api = createApi("fixture", {
-      origin: "http://127.0.0.1:4747",
-      fetchImpl: async () => Response.json({ path: "~/Downloads/one.txt" }, { status: 201 }),
-    });
-    let select: ReturnType<typeof useUploads>["select"] = () => {};
-    function Harness({ cellId }: { cellId: string }) {
-      const uploads = useUploads({ api, cellId, ready: true, enabled: true });
-      select = uploads.select;
-      return <Attachments uploads={uploads} disabled={false} />;
-    }
-    const view = render(<Harness cellId={CELL} />);
-    expect(screen.queryByText(REMOVED)).toBeNull();
-    act(() => select([file("one.txt")]));
-    await screen.findByText("Uploaded to Downloads");
-    view.rerender(<Harness cellId={OTHER} />);
-    expect(screen.getByText(REMOVED).getAttribute("role")).toBe("status");
-    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

@@ -67,6 +67,39 @@ describe("the conversation thread", () => {
     expect(rows[1]?.querySelector(".thread-bubble")).toBeNull();
   });
 
+  it("shows files sent with your message as chips, and when a message was sent", () => {
+    render(
+      <Conversation
+        items={items([
+          {
+            ...message(
+              "one",
+              "Read both files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.csv",
+            ),
+            kind: "steer",
+          },
+          { ...message("two", "Then tidy up"), kind: "followup", queued: true },
+          { ...message("three", "One more"), kind: "followup" },
+        ])}
+        truncated={false}
+      />,
+    );
+    const [first, second, third] = document.querySelectorAll(".thread-message");
+    expect(first?.querySelector(".thread-bubble")?.textContent).toBe("Read both files");
+    expect(
+      within(first as HTMLElement).getByRole("list", { name: "Attached files" }).textContent,
+    ).toBe("one.txttwo.csv");
+    expect(first?.textContent).not.toContain("Attached files on this computer");
+    expect(first?.querySelector(".thread-tag")?.textContent).toBe("Sent while working");
+    expect(second?.querySelector(".thread-tag")?.textContent).toBe("After this task");
+    expect(third?.querySelector(".thread-tag")).toBeNull();
+  });
+
+  it("keeps the slot a sending message waits in right after the empty prompt, which it then hides", () => {
+    render(<Conversation items={[]} truncated={false} />);
+    expect(document.querySelector(".thread-empty + .thread-outbox")).not.toBeNull();
+  });
+
   it("keeps a streaming message in place as its text grows and when it finishes", () => {
     const writing = { ...message("reply", "Look", "assistant"), final: false };
     const view = render(<Conversation items={items([writing])} truncated={false} />);

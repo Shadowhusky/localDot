@@ -6,22 +6,6 @@
     "native-control": 5,
     "native-disabled": 4
   },
-  "src/agent/Attachments.tsx": {
-    "native-control": 3,
-    "native-disabled": 1
-  },
-  "src/agent/Composer.tsx": {
-    "native-control": 5,
-    "native-disabled": 3
-  },
-  "src/agent/DeliveryState.tsx": {
-    "native-control": 3,
-    "native-disabled": 1
-  },
-  "src/agent/KeyFound.tsx": {
-    "native-control": 3,
-    "native-disabled": 1
-  },
   "src/agent/SafetyControls.tsx": {
     "banned-copy": 4,
     "native-control": 5,
@@ -44,30 +28,10 @@
     "stray-stylesheet": 1,
     "type-literal": 1
   },
-  "src/agent/composer.css": {
-    "control-selector": 3,
-    "radius-literal": 3,
-    "spacing-literal": 12,
-    "stray-stylesheet": 1,
-    "type-literal": 4
-  },
   "src/agent/controls.css": {
     "control-selector": 4,
     "radius-literal": 4,
     "spacing-literal": 11,
-    "stray-stylesheet": 1,
-    "type-literal": 1
-  },
-  "src/agent/files.css": {
-    "control-selector": 4,
-    "radius-literal": 1,
-    "spacing-literal": 7,
-    "stray-stylesheet": 1
-  },
-  "src/agent/key-guard.css": {
-    "control-selector": 3,
-    "radius-literal": 3,
-    "spacing-literal": 5,
     "stray-stylesheet": 1,
     "type-literal": 1
   },

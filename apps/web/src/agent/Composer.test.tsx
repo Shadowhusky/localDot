@@ -4,7 +4,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
 import { Composer, type ComposerProps } from "./Composer.tsx";
-import { emptyAgentModel } from "./model.ts";
+import { type AgentMessage, emptyAgentModel } from "./model.ts";
+import { Outbox } from "./outbox.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
 // Lets one test pass a key-shaped name through the upload's own guards to reach Send's check.
@@ -43,6 +44,7 @@ const agent: AgentSessionView = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
   transfer.trustNames = false;
 });
 function setup(
@@ -73,11 +75,16 @@ function setup(
     (screen.getByLabelText("New task") as HTMLTextAreaElement);
   const input = (text: string) => fireEvent.input(field, { target: { value: text } });
   const submit = () => fireEvent.submit(screen.getByRole("form", { name: "Message dot" }));
+  const attach = (...files: File[]) =>
+    fireEvent.change(view.container.querySelector("input[type=file]") as HTMLInputElement, {
+      target: { files },
+    });
   return {
     ...view,
     field,
     input,
     submit,
+    attach,
     requests,
     get props() {
       return props;
@@ -168,21 +175,24 @@ describe("composer delivery ownership and draft handling", () => {
   });
   it("never resends an uncertain action until the user chooses the explicit duplicate-risk retry", async () => {
     let attempts = 0;
-    const f = setup(() => {
-      if (++attempts === 1) throw new Error("lost after acceptance");
-      return new Response(null, { status: 202 });
-    });
+    const reconcile = vi.fn();
+    const f = setup(
+      () => {
+        if (++attempts === 1) throw new Error("lost after acceptance");
+        return new Response(null, { status: 202 });
+      },
+      { agent: { ...agent, reconcile } },
+    );
     f.input("captured ordinary message");
     f.submit();
-    await screen.findByText(/reply was lost/);
+    await screen.findByText(/Not sure dot got that/);
     expect(f.field.value).toBe("captured ordinary message");
     f.input("new unsent draft");
     f.submit();
+    // The task is checked at once, and that sends nothing.
+    expect(reconcile).toHaveBeenCalledOnce();
     expect(f.requests).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Check current task" }));
-    expect(agent.reconcile).toHaveBeenCalled();
-    expect(f.requests).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send again" }));
     await screen.findByText("Sent to dot.");
     expect(f.requests).toHaveLength(2);
     expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "captured ordinary message" });
@@ -194,7 +204,6 @@ describe("composer delivery ownership and draft handling", () => {
     for (const modifier of [
       { shiftKey: true },
       { ctrlKey: true },
-      { altKey: true },
       { metaKey: true },
       { isComposing: true },
     ])
@@ -216,8 +225,8 @@ describe("composer delivery ownership and draft handling", () => {
     });
     f.input("captured message");
     f.submit();
-    await screen.findByText(/reply was lost/);
-    const retry = screen.getByRole("button", { name: "Resend once, risking a duplicate" });
+    await screen.findByText(/Not sure dot got that/);
+    const retry = screen.getByRole("button", { name: "Send again" });
     act(() => {
       retry.click();
       retry.click();
@@ -233,18 +242,16 @@ describe("composer delivery ownership and draft handling", () => {
     });
     f.input("ordinary request");
     f.submit();
-    await screen.findByText(/reply was lost/);
+    await screen.findByText(/Not sure dot got that/);
     const key = `sk-proj-${"a".repeat(156)}`;
     f.field.value = key;
-    fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send again" }));
     expect(f.requests).toHaveLength(1);
     expect(f.field.value).toBe("");
     expect(document.body.innerHTML).not.toContain(key);
-    expect(
-      screen
-        .getByRole("button", { name: "Resend once, risking a duplicate" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+    expect(screen.getByRole("button", { name: "Send again" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
   });
   it("retains a refused new task when polling retires the stopped owner, but clears it on another task", async () => {
     const f = setup(() => new Response("refused", { status: 409 }), {
@@ -252,9 +259,9 @@ describe("composer delivery ownership and draft handling", () => {
     });
     f.input("explicit new task after Stop");
     f.submit();
-    await screen.findByText(/This message was not accepted/);
+    await screen.findByText(/Task not started/);
     f.update({ agent: { ...agent, sessionId: null, snapshot: null, fresh: false } });
-    expect(screen.getByText(/This message was not accepted/)).toBeTruthy();
+    expect(screen.getByText(/Task not started/)).toBeTruthy();
     expect(f.field.value).toBe("explicit new task after Stop");
     expect(f.requests).toHaveLength(1);
     f.update({
@@ -264,7 +271,7 @@ describe("composer delivery ownership and draft handling", () => {
         snapshot: { ...snapshot, sessionId: otherSession },
       },
     });
-    expect(screen.queryByText(/This message was not accepted/)).toBeNull();
+    expect(screen.queryByText(/Task not started/)).toBeNull();
     expect(f.requests).toHaveLength(1);
   });
   it("retains the start gate when live polling adopts its session before the confirmed reply", async () => {
@@ -324,38 +331,45 @@ describe("composer delivery ownership and draft handling", () => {
     f.submit();
     f.update({ agent });
     await act(async () => pending.reject(new Error("lost after start")));
-    expect(screen.getByText(/reply was lost/)).toBeTruthy();
-    expect(
-      screen
-        .getByRole("button", { name: "Resend once, risking a duplicate" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+    expect(screen.getByText(/Not sure dot got that/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Send again" }).getAttribute("aria-disabled")).toBe(
+      "true",
+    );
     f.input("new unsent draft");
     f.submit();
     expect(f.requests).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Keep draft and stop retrying" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
     expect(f.field.value).toBe("new unsent draft");
-    expect(screen.getByText(/Delivery is still unconfirmed/)).toBeTruthy();
+    expect(screen.getByText(/dot may already have that message/)).toBeTruthy();
     expect(f.requests).toHaveLength(1);
     expect(screen.queryByLabelText("Message delivery")).toBeNull();
   });
-  it("captures the selected mode synchronously and labels paused/takeover messages honestly", async () => {
+  it("sends after this task from the menu or Option-Return, and labels paused/takeover messages honestly", async () => {
     const f = setup();
     f.input("afterwards");
-    act(() => {
-      fireEvent.click(screen.getByLabelText("After this task"));
-      f.submit();
-    });
+    fireEvent.click(screen.getByRole("button", { name: "Choose when to send" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Send after this task" }));
     expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "afterwards" });
+    expect(document.activeElement).toBe(f.field);
+    await act(async () => {});
+    f.input("later again");
+    fireEvent.keyDown(f.field, { key: "Enter", altKey: true });
+    expect(f.requests[1]?.body).toEqual({ kind: "followup", text: "later again" });
     await act(async () => {});
     f.update({ agent: { ...agent, snapshot: { ...snapshot, status: "paused" } } });
-    expect(
-      screen.getByText("A message does not resume the task or hand back control."),
-    ).toBeTruthy();
+    expect(screen.getByText("Sending won't resume the task")).toBeTruthy();
     f.update({ agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } } });
-    expect(
-      screen.getByText("A message does not resume the task or hand back control."),
-    ).toBeTruthy();
+    expect(screen.getByText("You keep control of the computer")).toBeTruthy();
+  });
+  it("offers no choice of when to send once the task is idle, so Option-Return does nothing", async () => {
+    const f = setup(undefined, { agent: { ...agent, snapshot: { ...snapshot, status: "idle" } } });
+    expect(screen.queryByRole("button", { name: "Choose when to send" })).toBeNull();
+    f.input("next");
+    fireEvent.keyDown(f.field, { key: "Enter", altKey: true });
+    expect(f.requests).toEqual([]);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "next" });
+    await act(async () => {});
   });
   it.each([
     "stale",
@@ -386,7 +400,7 @@ describe("composer delivery ownership and draft handling", () => {
     f.submit();
     expect(f.requests).toEqual([]);
     expect(document.body.innerHTML).not.toContain(key);
-    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
     f.field.value = key;
     f.submit();
     expect(f.field.value).toBe("");
@@ -398,19 +412,24 @@ describe("composer delivery ownership and draft handling", () => {
     const key = `sk-ant-api03-${"x".repeat(40)}`;
     f.input(`token ${key} please`);
     const send = screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
-    const reason = document.getElementById(send.getAttribute("aria-describedby") ?? "");
-    expect(reason?.textContent).toContain("1 recognised key was removed from your message");
+    const blocked = () => send.getAttribute("aria-disabled") === "true";
+    expect(blocked()).toBe(true);
+    const described = (send.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "");
+    expect(described.join(" ")).toContain("A key in your message was taken out");
     expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
     f.input(`${f.field.value} continue`);
     fireEvent.keyDown(f.field, { key: "Enter" });
     f.submit();
     expect(f.requests).toEqual([]);
-    expect(send.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
+    expect(blocked()).toBe(true);
+    fireEvent.click(send);
+    expect(f.requests).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
     expect(screen.queryByRole("region", { name: "Key safeguard" })).toBeNull();
     expect(document.activeElement).toBe(f.field);
-    expect(send.disabled).toBe(false);
+    expect(blocked()).toBe(false);
     expect(send.hasAttribute("aria-describedby")).toBe(false);
     fireEvent.keyDown(f.field, { key: "Enter" });
     await act(async () => {});
@@ -509,7 +528,7 @@ describe("explicit composer attachments", () => {
     });
     const f = setup(undefined, { api });
     f.input("Read both sample files");
-    fireEvent.change(screen.getByLabelText("Add files"), { target: { files: [one] } });
+    f.attach(one);
     fireEvent.drop(screen.getByRole("form", { name: "Message dot" }), {
       dataTransfer: { files: [two], types: ["Files"] },
     });
@@ -527,7 +546,8 @@ describe("explicit composer attachments", () => {
       text: "Read both sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
     });
     expect(f.field.value).toBe("");
-    expect(screen.queryByText("Uploaded to Downloads")).toBeNull();
+    // The chips fold away once the message carries the files.
+    await waitFor(() => expect(screen.queryByText("Uploaded to Downloads")).toBeNull());
   });
   it("cannot cite a forged upload acknowledgment or send an unconfirmed attachment", async () => {
     const calls: string[] = [];
@@ -540,10 +560,8 @@ describe("explicit composer attachments", () => {
     });
     const f = setup(undefined, { api });
     f.input("Read the file");
-    fireEvent.change(screen.getByLabelText("Add files"), {
-      target: { files: [new File(["x"], "one.txt")] },
-    });
-    await screen.findByText("Upload unconfirmed");
+    f.attach(new File(["x"], "one.txt"));
+    await screen.findByText("Unconfirmed");
     f.submit();
     expect(calls).toEqual([`/api/cells/${cellId}/upload`]);
     expect(f.field.value).toBe("Read the file");
@@ -555,9 +573,7 @@ describe("explicit composer attachments", () => {
     const key = `sk-ant-api03-${"x".repeat(40)}`;
     const f = setup();
     f.input("Read the file");
-    fireEvent.change(screen.getByLabelText("Add files"), {
-      target: { files: [new File(["x"], `${key}.txt`)] },
-    });
+    f.attach(new File(["x"], `${key}.txt`));
     await screen.findByText("Uploaded to Downloads");
     f.submit();
     await act(async () => {});
@@ -582,21 +598,220 @@ describe("explicit composer attachments", () => {
     });
     const f = setup(undefined, { api });
     f.input("Original text");
-    fireEvent.change(screen.getByLabelText("Add files"), {
-      target: { files: [new File(["x"], "one.txt")] },
-    });
+    f.attach(new File(["x"], "one.txt"));
     await screen.findByText("Uploaded to Downloads");
     f.submit();
-    await screen.findByText(/reply was lost/);
+    await screen.findByText(/Not sure dot got that/);
     f.input("New unsent draft");
     f.submit();
     expect(delivered).toHaveLength(1);
-    fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send again" }));
     await screen.findByText("Sent to dot.");
     expect(delivered).toHaveLength(2);
     expect(delivered[1]).toBe(delivered[0]);
     expect(JSON.parse(delivered[0] as string).text).toContain("~/Downloads/one.txt");
     expect(f.field.value).toBe("New unsent draft");
-    expect(screen.queryByText("Uploaded to Downloads")).toBeNull();
+    await waitFor(() => expect(screen.queryByText("Uploaded to Downloads")).toBeNull());
+  });
+});
+
+describe("the composer's controls", () => {
+  const reasonOf = (button: HTMLElement) =>
+    (button.getAttribute("aria-describedby") ?? "")
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent ?? "")
+      .join(" ");
+  it("offers the task's Stop beside Send only while there is one, and says when it is stopping", () => {
+    const run = vi.fn();
+    const f = setup(undefined, { stop: { run, busy: false, enabled: true } });
+    fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+    expect(run).toHaveBeenCalledOnce();
+    f.update({ stop: { run, busy: true, enabled: false } });
+    const stop = screen.getByRole("button", { name: "Stop task" });
+    expect(stop.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(stop);
+    expect(run).toHaveBeenCalledOnce();
+    f.update({ stop: undefined });
+    expect(screen.queryByRole("button", { name: "Stop task" })).toBeNull();
+    expect(f.requests).toEqual([]);
+  });
+  it("counts what is left only near the limit, where typing stops", () => {
+    const f = setup();
+    expect(f.field.maxLength).toBe(8000);
+    f.input("x".repeat(7000));
+    expect(screen.queryByText(/ left$/)).toBeNull();
+    f.input("x".repeat(7500));
+    expect(screen.getByText("500 left")).toBeTruthy();
+    f.input("x".repeat(8000));
+    expect(screen.getByText("0 left")).toBeTruthy();
+    f.input("x".repeat(10));
+    expect(screen.queryByText(/ left$/)).toBeNull();
+  });
+  it("starts a new line on Return on a phone, where Send sends", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(hover: none) and (pointer: coarse)",
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    const f = setup();
+    f.input("Also add a chart");
+    expect(fireEvent.keyDown(f.field, { key: "Enter" })).toBe(true);
+    expect(f.requests).toEqual([]);
+    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    expect(f.requests).toHaveLength(1);
+    await act(async () => {});
+  });
+  it("does nothing on Return with nothing written, and says why Send waits", () => {
+    const f = setup();
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(f.requests).toEqual([]);
+    expect(reasonOf(screen.getByRole("button", { name: "Send now" }))).toContain(
+      "Write a message first.",
+    );
+  });
+  it("keeps a new task's draft while the computer is off and says what to do", () => {
+    const f = setup(undefined, {
+      cell: null,
+      known: true,
+      configured: true,
+      model: "Claude Sonnet 5.5",
+      agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
+    });
+    f.input("Summarise the report");
+    expect(reasonOf(screen.getByRole("button", { name: "Start task" }))).toContain(
+      "Turn on your computer first.",
+    );
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Turn on your computer first. Your message stays here.",
+    );
+    expect(f.field.value).toBe("Summarise the report");
+    expect(f.requests).toEqual([]);
+  });
+  it("names the main model on a new task and opens Settings from it", () => {
+    const onSettings = vi.fn();
+    setup(undefined, {
+      configured: true,
+      model: "Claude Sonnet 5.5",
+      onSettings,
+      agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
+    });
+    expect(screen.getByRole("textbox", { name: "New task" }).getAttribute("placeholder")).toBe(
+      "Ask dot to do something…",
+    );
+    const chip = screen.getByRole("button", { name: /^Model: Claude Sonnet 5\.5/ });
+    fireEvent.click(chip);
+    expect(onSettings).toHaveBeenCalledExactlyOnceWith(chip);
+  });
+  it("shows a dragged file over the card and adds what is dropped", async () => {
+    transfer.trustNames = true;
+    setup();
+    const card = screen.getByRole("form", { name: "Message dot" });
+    fireEvent.dragEnter(card, { dataTransfer: { types: ["Files"], files: [] } });
+    expect(card.hasAttribute("data-dragging")).toBe(true);
+    fireEvent.dragLeave(card, { dataTransfer: { types: ["Files"], files: [] } });
+    expect(card.hasAttribute("data-dragging")).toBe(false);
+    fireEvent.dragEnter(card, { dataTransfer: { types: ["Files"], files: [] } });
+    fireEvent.drop(card, {
+      dataTransfer: { types: ["Files"], files: [new File(["x"], "one.txt")] },
+    });
+    expect(card.hasAttribute("data-dragging")).toBe(false);
+    await screen.findByText("Uploaded to Downloads");
+    expect(screen.getByRole("list", { name: "Attached files" }).textContent).toContain("one.txt");
+  });
+  it("says politely that attachments went when the computer changed", async () => {
+    transfer.trustNames = true;
+    const f = setup();
+    f.attach(new File(["x"], "one.txt"));
+    await screen.findByText("Uploaded to Downloads");
+    f.update({ cell: { ...cell, id: "01JXYZ00000000000000000CE2" } });
+    const notice = screen.getByText(
+      "Your computer was interrupted, so the files you added were removed. Add them again.",
+    );
+    expect(notice.closest("[role]")?.getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+});
+
+describe("a message on its way", () => {
+  const user = (id: string, text: string): AgentMessage => ({
+    id,
+    role: "user",
+    text,
+    final: true,
+  });
+  it("waits at the end of the thread, faint while sent, and gives way to its own row", async () => {
+    const outbox = document.createElement("div");
+    document.body.append(outbox);
+    const pending = Promise.withResolvers<Response>();
+    const earlier = user("01JXYZ00000000000000000M01", "Add a chart");
+    const model = { ...emptyAgentModel(), messages: new Map([[earlier.id, earlier]]) };
+    const props: ComposerProps = {
+      api: createApi("fixture", {
+        origin: "http://127.0.0.1:4790",
+        fetchImpl: async () => pending.promise,
+      }),
+      cell,
+      agent: { ...agent, model },
+      known: true,
+      pending: false,
+      keysOpen: false,
+      receiveKey: vi.fn(() => false),
+    };
+    const view = render(
+      <Outbox.Provider value={outbox}>
+        <Composer {...props} />
+      </Outbox.Provider>,
+    );
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.input(field, { target: { value: "Add a chart" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    const waiting = outbox.querySelector<HTMLElement>(".thread-pending");
+    expect(waiting?.dataset.phase).toBe("sending");
+    expect(waiting?.querySelector(".thread-bubble")?.textContent).toBe("Add a chart");
+    expect(waiting?.querySelector(".thread-tag")?.textContent).toBe("Sent while working");
+    expect(field.value).toBe("Add a chart");
+    await act(async () => pending.resolve(new Response(null, { status: 202 })));
+    expect(outbox.querySelector<HTMLElement>(".thread-pending")?.dataset.phase).toBe("accepted");
+    expect(field.value).toBe("");
+    // The same words sent before are not this message's row.
+    const rerender = (messages: AgentMessage[]) =>
+      view.rerender(
+        <Outbox.Provider value={outbox}>
+          <Composer
+            {...props}
+            agent={{
+              ...agent,
+              model: { ...model, messages: new Map(messages.map((m) => [m.id, m])) },
+            }}
+          />
+        </Outbox.Provider>,
+      );
+    rerender([earlier]);
+    expect(outbox.querySelector(".thread-pending")).not.toBeNull();
+    rerender([earlier, user("01JXYZ00000000000000000M02", "Add a chart")]);
+    expect(outbox.querySelector(".thread-pending")).toBeNull();
+    outbox.remove();
+  });
+  it("shows the files it carries and a refusal with the way back to the draft", async () => {
+    transfer.trustNames = true;
+    let refuse = false;
+    const f = setup(() =>
+      refuse ? new Response("no", { status: 409 }) : new Response(null, { status: 202 }),
+    );
+    f.attach(new File(["x"], "monthly-figures.csv"));
+    await screen.findByText("Uploaded to Downloads");
+    refuse = true;
+    f.input("Use this");
+    f.submit();
+    const waiting = await screen.findByRole("region", { name: "Message delivery" });
+    await waitFor(() => expect(waiting.textContent).toContain("Not sent"));
+    expect(waiting.textContent).toContain("monthly-figures.csv");
+    expect(waiting.querySelector(".thread-bubble")?.textContent).toBe("Use this");
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();
+    expect(document.activeElement).toBe(f.field);
+    expect(f.field.value).toBe("Use this");
   });
 });

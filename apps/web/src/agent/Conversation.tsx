@@ -17,10 +17,13 @@ import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
+import { SentFiles } from "./Attachments.tsx";
+import { fileName, splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult } from "./model.ts";
+import { Outbox } from "./outbox.ts";
 import { answerText, QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
@@ -37,12 +40,12 @@ import { usePagedRows } from "./usePagedRows.ts";
 // The thread mounts at most this many items; scrolling to either end moves it by half.
 const WINDOW = 200;
 // The foot (the live work line and the composer) sits under the thread and stays put while it
-// scrolls. Today's composer is tall, so on a shorter column the foot joins the end of the thread
+// scrolls. Only on a very short column (a phone on its side) does it join the end of the thread
 // instead, which keeps one scroller and room to read. Only the column's height decides, so typing, a
 // question or a field unfolding never moves the foot; the gap between the two heights covers the
 // task bar coming and going.
-const FOOT_FROM = 800;
-const END_BELOW = 720;
+const FOOT_FROM = 480;
+const END_BELOW = 400;
 // A recovery card brought into view sits this far under the scroller's faded top edge.
 const REVEAL_MARGIN = 16;
 const itemKey = (item: ThreadItem) => item.key;
@@ -102,14 +105,23 @@ const MessageCard = memo(function MessageCard({
   announce(text: string): void;
 }) {
   const user = message.role === "user";
+  const { body, files } = user ? splitAttachments(message.text) : { body: message.text, files: [] };
   const copy = (
-    <CopyButton
-      className="thread-copy"
-      text={message.text}
-      label={user ? "Copy your message" : "Copy dot's message"}
-      announce={announce}
-    />
+    <span className="thread-copy-slot" inert={!message.final}>
+      <CopyButton
+        className="thread-copy"
+        text={body}
+        label={user ? "Copy your message" : "Copy dot's message"}
+        announce={announce}
+      />
+    </span>
   );
+  const tag =
+    message.kind === "steer"
+      ? "Sent while working"
+      : message.queued
+        ? "After this task"
+        : undefined;
   return (
     <article
       className="thread-message"
@@ -117,13 +129,20 @@ const MessageCard = memo(function MessageCard({
       data-streaming={!message.final || undefined}
       aria-label={user ? "You" : "dot"}
     >
-      <span className="thread-copy-slot" inert={!message.final}>
-        {copy}
-      </span>
       {user ? (
-        <p className="thread-bubble">{message.text}</p>
+        <>
+          <div className="thread-said">
+            {copy}
+            <p className="thread-bubble">{body}</p>
+          </div>
+          {files.length > 0 && <SentFiles names={files.map(fileName)} />}
+          {tag && <p className="thread-tag">{tag}</p>}
+        </>
       ) : (
-        <SafeMarkdown text={message.text} announce={announce} />
+        <>
+          {copy}
+          <SafeMarkdown text={message.text} announce={announce} />
+        </>
       )}
       {message.truncated && <p className="thread-note">Message preview shortened.</p>}
     </article>
@@ -429,6 +448,7 @@ export function Conversation({
   // is, and how much of it is in view, is written straight onto the elements, so scrolling never
   // re-renders the thread; the jump button keeps clear of it.
   const body = useRef<HTMLDivElement>(null);
+  const [outbox, setOutbox] = useState<HTMLDivElement | null>(null);
   const foot = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const jump = useRef<HTMLSpanElement>(null);
@@ -622,6 +642,7 @@ export function Conversation({
                 />
               ))
             )}
+            <div className="thread-outbox" ref={setOutbox} hidden={page.hasNewer} />
             {page.hasNewer && (
               <p className="thread-note thread-newer" ref={edges.newer}>
                 Loading later…
@@ -659,7 +680,7 @@ export function Conversation({
       </span>
       <div className="thread-foot" ref={foot} />
       {createPortal(
-        <>
+        <Outbox.Provider value={outbox}>
           <Collapse open={!!liveWork} className="thread-live">
             {footWork && (
               <LiveWorkLine
@@ -674,7 +695,7 @@ export function Conversation({
           <div className="thread-composer" hidden={asking}>
             {composer}
           </div>
-        </>,
+        </Outbox.Provider>,
         dockHost,
       )}
     </div>
