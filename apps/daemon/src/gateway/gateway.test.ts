@@ -899,7 +899,14 @@ describe("ActionGateway keyboard", () => {
     s.fake.script.settle = () => settled(false);
     const moved = await s.gateway.run(ctx, { verb: "key", combo: ["Tab"] });
     expect(moved).toMatchObject({ ok: true, changed: true });
-    expect(ctx.afterEffect.mock.calls).toEqual([[false], [true]]);
+    expect(ctx.afterEffect.mock.calls.map((c) => [c[0].combo, c[2]])).toEqual([
+      [["ctrl", "a"], false],
+      [["Tab"], true],
+    ]);
+    expect(ctx.afterEffect.mock.calls[0]?.[1]).toMatchObject({
+      window: 77,
+      target: search().target,
+    });
     s.fake.script.focused = () => ({ target: null, window: 77, unknown: true, ms: 300 });
     const unknown = await s.gateway.run(ctx, { verb: "key", combo: ["Tab"] });
     expect(unknown).toMatchObject({ ok: true, focus: { target: null, unknown: true } });
@@ -912,7 +919,7 @@ describe("ActionGateway keyboard", () => {
     await s.gateway.observe(ctx);
     const outcome = await s.gateway.run(ctx, { verb: "key", combo: ["ctrl", "a"] });
     expect(outcome).toMatchObject({ ok: true, changed: false });
-    expect(ctx.afterEffect.mock.calls).toEqual([[false]]);
+    expect(ctx.afterEffect.mock.calls.map((c) => c[2])).toEqual([false]);
   });
 
   it("reports the field that typing went into", async () => {

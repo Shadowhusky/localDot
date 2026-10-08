@@ -107,8 +107,8 @@ export interface ActionContext {
   authorizeAgent?(request: NativeActionRequest): Promise<NativeActionPermit | undefined>;
   // Private daemon callback at the last synchronous boundary before physical input.
   beforeEffect?(action: GuiAction, identity: NativeActionIdentity): boolean;
-  // The admitted input's outcome once it settled: whether the screen changed.
-  afterEffect?(changed: boolean): void;
+  // The outcome of the input beforeEffect admitted, once it settled: whether the screen changed.
+  afterEffect?(action: GuiAction, identity: NativeActionIdentity, changed: boolean): void;
   sessionId: string;
   cellId: string;
   agent?: string;
@@ -392,7 +392,7 @@ export class ActionGateway {
       });
       this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
       this.#cursor.set(ctx.cellId, point);
-      result = await this.#finish(ctx, d, verb);
+      result = await this.#finish(ctx, d, verb, identity && { action, identity });
     } finally {
       ended = true;
     }
@@ -480,7 +480,7 @@ export class ActionGateway {
       ctx.signal,
     );
     if (result.count === 0) throw new Cancelled("timeout", "nothing was typed");
-    const settled = await this.#finish(ctx, d, "type");
+    const settled = await this.#finish(ctx, d, "type", { action, identity });
     return {
       ok: true,
       ...settled,
@@ -576,7 +576,7 @@ export class ActionGateway {
       };
     }
     await dispatch(res.pressMono, res.injector);
-    const settled = await this.#finish(ctx, d, "key");
+    const settled = await this.#finish(ctx, d, "key", identity && { action, identity });
     return { ok: true, ...settled, ...(fresh ? { focus: focusOf(fresh) } : {}) };
   }
 
@@ -654,10 +654,12 @@ export class ActionGateway {
 
   // settle → observe → result; returns this action's own frame, never a concurrent action's, and
   // whether the screen changed: settle saw a change and the frame differs from the one before.
+  // `admitted` is the input beforeEffect admitted, which afterEffect hears about.
   async #finish(
     ctx: ActionContext,
     d: NativeDevice,
     verb: keyof typeof SETTLE_FIRST_MS,
+    admitted?: { action: GuiAction; identity: NativeActionIdentity },
   ): Promise<{ frameId: string; changed: boolean }> {
     this.#check(ctx);
     const before = this.#lastFrame.get(ctx.cellId)?.digest;
@@ -678,7 +680,7 @@ export class ActionGateway {
     });
     const o = await this.observe(ctx);
     const changed = !s.noVisibleChange && this.#lastFrame.get(ctx.cellId)?.digest !== before;
-    ctx.afterEffect?.(changed);
+    if (admitted) ctx.afterEffect?.(admitted.action, admitted.identity, changed);
     this.#append(ctx, "action.result", { ok: true });
     return { frameId: o.frameId, changed };
   }

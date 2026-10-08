@@ -104,40 +104,50 @@ describe("private actual native action repetition", () => {
     const guard = new RepeatGuard();
     for (let i = 0; i < 6; i++) {
       expect(guard.admit(key, identity)).toBe(true);
-      guard.settle(true);
+      guard.settle(key, identity, true);
     }
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(false);
+    guard.settle(key, identity, false);
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(false);
+    guard.settle(key, identity, false);
     expect(guard.admit(key, identity)).toBe(false);
   });
   it("pauses on the third identical input when the two before it had no effect", () => {
     const guard = new RepeatGuard();
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(false);
+    guard.settle(key, identity, false);
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(false);
+    guard.settle(key, identity, false);
     expect(guard.admit(key, identity)).toBe(false);
   });
   it("a visible change between no-effect inputs restarts the count", () => {
     const guard = new RepeatGuard();
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(false);
+    guard.settle(key, identity, false);
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(true);
+    guard.settle(key, identity, true);
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(false);
+    guard.settle(key, identity, false);
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(false);
+    guard.settle(key, identity, false);
     expect(guard.admit(key, identity)).toBe(false);
   });
   it("an input whose effect never arrived counts as one without effect", () => {
     const guard = new RepeatGuard();
     expect(guard.admit(key, identity)).toBe(true);
-    guard.settle(true);
+    guard.settle(key, identity, true);
     expect(guard.admit(key, identity)).toBe(true);
     expect(guard.admit(key, identity)).toBe(true);
+    expect(guard.admit(key, identity)).toBe(false);
+  });
+  it("ignores a late report about an input admitted before the last one", () => {
+    const guard = new RepeatGuard();
+    const other = { ...identity, window: 78 };
+    expect(guard.admit(key, other)).toBe(true);
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(key, identity, false);
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(key, other, true);
     expect(guard.admit(key, identity)).toBe(false);
   });
   it("a repeated or held combo is the same input as its single press", () => {
