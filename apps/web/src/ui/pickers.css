@@ -116,16 +116,26 @@
 
   .ui-listbox-group + .ui-listbox-group,
   .ui-listbox-group + .ui-option,
-  .ui-option + .ui-listbox-group,
-  .ui-option[data-custom] {
+  .ui-option + .ui-listbox-group {
     margin-top: var(--spacing);
     padding-top: var(--spacing);
     border-top: 1px solid var(--color-hairline);
   }
 
-  .ui-option[data-custom] {
-    border-top-left-radius: 0;
-    border-top-right-radius: 0;
+  /* The typed value sits apart from the matches, its rule drawn outside the row so the row lights
+     whole, with its corners. */
+  .ui-option[data-custom]:not(:first-child) {
+    position: relative;
+    margin-top: calc(var(--spacing) * 2 + 1px);
+  }
+
+  .ui-option[data-custom]:not(:first-child)::before {
+    content: "";
+    position: absolute;
+    top: calc(-1px - var(--spacing));
+    right: 0;
+    left: 0;
+    border-top: 1px solid var(--color-hairline);
   }
 
   .ui-option[data-two-line] {
