@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
-import { raiseChoice, raiseSteps, TaskRecovery } from "./TaskRecovery.tsx";
+import { raiseChoice, raiseSteps, spendingText, TaskRecovery } from "./TaskRecovery.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 
@@ -79,7 +79,10 @@ it("raises the limit by a chosen step and continues, and checks an amount of you
   );
   const region = screen.getByRole("region", { name: "Task recovery" });
   expect(region.textContent).toContain("$4 of $5 spent");
-  expect(region.textContent).not.toMatch(/microdollar|ceiling/i);
+  expect(region.textContent).toContain(
+    "dot's next step could cost up to $2, and $1 of this task's limit is left.",
+  );
+  expect(region.textContent).not.toMatch(/microdollar|ceiling|reached/i);
   expect(screen.getByRole("meter", { name: "Spent of this task's limit" })).toBeTruthy();
   // The smallest step that covers what the next request needs is chosen first.
   fireEvent.click(screen.getByRole("button", { name: "Raise to $7 and continue" }));
@@ -97,6 +100,18 @@ it("raises the limit by a chosen step and continues, and checks an amount of you
   });
   fireEvent.click(screen.getByRole("button", { name: "Raise to $8.50 and continue" }));
   expect(raiseBudget).toHaveBeenLastCalledWith(8.5);
+});
+
+it("says why the limit stopped dot: a next step that needs more than is left, or nothing left", () => {
+  expect(spendingText({ scope: "task", limitUSD: 5, spentUSD: 4.5, needUSD: 1.25 })).toBe(
+    "dot's next step could cost up to $1.25, and $0.50 of this task's limit is left. Raise the limit to continue; what was spent stays counted.",
+  );
+  expect(spendingText({ scope: "task", limitUSD: 5, spentUSD: 5.01 })).toBe(
+    "dot has spent all of this task's limit. Raise the limit to continue; what was spent stays counted.",
+  );
+  expect(spendingText({ scope: "day", limitUSD: 20, spentUSD: 19.8, needUSD: 0.4 })).toBe(
+    "dot's next step could cost up to $0.40, and $0.20 of today's limit is left.",
+  );
 });
 
 it("offers the smallest step that covers the next request, and the one after", () => {

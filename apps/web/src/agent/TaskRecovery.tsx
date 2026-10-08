@@ -23,7 +23,7 @@ function knownReason(
   if (reason === "budget")
     return {
       title: "Paused at the spending limit",
-      text: "dot reached this task's spending limit. Raise it to continue; what was spent stays counted.",
+      text: "dot stopped at the spending limit. Raise it to continue; what was spent stays counted.",
     };
   if (reason === "keyd unavailable")
     return {
@@ -62,6 +62,24 @@ export function raiseSteps(need: number | undefined): number[] {
   const first = RAISES.findIndex((raise) => raise >= (need ?? 5));
   const at = first < 0 ? RAISES.length - 2 : Math.min(first, RAISES.length - 2);
   return RAISES.slice(at, at + 2);
+}
+// Why the limit stopped dot: the next request may need more than is left, or nothing is left. A
+// task's own limit is raised here; the daily one says where it is changed.
+export function spendingText(data: {
+  scope: "task" | "day";
+  limitUSD: number;
+  spentUSD: number;
+  needUSD?: number;
+}): string {
+  const limit = data.scope === "day" ? "today's limit" : "this task's limit";
+  const left = Math.round(Math.max(0, data.limitUSD - data.spentUSD) * 100) / 100;
+  const why =
+    data.needUSD && left > 0
+      ? `dot's next step could cost up to ${dollars(data.needUSD)}, and ${dollars(left)} of ${limit} is left.`
+      : `dot has spent all of ${limit}.`;
+  return data.scope === "day"
+    ? why
+    : `${why} Raise the limit to continue; what was spent stays counted.`;
 }
 const CUSTOM = "other";
 const MAX_LIMIT = 10_000;
@@ -143,7 +161,11 @@ export function TaskRecovery({
       <h3 className="thread-recovery-title">
         {known?.title ?? (state.state === "paused" ? "Task paused" : "The task needs attention")}
       </h3>
-      <p className="thread-recovery-text">{known?.text ?? UNEXPLAINED}</p>
+      <p className="thread-recovery-text">
+        {state.reason === "budget" && budget && !subscription
+          ? spendingText(budget.data)
+          : (known?.text ?? UNEXPLAINED)}
+      </p>
       {state.reason && !known && (
         <p className="thread-recovery-reason">Reported reason: {state.reason}</p>
       )}
