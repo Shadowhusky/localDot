@@ -9,10 +9,45 @@ export type Inline =
   | { kind: "code"; text: string }
   | { kind: "link"; text: string; href: string }
   | { kind: "strong" | "em"; children: Inline[] };
+export type Align = "left" | "center" | "right" | null;
 export type Block =
-  | { kind: "paragraph" | "heading"; children: Inline[] }
+  | { kind: "paragraph" | "quote"; children: Inline[] }
+  | { kind: "heading"; level: number; children: Inline[] }
   | { kind: "code"; text: string; language: string }
-  | { kind: "list"; ordered: boolean; items: Inline[][] };
+  | { kind: "list"; ordered: boolean; items: Inline[][] }
+  | { kind: "table"; align: Align[]; head: Inline[][]; rows: Inline[][][] }
+  | { kind: "rule" };
+
+const MAX_COLUMNS = 12;
+// A table row and its cells, without the outer pipes; escaped pipes stay in the cell.
+function cells(line: string): string[] {
+  const body = line
+    .trim()
+    .replace(/^\|/, "")
+    .replace(/(?<!\\)\|$/, "");
+  return body.split(/(?<!\\)\|/).map((cell) => cell.trim().replaceAll("\\|", "|"));
+}
+const DELIMITER = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+const RULE = /^ {0,3}([-*_])( *\1){2,} *$/;
+// Short lines only: the patterns backtrack over long runs of spaces.
+const SHORT = 512;
+const isRule = (line: string) => line.length <= SHORT && RULE.test(line);
+const startsTable = (line: string, next: string) =>
+  line.includes("|") &&
+  next.length <= SHORT &&
+  DELIMITER.test(next) &&
+  cells(next).length === cells(line).length;
+const align = (cell: string): Align =>
+  cell.startsWith(":") && cell.endsWith(":")
+    ? "center"
+    : cell.endsWith(":")
+      ? "right"
+      : cell.startsWith(":")
+        ? "left"
+        : null;
+const QUOTE = /^ {0,3}> ?(.*)$/;
+// A line that starts another block ends a paragraph.
+const OPENS_BLOCK = /^( {0,3}(`{3}|~{3}|[-+*]\s|[0-9]{1,6}[.)]\s|>)|#{1,6}\s)/;
 export function safeMarkdownLink(raw: string): string | null {
   if (
     raw.length > 2048 ||
@@ -138,6 +173,50 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
       remaining--;
       continue;
     }
+    if (isRule(line)) {
+      blocks.push({ kind: "rule" });
+      position++;
+      remaining--;
+      continue;
+    }
+    const next = lines[position + 1] ?? "";
+    if (startsTable(line, next)) {
+      const head = cells(line).slice(0, MAX_COLUMNS);
+      const columns = head.length;
+      const aligns = cells(next).slice(0, columns).map(align);
+      const rows: Inline[][][] = [];
+      position += 2;
+      while (position < lines.length && remaining > columns + 1) {
+        const row = lines[position] ?? "";
+        if (!row.trim() || !row.includes("|")) break;
+        const values = cells(row);
+        rows.push(Array.from({ length: columns }, (_, i) => inline(values[i] ?? "")));
+        remaining -= columns;
+        position++;
+      }
+      blocks.push({
+        kind: "table",
+        align: Array.from({ length: columns }, (_, i) => aligns[i] ?? null),
+        head: head.map((cell) => inline(cell)),
+        rows,
+      });
+      remaining--;
+      continue;
+    }
+    const quote = QUOTE.exec(line);
+    if (quote) {
+      const body = [quote[1] ?? ""];
+      position++;
+      while (position < lines.length) {
+        const more = QUOTE.exec(lines[position] ?? "");
+        if (!more) break;
+        body.push(more[1] ?? "");
+        position++;
+      }
+      blocks.push({ kind: "quote", children: inline(body.join("\n").trim()) });
+      remaining--;
+      continue;
+    }
     const list = /^ {0,3}([-+*]|[0-9]{1,6}[.)])\s+(.+)$/.exec(line);
     if (list) {
       const ordered = /^[0-9]/.test(list[1] ?? ""),
@@ -153,9 +232,13 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
       remaining--;
       continue;
     }
-    const heading = /^#{1,6}\s+(.+)$/.exec(line);
+    const heading = line.length <= SHORT ? /^(#{1,6})\s+(.+?)\s*#*\s*$/.exec(line) : null;
     if (heading) {
-      blocks.push({ kind: "heading", children: inline(heading[1] ?? "") });
+      blocks.push({
+        kind: "heading",
+        level: heading[1]?.length ?? 1,
+        children: inline(heading[2] ?? ""),
+      });
       position++;
       remaining--;
       continue;
@@ -165,7 +248,9 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
     while (
       position < lines.length &&
       (lines[position] ?? "").trim() &&
-      !/^( {0,3}(`{3}|~{3}|[-+*]\s|[0-9]{1,6}[.)]\s)|#{1,6}\s)/.test(lines[position] ?? "")
+      !OPENS_BLOCK.test(lines[position] ?? "") &&
+      !isRule(lines[position] ?? "") &&
+      !startsTable(lines[position] ?? "", lines[position + 1] ?? "")
     )
       paragraph.push(lines[position++] ?? "");
     blocks.push({ kind: "paragraph", children: inline(paragraph.join("\n")) });

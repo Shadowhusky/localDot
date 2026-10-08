@@ -1,16 +1,14 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { bytes, count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
+import { Spinner } from "../ui/Spinner.tsx";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
 
 type FileRow = AgentResult["files"][number];
-const bytes = (value: number) =>
-  value < 1024
-    ? `${value.toLocaleString()} bytes`
-    : value < 1024 * 1024
-      ? `${(value / 1024).toFixed(1)} KB`
-      : `${(value / (1024 * 1024)).toFixed(1)} MB`;
 interface Selection {
   resultId: string;
   file: FileRow;
@@ -18,6 +16,17 @@ interface Selection {
   sessionId: string;
   abort: AbortController;
 }
+export type FileState = "busy" | "done" | "failed";
+// How long a finished download shows its check.
+const DONE_MS = 1500;
+
+const fileKey = (resultId: string, file: FileRow) => `${resultId}/${file.name}`;
+const valid = (file: FileRow) =>
+  safeTransferName(file.name) &&
+  Number.isSafeInteger(file.bytes) &&
+  file.bytes >= 0 &&
+  file.bytes <= FILE_LIMITS.bytes;
+
 function present(results: readonly AgentResult[], selection: Selection): boolean {
   return results.some(
     (result) =>
@@ -30,26 +39,29 @@ function present(results: readonly AgentResult[], selection: Selection): boolean
       ),
   );
 }
-export function ResultFiles({
-  api,
-  sessionId,
-  results,
-  ended,
-  idle,
-}: {
-  api: ApiClient;
-  sessionId: string | null;
-  results: readonly AgentResult[];
-  ended: boolean;
-  idle: boolean;
-}) {
-  const [pending, setPending] = useState(false),
-    [message, setMessage] = useState<string | null>(null);
-  const current = useRef({ api, sessionId, results }),
+
+// One download at a time across the task's results. A file is fetched only on the user's press,
+// by this session's validated name, and handed to the browser as an inert attachment.
+export function useResultDownloads(
+  api: ApiClient | null,
+  sessionId: string | null,
+  results: readonly AgentResult[],
+  announce?: (text: string) => void,
+) {
+  const [states, setStates] = useState<ReadonlyMap<string, FileState>>(new Map());
+  const current = useRef({ api, sessionId, results, announce }),
     active = useRef<Selection | null>(null),
     mounted = useRef(true),
     urls = useRef(new Set<string>()),
     timers = useRef(new Set<ReturnType<typeof setTimeout>>());
+  const mark = useCallback((key: string, state: FileState | null) => {
+    setStates((old) => {
+      const next = new Map(old);
+      if (state) next.set(key, state);
+      else next.delete(key);
+      return next;
+    });
+  }, []);
   const release = useCallback(() => {
     for (const timer of timers.current) clearTimeout(timer);
     timers.current.clear();
@@ -60,21 +72,18 @@ export function ResultFiles({
     active.current?.abort.abort();
     active.current = null;
     release();
-    if (mounted.current) {
-      setPending(false);
-      setMessage(null);
-    }
+    if (mounted.current) setStates(new Map());
   }, [release]);
   useLayoutEffect(() => {
     const old = current.current;
-    current.current = { api, sessionId, results };
+    current.current = { api, sessionId, results, announce };
     if (
       old.api !== api ||
       old.sessionId !== sessionId ||
       (active.current && !present(results, active.current))
     )
       retire();
-  }, [api, sessionId, results, retire]);
+  }, [api, sessionId, results, announce, retire]);
   useEffect(() => {
     mounted.current = true;
     const hidden = () => {
@@ -91,155 +100,239 @@ export function ResultFiles({
       document.removeEventListener("visibilitychange", hidden);
     };
   }, [retire]);
-  const request = async (resultId: string, file: FileRow) => {
-    const owner = current.current;
-    if (
-      active.current ||
-      !owner.sessionId ||
-      !navigator.onLine ||
-      document.visibilityState === "hidden" ||
-      !safeTransferName(file.name) ||
-      !Number.isSafeInteger(file.bytes) ||
-      file.bytes < 0 ||
-      file.bytes > FILE_LIMITS.bytes
-    )
-      return;
-    const record: Selection = {
-      resultId,
-      file,
-      api: owner.api,
-      sessionId: owner.sessionId,
-      abort: new AbortController(),
-    };
-    if (!present(owner.results, record)) return;
-    release();
-    active.current = record;
-    setPending(true);
-    setMessage(null);
-    const owns = () =>
-      mounted.current &&
-      active.current === record &&
-      current.current.api === record.api &&
-      current.current.sessionId === record.sessionId &&
-      present(current.current.results, record) &&
-      !record.abort.signal.aborted;
-    try {
-      // The model's arbitrary path is never a fetch target; only this session's validated name is used.
-      const blob = await downloadResult(
-        record.api,
-        record.sessionId,
-        record.file.name,
-        record.abort.signal,
-      );
-      if (!owns()) return;
-      const url = URL.createObjectURL(blob);
-      urls.current.add(url);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = record.file.name;
-      anchor.hidden = true;
-      anchor.rel = "noopener noreferrer";
+
+  const request = useCallback(
+    async (resultId: string, file: FileRow): Promise<boolean> => {
+      const owner = current.current;
+      if (
+        active.current ||
+        !owner.api ||
+        !owner.sessionId ||
+        !navigator.onLine ||
+        document.visibilityState === "hidden" ||
+        !valid(file)
+      )
+        return false;
+      const record: Selection = {
+        resultId,
+        file,
+        api: owner.api,
+        sessionId: owner.sessionId,
+        abort: new AbortController(),
+      };
+      if (!present(owner.results, record)) return false;
+      release();
+      active.current = record;
+      const key = fileKey(resultId, file);
+      mark(key, "busy");
+      const owns = () =>
+        mounted.current &&
+        active.current === record &&
+        current.current.api === record.api &&
+        current.current.sessionId === record.sessionId &&
+        present(current.current.results, record) &&
+        !record.abort.signal.aborted;
+      let saved = false;
       try {
-        document.body.append(anchor);
-        anchor.click();
-        setMessage("Download requested. Check your browser's downloads.");
+        // The model's arbitrary path is never a fetch target; only this session's validated name is used.
+        const blob = await downloadResult(
+          record.api,
+          record.sessionId,
+          record.file.name,
+          record.abort.signal,
+        );
+        if (!owns()) return false;
+        const url = URL.createObjectURL(blob);
+        urls.current.add(url);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = record.file.name;
+        anchor.hidden = true;
+        anchor.rel = "noopener noreferrer";
+        try {
+          document.body.append(anchor);
+          anchor.click();
+          saved = true;
+          mark(key, "done");
+          current.current.announce?.(`${record.file.name} downloaded.`);
+          const done = setTimeout(() => {
+            timers.current.delete(done);
+            if (mounted.current) mark(key, null);
+          }, DONE_MS);
+          timers.current.add(done);
+        } finally {
+          anchor.remove();
+          const timer = setTimeout(() => {
+            URL.revokeObjectURL(url);
+            urls.current.delete(url);
+            timers.current.delete(timer);
+          }, 1000);
+          timers.current.add(timer);
+        }
+      } catch {
+        if (owns()) {
+          mark(key, "failed");
+          current.current.announce?.(`${record.file.name} couldn't be downloaded. Try again.`);
+        }
       } finally {
-        anchor.remove();
-        const timer = setTimeout(() => {
-          URL.revokeObjectURL(url);
-          urls.current.delete(url);
-          timers.current.delete(timer);
-        }, 1000);
-        timers.current.add(timer);
+        if (active.current === record) {
+          active.current = null;
+          record.abort.abort();
+        }
       }
-    } catch {
-      if (owns())
-        setMessage("The download was cancelled or could not be verified. You can try it again.");
-    } finally {
-      if (active.current === record) {
-        active.current = null;
-        record.abort.abort();
-        if (mounted.current) setPending(false);
-      }
-    }
-  };
-  if (!results.length) return null;
-  const latest = results.at(-1);
+      return saved;
+    },
+    [mark, release],
+  );
+  const cancel = useCallback(() => {
+    const record = active.current;
+    if (!record) return;
+    active.current = null;
+    record.abort.abort();
+    mark(fileKey(record.resultId, record.file), null);
+    current.current.announce?.("Download cancelled.");
+  }, [mark]);
+  // The same object until a download's state changes, so the results that show it redraw only then.
+  return useMemo(
+    () => ({
+      state: (resultId: string, file: FileRow) => states.get(fileKey(resultId, file)),
+      busy: [...states.values()].includes("busy"),
+      request,
+      cancel,
+      sessionId: api ? sessionId : null,
+    }),
+    [states, request, cancel, api, sessionId],
+  );
+}
+export type ResultDownloads = ReturnType<typeof useResultDownloads>;
+
+// Keeps the end of a long name (its extension) in view; the middle gives way.
+function MiddleName({ name }: { name: string }) {
+  const tail = Math.min(8, Math.max(0, name.length - 4));
   return (
-    <section className="activity-results" aria-label="Result files">
-      {results.map((result) => (
-        <section key={result.id} className="activity-result" aria-label="Task result">
-          <div className="activity-section-head">
-            <h3 className="activity-section-title">Result</h3>
-            {result !== latest ? (
-              <span className="activity-section-meta">Earlier</span>
-            ) : ended ? (
-              <span className="activity-section-meta">Task ended</span>
-            ) : idle ? (
-              <span className="activity-section-meta">Ready for a follow-up</span>
-            ) : null}
-          </div>
-          <p className="result-summary">{result.summary}</p>
-          {result.files.length > 0 && (
-            <ul className="activity-files" aria-label={`Files in result ${result.id}`}>
-              {result.files.map((file) => {
-                const valid =
-                  safeTransferName(file.name) &&
-                  Number.isSafeInteger(file.bytes) &&
-                  file.bytes >= 0 &&
-                  file.bytes <= FILE_LIMITS.bytes;
-                return (
-                  <li key={file.name} className="activity-file">
-                    <span className="activity-file-name">
-                      {valid ? file.name : "Unavailable file name"}
-                    </span>
-                    <span className="activity-file-size num">
-                      {valid ? bytes(file.bytes) : "Can't be downloaded"}
-                    </span>
-                    <Button
-                      size="sm"
-                      aria-label={valid ? `Download ${file.name}` : "Unavailable file"}
-                      disabledReason={
-                        !valid
+    <span className="result-file-name" title={name}>
+      <span className="result-file-head">{name.slice(0, name.length - tail)}</span>
+      <span className="result-file-tail">{name.slice(name.length - tail)}</span>
+    </span>
+  );
+}
+
+function extension(name: string) {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 && name.length - dot <= 5 ? name.slice(dot + 1).toUpperCase() : "";
+}
+
+export function ResultCard({
+  result,
+  downloads,
+  onReplay,
+}: {
+  result: AgentResult;
+  downloads: ResultDownloads;
+  onReplay?: () => void;
+}) {
+  const files = result.files;
+  const all = async () => {
+    for (const file of files)
+      if (valid(file) && !(await downloads.request(result.id, file))) return;
+  };
+  return (
+    <section className="result-card" aria-label="Task result">
+      <p className="result-summary">{result.summary}</p>
+      {files.length > 0 && (
+        <ul className="result-files" aria-label={`Files in result ${result.id}`}>
+          {files.map((file) => {
+            const ok = valid(file);
+            const state = downloads.state(result.id, file);
+            const type = ok ? extension(file.name) : "";
+            return (
+              <li key={file.name} className="result-file" data-state={state}>
+                <span className="result-file-tile" aria-hidden="true">
+                  {type || <Icon name="file" size={16} />}
+                </span>
+                <span className="result-file-text">
+                  {ok ? <MiddleName name={file.name} /> : <span>Unavailable file name</span>}
+                  <span className="result-file-meta num">
+                    {!ok
+                      ? "Can't be downloaded"
+                      : state === "busy"
+                        ? "Downloading…"
+                        : state === "failed"
+                          ? "Couldn't download. Try again."
+                          : bytes(file.bytes)}
+                  </span>
+                </span>
+                <span className="result-file-action">
+                  {state === "busy" && <Spinner className="result-file-ring" />}
+                  <IconButton
+                    icon={state === "busy" ? "x" : state === "done" ? "check" : "download"}
+                    label={
+                      state === "busy"
+                        ? "Cancel download"
+                        : ok
+                          ? `Download ${file.name}`
+                          : "Unavailable file"
+                    }
+                    data-state={state}
+                    disabledReason={
+                      state === "busy"
+                        ? undefined
+                        : !ok
                           ? "This file can't be downloaded."
-                          : !sessionId
+                          : !downloads.sessionId
                             ? "This task is no longer available."
-                            : pending
+                            : downloads.busy
                               ? "Another download is still running."
                               : undefined
-                      }
-                      onClick={() => void request(result.id, file)}
-                    >
-                      Download
-                    </Button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </section>
-      ))}
-      {results.some((result) => result.files.length) && (
-        <p className="activity-note">
-          Files download to this device. They never open on their own.
-        </p>
+                    }
+                    onClick={() => {
+                      if (state === "busy") downloads.cancel();
+                      else void downloads.request(result.id, file);
+                    }}
+                  />
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       )}
-      {(pending || message) && (
-        <div className="activity-files-status">
-          {pending && (
+      {(files.length > 1 || onReplay) && (
+        <div className="result-actions">
+          {onReplay && (
             <Button
               variant="quiet"
               size="sm"
-              onClick={() => {
-                retire();
-                setMessage("Download cancelled.");
-              }}
+              icon="play"
+              className="result-replay"
+              aria-label="Replay this task"
+              onClick={onReplay}
             >
-              Cancel download
+              Replay
             </Button>
           )}
-          <p role="status">{message}</p>
+          {files.length > 1 && (
+            <Button
+              size="sm"
+              icon="download"
+              variant="quiet"
+              className="result-all"
+              aria-label={`Download all ${count(files.length, "file", "files")}`}
+              disabledReason={
+                !downloads.sessionId
+                  ? "This task is no longer available."
+                  : downloads.busy
+                    ? "Another download is still running."
+                    : undefined
+              }
+              onClick={() => void all()}
+            >
+              Download all
+            </Button>
+          )}
         </div>
+      )}
+      {files.length > 0 && (
+        <p className="thread-note">Files download to this device. They never open on their own.</p>
       )}
     </section>
   );

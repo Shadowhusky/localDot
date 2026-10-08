@@ -13,6 +13,8 @@ interface Tracking {
   // A jump scrolls smoothly; until it lands, its own scroll events must not end the following.
   jumping: boolean;
   glide: { frame: number; from: number; start: number; at: number } | null;
+  // Until then, the next growth glides even where growth is otherwise held at once.
+  glideUntil: number;
   height: number;
 }
 
@@ -26,12 +28,27 @@ export const reducedMotion = () =>
 const scrollToEnd = (element: HTMLElement) =>
   element.scrollTo?.({ top: element.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
 
-const topOf = (element: HTMLElement, scroller: HTMLElement) =>
-  element.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+// Where a row sits in the view, by layout: a row still easing in (a transform) has not moved.
+function topOf(element: HTMLElement, scroller: HTMLElement): number {
+  let top = 0;
+  for (let node: HTMLElement | null = element; node; ) {
+    top += node.offsetTop;
+    const parent: Element | null = node.offsetParent;
+    node =
+      parent instanceof HTMLElement && parent !== scroller && scroller.contains(parent)
+        ? parent
+        : null;
+  }
+  return top - scroller.scrollTop;
+}
 
 // Following the end, the end stays in view; scrolled back, the first [data-anchor] row in view stays
 // put. The browser's own scroll anchoring is off (WebKit has none), so both engines behave alike.
-export function useFollowScroll(owner: string, follow: boolean) {
+// Without glide the end is held at once, in the same frame as the growth, so nothing at the end
+// moves.
+export function useFollowScroll(owner: string, follow: boolean, { glide = true } = {}) {
+  const glides = useRef(glide);
+  glides.current = glide;
   const [pinned, setPinned] = useState(follow);
   const tracking = useRef<Tracking>({
     element: null,
@@ -42,6 +59,7 @@ export function useFollowScroll(owner: string, follow: boolean) {
     frame: 0,
     jumping: false,
     glide: null,
+    glideUntil: 0,
     height: 0,
   });
 
@@ -50,6 +68,8 @@ export function useFollowScroll(owner: string, follow: boolean) {
       element = t.element;
     if (!element) return;
     t.height = element.scrollHeight;
+    const glideOnce = performance.now() < t.glideUntil;
+    t.glideUntil = 0;
     if (t.pinned) {
       const end = element.scrollHeight - element.clientHeight;
       const lift = end - element.scrollTop;
@@ -61,12 +81,15 @@ export function useFollowScroll(owner: string, follow: boolean) {
       }
       // A whole screen or more (a first load, a page) is taken at once; one or two rows glide, from
       // wherever a glide in flight has got to, toward the end as it is when each frame is drawn.
-      if (lift >= element.clientHeight || reducedMotion()) {
+      const starts = glides.current || glideOnce;
+      if (lift >= element.clientHeight || reducedMotion() || !(starts || t.glide)) {
         if (t.glide) cancelAnimationFrame(t.glide.frame);
         t.glide = null;
         element.scrollTop = end;
         return;
       }
+      // Where growth is held at once, a glide already under way keeps its pace to the end.
+      if (!starts) return;
       if (t.glide) cancelAnimationFrame(t.glide.frame);
       const glide = { frame: 0, from: element.scrollTop, start: performance.now(), at: -1 };
       const step = (now: number) => {
@@ -101,7 +124,7 @@ export function useFollowScroll(owner: string, follow: boolean) {
     for (const row of element.querySelectorAll<HTMLElement>("[data-anchor]")) {
       if (row.getBoundingClientRect().bottom > top) {
         t.anchor = row;
-        t.anchorTop = row.getBoundingClientRect().top - top;
+        t.anchorTop = topOf(row, element);
         break;
       }
     }
@@ -135,8 +158,10 @@ export function useFollowScroll(owner: string, follow: boolean) {
       element = t.element;
     if (!element) return t.pinned;
     const below = element.scrollHeight - element.clientHeight - element.scrollTop;
-    // Rows that arrived before their resize was observed moved the end, not the reader.
-    if (t.pinned && t.observer && element.scrollHeight > t.height + 0.5) {
+    // Rows that arrived before their resize was observed moved the end, not the reader; a reader who
+    // scrolled back further than they grew is reading.
+    const unseen = element.scrollHeight - t.height;
+    if (t.pinned && t.observer && unseen > 0.5 && below < unseen + PIN_SLACK) {
       settle();
       return true;
     }
@@ -174,11 +199,44 @@ export function useFollowScroll(owner: string, follow: boolean) {
       t.jumping = true;
       scrollToEnd(t.element);
     },
+    // The growth about to be drawn glides to the end, for a change the reader should see happen.
+    glideNext() {
+      tracking.current.glideUntil = performance.now() + 250;
+    },
     interrupt() {
       const t = tracking.current;
       t.jumping = false;
       if (t.glide) cancelAnimationFrame(t.glide.frame);
       t.glide = null;
     },
+    // Following the end, an element whose top the end would hide is brought to the top of the view,
+    // this far below it, and held there instead. Says whether it was.
+    reveal(element: HTMLElement, margin = 0): boolean {
+      const t = tracking.current,
+        view = t.element;
+      const content = view?.firstElementChild;
+      if (!view || !t.pinned || !(content instanceof HTMLElement)) return false;
+      const top = topOf(element, view) - topOf(content, view) - margin;
+      if (top >= view.scrollHeight - view.clientHeight - 0.5) return false;
+      t.jumping = false;
+      if (t.glide) cancelAnimationFrame(t.glide.frame);
+      t.glide = null;
+      view.scrollTop = top;
+      setPin(false);
+      t.anchor = element;
+      t.anchorTop = topOf(element, view);
+      return true;
+    },
+    // Stops following the end before the reader is moved elsewhere on purpose, such as a page.
+    release() {
+      const t = tracking.current;
+      t.jumping = false;
+      if (t.glide) cancelAnimationFrame(t.glide.frame);
+      t.glide = null;
+      t.anchor = null;
+      setPin(false);
+    },
+    // Read now, not as of the last render.
+    following: () => tracking.current.pinned,
   };
 }

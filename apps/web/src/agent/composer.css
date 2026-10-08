@@ -85,15 +85,3 @@
   overflow: auto;
   overscroll-behavior: contain;
 }
-.copy-message,
-.new-messages {
-  min-height: 44px;
-  color: var(--color-text-2);
-  padding: 6px 12px;
-}
-.new-messages {
-  flex: none;
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  background: var(--color-surface);
-}

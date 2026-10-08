@@ -153,7 +153,10 @@
   background: var(--color-text);
 }
 
+/* The free row, also where the phone's pane tabs are hidden, so the rails never grow with their
+   content. */
 .house {
+  grid-row: -2;
   display: grid;
   grid-template-columns: minmax(220px, var(--spacing-rail)) minmax(0, 1fr) minmax(
       220px,
@@ -179,47 +182,6 @@
   font-size: 11.5px;
   font-weight: 500;
   letter-spacing: 0.01em;
-  color: var(--color-text-3);
-}
-
-.msgs {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: var(--spacing-say-gap);
-  overflow: hidden;
-}
-
-.say {
-  color: var(--color-text);
-  line-height: 1.55;
-}
-
-.say.empty {
-  color: var(--color-text-2);
-}
-
-.dock {
-  display: grid;
-  grid-template-columns: var(--spacing-avatar) 1fr;
-  gap: var(--spacing-dock-gap);
-  align-items: center;
-  padding-top: var(--spacing-rail-gap);
-}
-
-.dock .mascot {
-  width: var(--spacing-avatar);
-  height: var(--spacing-avatar);
-}
-
-.input {
-  height: var(--spacing-pill);
-  border-radius: var(--radius-full);
-  background: var(--color-surface);
-  display: flex;
-  align-items: center;
-  padding: 0 var(--spacing-input-x);
   color: var(--color-text-3);
 }
 
@@ -646,68 +608,10 @@
   font-size: inherit;
   font-weight: inherit;
 }
-.conversation-empty {
-  margin: auto 0;
-  max-width: 40ch;
-}
-.conversation-empty h3 {
-  font-size: 20px;
-  line-height: 1.3;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  margin-bottom: 12px;
-}
-.conversation-empty p {
-  color: var(--color-text-2);
-}
 .history-note {
   font-size: 12px;
   color: var(--color-text-2);
   margin-top: 8px;
-}
-.msgs {
-  min-height: 0;
-  overflow: auto;
-  overscroll-behavior: contain;
-  justify-content: flex-start;
-  padding: 4px 4px 12px 0;
-}
-.conversation-rail > .msgs {
-  min-height: min(180px, 26vh);
-}
-.conversation-controls {
-  flex: 0 1 auto;
-  min-height: 0;
-  max-height: 58%;
-  overflow: auto;
-  overscroll-behavior: contain;
-}
-.conversation-controls > .composer {
-  max-height: none;
-  overflow: visible;
-}
-.message {
-  flex: none;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--color-line);
-}
-.message-who {
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--color-text-2);
-  margin-bottom: 6px;
-}
-.message-who span {
-  font-weight: 400;
-}
-.message-text {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-.rail-error {
-  color: var(--color-text-2);
-  font-size: 12px;
-  padding-top: 12px;
 }
 .keys-btn {
   min-height: 44px;

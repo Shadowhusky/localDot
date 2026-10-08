@@ -1,183 +1,272 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Conversation } from "./Conversation.tsx";
-import type { AgentMessage } from "./model.ts";
+import type { AgentMessage, AgentQuestion } from "./model.ts";
+import { threadItems } from "./thread.ts";
 
+const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
+vi.mock("../ui/Announcer.tsx", () => spoken);
+
+beforeEach(() => {
+  spoken.announce.mockClear();
+  spoken.withdraw.mockClear();
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
 });
-const message = (id: string, text = "Same message"): AgentMessage => ({
-  id,
-  role: "user",
-  text,
-  final: true,
-});
-describe("conversation ownership and scrolling", () => {
-  it.each([true, false])(
-    "reconciles hidden updates on return without moving a reader who scrolled up (bottom=%s)",
-    (bottom) => {
-      const messages = [message("one")];
-      const view = render(<Conversation messages={messages} truncated={false} />);
-      const history = screen.getByRole("region", { name: "Conversation history" });
-      Object.defineProperties(history, {
-        scrollHeight: { configurable: true, value: 1000 },
-        clientHeight: { configurable: true, value: 200 },
-      });
-      history.scrollTop = bottom ? 800 : 100;
-      fireEvent.scroll(history);
-      view.rerender(<Conversation messages={messages} truncated={false} visible={false} />);
-      Object.defineProperties(history, {
-        scrollHeight: { configurable: true, value: 0 },
-        clientHeight: { configurable: true, value: 0 },
-      });
-      fireEvent.scroll(history); // A hidden layout must not overwrite the reader's remembered intent.
-      const changed = [...messages, message("two")];
-      view.rerender(<Conversation messages={changed} truncated={false} visible={false} />);
-      expect(history.scrollTop).toBe(bottom ? 800 : 100);
-      Object.defineProperties(history, {
-        scrollHeight: { configurable: true, value: 1400 },
-        clientHeight: { configurable: true, value: 200 },
-      });
-      view.rerender(<Conversation messages={changed} truncated={false} visible />);
-      if (bottom) {
-        expect(history.scrollTop).toBe(1400);
-        expect(screen.queryByRole("button", { name: "New messages" })).toBeNull();
-      } else {
-        expect(history.scrollTop).toBe(100);
-        expect(screen.getByRole("button", { name: "New messages" })).toBeTruthy();
-      }
-    },
-  );
-  it("keeps identical messages separate and replaces the same assistant's streaming content", () => {
-    const messages = [
-      message("one"),
-      message("two"),
-      { ...message("assistant", "writing"), role: "assistant" as const, final: false },
-    ];
-    const view = render(<Conversation messages={messages} truncated={false} />);
-    expect(screen.getAllByText("Same message")).toHaveLength(2);
-    const assistant = screen.getByText("writing").closest("article");
-    view.rerender(
+const message = (id: string, text = "Same message", role: "user" | "assistant" = "user") =>
+  ({ id, role, text, final: true }) as AgentMessage;
+const items = (messages: AgentMessage[], questions: AgentQuestion[] = []) =>
+  threadItems(messages, questions);
+const history = () => screen.getByRole("region", { name: "Conversation history" });
+// `threadEnd` is where the thread's last row ends; below it there is only the foot.
+function scrolled(top: number, height = 1000, view = 200, threadEnd = height) {
+  const scroller = history().closest(".thread-scroll") as HTMLElement;
+  Object.defineProperties(scroller, {
+    scrollHeight: { configurable: true, value: height },
+    clientHeight: { configurable: true, value: view },
+  });
+  scroller.getBoundingClientRect = () => ({ top: 0, bottom: view }) as DOMRect;
+  history().getBoundingClientRect = () => ({ top: -top, bottom: threadEnd - top }) as DOMRect;
+  scroller.scrollTop = top;
+  fireEvent.scroll(scroller);
+  return scroller;
+}
+
+describe("the conversation thread", () => {
+  it("shows you in a bubble and dot under its name once per run of its messages", () => {
+    render(
       <Conversation
-        messages={[
-          messages[0] as AgentMessage,
-          messages[1] as AgentMessage,
-          { ...message("assistant", "Finished"), role: "assistant", final: true },
-        ]}
+        items={items([
+          message("one", "Draw a dog"),
+          message("two", "Opening the paint app.", "assistant"),
+          message("three", "Drawing the ears now.", "assistant"),
+          message("four", "Make it brown"),
+        ])}
         truncated={false}
       />,
     );
-    expect(screen.getByText("Finished").closest("article")).toBe(assistant);
-    expect(screen.queryByText("writing")).toBeNull();
+    const rows = [...document.querySelectorAll(".thread-row")];
+    expect(rows.map((row) => row.getAttribute("data-speaker"))).toEqual([
+      "user",
+      "dot",
+      "dot",
+      "user",
+    ]);
+    expect(rows.map((row) => row.hasAttribute("data-group-start"))).toEqual([
+      true,
+      true,
+      false,
+      true,
+    ]);
+    expect(document.querySelectorAll(".thread-who")).toHaveLength(1);
+    expect(rows[0]?.querySelector(".thread-bubble")?.textContent).toBe("Draw a dog");
+    expect(rows[1]?.querySelector(".thread-bubble")).toBeNull();
   });
-  it("preserves a reader's scroll position and offers an explicit return to new messages", () => {
-    const view = render(<Conversation messages={[message("one")]} truncated={false} />);
-    const history = screen.getByRole("region", { name: "Conversation history" });
-    Object.defineProperties(history, {
-      scrollHeight: { configurable: true, value: 1000 },
-      clientHeight: { configurable: true, value: 200 },
-    });
-    history.scrollTop = 100;
-    fireEvent.scroll(history);
-    view.rerender(
-      <Conversation messages={[message("one"), message("two", "New arrival")]} truncated={false} />,
-    );
-    expect(history.scrollTop).toBe(100);
-    fireEvent.click(screen.getByRole("button", { name: "New messages" }));
-    expect(history.scrollTop).toBe(1000);
+
+  it("keeps a streaming message in place as its text grows and when it finishes", () => {
+    const writing = { ...message("reply", "Look", "assistant"), final: false };
+    const view = render(<Conversation items={items([writing])} truncated={false} />);
+    const article = screen.getByText("Look").closest("article");
+    expect(article?.hasAttribute("data-streaming")).toBe(true);
     view.rerender(
       <Conversation
-        messages={[message("one"), message("two"), message("three")]}
+        items={items([{ ...writing, text: "Looking at the totals.", final: true }])}
         truncated={false}
       />,
     );
-    expect(history.scrollTop).toBe(1000);
-    expect(screen.queryByRole("button", { name: "New messages" })).toBeNull();
+    expect(screen.getByText("Looking at the totals.").closest("article")).toBe(article);
+    expect(article?.hasAttribute("data-streaming")).toBe(false);
   });
-  it("copies only the displayed bounded non-key-shaped text after user activation", async () => {
+
+  it("copies a message after a press, shows a check for a moment, and never copies a key", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
     const writeText = vi.fn(async () => {});
     Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
     render(
       <Conversation
-        messages={[
-          message("one", "可见 text"),
-          message("two", `sk-proj-${"a".repeat(156)}`),
-          message("three", "x".repeat(8001)),
-        ]}
-        truncated={true}
+        items={items([message("one", "可见 text"), message("two", `sk-proj-${"a".repeat(156)}`)])}
+        truncated={false}
       />,
     );
     expect(writeText).not.toHaveBeenCalled();
-    const buttons = screen.getAllByRole("button", { name: "Copy your message" });
-    fireEvent.click(buttons[0] as HTMLElement);
+    const [plain, key] = screen.getAllByRole("button", { name: "Copy your message" });
+    expect(key?.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(key as HTMLElement);
+    expect(writeText).not.toHaveBeenCalled();
+    await act(async () => fireEvent.click(plain as HTMLElement));
     expect(writeText).toHaveBeenCalledExactlyOnceWith("可见 text");
-    fireEvent.click(buttons[1] as HTMLElement);
-    fireEvent.click(buttons[2] as HTMLElement);
-    expect(writeText).toHaveBeenCalledOnce();
-    expect(await screen.findByText("Message copied.")).toBeTruthy();
-    expect(screen.getByText(/Earlier history is kept/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
+    expect(spoken.announce).toHaveBeenLastCalledWith("thread", "Copied.");
+    await act(async () => vi.advanceTimersByTime(1600));
+    expect(screen.getAllByRole("button", { name: "Copy your message" })).toHaveLength(2);
+  });
+
+  it("asks a question as dot and shows your answer as your own message under it", () => {
+    const question: AgentQuestion = {
+      askId: "ask",
+      seq: 3,
+      question: "Which format?",
+      options: [{ key: "A", text: "Markdown" }],
+      allowText: true,
+      answer: { askId: "ask", by: "user", option: "A", text: "With headings" },
+    };
+    render(
+      <Conversation
+        items={items(
+          [
+            { ...message("one", "Write it up"), seq: 1 },
+            { ...message("two", "Done.", "assistant"), seq: 9 },
+          ],
+          [question],
+        )}
+        truncated={false}
+      />,
+    );
+    const rows = [...document.querySelectorAll(".thread-row")];
+    expect(rows.map((row) => row.getAttribute("data-kind"))).toEqual([
+      "message",
+      "question",
+      "answer",
+      "message",
+    ]);
+    expect(within(rows[1] as HTMLElement).getByText("Which format?")).toBeTruthy();
+    expect(rows[2]?.querySelector(".thread-bubble")?.textContent).toBe("Markdown\n\nWith headings");
+    expect(document.querySelectorAll("form,input,textarea")).toHaveLength(0);
+  });
+
+  it("offers the newest messages after the reader scrolls back, counting what arrived", () => {
+    const view = render(<Conversation items={items([message("one")])} truncated={false} />);
+    const jump = () => document.querySelector(".thread-jump") as HTMLElement;
+    expect(jump().hasAttribute("data-shown")).toBe(false);
+    scrolled(100);
+    expect(jump().hasAttribute("data-shown")).toBe(true);
+    expect(within(jump()).getByRole("button", { name: "Jump to latest" })).toBeTruthy();
+    view.rerender(
+      <Conversation
+        items={items([message("one"), message("two", "New arrival", "assistant")])}
+        truncated={false}
+      />,
+    );
+    expect(within(jump()).getByRole("button", { name: "1 new message" }).textContent).toBe("1 new");
+    scrolled(800);
+    expect(jump().hasAttribute("data-shown")).toBe(false);
+  });
+
+  it("names what arrived while the reader was away: one kind by its name, a mix as updates", () => {
+    const question: AgentQuestion = {
+      askId: "ask",
+      question: "Which format?",
+      options: [{ key: "A", text: "Markdown" }],
+      allowText: false,
+    };
+    const view = render(<Conversation items={items([message("one")])} truncated={false} />);
+    const jump = () => document.querySelector(".thread-jump") as HTMLElement;
+    scrolled(100);
+    view.rerender(<Conversation items={items([message("one")], [question])} truncated={false} />);
+    expect(within(jump()).getByRole("button", { name: "1 new question" }).textContent).toBe(
+      "1 new",
+    );
+    view.rerender(
+      <Conversation
+        items={items([message("one"), message("two", "Here it is", "assistant")], [question])}
+        truncated={false}
+      />,
+    );
+    expect(within(jump()).getByRole("button", { name: "2 new updates" })).toBeTruthy();
+  });
+
+  it("offers nothing to jump to when only the composer lies past the view", () => {
+    render(<Conversation items={items([message("one")])} truncated={false} />);
+    const jump = () => document.querySelector(".thread-jump") as HTMLElement;
+    scrolled(500, 1000, 200, 650);
+    expect(jump().hasAttribute("data-shown")).toBe(false);
+    expect(jump().hasAttribute("inert")).toBe(true);
+    scrolled(400, 1000, 200, 650);
+    expect(jump().hasAttribute("data-shown")).toBe(true);
   });
 });
 
-it("mounts only a bounded page of 10,000 messages and keeps reading/copy identity through a live addition", () => {
+it("mounts a bounded window of 10,000 messages and keeps the reader's rows through a live addition", () => {
   const data = Array.from({ length: 10_000 }, (_, n) => message(`message-${n}`, `Content ${n}`));
-  const v = render(<Conversation messages={data} truncated={false} ownerKey="large-task" />);
-  const history = screen.getByRole("region", { name: "Conversation history" });
-  expect(history.querySelectorAll("article.message")).toHaveLength(100);
+  const v = render(<Conversation items={items(data)} truncated={false} ownerKey="large-task" />);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
   fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
-  const retained = screen.getByText("Content 9800").closest("article");
+  const kept = screen.getByText("Content 9800").closest("article");
+  expect(screen.getByText("Content 9700")).toBeTruthy();
   v.rerender(
     <Conversation
-      messages={[...data, message("new", "Newest content")]}
+      items={items([...data, message("new", "Newest content")])}
       truncated={false}
       ownerKey="large-task"
     />,
   );
-  expect(screen.getByText("Content 9800").closest("article")).toBe(retained);
-  expect(history.querySelectorAll("article.message")).toHaveLength(100);
+  expect(screen.getByText("Content 9800").closest("article")).toBe(kept);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
   expect(screen.queryByText("Newest content")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "New messages" }));
+  // Each move keeps half the window, so two reach the newest end.
+  fireEvent.click(screen.getByRole("button", { name: "Newer messages" }));
+  expect(screen.queryByText("Newest content")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Newer messages" }));
   expect(screen.getByText("Newest content")).toBeTruthy();
-  expect(history.querySelectorAll("article.message")).toHaveLength(100);
+  expect(history().querySelectorAll("article.thread-message")).toHaveLength(200);
 });
 
-it("announces completed replies without reading each streaming delta", async () => {
+it("announces completed replies without reading each streaming delta", () => {
   const reply = (text: string, final: boolean): AgentMessage => ({
     id: "reply",
     role: "assistant",
     text,
     final,
   });
-  const v = render(<Conversation messages={[reply("First", false)]} truncated={false} />);
-  const live = screen.getByRole("status");
-  expect(live.textContent).toBe("");
-  v.rerender(<Conversation messages={[reply("First second", false)]} truncated={false} />);
-  expect(live.textContent).toBe("");
-  v.rerender(<Conversation messages={[reply("First second complete", true)]} truncated={false} />);
-  expect(live.textContent).toBe("dot replied: First second complete");
+  const v = render(<Conversation items={items([reply("First", false)])} truncated={false} />);
+  v.rerender(<Conversation items={items([reply("First second", false)])} truncated={false} />);
+  expect(spoken.announce).not.toHaveBeenCalled();
+  v.rerender(
+    <Conversation items={items([reply("First second complete", true)])} truncated={false} />,
+  );
+  expect(spoken.announce).toHaveBeenCalledExactlyOnceWith(
+    "thread",
+    "dot replied: First second complete",
+  );
   v.rerender(
     <Conversation
-      messages={[
+      items={items([
         reply("First second complete", true),
         { ...reply("New streaming text", false), id: "next" },
-      ]}
+      ])}
       truncated={false}
     />,
   );
-  expect(live.textContent).toBe("dot replied: First second complete");
+  expect(spoken.announce).toHaveBeenCalledOnce();
+});
+
+it("says nothing while the conversation is out of view", () => {
+  render(
+    <Conversation
+      items={items([message("reply", "Done.", "assistant")])}
+      truncated={false}
+      visible={false}
+    />,
+  );
+  expect(spoken.announce).not.toHaveBeenCalled();
 });
 
 it("retires the previous task's reply announcement when the conversation owner changes", () => {
-  const reply: AgentMessage = {
-    id: "previous-reply",
-    role: "assistant",
-    text: "Previous task result",
-    final: true,
-  };
-  const v = render(<Conversation messages={[reply]} truncated={false} ownerKey="first-task" />);
-  expect(screen.getByRole("status").textContent).toBe("dot replied: Previous task result");
-  v.rerender(<Conversation messages={[]} truncated={false} ownerKey="second-task" />);
-  expect(screen.getByRole("status").textContent).toBe("");
+  const reply = message("previous-reply", "Previous task result", "assistant");
+  const v = render(<Conversation items={items([reply])} truncated={false} ownerKey="first-task" />);
+  expect(spoken.announce).toHaveBeenLastCalledWith("thread", "dot replied: Previous task result");
+  expect(spoken.withdraw).not.toHaveBeenCalled();
+  v.rerender(<Conversation items={[]} truncated={false} ownerKey="second-task" />);
+  expect(spoken.withdraw).toHaveBeenCalledExactlyOnceWith("thread");
+  // The thread has no live region of its own; the page's one is the Announcer's.
+  expect(screen.queryByRole("status")).toBeNull();
+});
+
+it("says earlier history lives in the task log when the projection dropped it", () => {
+  render(<Conversation items={items([message("one")])} truncated />);
+  expect(screen.getByText("Earlier messages are kept in the task log.")).toBeTruthy();
 });

@@ -494,8 +494,7 @@ button.activity-row-head[data-pressed] {
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
-.activity-section,
-.activity-results {
+.activity-section {
   display: flex;
   flex-direction: column;
   margin-top: calc(var(--spacing) * 6);
@@ -508,59 +507,6 @@ button.activity-row-head[data-pressed] {
 .activity-section-meta {
   flex-shrink: 0;
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-}
-
-.activity-result + .activity-result {
-  margin-top: calc(var(--spacing) * 4);
-}
-
-.result-summary {
-  color: var(--color-fg-1);
-  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
-  letter-spacing: var(--text-reading--letter-spacing);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.activity-files {
-  list-style: none;
-  display: grid;
-  margin: calc(var(--spacing) * 3) 0 0;
-  padding: 0;
-}
-
-.activity-file {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  column-gap: calc(var(--spacing) * 3);
-  align-items: center;
-  min-height: calc(var(--spacing) * 10);
-  border-top: 1px solid var(--color-hairline);
-}
-
-.activity-file:last-child {
-  border-bottom: 1px solid var(--color-hairline);
-}
-
-.activity-file-name {
-  min-width: 0;
-  color: var(--color-fg-1);
-  overflow-wrap: anywhere;
-}
-
-.activity-file-size {
-  color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-}
-
-.activity-files-status {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-  margin-top: calc(var(--spacing) * 2);
-  color: var(--color-fg-2);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
@@ -860,70 +806,4 @@ button.activity-usage-trigger:active {
   .activity-usage-chevron {
     transition: none;
   }
-}
-
-/* Shared by the conversation's question form, its history pages and screen-reader text. */
-.activity-heading {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-}
-
-.activity-heading h3 {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.activity-heading > span {
-  color: var(--color-text-2);
-  font-size: 11px;
-}
-
-.question-card {
-  border: 1px solid var(--color-line);
-  border-radius: 8px;
-  padding: 12px;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.question-card p {
-  margin: 8px 0;
-  white-space: pre-wrap;
-}
-
-.history-pages {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-block: 12px;
-}
-
-.history-pages button {
-  min-height: 44px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--color-line);
-  background: var(--color-surface);
-  color: inherit;
-  font: inherit;
-}
-
-.history-pages button:disabled {
-  opacity: 0.45;
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-  border: 0;
 }
