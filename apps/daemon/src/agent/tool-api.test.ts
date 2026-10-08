@@ -199,13 +199,44 @@ describe("the tools", () => {
     expect(stale.body.content[1]?.type).toBe("image");
   });
 
-  it("answers cursor_position in model pixels and repeats a key", async () => {
+  it("answers cursor_position in model pixels and repeats a key as one input", async () => {
     const h = toolHarness();
     expect((await h.call("computer", { action: "cursor_position" })).body.content[0]?.text).toBe(
       "The cursor is at (300, 200).",
     );
     await h.call("computer", { action: "key", keys: ["Down"], repeat: 3 });
-    expect(h.actions.map((a) => a.action.verb)).toEqual(["key", "key", "key"]);
+    expect(h.actions.map((a) => a.action)).toEqual([
+      { verb: "key", combo: ["Down"], repeat: 3, speed: "auto" },
+    ]);
+  });
+
+  it("holds keys as one input, and refuses an unknown key before the computer", async () => {
+    const h = toolHarness();
+    await h.call("computer", { action: "hold_key", keys: ["shift"], ms: 1500 });
+    expect(h.actions.map((a) => a.action)).toEqual([
+      { verb: "key", combo: ["shift"], holdMs: 1500, speed: "auto" },
+    ]);
+    const refused = await h.call("computer", { action: "key", keys: ["ctrl", "Retrun"] });
+    expect(refused.body).toMatchObject({ ok: false });
+    expect(refused.body.content[0]?.text).toMatch(/unknown key "Retrun"; did you mean Return/);
+    expect((await h.call("computer", { action: "hold_key", keys: ["shift"] })).body.ok).toBe(false);
+    expect(h.actions).toHaveLength(1);
+  });
+
+  it("ends a hold when the task is paused", async () => {
+    const h = toolHarness();
+    let signal: AbortSignal | undefined;
+    h.tools.gateway.run = async (ctx) => {
+      signal = ctx.signal;
+      await new Promise((resolve) => ctx.signal?.addEventListener("abort", resolve));
+      return { ok: false, cancelled: "user", error: "session stopped" };
+    };
+    const holding = h.call("computer", { action: "hold_key", keys: ["shift"], ms: 20_000 });
+    await until(() => signal !== undefined);
+    expect(signal?.aborted).toBe(false);
+    h.session.requestSafetyPause(ulid());
+    await until(() => signal?.aborted === true);
+    expect((await holding).body.ok).toBe(false);
   });
 
   it("keeps the plan as plan.set, then plan.update for status changes", async () => {

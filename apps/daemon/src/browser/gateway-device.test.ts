@@ -128,6 +128,23 @@ describe("leased browser gateway device", () => {
       expect(f.device.clocks.toDaemonMicros(50)).toBe(100_000);
     },
   );
+  it("presses a repeated key once per repeat and refuses to hold keys", async () => {
+    const f = fixture();
+    const key = { kind: "key" as const, combo: ["Down"] };
+    const result = await f.device.client.input({
+      input: { ...key, repeat: 3 },
+      injector: "xtest",
+      holdMs: 0,
+    });
+    expect(f.client.input.mock.calls.map((c) => (c as unknown[])[2])).toEqual(
+      Array(3).fill({ input: key, injector: "xtest", holdMs: 0 }),
+    );
+    expect(result).toMatchObject({ pressMono: 51, presses: [51, 51, 51] });
+    await expect(
+      f.device.client.input({ input: { ...key, holdMs: 500 }, injector: "xtest", holdMs: 0 }),
+    ).rejects.toThrow(/hold/i);
+    expect(f.client.input).toHaveBeenCalledTimes(3);
+  });
   it("refuses a finished screen lease before and after asynchronous service replies", async () => {
     const f = fixture();
     f.onReply(() => f.lease.finish());

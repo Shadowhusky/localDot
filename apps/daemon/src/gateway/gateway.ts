@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import {
   clipText,
   type Input,
+  type InputResult,
   microsToMs,
   type Point,
   type Rect,
@@ -53,7 +54,15 @@ export type GuiAction =
       basedOn?: string;
     }
   | { verb: "type"; label?: string; text: string; masked?: boolean; speed?: Speed | "auto" }
-  | { verb: "key"; label?: string; combo: string[]; speed?: Speed | "auto" }
+  | {
+      verb: "key";
+      label?: string;
+      combo: string[];
+      // Presses of the combo in one input, or how long it stays down; never both.
+      repeat?: number;
+      holdMs?: number;
+      speed?: Speed | "auto";
+    }
   | {
       verb: "scroll";
       label?: string;
@@ -477,25 +486,38 @@ export class ActionGateway {
       : undefined;
     this.#append(ctx, "action.intent", {
       verb: "key",
-      label: clipText(action.label ?? keyLabel(action.combo), 80),
+      label: clipText(action.label ?? keyLabel(action.combo, action), 80),
       risk: "none",
     });
     await this.deps.sleep(dwellMs(speed), ctx.signal);
     await this.#waitForStream(ctx);
-    const input: Input = { kind: "key", combo: action.combo };
+    const input: Input = {
+      kind: "key",
+      combo: action.combo,
+      ...(action.repeat && action.repeat > 1 ? { repeat: action.repeat } : {}),
+      ...(action.holdMs ? { holdMs: action.holdMs } : {}),
+    };
     if (identity) await this.#consume(ctx, action, identity, permit, readIdentity);
     this.#check(ctx);
-    const res = await d.client.input(
-      {
-        input,
-        injector: "xtest",
-        holdMs: 0,
-        ...(identity?.window !== undefined && identity.window !== null
-          ? { window: identity.window }
-          : {}),
-      },
-      ctx.signal,
-    );
+    let res: InputResult;
+    try {
+      res = await d.client.input(
+        {
+          input,
+          injector: "xtest",
+          holdMs: 0,
+          ...(identity?.window !== undefined && identity.window !== null
+            ? { window: identity.window }
+            : {}),
+        },
+        ctx.signal,
+      );
+    } catch (error) {
+      // A hold that was stopped, or keys that failed partway, may still be down. desktopd and its
+      // helper release them too; this waits for it before Stop or a takeover goes on.
+      await d.client.release?.().catch(() => undefined);
+      throw error;
+    }
     mark(true);
     const pressT = this.#pressT(ctx, d, res.pressMono);
     const ringAt = await this.deps.ringOnset.onset({

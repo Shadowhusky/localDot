@@ -24,6 +24,8 @@ export interface FakeScript {
   clockDelayMs?: number;
   // A long string still typing: /type sends its progress lines, then nothing until the request ends.
   typeHolds?: boolean;
+  // Held keys: /input answers a key hold only once the request ends, as a Stop ends it.
+  inputHolds?: boolean;
 }
 
 export class FakeDesktopd {
@@ -49,9 +51,21 @@ export class FakeDesktopd {
     });
     this.app.post("/input", async (c) => {
       const body = (await c.req.json()) as {
-        input?: { kind?: string; at?: { x: number; y: number }; to?: { x: number; y: number } };
+        input?: {
+          kind?: string;
+          at?: { x: number; y: number };
+          to?: { x: number; y: number };
+          holdMs?: number;
+        };
       };
       this.calls.push({ path: "/input", body });
+      if (this.script.inputHolds && body.input?.holdMs) {
+        const signal = c.req.raw.signal;
+        await new Promise<void>((resolve) =>
+          signal.aborted ? resolve() : signal.addEventListener("abort", () => resolve()),
+        );
+        return c.text("stopped", 499 as never);
+      }
       const at = body.input?.kind === "move" ? body.input.to : body.input?.at;
       if (at) this.pointer = { x: at.x, y: at.y };
       const armedMono = this.mono();
@@ -105,6 +119,10 @@ export class FakeDesktopd {
       );
     });
     this.app.post("/arm", (c) => c.json({ mono: this.mono() }));
+    this.app.post("/release", (c) => {
+      this.calls.push({ path: "/release", body: null });
+      return c.json({ keys: 0, buttons: 0 });
+    });
     this.app.post("/launch", async (c) => {
       const body = await c.req.json();
       this.calls.push({ path: "/launch", body });

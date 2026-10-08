@@ -107,7 +107,12 @@ export function manualInputsFor(action: ComputerAction | undefined, scale: 1 | 2
               ? { kind: "key", combo: ["Tab"] }
               : { kind: "text", text: part },
       );
-  if (action?.action === "key" && action.keys) return [{ kind: "key", combo: action.keys }];
+  const keys = action?.action === "key" ? action.keys : undefined;
+  if (keys)
+    return Array.from(
+      { length: action?.repeat ?? 1 },
+      (): ManualInput => ({ kind: "key", combo: keys }),
+    );
   if (action?.action === "click" && action.point)
     return [
       {

@@ -753,6 +753,74 @@ describe("ActionGateway type and key", () => {
   });
 });
 
+describe("ActionGateway keyboard", () => {
+  function agentCtx(s: ReturnType<typeof setup>, signal?: AbortSignal) {
+    return {
+      source: "agent" as const,
+      sessionId: s.sessionId,
+      cellId: s.cellId,
+      ...(signal ? { signal } : {}),
+      authorizeAgent: vi.fn(async () => ({ consume: () => true })),
+      beforeEffect: vi.fn(() => true),
+    };
+  }
+  const inputs = (s: ReturnType<typeof setup>) =>
+    s.fake.calls
+      .filter((c) => c.path === "/input")
+      .map((c) => (c.body as { input: unknown }).input);
+
+  it("presses a repeated combo as one input, under one approval and one admission", async () => {
+    const s = setup({ focused: () => search() });
+    const ctx = agentCtx(s);
+    const outcome = await s.gateway.run(ctx, { verb: "key", combo: ["]"], repeat: 5 });
+    expect(outcome.ok).toBe(true);
+    expect(ctx.authorizeAgent).toHaveBeenCalledOnce();
+    expect(ctx.beforeEffect).toHaveBeenCalledOnce();
+    expect(inputs(s)).toEqual([{ kind: "key", combo: ["]"], repeat: 5 }]);
+    expect(s.ofType("action.intent")[0]?.data.label).toBe("Press ] 5 times");
+    expect(s.ofType("action.dispatch")).toHaveLength(1);
+  });
+
+  it("holds keys for their time, then settles once they are released", async () => {
+    const s = setup({ focused: () => search() });
+    const outcome = await s.gateway.run(agentCtx(s), {
+      verb: "key",
+      combo: ["shift"],
+      holdMs: 1500,
+    });
+    expect(outcome.ok).toBe(true);
+    expect(inputs(s)).toEqual([{ kind: "key", combo: ["shift"], holdMs: 1500 }]);
+    expect(s.ofType("action.intent")[0]?.data.label).toBe("Hold Shift for 1.5 s");
+    const paths = s.fake.calls.map((c) => c.path);
+    expect(paths.indexOf("/settle")).toBeGreaterThan(paths.indexOf("/input"));
+    expect(paths).not.toContain("/release");
+  });
+
+  it("releases every key and button when a hold is stopped", async () => {
+    const s = setup({ focused: () => search(), inputHolds: true });
+    const stop = new AbortController();
+    const running = s.gateway.run(agentCtx(s, stop.signal), {
+      verb: "key",
+      combo: ["shift"],
+      holdMs: 20_000,
+    });
+    await vi.waitFor(() => expect(inputs(s)).toHaveLength(1));
+    stop.abort();
+    expect(await running).toMatchObject({ ok: false, cancelled: "user" });
+    expect(s.fake.calls.at(-1)?.path).toBe("/release");
+  });
+
+  it("releases every key and button when a key input fails", async () => {
+    const s = setup({
+      focused: () => search(),
+      input: () => ({ status: 500, body: "the helper went away" }),
+    });
+    const outcome = await s.gateway.run(agentCtx(s), { verb: "key", combo: ["ctrl", "a"] });
+    expect(outcome.ok).toBe(false);
+    expect(s.fake.calls.map((c) => c.path).slice(-2)).toEqual(["/input", "/release"]);
+  });
+});
+
 describe("ActionGateway settle and zoom", () => {
   it("settles each input with its verb and that verb's wait for a first change", async () => {
     const s = setup(

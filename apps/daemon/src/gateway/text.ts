@@ -14,8 +14,15 @@ export function typeLabel(text: string, masked: boolean): string {
     : clipText(`Type "${text}"`, LABEL_MAX);
 }
 
-export function keyLabel(combo: string[]): string {
-  return clipText(`Press ${combo.map(keyDisplayName).join("+")}`, LABEL_MAX);
+export function keyLabel(
+  combo: string[],
+  how: { repeat?: number | undefined; holdMs?: number | undefined } = {},
+): string {
+  const keys = combo.map(keyDisplayName).join("+");
+  if (how.holdMs)
+    return clipText(`Hold ${keys} for ${Number((how.holdMs / 1000).toFixed(1))} s`, LABEL_MAX);
+  const times = how.repeat && how.repeat > 1 ? ` ${how.repeat} times` : "";
+  return clipText(`Press ${keys}${times}`, LABEL_MAX);
 }
 
 export function scrollLabel(dx: number, dy: number): string {

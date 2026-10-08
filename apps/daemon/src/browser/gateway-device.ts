@@ -1,4 +1,4 @@
-import type { HitTestResult, InputRequest, Point, Target } from "@localdot/protocol";
+import type { HitTestResult, InputRequest, InputResult, Point, Target } from "@localdot/protocol";
 import { BrowserActionPermit } from "../../../../packages/protocol/src/browser-control.ts";
 import { ClockMap } from "../desktopd/clock-map.ts";
 import type { NativeDevice } from "../desktopd/registry.ts";
@@ -103,9 +103,18 @@ export function browserGatewayDevice(options: {
           : input.kind === "click" || input.kind === "scroll"
             ? { ...input, at: toModel(input.at) }
             : input;
-      const result = await client.input(permit, tabId, { ...request, input: mapped }, owner);
-      owner.check();
-      return result;
+      // browserd presses one combo per request: a repeat is that many requests, a hold none.
+      if (mapped.kind === "key" && mapped.holdMs)
+        throw new Error("Holding keys is not available on the browser screen.");
+      const times = mapped.kind === "key" ? (mapped.repeat ?? 1) : 1;
+      const once = mapped.kind === "key" ? { kind: "key" as const, combo: mapped.combo } : mapped;
+      const results: InputResult[] = [];
+      for (let i = 0; i < times; i++) {
+        results.push(await client.input(permit, tabId, { ...request, input: once }, owner));
+        owner.check();
+      }
+      const [first] = results as [InputResult, ...InputResult[]];
+      return { ...first, presses: results.flatMap((r) => r.presses) };
     },
     type: async (request, onProgress, signal) => {
       const owner = scope(signal);

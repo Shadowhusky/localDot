@@ -706,6 +706,26 @@ describe("immediate effect ownership", () => {
     await pending;
     expect(f.effects()).toHaveLength(0);
   });
+  it("a keyboard card says how often the keys are pressed or how long they are held", async () => {
+    const f = setup();
+    const cardFor = async (input: unknown) => {
+      const pending = f.call("computer", input);
+      await until(() => !!f.session.pendingApproval);
+      const fields = f.session.pendingApproval?.fields;
+      await f.post(f.answer("deny"));
+      await pending;
+      return fields;
+    };
+    expect(await cardFor({ action: "key", keys: ["]"], repeat: 5 })).toContainEqual([
+      "Repeat",
+      "5 times",
+    ]);
+    expect(await cardFor({ action: "hold_key", keys: ["shift"], ms: 1500 })).toContainEqual([
+      "Hold",
+      "1.5 s",
+    ]);
+    expect(f.effects()).toHaveLength(0);
+  });
   it("calling an effect handler directly without a consumed dispatcher permit executes nothing", async () => {
     const f = setup();
     const generation = f.session.generation;
@@ -775,11 +795,16 @@ async function approvedClick(f: ReturnType<typeof setup>, label: string) {
   expect((await f.post(f.answer())).status).toBe(204);
   return pending;
 }
+async function threeKeys(f: ReturnType<typeof setup>) {
+  for (let i = 0; i < 3; i++) await f.call("computer", repeatedKey);
+}
 describe("repeat safety at actual native dispatch", () => {
-  it("third identical key inside one tool batch pauses after exactly two physical effects", async () => {
+  it("third identical key that changed nothing pauses after exactly two physical effects", async () => {
     const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
     const controller = repeatController(f);
-    const out = await f.call("computer", { ...repeatedKey, repeat: 3 });
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    const out = await f.call("computer", repeatedKey);
     expect(f.effects()).toHaveLength(2);
     expect(out.body).toMatchObject({ ok: false, pause: true });
     await controller.settled();
@@ -788,6 +813,22 @@ describe("repeat safety at actual native dispatch", () => {
       phase: "paused",
       resumeAvailable: true,
     });
+  });
+  it("a repeated key is one admission and one physical input", async () => {
+    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const controller = repeatController(f);
+    expect((await f.call("computer", { ...repeatedKey, repeat: 5 })).body.ok).toBe(true);
+    expect(f.effects().map((c) => (c.body as { input: unknown }).input)).toEqual([
+      { kind: "key", combo: ["ARROWDOWN"], repeat: 5 },
+    ]);
+    expect((await f.call("computer", { ...repeatedKey, repeat: 5 })).body.ok).toBe(true);
+    expect(f.session.safetyPause).toBeUndefined();
+    const third = await f.call("computer", { ...repeatedKey, repeat: 5 });
+    expect({ effects: f.effects().length, pause: third.body.pause }).toEqual({
+      effects: 2,
+      pause: true,
+    });
+    await controller.settled();
   });
   it("third click still pauses when model labels, call IDs and frame IDs change", async () => {
     const f = setup();
@@ -803,7 +844,8 @@ describe("repeat safety at actual native dispatch", () => {
   it("a different actual native window resets the consecutive input identity", async () => {
     const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
     repeatController(f);
-    expect((await f.call("computer", { ...repeatedKey, repeat: 2 })).body.ok).toBe(true);
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     f.target.value = { ...f.target.value, window: 78 };
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     expect(f.effects()).toHaveLength(3);
@@ -827,7 +869,7 @@ describe("repeat safety at actual native dispatch", () => {
   it("answering the daemon repeat question cannot Resume and explicit Resume resets the streak", async () => {
     const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
     const controller = repeatController(f);
-    await f.call("computer", { ...repeatedKey, repeat: 3 });
+    await threeKeys(f);
     await controller.settled();
     const pause = f.session.safetyPause,
       ask = f.session.pendingAsk;

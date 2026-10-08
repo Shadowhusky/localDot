@@ -1,7 +1,9 @@
 import type { ComputerAction, Target, ToolResult } from "@localdot/protocol";
-import type { ActionContext, GuiAction } from "../../gateway/gateway.ts";
+import { checkCombo } from "@localdot/protocol/keys";
+import type { ActionContext, ActionOutcome, GuiAction } from "../../gateway/gateway.ts";
 import { authorizePrepared } from "../safety/authorize.ts";
 import { classify, type RiskFacts } from "../safety/risk.ts";
+import type { AgentSession } from "../session.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
@@ -51,7 +53,17 @@ function gui(a: ComputerAction): GuiAction | string {
       return { verb: "type", text: a.text, speed: "auto" };
     case "key":
       if (!a.keys) return "key needs keys";
-      return { verb: "key", combo: a.keys, speed: "auto" };
+      return (
+        checkCombo(a.keys) ?? {
+          verb: "key",
+          combo: a.keys,
+          ...(a.repeat && a.repeat > 1 ? { repeat: a.repeat } : {}),
+          speed: "auto",
+        }
+      );
+    case "hold_key":
+      if (!a.keys || !a.ms) return "hold_key needs keys and how long to hold them (ms)";
+      return checkCombo(a.keys) ?? { verb: "key", combo: a.keys, holdMs: a.ms, speed: "auto" };
     case "scroll":
       if (!a.point) return "scroll needs a coordinate";
       return {
@@ -67,6 +79,21 @@ function gui(a: ComputerAction): GuiAction | string {
     default:
       return `${a.action} is not an input`;
   }
+}
+
+// A hold ends when the task is paused: nobody is left to let go of the keys.
+function untilPaused(session: AgentSession, signal: AbortSignal) {
+  const paused = new AbortController();
+  const over = new AbortController();
+  const watching = AbortSignal.any([signal, over.signal]);
+  void (async () => {
+    while (!watching.aborted) {
+      if (session.safetyPause) return paused.abort(new Error("the task was paused"));
+      const revision = session.safetyControlRevision;
+      await session.waitSafetyControl(revision, 25_000, watching).catch(() => undefined);
+    }
+  })();
+  return { signal: AbortSignal.any([signal, paused.signal]), end: () => over.abort() };
 }
 
 // The computer tool: every input runs through Part 3's action gateway (intent → travel → dispatch
@@ -102,9 +129,11 @@ export async function computerTool(
   }
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
-  const repeat = a.action === "key" ? (a.repeat ?? 1) : 1;
+  const hold =
+    action.verb === "key" && action.holdMs ? untilPaused(session, ctx.signal) : undefined;
   const nativeContext: ActionContext = {
     ...selected,
+    ...(hold ? { signal: hold.signal } : {}),
     source: "agent",
     beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
     redact: ctx.redact,
@@ -134,12 +163,13 @@ export async function computerTool(
       };
     },
   };
-  let outcome = await deps.gateway.run(nativeContext, action);
-  ctx.check();
-  for (let i = 1; i < repeat && outcome.ok; i++) {
+  let outcome: ActionOutcome;
+  try {
     outcome = await deps.gateway.run(nativeContext, action);
-    ctx.check();
+  } finally {
+    hold?.end();
   }
+  ctx.check();
   if (action.verb === "wait" && outcome.ok) return screenshot(deps, ctx);
   const content: ToolResult["content"] = [];
   if (outcome.cancelled === "stale") {

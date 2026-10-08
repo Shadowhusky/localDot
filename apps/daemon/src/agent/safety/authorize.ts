@@ -78,6 +78,10 @@ export async function authorizePrepared(
       fields.push(["Action", boundedPreview(String(action.verb), ctx)]);
       if (Array.isArray(action.combo))
         fields.push(["Keys", boundedPreview(action.combo.join(" + "), ctx)]);
+      if (typeof action.repeat === "number")
+        fields.push(["Repeat", boundedPreview(`${action.repeat} times`, ctx)]);
+      if (typeof action.holdMs === "number")
+        fields.push(["Hold", boundedPreview(`${action.holdMs / 1000} s`, ctx)]);
       if (action.point && typeof action.point === "object")
         fields.push(["Pointer", boundedPreview(JSON.stringify(action.point), ctx)]);
       if (action.verb === "click")

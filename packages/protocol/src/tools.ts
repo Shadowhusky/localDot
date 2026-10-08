@@ -77,6 +77,7 @@ export const ComputerAction = z.object({
     "click",
     "type",
     "key",
+    "hold_key",
     "scroll",
     "wait",
     "zoom",
@@ -87,7 +88,8 @@ export const ComputerAction = z.object({
   count: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
   text: z.string().min(1).max(4000).optional(),
   keys: z.array(z.string().min(1).max(32)).min(1).max(8).optional(),
-  repeat: z.number().int().min(1).max(20).optional(),
+  // key: presses of the combo, as one input. hold_key: `ms` is how long the keys stay down.
+  repeat: z.number().int().min(1).max(100).optional(),
   dx: z.number().int().min(-30).max(30).optional(),
   dy: z.number().int().min(-30).max(30).optional(),
   ms: z.number().int().min(0).max(30_000).optional(),

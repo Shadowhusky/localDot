@@ -20,7 +20,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   computer:
     `Use the virtual computer's screen, a ${W}x${H} Linux desktop. action: screenshot (returns the screen), ` +
     `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}; button left/right/middle; count 1-3), ` +
-    "type (text), key (keys, X key names such as Return, ctrl+l; repeat), scroll (point, dx and dy in " +
+    "type (text), key (keys: X key names such as Return, Page_Up or plus, several for a combo like ctrl+l; " +
+    "repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them down), scroll (point, dx and dy in " +
     "steps of -30..30), wait (ms), zoom (region {x, y, w, h}, returns that part enlarged), cursor_position. " +
     "Each action can return a new screenshot. Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.",
   shell:
