@@ -354,7 +354,11 @@ describe("ChatGPT production integration", () => {
       await f.agent.start();
       expect(m.verify).not.toHaveBeenCalled();
       expect(m.ensure).not.toHaveBeenCalled();
-      expect(f.agent.routes.harness?.().available).toBe(false);
+      expect(f.agent.routes.harness?.()).toEqual(
+        unsafe
+          ? { available: false, reason: "The ChatGPT storage could not be validated." }
+          : pending,
+      );
     },
   );
   it("keeps unsupported-platform capability separate from installer state", () => {
