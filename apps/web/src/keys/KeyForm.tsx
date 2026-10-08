@@ -269,6 +269,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
             onChange={(e) => set({ id: e.target.value })}
             placeholder={draft.kind === "llm" ? "anthropic" : "weather"}
             autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
             spellCheck={false}
             {...invalid("id")}
           />
@@ -299,6 +301,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
                     onChange={(e) => set({ baseURL: e.target.value })}
                     placeholder="https://api.example.com/v1"
                     autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     spellCheck={false}
                     inputMode="url"
                     {...invalid("baseURL")}
@@ -317,6 +321,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
                 onChange={(e) => set({ hosts: e.target.value })}
                 placeholder="api.example.com"
                 autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
                 spellCheck={false}
                 {...invalid("hosts")}
               />
@@ -329,6 +335,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
                   value={draft.header}
                   onChange={(e) => set({ header: e.target.value })}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   spellCheck={false}
                   {...invalid("header")}
                 />
@@ -360,7 +368,7 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
             type="text"
             className="secret"
             autoComplete="off"
-            autoCapitalize="off"
+            autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             data-1p-ignore="true"

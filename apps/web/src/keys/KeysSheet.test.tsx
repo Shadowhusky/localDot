@@ -512,6 +512,22 @@ describe("KeysSheet", () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  it("keeps iOS from capitalising or correcting names, addresses and headers", () => {
+    render(<KeysSheet open keys={controller()} onClose={() => {}} />);
+    fireEvent.change(screen.getByLabelText("Provider"), {
+      target: { value: "openai-compatible" },
+    });
+    const plain = (name: string) => {
+      expect(field(name).getAttribute("autocapitalize"), name).toBe("none");
+      expect(field(name).getAttribute("autocorrect"), name).toBe("off");
+    };
+    plain("Name");
+    plain("Base URL");
+    fireEvent.click(screen.getByRole("button", { name: "Web API" }));
+    plain("Hosts");
+    plain("Header");
+  });
+
   it("returns focus to its opener after a click outside", () => {
     const onClose = vi.fn();
     const sheet = (open: boolean) => (
