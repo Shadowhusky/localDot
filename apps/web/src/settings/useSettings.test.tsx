@@ -113,7 +113,8 @@ describe("explicit configuration save ownership", () => {
       await result.current.save();
     });
     expect(f.state.puts).toEqual([]);
-    expect(result.current.error).toContain("stored key");
+    expect(result.current.validation?.join(" ")).toContain("stored key");
+    expect(result.current.error).toBeNull();
     expect(result.current.draft?.budget).toBe("3");
     expect(result.current.dirty).toBe(true);
   });

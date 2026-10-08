@@ -257,11 +257,7 @@ export function useSettings(
       loadedFor.current !== api
     )
       return;
-    const initial = validateForm(captured, previous, owner.index, subscriptionModels);
-    if (!initial.ok) {
-      setError(initial.problems.join(" "));
-      return;
-    }
+    if (!validateForm(captured, previous, owner.index, subscriptionModels).ok) return;
     const revision = owner.revision,
       generation = owner.generation;
     const abort = new AbortController();
@@ -284,10 +280,7 @@ export function useSettings(
       owner.index = fresh;
       setIndex(fresh);
       const checked = validateForm(captured, previous, fresh, subscriptionModels);
-      if (!checked.ok) {
-        setError(checked.problems.join(" "));
-        return;
-      }
+      if (!checked.ok) return;
       sent = true;
       writing.current = true;
       const next = await saveSettings(api, checked.document, abort.signal);

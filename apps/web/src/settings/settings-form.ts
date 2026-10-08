@@ -81,7 +81,7 @@ export type FormResult =
   | { ok: true; document: AgentSettingsDocument }
   | { ok: false; problems: string[] };
 const ROLE_NAMES: Record<ModelRole, string> = { main: "Main", fast: "Fast", local: "Local" };
-// Every problem is reported at once (at most one per role), so fixing one never uncovers another.
+// Reports the first problem in each role, and any budget problem, together.
 export function validateForm(
   draft: SettingsDraft,
   saved: AgentSettingsDocument,
