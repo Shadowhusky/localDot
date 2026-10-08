@@ -98,6 +98,21 @@ export const CAREFUL_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
   computer: "ask",
 });
 export const DEFAULT_AUTONOMY = BALANCED_AUTONOMY;
+export const ACTION_CLASS_LABELS: Readonly<Record<ActionClass, string>> = Object.freeze({
+  reading: "Read and look",
+  browsing: "Browse websites",
+  computer: "Work in its computer",
+  download_execute: "Run programs from the internet",
+  memory: "Save to its memory",
+  send: "Send as you",
+  post: "Post or publish as you",
+  delete: "Delete your online data",
+  system_settings: "Change account settings",
+  purchase: "Buy or pay",
+  upload: "Upload your files",
+  credentials: "Passwords, codes and card details",
+  unknown: "Unclear steps on signed-in sites",
+});
 export function freezeAutonomy(value: unknown = DEFAULT_AUTONOMY): Readonly<AutonomyPolicy> {
   return AutonomyPolicy.parse(value);
 }

@@ -2,6 +2,7 @@ import { ApprovalCardDraft, type ToolName, UploadApproval } from "@localdot/prot
 import type { ToolCallContext } from "../tools/deps.ts";
 import { CountedPermit } from "./approvals.ts";
 import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
+import { handoffFor } from "./handoff.ts";
 import { actionDigest, buildApprovalCard, type RiskFacts } from "./risk.ts";
 
 export interface EffectPermit {
@@ -66,12 +67,8 @@ export async function authorizePrepared(
     // before takeover drains all screens; the old lease can never authorize a replay.
     ctx.screen?.finish();
     ctx.session.taskAutonomy.signIn(screenOf(ctx));
-    await ctx.session.takeover(
-      "other",
-      "This action needs your control. Complete it on the computer, then hand control back.",
-      ctx.step,
-      ctx.lease,
-    );
+    const { reason, note } = handoffFor(decision, prepared.facts);
+    await ctx.session.takeover(reason, note, ctx.step, ctx.lease);
     ctx.check();
     // Hand-back never authorizes automatic replay of the action that caused takeover.
     return undefined;

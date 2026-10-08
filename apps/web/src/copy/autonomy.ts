@@ -1,4 +1,5 @@
 import {
+  ACTION_CLASS_LABELS,
   type ActionClass,
   type AlwaysOption,
   type AutonomyPolicy,
@@ -7,21 +8,8 @@ import {
   EDITABLE_ACTION_CLASSES,
 } from "@localdot/protocol";
 
-export const CLASS_LABELS: Readonly<Record<ActionClass, string>> = {
-  reading: "Read and look",
-  browsing: "Browse websites",
-  computer: "Work in its computer",
-  download_execute: "Run programs from the internet",
-  memory: "Save to its memory",
-  send: "Send as you",
-  post: "Post or publish as you",
-  delete: "Delete your online data",
-  system_settings: "Change account settings",
-  purchase: "Buy or pay",
-  upload: "Upload your files",
-  credentials: "Passwords, codes and card details",
-  unknown: "Unclear steps on signed-in sites",
-};
+// The daemon's hand-off copy names a class the same way.
+export const CLASS_LABELS = ACTION_CLASS_LABELS;
 
 const CLASS_WORK: Readonly<Record<ActionClass, string>> = {
   reading: "reading and looking",
