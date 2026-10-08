@@ -1,0 +1,178 @@
+import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
+import type { EntryView } from "./activity.ts";
+import type { AgentMessage, AgentQuestion, AgentResult } from "./model.ts";
+
+export type Speaker = "user" | "dot";
+export type WorkStep = EntryView & { key: string };
+
+interface Item<K extends string> {
+  kind: K;
+  key: string;
+  speaker: Speaker;
+  // Wall-clock ms, when the item's ID says.
+  time?: number;
+}
+export type ThreadItem =
+  | (Item<"message"> & { message: AgentMessage })
+  | (Item<"question"> & { question: AgentQuestion })
+  | (Item<"answer"> & { question: AgentQuestion })
+  | (Item<"result"> & { result: AgentResult })
+  | (Item<"work"> & { turn: string; steps: readonly WorkStep[]; startMs: number | null });
+
+export type ThreadKind = ThreadItem["kind"];
+
+export interface ThreadRow {
+  item: ThreadItem;
+  // The first item of a run by one speaker carries the speaker's name, and the run's gap above.
+  groupStart: boolean;
+  // A quiet time above the item: at the start, and after a long pause.
+  separator: string | null;
+}
+
+const wallTime = (id: string) => (ULID_PATTERN.test(id) ? ulidTime(id) : undefined);
+
+interface Placed {
+  item: ThreadItem;
+  order: number;
+  index: number;
+}
+
+// Messages, questions and the answers to them, and results, in the order the task produced them.
+export function threadItems(
+  messages: Iterable<AgentMessage>,
+  questions: Iterable<AgentQuestion> = [],
+  results: Iterable<AgentResult> = [],
+): ThreadItem[] {
+  const placed: Placed[] = [];
+  const place = (item: ThreadItem, order: number | undefined) =>
+    placed.push({ item, order: order ?? Number.NaN, index: placed.length });
+  for (const message of messages)
+    place(
+      {
+        kind: "message",
+        key: `message-${message.id}`,
+        speaker: message.role === "user" ? "user" : "dot",
+        time: wallTime(message.id),
+        message,
+      },
+      message.seq,
+    );
+  for (const question of questions) {
+    place(
+      {
+        kind: "question",
+        key: `question-${question.askId}`,
+        speaker: "dot",
+        time: wallTime(question.askId),
+        question,
+      },
+      question.seq,
+    );
+    // The reply sits under its question, whenever it came.
+    if (question.answer?.by === "user")
+      place(
+        { kind: "answer", key: `answer-${question.askId}`, speaker: "user", question },
+        question.seq === undefined ? undefined : question.seq + 0.5,
+      );
+  }
+  for (const result of results)
+    place(
+      {
+        kind: "result",
+        key: `result-${result.id}`,
+        speaker: "dot",
+        time: wallTime(result.id),
+        result,
+      },
+      result.seq,
+    );
+  return placed
+    .sort((a, b) =>
+      Number.isNaN(a.order) || Number.isNaN(b.order) ? a.index - b.index : a.order - b.order,
+    )
+    .map((entry) => entry.item);
+}
+
+// A turn starts at each task or follow-up the user sends; steering a running task stays in its turn.
+const startsTurn = (item: ThreadItem) =>
+  item.kind === "message" && item.message.role === "user" && item.message.kind !== "steer";
+
+const startOf = (item: ThreadItem) =>
+  item.kind === "message" && item.message.at !== undefined ? microsToMs(item.message.at) : null;
+
+// Each turn that worked on the computer ends with a line of what it did. The latest turn also has one
+// while the task is live, steps or not, so the thread is never silent while dot works.
+export function withWork(
+  items: readonly ThreadItem[],
+  steps: readonly WorkStep[],
+  live: boolean,
+): ThreadItem[] {
+  const turns: { key: string; start: number | null; items: ThreadItem[] }[] = [];
+  for (const item of items) {
+    const turn = turns.at(-1);
+    if (startsTurn(item) || !turn)
+      turns.push({
+        key: startsTurn(item) ? item.key : "start",
+        start: startOf(item),
+        items: [item],
+      });
+    else turn.items.push(item);
+  }
+  if (!turns.length) turns.push({ key: "start", start: null, items: [] });
+  const owned = new Map<number, WorkStep[]>();
+  for (const step of steps) {
+    let at = 0;
+    for (let i = 1; i < turns.length; i++) {
+      const start = turns[i]?.start;
+      if (start !== null && start !== undefined && step.startT >= start) at = i;
+    }
+    owned.set(at, [...(owned.get(at) ?? []), step]);
+  }
+  return turns.flatMap((turn, index) => {
+    const own = owned.get(index) ?? [];
+    const latest = index === turns.length - 1;
+    if (!own.length && !(latest && live)) return turn.items;
+    return [
+      ...turn.items,
+      {
+        kind: "work" as const,
+        key: `work-${turn.key}`,
+        speaker: "dot" as const,
+        turn: turn.key,
+        steps: own,
+        startMs: turn.start ?? own[0]?.startT ?? null,
+      },
+    ];
+  });
+}
+
+const PAUSE_MS = 10 * 60_000;
+const DAY_MS = 86_400_000;
+
+export function timeLabel(time: number, now = Date.now()): string {
+  const at = new Date(time);
+  const clock = at.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const today = new Date(now);
+  if (at.toDateString() === today.toDateString()) return clock;
+  if (now - time < 6 * DAY_MS)
+    return `${at.toLocaleDateString(undefined, { weekday: "short" })} ${clock}`;
+  return `${at.toLocaleDateString(undefined, { day: "numeric", month: "short" })}, ${clock}`;
+}
+
+export function threadRows(items: readonly ThreadItem[], now = Date.now()): ThreadRow[] {
+  let last: number | undefined;
+  return items.map((item, index) => {
+    const before = items[index - 1];
+    const time = item.time;
+    const separator =
+      time !== undefined && (last === undefined || time - last >= PAUSE_MS)
+        ? timeLabel(time, now)
+        : null;
+    if (time !== undefined) last = time;
+    return {
+      item,
+      groupStart: !before || before.speaker !== item.speaker || separator !== null,
+      separator,
+    };
+  });
+}

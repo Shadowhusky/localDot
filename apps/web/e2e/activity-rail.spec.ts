@@ -184,7 +184,9 @@ for (const engine of ["chrome", "webkit"] as const) {
     );
     const before = await reading.boundingBox();
     await qa("ask");
-    await expect(rail.getByRole("region", { name: "Question history" })).toBeAttached();
+    await expect(
+      page.getByRole("article", { name: "Question", includeHidden: true }),
+    ).toBeAttached();
     await page.waitForTimeout(400);
     expect((await reading.boundingBox())?.y).toBeCloseTo(before?.y ?? Number.NaN, 0);
     await browser.close();

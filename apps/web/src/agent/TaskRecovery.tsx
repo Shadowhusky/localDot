@@ -1,32 +1,102 @@
 import { BudgetRaiseRequest } from "@localdot/protocol";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { ownedPause } from "../session/status.ts";
+import { Button } from "../ui/Button.tsx";
+import { Collapse, Disclosure } from "../ui/Disclosure.tsx";
+import { Field } from "../ui/Field.tsx";
+import { Meter } from "../ui/Meter.tsx";
+import { MoneyField } from "../ui/MoneyField.tsx";
+import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { resetTime } from "./UsageFooter.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
-import "./recovery.css";
 
 const UNEXPLAINED =
-  "The task could not continue. Check the reported reason and repair its provider or model before deciding whether to resume.";
+  "The task could not continue. Check the reported reason and repair its provider or model before deciding whether to continue.";
 export function recoveryMessage(reason: string | undefined, local: boolean): string {
-  return knownReason(reason, local) ?? UNEXPLAINED;
+  return knownReason(reason, local)?.text ?? UNEXPLAINED;
 }
-function knownReason(reason: string | undefined, local: boolean): string | undefined {
+function knownReason(
+  reason: string | undefined,
+  local: boolean,
+): { title: string; text: string } | undefined {
   if (reason === "budget")
-    return "The task reached its spending limit. Raising the ceiling keeps the amount already spent.";
+    return {
+      title: "Paused at the spending limit",
+      text: "dot stopped at the spending limit. Raise it to continue; what was spent stays counted.",
+    };
   if (reason === "keyd unavailable")
-    return "The key layer is offline. Restore it, check task state, then resume if the task is still paused.";
+    return {
+      title: "Keys are offline",
+      text: "dot can't reach your keys. Bring Keys back online, check the task, then continue.",
+    };
   if (reason === "chatgpt sign-in expired" || reason === "chatgpt account changed")
-    return "Repair the ChatGPT account in Settings, then explicitly resume this task.";
+    return {
+      title: "Sign in to ChatGPT again",
+      text: "Repair the ChatGPT account in Settings, then continue this task.",
+    };
   if (reason === "chatgpt plan limit reached")
-    return "Plan limit reached. Wait for the reported reset, then resume. This task has no localDot USD budget.";
+    return {
+      title: "Paused at your plan's limit",
+      text: "Your ChatGPT plan is at its limit. Continue once it resets; this task has no spending limit of its own.",
+    };
   if (reason === "model unavailable")
-    return local
-      ? "The local model is unavailable. Start its server and restore the selected model before resuming."
-      : "The selected model could not continue. Check its provider and access before resuming.";
+    return {
+      title: "The model isn't available",
+      text: local
+        ? "The local model is unavailable. Start its server and load the chosen model, then continue."
+        : "The chosen model could not continue. Check its provider and access, then continue.",
+    };
   return undefined;
 }
-const dollars = (value: number) =>
-  `$${value.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
+// Whole dollars without cents; anything else to the cent.
+export const dollars = (value: number) =>
+  `$${value.toLocaleString(undefined, {
+    minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
+    maximumFractionDigits: 2,
+  })}`;
+// What a step adds to the limit. Two are offered: the smallest that covers what the next request
+// needs, and the one after it.
+const RAISES = [2, 5, 10, 25, 50] as const;
+export function raiseSteps(need: number | undefined): number[] {
+  const first = RAISES.findIndex((raise) => raise >= (need ?? 5));
+  const at = first < 0 ? RAISES.length - 2 : Math.min(first, RAISES.length - 2);
+  return RAISES.slice(at, at + 2);
+}
+// Why the limit stopped dot: the next request may need more than is left, or nothing is left. A
+// task's own limit is raised here; the daily one says where it is changed.
+export function spendingText(data: {
+  scope: "task" | "day";
+  limitUSD: number;
+  spentUSD: number;
+  needUSD?: number;
+}): string {
+  const limit = data.scope === "day" ? "today's limit" : "this task's limit";
+  const left = Math.round(Math.max(0, data.limitUSD - data.spentUSD) * 100) / 100;
+  const why =
+    data.needUSD && left > 0
+      ? `dot's next step could cost up to ${dollars(data.needUSD)}, and ${dollars(left)} of ${limit} is left.`
+      : `dot has spent all of ${limit}.`;
+  return data.scope === "day"
+    ? why
+    : `${why} Raise the limit to continue; what was spent stays counted.`;
+}
+const CUSTOM = "other";
+const MAX_LIMIT = 10_000;
+
+export function raiseChoice(choice: string, custom: string, limitUSD: number): number | string {
+  const value = choice === CUSTOM ? Number(custom) : limitUSD + Number(choice);
+  if (
+    choice === CUSTOM &&
+    (!custom ||
+      !Number.isFinite(value) ||
+      value <= limitUSD ||
+      !BudgetRaiseRequest.safeParse({ budgetUSD: value }).success)
+  )
+    return `Enter a limit above ${dollars(limitUSD)}, up to ${dollars(MAX_LIMIT)}.`;
+  return Math.round(value * 100) / 100;
+}
+
 export function TaskRecovery({
   agent,
   controls,
@@ -36,8 +106,14 @@ export function TaskRecovery({
   controls: TaskControls;
   onSettings(trigger: HTMLButtonElement): void;
 }) {
-  const [validation, setValidation] = useState<string | null>(null);
-  const field = useRef<HTMLInputElement>(null);
+  const budget = agent.model.budget;
+  const need = budget?.data.needUSD;
+  const steps = raiseSteps(need);
+  // A choice belongs to the refusal it was made for; a new one starts from its own first step.
+  const [chosen, setChosen] = useState<{ budget: string | undefined; value: string } | null>(null);
+  const choice = chosen && chosen.budget === budget?.id ? chosen.value : String(steps[0]);
+  const [custom, setCustom] = useState("");
+  const [problem, setProblem] = useState<string | null>(null);
   const state = agent.model.state;
   if (
     controls.fenced ||
@@ -55,86 +131,136 @@ export function TaskRecovery({
     agent.snapshot.models.roles.some(
       (role) => role.role === "main" && ["ollama", "lmstudio"].includes(role.provider),
     );
-  const budget = agent.model.budget;
+  const known = knownReason(state.reason, local);
   const taskBudget =
     !subscription && budget?.data.scope === "task" && budget.data.taskId === agent.sessionId;
+  const raising = taskBudget && state.state === "paused" && budget;
+  const raised = raising ? raiseChoice(choice, custom, budget.data.limitUSD) : null;
+  const resets = subscription
+    ? resetTime(
+        agent.model.subscription?.data.windows
+          .filter(
+            (window) => window.usedPercent >= 100 || agent.model.subscription?.data.limitReached,
+          )
+          .map((window) => window.resetsAt)
+          .filter((at): at is number => at !== undefined)
+          .sort((a, b) => b - a)[0],
+      )
+    : null;
+  const resume = (
+    <Button
+      variant={raising ? "secondary" : "primary"}
+      disabledReason={controls.canResumeTask ? undefined : "The task can't continue right now."}
+      onClick={() => void controls.resume()}
+    >
+      {raising ? "Continue without raising" : "Continue"}
+    </Button>
+  );
   return (
-    <section className="task-recovery" aria-label="Task recovery">
-      <h3>{state.state === "paused" ? "Task paused" : "Task needs attention"}</h3>
-      <p>{recoveryMessage(state.reason, local)}</p>
-      {!subscription && budget && (
-        <p>
-          Last {budget.data.scope} budget refusal: ceiling {dollars(budget.data.limitUSD)}, spent{" "}
-          {dollars(budget.data.spentUSD)}
-          {budget.data.needUSD === undefined
-            ? ""
-            : `, next request needed ${dollars(budget.data.needUSD)}`}
-          . Recorded at the last refusal.
+    <section className="thread-recovery" aria-label="Task recovery">
+      <h3 className="thread-recovery-title">
+        {known?.title ?? (state.state === "paused" ? "Task paused" : "The task needs attention")}
+      </h3>
+      <p className="thread-recovery-text">
+        {state.reason === "budget" && budget && !subscription
+          ? spendingText(budget.data)
+          : (known?.text ?? UNEXPLAINED)}
+      </p>
+      {state.reason && !known && (
+        <p className="thread-recovery-reason">Reported reason: {state.reason}</p>
+      )}
+      {resets && (
+        <p className="thread-recovery-reason">
+          {resets.replace(/^Resets/, "Your plan's limit resets")}.
         </p>
       )}
-      {taskBudget && state.state === "paused" && (
-        <form
-          aria-label="Set task budget"
-          onSubmit={(event) => {
-            event.preventDefault();
-            const text = field.current?.value.trim() ?? "";
-            const budgetUSD = Number(text);
-            if (!text || !BudgetRaiseRequest.safeParse({ budgetUSD }).success) {
-              setValidation(
-                "Enter a positive USD ceiling up to 10,000, with at least one microdollar.",
-              );
-              return;
+      {!subscription && budget && (
+        <div className="thread-recovery-meter">
+          <p className="num">
+            {dollars(budget.data.spentUSD)} of {dollars(budget.data.limitUSD)} spent
+            {budget.data.scope === "day" ? " today" : ""}
+          </p>
+          <Meter
+            value={budget.data.spentUSD}
+            max={budget.data.limitUSD}
+            label={
+              budget.data.scope === "day" ? "Spent of today's limit" : "Spent of this task's limit"
             }
-            setValidation(null);
-            if (controls.canRaiseBudget) void controls.raiseBudget(budgetUSD);
-          }}
-        >
-          <label className="control-field">
-            New task ceiling (USD)
-            <input
-              ref={field}
-              type="number"
-              inputMode="decimal"
-              min="0.000001"
-              max="10000"
-              step="any"
-              disabled={!controls.canRaiseBudget}
-            />
-          </label>
-          <button type="submit" disabled={!controls.canRaiseBudget}>
-            Set task budget and resume
-          </button>
-          {validation && <p role="status">{validation}</p>}
-        </form>
+          />
+        </div>
       )}
       {budget?.data.scope === "day" && (
-        <p>
-          A task ceiling cannot raise the day limit. Check the key layer configuration before
-          resuming.
+        <p className="thread-recovery-reason">
+          This is the daily limit for all tasks. Change it in Settings, then continue.
         </p>
       )}
-      <button
-        type="button"
-        disabled={!controls.canResumeTask}
-        onClick={() => void controls.resume()}
-      >
-        Resume task
-      </button>
-      <details className="recovery-options">
-        <summary>Recovery options</summary>
-        {state.reason && !knownReason(state.reason, local) && (
-          <p>Reported reason: {state.reason}</p>
-        )}
-        <div className="recovery-actions">
-          <button type="button" onClick={(event) => onSettings(event.currentTarget)}>
-            Open recovery settings
-          </button>
-          <button type="button" onClick={controls.recheck}>
+      {raising ? (
+        <form
+          className="thread-recovery-raise"
+          aria-label="Raise the spending limit"
+          onSubmit={(event) => {
+            event.preventDefault();
+            if (typeof raised !== "number") {
+              setProblem(raised);
+              return;
+            }
+            setProblem(null);
+            if (controls.canRaiseBudget) void controls.raiseBudget(raised);
+          }}
+        >
+          <SegmentedControl
+            aria-label="Raise the limit by"
+            items={[
+              ...steps.map((raise) => ({ value: String(raise), label: `+$${raise}` })),
+              { value: CUSTOM, label: "Other" },
+            ]}
+            value={choice}
+            onValueChange={(value) => {
+              setChosen({ budget: budget.id, value });
+              setProblem(null);
+            }}
+          />
+          <Collapse open={choice === CUSTOM} className="thread-recovery-custom">
+            <Field label="New limit" error={problem}>
+              <MoneyField
+                placeholder={String(budget.data.limitUSD + 5)}
+                value={custom}
+                onValueChange={(value) => {
+                  setCustom(value);
+                  setProblem(null);
+                }}
+              />
+            </Field>
+          </Collapse>
+          <div className="thread-recovery-actions">
+            <Button
+              type="submit"
+              variant="primary"
+              disabledReason={
+                controls.canRaiseBudget ? undefined : "The limit can't be raised right now."
+              }
+            >
+              {typeof raised === "number"
+                ? `Raise to ${dollars(raised)} and continue`
+                : "Raise and continue"}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <div className="thread-recovery-actions">{resume}</div>
+      )}
+      <Disclosure summary="Recovery options" className="thread-recovery-options">
+        <div className="thread-recovery-actions">
+          {raising && resume}
+          <Button variant="quiet" onClick={(event) => onSettings(event.currentTarget)}>
+            Open Settings
+          </Button>
+          <Button variant="quiet" onClick={controls.recheck}>
             Check task state
-          </button>
+          </Button>
         </div>
-        <p className="history-note">Resume keeps this task's model choice and existing ceiling.</p>
-      </details>
+        <p className="thread-note">Continuing keeps this task's model and its spending limit.</p>
+      </Disclosure>
     </section>
   );
 }

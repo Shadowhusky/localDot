@@ -48,6 +48,7 @@ import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import { Announcer } from "./ui/Announcer.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -496,9 +497,11 @@ function Theatre({ api }: { api: ApiClient }) {
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };
-  const rows = session.sessionId
-    ? timelineRows(stepRows(session.model), session.model.keyUses)
-    : [];
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the model is folded in place, so its version is what changes
+  const rows = useMemo(
+    () => (session.sessionId ? timelineRows(stepRows(session.model), session.model.keyUses) : []),
+    [session.sessionId, session.model, session.version],
+  );
   const keyUses = session.model.keyUses;
   const uses = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -606,45 +609,54 @@ function Theatre({ api }: { api: ApiClient }) {
               <ConversationRail
                 visible={!narrow || pane === "conversation"}
                 agent={agent}
-                composer={
-                  <>
-                    <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
-                    {question && !agent.model.ended && (
-                      <AskForm
-                        key={question.askId}
-                        question={question}
-                        controls={controls}
-                        visible={
-                          (!narrow || pane === "conversation") && !keysOpen && !settings.open
-                        }
-                        receiveKey={receiveKey}
-                      />
-                    )}
-                    <Composer
-                      api={api}
-                      cell={cell}
-                      known={status === "known"}
-                      pending={pending !== null}
-                      controlBlocked={
-                        controls.fenced ||
-                        controls.stopping ||
-                        !!cell?.fenced ||
-                        !!cell?.replacementPending ||
-                        !!safety.approval
-                      }
-                      agent={agent}
-                      keysOpen={keysOpen || settings.open}
+                api={api}
+                rows={rows}
+                computerReady={cell?.state === "ready" && !cell.paused}
+                live={task && !session.ended ? { ...task, nowMs: now } : null}
+                onReplay={
+                  agent.sessionId && (agent.model.ended || task?.phase === "finished")
+                    ? () => selectReplay(agent.sessionId)
+                    : undefined
+                }
+                recovery={
+                  <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
+                }
+                answer={
+                  question && !agent.model.ended ? (
+                    <AskForm
+                      key={question.askId}
+                      question={question}
+                      controls={controls}
+                      visible={(!narrow || pane === "conversation") && !keysOpen && !settings.open}
                       receiveKey={receiveKey}
-                      configured={mainReady}
-                      onSettings={showSettings}
-                      onTaskStarted={session.check}
-                      modelSummary={
-                        settings.saved?.main
-                          ? `Saved main: ${providerName(settings.saved.main.provider)} · ${settings.saved.main.model}`
-                          : "Choose a main model in Settings before starting a task."
-                      }
                     />
-                  </>
+                  ) : undefined
+                }
+                composer={
+                  <Composer
+                    api={api}
+                    cell={cell}
+                    known={status === "known"}
+                    pending={pending !== null}
+                    controlBlocked={
+                      controls.fenced ||
+                      controls.stopping ||
+                      !!cell?.fenced ||
+                      !!cell?.replacementPending ||
+                      !!safety.approval
+                    }
+                    agent={agent}
+                    keysOpen={keysOpen || settings.open}
+                    receiveKey={receiveKey}
+                    configured={mainReady}
+                    onSettings={showSettings}
+                    onTaskStarted={session.check}
+                    modelSummary={
+                      settings.saved?.main
+                        ? `Saved main: ${providerName(settings.saved.main.provider)} · ${settings.saved.main.model}`
+                        : "Choose a main model in Settings before starting a task."
+                    }
+                  />
                 }
               />
             </div>
@@ -906,6 +918,7 @@ function Theatre({ api }: { api: ApiClient }) {
         }
       />
       <KeysSheet {...keysPanel} open={keysIn === "sheet"} onClose={closeKeys} />
+      <Announcer />
     </div>
   );
 }

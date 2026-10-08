@@ -13,8 +13,11 @@ export const AGENT_LIMITS = Object.freeze({
   outputText: 65_536,
   patchText: 8192,
 });
+// seq orders the conversation; at is the session time (µs) it was first seen.
 export interface AgentMessage {
   readonly id: string;
+  readonly seq?: number;
+  readonly at?: number;
   readonly role: "user" | "assistant";
   readonly text: string;
   readonly final: boolean;
@@ -42,6 +45,8 @@ export interface AgentStep {
   readonly terminal?: TerminalText;
 }
 export type AgentQuestion = EventOf<"ask.request">["data"] & {
+  readonly seq?: number;
+  readonly at?: number;
   readonly answer?: EventOf<"ask.answer">["data"];
 };
 export type AgentTakeover = EventOf<"takeover.request">["data"] & {
@@ -60,6 +65,8 @@ export interface AgentChange {
 }
 export interface AgentResult {
   readonly id: string;
+  readonly seq?: number;
+  readonly at?: number;
   readonly summary: string;
   readonly files: readonly EventOf<"task.result">["data"]["files"][number][];
 }

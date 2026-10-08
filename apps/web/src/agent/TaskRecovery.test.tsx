@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
-import { TaskRecovery } from "./TaskRecovery.tsx";
+import { raiseChoice, raiseSteps, spendingText, TaskRecovery } from "./TaskRecovery.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 
@@ -50,4 +50,92 @@ it("explains a known pause reason without printing its internal code", () => {
     />,
   );
   expect(screen.getByText("Reported reason: provider quota exhausted")).toBeTruthy();
+});
+
+const budgetAgent = (): AgentSessionView => {
+  const agent = agentWith("budget");
+  return {
+    ...agent,
+    snapshot: agent.snapshot ? { ...agent.snapshot, status: "paused" } : null,
+    model: {
+      ...agent.model,
+      budget: {
+        id: "01JXYZ00000000000000BUDGET",
+        at: 1,
+        data: { scope: "task", taskId: sessionId, limitUSD: 5, spentUSD: 4, needUSD: 2 },
+      },
+    },
+  };
+};
+
+it("raises the limit by a chosen step and continues, and checks an amount of your own", () => {
+  const raiseBudget = vi.fn(async () => true);
+  render(
+    <TaskRecovery
+      agent={budgetAgent()}
+      controls={{ ...controls, canRaiseBudget: true, canResumeTask: true, raiseBudget }}
+      onSettings={vi.fn()}
+    />,
+  );
+  const region = screen.getByRole("region", { name: "Task recovery" });
+  expect(region.textContent).toContain("$4 of $5 spent");
+  expect(region.textContent).toContain(
+    "dot's next step could cost up to $2, and $1 of this task's limit is left.",
+  );
+  expect(region.textContent).not.toMatch(/microdollar|ceiling|reached/i);
+  expect(screen.getByRole("meter", { name: "Spent of this task's limit" })).toBeTruthy();
+  // The smallest step that covers what the next request needs is chosen first.
+  fireEvent.click(screen.getByRole("button", { name: "Raise to $7 and continue" }));
+  expect(raiseBudget).toHaveBeenLastCalledWith(7);
+  fireEvent.click(screen.getByRole("radio", { name: "+$5" }));
+  fireEvent.click(screen.getByRole("button", { name: "Raise to $10 and continue" }));
+  expect(raiseBudget).toHaveBeenLastCalledWith(10);
+  fireEvent.click(screen.getByRole("radio", { name: "Other" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "New limit" }), { target: { value: "4" } });
+  fireEvent.click(screen.getByRole("button", { name: "Raise and continue" }));
+  expect(screen.getByText("Enter a limit above $5, up to $10,000.")).toBeTruthy();
+  expect(raiseBudget).toHaveBeenCalledTimes(2);
+  fireEvent.change(screen.getByRole("textbox", { name: "New limit" }), {
+    target: { value: "8.5" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Raise to $8.50 and continue" }));
+  expect(raiseBudget).toHaveBeenLastCalledWith(8.5);
+});
+
+it("says why the limit stopped dot: a next step that needs more than is left, or nothing left", () => {
+  expect(spendingText({ scope: "task", limitUSD: 5, spentUSD: 4.5, needUSD: 1.25 })).toBe(
+    "dot's next step could cost up to $1.25, and $0.50 of this task's limit is left. Raise the limit to continue; what was spent stays counted.",
+  );
+  expect(spendingText({ scope: "task", limitUSD: 5, spentUSD: 5.01 })).toBe(
+    "dot has spent all of this task's limit. Raise the limit to continue; what was spent stays counted.",
+  );
+  expect(spendingText({ scope: "day", limitUSD: 20, spentUSD: 19.8, needUSD: 0.4 })).toBe(
+    "dot's next step could cost up to $0.40, and $0.20 of today's limit is left.",
+  );
+});
+
+it("offers the smallest step that covers the next request, and the one after", () => {
+  expect(raiseSteps(2)).toEqual([2, 5]);
+  expect(raiseSteps(3)).toEqual([5, 10]);
+  expect(raiseSteps(undefined)).toEqual([5, 10]);
+  expect(raiseSteps(400)).toEqual([25, 50]);
+});
+
+it("works out the new limit from a step or an amount", () => {
+  expect(raiseChoice("2", "", 5)).toBe(7);
+  expect(raiseChoice("other", "12.25", 5)).toBe(12.25);
+  for (const custom of ["", "5", "0", "10001", "abc"])
+    expect(typeof raiseChoice("other", custom, 5)).toBe("string");
+});
+
+it("starts from the first step that covers a refusal that arrives after the card", () => {
+  const agent = budgetAgent();
+  const later = { ...agent, model: { ...agent.model, budget: null } };
+  const props = {
+    controls: { ...controls, canRaiseBudget: true, canResumeTask: true },
+    onSettings: vi.fn(),
+  };
+  const view = render(<TaskRecovery agent={later} {...props} />);
+  view.rerender(<TaskRecovery agent={agent} {...props} />);
+  expect(screen.getByRole("button", { name: "Raise to $7 and continue" })).toBeTruthy();
 });

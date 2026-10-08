@@ -45,3 +45,13 @@ it("never exposes a retained page from a replaced task", () => {
   expect(h.result.current.retained).toBe(false);
   expect(h.result.current.following).toBe(true);
 });
+it("moves a larger window by half its size, so the rows in view stay mounted", () => {
+  const h = renderHook(() => usePagedRows(rows, key, "task-a", { size: 200, step: 100 }));
+  expect(h.result.current.rows.map(key).slice(0, 1)).toEqual(["row-9800"]);
+  act(() => h.result.current.older());
+  expect(h.result.current.rows[0]?.id).toBe("row-9700");
+  expect(h.result.current.rows.at(-1)?.id).toBe("row-9899");
+  act(() => h.result.current.newer());
+  expect(h.result.current.following).toBe(true);
+  expect(h.result.current.rows[0]?.id).toBe("row-9800");
+});

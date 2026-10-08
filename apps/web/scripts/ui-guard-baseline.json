@@ -6,10 +6,6 @@
     "native-control": 5,
     "native-disabled": 4
   },
-  "src/agent/AskForm.tsx": {
-    "native-control": 3,
-    "native-disabled": 3
-  },
   "src/agent/Attachments.tsx": {
     "native-control": 3,
     "native-disabled": 1
@@ -18,17 +14,9 @@
     "native-control": 5,
     "native-disabled": 3
   },
-  "src/agent/Conversation.tsx": {
-    "native-control": 2,
-    "native-disabled": 1
-  },
   "src/agent/DeliveryState.tsx": {
     "native-control": 3,
     "native-disabled": 1
-  },
-  "src/agent/HistoryPages.tsx": {
-    "native-control": 2,
-    "native-disabled": 2
   },
   "src/agent/KeyFound.tsx": {
     "native-control": 3,
@@ -47,32 +35,26 @@
     "native-control": 7,
     "native-disabled": 7
   },
-  "src/agent/TaskRecovery.tsx": {
-    "native-control": 6,
-    "native-disabled": 3
-  },
   "src/agent/UsageFooter.tsx": {
     "native-control": 1
   },
   "src/agent/activity.css": {
-    "control-selector": 8,
+    "control-selector": 6,
     "half-pixel": 2,
-    "radius-literal": 2,
-    "spacing-literal": 6,
     "stray-stylesheet": 1,
-    "type-literal": 3
+    "type-literal": 1
   },
   "src/agent/composer.css": {
     "control-selector": 3,
-    "radius-literal": 4,
-    "spacing-literal": 13,
+    "radius-literal": 3,
+    "spacing-literal": 12,
     "stray-stylesheet": 1,
     "type-literal": 4
   },
   "src/agent/controls.css": {
-    "control-selector": 5,
+    "control-selector": 4,
     "radius-literal": 4,
-    "spacing-literal": 12,
+    "spacing-literal": 11,
     "stray-stylesheet": 1,
     "type-literal": 1
   },
@@ -90,15 +72,6 @@
     "type-literal": 1
   },
   "src/agent/output.css": {
-    "radius-literal": 1,
-    "spacing-literal": 5,
-    "stray-stylesheet": 1,
-    "type-literal": 3
-  },
-  "src/agent/recovery.css": {
-    "control-selector": 3,
-    "radius-literal": 2,
-    "spacing-literal": 9,
     "stray-stylesheet": 1,
     "type-literal": 1
   },
@@ -116,9 +89,9 @@
     "control-selector": 12,
     "half-pixel": 9,
     "radius-literal": 9,
-    "spacing-literal": 28,
+    "spacing-literal": 23,
     "stray-stylesheet": 1,
-    "type-literal": 22
+    "type-literal": 17
   },
   "src/browser/BrowserDownloads.tsx": {
     "native-control": 2,
