@@ -75,3 +75,21 @@ it("names the wait or the end instead of narrating, and stops the clock", () => 
   view.rerender(<LiveWorkLine steps={steps} startMs={1000} live={null} ended="stopped" />);
   expect(summary()).toBe("Stopped after 0:06 · 3 steps · 1 failed");
 });
+
+it("opens again on what dot does next, never on the words of the wait", () => {
+  vi.useFakeTimers();
+  const view = render(<LiveWorkLine steps={steps} startMs={1000} live={live("Clicking Save")} />);
+  act(() => vi.advanceTimersByTime(HOLD_MS));
+  view.rerender(
+    <LiveWorkLine
+      steps={steps}
+      startMs={1000}
+      live={live("Has a question", { phase: "waiting", row: "question" })}
+    />,
+  );
+  act(() => vi.advanceTimersByTime(HOLD_MS * 2));
+  view.rerender(<LiveWorkLine steps={steps} startMs={1000} live={live("Typing PDF")} />);
+  act(() => vi.advanceTimersByTime(HOLD_MS * 2));
+  expect(screen.queryByText("Has a question")).toBeNull();
+  expect(screen.getByText("Typing PDF")).toBeTruthy();
+});

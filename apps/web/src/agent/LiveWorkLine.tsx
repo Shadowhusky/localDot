@@ -76,8 +76,11 @@ export function LiveWorkLine({
   const took = (verb: string, joiner: string) =>
     elapsed === null ? verb : `${verb} ${joiner} ${clock(elapsed)}`;
   const failed = steps.filter((step) => step.state === "failed").length;
-  // The narration line shows only while dot works; at a wait or the end the summary says it all.
-  const { lines, retire } = useHeldLines(live?.label ?? "");
+  // The narration line shows only while dot works; at a wait or the end the summary says it all,
+  // and the line keeps what dot last did, so it never speaks a wait's words when it opens again.
+  const said = useRef(live?.label ?? "");
+  if (running && live) said.current = live.label;
+  const { lines, retire } = useHeldLines(said.current);
   const shown = steps.slice(-SHOWN_STEPS);
   const summary = running
     ? "Working"

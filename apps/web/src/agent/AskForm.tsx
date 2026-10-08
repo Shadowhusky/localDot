@@ -17,7 +17,8 @@ const TOUCH = "(hover: none) and (pointer: coarse)";
 const ANSWER_LIMIT = 2000;
 
 // Takes the composer's place while dot waits for an answer. The question itself is dot's turn in
-// the thread above.
+// the thread above. A choice can be made at any time; only sending waits for the task to be ready,
+// so the rows never change size while it settles.
 export function AskForm({
   question,
   controls,
@@ -109,7 +110,7 @@ export function AskForm({
         }}
         onKeyDown={(event) => {
           if (event.target instanceof HTMLTextAreaElement) return;
-          if (event.altKey || event.ctrlKey || event.metaKey || unavailable) return;
+          if (event.altKey || event.ctrlKey || event.metaKey) return;
           const choice = /^[1-9]$/.test(event.key) ? choices[Number(event.key) - 1] : undefined;
           if (!choice) return;
           event.preventDefault();
@@ -134,7 +135,6 @@ export function AskForm({
             options={choices.map((choice, index) => ({
               ...choice,
               ...(touch ? {} : { preview: <Kbd keys={[String(index + 1)]} /> }),
-              ...(unavailable ? { disabledReason: unavailable } : {}),
             }))}
           />
         )}

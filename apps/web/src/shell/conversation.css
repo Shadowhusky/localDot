@@ -413,6 +413,12 @@
     thread-shimmer 1.8s linear infinite;
 }
 
+/* The new line waits for the old one to leave, so the two never show over each other. */
+.thread-work .thread-work-text[data-leaving] + .thread-work-text {
+  animation-delay: var(--dur-exit);
+  animation-fill-mode: both;
+}
+
 @keyframes thread-line-in {
   from {
     opacity: 0;
@@ -683,6 +689,11 @@
   padding-top: calc(var(--spacing) * 2);
 }
 
+/* The composer comes back softly once an answer is sent. */
+.thread-composer:not([hidden]) {
+  animation: thread-fade-in var(--dur-fade) var(--ease-standard);
+}
+
 /* The thread is the column's scroller, so the composer never scrolls on its own. */
 .thread-composer > .composer {
   max-height: none;
@@ -820,6 +831,11 @@
     background-image: none;
     color: var(--color-fg-2);
     animation: thread-fade-in var(--dur-fade) var(--ease-standard);
+  }
+
+  .thread-work .thread-work-text[data-leaving] + .thread-work-text {
+    animation-delay: var(--dur-exit);
+    animation-fill-mode: both;
   }
 
   .thread-copy-slot [data-copy] > .ui-icon,
