@@ -889,8 +889,8 @@ function NoToken({ rejected }: { rejected: Rejected }) {
       <h1>Sign in to localDot</h1>
       <p>
         {rejected ? `${REJECTED[rejected]} ` : ""}Run <code>localdot open</code> where localDot is
-        installed, then open its sign-in link here as <code>{window.location.origin}/#code=…</code>.
-        Each link works once and expires after one minute.
+        installed, then open its sign-in link here as <code>{window.location.origin}/#code=…</code>{" "}
+        within one minute. Each link works once.
       </p>
     </section>
   );
