@@ -179,6 +179,8 @@
   --rail-tabbed-w: 340px;
 }
 
+/* Lightning CSS resolves these per stylesheet, so they work only in files that stack.css imports.
+   Any other stylesheet restates the query, as app.css does; kit markup uses tablet:, laptop:, wide:. */
 @custom-media --wide (width >= 1680px);
 @custom-media --laptop (1180px <= width < 1680px);
 @custom-media --tablet (760px <= width < 1180px);

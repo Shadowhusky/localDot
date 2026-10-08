@@ -7,12 +7,14 @@ const SRC = new URL("../", import.meta.url);
 const tokensCss = await readSource(new URL("./tokens.css", import.meta.url));
 const motionCss = await readSource(new URL("./motion.css", import.meta.url));
 const baseCss = await readSource(new URL("./base.css", import.meta.url));
+const stackCss = await readSource(new URL("./stack.css", import.meta.url));
 const legacyCss = await readSource(new URL("../theme.css", import.meta.url));
 const onboardingCss = await readSource(new URL("../onboarding/onboarding.css", import.meta.url));
 const page = await readSource(new URL("../../index.html", import.meta.url));
 const stylesheets = (await readdir(SRC, { recursive: true }))
   .filter((path) => path.endsWith(".css") && !path.includes("_spike"))
   .sort();
+const legacySheets = stylesheets.filter((path) => !path.startsWith("ui/"));
 
 type Rgba = [number, number, number, number];
 
@@ -175,12 +177,37 @@ describe("colour tokens", () => {
 });
 
 describe("token layer", () => {
-  it("declares each token once, so a legacy rule cannot outrank it from a later layer", () => {
+  it("declares each token once, so a legacy rule cannot outrank it from a later layer", async () => {
     const owned = new Set(readTokens([tokensCss]).keys());
-    const redeclared = cssBlocks(legacyCss)
-      .flatMap((block) => [...block.body.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1] as string))
-      .filter((name) => owned.has(name));
+    const redeclared: string[] = [];
+    for (const path of legacySheets) {
+      for (const block of cssBlocks(await readSource(new URL(path, SRC)))) {
+        for (const [, name] of block.body.matchAll(/(--[\w-]+)\s*:/g)) {
+          if (owned.has(name as string)) redeclared.push(`${path} ${name}`);
+        }
+      }
+    }
+    expect(legacySheets).toContain("theme.css");
     expect(redeclared).toEqual([]);
+  });
+
+  it("uses a custom media name only where the stylesheet can see it", async () => {
+    const bundled = [...stackCss.matchAll(/@import "\.\/([\w-]+\.css)"/g)].map((m) => `ui/${m[1]}`);
+    const defined = (css: string) =>
+      [...css.matchAll(/@custom-media (--[\w-]+)/g)].map((m) => m[1]);
+    const shared = defined(tokensCss);
+    const unseen: string[] = [];
+    for (const path of stylesheets) {
+      const css = await readSource(new URL(path, SRC));
+      const visible = new Set([...defined(css), ...(bundled.includes(path) ? shared : [])]);
+      for (const [prelude] of css.matchAll(/@media[^{]*/g)) {
+        for (const [, name] of prelude.matchAll(/\((--[\w-]+)\)/g)) {
+          if (!visible.has(name as string)) unseen.push(`${path} ${name}`);
+        }
+      }
+    }
+    expect(bundled).toContain("ui/tokens.css");
+    expect(unseen).toEqual([]);
   });
 
   it("points the legacy colour names at the roles", () => {

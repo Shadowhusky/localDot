@@ -193,6 +193,10 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   eases and breakpoints are cleared (`--color-*: initial` and the like), so kit code can reach only the
   roles: `bg-raised`, `text-fg-2`, `text-body`, `rounded-lg`, `shadow-overlay`, `ease-spring`, and the
   `tablet:`, `laptop:` and `wide:` variants.
+- **Custom media stay in the stack bundle.** Lightning CSS resolves `@custom-media` per stylesheet and
+  passes an unknown name through, so `--phone`, `--tablet`, `--laptop`, `--wide` and `--coarse` work
+  only in files that `stack.css` imports. Any other stylesheet restates the query (as `app.css` does
+  with `--rails-collapse`); the unit test fails on a custom media name a file does not define.
 - **Appearances.** Two ramps of the same OKLCH lightness steps, `--graphite-*` and `--midnight-*`. The
   roles point into Graphite on `:root` and into Midnight under `:root[data-appearance="midnight"]`.
   Midnight sits at hue 255. Its void and well keep chroma about .02; its raised, raised-2 and overlay
