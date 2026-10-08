@@ -1,5 +1,5 @@
 import type { Point, Rect } from "@localdot/protocol";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { XHelper } from "../x/helper.ts";
 import type { ChromiumPerception } from "./cdp.ts";
 import type { CuaDriver } from "./driver.ts";
@@ -8,6 +8,7 @@ import {
   focusedTarget,
   type HelperWindow,
   hitTest,
+  LOOKUP_BUDGET_MS,
   NATIVE_BUDGET_MS,
   type PerceptionDeps,
 } from "./hit-test.ts";
@@ -69,8 +70,8 @@ interface Asked {
 
 // A scripted accessibility helper: answers per window and records what it was asked.
 function fakeNative(answers: {
-  at?: (win: HelperWindow, point: Point) => NativeAnswer;
-  focused?: (win: HelperWindow) => NativeAnswer;
+  at?: (win: HelperWindow, point: Point) => NativeAnswer | Promise<NativeAnswer>;
+  focused?: (win: HelperWindow) => NativeAnswer | Promise<NativeAnswer>;
   tree?: (win: HelperWindow) => NativeTree;
 }): NativeAccessibility & { asked: Asked[] } {
   const asked: Asked[] = [];
@@ -323,6 +324,54 @@ describe("focusedTarget", () => {
       deps([dialog], fakeNative({ focused: () => ({ unknown: true }) })),
     );
     expect(late).toMatchObject({ target: null, window: 1, unknown: true });
+  });
+});
+
+describe("the lookup budget", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  const never = <T>() => new Promise<T>(() => {});
+  const chromium = win(1, "Chromium", 0, 54, 2560, 1414, { frame: [0, 54, 2560, 1414] });
+  const reload = el("button", "Reload", { x: 78, y: 73, w: 34, h: 34 }, { space: "chrome" });
+  const unknownWindow = {
+    window: 1,
+    windowFrame: { x: 0, y: 54, w: 2560, h: 1414 },
+    unknown: true,
+  };
+  // A part of the lookup that never answers: the whole lookup still answers within the budget.
+  async function past<T>(lookup: () => Promise<T>): Promise<T> {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const answer = lookup();
+    await vi.advanceTimersByTimeAsync(LOOKUP_BUDGET_MS);
+    return answer;
+  }
+
+  it("answers unknown with the window when CDP misses it on a hit test", async () => {
+    const native = fakeNative({ at: () => ({ element: reload }) });
+    const silentPage = { hitTest: never, deviceScaleFactor: async () => 2 };
+    const silentScale = { hitTest: async () => null, deviceScaleFactor: never };
+    for (const cdp of [silentPage, silentScale]) {
+      const d = deps([chromium], native, { cdp: cdp as unknown as ChromiumPerception });
+      const hit = await past(() => hitTest(d, { x: 189, y: 179 }));
+      expect(hit).toMatchObject({ ...unknownWindow, target: { source: "coords" } });
+    }
+  });
+
+  it("answers unknown with the window when the helper misses it", async () => {
+    const native = fakeNative({ at: never, focused: never });
+    const hit = await past(() => hitTest(deps([IMAGE], native), { x: 40, y: 250 }));
+    expect(hit).toMatchObject({ window: 11, unknown: true, target: { source: "coords" } });
+    const focus = await past(() => focusedTarget(deps([chromium], native)));
+    expect(focus).toMatchObject({ ...unknownWindow, target: null });
+  });
+
+  it("answers unknown focus with the window when CDP misses it", async () => {
+    const native = fakeNative({ focused: () => ({ element: reload }) });
+    const cdp = { focused: never, deviceScaleFactor: async () => 2 };
+    const d = deps([chromium], native, { cdp: cdp as unknown as ChromiumPerception });
+    expect(await past(() => focusedTarget(d))).toMatchObject({ ...unknownWindow, target: null });
+    expect(native.asked).toEqual([]);
   });
 });
 

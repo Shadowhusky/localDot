@@ -11,7 +11,12 @@ import type { Screenshots } from "./capture.ts";
 import type { ChromiumPerception } from "./cdp.ts";
 import type { CuaDriver } from "./driver.ts";
 import { appToolkit, frameToDevice } from "./mapping.ts";
-import type { NativeAccessibility, NativeElement, NativeQuery } from "./native.ts";
+import {
+  type NativeAccessibility,
+  type NativeElement,
+  type NativeQuery,
+  within,
+} from "./native.ts";
 
 export interface HelperWindow {
   id: number;
@@ -41,6 +46,9 @@ export interface PerceptionDeps {
 // Each action reads its identity twice: past this the accessibility helper answers "unknown"
 // rather than hold the action.
 export const NATIVE_BUDGET_MS = 300;
+// A whole lookup answers within this, well inside the daemon's 1 s backstop: a part that misses it
+// (a slow CDP round trip, a busy helper) leaves the element unknown, with its window.
+export const LOOKUP_BUDGET_MS = 600;
 // find walks window after window; it stops inside the daemon client's 5 s find timeout.
 const FIND_BUDGET_MS = 4000;
 const TREE_BUDGET_MS = 1500;
@@ -130,6 +138,7 @@ function elementTarget(win: HelperWindow, el: NativeElement, q: NativeQuery): Ta
 // time is reported as unknown, so the gateway can mask it conservatively.
 export async function focusedTarget(deps: PerceptionDeps): Promise<HitTestResult> {
   const t0 = performance.now();
+  const left = () => LOOKUP_BUDGET_MS - (performance.now() - t0);
   const windows = await listWindows(deps.x);
   const win = windows.find((w) => w.active && !DECOR_CLASSES.has(w.cls));
   const done = (target: Target | null, unknown = false): HitTestResult => ({
@@ -141,18 +150,24 @@ export async function focusedTarget(deps: PerceptionDeps): Promise<HitTestResult
   });
   if (!win) return done(null);
   if (appToolkit(win.cls) === "chromium" && deps.cdp) {
-    const web = await deps.cdp.focused(win).catch(() => null);
+    const focus = deps.cdp.focused(win).catch(() => null);
+    const web = await within(focus, left());
+    if (web === undefined) return done(null, true);
     if (web) return done(web);
   }
   if (!deps.native) return done(null);
-  const q = await nativeQuery(deps, win, windows);
-  const answer = await deps.native.focused(win, q, NATIVE_BUDGET_MS);
+  const q = await within(nativeQuery(deps, win, windows), left());
+  if (!q) return done(null, true);
+  const answer =
+    (await within(deps.native.focused(win, q, Math.min(NATIVE_BUDGET_MS, left())), left())) ??
+    ({ unknown: true } as const);
   if ("unknown" in answer) return done(null, true);
   return done(answer.element ? elementTarget(win, answer.element, q) : null);
 }
 
 export async function hitTest(deps: PerceptionDeps, point: Point): Promise<HitTestResult> {
   const t0 = performance.now();
+  const left = () => LOOKUP_BUDGET_MS - (performance.now() - t0);
   const windows = await listWindows(deps.x);
   const win = windowUnder(windows, point);
   const done = (target: Target | null, unknown = false): HitTestResult => ({
@@ -170,9 +185,13 @@ export async function hitTest(deps: PerceptionDeps, point: Point): Promise<HitTe
     appToolkit(win.cls) === "chromium" && deps.cdp
       ? deps.cdp.hitTest(win, point).catch(() => null)
       : null;
-  const q = await nativeQuery(deps, win, windows);
-  const answer = await deps.native.at(win, point, q, NATIVE_BUDGET_MS);
-  const page = await web;
+  const q = await within(nativeQuery(deps, win, windows), left());
+  if (!q) return done(windowTarget(point, win), true);
+  const answer =
+    (await within(deps.native.at(win, point, q, Math.min(NATIVE_BUDGET_MS, left())), left())) ??
+    ({ unknown: true } as const);
+  const page = web ? await within(web, left()) : null;
+  if (page === undefined) return done(windowTarget(point, win), true);
   if (page) return done(page);
   if ("unknown" in answer) return done(windowTarget(point, win), true);
   const target = answer.element ? elementTarget(win, answer.element, q) : undefined;

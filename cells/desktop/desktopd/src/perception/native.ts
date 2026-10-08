@@ -48,6 +48,15 @@ export interface NativeAccessibility {
 const GRACE_MS = 200;
 const TREE_CACHE_LIMIT = 32;
 
+// `work`'s answer if it comes within `ms`, else undefined; `work` itself runs on.
+export function within<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(resolve, Math.max(0, ms), undefined);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
 const wire = (w: HelperWindow) => ({
   pid: w.pid,
   title: w.title,
@@ -64,9 +73,12 @@ const query = (q: NativeQuery) => ({
 });
 
 // One persistent AT-SPI helper, apart from XTest's: a hung application must not block input or its
-// raw timestamps. A helper that misses its own deadline is replaced on the next query.
+// raw timestamps. A helper that misses its own deadline is replaced at once. It answers one query
+// at a time, so each query's budget runs from the call: one whose turn, or a helper still starting,
+// does not come within it answers unknown without being sent.
 export class AtspiAccessibility implements NativeAccessibility {
   #helper: Promise<XHelper> | undefined;
+  #idle: Promise<true> = Promise.resolve(true);
   readonly #trees = new Map<number, { key: string; elements: NativeElement[] }>();
 
   constructor(
@@ -108,24 +120,31 @@ export class AtspiAccessibility implements NativeAccessibility {
     args: Record<string, unknown>,
     budgetMs: number,
   ): Promise<T | { unknown: true }> {
-    let helper: XHelper;
+    const deadline = this.mono() + budgetMs;
+    const left = () => deadline - this.mono();
+    const previous = this.#idle;
+    let finished!: (value: true) => void;
+    const mine = new Promise<true>((resolve) => {
+      finished = resolve;
+    });
+    this.#idle = previous.then(() => mine);
     try {
-      helper = await this.#ensure();
-    } catch {
-      return { unknown: true };
-    }
-    try {
-      return await helper.call<T>(
-        cmd,
-        { ...args, deadline: this.mono() + budgetMs },
-        budgetMs + GRACE_MS,
-      );
-    } catch (err) {
-      if (err instanceof XHelperTimeoutError) {
-        this.#helper = undefined;
-        void helper.close();
+      const turn = await within(previous, left());
+      const starting = turn && this.#ensure().catch(() => undefined);
+      const helper = starting && (await within(starting, left()));
+      if (!helper) return { unknown: true };
+      try {
+        return await helper.call<T>(cmd, { ...args, deadline }, Math.max(0, left()) + GRACE_MS);
+      } catch (err) {
+        if (err instanceof XHelperTimeoutError) {
+          this.#helper = undefined;
+          void helper.close();
+          this.warm();
+        }
+        return { unknown: true };
       }
-      return { unknown: true };
+    } finally {
+      finished(true);
     }
   }
 

@@ -98,8 +98,68 @@ describe("AtspiAccessibility", () => {
     const native = new AtspiAccessibility(h.start, () => 0);
     expect(await native.at(dialog, { x: 1, y: 1 }, q, 300)).toEqual({ unknown: true });
     expect(h.closed).toEqual([0]);
+    // The next helper starts at once, not on the next query.
+    expect(h.started()).toBe(2);
     expect(await native.focused(dialog, q, 300)).toEqual({ element: null });
     expect(h.started()).toBe(2);
+  });
+
+  it("answers unknown, without sending or replacing the helper, when its turn misses its budget", async () => {
+    const release: (() => void)[] = [];
+    const h = helpers((cmd) =>
+      cmd === "tree"
+        ? new Promise((resolve) => release.push(() => resolve({ elements: [], truncated: false })))
+        : { element: entry },
+    );
+    const native = new AtspiAccessibility(h.start, () => 0);
+    const tree = native.tree(dialog, q, 1500, 1);
+    expect(await native.at(dialog, { x: 1, y: 1 }, q, 20)).toEqual({ unknown: true });
+    expect(h.calls[0]?.map((c) => c.cmd)).toEqual(["tree"]);
+    expect(h.closed).toEqual([]);
+    release[0]?.();
+    await tree;
+    expect(await native.at(dialog, { x: 1, y: 1 }, q, 20)).toMatchObject({ element: entry });
+    expect(h.started()).toBe(1);
+  });
+
+  it("times a query that waited its turn by what is left of its budget", async () => {
+    let now = 1_000;
+    const release: (() => void)[] = [];
+    const h = helpers((cmd) =>
+      cmd === "content"
+        ? new Promise((resolve) => release.push(() => resolve({ frame: null })))
+        : { element: null },
+    );
+    const native = new AtspiAccessibility(h.start, () => now);
+    const content = native.content(dialog, 1500);
+    const at = native.at(dialog, { x: 1, y: 1 }, q, 300);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    now = 1_100;
+    release[0]?.();
+    await content;
+    expect(await at).toEqual({ element: null });
+    const sent = h.calls[0]?.[1];
+    expect(sent?.args.deadline).toBe(1_300);
+    expect(sent?.timeoutMs).toBe(400);
+  });
+
+  it("answers unknown while its helper is still starting, and uses it once it has", async () => {
+    const h = helpers(() => ({ element: entry }));
+    let ready!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      ready = resolve;
+    });
+    const native = new AtspiAccessibility(
+      async () => {
+        await gate;
+        return h.start();
+      },
+      () => 0,
+    );
+    expect(await native.at(dialog, { x: 1, y: 1 }, q, 20)).toEqual({ unknown: true });
+    ready();
+    expect(await native.at(dialog, { x: 1, y: 1 }, q, 20)).toMatchObject({ element: entry });
+    expect(h.started()).toBe(1);
   });
 
   it("answers unknown and keeps the helper when a query fails", async () => {
