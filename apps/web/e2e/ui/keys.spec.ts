@@ -95,9 +95,10 @@ test("the Web API fields pair up when wide and stack with even gaps on a phone",
       };
     });
   };
-  const [hosts, header, format, label] = await Promise.all(
-    ["Hosts", "Header", "Sent as", "Label (optional)"].map(field),
-  );
+  const hosts = await field("Hosts");
+  const header = await field("Header");
+  const format = await field("Sent as");
+  const label = await field("Label (optional)");
   if (header.top === format.top) return;
   const gaps = [
     header.top - hosts.bottom,
