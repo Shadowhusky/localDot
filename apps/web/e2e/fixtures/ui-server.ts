@@ -12,6 +12,9 @@ import {
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
   type KeydRecord,
+  microsToMs,
+  msToMicros,
+  type Point,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
@@ -1411,6 +1414,112 @@ function pointerSteps(): string | undefined {
   });
   session.append("action.result", { ok: true });
 }
+// A drag played live with the gateway's own events, so the stage draws its path as it goes: a
+// stroke through four points, or (held) a button held down through eight moves around a loop.
+function liveDrag(held: boolean): string | undefined {
+  if (!session) return "no session";
+  const owned = session;
+  const now = () => Math.round(microsToMs(log.toSessionT(owned.id, clock.nowMicros())));
+  const model = (p: Point) => ({ x: Math.round(p.x / 2), y: Math.round(p.y / 2) });
+  const travel = (from: Point, to: Point, durationMs: number) => ({
+    from,
+    to,
+    startsAt: now() + 50,
+    durationMs,
+    seed: 7,
+    curve: "minjerk-bow-v1" as const,
+  });
+  const later = (ms: number, act: () => void) => setTimeout(act, ms).unref();
+  const run = (
+    at: number,
+    verb: "drag" | "move" | "click",
+    label: string,
+    from: Point,
+    to: Point,
+    input: Record<string, unknown>,
+    motionMs: number,
+  ) =>
+    later(at, () => {
+      const step = ulid();
+      owned.append("step.start", { kind: "gui", planItem: "calc" }, step);
+      owned.append(
+        "action.intent",
+        { verb, label, point: to, risk: "none", pointer: travel(from, to, motionMs) },
+        step,
+      );
+      const press = () => {
+        const pressT = msToMicros(now());
+        owned.append("action.dispatch", { input, pressT, ringAt: pressT, injector: "xtest" }, step);
+      };
+      // A drag's press comes after its travel and its motion after the press; a held move's
+      // dispatch comes once its glide is over.
+      later(verb === "drag" ? motionMs + 100 : motionMs, press);
+      later(motionMs + 100 + (verb === "drag" ? Number(input.durationMs) + 200 : 0), () => {
+        owned.append("action.result", { ok: true }, step);
+        owned.append("step.end", { status: "ok" }, step);
+      });
+    });
+  const centre = { x: 1280, y: 800 };
+  if (!held) {
+    const way = [
+      { x: 700, y: 1000 },
+      { x: 1100, y: 600 },
+      { x: 1500, y: 1000 },
+      { x: 1900, y: 600 },
+    ];
+    const [from, to] = [way[0] as Point, way.at(-1) as Point];
+    run(
+      0,
+      "drag",
+      dragLabel({ target: null, point: model(from) }, { target: null, point: model(to) }),
+      centre,
+      from,
+      { kind: "drag", from, to, path: way.slice(1, -1), button: "left", durationMs: 3000 },
+      400,
+    );
+    return;
+  }
+  const loop = Array.from({ length: 8 }, (_, i) => ({
+    x: Math.round(1280 + 420 * Math.cos((2 * Math.PI * (i + 1)) / 8)),
+    y: Math.round(800 + 300 * Math.sin((2 * Math.PI * (i + 1)) / 8)),
+  }));
+  const start = { x: 1700, y: 800 };
+  run(
+    0,
+    "click",
+    buttonLabel("down", "left", null, model(start)),
+    centre,
+    start,
+    { kind: "down", button: "left", at: start },
+    400,
+  );
+  loop.forEach((to, i) => {
+    const from = i === 0 ? start : (loop[i - 1] as Point);
+    run(
+      700 + i * 650,
+      "move",
+      moveLabel(null, model(to)),
+      from,
+      to,
+      {
+        kind: "move",
+        to,
+        durationMs: 500,
+      },
+      500,
+    );
+  });
+  const end = loop.at(-1) as Point;
+  run(
+    700 + loop.length * 650,
+    "click",
+    buttonLabel("up", "left", null, model(end)),
+    end,
+    end,
+    { kind: "up", button: "left", at: end },
+    0,
+  );
+}
 function ask(allowText: boolean): string | undefined {
   if (!session) return "no session";
   void session
@@ -1524,6 +1633,7 @@ routes.post("/__qa/approval", async (c) => {
 });
 routes.post("/__qa/keys", () => reply(keySteps()));
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
+routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),

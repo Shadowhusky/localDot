@@ -1,5 +1,6 @@
 import {
   clipText,
+  type Input,
   keyDisplayName,
   type LocalDotEvent,
   msToSeconds,
@@ -7,6 +8,7 @@ import {
   type Rect,
   type ScreenName,
 } from "@localdot/protocol";
+import { type MotionSample, motionSamples } from "@localdot/protocol/motion";
 import {
   type ActionState,
   agentStateAt,
@@ -49,6 +51,11 @@ const RELEASE_MS = 150;
 const REDUCED_FADE_MS = 120;
 const INSTANT_FADE_MS = 150;
 const CANCEL_CHIP_MS = 1500;
+// desktopd starts a drag's motion this long after its press.
+const DRAG_PRESS_MS = 50;
+// A drag's path stays this long after its drop, then fades.
+const DRAG_HOLD_MS = 600;
+const DRAG_FADE_MS = 300;
 const PILL_MAX = 60;
 const CLICKABLE = new Set([
   "button",
@@ -113,6 +120,12 @@ export interface KeycapsScene {
   dy: number;
 }
 
+export interface DragScene {
+  // The way a held button has gone so far, in desktop device px.
+  points: Point[];
+  alpha: number;
+}
+
 export interface CancelScene {
   x: number;
   y: number;
@@ -133,6 +146,7 @@ export interface Scene {
   cursor: CursorScene | null;
   target: TargetScene | null;
   rings: RingScene[];
+  drag: DragScene | null;
   typing: TypingScene | null;
   keycaps: KeycapsScene | null;
   cancel: CancelScene | null;
@@ -170,11 +184,13 @@ export function sceneAt(
   if (lookback !== Number.POSITIVE_INFINITY && !(Number.isInteger(lookback) && lookback >= 0))
     throw new RangeError("ring lookback must be a nonnegative integer or Infinity");
   const control = controlAt(model, t);
+  const drag = dragAt(model, n, current, t, view, first);
   return {
     control,
-    cursor: cursorAt(model, n, current, t, view, control, first),
+    cursor: cursorAt(model, n, current, t, view, control, first, drag?.head),
     target: current ? targetAt(current, t, view) : null,
     rings: ringsAt(model, n, t, lookback, first),
+    drag: drag && { points: drag.points, alpha: drag.alpha },
     typing: current ? typingAt(current, t, view) : null,
     keycaps: current ? keycapsAt(current, t, view) : null,
     cancel: current
@@ -190,8 +206,12 @@ function controlAt(model: SessionModel, t: number): boolean {
   return s === "acting" || s === "observing" || s === "thinking";
 }
 
-// Where the cursor rests after an action: its dispatch point, or where a cancel froze it.
+// Where the cursor rests after an action: its dispatch point, or where a cancel froze it. A drag
+// rests at its drop, or where it was stopped.
 function restingPoint(a: ActionState | undefined): Point | undefined {
+  const input = a?.dispatch?.input;
+  if (a && input?.kind === "drag")
+    return a.cancel ? dragWay(a, input, a.cancel.t).at(-1) : input.to;
   if (a?.plan) return a.cancel ? pointerAt(a.plan, a.cancel.t) : a.plan.to;
   return a?.point;
 }
@@ -204,14 +224,18 @@ function cursorAt(
   view: View,
   control: boolean,
   first: number,
+  dragging: Point | undefined,
 ): CursorScene | null {
   if (!current) return null;
-  let pos: Point | undefined;
+  let pos: Point | undefined = dragging;
   let floating = false;
   for (let i = n - 1; i >= first && !pos; i--) {
     const a = model.actions[i];
     if (!a) continue;
-    pos = a === current && a.plan ? positionOnPlan(a, t, view) : restingPoint(a);
+    // A drag that ended rests at its drop, past the plan that only took it to its start.
+    const dropped =
+      a.dispatch?.input.kind === "drag" && t >= (ended(a) ?? Number.POSITIVE_INFINITY);
+    pos = a === current && a.plan && !dropped ? positionOnPlan(a, t, view) : restingPoint(a);
   }
   if (!pos) return null;
   const idleSince = current.cancel?.t ?? current.resultT;
@@ -279,6 +303,92 @@ function positionOnPlan(a: ActionState, t: number, view: View): Point {
   const stop = a.cancel ? Math.min(t, a.cancel.t) : t;
   if (!view.reducedMotion && plan.durationMs > 0) return pointerAt(plan, stop);
   return stop < planEnd(a) ? { x: plan.from.x, y: plan.from.y } : { x: plan.to.x, y: plan.to.y };
+}
+
+// A one-step drag from its press, or the press of a button held between actions and the moves,
+// scrolls and release since: the way the button has gone so far, which stays a moment after the
+// drop. `head` is where the pointer is on it while it moves.
+function dragAt(
+  model: SessionModel,
+  n: number,
+  current: ActionState | undefined,
+  t: number,
+  view: View,
+  first: number,
+): (DragScene & { head?: Point }) | null {
+  const input = current?.dispatch?.input;
+  let way: { points: Point[]; end?: number; moving: boolean } | null = null;
+  if (current && input?.kind === "drag") {
+    if (t < (current.dispatch?.pressT ?? 0)) return null;
+    const done = ended(current);
+    way = {
+      points: view.reducedMotion && !current.cancel ? fullWay(input) : dragWay(current, input, t),
+      ...(done === undefined ? {} : { end: done }),
+      moving: done === undefined || t < done,
+    };
+  } else way = heldWay(model, n, t, view, first);
+  if (!way || way.points.length < 2) return null;
+  const end = way.end ?? (model.ended && model.ended.t <= t ? model.ended.t : undefined);
+  const alpha = end === undefined ? 1 : 1 - clamp01((t - end - DRAG_HOLD_MS) / DRAG_FADE_MS);
+  if (alpha <= 0) return null;
+  const head = way.moving && !view.reducedMotion ? way.points.at(-1) : undefined;
+  return { points: way.points, alpha, ...(head ? { head } : {}) };
+}
+
+const fullWay = (input: Extract<Input, { kind: "drag" }>) => [
+  input.from,
+  ...(input.path ?? []),
+  input.to,
+];
+const samplesOf = new WeakMap<Input, MotionSample[]>();
+
+// A one-step drag's way as far as its motion got at t, the way desktopd samples it.
+function dragWay(a: ActionState, input: Extract<Input, { kind: "drag" }>, t: number): Point[] {
+  const stop = a.cancel ? Math.min(t, a.cancel.t) : t;
+  if (!a.cancel && a.resultT !== undefined && t >= a.resultT) return fullWay(input);
+  let samples = samplesOf.get(input);
+  if (!samples) {
+    samples = motionSamples(fullWay(input), input.durationMs);
+    samplesOf.set(input, samples);
+  }
+  const elapsed = stop - (a.dispatch?.pressT ?? stop) - DRAG_PRESS_MS;
+  return [input.from, ...samples.filter((s) => s.t <= elapsed).map((s) => s.at)];
+}
+
+// A button held between actions: from its press through each move, scroll and the release since,
+// the current one as far as its glide got. None once a release before the current action ended it.
+function heldWay(
+  model: SessionModel,
+  n: number,
+  t: number,
+  view: View,
+  first: number,
+): { points: Point[]; end?: number; moving: boolean } | null {
+  let press = -1;
+  for (let i = n - 1; i >= first && press < 0; i--) {
+    const kind = model.actions[i]?.dispatch?.input.kind;
+    if (kind === "down") press = i;
+    else if ((kind === "up" && i < n - 1) || kind === "drag" || kind === "click") return null;
+  }
+  if (press < 0) return null;
+  const points: Point[] = [];
+  let end: number | undefined;
+  let moving = false;
+  for (let i = press; i < n; i++) {
+    const a = model.actions[i] as ActionState;
+    const input = a.dispatch?.input;
+    const plan = i > press && i === n - 1 && !a.cancel ? a.plan : undefined;
+    if (plan && (!input || t < planEnd(a))) {
+      if (t >= plan.startsAt) points.push(view.reducedMotion ? plan.to : pointerAt(plan, t, true));
+      moving = t < planEnd(a);
+    } else if (input?.kind === "down" || input?.kind === "scroll") points.push(input.at);
+    else if (input?.kind === "move") points.push(input.to);
+    else if (input?.kind === "up") {
+      points.push(input.at);
+      end = ended(a) ?? a.dispatch?.t;
+    }
+  }
+  return { points, ...(end === undefined ? {} : { end }), moving };
 }
 
 function crossfadeAlpha(a: ActionState, t: number, fadeMs: number): number {
