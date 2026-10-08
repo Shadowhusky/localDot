@@ -523,9 +523,9 @@ export class Agent {
         input: call.input,
       };
       this.#o.onEvent?.({ type: "tool_execution_start", callId: info.callId, name: info.name });
-      // A skipped call never ran, so it is not another failed action.
-      const skipped = final !== undefined || (batchFailed && call.toolName === "computer");
       let result: ToolResult;
+      // A skipped call never ran, so it is not another failed action.
+      let skipped = false;
       if (signal.aborted) result = { ok: false, content: [{ type: "text", text: "Stopped." }] };
       else if (batchPaused)
         result = {
@@ -535,17 +535,19 @@ export class Agent {
             { type: "text", text: "Skipped: the task was paused before this call executed." },
           ],
         };
-      else if (final)
+      else if (final) {
+        skipped = true;
         result = {
           ok: false,
           content: [{ type: "text", text: "Skipped: the task already ended." }],
         };
-      else if (batchFailed && call.toolName === "computer")
+      } else if (batchFailed && call.toolName === "computer") {
+        skipped = true;
         result = {
           ok: false,
           content: [{ type: "text", text: "Skipped: an earlier action in this batch failed." }],
         };
-      else if (call.toolName === "done" && this.#hasFollowUps())
+      } else if (call.toolName === "done" && this.#hasFollowUps())
         result = {
           ok: false,
           content: [

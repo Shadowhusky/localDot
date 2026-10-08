@@ -258,6 +258,27 @@ describe("Agent", () => {
           question: "My last 2 actions failed. Keep trying?",
         });
       });
+
+      it("still counts a failing command after a failed computer action in the same batch", async () => {
+        const t = agent(
+          [
+            calls(["computer", { action: "key", text: "ctrl+a" }], ["shell", { command: "false" }]),
+            call("done", { summary: "x" }),
+          ],
+          {
+            boot: { limits: { maxTurns: 100, maxFailedCalls: 2, maxRetries: 1 } },
+            answer: (name, input) =>
+              name === "shell"
+                ? { ok: false, content: [{ type: "text", text: "Exit code 1." }] }
+                : failingKeys(name, input),
+          },
+        );
+        expect(await t.run()).toBe("gave_up");
+        expect(t.f.toolCalls.filter((c) => c.name === "shell")).toHaveLength(1);
+        expect(t.f.toolCalls.at(-1)?.input).toMatchObject({
+          question: "My last 2 actions failed. Keep trying?",
+        });
+      });
     });
 
     it("pauses on keyd's 402 until the user raises the budget, then retries the same turn", async () => {
