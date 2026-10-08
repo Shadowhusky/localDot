@@ -20,8 +20,14 @@ const agentWith = (reason: string): AgentSessionView => ({
 });
 afterEach(() => cleanup());
 
-it("offers recovery for a budget pause but not for a Pause or question that has settled", () => {
-  for (const reason of ["user", "repeated_action", "question", "Waiting for explicit Resume"]) {
+it("offers recovery for a budget pause but not for a Pause, question or approval that has settled", () => {
+  for (const reason of [
+    "user",
+    "repeated_action",
+    "question",
+    "approval",
+    "Waiting for explicit Resume",
+  ]) {
     render(<TaskRecovery agent={agentWith(reason)} controls={controls} onSettings={vi.fn()} />);
     expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull();
     cleanup();

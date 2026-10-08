@@ -1,10 +1,12 @@
-import { msToSeconds, type PauseSnapshot } from "@localdot/protocol";
+import { msToSeconds, type PauseSnapshot, SESSION_PAUSE_REASONS } from "@localdot/protocol";
 import {
   type ActionState,
+  type AgentStateAt,
   agentStateAt,
   type SessionModel,
   screenAt,
   startedCount,
+  stepAt,
 } from "@localdot/stage";
 import type { AgentModel } from "../agent/model.ts";
 import type { HudState } from "../cells/hud-state.ts";
@@ -85,15 +87,35 @@ export const past = (label: string) => tense(label, PAST);
 
 // Reasons the daemon and brain give a paused state that the Pause, question or approval owns,
 // rather than a recovery such as the spending limit. Once that control is settled, so is the pause.
-const OWNED_REASONS = new Set([
-  "user",
-  "repeated_action",
-  "Waiting for explicit Resume",
-  "question",
-  "approval",
-]);
+const OWNED_REASONS = new Set([...SESSION_PAUSE_REASONS, "Waiting for explicit Resume"]);
 export const ownedPause = (reason: string | null | undefined) =>
   reason != null && OWNED_REASONS.has(reason);
+
+// Approving, answering, handing back and Resume publish no state of their own, so a wait whose
+// control has settled is over and the task carries on until the brain next reports.
+function settled(state: string | undefined, facts: TaskFacts): string | undefined {
+  const pending =
+    facts.approval || facts.question !== null || facts.takeover !== null || facts.pause !== null;
+  return !pending && (state === "waiting_user" || (state === "paused" && ownedPause(facts.reason)))
+    ? "acting"
+    : state;
+}
+export const liveState = (model: AgentModel) => settled(model.state?.state, taskFacts(model));
+
+// Replay has only the timeline: a wait is over once the user settles it or a new step starts.
+// The step a Pause waits on may still be acting, so only a new step ends a pause.
+const SETTLES = new Set(["approval.resolve", "ask.answer", "takeover.end"]);
+function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): string {
+  if (at.state !== "waiting_user" && at.state !== "paused") return at.state;
+  if ((stepAt(model, nowMs)?.startT ?? Number.NEGATIVE_INFINITY) > at.t) return "acting";
+  if (at.state === "waiting_user")
+    for (let i = model.marks.length - 1; i >= 0; i--) {
+      const mark = model.marks[i];
+      if (!mark || mark.t <= at.t) break;
+      if (mark.t <= nowMs && SETTLES.has(mark.type)) return "acting";
+    }
+  return at.state;
+}
 
 const PAST_HOLD_MS = 1200;
 const WORKING = new Set(["acting", "observing", "thinking"]);
@@ -146,10 +168,8 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (facts?.pause === "resuming") return running("resuming", "Resuming…", "Resuming…", false);
   if (facts?.pause) return waiting("paused", "Paused", "Paused.");
 
-  let state = agentStateAt(model, nowMs)?.state;
-  // Live, a wait the controls above no longer show has ended, and the task carries on.
-  if (facts && (state === "waiting_user" || (state === "paused" && ownedPause(facts.reason))))
-    state = "acting";
+  const at = agentStateAt(model, nowMs);
+  const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
   if (state === "waiting_user") return waiting("waiting", "Waiting for you", "Waiting for you.");
   if (state === "paused")
     return facts?.reason === "budget"

@@ -77,6 +77,21 @@ const pause = (phase: "pausing" | "paused") => ({
     resumeAvailable: phase === "paused",
   },
 });
+const approvalRequest = (tMs: number) =>
+  ev("approval.request", tMs, {
+    approvalId: ID,
+    generation: 1,
+    revision: 1,
+    expiresAt: 9_999_999_999,
+    actionClass: "send",
+    risk: "high",
+    title: "Send the report",
+    kind: "send",
+    preview: { fields: [["To", "team@example.test"]] },
+  });
+// Replay has the timeline only, with no live facts.
+const replay = (events: LocalDotEvent[], nowMs: number) =>
+  taskHud(foldEvents(emptyModel(), events), nowMs);
 
 describe("the task HUD tells the task's state before its last action (QA-D6)", () => {
   it("says Done for a finished task in the follow-up window, with no clock and the computer's control", () => {
@@ -117,20 +132,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
   });
 
   it("puts an approval first, before the daemon's waiting state arrives", () => {
-    const requested = [
-      ...start(),
-      ev("approval.request", 1500, {
-        approvalId: ID,
-        generation: 1,
-        revision: 1,
-        expiresAt: 9_999_999_999,
-        actionClass: "send",
-        risk: "high",
-        title: "Send the report",
-        kind: "send",
-        preview: { fields: [["To", "team@example.test"]] },
-      }),
-    ];
+    const requested = [...start(), approvalRequest(1500)];
     expect(view(requested, 9500).merged).toMatchObject({
       label: "Needs your OK",
       stop: true,
@@ -146,6 +148,74 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       label: "Waiting for you",
       control: false,
     });
+  });
+
+  it("in Replay, ends a wait once the user settles it or a new step starts", () => {
+    const approved = [
+      ev("session.start", 0, { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux" }),
+      ev("agent.state", 1, { state: "acting" }),
+      ev("step.start", 10, { kind: "gui" }, "s1"),
+      approvalRequest(100),
+      ev("agent.state", 101, { state: "waiting_user", reason: "approval" }),
+      ev("approval.resolve", 3000, { approvalId: ID, decision: "approve", by: "user" }),
+      ev(
+        "action.intent",
+        3020,
+        { verb: "type", label: "Type the report", point: { x: 1, y: 1 }, risk: "high" },
+        "s1",
+      ),
+    ];
+    expect(replay(approved, 2000)).toMatchObject({ row: "waiting", control: false });
+    expect(replay(approved, 3010)).toMatchObject({ row: "working", control: true });
+    expect(replay(approved, 5000)).toMatchObject({ label: "Typing the report", control: true });
+    const shell = [
+      ...approved.slice(0, 3),
+      approvalRequest(100),
+      ev("agent.state", 101, { state: "waiting_user", reason: "approval" }),
+      ev("step.start", 3000, { kind: "shell" }, "s2"),
+    ];
+    expect(replay(shell, 2000).row).toBe("waiting");
+    expect(replay(shell, 60_000)).toMatchObject({ row: "working", control: true });
+    const answered = [
+      ...start(),
+      ev("ask.request", 100, { askId: ID, question: "Which?", options: [], allowText: true }),
+      ev("agent.state", 101, { state: "waiting_user", reason: "question" }),
+      ev("ask.answer", 2000, { askId: ID, text: "This one", by: "user" }),
+    ];
+    expect(replay(answered, 1500).row).toBe("waiting");
+    expect(replay(answered, 2500).control).toBe(true);
+    const handedBack = [
+      ...start(),
+      ev("takeover.request", 100, { requestId: ID, reason: "login", note: "Sign in" }),
+      ev("agent.state", 101, { state: "waiting_user", reason: "takeover" }),
+      ev("takeover.end", 4000, { requestId: ID, by: "user" }),
+    ];
+    expect(replay(handedBack, 3000).row).toBe("waiting");
+    expect(replay(handedBack, 4500).control).toBe(true);
+    const resumed = [
+      ...start(),
+      ev("safety.pause", 300, pause("pausing")),
+      ev("agent.state", 300, { state: "paused", reason: "user" }),
+      ev("action.result", 400, { ok: true }, "s1"),
+      ev("step.end", 410, { status: "ok" }, "s1"),
+      ev("safety.pause", 420, pause("paused")),
+      ev("safety.pause", 9000, { revision: 2 }),
+      ev("step.start", 9100, { kind: "gui" }, "s2"),
+    ];
+    expect(replay(resumed, 350).label).toBe("Paused");
+    expect(replay(resumed, 5000).label).toBe("Paused");
+    expect(replay(resumed, 9200)).toMatchObject({ row: "working", control: true });
+  });
+
+  it("leaves a recovery pause standing in Replay until a new step starts", () => {
+    const budget = [
+      ...typed(),
+      ev("agent.state", 1500, { state: "paused", reason: "budget" }),
+      ev("approval.resolve", 1600, { approvalId: ID, decision: "deny", by: "timeout" }),
+      ev("step.start", 9000, { kind: "gui" }, "s2"),
+    ];
+    expect(replay(budget, 8000)).toMatchObject({ row: "recovery", control: false });
+    expect(replay(budget, 9100)).toMatchObject({ row: "working", control: true });
   });
 
   it("names a budget pause and shows no clock", () => {
