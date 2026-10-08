@@ -182,6 +182,20 @@ function classNames(css: string): Set<string> {
   );
 }
 
+function bundle(dir: string): { css: string; js: string } {
+  const assets = join(dir, "assets");
+  const read = (suffix: string) =>
+    readdirSync(assets)
+      .filter((name) => name.endsWith(suffix))
+      .map((name) => readFileSync(join(assets, name), "utf8"))
+      .join("\n");
+  return { css: read(".css"), js: read(".js") };
+}
+
+// Every Base UI part that renders an element carries its production error URL
+// (base-ui.com/production-error), and tailwind-merge's class-group table names overscroll-x.
+const KIT_LIBRARIES = ["base-ui", "overscroll-x"];
+
 test("the production build orders the layers with the legacy styles in components", async () => {
   const out = join(scratch, "dist");
   await build({
@@ -190,10 +204,9 @@ test("the production build orders the layers with the legacy styles in component
     logLevel: "warn",
     build: { outDir: out, emptyOutDir: true, sourcemap: false },
   });
-  const assets = join(out, "assets");
-  const sheets = readdirSync(assets).filter((name) => name.endsWith(".css"));
+  const sheets = readdirSync(join(out, "assets")).filter((name) => name.endsWith(".css"));
   expect(sheets).toHaveLength(1);
-  const css = readFileSync(join(assets, sheets[0] as string), "utf8");
+  const { css, js } = bundle(out);
   const order = [...css.matchAll(/@layer ([a-z, ]+?) ?[;{]/g)].flatMap((match) =>
     (match[1] as string).split(/, ?/),
   );
@@ -209,11 +222,12 @@ test("the production build orders the layers with the legacy styles in component
   expect([...classNames(layerRules(css, "utilities"))].filter((name) => legacy.has(name))).toEqual(
     [],
   );
-  for (const name of readdirSync(assets)) {
-    const text = readFileSync(join(assets, name), "latin1");
-    expect(text, name).not.toContain("Kit spike");
-    expect(text, name).not.toContain("base-ui-disable-scrollbar");
-  }
+
+  expect(css + js).not.toContain("Kit spike");
+  for (const marker of KIT_LIBRARIES) expect(js).not.toContain(marker);
+  const gallery = bundle(join(scratch, "gallery"));
+  expect(gallery.js).toContain("Kit spike");
+  for (const marker of KIT_LIBRARIES) expect(gallery.js).toContain(marker);
 });
 
 for (const [engine, launch] of Object.entries(ENGINES))
