@@ -128,6 +128,16 @@ function pixels(
   return Object.freeze([left, top, right - left, bottom - top]);
 }
 
+// Page identity is useful; credentials, fragments and query tokens are not public metadata.
+function pageAddress(raw: string): URL {
+  const url = new URL(raw);
+  url.username = "";
+  url.password = "";
+  url.search = "";
+  url.hash = "";
+  return url;
+}
+
 export function projectBrowser(
   rawSnapshot: unknown,
   rawAX: unknown,
@@ -316,14 +326,9 @@ export function projectBrowser(
       )
         throw new BrowserPerceptionError("metadata");
       const rawURL = stringAt(root.documentURL);
-      const url = new URL(rawURL);
+      const url = pageAddress(rawURL);
       if (!["http:", "https:"].includes(url.protocol) && rawURL !== "about:blank")
         throw new BrowserPerceptionError("metadata");
-      // Page identity is useful; credentials, fragments and query tokens are not public metadata.
-      url.username = "";
-      url.password = "";
-      url.search = "";
-      url.hash = "";
       const clean = (value: string) =>
         value
           .replace(/[\p{Cc}\p{Cf}]/gu, " ")
@@ -392,6 +397,16 @@ export function projectBrowser(
         truncated,
       });
     }
+    const rawAddress = root.documentURL === undefined ? undefined : stringAt(root.documentURL);
+    const address =
+      rawAddress !== undefined && URL.canParse(rawAddress) ? pageAddress(rawAddress) : undefined;
+    // Every target names its page, so a step can be allowed on its site.
+    const pageURL =
+      address && ["http:", "https:"].includes(address.protocol)
+        ? address.href.length <= 2048
+          ? address.href
+          : address.origin
+        : undefined;
     const targets: Target[] = [];
     const projected = new Map<number, Target>();
     let focused: Target | null = null;
@@ -431,6 +446,7 @@ export function projectBrowser(
           role: text(role),
           name,
           app: "Chromium",
+          ...(pageURL ? { url: pageURL } : {}),
           secret: isSecret,
         }),
       );

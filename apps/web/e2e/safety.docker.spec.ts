@@ -34,10 +34,10 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
     const owner = await startSafetyTask(page, f),
       request = fixtureRequest(page, f);
     await approveCurrent(page, f); // the explicitly reviewed synthetic HTML file
-    await expect(page.locator(".approval-card")).toContainText("Send message");
+    await expect(page.locator(".approval-card")).toContainText("Work in its computer");
     const initial = (await f.state(owner))[0];
     const card = initial?.approval;
-    if (!card) throw new Error("The high-risk public card is missing.");
+    if (!card) throw new Error("The public card is missing.");
     expect((await f.effects())[0]?.sendCount).toBe(0);
     const answer = {
       approvalId: card.approvalId,
@@ -227,6 +227,7 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
           (e.data.pause as { phase?: string }).phase === "resuming",
       ),
     ).toBe(true);
+    // One card per identical key call. The third is approved, then stops before its dispatch.
     for (let n = 0; n < 3; n++) await approveCurrent(page, f);
     await expect
       .poll(async () => (await f.state(owner))[0]?.pause?.reason, { timeout: 30000 })
@@ -235,7 +236,7 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
       .poll(async () => (await f.state(owner))[0]?.pause?.phase, { timeout: 30000 })
       .toBe("paused");
     const repeated = (await f.state(owner))[0];
-    expect(repeated?.provider).toHaveLength(9);
+    expect(repeated?.provider).toHaveLength(11);
     const nativeKeys = repeated?.events.filter(
       (e) =>
         e.type === "action.dispatch" &&

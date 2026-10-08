@@ -1,4 +1,5 @@
 import type { AskUserInput, RequestTakeoverInput, ToolResult } from "@localdot/protocol";
+import { PausedStepError } from "../safety/step-barrier.ts";
 import { frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 export async function askUserTool(
   deps: ToolDeps,
@@ -49,6 +50,10 @@ export async function requestTakeoverTool(
   input: RequestTakeoverInput,
 ): Promise<ToolResult> {
   ctx.check();
+  // A held Pause refuses the hand-off before anything counts as signed in.
+  if (ctx.session.safetyPause) throw new PausedStepError();
+  // The user gets every screen during a takeover, so a sign-in may land on the desktop.
+  if (input.reason !== "other") ctx.session.taskAutonomy.signIn("desktop");
   const outcome = await ctx.session.takeover(
     input.reason,
     ctx.redact(input.note),

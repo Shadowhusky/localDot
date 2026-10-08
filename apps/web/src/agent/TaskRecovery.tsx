@@ -81,6 +81,9 @@ export function spendingText(data: {
     ? why
     : `${why} Raise the limit to continue; what was spent stays counted.`;
 }
+// The daily limit belongs to the key layer and is shared by every task, so no raise here moves it.
+const DAY_LIMIT =
+  "All tasks share one daily spending limit, and today's is used up. It resets at midnight; resume the task after that. Raising this task's limit does not change it.";
 const CUSTOM = "other";
 const MAX_LIMIT = 10_000;
 
@@ -115,14 +118,17 @@ export function TaskRecovery({
   const [custom, setCustom] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const state = agent.model.state;
+  // While a Pause holds the task, only a spending limit that still holds it needs this panel.
+  const hold = agent.snapshot?.pause ? agent.snapshot.budgetHold : undefined;
   if (
     controls.fenced ||
-    agent.snapshot?.pause ||
+    (agent.snapshot?.pause && !hold) ||
     !agent.sessionId ||
     agent.model.ended ||
     !state ||
-    !["paused", "error"].includes(state.state) ||
-    (state.state === "paused" && ownedPause(state.reason))
+    (!hold &&
+      (!["paused", "error"].includes(state.state) ||
+        (state.state === "paused" && ownedPause(state.reason))))
   )
     return null;
   const subscription = agent.snapshot?.models?.kind === "chatgpt" || !!agent.model.subscription;
@@ -131,10 +137,16 @@ export function TaskRecovery({
     agent.snapshot.models.roles.some(
       (role) => role.role === "main" && ["ollama", "lmstudio"].includes(role.provider),
     );
-  const known = knownReason(state.reason, local);
+  // A held Pause stands in for the paused state the spending limit published.
+  const reason = hold ? "budget" : state.reason;
+  const known = knownReason(reason, local);
   const taskBudget =
-    !subscription && budget?.data.scope === "task" && budget.data.taskId === agent.sessionId;
-  const raising = taskBudget && state.state === "paused" && budget;
+    !subscription &&
+    budget?.data.scope === "task" &&
+    budget.data.taskId === agent.sessionId &&
+    (hold ? hold === "task" : state.state === "paused");
+  const dayLimit = hold ? hold === "day" : reason === "budget" && budget?.data.scope === "day";
+  const raising = taskBudget && budget;
   const raised = raising ? raiseChoice(choice, custom, budget.data.limitUSD) : null;
   const resets = subscription
     ? resetTime(
@@ -159,16 +171,17 @@ export function TaskRecovery({
   return (
     <section className="thread-recovery" aria-label="Task recovery">
       <h3 className="thread-recovery-title">
-        {known?.title ?? (state.state === "paused" ? "Task paused" : "The task needs attention")}
+        {known?.title ??
+          (hold || state.state === "paused" ? "Task paused" : "The task needs attention")}
       </h3>
       <p className="thread-recovery-text">
-        {state.reason === "budget" && budget && !subscription
-          ? spendingText(budget.data)
-          : (known?.text ?? UNEXPLAINED)}
+        {dayLimit
+          ? DAY_LIMIT
+          : reason === "budget" && budget && !subscription
+            ? spendingText(budget.data)
+            : (known?.text ?? UNEXPLAINED)}
       </p>
-      {state.reason && !known && (
-        <p className="thread-recovery-reason">Reported reason: {state.reason}</p>
-      )}
+      {reason && !known && <p className="thread-recovery-reason">Reported reason: {reason}</p>}
       {resets && (
         <p className="thread-recovery-reason">
           {resets.replace(/^Resets/, "Your plan's limit resets")}.
@@ -188,11 +201,6 @@ export function TaskRecovery({
             }
           />
         </div>
-      )}
-      {budget?.data.scope === "day" && (
-        <p className="thread-recovery-reason">
-          This is the daily limit for all tasks. Change it in Settings, then continue.
-        </p>
       )}
       {raising ? (
         <form
@@ -241,17 +249,22 @@ export function TaskRecovery({
               }
             >
               {typeof raised === "number"
-                ? `Raise to ${dollars(raised)} and continue`
-                : "Raise and continue"}
+                ? `Raise to ${dollars(raised)}${hold ? "" : " and continue"}`
+                : hold
+                  ? "Raise the limit"
+                  : "Raise and continue"}
             </Button>
           </div>
         </form>
       ) : (
-        <div className="thread-recovery-actions">{resume}</div>
+        !hold && <div className="thread-recovery-actions">{resume}</div>
+      )}
+      {hold && (
+        <p className="thread-recovery-reason">The task stays paused until you press Resume task.</p>
       )}
       <Disclosure summary="Recovery options" className="thread-recovery-options">
         <div className="thread-recovery-actions">
-          {raising && resume}
+          {raising && !hold && resume}
           <Button variant="quiet" onClick={(event) => onSettings(event.currentTarget)}>
             Open Settings
           </Button>

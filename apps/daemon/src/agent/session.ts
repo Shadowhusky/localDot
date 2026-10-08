@@ -1,4 +1,4 @@
-import type { ApprovalRequestDraft, PauseSnapshot } from "@localdot/protocol";
+import type { ApprovalRequestDraft, PauseSnapshot, RuleChange } from "@localdot/protocol";
 import {
   type ApprovalCard,
   type AutonomyPolicy,
@@ -21,7 +21,9 @@ import {
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
+import { RuleError, type RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
+import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const AGENT = "main";
@@ -98,6 +100,7 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
+  readonly taskAutonomy: TaskAutonomy;
   readonly #approvals: ApprovalBroker;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();
@@ -148,8 +151,10 @@ export class AgentSession {
     readonly task: string,
     private readonly eventLog: Pick<EventLog, "append">,
     autonomy?: AutonomyPolicy,
+    rules?: Pick<RulesStore, "matches" | "add">,
   ) {
     this.#autonomy = freezeAutonomy(autonomy);
+    this.taskAutonomy = new TaskAutonomy(rules);
     this.#approvals = new ApprovalBroker(
       Date.now,
       (card) => {
@@ -159,17 +164,29 @@ export class AgentSession {
             ? "install"
             : card.actionClass === "system_settings"
               ? "permission"
-              : ["purchase", "send", "post", "delete"].includes(card.actionClass)
-                ? card.actionClass
-                : "other";
+              : card.actionClass === "upload"
+                ? "send"
+                : ["purchase", "send", "post", "delete"].includes(card.actionClass)
+                  ? card.actionClass
+                  : "other";
         const { fields, ...data } = card;
         this.append("approval.request", { ...data, kind, preview: { fields } });
         this.#publishState(this.safetyPause ? "paused" : "waiting_user", "approval");
       },
-      (resolution) => {
+      ({ always, ...resolution }) => {
         if (this.status === "waiting_user" && !this.stopped && !this.controlHeld)
           this.setStatus("running");
-        this.append("approval.resolve", { ...resolution });
+        let change: RuleChange | undefined;
+        let note = resolution.note;
+        try {
+          change =
+            always &&
+            this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+        } catch (error) {
+          note = `Approved once. Your Always allow choice was not saved. ${error instanceof RuleError ? error.message : "Try again later."}`;
+        }
+        this.append("approval.resolve", { ...resolution, ...(note ? { note } : {}) });
+        if (change) this.append("rule.created", change);
       },
     );
   }
@@ -290,9 +307,9 @@ export class AgentSession {
     if (this.#repeatPauseHandler) throw new Error("task safety controller already installed");
     this.#repeatPauseHandler = handler;
   }
-  admitNativeEffect(action: GuiAction, identity: NativeActionIdentity): boolean {
+  admitNativeEffect(action: GuiAction, identity: NativeActionIdentity, call: string): boolean {
     if (this.stopped || this.controlHeld || this.safetyPause) return false;
-    if (this.#repeatGuard.admit(action, identity)) return true;
+    if (this.#repeatGuard.admit(action, identity, call)) return true;
     const requestId = ulid();
     let pause: PauseSnapshot;
     if (this.#repeatPauseHandler) pause = this.#repeatPauseHandler(requestId);
@@ -851,6 +868,8 @@ export class AgentSession {
     const generation = lease?.generation ?? this.generation;
     if (!generation) throw new SessionStoppedError();
     this.check(generation, lease?.signal);
+    // A held Pause refuses a hand-off like any step; the model can ask again after Resume.
+    if (this.#steps.pause) throw new PausedStepError();
     let resolve!: (outcome: TakeoverOutcome) => void;
     const released = new Promise<TakeoverOutcome>((r) => {
       resolve = r;

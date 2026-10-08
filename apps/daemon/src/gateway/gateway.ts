@@ -40,6 +40,8 @@ const LOOKUP_TIMEOUT_MS = 1000;
 // Fitts' W in CSS px, multiplied by the cell's scale: the distance it divides is in device px.
 const UNKNOWN_TARGET_PX = 24;
 const MIN_TARGET_PX = 16;
+export const CHANGED_WHILE_DECIDING =
+  "The screen changed while the user was deciding. Look again before acting.";
 
 export type GuiAction =
   | {
@@ -540,16 +542,28 @@ export class ActionGateway {
     if (ctx.source === "manual") return undefined;
     if (ctx.source !== "agent" || !ctx.authorizeAgent)
       throw new Cancelled("preflight", "this native action has no admitted owner");
+    let changed = false;
     const permit = await ctx.authorizeAgent({
       action,
       identity,
       revalidate: async () => {
         const fresh = await read();
         this.#check(ctx);
-        return sameNativeIdentity(identity, fresh);
+        changed = !sameNativeIdentity(identity, fresh);
+        return !changed;
       },
     });
     this.#check(ctx);
+    if (!permit && changed) {
+      // Approved, but the target moved on while the card was open: the model may look and retry.
+      let frameId: string | undefined;
+      try {
+        frameId = (await this.observe(ctx)).frameId;
+      } catch {
+        this.#check(ctx);
+      }
+      throw new Cancelled("stale", CHANGED_WHILE_DECIDING, frameId);
+    }
     if (!permit)
       throw new Cancelled("user", "this action was not authorized; do not retry automatically");
     return permit;

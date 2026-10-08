@@ -1,7 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { CodexLaunchError, prepareOwnedCodexRoots } from "@localdot/codex-harness";
-import { DEFAULT_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -605,14 +605,14 @@ describe("ChatGPT runner lifecycle", () => {
       gate = deferred<ChatgptStatus>();
     f.setSettings({
       main: { provider: "chatgpt", model: "gpt-6-astra" },
-      autonomy: DEFAULT_AUTONOMY,
+      autonomy: CAREFUL_AUTONOMY,
     });
     f.account.status.mockReturnValueOnce(gate.promise);
     const pending = f.runner.start(f.cellId, "Synthetic policy task");
     await until(() => f.account.status.mock.calls.length === 1);
     f.setSettings({
       main: { provider: "chatgpt", model: "gpt-6-astra" },
-      autonomy: { ...DEFAULT_AUTONOMY, send: "act" },
+      autonomy: { ...CAREFUL_AUTONOMY, send: "act" },
     });
     gate.resolve({ available: true, state: "signed_in", codexVersion: "0.154.0" });
     const session = await pending;

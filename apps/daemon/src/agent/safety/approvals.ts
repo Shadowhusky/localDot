@@ -1,4 +1,6 @@
 import {
+  type ActionClass,
+  type AlwaysOption,
   APPROVAL_FIELD_CHARS,
   APPROVAL_TIMEOUT_MS,
   ApprovalAnswer,
@@ -28,6 +30,8 @@ export interface ApprovalResolution {
   decision: "approve" | "deny" | "take_control";
   by: "user" | "timeout";
   note?: string;
+  // The card's own option the user chose, never one the answer described.
+  always?: { readonly actionClass: ActionClass; readonly option: AlwaysOption };
 }
 interface Pending {
   readonly binding: ActionBinding;
@@ -38,7 +42,7 @@ interface Pending {
   readonly signal: AbortSignal;
   readonly timer: ReturnType<typeof setTimeout>;
   abort(): void;
-  finish(outcome: ApprovalOutcome, by: ApprovalResolution["by"]): void;
+  finish(outcome: ApprovalOutcome, by: ApprovalResolution["by"], always?: AlwaysOption): void;
 }
 
 function cardFields(draft: ApprovalRequestDraft) {
@@ -96,7 +100,11 @@ export class ApprovalBroker {
       expiresAt: this.now() + APPROVAL_TIMEOUT_MS,
     });
     const outcome = await new Promise<ApprovalOutcome>((resolve) => {
-      const finish = (result: ApprovalOutcome, by: ApprovalResolution["by"]) => {
+      const finish = (
+        result: ApprovalOutcome,
+        by: ApprovalResolution["by"],
+        always?: AlwaysOption,
+      ) => {
         const pending = this.#pending.get(binding.sessionId);
         if (pending?.binding !== privateBinding) return;
         this.#pending.delete(binding.sessionId);
@@ -110,6 +118,9 @@ export class ApprovalBroker {
             decision: result === "stale" ? "deny" : result,
             by,
             ...(result === "stale" ? { note: "Approval cancelled." } : {}),
+            ...(always && result === "approve"
+              ? { always: { actionClass: card.actionClass, option: always } }
+              : {}),
           });
         } catch {
           // A missing completion event cannot revive a consumed card.
@@ -156,11 +167,14 @@ export class ApprovalBroker {
       (answer.data.decision === "approve" && pending.unread.size > 0)
     )
       return false;
+    const scope = answer.data.always;
+    const always = pending.card.always?.find((option) => option.scope === scope);
+    if (scope !== undefined && !always) return false;
     if (this.now() >= pending.card.expiresAt) {
       pending.finish("deny", "timeout");
       return false;
     }
-    pending.finish(answer.data.decision, "user");
+    pending.finish(answer.data.decision, "user", always);
     return true;
   }
   cancel(sessionId: string): void {
@@ -168,13 +182,24 @@ export class ApprovalBroker {
   }
 }
 
-// Consumed immediately before a single exact effect; never cached by action class or label.
-export class OncePermit {
-  #used = false;
-  constructor(private readonly digest: string) {}
+// Consumed immediately before each exact effect it covers; never cached by action class or label.
+export class CountedPermit {
+  #left: number;
+  constructor(
+    private readonly digest: string,
+    uses: number,
+  ) {
+    if (!Number.isSafeInteger(uses) || uses < 1) throw new Error("invalid permit count");
+    this.#left = uses;
+  }
   consume(digest: string): boolean {
-    if (this.#used || digest !== this.digest) return false;
-    this.#used = true;
+    if (this.#left < 1 || digest !== this.digest) return false;
+    this.#left--;
     return true;
+  }
+}
+export class OncePermit extends CountedPermit {
+  constructor(digest: string) {
+    super(digest, 1);
   }
 }

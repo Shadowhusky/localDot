@@ -73,6 +73,17 @@ async function expectAutonomyRow(sheet: Locator) {
   if (!text || !select) throw new Error("autonomy row missing");
   expect(Math.abs(text.y + text.height / 2 - (select.y + select.height / 2))).toBeLessThan(2);
   expect(select.x).toBeGreaterThan(text.x + text.width);
+  const wrapped = await sheet
+    .locator(".safety-settings > label > span, .safety-locked li > span")
+    .evaluateAll((spans) =>
+      spans.flatMap((span) =>
+        span.getBoundingClientRect().height >
+        1.5 * Number.parseFloat(getComputedStyle(span).lineHeight)
+          ? [span.textContent]
+          : [],
+      ),
+    );
+  expect(wrapped).toEqual([]);
 }
 
 async function expectThemeTiles(sheet: Locator) {
@@ -157,7 +168,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
     test("Escape after a select change keeps the sheet and the choice", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      const send = sheet.getByRole("combobox", { name: "Send messages" });
+      const send = sheet.getByRole("combobox", { name: "Send as you" });
       const saved = await send.inputValue();
       const choice = saved === "handoff" ? "act" : "handoff";
       await send.focus();
@@ -191,7 +202,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
     test("selects and fields are tap-sized and never zoom the page", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      for (const name of ["main provider", "main model", "main key", "Send messages"]) {
+      for (const name of ["main provider", "main model", "main key", "Send as you"]) {
         const control = sheet.getByRole("combobox", { name });
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
@@ -235,12 +246,14 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await context.close();
     });
 
-    test("theme choices are preview tiles and autonomy rows sit on one line", async () => {
+    test("theme choices are preview tiles and autonomy rows sit on one line down to 360", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
       await expectThemeTiles(sheet);
       const option = sheet.locator(".appearance-option").filter({ hasText: "Graphite" });
       expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expectAutonomyRow(sheet);
+      await page.setViewportSize({ width: 360, height: 780 });
       await expectAutonomyRow(sheet);
       await context.close();
     });
@@ -255,7 +268,7 @@ test("chrome at 1440: theme tiles, autonomy rows and pointer-sized selects", asy
   await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
   await expectThemeTiles(sheet);
   await expectAutonomyRow(sheet);
-  for (const name of ["main provider", "main model", "main key", "Send messages"]) {
+  for (const name of ["main provider", "main model", "main key", "Send as you"]) {
     const height = (await sheet.getByRole("combobox", { name }).boundingBox())?.height ?? 0;
     expect(height, name).toBeGreaterThanOrEqual(32);
     expect(height, name).toBeLessThan(44);

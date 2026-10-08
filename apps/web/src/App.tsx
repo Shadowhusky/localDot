@@ -34,6 +34,7 @@ import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
+import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ConversationRail } from "./shell/ConversationRail.tsx";
@@ -224,6 +225,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const keys = useKeys(api);
   const [keysOpen, setKeysOpen] = useState(false);
   const settings = useSettings(api, [], !keysOpen);
+  const rules = useRules(api, settings.open);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
   const modelName = useCallback(
@@ -549,7 +551,8 @@ function Theatre({ api }: { api: ApiClient }) {
             attention={
               agent.model.pendingTakeover
                 ? "computer"
-                : agent.model.pendingAsk
+                : agent.model.pendingAsk ||
+                    (agent.snapshot?.pause && agent.snapshot.budgetHold === "task")
                   ? "conversation"
                   : undefined
             }
@@ -865,6 +868,7 @@ function Theatre({ api }: { api: ApiClient }) {
         onPrice={settings.changePrice}
         autonomy={settings.draft?.autonomy}
         onAutonomy={settings.changeAutonomy}
+        rules={rules}
         budget={
           settings.draft
             ? {

@@ -6,6 +6,7 @@ import {
   type HarnessAvailability,
 } from "@localdot/codex-harness";
 import {
+  ActionClass,
   ApprovalAnswer,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
@@ -40,7 +41,8 @@ import { chatgptRoutes } from "./codex/routes.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
-import { AgentError, type AgentRunner } from "./runner.ts";
+import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
+import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
 import type { SkillInfo } from "./skills.ts";
@@ -53,7 +55,12 @@ export interface UploadAccess {
 }
 export interface AgentRoutesDeps {
   runner: Pick<AgentRunner, "start" | "get" | "raiseBudget"> &
-    Partial<Pick<AgentRunner, "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety">>;
+    Partial<
+      Pick<
+        AgentRunner,
+        "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety" | "budgetHoldOf" | "sessions"
+      >
+    >;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & Partial<Pick<KeydClient, "budget">>;
@@ -194,6 +201,7 @@ function fail(error: unknown): Response {
     return new Response("memory change is unavailable", { status: error.status });
   if (error instanceof SettingsError)
     return new Response("agent settings are unavailable", { status: error.status });
+  if (error instanceof RuleError) return new Response(error.message, { status: error.status });
   if (error instanceof BindingError)
     return new Response("the selected models or keys are unavailable", { status: 400 });
   if (error instanceof SessionStoppedError || error instanceof ControlHeldError)
@@ -455,6 +463,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         if (terminal) return c.json(terminal);
       }
       const s = session(id);
+      const budgetHold = deps.runner.budgetHoldOf?.(s.id);
       return c.json({
         sessionId: s.id,
         cellId: s.cellId,
@@ -464,6 +473,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(s.screens ? { screen: s.screens.selection } : {}),
         ...(s.pendingApproval ? { approval: s.pendingApproval } : {}),
         ...(s.safetyPause ? { pause: s.safetyPause } : {}),
+        ...(budgetHold ? { budgetHold } : {}),
         ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),
         ...(s.brainCellId ? { brainCellId: s.brainCellId } : {}),
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
@@ -494,6 +504,48 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!s.isCurrent(generation) || s.controlHeld)
         throw new RouteError(409, "approval owner changed");
       return s.answerApproval(parsed) ? c.body(null, 204) : c.text("approval is not waiting", 409);
+    }),
+  );
+  const rules = new RulesStore(deps.home);
+  app.get(
+    "/api/agent/rules",
+    route((c) => c.json(rules.list())),
+  );
+  app.post(
+    "/api/agent/rules/reset",
+    route(async (c) => {
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      rules.setAside();
+      return c.body(null, 204);
+    }),
+  );
+  app.delete(
+    "/api/agent/rules/:id",
+    route(async (c) => {
+      const id = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(id)) throw new RouteError(400, "invalid rule id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      const rule = rules.remove(id);
+      if (!rule) throw new RouteError(404, "no such rule");
+      for (const s of deps.runner.sessions?.values() ?? [])
+        if (!s.stopped) s.append("rule.removed", ruleChange(rule));
+      return c.body(null, 204);
+    }),
+  );
+  app.delete(
+    "/api/agent/sessions/:id/allowances/:actionClass",
+    route(async (c) => {
+      const s = active(c.req.param("id") ?? "");
+      const actionClass = ActionClass.safeParse(c.req.param("actionClass"));
+      if (!actionClass.success) throw new RouteError(400, "invalid action class");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      const change = s.taskAutonomy.revoke(actionClass.data);
+      if (!change) throw new RouteError(404, "nothing is allowed for that in this task");
+      s.append("rule.removed", change);
+      return c.body(null, 204);
     }),
   );
   app.get(
@@ -579,6 +631,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         const input = await json(c.req.raw, ResumeSafetyRequest);
         check(c.req.raw.signal);
         if (!deps.runner.resumeSafety) throw new RouteError(503, "Safety Resume is unavailable");
+        if (deps.runner.budgetHoldOf?.(s.id) === "task")
+          throw new RouteError(409, RAISE_BUDGET_FIRST);
         await deps.runner.resumeSafety(s.id, input.requestId, input.revision);
         return c.body(null, 204);
       }
