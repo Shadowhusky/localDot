@@ -359,6 +359,7 @@
   margin-top: var(--spacing-caption-top);
   max-width: min(100%, var(--spacing-caption));
   overflow-wrap: anywhere;
+  text-wrap: balance;
   text-align: center;
   font-size: 15px;
   line-height: 1.45;
