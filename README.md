@@ -294,11 +294,13 @@ The offline record and the native stamp are bound to the release sources, so any
 under `harness/codex`, `apps/daemon/src` or `packages/protocol/src` needs both rerun. The
 account stamp is bound only to the pin and its manifest. The `--account` run is the manual
 sign-in described below; ChatGPT ships device code sign-in switched off for personal
-accounts, so turn it on under ChatGPT Settings → Security first.
+accounts, so turn it on under ChatGPT Settings → Security first. `--native` keeps the account
+stamp of the record in `harness/codex/acceptance/`, so copy the `--account` output there first,
+then run `--run` and `--native` on the commit being released, copy their output and verify once.
 
-`pnpm test:codex` runs the 13 pinned protocol/tool probes and 10 native
-sandbox/encrypted-refresh probes on a supported Mac. The native cases require permission to create their own private temporary
-files, inert real-home canary and local listeners. They read no existing home credential
+`pnpm test:codex` runs the 15 pinned protocol/tool probes and 10 native sandbox/encrypted-refresh
+probes on a supported Mac. The native cases require permission to create their own private
+temporary files, inert real-home canary and local listeners. They read no existing home credential
 contents. Compiler, sandbox, child-process, cleanup or unavailable-platform errors fail
 acceptance. The receipt describes offline acceptance only; real account acceptance and
 Linux runtime support remain unverified until separately demonstrated. The native socket
