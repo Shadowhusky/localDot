@@ -11,6 +11,7 @@ describe("readStatic", () => {
   mkdirSync(join(dir, "assets"), { recursive: true });
   writeFileSync(join(dir, "index.html"), "<html>hi</html>");
   writeFileSync(join(dir, "assets", "a.js"), "export {}");
+  writeFileSync(join(dir, "assets", "body-48.webp"), "RIFF");
   writeFileSync(join(top, "ld-outside.txt"), "secret");
   afterAll(() => rmSync(top, { recursive: true, force: true }));
 
@@ -20,6 +21,7 @@ describe("readStatic", () => {
       type: "text/html; charset=utf-8",
     });
     expect(readStatic(dir, "assets/a.js")?.type).toBe("text/javascript; charset=utf-8");
+    expect(readStatic(dir, "/assets/body-48.webp")?.type).toBe("image/webp");
   });
 
   it("refuses paths that escape the directory, directories and missing files", () => {
