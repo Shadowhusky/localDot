@@ -43,7 +43,7 @@ for (const engine of ["chrome", "webkit"] as const)
       await expect(page.getByRole("button", { name: "Edit message" })).toHaveCount(0);
       await box.pressSequentially(" continue");
       await expect(send).toBeDisabled();
-      await page.getByRole("button", { name: "Discard keys and edit" }).tap();
+      await page.getByRole("button", { name: "Discard key and edit" }).tap();
       await expect(page.getByRole("region", { name: "Key safeguard" })).toHaveCount(0);
       await expect(box).toBeFocused();
       await expect(send).toBeEnabled();

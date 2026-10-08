@@ -138,7 +138,7 @@ describe("key guard at the composer and sealed form boundary", () => {
       f.submit();
       expect(f.calls).toEqual([]);
       expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+      fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
       expect(document.activeElement).toBe(f.task);
       f.submit();
       await act(async () => {});
@@ -171,6 +171,7 @@ describe("key guard at the composer and sealed form boundary", () => {
       toBase64url(new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey))),
     );
     fireEvent.input(f.task, { target: { value: `before ${keys[0]} then ${keys[7]} after` } });
+    expect(screen.getByRole("button", { name: "Discard keys and edit" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Key to move"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(f.task.value).toBe("before  then  after");

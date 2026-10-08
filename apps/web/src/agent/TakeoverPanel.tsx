@@ -1,5 +1,5 @@
 import { HandbackRequest, ManualInput } from "@localdot/protocol";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import type { AgentTakeover } from "./model.ts";
@@ -33,6 +33,7 @@ export function TakeoverPanel({
   const [problem, setProblem] = useState<string | null>(null);
   const guard = useKeyGuard(visible),
     guardOwner = useRef(guard);
+  const keyNotice = useId();
   const current = useRef({ takeover, controls, visible });
   const clear = () => {
     if (text.current) text.current.value = "";
@@ -251,10 +252,11 @@ export function TakeoverPanel({
           }}
         />
       </label>
-      <KeyFound guard={guard} receive={receiveKey} />
+      <KeyFound guard={guard} receive={receiveKey} noticeId={keyNotice} />
       <button
         type="button"
         disabled={!visible || !controls.canHandback || !!guard.notice}
+        aria-describedby={guard.notice ? keyNotice : undefined}
         onClick={handback}
       >
         Return control to dot

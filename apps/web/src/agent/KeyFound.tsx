@@ -42,7 +42,11 @@ export function KeyFound({
       {notice.candidates.length > 1 && <p>Moving one key discards the other detected keys.</p>}
       <div className="key-found-actions">
         <button type="button" onClick={guard.remove}>
-          {notice.kind === "found" ? "Discard keys and edit" : "Edit message"}
+          {notice.kind !== "found"
+            ? "Edit message"
+            : notice.candidates.length === 1
+              ? "Discard key and edit"
+              : "Discard keys and edit"}
         </button>
         {notice.kind === "found" && (
           <button

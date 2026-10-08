@@ -131,12 +131,18 @@ it("guards question and hand-back notes before a recognized key can enter a requ
     fireEvent.input(field, { target: { value: sentinel } });
     expect(field.value).toBe("");
     expect(f.container.textContent).not.toContain(sentinel);
-    fireEvent.click(
-      screen.getByRole("button", { name: takeover ? "Return control to dot" : "Send answer" }),
+    const send = screen.getByRole("button", {
+      name: takeover ? "Return control to dot" : "Send answer",
+    }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    expect(document.getElementById(send.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
+      "1 recognised key was removed from your message. Discard it or move it to Keys before sending.",
     );
+    fireEvent.click(send);
     expect(f.fetchImpl).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(f.receive).toHaveBeenCalledOnce();
+    expect(send.hasAttribute("aria-describedby")).toBe(false);
     f.unmount();
     cleanup();
   }

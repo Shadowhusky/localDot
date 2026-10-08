@@ -358,7 +358,7 @@ describe("composer delivery ownership and draft handling", () => {
     f.submit();
     expect(f.requests).toEqual([]);
     expect(document.body.innerHTML).not.toContain(key);
-    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
     f.field.value = key;
     f.submit();
     expect(f.field.value).toBe("");
@@ -379,7 +379,7 @@ describe("composer delivery ownership and draft handling", () => {
     f.submit();
     expect(f.requests).toEqual([]);
     expect(send.disabled).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
     expect(screen.queryByRole("region", { name: "Key safeguard" })).toBeNull();
     expect(document.activeElement).toBe(f.field);
     expect(send.disabled).toBe(false);
