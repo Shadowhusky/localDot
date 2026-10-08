@@ -455,31 +455,39 @@ func TestAFailedRenameKeepsTheOldValue(t *testing.T) {
 // cannot write the store's copy of the binding. A value must never be read for a binding it was not
 // stored with.
 func TestARewrittenIndexCannotRebindAStoredValue(t *testing.T) {
-	edits := map[string]func(*Record){
-		"host":       func(r *Record) { r.Hosts = []string{"attacker.example.test"} },
-		"extra host": func(r *Record) { r.Hosts = append(r.Hosts, "attacker.example.test") },
-		"header":     func(r *Record) { r.Header = "X-Leak" },
-		"format":     func(r *Record) { r.Format = "bearer" },
-		"methods":    func(r *Record) { r.Methods = []string{"POST"} },
-		"paths":      func(r *Record) { r.Paths = []string{"/"} },
-		"kind": func(r *Record) {
+	weather := httpRecord("weather")
+	fixedBase := Record{ID: "model", Kind: KindLLM, Provider: "openai"}
+	userBase := Record{ID: "model", Kind: KindLLM, Provider: "openai-compatible", BaseURL: "https://llm.example.test/v1"}
+	edits := map[string]struct {
+		stored Record
+		edit   func(*Record)
+	}{
+		"host":       {weather, func(r *Record) { r.Hosts = []string{"attacker.example.test"} }},
+		"extra host": {weather, func(r *Record) { r.Hosts = append(r.Hosts, "attacker.example.test") }},
+		"header":     {weather, func(r *Record) { r.Header = "X-Leak" }},
+		"format":     {weather, func(r *Record) { r.Format = "bearer" }},
+		"methods":    {weather, func(r *Record) { r.Methods = []string{"POST"} }},
+		"paths":      {weather, func(r *Record) { r.Paths = []string{"/"} }},
+		"kind": {weather, func(r *Record) {
 			*r = Record{ID: r.ID, Kind: KindLLM, Provider: "openai-compatible", BaseURL: "https://attacker.example.test/v1"}
-		},
+		}},
+		"provider": {fixedBase, func(r *Record) { r.Provider = "mistral" }},
+		"base URL": {userBase, func(r *Record) { r.BaseURL = "https://attacker.example.test/v1" }},
 	}
 	stores := map[string]func(*testing.T) Store{
 		"memory":   func(*testing.T) Store { return NewMemory() },
 		"keychain": func(t *testing.T) Store { k, _ := fakeKeychain(t); return k },
 	}
 	for storeName, newStore := range stores {
-		for name, edit := range edits {
+		for name, c := range edits {
 			t.Run(storeName+"/"+name, func(t *testing.T) {
 				store := newStore(t)
 				v, _ := openTemp(t, store)
-				if err := v.Put(httpRecord("weather"), fakeValue); err != nil {
+				if err := v.Put(c.stored, fakeValue); err != nil {
 					t.Fatal(err)
 				}
-				rec, _ := v.Record("weather")
-				edit(&rec)
+				rec, _ := v.Record(c.stored.ID)
+				c.edit(&rec)
 				data, err := json.Marshal(indexFile{V: indexVersion, Secrets: []Record{rec}})
 				if err != nil {
 					t.Fatal(err)
@@ -492,7 +500,7 @@ func TestARewrittenIndexCannotRebindAStoredValue(t *testing.T) {
 				if err != nil {
 					return
 				}
-				if got, err := forged.Value("weather"); err == nil || bytes.Equal(got, fakeValue) || carries(err.Error(), fakeValue) {
+				if got, err := forged.Value(rec.ID); err == nil || bytes.Equal(got, fakeValue) || carries(err.Error(), fakeValue) {
 					t.Fatalf("the rewritten index reads the value %q (%v)", got, err)
 				}
 			})
