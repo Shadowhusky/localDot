@@ -84,7 +84,7 @@
 .export-sheet button:focus-visible,
 .export-sheet select:focus-visible,
 .export-sheet input:focus-visible {
-  outline: 2px solid var(--color-text);
+  outline: var(--focus-width) solid var(--color-text);
   outline-offset: 3px;
 }
 .export-sheet header button {

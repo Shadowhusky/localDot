@@ -3,6 +3,10 @@
   padding: 8px 0;
   min-width: 0;
 }
+.result-files h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
 .attachments ul,
 .result-files ul {
   list-style: none;
@@ -56,7 +60,7 @@
 .attachments button:focus-visible,
 .result-files button:focus-visible,
 .file-picker input:focus-visible {
-  outline: 2px solid var(--color-text-2);
+  outline: var(--focus-width) solid var(--color-text-2);
   outline-offset: 2px;
 }
 .attachments [role="status"] {

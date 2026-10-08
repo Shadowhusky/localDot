@@ -18,6 +18,7 @@
 .safety-controls h2,
 .approval-card h2 {
   font-size: 18px;
+  font-weight: 600;
   margin: 0 0 16px;
   overflow-wrap: anywhere;
 }
@@ -128,6 +129,7 @@
 .approval-upload h3 {
   margin: 20px 0 10px;
   font-size: 15px;
+  font-weight: 600;
 }
 .approval-upload-files {
   list-style: none;
@@ -194,7 +196,7 @@
 .safety-controls button:focus-visible,
 .approval-card button:focus-visible,
 .approval-card h2:focus-visible {
-  outline: 2px solid #afdfff;
+  outline: var(--focus-width) solid #afdfff;
   outline-offset: 4px;
 }
 .stop-hint {

@@ -1,5 +1,7 @@
 import { vi } from "vitest";
 import themeCss from "../theme.css?raw";
+import tokensCss from "../ui/tokens.css?raw";
+import { readTokens } from "./tokens.ts";
 
 // Keeps every worker the stage starts and what it is sent, so a test can read the protocol.
 export class FakeWorker {
@@ -27,11 +29,8 @@ export function fakeChromium(): () => void {
   // Apply the real tokens inline: jsdom does not reliably compute stylesheet variables.
   const root = document.documentElement;
   const previousStyle = root.style.cssText;
-  for (const declaration of (themeCss.match(/:root\s*\{([^}]+)\}/)?.[1] ?? "").matchAll(
-    /(--[\w-]+)\s*:\s*([^;]+);/g,
-  )) {
-    root.style.setProperty(declaration[1] as string, declaration[2] as string);
-  }
+  for (const [name, value] of readTokens([tokensCss, themeCss]))
+    root.style.setProperty(name, value);
   vi.stubGlobal(
     "ResizeObserver",
     class {

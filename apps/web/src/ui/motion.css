@@ -1,0 +1,15 @@
+/* Under reduced motion every transition becomes a 120–150 ms opacity change; a component drops its
+   own movement in the same media query. */
+@layer theme {
+  @media (prefers-reduced-motion: reduce) {
+    :root {
+      --ease-spring: var(--ease-standard);
+      --dur-press: 120ms;
+      --dur-hover: 120ms;
+      --dur-fade: 150ms;
+      --dur-exit: 150ms;
+      --dur-sheet: 150ms;
+      --dur-spring: 150ms;
+    }
+  }
+}

@@ -183,7 +183,7 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
   );
   await page.screenshot({ path: "e2e/out/keys-narrow.png" });
   await remove.click();
-  await sheet.getByRole("button", { name: `Confirm deleting ${id}` }).click();
+  await sheet.getByRole("button", { name: `Confirm remove ${id}` }).click();
   await expect(sheet.getByText("No keys yet.")).toBeVisible();
 });
 

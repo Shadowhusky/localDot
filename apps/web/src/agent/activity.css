@@ -68,6 +68,10 @@
 .result-preview {
   white-space: normal;
 }
+.skills-view h3 {
+  font-size: 15px;
+  font-weight: 600;
+}
 .skills-view ul {
   list-style: none;
   padding: 0;

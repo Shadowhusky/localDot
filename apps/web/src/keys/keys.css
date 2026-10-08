@@ -193,7 +193,7 @@
 .key-form input:focus-visible,
 .key-form select:focus-visible,
 .sheet button:focus-visible {
-  outline: 2px solid var(--color-text-2);
+  outline: var(--focus-width) solid var(--color-text-2);
   outline-offset: 1px;
 }
 
