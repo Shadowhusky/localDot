@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CellView, hudFor } from "./hud-state.ts";
+import { type CellView, type ComputerPhase, hudFor } from "./hud-state.ts";
 import type { CellSummary } from "./types.ts";
 
 const cell = (
@@ -160,6 +160,7 @@ describe("hudFor", () => {
 
   it("shows a crash restart as reconnecting, with the attempt from the orchestrator's note", () => {
     expect(hudFor(known(cell("starting", "none", RESTART_NOTE)))).toEqual({
+      phase: "restarting",
       label: "Reconnecting…",
       caption: "Your computer stopped unexpectedly. Restarting it (attempt 2 of 5).",
       action: { kind: "stop", enabled: true },
@@ -168,5 +169,37 @@ describe("hudFor", () => {
     expect(hudFor(known(cell("starting", "none", RESTART_NOTE), "stop")).action.enabled).toBe(
       false,
     );
+  });
+
+  it("names the computer's phase on every branch, live only when the stream is", () => {
+    const paused = { paused: true as const };
+    const cases: [CellView, ComputerPhase][] = [
+      [{ cell: null, status: "listing", pending: "list" }, "checking"],
+      [{ cell: null, status: "unknown", pending: null }, "unavailable"],
+      [known(cell("ready", "live"), "list"), "checking"],
+      [known({ ...cell("ready", "live"), ...paused }, "list"), "frozen"],
+      [known(null, "create"), "starting"],
+      [known(null), "none"],
+      [known({ ...cell("ready", "live"), fenced: { revision: 1 } }), "unavailable"],
+      [known({ ...cell("ready", "live"), replacementPending: true }), "starting"],
+      [known({ ...cell("starting"), ...paused }), "frozen"],
+      [known(cell("starting", "none", RESTART_NOTE)), "restarting"],
+      [known(cell("starting")), "starting"],
+      [known(cell("stopping")), "stopping"],
+      [known(cell("stopped")), "stopped"],
+      [known(cell("removed")), "stopped"],
+      [known(cell("failed", "none", DOCKER_DOWN)), "failed"],
+      [known({ ...cell("ready", "live"), ...paused }), "frozen"],
+      [known(cell("ready", "live")), "live"],
+      [known(cell("ready", "stalled")), "reconnecting"],
+      [known(cell("ready", "disconnected")), "reconnecting"],
+      [known(cell("ready", "connecting")), "connecting"],
+      [known(cell("ready", "none")), "connecting"],
+    ];
+    for (const [view, phase] of cases) {
+      const hud = hudFor(view);
+      expect(hud.phase, hud.label).toBe(phase);
+      expect(hud.live, hud.label).toBe(phase === "live");
+    }
   });
 });

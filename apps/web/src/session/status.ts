@@ -1,4 +1,9 @@
-import { msToSeconds, type PauseSnapshot, SESSION_PAUSE_REASONS } from "@localdot/protocol";
+import {
+  type Attention,
+  msToSeconds,
+  type PauseSnapshot,
+  SESSION_PAUSE_REASONS,
+} from "@localdot/protocol";
 import {
   type ActionState,
   type AgentStateAt,
@@ -10,7 +15,8 @@ import {
   stepAt,
 } from "@localdot/stage";
 import type { AgentModel } from "../agent/model.ts";
-import type { HudState } from "../cells/hud-state.ts";
+import type { ComputerPhase, HudActionKind, HudState } from "../cells/hud-state.ts";
+import type { DotState } from "../dot/engine/states.ts";
 
 // What the live task feed knows beyond the timeline. Replay has only the timeline.
 export interface TaskFacts {
@@ -222,27 +228,180 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   return running("working", "Working", model.actions.length ? "Working…" : "Starting…", control);
 }
 
-export function mergeHud(
-  hud: HudState,
-  task: TaskHud | null,
-): HudState & { control: boolean; elapsedS?: number | null; stop?: boolean } {
-  // Pause is authoritative even when the session-end event arrives after cell status.
-  if (!task || hud.paused) return { ...hud, control: false };
-  if (task.phase === "finished") {
-    // A finished task keeps its verdict while the computer is live; the computer's controls return.
-    return {
-      ...hud,
-      ...(hud.live ? { label: task.label } : {}),
-      caption: task.caption,
-      control: false,
-    };
-  }
+export type StatusRow = TaskRow | "computer" | "stopping";
+
+export interface HudAction {
+  // stop-task stops the task; the others are the computer's own.
+  readonly kind: "stop-task" | HudActionKind;
+  readonly enabled: boolean;
+  readonly busy?: true;
+}
+
+export interface Status {
+  readonly row: StatusRow;
+  // Where the computer is in its life, whatever the row.
+  readonly computer: ComputerPhase;
+  readonly label: string;
+  readonly caption: { readonly speaker: "dot" | "system"; readonly text: string };
+  readonly elapsedS: number | null;
+  // The HUD's controls, in order; never empty.
+  readonly actions: readonly HudAction[];
+  // dot has control: the xenon rim.
+  readonly control: boolean;
+  readonly dotPose: DotState;
+  // How urgently this asks for the user, on the scale every surface shares. "done" marks any
+  // finished task; the surface that shows it drops it once the user has seen it.
+  readonly attention: Attention | null;
+  readonly title: string;
+}
+
+export interface StatusInput {
+  // The computer's own HUD, its action already gated on the requests in flight.
+  readonly computer: HudState;
+  // The task on this computer; null when there is none, or once a task Stop froze or stopped it.
+  readonly task: TaskHud | null;
+  // A task Stop in flight, or one whose outcome is not confirmed.
+  readonly stop?: "stopping" | "unconfirmed" | null;
+  readonly canStop?: boolean;
+  // False while the task feed is stale, a takeover waits or the computer is fenced.
+  readonly mayControl?: boolean;
+}
+
+const COMPUTER_POSE: Record<ComputerPhase, DotState> = {
+  checking: "idle",
+  none: "sleeping",
+  starting: "waking",
+  restarting: "waking",
+  connecting: "waking",
+  live: "idle",
+  reconnecting: "reconnecting",
+  frozen: "resting",
+  stopping: "sleeping",
+  stopped: "sleeping",
+  failed: "error",
+  unavailable: "error",
+};
+const TASK_POSE: Record<TaskRow, DotState> = {
+  approval: "waiting",
+  question: "waiting",
+  waiting: "waiting",
+  takeover: "your-turn",
+  pausing: "thinking",
+  paused: "resting",
+  resuming: "thinking",
+  recovery: "resting",
+  acting: "acting",
+  working: "acting",
+  thinking: "thinking",
+  observing: "observing",
+  done: "idle",
+  stopped: "idle",
+  ready: "idle",
+  failed: "error",
+};
+const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
+  approval: "needs_you",
+  question: "needs_you",
+  waiting: "needs_you",
+  takeover: "needs_you",
+  pausing: "working",
+  paused: null,
+  resuming: "working",
+  recovery: "blocked",
+  acting: "working",
+  working: "working",
+  thinking: "working",
+  observing: "working",
+  done: "done",
+  stopped: null,
+  ready: null,
+  failed: "blocked",
+};
+// Rows whose caption is dot's own words: its narration, its question or its note to the user.
+const DOT_SPEAKS = new Set<TaskRow>([
+  "question",
+  "takeover",
+  "acting",
+  "working",
+  "thinking",
+  "observing",
+]);
+
+// Computers that can't carry a task: off, failing or not up yet. A late picture (connecting,
+// reconnecting) or a list check leaves the task in charge, since dot works on the computer itself.
+const DOWN = new Set<ComputerPhase>([
+  "none",
+  "starting",
+  "restarting",
+  "stopping",
+  "stopped",
+  "failed",
+  "unavailable",
+]);
+
+// The one place status is decided: the HUD, the caption, dot's pose and the tab title all read it.
+// A task Stop outranks everything. A frozen computer outranks any task, its Stop included; a
+// computer that is down outranks it too but leaves its Stop. A finished task keeps its verdict
+// only while the computer is live.
+export function statusFor({
+  computer,
+  task,
+  stop = null,
+  canStop = true,
+  mayControl = true,
+}: StatusInput): Status {
+  const held = computer.paused ? null : task;
+  const own = DOWN.has(computer.phase) ? null : held;
+  const running = own && own.phase !== "finished" ? own : null;
+  const shown = running ?? (own && computer.live ? own : null);
+  const row: StatusRow = stop
+    ? "stopping"
+    : (shown?.row ?? (computer.phase === "live" ? "ready" : "computer"));
+  const label =
+    stop === "stopping"
+      ? "Stopping…"
+      : stop === "unconfirmed"
+        ? "Stop unconfirmed"
+        : (shown ?? computer).label;
+  const actions: HudAction[] =
+    stop || (held && held.phase !== "finished")
+      ? [
+          stop === "stopping"
+            ? { kind: "stop-task", enabled: false, busy: true }
+            : { kind: "stop-task", enabled: canStop },
+        ]
+      : computer.action.kind === "resume"
+        ? [computer.action, { kind: "stop", enabled: computer.action.enabled }]
+        : [computer.action];
   return {
-    ...hud,
-    label: task.label,
-    caption: task.caption,
-    control: task.control,
-    elapsedS: task.elapsedS,
-    stop: true,
+    row,
+    computer: computer.phase,
+    label,
+    caption: {
+      speaker: own && DOT_SPEAKS.has(own.row) ? "dot" : "system",
+      text: own?.caption ?? computer.caption,
+    },
+    elapsedS: running?.elapsedS ?? null,
+    actions,
+    control: (running?.control ?? false) && mayControl,
+    dotPose:
+      stop === "unconfirmed"
+        ? "error"
+        : stop
+          ? "resting"
+          : shown
+            ? TASK_POSE[shown.row]
+            : COMPUTER_POSE[computer.phase],
+    attention:
+      stop === "unconfirmed"
+        ? "blocked"
+        : stop
+          ? "working"
+          : shown
+            ? TASK_ATTENTION[shown.row]
+            : computer.phase === "failed" || computer.phase === "unavailable"
+              ? "blocked"
+              : null,
+    title: `localDot — ${label}`,
   };
 }

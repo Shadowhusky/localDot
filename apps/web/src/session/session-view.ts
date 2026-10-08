@@ -1,6 +1,6 @@
 import type { Rect } from "@localdot/protocol";
 import type { ActionState, SessionModel } from "@localdot/stage";
-import { past, progressive } from "./task-hud.ts";
+import { past, progressive } from "./status.ts";
 
 export interface StepRowView {
   id: string;

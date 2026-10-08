@@ -28,7 +28,7 @@ import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
 import { ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { mergeHud, taskFacts, taskHud } from "./session/task-hud.ts";
+import { statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
@@ -422,46 +422,56 @@ function Theatre({ api }: { api: ApiClient }) {
     (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
   );
   const task = session.sessionId ? taskHud(session.model, now, facts) : null;
-  const sessionMerged = mergeHud(
-    error ? { ...containedHud, caption: error } : containedHud,
-    controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped" ? null : task,
-  );
-  const merged = {
-    ...sessionMerged,
-    ...(controls.stopping
-      ? { label: "Stopping…", stop: true }
-      : controls.stopStatus.phase === "unconfirmed"
-        ? { label: "Stop unconfirmed", stop: true }
-        : {}),
-    action: {
-      ...sessionMerged.action,
-      enabled:
-        sessionMerged.action.enabled &&
-        !controls.stopping &&
-        !controls.busy &&
-        controls.stopStatus.phase !== "unconfirmed" &&
-        (sessionMerged.action.kind !== "resume" ||
-          (cell?.state === "ready" && cell.paused === true && !agent.model.pendingTakeover)) &&
-        (sessionMerged.action.kind !== "start" ||
-          controls.stopStatus.phase !== "stopped" ||
-          hud.action.kind === "start"),
+  const computer = error ? { ...containedHud, caption: error } : containedHud;
+  const appStatus = statusFor({
+    computer: {
+      ...computer,
+      action: {
+        ...computer.action,
+        enabled:
+          computer.action.enabled &&
+          !controls.stopping &&
+          !controls.busy &&
+          controls.stopStatus.phase !== "unconfirmed" &&
+          (computer.action.kind !== "resume" ||
+            (cell?.state === "ready" && cell.paused === true && !agent.model.pendingTakeover)) &&
+          (computer.action.kind !== "start" ||
+            controls.stopStatus.phase !== "stopped" ||
+            hud.action.kind === "start"),
+      },
     },
-    control: Boolean(
-      sessionMerged.control &&
-        !controls.fenced &&
-        agent.fresh &&
-        !agent.model.pendingTakeover &&
-        !agent.snapshot?.pendingTakeover,
-    ),
+    task:
+      controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
+        ? null
+        : task,
+    stop: controls.stopping
+      ? "stopping"
+      : controls.stopStatus.phase === "unconfirmed"
+        ? "unconfirmed"
+        : null,
+    canStop: controls.canStop,
+    mayControl:
+      !controls.fenced &&
+      agent.fresh &&
+      !agent.model.pendingTakeover &&
+      !agent.snapshot?.pendingTakeover,
+  });
+  const sheetStop = appStatus.actions.find(
+    (action) => action.kind === "stop-task" || action.kind === "stop",
+  );
+  const sheetStopControl = sheetStop && {
+    label: sheetStop.kind === "stop" ? "Stop computer" : sheetStop.busy ? "Stopping…" : "Stop",
+    enabled: sheetStop.enabled,
+    run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };
   const rows = session.sessionId
     ? timelineRows(stepRows(session.model), session.model.keyUses)
     : [];
   useEffect(() => {
-    document.title = `localDot — ${merged.label}`;
-  }, [merged.label]);
+    document.title = appStatus.title;
+  }, [appStatus.title]);
   return (
-    <div className={replayId ? "app replaying" : merged.control ? "app control" : "app"}>
+    <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
       <div className="theatre-content" inert={keysOpen || settings.open}>
         <TopBar
           title={session.model.title ?? "Your computer"}
@@ -483,13 +493,11 @@ function Theatre({ api }: { api: ApiClient }) {
         <div className="task-controls-area">
           <div className="task-bar" hidden={!!replayId}>
             <Hud
-              hud={merged}
+              status={appStatus}
               onStart={guardStart}
               onStop={guardComputerStop}
               onResume={guardResume}
               onStopSession={taskStop}
-              stopping={controls.stopping}
-              stopEnabled={controls.canStop}
               onRetry={retry}
             />
             {task && !session.ended && (
@@ -627,14 +635,10 @@ function Theatre({ api }: { api: ApiClient }) {
                     />
                   ) : undefined
                 }
-                showHud={false}
-                hud={{ ...merged, live: stageHud.live, paused: stageHud.paused }}
-                control={merged.control}
-                onStart={guardStart}
-                onStop={guardComputerStop}
-                onResume={guardResume}
-                onStopSession={taskStop}
-                onRetry={retry}
+                live={stageHud.live}
+                frozen={!!stageHud.paused}
+                control={appStatus.control}
+                caption={appStatus.caption.text}
               >
                 {!replayId && status === "known" && !cell && listed.length === 0 && (
                   <WelcomeSetup
@@ -648,7 +652,9 @@ function Theatre({ api }: { api: ApiClient }) {
                     autonomy={settings.saved?.autonomy}
                     appearance={appearance}
                     starting={pending !== null}
-                    canStart={merged.action.kind === "start" && merged.action.enabled}
+                    canStart={appStatus.actions.some(
+                      (action) => action.kind === "start" && action.enabled,
+                    )}
                     onSettings={showSettings}
                     onStart={guardStart}
                   />
@@ -668,7 +674,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   parentId={cell?.id}
                   selection={selectedScreen}
                   api={api}
-                  control={merged.control}
+                  control={appStatus.control}
                   reconnects={reconnects + browserScreen.reconnects}
                   listed={listed}
                   manual={
@@ -839,17 +845,7 @@ function Theatre({ api }: { api: ApiClient }) {
               }
             : undefined
         }
-        stop={
-          merged.stop
-            ? {
-                label: controls.stopping ? "Stopping…" : "Stop",
-                enabled: controls.canStop && !controls.stopping,
-                run: taskStop,
-              }
-            : merged.action.kind === "stop" || merged.action.kind === "resume"
-              ? { label: "Stop computer", enabled: merged.action.enabled, run: guardComputerStop }
-              : undefined
-        }
+        stop={sheetStopControl}
       />
       <KeysSheet
         taskControls={<StopControl controls={controls} />}
@@ -862,17 +858,7 @@ function Theatre({ api }: { api: ApiClient }) {
           const context = keyCapture.current;
           if (context?.request === request) void settings.keySaved(context.capture, key);
         }}
-        stop={
-          merged.stop
-            ? {
-                label: controls.stopping ? "Stopping…" : "Stop",
-                enabled: controls.canStop && !controls.stopping,
-                run: taskStop,
-              }
-            : merged.action.kind === "stop" || merged.action.kind === "resume"
-              ? { label: "Stop computer", enabled: merged.action.enabled, run: guardComputerStop }
-              : undefined
-        }
+        stop={sheetStopControl}
       />
     </div>
   );

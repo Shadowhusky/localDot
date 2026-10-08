@@ -7,7 +7,7 @@ import { useExportProbe } from "../export/useExportProbe.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import { type StepRowView, stepRows } from "../session/session-view.ts";
-import { taskHud } from "../session/task-hud.ts";
+import { taskHud } from "../session/status.ts";
 import { PlanRail } from "../shell/PlanRail.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
 import { CompareView } from "./CompareView.tsx";

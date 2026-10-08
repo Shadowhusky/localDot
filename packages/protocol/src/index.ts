@@ -1,5 +1,6 @@
 export * from "./agent-controls.ts";
 export * from "./agent-settings.ts";
+export * from "./attention.ts";
 export * from "./computer-reset.ts";
 export * from "./desktopd.ts";
 export * from "./desktopd-tools.ts";

@@ -5,11 +5,13 @@
   "type": "module",
   "scripts": {
     "build": "vite build && node scripts/notices.mjs",
+    "build:gallery": "vite build --config vite.gallery.config.ts",
     "dev": "vite build --watch",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e",
     "shot": "tsx e2e/shot.ts",
     "e2e": "playwright test",
     "e2e:setup": "vite build --config vite.setup.config.ts && playwright test --config playwright.setup.config.ts",
+    "e2e:ui": "pnpm build && pnpm build:gallery && playwright test --config playwright.ui.config.ts",
     "calibrate": "tsx e2e/calibrate.ts"
   },
   "dependencies": {

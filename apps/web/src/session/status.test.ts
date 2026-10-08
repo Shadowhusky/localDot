@@ -1,10 +1,20 @@
-import { type LocalDotEvent, msToMicros, sessionMsOf } from "@localdot/protocol";
+import { type Attention, type LocalDotEvent, msToMicros, sessionMsOf } from "@localdot/protocol";
 import { emptyModel, foldEvents } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { emptyAgentModel } from "../agent/model.ts";
 import { projectAgentEvent } from "../agent/reducer.ts";
 import { type HudState, hudFor } from "../cells/hud-state.ts";
-import { liveState, mergeHud, type TaskFacts, taskFacts, taskHud } from "./task-hud.ts";
+import type { CellSummary } from "../cells/types.ts";
+import type { DotState } from "../dot/engine/states.ts";
+import {
+  liveState,
+  type Status,
+  type StatusRow,
+  statusFor,
+  type TaskFacts,
+  taskFacts,
+  taskHud,
+} from "./status.ts";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 let seq = 0;
@@ -61,11 +71,13 @@ const cell = {
 const live = hudFor({ cell, status: "known", pending: null });
 const facts = (events: LocalDotEvent[]): TaskFacts =>
   taskFacts(events.reduce(projectAgentEvent, emptyAgentModel()));
-// The live HUD as App derives it: the timeline plus the facts from the same events.
+// The live status as App derives it: the timeline plus the facts from the same events.
 function view(events: LocalDotEvent[], nowMs: number, hud: HudState = live) {
   const task = taskHud(foldEvents(emptyModel(), events), nowMs, facts(events));
-  return { task, merged: mergeHud(hud, task) };
+  return { task, status: statusFor({ computer: hud, task }) };
 }
+// The task's own Stop, in place of the computer's controls.
+const stopsTask = [{ kind: "stop-task", enabled: true }];
 const pause = (phase: "pausing" | "paused" | "resuming" | "uncertain") => ({
   revision: 1,
   pause: {
@@ -107,13 +119,16 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("task.result", 1600, { summary: "done", files: [] }),
       ev("agent.state", 1700, { state: "done" }),
     ];
-    const { task, merged } = view(done, 9500);
+    const { task, status } = view(done, 9500);
     expect(task).toMatchObject({ row: "done", phase: "finished", label: "Done", control: false });
-    expect(merged).toMatchObject({ label: "Done", action: { kind: "stop" }, control: false });
-    expect(merged.stop).toBeUndefined();
-    expect(merged.elapsedS).toBeUndefined();
+    expect(status).toMatchObject({
+      label: "Done",
+      actions: [{ kind: "stop" }],
+      control: false,
+      elapsedS: null,
+    });
     const idle = [...done.slice(0, -1), ev("agent.state", 1700, { state: "idle" })];
-    expect(view(idle, 9500).merged.label).toBe("Done");
+    expect(view(idle, 9500).status.label).toBe("Done");
     const noResult = [...typed(), ev("agent.state", 1700, { state: "idle", reason: "gave up" })];
     expect(view(noResult, 9500).task).toMatchObject({ row: "ready", label: "Ready" });
   });
@@ -129,19 +144,23 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       }),
       ev("agent.state", 1510, { state: "waiting_user", reason: "question" }),
     ];
-    const { task, merged } = view(asked, 9500);
+    const { task, status } = view(asked, 9500);
     expect(task).toMatchObject({ row: "question", label: "Has a question", control: false });
-    expect(merged).toMatchObject({ caption: "Which format?", stop: true, control: false });
-    expect(merged.elapsedS).toBeNull();
+    expect(status).toMatchObject({
+      caption: { speaker: "dot", text: "Which format?" },
+      actions: stopsTask,
+      control: false,
+      elapsedS: null,
+    });
     const answered = [...asked, ev("ask.answer", 2000, { askId: ID, option: "A", by: "user" })];
     expect(view(answered, 3000).task).toMatchObject({ row: "working", control: true });
   });
 
   it("puts an approval first, before the daemon's waiting state arrives", () => {
     const requested = [...start(), approvalRequest(1500)];
-    expect(view(requested, 9500).merged).toMatchObject({
+    expect(view(requested, 9500).status).toMatchObject({
       label: "Needs your OK",
-      stop: true,
+      actions: stopsTask,
       control: false,
       elapsedS: null,
     });
@@ -380,7 +399,12 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     ];
     expect(view(requested, 9500)).toMatchObject({
       task: { row: "takeover", phase: "waiting", label: "Your turn" },
-      merged: { caption: "Sign in for me", stop: true, control: false, elapsedS: null },
+      status: {
+        caption: { speaker: "dot", text: "Sign in for me" },
+        actions: stopsTask,
+        control: false,
+        elapsedS: null,
+      },
     });
     const ended = [...requested, ev("takeover.end", 4000, { requestId: ID, by: "user" })];
     expect(view(ended, 4500).task).toMatchObject({ row: "working", control: true });
@@ -388,11 +412,11 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
 
   it("names the Pause's resuming and unconfirmed phases", () => {
     expect(
-      view([...typed(), ev("safety.pause", 1100, pause("resuming"))], 9500).merged,
-    ).toMatchObject({ label: "Resuming…", control: false, elapsedS: 9, stop: true });
+      view([...typed(), ev("safety.pause", 1100, pause("resuming"))], 9500).status,
+    ).toMatchObject({ label: "Resuming…", control: false, elapsedS: 9, actions: stopsTask });
     expect(view([...typed(), ev("safety.pause", 1100, pause("uncertain"))], 9500)).toMatchObject({
       task: { row: "paused", phase: "waiting", label: "Pause unconfirmed" },
-      merged: { stop: true, control: false, elapsedS: null },
+      status: { actions: stopsTask, control: false, elapsedS: null },
     });
   });
 
@@ -436,13 +460,13 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
 
   it("names a budget pause and shows no clock", () => {
     const budget = [...typed(), ev("agent.state", 1500, { state: "paused", reason: "budget" })];
-    const { task, merged } = view(budget, 9500);
+    const { task, status } = view(budget, 9500);
     expect(task).toMatchObject({
       row: "recovery",
       phase: "waiting",
       label: "Paused · Limit reached",
     });
-    expect(merged).toMatchObject({ stop: true, control: false, elapsedS: null });
+    expect(status).toMatchObject({ actions: stopsTask, control: false, elapsedS: null });
     const keyLayer = [
       ...typed(),
       ev("agent.state", 1500, { state: "paused", reason: "keyd unavailable" }),
@@ -452,14 +476,14 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
 
   it("follows a user Pause from pausing to paused, then back to work after Resume", () => {
     const pausing = [...start(), ev("safety.pause", 300, pause("pausing"))];
-    expect(view(pausing, 9500).merged).toMatchObject({
+    expect(view(pausing, 9500).status).toMatchObject({
       label: "Pausing after this step",
       control: true,
       elapsedS: 9,
-      stop: true,
+      actions: stopsTask,
     });
     const settling = [...typed(), ev("safety.pause", 1100, pause("pausing"))];
-    expect(view(settling, 9500).merged).toMatchObject({
+    expect(view(settling, 9500).status).toMatchObject({
       label: "Pausing after this step",
       control: false,
     });
@@ -471,7 +495,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     ];
     expect(view(paused, 18500)).toMatchObject({
       task: { row: "paused", phase: "waiting", label: "Paused" },
-      merged: { label: "Paused", stop: true, control: false, elapsedS: null },
+      status: { label: "Paused", actions: stopsTask, control: false, elapsedS: null },
     });
     const resumed = [...paused, ev("safety.pause", 20000, { revision: 2 })];
     expect(view(resumed, 20100).task).toMatchObject({
@@ -483,29 +507,31 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
 
   it("after Stop, a computer that is live again keeps the stopped verdict with its own control", () => {
     const stopped = [...typed(), ev("session.end", 1500, { reason: "stopped" })];
-    const { task, merged } = view(stopped, 9500);
+    const { task, status } = view(stopped, 9500);
     expect(task).toMatchObject({ row: "stopped", label: "Task stopped", control: false });
-    expect(merged).toMatchObject({
+    expect(status).toMatchObject({
       label: "Task stopped",
-      live: true,
-      action: { kind: "stop", enabled: true },
+      computer: "live",
+      actions: [{ kind: "stop", enabled: true }],
       control: false,
     });
-    expect(merged.stop).toBeUndefined();
     const frozen = hudFor({ cell: { ...cell, paused: true }, status: "known", pending: null });
-    expect(view(stopped, 9500, frozen).merged).toMatchObject({ label: "Paused", control: false });
+    expect(view(stopped, 9500, frozen).status).toMatchObject({ label: "Paused", control: false });
     const off = hudFor({
       cell: { ...cell, state: "stopped", stream: { ...cell.stream, connection: "none" } },
       status: "known",
       pending: null,
     });
-    expect(view(stopped, 9500, off).merged.label).toBe("Stopped");
+    expect(view(stopped, 9500, off).status.label).toBe("Stopped");
     const done = [...typed(), ev("session.end", 1500, { reason: "done" })];
-    expect(view(done, 9500).merged).toMatchObject({ label: "Done", caption: "Done." });
+    expect(view(done, 9500).status).toMatchObject({
+      label: "Done",
+      caption: { speaker: "system", text: "Done." },
+    });
   });
 
   it("never uses the present tense for an action whose result arrived", () => {
-    expect(view(start(), 7200).merged).toMatchObject({
+    expect(view(start(), 7200).status).toMatchObject({
       label: "Typing =SUM(F2:F13)",
       control: true,
       elapsedS: 7,
@@ -547,36 +573,324 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       [...typed(), ev("session.end", 1500, { reason: "done" })],
       [...typed(), ev("session.end", 1500, { reason: "error" })],
     ]) {
-      const merged = view(events, 2000, frozen).merged;
-      expect(merged).toMatchObject({
+      expect(view(events, 2000, frozen).status).toMatchObject({
         label: "Paused",
-        caption: frozen.caption,
+        computer: "frozen",
+        caption: { speaker: "system", text: frozen.caption },
         control: false,
-        live: false,
-        action: { kind: "resume" },
+        actions: [{ kind: "resume" }, { kind: "stop" }],
       });
-      expect(merged.stop).toBeUndefined();
     }
     expect(
-      mergeHud({ ...frozen, caption: "The key layer is offline." }, view(start(), 2000).task)
-        .caption,
+      statusFor({
+        computer: { ...frozen, caption: "The key layer is offline." },
+        task: view(start(), 2000).task,
+      }).caption.text,
     ).toBe("The key layer is offline.");
     const paused = { ...cell, paused: true as const };
     for (const hud of [
       hudFor({ cell: paused, status: "known", pending: "list" }),
       hudFor({ cell: { ...paused, state: "starting" }, status: "known", pending: null }),
     ]) {
-      const merged = view(start(), 1200, hud).merged;
-      expect(merged).toMatchObject({ label: "Paused", control: false, live: false });
-      expect(merged.stop).toBeUndefined();
+      const { status } = view(start(), 1200, hud);
+      expect(status).toMatchObject({ label: "Paused", computer: "frozen", control: false });
+      expect(status.actions.map((action) => action.kind)).not.toContain("stop-task");
     }
   });
 
   it("gives the computer's own HUD back when there is no task", () => {
-    expect(mergeHud(live, null)).toMatchObject({
+    expect(statusFor({ computer: live, task: null })).toMatchObject({
+      row: "ready",
       label: "Live",
-      action: { kind: "stop", enabled: true },
+      actions: [{ kind: "stop", enabled: true }],
       control: false,
     });
+  });
+});
+
+const computerIn = (summary: Partial<CellSummary>) =>
+  hudFor({ cell: { ...cell, ...summary }, status: "known", pending: null });
+const noCell = (status: "listing" | "known" | "unknown") =>
+  hudFor({ cell: null, status, pending: status === "listing" ? "list" : null });
+const stream = (connection: "connecting" | "stalled" | "none") =>
+  computerIn({ stream: { ...cell.stream, connection } });
+const RESTART_NOTE = "desktop container exited with 137; restarting (attempt 2 of 5)";
+const asked = (tMs: number) =>
+  ev("ask.request", tMs, { askId: ID, question: "Which format?", options: [], allowText: true });
+const takeoverRequest = (tMs: number) =>
+  ev("takeover.request", tMs, { requestId: ID, reason: "login", note: "Sign in for me" });
+const paused = [
+  ...typed(),
+  ev("safety.pause", 1100, pause("pausing")),
+  ev("agent.state", 1100, { state: "paused", reason: "user" }),
+  ev("safety.pause", 1200, pause("paused")),
+];
+const budget = [...typed(), ev("agent.state", 1500, { state: "paused", reason: "budget" })];
+const ended = (reason: string) => [...typed(), ev("session.end", 1500, { reason })];
+const at = (events: LocalDotEvent[], nowMs = 9500, computer: HudState = live) =>
+  view(events, nowMs, computer).status;
+const alone = (computer: HudState) => statusFor({ computer, task: null });
+const typing = () => view(start(), 2000).task;
+// dot mid-action on a computer in the given state.
+const underTask = (computer: HudState) => at(start(), 2000, computer);
+const FAILED = { state: "failed", error: "not ready after 120 s" } as const;
+const FENCED = { fenced: { revision: 1 } } as const;
+
+// One fixture per state the status model knows.
+const STATES: Record<string, Status> = {
+  checking: alone(noCell("listing")),
+  "no computer": alone(noCell("known")),
+  "list failed": alone(noCell("unknown")),
+  starting: alone(computerIn({ state: "starting" })),
+  restarting: alone(computerIn({ state: "starting", error: RESTART_NOTE })),
+  connecting: alone(stream("connecting")),
+  reconnecting: alone(stream("stalled")),
+  frozen: at(start(), 2000, computerIn({ paused: true })),
+  "shutting down": alone(computerIn({ state: "stopping" })),
+  off: alone(computerIn({ state: "stopped" })),
+  "off after a task": at(ended("done"), 9500, computerIn({ state: "stopped", ...stream("none") })),
+  "failed to start": alone(computerIn(FAILED)),
+  fenced: alone(computerIn(FENCED)),
+  "no computer, task open": underTask(noCell("known")),
+  "list failed, task open": underTask(noCell("unknown")),
+  "starting, task open": underTask(computerIn({ state: "starting" })),
+  "restarting, task open": underTask(computerIn({ state: "starting", error: RESTART_NOTE })),
+  "shutting down, task open": underTask(computerIn({ state: "stopping" })),
+  "off, task open": underTask(computerIn({ state: "stopped" })),
+  "failed, task open": underTask(computerIn(FAILED)),
+  "fenced, task open": underTask(computerIn(FENCED)),
+  "task stopping": statusFor({ computer: live, task: typing(), stop: "stopping" }),
+  "stop unconfirmed": statusFor({ computer: live, task: typing(), stop: "unconfirmed" }),
+  approval: at([...start(), approvalRequest(1500)]),
+  question: at([...typed(), asked(1500)]),
+  takeover: at([...typed(), takeoverRequest(1500)]),
+  "waiting in Replay": statusFor({
+    computer: live,
+    task: replay(
+      [
+        ...start(),
+        approvalRequest(1500),
+        ev("agent.state", 1501, { state: "waiting_user", reason: "approval" }),
+      ],
+      9500,
+    ),
+  }),
+  pausing: at([...start(), ev("safety.pause", 300, pause("pausing"))]),
+  paused: at(paused, 18_500),
+  "pause unconfirmed": at([...typed(), ev("safety.pause", 1100, pause("uncertain"))]),
+  resuming: at([...typed(), ev("safety.pause", 1100, pause("resuming"))]),
+  "spending limit": at(budget),
+  "needs attention": at([...typed(), ev("agent.state", 1500, { state: "error" })]),
+  acting: at(start(), 7200),
+  "just acted": at(typed(), 1500),
+  thinking: at([...typed(), ev("agent.state", 1100, { state: "thinking" })]),
+  observing: at([...typed(), ev("agent.state", 1100, { state: "observing" })]),
+  working: at(typed()),
+  done: at(ended("done")),
+  stopped: at(ended("stopped")),
+  failed: at(ended("error")),
+  "ready for more": at([...typed(), ev("agent.state", 1700, { state: "idle" })]),
+  ready: alone(live),
+};
+
+// The audit's status table, first match wins from the top, behind a task Stop in flight: the HUD
+// label, dot's pose, the attention and who speaks the caption for every state.
+const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "system"][] = [
+  // A task Stop outranks every row.
+  ["task stopping", "stopping", "Stopping…", "resting", "working", "dot"],
+  ["stop unconfirmed", "stopping", "Stop unconfirmed", "error", "blocked", "dot"],
+  // 1. The computer is not live, or nothing runs on it. A computer that is off, failing or not
+  // up yet holds the row over an open task; a late picture or a list check does not.
+  ["checking", "computer", "Checking…", "idle", null, "system"],
+  ["no computer", "computer", "No computer", "sleeping", null, "system"],
+  ["list failed", "computer", "Unavailable", "error", "blocked", "system"],
+  ["starting", "computer", "Starting…", "waking", null, "system"],
+  ["restarting", "computer", "Reconnecting…", "waking", null, "system"],
+  ["connecting", "computer", "Connecting…", "waking", null, "system"],
+  ["reconnecting", "computer", "Reconnecting…", "reconnecting", null, "system"],
+  ["frozen", "computer", "Paused", "resting", null, "system"],
+  ["shutting down", "computer", "Stopping…", "sleeping", null, "system"],
+  ["off", "computer", "Stopped", "sleeping", null, "system"],
+  ["off after a task", "computer", "Stopped", "sleeping", null, "system"],
+  ["failed to start", "computer", "Failed", "error", "blocked", "system"],
+  ["fenced", "computer", "Unavailable", "error", "blocked", "system"],
+  ["no computer, task open", "computer", "No computer", "sleeping", null, "system"],
+  ["list failed, task open", "computer", "Unavailable", "error", "blocked", "system"],
+  ["starting, task open", "computer", "Starting…", "waking", null, "system"],
+  ["restarting, task open", "computer", "Reconnecting…", "waking", null, "system"],
+  ["shutting down, task open", "computer", "Stopping…", "sleeping", null, "system"],
+  ["off, task open", "computer", "Stopped", "sleeping", null, "system"],
+  ["failed, task open", "computer", "Failed", "error", "blocked", "system"],
+  ["fenced, task open", "computer", "Unavailable", "error", "blocked", "system"],
+  // 2–4. Approval, question, takeover.
+  ["approval", "approval", "Needs your OK", "waiting", "needs_you", "system"],
+  ["question", "question", "Has a question", "waiting", "needs_you", "dot"],
+  ["takeover", "takeover", "Your turn", "your-turn", "needs_you", "dot"],
+  ["waiting in Replay", "waiting", "Waiting for you", "waiting", "needs_you", "system"],
+  // 5. The user's Pause.
+  ["pausing", "pausing", "Pausing after this step", "thinking", "working", "system"],
+  ["paused", "paused", "Paused", "resting", null, "system"],
+  ["pause unconfirmed", "paused", "Pause unconfirmed", "resting", null, "system"],
+  ["resuming", "resuming", "Resuming…", "thinking", "working", "system"],
+  // 6. Budget or plan recovery.
+  ["spending limit", "recovery", "Paused · Limit reached", "resting", "blocked", "system"],
+  ["needs attention", "recovery", "Needs attention", "resting", "blocked", "system"],
+  // 7–9. dot at work.
+  ["acting", "acting", "Typing =SUM(F2:F13)", "acting", "working", "dot"],
+  ["just acted", "acting", "Typed =SUM(F2:F13)", "acting", "working", "dot"],
+  ["thinking", "thinking", "Thinking…", "thinking", "working", "dot"],
+  ["observing", "observing", "Checking the screen", "observing", "working", "dot"],
+  ["working", "working", "Working", "acting", "working", "dot"],
+  // 10–11. The task is over, or there is none.
+  ["done", "done", "Done", "idle", "done", "system"],
+  ["stopped", "stopped", "Task stopped", "idle", null, "system"],
+  ["failed", "failed", "Task failed", "error", "blocked", "system"],
+  ["ready for more", "ready", "Ready", "idle", null, "system"],
+  ["ready", "ready", "Live", "idle", null, "system"],
+];
+
+describe("one status model for every surface (T10)", () => {
+  it.each(TABLE)("%s", (name, row, label, dotPose, attention, speaker) => {
+    const status = STATES[name] as Status;
+    expect(status).toMatchObject({
+      row,
+      label,
+      dotPose,
+      attention,
+      caption: { speaker },
+      title: `localDot — ${label}`,
+    });
+    expect(status.actions.length).toBeGreaterThan(0);
+  });
+
+  it("has a row in the table for every fixture, and every row and phase the model gives", () => {
+    expect(TABLE.map(([name]) => name).sort()).toEqual(Object.keys(STATES).sort());
+    const rows = new Set(Object.values(STATES).map((status) => status.row));
+    expect(rows.size).toBe(18);
+    const phases = new Set(Object.values(STATES).map((status) => status.computer));
+    expect(phases.size).toBe(12);
+  });
+
+  it("never names an action in the present tense once it has ended", () => {
+    for (const [name, status] of Object.entries(STATES))
+      if (name !== "acting")
+        expect(status.label, name).not.toMatch(/^(Clicking|Typing|Pressing|Scrolling|Opening)\b/);
+  });
+
+  it("ranks the rows: Stop, a computer that can't carry the task, the verdict, then what waits for the user", () => {
+    const frozen = computerIn({ paused: true });
+    const pairs: [string, Status, StatusRow][] = [
+      [
+        "Stop over a frozen computer",
+        statusFor({ computer: frozen, task: null, stop: "stopping" }),
+        "stopping",
+      ],
+      [
+        "Stop over a failed computer",
+        statusFor({ computer: computerIn(FAILED), task: typing(), stop: "stopping" }),
+        "stopping",
+      ],
+      [
+        "a frozen computer over an approval",
+        at([...start(), approvalRequest(1500)], 9500, frozen),
+        "computer",
+      ],
+      [
+        "an unavailable computer over an approval",
+        at([...start(), approvalRequest(1500)], 9500, computerIn(FENCED)),
+        "computer",
+      ],
+      [
+        "a computer that is off over a running task",
+        underTask(computerIn({ state: "stopped" })),
+        "computer",
+      ],
+      [
+        "a verdict over an approval",
+        at([...start(), approvalRequest(1500), ev("session.end", 1600, { reason: "done" })]),
+        "done",
+      ],
+      [
+        "an approval over a question",
+        at([...typed(), approvalRequest(1500), asked(1500)]),
+        "approval",
+      ],
+      [
+        "a question over a takeover",
+        at([...typed(), asked(1500), takeoverRequest(1500)]),
+        "question",
+      ],
+      ["a takeover over a Pause", at([...paused, takeoverRequest(1300)]), "takeover"],
+      [
+        "a Pause over the spending limit",
+        at([...budget, ev("safety.pause", 1600, pause("paused"))]),
+        "paused",
+      ],
+      [
+        "the spending limit over an action in flight",
+        at([...start(), ev("agent.state", 100, { state: "paused", reason: "budget" })], 500),
+        "recovery",
+      ],
+      [
+        "an action in flight over thinking",
+        at([...start(), ev("agent.state", 100, { state: "thinking" })], 500),
+        "acting",
+      ],
+      // The computer is up and dot works on it, whatever the picture does.
+      ["the task over a stalled picture", at(start(), 500, stream("stalled")), "acting"],
+      [
+        "the task over a picture still connecting",
+        at(start(), 500, stream("connecting")),
+        "acting",
+      ],
+      [
+        "the task over a list check",
+        at(start(), 500, hudFor({ cell, status: "known", pending: "list" })),
+        "acting",
+      ],
+    ];
+    for (const [name, status, row] of pairs) expect(status.row, name).toBe(row);
+  });
+
+  it("lets a computer that can't carry the task speak for it, with no clock and no control", () => {
+    const fenced = computerIn(FENCED);
+    expect(at(start(), 7200, fenced)).toMatchObject({
+      caption: { speaker: "system", text: fenced.caption },
+      elapsedS: null,
+      control: false,
+    });
+    expect(at(start(), 7200, stream("stalled"))).toMatchObject({ elapsedS: 7, control: true });
+  });
+
+  it("gives dot control only while it works and the app allows it", () => {
+    expect(statusFor({ computer: live, task: typing(), mayControl: false }).control).toBe(false);
+    const working = ["acting", "just acted", "thinking", "observing", "working", "pausing"];
+    const stopping = ["task stopping", "stop unconfirmed"];
+    for (const [name, status] of Object.entries(STATES))
+      expect(status.control, name).toBe([...working, ...stopping].includes(name));
+  });
+
+  it("offers the task's Stop while it runs, and the computer's own controls otherwise", () => {
+    expect(statusFor({ computer: live, task: typing(), canStop: false }).actions).toEqual([
+      { kind: "stop-task", enabled: false },
+    ]);
+    expect(STATES["task stopping"]?.actions).toEqual([
+      { kind: "stop-task", enabled: false, busy: true },
+    ]);
+    expect(statusFor({ computer: live, task: null, stop: "unconfirmed" }).actions).toEqual(
+      stopsTask,
+    );
+    const frozen = computerIn({ paused: true });
+    const held = { ...frozen, action: { kind: "resume" as const, enabled: false } };
+    expect(statusFor({ computer: held, task: typing() }).actions).toEqual([
+      { kind: "resume", enabled: false },
+      { kind: "stop", enabled: false },
+    ]);
+    expect(STATES.off?.actions).toEqual([{ kind: "start", enabled: true }]);
+    // The task keeps its Stop on a computer that can't carry it. With no computer, that Stop is
+    // the only control, so Welcome's Turn on waits until the task ends.
+    for (const [name, status] of Object.entries(STATES))
+      if (name.endsWith(", task open")) expect(status.actions, name).toEqual(stopsTask);
+    expect(STATES.done?.actions).toEqual([{ kind: "stop", enabled: true }]);
   });
 });
