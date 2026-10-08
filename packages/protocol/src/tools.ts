@@ -65,7 +65,10 @@ export const GenericComputerInput = z.object({
   scroll_amount: z.number().int().min(1).max(30).optional(),
   duration: z.number().min(0).max(30).optional(),
   region: z.array(z.number()).length(4).optional(),
-  repeat: z.number().int().min(1).max(20).optional(),
+  repeat: z.number().int().min(1).max(100).optional(),
+  // type only: click `coordinate` first, select all and delete before typing, press Return after.
+  clear: z.boolean().optional(),
+  submit: z.boolean().optional(),
 });
 export type GenericComputerInput = z.infer<typeof GenericComputerInput>;
 

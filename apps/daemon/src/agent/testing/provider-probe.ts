@@ -3,7 +3,7 @@ import { APICallError, streamText } from "ai";
 import sharp from "sharp";
 import {
   type ProviderComputerInput,
-  toComputerAction,
+  toComputerActions,
 } from "../../../../../cells/brain/src/computer.ts";
 import { languageModel } from "../../../../../cells/brain/src/models.ts";
 import { type ProxyFetch, proxyFetch } from "../../../../../cells/brain/src/proxy-fetch.ts";
@@ -204,10 +204,10 @@ export function requireGammaClick(
   const call = calls[0];
   if (calls.length !== 1 || call?.toolName !== "computer")
     throw new ProviderProbeError("answer", "provider must return exactly one computer click");
-  const action = toComputerAction(call.input as ProviderComputerInput, binding.coords, undefined);
+  const actions = toComputerActions(call.input as ProviderComputerInput, binding.coords, undefined);
+  const action = typeof actions === "string" || actions.length !== 1 ? undefined : actions[0];
   if (
-    typeof action === "string" ||
-    action.action !== "click" ||
+    action?.action !== "click" ||
     action.button !== "left" ||
     action.count !== 1 ||
     !action.point ||

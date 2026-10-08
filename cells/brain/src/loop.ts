@@ -10,7 +10,7 @@ import type {
 import { isToolName } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
 import { APICallError, generateText, type LanguageModel, type ModelMessage, streamText } from "ai";
-import { toComputerAction } from "./computer.ts";
+import { toComputerActions } from "./computer.ts";
 import {
   compactionEntry,
   compactionMessage,
@@ -603,12 +603,12 @@ export class Agent {
     if (blocked) return fail(blocked.block);
     let result: ToolResult;
     if (call.toolName === "computer") {
-      const action = toComputerAction(call.input as never, binding.coords, basedOn);
-      if (typeof action === "string") return fail(action);
-      if (!basedOn && (action.action === "click" || action.action === "scroll"))
+      const actions = toComputerActions(call.input as never, binding.coords, basedOn);
+      if (typeof actions === "string") return fail(actions);
+      if (!basedOn && actions.some((a) => a.action === "click" || a.action === "scroll"))
         return fail("Take a full screenshot before choosing a point on the desktop.");
-      result = await this.#o.api.tool("computer", call.toolCallId, action, signal);
-      if (action.action === "cursor_position" && binding.coords === "per1000")
+      result = await this.#computer(call.toolCallId, actions, signal);
+      if (actions[0]?.action === "cursor_position" && binding.coords === "per1000")
         result = this.#cursorPer1000(result);
     } else {
       result = await this.#o.api.tool(call.toolName, call.toolCallId, call.input, signal);
@@ -619,6 +619,25 @@ export class Agent {
     const adjusted = await this.#o.hooks?.afterToolCall?.(info, result);
     signal.throwIfAborted();
     return result.pause === true ? { ...(adjusted ?? result), pause: true } : (adjusted ?? result);
+  }
+
+  // The daemon actions of one model call, in order, as one result: each step's text, then the
+  // last step's own result. A step that fails or pauses ends the call there.
+  async #computer(
+    callId: string,
+    actions: ComputerAction[],
+    signal: AbortSignal,
+  ): Promise<ToolResult> {
+    const notes: ToolResult["content"] = [];
+    for (const [i, action] of actions.entries()) {
+      const id = i === 0 ? callId : `${callId.slice(0, 120)}.${i}`;
+      const result = await this.#o.api.tool("computer", id, action, signal);
+      signal.throwIfAborted();
+      if (!result.ok || result.pause || result.final || i === actions.length - 1)
+        return { ...result, content: [...notes, ...result.content] };
+      notes.push(...result.content.filter((c) => c.type === "text"));
+    }
+    throw new Error("a computer call has at least one action");
   }
 
   #cursorPer1000(result: ToolResult): ToolResult {

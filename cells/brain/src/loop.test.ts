@@ -397,6 +397,75 @@ describe("Agent", () => {
     expect(u.f.toolCalls.filter((c) => (c.input as { text?: string }).text === "b")).toEqual([]);
   });
 
+  it("runs typing's click, clear and submit as separate actions of one call, in order", async () => {
+    const image = { type: "image", frameId: ulid(), mediaType: "image/png", data: "iVBORw0KGgo=" };
+    const t = agent(
+      [
+        call("computer", {
+          action: "type",
+          text: "A9743E",
+          coordinate: [431, 363],
+          clear: true,
+          submit: true,
+        }),
+        call("done", { summary: "x" }),
+      ],
+      {
+        boot: { models: { main: binding({ computer: "generic" }) } },
+        answer: (name, input) => {
+          const a = input as { action: string; keys?: string[]; text?: string };
+          if (name !== "computer" || a.action === "screenshot") return undefined;
+          return {
+            ok: true,
+            content: [
+              { type: "text", text: `did ${a.action} ${a.keys?.join("+") ?? a.text ?? ""}` },
+              image as never,
+            ],
+          };
+        },
+      },
+    );
+    expect(await t.run()).toBe("done");
+    expect(t.f.toolCalls.slice(1, 6).map((c) => c.input)).toMatchObject([
+      { action: "click", point: { x: 431, y: 363 }, button: "left", count: 1 },
+      { action: "key", keys: ["ctrl", "a"] },
+      { action: "key", keys: ["BackSpace"] },
+      { action: "type", text: "A9743E" },
+      { action: "key", keys: ["Return"] },
+    ]);
+    const base = t.f.callIds[1] as string;
+    expect(t.f.callIds.slice(2, 6)).toEqual([1, 2, 3, 4].map((i) => `${base}.${i}`));
+    const tool = JSON.stringify(
+      (t.main.prompts[1] as { role: string }[]).find((m) => m.role === "tool"),
+    );
+    for (const text of ["did click", "did key ctrl+a", "did key BackSpace", "did type A9743E"])
+      expect(tool).toContain(text);
+    expect(tool.match(/iVBORw0KGgo=/g)).toHaveLength(1);
+  });
+
+  it("ends an expanded call at its first failed step", async () => {
+    const t = agent(
+      [
+        call("computer", { action: "type", text: "cat", clear: true, submit: true }),
+        call("done", { summary: "x" }),
+      ],
+      {
+        boot: { models: { main: binding({ computer: "generic" }) } },
+        answer: (name, input) =>
+          name === "computer" && (input as { keys?: string[] }).keys?.[0] === "BackSpace"
+            ? { ok: false, content: [{ type: "text", text: "Failed: paused" }] }
+            : undefined,
+      },
+    );
+    await t.run();
+    expect(t.f.toolCalls.map((c) => (c.input as { action?: string }).action)).toEqual([
+      "screenshot",
+      "key",
+      "key",
+      undefined,
+    ]);
+  });
+
   it("puts screenshots in a user message for clients whose tool results cannot carry images", async () => {
     const t = agent([call("computer", { action: "screenshot" }), call("done", { summary: "x" })], {
       boot: {

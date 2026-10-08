@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { toComputerAction } from "../../../../../cells/brain/src/computer.ts";
+import { toComputerActions } from "../../../../../cells/brain/src/computer.ts";
 import { type EvalCell, waitForWindow } from "./cell.ts";
 import {
   decodeImage,
@@ -52,7 +52,7 @@ export interface EvalTask {
 // A capability counts as landed once the brain turns its actions into daemon actions.
 export function capabilityLanded(capability: Capability): boolean {
   const accepts = (input: Record<string, unknown>) =>
-    typeof toComputerAction(input, "pixels", "01M4DAHWJZV7VKKJNW9F0A3WXJ") !== "string";
+    typeof toComputerActions(input, "pixels", "01M4DAHWJZV7VKKJNW9F0A3WXJ") !== "string";
   if (capability === "modifier_click")
     return accepts({ action: "left_click", coordinate: [10, 10], text: "ctrl" });
   return (

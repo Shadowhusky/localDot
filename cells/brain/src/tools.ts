@@ -17,7 +17,7 @@ import {
 import { type ToolSet, tool } from "ai";
 
 const GENERIC_ACTIONS =
-  'Actions: screenshot; left_click, right_click, middle_click, double_click, triple_click (coordinate); type (text); key (text, e.g. "ctrl+s" or "Return"; repeat); scroll (coordinate, scroll_direction, scroll_amount); wait (duration in seconds); zoom (region [x0, y0, x1, y1]); cursor_position.';
+  'Actions: screenshot; left_click, right_click, middle_click, double_click, triple_click (coordinate); type (text; optional coordinate to click first, clear to select all and delete first, submit to press Return after); key (text: X key names joined by +, e.g. "ctrl+s", "Return", "Page_Up", "ctrl++"; repeat up to 100 presses); hold_key (text, duration up to 30 seconds); scroll (coordinate, scroll_direction, scroll_amount); wait (duration in seconds); zoom (region [x0, y0, x1, y1]); cursor_position.';
 
 function computerTool(b: ModelBinding) {
   switch (b.computer) {
