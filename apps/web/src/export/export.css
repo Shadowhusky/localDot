@@ -58,6 +58,22 @@
   color: var(--color-text);
   font: inherit;
 }
+/* WebKit ignores min-height on a native menulist, so the select draws its own box and chevron. */
+.export-sheet select {
+  appearance: none;
+  height: 36px;
+  padding: 0 32px 0 12px;
+  background:
+    var(--icon-chevron-down) no-repeat right 10px center / 12px 12px,
+    var(--color-void);
+  text-overflow: ellipsis;
+}
+@media (pointer: coarse) {
+  .export-sheet select {
+    height: 44px;
+    font-size: 16px;
+  }
+}
 .export-sheet button {
   cursor: pointer;
 }

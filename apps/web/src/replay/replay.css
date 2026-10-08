@@ -49,6 +49,24 @@
   font: inherit;
   cursor: pointer;
 }
+/* WebKit ignores the size of a native menulist, so the select draws its own box and chevron. */
+.replay-house select {
+  appearance: none;
+  align-self: stretch;
+  padding-right: 28px;
+  background:
+    var(--icon-chevron-down) no-repeat right 8px center / 12px 12px,
+    var(--color-surface);
+}
+@media (pointer: coarse) {
+  .replay-house select,
+  .replay-controls button {
+    min-height: 44px;
+  }
+  .replay-house select {
+    font-size: 16px;
+  }
+}
 .replay-house button:disabled,
 .replay-delete-dialog button:disabled {
   opacity: 0.5;
@@ -130,6 +148,7 @@
 }
 .replay-controls label {
   display: inline-flex;
+  align-self: stretch;
   gap: 6px;
   align-items: center;
   font-size: 12px;
