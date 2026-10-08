@@ -282,6 +282,15 @@ describe("puppet, live and frame routes", () => {
     },
   );
 
+  it("answers an idle computer's live query with no content rather than an error", async () => {
+    const { app, id } = setup();
+    const idle = await app.request(url(`/api/cells/${id}/live`), { headers: bearer });
+    expect(idle.status).toBe(204);
+    expect(await idle.text()).toBe("");
+    expect((await app.request(url("/api/cells/not-a-cell/live"), { headers: bearer })).status).toBe(
+      400,
+    );
+  });
   it("serves a session's clock origin and refuses an unknown session", async () => {
     const { app, eventLog } = setup();
     const id = eventLog.createSession("c");
@@ -356,7 +365,7 @@ describe("puppet, live and frame routes", () => {
       type: "session.end",
       data: { reason: "stopped" },
     });
-    expect((await app.request(url(`/api/cells/${id}/live`), { headers: bearer })).status).toBe(404);
+    expect((await app.request(url(`/api/cells/${id}/live`), { headers: bearer })).status).toBe(204);
     expect(
       (
         await app.request(url(`/api/cells/${id}/puppet`), {
