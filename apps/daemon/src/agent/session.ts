@@ -161,9 +161,11 @@ export class AgentSession {
             ? "install"
             : card.actionClass === "system_settings"
               ? "permission"
-              : ["purchase", "send", "post", "delete"].includes(card.actionClass)
-                ? card.actionClass
-                : "other";
+              : card.actionClass === "upload"
+                ? "send"
+                : ["purchase", "send", "post", "delete"].includes(card.actionClass)
+                  ? card.actionClass
+                  : "other";
         const { fields, ...data } = card;
         this.append("approval.request", { ...data, kind, preview: { fields } });
         this.#publishState(this.safetyPause ? "paused" : "waiting_user", "approval");

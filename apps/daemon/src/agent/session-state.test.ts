@@ -1,4 +1,4 @@
-import { ulid } from "@localdot/protocol";
+import { type ActionClass, ulid } from "@localdot/protocol";
 import { expect, it } from "vitest";
 import { AgentSession } from "./session.ts";
 
@@ -15,7 +15,11 @@ function setup(fail?: (type: string) => boolean) {
   const states = () => events.filter((e) => e.type === "agent.state").map((e) => ({ ...e.data }));
   return { session, generation, events, states };
 }
-function approval(session: AgentSession, generation: { id: number }) {
+function approval(
+  session: AgentSession,
+  generation: { id: number },
+  actionClass: ActionClass = "send",
+) {
   return session.requestApproval(
     {
       sessionId: session.id,
@@ -25,7 +29,7 @@ function approval(session: AgentSession, generation: { id: number }) {
       digest: "d".repeat(64),
       targetDigest: "t".repeat(64),
     } as never,
-    { actionClass: "send", risk: "high", title: "Send the report", fields: [] },
+    { actionClass, risk: "high", title: "Send the report", fields: [] },
     { signal: new AbortController().signal, check: () => {}, revalidate: async () => true },
   );
 }
@@ -37,6 +41,23 @@ it("publishes that the task waits on an approval, after the request itself", () 
   expect(session.status).toBe("waiting_user");
   expect(events.map((e) => e.type)).toEqual(["approval.request", "agent.state"]);
   expect(states()).toEqual([{ state: "waiting_user", reason: "approval" }]);
+});
+
+it.each([
+  ["upload", "send"],
+  ["send", "send"],
+  ["download_execute", "install"],
+  ["system_settings", "permission"],
+  ["computer", "other"],
+  ["memory", "other"],
+] as const)("files a %s card under the %s kind", (actionClass, kind) => {
+  const { session, generation, events } = setup();
+  session.setStatus("running");
+  void approval(session, generation, actionClass);
+  expect(events.find((e) => e.type === "approval.request")?.data).toMatchObject({
+    actionClass,
+    kind,
+  });
 });
 
 it("keeps an approval pending when its waiting state cannot be journaled", async () => {

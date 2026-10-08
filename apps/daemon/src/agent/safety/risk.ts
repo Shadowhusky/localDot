@@ -128,7 +128,7 @@ const titles: Record<ActionClass, string> = {
   memory: "Save to its memory",
   upload: "Upload your files",
   credentials: "Enter a password or code yourself",
-  unknown: "Unclear step on a signed-in site",
+  unknown: "Unclear step",
 };
 export function buildApprovalCard(
   facts: RiskFacts,

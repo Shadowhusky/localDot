@@ -119,7 +119,7 @@ describe("reviewer policy and preview boundaries", () => {
       redactor([secret]),
     );
     expect(JSON.stringify(card)).not.toContain("REVIEW_");
-    expect(card.title).toBe("Unclear step on a signed-in site");
+    expect(card.title).toBe("Unclear step");
     expect(card.fields.find(([k]) => k === "Command")?.[1]).toHaveLength(512);
     expect(card.fields.find(([k]) => k === "App location")?.[1]).toBe("https://example.test/path");
   });
