@@ -36,6 +36,8 @@ const WINDOW = 200;
 const THREAD_ROOM = 200;
 const ROOM_BACK = 224;
 const itemKey = (item: ThreadItem) => item.key;
+// How long a newly shown task's history may take to arrive.
+const LOADING_MS = 600;
 
 interface ThreadContext {
   announce(text: string): void;
@@ -115,7 +117,35 @@ function Card({ item, thread }: { item: ThreadItem; thread: ThreadContext }) {
   return <Render item={item as never} thread={thread} />;
 }
 
-function Row({ row, fresh, thread }: { row: ThreadRow; fresh: boolean; thread: ThreadContext }) {
+interface RowProps {
+  row: ThreadRow;
+  fresh: boolean;
+  thread: ThreadContext;
+}
+
+// Items are rebuilt on every event, so a row compares what it shows: the same message, question
+// or answer draws the same. Results (downloads in flight) and work lines (their steps) always draw.
+function sameRow(a: RowProps, b: RowProps): boolean {
+  const x = a.row.item,
+    y = b.row.item;
+  const same =
+    x.kind === y.kind &&
+    ((x.kind === "message" && y.kind === "message" && x.message === y.message) ||
+      (x.kind === "question" &&
+        y.kind === "question" &&
+        x.question === y.question &&
+        a.thread.pendingAsk === b.thread.pendingAsk) ||
+      (x.kind === "answer" && y.kind === "answer" && x.question === y.question));
+  return (
+    same &&
+    a.row.groupStart === b.row.groupStart &&
+    a.row.separator === b.row.separator &&
+    a.fresh === b.fresh &&
+    a.thread.announce === b.thread.announce
+  );
+}
+
+const Row = memo(function Row({ row, fresh, thread }: RowProps) {
   const { item } = row;
   return (
     <div
@@ -140,7 +170,7 @@ function Row({ row, fresh, thread }: { row: ThreadRow; fresh: boolean; thread: T
       <Card item={item} thread={thread} />
     </div>
   );
-}
+}, sameRow);
 
 export interface ConversationProps {
   items: readonly ThreadItem[];
@@ -226,10 +256,13 @@ export function Conversation({
     });
   }, [completed, ownerKey, visible]);
 
-  // Items that arrive at the end after the thread first drew ease in; history appears as it is.
-  const known = useRef<{ owner: string; keys: Set<string> }>({ owner: ownerKey, keys: new Set() });
-  if (known.current.owner !== ownerKey) known.current = { owner: ownerKey, keys: new Set() };
-  const settled = known.current.keys.size > 0;
+  // Items that arrive at the end once the thread has drawn its history ease in; history, which may
+  // come in a few batches as the task loads, appears as it is.
+  const known = useRef({ owner: ownerKey, keys: new Set<string>(), since: performance.now() });
+  if (known.current.owner !== ownerKey)
+    known.current = { owner: ownerKey, keys: new Set(), since: performance.now() };
+  const settled =
+    known.current.keys.size > 0 && performance.now() - known.current.since > LOADING_MS;
   const lastKnown = rows.findLastIndex((row) => known.current.keys.has(row.item.key));
   useLayoutEffect(() => {
     for (const row of rows) known.current.keys.add(row.item.key);
