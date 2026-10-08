@@ -41,9 +41,11 @@ it("keeps the live task's Pause and Stop guidance out of Replay", () => {
   const view = render(<SafetyControls safety={safety} agent={agent} cell={null} />);
   expect(screen.getByRole("button", { name: "Pause after this step" })).toBeTruthy();
   expect(screen.getByText("Stop: Ctrl/Cmd + Shift + .")).toBeTruthy();
-  expect(screen.getByText(/heartbeat is late/)).toBeTruthy();
+  expect(screen.getByText(/heartbeat is late/).textContent).toContain("use Stop");
   view.rerender(<SafetyControls safety={safety} agent={agent} cell={null} replaying />);
   expect(screen.queryByRole("button", { name: "Pause after this step" })).toBeNull();
   expect(screen.queryByText("Stop: Ctrl/Cmd + Shift + .")).toBeNull();
-  expect(screen.queryByText(/heartbeat is late/)).toBeNull();
+  expect(screen.getByText(/heartbeat is late/).textContent).toBe(
+    "The live task's heartbeat is late. Switch to Watch if you want to stop it.",
+  );
 });

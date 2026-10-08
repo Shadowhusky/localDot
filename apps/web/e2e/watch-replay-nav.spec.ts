@@ -165,6 +165,20 @@ for (const engine of ["chrome", "webkit"] as const satisfies Engine[])
     }
   });
 
+test("Replay keeps the late-heartbeat warning and points to Watch", async ({ page }) => {
+  await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+  await modes(page).getByRole("button", { name: "Replay", exact: true }).click();
+  await expect(page.getByRole("main", { name: "Session replay" })).toBeVisible();
+  await page.request.post(`${fixture.origin}/__qa/heartbeat`);
+  await expect(
+    page.getByText("The live task's heartbeat is late. Switch to Watch if you want to stop it."),
+  ).toBeVisible();
+  await modes(page).getByRole("button", { name: "Watch", exact: true }).click();
+  await expect(
+    page.getByText("The task heartbeat is late. You can use Stop if you want to contain it."),
+  ).toBeVisible();
+});
+
 // Runs last: it deletes a seeded recording the earlier tests open.
 test("browser Back never reopens a deleted recording", async ({ page }) => {
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);

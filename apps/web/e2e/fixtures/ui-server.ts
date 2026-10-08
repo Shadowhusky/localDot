@@ -874,6 +874,11 @@ app.post("/__qa/budget", (c) => {
   session.append("agent.state", { state: "paused", reason: "budget" });
   return c.json({ ok: true });
 });
+app.post("/__qa/heartbeat", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("heartbeat", { ongoing: true, everyMs: 500 });
+  return c.json({ ok: true });
+});
 app.post("/__qa/finish", (c) => {
   if (!session) return c.text("no session", 409);
   session.append("message.assistant", { messageId: ulid(), text: "Finished the sample task." });

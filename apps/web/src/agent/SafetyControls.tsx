@@ -121,8 +121,12 @@ export function SafetyControls({
           <span className="stop-hint">Stop: Ctrl/Cmd + Shift + .</span>
         </div>
       )}
-      {!replaying && taskStalled(agent, now) && (
-        <p role="status">The task heartbeat is late. You can use Stop if you want to contain it.</p>
+      {taskStalled(agent, now) && (
+        <p role="status">
+          {replaying
+            ? "The live task's heartbeat is late. Switch to Watch if you want to stop it."
+            : "The task heartbeat is late. You can use Stop if you want to contain it."}
+        </p>
       )}
       {cell?.fenced && (
         <section className="fenced-recovery" aria-label="Computer recovery">
