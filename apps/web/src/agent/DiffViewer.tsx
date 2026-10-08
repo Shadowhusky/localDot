@@ -100,8 +100,7 @@ export function DiffViewer({
         <p className="diff-empty">No text diff available.</p>
       ) : (
         <>
-          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to scroll the bounded diff. */}
-          <section className="diff-text" tabIndex={0} aria-label="Unified text diff">
+          <section className="diff-text" aria-label="Unified text diff">
             <pre>
               {preview.lines.map((line, index) => {
                 const row = numbered[index];

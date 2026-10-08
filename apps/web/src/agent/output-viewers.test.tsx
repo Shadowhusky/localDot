@@ -48,6 +48,15 @@ describe("non-executing output inspection", () => {
     expect(write.mock.calls[0]?.[0]).not.toContain("hidden");
     expect(write.mock.calls[0]?.[0]).not.toContain("\x1b");
   });
+  it("adds no tab stops for output and diffs that wrap instead of scrolling", () => {
+    const { container } = render(
+      <>
+        <TerminalViewer step={step()} />
+        <DiffViewer change={change("@@ -1 +1 @@\n-old\n+new")} />
+      </>,
+    );
+    expect(container.querySelectorAll("[tabindex]")).toHaveLength(0);
+  });
   it.each([undefined, "", "Binary files a/x and b/x differ", "binary\0patch"])(
     "shows missing or binary diff as unavailable, never as no changes (%s)",
     (patch) => {

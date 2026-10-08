@@ -45,7 +45,6 @@
   margin: 0;
 }
 
-/* Step output sits in a well: mono 12/19, wrapped so the panel never scrolls sideways. */
 .terminal-viewer,
 .diff-viewer {
   display: grid;
@@ -114,12 +113,6 @@
   padding: 0 calc(var(--spacing) * 3);
   color: var(--color-fg-3);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-}
-
-.terminal-text:focus-visible,
-.diff-text:focus-visible {
-  outline: var(--focus-width) solid var(--color-fg-1);
-  outline-offset: var(--focus-offset);
 }
 
 .terminal-foot,

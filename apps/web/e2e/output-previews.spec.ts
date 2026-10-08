@@ -273,8 +273,7 @@ for (const width of [1280, 390]) {
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       "Checked 12 rows\nTotal: 12,480\nCompleted\n",
     );
-    await stdout.focus();
-    await expect(stdout).toBeFocused();
+    expect(await stdout.getAttribute("tabindex")).toBeNull();
     await fits(page);
     await page.screenshot({ path: info.outputPath(`output-${width}-sample.png`) });
     const diff = detail.getByRole("region", { name: "Unified text diff", exact: true });

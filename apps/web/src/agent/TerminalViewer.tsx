@@ -1,4 +1,3 @@
-// biome-ignore-all lint/a11y/noNoninteractiveTabindex: Named scroll regions require keyboard focus so long output can be scrolled.
 import { useMemo } from "react";
 import { Badge } from "../ui/Badge.tsx";
 import type { AgentStep } from "./model.ts";
@@ -13,7 +12,6 @@ const STREAMS = {
 // A command that succeeded still writes warnings and notes to its error stream.
 const NOTES = { ...STREAMS.stderr, name: "Messages", copy: "Copy messages" };
 
-// Read-only: what the step printed, in a well. Error lines carry a rule, not only a colour.
 export function TerminalViewer({ step }: { step: AgentStep }) {
   const display = useMemo(() => {
     const terminal = step.terminal ?? emptyTerminal();
@@ -46,7 +44,7 @@ export function TerminalViewer({ step }: { step: AgentStep }) {
             aria-label={named(stream).name}
           >
             <h4 className="terminal-stream-name">{named(stream).name}</h4>
-            <section className="terminal-text" tabIndex={0} aria-label={named(stream).region}>
+            <section className="terminal-text" aria-label={named(stream).region}>
               <pre>{display[stream].text}</pre>
             </section>
           </section>
