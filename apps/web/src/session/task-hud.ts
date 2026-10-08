@@ -166,6 +166,8 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (facts?.pause === "pausing")
     return running("pausing", "Pausing after this step", "Pausing after this step.", acting);
   if (facts?.pause === "resuming") return running("resuming", "Resuming…", "Resuming…", false);
+  if (facts?.pause === "uncertain")
+    return waiting("paused", "Pause unconfirmed", "Pause is unconfirmed.");
   if (facts?.pause) return waiting("paused", "Paused", "Paused.");
 
   const at = agentStateAt(model, nowMs);

@@ -66,7 +66,7 @@ function view(events: LocalDotEvent[], nowMs: number, hud: HudState = live) {
   const task = taskHud(foldEvents(emptyModel(), events), nowMs, facts(events));
   return { task, merged: mergeHud(hud, task) };
 }
-const pause = (phase: "pausing" | "paused") => ({
+const pause = (phase: "pausing" | "paused" | "resuming" | "uncertain") => ({
   revision: 1,
   pause: {
     requestId: ID,
@@ -216,6 +216,16 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     ];
     expect(replay(budget, 8000)).toMatchObject({ row: "recovery", control: false });
     expect(replay(budget, 9100)).toMatchObject({ row: "working", control: true });
+  });
+
+  it("names the Pause's resuming and unconfirmed phases", () => {
+    expect(
+      view([...typed(), ev("safety.pause", 1100, pause("resuming"))], 9500).merged,
+    ).toMatchObject({ label: "Resuming…", control: false, elapsedS: 9, stop: true });
+    expect(view([...typed(), ev("safety.pause", 1100, pause("uncertain"))], 9500)).toMatchObject({
+      task: { row: "paused", phase: "waiting", label: "Pause unconfirmed" },
+      merged: { stop: true, control: false, elapsedS: null },
+    });
   });
 
   it("names a budget pause and shows no clock", () => {
