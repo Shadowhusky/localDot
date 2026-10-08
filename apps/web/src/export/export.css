@@ -52,10 +52,12 @@
   gap: calc(var(--spacing) * 1.5);
 }
 
-/* The chosen range, bracketed on the whole recording the way the scrubber marks a selection. */
+/* The chosen range, bracketed on the whole recording the way the scrubber marks a selection. The
+   band and its brackets span the track and move by translate and scale, as the played bar does. */
 .export-range-track {
   position: relative;
   height: calc(var(--spacing) * 3);
+  overflow: clip;
 }
 
 .export-range-track::before {
@@ -69,18 +71,45 @@
   translate: 0 -50%;
 }
 
+.export-range-chosen,
+.export-range-edge {
+  position: absolute;
+  inset: 0;
+  translate: calc(var(--_from) * 100%) 0;
+  transition: translate var(--dur-spring) var(--ease-spring);
+}
+
 .export-range-chosen {
+  background-color: var(--color-state-selected);
+  transform-origin: left;
+  scale: calc(var(--_to) - var(--_from)) 1;
+  transition:
+    translate var(--dur-spring) var(--ease-spring),
+    scale var(--dur-spring) var(--ease-spring);
+}
+
+/* Ends a track's width before its mark, so a range to the end never leaves it wholly outside the
+   track, where browsers skip painting it. */
+.export-range-edge[data-end] {
+  translate: calc((var(--_to) - 1) * 100%) 0;
+}
+
+.export-range-edge::before {
+  content: "";
   position: absolute;
   inset-block: 0;
-  left: calc(var(--_from) * 100%);
-  right: calc((1 - var(--_to)) * 100%);
-  min-width: calc(var(--spacing) * 2);
-  border-inline: 2px solid var(--color-fg-2);
-  border-radius: var(--radius-xs);
-  background-color: var(--color-state-selected);
-  transition:
-    left var(--dur-spring) var(--ease-spring),
-    right var(--dur-spring) var(--ease-spring);
+  left: 0;
+  width: var(--spacing);
+  border-left: 2px solid var(--color-fg-2);
+  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
+}
+
+.export-range-edge[data-end]::before {
+  right: 0;
+  left: auto;
+  border-right: 2px solid var(--color-fg-2);
+  border-left: 0;
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
 }
 
 .export-range-label,
@@ -211,7 +240,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .export-range-chosen {
+  .export-range-chosen,
+  .export-range-edge {
     transition: none;
   }
 }

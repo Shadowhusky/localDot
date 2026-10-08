@@ -204,16 +204,14 @@ export function ExportPopover({
         </span>
       </div>
       <div className="export-range">
-        <span className="export-range-track" aria-hidden="true">
-          <span
-            className="export-range-chosen"
-            style={
-              {
-                "--_from": share(chosen.fromMs),
-                "--_to": share(chosen.toMs),
-              } as CSSProperties
-            }
-          />
+        <span
+          className="export-range-track"
+          aria-hidden="true"
+          style={{ "--_from": share(chosen.fromMs), "--_to": share(chosen.toMs) } as CSSProperties}
+        >
+          <span className="export-range-chosen" />
+          <span className="export-range-edge" />
+          <span className="export-range-edge" data-end="" />
         </span>
         <span className="export-range-label num">
           {timeLabel(chosen.fromMs)} – {timeLabel(chosen.toMs)}
