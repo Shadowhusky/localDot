@@ -798,6 +798,23 @@ async function approvedClick(f: ReturnType<typeof setup>, label: string) {
 async function threeKeys(f: ReturnType<typeof setup>) {
   for (let i = 0; i < 3; i++) await f.call("computer", repeatedKey);
 }
+let frames = 0;
+function screenChanges(f: ReturnType<typeof setup>) {
+  f.fake.script.settle = () => ({
+    changed: [{ x: 10, y: 10, w: 40, h: 20 }],
+    lastChangeMono: 50_100,
+    quiet: true,
+    noVisibleChange: false,
+  });
+  f.fake.script.observe = () => ({
+    frameId: ulid(),
+    width: 1280,
+    height: 800,
+    image: Buffer.from(`frame ${frames++}`).toString("base64"),
+    pointer: { x: 0, y: 0 },
+    windows: [],
+  });
+}
 describe("repeat safety at actual native dispatch", () => {
   it("third identical key that changed nothing pauses after exactly two physical effects", async () => {
     const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
@@ -829,6 +846,33 @@ describe("repeat safety at actual native dispatch", () => {
       pause: true,
     });
     await controller.settled();
+  });
+  it("identical inputs that change the screen each time never pause", async () => {
+    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    repeatController(f);
+    screenChanges(f);
+    for (let i = 0; i < 5; i++)
+      expect((await f.call("computer", { ...repeatedKey, repeat: 5 })).body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(5);
+    expect(f.session.safetyPause).toBeUndefined();
+  });
+  it("a frame identical to the one before the input counts as no change", async () => {
+    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const controller = repeatController(f);
+    screenChanges(f);
+    f.fake.script.observe = () => ({
+      frameId: ulid(),
+      width: 1280,
+      height: 800,
+      image: Buffer.from("the same pixels").toString("base64"),
+      pointer: { x: 0, y: 0 },
+      windows: [],
+    });
+    await f.call("computer", { action: "screenshot" });
+    await threeKeys(f);
+    expect(f.effects()).toHaveLength(2);
+    await controller.settled();
+    expect(f.session.safetyPause?.reason).toBe("repeated_action");
   });
   it("third click still pauses when model labels, call IDs and frame IDs change", async () => {
     const f = setup();

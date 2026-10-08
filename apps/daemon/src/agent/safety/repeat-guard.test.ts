@@ -100,6 +100,52 @@ describe("private actual native action repetition", () => {
     expect(guard.admit(key, value)).toBe(true);
     expect(guard.admit(key, identity)).toBe(true);
   });
+  it("counts an identical input only after one that changed nothing on the screen", () => {
+    const guard = new RepeatGuard();
+    for (let i = 0; i < 6; i++) {
+      expect(guard.admit(key, identity)).toBe(true);
+      guard.settle(true);
+    }
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(false);
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(false);
+    expect(guard.admit(key, identity)).toBe(false);
+  });
+  it("pauses on the third identical input when the two before it had no effect", () => {
+    const guard = new RepeatGuard();
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(false);
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(false);
+    expect(guard.admit(key, identity)).toBe(false);
+  });
+  it("a visible change between no-effect inputs restarts the count", () => {
+    const guard = new RepeatGuard();
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(false);
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(true);
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(false);
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(false);
+    expect(guard.admit(key, identity)).toBe(false);
+  });
+  it("an input whose effect never arrived counts as one without effect", () => {
+    const guard = new RepeatGuard();
+    expect(guard.admit(key, identity)).toBe(true);
+    guard.settle(true);
+    expect(guard.admit(key, identity)).toBe(true);
+    expect(guard.admit(key, identity)).toBe(true);
+    expect(guard.admit(key, identity)).toBe(false);
+  });
+  it("a repeated or held combo is the same input as its single press", () => {
+    const guard = new RepeatGuard();
+    expect(guard.admit({ ...key, repeat: 5 }, identity)).toBe(true);
+    expect(guard.admit({ ...key, repeat: 3 }, identity)).toBe(true);
+    expect(guard.admit({ ...key, holdMs: 500 }, identity)).toBe(false);
+  });
   it("an explicit owner reset is the positive Resume boundary", () => {
     const guard = new RepeatGuard();
     expect(guard.admit(key, identity)).toBe(true);

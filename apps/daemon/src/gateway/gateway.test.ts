@@ -762,12 +762,28 @@ describe("ActionGateway keyboard", () => {
       ...(signal ? { signal } : {}),
       authorizeAgent: vi.fn(async () => ({ consume: () => true })),
       beforeEffect: vi.fn(() => true),
+      afterEffect: vi.fn(),
     };
   }
   const inputs = (s: ReturnType<typeof setup>) =>
     s.fake.calls
       .filter((c) => c.path === "/input")
       .map((c) => (c.body as { input: unknown }).input);
+  let frames = 0;
+  const frame = (image = `frame ${frames++}`) => ({
+    frameId: ulid(),
+    width: 1280,
+    height: 800,
+    image: Buffer.from(image).toString("base64"),
+    pointer: { x: 0, y: 0 },
+    windows: [],
+  });
+  const settled = (noVisibleChange: boolean) => ({
+    changed: noVisibleChange ? [] : [{ x: 10, y: 10, w: 40, h: 20 }],
+    lastChangeMono: noVisibleChange ? null : 50_100,
+    quiet: true,
+    noVisibleChange,
+  });
 
   it("presses a repeated combo as one input, under one approval and one admission", async () => {
     const s = setup({ focused: () => search() });
@@ -818,6 +834,16 @@ describe("ActionGateway keyboard", () => {
     const outcome = await s.gateway.run(agentCtx(s), { verb: "key", combo: ["ctrl", "a"] });
     expect(outcome.ok).toBe(false);
     expect(s.fake.calls.map((c) => c.path).slice(-2)).toEqual(["/input", "/release"]);
+  });
+
+  it("counts a frame identical to the one before the input as no change", async () => {
+    const s = setup({ focused: () => search(), observe: () => frame("the same pixels") });
+    const ctx = agentCtx(s);
+    s.fake.script.settle = () => settled(false);
+    await s.gateway.observe(ctx);
+    const outcome = await s.gateway.run(ctx, { verb: "key", combo: ["ctrl", "a"] });
+    expect(outcome).toMatchObject({ ok: true, changed: false });
+    expect(ctx.afterEffect.mock.calls).toEqual([[false]]);
   });
 });
 

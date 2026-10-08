@@ -136,6 +136,7 @@ export async function computerTool(
     ...(hold ? { signal: hold.signal } : {}),
     source: "agent",
     beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
+    afterEffect: (changed) => session.settleNativeEffect(changed),
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();

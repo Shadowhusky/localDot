@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   clipText,
@@ -106,6 +107,8 @@ export interface ActionContext {
   authorizeAgent?(request: NativeActionRequest): Promise<NativeActionPermit | undefined>;
   // Private daemon callback at the last synchronous boundary before physical input.
   beforeEffect?(action: GuiAction, identity: NativeActionIdentity): boolean;
+  // The admitted input's outcome once it settled: whether the screen changed.
+  afterEffect?(changed: boolean): void;
   sessionId: string;
   cellId: string;
   agent?: string;
@@ -120,6 +123,8 @@ export interface ActionOutcome {
   target?: Target;
   error?: string;
   cancelled?: "preflight" | "user" | "timeout" | "stale";
+  // Settle saw a change and the result frame differs from the frame before the input.
+  changed?: boolean;
 }
 
 export interface GatewayDeps {
@@ -157,7 +162,7 @@ export class ActionGateway {
   // Each screen's newest frame: its desktopd keeps that frame's device-resolution pixels.
   readonly #lastFrame = new Map<
     string,
-    { frameId: string; sessionId: string; device: NativeDevice }
+    { frameId: string; sessionId: string; device: NativeDevice; digest: string }
   >();
 
   constructor(private readonly deps: GatewayDeps) {}
@@ -172,10 +177,16 @@ export class ActionGateway {
     const d = await this.#ready(ctx);
     const o = await d.client.observe(ctx.signal);
     this.#check(ctx);
-    this.deps.frames.save(ctx.sessionId, o.frameId, Buffer.from(o.image, "base64"));
+    const image = Buffer.from(o.image, "base64");
+    this.deps.frames.save(ctx.sessionId, o.frameId, image);
     this.#append(ctx, "observe", { frameId: o.frameId, width: o.width, height: o.height });
     this.#cursor.set(ctx.cellId, o.pointer);
-    this.#lastFrame.set(ctx.cellId, { frameId: o.frameId, sessionId: ctx.sessionId, device: d });
+    this.#lastFrame.set(ctx.cellId, {
+      frameId: o.frameId,
+      sessionId: ctx.sessionId,
+      device: d,
+      digest: createHash("sha256").update(image).digest("hex"),
+    });
     return { frameId: o.frameId, pointer: o.pointer };
   }
 
@@ -334,7 +345,7 @@ export class ActionGateway {
       if (r.target && !ended) this.#append(ctx, "action.target", { target: clipTarget(r.target) });
       return r;
     });
-    let frameId: string;
+    let result: { frameId: string; changed: boolean };
     try {
       const pressAtMs =
         speed === "instant" ? startsAt + INSTANT_LEAD_MS : startsAt + durationMs + dwellMs(speed);
@@ -376,12 +387,12 @@ export class ActionGateway {
       });
       this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
       this.#cursor.set(ctx.cellId, point);
-      frameId = await this.#finish(ctx, d, verb);
+      result = await this.#finish(ctx, d, verb);
     } finally {
       ended = true;
     }
     const outcome = await targetKnown;
-    return { ok: true, frameId, ...(outcome.target ? { target: outcome.target } : {}) };
+    return { ok: true, ...result, ...(outcome.target ? { target: outcome.target } : {}) };
   }
 
   async #typeAction(
@@ -464,8 +475,8 @@ export class ActionGateway {
       ctx.signal,
     );
     if (result.count === 0) throw new Cancelled("timeout", "nothing was typed");
-    const frameId = await this.#finish(ctx, d, "type");
-    return { ok: true, frameId, ...(identity.target ? { target: identity.target } : {}) };
+    const settled = await this.#finish(ctx, d, "type");
+    return { ok: true, ...settled, ...(identity.target ? { target: identity.target } : {}) };
   }
 
   async #keyAction(
@@ -527,8 +538,8 @@ export class ActionGateway {
       scale,
     });
     this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
-    const frameId = await this.#finish(ctx, d, "key");
-    return { ok: true, frameId };
+    const settled = await this.#finish(ctx, d, "key");
+    return { ok: true, ...settled };
   }
 
   // The element under a point, or keyboard focus without one. A lookup that failed or ran out of
@@ -601,13 +612,15 @@ export class ActionGateway {
       );
   }
 
-  // settle → observe → result; returns this action's own frame, never a concurrent action's.
+  // settle → observe → result; returns this action's own frame, never a concurrent action's, and
+  // whether the screen changed: settle saw a change and the frame differs from the one before.
   async #finish(
     ctx: ActionContext,
     d: NativeDevice,
     verb: keyof typeof SETTLE_FIRST_MS,
-  ): Promise<string> {
+  ): Promise<{ frameId: string; changed: boolean }> {
     this.#check(ctx);
+    const before = this.#lastFrame.get(ctx.cellId)?.digest;
     const s = await d.client.settle({
       verb,
       quietMs: SETTLE_QUIET_MS,
@@ -624,8 +637,10 @@ export class ActionGateway {
       noVisibleChange: s.noVisibleChange,
     });
     const o = await this.observe(ctx);
+    const changed = !s.noVisibleChange && this.#lastFrame.get(ctx.cellId)?.digest !== before;
+    ctx.afterEffect?.(changed);
     this.#append(ctx, "action.result", { ok: true });
-    return o.frameId;
+    return { frameId: o.frameId, changed };
   }
 
   #fail(ctx: ActionContext, err: unknown, dispatched: boolean): ActionOutcome {
