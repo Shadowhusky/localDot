@@ -1,6 +1,7 @@
 import { simulateReadableStream } from "ai";
 import { MockLanguageModelV4 } from "ai/test";
 import sharp from "sharp";
+import { calls, say } from "../../../../../cells/brain/src/testing/scripted.ts";
 
 type LanguageModelV4Prompt = Parameters<MockLanguageModelV4["doStream"]>[0]["prompt"];
 
@@ -96,13 +97,11 @@ function lastResults(prompt: LanguageModelV4Prompt): ToolOutcome[] {
   return [];
 }
 
-const usage = {
-  inputTokens: { total: 0, noCache: 0, cacheRead: undefined, cacheWrite: undefined },
-  outputTokens: { total: 0, text: 0, reasoning: undefined },
-};
+const NOTHING_LEFT = "No further steps.";
 
 // A model whose every turn is the policy's answer to what it was just shown: the newest
-// screenshot, the previous turn's tool results and the desktop's window list at that frame.
+// screenshot, the previous turn's tool results and the desktop's window list at that frame. A
+// summary request gets the same plain answer as a turn with no call.
 export function oracleModel(policy: Policy, facts: () => DesktopFacts) {
   let turn = 0;
   const seen: OracleView[] = [];
@@ -115,25 +114,21 @@ export function oracleModel(policy: Policy, facts: () => DesktopFacts) {
         ...facts(),
       };
       seen.push({ ...view, frame: undefined });
-      const calls = await policy(view);
-      const chunks: Record<string, unknown>[] = calls.length
-        ? [
-            ...calls.map(([toolName, input], i) => ({
-              type: "tool-call",
-              toolCallId: `oracle-${view.turn}-${i}`,
-              toolName,
-              input: JSON.stringify(input),
-            })),
-            { type: "finish", finishReason: { unified: "tool-calls", raw: undefined }, usage },
-          ]
-        : [
-            { type: "text-start", id: "t" },
-            { type: "text-delta", id: "t", delta: "No further steps." },
-            { type: "text-end", id: "t" },
-            { type: "finish", finishReason: { unified: "stop", raw: undefined }, usage },
-          ];
+      const picked = await policy(view);
+      const chunks = picked.length
+        ? calls(...picked.map(([name, input]): [string, unknown] => [name, input]))
+        : say(NOTHING_LEFT);
       return { stream: simulateReadableStream({ chunks: chunks as never[] }) };
     },
+    doGenerate: async () => ({
+      content: [{ type: "text", text: NOTHING_LEFT }],
+      finishReason: { unified: "stop", raw: undefined },
+      usage: {
+        inputTokens: { total: 0, noCache: 0, cacheRead: undefined, cacheWrite: undefined },
+        outputTokens: { total: 0, text: 0, reasoning: undefined },
+      },
+      warnings: [],
+    }),
   });
   return { model, seen };
 }
