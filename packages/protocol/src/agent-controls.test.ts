@@ -70,3 +70,17 @@ it("rejects invalid ceilings and exposes only a strict frozen model identity wit
   ])
     expect(TaskModelSelection.safeParse(value).success).toBe(false);
 });
+
+it("marks a task whose models all run on a plan or this Mac, and nothing else", () => {
+  const roles = [{ role: "main", provider: "minimax-coding-plan", model: "MiniMax-M3" }];
+  expect(TaskModelSelection.parse({ kind: "api", roles, plan: true })).toEqual({
+    kind: "api",
+    roles,
+    plan: true,
+  });
+  for (const plan of [false, null, "yes"])
+    expect(TaskModelSelection.safeParse({ kind: "api", roles, plan }).success).toBe(false);
+  expect(
+    TaskModelSelection.safeParse({ kind: "chatgpt", model: "fixture", plan: true }).success,
+  ).toBe(false);
+});

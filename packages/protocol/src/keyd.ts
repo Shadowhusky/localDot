@@ -222,15 +222,30 @@ export const TaskPricingModel = KeydRouteModel.extend({
   maxOutputTokens: z.number().int().min(1).max(100_000_000),
 }).strict();
 export type TaskPricingModel = z.infer<typeof TaskPricingModel>;
+// A flat route is a plan the provider bills at a flat rate: it states no price, and keyd runs its
+// $0 models there only.
 export const TaskPricingRoute = z
   .object({
     route: z.string().regex(SECRET_ID_PATTERN),
+    flat: z.literal(true).optional(),
     models: z.array(TaskPricingModel).min(1).max(64),
   })
   .strict()
   .refine(
     (r) => new Set(r.models.map((m) => m.id)).size === r.models.length,
     "duplicate task model",
+  )
+  .refine(
+    (r) =>
+      !r.flat ||
+      r.models.every(
+        (m) =>
+          m.inputUSDPerMTok === 0 &&
+          m.outputUSDPerMTok === 0 &&
+          m.cacheReadUSDPerMTok === undefined &&
+          m.cacheWriteUSDPerMTok === undefined,
+      ),
+    "a flat route states no price",
   );
 export type TaskPricingRoute = z.infer<typeof TaskPricingRoute>;
 export const TaskPricing = z
