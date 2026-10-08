@@ -80,6 +80,12 @@
     rotate: 0deg;
   }
 
+  @media (prefers-reduced-motion: reduce) {
+    summary::before {
+      transition: none;
+    }
+  }
+
   input[type="number"] {
     appearance: textfield;
   }

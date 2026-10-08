@@ -4,6 +4,7 @@ import { readSource } from "../testing/read-source.ts";
 import { cssBlocks } from "../testing/tokens.ts";
 
 const SRC = new URL("../", import.meta.url);
+const baseCss = await readSource(new URL("./base.css", import.meta.url));
 const stylesheets = (await readdir(SRC, { recursive: true }))
   .filter((path) => path.endsWith(".css") && !path.includes("_spike") && !path.startsWith("ui/"))
   .sort();
@@ -21,5 +22,23 @@ describe("base layer", () => {
     }
     expect(stylesheets).toContain("agent/usage.css");
     expect(unweighted).toEqual([]);
+  });
+
+  it("stops every base transition that moves something when the viewer asks for less motion", () => {
+    const blocks = cssBlocks(baseCss);
+    const moving = blocks
+      .filter(
+        ({ media, body }) => !media.length && /transition\s*:\s*(?!opacity\b|none\b)\w/.test(body),
+      )
+      .map(({ selector }) => selector);
+    const still = blocks
+      .filter(
+        ({ media, body }) =>
+          media.some((m) => m.includes("prefers-reduced-motion: reduce")) &&
+          /transition\s*:\s*none/.test(body),
+      )
+      .flatMap(({ selector }) => selector.split(",").map((s) => s.trim()));
+    expect(moving).toContain("summary::before");
+    expect(moving.filter((selector) => !still.includes(selector))).toEqual([]);
   });
 });
