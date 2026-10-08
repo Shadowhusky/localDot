@@ -67,7 +67,7 @@ function onKeyDown(event: KeyboardEvent) {
     top.escape();
     return;
   }
-  if (event.key !== "Tab") return;
+  if (event.key !== "Tab" || event.defaultPrevented) return;
   direction = event.shiftKey ? -1 : 1;
   const index = trapping();
   const entry = stack[index];
@@ -133,10 +133,6 @@ export function pushLayer(entry: LayerEntry): () => void {
     if (index >= 0) stack.splice(index, 1);
     notify();
   };
-}
-
-export function isTopmost(entry: LayerEntry): boolean {
-  return stack.at(-1) === entry;
 }
 
 // True while a modal layer is open above this one: the layer below is pushed back.
