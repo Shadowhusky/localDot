@@ -340,6 +340,18 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(past("Hold Shift for 1.5 s")).toBe("Held Shift for 1.5 s");
     expect(progressive("Press ] 5 times")).toBe("Pressing ] 5 times");
     expect(past("Press ] 5 times")).toBe("Pressed ] 5 times");
+    expect(progressive('Drag "report.txt" to "Trash"')).toBe('Dragging "report.txt" to "Trash"');
+    expect(past('Drag "report.txt" to "Trash"')).toBe('Dragged "report.txt" to "Trash"');
+    expect(progressive("Move to (40, 60)")).toBe("Moving to (40, 60)");
+    expect(past("Move to (40, 60)")).toBe("Moved to (40, 60)");
+    expect(progressive("Hold down the left button at (7, 8)")).toBe(
+      "Holding down the left button at (7, 8)",
+    );
+    expect(past("Hold down the left button at (7, 8)")).toBe("Held down the left button at (7, 8)");
+    expect(progressive("Release the left button at (7, 8)")).toBe(
+      "Releasing the left button at (7, 8)",
+    );
+    expect(past("Release the left button at (7, 8)")).toBe("Released the left button at (7, 8)");
   });
 
   it("keeps the frozen computer authoritative over any task verdict", () => {

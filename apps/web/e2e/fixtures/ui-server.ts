@@ -30,7 +30,7 @@ import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
 import { FrameStore } from "../../../daemon/src/gateway/frames.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
-import { keyLabel } from "../../../daemon/src/gateway/text.ts";
+import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src/gateway/text.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
@@ -833,10 +833,27 @@ const KEY_CARDS: Record<string, [string, string][]> = {
     ["Hold", "3 s (repeats while held)"],
   ],
 };
+// A drag approval as the daemon builds it (?kind=drag): a file dropped on Trash is a delete.
+const DRAG_CARD = {
+  actionClass: "delete",
+  risk: "high",
+  title: "Delete item",
+  fields: [
+    ["Target", "report.txt"],
+    ["Drop target", "Trash"],
+    ["Tool", "computer"],
+    ["Action", "drag"],
+    ["Keys held", "shift"],
+    ["Drag", "(214, 180) to (1180, 640)"],
+    ["Path", "5 points"],
+    ["Button", "left"],
+  ],
+};
 app.post("/__qa/approval", (c) => {
   if (!session?.generation) return c.text("no brain", 409);
   const risk = (c.req.query("risk") ?? "high") as "medium" | "high";
-  const keys = KEY_CARDS[c.req.query("kind") ?? ""];
+  const kind = c.req.query("kind") ?? "";
+  const keys = KEY_CARDS[kind];
   const controller = new AbortController();
   pendingApprovals.push(controller);
   void session
@@ -849,18 +866,20 @@ app.post("/__qa/approval", (c) => {
         digest: "d".repeat(64),
         targetDigest: "t".repeat(64),
       } as never,
-      (keys
-        ? { actionClass: "unknown", risk: "medium", title: "Review action", fields: keys }
-        : {
-            actionClass: "send",
-            risk,
-            title: "Send the monthly report to team@example.test",
-            fields: [
-              ["To", "team@example.test"],
-              ["Subject", "Monthly report (sample)"],
-              ["Attachment", "summary.md"],
-            ],
-          }) as never,
+      (kind === "drag"
+        ? DRAG_CARD
+        : keys
+          ? { actionClass: "unknown", risk: "medium", title: "Review action", fields: keys }
+          : {
+              actionClass: "send",
+              risk,
+              title: "Send the monthly report to team@example.test",
+              fields: [
+                ["To", "team@example.test"],
+                ["Subject", "Monthly report (sample)"],
+                ["Attachment", "summary.md"],
+              ],
+            }) as never,
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
@@ -888,6 +907,49 @@ app.post("/__qa/keys", (c) => {
       { input: { kind: "key", combo, ...how }, pressT: 0, ringAt: 0, injector: "xtest" },
       step,
     );
+    session.append("action.result", error ? { ok: false, error } : { ok: true }, step);
+    session.append("step.end", { status: error ? "failed" : "ok" }, step);
+  }
+  return c.json({ ok: true });
+});
+// Pointer steps with the gateway's own labels: a file dragged onto Trash, a hover, a button held
+// down and released, and a drag stopped before its drop (delivered, then failed).
+app.post("/__qa/pointer", (c) => {
+  if (!session) return c.text("no session", 409);
+  const report = { point: { x: 428, y: 360 }, source: "ax" as const, name: "report.txt" };
+  const trash = { point: { x: 2360, y: 1280 }, source: "ax" as const, name: "Trash" };
+  const at = (x: number, y: number) => ({ x, y });
+  for (const [verb, label, input, error] of [
+    [
+      "drag",
+      dragLabel({ target: report, point: report.point }, { target: trash, point: trash.point }),
+      { kind: "drag", from: report.point, to: trash.point, button: "left", durationMs: 600 },
+      undefined,
+    ],
+    ["move", moveLabel(null, at(1280, 640)), { kind: "move", to: at(1280, 640) }, undefined],
+    [
+      "click",
+      buttonLabel("down", "left", null, at(1280, 640)),
+      { kind: "down", button: "left", at: at(1280, 640) },
+      undefined,
+    ],
+    [
+      "click",
+      buttonLabel("up", "left", null, at(1800, 840)),
+      { kind: "up", button: "left", at: at(1800, 840) },
+      undefined,
+    ],
+    [
+      "drag",
+      dragLabel({ target: null, point: at(300, 900) }, { target: null, point: at(1900, 300) }),
+      { kind: "drag", from: at(300, 900), to: at(1900, 300), button: "left", durationMs: 900 },
+      "another window is at the drop point now; the drag let go where it started",
+    ],
+  ] as const) {
+    const step = ulid();
+    session.append("step.start", { kind: "gui", planItem: "calc" }, step);
+    session.append("action.intent", { verb, label, risk: "none" }, step);
+    session.append("action.dispatch", { input, pressT: 0, ringAt: 0, injector: "xtest" }, step);
     session.append("action.result", error ? { ok: false, error } : { ok: true }, step);
     session.append("step.end", { status: error ? "failed" : "ok" }, step);
   }
