@@ -59,6 +59,12 @@
   --color-hairline: rgba(255, 255, 255, 0.07);
   --color-field-line: #6b6e75;
   --color-field-line-hover: #83868b;
+  /* A field's fill inside its field-line edge, the ring it wears while focused, and the sunken track
+     of a segmented control or switch. */
+  --color-field: rgba(255, 255, 255, 0.04);
+  --color-field-ring: rgba(255, 255, 255, 0.08);
+  --color-track: rgba(255, 255, 255, 0.05);
+  --color-scrollbar: rgba(255, 255, 255, 0.16);
 
   /* Xenon means "dot has control" and nothing else. Attention is a dot or a 1 px rim, never a fill. */
   --color-xenon: #3fb5de;
@@ -99,6 +105,8 @@
     inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.6),
     0 6px 16px rgba(0, 0, 0, 0.35);
   --shadow-overlay: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 64px rgba(0, 0, 0, 0.55);
+  /* A small part that slides inside a track: a segmented control's thumb, a switch's knob. */
+  --shadow-thumb: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 3px rgba(0, 0, 0, 0.45);
   --shadow-stage: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
 
   --focus-width: 2px;
@@ -211,6 +219,7 @@
     :root,
     :root[data-appearance="midnight"] {
       --color-hairline: var(--color-field-line);
+      --color-field-ring: rgba(255, 255, 255, 0.24);
       --color-fg-2: #c4c7cd;
       --color-fg-3: #a6a9b0;
       --color-hud: var(--color-hud-solid);

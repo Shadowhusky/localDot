@@ -325,11 +325,11 @@ export function ActivityRail({
                 <div className="activity-steps-head">
                   <h3 id={`${domId}-steps`}>Steps</h3>
                   <SegmentedControl
-                    label="Activity filter"
+                    aria-label="Activity filter"
                     size={24}
                     items={FILTERS}
                     value={filter}
-                    onChange={setFilter}
+                    onValueChange={(value) => setFilter(value as ActivityFilter)}
                   />
                 </div>
                 {page.hasOlder && (

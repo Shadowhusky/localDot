@@ -6,7 +6,6 @@ import { Collapse, Disclosure } from "./Disclosure.tsx";
 import { Meter } from "./Meter.tsx";
 import { Popover } from "./Popover.tsx";
 import { ScrollArea } from "./ScrollArea.tsx";
-import { SegmentedControl } from "./SegmentedControl.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
 
 afterEach(() => {
@@ -78,42 +77,6 @@ describe("Disclosure", () => {
     expect(collapse.hasAttribute("data-settled")).toBe(true);
     rerender(<Collapse open={false}>content</Collapse>);
     expect(collapse.hasAttribute("data-settled")).toBe(false);
-  });
-});
-
-function Segments() {
-  const [value, setValue] = useState<"all" | "screen" | "tools">("all");
-  return (
-    <SegmentedControl
-      label="Filter"
-      value={value}
-      onChange={setValue}
-      items={[
-        { value: "all", label: "All" },
-        { value: "screen", label: "Screen" },
-        { value: "tools", label: "Tools" },
-      ]}
-    />
-  );
-}
-
-describe("SegmentedControl", () => {
-  it("is one tab stop whose arrows, Home and End move the choice and focus together", () => {
-    render(<Segments />);
-    const [all, screenItem, tools] = screen.getAllByRole("radio") as HTMLElement[];
-    expect([all, screenItem, tools].map((item) => item?.tabIndex)).toEqual([0, -1, -1]);
-    all?.focus();
-    fireEvent.keyDown(all as HTMLElement, { key: "ArrowRight" });
-    expect(screenItem?.getAttribute("aria-checked")).toBe("true");
-    expect(document.activeElement).toBe(screenItem);
-    fireEvent.keyDown(screenItem as HTMLElement, { key: "End" });
-    expect(document.activeElement).toBe(tools);
-    fireEvent.keyDown(tools as HTMLElement, { key: "ArrowRight" });
-    expect(all?.getAttribute("aria-checked")).toBe("true");
-    const group = screen.getByRole("radiogroup", { name: "Filter" });
-    expect(group.style.getPropertyValue("--_index")).toBe("0");
-    fireEvent.click(tools as HTMLElement);
-    expect(group.style.getPropertyValue("--_index")).toBe("2");
   });
 });
 

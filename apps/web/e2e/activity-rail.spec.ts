@@ -105,7 +105,7 @@ for (const [engine, size, options] of MATRIX) {
     ).toEqual([]);
     if (size === "phone")
       for (const target of await rail
-        .locator(".activity-row-head, .ui-disclosure-trigger, .ui-segmented-item")
+        .locator(".activity-row-head, .ui-disclosure-trigger, .ui-segment")
         .all()) {
         const box = await target.boundingBox();
         if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);

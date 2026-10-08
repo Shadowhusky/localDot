@@ -6,8 +6,10 @@ import { ICONS, type IconName } from "./icons.ts";
 
 afterEach(cleanup);
 
-// The set the UI plan names (§4.2), so later screens can count on each one.
+// The set the UI plan names (§4.2), so later screens can count on each one, plus the kit's own:
+// search, for the Combobox's search field.
 const PLANNED: IconName[] = [
+  "search",
   "check",
   "x",
   "chevron-right",

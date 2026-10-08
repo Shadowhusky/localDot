@@ -160,78 +160,6 @@
     outline-offset: calc(var(--focus-width) * -1);
   }
 
-  .ui-segmented {
-    --_h: calc(var(--spacing) * 7);
-    position: relative;
-    isolation: isolate;
-    display: inline-grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 1fr;
-    height: var(--_h);
-    padding: 2px;
-    border-radius: var(--radius-md);
-    background-color: var(--color-state-hover);
-  }
-
-  .ui-segmented[data-size="24"] {
-    --_h: calc(var(--spacing) * 6);
-  }
-
-  .ui-segmented-thumb {
-    position: absolute;
-    z-index: -1;
-    top: 2px;
-    bottom: 2px;
-    left: 2px;
-    width: calc((100% - 4px) / var(--_count));
-    border-radius: var(--radius-sm);
-    background-color: var(--color-raised-2);
-    box-shadow: var(--shadow-edge);
-    translate: calc(var(--_index) * 100%) 0;
-    transition: translate var(--dur-spring) var(--ease-spring);
-  }
-
-  .ui-segmented-item {
-    position: relative;
-    min-width: 0;
-    padding: 0 calc(var(--spacing) * 2.5);
-    border: 0;
-    border-radius: var(--radius-sm);
-    background: none;
-    color: var(--color-fg-2);
-    font:
-      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
-      var(--font-ui);
-    white-space: nowrap;
-    user-select: none;
-    touch-action: manipulation;
-    -webkit-tap-highlight-color: transparent;
-    transform: none;
-    transition:
-      color var(--dur-hover) var(--ease-standard),
-      scale var(--dur-exit) var(--ease-enter);
-  }
-
-  .ui-segmented-item[aria-checked="true"] {
-    color: var(--color-fg-1);
-  }
-
-  @media (hover: hover) {
-    .ui-segmented-item:hover {
-      color: var(--color-fg-1);
-    }
-  }
-
-  .ui-segmented-item[data-pressed] {
-    scale: 0.97;
-    transition-duration: var(--dur-press);
-  }
-
-  .ui-segmented-item:focus-visible {
-    outline: var(--focus-width) solid var(--color-fg-1);
-    outline-offset: 0;
-  }
-
   .ui-popover {
     position: fixed;
     top: 0;
@@ -348,13 +276,6 @@
     .ui-disclosure-trigger {
       min-height: calc(var(--spacing) * 11);
     }
-
-    /* Each segment reaches the full 44 px; the thumb keeps its inset. */
-    .ui-segmented,
-    .ui-segmented[data-size="24"] {
-      --_h: calc(var(--spacing) * 11);
-      padding-block: 0;
-    }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -378,14 +299,6 @@
       transition: none;
     }
 
-    .ui-segmented-thumb {
-      transition: none;
-    }
-
-    .ui-segmented-item[data-pressed] {
-      scale: none;
-    }
-
     .ui-popover,
     .ui-popover[data-closing] {
       scale: none;
@@ -399,10 +312,6 @@
   }
 
   @media (forced-colors: active) {
-    .ui-segmented-thumb {
-      border: 1px solid Highlight;
-    }
-
     .ui-meter {
       border: 1px solid CanvasText;
     }
