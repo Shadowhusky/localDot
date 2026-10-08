@@ -48,6 +48,36 @@ describe("Field", () => {
     expect(container.querySelector(".ui-field-error svg")).not.toBeNull();
   });
 
+  it("keeps a line for an error yet to come, with or without a description", () => {
+    const { container, rerender } = render(
+      <Field label="Key name" error={undefined}>
+        <TextField />
+      </Field>,
+    );
+    const message = container.querySelector(".ui-field-message");
+    expect(message).not.toBeNull();
+    expect(message?.children).toHaveLength(0);
+    rerender(
+      <Field label="Key name" error="Give the key a name">
+        <TextField />
+      </Field>,
+    );
+    expect(container.querySelector(".ui-field-message")).toBe(message);
+    expect(message?.textContent).toBe("Give the key a name");
+    rerender(
+      <Field label="Search keys">
+        <TextField />
+      </Field>,
+    );
+    expect(container.querySelector(".ui-field-message")).toBeNull();
+    rerender(
+      <Field label="Search keys" validates>
+        <TextField />
+      </Field>,
+    );
+    expect(container.querySelector(".ui-field-message")).not.toBeNull();
+  });
+
   it("keeps an unavailable field focusable, read-only and says why", () => {
     const onChange = vi.fn();
     render(

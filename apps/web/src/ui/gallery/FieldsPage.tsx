@@ -84,11 +84,15 @@ function TextFields() {
   const [name, setName] = useState("Quarterly report");
   const [id, setId] = useState("claude sonnet!");
   const [budget, setBudget] = useState("3.00");
+  const [keyName, setKeyName] = useState("Work");
   const problem = /^[\w.:/-]+$/.test(id) ? undefined : "Use letters, digits, dots and dashes";
   return (
     <div className="fields-grid">
       <Field label="Task name" description="Shown in your replays">
         <TextField value={name} onChange={(event) => setName(event.target.value)} />
+      </Field>
+      <Field label="Key name" error={keyName.trim() ? undefined : "Give the key a name"}>
+        <TextField value={keyName} onChange={(event) => setKeyName(event.target.value)} />
       </Field>
       <Field label="Search keys">
         <TextField placeholder="Name or provider" prefix={<Icon name="search" />} />

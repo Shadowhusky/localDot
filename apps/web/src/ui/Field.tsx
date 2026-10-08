@@ -23,20 +23,25 @@ export interface FieldProps {
   label: ReactNode;
   description?: ReactNode;
   error?: ReactNode;
+  // Keeps a line under the control for an error yet to come, so its arrival moves nothing below.
+  // On whenever an error prop is passed, even an empty one.
+  validates?: boolean;
   // Unavailable while set: the control keeps focus, and the reason takes the description's place.
   disabledReason?: string;
   className?: string;
   children: ReactNode;
 }
 
-export function Field({
-  label,
-  description,
-  error,
-  disabledReason,
-  className,
-  children,
-}: FieldProps) {
+export function Field(props: FieldProps) {
+  const {
+    label,
+    description,
+    error,
+    validates = "error" in props,
+    disabledReason,
+    className,
+    children,
+  } = props;
   const id = useId();
   const controlId = `${id}control`;
   const labelId = `${id}label`;
@@ -74,7 +79,7 @@ export function Field({
         {label}
       </label>
       <FieldContext.Provider value={state}>{children}</FieldContext.Provider>
-      {(described || invalid || disabledReason) && (
+      {(described || validates || invalid || disabledReason) && (
         // Every message shares one cell, so swapping the description for an error moves nothing.
         <div className="ui-field-message">
           {described && (

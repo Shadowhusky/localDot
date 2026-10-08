@@ -66,6 +66,15 @@ async function press(locator: Locator, phone: boolean) {
   else await locator.click();
 }
 
+// The top of every field after the one named, so a test can see whether anything below it moved.
+function fieldsBelow(page: Page, label: string) {
+  return page.evaluate((name) => {
+    const fields = [...document.querySelectorAll(".ui-field")];
+    const at = fields.findIndex((field) => field.querySelector("label")?.textContent === name);
+    return fields.slice(at + 1).map((field) => Math.round(field.getBoundingClientRect().y));
+  }, label);
+}
+
 for (const [engine, launch] of Object.entries(ENGINES))
   test.describe(engine, () => {
     let browser: Browser;
@@ -196,6 +205,24 @@ for (const [engine, launch] of Object.entries(ENGINES))
       }
     });
 
+    test("an error under a field without a description moves nothing below it", async () => {
+      for (const options of [DESKTOP, PHONE]) {
+        const { context, page, seen } = await open(browser, options);
+        const name = page.getByRole("textbox", { name: "Key name" });
+        await name.scrollIntoViewIfNeeded();
+        const before = await fieldsBelow(page, "Key name");
+        expect(before.length).toBeGreaterThan(0);
+        await name.fill("");
+        await expect(name).toHaveAccessibleDescription("Give the key a name");
+        expect(await fieldsBelow(page, "Key name")).toEqual(before);
+        await name.fill("Home");
+        await expect(name).not.toHaveAttribute("aria-invalid");
+        expect(await fieldsBelow(page, "Key name")).toEqual(before);
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      }
+    });
+
     test("an unavailable row stays open to read and cannot be chosen", async () => {
       const { context, page, seen } = await open(browser, PHONE);
       const autonomy = picker(page, "Autonomy");
@@ -316,7 +343,8 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const { context, page, seen } = await open(browser, DESKTOP);
       const area = page.getByRole("textbox", { name: "Message" });
       const marker = page.getByTestId("above-message");
-      await area.scrollIntoViewIfNeeded();
+      // With room below it, so the page never scrolls to follow the caret.
+      await marker.evaluate((element) => element.scrollIntoView({ block: "start" }));
       const above = await marker.boundingBox();
       const top = (await area.boundingBox())?.y;
       const heights: number[] = [];

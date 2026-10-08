@@ -16,9 +16,10 @@
   }
 
   /* The description, an error and an unavailable reason share one cell: the tallest sets its height,
-     so swapping one for another never moves what sits below. */
+     so swapping one for another never moves what sits below. Empty, it still holds one line. */
   .ui-field-message {
     display: grid;
+    min-height: var(--text-footnote--line-height);
   }
 
   .ui-field-message > * {
