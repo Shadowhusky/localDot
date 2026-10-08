@@ -318,7 +318,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     setView(view) {
       workerRef.current?.postMessage({ type: "view", view } satisfies WorkerIn);
     },
-    // A theme pack restyles the stage by sending its parsed tokens (the stage reads theme.css once).
+    // A theme pack restyles the stage by sending its parsed tokens (the stage reads tokens once).
     setTheme(theme) {
       workerRef.current?.postMessage({ type: "theme", theme } satisfies WorkerIn);
     },
