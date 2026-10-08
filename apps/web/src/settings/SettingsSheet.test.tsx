@@ -159,6 +159,20 @@ describe("settings inspector", () => {
     view.rerender(<SettingsSheet {...p} dirty={false} />);
     expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
   });
+  it("says when the model list may be out of date, and offers Refresh", () => {
+    const onRefresh = vi.fn();
+    const at = new Date(Date.now() - 5 * 60_000).toISOString();
+    const view = render(
+      <SettingsSheet {...props()} catalog="ready" catalogAt={at} onRefresh={onRefresh} />,
+    );
+    expect(screen.getByText("Model list updated 5 min ago")).toBeTruthy();
+    view.rerender(
+      <SettingsSheet {...props()} catalog="stale" catalogAt={at} onRefresh={onRefresh} />,
+    );
+    expect(screen.getByText("Model list from 5 min ago may be out of date")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(onRefresh).toHaveBeenCalledOnce();
+  });
   it("says in the footer what saving needs, and ties Save's reason to it", () => {
     vi.useFakeTimers();
     const p = props();

@@ -108,6 +108,10 @@ function catalogLine(state: CatalogState, at: string | undefined): string {
       return "The model list can't be reached. Your choices are kept.";
     case "empty":
       return "The model list is empty.";
+    case "stale": {
+      const when = ago(at, Date.now());
+      return when ? `Model list from ${when} may be out of date` : "Model list may be out of date";
+    }
     default: {
       const when = ago(at, Date.now());
       return when ? `Model list updated ${when}` : "Model list ready";
