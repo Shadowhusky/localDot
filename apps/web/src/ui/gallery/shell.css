@@ -31,6 +31,12 @@
     letter-spacing: var(--text-reading--letter-spacing);
   }
 
+  .atoms-navs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 2);
+  }
+
   .atoms-appearance {
     display: flex;
     gap: var(--spacing);
