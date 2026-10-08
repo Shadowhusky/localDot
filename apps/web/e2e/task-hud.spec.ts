@@ -113,6 +113,8 @@ test("Replay after Approve once shows dot back at work, not still waiting", asyn
     await page.keyboard.press("l");
     await expect(time).toHaveText(/^(\d+:\d\d) \/ \1$/, { timeout: 500 });
   }).toPass();
+  // The readout shows whole seconds, so one more 10 s step lands on the very end.
+  await page.keyboard.press("l");
   await expect(replay.locator(".replay-hud strong")).toHaveText(
     /^(Working|Select the Net total cell)$/,
   );
