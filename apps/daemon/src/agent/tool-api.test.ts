@@ -316,6 +316,7 @@ describe("the tools", () => {
 
   it("sends drags, moves, button presses and modifier clicks to the gateway, and refuses malformed ones", async () => {
     const h = toolHarness();
+    const FRAME = ulid();
     const path = [
       { x: 10, y: 20 },
       { x: 30, y: 40 },
@@ -323,7 +324,7 @@ describe("the tools", () => {
     ];
     for (const input of [
       { action: "drag", path, mods: ["shift"], ms: 800 },
-      { action: "move", point: { x: 5, y: 6 } },
+      { action: "move", point: { x: 5, y: 6 }, basedOn: FRAME },
       { action: "mouse_down", button: "right", mods: ["ctrl"] },
       { action: "mouse_up", point: { x: 7, y: 8 }, button: "right" },
       { action: "click", mods: ["ctrl", "shift"] },
@@ -332,7 +333,7 @@ describe("the tools", () => {
       expect((await h.call("computer", input)).body.ok, input.action).toBe(true);
     expect(h.actions.map((a) => a.action)).toEqual([
       { verb: "drag", path, button: "left", mods: ["shift"], durationMs: 800, speed: "auto" },
-      { verb: "move", point: { x: 5, y: 6 }, speed: "auto" },
+      { verb: "move", point: { x: 5, y: 6 }, speed: "auto", basedOn: FRAME },
       { verb: "down", button: "right", mods: ["ctrl"], speed: "auto" },
       { verb: "up", point: { x: 7, y: 8 }, button: "right", speed: "auto" },
       { verb: "click", button: "left", count: 1, mods: ["ctrl", "shift"], speed: "auto" },
@@ -356,7 +357,7 @@ describe("the tools", () => {
     const h = toolHarness();
     h.setOutcome(() => ({ ok: true, frameId: ulid() }));
     expect((await h.call("computer", { action: "mouse_down" })).body.content[0]?.text).toBe(
-      "The left button is down. It stays down until mouse up, or 60 s without another mouse action. Each mouse move and the mouse up while it is down asks like a drag.",
+      "The left button is down. It stays down until mouse up, or 60 s without another mouse action. A mouse move, a scroll and the mouse up while it is down drag from where it went down.",
     );
     h.setOutcome(() => ({ ok: true, frameId: ulid(), notDown: true }));
     expect((await h.call("computer", { action: "mouse_up" })).body.content[0]?.text).toBe(

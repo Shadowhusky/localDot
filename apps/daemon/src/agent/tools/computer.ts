@@ -178,7 +178,7 @@ const STALE: Partial<Record<ComputerAction["action"], string>> = {
 function pointerNote(a: ComputerAction, outcome: ActionOutcome): string | undefined {
   const button = a.button ?? "left";
   if (a.action === "mouse_down" && outcome.ok)
-    return `The ${button} button is down. It stays down until mouse up, or ${BUTTON_HELD_S} s without another mouse action. Each mouse move and the mouse up while it is down asks like a drag.`;
+    return `The ${button} button is down. It stays down until mouse up, or ${BUTTON_HELD_S} s without another mouse action. A mouse move, a scroll and the mouse up while it is down drag from where it went down.`;
   if (a.action === "mouse_up" && outcome.notDown) return `The ${button} button was not down.`;
   if (outcome.dropCancelled)
     return "The drag was cancelled before its drop: Escape was pressed while the button was down, then the button came up where the pointer was.";
