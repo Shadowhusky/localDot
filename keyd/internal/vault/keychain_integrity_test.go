@@ -3,7 +3,6 @@ package vault
 import (
 	"bytes"
 	"errors"
-	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -219,61 +218,43 @@ func TestKeychainRefusesAValueStoredForAnotherBinding(t *testing.T) {
 	}
 }
 
-// An item written before keyd stored bindings takes the binding of its first read. Its head then
-// has a fourth field, which a keyd build that predates bindings refuses to parse.
-func TestKeychainBindsAnItemFromBeforeBindingsOnItsFirstRead(t *testing.T) {
+// An item written before keyd stored bindings has none to check: whichever keyd read it first would
+// choose it. Such an item, like one whose head is malformed, is refused from its head alone and left
+// as it is, until the value is stored again.
+func TestKeychainRefusesAnItemStoredWithoutItsBinding(t *testing.T) {
 	k, dir := fakeKeychain(t)
 	if err := k.Put("weather", fakeValue, testBinding); err != nil {
 		t.Fatal(err)
 	}
 	head := filepath.Join(dir, "store", "localdot-keyd-test.weather")
 	legacy := strings.TrimSuffix(headOf(t, dir, "weather"), ":"+testBinding)
-	other := bindingOf(Record{ID: "weather", Kind: KindLLM, Provider: "anthropic"})
-	for name, binding := range map[string]string{"empty": "", "not hex": strings.Repeat("z", 64)} {
-		if err := os.WriteFile(head, []byte(legacy+":"+binding), 0o600); err != nil {
+	heads := map[string]string{
+		"no binding":    legacy,
+		"empty binding": legacy + ":",
+		"not hex":       legacy + ":" + strings.Repeat("z", 64),
+		"a fifth field": legacy + ":" + testBinding + ":" + testBinding,
+	}
+	for name, h := range heads {
+		if err := os.WriteFile(head, []byte(h), 0o600); err != nil {
 			t.Fatal(err)
 		}
-		if _, err := k.Get("weather", other); err == nil || errors.Is(err, errRebound) {
-			t.Errorf("%s fourth field: Get = %v", name, err)
+		if err := os.Remove(filepath.Join(dir, "argv.log")); err != nil {
+			t.Fatal(err)
+		}
+		if got, err := k.Get("weather", testBinding); err == nil || got != nil || carries(err.Error(), fakeValue) {
+			t.Errorf("%s: Get = %q, %v", name, got, err)
+		}
+		if argv, _ := os.ReadFile(filepath.Join(dir, "argv.log")); string(argv) != "keychain-item read localdot-keyd-test weather\n" {
+			t.Errorf("%s: the refused read ran %q", name, argv)
+		}
+		if got := headOf(t, dir, "weather"); got != h {
+			t.Errorf("%s: the refused read left the item holding %q", name, got)
 		}
 	}
-	if err := os.WriteFile(head, []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	if got, err := k.Get("weather", other); err != nil || !bytes.Equal(got, fakeValue) {
-		t.Fatalf("first read of an unbound item = %q, %v", got, err)
-	}
-	if got := headOf(t, dir, "weather"); got != legacy+":"+other {
-		t.Fatalf("after its first read the item holds %q", got)
-	}
-	if _, err := k.Get("weather", testBinding); !errors.Is(err, errRebound) {
-		t.Fatalf("a read for the binding it was first read for did not stick: %v", err)
-	}
-}
-
-// A first read whose binding cannot be written still serves the value it read, as keyd did before
-// it stored bindings, and the next read tries again.
-func TestKeychainServesAnUnboundItemWhoseBindingCannotBeWritten(t *testing.T) {
-	k, dir := failingFake(t)
 	if err := k.Put("weather", fakeValue, testBinding); err != nil {
 		t.Fatal(err)
 	}
-	legacy := strings.TrimSuffix(headOf(t, dir, "weather"), ":"+testBinding)
-	if err := os.WriteFile(filepath.Join(dir, "store", "localdot-keyd-test.weather"), []byte(legacy), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	var logged bytes.Buffer
-	log.SetOutput(&logged)
-	defer log.SetOutput(os.Stderr)
-	t.Setenv("FAKE_FAIL", "add:weather")
 	if got, err := k.Get("weather", testBinding); err != nil || !bytes.Equal(got, fakeValue) {
-		t.Fatalf("Get = %q, %v", got, err)
-	}
-	if headOf(t, dir, "weather") != legacy || !strings.Contains(logged.String(), "weather") || carries(logged.String(), fakeValue) {
-		t.Fatalf("the item holds %q, the log %q", headOf(t, dir, "weather"), logged.String())
-	}
-	t.Setenv("FAKE_FAIL", "")
-	if _, err := k.Get("weather", testBinding); err != nil || headOf(t, dir, "weather") != legacy+":"+testBinding {
-		t.Fatalf("the second read left %q (%v)", headOf(t, dir, "weather"), err)
+		t.Fatalf("after storing it again Get = %q, %v", got, err)
 	}
 }

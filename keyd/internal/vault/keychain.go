@@ -119,18 +119,19 @@ func (k *Keychain) Get(id, binding string) ([]byte, error) {
 }
 
 // get refuses a value stored for another binding before reading any of it. An item written before
-// keyd stored bindings takes the binding of its first read, as its ACL does on first access; from
-// then on a keyd build that predates bindings cannot parse it.
+// keyd stored bindings is refused too, since whichever keyd read it first would pick its binding.
 func (k *Keychain) get(ctx context.Context, id, binding string) ([]byte, error) {
 	head, err := k.find(ctx, id)
 	if err != nil {
 		return nil, err
 	}
 	gen, count, bound, ok := parseHead(head)
-	if !ok {
+	switch {
+	case !ok:
 		return nil, fmt.Errorf("keychain: item %s is not keyd's", id)
-	}
-	if bound != "" && bound != binding {
+	case bound == "":
+		return nil, fmt.Errorf("keychain: item %s was stored without its binding; store it again", id)
+	case bound != binding:
 		return nil, fmt.Errorf("keychain: item %s: %w", id, errRebound)
 	}
 	value := make([]byte, 0, count*chunkBytes)
@@ -145,11 +146,6 @@ func (k *Keychain) get(ctx context.Context, id, binding string) ([]byte, error) 
 			return nil, fmt.Errorf("keychain: item %s was torn by an interrupted write; store it again", id)
 		}
 		value = append(value, part...)
-	}
-	if bound == "" {
-		if err := k.add(ctx, id, itemHead(gen, count, binding)); err != nil {
-			log.Printf("keyd: secret %s is still stored without its binding: %v", id, err)
-		}
 	}
 	return value, nil
 }
