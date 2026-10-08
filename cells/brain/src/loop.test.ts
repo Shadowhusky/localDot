@@ -214,6 +214,52 @@ describe("Agent", () => {
       });
     });
 
+    describe("a failed action and the batch it stops", () => {
+      const batch = () =>
+        calls(
+          ["computer", { action: "key", text: "ctrl+a" }],
+          ...Array.from({ length: 5 }, (_, i): [string, unknown] => [
+            "computer",
+            { action: "key", text: `F${i + 1}` },
+          ]),
+        );
+      const failingKeys = (name: string, input: unknown) =>
+        name === "computer" && (input as { action: string }).action === "key"
+          ? { ok: false, content: [{ type: "text" as const, text: "Failed: no window." }] }
+          : name === "ask_user"
+            ? {
+                ok: true,
+                content: [{ type: "text" as const, text: "The user chose B: Stop here" }],
+              }
+            : undefined;
+      const keys = (t: ReturnType<typeof agent>) =>
+        t.f.toolCalls.filter(
+          (c) => c.name === "computer" && (c.input as { action: string }).action === "key",
+        );
+
+      it("counts one failure, not one per skipped sibling", async () => {
+        const t = agent([batch(), call("done", { summary: "x" })], {
+          boot: { limits: { maxTurns: 100, maxFailedCalls: 2, maxRetries: 1 } },
+          answer: failingKeys,
+        });
+        expect(await t.run()).toBe("done");
+        expect(keys(t)).toHaveLength(1);
+        expect(t.f.toolCalls.filter((c) => c.name === "ask_user")).toEqual([]);
+      });
+
+      it("still asks once two batches have failed", async () => {
+        const t = agent([batch(), batch(), call("done", { summary: "x" })], {
+          boot: { limits: { maxTurns: 100, maxFailedCalls: 2, maxRetries: 1 } },
+          answer: failingKeys,
+        });
+        expect(await t.run()).toBe("gave_up");
+        expect(keys(t)).toHaveLength(2);
+        expect(t.f.toolCalls.at(-1)?.input).toMatchObject({
+          question: "My last 2 actions failed. Keep trying?",
+        });
+      });
+    });
+
     it("pauses on keyd's 402 until the user raises the budget, then retries the same turn", async () => {
       const budget = new APICallError({
         message: "budget_exceeded",

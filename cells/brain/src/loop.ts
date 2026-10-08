@@ -523,6 +523,8 @@ export class Agent {
         input: call.input,
       };
       this.#o.onEvent?.({ type: "tool_execution_start", callId: info.callId, name: info.name });
+      // A skipped call never ran, so it is not another failed action.
+      const skipped = final !== undefined || (batchFailed && call.toolName === "computer");
       let result: ToolResult;
       if (signal.aborted) result = { ok: false, content: [{ type: "text", text: "Stopped." }] };
       else if (batchPaused)
@@ -555,7 +557,7 @@ export class Agent {
         };
       else result = await this.#execute(call, info, binding, basedOn, signal);
       signal.throwIfAborted();
-      if (!result.ok && result.pause !== true) {
+      if (!result.ok && result.pause !== true && !skipped) {
         this.#failed += 1;
         if (call.toolName === "computer") batchFailed = true;
       } else if (result.ok) this.#failed = 0;
