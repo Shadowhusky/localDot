@@ -54,6 +54,9 @@ test("installer progress hands off once to first-run setup and settings", async 
         .getByRole("radiogroup", { name: "Start from" })
         .getByRole("radio", { name: "Balanced (recommended)" }),
     ).toBeFocused();
+    expect(await settings.evaluate((sheet) => sheet.scrollTop), "the header stays in place").toBe(
+      0,
+    );
     await settings.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByRole("button", { name: "Review autonomy" })).toBeFocused();
     const start = page.locator(".welcome-setup").getByRole("button", { name: "Turn on" });

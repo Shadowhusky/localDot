@@ -121,6 +121,15 @@ function catalogLine(state: CatalogState, at: string | undefined): string {
   }
 }
 
+// Scrolls only the sheet's body: scrollIntoView would also scroll the clipped panel around it and
+// lift the sheet's header out of place.
+function bringToTop(section: HTMLElement) {
+  const body = section.closest<HTMLElement>(".ui-sheet-body");
+  if (!body) return;
+  const margin = Number.parseFloat(getComputedStyle(section).scrollMarginTop) || 0;
+  body.scrollTop += section.getBoundingClientRect().top - body.getBoundingClientRect().top - margin;
+}
+
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section id={id} className="settings-section" aria-labelledby={`${id}-title`}>
@@ -185,13 +194,17 @@ export function SettingsSheet(props: SettingsSheetProps) {
     placed.current = null;
     if (moved) return;
     if (props.focusSection === "knowledge") {
-      const title = sheet.querySelector<HTMLElement>("#settings-knowledge-title");
-      title?.scrollIntoView?.({ block: "start" });
-      title?.focus();
+      const section = sheet.querySelector<HTMLElement>("#settings-knowledge");
+      if (section) bringToTop(section);
+      section
+        ?.querySelector<HTMLElement>("#settings-knowledge-title")
+        ?.focus({ preventScroll: true });
     } else if (props.focusSection === "autonomy") {
       const section = sheet.querySelector<HTMLElement>("#settings-autonomy");
-      section?.scrollIntoView?.({ block: "start" });
-      section?.querySelector<HTMLElement>("[role=radio][tabindex='0']")?.focus();
+      if (section) bringToTop(section);
+      section
+        ?.querySelector<HTMLElement>("[role=radio][tabindex='0']")
+        ?.focus({ preventScroll: true });
     } else if (!matches("(pointer: coarse)")) {
       sheet.querySelector<HTMLElement>("[data-role=main] [role=combobox]")?.focus();
     }
