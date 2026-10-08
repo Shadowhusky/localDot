@@ -11,6 +11,8 @@ export interface IconButtonProps
   label: string;
   icon: IconName;
   size?: 24 | 28 | 32;
+  // Quiet draws only its icon; the filled ones are round.
+  variant?: "quiet" | "primary" | "secondary";
   kbd?: readonly string[];
   // Unavailable while set. The button keeps focus and gives this as its description and tooltip.
   disabledReason?: string;
@@ -20,6 +22,7 @@ export function IconButton({
   label,
   icon,
   size = 28,
+  variant = "quiet",
   kbd,
   disabledReason,
   type = "button",
@@ -47,6 +50,7 @@ export function IconButton({
         type={type}
         className={clsx("ui-icon-button", className)}
         data-size={size}
+        data-variant={variant === "quiet" ? undefined : variant}
         aria-label={label}
         aria-disabled={disabledReason ? true : undefined}
         aria-describedby={joinIds(props["aria-describedby"], triggerProps["aria-describedby"])}
