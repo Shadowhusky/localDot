@@ -230,6 +230,24 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await context.close();
     });
 
+    test("under reduced motion the sheet fades in where it rests instead of rising", async () => {
+      const { context, page, seen } = await open(browser, PHONE, "reduce");
+      const autonomy = picker(page, "Autonomy");
+      await autonomy.scrollIntoViewIfNeeded();
+      await autonomy.tap();
+      const sheet = page.locator(".ui-sheet");
+      await expect(sheet).toBeVisible();
+      const opening = await sheet.evaluate((element) =>
+        element.getAnimations().map((animation) => (animation as CSSTransition).transitionProperty),
+      );
+      expect(opening).not.toContain("translate");
+      expect(await sheet.evaluate((element) => getComputedStyle(element).translate)).toBe("none");
+      await page.keyboard.press("Escape");
+      await expect(page.locator(".ui-picker")).toHaveCount(0);
+      expect(await seen()).toEqual({ violations: [], styles: 0 });
+      await context.close();
+    });
+
     test("the text area grows a line at a time to eight, and what is above it stays put", async () => {
       const { context, page, seen } = await open(browser, DESKTOP);
       const area = page.getByRole("textbox", { name: "Message" });
