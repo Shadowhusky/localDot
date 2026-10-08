@@ -11,6 +11,7 @@ import {
   modelAllowed,
   modelIdProblem,
   type PickerKey,
+  planOnly,
   providerAllowed,
   type RoleChoice,
   type SubscriptionModel,
@@ -56,7 +57,8 @@ export function pickerKeys(index: ProviderIndex): PickerKey[] {
 export function needsPrice(choice: RoleChoice | undefined, index: ProviderIndex | null): boolean {
   if (!choice) return false;
   const provider = providerById(choice.provider);
-  if (!provider || provider.local || provider.availableIn || !choice.model) return false;
+  if (!provider || provider.local || provider.plan || provider.availableIn || !choice.model)
+    return false;
   if (provider.id === "openai-compatible") return true;
   const model = index?.providers
     .find((p) => p.id === provider.id)
@@ -110,14 +112,16 @@ export function validateForm(
     if (typeof checked === "string") problems.push(`${ROLE_NAMES[role]}: ${checked}`);
     else document[role] = checked;
   }
+  // A plan-only task shows no ceiling, so a ceiling it cannot show never blocks a save.
+  const plan = planOnly(draft.choices);
   if (draft.defaultBudget) {
-    if (!subscription && index.defaultTaskBudgetUSD === null)
+    if (!subscription && !plan && index.defaultTaskBudgetUSD === null)
       problems.push("The default task budget is unavailable. Enter an explicit ceiling.");
     delete document.taskBudgetUSD;
   } else {
     const budget = decimal(draft.budget);
-    if (budget === undefined) problems.push("Enter an explicit task ceiling in USD.");
-    else document.taskBudgetUSD = budget;
+    if (budget !== undefined) document.taskBudgetUSD = budget;
+    else if (!plan) problems.push("Enter an explicit task ceiling in USD.");
   }
   if (problems.length) return { ok: false, problems };
   if (
@@ -188,15 +192,23 @@ function checkRole(
     if (!price)
       return "enter both input and output prices, from 0 to 10000 USD per million tokens, with at least one positive.";
     next.price = price;
-  } else {
+  } else if (!provider.plan) {
     if (value.price !== undefined)
       return "the catalog already prices this model. Remove its manual price by choosing the model again.";
     if (model && (model.inputUSDPerMTok > 10_000 || model.outputUSDPerMTok > 10_000))
       return "this catalog price is unsupported.";
   }
-  const rate = next.price ?? model;
+  const route = routeFor(provider, next.key) ?? "";
+  const kind = provider.plan ? "plan" : "paid";
+  const [billing, owner] = accounting.get(route)?.split("\0") ?? [];
+  if (billing && billing !== kind)
+    return provider.plan
+      ? `this key is pay as you go for ${owner}. Use a key from this plan here.`
+      : `this key is a plan for ${owner}. Use a pay-as-you-go key here.`;
+  if (!billing) accounting.set(route, `${kind}\0${role}`);
+  const rate = provider.plan ? { inputUSDPerMTok: 0, outputUSDPerMTok: 0 } : (next.price ?? model);
   if (rate) {
-    const id = `${routeFor(provider, next.key)}\0${next.model}`;
+    const id = `${route}\0${next.model}`;
     const pair = JSON.stringify([rate.inputUSDPerMTok, rate.outputUSDPerMTok]);
     if (accounting.has(id) && accounting.get(id) !== pair)
       return "one task cannot use conflicting prices for the same route and model.";

@@ -15,6 +15,7 @@ import {
   modelAllowed,
   modelIdProblem,
   PROVIDER_GROUPS,
+  planOnly,
   providerAllowed,
   providerPickable,
 } from "./choices.ts";
@@ -88,6 +89,18 @@ describe("provider and model choice rules", () => {
     for (const provider of PROVIDERS.filter((p) => !p.notOffered))
       for (const role of ["main", "fast", "local"] as const)
         expect(providerPickable(role, provider)).toBe(providerAllowed(role, provider));
+  });
+  it("calls a choice plan-only when no role is billed and one runs on a plan", () => {
+    const plan = { provider: "alibaba-token-plan", model: "qwen3.8-max", key: "plan" };
+    const local = { provider: "lmstudio", model: "local" };
+    expect(planOnly({ main: plan })).toBe(true);
+    expect(planOnly({ main: plan, local })).toBe(true);
+    expect(planOnly({ main: plan, fast: { provider: "openai", model: "m", key: "k" } })).toBe(
+      false,
+    );
+    expect(planOnly({ main: plan, fast: { provider: "", model: "" } })).toBe(false);
+    expect(planOnly({ main: local })).toBe(false);
+    expect(planOnly({})).toBe(false);
   });
   it("matches every compatible preset by kind AND canonical bound URL", () => {
     for (const provider of PROVIDERS.filter((p) => p.baseURL)) {

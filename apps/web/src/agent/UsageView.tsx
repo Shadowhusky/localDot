@@ -25,13 +25,16 @@ export function UsageView({
       {selection?.kind === "chatgpt" ? (
         <p>Main · ChatGPT · {selection.model}</p>
       ) : selection?.kind === "api" ? (
-        <ul>
-          {selection.roles.map((role) => (
-            <li key={role.role}>
-              {role.role} · {role.provider} · {role.model}
-            </li>
-          ))}
-        </ul>
+        <>
+          <ul>
+            {selection.roles.map((role) => (
+              <li key={role.role}>
+                {role.role} · {role.provider} · {role.model}
+              </li>
+            ))}
+          </ul>
+          {selection.plan && <p>Uses your plan's limits.</p>}
+        </>
       ) : (
         <p>Frozen model identity has not been reported.</p>
       )}

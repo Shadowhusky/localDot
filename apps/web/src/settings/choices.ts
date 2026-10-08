@@ -1,5 +1,11 @@
 import type { AgentRoleChoice } from "@localdot/protocol";
-import { type Capability, PROVIDERS, type ProviderSpec, usableAs } from "@localdot/providers";
+import {
+  type Capability,
+  PROVIDERS,
+  type ProviderSpec,
+  providerById,
+  usableAs,
+} from "@localdot/providers";
 import type { KeyRecord } from "../keys/keys-api.ts";
 
 export type ModelRole = "main" | "fast" | "local";
@@ -45,6 +51,14 @@ export const PROVIDER_GROUPS: readonly ProviderGroup[] = [
 export function providerAllowed(role: ModelRole, provider: ProviderSpec): boolean {
   return (
     !provider.availableIn && !provider.notOffered && (role !== "local" || provider.local === true)
+  );
+}
+// No chosen role is billed per token and at least one runs on a plan.
+export function planOnly(choices: Partial<Record<ModelRole, RoleChoice>>): boolean {
+  const chosen = Object.values(choices).map((choice) => providerById(choice?.provider ?? ""));
+  return (
+    chosen.some((provider) => provider?.plan) &&
+    chosen.every((provider) => provider?.plan || provider?.local)
   );
 }
 // A plan that is not offered can still be picked, only to read why; it never saves.

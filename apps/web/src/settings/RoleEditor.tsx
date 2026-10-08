@@ -152,6 +152,9 @@ export function RoleEditor({
               </button>
             </div>
           )}
+          {provider?.plan && (
+            <p>Uses your plan's limits. Use a key from this plan, not a pay-as-you-go key.</p>
+          )}
           {value?.provider === "chatgpt" && (
             <p>The ChatGPT plan uses account sign-in and requires no API key or per-token price.</p>
           )}

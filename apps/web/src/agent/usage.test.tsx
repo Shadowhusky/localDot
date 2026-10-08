@@ -144,3 +144,12 @@ it("keeps retry events informational and identifies accepted repairs without der
   expect(recoveryMessage("chatgpt sign-in expired", false)).toContain("explicitly resume");
   expect(recoveryMessage("chatgpt plan limit reached", false)).toContain("no localDot USD budget");
 });
+it("says a task that runs on a plan uses the plan's limits", () => {
+  const roles = [{ role: "main" as const, provider: "minimax-coding-plan", model: "MiniMax-M3" }];
+  const view = render(
+    <UsageView model={emptyAgentModel()} selection={{ kind: "api", roles, plan: true }} />,
+  );
+  expect(screen.getByText("Uses your plan's limits.")).toBeTruthy();
+  view.rerender(<UsageView model={emptyAgentModel()} selection={{ kind: "api", roles }} />);
+  expect(screen.queryByText("Uses your plan's limits.")).toBeNull();
+});

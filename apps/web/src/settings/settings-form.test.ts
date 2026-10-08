@@ -120,13 +120,64 @@ describe("configuration validation before explicit save", () => {
     const plan = formOf({
       main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
     });
-    // models.dev prices plan models at $0, so they still take a manual rate for now.
-    expect(needsPrice(plan.choices.main, index)).toBe(true);
-    expect(validateForm(plan, {}, index)).toMatchObject({ ok: false });
-    plan.prices.main = { input: "0.3", output: "1.2" };
-    expect(validateForm(plan, {}, index)).toMatchObject({
+    // A plan uses its own limits: no manual rate, and a rate saved before is dropped.
+    expect(needsPrice(plan.choices.main, index)).toBe(false);
+    expect(validateForm(plan, {}, index)).toEqual({
       ok: true,
-      document: { main: { provider: "minimax-coding-plan", key: "token-plan" } },
+      document: {
+        main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      },
+    });
+    const stored = formOf({
+      main: {
+        provider: "minimax-coding-plan",
+        model: "MiniMax-M3",
+        key: "token-plan",
+        price: { inputUSDPerMTok: 0.3, outputUSDPerMTok: 1.2 },
+      },
+    });
+    expect(validateForm(stored, {}, index)).toEqual({
+      ok: true,
+      document: {
+        main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      },
+    });
+    // A plan-only task shows no ceiling, so a ceiling it cannot show never blocks the save.
+    const noCeiling = formOf({
+      main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      taskBudgetUSD: 4,
+    });
+    noCeiling.budget = "";
+    expect(validateForm(noCeiling, { taskBudgetUSD: 4 }, index)).toMatchObject({
+      ok: true,
+      document: { taskBudgetUSD: 4 },
+    });
+    noCeiling.defaultBudget = true;
+    expect(validateForm(noCeiling, {}, { ...index, defaultTaskBudgetUSD: null })).toMatchObject({
+      ok: true,
+    });
+    noCeiling.choices.fast = {
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      key: "anthropic",
+    };
+    expect(validateForm(noCeiling, {}, { ...index, defaultTaskBudgetUSD: null })).toEqual({
+      ok: false,
+      problems: ["The default task budget is unavailable. Enter an explicit ceiling."],
+    });
+    // One key cannot be the plan for main and pay as you go for fast.
+    const shared = formOf({
+      main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      fast: { provider: "minimax", model: "MiniMax-M3", key: "token-plan" },
+    });
+    expect(validateForm(shared, {}, index)).toEqual({
+      ok: false,
+      problems: ["Fast: this key is a plan for main. Use a pay-as-you-go key here."],
+    });
+    shared.choices = { main: shared.choices.fast, fast: shared.choices.main };
+    expect(validateForm(shared, {}, index)).toEqual({
+      ok: false,
+      problems: ["Fast: this key is pay as you go for main. Use a key from this plan here."],
     });
     // Even an index that listed models for it, with any compatible key, cannot save the row.
     index.providers
