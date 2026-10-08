@@ -214,11 +214,16 @@ export const ApprovalResolve = event(
   }),
 );
 // A task allowance has no id; a saved rule carries the id that removes it.
-export const RuleChange = z.object({
-  ...AlwaysOption.shape,
-  actionClass: ActionClass,
-  id: z.string().regex(ULID_PATTERN).optional(),
-});
+export const RuleChange = z
+  .object({
+    ...AlwaysOption.shape,
+    actionClass: ActionClass,
+    id: z.string().regex(ULID_PATTERN).optional(),
+  })
+  .refine(
+    ({ actionClass, id, ...option }) => AlwaysOption.safeParse(option).success,
+    "a site or app goes only with its own scope",
+  );
 export type RuleChange = z.infer<typeof RuleChange>;
 export const RuleCreated = event("rule.created", RuleChange);
 export const RuleRemoved = event("rule.removed", RuleChange);

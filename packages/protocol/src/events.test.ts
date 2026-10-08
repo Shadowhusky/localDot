@@ -143,6 +143,14 @@ describe("parseEvent", () => {
         parseEvent({ ...base, type, data: { ...site, site: "https://mail.example.test/inbox" } }),
       ).toThrow();
       expect(() => parseEvent({ ...base, type, data: { ...task, actionClass: "x" } })).toThrow();
+      for (const unplaced of [
+        { ...task, site: "https://mail.example.test" },
+        { ...site, scope: "app" },
+        { ...site, scope: "always" },
+        { ...task, scope: "app", actionClass: "computer" },
+        { ...task, scope: "site", actionClass: "send" },
+      ])
+        expect(() => parseEvent({ ...base, type, data: unplaced })).toThrow();
     }
   });
 });
