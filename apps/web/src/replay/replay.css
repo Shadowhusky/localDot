@@ -60,7 +60,8 @@
 }
 @media (pointer: coarse) {
   .replay-house select,
-  .replay-controls button {
+  .replay-controls button,
+  .replay-session-card .replay-session-delete {
     min-height: 44px;
   }
   .replay-house select {
@@ -293,7 +294,15 @@
   gap: 12px;
   padding-right: 4px;
 }
+.replay-session-list {
+  display: flex;
+  flex-direction: column;
+  flex: none;
+  gap: 12px;
+}
 .replay-session-card {
+  display: flex;
+  flex-direction: column;
   border: 1px solid var(--color-line);
   border-radius: 9px;
   overflow: hidden;
@@ -304,6 +313,7 @@
 }
 .replay-session-card .replay-session-open {
   display: flex;
+  flex: 1;
   flex-direction: column;
   width: 100%;
   gap: 4px;
@@ -330,6 +340,7 @@
   color: var(--color-text-2);
 }
 .replay-session-card .replay-session-delete {
+  align-self: flex-start;
   border: 0;
   margin: 0 6px 6px;
   font-size: 11px;
@@ -458,11 +469,12 @@
   gap: 10px;
   margin-top: 20px;
 }
+/* app.css loads after this sheet, so the layout overrides of .house and .rail name both classes. */
 @media (width < 1180px) {
   .app.replaying {
     grid-template-rows: var(--spacing-bar) auto minmax(0, 1fr);
   }
-  .replay-house {
+  .house.replay-house {
     grid-template-columns: 190px minmax(0, 1fr);
     overflow-y: auto;
   }
@@ -478,25 +490,26 @@
   }
 }
 @media (width < 680px) {
-  .replay-house {
+  .house.replay-house {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 16px;
   }
-  .replay-sessions {
-    display: flex;
+  .rail.replay-sessions {
+    flex: none;
+    overflow: visible;
+    padding: 12px 0 0;
+  }
+  .replay-session-list {
     flex-direction: row;
-    min-height: 140px;
-    max-height: 140px;
+    gap: 8px;
     overflow-x: auto;
-    overflow-y: hidden;
-    padding: 8px 0;
-  }
-  .replay-sessions .rail-h {
-    align-self: flex-start;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
   }
   .replay-session-card {
     width: 160px;
+    scroll-snap-align: start;
   }
   .replay-session-open > img,
   .replay-session-open > .replay-image-empty {
