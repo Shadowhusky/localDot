@@ -72,7 +72,7 @@ test("a key's use shows in the steps; Stop freezes the computer and Resume thaws
   // An allowed use folds into the step it came with; unfolding the step lists it.
   const rail = page.getByRole("complementary", { name: "Plan and steps" });
   await expect(async () => {
-    const head = rail.getByTestId("step-row").last().getByRole("button");
+    const head = rail.getByTestId("step-row").last().locator(".activity-row-head");
     if ((await head.getAttribute("aria-expanded")) === "false") await head.click();
     await expect(rail.getByRole("list", { name: "Keys used" })).toContainText(
       "Used echo key → postman-echo.com",
