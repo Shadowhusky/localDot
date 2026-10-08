@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type EventOf,
+  type HitTestResult,
   type LocalDotEvent,
   msToMicros,
+  type Point,
   sessionMsOf,
   ulid,
 } from "@localdot/protocol";
@@ -18,7 +20,12 @@ import { DesktopdRegistry } from "../desktopd/registry.ts";
 import { FakeDesktopd, type FakeScript } from "../desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "./frames.ts";
-import { type ActionContext, ActionGateway, type NativeScreenBinding } from "./gateway.ts";
+import {
+  type ActionContext,
+  ActionGateway,
+  type NativeActionIdentity,
+  type NativeScreenBinding,
+} from "./gateway.ts";
 import { DEFAULT_ONSET_TABLE } from "./onset-table.ts";
 import { keepPolicy } from "./ring-onset.ts";
 
@@ -808,5 +815,112 @@ describe("ActionGateway settle and zoom", () => {
     await s.gateway.observe(ctx);
     expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
     expect(s.fake.calls.filter((c) => c.path === "/zoom")).toHaveLength(1);
+  });
+});
+
+describe("ActionGateway native identity", () => {
+  const frame = { x: 0, y: 54, w: 1604, h: 1258 };
+  const element =
+    (name = "Search", dx = 0) =>
+    (point: Point): HitTestResult => {
+      const hit = search(point);
+      return {
+        ...hit,
+        target: { ...hit.target, name, bbox: { ...hit.target.bbox, x: hit.target.bbox.x + dx } },
+        windowFrame: frame,
+      };
+    };
+  // desktopd's answer when the element lookup ran out of time: the window and its frame only.
+  const timedOut = (point: Point): HitTestResult => ({
+    target: { point, source: "coords", app: "Chromium", window: "Example" },
+    window: 77,
+    windowFrame: frame,
+    unknown: true,
+    ms: 300,
+  });
+  // A reply the client cannot read: the lookup failed, so nothing at all is known.
+  const broken = () => ({ target: "?" }) as unknown as HitTestResult;
+  const click = { verb: "click", point: { x: 150, y: 200 }, speed: "instant" } as const;
+
+  function agent(reads: ((point: Point) => HitTestResult)[], revalidate = false) {
+    const s = setup();
+    let n = 0;
+    s.fake.script.hitTest = (point) => (reads[Math.min(n++, reads.length - 1)] ?? broken)(point);
+    const consumed: NativeActionIdentity[] = [];
+    const admitted: NativeActionIdentity[] = [];
+    const revalidated: boolean[] = [];
+    const ctx: ActionContext = {
+      source: "agent",
+      sessionId: s.sessionId,
+      cellId: s.cellId,
+      authorizeAgent: async (request) => {
+        if (revalidate) revalidated.push(await request.revalidate());
+        return {
+          consume: (_action, identity) => {
+            consumed.push(identity);
+            return true;
+          },
+        };
+      },
+      beforeEffect: (_action, identity) => {
+        admitted.push(identity);
+        return true;
+      },
+    };
+    const inputs = () => s.fake.calls.filter((c) => c.path === "/input");
+    return { s, ctx, consumed, admitted, revalidated, inputs };
+  }
+
+  it("acts on a window-level approval when the next read finds an element in that window", async () => {
+    const a = agent([timedOut, element()]);
+    const outcome = await a.s.gateway.run(a.ctx, click);
+    expect(outcome.ok).toBe(true);
+    expect(a.inputs()).toHaveLength(1);
+    expect(a.inputs()[0]?.body).toMatchObject({ window: 77 });
+    // The permit and the repeat guard see what was approved, not the later read.
+    expect(a.consumed).toEqual([expect.objectContaining({ unknown: true, window: 77 })]);
+    expect(a.admitted).toEqual(a.consumed);
+  });
+
+  it("refuses an approved element that a later read can no longer confirm", async () => {
+    const a = agent([element(), timedOut]);
+    const outcome = await a.s.gateway.run(a.ctx, click);
+    expect(outcome).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.inputs()).toHaveLength(0);
+  });
+
+  it("refuses a button swapped under the cursor after approval", async () => {
+    const a = agent([element("Search"), element("Send")]);
+    expect(await a.s.gateway.run(a.ctx, click)).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.inputs()).toHaveLength(0);
+  });
+
+  it("acts through a pixel of layout jitter and binds the approved box", async () => {
+    const a = agent([element("Search", 0), element("Search", 1)]);
+    expect((await a.s.gateway.run(a.ctx, click)).ok).toBe(true);
+    expect(a.consumed[0]?.target?.bbox?.x).toBe(280);
+    const far = agent([element("Search", 0), element("Search", 3)]);
+    expect((await far.s.gateway.run(far.ctx, click)).ok).toBe(false);
+  });
+
+  it("revalidates an approval by the same rule", async () => {
+    const lost = agent([element(), timedOut], true);
+    await lost.s.gateway.run(lost.ctx, click);
+    expect(lost.revalidated).toEqual([false]);
+    expect(lost.inputs()).toHaveLength(0);
+    const found = agent([timedOut, element()], true);
+    expect((await found.s.gateway.run(found.ctx, click)).ok).toBe(true);
+    expect(found.revalidated).toEqual([true]);
+  });
+
+  it("treats a failed lookup as unknown, never as an empty answer", async () => {
+    const appeared = agent([broken, element()]);
+    expect(await appeared.s.gateway.run(appeared.ctx, click)).toMatchObject({
+      ok: false,
+      cancelled: "stale",
+    });
+    const silent = agent([broken, broken]);
+    expect((await silent.s.gateway.run(silent.ctx, click)).ok).toBe(true);
+    expect(silent.consumed[0]).toMatchObject({ target: null, window: null, unknown: true });
   });
 });

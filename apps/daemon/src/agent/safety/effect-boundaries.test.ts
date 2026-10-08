@@ -385,11 +385,12 @@ describe("full native identity is revalidated", () => {
     const value = structuredClone(f.target.value);
     if (!value.target) throw new Error("missing native target");
     switch (field) {
+      // Past the two pixels a toolkit's own rounding moves an element between reads.
       case "point":
-        value.target.point.x++;
+        value.target.point.x += 3;
         break;
       case "bbox":
-        value.target.bbox = { x: 11, y: 20, w: 40, h: 40 };
+        value.target.bbox = { x: 13, y: 20, w: 40, h: 40 };
         break;
       case "source":
         value.target.source = "dom";
@@ -423,6 +424,22 @@ describe("full native identity is revalidated", () => {
     f.stage.hold.resolve(undefined);
     expect((await pending).body.ok).toBe(false);
     expect(f.effects()).toHaveLength(0);
+  });
+  it("a pixel of layout jitter after approval still dispatches the approved press", async () => {
+    const f = setup();
+    f.stage.hold = deferred();
+    const pending = f.call("computer", click);
+    await until(() => !!f.session.pendingApproval);
+    await f.post(f.answer());
+    await until(() => f.stage.entered);
+    const value = structuredClone(f.target.value);
+    if (!value.target?.bbox) throw new Error("missing native target");
+    value.target.point.x += 1;
+    value.target.bbox = { ...value.target.bbox, x: value.target.bbox.x + 1 };
+    f.target.value = value;
+    f.stage.hold.resolve(undefined);
+    expect((await pending).body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(1);
   });
   it("unknown coordinate and vision targets keep Ask under otherwise permissive policy", async () => {
     const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
