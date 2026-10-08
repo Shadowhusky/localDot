@@ -205,7 +205,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
         </div>
         {active && props.taskControls}
         <div className="settings-body">
-          {props.appearance && <AppearancePicker appearance={props.appearance} />}
+          {props.appearance && <AppearancePicker appearance={props.appearance} inSettings />}
           <p>Saved settings apply to future tasks. The current task keeps its models.</p>
           <p id="settings-state" role="status">
             {props.dirty ? "Unsaved choices" : "Saved choices"}
