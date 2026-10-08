@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from "./Menu.tsx";
+import { triggerProps } from "./Popover.tsx";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
@@ -26,7 +27,12 @@ function Harness() {
   const [under, setUnder] = useState(0);
   return (
     <>
-      <button ref={trigger} type="button" onClick={() => setOpen(true)}>
+      <button
+        ref={trigger}
+        type="button"
+        {...triggerProps("menu", open)}
+        onClick={() => setOpen(true)}
+      >
         Recording actions
       </button>
       <button type="button" onClick={() => setUnder((count) => count + 1)}>
@@ -82,6 +88,17 @@ describe("Menu", () => {
     expect(focused()).toBe("Delete recording");
     key(menu, "Home");
     expect(focused()).toBe("Rename");
+  });
+
+  it("tells its trigger it opens a menu and whether it is open", () => {
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Recording actions" });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("menu");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    const menu = openWithKeyboard();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    key(menu, "Escape");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("opened by a press waits for the pointer or an arrow key", () => {

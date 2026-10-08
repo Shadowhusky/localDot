@@ -27,6 +27,12 @@ export interface AnchoredProps {
   children: ReactNode;
 }
 
+// Spread on the control that opens a menu or a popover: it names what opens and whether it is open,
+// which also keeps the control lit while it is.
+export function triggerProps(popup: "menu" | "dialog", open: boolean) {
+  return { "aria-haspopup": popup, "aria-expanded": open } as const;
+}
+
 // The popup is inserted holding its starting state (data-placing) with no transition, placed, and
 // only then let go, so it grows toward the side it actually opens on. React never sets the attribute
 // again, because its value never changes.
@@ -168,6 +174,7 @@ export function Popover({ title, label, className, children, ...props }: Popover
       initialFocus={(panel) => tabbables(panel)[0]}
       panelProps={{
         role: "dialog",
+        "aria-modal": true,
         "aria-label": title ? undefined : label,
         "aria-labelledby": title ? titleId : undefined,
         className: clsx("ui-popover", className),

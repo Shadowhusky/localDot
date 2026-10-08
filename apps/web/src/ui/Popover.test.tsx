@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { Popover } from "./Popover.tsx";
+import { Popover, triggerProps } from "./Popover.tsx";
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
@@ -18,7 +18,12 @@ function Harness() {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <button ref={trigger} type="button" onClick={() => setOpen(true)}>
+      <button
+        ref={trigger}
+        type="button"
+        {...triggerProps("dialog", open)}
+        onClick={() => setOpen(true)}
+      >
         Share
       </button>
       <Popover
@@ -47,6 +52,22 @@ describe("Popover", () => {
     render(<Harness />);
     open();
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Copy link" }));
+  });
+
+  it("says it is modal, since it keeps Tab inside and an outside press only closes it", () => {
+    render(<Harness />);
+    expect(open().getAttribute("aria-modal")).toBe("true");
+  });
+
+  it("tells its trigger what it opens and whether it is open, which also keeps it lit", () => {
+    render(<Harness />);
+    const trigger = screen.getByRole("button", { name: "Share" });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
+    open();
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("false");
   });
 
   it("keeps Tab inside and gives focus back to its anchor on Escape", () => {

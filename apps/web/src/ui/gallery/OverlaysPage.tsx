@@ -4,7 +4,7 @@ import { Dialog } from "../Dialog.tsx";
 import { Icon } from "../Icon.tsx";
 import { IconButton } from "../IconButton.tsx";
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from "../Menu.tsx";
-import { Popover } from "../Popover.tsx";
+import { Popover, triggerProps } from "../Popover.tsx";
 import { Sheet, type SheetProps } from "../Sheet.tsx";
 import { Section } from "./AtomsPage.tsx";
 import "./atoms.css";
@@ -172,8 +172,7 @@ function SettingsDemo({
                 ref={more}
                 label="Model actions"
                 icon="more-horizontal"
-                aria-haspopup="menu"
-                aria-expanded={menu}
+                {...triggerProps("menu", menu)}
                 onClick={() => setMenu(true)}
               />
               <Menu
@@ -254,7 +253,7 @@ function PopoverDemo() {
         ref={trigger}
         variant="quiet"
         icon="globe"
-        aria-expanded={open}
+        {...triggerProps("dialog", open)}
         onClick={() => setOpen(true)}
       >
         Share
@@ -296,8 +295,7 @@ function MenuDemo() {
           ref={trigger}
           label="Recording actions"
           icon="more-horizontal"
-          aria-haspopup="menu"
-          aria-expanded={open}
+          {...triggerProps("menu", open)}
           onClick={() => setOpen(true)}
         />
         <p className="overlays-status">Last choice: {choice}</p>
