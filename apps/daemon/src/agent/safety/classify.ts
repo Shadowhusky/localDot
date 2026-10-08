@@ -52,6 +52,9 @@ const PATTERNS = {
   terminal: /terminal/i,
   ctrl: /^(?:ctrl|control(?:_l)?)$/i,
   shift: /^shift(?:_l)?$/i,
+  tab: /^(?:tab|\t)$/i,
+  modifier:
+    /^(?:ctrl|control(?:_l)?|shift(?:_l)?|alt(?:_l)?|option|cmd|super(?:_l)?|win|meta|iso_level3_shift)$/i,
   loopback: /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1|0\.0\.0\.0)$/i,
   bareLoopback:
     /^(?:[^@\s/]+@)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:\/\S*)?$/i,
@@ -111,6 +114,8 @@ const PATTERNS = {
     [/^php$/, { code: "rfRF", value: "cdzBE" }],
   ] as readonly (readonly [RegExp, Options])[],
   stdinPath: /^(?:-|\/dev\/stdin|\/dev\/fd\/0|\/proc\/self\/fd\/0)$/,
+  ansiEscape:
+    /^\\(?:x([\da-fA-F]{1,2})|([0-7]{1,3})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|c([\s\S])|([\s\S]))?/,
   installer:
     /^(?:(?:ba|z|da|k|fi)?sh|python[\d.]*|node|perl|ruby|php|chmod|dpkg|apt|apt-get|rpm|pip[\d.]*)$/,
   mail: /^(?:mail|mailx|sendmail|mutt|msmtp|ssmtp)$/,
@@ -163,7 +168,9 @@ export function nativeActionFacts(action: GuiAction, target: Target | null): Ris
   return {
     operation: action.verb,
     ...(action.verb === "key" ? { keys: action.combo } : {}),
-    ...(action.verb === "type" ? { newline: endsLine(action.text) } : {}),
+    ...(action.verb === "type"
+      ? { newline: endsLine(action.text), tabbed: /\t[\s\S]/.test(action.text) }
+      : {}),
     ...(action.verb === "type" && terminal ? { command: action.text } : {}),
     ...(target
       ? {
@@ -200,9 +207,16 @@ function input(facts: RiskFacts): ActionClass[] {
     if (facts.signedIn && PATTERNS.commit.test(name)) return ["system_settings"];
   }
   if (!facts.signedIn) return ["computer"];
-  if (!identified) return facts.operation === "type" && !facts.newline ? ["computer"] : ["unknown"];
-  const terminal = PATTERNS.terminal.test(identified.role ?? "");
   const keys = facts.operation === "key" ? (facts.keys ?? []) : [];
+  // Tab moves focus, so what follows it lands on the next control, where a space presses Send.
+  const tabbed =
+    facts.operation === "type"
+      ? facts.tabbed === true
+      : keys.some((key) => PATTERNS.tab.test(key)) &&
+        keys.some((key) => !PATTERNS.tab.test(key) && !PATTERNS.modifier.test(key));
+  if (!identified)
+    return facts.operation === "type" && !facts.newline && !tabbed ? ["computer"] : ["unknown"];
+  const terminal = PATTERNS.terminal.test(identified.role ?? "");
   const submits =
     keys.some((key) => PATTERNS.enter.test(key) || endsLine(key)) ||
     (terminal && runsLine(keys)) ||
@@ -215,7 +229,8 @@ function input(facts: RiskFacts): ActionClass[] {
     PATTERNS.field.test(identified.role ?? "") &&
     !PATTERNS.searchRole.test(identified.role ?? "") &&
     !PATTERNS.search.test(name);
-  return submits && compose ? ["send"] : ["computer"];
+  if (compose && (submits || tabbed)) return ["send"];
+  return tabbed ? ["unknown"] : ["computer"];
 }
 
 // A C0 control character other than Tab ends or runs a line: Enter is ^M and ^J, and bash runs the
@@ -279,35 +294,105 @@ interface Token {
   readonly text: string;
   readonly start: number;
   readonly end: number;
+  // A here-doc's text, on its `<<` redirect.
+  readonly body?: string;
 }
+
+interface Lexed {
+  readonly tokens: readonly Token[];
+  // A quote, substitution or here-doc is still open at the end of the input, or a backtick is
+  // nested inside another.
+  readonly open: boolean;
+  readonly bodies: readonly string[];
+}
+
+interface Heredoc {
+  readonly redirect: number;
+  readonly strip: boolean;
+  readonly delimiter: string;
+  // A quoted delimiter keeps the body as written; otherwise its substitutions run.
+  readonly literal: boolean;
+}
+
+// A newline after these continues the command on the next line.
+const CONTINUES = new Set(["|", "|&", "&&", "||"]);
+
+const ANSI_C: Readonly<Record<string, string>> = {
+  a: "\x07",
+  b: "\b",
+  e: "\x1b",
+  E: "\x1b",
+  f: "\f",
+  n: "\n",
+  r: "\r",
+  t: "\t",
+  v: "\v",
+};
 
 // The words and operators of a command line as the shell reads them: quotes and backslashes join a
 // word, and only unquoted characters are operators. A substitution, even inside double quotes, opens
 // a group of its own. A redirection is a `redirect` token before its target, which for a descriptor
-// copy (2>&1) is the descriptor.
-function lex(source: string): Token[] {
+// copy (2>&1) is the descriptor. A # at the start of a word comments out the rest of the line, and
+// a here-doc's body is its redirect's text rather than commands; an unquoted body's substitutions
+// still run, so their tokens follow the stream's as lines of their own.
+function lex(source: string, from = 0, to = source.length, inBody = false): Lexed {
   const tokens: Token[] = [];
-  const modes: ("quote" | "group" | "tick")[] = [];
+  const expansions: Token[] = [];
+  const modes: ("quote" | "group" | "tick" | "body")[] = inBody ? ["body"] : [];
+  const heredocs: Heredoc[] = [];
+  const bodies: string[] = [];
+  let redirect: { readonly redirect: number; readonly strip: boolean } | undefined;
+  let open = false;
   let word = "";
   let started = -1;
+  const char = (at: number) => (at < to ? (source[at] ?? "") : "");
   const begin = (at: number) => {
     if (started < 0) started = at;
   };
   const flush = (at: number) => {
-    if (started >= 0) tokens.push({ kind: "word", text: word, start: started, end: at });
+    if (started < 0) return;
+    tokens.push({ kind: "word", text: word, start: started, end: at });
+    if (redirect)
+      heredocs.push({
+        ...redirect,
+        delimiter: word,
+        literal: /['"\\]/.test(source.slice(started, at)),
+      });
+    redirect = undefined;
     word = "";
     started = -1;
   };
   const emit = (kind: Token["kind"], text: string, at: number, length: number) => {
     flush(at);
+    redirect = undefined;
     tokens.push({ kind, text, start: at, end: at + length });
   };
-  for (let i = 0; i < source.length; ) {
+  const readBodies = (at: number): number => {
+    for (const doc of heredocs.splice(0)) {
+      const { end, next } = delimited(source, at, to, doc);
+      if (next === undefined) open = true;
+      const raw = source.slice(at, end);
+      const text = doc.strip ? raw.replace(/^\t+/gm, "") : raw;
+      bodies.push(text);
+      const token = tokens[doc.redirect];
+      if (token) tokens[doc.redirect] = { ...token, body: text };
+      if (!doc.literal) {
+        const inner = lex(source, at, end, true);
+        expansions.push({ kind: "operator", text: ";", start: at, end: at }, ...inner.tokens);
+        open ||= inner.open;
+      }
+      at = next ?? to;
+    }
+    return at;
+  };
+  for (let i = from; i < to; ) {
     const c = source[i] ?? "";
-    const rest = source.slice(i);
+    const rest = source.slice(i, to);
     const mode = modes.at(-1);
-    if (mode === "quote") {
-      if (c === '"') modes.pop();
+    if (c === "\\" && char(i + 1) === "`" && modes.includes("tick")) open = true;
+    if (mode === "quote" || mode === "body") {
+      const escapes = mode === "quote" ? /^[$`"\\]$/ : /^[$`\\]$/;
+      if (c === '"' && mode === "quote") modes.pop();
       else if (rest.startsWith("$(")) {
         emit("operator", "(", i, 2);
         modes.push("group");
@@ -316,9 +401,12 @@ function lex(source: string): Token[] {
       } else if (c === "`") {
         emit("operator", "(", i, 1);
         modes.push("tick");
-      } else if (c === "\\" && /^[$`"\\\n]/.test(source[i + 1] ?? "")) {
+      } else if (c === "\\" && char(i + 1) === "\n") {
+        i += 2;
+        continue;
+      } else if (c === "\\" && escapes.test(char(i + 1))) {
         begin(i);
-        word += source[i + 1];
+        word += char(i + 1);
         i += 2;
         continue;
       } else {
@@ -329,19 +417,37 @@ function lex(source: string): Token[] {
       continue;
     }
     if (c === "\\") {
-      if (source[i + 1] !== "\n") {
+      if (char(i + 1) !== "\n") {
         begin(i);
-        word += source[i + 1] ?? "";
+        word += char(i + 1);
       }
       i += 2;
+      continue;
+    }
+    if (c === "#" && started < 0) {
+      while (i < to && !endsLine(source[i] ?? "")) i++;
       continue;
     }
     if (c === "'") {
       begin(i);
       const close = source.indexOf("'", i + 1);
-      const end = close < 0 ? source.length : close;
+      const end = close < 0 || close >= to ? to : close;
+      if (end === to) open = true;
       word += source.slice(i + 1, end);
       i = end + 1;
+      continue;
+    }
+    if (rest.startsWith("$'")) {
+      begin(i);
+      const quoted = ansiC(source, i + 2, to);
+      if (quoted.end === undefined) open = true;
+      word += quoted.text;
+      i = quoted.end ?? to;
+      continue;
+    }
+    if (rest.startsWith('$"')) {
+      begin(i);
+      i++;
       continue;
     }
     if (c === '"') {
@@ -376,19 +482,24 @@ function lex(source: string): Token[] {
       continue;
     }
     if (endsLine(c)) {
-      emit("operator", ";", i, 1);
+      const last = tokens.at(-1);
+      if (started >= 0 || last?.kind !== "operator" || !CONTINUES.has(last.text))
+        emit("operator", ";", i, 1);
       i++;
+      if (c === "\n") i = readBodies(i);
       continue;
     }
-    const redirect = /^(?:&>>?|[<>]&|<<<|<<-?|<>|>>|>\||[<>])/.exec(rest)?.[0];
-    if (redirect) {
+    const operator = /^(?:&>>?|[<>]&|<<<|<<-?|<>|>>|>\||[<>])/.exec(rest)?.[0];
+    if (operator) {
       // Digits right before it name the descriptor, not a word.
       if (started >= 0 && /^\d+$/.test(source.slice(started, i))) {
         word = "";
         started = -1;
       }
-      emit("redirect", redirect, i, redirect.length);
-      i += redirect.length;
+      emit("redirect", operator, i, operator.length);
+      if (operator.startsWith("<<") && operator !== "<<<")
+        redirect = { redirect: tokens.length - 1, strip: operator === "<<-" };
+      i += operator.length;
       continue;
     }
     const control = /^(?:&&|\|\||;;|\|&|[;&|])/.exec(rest)?.[0];
@@ -401,13 +512,63 @@ function lex(source: string): Token[] {
     word += c;
     i++;
   }
-  flush(source.length);
-  return tokens;
+  flush(to);
+  if (modes.length > (inBody ? 1 : 0) || heredocs.length || redirect) open = true;
+  return { tokens: [...tokens, ...expansions], open, bodies };
+}
+
+// Where a here-doc's body ends: at the line that is its delimiter (after leading tabs for <<-), or
+// at the end of the input when no line is.
+function delimited(
+  source: string,
+  at: number,
+  to: number,
+  doc: Heredoc,
+): { end: number; next?: number } {
+  for (let line = at; line < to; ) {
+    const newline = source.indexOf("\n", line);
+    const stop = newline < 0 || newline >= to ? to : newline;
+    const text = source.slice(line, stop);
+    if ((doc.strip ? text.replace(/^\t+/, "") : text) === doc.delimiter)
+      return { end: line, next: Math.min(stop + 1, to) };
+    line = stop + 1;
+  }
+  return { end: to };
+}
+
+// A $'…' word's text from just after its opening quote, with its backslash escapes decoded, and
+// where it ends. The shell cuts the word at a NUL.
+function ansiC(source: string, from: number, to: number): { text: string; end?: number } {
+  let text = "";
+  let cut = false;
+  for (let i = from; i < to; ) {
+    const c = source[i] ?? "";
+    if (c === "'") return { text, end: i + 1 };
+    const sequence = c === "\\" ? PATTERNS.ansiEscape.exec(source.slice(i, to)) : null;
+    const decoded = sequence ? decodeEscape(sequence) : c;
+    i += sequence?.[0].length ?? 1;
+    if (decoded === "\0") cut = true;
+    if (!cut) text += decoded;
+  }
+  return { text };
+}
+
+function decodeEscape(sequence: RegExpExecArray): string {
+  const [all, hex, octal, short, long, control, other] = sequence;
+  if (hex || octal)
+    return String.fromCharCode(Number.parseInt(hex ?? octal ?? "", hex ? 16 : 8) & 0xff);
+  if (short || long) {
+    const value = Number.parseInt(short ?? long ?? "", 16);
+    return value <= 0x10ffff ? String.fromCodePoint(value) : "";
+  }
+  if (control) return String.fromCharCode((control.codePointAt(0) ?? 0) & 0x1f);
+  if (other) return ANSI_C[other] ?? (/^['"\\?]$/.test(other) ? other : all);
+  return all;
 }
 
 interface Stage {
   readonly words: readonly string[];
-  // A here-string's text, which the stage reads as its input.
+  // A here-string's or here-doc's text, which the stage reads as its input.
   readonly input?: string;
 }
 interface Line {
@@ -417,7 +578,8 @@ interface Line {
 
 // The commands of a command line, each a list of the stages its pipes, groups and substitutions
 // separate, with redirections taken out.
-function parse(source: string): Line[] {
+function parse(source: string): { lines: Line[]; open: boolean; bodies: readonly string[] } {
+  const lexed = lex(source);
   const lines: Line[] = [];
   let tokens: Token[] = [];
   const close = () => {
@@ -438,18 +600,33 @@ function parse(source: string): Line[] {
       else if (token?.kind === "redirect") {
         const target = tokens[k + 1]?.kind === "word" ? tokens[++k] : undefined;
         if (token.text === "<<<" && target) input = target.text;
+        if (token.body !== undefined) input = token.body;
       } else if (token) words.push(token.text);
     }
     end();
     lines.push({ text: source.slice(first.start, last.end), stages });
     tokens = [];
   };
-  for (const token of lex(source)) {
+  for (const token of lexed.tokens) {
     if (token.kind === "operator" && [";", ";;", "&&", "||", "&"].includes(token.text)) close();
     else tokens.push(token);
   }
   close();
-  return lines;
+  return { lines, open: lexed.open, bodies: lexed.bodies };
+}
+
+// The physical lines of a command, split where the lexer ends a line.
+function physicalLines(command: string): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const c of command) {
+    if (!endsLine(c)) line += c;
+    else {
+      lines.push(line);
+      line = "";
+    }
+  }
+  return [...lines, line];
 }
 
 function base(token: string | undefined): string {
@@ -561,13 +738,15 @@ function switchUser(args: readonly string[]): { code?: string; command?: readonl
   return {};
 }
 
-// The commands find runs with -exec, -execdir, -ok and -okdir, each up to its ; or +.
+// The commands find runs with -exec, -execdir, -ok and -okdir, each up to its ; or +. Their words
+// are run as they are, so each is quoted for the command string.
 function execs(args: readonly string[]): string[] {
   const found: string[] = [];
   for (let i = 0; i < args.length; i++) {
     if (!/^-(?:exec|ok)(?:dir)?$/.test(args[i] ?? "")) continue;
     const end = args.findIndex((arg, k) => k > i && (arg === ";" || arg === "+"));
-    found.push(args.slice(i + 1, end < 0 ? undefined : end).join(" "));
+    const words = args.slice(i + 1, end < 0 ? undefined : end);
+    found.push(words.map((word) => `'${word.replaceAll("'", "'\\''")}'`).join(" "));
     if (end < 0) break;
     i = end;
   }
@@ -717,15 +896,38 @@ function shell(command: string, signedIn: boolean): ActionClass[] {
   return [...classes];
 }
 
-function effects(command: string, depth: number): ActionClass[] {
+// Fails closed: a command the lexer cannot read to its end is unclear, and every here-doc body and
+// physical line is also read as commands on its own, so a quote or here-doc misread on one line
+// cannot hide the next. Those extra reads see fragments, so they are not held to reading to the end.
+function effects(command: string, depth: number, whole = true): ActionClass[] {
   if (depth > MAX_NESTING) return ["unknown"];
+  const { found, open } = stream(command, depth, whole);
+  if (open && whole) found.push("unknown");
+  const physical = physicalLines(command);
+  if (physical.length > 1)
+    for (const line of physical) found.push(...commands(parse(line).lines, depth, false));
+  return found;
+}
+
+function stream(
+  command: string,
+  depth: number,
+  whole: boolean,
+): { found: ActionClass[]; open: boolean } {
+  const { lines, open, bodies } = parse(command);
+  const found = commands(lines, depth, whole);
+  for (const body of bodies) found.push(...stream(body, depth, false).found);
+  return { found, open };
+}
+
+function commands(lines: readonly Line[], depth: number, whole: boolean): ActionClass[] {
   const found: ActionClass[] = [];
-  for (const line of parse(command)) {
+  for (const line of lines) {
     const words = line.stages.flatMap((stage) => stage.words);
     if (PATTERNS.substitution.test(line.text) && remote(words)) found.push("download_execute");
     const runs = line.stages.map(program);
     runs.forEach((run, index) => {
-      for (const code of run.nested) found.push(...effects(code, depth + 1));
+      for (const code of run.nested) found.push(...effects(code, depth + 1, whole));
       const effect = stageClass(run.words);
       if (effect) found.push(effect);
       const next = runs[index + 1];
@@ -733,9 +935,11 @@ function effects(command: string, depth: number): ActionClass[] {
       const name = base(run.words[0]);
       if ((name === "curl" || name === "wget") && remote(run.words.slice(1)))
         found.push("download_execute");
-      // echo "git push" | sh runs what it echoes.
-      if ((name === "echo" || name === "printf") && interpreter(base(next.words[0])) === SHELL)
-        found.push(...effects(echoed(run.words), depth + 1));
+      // echo "git push" | sh runs what it echoes, and cat <<EOF | sh its here-doc.
+      const text =
+        name === "echo" || name === "printf" ? echoed(run.words) : line.stages[index]?.input;
+      if (text !== undefined && interpreter(base(next.words[0])) === SHELL)
+        found.push(...effects(text, depth + 1, whole));
     });
   }
   return found;
@@ -746,7 +950,7 @@ function reads(run: Run, depth: number): boolean {
   if (readsProgram(run.words)) return true;
   if (depth >= MAX_NESTING) return false;
   return run.nested.some((code) =>
-    parse(code).some((line) => line.stages.some((stage) => reads(program(stage), depth + 1))),
+    parse(code).lines.some((line) => line.stages.some((stage) => reads(program(stage), depth + 1))),
   );
 }
 

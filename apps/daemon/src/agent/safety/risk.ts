@@ -38,6 +38,8 @@ export type RiskFacts = {
   target?: NativeTargetFacts;
   keys?: readonly string[];
   newline?: boolean;
+  // Typed text goes on past a Tab, which moves focus to the next control.
+  tabbed?: boolean;
   command?: string;
   destination?: string;
 };

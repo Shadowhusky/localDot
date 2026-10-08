@@ -132,24 +132,36 @@ describe("consequential steps still stop under Balanced", () => {
     expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
   });
 
-  it("Enter in a compose field on the signed-in browser asks", async () => {
+  it.each<[string, ComputerAction]>([
+    ["Enter", { action: "key", keys: ["Return"] }],
+    ["Typing past a Tab, whose space presses Send,", { action: "type", text: "Hi Bob.\t " }],
+  ])("%s in a compose field on the signed-in browser asks", async (_name, action) => {
     const h = harness(DEFAULT_AUTONOMY, "browser");
-    await native(
-      h.ctx,
-      { action: "key", keys: ["Return"] },
-      {
-        target: {
-          point: { x: 5, y: 5 },
-          source: "ax",
-          role: "textbox",
-          name: "Input field",
-          app: "Chromium",
-        },
-        window: null,
+    await native(h.ctx, action, {
+      target: {
         point: { x: 5, y: 5 },
+        source: "ax",
+        role: "textbox",
+        name: "Input field",
+        app: "Chromium",
       },
-    );
+      window: null,
+      point: { x: 5, y: 5 },
+    });
     expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+    expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "send" });
+  });
+
+  it("a push after a comment with an apostrophe asks", async () => {
+    const h = harness(DEFAULT_AUTONOMY);
+    await run(h.ctx, {
+      id: "c",
+      kind: "tool",
+      tool: "shell",
+      input: { command: "# Push the branch so it's on the remote\ngit push origin main" },
+    });
+    expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+    expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "post" });
   });
 
   describe("the desktop's terminal window", () => {
