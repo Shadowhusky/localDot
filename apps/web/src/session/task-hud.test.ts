@@ -218,6 +218,20 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(replay(budget, 9100)).toMatchObject({ row: "working", control: true });
   });
 
+  it("gives a takeover the user's turn and keeps the task's Stop", () => {
+    const requested = [
+      ...typed(),
+      ev("takeover.request", 1500, { requestId: ID, reason: "login", note: "Sign in for me" }),
+      ev("agent.state", 1501, { state: "waiting_user", reason: "takeover" }),
+    ];
+    expect(view(requested, 9500)).toMatchObject({
+      task: { row: "takeover", phase: "waiting", label: "Your turn" },
+      merged: { caption: "Sign in for me", stop: true, control: false, elapsedS: null },
+    });
+    const ended = [...requested, ev("takeover.end", 4000, { requestId: ID, by: "user" })];
+    expect(view(ended, 4500).task).toMatchObject({ row: "working", control: true });
+  });
+
   it("names the Pause's resuming and unconfirmed phases", () => {
     expect(
       view([...typed(), ev("safety.pause", 1100, pause("resuming"))], 9500).merged,
@@ -251,6 +265,11 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       control: true,
       elapsedS: 9,
       stop: true,
+    });
+    const settling = [...typed(), ev("safety.pause", 1100, pause("pausing"))];
+    expect(view(settling, 9500).merged).toMatchObject({
+      label: "Pausing after this step",
+      control: false,
     });
     const paused = [
       ...typed(),

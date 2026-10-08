@@ -31,6 +31,23 @@ it("anchors on the latest event of any kind, so a late state is not read as stil
   expect(result.current).toBeGreaterThanOrEqual(21_010);
 });
 
+it.each([
+  ["a screen read", () => [ev("observe", 30_000, { frameId: "f1", width: 2560, height: 1600 })]],
+  ["a step's start", () => [ev("step.start", 30_000, { kind: "gui" }, "s9")]],
+  [
+    "a step's end",
+    () => [
+      ev("step.start", 21_020, { kind: "gui" }, "s9"),
+      ev("step.end", 30_000, { status: "ok" }, "s9"),
+    ],
+  ],
+])("anchors on %s that comes after the latest state", (_, later) => {
+  const m = model();
+  foldEvents(m, later());
+  const { result } = renderHook(() => useNowMs(m, 0, () => false));
+  expect(result.current).toBeGreaterThanOrEqual(30_000);
+});
+
 it("ticks only while the task is running", () => {
   vi.useFakeTimers();
   const m = model();
