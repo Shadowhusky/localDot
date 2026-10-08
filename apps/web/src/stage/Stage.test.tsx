@@ -23,7 +23,7 @@ const client = () => document.querySelector<HTMLIFrameElement>("iframe.desktop-f
 afterEach(cleanup);
 
 describe("Stage", () => {
-  it("says a Chromium browser is needed where frames cannot be tapped", () => {
+  it("says which browser can show the desktop where frames cannot be tapped", () => {
     render(
       <Stage
         cell={ready}
@@ -33,7 +33,7 @@ describe("Stage", () => {
       />,
     );
     expect(screen.getByRole("alert").textContent).toBe(
-      "This browser has no MediaStreamTrackProcessor. Open localDot in Google Chrome or another Chromium browser.",
+      "This browser lacks WebCodecs. Open localDot in a current Chromium browser.",
     );
     expect(client()).toBeNull();
   });
