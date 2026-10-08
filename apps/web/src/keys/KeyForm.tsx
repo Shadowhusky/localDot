@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  baseURLHint,
   bindingOf,
   type DraftField,
   EMPTY_DRAFT,
@@ -176,6 +177,7 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
   }, []);
   const check = bindingOf(draft);
   const hint = valueHint(draft);
+  const urlHint = draft.kind === "llm" ? baseURLHint(draft.provider) : undefined;
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
     revision.current++;
@@ -196,10 +198,14 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
         {shown.message}
       </p>
     ) : null;
-  const invalid = (field: DraftField) =>
-    shown?.field === field
-      ? { "aria-invalid": true, "aria-describedby": `key-${field}-error` }
-      : {};
+  const invalid = (field: DraftField, described?: string) => {
+    const error = shown?.field === field ? `key-${field}-error` : undefined;
+    const ids = [error, described].filter(Boolean).join(" ");
+    return {
+      ...(error ? { "aria-invalid": true } : {}),
+      ...(ids ? { "aria-describedby": ids } : {}),
+    };
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -326,16 +332,25 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
                   <input
                     value={draft.baseURL}
                     onChange={(e) => set({ baseURL: e.target.value })}
-                    placeholder="https://api.example.com/v1"
+                    placeholder={
+                      draft.provider === "anthropic-compatible"
+                        ? "https://api.example.com/anthropic"
+                        : "https://api.example.com/v1"
+                    }
                     autoComplete="off"
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
                     inputMode="url"
-                    {...invalid("baseURL")}
+                    {...invalid("baseURL", urlHint && "key-baseURL-hint")}
                   />
                 </label>
                 {errorFor("baseURL")}
+                {urlHint && (
+                  <p className="field-hint" id="key-baseURL-hint">
+                    {urlHint}
+                  </p>
+                )}
               </>
             )}
           </>

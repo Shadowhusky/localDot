@@ -83,6 +83,54 @@ describe("bindingOf", () => {
     }
   });
 
+  it("asks Anthropic-compatible keys for a base URL, ending it in /v1 where Anthropic's API lives", () => {
+    expect(needsBaseURL("anthropic-compatible")).toBe(true);
+    for (const [typed, sealed] of [
+      ["https://api.z.ai/api/anthropic", "https://api.z.ai/api/anthropic/v1"],
+      ["https://api.z.ai/api/anthropic/", "https://api.z.ai/api/anthropic/v1"],
+      [" https://API.minimax.io/anthropic/v1 ", "https://api.minimax.io/anthropic/v1"],
+      ["https://api.minimax.io/anthropic/v1/", "https://api.minimax.io/anthropic/v1"],
+      ["https://llm.example.com", "https://llm.example.com/v1"],
+    ])
+      expect(
+        bindingOf(draft({ id: "anc", provider: "anthropic-compatible", baseURL: typed })),
+        typed,
+      ).toEqual({
+        ok: true,
+        binding: { id: "anc", kind: "llm", provider: "anthropic-compatible", baseURL: sealed },
+      });
+    // An OpenAI-compatible address is the one the vendor gives, version path and all.
+    expect(
+      bindingOf(
+        draft({ id: "z", provider: "openai-compatible", baseURL: "https://api.z.ai/api/paas/v4" }),
+      ),
+    ).toMatchObject({ ok: true, binding: { baseURL: "https://api.z.ai/api/paas/v4" } });
+  });
+
+  it("sends Anthropic's own API to the Anthropic provider", () => {
+    for (const baseURL of ["https://api.anthropic.com", "https://api.anthropic.com/v1"])
+      expect(bindingOf(draft({ id: "anc", provider: "anthropic-compatible", baseURL }))).toEqual({
+        ok: false,
+        field: "baseURL",
+        message: "For Anthropic's own API, choose Anthropic as the provider.",
+      });
+  });
+
+  it("refuses addresses and names that are not a public host, as keyd does", () => {
+    for (const provider of ["openai-compatible", "anthropic-compatible"] as const)
+      for (const baseURL of [
+        "https://127.0.0.1/v1",
+        "https://192.168.1.20:443/v1",
+        "https://[::1]/v1",
+        "https://localhost/v1",
+        "https://10.0.0.8/anthropic",
+      ])
+        expect(bindingOf(draft({ id: "x", provider, baseURL })), baseURL).toMatchObject({
+          ok: false,
+          field: "baseURL",
+        });
+  });
+
   it("splits, lower-cases and de-duplicates hosts, and keeps the header as typed", () => {
     expect(
       bindingOf(
@@ -203,6 +251,13 @@ describe("describeKey", () => {
         baseURL: "https://api.groq.com/openai/v1",
       }),
     ).toBe("OpenAI-compatible · api.groq.com");
+    expect(
+      describeKey({
+        kind: "llm",
+        provider: "anthropic-compatible",
+        baseURL: "https://api.z.ai/api/anthropic/v1",
+      }),
+    ).toBe("Anthropic-compatible · api.z.ai");
     expect(
       describeKey({ kind: "http", hosts: ["a.example", "b.example"], header: "Authorization" }),
     ).toBe("a.example, b.example · Authorization");

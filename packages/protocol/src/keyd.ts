@@ -20,6 +20,7 @@ export const LLM_PROVIDERS = [
   "openrouter",
   "openai-compatible",
   "azure",
+  "anthropic-compatible",
 ] as const;
 export const HTTP_FORMATS = ["bearer", "raw", "basic-user", "basic-password"] as const;
 

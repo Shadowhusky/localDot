@@ -465,6 +465,25 @@ describe("KeysSheet", () => {
     expect(screen.getByLabelText("Base URL")).toBeTruthy();
   });
 
+  it("says a custom endpoint's address must be https, and where local servers go", () => {
+    render(<KeysSheet open keys={controller()} onClose={() => {}} />);
+    const provider = screen.getByLabelText("Provider") as HTMLSelectElement;
+    expect([...provider.options].find((o) => o.value === "anthropic-compatible")?.textContent).toBe(
+      "Anthropic-compatible",
+    );
+    const hint = (text: string) => {
+      const node = screen.getByText(text);
+      expect(field("Base URL").getAttribute("aria-describedby")).toContain(node.id);
+    };
+    fireEvent.change(provider, { target: { value: "openai-compatible" } });
+    hint("Use https. Local servers go through LM Studio or Ollama.");
+    fireEvent.change(provider, { target: { value: "anthropic-compatible" } });
+    expect(field("Base URL").placeholder).toBe("https://api.example.com/anthropic");
+    hint("Use https. Local servers go through LM Studio or Ollama. /v1 is added if it is missing.");
+    fireEvent.change(provider, { target: { value: "azure" } });
+    expect(screen.queryByText(/Local servers go through/)).toBeNull();
+  });
+
   it("says the key layer is offline and will not save", () => {
     render(<KeysSheet open keys={controller({ health: { online: false } })} onClose={() => {}} />);
     expect(screen.getByRole("alert").textContent).toContain("The key layer is offline");

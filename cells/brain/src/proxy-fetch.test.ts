@@ -181,6 +181,35 @@ describe("the brain's way to a model", () => {
     ]);
     expect(auths).toEqual([`Bearer ${SURROGATE}`, undefined]);
   });
+
+  it("reaches Anthropic-compatible routes at their messages operation with the surrogate as a bearer token", async () => {
+    const seen: { auth?: string; apiKey?: string; version?: string }[] = [];
+    const listener = await fakeListener((req) => {
+      seen.push({
+        auth: req.headers.authorization,
+        apiKey: req.headers["x-api-key"] as string | undefined,
+        version: req.headers["anthropic-version"] as string | undefined,
+      });
+      return { status: 200, body: SSE, type: "text/event-stream" };
+    });
+    const model = languageModel(
+      binding({
+        client: "anthropic-compatible",
+        route: "zai-anthropic",
+        model: "glm-5.3-flash",
+        computer: "generic",
+      }),
+      proxyFetch(listener.url, PROXY_TOKEN),
+    );
+    const result = streamText({ model, prompt: "hi", maxRetries: 0 });
+    expect(await result.text).toBe("Hello from keyd");
+    expect(listener.seen.map((s) => s.line)).toEqual([
+      "POST http://llm.ldot/zai-anthropic/messages",
+    ]);
+    expect(seen).toEqual([
+      { auth: `Bearer ${SURROGATE}`, apiKey: undefined, version: "2023-06-01" },
+    ]);
+  });
 });
 
 // keyd's listener again, keeping each request's headers and body.
