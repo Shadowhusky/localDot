@@ -1,4 +1,5 @@
 import type {
+  HeldResult,
   HitTestResult,
   InputResult,
   ObserveResult,
@@ -30,6 +31,8 @@ export interface FakeScript {
   inputHolds?: number;
   // How long /release takes before it answers (and is recorded).
   releaseMs?: number;
+  // What /held answers; by default the buttons /input pressed with `down` and has not let go.
+  held?: () => HeldResult;
 }
 
 export class FakeDesktopd {
@@ -40,6 +43,8 @@ export class FakeDesktopd {
   #mono = 50_000;
   // Where the fake's pointer is: the last /input point, as a real desktop's would be after a click.
   pointer = { x: 0, y: 0 };
+  // Buttons a `down` pressed and nothing let go of yet (1 left, 2 middle, 3 right).
+  readonly buttons = new Set<number>();
 
   constructor(script: FakeScript = {}) {
     this.script = script;
@@ -80,6 +85,11 @@ export class FakeDesktopd {
         armedMono,
       };
       if ("status" in out) return c.text(out.body, out.status as 500);
+      const button = { left: 1, middle: 2, right: 3 }[
+        (body.input as { button?: "left" | "middle" | "right" } | undefined)?.button ?? "left"
+      ];
+      if (body.input?.kind === "down") this.buttons.add(button);
+      if (body.input?.kind === "up") this.buttons.delete(button);
       if (!long) return c.json(out);
       const lines = out.presses.map((pressMono, i) => ({ presses: i + 1, pressMono }));
       const ndjson = (ls: unknown[]) => ls.map((l) => `${JSON.stringify(l)}\n`).join("");
@@ -141,7 +151,13 @@ export class FakeDesktopd {
     this.app.post("/release", async (c) => {
       if (this.script.releaseMs) await new Promise((r) => setTimeout(r, this.script.releaseMs));
       this.calls.push({ path: "/release", body: null });
-      return c.json({ keys: 0, buttons: 0 });
+      const buttons = this.buttons.size;
+      this.buttons.clear();
+      return c.json({ keys: 0, buttons });
+    });
+    this.app.post("/held", (c) => {
+      this.calls.push({ path: "/held", body: null });
+      return c.json(this.script.held?.() ?? { buttons: [...this.buttons] });
     });
     this.app.post("/launch", async (c) => {
       const body = await c.req.json();

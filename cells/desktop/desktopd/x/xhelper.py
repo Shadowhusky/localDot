@@ -714,6 +714,14 @@ class Commands:
         self.buttons_until = mono() + BUTTON_HOLD_MS
         return {"button": button}
 
+    # While the user decides about the next step, desktopd keeps the buttons a `down` pressed down
+    # as long again, and learns which of them the server still has down.
+    def cmd_held(self, a):
+        if self.buttons:
+            self.buttons_until = mono() + BUTTON_HOLD_MS
+        mask = self.root.query_pointer().mask
+        return {"buttons": [b for b in self.buttons if mask & (1 << (7 + b))]}
+
     # Lets go of a button at a point, and of the modifiers pressed with the last held button.
     # `released` is false when the button was not down.
     def cmd_up(self, a):

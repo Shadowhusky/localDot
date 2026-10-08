@@ -1,6 +1,7 @@
 import {
   ClockResult,
   type FindRequest,
+  HeldResult,
   HitTestResult,
   type InputRequest,
   InputResult,
@@ -84,6 +85,12 @@ export class DesktopdClient {
   // Releases every key and button that is down on the desktop.
   release(): Promise<ReleaseResult> {
     return this.#json("POST", "/release", {}, TIMEOUT_MS.input, ReleaseResult.parse);
+  }
+
+  // Keeps the buttons the agent holds down between actions down for another while; says which
+  // of them are still down.
+  held(): Promise<HeldResult> {
+    return this.#json("POST", "/held", {}, TIMEOUT_MS.input, HeldResult.parse);
   }
 
   settle(req: Partial<SettleRequest> = {}): Promise<SettleResult> {

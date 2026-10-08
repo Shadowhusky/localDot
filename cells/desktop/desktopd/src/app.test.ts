@@ -194,6 +194,7 @@ function fakeX(): XHelper & {
       }
       if (cmd === "release") return { keycodes: [50] } as never;
       if (cmd === "release_all") return { keys: 2, buttons: 1 } as never;
+      if (cmd === "held") return { buttons: [1] } as never;
       if (cmd === "settle")
         return {
           changed: [[1, 2, 3, 4]],
@@ -467,6 +468,13 @@ describe("desktopd input routes", () => {
     const res = await fullApp(x).request("/release", { method: "POST", headers: bearer });
     expect(await res.json()).toMatchObject({ keys: 2, buttons: 1 });
     expect(x.calls).toEqual(["release_all"]);
+  });
+
+  it("keeps a held button down and names the buttons still down", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/held", { method: "POST", headers: bearer });
+    expect(await res.json()).toEqual({ buttons: [1] });
+    expect(x.calls).toEqual(["held"]);
   });
 
   it("answers an unknown key name with 400 and its close matches", async () => {

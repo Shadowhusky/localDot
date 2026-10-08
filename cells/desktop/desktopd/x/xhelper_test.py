@@ -790,6 +790,27 @@ class Cancel(unittest.TestCase):
         cmds.cmd_up({"x": 300, "y": 400, "button": 1})
         self.assertNotIn((X.KeyPress, 9), kb.events)
 
+    def test_a_pointer_moved_by_anyone_else_since_the_press_still_cancels_with_escape(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        kb.pointer = (200, 220)
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 1, "escaped": True})
+        self.assertEqual(kb.events, [(X.KeyPress, 9), (X.KeyRelease, 9), (X.ButtonRelease, 1)])
+
+    def test_held_puts_off_the_backstop_and_names_the_buttons_still_down(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_held({}), {"buttons": []})
+        self.assertIsNone(cmds.buttons_until)
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        before = cmds.buttons_until
+        time.sleep(0.01)
+        self.assertEqual(cmds.cmd_held({}), {"buttons": [1]})
+        self.assertGreater(cmds.buttons_until, before)
+        kb.buttons.discard(1)
+        self.assertEqual(cmds.cmd_held({}), {"buttons": []})
+        self.assertNotIn(X.ButtonRelease, [k for k, _ in kb.events])
+
     def test_a_scroll_while_held_keeps_the_button_down_as_long_as_a_move(self):
         cmds, kb = keyboard()
         cmds.cmd_down({"x": 10, "y": 20, "button": 1})

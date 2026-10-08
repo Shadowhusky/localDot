@@ -1,5 +1,6 @@
 import {
   FindRequest,
+  HeldResult,
   HitTestRequest,
   InputRequest,
   type InputResult,
@@ -230,6 +231,11 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
   // Every key and button the X server has down, whoever pressed them: after a Stop or a failure.
   app.post("/release", async (c) =>
     withX(async (x) => c.json(await x.call<{ keys: number; buttons: number }>("release_all")))(),
+  );
+
+  // Keeps the buttons the agent holds between actions down while the daemon waits on the user.
+  app.post("/held", async (c) =>
+    withX(async (x) => c.json(HeldResult.parse(await x.call("held"))))(),
   );
 
   app.post("/type", async (c) =>

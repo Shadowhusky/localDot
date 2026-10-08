@@ -54,6 +54,12 @@ export const ReleaseResult = z.object({
   buttons: z.number().int().nonnegative(),
 });
 export type ReleaseResult = z.infer<typeof ReleaseResult>;
+// /held keeps the buttons the agent holds down between actions down for another while, and names
+// those the X server still has down (1 left, 2 middle, 3 right).
+export const HeldResult = z.object({
+  buttons: z.array(z.number().int().min(1).max(3)),
+});
+export type HeldResult = z.infer<typeof HeldResult>;
 
 export const TypePace = z.object({
   firstMs: z.number().nonnegative(),
