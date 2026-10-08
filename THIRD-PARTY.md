@@ -8,6 +8,7 @@ components retain their respective licenses and notices.
 | mediabunny | 1.61.0 | MPL-2.0 | Used unmodified by the daemon and web app. Its complete license and exact source locations ship with each web build at `/assets/licenses/mediabunny-1.61.0.txt`. |
 | Selkies client | Pinned vendored client | See its notice | [Client notice](apps/web/vendor/selkies/NOTICE.md). |
 | Desktop cell software | Pinned cell image | See individual components | [Desktop third-party list](cells/desktop/THIRD-PARTY.md). |
+| X keysym names (xorgproto `keysymdef.h`, `XF86keysym.h`) | 2025.1 | MIT-style (The Open Group, Digital) | The names and values in [`packages/protocol/src/keysyms.ts`](packages/protocol/src/keysyms.ts), which carries the notice. |
 
 mediabunny's Source Code Form for the exact version used here is available from
 [the npm source archive](https://registry.npmjs.org/mediabunny/-/mediabunny-1.61.0.tgz)
