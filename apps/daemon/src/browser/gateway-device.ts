@@ -95,14 +95,25 @@ export function browserGatewayDevice(options: {
     },
     input: async (request, signal, onPress) => {
       const owner = scope(signal);
-      if (request.window !== undefined) throw new BrowserClientError("request");
+      if (request.window !== undefined || request.dropWindow !== undefined)
+        throw new BrowserClientError("request");
       const input = request.input;
+      // A button never stays down past one browser request: drags press and let go inside one.
+      if (input.kind === "down" || input.kind === "up")
+        throw new Error("Holding a mouse button is not available on the browser screen.");
       const mapped: InputRequest["input"] =
         input.kind === "move"
           ? { ...input, to: toModel(input.to) }
-          : input.kind === "click" || input.kind === "scroll"
-            ? { ...input, at: toModel(input.at) }
-            : input;
+          : input.kind === "drag"
+            ? {
+                ...input,
+                from: toModel(input.from),
+                to: toModel(input.to),
+                ...(input.path ? { path: input.path.map(toModel) } : {}),
+              }
+            : input.kind === "click" || input.kind === "scroll"
+              ? { ...input, at: toModel(input.at) }
+              : input;
       // browserd presses one combo per request: a repeat is that many requests, a hold none.
       if (mapped.kind === "key" && mapped.holdMs)
         throw new Error("Holding keys is not available on the browser screen.");

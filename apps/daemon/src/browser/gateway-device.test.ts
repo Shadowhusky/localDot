@@ -128,6 +128,39 @@ describe("leased browser gateway device", () => {
       expect(f.device.clocks.toDaemonMicros(50)).toBe(100_000);
     },
   );
+  it("sends a drag's every point in model pixels and keeps no button down past one request", async () => {
+    const f = fixture(2);
+    const drag = {
+      kind: "drag" as const,
+      from: { x: 20, y: 40 },
+      to: { x: 600, y: 800 },
+      path: [{ x: 200, y: 300 }],
+      button: "left" as const,
+      durationMs: 400,
+    };
+    await f.device.client.input({ input: drag, injector: "xtest", holdMs: 0 });
+    expect((f.client.input.mock.calls[0] as unknown[])[2]).toEqual({
+      input: {
+        ...drag,
+        from: { x: 10, y: 20 },
+        to: { x: 300, y: 400 },
+        path: [{ x: 100, y: 150 }],
+      },
+      injector: "xtest",
+      holdMs: 0,
+    });
+    for (const input of [
+      { kind: "down" as const, button: "left" as const, at: { x: 2, y: 2 } },
+      { kind: "up" as const, button: "left" as const, at: { x: 2, y: 2 } },
+    ])
+      await expect(f.device.client.input({ input, injector: "xtest", holdMs: 0 })).rejects.toThrow(
+        /mouse button/,
+      );
+    await expect(
+      f.device.client.input({ input: drag, injector: "xtest", holdMs: 0, dropWindow: 3 }),
+    ).rejects.toThrow();
+    expect(f.client.input).toHaveBeenCalledTimes(1);
+  });
   it("presses a repeated key once per repeat and refuses to hold keys", async () => {
     const f = fixture();
     const key = { kind: "key" as const, combo: ["Down"] };

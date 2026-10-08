@@ -657,12 +657,16 @@ export class BrowserClient {
     request: InputRequest,
     scope: BrowserScope,
   ): Promise<InputResult> {
+    const motionMs =
+      request.input.kind === "drag" || request.input.kind === "move"
+        ? (request.input.durationMs ?? 0)
+        : 0;
     return this.#json(
       "POST",
       "/input",
       { ...this.#action(permit, tabId), request },
       scope,
-      10000,
+      10000 + motionMs,
       inputReply,
       65536,
     );

@@ -8,6 +8,7 @@ import {
   type TypeResult,
 } from "@localdot/protocol";
 import { keyName } from "@localdot/protocol/keys";
+import { type MotionSample, motionSamples } from "@localdot/protocol/motion";
 import { z as schema } from "zod";
 import type { BrowserManualReply } from "../../../../packages/protocol/src/browser-control.ts";
 import type { BrowserActionLease, BrowserControl } from "./control.ts";
@@ -19,6 +20,11 @@ import type { BrowserDocument, BrowserTargets } from "./targets.ts";
 
 export const BROWSER_INPUT_TIMEOUT_MS = 120_000;
 export const BROWSER_INPUT_PRESS_MS = 150;
+// A drag waits this long after its press before it moves, and over the drop point before it lets
+// go: pages start a drag on the motion after a press, and a drop target has to answer the drag.
+const DRAG_PRESS_MS = 50;
+const DRAG_DROP_MS = 120;
+const BUTTON = { left: 1, middle: 2, right: 3 } as const;
 
 const screenPoint = schema.strictObject({
   x: schema.number().finite().min(0).lt(1280),
@@ -33,7 +39,20 @@ const pointerInput = schema.discriminatedUnion("kind", [
     count: schema.number().int().min(1).max(3),
     mods: schema.array(key).max(2).default([]),
   }),
-  schema.strictObject({ kind: schema.literal("move"), to: screenPoint }),
+  schema.strictObject({
+    kind: schema.literal("move"),
+    to: screenPoint,
+    durationMs: schema.number().int().positive().max(10_000).optional(),
+  }),
+  schema.strictObject({
+    kind: schema.literal("drag"),
+    from: screenPoint,
+    to: screenPoint,
+    path: schema.array(screenPoint).max(62).optional(),
+    button: schema.enum(["left", "middle", "right"]),
+    mods: schema.array(key).max(2).default([]),
+    durationMs: schema.number().int().positive().max(10_000),
+  }),
   schema.strictObject({
     kind: schema.literal("scroll"),
     at: screenPoint,
@@ -101,8 +120,9 @@ interface Scope {
   check(document?: BrowserDocument): void;
 }
 
+// A drag's path is the largest request: 64 points.
 function capture(raw: unknown): unknown {
-  let remaining = 96;
+  let remaining = 320;
   const visit = (value: unknown, depth: number): unknown => {
     remaining -= 1;
     if (remaining < 0 || depth > 5) throw new BrowserInputError("request");
@@ -134,7 +154,7 @@ function capture(raw: unknown): unknown {
       result[name] = visit(descriptor.value, depth + 1);
     }
     if (!array) return result;
-    if (names.length !== value.length + 1 || value.length > 3)
+    if (names.length !== value.length + 1 || value.length > 64)
       throw new BrowserInputError("request");
     return Array.from({ length: value.length }, (_unused, position) => {
       if (!Object.hasOwn(result, String(position))) throw new BrowserInputError("request");
@@ -598,6 +618,17 @@ export class BrowserInput {
           )
             throw new BrowserInputError("request");
         }
+        if (request.input.kind === "drag") {
+          request.input.mods = request.input.mods.map(keyName);
+          if (
+            !nativeRequest(
+              "down",
+              { x: 0, y: 0, button: 1, mods: request.input.mods },
+              this.#options.scale,
+            )
+          )
+            throw new BrowserInputError("request");
+        }
         if (request.input.kind === "scroll" && request.input.dx === 0 && request.input.dy === 0)
           throw new BrowserInputError("request");
         return request;
@@ -624,6 +655,7 @@ export class BrowserInput {
             ...(receipt.releaseMono === undefined ? {} : { releaseMono: receipt.releaseMono }),
           };
         }
+        if (input.kind === "drag") return this.#drag(tabId, input, armedMono, scope);
         const mapped = await this.#pointer(
           tabId,
           input.kind === "move" ? input.to : input.at,
@@ -631,11 +663,20 @@ export class BrowserInput {
         );
         scope.check(mapped.document);
         if (input.kind === "move") {
-          const receipt = await this.#options.native.command(
-            "move",
-            { ...mapped.point.native },
-            scope.signal,
-          );
+          const pointer = input.durationMs
+            ? await this.#options.native.command("pointer", {}, scope.signal)
+            : undefined;
+          scope.check();
+          const mono = pointer
+            ? await this.#glide(
+                motionSamples([pointer, mapped.point.native], input.durationMs ?? 0),
+                scope,
+              )
+            : undefined;
+          const receipt =
+            mono === undefined
+              ? await this.#options.native.command("move", { ...mapped.point.native }, scope.signal)
+              : { mono };
           scope.check();
           return { armedMono, pressMono: receipt.mono, presses: [], injector: "xtest" };
         }
@@ -688,6 +729,86 @@ export class BrowserInput {
         };
       },
     );
+  }
+
+  // Moves the pointer through `samples` on their schedule; a stop ends it between two motions.
+  async #glide(samples: MotionSample[], scope: Scope): Promise<number | undefined> {
+    const start = performance.now();
+    let mono: number | undefined;
+    for (const sample of samples) {
+      const wait = sample.t - (performance.now() - start);
+      if (wait > 0) await sleep(wait, undefined, { signal: scope.signal });
+      scope.check();
+      ({ mono } = await this.#options.native.command("move", { ...sample.at }, scope.signal));
+    }
+    return mono;
+  }
+
+  // Press at the start, follow the path, let go at the end, all inside the checked page: both ends
+  // pass the pointer checks (frame, secret fields, stable geometry) and every point maps into the
+  // page. The page must be unchanged before the drop, and a drag that stops early lets go where it
+  // started.
+  async #drag(
+    tabId: string,
+    input: Extract<schema.infer<typeof pointerInput>, { kind: "drag" }>,
+    armedMono: number,
+    scope: Scope,
+  ): Promise<InputResult> {
+    const start = await this.#pointer(tabId, input.from, scope);
+    const end = await this.#pointer(tabId, input.to, scope);
+    const snapshot = await this.#geometry(tabId, scope);
+    if (snapshot.document.revision !== end.document.revision) throw new BrowserInputError("target");
+    const native = (at: { x: number; y: number }) =>
+      this.#options.geometry.point(
+        snapshot,
+        (at.x * this.#options.scale - snapshot.content[0]) / snapshot.factor,
+        (at.y * this.#options.scale - snapshot.content[1]) / snapshot.factor,
+        scope.signal,
+      ).native;
+    const way = [start.point.native, ...(input.path ?? []).map(native), end.point.native];
+    const button = BUTTON[input.button];
+    let held = false;
+    try {
+      const receipt = await this.#press(
+        scope,
+        armedMono,
+        async () => {
+          const reply = await this.#options.native.command(
+            "down",
+            {
+              ...start.point.native,
+              button,
+              mods: input.mods as ("Control_L" | "Shift_L")[],
+            },
+            scope.signal,
+          );
+          held = true;
+          return reply;
+        },
+        (event) => event.kind === "button" && event.detail === button,
+        1,
+      );
+      await sleep(DRAG_PRESS_MS, undefined, { signal: scope.signal });
+      await this.#glide(motionSamples(way, input.durationMs), scope);
+      await sleep(DRAG_DROP_MS, undefined, { signal: scope.signal });
+      const after = await this.#geometry(tabId, scope);
+      if (!sameGeometry(snapshot, after)) throw new BrowserInputError("target");
+      await this.#options.native.command("up", { ...end.point.native, button }, scope.signal);
+      held = false;
+      scope.check();
+      return {
+        armedMono,
+        pressMono: receipt.presses[0] as number,
+        presses: [...receipt.presses],
+        injector: "xtest",
+      };
+    } finally {
+      // Without the request's signal: a stopped drag still lets go.
+      if (held)
+        await this.#options.native
+          .command("up", { ...start.point.native, button })
+          .catch(() => undefined);
+    }
   }
 
   type(
