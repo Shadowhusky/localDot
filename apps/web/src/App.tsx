@@ -28,7 +28,7 @@ import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
 import { ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { mergeHud, taskFacts, taskHud } from "./session/task-hud.ts";
+import { mergeHud, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";

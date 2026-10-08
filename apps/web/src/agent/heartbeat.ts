@@ -1,4 +1,4 @@
-import { liveState } from "../session/task-hud.ts";
+import { liveState } from "../session/status.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 export function taskStalled(agent: AgentSessionView, now: number): boolean {
   const beat = agent.model.lastHeartbeat;

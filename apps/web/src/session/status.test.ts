@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { emptyAgentModel } from "../agent/model.ts";
 import { projectAgentEvent } from "../agent/reducer.ts";
 import { type HudState, hudFor } from "../cells/hud-state.ts";
-import { liveState, mergeHud, type TaskFacts, taskFacts, taskHud } from "./task-hud.ts";
+import { liveState, mergeHud, type TaskFacts, taskFacts, taskHud } from "./status.ts";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 let seq = 0;
