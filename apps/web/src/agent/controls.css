@@ -71,6 +71,7 @@
 .takeover-panel h3 {
   margin: 0;
   font-size: 15px;
+  font-weight: 600;
 }
 .takeover-panel p {
   white-space: pre-wrap;

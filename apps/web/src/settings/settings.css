@@ -197,6 +197,7 @@
 .chatgpt-panel h3 {
   margin: 0;
   font-size: 16px;
+  font-weight: 600;
 }
 .chatgpt-actions {
   display: flex;
@@ -215,6 +216,7 @@
 }
 .chatgpt-confirm h4 {
   margin: 0;
+  font-weight: 600;
 }
 @media (pointer: coarse) {
   .settings-sheet select,

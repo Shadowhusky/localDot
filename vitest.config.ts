@@ -6,7 +6,7 @@ export default defineConfig({
   // apps/web resolves its @/ alias from its tsconfig.
   resolve: { tsconfigPaths: true },
   test: {
-    css: { include: [/theme\.css/] },
+    css: { include: [/theme\.css/, /tokens\.css/] },
     include: [
       "packages/*/src/**/*.test.ts",
       "harness/*/src/**/*.test.ts",

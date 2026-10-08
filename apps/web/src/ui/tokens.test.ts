@@ -1,0 +1,204 @@
+import { readdir } from "node:fs/promises";
+import { describe, expect, it } from "vitest";
+import { readSource } from "../testing/read-source.ts";
+import { cssBlocks, readTokens, type TokenContext } from "../testing/tokens.ts";
+
+const SRC = new URL("../", import.meta.url);
+const tokensCss = await readSource(new URL("./tokens.css", import.meta.url));
+const motionCss = await readSource(new URL("./motion.css", import.meta.url));
+const baseCss = await readSource(new URL("./base.css", import.meta.url));
+const legacyCss = await readSource(new URL("../theme.css", import.meta.url));
+const page = await readSource(new URL("../../index.html", import.meta.url));
+const stylesheets = (await readdir(SRC, { recursive: true }))
+  .filter((path) => path.endsWith(".css") && !path.includes("_spike"))
+  .sort();
+
+type Rgba = [number, number, number, number];
+
+function rgba(value: string): Rgba {
+  const hex = /^#([0-9a-f]{6})$/i.exec(value);
+  if (hex) {
+    const [r, g, b] = [0, 2, 4].map((i) => Number.parseInt((hex[1] as string).slice(i, i + 2), 16));
+    return [r, g, b, 1] as Rgba;
+  }
+  const fn = /^rgba?\((\d+), (\d+), (\d+)(?:, ([\d.]+))?\)$/.exec(value);
+  if (fn) return [Number(fn[1]), Number(fn[2]), Number(fn[3]), fn[4] ? Number(fn[4]) : 1];
+  throw new Error(`not a colour: ${value}`);
+}
+
+function over([r, g, b, a]: Rgba, ground: Rgba): Rgba {
+  return [r, g, b].map((c, i) => a * c + (1 - a) * (ground[i] as number)).concat(1) as Rgba;
+}
+
+function linear(channel: number): number {
+  const c = channel / 255;
+  return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+}
+
+// WCAG 2 contrast ratio of two opaque colours.
+function contrast(a: Rgba, b: Rgba): number {
+  const luminance = ([r, g, b]: Rgba) =>
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b);
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x) as [number, number];
+  return (hi + 0.05) / (lo + 0.05);
+}
+
+// OKLCH lightness, chroma and hue, with Björn Ottosson's OKLab matrices.
+function oklch([r, g, b]: Rgba): [number, number, number] {
+  const [lr, lg, lb] = [r, g, b].map(linear) as [number, number, number];
+  const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
+  const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
+  const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
+  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
+  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
+  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return [L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360];
+}
+
+function palette(context: TokenContext) {
+  const tokens = readTokens([tokensCss], context);
+  return (name: string): Rgba => rgba(tokens.get(`--color-${name}`) ?? `no --color-${name}`);
+}
+
+const WHITE: Rgba = [255, 255, 255, 1];
+const BLACK: Rgba = [0, 0, 0, 1];
+const MORE_CONTRAST = "prefers-contrast: more";
+const CONTEXTS: TokenContext[] = [
+  { appearance: "graphite" },
+  { appearance: "midnight" },
+  { appearance: "graphite", media: [MORE_CONTRAST] },
+  { appearance: "midnight", media: [MORE_CONTRAST] },
+];
+
+describe("colour tokens", () => {
+  for (const context of CONTEXTS) {
+    const label = `${context.appearance}${context.media ? ", more contrast" : ""}`;
+    const color = palette(context);
+
+    it(`keeps text at 4.5:1 on every surface it may sit on (${label})`, () => {
+      for (const ground of ["void", "well", "raised", "raised-2", "overlay"]) {
+        for (const text of ["fg-1", "fg-2", "fg-3"]) {
+          if (text === "fg-3" && (ground === "raised-2" || ground === "overlay")) continue;
+          const ratio = contrast(color(text), color(ground));
+          expect(ratio, `${text} on ${ground}`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    });
+
+    it(`keeps HUD text at 4.5:1 over a white or a black frame (${label})`, () => {
+      for (const frame of [WHITE, BLACK]) {
+        const hud = over(color("hud"), frame);
+        for (const text of ["fg-1", "fg-2"]) {
+          expect(contrast(color(text), hud), `${text} on the HUD`).toBeGreaterThanOrEqual(4.5);
+        }
+      }
+    });
+
+    it(`gives field edges 3:1 on the void and on raised surfaces (${label})`, () => {
+      for (const ground of ["void", "raised"]) {
+        const ratio = contrast(color("field-line"), color(ground));
+        expect(ratio, `field-line on ${ground}`).toBeGreaterThanOrEqual(3);
+      }
+    });
+  }
+
+  it("keeps secondary and tertiary text apart in both appearances", () => {
+    for (const appearance of ["graphite", "midnight"] as const) {
+      const color = palette({ appearance });
+      expect(contrast(color("fg-2"), color("fg-3")), appearance).toBeGreaterThanOrEqual(1.5);
+    }
+  });
+
+  it("builds Midnight on Graphite's lightness ramp at hue 255", () => {
+    const graphite = palette({ appearance: "graphite" });
+    const midnight = palette({ appearance: "midnight" });
+    for (const step of ["void", "well", "raised", "raised-2", "overlay"]) {
+      const [lightness] = oklch(graphite(step));
+      const [l, c, h] = oklch(midnight(step));
+      expect(Math.abs(l - lightness), `${step} lightness`).toBeLessThan(0.005);
+      expect(c, `${step} chroma`).toBeGreaterThan(0.015);
+      expect(c, `${step} chroma`).toBeLessThan(0.03);
+      expect(Math.abs(h - 255), `${step} hue`).toBeLessThan(3);
+    }
+  });
+
+  it("makes the HUD solid for more contrast or less transparency", () => {
+    for (const appearance of ["graphite", "midnight"] as const) {
+      for (const feature of [MORE_CONTRAST, "prefers-reduced-transparency: reduce"]) {
+        const tokens = readTokens([tokensCss], { appearance, media: [feature] });
+        expect(tokens.get("--color-hud"), `${appearance}, ${feature}`).toBe(
+          tokens.get("--color-hud-solid"),
+        );
+      }
+    }
+  });
+});
+
+describe("token layer", () => {
+  it("declares each token once, so a legacy rule cannot outrank it from a later layer", () => {
+    const owned = new Set(readTokens([tokensCss]).keys());
+    const redeclared = cssBlocks(legacyCss)
+      .flatMap((block) => [...block.body.matchAll(/(--[\w-]+)\s*:/g)].map((m) => m[1] as string))
+      .filter((name) => owned.has(name));
+    expect(redeclared).toEqual([]);
+  });
+
+  it("points the legacy colour names at the roles", () => {
+    const tokens = readTokens([tokensCss, legacyCss]);
+    for (const [legacy, role] of [
+      ["surface", "raised"],
+      ["surface-2", "raised-2"],
+      ["line", "overlay"],
+      ["text", "fg-1"],
+      ["text-2", "fg-2"],
+      ["text-3", "fg-3"],
+    ]) {
+      expect(legacyCss).toContain(`--color-${legacy}: var(--color-${role});`);
+      expect(tokens.get(`--color-${legacy}`)).toBe(tokens.get(`--color-${role}`));
+    }
+  });
+
+  it("strengthens the legacy line with every other hairline when the viewer asks for contrast", () => {
+    const tokens = readTokens([tokensCss, legacyCss], { media: [MORE_CONTRAST] });
+    expect(tokens.get("--color-line")).toBe(tokens.get("--color-field-line"));
+    expect(tokens.get("--color-hairline")).toBe(tokens.get("--color-field-line"));
+  });
+
+  it("maps every duration into 120–150 ms under reduced motion", () => {
+    const normal = readTokens([tokensCss, motionCss]);
+    const reduced = readTokens([tokensCss, motionCss], {
+      media: ["prefers-reduced-motion: reduce"],
+    });
+    const durations = [...normal.keys()].filter((name) => name.startsWith("--dur-"));
+    expect(durations).toHaveLength(6);
+    for (const name of durations) {
+      const ms = Number(/^(\d+)ms$/.exec(reduced.get(name) ?? "")?.[1]);
+      expect(ms, name).toBeGreaterThanOrEqual(120);
+      expect(ms, name).toBeLessThanOrEqual(150);
+    }
+    expect(reduced.get("--ease-spring")).toBe(normal.get("--ease-standard"));
+  });
+
+  it("tints the browser chrome with the void", () => {
+    const content = /<meta name="theme-color" content="(#[0-9a-f]{6})" \/>/.exec(page)?.[1];
+    expect(content).toBe(readTokens([tokensCss]).get("--color-void"));
+  });
+});
+
+describe("focus", () => {
+  it("draws the ring in fg-1 and never in xenon", async () => {
+    expect(baseCss).toMatch(
+      /:focus-visible \{\s*outline: var\(--focus-width\) solid var\(--color-fg-1\);/,
+    );
+    const xenon: string[] = [];
+    for (const path of stylesheets) {
+      for (const block of cssBlocks(await readSource(new URL(path, SRC)))) {
+        if (/:focus/.test(block.selector) && /xenon/.test(block.body)) {
+          xenon.push(`${path} ${block.selector}`);
+        }
+      }
+    }
+    expect(stylesheets).toContain("onboarding/onboarding.css");
+    expect(xenon).toEqual([]);
+  });
+});

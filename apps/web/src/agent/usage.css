@@ -20,6 +20,12 @@
 .knowledge-view h3 {
   margin: 0 0 8px;
   font-size: 15px;
+  font-weight: 600;
+}
+.knowledge-view h4,
+.plan-usage h4,
+.retry-note h4 {
+  font-weight: 600;
 }
 .usage-view p,
 .task-recovery p,

@@ -1,0 +1,217 @@
+/* One ramp per appearance, from the same OKLCH lightness steps: Graphite near-neutral, Midnight at
+   hue 255 and chroma about .02. Roles below point into the ramp of the active appearance. */
+@layer theme {
+  :root {
+    --graphite-void: #0a0b0d;
+    --graphite-raised: #1a1c1f;
+    --graphite-raised-2: #25262a;
+    --graphite-overlay: #2c2e31;
+    --graphite-well: #070809;
+    --graphite-fg-1: #eeeff1;
+    --graphite-hud: rgba(14, 15, 18, 0.8);
+    --graphite-hud-solid: rgba(14, 15, 18, 0.92);
+    --graphite-stage-dim: rgba(10, 11, 13, 0.45);
+
+    --midnight-void: #050b14;
+    --midnight-raised: #151c26;
+    --midnight-raised-2: #1f2731;
+    --midnight-overlay: #272f39;
+    --midnight-well: #030811;
+    --midnight-fg-1: #edeff2;
+    --midnight-hud: rgba(9, 16, 24, 0.8);
+    --midnight-hud-solid: rgba(9, 16, 24, 0.92);
+    --midnight-stage-dim: rgba(5, 11, 20, 0.45);
+  }
+}
+
+@theme static {
+  --color-*: initial;
+  --font-*: initial;
+  --font-weight-*: initial;
+  --text-*: initial;
+  --tracking-*: initial;
+  --leading-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+  --inset-shadow-*: initial;
+  --drop-shadow-*: initial;
+  --text-shadow-*: initial;
+  --blur-*: initial;
+  --ease-*: initial;
+  --animate-*: initial;
+  --breakpoint-*: initial;
+
+  --color-void: var(--graphite-void);
+  --color-raised: var(--graphite-raised);
+  --color-raised-2: var(--graphite-raised-2);
+  --color-overlay: var(--graphite-overlay);
+  --color-well: var(--graphite-well);
+
+  /* fg-3 holds 4.5:1 on void, well and raised only: never on raised-2 or overlay. fg-4 is never text. */
+  --color-fg-1: var(--graphite-fg-1);
+  --color-fg-2: #a8abb0;
+  --color-fg-3: #83868b;
+  --color-fg-4: rgba(255, 255, 255, 0.28);
+
+  /* Hairline is decorative only; every field and outlined control uses field-line (3:1). */
+  --color-hairline: rgba(255, 255, 255, 0.07);
+  --color-field-line: #6b6e75;
+  --color-field-line-hover: #83868b;
+
+  /* Xenon means "dot has control" and nothing else. Attention is a dot or a 1 px rim, never a fill. */
+  --color-xenon: #3fb5de;
+  --color-xenon-a08: rgba(63, 181, 222, 0.08);
+  --color-xenon-a10: rgba(63, 181, 222, 0.1);
+  --color-xenon-a40: rgba(63, 181, 222, 0.4);
+  --color-attention: #e9b44c;
+
+  --color-diff-add-fg: #8fd6a6;
+  --color-diff-add-bg: rgba(70, 190, 120, 0.12);
+  --color-diff-del-fg: #f0a3a3;
+  --color-diff-del-bg: rgba(235, 95, 95, 0.12);
+  --color-danger-fg: #f08f8f;
+  --color-danger-bg: rgba(235, 95, 95, 0.12);
+
+  --color-state-hover: rgba(255, 255, 255, 0.06);
+  --color-state-pressed: rgba(255, 255, 255, 0.1);
+  --color-state-selected: rgba(255, 255, 255, 0.12);
+  --opacity-disabled: 0.45;
+
+  --color-scrim: rgba(0, 0, 0, 0.45);
+  --color-stage-dim: var(--graphite-stage-dim);
+
+  /* The HUD sits on video only. At .8 the elapsed time (fg-2) keeps 4.5:1 over a white frame. */
+  --color-hud: var(--graphite-hud);
+  --color-hud-solid: var(--graphite-hud-solid);
+  --color-hud-line: rgba(255, 255, 255, 0.1);
+  --blur-hud: 20px;
+
+  --shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --shadow-raised:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.6),
+    0 6px 16px rgba(0, 0, 0, 0.35);
+  --shadow-overlay: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 64px rgba(0, 0, 0, 0.55);
+  --shadow-stage: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+
+  --focus-width: 2px;
+  --focus-offset: 2px;
+  --focus-halo: 0 0 0 5px rgba(10, 11, 13, 0.75);
+
+  --font-ui:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", Inter, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+
+  --text-micro: 11px;
+  --text-micro--line-height: 14px;
+  --text-micro--font-weight: 500;
+  --text-micro--letter-spacing: 0.01em;
+  --text-footnote: 12px;
+  --text-footnote--line-height: 16px;
+  --text-body: 13px;
+  --text-body--line-height: 18px;
+  --text-reading: 14px;
+  --text-reading--line-height: 22px;
+  --text-reading--letter-spacing: -0.003em;
+  --text-headline: 13px;
+  --text-headline--line-height: 18px;
+  --text-headline--font-weight: 600;
+  --text-title: 15px;
+  --text-title--line-height: 20px;
+  --text-title--font-weight: 600;
+  --text-title--letter-spacing: -0.01em;
+  --text-title-2: 17px;
+  --text-title-2--line-height: 22px;
+  --text-title-2--font-weight: 600;
+  --text-title-2--letter-spacing: -0.015em;
+  --text-display: 22px;
+  --text-display--line-height: 28px;
+  --text-display--font-weight: 600;
+  --text-display--letter-spacing: -0.02em;
+
+  --spacing: 4px;
+
+  /* Concentric: an inner radius is the outer radius minus the inset, and never under 4 px. */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-full: 9999px;
+
+  /* A critically damped spring (response .30 s) sampled every 30 ms. */
+  --ease-spring: linear(
+    0,
+    0.131,
+    0.358,
+    0.562,
+    0.715,
+    0.821,
+    0.89,
+    0.934,
+    0.96,
+    0.977,
+    0.986,
+    0.992,
+    1
+  );
+  --ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --ease-standard: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-press: 80ms;
+  --dur-hover: 120ms;
+  --dur-fade: 150ms;
+  --dur-exit: 180ms;
+  --dur-sheet: 280ms;
+  --dur-spring: 360ms;
+  --default-transition-duration: var(--dur-fade);
+  --default-transition-timing-function: var(--ease-standard);
+
+  --breakpoint-tablet: 760px;
+  --breakpoint-laptop: 1180px;
+  --breakpoint-wide: 1680px;
+  --chrome-h: 140px;
+  --rail-w: clamp(300px, 18vw, 360px);
+  --rail-tabbed-w: 340px;
+}
+
+@custom-media --wide (width >= 1680px);
+@custom-media --laptop (1180px <= width < 1680px);
+@custom-media --tablet (760px <= width < 1180px);
+@custom-media --phone (width < 760px);
+@custom-media --coarse (pointer: coarse);
+
+/* Later in the theme layer than the @theme block, so these win at equal specificity. */
+@layer theme {
+  :root[data-appearance="midnight"] {
+    --color-void: var(--midnight-void);
+    --color-raised: var(--midnight-raised);
+    --color-raised-2: var(--midnight-raised-2);
+    --color-overlay: var(--midnight-overlay);
+    --color-well: var(--midnight-well);
+    --color-fg-1: var(--midnight-fg-1);
+    --color-stage-dim: var(--midnight-stage-dim);
+    --color-hud: var(--midnight-hud);
+    --color-hud-solid: var(--midnight-hud-solid);
+  }
+
+  @media (prefers-contrast: more) {
+    :root,
+    :root[data-appearance="midnight"] {
+      --color-hairline: var(--color-field-line);
+      --color-fg-2: #c4c7cd;
+      --color-fg-3: #a6a9b0;
+      --color-hud: var(--color-hud-solid);
+      --focus-width: 3px;
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce) {
+    :root,
+    :root[data-appearance="midnight"] {
+      --color-hud: var(--color-hud-solid);
+    }
+  }
+}
