@@ -1,5 +1,7 @@
 import {
   AccountRead,
+  CHATGPT_INSTALL_FIRST,
+  CHATGPT_NEEDS_APPLE_SILICON,
   type ClientMethod,
   CODEX_VERSION,
   type CodexConnection,
@@ -33,6 +35,8 @@ const BUSY = "The ChatGPT account is busy.";
 const RETIRE_FAILED = "Account process could not be stopped.";
 const SUPERSEDED = "The ChatGPT account operation was superseded.";
 const BROWSER_GATE = "Browser sign-in is awaiting its bounded native callback check.";
+// ChatGPT ships device code sign-in switched off for personal accounts.
+const DEVICE_CODE_OFF = "Turn on device code sign-in in ChatGPT under Settings → Security first.";
 const opaque = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== "object" || Array.isArray(value))
     throw new Error("Invalid account response.");
@@ -172,9 +176,8 @@ export class CodexAuthOwner {
     if (!available.available)
       return available.reason === "The system certificate bundle is unavailable."
         ? available.reason
-        : "The ChatGPT plan needs macOS on Apple silicon for now.";
-    if (this.installer.status().state !== "ready")
-      return "Install the ChatGPT harness before signing in.";
+        : CHATGPT_NEEDS_APPLE_SILICON;
+    if (this.installer.status().state !== "ready") return CHATGPT_INSTALL_FIRST;
   }
   #usable(): void {
     const reason = this.#reason();
@@ -618,11 +621,7 @@ export class CodexAuthOwner {
         if (entry) await this.#retire(entry);
         if (this.#generation === mutation.generation && this.#mutation === mutation) {
           this.#invalidateAttempt();
-          this.#cache = {
-            ...this.#base(),
-            lastError:
-              "Sign-in with a code could not start. Check whether your account allows device codes.",
-          };
+          this.#cache = { ...this.#base(), lastError: DEVICE_CODE_OFF };
         }
         if (cause instanceof AccountError) throw cause;
         if (
@@ -630,7 +629,7 @@ export class CodexAuthOwner {
           ["install_required", "integrity_failed", "browser_unavailable"].includes(cause.code)
         )
           throw new AccountError(503, cause.message);
-        throw new AccountError(503, "The ChatGPT sign-in could not start.");
+        throw new AccountError(503, DEVICE_CODE_OFF);
       } finally {
         this.#endMutation(mutation);
       }

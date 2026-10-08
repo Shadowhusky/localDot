@@ -1,5 +1,12 @@
 export { CodexInstallFailure, CodexInstallState } from "@localdot/protocol";
 export {
+  CHATGPT_SWITCHED_OFF,
+  CODEX_MANIFEST_SHA256,
+  canonical,
+  canonicalDigest,
+  codexAccepted,
+} from "./acceptance.ts";
+export {
   type ApprovalBrainGeneration,
   type ApprovalContext,
   type ApprovalIdentity,
@@ -32,6 +39,8 @@ export {
   type InstalledCodex,
 } from "./install.ts";
 export {
+  CHATGPT_INSTALL_FIRST,
+  CHATGPT_NEEDS_APPLE_SILICON,
   type CodexConnection,
   CodexLaunchError,
   type CodexLaunchFailure,

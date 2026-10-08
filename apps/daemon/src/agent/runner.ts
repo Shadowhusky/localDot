@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
   type AgentLimits,
   BootConfig,
@@ -235,7 +236,7 @@ export class AgentRunner {
           }
         }
         const codex = this.deps.codex;
-        if (!codex) throw new AgentError(400, "The ChatGPT plan is not set up in this daemon.");
+        if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
         if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
         const status = await codex.account.status();
         signal?.throwIfAborted();

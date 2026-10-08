@@ -678,6 +678,28 @@ describe("ChatGPT settings and installation integration", () => {
     expect(f.account.status).not.toHaveBeenCalled();
     expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
   });
+  it("explains the plan in plain words without internal names", async () => {
+    const off = await setup();
+    const reply = (await (await off.send("GET", "/api/agent/providers")).json()) as {
+      subscriptions: { reason?: string }[];
+    };
+    expect(reply.subscriptions[0]?.reason).toBe(
+      "ChatGPT plan support isn't switched on in this version yet.",
+    );
+    const f = await installedFixture();
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "unavailable",
+      reason: "Install ChatGPT support first.",
+    });
+    const login = await f.send("POST", "/api/agent/chatgpt/login", {});
+    expect(login.status).toBe(409);
+    expect(await login.text()).toBe("Install ChatGPT support first.");
+    f.setAvailable(false);
+    const install = await f.send("POST", "/api/agent/chatgpt/install");
+    expect(install.status).toBe(503);
+    expect(await install.text()).toBe("ChatGPT support can't be installed on this computer.");
+  });
   it.each(["/install", "/install/cancel"])("requires the install token for %s", async (path) => {
     const f = await installedFixture(),
       log = new EventLog(f.home);

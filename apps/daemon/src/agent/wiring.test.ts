@@ -2,6 +2,8 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
+  CODEX_MANIFEST_SHA256,
+  CODEX_VERSION,
   CodexInstallError,
   type CodexInstaller,
   type HarnessAvailability,
@@ -26,6 +28,7 @@ const m = vi.hoisted(() => ({
   toolApp: undefined as ReturnType<typeof import("./tool-api.ts")["createToolApi"]> | undefined,
   endpoints: [] as McpEndpointInput[],
   available: { available: true } as HarnessAvailability,
+  record: {} as Record<string, unknown>,
   installed: false,
   ensure: vi.fn(),
   verify: vi.fn(),
@@ -42,6 +45,7 @@ vi.mock("@localdot/codex-harness", async (original) => ({
   ...(await original<typeof import("@localdot/codex-harness")>()),
   harnessAvailability: () => m.available,
 }));
+vi.mock("../../../../harness/codex/acceptance/record.json", () => ({ default: m.record }));
 vi.mock("@hono/node-server", () => ({ serve: (...args: unknown[]) => m.serve(...args) }));
 vi.mock("./brain-cell.ts", async (original) => ({
   ...(await original<typeof import("./brain-cell.ts")>()),
@@ -161,6 +165,7 @@ beforeEach(() => {
   m.toolApp = undefined;
   m.endpoints.length = 0;
   m.available = { available: true };
+  for (const key of Object.keys(m.record)) delete m.record[key];
   m.installed = false;
   m.verify.mockResolvedValue(undefined);
   m.ensure.mockResolvedValue({ version: "0.154.0" });
@@ -297,14 +302,30 @@ describe("ChatGPT production integration", () => {
     expect(m.ensure).not.toHaveBeenCalled();
     expect(m.status).not.toHaveBeenCalled();
   });
-  it("keeps the harness unavailable after installation until pinned and native acceptance", async () => {
+  const accepted = () => ({
+    format: 1,
+    codexVersion: CODEX_VERSION,
+    platform: `${process.platform}-${process.arch}`,
+    manifestSha256: CODEX_MANIFEST_SHA256,
+    nativeSandbox: { passed: true, inputSha256: "a".repeat(64), reportSha256: "b".repeat(64) },
+    realAccount: { passed: true, reportSha256: "c".repeat(64) },
+  });
+  const pending = {
+    available: false,
+    reason: "ChatGPT plan support isn't switched on in this version yet.",
+  };
+  it.each([
+    ["no record", {}],
+    ["no native sandbox stamp", { nativeSandbox: { passed: false } }],
+    ["no real-account stamp", { realAccount: { passed: false } }],
+    ["another Codex version", { codexVersion: "0.155.0" }],
+    ["another release manifest", { manifestSha256: "0".repeat(64) }],
+  ])("keeps the plan switched off after installation with %s", async (name, patch) => {
+    if (name !== "no record") Object.assign(m.record, accepted(), patch);
     m.installed = true;
     const f = setup();
     await f.agent.start();
-    expect(f.agent.routes.harness?.()).toEqual({
-      available: false,
-      reason: "The ChatGPT plan is awaiting pinned privacy and native safety checks.",
-    });
+    expect(f.agent.routes.harness?.()).toEqual(pending);
     f.agent.routes.settings.put({ main: { provider: "chatgpt", model: "gpt-6-astra" } });
     await expect(f.agent.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
       status: 400,
@@ -312,6 +333,16 @@ describe("ChatGPT production integration", () => {
     expect(m.status).not.toHaveBeenCalled();
     expect(m.run).not.toHaveBeenCalled();
     expect(m.ensure).not.toHaveBeenCalled();
+  });
+  it("opens the plan only with the complete committed acceptance record", async () => {
+    Object.assign(m.record, accepted());
+    m.installed = true;
+    const f = setup();
+    await f.agent.start();
+    expect(f.agent.routes.harness?.()).toEqual({ available: true });
+    expect(f.agent.routes.chatgpt?.availability()).toEqual({ available: true });
+    m.available = { available: false, reason: "fixture unsupported platform" };
+    expect(f.agent.routes.harness?.()).toEqual(m.available);
   });
   it.each([false, true])(
     "does not construct a launcher for absent or unsafe roots: unsafe=%s",

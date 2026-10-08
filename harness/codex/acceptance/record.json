@@ -1,0 +1,8 @@
+{
+  "format": 1,
+  "codexVersion": "0.154.0",
+  "platform": "darwin-arm64",
+  "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
+  "nativeSandbox": { "passed": false },
+  "realAccount": { "passed": false }
+}
