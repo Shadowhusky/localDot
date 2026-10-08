@@ -28,6 +28,7 @@ export interface KeyFormProps {
   disabled: boolean;
   save(binding: SecretBinding, value: string): Promise<{ restart: boolean }>;
   intakeRef?: Ref<KeyIntake>;
+  fieldRef?: Ref<KeyField>;
   preset?: KeyFormPreset;
 }
 export interface KeyFormPreset {
@@ -39,12 +40,16 @@ export interface KeyIntake {
   // A synchronous one-shot DOM handoff, never a secret string prop or deferred queue.
   receive(source: HTMLInputElement, provider?: Provider): boolean;
 }
+export interface KeyField {
+  holdsKey(): boolean;
+  focus(): void;
+}
 
 type Problem = { field: DraftField | "form"; message: string };
 
 // The key itself lives only in the key field's DOM value (never in React state): it is read
 // on submit, the field is cleared at once, and the page sends keyd's sealed copy.
-export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormProps) {
+export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }: KeyFormProps) {
   const labels = useId();
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
@@ -136,6 +141,14 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
           if (!received && target) target.value = "";
         }
       },
+    }),
+    [],
+  );
+  useImperativeHandle(
+    fieldRef,
+    () => ({
+      holdsKey: () => !!valueRef.current?.value,
+      focus: () => valueRef.current?.focus(),
     }),
     [],
   );

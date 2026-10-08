@@ -8,7 +8,7 @@ import {
   useState,
 } from "react";
 import { ownedByPicker } from "../lib/dismiss.ts";
-import { KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
+import { type KeyField, KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { type KeydHealth, KeyProblem, type KeyRecord } from "./keys-api.ts";
 import { type KeysController, keyStatus } from "./useKeys.ts";
@@ -38,6 +38,7 @@ export function KeysSheet({
   taskControls,
 }: KeysSheetProps) {
   const panel = useRef<HTMLDivElement>(null);
+  const field = useRef<KeyField>(null);
   const status = keyStatus(keys.health);
   const offline = status.state === "offline";
   const changing = useRef(false);
@@ -90,14 +91,13 @@ export function KeysSheet({
   }, [confirming]);
   // A typed key exists only in its field, so closing would lose it without a word.
   const requestClose = useCallback(() => {
-    const typed = panel.current?.querySelector<HTMLInputElement>(".key-form input.secret")?.value;
-    if (!typed) return onClose();
+    if (!field.current?.holdsKey()) return onClose();
     setConfirming(true);
     keep.current?.focus();
   }, [onClose]);
   const keepEditing = useCallback(() => {
     setConfirming(false);
-    panel.current?.querySelector<HTMLElement>(".key-form input.secret")?.focus();
+    field.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -187,6 +187,7 @@ export function KeysSheet({
         />
         <KeyForm
           intakeRef={intakeRef}
+          fieldRef={field}
           active={open}
           disabled={disabled}
           preset={preset}

@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TopBar } from "../shell/TopBar.tsx";
-import { KeyForm } from "./KeyForm.tsx";
+import { type KeyField, KeyForm, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { KeysSheet } from "./KeysSheet.tsx";
 import type { KeyRecord } from "./keys-api.ts";
@@ -510,6 +511,37 @@ describe("KeysSheet", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("asks before closing discards a key handed over from elsewhere", () => {
+    const onClose = vi.fn();
+    const intake = createRef<KeyIntake>();
+    render(<KeysSheet open keys={controller()} onClose={onClose} intakeRef={intake} />);
+    const source = document.createElement("input");
+    source.value = "fake-private-value";
+    act(() => {
+      intake.current?.receive(source, "openai");
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Close keys" }));
+    expect(screen.getByRole("alert").textContent).toBe("Discard the key you entered?");
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("reports whether its key field holds a key", () => {
+    const fieldRef = createRef<KeyField>();
+    render(
+      <KeyForm
+        active
+        disabled={false}
+        fieldRef={fieldRef}
+        save={async () => ({ restart: false })}
+      />,
+    );
+    expect(fieldRef.current?.holdsKey()).toBe(false);
+    type("Key", "fake-private-value");
+    expect(fieldRef.current?.holdsKey()).toBe(true);
+    fieldRef.current?.focus();
+    expect(document.activeElement).toBe(field("Key"));
   });
 
   it("keeps iOS from capitalising or correcting names, addresses and headers", () => {
