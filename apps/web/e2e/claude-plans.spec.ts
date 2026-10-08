@@ -163,6 +163,19 @@ for (const run of runs) {
       await expect(page.getByRole("button", { name: "Send now" })).toBeDisabled();
       await press(notice.getByRole("button", { name: "Discard key and edit" }));
       await expect(notice).toHaveCount(0);
+
+      // With an API key beside it, only the API key can move to Keys.
+      await box.fill(`${PLAN_TOKEN} and sk-ant-api03-${"Rw8-".repeat(24)}`);
+      const choice = notice.getByLabel("Key to move");
+      await expect(choice).toHaveValue("0");
+      expect((await choice.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expect(notice.getByText(SENTENCE, { exact: true })).toBeVisible();
+      await expect(notice.getByRole("button", { name: "Move to Keys" })).toHaveCount(0);
+      await choice.selectOption("1");
+      await expect(notice.getByText(SENTENCE, { exact: true })).toHaveCount(0);
+      await expect(notice.getByRole("button", { name: "Move to Keys" })).toBeVisible();
+      await press(notice.getByRole("button", { name: "Discard keys and edit" }));
+      await expect(notice).toHaveCount(0);
       expect(carried).toEqual([]);
     });
   });
