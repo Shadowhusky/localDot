@@ -355,10 +355,16 @@ describe("ui guard rules", () => {
       "src/shell/phone.css",
       "src/shell/conversation.css",
       "src/shell/decision.css",
+      "src/settings/settings.css",
     ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual([]);
     }
-    for (const path of ["src/agent/a.css", "src/shell/misc.css", "src/shell/x/hud.css"]) {
+    for (const path of [
+      "src/agent/a.css",
+      "src/shell/misc.css",
+      "src/shell/x/hud.css",
+      "src/settings/other.css",
+    ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual(["stray-stylesheet"]);
     }
   });

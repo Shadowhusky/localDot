@@ -43,10 +43,13 @@ it("guides an empty authenticated workspace without starting tasks or saving pol
   await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("midnight"));
   expect(localStorage.getItem(APPEARANCE_KEY)).toBe("midnight");
   fireEvent.click(screen.getByRole("button", { name: "Review autonomy" }));
-  const dialog = await screen.findByRole("dialog", { name: "Models and settings" });
+  const dialog = await screen.findByRole("dialog", { name: "Settings" });
   await waitFor(() =>
     expect(document.activeElement).toBe(
-      within(dialog).getByRole("combobox", { name: "Read information" }),
+      within(within(dialog).getByRole("radiogroup", { name: "Read information" })).getByRole(
+        "radio",
+        { name: "Just do it" },
+      ),
     ),
   );
   expect(

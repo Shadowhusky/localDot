@@ -235,44 +235,6 @@
   "src/replay/useReplay.ts": {
     "banned-copy": 2
   },
-  "src/settings/ChatgptPanel.tsx": {
-    "native-control": 16,
-    "native-disabled": 11
-  },
-  "src/settings/ModelPicker.tsx": {
-    "native-control": 3,
-    "native-disabled": 5
-  },
-  "src/settings/ProviderPicker.tsx": {
-    "native-control": 2,
-    "native-disabled": 6
-  },
-  "src/settings/RoleEditor.tsx": {
-    "native-control": 8,
-    "native-disabled": 5
-  },
-  "src/settings/SafetySettings.tsx": {
-    "native-control": 1,
-    "native-disabled": 1
-  },
-  "src/settings/SettingsSheet.tsx": {
-    "native-control": 9,
-    "native-disabled": 3
-  },
-  "src/settings/SubscriptionPicker.tsx": {
-    "native-control": 2,
-    "native-disabled": 3
-  },
-  "src/settings/settings-form.ts": {
-    "banned-copy": 1
-  },
-  "src/settings/settings.css": {
-    "control-selector": 12,
-    "radius-literal": 4,
-    "spacing-literal": 31,
-    "stray-stylesheet": 1,
-    "type-literal": 3
-  },
   "src/shell/ActivityRail.tsx": {
     "native-control": 1
   },

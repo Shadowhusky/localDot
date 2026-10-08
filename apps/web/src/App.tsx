@@ -1,4 +1,9 @@
-import { LLM_PROVIDERS, SessionIndexPage, ULID_PATTERN } from "@localdot/protocol";
+import {
+  DEFAULT_AUTONOMY,
+  LLM_PROVIDERS,
+  SessionIndexPage,
+  ULID_PATTERN,
+} from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -361,6 +366,7 @@ function Theatre({ api }: { api: ApiClient }) {
     agent.sessionId,
     !!agent.sessionId && (!narrow || pane === "activity") && !keysOpen && !settings.open,
   );
+  const settingsKnowledge = useKnowledge(api, null, settings.open && !keysOpen);
   useEffect(() => {
     if (agent.model.pendingTakeover) setPointerMode("click");
   }, [agent.model.pendingTakeover]);
@@ -482,7 +488,7 @@ function Theatre({ api }: { api: ApiClient }) {
   }, [appStatus.title]);
   return (
     <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
-      <div className="theatre-content" inert={keysOpen || settings.open}>
+      <div className="theatre-content" inert={keysOpen}>
         <TopBar
           title={session.model.title ?? "Your computer"}
           live={stageHud.live}
@@ -779,7 +785,6 @@ function Theatre({ api }: { api: ApiClient }) {
       <SettingsSheet
         focusSection={settingsSection}
         appearance={appearance}
-        taskControls={<StopControl controls={controls} />}
         open={settings.open}
         suspended={keysOpen}
         choices={settings.draft?.choices ?? {}}
@@ -801,6 +806,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     ? "stale"
                     : "ready"
         }
+        catalogAt={settings.index?.catalog?.fetchedAt}
         dirty={settings.dirty}
         busy={settings.busy}
         loading={settings.phase === "loading" || !settings.draft}
@@ -844,7 +850,9 @@ function Theatre({ api }: { api: ApiClient }) {
         )}
         onPrice={settings.changePrice}
         autonomy={settings.draft?.autonomy}
+        savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
         onAutonomy={settings.changeAutonomy}
+        knowledge={settingsKnowledge}
         budget={
           settings.draft
             ? {
@@ -855,7 +863,6 @@ function Theatre({ api }: { api: ApiClient }) {
               }
             : undefined
         }
-        stop={sheetStopControl}
       />
       <KeysSheet
         taskControls={<StopControl controls={controls} />}
