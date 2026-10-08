@@ -2,7 +2,7 @@ import type { ComponentType } from "react";
 import { Dot } from "../dot/Dot.tsx";
 import type { DotState } from "../dot/engine/states.ts";
 import { Glyph } from "../dot/Glyph.tsx";
-import { Caption } from "../shell/Caption.tsx";
+import { StageColumn } from "../shell/StageColumn.tsx";
 import { StillFrame } from "./StillFrame.tsx";
 
 export interface GalleryPage {
@@ -25,19 +25,22 @@ const DOT_STATES: DotState[] = [
   "error",
 ];
 
+// Every dot takes this seed, so adding a state leaves the others as they were.
+const SEED = 1;
+
 function DotPage() {
   return (
     <div className="gallery-grid">
       {DOT_STATES.map((state) => (
         <figure key={state} className="gallery-dot">
-          <Dot size={96} state={state} />
-          <Dot size={24} state={state} />
+          <Dot size={96} state={state} seed={SEED} />
+          <Dot size={24} state={state} seed={SEED} />
           <figcaption>{state}</figcaption>
         </figure>
       ))}
       <figure className="gallery-dot">
-        <Dot size={96} state="acting" control />
-        <Dot size={24} state="acting" control />
+        <Dot size={96} state="acting" control seed={SEED} />
+        <Dot size={24} state="acting" control seed={SEED} />
         <figcaption>acting, with control</figcaption>
       </figure>
       <figure className="gallery-dot">
@@ -48,28 +51,34 @@ function DotPage() {
   );
 }
 
+const noop = () => {};
 const STAGES = [
-  {
-    label: "dot has control",
-    classes: "stage lit control",
-    rim: true,
-    caption: "Select the Net total cell",
-  },
-  { label: "Waiting for you", classes: "stage lit", rim: false, caption: "Waiting for your OK." },
-  { label: "Paused", classes: "stage lit frozen", rim: false, caption: "Paused." },
+  { label: "dot has control", caption: "Select the Net total cell", control: true },
+  { label: "Waiting for you", caption: "Waiting for your OK." },
+  { label: "Paused", caption: "Paused.", paused: true as const },
 ];
 
+// The real StageColumn around a still frame. The frame stands in for Stage, so the rim Stage draws
+// while dot has control is drawn here.
 function StagePage() {
   return (
     <div className="gallery-stages">
-      {STAGES.map((stage) => (
-        <figure key={stage.label} className="stage-col">
-          <div className={stage.classes}>
+      {STAGES.map(({ label, caption, control = false, paused }) => (
+        <figure key={label}>
+          <StageColumn
+            hud={{ label, caption, action: { kind: "stop", enabled: true }, live: true, paused }}
+            control={control}
+            showHud={false}
+            onStart={noop}
+            onStop={noop}
+            onStopSession={noop}
+            onResume={noop}
+            onRetry={noop}
+          >
             <StillFrame />
-            {stage.rim && <div className="rim" aria-hidden="true" />}
-          </div>
-          <Caption text={stage.caption} />
-          <figcaption>{stage.label}</figcaption>
+            {control && <div className="rim" aria-hidden="true" />}
+          </StageColumn>
+          <figcaption>{label}</figcaption>
         </figure>
       ))}
     </div>

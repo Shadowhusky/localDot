@@ -64,5 +64,5 @@
 }
 
 .gallery-stages figcaption {
-  margin-top: var(--spacing-mark-drop);
+  text-align: center;
 }
