@@ -186,6 +186,19 @@ describe("inject", () => {
       expect(order(s)).toEqual(["windows", "click"]);
     });
 
+    it("never activates a popup that names no parent window", async () => {
+      // Chromium's menus are override-redirect windows without WM_TRANSIENT_FOR.
+      const popup = xwin(31, { cls: "Chromium", overrideRedirect: true });
+      for (const req of [
+        { ...click, window: 31 },
+        { ...key, window: 31 },
+      ]) {
+        const { s, done } = run([popup, { ...terminal, active: true }], req);
+        await done;
+        expect(order(s)).toEqual(["windows", req.input.kind === "key" ? "keys" : "click"]);
+      }
+    });
+
     it("never activates the active window or another window of its transient group", async () => {
       for (const target of [11, 21]) {
         const { s, done } = run([{ ...dialog, active: true }, image, terminal], {
@@ -330,6 +343,21 @@ describe("typeText", () => {
     );
     await expect(typing).rejects.toThrow(/aborted/);
     expect(s.calls.filter((c) => c.cmd === "char")).toHaveLength(1);
+  });
+  it("moves the focus to the typing's window, even from another window of its group", async () => {
+    const s = scripted((cmd, args, emit) => {
+      if (cmd === "windows")
+        return { windows: [{ ...STACK.dialog, active: true }, STACK.image], generation: 1 };
+      if (cmd === "activate") return { active: args.window, changed: true, waitedMs: 3 };
+      emit(press("key", 30, 500));
+      return { keycode: 30, mods: [] };
+    });
+    await typeText(
+      s.helper,
+      { text: "a", masked: false, pace, injector: "xtest", window: 11 },
+      () => {},
+    );
+    expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "windows", "activate", "char"]);
   });
   it("refuses an already cancelled request before arming or activating", async () => {
     const s = scripted(() => ({}));
