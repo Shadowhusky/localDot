@@ -2,10 +2,12 @@ import { webcrypto } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
+import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
+import { parseArgs } from "node:util";
 import { type KeydRecord, toBase64url, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
@@ -30,11 +32,21 @@ import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
 import { FrameStore } from "../../../daemon/src/gateway/frames.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
+import { setPublicOrigin } from "../../../daemon/src/guard.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
 import { Thumbnails } from "../../../daemon/src/sessions/thumbs.ts";
+import { readStatic } from "../../../daemon/src/static-files.ts";
+import { UI_CSP } from "../../../daemon/src/static-ui.ts";
 import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
+import {
+  type CellKind,
+  type ScenarioStep,
+  UI_SCENARIOS,
+  type UiScenario,
+  uiScenario,
+} from "./ui-scenarios.ts";
 
 const require = createRequire(new URL("../../../daemon/package.json", import.meta.url));
 const { getRequestListener } = require("@hono/node-server") as {
@@ -42,21 +54,37 @@ const { getRequestListener } = require("@hono/node-server") as {
     fetch: (request: Request) => Response | Promise<Response>,
   ): Parameters<typeof createServer>[0];
 };
-const env = process.env;
+const { values: args } = parseArgs({
+  options: { port: { type: "string" }, scenario: { type: "string" } },
+});
+const scenarioName = args.scenario ?? process.env.QA_SCENARIO;
+const scenario = scenarioName ? uiScenario(scenarioName) : undefined;
+const env: Record<string, string | undefined> = { ...scenario?.boot, ...process.env };
+
+// Session dates, ids and approval deadlines all read the wall clock. Starting it at a fixed
+// instant, while it still advances, keeps every date the UI prints the same from run to run.
+function startWallClockAt(start: number) {
+  const RealDate = Date;
+  const offset = start - RealDate.now();
+  const now = () => RealDate.now() + offset;
+  globalThis.Date = class extends RealDate {
+    constructor(...given: unknown[]) {
+      super(...((given.length ? given : [now()]) as [number]));
+    }
+    static now() {
+      return now();
+    }
+  } as DateConstructor;
+}
+
 const TOKEN = "a".repeat(43);
-const PORT = Number(env.QA_PORT ?? 4786);
-const HOME = env.QA_HOME ?? join(tmpdir(), `localdot-ui-fixture-${PORT}`);
+// 0 lets the system pick a free port; the ready line names the one it chose.
+const REQUESTED_PORT = Number(args.port ?? env.QA_PORT ?? 4786);
+const HOME = env.QA_HOME ?? join(tmpdir(), `localdot-ui-fixture-${process.pid}`);
 const ASSETS = fileURLToPath(new URL("./ui-assets", import.meta.url));
-type CellKind =
-  | "none"
-  | "starting"
-  | "connecting"
-  | "live"
-  | "reconnecting"
-  | "paused"
-  | "stopped"
-  | "failed"
-  | "fenced";
+const GALLERY = fileURLToPath(new URL("../../dist-gallery", import.meta.url));
+if (env.QA_NOW) startWallClockAt(Date.parse(env.QA_NOW));
+setPublicOrigin(env.QA_FRONTS || undefined);
 const cellKind = (env.QA_CELL ?? "live") as CellKind;
 const withSession = env.QA_SESSION !== "0";
 const phase = env.QA_PHASE ?? "running";
@@ -123,24 +151,21 @@ const SETTINGS: Record<string, AgentSettings> = {
   chatgpt: { main: { provider: "chatgpt", model: "sample-plan-model" } } as AgentSettings,
 };
 
+// The desktop repaints one still frame, so the picture is steady while the stream stays live.
 const DESKTOP_JS = `
-const W=2560,H=1600;const canvas=document.createElement('canvas');canvas.width=W;canvas.height=H;
-const ctx=canvas.getContext('2d');let t=0;
-function draw(){t++;
- const g=ctx.createLinearGradient(0,0,W,H);g.addColorStop(0,'#2b3442');g.addColorStop(1,'#151a22');
- ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
- ctx.fillStyle='#f4f5f7';ctx.fillRect(240,150,2080,1300);
- ctx.fillStyle='#30343c';ctx.font='600 60px system-ui';ctx.fillText('Sample desktop '+t,300,300);
- ctx.strokeStyle='#2f7cf6';ctx.lineWidth=8;ctx.strokeRect(300+(t%60)*10,500,400,200);
-}
-draw();setInterval(draw,100);
+const canvas=document.createElement('canvas');canvas.width=2560;canvas.height=1600;
+const ctx=canvas.getContext('2d');const still=new Image();still.src='/owned-desktop.webp';
+setInterval(()=>{if(still.complete)ctx.drawImage(still,0,0)},100);
 const video=document.getElementById('videoStream');video.srcObject=canvas.captureStream(10);
 video.play().catch(()=>{});
 `;
 
 let skew = 0;
+// While held, session time moves only by the seed's own steps, so a seeded task lasts the same
+// on every run however long the seeding takes.
+let heldAt: number | undefined;
 const base = monotonicClock();
-const clock = { nowMicros: () => base.nowMicros() + skew };
+const clock = { nowMicros: () => (heldAt ?? base.nowMicros()) + skew };
 const log = new EventLog(HOME, clock);
 const cells = new FakeOrchestrator();
 const tickets = new TicketRegistry();
@@ -262,8 +287,45 @@ function newSession(title: string, task: string): AgentSession {
   return s;
 }
 
+type Append = (type: string, data: Record<string, unknown>, step?: string) => void;
+
+const planItems = (finished: boolean) => [
+  { id: "open", text: "Open the sample spreadsheet", status: "done" },
+  { id: "calc", text: "Calculate monthly totals", status: finished ? "done" : "doing" },
+  { id: "write", text: "Write the summary report", status: finished ? "done" : "todo" },
+  { id: "send", text: "Email the report to the team", status: "skipped" },
+];
+
+function finishTask(s: AgentSession, a: Append) {
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
+  });
+  mkdirSync(join(HOME, "sessions", s.id, "out"), { recursive: true, mode: 0o700 });
+  writeFileSync(
+    join(HOME, "sessions", s.id, "out", "summary.md"),
+    "# Monthly report (sample)\n\n- Total net: 12,480\n",
+    { mode: 0o600 },
+  );
+  writeFileSync(
+    join(HOME, "sessions", s.id, "out", "totals.csv"),
+    "Month,Net\nDec,12311\nTotal,12480\n",
+    { mode: 0o600 },
+  );
+  a("task.result", {
+    summary:
+      "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
+    files: [
+      { name: "summary.md", path: "summary.md", bytes: 48 },
+      { name: "totals.csv", path: "totals.csv", bytes: 32 },
+    ],
+  });
+  s.setStatus("idle");
+  a("agent.state", { state: "idle" });
+}
+
 function seedTask(s: AgentSession, finished: boolean) {
-  const a = (type: string, data: Record<string, unknown>, step?: string) => {
+  const a: Append = (type, data, step) => {
     skew += type === "step.end" ? 1_100_000 : 320_000;
     s.append(type, data, step);
   };
@@ -286,14 +348,7 @@ function seedTask(s: AgentSession, finished: boolean) {
     messageId: ulid(),
     text: "I'll open the spreadsheet, check the totals, then write a short summary file.",
   });
-  a("plan.set", {
-    items: [
-      { id: "open", text: "Open the sample spreadsheet", status: "done" },
-      { id: "calc", text: "Calculate monthly totals", status: finished ? "done" : "doing" },
-      { id: "write", text: "Write the summary report", status: finished ? "done" : "todo" },
-      { id: "send", text: "Email the report to the team", status: "skipped" },
-    ],
-  });
+  a("plan.set", { items: planItems(finished) });
   const click = ulid();
   a("step.start", { kind: "gui", planItem: "open" }, click);
   a(
@@ -414,31 +469,7 @@ function seedTask(s: AgentSession, finished: boolean) {
     outputTokens: 380,
   });
   if (finished) {
-    a("message.assistant", {
-      messageId: ulid(),
-      text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
-    });
-    mkdirSync(join(HOME, "sessions", s.id, "out"), { recursive: true, mode: 0o700 });
-    writeFileSync(
-      join(HOME, "sessions", s.id, "out", "summary.md"),
-      "# Monthly report (sample)\n\n- Total net: 12,480\n",
-      { mode: 0o600 },
-    );
-    writeFileSync(
-      join(HOME, "sessions", s.id, "out", "totals.csv"),
-      "Month,Net\nDec,12311\nTotal,12480\n",
-      { mode: 0o600 },
-    );
-    a("task.result", {
-      summary:
-        "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
-      files: [
-        { name: "summary.md", path: "summary.md", bytes: 48 },
-        { name: "totals.csv", path: "totals.csv", bytes: 32 },
-      ],
-    });
-    s.setStatus("idle");
-    a("agent.state", { state: "idle" });
+    finishTask(s, a);
   } else {
     s.setStatus("running");
     a("agent.state", { state: "acting" });
@@ -458,9 +489,12 @@ function seedTask(s: AgentSession, finished: boolean) {
 }
 
 if (withSession && initial) {
+  heldAt = base.nowMicros();
   session = newSession("Sample · monthly report", "Sample task");
   attachLive(session);
   seedTask(session, phase === "finished");
+  skew -= base.nowMicros() - heldAt;
+  heldAt = undefined;
 }
 
 const native = new FakeDesktopd({
@@ -744,18 +778,25 @@ const recorder = new Recorder({
 });
 const index = new SessionIndex(HOME, { isLive: (id) => live.cellOf(id) !== undefined });
 
-let app: ReturnType<typeof createApp>;
-const server: Server = createServer(getRequestListener((request) => app.fetch(request)));
+let app: ReturnType<typeof createApp> | undefined;
+const server: Server = createServer(
+  getRequestListener((request) => app?.fetch(request) ?? new Response("starting", { status: 503 })),
+);
 const upgraded = new Set<Duplex>();
 server.on("upgrade", (_req, peer) => {
   upgraded.add(peer);
   peer.once("close", () => upgraded.delete(peer));
 });
+await new Promise<void>((resolve, reject) => {
+  server.once("error", reject);
+  server.listen(REQUESTED_PORT, "127.0.0.1", resolve);
+});
+const PORT = (server.address() as AddressInfo).port;
 attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   cellStatusRoute(cells),
   sessionStreamRoute(log),
 ]);
-app = createApp({
+const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
@@ -773,7 +814,7 @@ app = createApp({
   },
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
 });
-app.get("/api/keyd", (c) =>
+routes.get("/api/keyd", (c) =>
   keydMode === "offline"
     ? c.text("owned key layer offline", 503)
     : c.json({
@@ -787,35 +828,39 @@ app.get("/api/keyd", (c) =>
             : { state: "active", source: "router", addresses: 1 },
       }),
 );
-app.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
-app.get("/api/keys", (c) =>
+routes.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
+routes.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
-app.post("/api/keys", async (c) => {
+routes.post("/api/keys", async (c) => {
   const { binding } = (await c.req.json()) as { binding: KeydRecord };
   const at = new Date().toISOString();
   const key = { ...binding, createdAt: at, updatedAt: at } as KeydRecord;
   keys = [...keys.filter((k) => k.id !== key.id), key];
   return c.json({ key, restart: false });
 });
-app.delete("/api/keys/:id", (c) => {
+routes.delete("/api/keys/:id", (c) => {
   keys = keys.filter((k) => k.id !== c.req.param("id"));
   return c.body(null, 204);
 });
-app.get("/cells/:cell/desktop/:ticket/", (c) =>
+routes.get("/cells/:cell/desktop/:ticket/", (c) =>
   tickets.resolve(c.req.param("ticket")) === c.req.param("cell")
     ? c.html(
         '<!doctype html><video id="videoStream" autoplay muted></video><script src="/owned-preview.js"></script>',
       )
     : c.text("unknown ticket", 404),
 );
-app.get("/owned-preview.js", (c) => c.body(DESKTOP_JS, 200, { "content-type": "text/javascript" }));
+routes.get("/owned-preview.js", (c) =>
+  c.body(DESKTOP_JS, 200, { "content-type": "text/javascript" }),
+);
+routes.get("/owned-desktop.webp", (c) =>
+  c.body(readFileSync(join(ASSETS, "frame-1.webp")), 200, { "content-type": "image/webp" }),
+);
 
-// QA control plane (no auth; loopback only, scratch fixture).
+// QA control plane (no auth; loopback only, scratch fixture). A step returns why it can't run.
 const pendingApprovals: AbortController[] = [];
-app.post("/__qa/approval", (c) => {
-  if (!session?.generation) return c.text("no brain", 409);
-  const risk = (c.req.query("risk") ?? "high") as "medium" | "high";
+function requestApproval(risk: "medium" | "high"): string | undefined {
+  if (!session?.generation) return "no brain";
   const controller = new AbortController();
   pendingApprovals.push(controller);
   void session
@@ -842,31 +887,23 @@ app.post("/__qa/approval", (c) => {
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
     .catch((e) => effects.push(`approval-error:${String(e)}`));
-  return c.json({ ok: true });
-});
-app.post("/__qa/ask", (c) => {
-  if (!session) return c.text("no session", 409);
+}
+function ask(allowText: boolean): string | undefined {
+  if (!session) return "no session";
   void session
-    .ask(
-      "Which report format should I use?",
-      ["Markdown", "Plain text", "PDF"],
-      c.req.query("text") !== "0",
-      0,
-    )
+    .ask("Which report format should I use?", ["Markdown", "Plain text", "PDF"], allowText, 0)
     .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
     .catch((e) => effects.push(`ask-error:${String(e)}`));
-  return c.json({ ok: true });
-});
-app.post("/__qa/takeover", (c) => {
-  if (!session) return c.text("no session", 409);
+}
+function takeover(): string | undefined {
+  if (!session) return "no session";
   void session
     .takeover("login", "Please sign in to the sample site, then hand control back.")
     .then((o) => effects.push(`takeover:${JSON.stringify(o)}`))
     .catch((e) => effects.push(`takeover-error:${String(e)}`));
-  return c.json({ ok: true });
-});
-app.post("/__qa/budget", (c) => {
-  if (!session) return c.text("no session", 409);
+}
+function budget(): string | undefined {
+  if (!session) return "no session";
   session.append("budget.exceeded", {
     scope: "task",
     taskId: session.id,
@@ -876,46 +913,91 @@ app.post("/__qa/budget", (c) => {
   });
   session.setStatus("paused");
   session.append("agent.state", { state: "paused", reason: "budget" });
-  return c.json({ ok: true });
-});
-app.post("/__qa/pause-uncertain", (c) => {
+}
+function endLiveStep() {
+  if (!session || !liveStep) return;
+  session.append("action.result", { ok: true }, liveStep);
+  session.append("step.end", { status: "ok" }, liveStep);
+  liveStep = undefined;
+}
+function finish(): string | undefined {
+  const owned = session;
+  if (!owned) return "no session";
+  const append: Append = (type, data, step) => owned.append(type, data, step);
+  endLiveStep();
+  append("plan.set", { items: planItems(true) });
+  finishTask(owned, append);
+}
+function setCell(kind: CellKind): undefined {
+  const next = cellFor(kind, cellId);
+  if (next) cells.emit(next);
+}
+const STEPS: Record<ScenarioStep, () => string | undefined> = {
+  approval: () => requestApproval("high"),
+  ask: () => ask(true),
+  takeover,
+  budget,
+  finish,
+  "cell/starting": () => setCell("starting"),
+  "cell/connecting": () => setCell("connecting"),
+  "cell/live": () => setCell("live"),
+  "cell/reconnecting": () => setCell("reconnecting"),
+  "cell/paused": () => setCell("paused"),
+  "cell/stopped": () => setCell("stopped"),
+  "cell/failed": () => setCell("failed"),
+  "cell/fenced": () => setCell("fenced"),
+};
+const reply = (problem: string | undefined) =>
+  problem ? new Response(problem, { status: 409 }) : Response.json({ ok: true });
+
+routes.post("/__qa/approval", (c) =>
+  reply(requestApproval((c.req.query("risk") ?? "high") as "medium" | "high")),
+);
+routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
+routes.post("/__qa/takeover", () => reply(takeover()));
+routes.post("/__qa/budget", () => reply(budget()));
+routes.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);
   session.uncertainSafetyPause(pause.requestId, pause.revision);
   return c.json({ ok: true });
 });
-app.post("/__qa/step-end", (c) => {
+routes.post("/__qa/step-end", (c) => {
   if (!session || !liveStep) return c.text("no open step", 409);
-  session.append("action.result", { ok: true }, liveStep);
-  session.append("step.end", { status: "ok" }, liveStep);
-  liveStep = undefined;
+  endLiveStep();
   const pause = session.safetyPause;
   if (pause?.phase === "pausing") session.confirmSafetyPause(pause.requestId, pause.revision);
   return c.json({ ok: true });
 });
-app.post("/__qa/heartbeat", (c) => {
+routes.post("/__qa/heartbeat", (c) => {
   if (!session) return c.text("no session", 409);
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-app.post("/__qa/finish", (c) => {
-  if (!session) return c.text("no session", 409);
-  session.append("message.assistant", { messageId: ulid(), text: "Finished the sample task." });
-  session.append("task.result", { summary: "Sample task done.", files: [] });
-  session.setStatus("idle");
-  session.append("agent.state", { state: "idle" });
-  return c.json({ ok: true });
-});
-app.post("/__qa/cell/:kind", (c) => {
-  const next = cellFor(c.req.param("kind") as CellKind, cellId);
-  if (next) cells.emit(next);
-  return c.json({ ok: true });
-});
-app.post("/__qa/keyd/:mode", (c) => {
+routes.post("/__qa/finish", () => reply(finish()));
+routes.post("/__qa/cell/:kind", (c) => reply(setCell(c.req.param("kind") as CellKind)));
+routes.post("/__qa/keyd/:mode", (c) => {
   keydMode = c.req.param("mode") as typeof keydMode;
   return c.json({ ok: true });
 });
-app.get("/__qa/state", (c) =>
+routes.get("/__qa/scenarios", (c) =>
+  c.json(
+    Object.entries(UI_SCENARIOS as Record<string, UiScenario>).map(([name, s]) => ({
+      name,
+      about: s.about,
+      boot: s.boot ?? {},
+      live: s.step !== undefined,
+    })),
+  ),
+);
+routes.post("/__qa/scenario/:name", (c) => {
+  const name = c.req.param("name");
+  const wanted = (UI_SCENARIOS as Record<string, UiScenario>)[name];
+  if (!wanted) return c.text("unknown scenario", 404);
+  if (!wanted.step) return c.text(`start the fixture with --scenario ${name}`, 409);
+  return reply(STEPS[wanted.step]());
+});
+routes.get("/__qa/state", (c) =>
   c.json({
     sessionId: session?.id,
     cellId,
@@ -925,15 +1007,29 @@ app.get("/__qa/state", (c) =>
     cell: cells.get(cellId),
   }),
 );
-
-await new Promise<void>((resolve, reject) => {
-  server.once("error", reject);
-  server.listen(PORT, "127.0.0.1", resolve);
+// The gallery build, with the page policy the app itself is served with.
+routes.get("/gallery/*", (c) => {
+  const rel = c.req.path.slice("/gallery".length);
+  const file = readStatic(GALLERY, rel === "/" ? "/gallery.html" : rel);
+  if (!file) return c.text("Gallery not built: pnpm --filter @localdot/web build:gallery", 404);
+  return c.body(file.body, 200, {
+    ...UI_CSP,
+    "content-type": file.type,
+    "cache-control": "no-store",
+  });
 });
+
+if (scenario?.step && !scenario.boot) {
+  const problem = STEPS[scenario.step]();
+  if (problem) throw new Error(`${scenarioName}: ${problem}`);
+}
+app = routes;
 console.log(
   JSON.stringify({
     ready: true,
     origin: `http://127.0.0.1:${PORT}`,
+    port: PORT,
+    scenario: scenarioName,
     sessionId: session?.id,
     cellId,
     seeded,
@@ -959,3 +1055,13 @@ const shutdown = async () => {
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+// A launcher that dies without stopping its fixture would leave it running; it stops itself.
+const launcher = Number(env.QA_PARENT_PID);
+if (launcher) {
+  const watch = setInterval(() => {
+    if (process.ppid === launcher) return;
+    clearInterval(watch);
+    void shutdown();
+  }, 1000);
+  watch.unref();
+}

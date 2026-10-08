@@ -14,7 +14,7 @@ const NOSNIFF = { "x-content-type-options": "nosniff" };
 // one of this origin: the vendored client's cell can point that client's frame at any same-origin
 // URL (Selkies' settings handler assigns window[key] for each key the cell sends), and a Theatre
 // loaded there would act on a fragment token the cell chose.
-const UI_CSP = {
+export const UI_CSP = {
   "referrer-policy": "no-referrer",
   "content-security-policy": [
     "default-src 'self'",
