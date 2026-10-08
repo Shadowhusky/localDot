@@ -43,12 +43,17 @@ export function allowWithoutAsking(actionClass: ActionClass): string {
   return `Allow ${CLASS_WORK[actionClass]} without asking:`;
 }
 
+const lower = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+
 export function allowedLine(actionClass: ActionClass, option: AlwaysOption): string {
-  const where =
-    option.scope === "always"
-      ? "Always allowed"
-      : `Allowed ${option.label.charAt(0).toLowerCase()}${option.label.slice(1)}`;
+  const where = option.scope === "always" ? "Always allowed" : `Allowed ${lower(option.label)}`;
   return `${where}: ${CLASS_WORK[actionClass]}.`;
+}
+
+export function undoAllowedLabel(actionClass: ActionClass, option: AlwaysOption): string {
+  return option.scope === "always"
+    ? `Undo always allowing ${CLASS_WORK[actionClass]}`
+    : `Undo allowing ${CLASS_WORK[actionClass]} ${lower(option.label)}`;
 }
 
 export interface AutonomyPreset {

@@ -103,14 +103,13 @@ export function SafetyControls({
           )}
         </ApprovalCard>
       )}
-      {safety.allowed && visible && !safety.approval && (
-        <AllowedNotice
-          choice={safety.allowed}
-          outcome={agent.model.approvalOutcome}
-          onUndo={() => void safety.undoAllowed()}
-          onDismiss={safety.dismissAllowed}
-        />
-      )}
+      <AllowedNotice
+        choice={approval ? null : safety.allowed}
+        outcome={agent.model.approvalOutcome}
+        visible={visible}
+        onUndo={() => void safety.undoAllowed()}
+        onDismiss={safety.dismissAllowed}
+      />
       {taskOpen && (
         <div className="safety-task-controls">
           {pause ? (

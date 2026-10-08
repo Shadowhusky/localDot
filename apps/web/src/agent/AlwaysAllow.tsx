@@ -5,7 +5,7 @@ import {
 } from "@localdot/protocol";
 import { type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { allowedLine, allowWithoutAsking } from "../copy/autonomy.ts";
+import { allowedLine, allowWithoutAsking, undoAllowedLabel } from "../copy/autonomy.ts";
 import type { ApprovalOutcome } from "./model.ts";
 import type { AllowedChoice } from "./useSafety.ts";
 
@@ -82,14 +82,17 @@ export function AlwaysAllow({
 
 const SHOWN_MS = 8000;
 const LEAVE_MS = 180;
+// Mounted for as long as the task view is, so its live region exists before a line arrives.
 export function AllowedNotice({
   choice,
   outcome,
+  visible,
   onUndo,
   onDismiss,
 }: {
-  choice: AllowedChoice;
+  choice: AllowedChoice | null;
   outcome: ApprovalOutcome | undefined;
+  visible: boolean;
   onUndo(): void;
   onDismiss(): void;
 }) {
@@ -100,18 +103,24 @@ export function AllowedNotice({
     dismiss.current = onDismiss;
   });
   const confirmed =
-    outcome?.approvalId === choice.approvalId && outcome.decision === "approve"
+    choice && outcome?.approvalId === choice.approvalId && outcome.decision === "approve"
       ? outcome
       : undefined;
-  const saved = confirmed?.rule?.scope === choice.option.scope;
-  const undone = choice.undo === "done" || !!confirmed?.ruleRemoved;
+  const saved = !!choice && confirmed?.rule?.scope === choice.option.scope;
+  const undone = choice?.undo === "done" || !!confirmed?.ruleRemoved;
   const text = saved
     ? undone
       ? "Undone. You'll be asked again next time."
       : allowedLine(choice.actionClass, choice.option)
     : (confirmed?.note ?? null);
   const undoable = saved && !undone;
-  const waiting = held.pointer || held.focus;
+  const failed = undoable && choice.undo === "failed" ? " Couldn't undo. Try again." : "";
+  // A removed or hidden Undo never reports pointer-leave or blur.
+  const reachable = visible && undoable;
+  useEffect(() => {
+    if (!reachable) setHeld({ pointer: false, focus: false });
+  }, [reachable]);
+  const waiting = reachable && (held.pointer || held.focus);
   useEffect(() => {
     if (!text || waiting) return;
     setLeaving(false);
@@ -122,28 +131,36 @@ export function AllowedNotice({
       clearTimeout(gone);
     };
   }, [text, waiting]);
-  if (!text) return null;
+  const shown = visible && text;
   return createPortal(
-    <div className={leaving ? "always-notice leaving" : "always-notice"}>
-      <p role="status">
-        {text}
-        {undoable && choice.undo === "failed" ? " Couldn't undo. Try again." : ""}
-      </p>
-      {undoable && (
-        <button
-          type="button"
-          className="always-notice-undo"
-          disabled={choice.undo === "pending"}
-          onClick={onUndo}
-          onPointerEnter={() => setHeld((old) => ({ ...old, pointer: true }))}
-          onPointerLeave={() => setHeld((old) => ({ ...old, pointer: false }))}
-          onFocus={() => setHeld((old) => ({ ...old, focus: true }))}
-          onBlur={() => setHeld((old) => ({ ...old, focus: false }))}
-        >
-          Undo
-        </button>
+    <>
+      <span className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {shown ? `${text}${failed}` : ""}
+      </span>
+      {shown && (
+        <div className={leaving ? "always-notice leaving" : "always-notice"}>
+          <p aria-hidden="true">
+            {text}
+            {failed}
+          </p>
+          {undoable && (
+            <button
+              type="button"
+              className="always-notice-undo"
+              aria-label={undoAllowedLabel(choice.actionClass, choice.option)}
+              disabled={choice.undo === "pending"}
+              onClick={onUndo}
+              onPointerEnter={() => setHeld((old) => ({ ...old, pointer: true }))}
+              onPointerLeave={() => setHeld((old) => ({ ...old, pointer: false }))}
+              onFocus={() => setHeld((old) => ({ ...old, focus: true }))}
+              onBlur={() => setHeld((old) => ({ ...old, focus: false }))}
+            >
+              Undo
+            </button>
+          )}
+        </div>
       )}
-    </div>,
+    </>,
     document.body,
   );
 }

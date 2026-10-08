@@ -78,6 +78,7 @@ for (const size of SIZES)
       await expect(page.getByRole("status").filter({ hasText: "Allowed on" })).toHaveText(
         "Allowed on mail.example.test: sending messages.",
       );
+      await expect(page.locator(".always-notice")).toBeVisible();
       await expect
         .poll(async () => (await api<{ effects: string[] }>("/__qa/state", origin)).effects)
         .toContain("approval:approve");
@@ -124,9 +125,14 @@ test("Undo from the status line takes back a task allowance", async ({ browser }
     await expect(page.locator(".approval-card")).toHaveCount(0);
     const status = page.getByRole("status").filter({ hasText: "this task" });
     await expect(status).toHaveText("Allowed for this task: sending messages.");
-    await press(page, "Undo", false);
-    await expect(page.getByText("Undone. You'll be asked again next time.")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Undo", exact: true })).toHaveCount(0);
+    await press(page, "Undo allowing sending messages for this task", false);
+    await expect(page.getByRole("status").filter({ hasText: "Undone." })).toHaveText(
+      "Undone. You'll be asked again next time.",
+    );
+    await expect(page.locator(".always-notice")).toHaveText(
+      "Undone. You'll be asked again next time.",
+    );
+    await expect(page.getByRole("button", { name: /^Undo allowing/ })).toHaveCount(0);
 
     await requestSend(page, origin);
     const effects = (await api<{ effects: string[] }>("/__qa/state", origin)).effects;

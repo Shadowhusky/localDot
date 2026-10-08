@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { SafetyControls } from "./SafetyControls.tsx";
@@ -7,6 +7,7 @@ import type { AgentSessionView } from "./useAgentSession.ts";
 import type { SafetyView } from "./useSafety.ts";
 
 afterEach(cleanup);
+const line = () => document.querySelector(".sr-only[role=status]")?.textContent;
 
 const sessionId = "01J00000000000000000000002";
 const cellId = "01J00000000000000000000001";
@@ -110,11 +111,55 @@ it("puts Always allow in the approval card and confirms the choice after it", ()
   };
   view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
   expect(screen.queryByRole("button", { name: "Always allow…" })).toBeNull();
-  expect(screen.getByText("Allowed for this task: sending messages.")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(line()).toBe("Allowed for this task: sending messages.");
+  fireEvent.click(
+    screen.getByRole("button", { name: "Undo allowing sending messages for this task" }),
+  );
   expect(undoAllowed).toHaveBeenCalledOnce();
   view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} visible={false} />);
-  expect(screen.queryByText("Allowed for this task: sending messages.")).toBeNull();
+  expect(line()).toBe("");
+  expect(document.querySelector(".always-notice")).toBeNull();
+});
+
+it("keeps the status line's time running while Settings is open", () => {
+  vi.useFakeTimers();
+  try {
+    const dismissAllowed = vi.fn();
+    const allowed = {
+      ...safety,
+      undoAllowed: vi.fn(),
+      dismissAllowed,
+      allowed: {
+        session: sessionId,
+        approvalId: ID,
+        actionClass: "send" as const,
+        option: card.always[0],
+        undo: "idle" as const,
+      },
+    } as unknown as SafetyView;
+    const confirmed = {
+      ...agent,
+      model: {
+        ...agent.model,
+        approvalOutcome: {
+          approvalId: ID,
+          decision: "approve" as const,
+          actionClass: "send" as const,
+          rule: { scope: "task" as const, label: "For this task", actionClass: "send" as const },
+        },
+      },
+    };
+    const view = render(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
+    expect(line()).toBe("Allowed for this task: sending messages.");
+    act(() => vi.advanceTimersByTime(3_000));
+    view.rerender(
+      <SafetyControls safety={allowed} agent={confirmed} cell={null} visible={false} />,
+    );
+    act(() => vi.advanceTimersByTime(10_000));
+    expect(dismissAllowed).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it.each([
