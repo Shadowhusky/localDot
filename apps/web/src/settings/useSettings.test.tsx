@@ -23,6 +23,7 @@ function server(settings = initial()) {
     puts: [] as AgentSettingsDocument[],
     calls: [] as string[],
     readIndex: undefined as (() => Promise<ProviderIndex>) | undefined,
+    refreshCatalog: undefined as (() => Promise<Response>) | undefined,
     put: undefined as ((data: AgentSettingsDocument) => Promise<Response>) | undefined,
   };
   const api = createApi("fixture", {
@@ -34,6 +35,10 @@ function server(settings = initial()) {
       if (path === "/api/agent/providers")
         return Response.json(f.readIndex ? await f.readIndex() : f.index);
       if (path === "/api/agent/settings" && method === "GET") return Response.json(f.settings);
+      if (path === "/api/agent/catalog/refresh" && method === "POST")
+        return f.refreshCatalog
+          ? f.refreshCatalog()
+          : Response.json({ fetchedAt: "2026-10-08T09:00:00Z", providers: 3, skipped: 0 });
       if (path === "/api/agent/settings" && method === "PUT") {
         const data = JSON.parse(String(init?.body)) as AgentSettingsDocument;
         f.puts.push(structuredClone(data));
@@ -277,6 +282,25 @@ describe("explicit configuration save ownership", () => {
     await waitFor(() => expect(result.current.saveEnabled).toBe(true));
     expect(result.current.draft?.choices.main?.model).toBe("edited");
     expect(f.state.calls).not.toContain("POST /api/agent/catalog/refresh");
+  });
+  it("retries the catalog refresh, not a read, after a failed refresh", async () => {
+    const f = server(),
+      { result } = await opened(f);
+    f.state.refreshCatalog = async () => new Response("down", { status: 503 });
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.phase).toBe("error");
+    expect(result.current.error).toContain("could not be refreshed");
+    f.state.refreshCatalog = undefined;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(f.state.calls.filter((call) => call === "POST /api/agent/catalog/refresh")).toHaveLength(
+      2,
+    );
+    expect(result.current.phase).toBe("ready");
+    expect(result.current.error).toBeNull();
   });
   it("ignores an old account's save and metadata responses after API replacement", async () => {
     const first = server(),

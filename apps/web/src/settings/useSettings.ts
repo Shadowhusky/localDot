@@ -64,6 +64,7 @@ export function useSettings(
   const unresolved = useRef(false);
   const writing = useRef(false);
   const blocked = useRef(false);
+  const failed = useRef<"read" | "refresh">("read");
   const loadedFor = useRef<ApiClient | null>(null);
   useLayoutEffect(() => {
     Object.assign(current.current, { api, saved, index, draft, phase });
@@ -122,6 +123,7 @@ export function useSettings(
           reading.current !== abort
         )
           return;
+        failed.current = "read";
         setPhase("error");
         setError(
           owner.draft
@@ -162,6 +164,7 @@ export function useSettings(
         setUncertain(true);
       }
       mutating.current?.abort();
+      failed.current = "read";
       setPhase("error");
       setError("The view was interrupted. Reload saved settings before continuing.");
     };
@@ -325,7 +328,7 @@ export function useSettings(
   const refresh = async () => {
     const owner = current.current;
     if (!owner.open || mutating.current || document.hidden || blocked.current) return;
-    if (owner.phase === "error") return read(!owner.draft);
+    if (owner.phase === "error" && failed.current === "read") return read(!owner.draft);
     if (unresolved.current) return;
     const generation = owner.generation,
       revision = owner.revision;
@@ -356,6 +359,7 @@ export function useSettings(
         current.current.api === api &&
         owner.generation === generation
       ) {
+        failed.current = "refresh";
         setPhase("error");
         setError("The catalog could not be refreshed. Your choices are retained.");
       }
