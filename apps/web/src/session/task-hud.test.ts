@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { emptyAgentModel } from "../agent/model.ts";
 import { projectAgentEvent } from "../agent/reducer.ts";
 import { type HudState, hudFor } from "../cells/hud-state.ts";
-import { mergeHud, type TaskFacts, taskFacts, taskHud } from "./task-hud.ts";
+import { mergeHud, past, progressive, type TaskFacts, taskFacts, taskHud } from "./task-hud.ts";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 let seq = 0;
@@ -333,6 +333,13 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("action.result", 1300, { ok: true }, "s2"),
     ];
     expect(view(unknownVerb, 1400).task.label).toBe("Working");
+  });
+
+  it("tells a held or repeated key in the tense of its moment", () => {
+    expect(progressive("Hold Shift for 1.5 s")).toBe("Holding Shift for 1.5 s");
+    expect(past("Hold Shift for 1.5 s")).toBe("Held Shift for 1.5 s");
+    expect(progressive("Press ] 5 times")).toBe("Pressing ] 5 times");
+    expect(past("Press ] 5 times")).toBe("Pressed ] 5 times");
   });
 
   it("keeps the frozen computer authoritative over any task verdict", () => {
