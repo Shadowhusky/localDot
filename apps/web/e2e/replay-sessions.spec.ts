@@ -93,6 +93,7 @@ for (const [label, engine, size] of [
       await expect(replayTime(page)).toHaveText(/^2:\d\d \/ 3:00$/);
       await expect.poll(() => Number(query(page, "t"))).toBeGreaterThan(100_000);
 
+      const stage = await page.locator(".replay-stage").boundingBox();
       const list = await tasks(page, press);
       const row = list.getByRole("link", { name: /^Earlier sample task 1/ });
       await expect(row).toBeInViewport({ ratio: 1 });
@@ -110,6 +111,7 @@ for (const [label, engine, size] of [
       await expect(page.getByRole("dialog", { name: "Tasks" })).toHaveCount(0);
       await page.waitForTimeout(500);
       expect(misses).toEqual([]);
+      expect(await page.locator(".replay-stage").boundingBox()).toEqual(stage);
       await context.close();
     });
 
@@ -187,9 +189,12 @@ for (const [label, engine, size] of [
       });
       expect(look.background).toBeGreaterThanOrEqual(0.9);
       expect(look).toMatchObject({ lower: true, inside: true, title: "rgb(238, 239, 241)" });
+      const play = page.getByRole("button", { name: "Play replay" });
+      const before = await play.boundingBox();
       const controls = page.getByRole("group", { name: "Playback controls" });
       await expect(controls.getByText("No video", { exact: true })).toBeVisible({ timeout: 5000 });
       await expect(card).toBeHidden();
+      expect(await play.boundingBox()).toEqual(before);
       await context.close();
     });
 
