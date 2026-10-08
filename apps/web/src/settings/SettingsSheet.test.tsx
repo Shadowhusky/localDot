@@ -178,23 +178,105 @@ describe("settings inspector", () => {
     expect(screen.getByRole("alert").textContent).toBe("Settings couldn't be saved. Try again.");
     expect(save().getAttribute("aria-describedby")).toContain(screen.getByRole("alert").id);
   });
-  it("closes while Keys is open, keeps the choices, and gives focus back to the Add key pressed", () => {
+  it("slides Keys over itself, keeps the choices, and Back gives focus to the Add key pressed", () => {
     const p = props();
+    const onBack = vi.fn();
+    const keysPage = {
+      keys: {
+        health: {
+          online: true,
+          audit: { ok: true },
+          hairpin: { state: "active" as const, addresses: 1 },
+        },
+        keys: [],
+        loadError: null,
+        busy: false,
+        save: vi.fn(async () => ({ restart: false })),
+        remove: vi.fn(async () => {}),
+      },
+      preset: { requestId: 1, provider: "openai" as const },
+      onBack,
+    };
     const view = render(<SettingsSheet {...p} />);
     const add = within(screen.getByRole("region", { name: "Main model" })).getByRole("button", {
       name: "Add key",
     });
     fireEvent.click(add);
     expect(p.onKeys).toHaveBeenCalledWith("main", "openai", add);
-    view.rerender(<SettingsSheet {...p} suspended />);
-    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    add.focus();
+    view.rerender(<SettingsSheet {...p} keysPage={keysPage} />);
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    const keys = document.querySelector<HTMLElement>('[data-page="keys"]') as HTMLElement;
+    expect(within(keys).getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
+    expect(add.closest("[inert]")).not.toBeNull();
+    fireEvent.click(within(keys).getByRole("button", { name: "Settings" }));
+    expect(onBack).toHaveBeenCalledOnce();
     view.rerender(<SettingsSheet {...p} />);
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
     expect(document.activeElement).toBe(
       within(screen.getByRole("region", { name: "Main model" })).getByRole("button", {
         name: "Add key",
       }),
     );
     expect(p.onChange).not.toHaveBeenCalled();
+  });
+  it("leaves on the page it showed, whatever Keys does while it closes", () => {
+    // Something still moving keeps the closing sheet on the page, as a browser's transitions do.
+    Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+      configurable: true,
+      value: () => [
+        {
+          effect: { getComputedTiming: () => ({ endTime: 1000 }) },
+          finished: new Promise(() => {}),
+        },
+      ],
+    });
+    try {
+      const p = props();
+      const keysPage = {
+        keys: {
+          health: { online: true },
+          keys: [],
+          loadError: null,
+          busy: false,
+          save: vi.fn(async () => ({ restart: false })),
+          remove: vi.fn(async () => {}),
+        },
+        onBack: vi.fn(),
+      };
+      const view = render(<SettingsSheet {...p} />);
+      view.rerender(<SettingsSheet {...p} open={false} keysPage={keysPage} />);
+      expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+      expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull();
+      view.rerender(<SettingsSheet {...p} keysPage={keysPage} />);
+      view.rerender(<SettingsSheet {...p} open={false} />);
+      expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
+    }
+  });
+  it("asks before closing over Keys with a key typed, even with no settings changed", () => {
+    const p = props();
+    const keysPage = {
+      keys: {
+        health: {
+          online: true,
+          audit: { ok: true },
+          hairpin: { state: "active" as const, addresses: 1 },
+        },
+        keys: [],
+        loadError: null,
+        busy: false,
+        save: vi.fn(async () => ({ restart: false })),
+        remove: vi.fn(async () => {}),
+      },
+      onBack: vi.fn(),
+    };
+    render(<SettingsSheet {...p} keysPage={keysPage} />);
+    fireEvent.change(screen.getByLabelText("Key"), { target: { value: "fake-private-value" } });
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    expect(asking()).toBe(true);
+    expect(p.onClose).not.toHaveBeenCalled();
   });
   it("shows the ChatGPT plan without prices, a spending limit or the optional roles", () => {
     render(
@@ -285,10 +367,16 @@ describe("settings inspector", () => {
       removeEventListener: () => {},
     }));
     try {
-      render(<SettingsSheet {...props()} stop={stop} taskControls={<p>Stopping…</p>} />);
+      const later = render(
+        <SettingsSheet {...props()} stop={stop} taskControls={<p>Stopping…</p>} />,
+      );
       fireEvent.click(within(sheet()).getByRole("button", { name: "Stop" }));
       expect(run).toHaveBeenCalledOnce();
       expect(within(sheet()).getByText("Stopping…")).toBeTruthy();
+      // Stopped, the computer has no Stop to offer, and the sheet still says how it went.
+      later.rerender(<SettingsSheet {...props()} taskControls={<p>Stopped.</p>} />);
+      expect(within(sheet()).queryByRole("button", { name: "Stop" })).toBeNull();
+      expect(within(sheet()).getByText("Stopped.")).toBeTruthy();
     } finally {
       vi.unstubAllGlobals();
     }

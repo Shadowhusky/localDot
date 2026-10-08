@@ -31,10 +31,10 @@ const KIT = "src/ui/";
 const TOKENS = "src/ui/tokens.css";
 const TOKEN_LAYER = [TOKENS, "src/ui/motion.css"];
 const DECLARING = [...TOKEN_LAYER, "src/theme.css"];
-// The kit, the galleries, and the stylesheets the UI plan gives the shell (T11-T18), Settings (T19)
-// and the dot (T24).
+// The kit, the galleries, and the stylesheets the UI plan gives the shell (T11-T18), Settings (T19),
+// Keys (T20) and the dot (T24).
 const STYLESHEET_HOMES =
-  /^src\/(?:ui\/|gallery\/|dot\/dot\.css$|settings\/settings\.css$|shell\/(?:stage-frame|hud|layout|bar|rails|phone|conversation|decision)\.css$)/;
+  /^src\/(?:ui\/|gallery\/|dot\/dot\.css$|settings\/settings\.css$|keys\/keys\.css$|shell\/(?:stage-frame|hud|layout|bar|rails|phone|conversation|decision)\.css$)/;
 // Dev-only pages, and the list of banned words itself.
 const NOT_COPY = /^src\/(?:ui\/)?gallery\/|^src\/copy\/banned\.ts$/;
 

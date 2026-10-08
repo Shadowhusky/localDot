@@ -115,10 +115,10 @@
   "src/app.css": {
     "control-selector": 12,
     "half-pixel": 9,
-    "radius-literal": 10,
-    "spacing-literal": 30,
+    "radius-literal": 9,
+    "spacing-literal": 28,
     "stray-stylesheet": 1,
-    "type-literal": 23
+    "type-literal": 22
   },
   "src/browser/BrowserDownloads.tsx": {
     "native-control": 2,
@@ -156,33 +156,6 @@
   "src/gallery/gallery.css": {
     "half-pixel": 1,
     "type-literal": 2
-  },
-  "src/keys/KeyForm.tsx": {
-    "native-control": 10,
-    "native-disabled": 2
-  },
-  "src/keys/KeyList.tsx": {
-    "native-control": 1,
-    "native-disabled": 1
-  },
-  "src/keys/KeysSheet.tsx": {
-    "banned-copy": 6,
-    "native-control": 4
-  },
-  "src/keys/keys-api.ts": {
-    "banned-copy": 2
-  },
-  "src/keys/keys.css": {
-    "control-selector": 11,
-    "half-pixel": 5,
-    "motion-literal": 5,
-    "radius-literal": 11,
-    "spacing-literal": 27,
-    "stray-stylesheet": 1,
-    "type-literal": 10
-  },
-  "src/keys/useKeys.ts": {
-    "banned-copy": 1
   },
   "src/onboarding/AppearancePicker.tsx": {
     "native-control": 1

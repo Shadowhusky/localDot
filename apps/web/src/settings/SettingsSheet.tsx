@@ -1,6 +1,12 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
+import {
+  KEYS_DESCRIPTION,
+  KEYS_TITLE,
+  KeysPanel,
+  type KeysPanelProps,
+} from "../keys/KeysSheet.tsx";
 import type { AppearanceControl } from "../onboarding/AppearancePicker.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -34,10 +40,12 @@ const SAVED_MS = 1200;
 
 export type CatalogState = "loading" | "ready" | "empty" | "stale" | "refreshing" | "offline";
 
+// Keys slid over Settings, with a Back to it.
+export type KeysPage = Omit<KeysPanelProps, "active" | "onHolding"> & { onBack(): void };
+
 export interface SettingsSheetProps {
   open: boolean;
-  // Held closed while Keys, opened from here, is on screen; the draft stays.
-  suspended?: boolean;
+  keysPage?: KeysPage;
   focusSection?: "models" | "autonomy";
   appearance?: AppearanceControl;
   choices: Partial<Record<ModelRole, RoleChoice>>;
@@ -118,14 +126,15 @@ function Section({ id, title, children }: { id: string; title: string; children:
 
 export function SettingsSheet(props: SettingsSheetProps) {
   const statusId = useId();
-  const active = props.open && !props.suspended;
   const phone = useMediaQuery(PHONE);
   const [saved, setSaved] = useState(false);
   // Set from a press of Save until that save is done; the account's own steps are busy too.
   const [saving, setSaving] = useState(false);
   const sawBusy = useRef(false);
-  // The role whose Add key opened Keys gets focus back when Settings returns.
-  const keysFrom = useRef<ModelRole | null>(null);
+  const [keysHolding, setKeysHolding] = useState(false);
+  // Closing, the sheet leaves on the page it showed.
+  const keysPage = useRef(props.keysPage);
+  if (props.open) keysPage.current = props.keysPage;
 
   useEffect(() => {
     if (!saving) return;
@@ -150,27 +159,17 @@ export function SettingsSheet(props: SettingsSheetProps) {
   }, [props.dirty]);
 
   // Once the saved settings are in, focus goes to the main model's provider, or to the requested
-  // section, unless the person has already moved it from where the sheet put it on opening; Settings
-  // coming back from Keys gives it to the Add key pressed.
+  // section, unless the person has already moved it from where the sheet put it on opening.
   const placed = useRef<Element | null | undefined>(undefined);
   useEffect(() => {
     if (!props.open) {
       placed.current = undefined;
-      keysFrom.current = null;
       return;
     }
-    if (!active) return;
     const sheet = document
       .getElementById("settings-sheet-body")
       ?.closest<HTMLElement>("[role=dialog]");
     if (!sheet) return;
-    const role = keysFrom.current;
-    if (role) {
-      keysFrom.current = null;
-      placed.current = null;
-      sheet.querySelector<HTMLElement>(`[data-role="${role}"] .settings-add-key`)?.focus();
-      return;
-    }
     if (placed.current === undefined) placed.current = document.activeElement;
     if (props.loading || placed.current === null) return;
     const now = document.activeElement;
@@ -184,7 +183,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     } else if (!matches("(pointer: coarse)")) {
       sheet.querySelector<HTMLElement>("[data-role=main] [role=combobox]")?.focus();
     }
-  }, [props.open, active, props.loading, props.focusSection]);
+  }, [props.open, props.loading, props.focusSection]);
 
   const lockReason = props.loading
     ? "Loading saved settings"
@@ -269,9 +268,26 @@ export function SettingsSheet(props: SettingsSheetProps) {
     </div>
   );
 
+  if (keysPage.current) {
+    const { onBack, ...panel } = keysPage.current;
+    return (
+      <Sheet
+        open={props.open}
+        onClose={props.onClose}
+        dirty={props.dirty || keysHolding}
+        page="keys"
+        back={{ label: "Settings", onBack }}
+        title={KEYS_TITLE}
+        description={KEYS_DESCRIPTION}
+        closeLabel="Close settings"
+      >
+        <KeysPanel {...panel} active={props.open} onHolding={setKeysHolding} />
+      </Sheet>
+    );
+  }
   return (
     <Sheet
-      open={active}
+      open={props.open}
       onClose={props.onClose}
       dirty={props.dirty}
       title="Settings"
@@ -280,35 +296,35 @@ export function SettingsSheet(props: SettingsSheetProps) {
       footer={footer}
     >
       <div id="settings-sheet-body" className="settings-body">
-        {phone && props.stop && (
+        {phone && (
+          // What Stop reports stays after Stop itself has gone.
           <div className="settings-stop">
-            <div className="settings-inline">
-              <p className="settings-note">Your computer</p>
-              <Button
-                icon="square"
-                disabledReason={props.stop.enabled ? undefined : "Not available right now"}
-                onClick={() => props.stop?.run()}
-              >
-                {props.stop.label}
-              </Button>
-            </div>
+            {props.stop && (
+              <div className="settings-inline">
+                <p className="settings-note">Your computer</p>
+                <Button
+                  icon="square"
+                  disabledReason={props.stop.enabled ? undefined : "Not available right now"}
+                  onClick={() => props.stop?.run()}
+                >
+                  {props.stop.label}
+                </Button>
+              </div>
+            )}
             {props.taskControls}
           </div>
         )}
         {props.loading ? (
           <Skeleton loading shape="block" height="320px" className="settings-loading" />
         ) : (
-          <SettingsSections {...props} keysFrom={keysFrom} />
+          <SettingsSections {...props} />
         )}
       </div>
     </Sheet>
   );
 }
 
-function SettingsSections({
-  keysFrom,
-  ...props
-}: SettingsSheetProps & { keysFrom: { current: ModelRole | null } }) {
+function SettingsSections(props: SettingsSheetProps) {
   const chatgptMain = props.choices.main?.provider === CHATGPT;
   return (
     <>
@@ -326,10 +342,7 @@ function SettingsSections({
             inactive={role !== "main" && chatgptMain}
             manualPrice={props.manualPrices?.[role]}
             onChange={(value) => props.onChange(role, value)}
-            onKeys={(from, provider, trigger) => {
-              keysFrom.current = from;
-              props.onKeys(from, provider, trigger);
-            }}
+            onKeys={props.onKeys}
             onPrice={(value) => props.onPrice?.(role, value)}
           />
         ))}

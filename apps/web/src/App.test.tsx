@@ -294,20 +294,47 @@ describe("App token states", () => {
     expect(notice).not.toMatch(/daemon|token/i);
   });
 
-  it("makes the Theatre inert while keys are open and restores the trigger after closing", async () => {
+  it("opens Keys beside the live page and gives focus back to the trigger after closing", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     render(<App fetchImpl={noCells as typeof fetch} />);
     await screen.findAllByRole("button", { name: "Turn on" });
     const trigger = screen.getByTestId("keys-button");
     fireEvent.click(trigger);
-    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
-    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
-    fireEvent.keyDown(window, { key: "Escape" });
+    const sheet = screen.getByRole("dialog", { name: "Keys" });
+    expect(sheet.getAttribute("aria-modal")).toBe("false");
     expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(false);
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
   });
 
-  it("keeps Stop computer reachable inside Keys while the Theatre is inert", async () => {
+  it("gives Keys way to Settings, so one sheet shows at a time", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    render(<App fetchImpl={noCells as typeof fetch} />);
+    await screen.findAllByRole("button", { name: "Turn on" });
+    fireEvent.click(screen.getByTestId("keys-button"));
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
+    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
+    expect(
+      screen.getAllByRole("dialog").map((dialog) => dialog.getAttribute("aria-labelledby")),
+    ).toHaveLength(1);
+    fireEvent.click(screen.getByTestId("keys-button"));
+    // Keys opened over Settings slides in as its page, with a way back.
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    const page = document.querySelector<HTMLElement>("[data-page='keys']") as HTMLElement;
+    expect(within(page).getByRole("button", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("keeps Stop computer inside Keys on a phone, where the sheet covers the page's Stop", async () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: /width < (760|1180)px/.test(query),
+      media: query,
+      addEventListener() {},
+      removeEventListener() {},
+    }));
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const { fetchImpl, calls } = daemon((call) => {
       if (call.path === "/api/cells") return json([summary("ready")]);
@@ -320,7 +347,7 @@ describe("App token states", () => {
     await screen.findByRole("button", { name: "Stop computer" });
     fireEvent.click(screen.getByTestId("keys-button"));
     const sheet = screen.getByRole("dialog", { name: "Keys" });
-    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
+    expect(sheet.getAttribute("aria-modal")).toBe("true");
     fireEvent.click(within(sheet).getByRole("button", { name: "Stop computer" }));
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/stop"))).toBe(
@@ -345,11 +372,11 @@ describe("App token states", () => {
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
     expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe(key);
-    expect((screen.getByLabelText("Provider") as HTMLSelectElement).value).toBe("openai");
-    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
+    expect(screen.getByRole("combobox", { name: "Provider" }).textContent).toBe("OpenAI");
     expect(calls.some((call) => call.method === "POST")).toBe(false);
-    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
     fireEvent.click(screen.getByTestId("keys-button"));
     expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
     expect(field.value).toBe("before  after");

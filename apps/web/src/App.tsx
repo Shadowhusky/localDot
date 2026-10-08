@@ -24,6 +24,7 @@ import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
+import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
 import { exchangeInstallCode, type InstallLink, takeInstallLink } from "./lib/install-link.ts";
@@ -226,8 +227,16 @@ function Theatre({ api }: { api: ApiClient }) {
     selectReady,
   } = useCell(api);
   const keys = useKeys(api);
-  const [keysOpen, setKeysOpen] = useState(false);
+  // Keys shows on its own sheet, or slid over Settings while Settings is open.
+  const [keysIn, setKeysIn] = useState<"sheet" | "settings" | null>(null);
+  const keysOpen = keysIn !== null;
   const settings = useSettings(api, [], !keysOpen);
+  const settingsOpen = useRef(settings.open);
+  settingsOpen.current = settings.open;
+  const openKeys = useCallback(() => setKeysIn(settingsOpen.current ? "settings" : "sheet"), []);
+  useEffect(() => {
+    if (!settings.open) setKeysIn((now) => (now === "settings" ? null : now));
+  }, [settings.open]);
   const providerIndex = settings.index;
   const accountModels = settings.chatgpt.models;
   const modelName = useCallback(
@@ -268,22 +277,29 @@ function Theatre({ api }: { api: ApiClient }) {
   const showSettings = (trigger: HTMLElement, section: "models" | "autonomy" = "models") => {
     settingsOrigin.current = trigger;
     setSettingsSection(section);
+    // One sheet at a time: Keys on its own gives way to Settings.
+    if (keysIn === "sheet") {
+      keysOrigin.current = null;
+      setKeysIn(null);
+    }
     settings.show();
   };
-  const receiveKey = useCallback<KeyIntake["receive"]>((source, provider) => {
-    keysOrigin.current =
-      document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    keyCapture.current = null;
-    flushSync(() => {
-      setKeyPreset(undefined);
-      setKeysOpen(true);
-    });
-    return keysIntake.current?.receive(source, provider) ?? false;
-  }, []);
+  const receiveKey = useCallback<KeyIntake["receive"]>(
+    (source, provider) => {
+      keysOrigin.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+      keyCapture.current = null;
+      flushSync(() => {
+        setKeyPreset(undefined);
+        openKeys();
+      });
+      return keysIntake.current?.receive(source, provider) ?? false;
+    },
+    [openKeys],
+  );
   const wasOpen = useRef(false);
-  const closeKeys = useCallback(() => setKeysOpen(false), []);
+  const closeKeys = useCallback(() => setKeysIn(null), []);
   useEffect(() => {
-    // Restore only after the render has removed inert from the Theatre.
     if (wasOpen.current && !keysOpen) {
       if (keysOrigin.current?.isConnected && !keysOrigin.current.closest("[inert], [hidden]"))
         keysOrigin.current.focus();
@@ -483,12 +499,32 @@ function Theatre({ api }: { api: ApiClient }) {
   const rows = session.sessionId
     ? timelineRows(stepRows(session.model), session.model.keyUses)
     : [];
+  const keyUses = session.model.keyUses;
+  const uses = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const use of keyUses)
+      if (use.decision === "allow") counts[use.secretId] = (counts[use.secretId] ?? 0) + 1;
+    return counts;
+  }, [keyUses]);
+  // One panel, on its own sheet or slid over Settings when Settings is open.
+  const keysPanel = {
+    keys,
+    intakeRef: keysIntake,
+    preset: keyPreset,
+    uses,
+    onSaved: (key: KeyRecord, request: number) => {
+      const context = keyCapture.current;
+      if (context?.request === request) void settings.keySaved(context.capture, key);
+    },
+    stop: sheetStopControl,
+    taskControls: <StopControl controls={controls} />,
+  };
   useEffect(() => {
     document.title = appStatus.title;
   }, [appStatus.title]);
   return (
     <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
-      <div className="theatre-content" inert={keysOpen}>
+      <div className="theatre-content">
         <TopBar
           title={session.model.title ?? "Your computer"}
           live={stageHud.live}
@@ -501,7 +537,7 @@ function Theatre({ api }: { api: ApiClient }) {
             keysOrigin.current = keysButton.current;
             keyCapture.current = null;
             setKeyPreset(undefined);
-            setKeysOpen(true);
+            openKeys();
           }}
           keysRef={keysButton}
           settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
@@ -788,7 +824,7 @@ function Theatre({ api }: { api: ApiClient }) {
         taskControls={<StopControl controls={controls} />}
         stop={sheetStopControl}
         open={settings.open}
-        suspended={keysOpen}
+        keysPage={keysIn === "settings" ? { ...keysPanel, onBack: closeKeys } : undefined}
         choices={settings.draft?.choices ?? {}}
         chatgpt={settings.chatgpt}
         subscriptionModels={settings.subscriptionModels}
@@ -814,7 +850,10 @@ function Theatre({ api }: { api: ApiClient }) {
         loading={settings.phase === "loading" || !settings.draft}
         error={settings.error}
         validation={settings.validation}
-        onClose={settings.close}
+        onClose={() => {
+          settings.close();
+          setKeysIn(null);
+        }}
         onChange={settings.change}
         onKeys={(role, providerId, trigger) => {
           const provider = providerById(providerId);
@@ -836,7 +875,7 @@ function Theatre({ api }: { api: ApiClient }) {
             provider: provider.keyd as (typeof LLM_PROVIDERS)[number],
             ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
           });
-          setKeysOpen(true);
+          setKeysIn("settings");
         }}
         onRefresh={() => void settings.refresh()}
         onReload={settings.reload}
@@ -866,19 +905,7 @@ function Theatre({ api }: { api: ApiClient }) {
             : undefined
         }
       />
-      <KeysSheet
-        taskControls={<StopControl controls={controls} />}
-        intakeRef={keysIntake}
-        open={keysOpen}
-        keys={keys}
-        onClose={closeKeys}
-        preset={keyPreset}
-        onSaved={(key, request) => {
-          const context = keyCapture.current;
-          if (context?.request === request) void settings.keySaved(context.capture, key);
-        }}
-        stop={sheetStopControl}
-      />
+      <KeysSheet {...keysPanel} open={keysIn === "sheet"} onClose={closeKeys} />
     </div>
   );
 }

@@ -1,391 +1,373 @@
-.scrim {
-  position: fixed;
-  inset: 0;
-  background: var(--color-shade-hud);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 200ms ease-out;
-  z-index: 20;
-}
-
-.scrim.on {
-  opacity: 1;
-  pointer-events: auto;
-}
-
-.sheet {
-  position: fixed;
-  top: 50px;
-  right: 16px;
-  width: min(400px, calc(100vw - 32px));
-  max-height: calc(100dvh - 66px);
-  overflow-y: auto;
-  padding: 18px 18px 20px;
-  border-radius: 14px;
-  background: var(--color-surface);
-  box-shadow:
-    inset 0 0 0 1px var(--color-hud-line),
-    0 24px 64px var(--color-edge);
-  transform-origin: calc(100% - 40px) -8px;
-  transform: translateY(-6px) scale(0.97);
-  opacity: 0;
-  visibility: hidden;
-  transition:
-    opacity 180ms ease-out,
-    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    visibility 0s linear 260ms;
-  z-index: 21;
-}
-
-.sheet.on {
-  transform: none;
-  opacity: 1;
-  visibility: visible;
-  transition:
-    opacity 180ms ease-out,
-    transform 260ms cubic-bezier(0.2, 0.8, 0.2, 1),
-    visibility 0s;
-}
-
-.sheet header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-}
-
-.sheet h2 {
-  font-size: 17px;
-  font-weight: 600;
-  letter-spacing: -0.015em;
-}
-
-.sheet h3 {
-  font-size: 12.5px;
-  font-weight: 600;
-  margin-bottom: 10px;
-}
-
-.sheet .x {
+/* The Keys sheet: protection, saved keys and the form, flat on the sheet's surface with one scroller
+   (the sheet's body). It lays kit parts out and never restyles them. */
+.keys-body {
   display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
-  border-radius: 14px;
-  background: var(--color-hud-button);
-  color: var(--color-text-2);
-  font-size: 17px;
-  line-height: 1;
+  gap: calc(var(--spacing) * 8);
+  padding-block: calc(var(--spacing) * 2) calc(var(--spacing) * 4);
 }
 
-.sheet .lede {
-  color: var(--color-text-2);
-  margin-bottom: 14px;
+.keys-section {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+  scroll-margin-top: calc(var(--spacing) * 4);
+}
+
+.keys-section-title {
+  font:
+    var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+  letter-spacing: var(--text-title--letter-spacing);
 }
 
 .keys-note {
-  overflow-wrap: anywhere;
-  margin: 0 0 14px;
-  padding: 9px 12px;
-  border-radius: 10px;
-  background: var(--color-surface-2);
-  color: var(--color-text);
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
-.keys-empty {
-  color: var(--color-text-3);
-  margin-bottom: 16px;
+.keys-note[data-alert] {
+  color: var(--color-fg-1);
 }
 
-.key-list {
-  list-style: none;
-  margin-bottom: 16px;
-  border-top: 1px solid var(--color-line);
+.keys-note > .ui-icon,
+.keys-form-error > .ui-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--color-danger-fg);
 }
 
-.key-list li {
+.keys-code {
+  font-family: var(--font-mono);
+}
+
+.keys-stop {
   display: grid;
-  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.3fr) auto;
+  gap: calc(var(--spacing) * 2);
+  padding-bottom: calc(var(--spacing) * 4);
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.keys-stop:empty {
+  display: none;
+}
+
+.keys-inline {
+  display: flex;
   align-items: center;
-  gap: 10px;
-  min-height: 42px;
-  border-bottom: 1px solid var(--color-line);
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
 }
 
-.key-name {
-  overflow-wrap: anywhere;
-  font-family: var(--font-mono);
-  font-size: 12.5px;
+/* Protection: one 36 px row per safeguard; a problem opens under its row. */
+.keys-protection {
+  display: grid;
+  list-style: none;
 }
 
-.key-what {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--color-text-2);
+.keys-status {
+  border-top: 1px solid var(--color-hairline);
 }
 
-.key-del {
-  height: 26px;
-  padding: 0 10px;
-  border-radius: 13px;
-  background: var(--color-hud-button);
-  color: var(--color-text-2);
-  font-size: 12px;
-  font-weight: 500;
+.keys-status:last-child {
+  border-bottom: 1px solid var(--color-hairline);
 }
 
-.key-del.armed {
-  background: var(--color-text);
-  color: var(--color-void);
-}
-
-.key-form {
+.keys-status-line {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding-top: 4px;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 9);
 }
 
-.key-form label {
-  display: grid;
-  gap: 5px;
+.keys-status-name {
+  color: var(--color-fg-1);
 }
 
-.key-fields {
+.keys-status-state {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  min-width: 0;
-  border: 0;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-align: end;
 }
 
-.key-form label > span {
-  font-size: 11.5px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
-  color: var(--color-text-3);
+.keys-status[data-tone="bad"] .keys-status-state {
+  color: var(--color-fg-1);
 }
 
-.key-form input,
-.key-form select {
-  min-width: 0;
-  height: 34px;
-  padding: 0 10px;
-  border-radius: 8px;
-  border: 1px solid var(--color-line);
-  background: var(--color-void);
-  color: var(--color-text);
-  font: inherit;
+.keys-status-state > .ui-icon {
+  color: var(--color-fg-2);
 }
 
-/* WebKit ignores the height of a native menulist, so the select draws its own box and chevron. */
-.key-form select {
-  appearance: none;
-  padding-right: 32px;
-  background:
-    var(--icon-chevron-down) no-repeat right 10px center / 12px 12px,
-    var(--color-void);
-  text-overflow: ellipsis;
+.keys-status-ring {
+  width: calc(var(--spacing) * 2);
+  height: calc(var(--spacing) * 2);
+  border: 1px solid var(--color-fg-3);
+  border-radius: var(--radius-full);
 }
 
-.key-form input:focus-visible,
-.key-form select:focus-visible,
-.sheet button:focus-visible {
-  outline: var(--focus-width) solid var(--color-text-2);
-  outline-offset: 1px;
-}
-
-.key-form input.secret {
-  -webkit-text-security: disc;
-}
-
-.keys-guard {
-  margin: 0 0 14px;
-  color: var(--color-text-3);
-}
-
-.key-form input[aria-invalid="true"] {
-  border-color: var(--color-text-2);
-}
-
-.key-form .pair {
+.keys-status-help {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+  gap: calc(var(--spacing) * 2);
+  padding-bottom: calc(var(--spacing) * 3);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
-.kinds {
-  border: 0;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  padding: 3px;
-  border-radius: 10px;
-  background: var(--color-void);
-}
-
-.kind {
-  height: 28px;
-  border-radius: 7px;
-  color: var(--color-text-2);
-  font-weight: 500;
-  font-size: 12.5px;
-}
-
-.kind[aria-pressed="true"] {
-  background: var(--color-surface-2);
-  color: var(--color-text);
-}
-
-.field-hint {
-  margin-top: calc(var(--spacing) * -1);
-  font-size: var(--text-footnote);
-  color: var(--color-text-3);
-}
-
-.field-hint code {
-  font-family: var(--font-mono);
-  font-size: var(--text-micro);
-  color: var(--color-text-2);
-}
-
-.field-error {
-  overflow-wrap: anywhere;
-  margin-top: -4px;
-  font-size: 12px;
-  color: var(--color-text);
-}
-
-.field-error::before {
-  content: "";
-  display: inline-block;
-  width: 5px;
-  height: 5px;
-  margin: 0 7px 1px 1px;
-  border: 1.5px solid var(--color-text);
-  border-radius: 50%;
-}
-
-.key-form .save {
-  align-self: flex-end;
-  height: 34px;
-  padding: 0 16px;
-  border-radius: 17px;
-  background: var(--color-text);
-  color: var(--color-void);
-  font-weight: 600;
-}
-
-.key-form .save:disabled {
-  opacity: 0.4;
-  cursor: default;
-}
-
-.keys-discard {
-  position: sticky;
-  bottom: -20px;
+.keys-status-fix {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px 12px;
-  margin: 16px -18px -20px;
-  padding: 12px 18px;
-  border-top: 1px solid var(--color-line);
-  background: var(--color-surface);
+  gap: calc(var(--spacing) * 2);
 }
 
-.keys-discard p {
-  font-weight: 500;
+/* The Details row's chevron lines up with the text above it. */
+.keys-status-details {
+  margin-inline-start: calc(var(--spacing) * -2);
 }
 
-.keys-discard div {
-  display: flex;
-  gap: 8px;
-  margin-left: auto;
+.keys-raw {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
+  overflow-wrap: anywhere;
 }
 
-.keys-discard button {
-  height: 34px;
-  padding: 0 14px;
-  border-radius: 17px;
-  background: var(--color-hud-button);
-  font-weight: 500;
+/* Saved keys. Holding keys back, the list stays readable but steps back. */
+.keys-saved {
+  min-width: 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
 }
 
-@media (width < 600px) {
-  .keys-discard div {
-    flex: 1 0 100%;
+.keys-saved[data-held] {
+  opacity: 0.5;
+}
+
+.keys-list {
+  display: grid;
+  list-style: none;
+}
+
+/* A row folds open when its key arrives and folds away when it is removed. */
+.keys-row {
+  display: grid;
+  grid-template-rows: 1fr;
+  border-top: 1px solid var(--color-hairline);
+  transition:
+    grid-template-rows var(--dur-sheet) var(--ease-standard),
+    opacity var(--dur-fade) var(--ease-standard),
+    border-color var(--dur-fade) var(--ease-standard);
+}
+
+.keys-row:last-child {
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.keys-row[data-leaving] {
+  grid-template-rows: 0fr;
+  border-color: transparent;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--dur-sheet) var(--ease-standard),
+    opacity var(--dur-exit) var(--ease-exit),
+    border-color var(--dur-exit) var(--ease-exit);
+}
+
+@starting-style {
+  .keys-row[data-fresh] {
+    grid-template-rows: 0fr;
+    opacity: 0;
   }
-  .keys-discard button {
+}
+
+.keys-row-inner {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 0;
+  margin-inline: calc(var(--spacing) * -2);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 2);
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  isolation: isolate;
+  transition: background-color var(--dur-fade) var(--ease-standard);
+}
+
+.keys-row[data-armed] .keys-row-inner {
+  background-color: var(--color-danger-bg);
+}
+
+.keys-row-glow {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  border-radius: inherit;
+  background-color: var(--color-state-selected);
+  opacity: 0;
+  animation: keys-glow calc(var(--dur-spring) * 2.5) var(--ease-standard);
+}
+
+@keyframes keys-glow {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+/* How long the armed Remove has left. */
+.keys-row-drain {
+  position: absolute;
+  inset-inline: calc(var(--spacing) * 2);
+  bottom: 0;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-fg-3);
+  transform-origin: left;
+  animation: keys-drain var(--_armed) linear forwards;
+}
+
+@keyframes keys-drain {
+  from {
+    scale: 1 1;
+  }
+
+  to {
+    scale: 0 1;
+  }
+}
+
+.keys-remove-label {
+  display: inline-grid;
+  justify-items: end;
+}
+
+.keys-remove-label > span,
+.keys-remove-label::after {
+  grid-area: 1 / 1;
+}
+
+.keys-remove-label::after {
+  visibility: hidden;
+  content: attr(data-longest);
+}
+
+.keys-monogram {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: calc(var(--spacing) * 5);
+  height: calc(var(--spacing) * 5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-control);
+  color: var(--color-fg-1);
+  font:
+    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+}
+
+.keys-row-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+
+.keys-row-name {
+  color: var(--color-fg-1);
+  font-weight: var(--font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+/* The dot between two facts sits in the gap; a fact that wraps to the start of a line takes its dot
+   outside the box, where it is clipped. */
+.keys-row-meta {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: calc(var(--spacing) * 3);
+  overflow: clip;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.keys-row-meta > span {
+  position: relative;
+  min-width: 0;
+}
+
+.keys-row-meta > span + span::before {
+  position: absolute;
+  left: calc(var(--spacing) * -2);
+  content: "·";
+}
+
+/* Adding a key. */
+.keys-form {
+  display: grid;
+  gap: calc(var(--spacing) * 4);
+  min-width: 0;
+}
+
+.keys-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: calc(var(--spacing) * 3);
+}
+
+/* The key shows as dots in a text field: a password field would be offered to the browser's
+   password manager. */
+.keys-secret .ui-input {
+  -webkit-text-security: disc;
+}
+
+.keys-form-actions {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+}
+
+.keys-form-status {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.keys-form-error {
+  display: flex;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-1);
+}
+
+@media (width < 760px) {
+  .keys-pair {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .keys-form-actions {
+    flex-wrap: wrap;
+  }
+
+  .keys-form-status {
+    flex-basis: 100%;
+  }
+
+  .keys-form-actions > .ui-button {
     flex: 1;
   }
 }
 
-.keys-discard button:first-child {
-  background: var(--color-text);
-  color: var(--color-void);
-  font-weight: 600;
-}
-
-@media (pointer: coarse) {
-  .sheet .x,
-  .key-del,
-  .kind,
-  .key-form input,
-  .key-form select,
-  .key-form .save,
-  .keys-discard button {
-    min-height: 44px;
-  }
-  .sheet .x {
-    width: 44px;
-    border-radius: 22px;
-  }
-  .key-list li {
-    min-height: 56px;
-  }
-  .key-del,
-  .key-form .save,
-  .keys-discard button {
-    border-radius: 22px;
-  }
-  /* Below 16px, iOS zooms the page into a focused field and leaves it zoomed. */
-  .key-form input,
-  .key-form select {
-    font-size: 16px;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .sheet,
-  .sheet.on {
-    transform: none;
-    transition:
-      opacity 120ms ease-out,
-      visibility 0s linear 120ms;
+  .keys-row,
+  .keys-row[data-leaving] {
+    transition: none;
   }
-  .sheet.on {
-    transition:
-      opacity 120ms ease-out,
-      visibility 0s;
-  }
-}
 
-@media (prefers-contrast: more) {
-  .sheet {
-    box-shadow:
-      inset 0 0 0 1px var(--color-text-2),
-      0 24px 64px var(--color-edge);
+  .keys-row-drain {
+    animation: none;
   }
-}
-
-.sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
 }

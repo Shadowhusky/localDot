@@ -9,6 +9,14 @@ import {
   useRef,
   useState,
 } from "react";
+import { Button } from "../ui/Button.tsx";
+import { Combobox } from "../ui/Combobox.tsx";
+import { Field } from "../ui/Field.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
+import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { Select } from "../ui/Select.tsx";
+import { TextField } from "../ui/TextField.tsx";
 import {
   baseURLHint,
   bindingOf,
@@ -18,8 +26,10 @@ import {
   type HttpFormat,
   type KeyDraft,
   needsBaseURL,
+  PROVIDER_GROUPS,
   PROVIDER_NAMES,
   type Provider,
+  suggestedId,
   valueHint,
   valueProblem,
 } from "./binding.ts";
@@ -27,11 +37,18 @@ import { problemText } from "./keys-api.ts";
 
 export interface KeyFormProps {
   active: boolean;
-  disabled: boolean;
+  // Why no key can be saved now: key protection is off, or it is holding keys back.
+  unavailable?: string;
+  // A key change is in flight, from this form or from the list.
+  busy?: boolean;
+  // The labels already saved, so one made up for a new key is new.
+  taken?: readonly string[];
   save(binding: SecretBinding, value: string): Promise<{ restart: boolean }>;
   intakeRef?: Ref<KeyIntake>;
   fieldRef?: Ref<KeyField>;
   preset?: KeyFormPreset;
+  // Whether the key field holds a key, each time that may have changed; never the key.
+  onHolding?(holding: boolean): void;
 }
 export interface KeyFormPreset {
   readonly requestId: number;
@@ -49,13 +66,47 @@ export interface KeyField {
 
 type Problem = { field: DraftField | "form"; message: string };
 
+const KINDS = [
+  { value: "llm", label: "Model provider" },
+  { value: "http", label: "Web API" },
+];
+
+const PROVIDER_PICKS = PROVIDER_GROUPS.map((group) => ({
+  label: group.label,
+  items: group.providers.map((provider) => ({ value: provider, label: PROVIDER_NAMES[provider] })),
+}));
+
+const FORMAT_PICKS = Object.entries(FORMAT_NAMES).map(([value, label]) => ({ value, label }));
+
+// Labels, hosts, addresses and headers go as typed: no capitals, corrections or spelling marks.
+const PLAIN = {
+  autoComplete: "off",
+  autoCapitalize: "none",
+  autoCorrect: "off",
+  spellCheck: false,
+} as const;
+
+function clipboardReadable(): boolean {
+  return typeof navigator !== "undefined" && typeof navigator.clipboard?.readText === "function";
+}
+
 // The key itself lives only in the key field's DOM value (never in React state): it is read
 // on submit, the field is cleared at once, and the page sends keyd's sealed copy.
-export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }: KeyFormProps) {
-  const labels = useId();
+export function KeyForm({
+  active,
+  unavailable,
+  busy = false,
+  taken = [],
+  save,
+  intakeRef,
+  fieldRef,
+  preset,
+  onHolding,
+}: KeyFormProps) {
+  const statusId = useId();
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [saved, setSaved] = useState<string | null>(null);
   const valueRef = useRef<HTMLInputElement>(null);
@@ -66,11 +117,16 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
   const lifetime = useRef(0);
   const mounted = useRef(false);
   const previousActive = useRef(active);
+  const holding = useRef(onHolding);
+  holding.current = onHolding;
+  const locked = Boolean(unavailable) || busy;
+  const report = () => holding.current?.(!!valueRef.current?.value);
   useEffect(() => {
     mounted.current = true;
     return () => {
       mounted.current = false;
       lifetime.current++;
+      holding.current?.(false);
     };
   }, []);
   useLayoutEffect(() => {
@@ -79,9 +135,11 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
       previousActive.current = active;
     }
   }, [active]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: only a new preset resets the form
   useLayoutEffect(() => {
     if (!preset || !Object.hasOwn(PROVIDER_NAMES, preset.provider)) return;
     if (valueRef.current) valueRef.current.value = "";
+    report();
     revision.current++;
     setDraft({
       ...EMPTY_DRAFT,
@@ -93,11 +151,15 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     setSaved(null);
     setTried(false);
   }, [preset]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: report reads refs only
   useLayoutEffect(() => {
-    if ((!active || disabled) && valueRef.current) valueRef.current.value = "";
-    intakeAllowed.current = active && !disabled;
+    if ((!active || locked) && valueRef.current?.value) {
+      valueRef.current.value = "";
+      report();
+    }
+    intakeAllowed.current = active && !locked;
     intakeBlocked.current = !active || document.hidden;
-  }, [active, disabled]);
+  }, [active, locked]);
   useImperativeHandle(
     intakeRef,
     () => ({
@@ -141,6 +203,7 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
           value = "";
           source.value = "";
           if (!received && target) target.value = "";
+          holding.current?.(!!target?.value);
         }
       },
     }),
@@ -160,6 +223,7 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
       if (input) input.value = "";
       intakeBlocked.current = true;
       lifetime.current++;
+      holding.current?.(false);
     };
     const onVisibility = () => {
       if (document.hidden) clear();
@@ -175,7 +239,8 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
       document.removeEventListener("visibilitychange", onVisibility);
     };
   }, []);
-  const check = bindingOf(draft);
+  const label = draft.id.trim() || suggestedId(draft, taken);
+  const check = bindingOf({ ...draft, id: label });
   const hint = valueHint(draft);
   const urlHint = draft.kind === "llm" ? baseURLHint(draft.provider) : undefined;
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
@@ -185,26 +250,52 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     setProblem(null);
     setSaved(null);
   };
+  // A plan refusal wipes the field as it appears, so it is announced. A fresh node per message is
+  // read even when it replaces another error.
   const errorFor = (field: DraftField) =>
     shown?.field === field ? (
-      // A plan refusal wipes the field as it appears, so it is announced. A fresh node per
-      // message is read even when it replaces another error.
-      <p
-        key={shown.message}
-        className="field-error"
-        id={`key-${field}-error`}
-        role={shown.message === CLAUDE_PLAN_REFUSAL ? "alert" : undefined}
-      >
+      <span key={shown.message} role={shown.message === CLAUDE_PLAN_REFUSAL ? "alert" : undefined}>
         {shown.message}
-      </p>
-    ) : null;
-  const invalid = (field: DraftField, described?: string) => {
-    const error = shown?.field === field ? `key-${field}-error` : undefined;
-    const ids = [error, described].filter(Boolean).join(" ");
-    return {
-      ...(error ? { "aria-invalid": true } : {}),
-      ...(ids ? { "aria-describedby": ids } : {}),
-    };
+      </span>
+    ) : undefined;
+
+  const paste = async () => {
+    const target = valueRef.current;
+    if (!target || !intakeAllowed.current || savingRef.current || intakeBlocked.current) return;
+    let text = "";
+    try {
+      text = await navigator.clipboard.readText();
+    } catch {
+      setProblem({
+        field: "value",
+        message: "The browser kept what you copied to itself. Paste into the field instead.",
+      });
+      return;
+    }
+    try {
+      const value = text.trim();
+      if (
+        !value ||
+        !target.isConnected ||
+        !intakeAllowed.current ||
+        savingRef.current ||
+        intakeBlocked.current ||
+        document.hidden
+      )
+        return;
+      setSaved(null);
+      if (claudePlanToken(value)) {
+        target.value = "";
+        setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+        return;
+      }
+      target.value = value;
+      setProblem((now) => (now?.field === "value" ? null : now));
+      target.focus();
+    } finally {
+      text = "";
+      report();
+    }
   };
 
   const submit = async (e: FormEvent) => {
@@ -213,6 +304,7 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     if (!input) return;
     if (!intakeAllowed.current || savingRef.current || intakeBlocked.current || document.hidden) {
       input.value = "";
+      report();
       return;
     }
     setTried(true);
@@ -220,6 +312,7 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     const value = input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";
+    report();
     // Refused for itself first: fixing another field would not make a plan token usable.
     if (claudePlanToken(value)) {
       setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
@@ -228,7 +321,9 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     if (!check.ok) {
       setProblem({
         ...check,
-        message: `${check.message} Paste the key again after correcting it.`,
+        message: value
+          ? `${check.message} Paste the key again after correcting it.`
+          : check.message,
       });
       return;
     }
@@ -247,7 +342,7 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
       !document.hidden &&
       revision.current === capturedRevision &&
       lifetime.current === capturedLifetime;
-    setBusy(true);
+    setSaving(true);
     try {
       const { restart } = await save(check.binding, value);
       if (!current()) return;
@@ -260,195 +355,189 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
       setProblem({ field: "form", message: `${problemText(err)} Paste the key again to retry.` });
     } finally {
       savingRef.current = false;
-      if (mounted.current) setBusy(false);
+      if (mounted.current) setSaving(false);
     }
   };
 
+  const readOnly = locked || saving;
+  const typed = draft.id.trim();
   return (
     <form
-      className="key-form"
+      className="keys-form"
       onSubmit={submit}
       noValidate
       aria-label="Add a key"
-      aria-busy={busy}
+      aria-busy={saving}
       autoComplete="off"
     >
-      <h3>Add a key</h3>
-      <fieldset className="key-fields" disabled={!active || disabled || busy}>
-        <legend className="sr-only">Key details</legend>
-        <fieldset className="kinds">
-          <legend className="sr-only">Kind of key</legend>
-          <button
-            type="button"
-            className="kind"
-            aria-pressed={draft.kind === "llm"}
-            onClick={() => set({ kind: "llm" })}
-          >
-            Model provider
-          </button>
-          <button
-            type="button"
-            className="kind"
-            aria-pressed={draft.kind === "http"}
-            onClick={() => set({ kind: "http" })}
-          >
-            Web API
-          </button>
-        </fieldset>
-        <label>
-          <span>Name</span>
-          <input
-            value={draft.id}
-            onChange={(e) => set({ id: e.target.value })}
-            placeholder={draft.kind === "llm" ? "anthropic" : "weather"}
-            autoComplete="off"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            {...invalid("id")}
-          />
-        </label>
-        {errorFor("id")}
-        {draft.kind === "llm" ? (
-          <>
-            <label>
-              <span id={`${labels}-provider`}>Provider</span>
-              <select
-                aria-labelledby={`${labels}-provider`}
-                value={draft.provider}
-                onChange={(e) => set({ provider: e.target.value as Provider })}
-              >
-                {Object.entries(PROVIDER_NAMES).map(([p, name]) => (
-                  <option key={p} value={p}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-            </label>
-            {needsBaseURL(draft.provider) && (
-              <>
-                <label>
-                  <span>Base URL</span>
-                  <input
-                    value={draft.baseURL}
-                    onChange={(e) => set({ baseURL: e.target.value })}
-                    placeholder={
-                      draft.provider === "anthropic-compatible"
-                        ? "https://api.example.com/anthropic"
-                        : "https://api.example.com/v1"
-                    }
-                    autoComplete="off"
-                    autoCapitalize="none"
-                    autoCorrect="off"
-                    spellCheck={false}
-                    inputMode="url"
-                    {...invalid("baseURL", urlHint && "key-baseURL-hint")}
-                  />
-                </label>
-                {errorFor("baseURL")}
-                {urlHint && (
-                  <p className="field-hint" id="key-baseURL-hint">
-                    {urlHint}
-                  </p>
-                )}
-              </>
-            )}
-          </>
-        ) : (
-          <>
-            <label>
-              <span>Hosts</span>
-              <input
-                value={draft.hosts}
-                onChange={(e) => set({ hosts: e.target.value })}
-                placeholder="api.example.com"
-                autoComplete="off"
-                autoCapitalize="none"
-                autoCorrect="off"
-                spellCheck={false}
-                {...invalid("hosts")}
+      <SegmentedControl
+        aria-label="Kind of key"
+        items={KINDS}
+        value={draft.kind}
+        onValueChange={(kind) => set({ kind: kind as KeyDraft["kind"] })}
+      />
+      {draft.kind === "llm" ? (
+        <>
+          <Field label="Provider">
+            <Combobox
+              size="lg"
+              value={draft.provider}
+              groups={PROVIDER_PICKS}
+              searchPlaceholder="Search providers"
+              onValueChange={(provider) => set({ provider: provider as Provider })}
+            />
+          </Field>
+          {needsBaseURL(draft.provider) && (
+            <Field label="Base URL" description={urlHint} error={errorFor("baseURL")}>
+              <TextField
+                {...PLAIN}
+                size="lg"
+                value={draft.baseURL}
+                readOnly={readOnly}
+                inputMode="url"
+                enterKeyHint="next"
+                placeholder={
+                  draft.provider === "anthropic-compatible"
+                    ? "e.g. https://api.example.com/anthropic"
+                    : "e.g. https://api.example.com/v1"
+                }
+                onChange={(e) => set({ baseURL: e.target.value })}
               />
-            </label>
-            {errorFor("hosts")}
-            <div className="pair">
-              <label>
-                <span>Header</span>
-                <input
-                  value={draft.header}
-                  onChange={(e) => set({ header: e.target.value })}
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                  {...invalid("header")}
-                />
-              </label>
-              <label>
-                <span id={`${labels}-format`}>Sent as</span>
-                <select
-                  aria-labelledby={`${labels}-format`}
-                  value={draft.format}
-                  onChange={(e) => set({ format: e.target.value as HttpFormat })}
-                >
-                  {Object.entries(FORMAT_NAMES).map(([f, name]) => (
-                    <option key={f} value={f}>
-                      {name}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-            {errorFor("header")}
-          </>
-        )}
-        <label>
-          <span>Key</span>
-          {/* A text field drawn as dots: Chrome offers to save a password field's value to the
-            user's synced password manager, autocomplete="off" or not. */}
-          <input
-            ref={valueRef}
-            type="text"
-            className="secret"
-            autoComplete="off"
-            autoCapitalize="none"
-            autoCorrect="off"
-            spellCheck={false}
-            data-1p-ignore="true"
-            data-lpignore="true"
-            onChange={(e) => {
-              if (claudePlanToken(e.currentTarget.value)) {
-                e.currentTarget.value = "";
-                setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
-              } else if (problem?.field === "value") setProblem(null);
-            }}
-            aria-invalid={shown?.field === "value" || undefined}
-            aria-describedby={
-              [shown?.field === "value" && "key-value-error", hint && "key-value-hint"]
-                .filter(Boolean)
-                .join(" ") || undefined
-            }
-          />
-        </label>
-        {hint && (
-          <p className="field-hint" id="key-value-hint">
-            Starts with <code>{hint}</code>
-          </p>
-        )}
-        {errorFor("value")}
-        {shown?.field === "form" && (
-          <p className="field-error" role="alert">
-            {shown.message}
-          </p>
-        )}
-        <button type="submit" className="save" disabled={!active || disabled || busy}>
-          {busy ? "Saving…" : "Save key"}
-        </button>
-      </fieldset>
-      {saved && (
-        <p className="keys-note" role="status">
-          {saved}
-        </p>
+            </Field>
+          )}
+        </>
+      ) : (
+        <>
+          <Field
+            label="Hosts"
+            description="The key goes to these hosts only. Separate several with commas."
+            error={errorFor("hosts")}
+          >
+            <TextField
+              {...PLAIN}
+              size="lg"
+              value={draft.hosts}
+              readOnly={readOnly}
+              inputMode="url"
+              enterKeyHint="next"
+              placeholder="e.g. api.example.com"
+              onChange={(e) => set({ hosts: e.target.value })}
+            />
+          </Field>
+          <div className="keys-pair">
+            <Field label="Header" error={errorFor("header")}>
+              <TextField
+                {...PLAIN}
+                size="lg"
+                value={draft.header}
+                readOnly={readOnly}
+                enterKeyHint="next"
+                placeholder="e.g. Authorization"
+                onChange={(e) => set({ header: e.target.value })}
+              />
+            </Field>
+            <Field label="Sent as" validates>
+              <Select
+                size="lg"
+                value={draft.format}
+                items={FORMAT_PICKS}
+                onValueChange={(format) => set({ format: format as HttpFormat })}
+              />
+            </Field>
+          </div>
+        </>
       )}
+      <Field
+        label="Label (optional)"
+        description={
+          typed && taken.includes(typed)
+            ? "Saving replaces the key with this label."
+            : "Shown in your keys and in Settings."
+        }
+        error={errorFor("id")}
+      >
+        <TextField
+          {...PLAIN}
+          size="lg"
+          value={draft.id}
+          readOnly={readOnly}
+          enterKeyHint="next"
+          placeholder={label}
+          onChange={(e) => set({ id: e.target.value })}
+        />
+      </Field>
+      <Field
+        label="Key"
+        description={
+          hint ? (
+            <>
+              Starts with <code className="keys-code">{hint}</code>
+            </>
+          ) : undefined
+        }
+        error={errorFor("value")}
+        disabledReason={unavailable}
+      >
+        {/* A text field drawn as dots: Chrome offers to save a password field's value to the
+          user's synced password manager, autocomplete="off" or not. */}
+        <TextField
+          ref={valueRef}
+          {...PLAIN}
+          size="lg"
+          className="keys-secret"
+          readOnly={saving || busy}
+          enterKeyHint="done"
+          data-1p-ignore="true"
+          data-lpignore="true"
+          suffix={
+            clipboardReadable() ? (
+              <IconButton
+                icon="clipboard-paste"
+                label="Paste key"
+                size={24}
+                disabledReason={unavailable}
+                onClick={() => void paste()}
+              />
+            ) : undefined
+          }
+          onFocus={() => {
+            // Problems with the label or where the key goes show before the key is pasted.
+            if (!check.ok && check.field !== "value") setTried(true);
+          }}
+          onChange={(e) => {
+            if (claudePlanToken(e.currentTarget.value)) {
+              e.currentTarget.value = "";
+              setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+            } else if (problem?.field === "value") setProblem(null);
+            report();
+          }}
+        />
+      </Field>
+      <div className="keys-form-actions">
+        <div id={statusId} className="keys-form-status">
+          {shown?.field === "form" ? (
+            <p className="keys-form-error" role="alert">
+              <Icon name="circle-alert" size={12} />
+              <span>{shown.message}</span>
+            </p>
+          ) : (
+            saved && <p role="status">{saved}</p>
+          )}
+        </div>
+        <Button
+          type="submit"
+          variant="primary"
+          busy={saving}
+          disabledReason={
+            saving
+              ? undefined
+              : (unavailable ?? (busy ? "Wait for the other key change to finish" : undefined))
+          }
+          aria-describedby={statusId}
+        >
+          Save key
+        </Button>
+      </div>
     </form>
   );
 }

@@ -712,26 +712,6 @@
 .keys-btn {
   min-height: 44px;
 }
-.sheet-task-control {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--color-text-2);
-  padding: 8px 0 16px;
-}
-.sheet-stop {
-  min-width: 80px;
-  min-height: 44px;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
-  color: var(--color-text);
-}
-.sheet-stop[aria-disabled="true"] {
-  color: var(--color-text-2);
-  cursor: default;
-}
 @media (--rails-collapse) {
   .pane-tabs {
     display: flex;

@@ -356,6 +356,7 @@ describe("ui guard rules", () => {
       "src/shell/conversation.css",
       "src/shell/decision.css",
       "src/settings/settings.css",
+      "src/keys/keys.css",
     ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual([]);
     }
@@ -364,6 +365,7 @@ describe("ui guard rules", () => {
       "src/shell/misc.css",
       "src/shell/x/hud.css",
       "src/settings/other.css",
+      "src/keys/other.css",
     ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual(["stray-stylesheet"]);
     }

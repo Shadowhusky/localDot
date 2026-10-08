@@ -170,7 +170,9 @@ describe("problemText", () => {
         ),
       ),
     ).toBe('Header "Cookie" cannot carry a key.');
-    expect(problemText(new ApiError(503, "offline"))).toBe("The key layer is offline: start keyd.");
+    expect(problemText(new ApiError(503, "offline"))).toBe(
+      "Key protection is off, so the key wasn't saved.",
+    );
     expect(problemText(new Error("boom"))).toBe("Something went wrong saving the key. Try again.");
   });
 });
@@ -188,21 +190,21 @@ describe("keyStatus", () => {
 
   it("says the key layer is offline, on hold, or unsure of the public address", () => {
     expect(keyStatus(null)).toEqual({ label: "Keys", state: "unknown" });
-    expect(keyStatus({ online: false })).toEqual({ label: "Key layer offline", state: "offline" });
+    expect(keyStatus({ online: false })).toEqual({ label: "Key protection off", state: "offline" });
     expect(keyStatus({ online: true, audit: { ok: false }, hairpin: active })).toEqual({
-      label: "Keys on hold",
+      label: "Keys held",
       state: "audit",
     });
     for (const hairpin of [{ state: "unknown" as const, addresses: 0 }, undefined]) {
       expect(keyStatus({ online: true, audit: { ok: true }, hairpin })).toEqual({
         label: "Keys",
         state: "guard",
-        spoken: "Keys, hairpin guard unknown",
+        spoken: "Keys, network protection checking",
       });
     }
     const off = { state: "off" as const, addresses: 0 };
     expect(keyStatus({ online: true, audit: { ok: true }, hairpin: off }).spoken).toBe(
-      "Keys, hairpin guard off",
+      "Keys, network protection off",
     );
     expect(keyStatus({ online: true, audit: { ok: true }, hairpin: active })).toEqual({
       label: "Keys",

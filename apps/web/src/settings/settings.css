@@ -17,6 +17,10 @@
   border-bottom: 1px solid var(--color-hairline);
 }
 
+.settings-stop:empty {
+  display: none;
+}
+
 .settings-section {
   display: grid;
   gap: calc(var(--spacing) * 3);
