@@ -6,7 +6,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { choose, roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { choose, nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // Settings and Keys on a phone, in Chrome and in WebKit (Safari and Chrome on iOS), and in Chrome
@@ -153,17 +153,18 @@ for (const [engine, launch] of Object.entries(ENGINES))
         tap: true,
       });
       await main.getByRole("button", { name: "Add key", exact: true }).tap();
-      const keys = page.getByRole("dialog", { name: "Keys" });
-      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue("google");
+      const keys = nestedKeys(page);
+      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveText("Google Gemini");
       const reread = page.waitForResponse((r) => r.url().endsWith("/api/agent/providers"));
       await background(page);
       await reread;
       const name = `copied-${engine}`;
-      await keys.getByLabel("Name", { exact: true }).fill(name);
+      await keys.getByLabel("Label (optional)", { exact: true }).fill(name);
       await keys.getByLabel("Key", { exact: true }).fill(`AIza${"k".repeat(35)}`);
       await keys.getByRole("button", { name: "Save key" }).tap();
       await expect(keys.getByText(`Saved ${name}.`)).toBeVisible();
-      await keys.getByRole("button", { name: "Close keys" }).tap();
+      await keys.getByRole("button", { name: "Settings", exact: true }).tap();
+      await expect(keys).toHaveCount(0);
       await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(name);
       await expect(sheet.getByText("Before you can save:")).toHaveCount(0);
       await expect(sheet.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
@@ -201,11 +202,13 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await page.getByTestId("keys-button").tap();
       const keys = page.getByRole("dialog", { name: "Keys" });
       const keyProvider = keys.getByRole("combobox", { name: "Provider" });
-      await keyProvider.focus();
-      await keyProvider.selectOption("openai");
+      await search(page, keyProvider, "openai");
+      await keyProvider.tap();
+      await expect(keyProvider).toHaveAttribute("aria-expanded", "true");
       await page.keyboard.press("Escape");
+      await expect(keyProvider).toHaveAttribute("aria-expanded", "false");
       await expect(keys).toBeVisible();
-      await expect(keyProvider).toHaveValue("openai");
+      await expect(keyProvider).toHaveText("OpenAI");
       await context.close();
     });
 
@@ -244,15 +247,27 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const keys = page.getByRole("dialog", { name: "Keys" });
       for (const control of [
         keys.getByRole("combobox", { name: "Provider" }),
-        keys.getByRole("button", { name: "Close keys" }),
         keys.getByRole("button", { name: "Remove weather" }),
         keys.getByRole("button", { name: "Save key" }),
       ]) {
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       }
+      // Icon buttons draw small and take presses past their edge.
+      for (const name of ["Close keys", "Paste key"]) {
+        const reach = await keys
+          .getByRole("button", { name })
+          .evaluate(
+            (el) =>
+              el.getBoundingClientRect().height -
+              2 * Number.parseFloat(getComputedStyle(el, "::after").top),
+          );
+        expect(reach, name).toBeGreaterThanOrEqual(44);
+      }
       const key = keys.getByLabel("Key", { exact: true });
-      expect(await key.evaluate((el) => getComputedStyle(el).fontSize)).toBe("16px");
+      expect(
+        await key.evaluate((el) => Number.parseFloat(getComputedStyle(el).fontSize)),
+      ).toBeGreaterThanOrEqual(16);
       await context.close();
     });
 

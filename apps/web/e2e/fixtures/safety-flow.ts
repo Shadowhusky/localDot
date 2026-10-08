@@ -1,5 +1,5 @@
 import { expect, type Page } from "@playwright/test";
-import { saveFixtureModel } from "../settings-ui.ts";
+import { saveFixtureModel, search } from "../settings-ui.ts";
 import type { assembledProcess } from "./assembled-process.ts";
 
 export type Assembly = Awaited<ReturnType<typeof assembledProcess>>;
@@ -20,8 +20,8 @@ export async function startSafetyTask(page: Page, f: Assembly) {
   await page.goto(f.url);
   await page.getByTestId("keys-button").click();
   const keys = page.getByRole("dialog", { name: "Keys", exact: true });
-  await keys.getByLabel("Name", { exact: true }).fill("fixture");
-  await keys.getByLabel("Provider", { exact: true }).selectOption("openai-compatible");
+  await keys.getByLabel("Label (optional)", { exact: true }).fill("fixture");
+  await search(page, keys.getByRole("combobox", { name: "Provider" }), "openai-compatible");
   await keys.getByLabel("Base URL", { exact: true }).fill("https://provider.example.test/v1");
   await keys.getByLabel("Key", { exact: true }).fill("task15-local-canary-never-real");
   await keys.getByRole("button", { name: "Save key", exact: true }).click();

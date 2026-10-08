@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { assembledProcess } from "./fixtures/assembled-process.ts";
 import { approveCurrent, fixtureRequest } from "./fixtures/safety-flow.ts";
-import { saveFixtureModel } from "./settings-ui.ts";
+import { saveFixtureModel, search } from "./settings-ui.ts";
 
 const CANARY = "task15-local-canary-never-real";
 for (const pending of ["wait", "shell"] as const)
@@ -85,8 +85,8 @@ for (const pending of ["wait", "shell"] as const)
       await page.getByTestId("keys-button").click();
       const keys = page.getByRole("dialog", { name: "Keys", exact: true });
       await expect(keys.getByRole("button", { name: "Save key", exact: true })).toBeEnabled();
-      await keys.getByLabel("Name", { exact: true }).fill("fixture");
-      await keys.getByLabel("Provider", { exact: true }).selectOption("openai-compatible");
+      await keys.getByLabel("Label (optional)", { exact: true }).fill("fixture");
+      await search(page, keys.getByRole("combobox", { name: "Provider" }), "openai-compatible");
       await keys.getByLabel("Base URL", { exact: true }).fill("https://provider.example.test/v1");
       await keys.getByLabel("Key", { exact: true }).fill(CANARY);
       await keys.getByRole("button", { name: "Save key", exact: true }).click();

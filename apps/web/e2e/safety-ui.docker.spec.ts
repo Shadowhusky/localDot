@@ -1,7 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { assembledProcess } from "./fixtures/assembled-process.ts";
-import { roleCard, saveFixtureModel } from "./settings-ui.ts";
+import { roleCard, saveFixtureModel, search } from "./settings-ui.ts";
 
 // Real daemon routes, keyd, Docker desktop/brain and browser UI; only the model script is synthetic.
 test("approval card, atomic Pause, matching Resume and in-dialog Stop remain honest", async ({
@@ -55,8 +55,8 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
     await page.goto(f.url);
     await page.getByTestId("keys-button").click();
     const keys = page.getByRole("dialog", { name: "Keys", exact: true });
-    await keys.getByLabel("Name", { exact: true }).fill("fixture");
-    await keys.getByLabel("Provider", { exact: true }).selectOption("openai-compatible");
+    await keys.getByLabel("Label (optional)", { exact: true }).fill("fixture");
+    await search(page, keys.getByRole("combobox", { name: "Provider" }), "openai-compatible");
     await keys.getByLabel("Base URL", { exact: true }).fill("https://provider.example.test/v1");
     await keys.getByLabel("Key", { exact: true }).fill("task15-local-canary-never-real");
     await keys.getByRole("button", { name: "Save key", exact: true }).click();

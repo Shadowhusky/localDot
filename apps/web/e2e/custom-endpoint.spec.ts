@@ -1,5 +1,5 @@
 import { type Browser, type BrowserContext, expect, type Locator, test } from "@playwright/test";
-import { roleCard, settingsSheet } from "./settings-ui.ts";
+import { nestedKeys, roleCard, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // A custom Anthropic-compatible endpoint, from an empty setup: its key with the vendor's base URL,
@@ -74,16 +74,16 @@ for (const run of runs) {
       await expect(provider).toHaveText("Other (Anthropic-compatible)");
 
       await press(main.getByRole("button", { name: "Add key", exact: true }));
-      const keys = page.getByRole("dialog", { name: "Keys" });
-      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue(
-        "anthropic-compatible",
+      const keys = nestedKeys(page);
+      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveText(
+        "Anthropic-compatible",
       );
       const base = keys.getByLabel("Base URL", { exact: true });
       await expect(base).toHaveValue("");
       await expect(base).toHaveAccessibleDescription(
         "Use https, ending in /v1 (added if missing). Local servers go through LM Studio or Ollama.",
       );
-      await keys.getByLabel("Name", { exact: true }).fill(MODEL.key);
+      await keys.getByLabel("Label (optional)", { exact: true }).fill(MODEL.key);
       await base.fill("https://127.0.0.1:8080/anthropic");
       await keys.getByLabel("Key", { exact: true }).fill("fixture-anthropic-compatible-value");
       await press(keys.getByRole("button", { name: "Save key" }));
@@ -101,7 +101,8 @@ for (const run of runs) {
           baseURL: "https://api.z.ai/api/anthropic/v1",
         }),
       ]);
-      await press(keys.getByRole("button", { name: "Close keys" }));
+      await press(keys.getByRole("button", { name: "Settings", exact: true }));
+      await expect(keys).toHaveCount(0);
       await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(MODEL.key);
 
       await main.getByRole("textbox", { name: "Model ID", exact: true }).fill(MODEL.model);

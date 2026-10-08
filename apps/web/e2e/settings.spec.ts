@@ -20,7 +20,7 @@ import { MemoryStore } from "../../daemon/src/agent/memory.ts";
 import { type AgentRoutesDeps, agentRoutes } from "../../daemon/src/agent/routes.ts";
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
 import { serveUi } from "../../daemon/src/static-ui.ts";
-import { roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
 
 // Production UI/CSP, real settings routes/private store and real browser ECDH/AES-GCM. The
 // computer, keyd metadata and catalog are owned stand-ins; no model/account/shared service runs.
@@ -281,16 +281,18 @@ for (const width of [1280, 390])
     await expect(output).toHaveValue("");
     await main.getByRole("button", { name: "Add key", exact: true }).click();
     await expect(sheet).toBeHidden();
-    const keySheet = page.getByRole("dialog", { name: "Keys" });
-    await expect(keySheet).toBeVisible();
-    await expect(page.getByLabel("Provider", { exact: true })).toHaveValue("openai-compatible");
-    await page.getByLabel("Name", { exact: true }).fill("fixture-gateway");
-    await page.getByLabel("Base URL", { exact: true }).fill("https://example.test/v1");
-    await page.getByLabel("Key", { exact: true }).fill(SECRET);
-    await page.getByRole("button", { name: "Save key", exact: true }).click();
-    await expect(page.getByLabel("Key", { exact: true })).toHaveValue("");
+    await expect(page.getByRole("dialog", { name: "Keys" })).toBeVisible();
+    const keySheet = nestedKeys(page);
+    await expect(keySheet.getByRole("combobox", { name: "Provider" })).toHaveText(
+      "OpenAI-compatible",
+    );
+    await keySheet.getByLabel("Label (optional)", { exact: true }).fill("fixture-gateway");
+    await keySheet.getByLabel("Base URL", { exact: true }).fill("https://example.test/v1");
+    await keySheet.getByLabel("Key", { exact: true }).fill(SECRET);
+    await keySheet.getByRole("button", { name: "Save key", exact: true }).click();
+    await expect(keySheet.getByLabel("Key", { exact: true })).toHaveValue("");
     await expect(keySheet.getByRole("status")).toContainText("Saved fixture-gateway.");
-    await page.getByRole("button", { name: "Close keys" }).click();
+    await keySheet.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(page.locator("#keys-sheet")).toBeHidden();
     await expect(sheet).toBeVisible();
     await expect(main.getByRole("button", { name: "Add key", exact: true })).toBeFocused();

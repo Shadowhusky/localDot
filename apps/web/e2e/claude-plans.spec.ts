@@ -6,7 +6,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { roleCard, search, settingsSheet } from "./settings-ui.ts";
+import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 const SENTENCE =
@@ -120,11 +120,10 @@ for (const run of runs) {
         "anthropic",
       );
       await press(main.getByRole("button", { name: "Add key", exact: true }));
-      const keys = page.getByRole("dialog", { name: "Keys" });
-      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue("anthropic");
-      const hint = keys.locator("#key-value-hint");
-      await expect(hint).toHaveText("Starts with sk-ant-api");
-      await keys.getByLabel("Name", { exact: true }).fill("anthropic");
+      const keys = nestedKeys(page);
+      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveText("Anthropic");
+      await expect(keys.getByText("Starts with sk-ant-api")).toBeVisible();
+      await keys.getByLabel("Label (optional)", { exact: true }).fill("anthropic");
       const field = keys.getByLabel("Key", { exact: true });
       await field.focus();
       await page.keyboard.insertText(PLAN_TOKEN);
@@ -133,9 +132,9 @@ for (const run of runs) {
       await expect(error).toBeVisible();
       await expect(keys.getByRole("alert")).toHaveText(SENTENCE);
       await expect(field).toHaveAttribute("aria-invalid", "true");
-      await expect(field).toHaveAttribute("aria-describedby", "key-value-error key-value-hint");
+      await expect(field).toHaveAccessibleDescription(`${SENTENCE} Starts with sk-ant-api`);
 
-      await keys.getByLabel("Name", { exact: true }).fill("claudewrapped");
+      await keys.getByLabel("Label (optional)", { exact: true }).fill("claudewrapped");
       await expect(error).toHaveCount(0);
       await field.focus();
       await page.keyboard.insertText(`export CLAUDE_CODE_OAUTH_TOKEN=${PLAN_TOKEN}`);
@@ -151,7 +150,7 @@ for (const run of runs) {
         await expect(field).toHaveValue("");
         await expect(error).toBeVisible();
       }
-      await expect(keys.getByText("No keys yet.")).toBeVisible();
+      await expect(keys.getByText("No keys yet")).toBeVisible();
       expect(posts).toEqual([]);
       expect(carried).toEqual([]);
       const stored = await (

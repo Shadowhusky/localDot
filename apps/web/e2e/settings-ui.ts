@@ -6,6 +6,11 @@ export function settingsSheet(page: Page): Locator {
   return page.getByRole("dialog", { name: "Settings", exact: true });
 }
 
+// Keys slid over Settings: its own page, apart from the Settings page held under it.
+export function nestedKeys(page: Page): Locator {
+  return page.getByRole("dialog", { name: "Keys", exact: true }).locator("[data-page='keys']");
+}
+
 export function roleCard(scope: Page | Locator, role: keyof typeof ROLE_TITLES): Locator {
   return scope.getByRole("region", { name: ROLE_TITLES[role], exact: true });
 }
