@@ -65,17 +65,27 @@ export function SettingsSheet(props: SettingsSheetProps) {
   const opener = useRef<HTMLElement | null>(null);
   const resume = useRef<HTMLElement | null>(null);
   const active = props.open && !props.suspended;
-  const [confirming, setConfirming] = useState(false);
-  const latest = useRef({ onClose: props.onClose, dirty: props.dirty, confirming });
+  const [confirming, setConfirming] = useState<"close" | "reload" | null>(null);
+  const latest = useRef({
+    onClose: props.onClose,
+    onReload: props.onReload,
+    dirty: props.dirty,
+    confirming,
+  });
   const focusedSection = useRef(false);
   useLayoutEffect(() => {
-    latest.current = { onClose: props.onClose, dirty: props.dirty, confirming };
-  }, [props.onClose, props.dirty, confirming]);
+    latest.current = {
+      onClose: props.onClose,
+      onReload: props.onReload,
+      dirty: props.dirty,
+      confirming,
+    };
+  }, [props.onClose, props.onReload, props.dirty, confirming]);
   useLayoutEffect(() => {
     if (props.open)
       opener.current =
         document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    else setConfirming(false);
+    else setConfirming(null);
   }, [props.open]);
   useEffect(() => {
     if (props.open) return;
@@ -84,21 +94,24 @@ export function SettingsSheet(props: SettingsSheetProps) {
     if (target?.isConnected && !target.closest("[inert], [hidden]")) target.focus();
   }, [props.open]);
   useEffect(() => {
-    if (!props.dirty) setConfirming(false);
+    if (!props.dirty) setConfirming(null);
   }, [props.dirty]);
   useEffect(() => {
     if (confirming) keep.current?.focus();
   }, [confirming]);
-  const requestClose = useCallback(() => {
-    if (!latest.current.dirty) return latest.current.onClose();
+  // Safari does not focus a tapped button, so a trigger names itself as the place to come back to.
+  const confirm = useCallback((action: "close" | "reload", trigger?: HTMLElement) => {
+    if (!latest.current.dirty)
+      return action === "close" ? latest.current.onClose() : latest.current.onReload?.();
     if (!latest.current.confirming)
       resume.current =
-        document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    setConfirming(true);
+        trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setConfirming(action);
     keep.current?.focus();
   }, []);
+  const requestClose = useCallback(() => confirm("close"), [confirm]);
   const keepEditing = useCallback(() => {
-    setConfirming(false);
+    setConfirming(null);
     const target = resume.current;
     resume.current = null;
     if (target?.isConnected && panel.current?.contains(target) && target !== keep.current)
@@ -314,7 +327,11 @@ export function SettingsSheet(props: SettingsSheetProps) {
           )}
           <div className="settings-commit">
             {props.onReload && (
-              <button type="button" disabled={props.busy} onClick={props.onReload}>
+              <button
+                type="button"
+                disabled={props.busy}
+                onClick={(event) => confirm("reload", event.currentTarget)}
+              >
                 Reload saved settings
               </button>
             )}
@@ -340,7 +357,14 @@ export function SettingsSheet(props: SettingsSheetProps) {
               <button ref={keep} type="button" onClick={keepEditing}>
                 Keep editing
               </button>
-              <button type="button" onClick={props.onClose}>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirming === "close") return props.onClose();
+                  keepEditing();
+                  props.onReload?.();
+                }}
+              >
                 Discard
               </button>
             </div>

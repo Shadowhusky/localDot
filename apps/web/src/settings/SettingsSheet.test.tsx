@@ -174,6 +174,25 @@ describe("settings sheet presentation ownership", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(p.onClose).toHaveBeenCalledOnce();
   });
+  it("asks before Reload saved settings drops unsaved choices", () => {
+    const p = { ...props(), onReload: vi.fn() };
+    const view = render(<SettingsSheet {...p} dirty />);
+    const reload = screen.getByRole("button", { name: "Reload saved settings" });
+    fireEvent.click(reload);
+    expect(screen.getByRole("alert").textContent).toBe("Discard unsaved changes?");
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(p.onReload).not.toHaveBeenCalled();
+    fireEvent.click(reload);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(p.onReload).toHaveBeenCalledOnce();
+    expect(p.onClose).not.toHaveBeenCalled();
+    expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+    expect(document.activeElement).toBe(reload);
+    view.rerender(<SettingsSheet {...p} dirty={false} />);
+    fireEvent.click(reload);
+    expect(p.onReload).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+  });
   it("returns focus to its opener after a click outside", () => {
     const p = props();
     const view = render(
