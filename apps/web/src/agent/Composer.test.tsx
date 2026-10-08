@@ -281,6 +281,21 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.field.value).toBe("");
     expect(screen.getByText("Accepted by the daemon.")).toBeTruthy();
   });
+  it("asks for the new task's session as soon as the start is accepted", async () => {
+    const onTaskStarted = vi.fn();
+    const f = setup(() => Response.json({ sessionId }, { status: 202 }), {
+      agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
+      onTaskStarted,
+    });
+    f.input("new task");
+    await act(async () => f.submit());
+    await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
+    f.update({ agent });
+    f.input("steer the running task");
+    await act(async () => f.submit());
+    await waitFor(() => expect(f.requests).toHaveLength(2));
+    expect(onTaskStarted).toHaveBeenCalledOnce();
+  });
   it("does not acknowledge or clear a start reply for an unrelated adopted session", async () => {
     const pending = Promise.withResolvers<Response>();
     const f = setup(() => pending.promise, {

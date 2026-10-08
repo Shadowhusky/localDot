@@ -577,6 +577,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       receiveKey={receiveKey}
                       configured={mainReady}
                       onSettings={showSettings}
+                      onTaskStarted={session.check}
                       modelSummary={
                         settings.saved?.main
                           ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`

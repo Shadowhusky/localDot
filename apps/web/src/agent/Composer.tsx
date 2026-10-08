@@ -24,6 +24,7 @@ export interface ComposerProps {
   configured?: boolean;
   modelSummary?: string;
   onSettings?(trigger: HTMLTextAreaElement): void;
+  onTaskStarted?(): void;
 }
 export interface Delivery {
   readonly id: number;
@@ -171,6 +172,7 @@ export function Composer(props: ComposerProps) {
         return;
       }
       setDelivery({ ...record, phase: "accepted" });
+      if (request.mode === "new") current.current.onTaskStarted?.();
       uploads.acknowledge(record.attachmentIDs);
       if (
         revision.current === capturedRevision &&

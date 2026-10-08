@@ -16,9 +16,12 @@ export interface LiveSession {
   version: number;
   ended: boolean;
   stop(): void;
+  check(): void;
 }
 
 const POLL_MS = 1000;
+const IDLE_POLL_MS = 5000;
+const QUICK_POLLS = 5;
 const REACT_HZ_MS = 100;
 const CLOCK_EVERY_MS = 20_000;
 
@@ -38,6 +41,7 @@ export function useLiveSession(
   const ready = cell?.state === "ready";
   const sessionId = identity?.cellId === cellId ? (identity?.sessionId ?? null) : null;
   const previousCell = useRef(cellId);
+  const lookNow = useRef(() => {});
 
   useEffect(() => {
     if (previousCell.current === cellId) return;
@@ -51,19 +55,21 @@ export function useLiveSession(
   }, [cellId, stage]);
 
   // Looks for a live session while there is none or the shown one has ended; an ended session
-  // stays on screen until the cell starts another.
+  // stays on screen until the cell starts another. An idle computer is checked less often.
   useEffect(() => {
     if (!cellId || !ready || (sessionId && !ended)) return;
     let cancelled = false;
     let polling = false;
+    let misses = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     const poll = async () => {
       if (polling) return;
       polling = true;
       try {
-        const live = await api.get<{ sessionId: string }>(`/api/cells/${cellId}/live`);
+        const live = await api.get<{ sessionId: string } | undefined>(`/api/cells/${cellId}/live`);
         if (
           !cancelled &&
-          typeof live.sessionId === "string" &&
+          typeof live?.sessionId === "string" &&
           ULID_PATTERN.test(live.sessionId) &&
           live.sessionId !== sessionId
         )
@@ -71,13 +77,21 @@ export function useLiveSession(
       } catch {
       } finally {
         polling = false;
+        misses++;
+        if (!cancelled) timer = setTimeout(poll, misses < QUICK_POLLS ? POLL_MS : IDLE_POLL_MS);
       }
     };
+    lookNow.current = () => {
+      misses = 0;
+      if (polling) return;
+      clearTimeout(timer);
+      void poll();
+    };
     void poll();
-    const timer = setInterval(poll, POLL_MS);
     return () => {
       cancelled = true;
-      clearInterval(timer);
+      clearTimeout(timer);
+      lookNow.current = () => {};
     };
   }, [api, cellId, ready, sessionId, ended]);
 
@@ -165,6 +179,7 @@ export function useLiveSession(
   const stop = useCallback(() => {
     if (sessionId) void api.post(`/api/sessions/${sessionId}/stop`).catch(() => {});
   }, [api, sessionId]);
+  const check = useCallback(() => lookNow.current(), []);
 
-  return { sessionId, agentFeed, model: modelRef.current, version, ended, stop };
+  return { sessionId, agentFeed, model: modelRef.current, version, ended, stop, check };
 }
