@@ -1,0 +1,62 @@
+@layer components {
+  .atoms-shell {
+    display: grid;
+    gap: calc(var(--spacing) * 12);
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: calc(var(--spacing) * 10) calc(var(--spacing) * 8) calc(var(--spacing) * 24);
+  }
+
+  .atoms-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: calc(var(--spacing) * 4);
+  }
+
+  .atoms-head h1 {
+    font:
+      var(--font-weight-semibold) var(--text-display) / var(--text-display--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-display--letter-spacing);
+  }
+
+  .atoms-head p {
+    max-width: 64ch;
+    margin-top: var(--spacing);
+    color: var(--color-fg-2);
+    font-size: var(--text-reading);
+    line-height: var(--text-reading--line-height);
+    letter-spacing: var(--text-reading--letter-spacing);
+  }
+
+  .atoms-appearance {
+    display: flex;
+    gap: var(--spacing);
+    padding: 2px;
+    border-radius: var(--radius-md);
+    background: var(--color-control);
+  }
+
+  .atoms-appearance a {
+    padding: var(--spacing) calc(var(--spacing) * 3);
+    border-radius: var(--radius-sm);
+    color: var(--color-fg-2);
+    font-weight: var(--font-weight-medium);
+    text-decoration: none;
+  }
+
+  .atoms-appearance a[aria-current="page"] {
+    background: var(--color-raised-2);
+    box-shadow: var(--shadow-edge);
+    color: var(--color-fg-1);
+  }
+
+  @media (width < 760px) {
+    .atoms-shell {
+      gap: calc(var(--spacing) * 10);
+      padding: calc(var(--spacing) * 6) calc(var(--spacing) * 4) calc(var(--spacing) * 16);
+    }
+  }
+}

@@ -8,7 +8,6 @@
   --color-text-3: var(--color-fg-3);
   --color-halo-target: rgba(10, 11, 13, 0.35);
   --color-shade-cursor: rgba(0, 0, 0, 0.4);
-  --color-key-bevel: rgba(255, 255, 255, 0.06);
   --color-hud-button: rgba(255, 255, 255, 0.08);
   --color-edge: rgba(0, 0, 0, 0.55);
   --color-shade-hud: rgba(0, 0, 0, 0.35);

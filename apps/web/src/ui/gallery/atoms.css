@@ -1,0 +1,161 @@
+@layer components {
+  .atoms {
+    display: grid;
+    gap: calc(var(--spacing) * 12);
+  }
+
+  .atoms-section header p {
+    max-width: 64ch;
+    margin-top: var(--spacing);
+    color: var(--color-fg-2);
+    font-size: var(--text-reading);
+    line-height: var(--text-reading--line-height);
+    letter-spacing: var(--text-reading--letter-spacing);
+  }
+
+  .atoms-section {
+    display: grid;
+    gap: calc(var(--spacing) * 5);
+  }
+
+  .atoms-section h2 {
+    font:
+      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+    letter-spacing: var(--text-title--letter-spacing);
+  }
+
+  .atoms-panel {
+    display: grid;
+    gap: calc(var(--spacing) * 6);
+    padding: calc(var(--spacing) * 6);
+    border-radius: var(--radius-lg);
+    background: var(--color-raised);
+    box-shadow: var(--shadow-raised);
+  }
+
+  .atoms-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--spacing) * 4) calc(var(--spacing) * 6);
+  }
+
+  .atoms-label {
+    flex: 0 0 calc(var(--spacing) * 24);
+    color: var(--color-fg-3);
+    font-size: var(--text-footnote);
+    line-height: var(--text-footnote--line-height);
+  }
+
+  /* Specimens carry a caption, so their row's label lines up with the controls, not the middle. */
+  .atoms-row:has(.atoms-specimen) {
+    align-items: flex-start;
+  }
+
+  .atoms-row:has(.atoms-specimen) > .atoms-label {
+    display: flex;
+    align-items: center;
+    min-height: calc(var(--spacing) * 11);
+  }
+
+  .atoms-specimen {
+    display: grid;
+    justify-items: start;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .atoms-stage {
+    display: flex;
+    align-items: center;
+    min-height: calc(var(--spacing) * 11);
+  }
+
+  .atoms-specimen figcaption {
+    color: var(--color-fg-3);
+    font-size: var(--text-micro);
+    line-height: var(--text-micro--line-height);
+  }
+
+  .atoms-badged {
+    position: relative;
+    display: inline-flex;
+  }
+
+  .atoms-badged .ui-badge {
+    position: absolute;
+    top: 3px;
+    right: 3px;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  .atoms-hud {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 11);
+    padding: 0 var(--spacing) 0 calc(var(--spacing) * 4);
+    border-radius: var(--radius-full);
+    background: var(--color-hud);
+    box-shadow: inset 0 0 0 1px var(--color-hud-line);
+    color: var(--color-fg-2);
+  }
+
+  .atoms-hud-label {
+    color: var(--color-fg-1);
+    font-weight: var(--font-weight-medium);
+  }
+
+  .atoms-hud-time {
+    margin-right: var(--spacing);
+  }
+
+  .atoms-pair {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing);
+  }
+
+  .atoms-icons {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing) * 48), 1fr));
+    gap: calc(var(--spacing) * 2);
+    list-style: none;
+  }
+
+  .atoms-icons li {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 3);
+    min-height: calc(var(--spacing) * 10);
+    padding: 0 calc(var(--spacing) * 3);
+    border-radius: var(--radius-md);
+    background: var(--color-raised);
+    color: var(--color-fg-1);
+  }
+
+  .atoms-icons span {
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
+  }
+
+  @media (width < 760px) {
+    .atoms {
+      gap: calc(var(--spacing) * 10);
+    }
+
+    .atoms-panel {
+      padding: calc(var(--spacing) * 4);
+    }
+
+    .atoms-label,
+    .atoms-row:has(.atoms-specimen) > .atoms-label {
+      flex-basis: 100%;
+      min-height: 0;
+    }
+
+    .atoms-icons {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+}
