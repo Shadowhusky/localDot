@@ -371,6 +371,20 @@ describe("persistent browser lifecycle", () => {
     expect(specs[0]?.Hostname).toMatch(/^browser-[0-9a-z]{26}$/u);
   });
 
+  it("streams the browser screen 4:2:0 unless the daemon opted in to 4:4:4", async () => {
+    const browserEnv = (f: ReturnType<typeof fixture>) =>
+      f.docker.requests
+        .filter((request) => request.path === "/containers/create")
+        .map((request) => request.body as { Hostname?: string; Env?: string[] })
+        .find((spec) => spec.Hostname)?.Env;
+    const standard = fixture();
+    await standard.controller.start(standard.parent.id);
+    expect(browserEnv(standard)).toContain("LOCALDOT_STREAM_FULLCOLOR=0");
+    const opted = fixture();
+    await new BrowserOrchestrator({ ...opted.deps, streamFullcolor: true }).start(opted.parent.id);
+    expect(browserEnv(opted)).toContain("LOCALDOT_STREAM_FULLCOLOR=1");
+  });
+
   it("retains and wipes the private handoff buffer when Stop occurs during delivery", async () => {
     const f = fixture();
     const entered = deferred();

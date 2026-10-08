@@ -6,13 +6,13 @@ import {
   profileVolumeSpec,
 } from "./browser-spec.ts";
 import { browserImagesFromEnv } from "./images.ts";
-import { gateSpec, ISOLATED_GATEWAY_OPTION } from "./spec.ts";
+import { gateSpec, ISOLATED_GATEWAY_OPTION, streamOptions } from "./spec.ts";
 import { sampleBrowserRecord } from "./testing/sample-browser-record.ts";
 
 describe("persistent browser container isolation", () => {
   it("mounts only the browser-owned profile and keeps credentials and home ephemeral", () => {
     const record = sampleBrowserRecord();
-    const spec = browserSpec(record, "browser-image");
+    const spec = browserSpec(record, "browser-image", streamOptions());
     expect(spec.HostConfig.Mounts).toEqual([
       { Type: "volume", Source: record.docker.profileVolume, Target: "/profile" },
     ]);
@@ -55,7 +55,7 @@ describe("persistent browser container isolation", () => {
 
   it("uses one-shot stdin for bootstrap and exposes neither proxy material nor a debug port", () => {
     const record = sampleBrowserRecord();
-    const spec = browserSpec(record, "browser-image");
+    const spec = browserSpec(record, "browser-image", streamOptions());
     expect(spec).toMatchObject({ OpenStdin: true, AttachStdin: true, StdinOnce: true, Tty: false });
     expect(spec).not.toHaveProperty("ExposedPorts");
     expect(spec.Env).toContain(`LOCALDOT_BROWSER_CELL_ID=${record.id}`);
@@ -65,6 +65,16 @@ describe("persistent browser container isolation", () => {
     );
     expect(spec.Env.some((entry) => entry.startsWith("LOCALDOT_BROWSERD_TOKEN="))).toBe(true);
     expect(spec.Env.some((entry) => entry.startsWith("LOCALDOT_STREAM_TOKEN="))).toBe(true);
+  });
+
+  it("streams the browser screen 4:2:0 unless the 4:4:4 opt-in is set", () => {
+    const record = sampleBrowserRecord();
+    expect(browserSpec(record, "browser-image", streamOptions()).Env).toContain(
+      "LOCALDOT_STREAM_FULLCOLOR=0",
+    );
+    expect(browserSpec(record, "browser-image", { fullcolor: true }).Env).toContain(
+      "LOCALDOT_STREAM_FULLCOLOR=1",
+    );
   });
 
   it("routes the browser's service and stream through its own loopback-published gate", () => {
@@ -138,9 +148,11 @@ interface Rule {
 }
 
 describe("Chromium namespace seccomp allowances without capabilities", () => {
-  const text = browserSpec(sampleBrowserRecord(), "image").HostConfig.SecurityOpt.find((value) =>
-    value.startsWith("seccomp="),
-  );
+  const text = browserSpec(
+    sampleBrowserRecord(),
+    "image",
+    streamOptions(),
+  ).HostConfig.SecurityOpt.find((value) => value.startsWith("seccomp="));
   const profile = JSON.parse(text?.slice("seccomp=".length) ?? "null") as {
     defaultAction: string;
     syscalls: Rule[];

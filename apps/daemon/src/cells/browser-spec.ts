@@ -1,7 +1,7 @@
 import { readFileSync } from "node:fs";
 import { ULID_PATTERN } from "@localdot/protocol";
 import { runtimeLayout } from "../runtime-layout.ts";
-import { egressNetworkSpec, internalNetworkSpec, NAME_PREFIX } from "./spec.ts";
+import { egressNetworkSpec, internalNetworkSpec, NAME_PREFIX, type StreamOptions } from "./spec.ts";
 import type { BrowserCellRecord } from "./types.ts";
 
 export const BROWSER_LIMITS = {
@@ -46,7 +46,7 @@ export function profileVolumeSpec(name: string, id: string, parentCellId: string
   };
 }
 
-export function browserSpec(record: BrowserCellRecord, image: string) {
+export function browserSpec(record: BrowserCellRecord, image: string, stream: StreamOptions) {
   const d = record.docker;
   return {
     Image: image,
@@ -62,6 +62,7 @@ export function browserSpec(record: BrowserCellRecord, image: string) {
       `LOCALDOT_STREAM_TOKEN=${record.tokens.stream}`,
       `LOCALDOT_GATE_ADDR=${d.gateInternalIp}`,
       `LOCALDOT_SCALE=${record.scale}`,
+      `LOCALDOT_STREAM_FULLCOLOR=${stream.fullcolor ? 1 : 0}`,
     ],
     Labels: {
       "localdot.cell": record.id,

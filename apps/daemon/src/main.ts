@@ -25,6 +25,7 @@ import { verifyDesktopRuntimeImages } from "./cells/runtime-image-check.ts";
 import { RuntimeUpdateAdmission } from "./cells/runtime-update-admission.ts";
 import { RuntimeImages } from "./cells/runtime-update-store.ts";
 import { TicketRegistry } from "./cells/secrets.ts";
+import { streamOptions } from "./cells/spec.ts";
 import { cellStatusRoute } from "./cells/status-stream.ts";
 import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
@@ -117,6 +118,7 @@ const keydWiring = new CellKeydWiring({ keyd, docker });
 let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
 const store = new CellStore(home, keydPorts);
+const stream = streamOptions(process.env);
 const orchestrator = new CellOrchestrator({
   diagnosticAdmission: (id) => live.admitIdleOperation(id),
   externalKeydPorts: () => [
@@ -143,7 +145,7 @@ const orchestrator = new CellOrchestrator({
   keyd: keydWiring,
   store,
   images: imagesFromEnv(),
-  streamFullcolor: process.env.LOCALDOT_STREAM_FULLCOLOR === "1",
+  streamFullcolor: stream.fullcolor,
   probeDesktopd,
   probeStream,
 });
@@ -171,6 +173,7 @@ browser = new BrowserOrchestrator({
   docker,
   keyd,
   images: browserImagesFromEnv(),
+  streamFullcolor: stream.fullcolor,
   parentAvailable: (id) =>
     !shuttingDown && browserRecovery.available && orchestrator.browserAvailable(id),
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],

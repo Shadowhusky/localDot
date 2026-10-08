@@ -10,6 +10,7 @@ import {
   type RuntimeUpdateHost,
 } from "../../../daemon/src/cells/runtime-update.ts";
 import { RuntimeUpdateStore } from "../../../daemon/src/cells/runtime-update-store.ts";
+import { desktopEnv, streamOptions } from "../../../daemon/src/cells/spec.ts";
 import { decodeRecord } from "../../../daemon/src/cells/store.ts";
 import type { CellRecord, StoredCellRecord } from "../../../daemon/src/cells/types.ts";
 import { containInstalledContainers, readContainerInventory } from "./container-containment.ts";
@@ -143,6 +144,20 @@ export async function prepareInstalledRuntimes(
             throw failure();
           signal.throwIfAborted();
         }
+        const stream = streamOptions();
+        // A desktop keeps the stream mode it was created with, so a changed mode needs a new one.
+        async function streamMatches(record: CellRecord): Promise<boolean> {
+          const raw = await docker.request<{ Config?: { Env?: unknown } }>({
+            method: "GET",
+            path: `/containers/${encodeURIComponent(record.docker.desktop)}/json`,
+          });
+          const mode = (entry: unknown) =>
+            typeof entry === "string" && entry.startsWith("SELKIES_VIDEO_FULLCOLOR=");
+          const env = raw?.Config?.Env;
+          return (
+            Array.isArray(env) && equal(env.filter(mode), desktopEnv(record, stream).filter(mode))
+          );
+        }
         const host: RuntimeUpdateHost = {
           docker,
           journal,
@@ -195,12 +210,16 @@ export async function prepareInstalledRuntimes(
           let matching = false;
           try {
             await verifyDesktopRuntimeImages(docker, current, target);
-            matching = true;
+            matching = await streamMatches(current);
           } catch {
             signal.throwIfAborted();
           }
-          if (!matching || (pending && !pending.fullcolor)) {
-            await prepareDesktopRuntime(host, { cellId: id, images: target, fullcolor: true });
+          if (!matching) {
+            await prepareDesktopRuntime(host, {
+              cellId: id,
+              images: target,
+              fullcolor: stream.fullcolor,
+            });
             remember(id);
           }
           await stable();

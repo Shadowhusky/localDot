@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LocalDotEvent } from "@localdot/protocol";
 import { synthFrame } from "@localdot/stage/testing";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeJournal } from "./journal.ts";
 import { readManifest } from "./manifest.ts";
 import { MAX_GOP_MICROS, SessionRecorder, type SessionRecorderDeps } from "./session-recorder.ts";
@@ -126,6 +126,16 @@ describe("session recording policy", () => {
       { from: dropped, to: dropped + 20, reason: "recorder-error" },
     ]);
     expect(feed.keyRequests.length).toBeGreaterThan(0);
+  });
+  it("checks the gap limit on every frame and tick without copying the manifest", async () => {
+    const { rec, feed } = await setup();
+    feed.frame(synthFrame(opts, 0), 0, 64, 64);
+    await rec.drain();
+    const manifest = vi.spyOn(rec, "manifest", "get");
+    for (let n = 1; n < 15; n++) feed.frame(synthFrame(opts, n), n * 33_000, 64, 64);
+    await rec.drain();
+    await rec.tick(500_000);
+    expect(manifest).not.toHaveBeenCalled();
   });
   it("bounds the queue and resumes after overflow only on a key frame", async () => {
     const key = synthFrame(opts, 0);

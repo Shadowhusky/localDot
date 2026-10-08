@@ -18,7 +18,9 @@ import { ComputerResetHolds } from "./reset-holds.ts";
 import { ComputerResetOwner } from "./reset-owner.ts";
 import { ComputerResetStore } from "./reset-store.ts";
 import { CellStore } from "./store.ts";
+import { startFakeDocker } from "./testing/fake-docker.ts";
 import { sampleRecord } from "./testing/sample-record.ts";
+import type { DesktopdHealth } from "./types.ts";
 
 const old = "01JXYZ00000000000000000001",
   fresh = "01JXYZ00000000000000000002",
@@ -129,6 +131,47 @@ it("restores reset admission in real cell controls before replacement recovery c
   } finally {
     cells.dispose();
     request.mockRestore();
+  }
+});
+it("a Reset candidate reaches Ready under its hold but stays withheld until the reset publishes it", async () => {
+  const f = fixture(),
+    fake = await startFakeDocker();
+  f.holds.hold(old, fresh, requestId);
+  const health: DesktopdHealth = {
+    ok: true,
+    scale: 2,
+    display: ":1",
+    screen: { w: 2560, h: 1600 },
+    hidpi: {
+      ok: true,
+      expected: { windowScalingFactor: 2, xftDpi: 96 },
+      windowScalingFactor: 2,
+      xftDpi: 96,
+    },
+  };
+  const cells = new CellOrchestrator({
+    store: new CellStore(f.home),
+    docker: new DockerClient(fake.socketPath),
+    images: { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" },
+    permanentFence: (id) => f.holds.oldHeld(id),
+    candidateHold: (id) => f.holds.candidateHeld(id),
+    probeDesktopd: async () => health,
+    probeStream: async () => true,
+    watchEveryMs: 60000,
+    readyTimeoutMs: 1000,
+  });
+  try {
+    await cells.create({ id: fresh, scale: 2 });
+    await vi.waitFor(() => expect(cells.get(fresh)?.state).toBe("ready"));
+    expect(cells.get(fresh)?.replacementPending).toBe(true);
+    expect(cells.endpoints(fresh)).toBeUndefined();
+    await expect(cells.start(fresh)).rejects.toThrow("awaiting replacement confirmation");
+    f.holds.publish(f.ready());
+    expect(cells.get(fresh)?.replacementPending).toBeUndefined();
+    expect(cells.endpoints(fresh)).toBeDefined();
+  } finally {
+    cells.dispose();
+    await fake.close();
   }
 });
 it("requires the exact durable Ready record and restores candidate holds on restart", () => {
