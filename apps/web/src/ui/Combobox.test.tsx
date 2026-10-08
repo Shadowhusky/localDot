@@ -4,6 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Combobox } from "./Combobox.tsx";
 import { Field } from "./Field.tsx";
+import { Sheet } from "./Sheet.tsx";
 
 afterEach(cleanup);
 
@@ -149,5 +150,23 @@ describe("Combobox", () => {
     fireEvent.keyDown(search(), { key: "Tab" });
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(trigger());
+  });
+
+  it("keeps focus in its search inside a modal sheet, and Enter chooses without closing the sheet", () => {
+    const onChange = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <Sheet open modal title="Settings" onClose={onClose}>
+        <Model onChange={onChange} />
+      </Sheet>,
+    );
+    trigger().focus();
+    fireEvent.keyDown(trigger(), { key: "ArrowDown" });
+    expect(document.activeElement).toBe(search());
+    fireEvent.change(search(), { target: { value: "haiku" } });
+    fireEvent.keyDown(search(), { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("claude-haiku-4-5");
+    expect(document.activeElement).toBe(trigger());
+    expect(onClose).not.toHaveBeenCalled();
   });
 });
