@@ -40,8 +40,8 @@ function intercept(run: Run, args: string, answer: Answer): Run {
 }
 
 describe("readXsettings", () => {
-  it("never runs xfconf-query, which would start an xfconfd, until the session's xfconfd runs", async () => {
-    for (const running of [[], ["xfce4-session"], ["xfconfd"]]) {
+  it("never runs xfconf-query, which would start an xfconfd, before xfce4-session runs", async () => {
+    for (const running of [[], ["xfconfd"]]) {
       const { run, calls } = fakeRun(running, SET);
       expect(await readXsettings(UID, run), running.join()).toBeNull();
       expect(
@@ -51,15 +51,21 @@ describe("readXsettings", () => {
     }
   });
 
-  it("reads the session's live values once xfce4-session and xfconfd run", async () => {
+  it("reads the session's live values once xfce4-session runs", async () => {
     const { run, calls } = fakeRun(SESSION, SET);
     expect(await readXsettings(UID, run)).toEqual({ windowScalingFactor: 2, xftDpi: 96 });
     expect(calls).toEqual([
       "pgrep -u 911 -x xfce4-session",
-      "pgrep -u 911 -x xfconfd",
       "xfconf-query -c xsettings -p /Gdk/WindowScalingFactor",
       "xfconf-query -c xsettings -p /Xft/DPI",
     ]);
+  });
+
+  // xfconfd exits after a while idle; reading then D-Bus-activates a fresh one, which loads the
+  // session's saved files. Refusing here once marked a healthy computer failed after 30 idle minutes.
+  it("wakes an xfconfd that went idle after the session started", async () => {
+    const { run } = fakeRun(["xfce4-session"], SET);
+    expect(await readXsettings(UID, run)).toEqual({ windowScalingFactor: 2, xftDpi: 96 });
   });
 
   it("reads an unset property as null once a listing of the channel confirms it", async () => {

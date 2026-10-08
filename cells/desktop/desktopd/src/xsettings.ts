@@ -69,14 +69,13 @@ async function isRunning(run: Run, uid: number, name: string): Promise<boolean> 
 
 // null: not known yet, as when a read fails. xfconf-query D-Bus-activates an xfconfd when none
 // runs, and one started before startwm.sh has written the HiDPI templates and exec'd
-// xfce4-session would load the previous session's files and keep them for this session.
+// xfce4-session would load the previous session's files and keep them for this session. Once
+// xfce4-session runs the templates are in place, so waking an xfconfd that exited idle is safe.
 export async function readXsettings(
   uid: number,
   run: Run = execFileAsync,
 ): Promise<Xsettings | null> {
-  if (!(await isRunning(run, uid, "xfce4-session")) || !(await isRunning(run, uid, "xfconfd"))) {
-    return null;
-  }
+  if (!(await isRunning(run, uid, "xfce4-session"))) return null;
   try {
     return {
       windowScalingFactor: await xfconfInt(run, "xsettings", "/Gdk/WindowScalingFactor"),
