@@ -6,7 +6,9 @@ import {
   EMPTY_DRAFT,
   type KeyDraft,
   needsBaseURL,
+  PROVIDER_GROUPS,
   PROVIDER_NAMES,
+  suggestedId,
   valueHint,
   valueProblem,
 } from "./binding.ts";
@@ -261,5 +263,34 @@ describe("describeKey", () => {
     expect(
       describeKey({ kind: "http", hosts: ["a.example", "b.example"], header: "Authorization" }),
     ).toBe("a.example, b.example · Authorization");
+  });
+});
+
+describe("PROVIDER_GROUPS", () => {
+  it("offers every provider once", () => {
+    const offered = PROVIDER_GROUPS.flatMap((group) => group.providers);
+    expect([...offered].sort()).toEqual([...LLM_PROVIDERS].sort());
+  });
+});
+
+describe("suggestedId", () => {
+  it("names a key after its provider, then -2, -3 past names already saved", () => {
+    expect(suggestedId(draft({ provider: "anthropic" }), [])).toBe("anthropic");
+    expect(suggestedId(draft({ provider: "anthropic" }), ["anthropic", "anthropic-2"])).toBe(
+      "anthropic-3",
+    );
+    expect(suggestedId(draft({ provider: "openai-compatible" }), [])).toBe("openai-compatible");
+  });
+  it("names a web API key after the service in its first host, even one typed as a URL", () => {
+    const named = (hosts: string) => suggestedId(draft({ kind: "http", hosts }), []);
+    expect(named("api.weather.example, b.example")).toBe("weather");
+    expect(named("https://api.weather.example:8443/v1")).toBe("weather");
+    expect(named("www.openweathermap.org")).toBe("openweathermap");
+    expect(named("localhost")).toBe("web-api");
+    expect(named("")).toBe("web-api");
+    expect(suggestedId(draft({ kind: "http", hosts: "x.example" }), ["x", "x-2"])).toBe("x-3");
+  });
+  it("never suggests a name kept for local servers", () => {
+    expect(suggestedId(draft({ kind: "http", hosts: "ollama.example" }), [])).toBe("ollama-2");
   });
 });

@@ -12,13 +12,15 @@ type Status =
       phase: "images";
       role: ImagePreparationProgress["role"];
       imagePhase: ImagePreparationProgress["phase"];
-      currentBytes?: number;
-      totalBytes?: number;
+      // The share of all four images on disk, 0 to 1. It never goes back.
+      progress: number;
     }
   | { phase: "ready"; url: string };
 const digest = (text: string) => createHash("sha256").update(text).digest("base64");
 const CSP = `default-src 'none'; script-src 'sha256-${digest(PROGRESS_SCRIPT)}'; style-src 'sha256-${digest(PROGRESS_STYLE)}'; connect-src 'self'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`;
 const IMAGE_PHASES = ["checking", "ready", "pulling", "downloading", "extracting", "verifying"];
+// Docker names each layer it pulls; more than this and the rest go uncounted.
+const MAX_LAYERS = 512;
 
 /** Pure state/HTTP boundary, kept separate from socket and OS browser effects for auditing. */
 export function progressChannel(capability: string, targetPort: number) {
@@ -32,33 +34,58 @@ export function progressChannel(capability: string, targetPort: number) {
     throw new Error("Invalid progress channel");
   const authorization = Buffer.from(`Bearer ${capability}`);
   let status: Status = { phase: "release" },
-    terminal = false;
+    terminal = false,
+    progress = 0;
+  // Downloaded and total bytes per image and layer. Only the shares leave this function.
+  const layers = new Map<string, { current: number; total: number }>();
+  const ready = new Set<string>();
+  const share = () => {
+    let sum = 0;
+    for (const role of IMAGE_ROLES) {
+      if (ready.has(role)) {
+        sum += 1;
+        continue;
+      }
+      let current = 0,
+        total = 0;
+      for (const [key, bytes] of layers) {
+        if (!key.startsWith(`${role} `)) continue;
+        current += bytes.current;
+        total += bytes.total;
+      }
+      if (total > 0) sum += current / total;
+    }
+    return Math.floor((sum / IMAGE_ROLES.length) * 1000) / 1000;
+  };
   let seen!: () => void;
   const delivered = new Promise<void>((resolve) => {
     seen = resolve;
   });
   return {
     delivered,
-    report(progress: ImagePreparationProgress) {
-      if (
-        terminal ||
-        !IMAGE_ROLES.includes(progress.role) ||
-        !IMAGE_PHASES.includes(progress.phase)
-      )
+    report(report: ImagePreparationProgress) {
+      if (terminal || !IMAGE_ROLES.includes(report.role) || !IMAGE_PHASES.includes(report.phase))
         return;
-      status = { phase: "images", role: progress.role, imagePhase: progress.phase };
-      const { currentBytes, totalBytes } = progress;
-      if (
-        Number.isSafeInteger(currentBytes) &&
-        Number.isSafeInteger(totalBytes) &&
-        currentBytes !== undefined &&
-        totalBytes !== undefined &&
-        currentBytes >= 0 &&
-        totalBytes >= currentBytes
-      ) {
-        status.currentBytes = currentBytes;
-        status.totalBytes = totalBytes;
+      const { role, phase, layer, currentBytes, totalBytes } = report;
+      if (phase === "ready") ready.add(role);
+      const key = `${role} ${layer ?? ""}`;
+      const known = layers.get(key);
+      if (known || layers.size < MAX_LAYERS) {
+        if (
+          phase === "downloading" &&
+          Number.isSafeInteger(currentBytes) &&
+          Number.isSafeInteger(totalBytes) &&
+          currentBytes !== undefined &&
+          totalBytes !== undefined &&
+          currentBytes >= 0 &&
+          totalBytes >= currentBytes
+        )
+          layers.set(key, { current: currentBytes, total: totalBytes });
+        else if (known && (phase === "verifying" || phase === "extracting"))
+          known.current = known.total;
       }
+      progress = Math.max(progress, share());
+      status = { phase: "images", role, imagePhase: phase, progress };
     },
     starting() {
       if (!terminal) status = { phase: "starting" };

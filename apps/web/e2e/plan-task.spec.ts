@@ -1,4 +1,5 @@
 import { type Browser, type BrowserContext, expect, type Locator, test } from "@playwright/test";
+import { roleCard, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // A task on a flat-rate plan, through the daemon's real bindings: no per-token price, no dollar
@@ -52,17 +53,18 @@ for (const run of runs) {
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
 
       await press(page.getByRole("button", { name: "Settings", exact: true }));
-      const sheet = page.getByRole("dialog", { name: "Models and settings" });
-      await expect(sheet.getByRole("combobox", { name: "main provider" })).toHaveValue(
-        PLAN.provider,
+      const sheet = settingsSheet(page);
+      const main = roleCard(sheet, "main");
+      await expect(main.getByRole("combobox", { name: "Provider", exact: true })).toHaveText(
+        "MiniMax Token Plan",
       );
       await expect(
         sheet
-          .getByRole("group", { name: "Task spending ceiling" })
-          .getByText("Uses your plan's limits.", { exact: true }),
+          .getByRole("region", { name: "Spending" })
+          .getByText("Your plan's own limits apply, so no limit is needed."),
       ).toBeAttached();
-      await expect(sheet.getByText(/USD per million tokens/)).toHaveCount(0);
-      await expect(sheet.getByLabel("Task ceiling — USD")).toHaveCount(0);
+      await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
+      await expect(sheet.getByRole("textbox", { name: "Custom limit" })).toHaveCount(0);
       await press(sheet.getByRole("button", { name: "Close settings" }));
 
       if (run.phone) await press(page.getByRole("tab", { name: "Conversation", exact: true }));

@@ -412,6 +412,21 @@
     margin-top: 14px;
     font-size: 14px;
   }
+  /* The stage keeps the middle of its pane whatever the caption under it says, so a caption that
+     wraps onto another line never moves it. */
+  .pane > .stage-col:not(.manual-column) {
+    display: grid;
+    grid-template-rows: 1fr auto 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+  .pane > .stage-col:not(.manual-column) > .stage {
+    grid-row: 2;
+  }
+  .pane > .stage-col:not(.manual-column) > .caption {
+    grid-row: 3;
+    align-self: start;
+  }
 }
 
 .stage > .rim {
@@ -455,6 +470,14 @@
 .keys-btn[aria-expanded="true"] {
   background: var(--color-hud-button);
   color: var(--color-text);
+}
+
+/* Wide, the inspector covers the bar's right end but for its top inset, where a pressed button
+   would show through. */
+@media (width >= 760px) {
+  .keys-btn[aria-expanded="true"] {
+    background: none;
+  }
 }
 
 .keys-btn .dot {
@@ -615,26 +638,6 @@
 }
 .keys-btn {
   min-height: 44px;
-}
-.sheet-task-control {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--color-text-2);
-  padding: 8px 0 16px;
-}
-.sheet-stop {
-  min-width: 80px;
-  min-height: 44px;
-  border: 1px solid var(--color-line);
-  border-radius: 10px;
-  color: var(--color-text);
-}
-.sheet-stop[aria-disabled="true"] {
-  color: var(--color-text-2);
-  cursor: default;
 }
 @media (--rails-collapse) {
   .pane-tabs {

@@ -6,6 +6,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { nestedKeys, roleCard, search, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 const SENTENCE =
@@ -68,40 +69,41 @@ for (const run of runs) {
     }
     async function settings(page: Page, press: (l: Locator) => Promise<void>) {
       await press(page.getByRole("button", { name: "Settings", exact: true }));
-      const sheet = page.getByRole("dialog", { name: "Models and settings" });
-      await expect(sheet.getByRole("combobox", { name: "main provider" })).toBeEnabled();
+      const sheet = settingsSheet(page);
+      await expect(
+        roleCard(sheet, "main").getByRole("combobox", { name: "Provider", exact: true }),
+      ).toBeEnabled();
       return sheet;
     }
 
     test("says Claude plans can't be used, under Anthropic, on a search and in Subscription", async () => {
       const { page, press } = await open();
       const sheet = await settings(page, press);
-      const provider = sheet.getByRole("combobox", { name: "main provider" });
-      const plan = provider.locator('optgroup[label="Subscription"] > option', {
-        hasText: "Claude Pro or Max",
-      });
-      await expect(plan).toHaveText("Claude Pro or Max — not available here");
-      await expect(plan).toHaveJSProperty("disabled", true);
+      const main = roleCard(sheet, "main");
+      const provider = main.getByRole("combobox", { name: "Provider", exact: true });
+      await press(provider);
+      const list = page.getByRole("listbox", { name: "Provider" });
+      const plan = list
+        .getByRole("group", { name: "Subscription" })
+        .getByRole("option", { name: /^Claude Pro or Max/ });
+      await expect(plan).toHaveAttribute("aria-disabled", "true");
+      await expect(plan).toContainText("Not allowed in other apps. Use an Anthropic key.");
       await expect(sheet.getByText(SENTENCE)).toHaveCount(0);
 
-      await sheet.getByLabel("Search main providers").fill("claude code");
-      await expect(sheet.getByText(SENTENCE, { exact: true })).toBeVisible();
+      const search = page.getByRole("combobox", { name: "Search: Provider" });
+      await search.fill("claude code");
       await expect(plan).toBeAttached();
-      await expect(provider.locator('option[value="anthropic"]')).toHaveJSProperty(
-        "disabled",
-        false,
-      );
-      await sheet.getByLabel("Search main providers").fill("");
-      await expect(sheet.getByText(SENTENCE)).toHaveCount(0);
-
-      await provider.selectOption("anthropic");
+      const anthropic = list.getByRole("option", { name: /^Anthropic$/ });
+      await expect(anthropic).not.toHaveAttribute("aria-disabled", "true");
+      await press(anthropic);
+      await expect(provider).toHaveText("Anthropic");
       const note = sheet.getByText(SENTENCE, { exact: true });
       await expect(note).toBeVisible();
       await expect(provider).toHaveAttribute(
         "aria-describedby",
         (await note.getAttribute("id")) as string,
       );
-      await expect(sheet.getByRole("button", { name: "Add key for main" })).toBeVisible();
+      await expect(main.getByRole("button", { name: "Add key", exact: true })).toBeVisible();
     });
 
     test("refuses a plan token pasted into an Anthropic key, and no request carries it", async () => {
@@ -111,13 +113,17 @@ for (const run of runs) {
         if (r.method() === "POST" && new URL(r.url()).pathname === "/api/keys") posts.push(r.url());
       });
       const sheet = await settings(page, press);
-      await sheet.getByRole("combobox", { name: "main provider" }).selectOption("anthropic");
-      await press(sheet.getByRole("button", { name: "Add key for main" }));
-      const keys = page.getByRole("dialog", { name: "Keys" });
-      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue("anthropic");
-      const hint = keys.locator("#key-value-hint");
-      await expect(hint).toHaveText("Starts with sk-ant-api");
-      await keys.getByLabel("Name", { exact: true }).fill("anthropic");
+      const main = roleCard(sheet, "main");
+      await search(
+        page,
+        main.getByRole("combobox", { name: "Provider", exact: true }),
+        "anthropic",
+      );
+      await press(main.getByRole("button", { name: "Add key", exact: true }));
+      const keys = nestedKeys(page);
+      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveText("Anthropic");
+      await expect(keys.getByText("Starts with sk-ant-api")).toBeVisible();
+      await keys.getByLabel("Label (optional)", { exact: true }).fill("anthropic");
       const field = keys.getByLabel("Key", { exact: true });
       await field.focus();
       await page.keyboard.insertText(PLAN_TOKEN);
@@ -126,9 +132,9 @@ for (const run of runs) {
       await expect(error).toBeVisible();
       await expect(keys.getByRole("alert")).toHaveText(SENTENCE);
       await expect(field).toHaveAttribute("aria-invalid", "true");
-      await expect(field).toHaveAttribute("aria-describedby", "key-value-error key-value-hint");
+      await expect(field).toHaveAccessibleDescription(`${SENTENCE} Starts with sk-ant-api`);
 
-      await keys.getByLabel("Name", { exact: true }).fill("claudewrapped");
+      await keys.getByLabel("Label (optional)", { exact: true }).fill("claudewrapped");
       await expect(error).toHaveCount(0);
       await field.focus();
       await page.keyboard.insertText(`export CLAUDE_CODE_OAUTH_TOKEN=${PLAN_TOKEN}`);
@@ -144,7 +150,7 @@ for (const run of runs) {
         await expect(field).toHaveValue("");
         await expect(error).toBeVisible();
       }
-      await expect(keys.getByText("No keys yet.")).toBeVisible();
+      await expect(keys.getByText("No keys yet")).toBeVisible();
       expect(posts).toEqual([]);
       expect(carried).toEqual([]);
       const stored = await (

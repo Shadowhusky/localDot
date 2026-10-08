@@ -314,7 +314,7 @@
     inset: 1px auto 1px 0;
     width: 30%;
     translate: none;
-    animation: ui-progress-sweep 1.4s var(--ease-standard) infinite;
+    animation: ui-progress-sweep var(--loop-sweep) var(--ease-standard) infinite;
   }
 
   @keyframes ui-progress-sweep {

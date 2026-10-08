@@ -10,6 +10,7 @@ const STATUS: Record<UiScenarioName, { control: string; label: string; pose: str
     "model-ready": { control: "Turn on", label: "No computer", pose: "sleeping" },
     starting: { control: "Stop computer", label: "Starting…", pose: "waking" },
     ready: { control: "Stop computer", label: "Live", pose: "idle" },
+    "chatgpt-plan": { control: "Stop computer", label: "Live", pose: "idle" },
     running: { control: "Stop", label: "Select the Net total cell", pose: "acting", rim: true },
     approval: { control: "Stop", label: "Needs your OK", pose: "waiting" },
     ask: { control: "Stop", label: "Has a question", pose: "waiting" },

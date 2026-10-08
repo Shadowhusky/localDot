@@ -46,6 +46,9 @@ export function undoAllowedLabel(actionClass: ActionClass, option: AlwaysOption)
 
 export interface AutonomyPreset {
   readonly name: string;
+  // The name where room is short, such as a segment.
+  readonly label: string;
+  readonly recommended?: boolean;
   readonly summary: string;
   readonly policy: Readonly<AutonomyPolicy>;
 }
@@ -53,11 +56,14 @@ export interface AutonomyPreset {
 export const AUTONOMY_PRESETS: readonly AutonomyPreset[] = [
   {
     name: "Balanced (recommended)",
+    label: "Balanced",
+    recommended: true,
     summary: "Works on its own in its computer and asks before acting as you.",
     policy: BALANCED_AUTONOMY,
   },
   {
     name: "Careful",
+    label: "Careful",
     summary: "Asks before every step except reading and browsing.",
     policy: CAREFUL_AUTONOMY,
   },
@@ -69,4 +75,27 @@ export function presetOf(policy: AutonomyPolicy): AutonomyPreset | undefined {
   return AUTONOMY_PRESETS.find((preset) =>
     EDITABLE_ACTION_CLASSES.every((key) => preset.policy[key] === policy[key]),
   );
+}
+
+const CHECKED_FIRST = [
+  ["purchase", "buying"],
+  ["send", "sending"],
+  ["post", "posting"],
+  ["delete", "deleting"],
+] as const;
+
+// What dot stops to ask about, in one line for someone who has not opened Settings yet.
+export function checksSummary(policy: AutonomyPolicy): string {
+  const asks = CHECKED_FIRST.filter(([key]) => policy[key] !== "act").map(([, verb]) => verb);
+  const listed =
+    asks.length > 1 ? `${asks.slice(0, -1).join(", ")} or ${asks.at(-1)}` : (asks[0] ?? "");
+  if (policy.computer !== "act") {
+    return listed
+      ? `Asks before every step in its computer, and before ${listed}.`
+      : "Asks before every step in its computer.";
+  }
+  if (listed) return `Asks before ${listed}.`;
+  return EDITABLE_ACTION_CLASSES.every((key) => policy[key] === "act")
+    ? "Works without asking, even when buying, sending, posting or deleting."
+    : "Asks before some steps.";
 }

@@ -1,6 +1,6 @@
 import type { TaskModelSelection } from "@localdot/protocol";
 import type { KeyUseState, PlanItemState } from "@localdot/stage";
-import { type ReactNode, useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { ActivityDetail } from "../agent/ActivityDetails.tsx";
 import { ActivityRow } from "../agent/ActivityRow.tsx";
 import {
@@ -52,11 +52,10 @@ export interface ActivityRailProps {
   agent?: AgentModel;
   models?: TaskModelSelection;
   modelName?(provider: string, model: string): string | undefined;
-  knowledge?: ReactNode;
   memoryAction?: (change: AgentChange) => {
     status?: UndoStatus;
     onUndo?: (changeId: string) => void;
-    onReread?: () => void;
+    onReread?: (trigger: HTMLButtonElement) => void;
   };
 }
 
@@ -92,7 +91,6 @@ export function ActivityRail({
   memoryAction,
   models,
   modelName,
-  knowledge,
   asOfMs,
   onSelect,
   planSnapshot,
@@ -130,8 +128,6 @@ export function ActivityRail({
   const started = !!sessionId || !!plan.length;
   const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
   const timeline = useRef<HTMLElement>(null);
-  const knowing = useRef<HTMLButtonElement>(null);
-  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
   const currentKey =
@@ -177,23 +173,6 @@ export function ActivityRail({
     reveal(timeline.current?.querySelector("[data-current]") ?? null);
   }, [replay, currentKey]);
 
-  // Reading memory again from a change shows what was read, where the stored files are listed.
-  const memoryActions = (change: AgentChange) => {
-    const actions = memoryAction?.(change);
-    const reread = actions?.onReread;
-    return {
-      ...actions,
-      ...(reread
-        ? {
-            onReread: () => {
-              reread();
-              setKnowledgeOpen(true);
-              window.setTimeout(() => reveal(knowing.current), REVEAL_AFTER);
-            },
-          }
-        : {}),
-    };
-  };
   const toggleKey = (key: string, trigger: HTMLButtonElement) => {
     const row = trigger.closest(".activity-row");
     if (row instanceof HTMLElement) follow.anchorTo(row);
@@ -303,24 +282,11 @@ export function ActivityRail({
             {plan.length > 0 && (
               <PlanView plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
             )}
-            {(knowledge || model.activity) && started && (
+            {model.activity && started && (
               <div className="activity-extras">
-                {model.activity && (
-                  <Disclosure summary="Thinking notes" className="activity-disclosure">
-                    <p className="activity-notes">{model.activity}</p>
-                  </Disclosure>
-                )}
-                {knowledge && (
-                  <Disclosure
-                    ref={knowing}
-                    summary="What dot knows"
-                    className="activity-disclosure"
-                    open={knowledgeOpen}
-                    onOpenChange={setKnowledgeOpen}
-                  >
-                    {knowledge}
-                  </Disclosure>
-                )}
+                <Disclosure summary="Thinking notes" className="activity-disclosure">
+                  <p className="activity-notes">{model.activity}</p>
+                </Disclosure>
               </div>
             )}
             {cellId && !replay && (
@@ -342,7 +308,7 @@ export function ActivityRail({
                     changes={model.changes}
                     open={openKey === `change-${change.id}`}
                     onToggle={(trigger) => toggleKey(`change-${change.id}`, trigger)}
-                    {...(change.type === "memory" ? memoryActions(change) : {})}
+                    {...(change.type === "memory" ? memoryAction?.(change) : {})}
                   />
                 ))}
               </section>

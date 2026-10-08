@@ -15,6 +15,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   "model-ready": hud("No computer"),
   starting: hud("Starting…"),
   ready: hud("Live"),
+  "chatgpt-plan": hud("Live"),
   running: hud("Select the Net total cell"),
   approval: shows((page) => page.getByRole("dialog", { name: /^Send the monthly report/ })),
   ask: hud("Has a question"),
@@ -54,8 +55,10 @@ test("a running fixture steps between scenarios", async ({ page, ui }) => {
 test("Settings and Keys open", async ({ page, ui }) => {
   await ui.open("ready");
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const settings = page.getByRole("dialog", { name: "Models and settings" });
-  await expect(settings.getByRole("combobox", { name: /main model/i })).toBeVisible();
+  const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+  await expect(
+    settings.getByRole("region", { name: "Main model" }).getByRole("combobox", { name: "Model" }),
+  ).toBeVisible();
   await settings.getByRole("button", { name: "Close settings" }).click();
   await page.getByTestId("keys-button").click();
   const keys = page.getByRole("dialog", { name: "Keys" });

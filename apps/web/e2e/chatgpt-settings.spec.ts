@@ -20,6 +20,7 @@ import { type AgentRoutesDeps, agentRoutes } from "../../daemon/src/agent/routes
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
 import { KeydUnavailableError } from "../../daemon/src/keyd/client.ts";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { choose, roleCard, search, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, TOKEN as FIXTURE_TOKEN, startUiFixture, type UiFixture } from "./ui-fixture.ts";
 
 // Real production bundle/CSP and accepted authenticated routes/private settings store. The
@@ -301,9 +302,11 @@ async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
   });
   await page.goto(f.origin);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Models and settings" });
-  await expect(sheet.getByRole("combobox", { name: "main provider", exact: true })).toBeEnabled();
-  await sheet.getByRole("combobox", { name: "main provider", exact: true }).selectOption("chatgpt");
+  const sheet = settingsSheet(page);
+  const provider = roleCard(sheet, "main").getByRole("combobox", { name: "Provider", exact: true });
+  await expect(provider).toBeEnabled();
+  await search(page, provider, "chatgpt");
+  await expect(provider).toHaveText("ChatGPT plan");
   return { sheet, errors, logs, external };
 }
 for (const width of [1280, 390])
@@ -327,7 +330,7 @@ for (const width of [1280, 390])
       ).toBeVisible();
       expect(f.counters.installations).toBe(1);
       f.verifying();
-      await expect(sheet.getByText("Verifying ChatGPT support…")).toBeVisible();
+      await expect(sheet.getByText("Checking ChatGPT support…")).toBeVisible();
       f.ready();
       await expect(
         sheet.getByRole("button", { name: "Sign in with code", exact: true }),
@@ -344,22 +347,29 @@ for (const width of [1280, 390])
       f.completeLogin();
       await expect(sheet.getByText("Signed in as preview@example.test")).toBeVisible();
       await expect(sheet.getByLabel("Sign-in code")).toHaveValue("");
-      await expect(sheet.getByText(/Primary window: 23% used/)).toBeVisible();
-      await expect(sheet.getByText(/Secondary window: Unknown/)).toBeVisible();
-      await sheet
-        .getByRole("combobox", { name: "main model", exact: true })
-        .selectOption("fixture-account-model");
-      await expect(sheet.getByRole("button", { name: "Save settings", exact: true })).toBeEnabled();
-      expect(await sheet.getByRole("combobox", { name: "fast key" }).count()).toBe(0);
-      expect(await sheet.getByRole("group", { name: "Task spending ceiling" }).count()).toBe(0);
-      await sheet.getByRole("button", { name: "Save settings", exact: true }).click();
-      await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
-      expect(f.settings.get()).toEqual({
-        main: { provider: "chatgpt", model: "fixture-account-model" },
-        fast: { provider: "openai", model: "stored-paid", key: "deleted" },
-        taskBudgetUSD: 8,
-      });
-      await sheet.locator(".settings-body").evaluate((node) => {
+      await expect(sheet.getByRole("meter", { name: /^5-hour limit/ })).toHaveAttribute(
+        "aria-valuetext",
+        "23% used",
+      );
+      await expect(sheet.getByText("Long limit: not reported")).toBeVisible();
+      await choose(
+        page,
+        roleCard(sheet, "main").getByRole("combobox", { name: "Model", exact: true }),
+        "fixture-account-model",
+      );
+      const save = sheet.getByRole("button", { name: "Save", exact: true });
+      await expect(save).toBeEnabled();
+      expect(await roleCard(sheet, "fast").getByRole("combobox", { name: "Key" }).count()).toBe(0);
+      expect(await sheet.getByRole("region", { name: "Spending" }).count()).toBe(0);
+      await save.click();
+      await expect
+        .poll(() => f.settings.get())
+        .toEqual({
+          main: { provider: "chatgpt", model: "fixture-account-model" },
+          fast: { provider: "openai", model: "stored-paid", key: "deleted" },
+          taskBudgetUSD: 8,
+        });
+      await sheet.locator(".ui-sheet-body").evaluate((node) => {
         node.scrollTop = 0;
       });
       await page.screenshot({ path: info.outputPath(`chatgpt-settings-${width}.png`) });
@@ -408,14 +418,15 @@ test("unsupported capability and an uncertain account retirement keep admission 
     f.completeLogin();
     const audit = await load(page, f),
       sheet = audit.sheet;
-    await expect(sheet.getByRole("button", { name: "Refresh account", exact: true })).toBeEnabled();
-    await sheet.getByRole("button", { name: "Refresh account", exact: true }).click();
+    await sheet.getByRole("button", { name: "Account actions", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Refresh account", exact: true }).click();
     expect(f.counters.refreshes).toBe(0);
-    await expect(sheet.getByRole("alertdialog")).toContainText("pauses current ChatGPT work");
+    await expect(page.getByRole("alertdialog")).toContainText("pauses current ChatGPT work");
     f.failRetirement();
-    await sheet.getByRole("button", { name: "Pause work and refresh" }).click();
+    await page.getByRole("button", { name: "Pause work and refresh" }).click();
     await expect(sheet.getByRole("alert")).toContainText("New ChatGPT tasks are blocked");
-    await sheet.getByRole("button", { name: "Stop computer", exact: true }).click();
+    // The inspector sits beside the page, so the computer's own Stop stays in reach.
+    await page.getByRole("button", { name: "Stop computer", exact: true }).click();
     await expect.poll(() => f.counters.stops).toBe(1);
     expect(f.counters.modelStarts).toBe(0);
   } finally {
@@ -461,8 +472,7 @@ test.describe("ChatGPT plan states on the fixture daemon", () => {
         const settings = page.getByRole("button", { name: "Settings", exact: true });
         if ("phone" in view) await settings.tap();
         else await settings.click();
-        const sheet = page.getByRole("dialog", { name: "Models and settings" });
-        const panel = sheet.locator(".chatgpt-panel");
+        const panel = page.getByRole("region", { name: "ChatGPT plan", exact: true });
         await expect(panel.getByRole("heading", { name: "ChatGPT plan" })).toBeVisible();
         await check(panel, page, view);
         await panel.scrollIntoViewIfNeeded();
@@ -514,9 +524,13 @@ test.describe("ChatGPT plan states on the fixture daemon", () => {
         const signIn = panel.getByRole("button", { name: "Sign in with code", exact: true });
         const press = async () => ("phone" in view ? signIn.tap() : signIn.click());
         await expect(signIn).toBeEnabled();
+        await signIn.scrollIntoViewIfNeeded();
+        const before = await signIn.boundingBox();
         await press();
         await expect(panel.getByRole("alert")).toHaveText(DEVICE_HINT);
         await expect(panel.getByText(DEVICE_HINT)).toHaveCount(1);
+        // The refusal swaps the hint for an alert in place: the button does not move.
+        expect(Math.abs(((await signIn.boundingBox())?.y ?? 0) - (before?.y ?? 0))).toBeLessThan(1);
         await expect(signIn).toBeEnabled();
         await expect(panel.getByRole("button", { name: "Cancel sign-in" })).toHaveCount(0);
         if ("phone" in view)
@@ -539,7 +553,10 @@ test.describe("ChatGPT plan states on the fixture daemon", () => {
   test("a signed-in plan shows the account and its usage", async () => {
     await each("signed_in", async (panel) => {
       await expect(panel.getByText("Signed in as preview@example.test")).toBeVisible();
-      await expect(panel.getByText(/Primary window: 23% used/)).toBeVisible();
+      await expect(panel.getByRole("meter", { name: /^5-hour limit/ })).toHaveAttribute(
+        "aria-valuetext",
+        "23% used",
+      );
       await expect(panel.getByText(DEVICE_HINT)).toHaveCount(0);
     });
   });

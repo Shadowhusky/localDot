@@ -11,13 +11,12 @@ import {
   customModelAllowed,
   groupOf,
   matchingKeys,
-  matchingProviders,
   modelAllowed,
   modelIdProblem,
   PROVIDER_GROUPS,
   planOnly,
   providerAllowed,
-  providerPickable,
+  providerName,
 } from "./choices.ts";
 
 const key = (provider: string, baseURL?: string): KeyRecord => ({
@@ -29,15 +28,7 @@ const key = (provider: string, baseURL?: string): KeyRecord => ({
   updatedAt: "t",
 });
 describe("provider and model choice rules", () => {
-  it("uses every accepted registry row and groups subscription separately", () => {
-    expect(matchingProviders("")).toEqual(PROVIDERS);
-    expect(matchingProviders("gemINI").map((p) => p.id)).toEqual(["google"]);
-    expect(matchingProviders("fireworks-ai").map((p) => p.name)).toEqual(["Fireworks"]);
-    expect(matchingProviders("coding plan").map((p) => p.name)).toEqual([
-      "Alibaba Coding Plan",
-      "GLM Coding Plan",
-      "Ark Coding Plan",
-    ]);
+  it("groups every registry row and allows only the offered ones", () => {
     expect(PROVIDER_GROUPS).toEqual([
       "API providers",
       "Compatible providers",
@@ -77,19 +68,13 @@ describe("provider and model choice rules", () => {
       "volcengine-coding-plan",
     ]);
   });
-  it("lets a plan that is not offered be picked to read why, never for the local role", () => {
+  it("binds no key and no typed model to a plan that is not offered", () => {
     for (const provider of PROVIDERS.filter((p) => p.notOffered)) {
-      expect(providerPickable("main", provider)).toBe(true);
-      expect(providerPickable("fast", provider)).toBe(true);
-      expect(providerPickable("local", provider)).toBe(false);
       expect(
         matchingKeys(provider, [key("openai-compatible", "https://api.z.ai/api/coding/paas/v4")]),
       ).toEqual([]);
       expect(customModelAllowed(provider)).toBe(false);
     }
-    for (const provider of PROVIDERS.filter((p) => !p.notOffered))
-      for (const role of ["main", "fast", "local"] as const)
-        expect(providerPickable(role, provider)).toBe(providerAllowed(role, provider));
   });
   it("calls a choice plan-only when no role is billed and one runs on a plan", () => {
     const plan = { provider: "alibaba-token-plan", model: "qwen3.8-max", key: "plan" };
@@ -198,5 +183,12 @@ describe("provider and model choice rules", () => {
       expect(isOpenRouterRouterId("openrouter", id)).toBe(true);
     expect(isOpenRouterRouterId("openrouter", "anthropic/fixed-model")).toBe(false);
     expect(isOpenRouterRouterId("other", "openrouter/auto")).toBe(false);
+  });
+});
+describe("provider names", () => {
+  it("names a provider as the registry does, and the ChatGPT plan by its own name", () => {
+    expect(providerName("minimax-coding-plan")).toBe("MiniMax Token Plan");
+    expect(providerName("chatgpt")).toBe("ChatGPT plan");
+    expect(providerName("retired-provider")).toBe("retired-provider");
   });
 });

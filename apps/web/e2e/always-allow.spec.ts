@@ -91,7 +91,7 @@ for (const size of SIZES)
       ]);
 
       await press(page, "Settings", size.phone);
-      const sheet = page.getByRole("dialog", { name: "Models and settings" });
+      const sheet = page.getByRole("dialog", { name: "Settings", exact: true });
       const list = sheet.getByRole("list", { name: "Always allowed" });
       await expect(list.getByRole("listitem")).toHaveText([
         "Send as youOn mail.example.testRemove",

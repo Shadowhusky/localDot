@@ -1,11 +1,5 @@
 import type { AgentRoleChoice } from "@localdot/protocol";
-import {
-  type Capability,
-  PROVIDERS,
-  type ProviderSpec,
-  providerById,
-  usableAs,
-} from "@localdot/providers";
+import { type Capability, type ProviderSpec, providerById, usableAs } from "@localdot/providers";
 import type { KeyRecord } from "../keys/keys-api.ts";
 
 export type ModelRole = "main" | "fast" | "local";
@@ -50,6 +44,10 @@ export const PROVIDER_GROUPS: readonly ProviderGroup[] = [
   "Not available here",
   "Later releases",
 ];
+// What people read for a provider: the registry's name, or the ChatGPT plan.
+export function providerName(id: string): string {
+  return id === "chatgpt" ? "ChatGPT plan" : (providerById(id)?.name ?? id);
+}
 export function providerAllowed(role: ModelRole, provider: ProviderSpec): boolean {
   return (
     !provider.availableIn && !provider.notOffered && (role !== "local" || provider.local === true)
@@ -66,16 +64,6 @@ export function planOnly(choices: Partial<Record<ModelRole, RoleChoice>>): boole
   return (
     chosen.some(onPlan) &&
     chosen.every((choice) => onPlan(choice) || providerById(choice?.provider ?? "")?.local)
-  );
-}
-// A plan that is not offered can still be picked, only to read why; it never saves.
-export function providerPickable(role: ModelRole, provider: ProviderSpec): boolean {
-  return providerAllowed(role, provider) || (!!provider.notOffered && role !== "local");
-}
-export function matchingProviders(search: string): readonly ProviderSpec[] {
-  const query = search.trim().toLowerCase();
-  return PROVIDERS.filter((provider) =>
-    `${provider.name} ${provider.id}`.toLowerCase().includes(query),
   );
 }
 function endpoint(raw: string | undefined): string | undefined {

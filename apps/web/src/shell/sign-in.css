@@ -1,0 +1,70 @@
+/* The page before the app: dot and one way forward, high on the void where the stage will be. It
+   shares its column, type and copy chip with the installer's page (apps/cli browser-page.ts). */
+.sign-in {
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  min-height: 100dvh;
+  padding: 20vh calc(var(--spacing) * 4) calc(var(--spacing) * 8);
+  background: var(--color-void);
+  color: var(--color-fg-1);
+}
+
+.sign-in-body {
+  display: grid;
+  justify-items: start;
+  width: 100%;
+  max-width: calc(var(--spacing) * 110);
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    translate var(--dur-spring) var(--ease-spring);
+}
+
+@starting-style {
+  .sign-in-body {
+    opacity: 0;
+    translate: 0 calc(var(--spacing) * 1);
+  }
+}
+
+.sign-in-body > .dot {
+  margin-bottom: calc(var(--spacing) * 5);
+}
+
+.sign-in-title {
+  font:
+    var(--text-display--font-weight) var(--text-display) / var(--text-display--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-display--letter-spacing);
+}
+
+.sign-in-message {
+  margin-top: calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+.sign-in-command {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  margin-top: calc(var(--spacing) * 5);
+  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1) calc(var(--spacing) * 1)
+    calc(var(--spacing) * 4);
+  border-radius: var(--radius-lg);
+  background: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.sign-in-command code {
+  color: var(--color-fg-1);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-mono);
+  user-select: all;
+}
+
+.sign-in-foot {
+  margin-top: calc(var(--spacing) * 4);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}

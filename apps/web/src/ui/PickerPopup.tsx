@@ -11,6 +11,7 @@ import {
 import { createPortal } from "react-dom";
 import { OutsideField } from "./Field.tsx";
 import { IconButton } from "./IconButton.tsx";
+import { pushLayer } from "./LayerStack.tsx";
 
 const GAP = 4;
 const EDGE = 8;
@@ -161,6 +162,19 @@ export function PickerPopup({
     style.transformOrigin = `${rect.left + rect.width / 2 - left}px ${side === "bottom" ? "0" : "100%"}`;
     panel.dataset.side = side;
   };
+
+  // On the stack while open, so a trapping sheet beneath counts the popup as above it and leaves focus
+  // in its search field and list, rather than pulling it back to the sheet.
+  useLayoutEffect(() => {
+    if (!open) return;
+    return pushLayer({
+      root: () => surface.current,
+      panel: () => surface.current,
+      trap: false,
+      modal: presentation === "sheet",
+      escape: () => dismiss.current(),
+    });
+  }, [open, presentation]);
 
   // Focus moves in when the surface opens, and back to the trigger when it closes. Both happen after
   // React's commit, which would otherwise hand focus back to a search field it saw focused.

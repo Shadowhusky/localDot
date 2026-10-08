@@ -117,12 +117,12 @@ export function validateForm(
   const plan = planOnly(draft.choices);
   if (draft.defaultBudget) {
     if (!subscription && !plan && index.defaultTaskBudgetUSD === null)
-      problems.push("The default task budget is unavailable. Enter an explicit ceiling.");
+      problems.push("No default limit is set. Choose Custom and enter a limit per task.");
     delete document.taskBudgetUSD;
   } else {
     const budget = decimal(draft.budget);
     if (budget !== undefined) document.taskBudgetUSD = budget;
-    else if (!plan) problems.push("Enter an explicit task ceiling in USD.");
+    else if (!plan) problems.push("Enter a limit per task in US dollars.");
   }
   if (problems.length) return { ok: false, problems };
   if (
@@ -137,7 +137,7 @@ export function validateForm(
     : {
         ok: false,
         problems: [
-          "Check the settings and task ceiling. The ceiling must be positive, within 10000 USD and at least one accounting microdollar.",
+          "Check the settings and the limit per task. The limit must be more than $0 and at most $10,000.",
         ],
       };
 }

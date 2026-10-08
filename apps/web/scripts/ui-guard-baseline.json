@@ -29,8 +29,7 @@
   "src/agent/activity.css": {
     "control-selector": 6,
     "half-pixel": 2,
-    "stray-stylesheet": 1,
-    "type-literal": 1
+    "stray-stylesheet": 1
   },
   "src/agent/controls.css": {
     "control-selector": 4,
@@ -56,10 +55,10 @@
   "src/app.css": {
     "control-selector": 12,
     "half-pixel": 9,
-    "radius-literal": 10,
-    "spacing-literal": 25,
+    "radius-literal": 9,
+    "spacing-literal": 23,
     "stray-stylesheet": 1,
-    "type-literal": 18
+    "type-literal": 17
   },
   "src/browser/BrowserDownloads.tsx": {
     "native-control": 2,
@@ -98,47 +97,6 @@
     "half-pixel": 1,
     "type-literal": 2
   },
-  "src/keys/KeyForm.tsx": {
-    "native-control": 10,
-    "native-disabled": 2
-  },
-  "src/keys/KeyList.tsx": {
-    "native-control": 1,
-    "native-disabled": 1
-  },
-  "src/keys/KeysSheet.tsx": {
-    "banned-copy": 6,
-    "native-control": 4
-  },
-  "src/keys/keys-api.ts": {
-    "banned-copy": 2
-  },
-  "src/keys/keys.css": {
-    "control-selector": 11,
-    "half-pixel": 5,
-    "motion-literal": 5,
-    "radius-literal": 11,
-    "spacing-literal": 27,
-    "stray-stylesheet": 1,
-    "type-literal": 10
-  },
-  "src/keys/useKeys.ts": {
-    "banned-copy": 1
-  },
-  "src/onboarding/AppearancePicker.tsx": {
-    "native-control": 1
-  },
-  "src/onboarding/WelcomeSetup.tsx": {
-    "native-control": 3
-  },
-  "src/onboarding/onboarding.css": {
-    "control-selector": 6,
-    "half-pixel": 1,
-    "radius-literal": 3,
-    "spacing-literal": 15,
-    "stray-stylesheet": 1,
-    "type-literal": 10
-  },
   "src/replay/CompareView.tsx": {
     "native-control": 1
   },
@@ -176,44 +134,6 @@
   "src/replay/useReplay.ts": {
     "banned-copy": 2
   },
-  "src/settings/ChatgptPanel.tsx": {
-    "native-control": 16,
-    "native-disabled": 11
-  },
-  "src/settings/ModelPicker.tsx": {
-    "native-control": 3,
-    "native-disabled": 5
-  },
-  "src/settings/ProviderPicker.tsx": {
-    "native-control": 2,
-    "native-disabled": 6
-  },
-  "src/settings/RoleEditor.tsx": {
-    "native-control": 8,
-    "native-disabled": 5
-  },
-  "src/settings/SafetySettings.tsx": {
-    "native-control": 5,
-    "native-disabled": 1
-  },
-  "src/settings/SettingsSheet.tsx": {
-    "native-control": 9,
-    "native-disabled": 3
-  },
-  "src/settings/SubscriptionPicker.tsx": {
-    "native-control": 2,
-    "native-disabled": 3
-  },
-  "src/settings/settings-form.ts": {
-    "banned-copy": 1
-  },
-  "src/settings/settings.css": {
-    "control-selector": 18,
-    "radius-literal": 4,
-    "spacing-literal": 31,
-    "stray-stylesheet": 1,
-    "type-literal": 3
-  },
   "src/shell/ActivityRail.tsx": {
     "native-control": 1
   },
@@ -235,10 +155,10 @@
   },
   "src/theme.css": {
     "control-selector": 2,
-    "half-pixel": 3,
+    "half-pixel": 2,
     "motion-literal": 7,
     "raw-colour": 15,
     "stray-stylesheet": 1,
-    "type-literal": 4
+    "type-literal": 2
   }
 }
