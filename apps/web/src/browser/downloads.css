@@ -1,8 +1,12 @@
+.download-row > .activity-row-head {
+  min-height: calc(var(--spacing) * 7);
+  padding-block: calc(var(--spacing) * 2) 0;
+}
+
 .download-detail {
   display: grid;
   gap: calc(var(--spacing) * 2);
-  margin-top: -6px;
-  padding: 0 calc(var(--spacing) * 2) 9px calc(var(--spacing) * 8);
+  padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 8);
 }
 
 .download-actions {

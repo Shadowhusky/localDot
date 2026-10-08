@@ -12,13 +12,10 @@ export interface ActivityRowProps {
   current?: boolean;
   future?: boolean;
   open?: boolean;
-  // Without it the row has nothing to unfold and is not a button.
   onToggle?(trigger: HTMLButtonElement): void;
   children?: ReactNode;
 }
 
-// One line per step: what kind, what happened, how long, and how it ended. The whole line unfolds
-// the step's output, change or screenshot in place; Escape folds it again.
 export function ActivityRow({
   id,
   view,
@@ -34,6 +31,15 @@ export function ActivityRow({
       <span className="activity-row-title">{view.title}</span>{" "}
       {view.metric && <span className="activity-row-metric num">{view.metric}</span>}{" "}
       <StatusGlyph state={view.state} label={view.stateLabel} />
+      {view.reason && (
+        <>
+          {" "}
+          <span className="activity-row-reason">
+            {view.notSent && <Badge tone="danger">Not sent</Badge>}
+            <span>{view.reason}</span>
+          </span>
+        </>
+      )}
     </>
   );
   return (
@@ -72,12 +78,6 @@ export function ActivityRow({
         <div className="activity-row-head" aria-current={current ? "step" : undefined}>
           {face}
         </div>
-      )}
-      {view.reason && (
-        <p className="activity-row-reason">
-          {view.notSent && <Badge tone="danger">Not sent</Badge>}
-          <span>{view.reason}</span>
-        </p>
       )}
       {onToggle && (
         <Collapse id={`${id}-detail`} open={open} className="activity-row-detail">

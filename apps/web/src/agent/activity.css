@@ -8,9 +8,8 @@
   flex-direction: column;
 }
 
-/* The rail itself never scrolls: its one ScrollArea does, between the label and the usage line. The
-   scroller reaches 8 px past the rail on each side, so row highlights have room to breathe while
-   their text stays on the rail's edges. */
+/* The scroller reaches 8 px past the rail on each side, so row highlights bleed while their text
+   stays on the rail's edges. */
 .activity-scroll {
   flex: 1;
   margin-inline: calc(var(--spacing) * -2);
@@ -21,6 +20,19 @@
   display: flex;
   flex-direction: column;
   padding-bottom: calc(var(--spacing) * 4);
+}
+
+/* Room for the Jump to latest pill, so it never covers the list's end or a row just revealed. */
+.activity-body:has(> .activity-jump) {
+  --_jump-room: calc(var(--spacing) * 12);
+}
+
+.activity-body:has(> .activity-jump) > .activity-scroll {
+  scroll-padding-bottom: var(--_jump-room);
+}
+
+.activity-body:has(> .activity-jump) .activity-content {
+  padding-bottom: var(--_jump-room);
 }
 
 .activity-content > :first-child {
@@ -40,7 +52,6 @@
   background-color: var(--color-void);
 }
 
-/* Where the steps slide under the stuck header, a short fade instead of a hard edge. */
 .plan-head::after {
   content: "";
   position: absolute;
@@ -64,7 +75,6 @@
     var(--font-ui);
 }
 
-/* One segment per item: done, in progress, next, skipped. It fades in once the list is out of view. */
 .plan-progress {
   flex: 1;
   min-width: 0;
@@ -145,7 +155,9 @@
   grid-template-columns: 16px minmax(0, 1fr);
   column-gap: calc(var(--spacing) * 2);
   align-items: start;
-  padding: 5px 0;
+  align-content: center;
+  min-height: calc(var(--spacing) * 7);
+  padding-block: var(--spacing);
   color: var(--color-fg-2);
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
   transition: color var(--dur-fade) var(--ease-standard);
@@ -180,7 +192,6 @@
   margin-top: calc(var(--spacing) * 3);
 }
 
-/* The header's highlight takes the same bleed as a row's; what it opens stays on the text edge. */
 .activity-disclosure,
 .activity-group {
   margin-inline: calc(var(--spacing) * -2);
@@ -191,7 +202,7 @@
   margin-inline: calc(var(--spacing) * 2);
 }
 
-/* A run's name over its count, the same in every run, so the headers keep one rhythm. */
+/* A run's name over its count in every run, so the headers keep one rhythm. */
 .activity-group .ui-disclosure-label {
   flex-direction: column;
   align-items: flex-start;
@@ -256,7 +267,6 @@
     translate var(--dur-spring) var(--ease-spring);
 }
 
-/* A row that arrives eases up into place; nothing around it moves. */
 @starting-style {
   .activity-row {
     opacity: 0;
@@ -272,7 +282,7 @@
   align-items: center;
   width: 100%;
   min-height: calc(var(--spacing) * 9);
-  padding: 9px calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 2);
   border: 0;
   border-radius: inherit;
   background-color: transparent;
@@ -309,7 +319,6 @@ button.activity-row-head[data-pressed] {
   color: var(--color-fg-3);
 }
 
-/* The glyph keeps its column whether or not the row has a metric. */
 .activity-row-head > .ui-status-glyph {
   grid-column: 4;
 }
@@ -338,6 +347,16 @@ button.activity-row-head[data-pressed] {
   background-color: var(--color-state-hover);
 }
 
+@media (hover: hover) {
+  .activity-row[data-current] > button.activity-row-head:not([data-pressed]):hover {
+    background-color: var(--color-state-pressed);
+  }
+}
+
+.activity-row[data-current] > button.activity-row-head[data-pressed] {
+  background-color: var(--color-state-selected);
+}
+
 .activity-row[data-future] {
   opacity: var(--opacity-disabled);
 }
@@ -347,14 +366,14 @@ button.activity-row-head[data-pressed] {
 }
 
 .activity-row-reason {
-  margin-top: -6px;
-  padding: 0 calc(var(--spacing) * 2) 9px calc(var(--spacing) * 8);
+  grid-column: 2 / -1;
+  grid-row: 2;
+  min-width: 0;
   color: var(--color-fg-2);
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   overflow-wrap: anywhere;
 }
 
-/* The chip runs inline, so the reason flows on beside it rather than dropping under it. */
 .activity-row-reason > .ui-badge {
   margin-right: calc(var(--spacing) * 2);
   vertical-align: 1px;
@@ -465,7 +484,7 @@ button.activity-row-head[data-pressed] {
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
-.rail.r.activity-rail > .activity-empty {
+.activity-content > .activity-empty:first-child {
   padding-top: 0;
 }
 
@@ -545,7 +564,6 @@ button.activity-row-head[data-pressed] {
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
-/* Over the list, so it never takes a line from it. It rises in when the reader leaves the end. */
 .activity-jump {
   position: absolute;
   z-index: 3;
@@ -806,12 +824,11 @@ button.activity-usage-trigger:active {
 @media (--coarse) {
   .activity-row-head {
     min-height: calc(var(--spacing) * 11);
-    padding-block: 13px;
+    padding-block: calc(var(--spacing) * 3);
   }
 
-  .activity-row-reason {
-    margin-top: -10px;
-    padding-bottom: 13px;
+  .activity-body:has(> .activity-jump) {
+    --_jump-room: calc(var(--spacing) * 15);
   }
 
   .activity-jump,
