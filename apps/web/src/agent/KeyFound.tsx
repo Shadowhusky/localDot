@@ -1,5 +1,5 @@
+import { CLAUDE_PLAN_REFUSAL } from "@localdot/protocol";
 import { useState } from "react";
-import { CLAUDE_PLAN_REFUSAL } from "../keys/binding.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { KeyGuard } from "./useKeyGuard.ts";
 import "./key-guard.css";

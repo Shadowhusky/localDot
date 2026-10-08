@@ -1,6 +1,6 @@
+import { CLAUDE_PLAN_REFUSAL } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useId, useState } from "react";
-import { CLAUDE_PLAN_REFUSAL } from "../keys/binding.ts";
 import {
   groupOf,
   type ModelRole,

@@ -26,6 +26,8 @@ export interface KeyScan {
 // one, so it has no provider and is refused wherever it sits, quoted or after an export line.
 const CLAUDE_PLAN = /sk-ant-(?:oat|ort|sid)\d{2}-/;
 export const claudePlanToken = (text: string) => CLAUDE_PLAN.test(text);
+export const CLAUDE_PLAN_REFUSAL =
+  "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
 
 const RULES: readonly { pattern: RegExp; hint: KeyHint; provider?: KeyMatch["provider"] }[] = [
   {

@@ -1,4 +1,5 @@
 import {
+  CLAUDE_PLAN_REFUSAL,
   claudePlanToken,
   type HTTP_FORMATS,
   type LLM_PROVIDERS,
@@ -112,9 +113,6 @@ export function bindingOf(d: KeyDraft): DraftCheck {
   }
   return { ok: true, binding: { id, kind: "http", hosts, header, format: d.format } };
 }
-
-export const CLAUDE_PLAN_REFUSAL =
-  "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
 
 export const valueHint = (d: KeyDraft) =>
   d.kind === "llm" && d.provider === "anthropic" ? "sk-ant-api" : undefined;
