@@ -129,10 +129,10 @@ describe("KeysSheet", () => {
     vi.spyOn(performance, "now").mockImplementation(() => now);
     const remove = vi.fn(async () => {});
     render(<KeyList active disabled={false} keys={[weather]} remove={remove} />);
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     // A suspended tab can resume with an expired deadline before its queued timeout executes.
     now = 5000;
-    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm remove weather" }));
     expect(remove).not.toHaveBeenCalled();
     await act(async () => {});
   });
@@ -142,7 +142,7 @@ describe("KeysSheet", () => {
     const { rerender } = render(
       <KeyList active disabled={false} keys={[weather]} remove={remove} />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     rerender(
       <KeyList
         active
@@ -151,8 +151,8 @@ describe("KeysSheet", () => {
         remove={remove}
       />,
     );
-    expect(screen.queryByRole("button", { name: "Confirm deleting weather" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    expect(screen.queryByRole("button", { name: "Confirm remove weather" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     expect(remove).not.toHaveBeenCalled();
   });
 
@@ -160,9 +160,9 @@ describe("KeysSheet", () => {
     const pending = Promise.withResolvers<void>();
     const remove = vi.fn(() => pending.promise);
     render(<KeyList active disabled={false} keys={[weather]} remove={remove} />);
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     const button = screen.getByRole("button", {
-      name: "Confirm deleting weather",
+      name: "Confirm remove weather",
     });
     try {
       act(() => {
@@ -186,9 +186,9 @@ describe("KeysSheet", () => {
       );
       type("Name", "weather");
       type("Key", "fake-private-value");
-      fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+      fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
       const button = screen.getByRole("button", {
-        name: "Confirm deleting weather",
+        name: "Confirm remove weather",
       });
       const form = screen.getByRole("form");
       const submit = () =>
@@ -272,8 +272,8 @@ describe("KeysSheet", () => {
     fireEvent.submit(screen.getByRole("form"));
     expect(save).toHaveBeenCalledOnce();
     expect(field("Name").matches(":disabled")).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     expect(remove).not.toHaveBeenCalled();
     const close = screen.getByRole("button", { name: "Close keys" });
     close.focus();
@@ -296,17 +296,17 @@ describe("KeysSheet", () => {
     const remove = vi.fn(async () => {});
     const keys = controller({ remove, keys: [weather] });
     const { rerender } = render(<KeysSheet open keys={keys} onClose={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     act(() => vi.advanceTimersByTime(4000));
-    expect(screen.queryByRole("button", { name: "Confirm deleting weather" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    expect(screen.queryByRole("button", { name: "Confirm remove weather" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     rerender(<KeysSheet open={false} keys={keys} onClose={() => {}} />);
     rerender(<KeysSheet open keys={keys} onClose={() => {}} />);
-    expect(screen.queryByRole("button", { name: "Confirm deleting weather" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    expect(screen.queryByRole("button", { name: "Confirm remove weather" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     rerender(<KeysSheet open keys={{ ...keys, health: { online: false } }} onClose={() => {}} />);
     rerender(<KeysSheet open keys={keys} onClose={() => {}} />);
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     expect(remove).not.toHaveBeenCalled();
   });
 
@@ -319,9 +319,9 @@ describe("KeysSheet", () => {
     );
     type("Name", "weather");
     type("Key", "fake-private-value");
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting weather" }));
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm remove weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Removing… weather" }));
     fireEvent.submit(screen.getByRole("form"));
     expect(remove).toHaveBeenCalledOnce();
     expect(save).not.toHaveBeenCalled();
@@ -423,9 +423,9 @@ describe("KeysSheet", () => {
     const remove = vi.fn(async () => {});
     render(<KeysSheet open keys={controller({ keys: [weather], remove })} onClose={() => {}} />);
     expect(screen.getByText("api.weather.example · Authorization")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Delete weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
     expect(remove).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Confirm deleting weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm remove weather" }));
     expect(remove).toHaveBeenCalledWith("weather");
   });
 
@@ -533,5 +533,14 @@ describe("KeysSheet", () => {
     expect(onClose).toHaveBeenCalledOnce();
     view.rerender(sheet(false));
     expect(document.activeElement).toBe(opener);
+  });
+
+  it("names each remove button with its visible label", () => {
+    render(<KeyList active disabled={false} keys={[weather]} remove={async () => {}} />);
+    const remove = screen.getByRole("button", { name: "Remove weather" });
+    expect(remove.textContent).toBe("Remove");
+    fireEvent.click(remove);
+    const confirm = screen.getByRole("button", { name: "Confirm remove weather" });
+    expect(confirm.textContent).toBe("Confirm remove");
   });
 });
