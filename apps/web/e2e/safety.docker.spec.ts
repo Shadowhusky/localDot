@@ -34,10 +34,10 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
     const owner = await startSafetyTask(page, f),
       request = fixtureRequest(page, f);
     await approveCurrent(page, f); // the explicitly reviewed synthetic HTML file
-    await expect(page.locator(".approval-card")).toContainText("Send message");
+    await expect(page.locator(".approval-card")).toContainText("Work in its computer");
     const initial = (await f.state(owner))[0];
     const card = initial?.approval;
-    if (!card) throw new Error("The high-risk public card is missing.");
+    if (!card) throw new Error("The public card is missing.");
     expect((await f.effects())[0]?.sendCount).toBe(0);
     const answer = {
       approvalId: card.approvalId,

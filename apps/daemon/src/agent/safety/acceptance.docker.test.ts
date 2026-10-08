@@ -1,7 +1,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  DEFAULT_AUTONOMY,
+  CAREFUL_AUTONOMY,
   ReplacementRecord,
   sealSecret,
   ULID_PATTERN,
@@ -71,7 +71,7 @@ async function setup(name: string, scenario: "safety" | "recovery", failRetireme
         price: { inputUSDPerMTok: 1, outputUSDPerMTok: 1 },
       },
       taskBudgetUSD: 0.05,
-      autonomy: DEFAULT_AUTONOMY,
+      autonomy: CAREFUL_AUTONOMY,
     });
     expect(settings.status, await settings.text()).toBe(200);
     const created = await request("/api/cells", "POST", { scale: 1 });
@@ -114,13 +114,13 @@ async function setup(name: string, scenario: "safety" | "recovery", failRetireme
 }
 
 describe.skipIf(!enabled)("assembled safety routes with actual keyd and Docker effects", () => {
-  it("a stale or reused public approval cannot create a second high-risk effect", async () => {
+  it("a stale or reused public approval cannot create a second effect", async () => {
     const f = await setup("approval", "safety");
     try {
       await f.approve(); // synthetic HTML write, through the real public card
       const c = await f.pending();
-      expect(c.actionClass).toBe("send");
-      expect(c.risk).toBe("high");
+      expect(c.actionClass).toBe("computer");
+      expect(c.risk).toBe("medium");
       expect((await f.f.effects())[0]?.sendCount).toBe(0);
       const answer = {
         approvalId: c.approvalId,

@@ -72,7 +72,8 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
       .getByRole("checkbox", { name: "Use the configured default", exact: true })
       .uncheck();
     await settings.getByLabel("Task ceiling — USD", { exact: true }).fill("0.05");
-    await expect(settings.getByLabel("Send messages", { exact: true })).toHaveValue("ask");
+    await expect(settings.getByLabel("Send as you", { exact: true })).toHaveValue("ask");
+    await settings.getByLabel("Work in its computer", { exact: true }).selectOption("ask");
     await settings.getByRole("button", { name: "Save settings", exact: true }).click();
     await expect(settings).toContainText("Saved choices");
     await page.screenshot({ path: info.outputPath("safety-settings.png"), fullPage: true });

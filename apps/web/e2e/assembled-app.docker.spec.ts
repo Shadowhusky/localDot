@@ -106,6 +106,7 @@ for (const pending of ["wait", "shell"] as const)
         .getByRole("checkbox", { name: "Use the configured default", exact: true })
         .uncheck();
       await settings.getByLabel("Task ceiling — USD", { exact: true }).fill("0.05");
+      await settings.getByLabel("Work in its computer", { exact: true }).selectOption("ask");
       await expect(
         settings.getByRole("button", { name: "Save settings", exact: true }),
       ).toBeEnabled();
