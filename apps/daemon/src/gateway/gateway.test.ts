@@ -1367,6 +1367,18 @@ describe("ActionGateway drags, moves and held buttons", () => {
     expect((await s.gateway.run(a.ctx, { verb: "click", point: { x: 5, y: 5 } })).ok).toBe(true);
   });
 
+  it("lets go at once of a button pressed just as its owner stopped", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx, forget } = agentCtx(s);
+    ctx.holdInput.mockImplementation((release: () => Promise<void>) => {
+      void release();
+      return forget;
+    });
+    expect((await s.gateway.run(ctx, { verb: "down" })).ok).toBe(true);
+    await vi.waitFor(() => expect(s.fake.calls.map((c) => c.path)).toContain("/release"));
+    expect((await s.gateway.run(ctx, { verb: "click", point: { x: 5, y: 5 } })).ok).toBe(true);
+  });
+
   it("lets go when a press fails", async () => {
     const s = setup({ hitTest: desk, input: () => ({ status: 504, body: "no raw press" }) });
     const { ctx } = agentCtx(s);

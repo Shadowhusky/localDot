@@ -64,6 +64,19 @@ describe("a mouse button the agent leaves down between actions", () => {
     await waiting;
   });
 
+  it("is let go of at once when it went down as the task stopped or paused", () => {
+    const stopped = fixture();
+    stopped.session.stop();
+    const late = vi.fn(async () => {});
+    stopped.session.holdInput(late);
+    expect(late).toHaveBeenCalledOnce();
+    const paused = fixture();
+    paused.session.requestSafetyPause(ulid());
+    const pausedLate = vi.fn(async () => {});
+    paused.session.holdInput(pausedLate);
+    expect(pausedLate).toHaveBeenCalledOnce();
+  });
+
   it("is let go of once only, and not at all after it came up on its own", () => {
     const f = fixture();
     f.session.requestSafetyPause(ulid());

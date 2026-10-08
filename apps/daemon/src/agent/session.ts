@@ -292,9 +292,11 @@ export class AgentSession {
     this.#repeatPauseHandler = handler;
   }
   // A button the agent left down is let go of before the user gets the screen, and when the task
-  // stops, ends, pauses, switches screens or replaces its brain; settlement waits for that.
+  // stops, ends, pauses, switches screens or replaces its brain; settlement waits for that. One
+  // pressed as any of those began is let go of at once.
   holdInput(release: () => Promise<void>): () => void {
     this.#held.add(release);
+    if (this.stopped || !this.#brain || this.#control || this.safetyPause) void this.releaseInput();
     return () => {
       this.#held.delete(release);
     };
@@ -1105,7 +1107,6 @@ export class AgentSession {
     const generation = this.generation;
     if (generation) this.retireBrain(generation);
     this.abort.abort(new SessionStoppedError());
-    void this.releaseInput();
     this.#screenReady = undefined;
     if (this.#screens && contain) {
       this.#screenClosing = this.#screens.close();

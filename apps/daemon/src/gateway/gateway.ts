@@ -266,8 +266,14 @@ export class ActionGateway {
       this.deps.heldButtonMs ?? HELD_BUTTON_MS,
     );
     timer.unref();
+    const held: HeldButton = { button, device, timer };
+    this.#held.set(ctx.cellId, held);
+    // The owner may let go at once (the task stopped as the button went down): set it first.
     const forget = ctx.holdInput?.(() => this.releaseHeld(ctx.cellId));
-    this.#held.set(ctx.cellId, { button, device, timer, ...(forget ? { forget } : {}) });
+    if (forget) {
+      if (this.#held.get(ctx.cellId) === held) held.forget = forget;
+      else forget();
+    }
   }
 
   // Another pointer action while a button is down restarts its time.
