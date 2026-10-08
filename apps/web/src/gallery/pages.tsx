@@ -3,6 +3,7 @@ import { Dot } from "../dot/Dot.tsx";
 import type { DotState } from "../dot/engine/states.ts";
 import { Glyph } from "../dot/Glyph.tsx";
 import { StageColumn } from "../shell/StageColumn.tsx";
+import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
 import { StillFrame } from "./StillFrame.tsx";
 
 export interface GalleryPage {
@@ -78,4 +79,10 @@ function StagePage() {
 export const GALLERY_PAGES: GalleryPage[] = [
   { id: "dot", title: "dot", about: "Every state at hero and badge size", Page: DotPage },
   { id: "stage", title: "Stage", about: "The lit stage around a still frame", Page: StagePage },
+  {
+    id: "overlays",
+    title: "Overlays",
+    about: "The kit's sheet, menu, popover and dialog",
+    Page: OverlaysPage,
+  },
 ];

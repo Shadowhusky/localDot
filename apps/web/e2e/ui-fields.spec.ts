@@ -148,7 +148,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await expect(page.getByRole("dialog", { name: "Autonomy" })).toBeVisible();
           await expect
             .poll(async () => {
-              const sheet = await page.locator(".ui-sheet").boundingBox();
+              const sheet = await page.locator(".ui-picker-sheet").boundingBox();
               return sheet && Math.round(sheet.y + sheet.height);
             })
             .toBe(844);
@@ -209,7 +209,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
         // above the sheet.
         const box = await backdrop.boundingBox();
         const sheetTop = await page.evaluate(
-          () => document.querySelector(".ui-sheet")?.getBoundingClientRect().top ?? Infinity,
+          () => document.querySelector(".ui-picker-sheet")?.getBoundingClientRect().top ?? Infinity,
         );
         if (!box) throw new Error("no backdrop");
         const corner = { x: box.x + 12, y: box.y + 12 };
@@ -316,11 +316,11 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const autonomy = picker(page, "Autonomy");
       await autonomy.scrollIntoViewIfNeeded();
       await autonomy.tap();
-      const sheet = page.locator(".ui-sheet");
+      const sheet = page.locator(".ui-picker-sheet");
       await expect(sheet).toBeVisible();
       await page.waitForTimeout(500);
       const rest = await sheet.boundingBox();
-      const head = await page.locator(".ui-sheet-head").boundingBox();
+      const head = await page.locator(".ui-picker-sheet-head").boundingBox();
       if (!rest || !head) throw new Error("no sheet");
       const x = head.x + head.width / 2;
       const y = head.y + head.height / 2;
@@ -350,10 +350,10 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const autonomy = picker(page, "Autonomy");
       await autonomy.scrollIntoViewIfNeeded();
       await autonomy.tap();
-      const sheet = page.locator(".ui-sheet");
+      const sheet = page.locator(".ui-picker-sheet");
       await settled(page);
       const rest = await sheet.boundingBox();
-      const head = await page.locator(".ui-sheet-head").boundingBox();
+      const head = await page.locator(".ui-picker-sheet-head").boundingBox();
       if (!rest || !head) throw new Error("no sheet");
       const grab = { x: head.x + head.width / 2, y: head.y + head.height / 2 };
       // It follows the finger exactly, and a finger that stopped lets it spring back.
@@ -416,7 +416,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const autonomy = picker(page, "Autonomy");
       await autonomy.scrollIntoViewIfNeeded();
       await autonomy.tap();
-      const sheet = page.locator(".ui-sheet");
+      const sheet = page.locator(".ui-picker-sheet");
       await expect(sheet).toBeVisible();
       const opening = await sheet.evaluate((element) =>
         element.getAnimations().map((animation) => (animation as CSSTransition).transitionProperty),

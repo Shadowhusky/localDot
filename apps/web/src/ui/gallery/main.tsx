@@ -1,3 +1,4 @@
+import "@localdot/protocol/csp";
 import "../stack.css";
 import "../../theme.css";
 import "../../app.css";
@@ -6,6 +7,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AtomsPage } from "./AtomsPage.tsx";
 import { FieldsPage } from "./FieldsPage.tsx";
+import { OverlaysPage } from "./OverlaysPage.tsx";
 
 const PAGES = {
   atoms: {
@@ -20,12 +22,20 @@ const PAGES = {
     note: "Text fields, choices, segmented controls, selects and searchable lists, in every state.",
     Page: FieldsPage,
   },
+  overlays: {
+    name: "Overlays",
+    title: "Overlays",
+    note: "Sheets, menus, popovers and dialogs, and how each one opens, closes and keeps your work.",
+    Page: OverlaysPage,
+  },
 };
 
 // A stand-in for the T01 gallery until it lands here, loading the same legacy styles it does.
 const query = new URLSearchParams(location.search);
 const midnight = query.get("appearance") === "midnight";
-const pageName = query.get("page") === "fields" ? "fields" : "atoms";
+const requested = query.get("page");
+const pageName: keyof typeof PAGES =
+  requested === "fields" || requested === "overlays" ? requested : "atoms";
 const { title, note, Page } = PAGES[pageName];
 if (midnight) document.documentElement.dataset.appearance = "midnight";
 

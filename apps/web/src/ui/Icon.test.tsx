@@ -12,6 +12,8 @@ const PLANNED: IconName[] = [
   "search",
   "check",
   "x",
+  // Not in the plan's list: the Back of a sheet's nested page (T08).
+  "chevron-left",
   "chevron-right",
   "chevron-down",
   "chevron-up",

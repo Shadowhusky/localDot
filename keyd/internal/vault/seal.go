@@ -9,6 +9,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,7 +19,10 @@ import (
 // the plaintext: ECDH P-256 with an ephemeral sender key, HKDF-SHA256 over the shared secret
 // (salt = sender public key || keyd public key), AES-256-GCM with the secret's binding in the AAD.
 // WebCrypto can produce it with ECDH deriveBits, HKDF deriveKey and AES-GCM encrypt.
-const sealInfo = "localdot-keyd seal v1"
+const (
+	sealInfo    = "localdot-keyd seal v1"
+	bindingInfo = "localdot-keyd binding v1"
+)
 
 var errSealed = errors.New("vault: cannot open the sealed secret")
 
@@ -119,17 +123,28 @@ func sealAEAD(priv *ecdh.PrivateKey, peer *ecdh.PublicKey, senderPub, recipientP
 	return cipher.NewGCM(block)
 }
 
-// sealAAD binds a sealed value to its record: the id and every field that says where the secret
-// may go, as the JSON array [id, kind, provider, baseURL, hosts, header, format, methods, paths]
-// with "" and [] for what is absent. JSON.stringify writes the same bytes except at U+2028 and
-// U+2029, which Go escapes and it does not, so a seal over a record holding either never opens:
-// it fails closed.
+// sealAAD binds a sealed value to its record (see bindingFields).
 func sealAAD(rec Record) []byte {
+	return append([]byte(sealInfo+":"), bindingFields(rec)...)
+}
+
+// bindingFields is the id and every field that says where the secret may go, as the JSON array
+// [id, kind, provider, baseURL, hosts, header, format, methods, paths] with "" and [] for what is
+// absent. JSON.stringify writes the same bytes except at U+2028 and U+2029, which Go escapes and it
+// does not, so a seal over a record holding either never opens: it fails closed.
+func bindingFields(rec Record) []byte {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
 	enc.Encode([]any{rec.ID, rec.Kind, rec.Provider, rec.BaseURL, list(rec.Hosts), rec.Header, rec.Format, list(rec.Methods), list(rec.Paths)})
-	return append([]byte(sealInfo+":"), bytes.TrimSuffix(buf.Bytes(), []byte("\n"))...)
+	return bytes.TrimSuffix(buf.Bytes(), []byte("\n"))
+}
+
+// bindingOf is what the store keeps beside rec's value: a digest of rec's binding, which the
+// index cannot change without the value refusing to read.
+func bindingOf(rec Record) string {
+	sum := sha256.Sum256(append([]byte(bindingInfo+":"), bindingFields(rec)...))
+	return hex.EncodeToString(sum[:])
 }
 
 func list(v []string) []string {

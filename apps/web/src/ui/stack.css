@@ -6,6 +6,7 @@
 @import "./actions.css";
 @import "./fields.css";
 @import "./pickers.css";
+@import "./overlays.css";
 @import "./structure.css";
 /* Only the kit is scanned, so words in legacy files cannot mint utilities that outrank legacy rules
    of the same name. Add a folder here when it moves onto the kit. */
@@ -14,3 +15,5 @@
 @source not "./**/*.test.*";
 @source not "./_spike";
 @source not "./gallery";
+/* Words in the kit's prose and code that would otherwise mint utilities nothing uses. */
+@source not inline("{container,fixed,visible,inline,transition}");

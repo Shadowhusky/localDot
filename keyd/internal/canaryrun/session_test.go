@@ -84,7 +84,7 @@ func TestSessionUsesOnlyItsGeneratedKeyAndIsolatedTransport(t *testing.T) {
 	}
 }
 func TestSessionRefusesUnsafeOrReusedDirectoriesBeforeOpening(t *testing.T) {
-	for _, fault := range []string{"relative", "symlink", "public", "nonempty", "file", "cell", "run", "cancelled"} {
+	for _, fault := range []string{"relative", "symlink", "symlinked parent", "public", "nonempty", "file", "cell", "run", "cancelled"} {
 		t.Run(fault, func(t *testing.T) {
 			c := config(t)
 			ctx, cancel := context.WithCancel(context.Background())
@@ -98,6 +98,12 @@ func TestSessionRefusesUnsafeOrReusedDirectoriesBeforeOpening(t *testing.T) {
 					t.Fatal("fixture link")
 				}
 				c.Directory = path
+			case "symlinked parent":
+				link := filepath.Join(config(t).Directory, "link")
+				if os.Symlink(filepath.Dir(c.Directory), link) != nil {
+					t.Fatal("fixture link")
+				}
+				c.Directory = filepath.Join(link, filepath.Base(c.Directory))
 			case "public":
 				os.Chmod(c.Directory, 0755)
 			case "nonempty":

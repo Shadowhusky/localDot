@@ -3,6 +3,7 @@ package vault
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -40,7 +41,7 @@ func TestAFailedPutChangesNothing(t *testing.T) {
 		}
 		rec, _ := v.Record("weather")
 		got, err := v.Value("weather")
-		stored, _ := store.Get("weather")
+		stored, _ := store.Get("weather", testBinding)
 		if rec.Hosts[0] != "api.example.test" || err != nil || !bytes.Equal(got, fakeValue) || !bytes.Equal(stored, fakeValue) {
 			t.Errorf("%s: after a failed Put the hosts are %v, the value %q (%v), the store %q", name, rec.Hosts, got, err, stored)
 		}
@@ -50,7 +51,7 @@ func TestAFailedPutChangesNothing(t *testing.T) {
 		if _, ok := v.Record("fresh"); ok {
 			t.Errorf("%s: a new record outlived its failed Put", name)
 		}
-		if _, err := store.Get("fresh"); !errors.Is(err, ErrNotFound) {
+		if _, err := store.Get("fresh", bindingOf(httpRecord("fresh"))); !errors.Is(err, ErrNotFound) {
 			t.Errorf("%s: a new value outlived its failed Put: %v", name, err)
 		}
 	}
@@ -312,11 +313,11 @@ type flakyStore struct {
 	getFails, deleteFails bool
 }
 
-func (f *flakyStore) Get(id string) ([]byte, error) {
+func (f *flakyStore) Get(id, binding string) ([]byte, error) {
 	if f.getFails {
 		return nil, errors.New("flaky: read refused")
 	}
-	return f.Memory.Get(id)
+	return f.Memory.Get(id, binding)
 }
 
 func (f *flakyStore) Delete(id string) error {
@@ -444,8 +445,65 @@ func TestAFailedRenameKeepsTheOldValue(t *testing.T) {
 		t.Fatal("Put succeeded with the index's rename refused")
 	}
 	got, err := v.Value("weather")
-	stored, _ := store.Get("weather")
+	stored, _ := store.Get("weather", testBinding)
 	if err != nil || !bytes.Equal(got, fakeValue) || !bytes.Equal(stored, fakeValue) {
 		t.Fatalf("after a refused rename the value is %q (%v), the store %q", got, err, stored)
+	}
+}
+
+// A same-user process can rewrite the index, or start another keyd over an index of its own, but it
+// cannot write the store's copy of the binding. A value must never be read for a binding it was not
+// stored with.
+func TestARewrittenIndexCannotRebindAStoredValue(t *testing.T) {
+	weather := httpRecord("weather")
+	fixedBase := Record{ID: "model", Kind: KindLLM, Provider: "openai"}
+	userBase := Record{ID: "model", Kind: KindLLM, Provider: "openai-compatible", BaseURL: "https://llm.example.test/v1"}
+	edits := map[string]struct {
+		stored Record
+		edit   func(*Record)
+	}{
+		"host":       {weather, func(r *Record) { r.Hosts = []string{"attacker.example.test"} }},
+		"extra host": {weather, func(r *Record) { r.Hosts = append(r.Hosts, "attacker.example.test") }},
+		"header":     {weather, func(r *Record) { r.Header = "X-Leak" }},
+		"format":     {weather, func(r *Record) { r.Format = "bearer" }},
+		"methods":    {weather, func(r *Record) { r.Methods = []string{"POST"} }},
+		"paths":      {weather, func(r *Record) { r.Paths = []string{"/"} }},
+		"kind": {weather, func(r *Record) {
+			*r = Record{ID: r.ID, Kind: KindLLM, Provider: "openai-compatible", BaseURL: "https://attacker.example.test/v1"}
+		}},
+		"provider": {fixedBase, func(r *Record) { r.Provider = "mistral" }},
+		"base URL": {userBase, func(r *Record) { r.BaseURL = "https://attacker.example.test/v1" }},
+	}
+	stores := map[string]func(*testing.T) Store{
+		"memory":   func(*testing.T) Store { return NewMemory() },
+		"keychain": func(t *testing.T) Store { k, _ := fakeKeychain(t); return k },
+	}
+	for storeName, newStore := range stores {
+		for name, c := range edits {
+			t.Run(storeName+"/"+name, func(t *testing.T) {
+				store := newStore(t)
+				v, _ := openTemp(t, store)
+				if err := v.Put(c.stored, fakeValue); err != nil {
+					t.Fatal(err)
+				}
+				rec, _ := v.Record(c.stored.ID)
+				c.edit(&rec)
+				data, err := json.Marshal(indexFile{V: indexVersion, Secrets: []Record{rec}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				path := filepath.Join(t.TempDir(), "secrets.json")
+				if err := os.WriteFile(path, data, 0o600); err != nil {
+					t.Fatal(err)
+				}
+				forged, err := Open(store, path)
+				if err != nil {
+					return
+				}
+				if got, err := forged.Value(rec.ID); err == nil || bytes.Equal(got, fakeValue) || carries(err.Error(), fakeValue) {
+					t.Fatalf("the rewritten index reads the value %q (%v)", got, err)
+				}
+			})
+		}
 	}
 }

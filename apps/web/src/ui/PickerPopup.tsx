@@ -256,7 +256,7 @@ export function PickerPopup({
     return createPortal(
       <div
         ref={surface}
-        className="ui-picker ui-popover"
+        className="ui-picker ui-picker-popover"
         {...(dialog && { role: "dialog", "aria-label": title })}
         data-closing={closing ? "" : undefined}
         onPointerDown={keepFocus}
@@ -331,7 +331,7 @@ export function PickerPopup({
       />
       <div
         ref={surface}
-        className="ui-picker ui-sheet"
+        className="ui-picker ui-picker-sheet"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
@@ -343,18 +343,18 @@ export function PickerPopup({
         }}
       >
         <div
-          className="ui-sheet-head"
+          className="ui-picker-sheet-head"
           onPointerDown={grab}
           onPointerMove={follow}
           onPointerUp={letGo}
           onPointerCancel={letGo}
         >
-          <span className="ui-sheet-grabber" aria-hidden="true" />
-          <h2 id={titleId} className="ui-sheet-title">
+          <span className="ui-picker-sheet-grabber" aria-hidden="true" />
+          <h2 id={titleId} className="ui-picker-sheet-title">
             {title}
           </h2>
           <IconButton
-            className="ui-sheet-close"
+            className="ui-picker-sheet-close"
             label="Close"
             icon="x"
             size={32}

@@ -57,7 +57,7 @@
   }
 
   /* It grows out of its trigger and goes back the same way, faster. */
-  .ui-popover {
+  .ui-picker-popover {
     min-height: 0;
     padding: var(--spacing);
     border-radius: var(--radius-lg);
@@ -69,13 +69,13 @@
   }
 
   @starting-style {
-    .ui-popover {
+    .ui-picker-popover {
       opacity: 0;
       scale: 0.97;
     }
   }
 
-  .ui-popover[data-closing] {
+  .ui-picker-popover[data-closing] {
     opacity: 0;
     scale: 0.97;
     transition:
@@ -227,7 +227,7 @@
   }
 
   /* A bottom sheet rises from the edge and leaves the same way; a drag on its head moves it 1:1. */
-  .ui-sheet {
+  .ui-picker-sheet {
     right: 0;
     bottom: 0;
     left: 0;
@@ -239,23 +239,23 @@
     transition: translate var(--dur-sheet) var(--ease-spring);
   }
 
-  .ui-sheet[data-full] {
+  .ui-picker-sheet[data-full] {
     top: calc(env(safe-area-inset-top) + var(--spacing) * 3);
     max-height: none;
   }
 
   @starting-style {
-    .ui-sheet {
+    .ui-picker-sheet {
       translate: 0 100%;
     }
   }
 
-  .ui-sheet[data-closing] {
+  .ui-picker-sheet[data-closing] {
     translate: 0 100%;
     transition: translate var(--dur-sheet) var(--ease-exit);
   }
 
-  .ui-sheet-head {
+  .ui-picker-sheet-head {
     position: relative;
     display: grid;
     flex-shrink: 0;
@@ -266,14 +266,14 @@
     cursor: grab;
   }
 
-  .ui-sheet-grabber {
+  .ui-picker-sheet-grabber {
     width: calc(var(--spacing) * 9);
     height: var(--spacing);
     border-radius: var(--radius-full);
     background-color: var(--color-fg-4);
   }
 
-  .ui-sheet-title {
+  .ui-picker-sheet-title {
     color: var(--color-fg-1);
     font:
       var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
@@ -281,54 +281,54 @@
     text-align: center;
   }
 
-  .ui-sheet-close {
+  .ui-picker-sheet-close {
     position: absolute;
     top: calc(var(--spacing) * 3);
     right: calc(var(--spacing) * 3);
   }
 
-  .ui-sheet .ui-combobox-search {
+  .ui-picker-sheet .ui-combobox-search {
     margin-bottom: 0;
     padding: 0 calc(var(--spacing) * 4) calc(var(--spacing) * 3);
   }
 
-  .ui-sheet .ui-listbox {
+  .ui-picker-sheet .ui-listbox {
     padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 2);
   }
 
   /* Rows at the system's reading size, as the trigger is on a touch screen. */
-  .ui-sheet .ui-option {
+  .ui-picker-sheet .ui-option {
     min-height: calc(var(--spacing) * 12);
     padding: 0 calc(var(--spacing) * 3);
     font-size: var(--text-title-2);
     line-height: var(--text-title-2--line-height);
   }
 
-  .ui-sheet .ui-option-note {
+  .ui-picker-sheet .ui-option-note {
     font-size: var(--text-body);
     line-height: var(--text-body--line-height);
   }
 
-  .ui-sheet .ui-option[data-two-line] {
+  .ui-picker-sheet .ui-option[data-two-line] {
     min-height: calc(var(--spacing) * 14);
   }
 
   /* On a touch screen a row lights while pressed, not because it is the list's active row. */
-  .ui-sheet .ui-option[data-active] {
+  .ui-picker-sheet .ui-option[data-active] {
     background-color: transparent;
   }
 
-  .ui-sheet .ui-listbox:focus-visible .ui-option[data-active],
-  .ui-sheet .ui-option:active {
+  .ui-picker-sheet .ui-listbox:focus-visible .ui-option[data-active],
+  .ui-picker-sheet .ui-option:active {
     background-color: var(--color-state-pressed);
   }
 
-  .ui-sheet .ui-listbox-heading {
+  .ui-picker-sheet .ui-listbox-heading {
     padding-inline: calc(var(--spacing) * 3);
   }
 
   @media (--coarse) {
-    .ui-popover .ui-option {
+    .ui-picker-popover .ui-option {
       min-height: calc(var(--spacing) * 11);
     }
   }
@@ -338,23 +338,23 @@
       transition: none;
     }
 
-    .ui-popover,
-    .ui-popover[data-closing] {
+    .ui-picker-popover,
+    .ui-picker-popover[data-closing] {
       scale: none;
     }
 
-    .ui-sheet {
+    .ui-picker-sheet {
       transition: opacity var(--dur-sheet) var(--ease-standard);
     }
 
     @starting-style {
-      .ui-sheet {
+      .ui-picker-sheet {
         translate: none;
         opacity: 0;
       }
     }
 
-    .ui-sheet[data-closing] {
+    .ui-picker-sheet[data-closing] {
       translate: none;
       opacity: 0;
       transition: opacity var(--dur-exit) var(--ease-exit);
@@ -362,8 +362,8 @@
   }
 
   @media (forced-colors: active) {
-    .ui-popover,
-    .ui-sheet {
+    .ui-picker-popover,
+    .ui-picker-sheet {
       border: 1px solid CanvasText;
     }
 

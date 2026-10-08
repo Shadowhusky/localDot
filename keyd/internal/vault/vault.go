@@ -1,5 +1,6 @@
 // Package vault keeps keyd's secrets: values in a Store, metadata in an index file that never
-// holds a value.
+// holds a value. The Store keeps each value with a digest of its binding, so an index rewritten
+// outside keyd cannot send a stored value anywhere else.
 package vault
 
 import (
@@ -87,22 +88,46 @@ type indexFile struct {
 	Secrets []Record `json:"secrets"`
 }
 
-// Vault is safe for concurrent use.
+// Vault is safe for concurrent use. Every request looks records up, and a Keychain call can run
+// to its deadline, so mu guards only the maps and is never held across a store call; change orders
+// Put and Delete.
 type Vault struct {
 	store   Store
 	path    string
 	now     func() time.Time
 	write   func(path string, data []byte) error
+	change  sync.Mutex
 	mu      sync.Mutex
 	records map[string]Record
 	cache   map[string][]byte
+	reads   map[string]*read
+	failed  map[string]failure
+}
+
+// read is a store read that every caller of Value for the secret waits on.
+type read struct {
+	done  chan struct{}
+	value []byte
+	err   error
+}
+
+// A failed read is held this long, so the requests behind it fail fast instead of each waiting out
+// another read of a locked or stalled Keychain.
+const failureHold = 5 * time.Second
+
+type failure struct {
+	err   error
+	until time.Time
 }
 
 // Open loads the index at path; a missing file is an empty vault. An empty path keeps the index
 // in memory only, for a vault whose values are in memory too. An index keyd could not have written
 // is refused whole.
 func Open(store Store, path string) (*Vault, error) {
-	v := &Vault{store: store, path: path, now: time.Now, write: writeFileAtomic, records: map[string]Record{}, cache: map[string][]byte{}}
+	v := &Vault{
+		store: store, path: path, now: time.Now, write: writeFileAtomic,
+		records: map[string]Record{}, cache: map[string][]byte{}, reads: map[string]*read{}, failed: map[string]failure{},
+	}
 	if path == "" {
 		return v, nil
 	}
@@ -150,69 +175,94 @@ func (v *Vault) Put(rec Record, value []byte) error {
 		return err
 	}
 	rec = rec.clone()
+	v.change.Lock()
+	defer v.change.Unlock()
 	v.mu.Lock()
-	defer v.mu.Unlock()
 	now := v.now().UTC()
 	rec.CreatedAt, rec.UpdatedAt = now, now
 	old, had := v.records[rec.ID]
 	var prev []byte
 	if had {
 		rec.CreatedAt = old.CreatedAt
-		prev, _ = v.valueLocked(rec.ID)
+		prev = v.cache[rec.ID]
 	}
-	if err := v.store.Put(rec.ID, value); err != nil {
+	v.mu.Unlock()
+	if had && prev == nil {
+		prev, _ = v.store.Get(rec.ID, bindingOf(old))
+	}
+	if err := v.store.Put(rec.ID, value, bindingOf(rec)); err != nil {
 		if !errors.Is(err, errUnchanged) {
-			v.restoreValueLocked(rec.ID, prev)
+			v.restore(rec.ID, old, prev)
 		}
 		return err
 	}
+	v.mu.Lock()
 	v.records[rec.ID] = rec
-	if err := v.saveLocked(); err != nil {
-		if had {
-			v.records[rec.ID] = old
-		} else {
-			delete(v.records, rec.ID)
-		}
-		// A rename that landed before its directory sync failed left the new index on disk; if the
-		// old one cannot be put back, the index may name either binding, so neither keeps a value.
-		if errors.Is(err, errNotSynced) && v.saveLocked() != nil {
-			prev = nil
-		}
-		v.restoreValueLocked(rec.ID, prev)
-		return err
+	err := v.saveLocked()
+	if err == nil {
+		v.settleLocked(rec.ID, slices.Clone(value))
+		v.mu.Unlock()
+		return nil
 	}
-	v.cache[rec.ID] = slices.Clone(value)
-	return nil
+	if had {
+		v.records[rec.ID] = old
+	} else {
+		delete(v.records, rec.ID)
+	}
+	// A rename that landed before its directory sync failed left the new index on disk; if the
+	// old one cannot be put back, the index may name either binding, so neither keeps a value.
+	if errors.Is(err, errNotSynced) && v.saveLocked() != nil {
+		prev = nil
+	}
+	v.mu.Unlock()
+	v.restore(rec.ID, old, prev)
+	return err
 }
 
-// restoreValueLocked undoes a store write that Put cannot keep. Without an old value to put back,
-// it deletes the item, so a restored record never meets the new value; and if the item cannot be
-// deleted, the record leaves memory, so this process fails closed.
-func (v *Vault) restoreValueLocked(id string, prev []byte) {
-	if prev != nil {
-		v.cache[id] = prev
-		if v.store.Put(id, prev) == nil {
-			return
-		}
-	} else {
-		delete(v.cache, id)
+// restore undoes a store write that Put cannot keep. Without an old value to put back, it deletes
+// the item, so a restored record never meets the new value; and if the item cannot be deleted, the
+// record leaves memory, so this process fails closed.
+func (v *Vault) restore(id string, old Record, prev []byte) {
+	var deleted error
+	if prev == nil || v.store.Put(id, prev, bindingOf(old)) != nil {
+		deleted = v.store.Delete(id)
 	}
-	if err := v.store.Delete(id); err != nil && !errors.Is(err, ErrNotFound) && prev == nil {
+	v.mu.Lock()
+	defer v.mu.Unlock()
+	v.settleLocked(id, prev)
+	if prev == nil && deleted != nil && !errors.Is(deleted, ErrNotFound) {
 		delete(v.records, id)
 	}
 }
 
+// settleLocked records what the store holds for id after a change: value, or nil for the next
+// read to fetch. A read still in flight began before the change, so its result is not kept.
+func (v *Vault) settleLocked(id string, value []byte) {
+	delete(v.reads, id)
+	delete(v.failed, id)
+	if value == nil {
+		delete(v.cache, id)
+	} else {
+		v.cache[id] = value
+	}
+}
+
 func (v *Vault) Delete(id string) error {
+	v.change.Lock()
+	defer v.change.Unlock()
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	if _, ok := v.records[id]; !ok {
+	_, ok := v.records[id]
+	v.mu.Unlock()
+	if !ok {
 		return ErrNotFound
 	}
 	if err := v.store.Delete(id); err != nil && !errors.Is(err, ErrNotFound) {
 		return err
 	}
+	v.mu.Lock()
+	defer v.mu.Unlock()
 	delete(v.records, id)
-	delete(v.cache, id)
+	v.settleLocked(id, nil)
 	return v.saveLocked()
 }
 
@@ -234,30 +284,48 @@ func (v *Vault) Records() []Record {
 	return out
 }
 
-// Value returns the secret, reading the store only on the first use.
+// Value returns the secret, reading the store only on the first use. Callers that need the secret
+// while it is being read share that read.
 func (v *Vault) Value(id string) ([]byte, error) {
 	v.mu.Lock()
-	defer v.mu.Unlock()
-	if _, ok := v.records[id]; !ok {
+	rec, ok := v.records[id]
+	if !ok {
+		v.mu.Unlock()
 		return nil, ErrNotFound
 	}
-	value, err := v.valueLocked(id)
-	if err != nil {
-		return nil, err
-	}
-	return slices.Clone(value), nil
-}
-
-func (v *Vault) valueLocked(id string) ([]byte, error) {
 	if cached, ok := v.cache[id]; ok {
-		return cached, nil
+		v.mu.Unlock()
+		return slices.Clone(cached), nil
 	}
-	value, err := v.store.Get(id)
-	if err != nil {
-		return nil, err
+	if f, ok := v.failed[id]; ok && v.now().Before(f.until) {
+		v.mu.Unlock()
+		return nil, f.err
 	}
-	v.cache[id] = value
-	return value, nil
+	r, reading := v.reads[id]
+	if !reading {
+		r = &read{done: make(chan struct{})}
+		v.reads[id] = r
+	}
+	v.mu.Unlock()
+	if !reading {
+		r.value, r.err = v.store.Get(id, bindingOf(rec))
+		v.mu.Lock()
+		if v.reads[id] == r {
+			delete(v.reads, id)
+			if r.err == nil {
+				v.cache[id] = r.value
+			} else {
+				v.failed[id] = failure{err: r.err, until: v.now().Add(failureHold)}
+			}
+		}
+		v.mu.Unlock()
+		close(r.done)
+	}
+	<-r.done
+	if r.err != nil {
+		return nil, r.err
+	}
+	return slices.Clone(r.value), nil
 }
 
 func (v *Vault) saveLocked() error {

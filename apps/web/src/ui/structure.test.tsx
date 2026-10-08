@@ -1,10 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Collapse, Disclosure } from "./Disclosure.tsx";
 import { Meter } from "./Meter.tsx";
-import { Popover } from "./Popover.tsx";
 import { ScrollArea } from "./ScrollArea.tsx";
 import { StatusGlyph } from "./StatusGlyph.tsx";
 
@@ -77,74 +75,6 @@ describe("Disclosure", () => {
     expect(collapse.hasAttribute("data-settled")).toBe(true);
     rerender(<Collapse open={false}>content</Collapse>);
     expect(collapse.hasAttribute("data-settled")).toBe(false);
-  });
-});
-
-function Anchored() {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLButtonElement>(null);
-  return (
-    <>
-      <button ref={anchor} type="button" onClick={() => setOpen((shown) => !shown)}>
-        Usage
-      </button>
-      <button type="button">Elsewhere</button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={anchor} label="Usage details">
-        <button type="button">Inside</button>
-      </Popover>
-    </>
-  );
-}
-
-describe("Popover", () => {
-  it("takes focus, gives it back on Escape, and stays until its exit has played", () => {
-    vi.useFakeTimers();
-    render(<Anchored />);
-    const trigger = screen.getByRole("button", { name: "Usage" });
-    fireEvent.click(trigger);
-    const dialog = screen.getByRole("dialog", { name: "Usage details" });
-    expect(document.activeElement).toBe(dialog);
-    const pressEscape = new KeyboardEvent("keydown", { key: "Escape", bubbles: true });
-    const outer = vi.fn();
-    document.body.addEventListener("keydown", outer);
-    act(() => {
-      dialog.dispatchEvent(pressEscape);
-    });
-    expect(outer).not.toHaveBeenCalled();
-    expect(document.activeElement).toBe(trigger);
-    expect(dialog.hasAttribute("data-closing")).toBe(true);
-    act(() => {
-      vi.advanceTimersByTime(300);
-    });
-    expect(screen.queryByRole("dialog")).toBeNull();
-  });
-
-  it("closes on a press outside it, but not on its own trigger's press", () => {
-    render(<Anchored />);
-    const trigger = screen.getByRole("button", { name: "Usage" });
-    fireEvent.click(trigger);
-    fireEvent.pointerDown(trigger);
-    expect(screen.getByRole("dialog").hasAttribute("data-closing")).toBe(false);
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }));
-    expect(screen.getByRole("dialog").hasAttribute("data-closing")).toBe(true);
-  });
-
-  it("stays open while only the height changes, as a phone's toolbar hides, and closes on a new width", () => {
-    render(<Anchored />);
-    fireEvent.click(screen.getByRole("button", { name: "Usage" }));
-    const dialog = screen.getByRole("dialog");
-    const width = window.innerWidth;
-    act(() => {
-      window.innerHeight -= 60;
-      window.dispatchEvent(new Event("resize"));
-    });
-    expect(dialog.hasAttribute("data-closing")).toBe(false);
-    act(() => {
-      window.innerWidth = width + 200;
-      window.dispatchEvent(new Event("resize"));
-    });
-    expect(dialog.hasAttribute("data-closing")).toBe(true);
-    window.innerWidth = width;
   });
 });
 
