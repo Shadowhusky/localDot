@@ -55,7 +55,7 @@ it("isolates each value and turns bidi controls into visible codes", () => {
   const value = dialog.querySelector("pre.approval-value");
   expect(value?.getAttribute("dir")).toBe("ltr");
   expect(dialog.textContent).not.toMatch(/[\u202a-\u202e\u2066-\u2069\u200e\u200f]/);
-  expect(value?.textContent).toBe("echo report U+202Ehs.lave|lruc;U+202C done");
+  expect(value?.textContent).toBe("echo report·U+202Ehs.lave|lruc;U+202C·done");
   expect(
     screen.getByText("Contains hidden characters that change text direction, shown as U+ codes."),
   ).toBeTruthy();
