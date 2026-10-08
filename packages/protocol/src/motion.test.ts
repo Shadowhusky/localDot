@@ -38,8 +38,17 @@ describe("motionSamples", () => {
     expect(rate(way, 1000)).toBeLessThanOrEqual(120);
     const dense = Array.from({ length: 64 }, (_, i) => ({ x: i * 10, y: (i % 2) * 10 }));
     expect(rate(dense, 200)).toBeLessThanOrEqual(120.5);
-    for (const [i, s] of motionSamples(dense, 200).entries())
-      expect(s.t).toBeGreaterThan(motionSamples(dense, 200)[i - 1]?.t ?? -1);
+    // A long segment takes nearly all the time; the short ones after it must not crowd together.
+    const uneven = [
+      { x: 0, y: 0 },
+      { x: 2000, y: 0 },
+      ...Array.from({ length: 62 }, (_, i) => ({ x: 2000, y: 3 * (i + 1) })),
+    ];
+    for (const points of [way, dense, uneven]) {
+      const samples = motionSamples(points, 500);
+      for (const [i, s] of samples.entries())
+        expect(s.t - (samples[i - 1]?.t ?? 0)).toBeGreaterThanOrEqual(1000 / 120 - 1e-9);
+    }
   });
 
   it("leaves out samples that would not move the cursor", () => {
