@@ -5,12 +5,16 @@ import {
 } from "@localdot/protocol";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { ApprovalValue } from "./ApprovalValue.tsx";
+
+class Mismatch extends Error {}
 export function ApprovalCard({
   card,
   onDecision,
   pending,
   enabled = true,
   visible = true,
+  loadField,
   children,
 }: {
   card: Card;
@@ -18,22 +22,59 @@ export function ApprovalCard({
   pending: boolean;
   enabled?: boolean;
   visible?: boolean;
+  loadField?(approvalId: string, field: number, signal: AbortSignal): Promise<string>;
   children?: ReactNode;
 }) {
   const value = CardSchema.safeParse(card);
   const heading = useRef<HTMLHeadingElement>(null);
   const [now, setNow] = useState(Date.now());
+  const [whole, setWhole] = useState<ReadonlyMap<number, string>>(new Map());
+  const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loader = useRef<AbortController | null>(null);
   useEffect(() => {
     setNow(Date.now());
     const timer = setInterval(() => setNow(Date.now()), 500);
-    return () => clearInterval(timer);
+    return () => {
+      clearInterval(timer);
+      loader.current?.abort();
+    };
   }, []);
   useEffect(() => {
     if (visible && enabled && !document.hidden) heading.current?.focus({ preventScroll: true });
   }, [enabled, visible]);
-  if (!value.success)
+  const partial = new Map(value.data?.partial?.map(({ field, length }) => [field, length]));
+  if (
+    !value.success ||
+    partial.size !== (value.data.partial?.length ?? 0) ||
+    [...partial].some(
+      ([field, length]) => (value.data.fields[field]?.[1].length ?? length) >= length,
+    )
+  )
     return <p role="alert">This decision could not be verified. Check task status again.</p>;
   const expired = now >= value.data.expiresAt;
+  const unread = [...partial.keys()].some((field) => !whole.has(field));
+  const showAll = async (field: number, preview: string, length: number) => {
+    if (!loadField || loading) return;
+    const abort = new AbortController();
+    loader.current = abort;
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const text = await loadField(value.data.approvalId, field, abort.signal);
+      if (text.length !== length || !text.startsWith(preview)) throw new Mismatch();
+      if (!abort.signal.aborted) setWhole((old) => new Map(old).set(field, text));
+    } catch (error) {
+      if (!abort.signal.aborted)
+        setLoadError(
+          error instanceof Mismatch
+            ? "The full text could not be checked. Deny, or take control."
+            : "The full text could not be loaded. Try again, deny, or take control.",
+        );
+    } finally {
+      if (!abort.signal.aborted) setLoading(false);
+    }
+  };
   const decide = (decision: ApprovalAnswer["decision"]) => {
     if (!visible || !enabled || pending || Date.now() >= value.data.expiresAt) return;
     void onDecision({
@@ -57,14 +98,42 @@ export function ApprovalCard({
             {value.data.title}
           </h2>
           <dl>
-            {value.data.fields.map(([label, text], index) => (
-              // biome-ignore lint/suspicious/noArrayIndexKey: these are immutable text rows within one approval identity, with no field state.
-              <div key={index}>
-                <dt>{label}</dt>
-                <dd>{text}</dd>
-              </div>
-            ))}
+            {value.data.fields.map(([label, text], index) => {
+              const length = whole.has(index) ? undefined : partial.get(index);
+              return (
+                // biome-ignore lint/suspicious/noArrayIndexKey: these are immutable text rows within one approval identity, with no field state.
+                <div key={index}>
+                  <dt>{label}</dt>
+                  <dd>
+                    {/* A fresh mount for the whole text: updating thousands of parts in place is quadratic in React. */}
+                    <ApprovalValue
+                      key={whole.has(index) ? "whole" : "start"}
+                      label={label}
+                      text={whole.get(index) ?? text}
+                      total={length}
+                      focusOnMount={whole.has(index)}
+                    />
+                    {length !== undefined && loadField && (
+                      <button
+                        type="button"
+                        className="approval-show-all"
+                        aria-label={`Show all of ${label}`}
+                        disabled={!visible || expired || loading}
+                        onClick={() => void showAll(index, text, length)}
+                      >
+                        Show all
+                      </button>
+                    )}
+                  </dd>
+                </div>
+              );
+            })}
           </dl>
+          {loadError && (
+            <p className="approval-value-warning" role="alert">
+              {loadError}
+            </p>
+          )}
           {value.data.upload && (
             <section className="approval-upload" aria-label="Files to upload">
               <p className="approval-upload-destination">
@@ -112,12 +181,14 @@ export function ApprovalCard({
               ? "This decision has expired. Check task status for the current request."
               : pending
                 ? "Checking your decision with the computer…"
-                : "Approve this action once, decline it, or take control yourself."}
+                : unread
+                  ? "Show all of the text before you approve."
+                  : "Approve this action once, decline it, or take control yourself."}
           </p>
           <div className="safety-actions">
             <button
               type="button"
-              disabled={!visible || !enabled || pending || expired}
+              disabled={!visible || !enabled || pending || expired || unread}
               onClick={() => decide("approve")}
             >
               Approve once
