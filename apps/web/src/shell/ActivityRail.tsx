@@ -249,6 +249,8 @@ export function ActivityRail({
             }}
             onWheel={follow.interrupt}
             onTouchStart={follow.interrupt}
+            onPointerDown={follow.interrupt}
+            onKeyDown={follow.interrupt}
           >
             <div className="activity-content">
               {plan.length > 0 && (

@@ -63,7 +63,7 @@ function inView(page: Page, selector: string) {
 for (const [engine, size, options] of MATRIX) {
   test(`a long task opens on its live step, in one scroller, with older runs folded (${engine} ${size})`, async () => {
     const { browser, page, rail } = await open(engine, options);
-    expect(await inView(page, ".activity-row[data-current]")).toBe(true);
+    await expect.poll(() => inView(page, ".activity-row[data-current]")).toBe(true);
     await expect(rail.locator("[data-current]")).toContainText("Fill the tail with brown");
     expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
     await expect(rail.getByRole("button", { name: /^Open the paint app/ })).toHaveAttribute(
@@ -74,9 +74,13 @@ for (const [engine, size, options] of MATRIX) {
       "aria-expanded",
       "true",
     );
-    // The plan header stays in view, naming the item in progress once the plan scrolls away.
+    // The plan header stays in view, as a strip of the plan's progress once the list scrolls away.
     await expect(rail.locator(".plan-head")).toHaveAttribute("data-stuck");
-    await expect(rail.locator(".plan-title-current")).toHaveText("Colour the dog in");
+    expect(
+      await rail
+        .locator(".plan-progress > span")
+        .evaluateAll((parts) => parts.map((part) => part.getAttribute("data-state"))),
+    ).toEqual(["done", "done", "done", "doing", "todo", "skipped"]);
     // Every model call uses a key; those fold into their step. Only the blocked use is a row.
     await rail.getByRole("button", { name: /^Sketch the dog's outline/ }).click();
     await expect(rail.getByTestId("key-use")).toHaveCount(1);

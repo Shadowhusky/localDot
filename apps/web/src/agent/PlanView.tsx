@@ -15,8 +15,8 @@ const STATES: Record<string, [GlyphState, string]> = {
 };
 const stateOf = (status: string): [GlyphState, string] => STATES[status] ?? ["todo", "Next"];
 
-// The header sticks to the top of the panel's scroller. Once the list has scrolled under it, it names
-// the item in progress, so where dot is in the plan stays in view however long the steps run.
+// The header sticks to the top of the panel's scroller. Once the list has scrolled under it, it shows
+// the plan as a strip of segments, so progress stays in view however long the steps run.
 export function PlanView({
   plan,
   label = "Task plan",
@@ -28,8 +28,6 @@ export function PlanView({
   const head = useRef<HTMLDivElement>(null);
   const [stuck, setStuck] = useState(false);
   const done = plan.filter((item) => item.status === "done").length;
-  const current =
-    plan.find((item) => item.status === "doing") ?? plan.find((item) => item.status === "todo");
   // Measured on scroll and resize rather than observed: a pane that was hidden when an observer
   // started never reports a change once it is shown.
   useEffect(() => {
@@ -57,17 +55,12 @@ export function PlanView({
   return (
     <>
       <div ref={head} className="plan-head" data-stuck={stuck || undefined}>
-        <h3 className="plan-title">
-          <span className="plan-title-name">Plan</span>
-          <span className="plan-title-current" aria-hidden="true">
-            {current && (
-              <>
-                <StatusGlyph state={stateOf(current.status)[0]} label="" />
-                <span>{current.text}</span>
-              </>
-            )}
-          </span>
-        </h3>
+        <h3 className="plan-title">Plan</h3>
+        <span className="plan-progress" aria-hidden="true">
+          {plan.map((item) => (
+            <span key={item.id} data-state={item.status} />
+          ))}
+        </span>
         <span className="plan-count num">
           <span className="plan-roll">
             <span key={done}>{done}</span>

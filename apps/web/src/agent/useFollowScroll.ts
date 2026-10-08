@@ -12,7 +12,12 @@ interface Tracking {
   frame: number;
   // A jump scrolls smoothly; until it lands, its own scroll events must not end the following.
   jumping: boolean;
+  glide: { frame: number; from: number; start: number; at: number } | null;
 }
+
+// Following the end, a new row lifts the list by its height over this long, eased like --ease-enter.
+const GLIDE_MS = 360;
+const eased = (progress: number) => 1 - (1 - progress) ** 4;
 
 export const reducedMotion = () =>
   typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -33,6 +38,7 @@ export function useFollowScroll(owner: string, follow: boolean) {
     anchorTop: 0,
     frame: 0,
     jumping: false,
+    glide: null,
   });
 
   const settle = useCallback(() => {
@@ -40,7 +46,29 @@ export function useFollowScroll(owner: string, follow: boolean) {
       element = t.element;
     if (!element) return;
     if (t.pinned) {
-      element.scrollTop = element.scrollHeight;
+      const end = element.scrollHeight - element.clientHeight;
+      const lift = end - element.scrollTop;
+      if (lift <= 0.5) return;
+      // A whole screen or more (a first load, a page) is taken at once; one or two rows glide, from
+      // wherever a glide in flight has got to, toward the end as it is when each frame is drawn.
+      if (lift >= element.clientHeight || reducedMotion()) {
+        if (t.glide) cancelAnimationFrame(t.glide.frame);
+        t.glide = null;
+        element.scrollTop = end;
+        return;
+      }
+      if (t.glide) cancelAnimationFrame(t.glide.frame);
+      const glide = { frame: 0, from: element.scrollTop, start: performance.now(), at: -1 };
+      const step = (now: number) => {
+        const progress = Math.min(1, (now - glide.start) / GLIDE_MS);
+        const target = element.scrollHeight - element.clientHeight;
+        element.scrollTop = glide.from + (target - glide.from) * eased(progress);
+        glide.at = element.scrollTop;
+        if (progress < 1 && t.glide === glide) glide.frame = requestAnimationFrame(step);
+        else if (t.glide === glide) t.glide = null;
+      };
+      t.glide = glide;
+      glide.frame = requestAnimationFrame(step);
       return;
     }
     if (!t.anchor?.isConnected) return;
@@ -97,7 +125,12 @@ export function useFollowScroll(owner: string, follow: boolean) {
       element = t.element;
     if (!element) return;
     const below = element.scrollHeight - element.clientHeight - element.scrollTop;
-    if (t.jumping && below >= PIN_SLACK) return;
+    // A scroll the glide did not make (the reader's, or the page's) ends the glide.
+    if (t.glide && t.glide.at >= 0 && Math.abs(element.scrollTop - t.glide.at) > 1) {
+      cancelAnimationFrame(t.glide.frame);
+      t.glide = null;
+    }
+    if ((t.jumping || t.glide) && below >= PIN_SLACK) return;
     t.jumping = false;
     const next = follow && below < PIN_SLACK;
     if (next !== t.pinned) setPin(next);
@@ -113,6 +146,8 @@ export function useFollowScroll(owner: string, follow: boolean) {
     anchorTo(element: HTMLElement) {
       const t = tracking.current;
       if (!t.element) return;
+      if (t.glide) cancelAnimationFrame(t.glide.frame);
+      t.glide = null;
       setPin(false);
       t.anchor = element;
       t.anchorTop = topOf(element, t.element);
@@ -129,7 +164,10 @@ export function useFollowScroll(owner: string, follow: boolean) {
     },
     // The reader's own wheel, touch or press takes over from a jump still on its way.
     interrupt() {
-      tracking.current.jumping = false;
+      const t = tracking.current;
+      t.jumping = false;
+      if (t.glide) cancelAnimationFrame(t.glide.frame);
+      t.glide = null;
     },
   };
 }
