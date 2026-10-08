@@ -367,6 +367,30 @@ describe("vendor presets and plans", () => {
     expect(planOnly([local])).toBe(false);
   });
 
+  it("marks only a registry plan flat, never a paid provider or a forged choice", () => {
+    expect(() =>
+      resolveRole(
+        "main",
+        { provider: "zai", model: "glm-5v-turbo", key: "zai", flat: true } as never,
+        catalog,
+        vendorKeys,
+      ),
+    ).toThrow(new BindingError("main", "invalid model selection or price"));
+    const paid = resolveRole(
+      "main",
+      { provider: "minimax", model: "MiniMax-M3", key: "minimax" },
+      catalog,
+      vendorKeys,
+    );
+    expect(paid.flat).toBeUndefined();
+    expect(pricingOf([paid]).routes[0]).not.toHaveProperty("flat");
+    expect(pricingOf([paid]).routes[0]?.models[0]).toMatchObject({
+      inputUSDPerMTok: 0.3,
+      outputUSDPerMTok: 1.2,
+    });
+    expect(planOnly([paid])).toBe(false);
+  });
+
   it("refuses one key used both as a plan and as a paid key in one task", () => {
     const plan = resolveRole(
       "main",
