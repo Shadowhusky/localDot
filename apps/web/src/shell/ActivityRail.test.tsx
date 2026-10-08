@@ -156,6 +156,77 @@ describe("ActivityRail", () => {
     expect(document.activeElement).toBe(second);
   });
 
+  it("keeps a filtered row under the plan item it happened in, with that run's own span", () => {
+    const model = {
+      ...emptyAgentModel(),
+      plan: [
+        { id: "open", text: "Open the app", status: "done" as const },
+        { id: "sketch", text: "Sketch it", status: "done" as const },
+        { id: "colour", text: "Colour it", status: "doing" as const },
+      ],
+      steps: new Map([
+        tool("find", "open", 1_000),
+        tool("outline", "sketch", 2_000, { kind: "gui" }),
+        tool("face", "sketch", 4_000, { kind: "gui" }),
+        tool("size", "colour", 60_000),
+      ]),
+    };
+    render(
+      <ActivityRail
+        rows={[]}
+        keyUses={[use(3_000, "deny")]}
+        sessionId="one"
+        scale={1}
+        api={api}
+        agent={model}
+      />,
+    );
+    const filter = within(screen.getByRole("radiogroup", { name: "Activity filter" }));
+    fireEvent.click(filter.getByRole("radio", { name: "Tools" }));
+    const sketch = screen.getByRole("button", { name: /^Sketch it/ });
+    fireEvent.click(sketch);
+    const blocked = screen.getByTestId("key-use");
+    expect(blocked.closest(".activity-group")?.contains(sketch)).toBe(true);
+    expect(screen.getByRole("button", { name: /^Open the app/ }).textContent).toBe(
+      "Open the app 1 step",
+    );
+  });
+
+  it("keeps the run just watched open when the next plan item starts, and folds it a run later", () => {
+    const plan = [
+      { id: "a", text: "First item", status: "done" as const },
+      { id: "b", text: "Second item", status: "doing" as const },
+      { id: "c", text: "Third item", status: "todo" as const },
+    ];
+    const at = (steps: ReturnType<typeof tool>[]) => ({
+      ...emptyAgentModel(),
+      plan,
+      steps: new Map(steps),
+    });
+    const first = [tool("a1", "a", 1), tool("a2", "a", 2)];
+    const second = [...first, tool("b1", "b", 3), tool("b2", "b", 4)];
+    const third = [...second, tool("c1", "c", 5, { status: undefined, endedAt: undefined })];
+    const view = render(
+      <ActivityRail rows={[]} sessionId="one" scale={1} api={api} agent={at(second)} />,
+    );
+    const run = (name: RegExp) => screen.getByRole("button", { name });
+    expect(run(/^First item/).getAttribute("aria-expanded")).toBe("false");
+    view.rerender(<ActivityRail rows={[]} sessionId="one" scale={1} api={api} agent={at(third)} />);
+    expect(run(/^Second item/).getAttribute("aria-expanded")).toBe("true");
+    expect(run(/^Third item/).getAttribute("aria-expanded")).toBe("true");
+    view.rerender(
+      <ActivityRail
+        rows={[]}
+        sessionId="one"
+        scale={1}
+        api={api}
+        agent={at([...third, tool("a3", "a", 6)])}
+      />,
+    );
+    expect(run(/^Second item/).getAttribute("aria-expanded")).toBe("false");
+    expect(run(/^Third item/).getAttribute("aria-expanded")).toBe("true");
+  });
+
   it("filters to screen steps or tools with a segmented choice", () => {
     const model = { ...emptyAgentModel(), steps: new Map([tool("cmd", "x", 5)]) };
     render(

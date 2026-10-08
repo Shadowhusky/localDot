@@ -256,3 +256,20 @@ it("shows a held download in Activity before any task has started", async () => 
   expect(within(downloads).getByText("report.pdf")).toBeTruthy();
   expect(within(downloads).getByText("1 waiting")).toBeTruthy();
 });
+it("keeps an open download decision, in one scroller, when a task starts", async () => {
+  const f = fixture();
+  const view = render(
+    <ActivityRail rows={[]} sessionId={null} cellId={parent} releaseReady scale={1} api={f.api} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Review & release" }));
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  view.rerender(
+    <ActivityRail rows={[]} sessionId="task" cellId={parent} releaseReady scale={1} api={f.api} />,
+  );
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(f.fetchImpl.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
+  expect(view.container.querySelectorAll(".ui-scroll-area")).toHaveLength(1);
+  expect(
+    view.container.querySelector(".ui-scroll-area")?.contains(screen.getByTestId("download-row")),
+  ).toBe(true);
+});

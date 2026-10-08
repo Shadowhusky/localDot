@@ -6,6 +6,7 @@ import { ActivityRow } from "../agent/ActivityRow.tsx";
 import {
   type ActivityEntry,
   type ActivityFilter,
+  type ActivityGroup,
   activityRows,
   clock,
   type EntryView,
@@ -16,6 +17,7 @@ import {
   hasDetails,
   matchesFilter,
   questionView,
+  runsOnView,
 } from "../agent/activity.ts";
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
@@ -70,6 +72,12 @@ const entryKey = (entry: ActivityEntry) => entry.key;
 const REVEAL_AFTER = 300;
 const EMPTY = emptyAgentModel();
 
+interface FollowedRun {
+  owner: string;
+  run: string | null;
+  watched: string | null;
+}
+
 function reveal(element: Element | null) {
   element?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
 }
@@ -111,7 +119,8 @@ export function ActivityRail({
     [entries, filter],
   );
   const page = usePagedRows(selected, entryKey, `${owner}:${filter}`);
-  const groups = useMemo(() => groupEntries(page.rows), [page.rows]);
+  const runs = useMemo(() => groupEntries(entries), [entries]);
+  const groups = useMemo(() => runsOnView(runs, page.rows), [runs, page.rows]);
   const views = useMemo(
     () =>
       new Map<string, EntryView>(
@@ -119,11 +128,12 @@ export function ActivityRail({
       ),
     [page.rows, model.changes, ended],
   );
-  const follow = useFollowScroll(`${owner}:${filter}`, !replay);
+  const plan = planSnapshot ?? model.plan;
+  const started = !!sessionId || !!plan.length;
+  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
   const timeline = useRef<HTMLElement>(null);
   const knowing = useRef<HTMLButtonElement>(null);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
-  const latestGroup = useRef<string | null>(null);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
   const currentKey =
@@ -137,17 +147,21 @@ export function ActivityRail({
         })();
   const openKey = opened?.owner === owner ? opened.key : null;
   const groupState = groupsOpen.owner === owner ? groupsOpen.open : {};
-  // Older runs fold only while the reader follows the live end, where the end stays put; scrolled
-  // back, nothing above them changes height.
-  if (follow.pinned || latestGroup.current === null)
-    latestGroup.current = groups.at(-1)?.id ?? null;
-  const foldBefore = Math.max(
-    0,
-    groups.findIndex((group) => group.id === latestGroup.current),
-  );
-  const plan = planSnapshot ?? model.plan;
+  // Runs older than the followed one fold, but only while the reader follows the live end, where the
+  // end stays put. The run the reader watched until a new one started stays open until the next.
+  const lastRun = runs.at(-1)?.id ?? null;
+  const [followed, setFollowed] = useState<FollowedRun>({ owner, run: lastRun, watched: null });
+  if (followed.owner !== owner) setFollowed({ owner, run: lastRun, watched: null });
+  else if (followed.run !== lastRun && (follow.pinned || followed.run === null))
+    setFollowed({
+      owner,
+      run: lastRun,
+      watched: followed.run !== null && runs.at(-2)?.id === followed.run ? followed.run : null,
+    });
+  const runIndex = new Map(runs.map((run, index) => [run.id, index]));
+  const foldBefore = runIndex.get(followed.run ?? "") ?? 0;
   const planText = new Map(plan.map((item) => [item.id, item.text]));
-  const headed = groups.length > 1 || (groups[0] !== undefined && groups[0].planItem !== null);
+  const headed = runs.length > 1 || (runs[0] !== undefined && runs[0].planItem !== null);
 
   useEffect(() => {
     const pane = timeline.current;
@@ -221,6 +235,40 @@ export function ActivityRail({
     );
   };
 
+  const renderRun = (group: ActivityGroup) => {
+    const meta = groupMeta(
+      group.entries.map((entry) => views.get(entry.key) ?? entryView(entry, model.changes, ended)),
+    );
+    const holdsOpen = group.entries.some(
+      (entry) => entry.key === openKey || entry.key === currentKey,
+    );
+    const open =
+      groupState[group.id] ??
+      (holdsOpen ||
+        group.id === followed.watched ||
+        (runIndex.get(group.id) ?? Number.POSITIVE_INFINITY) >= foldBefore);
+    return (
+      <Disclosure
+        key={group.id}
+        className="activity-group"
+        data-anchor=""
+        summary={(group.planItem && planText.get(group.planItem)) || "Other steps"}
+        meta={[
+          meta.steps ? count(meta.steps, "step", "steps") : "",
+          meta.failed ? `${meta.failed} failed` : "",
+          meta.durationMs >= 1000 ? clock(meta.durationMs) : "",
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+        open={open}
+        onClick={(event) => follow.anchorTo(event.currentTarget)}
+        onOpenChange={(next) => setGroupsOpen({ owner, open: { ...groupState, [group.id]: next } })}
+      >
+        <div className="activity-group-rows">{group.entries.map(renderEntry)}</div>
+      </Disclosure>
+    );
+  };
+
   const loose = model.changes.filter(
     (change) =>
       change.type === "memory" ||
@@ -228,7 +276,6 @@ export function ActivityRail({
       !entries.some((entry) => entry.row.kind === "step" && entry.row.id === change.step),
   );
   const questions = [...model.questions.values()];
-  const started = !!sessionId || !!plan.length;
 
   return (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
@@ -236,93 +283,86 @@ export function ActivityRail({
         <h2>Activity</h2>
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
-      {!started ? (
-        <>
-          <p className="activity-empty">Plan and steps appear here once dot starts.</p>
-          {cellId && !replay && (
-            <BrowserDownloads key={cellId} api={api} cellId={cellId} releaseReady={releaseReady} />
-          )}
-        </>
-      ) : (
-        <div className="activity-body">
-          <ScrollArea
-            ref={follow.ref}
-            className="activity-scroll"
-            fade={plan.length ? "bottom" : "both"}
-            onScroll={(event) => {
-              // Only the reader leaving the live end holds the page; the rail's own glides do not.
-              const pane = event.currentTarget;
-              if (
-                !follow.onScroll() &&
-                pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32
-              )
-                page.freeze();
-            }}
-            onWheel={follow.interrupt}
-            onTouchStart={follow.interrupt}
-            onPointerDown={follow.interrupt}
-            onKeyDown={follow.interrupt}
-          >
-            <div className="activity-content">
-              {plan.length > 0 && (
-                <PlanView plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
-              )}
-              {(knowledge || model.activity) && (
-                <div className="activity-extras">
-                  {model.activity && (
-                    <Disclosure summary="Thinking notes" className="activity-disclosure">
-                      <p className="activity-notes">{model.activity}</p>
-                    </Disclosure>
-                  )}
-                  {knowledge && (
-                    <Disclosure
-                      ref={knowing}
-                      summary="What dot knows"
-                      className="activity-disclosure"
-                      open={knowledgeOpen}
-                      onOpenChange={setKnowledgeOpen}
-                    >
-                      {knowledge}
-                    </Disclosure>
-                  )}
-                </div>
-              )}
-              {cellId && !replay && (
-                <BrowserDownloads
-                  key={cellId}
-                  api={api}
-                  cellId={cellId}
-                  releaseReady={releaseReady}
-                />
-              )}
-              {loose.length > 0 && (
-                <section className="activity-section" aria-label="Changes">
-                  <h3 className="activity-section-title">Changes</h3>
-                  {loose.map((change) => (
-                    <ChangeRow
-                      key={change.id}
-                      id={`${domId}-change-${change.id}`}
-                      change={change}
-                      changes={model.changes}
-                      open={openKey === `change-${change.id}`}
-                      onToggle={(trigger) => toggleKey(`change-${change.id}`, trigger)}
-                      {...(change.type === "memory" ? memoryActions(change) : {})}
-                    />
-                  ))}
-                </section>
-              )}
-              {questions.length > 0 && (
-                <section className="activity-section" aria-label="Question history">
-                  <h3 className="activity-section-title">Questions</h3>
-                  {questions.map((question) => (
-                    <ActivityRow
-                      key={question.askId}
-                      id={`${domId}-ask-${question.askId}`}
-                      view={questionView(question, model.pendingAsk === question.askId && !ended)}
-                    />
-                  ))}
-                </section>
-              )}
+      <div className="activity-body">
+        <ScrollArea
+          ref={follow.ref}
+          className="activity-scroll"
+          fade={plan.length ? "bottom" : "both"}
+          onScroll={(event) => {
+            // Only the reader leaving the live end holds the page; the rail's own glides do not.
+            const pane = event.currentTarget;
+            if (!follow.onScroll() && pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32)
+              page.freeze();
+          }}
+          onWheel={follow.interrupt}
+          onTouchStart={follow.interrupt}
+          onPointerDown={follow.interrupt}
+          onKeyDown={follow.interrupt}
+        >
+          <div className="activity-content">
+            {!started && (
+              <p className="activity-empty">Plan and steps appear here once dot starts.</p>
+            )}
+            {plan.length > 0 && (
+              <PlanView plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+            )}
+            {(knowledge || model.activity) && started && (
+              <div className="activity-extras">
+                {model.activity && (
+                  <Disclosure summary="Thinking notes" className="activity-disclosure">
+                    <p className="activity-notes">{model.activity}</p>
+                  </Disclosure>
+                )}
+                {knowledge && (
+                  <Disclosure
+                    ref={knowing}
+                    summary="What dot knows"
+                    className="activity-disclosure"
+                    open={knowledgeOpen}
+                    onOpenChange={setKnowledgeOpen}
+                  >
+                    {knowledge}
+                  </Disclosure>
+                )}
+              </div>
+            )}
+            {cellId && !replay && (
+              <BrowserDownloads
+                key={cellId}
+                api={api}
+                cellId={cellId}
+                releaseReady={releaseReady}
+              />
+            )}
+            {loose.length > 0 && (
+              <section className="activity-section" aria-label="Changes">
+                <h3 className="activity-section-title">Changes</h3>
+                {loose.map((change) => (
+                  <ChangeRow
+                    key={change.id}
+                    id={`${domId}-change-${change.id}`}
+                    change={change}
+                    changes={model.changes}
+                    open={openKey === `change-${change.id}`}
+                    onToggle={(trigger) => toggleKey(`change-${change.id}`, trigger)}
+                    {...(change.type === "memory" ? memoryActions(change) : {})}
+                  />
+                ))}
+              </section>
+            )}
+            {questions.length > 0 && (
+              <section className="activity-section" aria-label="Question history">
+                <h3 className="activity-section-title">Questions</h3>
+                {questions.map((question) => (
+                  <ActivityRow
+                    key={question.askId}
+                    id={`${domId}-ask-${question.askId}`}
+                    view={questionView(question, model.pendingAsk === question.askId && !ended)}
+                  />
+                ))}
+              </section>
+            )}
+            {started && (
               <section className="activity-steps" aria-labelledby={`${domId}-steps`}>
                 <div className="activity-steps-head">
                   <h3 id={`${domId}-steps`}>Steps</h3>
@@ -345,50 +385,7 @@ export function ActivityRail({
                   aria-label="Recorded steps"
                   onPointerDownCapture={() => page.freeze()}
                 >
-                  {sessionId &&
-                    (headed
-                      ? groups.map((group, index) => {
-                          const meta = groupMeta(
-                            group.entries.map(
-                              (entry) =>
-                                views.get(entry.key) ?? entryView(entry, model.changes, ended),
-                            ),
-                          );
-                          const holdsOpen = group.entries.some(
-                            (entry) => entry.key === openKey || entry.key === currentKey,
-                          );
-                          const open = groupState[group.id] ?? (index >= foldBefore || holdsOpen);
-                          return (
-                            <Disclosure
-                              key={group.id}
-                              className="activity-group"
-                              data-anchor=""
-                              summary={
-                                (group.planItem && planText.get(group.planItem)) || "Other steps"
-                              }
-                              meta={[
-                                count(meta.steps, "step", "steps"),
-                                meta.failed ? `${meta.failed} failed` : "",
-                                meta.durationMs >= 1000 ? clock(meta.durationMs) : "",
-                              ]
-                                .filter(Boolean)
-                                .join(" · ")}
-                              open={open}
-                              onClick={(event) => follow.anchorTo(event.currentTarget)}
-                              onOpenChange={(next) =>
-                                setGroupsOpen({
-                                  owner,
-                                  open: { ...groupState, [group.id]: next },
-                                })
-                              }
-                            >
-                              <div className="activity-group-rows">
-                                {group.entries.map(renderEntry)}
-                              </div>
-                            </Disclosure>
-                          );
-                        })
-                      : page.rows.map(renderEntry))}
+                  {sessionId && (headed ? groups.map(renderRun) : page.rows.map(renderEntry))}
                 </section>
                 {page.hasNewer && (
                   <Button variant="quiet" size="sm" className="activity-page" onClick={page.newer}>
@@ -406,38 +403,38 @@ export function ActivityRail({
                   </p>
                 )}
               </section>
-              {agent && (
-                <ResultFiles
-                  api={api}
-                  sessionId={sessionId}
-                  results={model.results}
-                  ended={ended}
-                  idle={model.state?.state === "idle"}
-                />
-              )}
-              {model.historyTruncated && (
-                <p className="activity-note">Older activity is kept in the task log.</p>
-              )}
-            </div>
-          </ScrollArea>
-          {!replay && (
-            <button
-              {...pressHandlers}
-              type="button"
-              className="activity-jump"
-              data-shown={!follow.pinned || undefined}
-              inert={follow.pinned}
-              onClick={() => {
-                page.latest();
-                follow.jump();
-              }}
-            >
-              <Icon name="arrow-down" size={14} />
-              Jump to latest
-            </button>
-          )}
-        </div>
-      )}
+            )}
+            {agent && started && (
+              <ResultFiles
+                api={api}
+                sessionId={sessionId}
+                results={model.results}
+                ended={ended}
+                idle={model.state?.state === "idle"}
+              />
+            )}
+            {model.historyTruncated && (
+              <p className="activity-note">Older activity is kept in the task log.</p>
+            )}
+          </div>
+        </ScrollArea>
+        {!replay && started && (
+          <button
+            {...pressHandlers}
+            type="button"
+            className="activity-jump"
+            data-shown={!follow.pinned || undefined}
+            inert={follow.pinned}
+            onClick={() => {
+              page.latest();
+              follow.jump();
+            }}
+          >
+            <Icon name="arrow-down" size={14} />
+            Jump to latest
+          </button>
+        )}
+      </div>
       {agent && sessionId && <UsageFooter model={model} selection={models} modelName={modelName} />}
     </aside>
   );

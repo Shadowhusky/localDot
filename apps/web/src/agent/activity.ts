@@ -124,6 +124,24 @@ export function groupEntries(entries: readonly ActivityEntry[]): ActivityGroup[]
   return groups;
 }
 
+// Runs come from the whole history, so a filter or a page never moves a row into the run that
+// happens to precede it on view.
+export function runsOnView(
+  runs: readonly ActivityGroup[],
+  rows: readonly ActivityEntry[],
+): ActivityGroup[] {
+  const runOf = new Map<string, ActivityGroup>();
+  for (const run of runs) for (const entry of run.entries) runOf.set(entry.key, run);
+  const shown: ActivityGroup[] = [];
+  for (const entry of rows) {
+    const run = runOf.get(entry.key) ?? { id: "none#0", planItem: null };
+    const last = shown.at(-1);
+    if (last?.id === run.id) last.entries.push(entry);
+    else shown.push({ id: run.id, planItem: run.planItem, entries: [entry] });
+  }
+  return shown;
+}
+
 export function stepStatus(step: AgentStep, ended: boolean): string {
   if (step.status)
     return { ok: "Done", failed: "Failed", blocked: "Blocked", cancelled: "Cancelled" }[
@@ -196,7 +214,6 @@ export interface EntryView {
   state: GlyphState;
   stateLabel: string;
   reason?: string;
-  // Shown before the reason when the input never reached the computer.
   notSent?: boolean;
   danger?: boolean;
   startT: number;

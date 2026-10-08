@@ -8,6 +8,8 @@ import {
   foldKeyUses,
   groupEntries,
   groupMeta,
+  matchesFilter,
+  runsOnView,
 } from "./activity.ts";
 import type { AgentStep } from "./model.ts";
 
@@ -143,6 +145,38 @@ describe("the activity timeline", () => {
       stepRow("b", 2000, "x", { status: "failed" }),
     ]).map((entry) => entryView(entry, [], false));
     expect(groupMeta(views)).toEqual({ steps: 2, failed: 1, durationMs: 1000 });
+  });
+
+  it("keeps a filtered row under the run it happened in, and spans a run by its own rows", () => {
+    const entries = foldKeyUses([
+      stepRow("find", 1000, "open", { status: "ok", startedAt: 1_000_000, endedAt: 1_600_000 }),
+      stepRow("outline", 2000, "sketch", { kind: "gui", status: "ok" }),
+      key(2500, "deny"),
+      stepRow("face", 3000, "sketch", { kind: "gui", status: "ok" }),
+      stepRow("size", 60_000, "colour", { status: "ok" }),
+    ]);
+    const tools = entries.filter((entry) => matchesFilter(entry.row, "tools"));
+    const shown = runsOnView(groupEntries(entries), tools);
+    expect(shown.map((run) => [run.id, run.entries.map((entry) => entry.key)])).toEqual([
+      ["open#0", ["step-find"]],
+      ["sketch#0", ["key-k2500"]],
+      ["colour#0", ["step-size"]],
+    ]);
+    const [open] = shown;
+    expect(groupMeta(open?.entries.map((entry) => entryView(entry, [], false)) ?? [])).toEqual({
+      steps: 1,
+      failed: 0,
+      durationMs: 600,
+    });
+    expect(
+      runsOnView(groupEntries(entries), entries.slice(3)).map((run) => [
+        run.id,
+        run.entries.length,
+      ]),
+    ).toEqual([
+      ["sketch#0", 1],
+      ["colour#0", 1],
+    ]);
   });
 
   it("counts added and removed lines, not file headers", () => {

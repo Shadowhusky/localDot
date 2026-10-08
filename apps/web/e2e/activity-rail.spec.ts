@@ -172,6 +172,88 @@ for (const engine of ["chrome", "webkit"] as const) {
   });
 }
 
+for (const engine of ["chrome", "webkit"] as const) {
+  test(`a question arriving above the row being read never moves it (${engine})`, async () => {
+    const { browser, page, rail } = await open(engine, DESKTOP);
+    const scroller = page.locator(".activity-scroll");
+    const reading = rail.getByRole("button", { name: /Check the canvas size/ });
+    await reading.scrollIntoViewIfNeeded();
+    await scroller.evaluate((element) => element.scrollBy(0, -40));
+    await expect(rail.getByRole("button", { name: "Jump to latest" })).toHaveAttribute(
+      "data-shown",
+    );
+    const before = await reading.boundingBox();
+    await qa("ask");
+    await expect(rail.getByRole("region", { name: "Question history" })).toBeAttached();
+    await page.waitForTimeout(400);
+    expect((await reading.boundingBox())?.y).toBeCloseTo(before?.y ?? Number.NaN, 0);
+    await browser.close();
+  });
+}
+
+test("a blocked key use stays under the plan item it happened in when only tools show (chrome)", async () => {
+  const { browser, page, rail } = await open("chrome", DESKTOP);
+  await rail.getByRole("radio", { name: "Tools" }).click();
+  const name = /^Sketch the dog's outline/;
+  await rail.getByRole("button", { name }).click();
+  await expect(rail.getByTestId("key-use")).toContainText("Blocked stock-images key");
+  await expect(
+    rail.locator(".activity-group", { has: page.getByRole("button", { name }) }),
+  ).toContainText("Blocked stock-images key");
+  await expect(rail.getByRole("button", { name: /^Open the paint app/ })).toHaveText(
+    "Open the paint app 1 step · 0:02",
+  );
+  await browser.close();
+});
+
+for (const [engine, size, options] of [
+  ["chrome", "desktop", DESKTOP],
+  ["webkit", "phone", PHONE],
+] as const)
+  test(`held downloads before a task scroll in the rail's one scroller (${engine} ${size})`, async () => {
+    fixture = await startUiFixture({ QA_SESSION: "0" });
+    const browser = await ENGINES[engine]();
+    const page = await (await browser.newContext(options)).newPage();
+    await page.route("**/api/cells/*/quarantine", (route) => {
+      const parentCellId = new URL(route.request().url()).pathname.split("/")[3];
+      return route.fulfill({
+        json: {
+          items: Array.from({ length: 10 }, (_, n) => ({
+            version: 1,
+            id: `01M4DQ00000000000000000${String(n).padStart(3, "0")}`,
+            parentCellId,
+            browserCellId: "01M4DB0000000000000000000B",
+            browserInstance: "3f1d8a52-5a3b-4f8e-9c0e-1d2b3c4d5e6f",
+            sessionId: "01M4DS000000000000000000SS",
+            name: `reference-${n + 1}.png`,
+            source: "images.example.test",
+            bytes: 204_800 * (n + 1),
+            sha256: "a".repeat(61) + String(n).padStart(3, "0"),
+            kind: "document",
+            createdAt: Date.now(),
+            revision: 1,
+            state: "held",
+          })),
+        },
+      });
+    });
+    await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+    if (size === "phone") await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    const rail = page.getByRole("complementary", { name: "Plan and steps" });
+    await expect(rail.getByTestId("download-row")).toHaveCount(10);
+    await expect(rail.getByText("Plan and steps appear here once dot starts.")).toBeVisible();
+    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+    expect(await page.locator(".activity-scroll").evaluate((element) => element.scrollTop)).toBe(0);
+    const refresh = rail.getByRole("button", { name: "Refresh downloads" });
+    await refresh.scrollIntoViewIfNeeded();
+    await expect.poll(() => inView(page, ".download-actions")).toBe(true);
+    await expect
+      .poll(() => inView(page, ".download-row:nth-last-child(1 of .download-row)"))
+      .toBe(true);
+    await refresh.click();
+    await browser.close();
+  });
+
 test("steps arriving while the reader follows shift nothing in the rail (chrome)", async () => {
   const { browser, page } = await open("chrome", DESKTOP);
   await page.evaluate(() => {
