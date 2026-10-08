@@ -6,6 +6,7 @@ import { joinIds } from "./merge.ts";
 interface FieldState {
   controlId: string;
   labelId: string;
+  label: string;
   describedBy: string | undefined;
   invalid: boolean;
   disabledReason: string | undefined;
@@ -20,7 +21,7 @@ function present(node: ReactNode): boolean {
 }
 
 export interface FieldProps {
-  label: ReactNode;
+  label: string;
   description?: ReactNode;
   error?: ReactNode;
   // Keeps a line under the control for an error yet to come, so its arrival moves nothing below.
@@ -52,6 +53,7 @@ export function Field(props: FieldProps) {
   const state: FieldState = {
     controlId,
     labelId,
+    label,
     describedBy: joinIds(
       disabledReason && ids.reason,
       invalid ? ids.error : undefined,
@@ -124,6 +126,7 @@ export function useFieldControl({
   return {
     id: id ?? field?.controlId,
     labelId: field?.labelId,
+    label: field?.label,
     describedBy: joinIds(describedBy, field?.describedBy),
     invalid: invalid ?? (field?.invalid ? true : undefined),
     disabledReason: field?.disabledReason,

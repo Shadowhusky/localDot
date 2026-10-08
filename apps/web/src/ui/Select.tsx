@@ -35,11 +35,6 @@ export function printable(event: KeyboardEvent): boolean {
   return event.key.length === 1 && !event.ctrlKey && !event.metaKey && !event.altKey;
 }
 
-// The label of whatever the field holds, from the trigger's own Field when it has one.
-export function pickerTitle(ariaLabel: string | undefined, labelId: string | undefined): string {
-  return ariaLabel ?? (labelId ? document.getElementById(labelId)?.textContent : "") ?? "";
-}
-
 export function Select({
   value,
   onValueChange,
@@ -62,7 +57,7 @@ export function Select({
   const { open, active } = picker;
   const selected = options.find((option) => option.value === value);
   const sheet = picker.presentation === "sheet";
-  const title = pickerTitle(ariaLabel, control.labelId);
+  const title = ariaLabel ?? control.label ?? "";
 
   const typeAhead = (event: KeyboardEvent, from: number): number | undefined => {
     const now = event.timeStamp;

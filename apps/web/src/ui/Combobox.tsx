@@ -14,7 +14,7 @@ import {
 } from "./listbox.ts";
 import { composing, PickerPopup } from "./PickerPopup.tsx";
 import { usePicker } from "./picker.ts";
-import { pickerTitle, printable, type SelectProps } from "./Select.tsx";
+import { printable, type SelectProps } from "./Select.tsx";
 import { TextField } from "./TextField.tsx";
 
 export interface ComboboxProps extends SelectProps {
@@ -53,7 +53,7 @@ export function Combobox({
   const picker = usePicker({ value, unavailable, onValueChange });
   const { open, active } = picker;
   const sheet = picker.presentation === "sheet";
-  const title = pickerTitle(ariaLabel, control.labelId);
+  const title = ariaLabel ?? control.label ?? "";
   const all = flatten(buildSections(items, groups));
   const selected = all.find((option) => option.value === value);
 

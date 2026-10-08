@@ -92,6 +92,19 @@ describe("Combobox", () => {
     expect(onChange).toHaveBeenCalledWith("claude-sonnet-4-5");
   });
 
+  it("names its list from its Field's label as it is now, not as the page last showed it", () => {
+    const field = (label: string) => (
+      <Field label={label}>
+        <Combobox value="" onValueChange={() => {}} items={MODELS} />
+      </Field>
+    );
+    const { rerender } = render(field("Main model"));
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Main model" }), { key: "ArrowDown" });
+    rerender(field("Fast model"));
+    expect(screen.getByRole("listbox").getAttribute("aria-label")).toBe("Fast model");
+    expect(screen.getByRole("dialog").getAttribute("aria-label")).toBe("Fast model");
+  });
+
   it("matches keywords as well as labels", () => {
     render(<Model />);
     fireEvent.keyDown(trigger(), { key: "ArrowDown" });
