@@ -352,28 +352,36 @@ describe("the tools", () => {
     expect(h.actions).toHaveLength(6);
   });
 
-  it("tells the model a pressed button stays down, a released one was not, and a drag let go", async () => {
+  it("tells the model a pressed button stays down, a released one was not, and a drag was cancelled", async () => {
     const h = toolHarness();
     h.setOutcome(() => ({ ok: true, frameId: ulid() }));
     expect((await h.call("computer", { action: "mouse_down" })).body.content[0]?.text).toBe(
-      "The left button is down. It stays down until mouse up, or 60 s without another mouse action.",
+      "The left button is down. It stays down until mouse up, or 60 s without another mouse action. Each mouse move and the mouse up while it is down asks like a drag.",
     );
     h.setOutcome(() => ({ ok: true, frameId: ulid(), notDown: true }));
     expect((await h.call("computer", { action: "mouse_up" })).body.content[0]?.text).toBe(
       "The left button was not down.",
     );
-    h.setOutcome(() => ({ ok: false, error: "another window is at the drop point now" }));
-    const dropped = await h.call("computer", {
-      action: "drag",
-      path: [
-        { x: 1, y: 1 },
-        { x: 9, y: 9 },
-      ],
-    });
-    expect(dropped.body.content.map((c) => c.text)).toEqual([
-      "The drag stopped before its drop and let go where it started.",
-      "Failed: another window is at the drop point now",
-    ]);
+    const path = [
+      { x: 1, y: 1 },
+      { x: 9, y: 9 },
+    ];
+    for (const action of [{ action: "drag", path }, { action: "mouse_up" }]) {
+      h.setOutcome(() => ({
+        ok: false,
+        error: "another window is at the drop point now",
+        dropCancelled: true,
+      }));
+      expect((await h.call("computer", action)).body.content.map((c) => c.text)).toEqual([
+        "The drag was cancelled before its drop: Escape was pressed while the button was down, then the button came up where the pointer was.",
+        "Failed: another window is at the drop point now",
+      ]);
+    }
+    // A drag that failed for any other reason may have dropped: nothing is claimed.
+    h.setOutcome(() => ({ ok: false, error: "no raw release observed" }));
+    expect(
+      (await h.call("computer", { action: "drag", path })).body.content.map((c) => c.text),
+    ).toEqual(["Failed: no raw release observed"]);
   });
 
   it("ends a drag when the task is paused", async () => {

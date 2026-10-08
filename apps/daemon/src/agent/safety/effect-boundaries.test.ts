@@ -764,6 +764,83 @@ describe("immediate effect ownership", () => {
     await pending;
     expect(f.effects()).toHaveLength(0);
   });
+  it("a button held between actions asks for each move and its release as a drag from where it went down", async () => {
+    const f = setup();
+    const item = (name: string, x: number): HitTestResult => ({
+      target: { point: { x, y: 40 }, source: "ax", role: "list item", name, app: "Thunar" },
+      window: 77,
+      ms: 1,
+    });
+    f.fake.script.hitTest = (point) =>
+      point.x > 60 ? item("Trash", point.x) : item("report.txt", point.x);
+    const ask = async (input: unknown) => {
+      const pending = f.call("computer", input);
+      await until(() => !!f.session.pendingApproval);
+      return { card: f.session.pendingApproval, pending };
+    };
+    const press = await ask({ action: "mouse_down", point: { x: 10, y: 20 } });
+    expect(press.card?.title).toBe("Review action");
+    expect(press.card?.fields).toContainEqual(["Target", "report.txt"]);
+    await f.post(f.answer());
+    expect((await press.pending).body.ok).toBe(true);
+    const move = await ask({ action: "move", point: { x: 50, y: 20 } });
+    expect(move.card?.title).toBe("Delete item");
+    for (const field of [
+      ["Target", "report.txt"],
+      ["Drop target", "Trash"],
+      ["Action", "move the pointer"],
+      ["Drag", "(10, 20) to (50, 20)"],
+    ])
+      expect(move.card?.fields).toContainEqual(field);
+    await f.post(f.answer());
+    expect((await move.pending).body.ok).toBe(true);
+    const release = await ask({ action: "mouse_up" });
+    expect(release.card?.title).toBe("Delete item");
+    for (const field of [
+      ["Target", "report.txt"],
+      ["Drop target", "Trash"],
+      ["Action", "release a mouse button"],
+      ["Drag", "(10, 20) to (50, 20)"],
+      ["Button", "left"],
+    ])
+      expect(release.card?.fields).toContainEqual(field);
+    await f.post(f.answer("deny"));
+    expect((await release.pending).body.ok).toBe(false);
+    expect(f.effects().map((c) => (c.body as { input: { kind: string } }).input.kind)).toEqual([
+      "down",
+      "move",
+    ]);
+  });
+  it("a drag approved over no element at its drop is refused once Trash is found there", async () => {
+    const f = setup();
+    const item = (name: string, x: number): HitTestResult => ({
+      target: { point: { x, y: 40 }, source: "ax", role: "list item", name, app: "Thunar" },
+      window: 77,
+      ms: 1,
+    });
+    let trash = false;
+    f.fake.script.hitTest = (point) =>
+      point.x <= 60
+        ? item("report.txt", point.x)
+        : trash
+          ? item("Trash", point.x)
+          : { target: null, window: 77, ms: 1 };
+    const pending = f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 50, y: 20 },
+      ],
+    });
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval?.title).toBe("Review action");
+    trash = true;
+    await f.post(f.answer());
+    const result = await pending;
+    expect(result.body.ok).toBe(false);
+    expect(result.body.content[0]?.text).toMatch(/^Not dragged: the screen changed/);
+    expect(f.effects()).toHaveLength(0);
+  });
   it("a drag's approval binds every point of its path", async () => {
     const f = setup();
     const generation = f.session.generation;

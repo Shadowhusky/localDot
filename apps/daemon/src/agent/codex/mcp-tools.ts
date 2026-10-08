@@ -23,8 +23,9 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}, or where the cursor is without one; ` +
     'button left/right/middle; count 1-3; mods: modifier keys held during the click, such as ["shift"] or ' +
     '["ctrl"]), drag (path: 2 to 64 points {x, y} to follow, start first, such as a stroke when drawing; ' +
-    `button; mods; ms up to ${MAX_DRAG_MS} for the motion), move (point: hovers, or drags while a button is ` +
-    "down), mouse_down (point optional, button, mods: the button stays down until mouse_up, at most 60 s), " +
+    `button; mods; ms up to ${MAX_DRAG_MS} for the motion; one approval covers the whole path), move (point: ` +
+    "hovers, or drags while a button is down), mouse_down (point optional, button, mods: the button stays " +
+    "down until mouse_up, at most 60 s; each move and the mouse_up while it is down asks like a drag), " +
     "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
     "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
     "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +

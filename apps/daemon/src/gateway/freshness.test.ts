@@ -316,15 +316,33 @@ describe("gateway freshness", () => {
     expect(out.ok).toBe(true);
     expect(s.clicks()).toHaveLength(1);
   });
-  it("checks a button press at a point against the screenshot, but not one where the cursor is", async () => {
+  it("checks a button press against the screenshot unless this agent's move on that screenshot just put the cursor there", async () => {
     const s = await setup();
     s.setFrames(await png(paint(base(), { x: 620, y: 380, w: 40, h: 40 })));
-    expect(
-      await s.gateway.run(s.ctx, { verb: "down", point, basedOn: s.basis.frameId }),
-    ).toMatchObject({ ok: false, cancelled: "stale" });
+    const basedOn = s.basis.frameId;
+    const press = () => s.gateway.run(s.ctx, { verb: "down", basedOn });
+    const stale = { ok: false, cancelled: "stale" };
+    expect(await s.gateway.run(s.ctx, { verb: "down", point, basedOn })).toMatchObject(stale);
+    // A move on no screenshot, on a later one, or another agent's move leaves the press checked.
     await s.gateway.run(s.ctx, { verb: "move", point });
-    expect((await s.gateway.run(s.ctx, { verb: "down", basedOn: s.basis.frameId })).ok).toBe(true);
+    expect(await press()).toMatchObject(stale);
+    const later = await s.gateway.observe(s.ctx);
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn: later.frameId });
+    expect(await press()).toMatchObject(stale);
+    await s.gateway.run({ ...s.ctx, agent: "helper" }, { verb: "move", point, basedOn });
+    expect(await press()).toMatchObject(stale);
+    // So does anything else that acted after the move.
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+    await s.gateway.run(s.ctx, { verb: "scroll", point, dx: 0, dy: 1 });
+    expect(await press()).toMatchObject(stale);
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+    expect((await press()).ok).toBe(true);
     expect(s.clicks().map((c) => (c.body as { input: { kind: string } }).input.kind)).toEqual([
+      "move",
+      "move",
+      "move",
+      "move",
+      "scroll",
       "move",
       "down",
     ]);

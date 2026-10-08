@@ -82,17 +82,22 @@ export async function authorizePrepared(
         fields.push(["Keys", boundedPreview(action.combo.join(" + "), ctx)]);
       if (Array.isArray(action.mods))
         fields.push(["Keys held", boundedPreview(action.mods.join(" + "), ctx)]);
+      const at = (p: unknown) => {
+        const { x, y } = p as { x: unknown; y: unknown };
+        return `(${String(x)}, ${String(y)})`;
+      };
       if (Array.isArray(action.path) && action.path.length >= 2) {
-        const at = (p: unknown) => {
-          const { x, y } = p as { x: unknown; y: unknown };
-          return `(${String(x)}, ${String(y)})`;
-        };
         fields.push([
           "Drag",
           boundedPreview(`${at(action.path[0])} to ${at(action.path.at(-1))}`, ctx),
         ]);
         if (action.path.length > 2)
           fields.push(["Path", boundedPreview(`${action.path.length} points`, ctx)]);
+      }
+      // A move or a release while a button is down: the drag from where it went down.
+      if (action.drag && typeof action.drag === "object") {
+        const { from, to } = action.drag as { from: unknown; to: unknown };
+        fields.push(["Drag", boundedPreview(`${at(from)} to ${at(to)}`, ctx)]);
       }
       if (["drag", "down", "up"].includes(verb))
         fields.push(["Button", boundedPreview(String(action.button ?? "left"), ctx)]);

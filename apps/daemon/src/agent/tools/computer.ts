@@ -37,18 +37,19 @@ const targetFacts = (target: Target): NativeTargetFacts => ({
 });
 
 // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-// A hover browses like a scroll; a drag, a press or a release acts like a click where it lands,
-// and a drag is as strong as the stronger of its two ends.
+// A hover browses like a scroll; a press or a release acts like a click where it lands. A drag is
+// as strong as the stronger of its two ends, and so is a move or a release while a button is down:
+// the gateway gives those the press as their start and their own point as the drop.
 function nativeFacts(action: GuiAction, identity: NativeActionIdentity): RiskFacts {
   const mods = "mods" in action && action.mods?.length ? { mods: action.mods } : {};
   if (action.verb === "wait") return { operation: "wait" };
   if (action.verb === "scroll") return { operation: "scroll", ...mods };
-  if (action.verb === "move") return { operation: "scroll" };
+  if (action.verb === "move" && !identity.drop) return { operation: "scroll" };
   const { target } = identity;
   return {
     operation: action.verb === "type" || action.verb === "key" ? action.verb : "click",
     ...(target ? { target: targetFacts(target) } : {}),
-    ...(action.verb === "drag"
+    ...(action.verb === "drag" || identity.drop
       ? { drop: identity.drop?.target ? targetFacts(identity.drop.target) : null }
       : {}),
     ...mods,
@@ -89,7 +90,7 @@ function gui(a: ComputerAction): GuiAction | string {
       };
     case "move":
       if (!a.point) return "move needs a point";
-      return { verb: "move", point: a.point, speed: "auto" };
+      return { verb: "move", point: a.point, speed: "auto", ...basedOn };
     case "mouse_down":
       return {
         verb: "down",
@@ -190,14 +191,14 @@ const STALE: Partial<Record<ComputerAction["action"], string>> = {
 };
 
 // What a pointer action did that its screenshot cannot show: a button left down, one that was not
-// down, or a drag that stopped before its drop.
+// down, or a drag that was cancelled before its drop.
 function pointerNote(a: ComputerAction, outcome: ActionOutcome): string | undefined {
   const button = a.button ?? "left";
   if (a.action === "mouse_down" && outcome.ok)
-    return `The ${button} button is down. It stays down until mouse up, or ${BUTTON_HELD_S} s without another mouse action.`;
+    return `The ${button} button is down. It stays down until mouse up, or ${BUTTON_HELD_S} s without another mouse action. Each mouse move and the mouse up while it is down asks like a drag.`;
   if (a.action === "mouse_up" && outcome.notDown) return `The ${button} button was not down.`;
-  if (a.action === "drag" && !outcome.ok && !outcome.cancelled)
-    return "The drag stopped before its drop and let go where it started.";
+  if (outcome.dropCancelled)
+    return "The drag was cancelled before its drop: Escape was pressed while the button was down, then the button came up where the pointer was.";
   return undefined;
 }
 
