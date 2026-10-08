@@ -7,6 +7,7 @@ import type {
   TypeRequest,
   TypeResult,
 } from "@localdot/protocol";
+import { type HelperWindow, listWindows } from "./perception/hit-test.ts";
 import type { XEvent, XHelper } from "./x/helper.ts";
 import { keyName } from "./x/keys.ts";
 
@@ -35,8 +36,32 @@ export class ActivationError extends Error {
   }
 }
 
-async function activate(x: XHelper, window: number | undefined): Promise<void> {
+function transientRoot(windows: HelperWindow[], win: HelperWindow): number {
+  let top = win;
+  for (let hops = 0; hops < 8 && top.transientFor !== null; hops++) {
+    const parent = windows.find((w) => w.id === top.transientFor);
+    if (!parent) break;
+    top = parent;
+  }
+  return top.id;
+}
+
+// Input goes to the window the action's identity named. Activating moves keyboard focus to it,
+// which only helps when focus is known to be in an unrelated window: activating the window under
+// an open menu or popup closes it, and the window manager focuses a dialog's parent on the click
+// itself. Keys and text never go to another window of the target's transient group in its place.
+async function activate(x: XHelper, window: number | undefined, keyboard: boolean): Promise<void> {
   if (window === undefined) return;
+  const windows = await listWindows(x);
+  const target = windows.find((w) => w.id === window);
+  if (!target) throw new ActivationError(window);
+  if (target.overrideRedirect || target.active) return;
+  const active = windows.find((w) => w.active);
+  if (!active) return;
+  if (transientRoot(windows, target) === transientRoot(windows, active)) {
+    if (keyboard) throw new ActivationError(window);
+    return;
+  }
   const result = await x.call<{ active: number; timedOut?: boolean }>("activate", { window });
   if (result.timedOut || result.active !== window) throw new ActivationError(window);
 }
@@ -113,7 +138,7 @@ export async function inject(
     throw new UnsupportedInputError(`${input.kind} through /input`);
   const driver = req.injector === "driver" ? driverFor(injectors, input.kind) : undefined;
   const { mono: armedMono } = await x.call<{ mono: number }>("arm");
-  await activate(x, req.window);
+  await activate(x, req.window, input.kind === "key");
   const injector: Injector = req.injector;
 
   if (input.kind === "click") {
@@ -207,7 +232,7 @@ export async function typeText(
   const driver = req.injector === "driver" ? driverFor(injectors, "type") : undefined;
   const { mono: armedMono } = await x.call<{ mono: number }>("arm");
   signal?.throwIfAborted();
-  await activate(x, req.window);
+  await activate(x, req.window, true);
   signal?.throwIfAborted();
   const chars = [...req.text];
   if (driver) {

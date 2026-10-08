@@ -1,6 +1,14 @@
 import type { InputRequest, TypeProgress, TypeRequest } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { inject, NoPressError, typeText, UnsupportedInputError, withPress } from "./input.ts";
+import {
+  ActivationError,
+  inject,
+  NoPressError,
+  typeText,
+  UnsupportedInputError,
+  withPress,
+} from "./input.ts";
+import type { HelperWindow } from "./perception/hit-test.ts";
 import type { XEvent, XHelper } from "./x/helper.ts";
 
 interface Scripted {
@@ -50,6 +58,30 @@ const click: InputRequest = {
   holdMs: 0,
 };
 
+const xwin = (id: number, over: Partial<HelperWindow> = {}): HelperWindow => ({
+  id,
+  pid: 2193,
+  cls: "Gimp",
+  title: `window ${id}`,
+  x: 0,
+  y: 0,
+  w: 100,
+  h: 100,
+  frame: [0, 0, 100, 100],
+  active: false,
+  overrideRedirect: false,
+  transientFor: null,
+  ...over,
+});
+// GIMP's image window (11), its colour dialog (21), an open menu over the image window (30) and
+// an unrelated terminal (40).
+const STACK = {
+  menu: xwin(30, { overrideRedirect: true, transientFor: 11 }),
+  dialog: xwin(21, { transientFor: 11 }),
+  image: xwin(11),
+  terminal: xwin(40, { cls: "Xfce4-terminal" }),
+};
+
 describe("withPress", () => {
   it("sees a press that lands before the reply", async () => {
     const s = scripted((_cmd, _args, emit) => {
@@ -96,20 +128,26 @@ describe("withPress", () => {
 
 describe("inject", () => {
   it("refuses to inject when the requested window cannot be activated", async () => {
-    const s = scripted(() => ({ active: 9, timedOut: true }));
+    const s = scripted((cmd) =>
+      cmd === "windows"
+        ? { windows: [xwin(77), xwin(9, { active: true })], generation: 1 }
+        : { active: 9, timedOut: true },
+    );
     await expect(inject(s.helper, { ...click, window: 77 })).rejects.toThrow(/activate/);
-    expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "activate"]);
+    expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "windows", "activate"]);
   });
   it("arms, activates the window when given, clicks, and returns the first raw press", async () => {
     const s = scripted((cmd, args, emit) => {
+      if (cmd === "windows")
+        return { windows: [xwin(77), xwin(9, { active: true })], generation: 1 };
       if (cmd === "activate") return { active: args.window, changed: true, waitedMs: 12 };
       emit(press("button", 1, 500));
       emit({ ev: "release", kind: "button", detail: 1, mono: 501 });
       return { button: 1, presses: 1 };
     });
     const res = await inject(s.helper, { ...click, window: 77 });
-    expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "activate", "click"]);
-    expect(s.calls[2]?.args).toMatchObject({ x: 10, y: 20, button: 1, count: 1, holdMs: 0 });
+    expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "windows", "activate", "click"]);
+    expect(s.calls[3]?.args).toMatchObject({ x: 10, y: 20, button: 1, count: 1, holdMs: 0 });
     expect(res).toMatchObject({
       pressMono: 500,
       presses: [500],
@@ -117,6 +155,71 @@ describe("inject", () => {
       injector: "xtest",
     });
     expect(res.armedMono).toBeLessThan(500);
+  });
+
+  describe("activation", () => {
+    const run = (windows: HelperWindow[], req: InputRequest) => {
+      const s = scripted((cmd, args, emit) => {
+        if (cmd === "windows") return { windows, generation: 1 };
+        if (cmd === "activate") return { active: args.window, changed: true, waitedMs: 3 };
+        if (cmd === "click") emit(press("button", 1, 500));
+        if (cmd === "keys") emit(press("key", 36, 500));
+        return {};
+      });
+      return { s, done: inject(s.helper, req) };
+    };
+    const key: InputRequest = {
+      input: { kind: "key", combo: ["Return"] },
+      injector: "xtest",
+      holdMs: 0,
+    };
+    const order = (s: Scripted) => s.calls.map((c) => c.cmd).filter((c) => c !== "arm");
+    const { menu, dialog, image, terminal } = STACK;
+
+    it("never activates the window a click on an open menu would close", async () => {
+      // The menu's item lies over the image window; activating that would close the menu.
+      const { s, done } = run([menu, { ...image, active: true }, terminal], {
+        ...click,
+        window: 30,
+      });
+      await done;
+      expect(order(s)).toEqual(["windows", "click"]);
+    });
+
+    it("never activates the active window or another window of its transient group", async () => {
+      for (const target of [11, 21]) {
+        const { s, done } = run([{ ...dialog, active: true }, image, terminal], {
+          ...click,
+          window: target,
+        });
+        await done;
+        expect(order(s)).toEqual(["windows", "click"]);
+      }
+    });
+
+    it("activates only when focus is known to be in an unrelated window", async () => {
+      const unknown = run([dialog, image, terminal], { ...click, window: 11 });
+      await unknown.done;
+      expect(order(unknown.s)).toEqual(["windows", "click"]);
+      const elsewhere = run([dialog, image, { ...terminal, active: true }], {
+        ...click,
+        window: 11,
+      });
+      await elsewhere.done;
+      expect(order(elsewhere.s)).toEqual(["windows", "activate", "click"]);
+    });
+
+    it("refuses keys meant for one window while another window of its group has focus", async () => {
+      const { s, done } = run([{ ...dialog, active: true }, image], { ...key, window: 11 });
+      await expect(done).rejects.toThrow(ActivationError);
+      expect(order(s)).toEqual(["windows"]);
+    });
+
+    it("refuses input for a window that is gone", async () => {
+      const { s, done } = run([image, { ...terminal, active: true }], { ...click, window: 21 });
+      await expect(done).rejects.toThrow(ActivationError);
+      expect(order(s)).toEqual(["windows"]);
+    });
   });
 
   it("maps buttons and double clicks and returns every press", async () => {
