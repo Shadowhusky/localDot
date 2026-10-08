@@ -12,6 +12,7 @@ export * from "./input.ts";
 export * from "./key-like.ts";
 export * from "./keyd.ts";
 export * from "./manual-input.ts";
+export * from "./notify.ts";
 export * from "./patch.ts";
 export * from "./recording.ts";
 export * from "./release.ts";
