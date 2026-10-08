@@ -209,10 +209,10 @@ describe("inject", () => {
       expect(order(elsewhere.s)).toEqual(["windows", "activate", "click"]);
     });
 
-    it("refuses keys meant for one window while another window of its group has focus", async () => {
+    it("moves the focus for keys to their window, even from another window of its group", async () => {
       const { s, done } = run([{ ...dialog, active: true }, image], { ...key, window: 11 });
-      await expect(done).rejects.toThrow(ActivationError);
-      expect(order(s)).toEqual(["windows"]);
+      await done;
+      expect(order(s)).toEqual(["windows", "activate", "keys"]);
     });
 
     it("refuses input for a window that is gone", async () => {

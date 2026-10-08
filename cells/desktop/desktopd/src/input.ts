@@ -46,10 +46,10 @@ function transientRoot(windows: HelperWindow[], win: HelperWindow): number {
   return top.id;
 }
 
-// Input goes to the window the action's identity named. Activating moves keyboard focus to it,
-// which only helps when focus is known to be in an unrelated window: activating the window under
-// an open menu or popup closes it, and the window manager focuses a dialog's parent on the click
-// itself. Keys and text never go to another window of the target's transient group in its place.
+// Input goes to the window the action's identity named, and activating moves keyboard focus there
+// only when focus is known to be in another window. A pointer press needs no activation within the
+// active window's transient group: activating the window under an open menu or popup closes it,
+// and the window manager focuses a dialog's parent on the click itself. Keys need the focus.
 async function activate(x: XHelper, window: number | undefined, keyboard: boolean): Promise<void> {
   if (window === undefined) return;
   const windows = await listWindows(x);
@@ -58,10 +58,7 @@ async function activate(x: XHelper, window: number | undefined, keyboard: boolea
   if (target.overrideRedirect || target.active) return;
   const active = windows.find((w) => w.active);
   if (!active) return;
-  if (transientRoot(windows, target) === transientRoot(windows, active)) {
-    if (keyboard) throw new ActivationError(window);
-    return;
-  }
+  if (!keyboard && transientRoot(windows, target) === transientRoot(windows, active)) return;
   const result = await x.call<{ active: number; timedOut?: boolean }>("activate", { window });
   if (result.timedOut || result.active !== window) throw new ActivationError(window);
 }
