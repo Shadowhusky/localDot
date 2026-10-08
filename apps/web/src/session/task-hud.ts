@@ -119,13 +119,17 @@ function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): stri
 
 const PAST_HOLD_MS = 1200;
 const WORKING = new Set(["acting", "observing", "thinking"]);
-const ended = (a: ActionState) => a.cancel?.t ?? a.resultT;
+// Replay folds the whole recording, so an action's end may still lie ahead of nowMs.
+const ended = (a: ActionState, nowMs: number) => {
+  const t = a.cancel?.t ?? a.resultT;
+  return t !== undefined && t <= nowMs;
+};
 
 export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): TaskHud {
   const n = startedCount(model, nowMs);
   const first = screenAt(model, nowMs)?.firstAction ?? 0;
   const current = n > first ? model.actions[n - 1] : undefined;
-  const acting = current !== undefined && ended(current) === undefined;
+  const acting = current !== undefined && !ended(current, nowMs);
   const elapsedMs = model.startT === null ? 0 : Math.max(0, nowMs - model.startT);
   const elapsedS = elapsedMs >= 5000 ? Math.floor(msToSeconds(elapsedMs)) : null;
   const finished = (row: TaskRow, label: string, caption: string): TaskHud => ({

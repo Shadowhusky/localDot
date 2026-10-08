@@ -335,6 +335,18 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(view(unknownVerb, 1400).task.label).toBe("Working");
   });
 
+  it("in Replay, keeps an action in flight until the time of its result", () => {
+    expect(replay(typed(), 700)).toMatchObject({
+      row: "acting",
+      label: "Typing =SUM(F2:F13)",
+      control: true,
+    });
+    expect(replay(typed(), 1500).label).toBe("Typed =SUM(F2:F13)");
+    const cancelled = [...start(), ev("action.cancel", 900, { reason: "user" }, "s1")];
+    expect(replay(cancelled, 700).label).toBe("Typing =SUM(F2:F13)");
+    expect(replay(cancelled, 1000).label).toBe("Working");
+  });
+
   it("keeps the frozen computer authoritative over any task verdict", () => {
     const frozen = hudFor({ cell: { ...cell, paused: true }, status: "known", pending: null });
     for (const events of [
