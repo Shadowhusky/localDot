@@ -5,7 +5,12 @@ import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 import "./usage.css";
 
+const UNEXPLAINED =
+  "The task could not continue. Check the reported reason and repair its provider or model before deciding whether to resume.";
 export function recoveryMessage(reason: string | undefined, local: boolean): string {
+  return knownReason(reason, local) ?? UNEXPLAINED;
+}
+function knownReason(reason: string | undefined, local: boolean): string | undefined {
   if (reason === "budget")
     return "The task reached its spending limit. Raising the ceiling keeps the amount already spent.";
   if (reason === "keyd unavailable")
@@ -18,7 +23,7 @@ export function recoveryMessage(reason: string | undefined, local: boolean): str
     return local
       ? "The local model is unavailable. Start its server and restore the selected model before resuming."
       : "The selected model could not continue. Check its provider and access before resuming.";
-  return "The task could not continue. Check the reported reason and repair its provider or model before deciding whether to resume.";
+  return undefined;
 }
 const dollars = (value: number) =>
   `$${value.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
@@ -117,7 +122,9 @@ export function TaskRecovery({
       </button>
       <details className="recovery-options">
         <summary>Recovery options</summary>
-        {state.reason && <p>{state.reason}</p>}
+        {state.reason && !knownReason(state.reason, local) && (
+          <p>Reported reason: {state.reason}</p>
+        )}
         <div className="recovery-actions">
           <button type="button" onClick={(event) => onSettings(event.currentTarget)}>
             Open recovery settings

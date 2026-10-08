@@ -183,6 +183,12 @@ describe("browser download review controls", () => {
     ).rejects.toThrow();
   });
 });
+it("counts one kept download as one file", async () => {
+  const f = fixture(released);
+  render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
+  await screen.findByText("Saved to ~/Downloads/report.pdf");
+  expect(screen.getByText("1 file")).toBeTruthy();
+});
 describe("download list refresh", () => {
   const FAILED = "Downloads could not be refreshed. Check the computer and try again.";
   const lists = (fetchImpl: ReturnType<typeof vi.fn<typeof fetch>>) =>

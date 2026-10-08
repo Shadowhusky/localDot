@@ -878,18 +878,19 @@ function Theatre({ api }: { api: ApiClient }) {
 }
 
 const REJECTED: Record<Exclude<Rejected, null>, string> = {
-  stored: "The daemon rejected the stored token.",
-  link: "The daemon rejected the token in the link.",
-  code: "This sign-in link could not be used. Open a fresh link and try again.",
+  stored: "Your saved sign-in no longer works.",
+  link: "This sign-in link was not accepted.",
+  code: "This sign-in link could not be used.",
 };
 
 function NoToken({ rejected }: { rejected: Rejected }) {
   return (
     <section className="notice" role="alert">
-      <h1>No access token</h1>
+      <h1>Sign in to localDot</h1>
       <p>
-        {rejected ? REJECTED[rejected] : "Open a sign-in link from your local daemon."} The link
-        works once and expires after one minute: <code>{window.location.origin}/#code=…</code>
+        {rejected ? `${REJECTED[rejected]} ` : ""}Run <code>localdot open</code> where localDot is
+        installed, then open its sign-in link here as <code>{window.location.origin}/#code=…</code>.
+        Each link works once and expires after one minute.
       </p>
     </section>
   );

@@ -37,3 +37,17 @@ it("offers recovery for a budget pause but not for a Pause, question or approval
     "spending limit",
   );
 });
+it("explains a known pause reason without printing its internal code", () => {
+  render(<TaskRecovery agent={agentWith("budget")} controls={controls} onSettings={vi.fn()} />);
+  const region = screen.getByRole("region", { name: "Task recovery" });
+  expect([...region.querySelectorAll("p")].map((p) => p.textContent)).not.toContain("budget");
+  cleanup();
+  render(
+    <TaskRecovery
+      agent={agentWith("provider quota exhausted")}
+      controls={controls}
+      onSettings={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("Reported reason: provider quota exhausted")).toBeTruthy();
+});

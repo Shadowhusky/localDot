@@ -68,9 +68,14 @@ it("keeps role/route/model totals with deduped replay and retains unknown reason
       selection={{ kind: "api", roles: [{ role: "main", provider: "openai", model: "fixture" }] }}
     />,
   );
-  expect(screen.getByRole("region", { name: "Task usage" }).textContent).toContain(
-    "310 input · 48 output tokens",
+  const usage = screen.getByRole("region", { name: "Task usage" }).textContent;
+  expect(usage).toContain("310 input · 48 output tokens");
+  expect(usage).toContain(
+    "6 reported reasoning tokens · some calls did not report reasoning · 2 reported calls",
   );
+  expect(usage).toContain("5 input · 2 output tokens");
+  expect(usage).toContain("1 reported call");
+  expect(usage).not.toContain("1 reported calls");
   expect(screen.getByText("Token counts do not establish an invoice cost.")).toBeTruthy();
   expect(document.body.textContent).not.toContain("$");
 });

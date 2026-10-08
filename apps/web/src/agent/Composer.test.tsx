@@ -134,7 +134,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.field.value).toBe("请继续 monthly report");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(f.field.value).toBe("");
-    expect(screen.getByText("Accepted by the daemon.")).toBeTruthy();
+    expect(screen.getByText("Sent to dot.")).toBeTruthy();
   });
   it("preserves a newer draft even when its text equals the accepted message", async () => {
     const pending = Promise.withResolvers<Response>();
@@ -162,7 +162,7 @@ describe("composer delivery ownership and draft handling", () => {
     f.input("new session draft");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(f.field.value).toBe("new session draft");
-    expect(screen.queryByText("Accepted by the daemon.")).toBeNull();
+    expect(screen.queryByText("Sent to dot.")).toBeNull();
     f.submit();
     expect(f.requests.at(-1)?.path).toContain(otherSession);
   });
@@ -183,7 +183,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(agent.reconcile).toHaveBeenCalled();
     expect(f.requests).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
-    await screen.findByText("Accepted by the daemon.");
+    await screen.findByText("Sent to dot.");
     expect(f.requests).toHaveLength(2);
     expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "captured ordinary message" });
     expect(f.field.value).toBe("new unsent draft");
@@ -225,7 +225,7 @@ describe("composer delivery ownership and draft handling", () => {
     });
     expect(f.requests).toHaveLength(2);
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
-    expect(screen.getByText("Accepted by the daemon.")).toBeTruthy();
+    expect(screen.getByText("Sent to dot.")).toBeTruthy();
   });
   it("checks the current field before retrying a captured ordinary request", async () => {
     const f = setup(() => {
@@ -252,9 +252,9 @@ describe("composer delivery ownership and draft handling", () => {
     });
     f.input("explicit new task after Stop");
     f.submit();
-    await screen.findByText(/The daemon refused this message/);
+    await screen.findByText(/This message was not accepted/);
     f.update({ agent: { ...agent, sessionId: null, snapshot: null, fresh: false } });
-    expect(screen.getByText(/The daemon refused this message/)).toBeTruthy();
+    expect(screen.getByText(/This message was not accepted/)).toBeTruthy();
     expect(f.field.value).toBe("explicit new task after Stop");
     expect(f.requests).toHaveLength(1);
     f.update({
@@ -264,7 +264,7 @@ describe("composer delivery ownership and draft handling", () => {
         snapshot: { ...snapshot, sessionId: otherSession },
       },
     });
-    expect(screen.queryByText(/The daemon refused this message/)).toBeNull();
+    expect(screen.queryByText(/This message was not accepted/)).toBeNull();
     expect(f.requests).toHaveLength(1);
   });
   it("retains the start gate when live polling adopts its session before the confirmed reply", async () => {
@@ -279,7 +279,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests).toHaveLength(1);
     await act(async () => pending.resolve(Response.json({ sessionId }, { status: 202 })));
     expect(f.field.value).toBe("");
-    expect(screen.getByText("Accepted by the daemon.")).toBeTruthy();
+    expect(screen.getByText("Task started.")).toBeTruthy();
   });
   it("asks for the new task's session as soon as the start is accepted", async () => {
     const onTaskStarted = vi.fn();
@@ -312,7 +312,7 @@ describe("composer delivery ownership and draft handling", () => {
     });
     await act(async () => pending.resolve(Response.json({ sessionId }, { status: 202 })));
     expect(f.field.value).toBe("new task awaiting reply");
-    expect(screen.queryByText("Accepted by the daemon.")).toBeNull();
+    expect(screen.queryByText("Task started.")).toBeNull();
     expect(screen.getByText(/task changed while sending/)).toBeTruthy();
   });
   it("keeps a lost start reply uncertain after adoption and permits explicit dismissal without resending", async () => {
@@ -521,7 +521,7 @@ describe("explicit composer attachments", () => {
     await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(2));
     expect(calls.map((c) => c.body)).toEqual([one, two]);
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    await screen.findByText("Accepted by the daemon.");
+    await screen.findByText("Sent to dot.");
     expect(JSON.parse(String(calls[2]?.body))).toEqual({
       kind: "steer",
       text: "Read both sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
@@ -592,7 +592,7 @@ describe("explicit composer attachments", () => {
     f.submit();
     expect(delivered).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
-    await screen.findByText("Accepted by the daemon.");
+    await screen.findByText("Sent to dot.");
     expect(delivered).toHaveLength(2);
     expect(delivered[1]).toBe(delivered[0]);
     expect(JSON.parse(delivered[0] as string).text).toContain("~/Downloads/one.txt");

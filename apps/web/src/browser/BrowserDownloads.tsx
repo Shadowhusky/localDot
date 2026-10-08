@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
+import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { changeDownload, listDownloads } from "./download-api.ts";
 import "../agent/safety.css";
@@ -173,7 +174,11 @@ export function BrowserDownloads({
         <summary>
           Browser downloads{" "}
           <span>
-            {waiting ? `${waiting} waiting` : visible.length ? `${visible.length} files` : ""}
+            {waiting
+              ? `${waiting} waiting`
+              : visible.length
+                ? count(visible.length, "file", "files")
+                : ""}
           </span>
         </summary>
         <p className="download-intro">

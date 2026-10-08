@@ -1,4 +1,5 @@
 import type { TaskModelSelection } from "@localdot/protocol";
+import { count } from "../copy/format.ts";
 import type { AgentModel } from "./model.ts";
 import "./usage.css";
 
@@ -43,13 +44,14 @@ export function UsageView({
               </strong>
               <span>Route: {row.route}</span>
               <span>
-                {number(row.inputTokens)} input · {number(row.outputTokens)} output tokens
+                {number(row.inputTokens)} input ·{" "}
+                {count(row.outputTokens, "output token", "output tokens")}
               </span>
               <span>
                 {row.reasoningTokens === undefined
                   ? "Reasoning tokens unavailable"
-                  : `${number(row.reasoningTokens)} reported reasoning tokens${row.reasoningPartial ? " · some calls did not report reasoning" : ""}`}{" "}
-                · {number(row.calls)} reported calls
+                  : `${count(row.reasoningTokens, "reported reasoning token", "reported reasoning tokens")}${row.reasoningPartial ? " · some calls did not report reasoning" : ""}`}{" "}
+                · {count(row.calls, "reported call", "reported calls")}
               </span>
             </li>
           ))}

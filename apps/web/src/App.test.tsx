@@ -288,7 +288,10 @@ describe("App token states", () => {
 
   it("asks for the token when none is stored", () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain("No access token");
+    const notice = screen.getByRole("alert").textContent;
+    expect(notice).toContain("Sign in to localDot");
+    expect(notice).toContain("Run localdot open");
+    expect(notice).not.toMatch(/daemon|token/i);
   });
 
   it("makes the Theatre inert while keys are open and restores the trigger after closing", async () => {
@@ -392,7 +395,7 @@ describe("App token states", () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const fetchImpl = vi.fn(unauthorized);
     render(<App fetchImpl={fetchImpl} />);
-    expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
+    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fetchImpl).toHaveBeenCalledTimes(5);
@@ -400,12 +403,12 @@ describe("App token states", () => {
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain("No access token");
+    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
 
     window.location.hash = "#token=abc";
     await waitFor(() => expect(window.location.hash).toBe(""));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("No access token");
+    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
 
     window.location.hash = `#token=${TOKEN}`;
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2));
@@ -745,7 +748,7 @@ describe("App on a refused status socket", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     revoked = true;
     act(() => FakeWebSocket.instances[0]?.onclose?.());
-    expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
+    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami"]);
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     // The unmount's or cell change's effect cleanup closes the socket; let React run it first.
@@ -835,7 +838,7 @@ describe("App token hardening", () => {
     await screen.findAllByRole("button", { name: "Turn on" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
-    expect(screen.queryByText("No access token")).toBeNull();
+    expect(screen.queryByText("Sign in to localDot")).toBeNull();
     expect(d.calls.filter((c) => c.path === "/api/cells").every((c) => c.token === TOKEN)).toBe(
       true,
     );
@@ -845,7 +848,7 @@ describe("App token hardening", () => {
     const d = daemon(() => new Response("unauthorized", { status: 401 }));
     window.location.hash = `#token=${NEWER}`;
     render(<App fetchImpl={d.fetchImpl} />);
-    expect(await screen.findByText(/rejected the token in the link/)).toBeTruthy();
+    expect(await screen.findByText(/This sign-in link was not accepted/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(d.seen()).toEqual(["GET /api/whoami"]);
   });
@@ -876,8 +879,8 @@ describe("App token hardening", () => {
       oldList.resolve(new Response("unauthorized", { status: 401 }));
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-      expect(screen.queryByText("No access token")).toBeNull();
-      expect(screen.queryByText(/rejected the stored token/)).toBeNull();
+      expect(screen.queryByText("Sign in to localDot")).toBeNull();
+      expect(screen.queryByText(/Your saved sign-in no longer works/)).toBeNull();
       expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
     },
   );

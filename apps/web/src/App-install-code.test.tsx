@@ -130,7 +130,7 @@ describe("App one-use sign-in", () => {
     await waitFor(() => expect(exchanges(request)).toHaveLength(1));
     await act(async () => {});
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
-    expect(screen.queryByRole("heading", { name: "No access token" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sign in to localDot" })).toBeNull();
   });
   it("never lets an older exchange overwrite a newer successful link", async () => {
     const older = deferred<Response>();
@@ -158,7 +158,7 @@ describe("App one-use sign-in", () => {
     await screen.findAllByRole("button", { name: "Turn on" });
     await act(async () => oldCheck.resolve(json({}, 401)));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-    expect(screen.queryByRole("heading", { name: "No access token" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sign in to localDot" })).toBeNull();
   });
   it("refuses malformed success authority and ambiguous fragments without storing them", async () => {
     const request = daemon(() => json({ token: "bad" }));

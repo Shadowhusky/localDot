@@ -316,7 +316,7 @@ for (const width of [1280, 390])
     if (width >= 1180)
       await page.screenshot({ path: info.outputPath(`files-${width}-sample.png`) });
     await page.getByRole("button", { name: "Send follow-up", exact: true }).click();
-    await expect(page.getByText("Accepted by the daemon.", { exact: true })).toBeVisible();
+    await expect(page.getByText("Sent to dot.", { exact: true })).toBeVisible();
     expect(messages).toEqual([
       "Read the two sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
     ]);

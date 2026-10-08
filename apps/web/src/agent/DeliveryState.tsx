@@ -18,9 +18,11 @@ export function DeliveryState({
     <section className="delivery-state" aria-label="Message delivery" role="status">
       <p>
         {delivery.phase === "sending"
-          ? "Sending to the daemon…"
+          ? "Sending…"
           : delivery.phase === "accepted"
-            ? "Accepted by the daemon."
+            ? delivery.request.mode === "new"
+              ? "Task started."
+              : "Sent to dot."
             : delivery.explanation}
       </p>
       {delivery.phase === "uncertain" && (
