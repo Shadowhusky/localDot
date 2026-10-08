@@ -17,6 +17,7 @@ import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { FileButton } from "../ui/FileButton.tsx";
+import { focusWithoutScroll } from "../ui/focus.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../ui/Menu.tsx";
@@ -139,6 +140,8 @@ export function Composer(props: ComposerProps) {
   // Without a thread to wait in, a message waits above the composer.
   const outbox = useContext(Outbox);
   const touch = useMediaQuery(TOUCH);
+  // Where a lost message offers its two choices.
+  const lostChoice = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     current.current = props;
     guardOwner.current = guard;
@@ -235,10 +238,11 @@ export function Composer(props: ComposerProps) {
     enabled: permitted && !sending && !uncertain,
   });
 
-  // An accepted message's stand-in gives way in the same frame its own row arrives in the thread.
+  // The message's own row is in the thread: one of yours, in its words, that the thread did not
+  // have when it was sent.
   const messages = props.agent.model.messages;
-  const landed = useMemo(() => {
-    if (delivery?.phase !== "accepted") return false;
+  const arrived = useMemo(() => {
+    if (delivery?.phase !== "accepted" && delivery?.phase !== "uncertain") return false;
     for (const message of messages.values())
       if (
         message.role === "user" &&
@@ -248,23 +252,53 @@ export function Composer(props: ComposerProps) {
         return true;
     return false;
   }, [delivery, messages]);
-  useEffect(() => {
-    if (delivery?.phase !== "accepted") return;
-    const done = () => setDelivery((now) => (now === delivery ? null : now));
-    if (landed) return done();
-    const timer = window.setTimeout(done, LANDING_MS);
-    return () => window.clearTimeout(timer);
-  }, [delivery, landed]);
-  // A lost reply is checked against the task at once; only you decide whether to send it again.
-  const lostId = delivery?.phase === "uncertain" ? delivery.id : null;
-  useEffect(() => {
-    if (lostId !== null) current.current.agent.reconcile();
-  }, [lostId]);
 
   const measure = (input: HTMLTextAreaElement) => {
     setLength(input.value.length);
     setBlank(!input.value.trim());
   };
+  // dot has the message: its files went with it, and the draft clears unless it changed since.
+  const delivered = (record: Delivery) => {
+    announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
+    uploads.acknowledge(record.attachmentIDs);
+    const input = field();
+    if (revision.current === record.revision && input && input.value === record.draftText) {
+      input.value = "";
+      measure(input);
+    }
+  };
+  // An accepted message's stand-in gives way in the same frame its own row arrives in the thread.
+  useEffect(() => {
+    if (delivery?.phase !== "accepted") return;
+    const done = () => setDelivery((now) => (now === delivery ? null : now));
+    if (arrived) return done();
+    const timer = window.setTimeout(done, LANDING_MS);
+    return () => window.clearTimeout(timer);
+  }, [delivery, arrived]);
+  // A lost reply is checked against the task at once. Once the task shows the message, dot has it;
+  // until then only you decide whether to send it again.
+  const lostId = delivery?.phase === "uncertain" ? delivery.id : null;
+  useEffect(() => {
+    if (lostId !== null) current.current.agent.reconcile();
+  }, [lostId]);
+  // While a lost message waits on your choice, the thread's jump button leads to it.
+  useEffect(() => {
+    if (!outbox || !uncertain) return;
+    outbox.needs(() => {
+      const choice = lostChoice.current?.querySelector("button");
+      if (choice) focusWithoutScroll(choice);
+    });
+    return () => outbox.needs(null);
+  }, [outbox, uncertain]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the lost message's arrival is the trigger.
+  useEffect(() => {
+    if (delivery?.phase !== "uncertain" || !arrived) return;
+    const lost = pending.current;
+    if (lost?.phase !== "uncertain" || lost.id !== delivery.id) return;
+    pending.current = null;
+    setDelivery(null);
+    delivered(delivery);
+  }, [delivery, arrived]);
   const perform = async (
     request: TextDelivery,
     capturedRevision: number,
@@ -284,6 +318,7 @@ export function Composer(props: ComposerProps) {
     pending.current = record;
     setDelivery(record);
     setProblem(null);
+    outbox?.show();
     const owns = (acceptedSession?: string) =>
       mounted.current &&
       pending.current === record &&
@@ -303,14 +338,8 @@ export function Composer(props: ComposerProps) {
         return;
       }
       setDelivery({ ...record, phase: "accepted", session: acceptedSession });
-      announce("composer", request.mode === "new" ? "Task started." : "Sent to dot.");
+      delivered(record);
       if (request.mode === "new") current.current.onTaskStarted?.();
-      uploads.acknowledge(record.attachmentIDs);
-      const input = field();
-      if (revision.current === capturedRevision && input && input.value === shown.draftText) {
-        input.value = "";
-        measure(input);
-      }
     } catch (error) {
       if (
         !owns() &&
@@ -482,9 +511,10 @@ export function Composer(props: ComposerProps) {
   const shownRows = useRef(rows);
   if (rows.length) shownRows.current = rows;
 
-  const waiting = delivery && !landed && (
+  const waiting = delivery && !arrived && (
     <PendingMessage
       delivery={delivery}
+      choiceRef={lostChoice}
       onRetry={retry}
       onDismiss={dismiss}
       onEdit={edit}
@@ -500,7 +530,7 @@ export function Composer(props: ComposerProps) {
 
   return (
     <div className="composer">
-      {waiting && (outbox ? createPortal(waiting, outbox) : waiting)}
+      {waiting && (outbox ? createPortal(waiting, outbox.slot) : waiting)}
       <form
         ref={form}
         className="composer-card"

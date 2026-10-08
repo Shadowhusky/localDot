@@ -82,6 +82,67 @@ test("composer, not sure dot got it", async ({ page, ui }) => {
   await expect(rail).toHaveScreenshot("composer-uncertain.png");
 });
 
+test("a lost reply that reached dot settles once the thread shows it", async ({ page, ui }) => {
+  await ui.open("running");
+  const card = await composer(page);
+  // The daemon takes the message, but its reply never reaches the page.
+  let posts = 0;
+  await page.route("**/messages", async (route) => {
+    if (route.request().method() !== "POST") return route.fallback();
+    posts += 1;
+    await route.fetch();
+    await route.abort();
+  });
+  const box = card.getByRole("textbox", { name: "Message" });
+  await box.fill("Also add a chart of the monthly totals");
+  await card.getByRole("button", { name: "Send now" }).click();
+  const rail = page.getByRole("complementary", { name: "Conversation" });
+  await expect(
+    rail.getByRole("article", { name: "You" }).filter({ hasText: "Also add a chart" }),
+  ).toHaveCount(1);
+  await expect(rail.getByRole("region", { name: "Message delivery" })).toHaveCount(0);
+  await expect(box).toHaveValue("");
+  await expect(card.getByRole("button", { name: "Send now" })).toHaveAccessibleDescription(
+    "Write a message first.",
+  );
+  expect(posts).toBe(1);
+});
+
+test("sending from far back brings the message's place at the end into view", async ({
+  page,
+  ui,
+}) => {
+  const fixture = await ui.open("running");
+  const card = await composer(page);
+  const rail = page.getByRole("complementary", { name: "Conversation" });
+  // More than the thread mounts at once, so reading back moves it to an earlier page.
+  const said = await page.request.post(
+    `${fixture.origin}/__qa/say?n=240&text=Checking%20that%20each%20month%20adds%20up`,
+  );
+  expect(said.ok()).toBe(true);
+  await expect(rail.getByText("Checking that each month adds up (240)")).toBeAttached();
+  const scroller = rail.locator(".thread-scroll");
+  await expect(async () => {
+    await scroller.evaluate((element) => element.scrollTo({ top: 0 }));
+    await expect(rail.getByText("Loading later…")).toBeAttached({ timeout: 500 });
+  }).toPass();
+  await page.route("**/messages", (route) =>
+    route.request().method() === "POST" ? route.abort() : route.fallback(),
+  );
+  await card.getByRole("textbox", { name: "Message" }).fill("Also add a chart");
+  await card.getByRole("button", { name: "Send now" }).click();
+  const waiting = rail.getByRole("region", { name: "Message delivery" });
+  const again = waiting.getByRole("button", { name: "Send again" });
+  await expect(waiting).toContainText("Not sure dot got that.");
+  await expect(again).toBeInViewport();
+  // Read back again, and the jump button leads to the choice still waiting there.
+  await scroller.evaluate((element) => element.scrollTo({ top: 0 }));
+  await expect(again).not.toBeInViewport();
+  await rail.getByRole("button", { name: "Check your last message" }).click();
+  await expect(again).toBeInViewport();
+  await expect(again).toBeFocused();
+});
+
 test("a sent message holds its place as its own row takes over", async ({ page, ui }) => {
   await ui.open("running");
   const card = await composer(page);

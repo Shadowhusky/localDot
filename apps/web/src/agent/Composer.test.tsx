@@ -3,10 +3,20 @@ import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-libra
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
+import { withAttachments } from "./attachments.ts";
 import { Composer, type ComposerProps } from "./Composer.tsx";
 import { type AgentMessage, emptyAgentModel } from "./model.ts";
 import { Outbox } from "./outbox.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
+
+const spoken = vi.hoisted(() => ({ announce: vi.fn() }));
+vi.mock("../ui/Announcer.tsx", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ui/Announcer.tsx")>()),
+  announce: spoken.announce,
+}));
+// What the composer said through the page's one polite region.
+const said = () =>
+  spoken.announce.mock.calls.flatMap(([channel, text]) => (channel === "composer" ? [text] : []));
 
 // Lets one test pass a key-shaped name through the upload's own guards to reach Send's check.
 const transfer = vi.hoisted(() => ({ trustNames: false }));
@@ -45,6 +55,7 @@ afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
+  spoken.announce.mockClear();
   transfer.trustNames = false;
 });
 function setup(
@@ -141,7 +152,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.field.value).toBe("请继续 monthly report");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(f.field.value).toBe("");
-    expect(screen.getByText("Sent to dot.")).toBeTruthy();
+    expect(said().at(-1)).toBe("Sent to dot.");
   });
   it("preserves a newer draft even when its text equals the accepted message", async () => {
     const pending = Promise.withResolvers<Response>();
@@ -169,7 +180,7 @@ describe("composer delivery ownership and draft handling", () => {
     f.input("new session draft");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(f.field.value).toBe("new session draft");
-    expect(screen.queryByText("Sent to dot.")).toBeNull();
+    expect(said()).toEqual([]);
     f.submit();
     expect(f.requests.at(-1)?.path).toContain(otherSession);
   });
@@ -193,7 +204,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(reconcile).toHaveBeenCalledOnce();
     expect(f.requests).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
-    await screen.findByText("Sent to dot.");
+    await waitFor(() => expect(said().at(-1)).toBe("Sent to dot."));
     expect(f.requests).toHaveLength(2);
     expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "captured ordinary message" });
     expect(f.field.value).toBe("new unsent draft");
@@ -234,7 +245,7 @@ describe("composer delivery ownership and draft handling", () => {
     });
     expect(f.requests).toHaveLength(2);
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
-    expect(screen.getByText("Sent to dot.")).toBeTruthy();
+    expect(said().at(-1)).toBe("Sent to dot.");
   });
   it("checks the current field before retrying a captured ordinary request", async () => {
     const f = setup(() => {
@@ -286,7 +297,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests).toHaveLength(1);
     await act(async () => pending.resolve(Response.json({ sessionId }, { status: 202 })));
     expect(f.field.value).toBe("");
-    expect(screen.getByText("Task started.")).toBeTruthy();
+    expect(said()).toEqual(["Task started."]);
   });
   it("asks for the new task's session as soon as the start is accepted", async () => {
     const onTaskStarted = vi.fn();
@@ -319,7 +330,7 @@ describe("composer delivery ownership and draft handling", () => {
     });
     await act(async () => pending.resolve(Response.json({ sessionId }, { status: 202 })));
     expect(f.field.value).toBe("new task awaiting reply");
-    expect(screen.queryByText("Task started.")).toBeNull();
+    expect(said()).not.toContain("Task started.");
     expect(screen.getByText(/task changed while sending/)).toBeTruthy();
   });
   it("keeps a lost start reply uncertain after adoption and permits explicit dismissal without resending", async () => {
@@ -540,7 +551,7 @@ describe("explicit composer attachments", () => {
     await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(2));
     expect(calls.map((c) => c.body)).toEqual([one, two]);
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    await screen.findByText("Sent to dot.");
+    await waitFor(() => expect(said().at(-1)).toBe("Sent to dot."));
     expect(JSON.parse(String(calls[2]?.body))).toEqual({
       kind: "steer",
       text: "Read both sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
@@ -606,7 +617,7 @@ describe("explicit composer attachments", () => {
     f.submit();
     expect(delivered).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Send again" }));
-    await screen.findByText("Sent to dot.");
+    await waitFor(() => expect(said().at(-1)).toBe("Sent to dot."));
     expect(delivered).toHaveLength(2);
     expect(delivered[1]).toBe(delivered[0]);
     expect(JSON.parse(delivered[0] as string).text).toContain("~/Downloads/one.txt");
@@ -759,8 +770,9 @@ describe("a message on its way", () => {
       keysOpen: false,
       receiveKey: vi.fn(() => false),
     };
+    const end = { slot: outbox, show: vi.fn(), needs: vi.fn() };
     const view = render(
-      <Outbox.Provider value={outbox}>
+      <Outbox.Provider value={end}>
         <Composer {...props} />
       </Outbox.Provider>,
     );
@@ -778,7 +790,7 @@ describe("a message on its way", () => {
     // The same words sent before are not this message's row.
     const rerender = (messages: AgentMessage[]) =>
       view.rerender(
-        <Outbox.Provider value={outbox}>
+        <Outbox.Provider value={end}>
           <Composer
             {...props}
             agent={{
@@ -815,5 +827,132 @@ describe("a message on its way", () => {
     expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();
     expect(document.activeElement).toBe(f.field);
     expect(f.field.value).toBe("Use this");
+  });
+  it("settles a lost reply once the thread shows dot got it, and sends nothing again", async () => {
+    transfer.trustNames = true;
+    const text = withAttachments("Also add a chart", ["~/Downloads/totals.csv"]);
+    // The same words sent before are not this message.
+    const earlier = user("01JXYZ00000000000000000M01", text);
+    const model = (...messages: AgentMessage[]) => ({
+      ...emptyAgentModel(),
+      messages: new Map(messages.map((message) => [message.id, message])),
+    });
+    let attempts = 0;
+    const f = setup(
+      () => {
+        if (++attempts === 1) throw new Error("lost after acceptance");
+        return new Response(null, { status: 202 });
+      },
+      { agent: { ...agent, model: model(earlier) } },
+    );
+    f.attach(new File(["x"], "totals.csv"));
+    await screen.findByText("Uploaded to Downloads");
+    f.input("Also add a chart");
+    f.submit();
+    await screen.findByText(/Not sure dot got that/);
+    expect(f.requests[0]?.body).toEqual({ kind: "steer", text });
+    f.update({ agent: { ...agent, model: model(earlier) } });
+    expect(screen.getByText(/Not sure dot got that/)).toBeTruthy();
+    f.update({
+      agent: { ...agent, model: model(earlier, user("01JXYZ00000000000000000M02", text)) },
+    });
+    expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();
+    expect(f.field.value).toBe("");
+    await waitFor(() => expect(screen.queryByText("Uploaded to Downloads")).toBeNull());
+    expect(said()).toEqual(["Not sure dot got that.", "Sent to dot."]);
+    expect(f.requests).toHaveLength(1);
+    // Nothing waits on the lost message any more, so the next one goes.
+    f.input("Then the totals");
+    f.submit();
+    await act(async () => {});
+    expect(f.requests.map((request) => request.body)).toEqual([
+      { kind: "steer", text },
+      { kind: "steer", text: "Then the totals" },
+    ]);
+  });
+  it("keeps what you wrote since when a lost reply settles", async () => {
+    const f = setup(() => {
+      throw new Error("lost after acceptance");
+    });
+    f.input("Also add a chart");
+    f.submit();
+    await screen.findByText(/Not sure dot got that/);
+    f.input("Then the totals");
+    f.update({
+      agent: {
+        ...agent,
+        model: {
+          ...emptyAgentModel(),
+          messages: new Map([
+            ["01JXYZ00000000000000000M02", user("01JXYZ00000000000000000M02", "Also add a chart")],
+          ]),
+        },
+      },
+    });
+    expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();
+    expect(f.field.value).toBe("Then the totals");
+    expect(f.requests).toHaveLength(1);
+  });
+  it("says how it went through the page's one polite region, never a live region of its own", async () => {
+    const pending = Promise.withResolvers<Response>();
+    let answer: () => Response | Promise<Response> = () => pending.promise;
+    const f = setup(() => answer());
+    const waiting = () => f.container.querySelector<HTMLElement>(".thread-pending");
+    const live = () => waiting()?.querySelectorAll("[role=status], [role=alert], [aria-live]");
+    f.input("Add a chart");
+    f.submit();
+    expect(waiting()?.dataset.phase).toBe("sending");
+    expect(live()).toHaveLength(0);
+    await act(async () => pending.resolve(new Response(null, { status: 202 })));
+    expect(waiting()?.dataset.phase).toBe("accepted");
+    expect(live()).toHaveLength(0);
+    answer = () => new Response("no", { status: 409 });
+    f.input("Add a table");
+    f.submit();
+    await waitFor(() => expect(waiting()?.dataset.phase).toBe("refused"));
+    expect(live()).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+    answer = () => {
+      throw new Error("lost");
+    };
+    f.submit();
+    await waitFor(() => expect(waiting()?.dataset.phase).toBe("uncertain"));
+    expect(live()).toHaveLength(0);
+    expect(said()).toEqual(["Sent to dot.", "Not sent.", "Not sure dot got that."]);
+  });
+  it("brings the thread's end into view as it is sent, and leads a lost one's choice there", async () => {
+    const outbox = document.createElement("div");
+    document.body.append(outbox);
+    const end = { slot: outbox, show: vi.fn(), needs: vi.fn() };
+    render(
+      <Outbox.Provider value={end}>
+        <Composer
+          api={createApi("fixture", {
+            origin: "http://127.0.0.1:4790",
+            fetchImpl: async () => {
+              throw new Error("lost");
+            },
+          })}
+          cell={cell}
+          agent={agent}
+          known
+          pending={false}
+          keysOpen={false}
+          receiveKey={vi.fn(() => false)}
+        />
+      </Outbox.Provider>,
+    );
+    const field = screen.getByLabelText("Message") as HTMLTextAreaElement;
+    fireEvent.input(field, { target: { value: "Add a chart" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    expect(end.show).toHaveBeenCalledOnce();
+    expect(end.needs).not.toHaveBeenCalled();
+    await screen.findByText(/Not sure dot got that/);
+    const reach = end.needs.mock.lastCall?.[0] as () => void;
+    act(() => reach());
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Send again" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
+    expect(end.needs).toHaveBeenLastCalledWith(null);
+    outbox.remove();
   });
 });

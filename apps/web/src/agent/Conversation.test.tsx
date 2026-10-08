@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { useContext, useEffect } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Conversation } from "./Conversation.tsx";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
+import { Outbox } from "./outbox.ts";
 import { threadItems } from "./thread.ts";
 
 const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
@@ -210,6 +212,53 @@ describe("the conversation thread", () => {
       />,
     );
     expect(within(jump()).getByRole("button", { name: "2 new updates" })).toBeTruthy();
+  });
+
+  it("brings the end, where your message waits, into view from a page of earlier messages", () => {
+    const data = Array.from({ length: 260 }, (_, n) => message(`message-${n}`, `Content ${n}`));
+    function Sender() {
+      const outbox = useContext(Outbox);
+      return (
+        <button type="button" onClick={() => outbox?.show()}>
+          Send
+        </button>
+      );
+    }
+    render(<Conversation items={items(data)} truncated={false} composer={<Sender />} />);
+    const scroller = history().closest(".thread-scroll") as HTMLElement;
+    const scrollTo = vi.fn();
+    scroller.scrollTo = scrollTo;
+    fireEvent.click(screen.getByRole("button", { name: "Older messages" }));
+    expect(screen.getByText("Loading later…")).toBeTruthy();
+    const outbox = history().querySelector(".thread-outbox");
+    expect(outbox?.closest("[hidden]")).toBeNull();
+    expect(outbox?.previousElementSibling?.textContent).toBe("Loading later…");
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    expect(screen.queryByText("Loading later…")).toBeNull();
+    expect(screen.getByText("Content 259")).toBeTruthy();
+    expect(scrollTo).toHaveBeenCalled();
+  });
+
+  it("turns the jump button into the way to a message's choice while one waits", () => {
+    const reach = vi.fn();
+    function Waiting() {
+      const outbox = useContext(Outbox);
+      useEffect(() => {
+        outbox?.needs(reach);
+        return () => outbox?.needs(null);
+      }, [outbox]);
+      return null;
+    }
+    const view = render(
+      <Conversation items={items([message("one")])} truncated={false} composer={<Waiting />} />,
+    );
+    const jump = () => document.querySelector(".thread-jump") as HTMLElement;
+    scrolled(100);
+    const check = within(jump()).getByRole("button", { name: "Check your last message" });
+    fireEvent.click(check);
+    expect(reach).toHaveBeenCalledOnce();
+    view.rerender(<Conversation items={items([message("one")])} truncated={false} />);
+    expect(within(jump()).getByRole("button", { name: "Jump to latest" })).toBeTruthy();
   });
 
   it("offers nothing to jump to when only the composer lies past the view", () => {

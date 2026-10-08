@@ -389,8 +389,8 @@ export function Conversation({
         .map((item) => item.kind)
     : [];
 
-  const paging = useRef({ page, following: follow.following });
-  paging.current = { page, following: follow.following };
+  const paging = useRef({ page, following: follow.following, jump: follow.jump });
+  paging.current = { page, following: follow.following, jump: follow.jump };
   const observer = useRef<IntersectionObserver | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
   // Reaching either end of the mounted window moves it; the rows in view stay mounted and in place.
@@ -448,7 +448,25 @@ export function Conversation({
   // is, and how much of it is in view, is written straight onto the elements, so scrolling never
   // re-renders the thread; the jump button keeps clear of it.
   const body = useRef<HTMLDivElement>(null);
-  const [outbox, setOutbox] = useState<HTMLDivElement | null>(null);
+  const [outboxSlot, setOutboxSlot] = useState<HTMLDivElement | null>(null);
+  // Your own message brings the thread's end into view, however far back you were reading.
+  const showEnd = useCallback(() => {
+    const { page: now, following, jump } = paging.current;
+    if (following() && !now.hasNewer) return;
+    now.latest();
+    jump();
+  }, []);
+  // A message at the end that waits on your choice turns the jump button into the way to it.
+  const reachChoice = useRef<(() => void) | null>(null);
+  const [choiceWaits, setChoiceWaits] = useState(false);
+  const needs = useCallback((reach: (() => void) | null) => {
+    reachChoice.current = reach;
+    setChoiceWaits(!!reach);
+  }, []);
+  const outbox = useMemo(
+    () => outboxSlot && { slot: outboxSlot, show: showEnd, needs },
+    [outboxSlot, showEnd, needs],
+  );
   const foot = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
   const jump = useRef<HTMLSpanElement>(null);
@@ -642,12 +660,12 @@ export function Conversation({
                 />
               ))
             )}
-            <div className="thread-outbox" ref={setOutbox} hidden={page.hasNewer} />
             {page.hasNewer && (
               <p className="thread-note thread-newer" ref={edges.newer}>
                 Loading later…
               </p>
             )}
+            <div className="thread-outbox" ref={setOutboxSlot} />
             <div className="thread-recovery-slot" ref={recoverySlot}>
               {recovery}
             </div>
@@ -669,13 +687,20 @@ export function Conversation({
         <Button
           size="sm"
           icon="arrow-down"
-          aria-label={unread.length ? unreadLabel(unread) : "Jump to latest"}
+          aria-label={
+            choiceWaits ? undefined : unread.length ? unreadLabel(unread) : "Jump to latest"
+          }
           onClick={() => {
             page.latest();
             follow.jump();
+            reachChoice.current?.();
           }}
         >
-          {unread.length ? `${unread.length} new` : "Latest"}
+          {choiceWaits
+            ? "Check your last message"
+            : unread.length
+              ? `${unread.length} new`
+              : "Latest"}
         </Button>
       </span>
       <div className="thread-foot" ref={foot} />

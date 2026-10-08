@@ -1,21 +1,25 @@
+import type { Ref } from "react";
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
-import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { SentFiles } from "./Attachments.tsx";
 import type { Delivery } from "./Composer.tsx";
 import { timeLabel } from "./thread.ts";
 
 // A message on its way, drawn as its own row will be: faint while it is sent, whole once dot has it.
 // The row replaces it in place when it arrives, where the copy button takes the spinner's place.
+// How it went is said through the page's one polite region, by the composer, not from here.
 export function PendingMessage({
   delivery,
+  choiceRef,
   onRetry,
   onDismiss,
   onEdit,
   retryReason,
 }: {
   delivery: Delivery;
+  // Where a lost message offers its two choices.
+  choiceRef?: Ref<HTMLDivElement>;
   onRetry(): void;
   onDismiss(): void;
   onEdit(): void;
@@ -45,7 +49,7 @@ export function PendingMessage({
           <p className="thread-tag">{delivery.tag}</p>
         )}
         {phase === "refused" ? (
-          <div className="thread-pending-status" role="status">
+          <div className="thread-pending-status">
             <p>
               <Icon name="circle-alert" size={12} className="thread-pending-icon" />
               <span>{started ? "Task not started" : "Not sent"}</span>
@@ -54,29 +58,27 @@ export function PendingMessage({
               Edit
             </Button>
           </div>
-        ) : phase === "uncertain" ? (
-          <div className="thread-pending-status" role="status">
-            <p>
-              <Icon name="circle-alert" size={12} className="thread-pending-icon" />
-              <span>
-                Not sure dot got that.
-                <br />
-                Sending again could repeat it.
-              </span>
-            </p>
-            <div className="thread-pending-actions">
-              <Button size="sm" disabledReason={retryReason} onClick={onRetry}>
-                Send again
-              </Button>
-              <Button size="sm" variant="quiet" onClick={onDismiss}>
-                Keep as draft
-              </Button>
-            </div>
-          </div>
         ) : (
-          <VisuallyHidden role="status">
-            {phase === "sending" ? "Sending…" : started ? "Task started." : "Sent to dot."}
-          </VisuallyHidden>
+          phase === "uncertain" && (
+            <div className="thread-pending-status" ref={choiceRef}>
+              <p>
+                <Icon name="circle-alert" size={12} className="thread-pending-icon" />
+                <span>
+                  Not sure dot got that.
+                  <br />
+                  Sending again could repeat it.
+                </span>
+              </p>
+              <div className="thread-pending-actions">
+                <Button size="sm" disabledReason={retryReason} onClick={onRetry}>
+                  Send again
+                </Button>
+                <Button size="sm" variant="quiet" onClick={onDismiss}>
+                  Keep as draft
+                </Button>
+              </div>
+            </div>
+          )
         )}
       </section>
     </div>
