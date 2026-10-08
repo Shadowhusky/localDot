@@ -28,6 +28,7 @@ import type { ReplaySource, ReplayStatus } from "../stage/worker-protocol.ts";
 import { compareFrames, followRule, type ReplayCommand } from "./replay-view.ts";
 
 export interface ReplayState {
+  sessionId: string | null;
   screen: ScreenName;
   setScreen(screen: ScreenName): void;
   status: ReplayStatus["state"];
@@ -53,8 +54,9 @@ type ReplayValues = Omit<
   "run" | "seek" | "setSpeed" | "setSkipIdle" | "selectStep" | "setScreen"
 >;
 
-function initialState(): ReplayValues {
+function initialState(sessionId: string | null): ReplayValues {
   return {
+    sessionId,
     screen: "desktop",
     status: "loading",
     card: null,
@@ -141,7 +143,7 @@ export function useReplay(
   stage: RefObject<StageHandle | null>,
   opts: { onGoLive(): void },
 ): ReplayState {
-  const [values, setValues] = useState<ReplayValues>(initialState);
+  const [values, setValues] = useState<ReplayValues>(() => initialState(sessionId));
   const [choice, setChoice] = useState<{ sessionId: string | null; screen: ScreenName }>({
     sessionId,
     screen: "desktop",
@@ -311,7 +313,7 @@ export function useReplay(
     screenSeek.current = null;
     mediaOwner.current++;
     change({
-      ...initialState(),
+      ...initialState(sessionId),
       model,
       screen,
       tMs: restoredTime ?? 0,
@@ -519,7 +521,8 @@ export function useReplay(
     };
   }, [api, sessionId, stage, screen]);
   return {
-    ...values,
+    // Until the effect resets for a newly picked session, the held values describe the previous one.
+    ...(values.sessionId === sessionId ? values : initialState(sessionId)),
     setScreen,
     run,
     seek,
