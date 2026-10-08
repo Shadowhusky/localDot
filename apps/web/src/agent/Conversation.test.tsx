@@ -149,6 +149,29 @@ describe("the conversation thread", () => {
     expect(jump().hasAttribute("data-shown")).toBe(false);
   });
 
+  it("names what arrived while the reader was away: one kind by its name, a mix as updates", () => {
+    const question: AgentQuestion = {
+      askId: "ask",
+      question: "Which format?",
+      options: [{ key: "A", text: "Markdown" }],
+      allowText: false,
+    };
+    const view = render(<Conversation items={items([message("one")])} truncated={false} />);
+    const jump = () => document.querySelector(".thread-jump") as HTMLElement;
+    scrolled(100);
+    view.rerender(<Conversation items={items([message("one")], [question])} truncated={false} />);
+    expect(within(jump()).getByRole("button", { name: "1 new question" }).textContent).toBe(
+      "1 new",
+    );
+    view.rerender(
+      <Conversation
+        items={items([message("one"), message("two", "Here it is", "assistant")], [question])}
+        truncated={false}
+      />,
+    );
+    expect(within(jump()).getByRole("button", { name: "2 new updates" })).toBeTruthy();
+  });
+
   it("offers nothing to jump to when only the composer lies past the view", () => {
     render(<Conversation items={items([message("one")])} truncated={false} />);
     const jump = () => document.querySelector(".thread-jump") as HTMLElement;

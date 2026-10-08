@@ -49,6 +49,21 @@ const itemKey = (item: ThreadItem) => item.key;
 // How long a newly shown task's history may take to arrive.
 const LOADING_MS = 600;
 
+// What the jump button says has arrived: one kind by its name, a mix as updates. Your answers are
+// messages too.
+const MESSAGES: [string, string] = ["new message", "new messages"];
+const NEW: Partial<Record<ThreadKind, [string, string]>> = {
+  message: MESSAGES,
+  answer: MESSAGES,
+  question: ["new question", "new questions"],
+  result: ["new result", "new results"],
+};
+function unreadLabel(kinds: readonly ThreadKind[]): string {
+  const nouns = new Set(kinds.map((kind) => NEW[kind]));
+  const [one, many] = (nouns.size === 1 && [...nouns][0]) || ["new update", "new updates"];
+  return count(kinds.length, one, many);
+}
+
 // Rows that would drop start where they were drawn, this far above, and ease down to where they sit.
 function easeDown(element: HTMLElement, from: number) {
   const style = getComputedStyle(element);
@@ -353,8 +368,10 @@ export function Conversation({
   )
     setLeft({ owner: ownerKey, keys: new Set(items.map(itemKey)) });
   const unread = left
-    ? items.filter((item) => item.kind !== "work" && !left.keys.has(item.key)).length
-    : 0;
+    ? items
+        .filter((item) => item.kind !== "work" && !left.keys.has(item.key))
+        .map((item) => item.kind)
+    : [];
 
   const paging = useRef({ page, following: follow.following });
   paging.current = { page, following: follow.following };
@@ -528,7 +545,7 @@ export function Conversation({
   }, [asking, following, glideNext]);
 
   // Scrolled back only as far as the foot, the reader has nothing newer to jump to.
-  const jumpShown = !follow.pinned && (unread > 0 || !endSeen);
+  const jumpShown = !follow.pinned && (unread.length > 0 || !endSeen);
 
   const thread: ThreadContext = {
     announce,
@@ -637,13 +654,13 @@ export function Conversation({
         <Button
           size="sm"
           icon="arrow-down"
-          aria-label={unread ? count(unread, "new message", "new messages") : "Jump to latest"}
+          aria-label={unread.length ? unreadLabel(unread) : "Jump to latest"}
           onClick={() => {
             page.latest();
             follow.jump();
           }}
         >
-          {unread ? `${unread} new` : "Latest"}
+          {unread.length ? `${unread.length} new` : "Latest"}
         </Button>
       </span>
       <div className="thread-foot" ref={foot} />
