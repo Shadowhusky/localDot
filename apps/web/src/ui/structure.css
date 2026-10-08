@@ -206,7 +206,7 @@
     --ui-fade-top: calc(var(--spacing) * 4);
   }
 
-  .ui-scroll-area[data-edge-bottom] {
+  .ui-scroll-area[data-edge-bottom]:not([data-fade="top"]) {
     --ui-fade-bottom: calc(var(--spacing) * 4);
   }
 

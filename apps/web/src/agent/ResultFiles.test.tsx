@@ -1,9 +1,30 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ApiClient } from "../lib/api.ts";
 import { createApi } from "../lib/api.ts";
 import { disposition } from "./file-transfer.ts";
-import { ResultFiles } from "./ResultFiles.tsx";
+import type { AgentResult } from "./model.ts";
+import { ResultCard, useResultDownloads } from "./ResultFiles.tsx";
+
+function ResultFiles({
+  api,
+  sessionId,
+  results,
+}: {
+  api: ApiClient;
+  sessionId: string | null;
+  results: AgentResult[];
+}) {
+  const downloads = useResultDownloads(api, sessionId, results);
+  return (
+    <>
+      {results.map((result) => (
+        <ResultCard key={result.id} result={result} downloads={downloads} />
+      ))}
+    </>
+  );
+}
 
 const SESSION = "01JXYZ0000000000000000SESS",
   OTHER = "01JXYZ00000000000000000002";
@@ -54,8 +75,6 @@ describe("user-activated inert result downloads", () => {
       <ResultFiles
         api={apiFor(fetchImpl)}
         sessionId={SESSION}
-        ended={false}
-        idle={false}
         results={[
           {
             id: "many-result-files",
@@ -76,9 +95,7 @@ describe("user-activated inert result downloads", () => {
   it("uses only authenticated session/name, never the model path, and releases its inert object URL", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => response()),
       api = apiFor(fetchImpl);
-    const view = render(
-      <ResultFiles api={api} sessionId={SESSION} results={results} ended={false} idle={false} />,
-    );
+    const view = render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(created).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
@@ -96,22 +113,18 @@ describe("user-activated inert result downloads", () => {
     const late = Promise.withResolvers<Response>(),
       fetchImpl = vi.fn<typeof fetch>(async () => late.promise),
       api = apiFor(fetchImpl);
-    const view = render(
-      <ResultFiles api={api} sessionId={SESSION} results={results} ended={false} idle={false} />,
-    );
+    const view = render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
     act(() => {
       const button = screen.getByRole("button", { name: "Download report.html" });
       button.click();
       button.click();
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
-    view.rerender(
-      <ResultFiles api={api} sessionId={OTHER} results={results} ended={false} idle={false} />,
-    );
+    view.rerender(<ResultFiles api={api} sessionId={OTHER} results={results} />);
     await act(async () => late.resolve(response()));
     expect(created).not.toHaveBeenCalled();
     expect(clicked).not.toHaveBeenCalled();
-    expect(screen.queryByText(/Download requested/)).toBeNull();
+    expect(screen.queryByText(/downloaded/)).toBeNull();
   });
   it("cancels an admitted download during body consumption without creating a URL", async () => {
     let cancelled = false;
@@ -133,14 +146,90 @@ describe("user-activated inert result downloads", () => {
           },
         }),
     );
-    render(
-      <ResultFiles api={api} sessionId={SESSION} results={results} ended={false} idle={false} />,
-    );
+    render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
     fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
     await act(async () => Promise.resolve());
     fireEvent.click(screen.getByRole("button", { name: "Cancel download" }));
     await waitFor(() => expect(cancelled).toBe(true));
     expect(created).not.toHaveBeenCalled();
     expect(clicked).not.toHaveBeenCalled();
+  });
+});
+
+describe("the result card", () => {
+  it("keeps multiline result text plain and sizes each file", () => {
+    const result = {
+      id: "r",
+      summary: "First line\n<script>plain text</script>\n中文",
+      files: [
+        { name: "a-very-long-report-name-that-runs-on.md", path: "ignored", bytes: 48 },
+        { name: "totals.csv", path: "ignored", bytes: 2048 },
+      ],
+    };
+    const view = render(
+      <ResultFiles api={apiFor(vi.fn<typeof fetch>())} sessionId={SESSION} results={[result]} />,
+    );
+    expect(view.container.querySelector(".result-summary")?.textContent).toBe(result.summary);
+    expect(view.container.querySelector("script")).toBeNull();
+    expect(screen.getByText("48 bytes")).toBeTruthy();
+    expect(screen.getByText("2.0 KB")).toBeTruthy();
+    expect(screen.getByTitle(result.files[0]?.name ?? "").textContent).toBe(result.files[0]?.name);
+    expect(screen.getByRole("button", { name: "Download all 2 files" })).toBeTruthy();
+  });
+
+  it("downloads every file in turn from Download all", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(
+      async (url) =>
+        new Response("x", {
+          headers: {
+            "content-type": "application/octet-stream",
+            "content-disposition": disposition(String(url).endsWith("b.txt") ? "b.txt" : "a.txt"),
+            "x-content-type-options": "nosniff",
+          },
+        }),
+    );
+    render(
+      <ResultFiles
+        api={apiFor(fetchImpl)}
+        sessionId={SESSION}
+        results={[
+          {
+            id: "r",
+            summary: "Two files",
+            files: [
+              { name: "a.txt", path: "a", bytes: 1 },
+              { name: "b.txt", path: "b", bytes: 1 },
+            ],
+          },
+        ]}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Download all 2 files" }));
+    await waitFor(() => expect(clicked).toHaveBeenCalledTimes(2));
+    expect(fetchImpl.mock.calls.map((call) => String(call[0]).split("/").at(-1))).toEqual([
+      "a.txt",
+      "b.txt",
+    ]);
+  });
+
+  it("offers a replay of the task only when given one", () => {
+    const onReplay = vi.fn();
+    const result = { id: "r", summary: "Done", files: [] };
+    const view = render(
+      <ResultCard
+        result={result}
+        downloads={{} as Parameters<typeof ResultCard>[0]["downloads"]}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: "Replay this task" })).toBeNull();
+    view.rerender(
+      <ResultCard
+        result={result}
+        downloads={{} as Parameters<typeof ResultCard>[0]["downloads"]}
+        onReplay={onReplay}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Replay this task" }));
+    expect(onReplay).toHaveBeenCalledOnce();
   });
 });

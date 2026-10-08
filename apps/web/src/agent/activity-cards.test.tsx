@@ -5,8 +5,6 @@ import { createApi } from "../lib/api.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { ChangeRow } from "./ChangeRow.tsx";
 import { type AgentChange, type AgentStep, emptyAgentModel } from "./model.ts";
-import { QuestionCard } from "./QuestionCard.tsx";
-import { ResultFiles } from "./ResultFiles.tsx";
 import { SkillsView } from "./SkillsView.tsx";
 import { appendTerminal, emptyTerminal } from "./terminal-text.ts";
 
@@ -132,53 +130,10 @@ describe("activity rows and inspection", () => {
     expect(undo).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps multiline result text plain and says where the task stands", () => {
-    const result = { id: "r", summary: "First line\n<script>plain text</script>\n中文", files: [] };
-    const view = render(
-      <ResultFiles api={api} sessionId="one" results={[result]} ended={false} idle={false} />,
-    );
-    expect(view.container.querySelector(".result-summary")?.textContent).toBe(result.summary);
-    expect(view.container.querySelector("script")).toBeNull();
-    expect(screen.queryByRole("list")).toBeNull();
-    view.rerender(
-      <ResultFiles
-        api={api}
-        sessionId="one"
-        results={[
-          {
-            ...result,
-            files: [
-              { name: "a", path: "ignored", bytes: 1 },
-              { name: "b", path: "ignored", bytes: 2 },
-            ],
-          },
-        ]}
-        ended={false}
-        idle
-      />,
-    );
-    expect(screen.getAllByRole("listitem")).toHaveLength(2);
-    expect(screen.getByText("Ready for a follow-up")).toBeTruthy();
-    view.rerender(<ResultFiles api={api} sessionId="one" results={[result]} ended idle={false} />);
-    expect(screen.getByText("Task ended")).toBeTruthy();
-  });
-
-  it("keeps questions and skills as plain history without submitting answers or exposing editors", () => {
-    const question = {
-      askId: "ask",
-      question: "Use <b>plain</b>?",
-      options: [{ key: "A" as const, text: "Yes" }],
-      allowText: true,
-      answer: { askId: "ask", by: "user" as const, option: "A" as const },
-    };
+  it("keeps skills as plain history without exposing editors", () => {
     const { container } = render(
-      <>
-        <QuestionCard question={question} pending={false} />
-        <SkillsView skills={[{ name: "Report", description: "<img src=x>", source: "user" }]} />
-      </>,
+      <SkillsView skills={[{ name: "Report", description: "<img src=x>", source: "user" }]} />,
     );
-    expect(screen.getByText("Answered")).toBeTruthy();
-    expect(screen.getByText("Answer: Yes")).toBeTruthy();
     expect(container.querySelectorAll("form,input,textarea,button,img,b")).toHaveLength(0);
     expect(screen.getByText("<img src=x>")).toBeTruthy();
     expect(screen.getByText("Yours")).toBeTruthy();

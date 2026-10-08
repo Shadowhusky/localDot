@@ -142,9 +142,11 @@ it("keeps retry events informational and identifies accepted repairs without der
     "Main model retried (try 2) after 4.0 s: Provider refused <img src=x> Switched to fixture-local.",
   );
   expect(recoveryMessage("model unavailable", true)).toContain("local model");
-  expect(recoveryMessage("keyd unavailable", false)).toContain("key layer is offline");
-  expect(recoveryMessage("chatgpt sign-in expired", false)).toContain("explicitly resume");
-  expect(recoveryMessage("chatgpt plan limit reached", false)).toContain("no localDot USD budget");
+  expect(recoveryMessage("keyd unavailable", false)).toContain("can't reach your keys");
+  expect(recoveryMessage("chatgpt sign-in expired", false)).toContain("then continue this task");
+  expect(recoveryMessage("chatgpt plan limit reached", false)).toContain(
+    "no spending limit of its own",
+  );
 });
 it("names the model as the catalog does, and keeps the id for a model it does not list", () => {
   const model = projectAgentEvent(

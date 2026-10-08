@@ -9,6 +9,7 @@ import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { Hud } from "../shell/Hud.tsx";
 import { Conversation } from "./Conversation.tsx";
 import type { AgentMessage } from "./model.ts";
+import { threadItems } from "./thread.ts";
 
 const api = createApi("inert-review", {
   origin: "https://owned.invalid",
@@ -106,13 +107,17 @@ it("completed announcements are bounded, key-guarded and retired on owner replac
     role: "assistant",
   });
   const v = render(
-    <Conversation messages={[m("one", "x".repeat(500))]} truncated={false} ownerKey="a" />,
+    <Conversation
+      items={threadItems([m("one", "x".repeat(500))])}
+      truncated={false}
+      ownerKey="a"
+    />,
   );
   const live = screen.getByRole("status");
   expect(live.textContent).toBe(`dot replied: ${"x".repeat(200)}`);
   v.rerender(
     <Conversation
-      messages={[m("one", "x".repeat(500)), m("two", "streaming", false)]}
+      items={threadItems([m("one", "x".repeat(500)), m("two", "streaming", false)])}
       truncated={false}
       ownerKey="a"
     />,
@@ -120,13 +125,13 @@ it("completed announcements are bounded, key-guarded and retired on owner replac
   expect(live.textContent).toBe(`dot replied: ${"x".repeat(200)}`);
   v.rerender(
     <Conversation
-      messages={[m("three", `sk-proj-${"a".repeat(156)}`)]}
+      items={threadItems([m("three", `sk-proj-${"a".repeat(156)}`)])}
       truncated={false}
       ownerKey="a"
     />,
   );
   expect(live.textContent).toBe("dot replied.");
-  v.rerender(<Conversation messages={[]} truncated={false} ownerKey="b" />);
+  v.rerender(<Conversation items={threadItems([])} truncated={false} ownerKey="b" />);
   expect(live.textContent).toBe("");
 });
 
