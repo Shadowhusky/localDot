@@ -1,4 +1,6 @@
 import { REPLAY_SPEEDS } from "@localdot/stage";
+import { useId } from "react";
+import { exportSupport } from "../export/sink.ts";
 import { speedLabel, timeLabel } from "./replay-view.ts";
 import type { ReplayState } from "./useReplay.ts";
 
@@ -10,6 +12,8 @@ export function ReplayControls({
   onExport?: (anchor: HTMLButtonElement) => void;
 }) {
   const label = speedLabel(replay.speed, replay.idleNow);
+  const support = exportSupport();
+  const exportNote = useId();
   return (
     <fieldset className="replay-controls" aria-label="Playback controls">
       <button
@@ -73,13 +77,20 @@ export function ReplayControls({
         Before / after
       </button>
       {onExport && (
-        <button
-          type="button"
-          disabled={!replay.map || !replay.info}
-          onClick={(event) => onExport(event.currentTarget)}
-        >
-          Export MP4
-        </button>
+        <span className="replay-export">
+          <button
+            type="button"
+            disabled={!replay.map || !replay.info}
+            aria-disabled={!support.ok || undefined}
+            aria-describedby={support.ok ? undefined : exportNote}
+            onClick={(event) => {
+              if (support.ok) onExport(event.currentTarget);
+            }}
+          >
+            Export MP4
+          </button>
+          {!support.ok && <span id={exportNote}>{support.reason}</span>}
+        </span>
       )}
       <span className="replay-speed-label" role="status">
         {label}

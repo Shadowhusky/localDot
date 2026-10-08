@@ -361,6 +361,7 @@ test("composer submits once and moves a recognised key without a task request", 
   await expect(keys.getByLabel("Key", { exact: true })).toHaveValue(key);
   await expect(keys.getByRole("combobox", { name: "Provider", exact: true })).toHaveValue("openai");
   await page.keyboard.press("Escape");
+  await keys.getByRole("button", { name: "Discard" }).click();
   await expect(draft).toHaveValue("before  after");
   await page.getByTestId("keys-button").click();
   await expect(keys.getByLabel("Key", { exact: true })).toHaveValue("");

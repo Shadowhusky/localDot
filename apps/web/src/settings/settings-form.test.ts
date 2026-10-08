@@ -14,9 +14,9 @@ describe("configuration validation before explicit save", () => {
     d.choices.fast = { provider: "openai-compatible", model: "custom", key: "gateway" };
     d.prices.main = { input: "0", output: "2" };
     d.prices.fast = { input: "1", output: "2" };
-    expect(validateForm(d, {}, providerFixture())).toMatchObject({
+    expect(validateForm(d, {}, providerFixture())).toEqual({
       ok: false,
-      message: expect.stringContaining("conflicting"),
+      problems: [expect.stringContaining("conflicting")],
     });
     d.prices.fast = { input: "0", output: "2" };
     expect(validateForm(d, {}, providerFixture())).toMatchObject({ ok: true });
@@ -176,6 +176,25 @@ describe("configuration validation before explicit save", () => {
     );
     draft.choices.main = { provider: "ollama", model: "local" };
     expect(validateForm(draft, saved, index)).toMatchObject({ ok: false });
+  });
+  it("reports every problem at once instead of the first one", () => {
+    const d = formOf({ main: { provider: "ollama", model: "custom" } });
+    d.choices.local = { provider: "ollama", model: "" };
+    d.defaultBudget = false;
+    d.budget = "abc";
+    expect(validateForm(d, {}, providerFixture())).toEqual({
+      ok: false,
+      problems: ["Local: choose a valid model ID.", "Enter an explicit task ceiling in USD."],
+    });
+    delete d.choices.main;
+    expect(validateForm(d, {}, providerFixture())).toMatchObject({
+      ok: false,
+      problems: [
+        "Choose a main provider and model.",
+        "Local: choose a valid model ID.",
+        "Enter an explicit task ceiling in USD.",
+      ],
+    });
   });
   it("requires a known default or an explicit valid ceiling, with no guessed budget", () => {
     const index = providerFixture();

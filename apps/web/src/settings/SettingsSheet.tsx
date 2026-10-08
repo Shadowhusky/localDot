@@ -1,5 +1,6 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
-import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ownedByPicker } from "../lib/dismiss.ts";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import type {
@@ -47,7 +48,7 @@ export interface SettingsSheetProps {
     change(value: string, useDefault: boolean): void;
   };
   onReload?(): void;
-  validation?: string | null;
+  validation?: readonly string[] | null;
   loading?: boolean;
 }
 const CATALOG_MESSAGE: Record<SettingsSheetProps["catalog"], string> = {
@@ -56,23 +57,75 @@ const CATALOG_MESSAGE: Record<SettingsSheetProps["catalog"], string> = {
   empty: "The model catalog is empty.",
   stale: "The saved catalog is older. Your selections are retained while you refresh.",
   refreshing: "Refreshing the model catalog…",
-  offline: "Catalog connection unavailable. Your selections are retained.",
+  offline: "The model catalog is unavailable right now. Your choices are kept.",
 };
 export function SettingsSheet(props: SettingsSheetProps) {
   const panel = useRef<HTMLElement>(null);
+  const keep = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const resume = useRef<HTMLElement | null>(null);
   const active = props.open && !props.suspended;
-  const close = useRef(props.onClose);
+  const [confirming, setConfirming] = useState<"close" | "reload" | null>(null);
+  const latest = useRef({
+    onClose: props.onClose,
+    onReload: props.onReload,
+    dirty: props.dirty,
+    confirming,
+  });
   const focusedSection = useRef(false);
   useLayoutEffect(() => {
-    close.current = props.onClose;
-  }, [props.onClose]);
+    latest.current = {
+      onClose: props.onClose,
+      onReload: props.onReload,
+      dirty: props.dirty,
+      confirming,
+    };
+  }, [props.onClose, props.onReload, props.dirty, confirming]);
+  useLayoutEffect(() => {
+    if (props.open)
+      opener.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    else setConfirming(null);
+  }, [props.open]);
+  useEffect(() => {
+    if (props.open) return;
+    const target = opener.current;
+    opener.current = null;
+    if (target?.isConnected && !target.closest("[inert], [hidden]")) target.focus();
+  }, [props.open]);
+  useEffect(() => {
+    if (!props.dirty) setConfirming(null);
+  }, [props.dirty]);
+  useEffect(() => {
+    if (confirming) keep.current?.focus();
+  }, [confirming]);
+  // Safari does not focus a tapped button, so a trigger names itself as the place to come back to.
+  const confirm = useCallback((action: "close" | "reload", trigger?: HTMLElement) => {
+    if (!latest.current.dirty)
+      return action === "close" ? latest.current.onClose() : latest.current.onReload?.();
+    if (!latest.current.confirming)
+      resume.current =
+        trigger ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    setConfirming(action);
+    keep.current?.focus();
+  }, []);
+  const requestClose = useCallback(() => confirm("close"), [confirm]);
+  const keepEditing = useCallback(() => {
+    setConfirming(null);
+    const target = resume.current;
+    resume.current = null;
+    if (target?.isConnected && panel.current?.contains(target) && target !== keep.current)
+      target.focus();
+    else panel.current?.querySelector<HTMLElement>("button")?.focus();
+  }, []);
   useEffect(() => {
     if (!active) return;
     panel.current?.querySelector<HTMLElement>("button")?.focus();
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !ownedByPicker(event)) {
         event.preventDefault();
-        close.current();
+        if (latest.current.confirming) keepEditing();
+        else requestClose();
       }
       if (event.key !== "Tab" || !panel.current) return;
       const items = [
@@ -98,7 +151,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [active]);
+  }, [active, keepEditing, requestClose]);
   useEffect(() => {
     if (!props.open) focusedSection.current = false;
     if (!active || props.loading || focusedSection.current || props.focusSection !== "autonomy")
@@ -109,13 +162,27 @@ export function SettingsSheet(props: SettingsSheetProps) {
     section.querySelector<HTMLSelectElement>("select")?.focus();
     focusedSection.current = true;
   }, [active, props.open, props.loading, props.focusSection]);
+  const saveBlocked = !props.save?.enabled || props.busy;
+  const problems = props.validation?.length ? props.validation : null;
+  const saveReason =
+    [
+      problems && "settings-problems",
+      props.error && "settings-error",
+      props.loading && "settings-loading",
+      (props.catalog === "refreshing" || props.catalog === "offline") && "settings-catalog-state",
+    ]
+      .filter(Boolean)
+      .join(" ") ||
+    (!props.dirty && "settings-state");
   return (
     <>
       <div
         className="settings-backdrop"
         hidden={!active}
         aria-hidden="true"
-        onPointerDown={props.onClose}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) requestClose();
+        }}
       />
       <section
         ref={panel}
@@ -130,7 +197,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
         <div className="settings-heading">
           <header>
             <h2 id="settings-title">Models and settings</h2>
-            <button type="button" onClick={props.onClose} aria-label="Close settings">
+            <button type="button" onClick={requestClose} aria-label="Close settings">
               ×
             </button>
           </header>
@@ -151,19 +218,27 @@ export function SettingsSheet(props: SettingsSheetProps) {
         </div>
         {active && props.taskControls}
         <div className="settings-body">
-          {props.appearance && <AppearancePicker appearance={props.appearance} />}
+          {props.appearance && <AppearancePicker appearance={props.appearance} inSettings />}
           <p>Saved settings apply to future tasks. The current task keeps its models.</p>
-          <p role="status">{props.dirty ? "Unsaved choices" : "Saved choices"}</p>
-          {props.loading && <p role="status">Loading saved settings…</p>}
+          <p id="settings-state" role="status">
+            {props.dirty ? "Unsaved choices" : "Saved choices"}
+          </p>
+          {props.loading && (
+            <p id="settings-loading" role="status">
+              Loading saved settings…
+            </p>
+          )}
           <div className="settings-catalog">
-            <p role="status">{CATALOG_MESSAGE[props.catalog]}</p>
+            <p id="settings-catalog-state" role="status">
+              {CATALOG_MESSAGE[props.catalog]}
+            </p>
             {props.onRefresh && (
               <button
                 type="button"
                 disabled={props.busy || props.catalog === "refreshing"}
                 onClick={props.onRefresh}
               >
-                Refresh catalog
+                {props.catalog === "offline" ? "Try again" : "Refresh catalog"}
               </button>
             )}
           </div>
@@ -235,23 +310,66 @@ export function SettingsSheet(props: SettingsSheetProps) {
               )}
             </fieldset>
           )}
-          {props.validation && <p role="status">{props.validation}</p>}
-          {props.error && <p role="alert">{props.error}</p>}
-          {props.onReload && (
-            <button type="button" disabled={props.busy} onClick={props.onReload}>
-              Reload saved settings
-            </button>
+          {problems && (
+            <div id="settings-problems" className="settings-problems" role="status">
+              <p>Before you can save:</p>
+              <ul>
+                {problems.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+            </div>
           )}
-          {props.save && (
-            <button
-              type="button"
-              disabled={!props.save.enabled || props.busy}
-              onClick={props.save.run}
-            >
-              {props.busy ? "Saving…" : "Save settings"}
-            </button>
+          {props.error && (
+            <p id="settings-error" role="alert">
+              {props.error}
+            </p>
           )}
+          <div className="settings-commit">
+            {props.onReload && (
+              <button
+                type="button"
+                disabled={props.busy}
+                onClick={(event) => confirm("reload", event.currentTarget)}
+              >
+                Reload saved settings
+              </button>
+            )}
+            {props.save && (
+              <button
+                type="button"
+                className="settings-save"
+                aria-disabled={saveBlocked || undefined}
+                aria-describedby={(saveBlocked && !props.busy && saveReason) || undefined}
+                onClick={() => {
+                  if (!saveBlocked) props.save?.run();
+                }}
+              >
+                {props.busy ? "Saving…" : "Save settings"}
+              </button>
+            )}
+          </div>
         </div>
+        {confirming && (
+          <div className="settings-discard">
+            <p role="alert">Discard unsaved changes?</p>
+            <div>
+              <button ref={keep} type="button" onClick={keepEditing}>
+                Keep editing
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirming === "close") return props.onClose();
+                  keepEditing();
+                  props.onReload?.();
+                }}
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </>
   );

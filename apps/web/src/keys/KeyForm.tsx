@@ -28,6 +28,7 @@ export interface KeyFormProps {
   disabled: boolean;
   save(binding: SecretBinding, value: string): Promise<{ restart: boolean }>;
   intakeRef?: Ref<KeyIntake>;
+  fieldRef?: Ref<KeyField>;
   preset?: KeyFormPreset;
 }
 export interface KeyFormPreset {
@@ -39,12 +40,16 @@ export interface KeyIntake {
   // A synchronous one-shot DOM handoff, never a secret string prop or deferred queue.
   receive(source: HTMLInputElement, provider?: Provider): boolean;
 }
+export interface KeyField {
+  holdsKey(): boolean;
+  focus(): void;
+}
 
 type Problem = { field: DraftField | "form"; message: string };
 
 // The key itself lives only in the key field's DOM value (never in React state): it is read
 // on submit, the field is cleared at once, and the page sends keyd's sealed copy.
-export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormProps) {
+export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }: KeyFormProps) {
   const labels = useId();
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
@@ -136,6 +141,14 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
           if (!received && target) target.value = "";
         }
       },
+    }),
+    [],
+  );
+  useImperativeHandle(
+    fieldRef,
+    () => ({
+      holdsKey: () => !!valueRef.current?.value,
+      focus: () => valueRef.current?.focus(),
     }),
     [],
   );
@@ -269,6 +282,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
             onChange={(e) => set({ id: e.target.value })}
             placeholder={draft.kind === "llm" ? "anthropic" : "weather"}
             autoComplete="off"
+            autoCapitalize="none"
+            autoCorrect="off"
             spellCheck={false}
             {...invalid("id")}
           />
@@ -299,6 +314,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
                     onChange={(e) => set({ baseURL: e.target.value })}
                     placeholder="https://api.example.com/v1"
                     autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
                     spellCheck={false}
                     inputMode="url"
                     {...invalid("baseURL")}
@@ -317,6 +334,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
                 onChange={(e) => set({ hosts: e.target.value })}
                 placeholder="api.example.com"
                 autoComplete="off"
+                autoCapitalize="none"
+                autoCorrect="off"
                 spellCheck={false}
                 {...invalid("hosts")}
               />
@@ -329,6 +348,8 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
                   value={draft.header}
                   onChange={(e) => set({ header: e.target.value })}
                   autoComplete="off"
+                  autoCapitalize="none"
+                  autoCorrect="off"
                   spellCheck={false}
                   {...invalid("header")}
                 />
@@ -360,7 +381,7 @@ export function KeyForm({ active, disabled, save, intakeRef, preset }: KeyFormPr
             type="text"
             className="secret"
             autoComplete="off"
-            autoCapitalize="off"
+            autoCapitalize="none"
             autoCorrect="off"
             spellCheck={false}
             data-1p-ignore="true"

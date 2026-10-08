@@ -180,6 +180,16 @@
   font: inherit;
 }
 
+/* WebKit ignores the height of a native menulist, so the select draws its own box and chevron. */
+.key-form select {
+  appearance: none;
+  padding-right: 32px;
+  background:
+    var(--icon-chevron-down) no-repeat right 10px center / 12px 12px,
+    var(--color-void);
+  text-overflow: ellipsis;
+}
+
 .key-form input:focus-visible,
 .key-form select:focus-visible,
 .sheet button:focus-visible {
@@ -258,6 +268,82 @@
 .key-form .save:disabled {
   opacity: 0.4;
   cursor: default;
+}
+
+.keys-discard {
+  position: sticky;
+  bottom: -20px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  margin: 16px -18px -20px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+
+.keys-discard p {
+  font-weight: 500;
+}
+
+.keys-discard div {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.keys-discard button {
+  height: 34px;
+  padding: 0 14px;
+  border-radius: 17px;
+  background: var(--color-hud-button);
+  font-weight: 500;
+}
+
+@media (width < 600px) {
+  .keys-discard div {
+    flex: 1 0 100%;
+  }
+  .keys-discard button {
+    flex: 1;
+  }
+}
+
+.keys-discard button:first-child {
+  background: var(--color-text);
+  color: var(--color-void);
+  font-weight: 600;
+}
+
+@media (pointer: coarse) {
+  .sheet .x,
+  .key-del,
+  .kind,
+  .key-form input,
+  .key-form select,
+  .key-form .save,
+  .keys-discard button {
+    min-height: 44px;
+  }
+  .sheet .x {
+    width: 44px;
+    border-radius: 22px;
+  }
+  .key-list li {
+    min-height: 56px;
+  }
+  .key-del,
+  .key-form .save,
+  .keys-discard button {
+    border-radius: 22px;
+  }
+  /* Below 16px, iOS zooms the page into a focused field and leaves it zoomed. */
+  .key-form input,
+  .key-form select {
+    font-size: 16px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

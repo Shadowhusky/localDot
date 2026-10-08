@@ -319,6 +319,7 @@ describe("App token states", () => {
     expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
     expect(calls.some((call) => call.method === "POST")).toBe(false);
     fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     fireEvent.click(screen.getByTestId("keys-button"));
     expect((screen.getByLabelText("Key") as HTMLInputElement).value).toBe("");
     expect(field.value).toBe("before  after");

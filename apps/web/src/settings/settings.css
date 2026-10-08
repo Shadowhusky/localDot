@@ -60,22 +60,40 @@
   gap: 6px;
   margin: 10px 0;
 }
-.settings-sheet input,
 .settings-sheet select,
-.settings-sheet button {
-  min-height: 44px;
-  min-width: 44px;
+.settings-sheet button,
+.settings-sheet input:not([type="checkbox"], [type="radio"]) {
+  min-height: 36px;
+  min-width: 36px;
   max-width: 100%;
   font: inherit;
   color: var(--color-text);
   border: 1px solid var(--color-line);
   border-radius: 6px;
-  padding: 8px 12px;
+  padding: 0 12px;
   background: var(--color-surface-2);
+}
+/* WebKit ignores min-height on a native menulist, so selects draw their own box and chevron. */
+.settings-sheet select {
+  appearance: none;
+  height: 36px;
+  padding-right: 32px;
+  background:
+    var(--icon-chevron-down) no-repeat right 10px center / 12px 12px,
+    var(--color-surface-2);
+  text-overflow: ellipsis;
+}
+.settings-sheet input[type="checkbox"] {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-text);
 }
 .settings-sheet input:disabled,
 .settings-sheet select:disabled,
-.settings-sheet button:disabled {
+.settings-sheet button:disabled,
+.settings-sheet button[aria-disabled="true"] {
   opacity: 0.6;
 }
 .role-editor {
@@ -92,13 +110,67 @@
 .settings-sheet .role-enabled {
   flex-direction: row;
   align-items: center;
+  gap: 10px;
 }
 .chatgpt-login input {
   font-family: monospace;
   letter-spacing: 0.08em;
 }
-.settings-sheet .role-enabled input {
-  min-width: 24px;
+.settings-sheet .safety-settings label {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+}
+.settings-sheet .safety-settings select {
+  flex: none;
+  width: 128px;
+  min-height: 36px;
+}
+.settings-problems ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--color-text);
+}
+.settings-problems li + li {
+  margin-top: 4px;
+}
+.settings-commit {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.settings-sheet .settings-save,
+.settings-sheet .settings-discard button:first-child {
+  background: var(--color-text);
+  border-color: var(--color-text);
+  color: var(--color-void);
+  font-weight: 600;
+}
+.settings-discard {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px var(--spacing-gutter);
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+.settings-sheet .settings-discard p {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: 500;
+}
+.settings-discard div {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 .settings-sheet .model-capability {
   color: var(--color-text);
@@ -113,6 +185,12 @@
   .settings-actions,
   .settings-catalog {
     flex-wrap: wrap;
+  }
+  .settings-discard div {
+    flex: 1 0 100%;
+  }
+  .settings-discard button {
+    flex: 1;
   }
 }
 
@@ -137,4 +215,25 @@
 }
 .chatgpt-confirm h4 {
   margin: 0;
+}
+@media (pointer: coarse) {
+  .settings-sheet select,
+  .settings-sheet button,
+  .settings-sheet input:not([type="checkbox"], [type="radio"]) {
+    min-height: 44px;
+    min-width: 44px;
+  }
+  /* Below 16px, iOS zooms the page into a focused field and leaves it zoomed. */
+  .settings-sheet select,
+  .settings-sheet input:not([type="checkbox"], [type="radio"]) {
+    font-size: 16px;
+  }
+  .settings-sheet select,
+  .settings-sheet .safety-settings select {
+    height: 44px;
+    min-height: 44px;
+  }
+  .settings-sheet .role-enabled {
+    min-height: 44px;
+  }
 }

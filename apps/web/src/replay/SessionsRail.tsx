@@ -170,57 +170,59 @@ export function SessionsRail({
         <span>{sessions.length}</span>
       </div>
       {!loading && !sessions.length && !error && <p>No sessions yet.</p>}
-      {sessions.map((session) => (
-        <article
-          key={session.id}
-          className={`replay-session-card${selectedId === session.id ? " selected" : ""}`}
-        >
-          <button
-            type="button"
-            className="replay-session-open"
-            aria-current={selectedId === session.id ? "true" : undefined}
-            onClick={() => onSelect(session.id)}
+      <div className="replay-session-list">
+        {sessions.map((session) => (
+          <article
+            key={session.id}
+            className={`replay-session-card${selectedId === session.id ? " selected" : ""}`}
           >
-            <ReplayImage api={api} sessionId={session.id} frameId={session.coverFrameId} />
-            <strong>{session.title ?? "Untitled session"}</strong>
-            <time dateTime={session.startedAt}>{startedLabel(session.startedAt)}</time>
-            <span>
-              {session.durationMs === null ? "In progress" : timeLabel(session.durationMs)} ·{" "}
-              {
+            <button
+              type="button"
+              className="replay-session-open"
+              aria-current={selectedId === session.id ? "true" : undefined}
+              onClick={() => onSelect(session.id)}
+            >
+              <ReplayImage api={api} sessionId={session.id} frameId={session.coverFrameId} />
+              <strong>{session.title ?? "Untitled session"}</strong>
+              <time dateTime={session.startedAt}>{startedLabel(session.startedAt)}</time>
+              <span>
+                {session.durationMs === null ? "In progress" : timeLabel(session.durationMs)} ·{" "}
                 {
-                  done: "Done",
-                  stopped: "Stopped",
-                  error: "Failed",
-                  live: "Live",
-                  interrupted: "Interrupted",
-                }[session.verdict]
-              }
-            </span>
-            <span>
-              {session.recordings?.browser.bytes &&
-              !["none", "failed", "expired"].includes(session.recordings.browser.state)
-                ? session.recording.bytes > 0 &&
-                  !["none", "failed", "expired"].includes(session.recording.state)
-                  ? "Desktop + browser video"
-                  : "Browser video"
-                : session.recording.state === "expired" ||
-                    session.recordings?.browser.state === "expired"
-                  ? "Video removed"
-                  : session.recording.bytes > 0 && session.recording.state !== "failed"
-                    ? "Video"
-                    : "Screenshots only"}
-            </span>
-          </button>
-          <button
-            type="button"
-            className="replay-session-delete"
-            aria-label={`Delete ${session.title ?? "untitled session"}`}
-            onClick={() => setDeleting(session)}
-          >
-            Delete
-          </button>
-        </article>
-      ))}
+                  {
+                    done: "Done",
+                    stopped: "Stopped",
+                    error: "Failed",
+                    live: "Live",
+                    interrupted: "Interrupted",
+                  }[session.verdict]
+                }
+              </span>
+              <span>
+                {session.recordings?.browser.bytes &&
+                !["none", "failed", "expired"].includes(session.recordings.browser.state)
+                  ? session.recording.bytes > 0 &&
+                    !["none", "failed", "expired"].includes(session.recording.state)
+                    ? "Desktop + browser video"
+                    : "Browser video"
+                  : session.recording.state === "expired" ||
+                      session.recordings?.browser.state === "expired"
+                    ? "Video removed"
+                    : session.recording.bytes > 0 && session.recording.state !== "failed"
+                      ? "Video"
+                      : "Screenshots only"}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="replay-session-delete"
+              aria-label={`Delete ${session.title ?? "untitled session"}`}
+              onClick={() => setDeleting(session)}
+            >
+              Delete
+            </button>
+          </article>
+        ))}
+      </div>
       {error && (
         <p role="alert">
           History could not be loaded.{" "}

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsSheet, type SettingsSheetProps } from "./SettingsSheet.tsx";
@@ -96,9 +96,9 @@ describe("settings sheet presentation ownership", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(run).toHaveBeenCalledOnce();
-    expect((screen.getByRole("button", { name: "Saving…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    const saving = screen.getByRole("button", { name: "Saving…" });
+    expect(saving.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(saving);
     expect(save).not.toHaveBeenCalled();
     view.rerender(<SettingsSheet {...p} stop={{ label: "Stop", enabled: false, run }} />);
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -129,5 +129,135 @@ describe("settings sheet presentation ownership", () => {
     expect(screen.queryByLabelText(/USD|fast provider|fast model/)).toBeNull();
     expect(screen.queryByRole("group", { name: "Task spending ceiling" })).toBeNull();
     expect(screen.queryByText(/million tokens/)).toBeNull();
+  });
+  it("keeps the sheet and the choice when Escape comes from a select", () => {
+    const p = { ...props(), dirty: true, autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
+    render(<SettingsSheet {...p} />);
+    const select = screen.getByRole("combobox", { name: "Send messages" });
+    select.focus();
+    fireEvent.change(select, { target: { value: "handoff" } });
+    fireEvent.keyDown(select, { key: "Escape" });
+    expect(p.onClose).not.toHaveBeenCalled();
+    expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Models and settings" })).toBeTruthy();
+    expect(p.onAutonomy).toHaveBeenCalledWith({ ...DEFAULT_AUTONOMY, send: "handoff" });
+  });
+  it("closes from the dim area only on a full click there", () => {
+    const p = props();
+    const { container } = render(<SettingsSheet {...p} />);
+    const backdrop = container.querySelector(".settings-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.mouseDown(backdrop);
+    expect(p.onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("dialog", { name: "Models and settings" }));
+    expect(p.onClose).not.toHaveBeenCalled();
+    fireEvent.click(backdrop);
+    expect(p.onClose).toHaveBeenCalledOnce();
+  });
+  it("asks before Escape, the close button or the dim area discards unsaved choices", () => {
+    const p = { ...props(), dirty: true };
+    const { container } = render(<SettingsSheet {...p} />);
+    const backdrop = container.querySelector(".settings-backdrop") as HTMLElement;
+    for (const dismiss of [
+      () => fireEvent.keyDown(window, { key: "Escape" }),
+      () => fireEvent.click(screen.getByRole("button", { name: "Close settings" })),
+      () => fireEvent.click(backdrop),
+    ]) {
+      dismiss();
+      expect(screen.getByRole("alert").textContent).toBe("Discard unsaved changes?");
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep editing" }));
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+    }
+    expect(p.onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(p.onClose).toHaveBeenCalledOnce();
+  });
+  it("asks before Reload saved settings drops unsaved choices", () => {
+    const p = { ...props(), onReload: vi.fn() };
+    const view = render(<SettingsSheet {...p} dirty />);
+    const reload = screen.getByRole("button", { name: "Reload saved settings" });
+    fireEvent.click(reload);
+    expect(screen.getByRole("alert").textContent).toBe("Discard unsaved changes?");
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(p.onReload).not.toHaveBeenCalled();
+    fireEvent.click(reload);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(p.onReload).toHaveBeenCalledOnce();
+    expect(p.onClose).not.toHaveBeenCalled();
+    expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+    expect(document.activeElement).toBe(reload);
+    view.rerender(<SettingsSheet {...p} dirty={false} />);
+    fireEvent.click(reload);
+    expect(p.onReload).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+  });
+  it("returns focus to its opener after a click outside", () => {
+    const p = props();
+    const view = render(
+      <>
+        <button type="button">Open settings</button>
+        <SettingsSheet {...p} open={false} />
+      </>,
+    );
+    const opener = screen.getByRole("button", { name: "Open settings" });
+    opener.focus();
+    const sheet = (open: boolean) => (
+      <>
+        <button type="button">Open settings</button>
+        <SettingsSheet {...p} open={open} />
+      </>
+    );
+    view.rerender(sheet(true));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close settings" }));
+    const backdrop = view.container.querySelector(".settings-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    // A pointer-down outside any control moves focus to the page body first.
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.click(backdrop);
+    expect(p.onClose).toHaveBeenCalledOnce();
+    view.rerender(sheet(false));
+    expect(document.activeElement).toBe(opener);
+  });
+  it("lists every problem and ties Save's reason to it", () => {
+    const p = props();
+    const view = render(
+      <SettingsSheet
+        {...p}
+        dirty
+        validation={["Local: choose a valid model ID.", "Enter an explicit task ceiling in USD."]}
+        save={{ enabled: false, run: vi.fn() }}
+      />,
+    );
+    const save = screen.getByRole("button", { name: "Save settings" });
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    const reason = document.getElementById(save.getAttribute("aria-describedby") ?? "");
+    expect(
+      within(reason as HTMLElement)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["Local: choose a valid model ID.", "Enter an explicit task ceiling in USD."]);
+    view.rerender(
+      <SettingsSheet
+        {...p}
+        dirty
+        catalog="offline"
+        error="Settings could not be loaded. Your edits are kept. Choose Try again."
+        onRefresh={vi.fn()}
+        save={{ enabled: false, run: vi.fn() }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Save settings" }).getAttribute("aria-describedby"),
+    ).toContain("settings-error");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    view.rerender(<SettingsSheet {...p} save={{ enabled: false, run: vi.fn() }} />);
+    expect(
+      document.getElementById(
+        screen.getByRole("button", { name: "Save settings" }).getAttribute("aria-describedby") ??
+          "",
+      )?.textContent,
+    ).toBe("Saved choices");
   });
 });

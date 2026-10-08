@@ -1,5 +1,14 @@
-import { type ReactNode, type Ref, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
+import {
+  type ReactNode,
+  type Ref,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
+import { ownedByPicker } from "../lib/dismiss.ts";
+import { type KeyField, KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
 import { type KeydHealth, KeyProblem, type KeyRecord } from "./keys-api.ts";
 import { type KeysController, keyStatus } from "./useKeys.ts";
@@ -29,6 +38,7 @@ export function KeysSheet({
   taskControls,
 }: KeysSheetProps) {
   const panel = useRef<HTMLDivElement>(null);
+  const field = useRef<KeyField>(null);
   const status = keyStatus(keys.health);
   const offline = status.state === "offline";
   const changing = useRef(false);
@@ -61,13 +71,42 @@ export function KeysSheet({
     }
   };
   const disabled = !keys.health?.online || busy;
+  const [confirming, setConfirming] = useState(false);
+  const keep = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    if (open)
+      opener.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    else setConfirming(false);
+  }, [open]);
+  useEffect(() => {
+    if (open) return;
+    const target = opener.current;
+    opener.current = null;
+    if (target?.isConnected && !target.closest("[inert], [hidden]")) target.focus();
+  }, [open]);
+  useEffect(() => {
+    if (confirming) keep.current?.focus();
+  }, [confirming]);
+  // A typed key exists only in its field, so closing would lose it without a word.
+  const requestClose = useCallback(() => {
+    if (!field.current?.holdsKey()) return onClose();
+    setConfirming(true);
+    keep.current?.focus();
+  }, [onClose]);
+  const keepEditing = useCallback(() => {
+    setConfirming(false);
+    field.current?.focus();
+  }, []);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
+      if (e.key === "Escape" && !ownedByPicker(e)) {
         e.preventDefault();
-        onClose();
+        if (keep.current) keepEditing();
+        else requestClose();
       }
       if (e.key === "Tab" && panel.current) keepFocusIn(panel.current, e);
     };
@@ -75,11 +114,17 @@ export function KeysSheet({
     const initial = panel.current?.querySelector<HTMLElement>(".key-form input:enabled, .x");
     initial?.focus();
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose]);
+  }, [open, requestClose, keepEditing]);
 
   return (
     <>
-      <div className={open ? "scrim on" : "scrim"} onPointerDown={onClose} aria-hidden="true" />
+      <div
+        className={open ? "scrim on" : "scrim"}
+        onClick={(e) => {
+          if (e.target === e.currentTarget) requestClose();
+        }}
+        aria-hidden="true"
+      />
       <div
         ref={panel}
         id="keys-sheet"
@@ -89,10 +134,11 @@ export function KeysSheet({
         aria-labelledby="keys-title"
         aria-hidden={!open}
         inert={!open}
+        onSubmit={() => setConfirming(false)}
       >
         <header>
           <h2 id="keys-title">Keys</h2>
-          <button type="button" className="x" onClick={onClose} aria-label="Close keys">
+          <button type="button" className="x" onClick={requestClose} aria-label="Close keys">
             <span aria-hidden="true">×</span>
           </button>
         </header>
@@ -141,6 +187,7 @@ export function KeysSheet({
         />
         <KeyForm
           intakeRef={intakeRef}
+          fieldRef={field}
           active={open}
           disabled={disabled}
           preset={preset}
@@ -161,6 +208,19 @@ export function KeysSheet({
             });
           }}
         />
+        {confirming && (
+          <div className="keys-discard">
+            <p role="alert">Discard the key you entered?</p>
+            <div>
+              <button ref={keep} type="button" onClick={keepEditing}>
+                Keep editing
+              </button>
+              <button type="button" onClick={onClose}>
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </>
   );

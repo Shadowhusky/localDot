@@ -33,40 +33,44 @@ export function KeyList({ active, keys, disabled, remove }: KeyListProps) {
   return (
     <>
       <ul className="key-list" aria-label="Saved keys">
-        {keys.map((k) => (
-          <li key={k.id}>
-            <span className="key-name">{k.id}</span>
-            <span className="key-what">{describeKey(k)}</span>
-            <button
-              type="button"
-              className={armed === k.id ? "key-del armed" : "key-del"}
-              disabled={!active || disabled || pending !== null}
-              aria-label={armed === k.id ? `Confirm deleting ${k.id}` : `Delete ${k.id}`}
-              onClick={async () => {
-                if (!active || disabled || pendingRef.current) return;
-                if (armed !== k.id || performance.now() >= expires.current) {
-                  expires.current = performance.now() + 4000;
-                  setArmed(k.id);
-                  return;
-                }
-                setArmed(null);
-                pendingRef.current = true;
-                setPending(k.id);
-                try {
-                  await remove(k.id);
-                  setProblem(null);
-                } catch (err) {
-                  setProblem(problemText(err));
-                } finally {
-                  pendingRef.current = false;
-                  setPending(null);
-                }
-              }}
-            >
-              {pending === k.id ? "Removing…" : armed === k.id ? "Delete" : "Remove"}
-            </button>
-          </li>
-        ))}
+        {keys.map((k) => {
+          const label =
+            pending === k.id ? "Removing…" : armed === k.id ? "Confirm remove" : "Remove";
+          return (
+            <li key={k.id}>
+              <span className="key-name">{k.id}</span>
+              <span className="key-what">{describeKey(k)}</span>
+              <button
+                type="button"
+                className={armed === k.id ? "key-del armed" : "key-del"}
+                disabled={!active || disabled || pending !== null}
+                aria-label={`${label} ${k.id}`}
+                onClick={async () => {
+                  if (!active || disabled || pendingRef.current) return;
+                  if (armed !== k.id || performance.now() >= expires.current) {
+                    expires.current = performance.now() + 4000;
+                    setArmed(k.id);
+                    return;
+                  }
+                  setArmed(null);
+                  pendingRef.current = true;
+                  setPending(k.id);
+                  try {
+                    await remove(k.id);
+                    setProblem(null);
+                  } catch (err) {
+                    setProblem(problemText(err));
+                  } finally {
+                    pendingRef.current = false;
+                    setPending(null);
+                  }
+                }}
+              >
+                {label}
+              </button>
+            </li>
+          );
+        })}
       </ul>
       {problem && (
         <p className="field-error" role="alert">

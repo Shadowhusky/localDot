@@ -8,6 +8,9 @@ import { providerFixture } from "./testing.ts";
 import { useSettings } from "./useSettings.ts";
 
 afterEach(cleanup);
+afterEach(() => {
+  Reflect.deleteProperty(document, "hidden");
+});
 const initial = (): AgentSettingsDocument => ({
   main: { provider: "ollama", model: "local" },
   codexDenyRead: ["/private/fixture"],
@@ -20,6 +23,7 @@ function server(settings = initial()) {
     puts: [] as AgentSettingsDocument[],
     calls: [] as string[],
     readIndex: undefined as (() => Promise<ProviderIndex>) | undefined,
+    refreshCatalog: undefined as (() => Promise<Response>) | undefined,
     put: undefined as ((data: AgentSettingsDocument) => Promise<Response>) | undefined,
   };
   const api = createApi("fixture", {
@@ -31,6 +35,10 @@ function server(settings = initial()) {
       if (path === "/api/agent/providers")
         return Response.json(f.readIndex ? await f.readIndex() : f.index);
       if (path === "/api/agent/settings" && method === "GET") return Response.json(f.settings);
+      if (path === "/api/agent/catalog/refresh" && method === "POST")
+        return f.refreshCatalog
+          ? f.refreshCatalog()
+          : Response.json({ fetchedAt: "2026-10-08T09:00:00Z", providers: 3, skipped: 0 });
       if (path === "/api/agent/settings" && method === "PUT") {
         const data = JSON.parse(String(init?.body)) as AgentSettingsDocument;
         f.puts.push(structuredClone(data));
@@ -42,6 +50,10 @@ function server(settings = initial()) {
     },
   });
   return { ...f, api, state: f };
+}
+function setHidden(hidden: boolean) {
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+  document.dispatchEvent(new Event("visibilitychange"));
 }
 async function opened(f: ReturnType<typeof server>) {
   const view = renderHook(() => useSettings(f.api));
@@ -101,7 +113,8 @@ describe("explicit configuration save ownership", () => {
       await result.current.save();
     });
     expect(f.state.puts).toEqual([]);
-    expect(result.current.error).toContain("stored key");
+    expect(result.current.validation?.join(" ")).toContain("stored key");
+    expect(result.current.error).toBeNull();
     expect(result.current.draft?.budget).toBe("3");
     expect(result.current.dirty).toBe(true);
   });
@@ -226,6 +239,70 @@ describe("explicit configuration save ownership", () => {
     await waitFor(() => expect(result.current.phase).toBe("ready"));
     expect(result.current.uncertain).toBe(false);
   });
+  it("keeps edits saveable after the page is hidden and shown again, then saves once", async () => {
+    const f = server(),
+      { result } = await opened(f);
+    act(() => result.current.change("main", { provider: "ollama", model: "edited" }));
+    act(() => setHidden(true));
+    expect(result.current.saveEnabled).toBe(false);
+    act(() => setHidden(false));
+    await waitFor(() => expect(result.current.saveEnabled).toBe(true));
+    expect(result.current.draft?.choices.main?.model).toBe("edited");
+    expect(result.current.dirty).toBe(true);
+    expect(result.current.error).toBeNull();
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(f.state.puts).toEqual([{ ...initial(), main: { provider: "ollama", model: "edited" } }]);
+  });
+  it("restores readiness after a background while Settings is closed", async () => {
+    const f = server(),
+      view = renderHook(() => useSettings(f.api));
+    await waitFor(() => expect(view.result.current.mainReady).toBe(true));
+    act(() => setHidden(true));
+    expect(view.result.current.mainReady).toBe(false);
+    act(() => setHidden(false));
+    await waitFor(() => expect(view.result.current.mainReady).toBe(true));
+  });
+  it("keeps edits when the return read fails and lets Try again recover them", async () => {
+    const f = server(),
+      { result } = await opened(f);
+    act(() => result.current.change("main", { provider: "ollama", model: "edited" }));
+    f.state.readIndex = async () => {
+      throw new Error("private-offline");
+    };
+    act(() => setHidden(true));
+    act(() => setHidden(false));
+    await waitFor(() => expect(result.current.phase).toBe("error"));
+    expect(result.current.error).toContain("Your edits are kept");
+    expect(result.current.draft?.choices.main?.model).toBe("edited");
+    f.state.readIndex = undefined;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.saveEnabled).toBe(true));
+    expect(result.current.draft?.choices.main?.model).toBe("edited");
+    expect(f.state.calls).not.toContain("POST /api/agent/catalog/refresh");
+  });
+  it("retries the catalog refresh, not a read, after a failed refresh", async () => {
+    const f = server(),
+      { result } = await opened(f);
+    f.state.refreshCatalog = async () => new Response("down", { status: 503 });
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(result.current.phase).toBe("error");
+    expect(result.current.error).toContain("could not be refreshed");
+    f.state.refreshCatalog = undefined;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    expect(f.state.calls.filter((call) => call === "POST /api/agent/catalog/refresh")).toHaveLength(
+      2,
+    );
+    expect(result.current.phase).toBe("ready");
+    expect(result.current.error).toBeNull();
+  });
   it("ignores an old account's save and metadata responses after API replacement", async () => {
     const first = server(),
       next = server({ main: { provider: "ollama", model: "new-account" } });
@@ -284,4 +361,38 @@ describe("explicit configuration save ownership", () => {
     });
     expect(result.current.draft?.choices.main?.key).toBeUndefined();
   });
+  it("binds a key saved after switching apps to copy it", async () => {
+    const f = server({ main: { provider: "anthropic", model: "claude-sonnet-5-5" } }),
+      { result } = await opened(f);
+    const context = result.current.captureKey("main", "anthropic");
+    act(() => setHidden(true));
+    act(() => setHidden(false));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+    f.state.index.keys.push({ id: "copied", provider: "anthropic" });
+    await act(async () => {
+      await result.current.keySaved(context, { ...storedKey, id: "copied" });
+    });
+    expect(result.current.index?.keys.map((key) => key.id)).toContain("copied");
+    expect(result.current.draft?.choices.main?.key).toBe("copied");
+    expect(result.current.saveEnabled).toBe(true);
+  });
+  it("lists a key saved after other edits without binding it", async () => {
+    const f = server({ main: { provider: "anthropic", model: "claude-sonnet-5-5" } }),
+      { result } = await opened(f);
+    const context = result.current.captureKey("main", "anthropic");
+    act(() => result.current.budget("3", false));
+    f.state.index.keys.push({ id: "later", provider: "anthropic" });
+    await act(async () => {
+      await result.current.keySaved(context, { ...storedKey, id: "later" });
+    });
+    expect(result.current.index?.keys.map((key) => key.id)).toContain("later");
+    expect(result.current.draft?.choices.main?.key).toBeUndefined();
+  });
 });
+const storedKey = {
+  id: "",
+  kind: "llm" as const,
+  provider: "anthropic",
+  createdAt: "t",
+  updatedAt: "t",
+};

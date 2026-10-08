@@ -47,17 +47,28 @@ export function useSettings(
   const [error, setError] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [busy, setBusy] = useState(false);
-  const current = useRef({ api, open: false, saved, index, draft, revision: 0, generation: 0 });
+  const current = useRef({
+    api,
+    open: false,
+    saved,
+    index,
+    draft,
+    phase,
+    revision: 0,
+    generation: 0,
+    session: 0,
+  });
   const reading = useRef<AbortController | null>(null);
   const mutating = useRef<AbortController | null>(null);
   const mounted = useRef(false);
   const unresolved = useRef(false);
   const writing = useRef(false);
   const blocked = useRef(false);
+  const failed = useRef<"read" | "refresh">("read");
   const loadedFor = useRef<ApiClient | null>(null);
   useLayoutEffect(() => {
-    Object.assign(current.current, { api, saved, index, draft });
-  }, [api, saved, index, draft]);
+    Object.assign(current.current, { api, saved, index, draft, phase });
+  }, [api, saved, index, draft, phase]);
   const read = useCallback(
     async (reset: boolean, reconcile = false) => {
       const owner = current.current;
@@ -112,9 +123,12 @@ export function useSettings(
           reading.current !== abort
         )
           return;
+        failed.current = "read";
         setPhase("error");
         setError(
-          "Settings are unavailable or do not match this version. Reconnect and reload saved settings.",
+          owner.draft
+            ? "Settings could not be loaded. Your edits are kept. Choose Try again."
+            : "Settings could not be loaded. Check that localDot is running, then choose Try again.",
         );
       } finally {
         if (reading.current === abort) reading.current = null;
@@ -126,6 +140,7 @@ export function useSettings(
     mounted.current = true;
     current.current.api = api;
     current.current.generation++;
+    current.current.session++;
     if (loadedFor.current !== api) {
       unresolved.current = false;
       setUncertain(false);
@@ -134,6 +149,7 @@ export function useSettings(
     return () => {
       mounted.current = false;
       current.current.generation++;
+      current.current.session++;
       reading.current?.abort();
       mutating.current?.abort();
     };
@@ -148,12 +164,17 @@ export function useSettings(
         setUncertain(true);
       }
       mutating.current?.abort();
+      failed.current = "read";
       setPhase("error");
       setError("The view was interrupted. Reload saved settings before continuing.");
     };
+    // Coming back re-reads what the interruption discarded but keeps the draft, so switching apps
+    // to copy a key never costs the user their choices.
     const visible = () => {
-      if (document.hidden) suspend();
-      else blocked.current = false;
+      if (document.hidden) return suspend();
+      if (!blocked.current) return;
+      blocked.current = false;
+      if (mounted.current) void read(current.current.open && !current.current.draft);
     };
     window.addEventListener("pagehide", suspend);
     window.addEventListener("pageshow", visible);
@@ -163,13 +184,14 @@ export function useSettings(
       window.removeEventListener("pageshow", visible);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, []);
+  }, [read]);
   const show = useCallback(() => {
     const owner = current.current;
     if (document.hidden || blocked.current) return;
     if (owner.open) return;
     owner.open = true;
     owner.generation++;
+    owner.session++;
     owner.revision++;
     setOpen(true);
     void read(true);
@@ -178,6 +200,7 @@ export function useSettings(
     const owner = current.current;
     owner.open = false;
     owner.generation++;
+    owner.session++;
     owner.revision++;
     reading.current?.abort();
     if (writing.current) {
@@ -234,11 +257,7 @@ export function useSettings(
       loadedFor.current !== api
     )
       return;
-    const initial = validateForm(captured, previous, owner.index, subscriptionModels);
-    if (!initial.ok) {
-      setError(initial.message);
-      return;
-    }
+    if (!validateForm(captured, previous, owner.index, subscriptionModels).ok) return;
     const revision = owner.revision,
       generation = owner.generation;
     const abort = new AbortController();
@@ -261,10 +280,7 @@ export function useSettings(
       owner.index = fresh;
       setIndex(fresh);
       const checked = validateForm(captured, previous, fresh, subscriptionModels);
-      if (!checked.ok) {
-        setError(checked.message);
-        return;
-      }
+      if (!checked.ok) return;
       sent = true;
       writing.current = true;
       const next = await saveSettings(api, checked.document, abort.signal);
@@ -291,7 +307,7 @@ export function useSettings(
         setError(
           unknown
             ? new SettingsFailure(true).message
-            : "The daemon refused the settings or key metadata is unavailable. Your edits are retained; check the choices before retrying.",
+            : "These settings could not be saved. Your edits are kept; check the choices and try again.",
         );
     } finally {
       if (mutating.current === abort) {
@@ -304,8 +320,9 @@ export function useSettings(
   };
   const refresh = async () => {
     const owner = current.current;
-    if (!owner.open || mutating.current || unresolved.current || document.hidden || blocked.current)
-      return;
+    if (!owner.open || mutating.current || document.hidden || blocked.current) return;
+    if (owner.phase === "error" && failed.current === "read") return read(!owner.draft);
+    if (unresolved.current) return;
     const generation = owner.generation,
       revision = owner.revision;
     const abort = new AbortController();
@@ -335,6 +352,7 @@ export function useSettings(
         current.current.api === api &&
         owner.generation === generation
       ) {
+        failed.current = "refresh";
         setPhase("error");
         setError("The catalog could not be refreshed. Your choices are retained.");
       }
@@ -352,60 +370,49 @@ export function useSettings(
       void read(true, true);
     }
   };
+  // Switching apps to copy a key bumps generation but not session, so the key still binds.
   const captureKey = (role: ModelRole, provider: string) => ({
     api,
-    generation: current.current.generation,
+    session: current.current.session,
     revision: current.current.revision,
     role,
     provider,
   });
   const keySaved = async (capture: ReturnType<typeof captureKey>, key: KeyRecord) => {
-    const owner = current.current;
-    if (
-      capture.api !== api ||
-      owner.api !== api ||
-      !owner.open ||
-      capture.generation !== owner.generation ||
-      capture.revision !== owner.revision ||
-      document.hidden ||
-      blocked.current ||
-      loadedFor.current !== api
-    )
-      return;
+    const owner = current.current,
+      session = owner.session;
+    const usable = () =>
+      mounted.current &&
+      owner.api === api &&
+      owner.open &&
+      owner.session === session &&
+      !document.hidden &&
+      !blocked.current &&
+      loadedFor.current === api;
+    if (capture.api !== api || !usable()) return;
     const before = owner.index?.keys ?? [];
     try {
       const next = await loadProviderIndex(api);
-      if (
-        !mounted.current ||
-        owner.api !== api ||
-        !owner.open ||
-        capture.generation !== owner.generation ||
-        capture.revision !== owner.revision ||
-        document.hidden ||
-        blocked.current ||
-        loadedFor.current !== api
-      )
-        return;
+      if (!usable()) return;
       owner.index = next;
       setIndex(next);
       const provider = providerById(capture.provider),
         d = owner.draft;
-      if (!provider || !d || d.choices[capture.role]?.provider !== capture.provider) return;
+      if (
+        capture.session !== session ||
+        capture.revision !== owner.revision ||
+        !provider ||
+        !d ||
+        d.choices[capture.role]?.provider !== capture.provider
+      )
+        return;
       const newlyBound = matchingKeys(provider, pickerKeys(next)).filter(
         (row) => !before.some((old) => old.id === row.id),
       );
       if (newlyBound.length !== 1 || newlyBound[0]?.id !== key.id) return;
       change(capture.role, { ...(d.choices[capture.role] as RoleChoice), key: key.id });
     } catch {
-      if (
-        mounted.current &&
-        owner.api === api &&
-        owner.open &&
-        capture.generation === owner.generation &&
-        capture.revision === owner.revision &&
-        !blocked.current &&
-        !document.hidden
-      )
+      if (usable())
         setError(
           "The key was saved, but current model key metadata could not be loaded. Choose its binding after reconnecting.",
         );
@@ -441,7 +448,7 @@ export function useSettings(
     captureKey,
     keySaved,
     dirty: !!draft && !!saved && !sameDraft(draft, formOf(saved)),
-    validation: validation && !validation.ok ? validation.message : null,
+    validation: validation && !validation.ok ? validation.problems : null,
     saveEnabled:
       validation?.ok === true &&
       !busy &&

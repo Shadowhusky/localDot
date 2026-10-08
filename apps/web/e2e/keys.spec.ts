@@ -70,6 +70,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
 
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await page.keyboard.press("Escape");
+  await sheet.getByRole("button", { name: "Discard" }).click();
   await expect(page.getByTestId("keys-button")).toBeFocused();
   await page.getByTestId("keys-button").click();
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
@@ -133,11 +134,11 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   await expect(sheet.getByText("OpenAI-compatible · xn--bcher-kva.example")).toBeVisible();
   expect(posted).toHaveLength(2);
   expect(posted[1]).not.toContain(VALUE);
-  await sheet.getByRole("button", { name: "Delete books" }).click();
-  await sheet.getByRole("button", { name: "Confirm deleting books" }).click();
+  await sheet.getByRole("button", { name: "Remove books" }).click();
+  await sheet.getByRole("button", { name: "Confirm remove books" }).click();
 
-  await sheet.getByRole("button", { name: "Delete weather" }).click();
-  await sheet.getByRole("button", { name: "Confirm deleting weather" }).click();
+  await sheet.getByRole("button", { name: "Remove weather" }).click();
+  await sheet.getByRole("button", { name: "Confirm remove weather" }).click();
   await expect(sheet.getByText("No keys yet.")).toBeVisible();
   const keys = await (
     await fetch(`${daemon.origin}/api/keys`, {
@@ -175,7 +176,7 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
   const bounds = await sheet.boundingBox();
   expect(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 375).toBe(true);
   expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  const remove = sheet.getByRole("button", { name: `Delete ${id}` });
+  const remove = sheet.getByRole("button", { name: `Remove ${id}` });
   const removeBounds = await remove.boundingBox();
   expect(removeBounds && removeBounds.x >= 0 && removeBounds.x + removeBounds.width <= 375).toBe(
     true,
