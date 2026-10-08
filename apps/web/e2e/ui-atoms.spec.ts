@@ -1,9 +1,3 @@
-import { mkdtempSync, rmSync } from "node:fs";
-import { createServer, type Server } from "node:http";
-import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { fileURLToPath } from "node:url";
 import {
   type Browser,
   type BrowserContext,
@@ -12,20 +6,11 @@ import {
   type Page,
   test,
 } from "@playwright/test";
-import { build } from "vite";
-import { serveUi } from "../../daemon/src/static-ui.ts";
+import { type KitGallery, serveKitGallery } from "./kit-gallery.ts";
 import { ENGINES } from "./ui-fixture.ts";
 
 // The T06 atoms in the kit gallery, served by the daemon's own static route so they run under the
 // production CSP, in Chrome and WebKit. No screenshots: WebKit's inject a <style> the CSP reports.
-const require = createRequire(new URL("../../daemon/package.json", import.meta.url));
-const { Hono } = require("hono") as { Hono: new () => Parameters<typeof serveUi>[0] };
-const { getRequestListener } = require("@hono/node-server") as {
-  getRequestListener(
-    fetch: (request: Request) => Response | Promise<Response>,
-  ): Parameters<typeof createServer>[0];
-};
-const WEB = fileURLToPath(new URL("..", import.meta.url));
 const DESKTOP = { viewport: { width: 1440, height: 900 } };
 const PHONE = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
 const SQUEEZED = "0.97";
@@ -36,8 +21,7 @@ interface Seen {
   styles: number;
 }
 
-let scratch: string;
-let server: Server;
+let gallery: KitGallery;
 let origin: string;
 
 test.use({ actionTimeout: 10_000, navigationTimeout: 10_000 });
@@ -45,24 +29,12 @@ test.describe.configure({ timeout: 120_000 });
 
 test.beforeAll(async () => {
   test.setTimeout(120_000);
-  scratch = mkdtempSync(join(tmpdir(), "localdot-kit-atoms-"));
-  await build({
-    configFile: join(WEB, "vite.kit-gallery.config.ts"),
-    logLevel: "warn",
-    build: { outDir: scratch, emptyOutDir: true, sourcemap: false },
-  });
-  const app = new Hono();
-  serveUi(app, scratch);
-  server = createServer(getRequestListener((request) => app.fetch(request)));
-  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
-  const address = server.address();
-  if (!address || typeof address === "string") throw new Error("no port");
-  origin = `http://127.0.0.1:${address.port}`;
+  gallery = await serveKitGallery("localdot-kit-atoms");
+  origin = gallery.origin;
 });
 
 test.afterAll(async () => {
-  await new Promise((resolve) => server?.close(resolve));
-  rmSync(scratch, { recursive: true, force: true });
+  await gallery?.stop();
 });
 
 async function open(

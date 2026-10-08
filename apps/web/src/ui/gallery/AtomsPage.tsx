@@ -14,7 +14,15 @@ const VARIANTS = ["primary", "secondary", "quiet"] as const;
 const SIZES = ["sm", "md", "lg"] as const;
 const BUSY_FOR = 1600;
 
-function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
+export function Section({
+  title,
+  note,
+  children,
+}: {
+  title: string;
+  note: string;
+  children: ReactNode;
+}) {
   return (
     <section className="atoms-section" aria-label={title}>
       <header>
