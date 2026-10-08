@@ -135,6 +135,19 @@ export class SafetyIntentStore {
       return undefined;
     }
   }
+  remove(sessionId: string, cellId: string): void {
+    const record = this.read(sessionId);
+    if (!record) return;
+    if (record.cellId !== cellId) throw new Error("safety intent owner mismatch");
+    const dir = join(resolve(this.home), "sessions", sessionId);
+    unlinkSync(join(dir, "safety.json"));
+    const parent = openSync(dir, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY);
+    try {
+      fsyncSync(parent);
+    } finally {
+      closeSync(parent);
+    }
+  }
   write(
     sessionId: string,
     cellId: string,

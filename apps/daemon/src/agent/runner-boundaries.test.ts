@@ -10,6 +10,8 @@ import type { KeydHealth } from "../keyd/monitor.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { MemoryStore } from "./memory.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { ComputerFences } from "./safety/fences.ts";
+import { SafetyIntentStore } from "./safety/store.ts";
 import type { AgentSettings } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
@@ -610,3 +612,35 @@ it("a keyd boot change cannot reopen a saved user Pause or claim an old model ow
   ).rejects.toMatchObject({ status: 503 });
   expect(writes.mock.calls.filter(([, input]) => input.state === "open")).toHaveLength(before);
 });
+
+it.each(["pausing", "uncertain"] as const)(
+  "Stop after a %s Pause leaves no intent that fences the computer at the next start",
+  async (phase) => {
+    const h = setup();
+    const store = new SafetyIntentStore(h.home);
+    const session = await h.runner.start(h.cellId, "Pause, then Stop");
+    await h.ready();
+    const step = deferred<void>();
+    let started = false;
+    const running = session.runAtomic(required(session.generation), undefined, () => {
+      started = true;
+      return step.promise;
+    });
+    await until(() => started);
+    h.runner.pauseTask(session.id, ulid());
+    await until(() => store.read(session.id)?.pause?.phase === "pausing");
+    if (phase === "uncertain") {
+      step.resolve();
+      await until(() => session.safetyPause?.phase === "paused");
+      await h.health({ online: true, bootId: "boot-restarted" });
+      await until(() => store.read(session.id)?.pause?.phase === "uncertain");
+    }
+    const stopped = h.deps.stopSession(session.id);
+    step.resolve();
+    await running.catch(() => {});
+    await stopped;
+    await h.live.settled(session.id);
+    expect(new ComputerFences(h.home).isFenced(h.cellId)).toBe(false);
+    expect(store.read(session.id)).toBeUndefined();
+  },
+);

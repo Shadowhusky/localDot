@@ -830,6 +830,13 @@ export class AgentRunner {
         session.stop();
         await session.screensSettled().catch(() => {});
       }
+      // Its tools have settled and any cleanup uncertainty has already fenced the computer, so a
+      // Pause that Stop left unsettled must not fence it at the next start.
+      try {
+        new SafetyIntentStore(this.deps.home).remove(session.id, session.cellId);
+      } catch {
+        console.error("agent safety intent could not be cleared");
+      }
       try {
         session.append("session.end", { reason });
         const models = this.selectionOf(session.id);

@@ -145,6 +145,13 @@ export class EventLog {
     );
   }
 
+  ended(sessionId: string): boolean {
+    return (
+      this.hasSession(sessionId) &&
+      this.read(sessionId).some((event) => event.type === "session.end")
+    );
+  }
+
   hasPendingDeletion(sessionId: string): boolean {
     return ULID_PATTERN.test(sessionId) && existsSync(join(this.#root, ".deleting", sessionId));
   }

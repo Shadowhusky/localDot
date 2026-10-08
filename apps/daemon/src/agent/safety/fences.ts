@@ -23,7 +23,15 @@ export class ComputerFences {
   constructor(
     home: string,
     private readonly additionalFence: (id: string) => boolean = () => false,
+    taskEnded: (sessionId: string) => boolean = () => false,
   ) {
+    const ended = (sessionId: string) => {
+      try {
+        return taskEnded(sessionId);
+      } catch {
+        return false;
+      }
+    };
     try {
       this.#records = new PrivateRecords(home, "fences", (raw, id) => {
         const record = FenceRecord.parse(raw);
@@ -35,9 +43,10 @@ export class ComputerFences {
         this.#durable.add(record.cellId);
       }
       // A crashed unsettled Pause is deny-only recovery. No recorded snapshot can mint a Resume permit.
+      // An intent left by a task that recorded its end is stale: that task settled its own tools.
       const { intents, refused } = new SafetyIntentStore(home).scan();
       for (const intent of intents)
-        if (intent.pause && intent.pause.phase !== "paused")
+        if (intent.pause && intent.pause.phase !== "paused" && !ended(intent.sessionId))
           this.capture(intent.cellId, intent.sessionId, intent.executor ?? "native");
       for (const intent of refused) {
         if (!intent.cellId) throw new Error("unattributable safety intent");

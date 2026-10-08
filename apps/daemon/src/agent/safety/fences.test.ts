@@ -25,8 +25,12 @@ function open(dir: string): EventLog {
 // Startup order in main.ts: the event log recovers first, then the fences read their records.
 function restart(dir: string): ComputerFences {
   for (const log of logs.splice(0)) log.close();
-  open(dir);
-  return new ComputerFences(dir);
+  const log = open(dir);
+  return new ComputerFences(
+    dir,
+    () => false,
+    (sessionId) => log.ended(sessionId),
+  );
 }
 function pause(phase: PauseSnapshot["phase"]): PauseSnapshot {
   return {
@@ -97,4 +101,20 @@ it("a refused intent fences only the computer it names", () => {
   expect(fences.isFenced(named)).toBe(true);
   expect(fences.isFenced(other)).toBe(false);
   expect(fences.record(named)).toMatchObject({ cellId: named, sessionId: session });
+});
+
+it("an unsettled intent fences after a crash but not once its task recorded its end", () => {
+  const dir = home(),
+    log = open(dir),
+    store = new SafetyIntentStore(dir);
+  const crashedCell = ulid(),
+    endedCell = ulid();
+  const crashed = log.createSession("crashed mid-pause"),
+    ended = log.createSession("stopped mid-pause");
+  store.write(crashed, crashedCell, DEFAULT_AUTONOMY, pause("pausing"), "api");
+  store.write(ended, endedCell, DEFAULT_AUTONOMY, pause("pausing"), "api");
+  log.append(ended, { type: "session.end", agent: "main", data: { reason: "stopped" } });
+  const fences = restart(dir);
+  expect(fences.isFenced(crashedCell)).toBe(true);
+  expect(fences.isFenced(endedCell)).toBe(false);
 });

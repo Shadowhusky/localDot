@@ -103,7 +103,11 @@ const tickets = new TicketRegistry();
 const resetHolds = new ComputerResetHolds(home);
 const runtimeAdmission = new RuntimeUpdateAdmission(home);
 const runtimeImages = serviceIdentity ? RuntimeImages.parse(imagesFromEnv()) : undefined;
-const fences = new ComputerFences(home, (id) => resetHolds.oldHeld(id));
+const fences = new ComputerFences(
+  home,
+  (id) => resetHolds.oldHeld(id),
+  (sessionId) => eventLog.ended(sessionId),
+);
 const docker = new DockerClient(findDockerSocket().path);
 const keyd = new KeydClient(keydSocketPath(home));
 serviceReadiness = serviceIdentity
