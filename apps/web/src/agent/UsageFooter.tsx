@@ -1,7 +1,7 @@
 import type { TaskModelSelection } from "@localdot/protocol";
-import { providerById } from "@localdot/providers";
 import { useRef, useState } from "react";
 import { count } from "../copy/format.ts";
+import { providerName } from "../settings/choices.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { Meter } from "../ui/Meter.tsx";
 import { Popover } from "../ui/Popover.tsx";
@@ -12,8 +12,6 @@ const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFracti
 const whole = (value: number) => value.toLocaleString();
 const ROLES: Record<string, string> = { main: "Main", fast: "Fast", vision: "Vision" };
 const roleName = (role: string) => ROLES[role] ?? role;
-const providerName = (id: string) =>
-  id === "chatgpt" ? "ChatGPT plan" : (providerById(id)?.name ?? id);
 
 export type ModelName = (provider: string, model: string) => string | undefined;
 

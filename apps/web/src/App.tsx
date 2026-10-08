@@ -36,7 +36,7 @@ import { stepRows } from "./session/session-view.ts";
 import { statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
-import { matchingKeys } from "./settings/choices.ts";
+import { matchingKeys, providerName } from "./settings/choices.ts";
 import { SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useSettings } from "./settings/useSettings.ts";
@@ -604,7 +604,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       onTaskStarted={session.check}
                       modelSummary={
                         settings.saved?.main
-                          ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`
+                          ? `Saved main: ${providerName(settings.saved.main.provider)} · ${settings.saved.main.model}`
                           : "Choose a main model in Settings before starting a task."
                       }
                     />
