@@ -8,7 +8,7 @@ const WIDE: Size = { viewport: { width: 1728, height: 1000 } };
 const DESKTOP: Size = { viewport: { width: 1440, height: 900 } };
 const TABLET: Size = { viewport: { width: 1024, height: 768 } };
 const PHONE: Size = { viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true };
-const EXPORT_REASON = "Export needs Chrome or Edge for now";
+const EXPORT_REASON = "Export needs Chrome, Edge or Safari 17 or later";
 let fixture: UiFixture, organize: string, earlier: string;
 
 test.beforeAll(async () => {
@@ -198,21 +198,42 @@ for (const [label, engine, size] of [
       await context.close();
     });
 
-    test("Export says when this browser cannot save it", async () => {
+    test("Export opens its choices above the transport, with or without a save picker", async () => {
       const { context, page, press } = await open(browser, size, `/?replay=${earlier}`);
       const trigger = page.getByRole("button", { name: "Export MP4" });
       await expect(replayTime(page)).toHaveText("0:00 / 1:00");
-      if (engine === "webkit") {
-        await expect(trigger).toHaveAttribute("aria-disabled", "true");
-        await expect(trigger).toHaveAccessibleDescription(EXPORT_REASON);
-        await press(trigger, { force: true });
-        await expect(page.locator(".ui-tooltip")).toContainText(EXPORT_REASON);
-        await expect(page.getByRole("dialog", { name: "Export MP4" })).toHaveCount(0);
-      } else {
-        await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
-        await press(trigger);
-        await expect(page.getByRole("dialog", { name: "Export MP4" })).toBeVisible();
-      }
+      await expect(trigger).not.toHaveAttribute("aria-disabled", "true");
+      const stage = await page.locator(".replay-stage").boundingBox();
+      await press(trigger);
+      const panel = page.getByRole("dialog", { name: "Export MP4" });
+      await expect(panel).toBeVisible();
+      await expect(trigger).toHaveAttribute("aria-expanded", "true");
+      await expect(panel.locator("select, input[type=radio], input[type=file]")).toHaveCount(0);
+      await expect(panel.getByRole("button", { name: /^Save/ })).toBeVisible();
+      const box = await panel.boundingBox();
+      expect(box?.x).toBeGreaterThanOrEqual(0);
+      expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(size.viewport.width);
+      expect(await page.locator(".replay-stage").boundingBox()).toEqual(stage);
+      await page.keyboard.press("Escape");
+      await expect(panel).toBeHidden();
+      await expect(trigger).toBeFocused();
+      await context.close();
+    });
+
+    test("Export says why when this browser cannot make video", async () => {
+      const context = await browser.newContext({ ...size, deviceScaleFactor: 2 });
+      await context.addInitScript(() => {
+        Object.assign(window, { VideoEncoder: undefined });
+      });
+      const page = await context.newPage();
+      await page.goto(`${fixture.origin}/?replay=${earlier}#token=${TOKEN}`);
+      const trigger = page.getByRole("button", { name: "Export MP4" });
+      await expect(replayTime(page)).toHaveText("0:00 / 1:00");
+      await expect(trigger).toHaveAttribute("aria-disabled", "true");
+      await expect(trigger).toHaveAccessibleDescription(EXPORT_REASON);
+      await (size.hasTouch ? trigger.tap({ force: true }) : trigger.click({ force: true }));
+      await expect(page.locator(".ui-tooltip")).toContainText(EXPORT_REASON);
+      await expect(page.getByRole("dialog", { name: "Export MP4" })).toHaveCount(0);
       await context.close();
     });
   });
