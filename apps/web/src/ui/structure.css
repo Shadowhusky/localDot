@@ -49,7 +49,7 @@
   .ui-status-check {
     stroke-dasharray: 1;
     stroke-dashoffset: 0;
-    transition: stroke-dashoffset 220ms var(--ease-enter);
+    transition: stroke-dashoffset var(--dur-sheet) var(--ease-enter);
   }
 
   @starting-style {
