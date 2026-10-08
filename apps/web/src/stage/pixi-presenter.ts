@@ -130,7 +130,7 @@ export class PixiPresenter implements Presenter {
     if (p.mismatch && !this.warned && !this.#backdrop) {
       this.warned = true;
       this.#warn(
-        `frame ${this.#frameSize.w}x${this.#frameSize.h} drawn into a ${screen.w}x${screen.h} session screen`,
+        `frame ${this.#frameSize.w}x${this.#frameSize.h} drawn into a ${screen.w}x${screen.h} screen`,
       );
     }
   }
