@@ -277,9 +277,27 @@ LOCALDOT_CODEX_TESTS=1 LOCALDOT_CODEX_ARCHIVE=/absolute/path/to/darwin-arm64.tgz
   pnpm test:codex
 ```
 
-The first command verifies the committed source-bound offline receipt. The second runs
-the 13 pinned protocol/tool probes and 10 native sandbox/encrypted-refresh probes on a
-supported Mac. The native cases require permission to create their own private temporary
+The first command verifies the committed source-bound offline receipt and the acceptance
+record in `harness/codex/acceptance/record.json`. The ChatGPT plan stays switched off in the
+app until that record carries a passed native sandbox stamp and a passed real-account stamp
+for the exact pin and manifest; no installation state or environment variable opens it.
+Stamps are produced on a supported Mac and copied from the output directory into
+`harness/codex/acceptance/`:
+
+```sh
+pnpm check:codex-release --run --archive /abs/codex.tgz --out /abs/new-offline-dir
+pnpm check:codex-release --native --archive /abs/codex.tgz --out /abs/new-native-dir
+pnpm check:codex-release --account --archive /abs/codex.tgz --out /abs/new-account-dir
+```
+
+The offline record and the native stamp are bound to the release sources, so any change
+under `harness/codex`, `apps/daemon/src` or `packages/protocol/src` needs both rerun. The
+account stamp is bound only to the pin and its manifest. The `--account` run is the manual
+sign-in described below; ChatGPT ships device code sign-in switched off for personal
+accounts, so turn it on under ChatGPT Settings → Security first.
+
+`pnpm test:codex` runs the 13 pinned protocol/tool probes and 10 native
+sandbox/encrypted-refresh probes on a supported Mac. The native cases require permission to create their own private temporary
 files, inert real-home canary and local listeners. They read no existing home credential
 contents. Compiler, sandbox, child-process, cleanup or unavailable-platform errors fail
 acceptance. The receipt describes offline acceptance only; real account acceptance and

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   lstatSync,
@@ -13,11 +13,14 @@ import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { promisify } from "node:util";
+import { canonical, canonicalDigest as digest } from "../harness/codex/src/acceptance.ts";
 import { CONTRACT_FILES } from "../harness/codex/src/contract.ts";
 import { CODEX_VERSION, codexRelease } from "../harness/codex/src/version.ts";
 
-// This is a developer/CI release gate, never a runtime feature toggle or a real account probe.
-// Schema equality alone cannot authorize a pin upgrade. The record also binds the current
+export { digest };
+
+// This is a developer/CI release gate, never a runtime feature toggle. Only --account signs in to a
+// real account, and only when an operator runs it. Schema equality alone cannot authorize a pin upgrade. The record also binds the current
 // implementation, measured manifest and every required actual-binary probe, with no passing skips.
 export const REQUIRED_PROBES = Object.freeze([
   "regenerates all35 committed schema files from the independently verified pin",
@@ -36,7 +39,48 @@ export const REQUIRED_PROBES = Object.freeze([
   "exposes no connector, plugin, foreign MCP or web tool and sends only allowed fixture HTTP requests",
   "closes the real nc bridge and pending call on app-server stdin EOF without delivering a late image",
 ]);
+export const NATIVE_PROBES = Object.freeze([
+  "allows owned home/work while denying protected config writes and user/data reads",
+  "denies all protected home writes with writable owned positive controls",
+  "denies parent canaries and both shared-temp spellings while private temp stays writable",
+  "denies the owned real-home canary through natural and Data-volume spellings",
+  "grants only the owned UDS and exact proxy ports",
+  "denies every task/account listener and refuses the unavailable browser profile",
+  "receives the scrubbed production environment",
+  "authenticates to the owned default proxy and rejects a foreign CONNECT host",
+  "denies native sandbox reinitialization with an unsandboxed positive control",
+]);
+export const ACCOUNT_PROBES = Object.freeze([
+  "manual device-code cancellation, real ChatGPT sign-in and forced refresh in an owned native home",
+]);
 const SCOPE = `actual pinned Codex ${CODEX_VERSION} offline acceptance`;
+const SUITES = Object.freeze({
+  offline: {
+    probes: REQUIRED_PROBES,
+    scope: SCOPE,
+    file: "apps/daemon/src/agent/codex/codex-harness.codex.test.ts",
+    config: "vitest.codex.config.ts",
+    timeout: (REQUIRED_PROBES.length + 1) * 75_000,
+  },
+  native: {
+    probes: NATIVE_PROBES,
+    scope: "native macOS Codex confinement",
+    file: "apps/daemon/src/agent/codex/sandbox.codex.test.ts",
+    config: "vitest.codex.config.ts",
+    timeout: (NATIVE_PROBES.length + 2) * 60_000,
+  },
+  // The real sign-in prints a one-time code for the operator, so it runs attached to the terminal.
+  account: {
+    probes: ACCOUNT_PROBES,
+    scope: "",
+    file: "apps/daemon/src/agent/codex/signin.codex.test.ts",
+    config: "vitest.codex-signin.config.ts",
+    timeout: 720_000,
+    interactive: true,
+  },
+});
+const PASSED_EXIT = Object.freeze({ code: 0, signal: null });
+const UNSTAMPED = Object.freeze({ passed: false });
 const DIRECTORIES = ["harness/codex", "apps/daemon/src", "packages/protocol/src"];
 const FILES = [
   "package.json",
@@ -52,20 +96,6 @@ const FILES = [
 const EXTENSION = /\.(?:[cm]?js|tsx?|c|json|ya?ml)$/;
 const HEX = /^[a-f0-9]{64}$/;
 const object = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-function canonical(value) {
-  if (Array.isArray(value)) return value.map(canonical);
-  if (object(value))
-    return Object.fromEntries(
-      Object.keys(value)
-        .sort()
-        .map((key) => [key, canonical(value[key])]),
-    );
-  return value;
-}
-export const digest = (value) =>
-  createHash("sha256")
-    .update(JSON.stringify(canonical(value)))
-    .digest("hex");
 function read(path) {
   const info = lstatSync(path);
   assert.ok(
@@ -115,12 +145,9 @@ export function releaseInputs(root) {
     assert.ok(HEX.test(hashes[path] ?? ""), `Missing required release source: ${path}`);
   return canonical(hashes);
 }
-export function validateProbeReport(report, exit) {
-  assert.deepEqual(
-    exit,
-    { code: 0, signal: null },
-    "The actual probe worker must exit successfully.",
-  );
+export function validateProbeReport(report, exit, kind = "offline") {
+  const { probes, scope } = SUITES[kind];
+  assert.deepEqual(exit, PASSED_EXIT, "The actual probe worker must exit successfully.");
   assert.ok(object(report) && report.success === true, "Actual probes did not pass.");
   for (const key of [
     "numFailedTests",
@@ -130,8 +157,8 @@ export function validateProbeReport(report, exit) {
     "numPendingTestSuites",
   ])
     assert.equal(report[key], 0, `Release probes contain failures or skips: ${key}`);
-  assert.equal(report.numTotalTests, REQUIRED_PROBES.length);
-  assert.equal(report.numPassedTests, REQUIRED_PROBES.length);
+  assert.equal(report.numTotalTests, probes.length);
+  assert.equal(report.numPassedTests, probes.length);
   assert.ok(Array.isArray(report.testResults) && report.testResults.length === 1);
   assert.ok(
     report.unhandledErrors === undefined ||
@@ -145,11 +172,11 @@ export function validateProbeReport(report, exit) {
   const assertions = suite.assertionResults;
   assert.deepEqual(
     assertions.map((test) => test.title).sort(),
-    [...REQUIRED_PROBES].sort(),
+    [...probes].sort(),
     "Missing, duplicate or unexpected pinned probe.",
   );
   for (const test of assertions) {
-    assert.equal(test.fullName, `${SCOPE} ${test.title}`);
+    assert.equal(test.fullName, scope ? `${scope} ${test.title}` : test.title);
     assert.equal(test.status, "passed");
     assert.deepEqual(test.failureMessages, []);
     assert.ok(
@@ -194,10 +221,76 @@ export function verifyRecord(record, evidence) {
   );
   return true;
 }
+// record.json carries the stamps that open the ChatGPT plan at runtime. The native stamp is bound
+// to the release sources like the offline record; the account stamp needs a person, so it is bound
+// only to the pin and its manifest.
+function acceptanceBase(previous, manifest) {
+  const base = {
+    format: 1,
+    codexVersion: CODEX_VERSION,
+    platform: "darwin-arm64",
+    manifestSha256: digest(manifest),
+  };
+  const same =
+    object(previous) && Object.entries(base).every(([key, value]) => previous[key] === value);
+  return {
+    ...base,
+    nativeSandbox: same ? previous.nativeSandbox : UNSTAMPED,
+    realAccount: same ? previous.realAccount : UNSTAMPED,
+  };
+}
+const nativeStamp = (inputs, report) => ({
+  passed: true,
+  inputSha256: digest(inputs),
+  reportSha256: digest(report),
+});
+const accountStamp = (report) => ({ passed: true, reportSha256: digest(report) });
+export function stampNative(previous, { inputs, manifest, report, exit }) {
+  validateProbeReport(report, exit, "native");
+  return { ...acceptanceBase(previous, manifest), nativeSandbox: nativeStamp(inputs, report) };
+}
+export function stampAccount(previous, { manifest, report, exit }) {
+  validateProbeReport(report, exit, "account");
+  return { ...acceptanceBase(previous, manifest), realAccount: accountStamp(report) };
+}
+export function verifyAcceptance(record, { inputs, manifest, native, account }) {
+  const expected = acceptanceBase(undefined, manifest);
+  assert.ok(object(record), "The acceptance record is missing.");
+  assert.deepEqual(
+    Object.keys(record).sort(),
+    Object.keys(expected).sort(),
+    "The acceptance record has missing or unexpected fields.",
+  );
+  for (const key of ["format", "codexVersion", "platform", "manifestSha256"])
+    assert.equal(
+      record[key],
+      expected[key],
+      "The acceptance record names another pin. Rerun native and account acceptance.",
+    );
+  if (record.nativeSandbox?.passed !== false) {
+    validateProbeReport(native, PASSED_EXIT, "native");
+    assert.deepEqual(
+      record.nativeSandbox,
+      nativeStamp(inputs, native),
+      "The native sandbox stamp does not match this source. Rerun native acceptance.",
+    );
+  } else assert.deepEqual(record.nativeSandbox, UNSTAMPED);
+  if (record.realAccount?.passed !== false) {
+    validateProbeReport(account, PASSED_EXIT, "account");
+    assert.deepEqual(
+      record.realAccount,
+      accountStamp(account),
+      "The real-account stamp does not match its report. Rerun account acceptance.",
+    );
+  } else assert.deepEqual(record.realAccount, UNSTAMPED);
+  return true;
+}
+const manifestOf = (root) =>
+  JSON.parse(read(join(root, `harness/codex/releases/${CODEX_VERSION}.json`)));
 function evidence(root, report, generatedSchema, exit) {
   return {
     inputs: releaseInputs(root),
-    manifest: JSON.parse(read(join(root, `harness/codex/releases/${CODEX_VERSION}.json`))),
+    manifest: manifestOf(root),
     expectedSchema: JSON.parse(
       read(join(root, `harness/codex/schema/contract-${CODEX_VERSION}.json`)),
     ),
@@ -206,61 +299,56 @@ function evidence(root, report, generatedSchema, exit) {
     exit,
   };
 }
-export async function main(argv) {
-  const root = realpathSync(join(dirname(fileURLToPath(import.meta.url)), ".."));
-  if (argv.length === 0 || (argv.length === 2 && argv[0] === "--verify")) {
-    const folder = argv[1] ?? join(root, "harness/codex/acceptance");
-    assert.ok(isAbsolute(folder), "The acceptance directory must be absolute.");
-    const record = JSON.parse(read(join(folder, "offline-record.json")));
-    const report = JSON.parse(read(join(folder, "offline-report.json")));
-    verifyRecord(record, evidence(root, report, record.generatedSchema, record.exit));
-    console.log(
-      `Pinned Codex ${CODEX_VERSION}: schemas and all ${REQUIRED_PROBES.length} offline probes match this source. Native and real-account acceptance remain separate.`,
+function worker(root, kind, args, env) {
+  const { timeout, interactive } = SUITES[kind];
+  if (!interactive)
+    return promisify(execFile)(process.execPath, args, {
+      cwd: root,
+      env,
+      maxBuffer: 2 * 1024 * 1024,
+      timeout,
+    });
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, args, {
+      cwd: root,
+      env,
+      stdio: ["ignore", "inherit", "inherit"],
+      timeout,
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) =>
+      code === 0 && signal === null
+        ? resolve({ stdout: "", stderr: "" })
+        : reject(Object.assign(new Error("The probe worker failed."), { code, signal })),
     );
-    return;
-  }
-  assert.ok(
-    argv.length === 5 && argv[0] === "--run" && argv[1] === "--archive" && argv[3] === "--out",
-    "Use --verify ABS_DIRECTORY or --run --archive ABS_TGZ --out NEW_ABS_DIRECTORY.",
-  );
-  const archive = argv[2],
-    output = argv[4];
-  assert.ok(isAbsolute(archive) && isAbsolute(output));
-  assert.equal(
-    `${process.platform}-${process.arch}`,
-    "darwin-arm64",
-    "The offline acceptance runner is unverified on this platform.",
-  );
-  assert.ok(codexRelease()); // The production manifest validator must accept this platform's exact pin.
-  mkdirSync(output, { mode: 0o700 }); // Exclusive directory: never overwrite earlier evidence.
-  const before = releaseInputs(root),
+  });
+}
+async function probe(root, kind, archive, output) {
+  const suite = SUITES[kind],
     rawReport = join(output, "raw-report.json");
-  let exit = { code: 0, signal: null },
+  let exit = PASSED_EXIT,
     stdout = "",
     stderr = "";
   try {
-    ({ stdout, stderr } = await promisify(execFile)(
-      process.execPath,
+    ({ stdout, stderr } = await worker(
+      root,
+      kind,
       [
         join(root, "node_modules/vitest/vitest.mjs"),
         "run",
         "--config",
-        "vitest.codex.config.ts",
-        "apps/daemon/src/agent/codex/codex-harness.codex.test.ts",
+        suite.config,
+        suite.file,
         "--reporter=json",
         `--outputFile=${rawReport}`,
       ],
       {
-        cwd: root,
-        env: {
-          PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
-          HOME: homedir(),
-          LOCALDOT_CODEX_TESTS: "1",
-          LOCALDOT_CODEX_ARCHIVE: archive,
-          LOCALDOT_CODEX_PROBE_OUTPUT: join(output, "wire"),
-        },
-        maxBuffer: 2 * 1024 * 1024,
-        timeout: (REQUIRED_PROBES.length + 1) * 75_000,
+        PATH: `${dirname(process.execPath)}:/usr/bin:/bin`,
+        HOME: homedir(),
+        LOCALDOT_CODEX_TESTS: "1",
+        LOCALDOT_CODEX_ARCHIVE: archive,
+        ...(kind === "offline" ? { LOCALDOT_CODEX_PROBE_OUTPUT: join(output, "wire") } : {}),
+        ...(kind === "account" ? { LOCALDOT_CODEX_SIGNIN: "1" } : {}),
       },
     ));
   } catch (error) {
@@ -273,22 +361,79 @@ export async function main(argv) {
     // A startup, hook, timeout or cleanup error has no accepted record. Retain its diagnostics.
     writeFileSync(join(output, "failed-exit.json"), `${JSON.stringify(exit)}\n`, { mode: 0o600 });
   } finally {
-    writeFileSync(join(output, "worker.log"), stdout + stderr, { mode: 0o600 });
+    if (!suite.interactive)
+      writeFileSync(join(output, "worker.log"), stdout + stderr, { mode: 0o600 });
   }
   const report = JSON.parse(read(rawReport));
   // The committed evidence keeps test results, not the build machine's absolute checkout path.
-  for (const suite of report.testResults ?? [])
-    suite.name = "apps/daemon/src/agent/codex/codex-harness.codex.test.ts";
+  for (const result of report.testResults ?? []) result.name = suite.file;
+  return { report, exit };
+}
+const json = (path, value) =>
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
+export async function main(argv) {
+  const root = realpathSync(join(dirname(fileURLToPath(import.meta.url)), ".."));
+  if (argv.length === 0 || (argv.length === 2 && argv[0] === "--verify")) {
+    const folder = argv[1] ?? join(root, "harness/codex/acceptance");
+    assert.ok(isAbsolute(folder), "The acceptance directory must be absolute.");
+    const record = JSON.parse(read(join(folder, "offline-record.json")));
+    const report = JSON.parse(read(join(folder, "offline-report.json")));
+    const data = evidence(root, report, record.generatedSchema, record.exit);
+    verifyRecord(record, data);
+    const acceptance = JSON.parse(read(join(folder, "record.json")));
+    const stamped = (name, stamp) =>
+      stamp?.passed === false ? undefined : JSON.parse(read(join(folder, name)));
+    verifyAcceptance(acceptance, {
+      inputs: data.inputs,
+      manifest: data.manifest,
+      native: stamped("native-report.json", acceptance.nativeSandbox),
+      account: stamped("account-report.json", acceptance.realAccount),
+    });
+    const state = (stamp) => (stamp.passed ? "passed" : "not run");
+    console.log(
+      `Pinned Codex ${CODEX_VERSION}: schemas and all ${REQUIRED_PROBES.length} offline probes match this source. Native sandbox ${state(acceptance.nativeSandbox)}; real account ${state(acceptance.realAccount)}.`,
+    );
+    return;
+  }
+  const modes = { "--run": "offline", "--native": "native", "--account": "account" };
+  assert.ok(
+    argv.length === 5 &&
+      Object.hasOwn(modes, argv[0]) &&
+      argv[1] === "--archive" &&
+      argv[3] === "--out",
+    "Use --verify ABS_DIRECTORY, or --run, --native or --account with --archive ABS_TGZ --out NEW_ABS_DIRECTORY.",
+  );
+  const kind = modes[argv[0]],
+    archive = argv[2],
+    output = argv[4];
+  assert.ok(isAbsolute(archive) && isAbsolute(output));
+  assert.equal(
+    `${process.platform}-${process.arch}`,
+    "darwin-arm64",
+    "The acceptance runner is unverified on this platform.",
+  );
+  assert.ok(codexRelease()); // The production manifest validator must accept this platform's exact pin.
+  mkdirSync(output, { mode: 0o700 }); // Exclusive directory: never overwrite earlier evidence.
+  const before = releaseInputs(root);
+  const { report, exit } = await probe(root, kind, archive, output);
+  if (kind !== "offline") {
+    const data = { inputs: releaseInputs(root), manifest: manifestOf(root), report, exit };
+    assert.deepEqual(before, data.inputs, "Sources changed while the probes were running.");
+    const previous = JSON.parse(read(join(root, "harness/codex/acceptance/record.json")));
+    const record = kind === "native" ? stampNative(previous, data) : stampAccount(previous, data);
+    json(join(output, `${kind}-report.json`), report);
+    json(join(output, "record.json"), record);
+    console.log(
+      `All ${SUITES[kind].probes.length} ${kind} probes passed. Stamped record and report: ${output}`,
+    );
+    return;
+  }
   const generatedSchema = JSON.parse(read(join(output, "wire/schema-contract.json")));
   const data = evidence(root, report, generatedSchema, exit);
   assert.deepEqual(before, data.inputs, "Sources changed while the probes were running.");
   const record = makeRecord(data);
-  writeFileSync(join(output, "offline-report.json"), `${JSON.stringify(report, null, 2)}\n`, {
-    mode: 0o600,
-  });
-  writeFileSync(join(output, "offline-record.json"), `${JSON.stringify(record, null, 2)}\n`, {
-    mode: 0o600,
-  });
+  json(join(output, "offline-report.json"), report);
+  json(join(output, "offline-record.json"), record);
   verifyRecord(record, data);
   console.log(
     `All ${REQUIRED_PROBES.length} actual pinned offline probes passed. Verified release evidence: ${output}`,
