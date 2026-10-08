@@ -116,11 +116,33 @@
   gap: 8px;
   margin-top: 16px;
 }
-.settings-sheet .settings-save {
+.settings-sheet .settings-save,
+.settings-sheet .settings-discard button:first-child {
   background: var(--color-text);
   border-color: var(--color-text);
   color: var(--color-void);
   font-weight: 600;
+}
+.settings-discard {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  padding: 12px var(--spacing-gutter);
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+.settings-sheet .settings-discard p {
+  margin: 0;
+  color: var(--color-text);
+  font-weight: 500;
+}
+.settings-discard div {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
 }
 .settings-sheet .model-capability {
   color: var(--color-text);
@@ -135,6 +157,12 @@
   .settings-actions,
   .settings-catalog {
     flex-wrap: wrap;
+  }
+  .settings-discard div {
+    flex: 1 0 100%;
+  }
+  .settings-discard button {
+    flex: 1;
   }
 }
 

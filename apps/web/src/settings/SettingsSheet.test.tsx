@@ -130,6 +130,77 @@ describe("settings sheet presentation ownership", () => {
     expect(screen.queryByRole("group", { name: "Task spending ceiling" })).toBeNull();
     expect(screen.queryByText(/million tokens/)).toBeNull();
   });
+  it("keeps the sheet and the choice when Escape comes from a select", () => {
+    const p = { ...props(), dirty: true, autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
+    render(<SettingsSheet {...p} />);
+    const select = screen.getByRole("combobox", { name: "Send messages" });
+    select.focus();
+    fireEvent.change(select, { target: { value: "handoff" } });
+    fireEvent.keyDown(select, { key: "Escape" });
+    expect(p.onClose).not.toHaveBeenCalled();
+    expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+    expect(screen.getByRole("dialog", { name: "Models and settings" })).toBeTruthy();
+    expect(p.onAutonomy).toHaveBeenCalledWith({ ...DEFAULT_AUTONOMY, send: "handoff" });
+  });
+  it("closes from the dim area only on a full click there", () => {
+    const p = props();
+    const { container } = render(<SettingsSheet {...p} />);
+    const backdrop = container.querySelector(".settings-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    fireEvent.mouseDown(backdrop);
+    expect(p.onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("dialog", { name: "Models and settings" }));
+    expect(p.onClose).not.toHaveBeenCalled();
+    fireEvent.click(backdrop);
+    expect(p.onClose).toHaveBeenCalledOnce();
+  });
+  it("asks before Escape, the close button or the dim area discards unsaved choices", () => {
+    const p = { ...props(), dirty: true };
+    const { container } = render(<SettingsSheet {...p} />);
+    const backdrop = container.querySelector(".settings-backdrop") as HTMLElement;
+    for (const dismiss of [
+      () => fireEvent.keyDown(window, { key: "Escape" }),
+      () => fireEvent.click(screen.getByRole("button", { name: "Close settings" })),
+      () => fireEvent.click(backdrop),
+    ]) {
+      dismiss();
+      expect(screen.getByRole("alert").textContent).toBe("Discard unsaved changes?");
+      expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep editing" }));
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(screen.queryByText("Discard unsaved changes?")).toBeNull();
+    }
+    expect(p.onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Close settings" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(p.onClose).toHaveBeenCalledOnce();
+  });
+  it("returns focus to its opener after a click outside", () => {
+    const p = props();
+    const view = render(
+      <>
+        <button type="button">Open settings</button>
+        <SettingsSheet {...p} open={false} />
+      </>,
+    );
+    const opener = screen.getByRole("button", { name: "Open settings" });
+    opener.focus();
+    const sheet = (open: boolean) => (
+      <>
+        <button type="button">Open settings</button>
+        <SettingsSheet {...p} open={open} />
+      </>
+    );
+    view.rerender(sheet(true));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close settings" }));
+    const backdrop = view.container.querySelector(".settings-backdrop") as HTMLElement;
+    fireEvent.pointerDown(backdrop);
+    // A pointer-down outside any control moves focus to the page body first.
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.click(backdrop);
+    expect(p.onClose).toHaveBeenCalledOnce();
+    view.rerender(sheet(false));
+    expect(document.activeElement).toBe(opener);
+  });
   it("lists every problem and ties Save's reason to it", () => {
     const p = props();
     const view = render(

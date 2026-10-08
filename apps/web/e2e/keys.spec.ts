@@ -70,6 +70,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
 
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await page.keyboard.press("Escape");
+  await sheet.getByRole("button", { name: "Discard" }).click();
   await expect(page.getByTestId("keys-button")).toBeFocused();
   await page.getByTestId("keys-button").click();
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");

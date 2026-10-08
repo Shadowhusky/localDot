@@ -1,5 +1,6 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
-import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
+import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { ownedByPicker } from "../lib/dismiss.ts";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import type {
@@ -60,19 +61,58 @@ const CATALOG_MESSAGE: Record<SettingsSheetProps["catalog"], string> = {
 };
 export function SettingsSheet(props: SettingsSheetProps) {
   const panel = useRef<HTMLElement>(null);
+  const keep = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const resume = useRef<HTMLElement | null>(null);
   const active = props.open && !props.suspended;
-  const close = useRef(props.onClose);
+  const [confirming, setConfirming] = useState(false);
+  const latest = useRef({ onClose: props.onClose, dirty: props.dirty, confirming });
   const focusedSection = useRef(false);
   useLayoutEffect(() => {
-    close.current = props.onClose;
-  }, [props.onClose]);
+    latest.current = { onClose: props.onClose, dirty: props.dirty, confirming };
+  }, [props.onClose, props.dirty, confirming]);
+  useLayoutEffect(() => {
+    if (props.open)
+      opener.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    else setConfirming(false);
+  }, [props.open]);
+  useEffect(() => {
+    if (props.open) return;
+    const target = opener.current;
+    opener.current = null;
+    if (target?.isConnected && !target.closest("[inert], [hidden]")) target.focus();
+  }, [props.open]);
+  useEffect(() => {
+    if (!props.dirty) setConfirming(false);
+  }, [props.dirty]);
+  useEffect(() => {
+    if (confirming) keep.current?.focus();
+  }, [confirming]);
+  const requestClose = useCallback(() => {
+    if (!latest.current.dirty) return latest.current.onClose();
+    if (!latest.current.confirming)
+      resume.current =
+        document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setConfirming(true);
+    keep.current?.focus();
+  }, []);
+  const keepEditing = useCallback(() => {
+    setConfirming(false);
+    const target = resume.current;
+    resume.current = null;
+    if (target?.isConnected && panel.current?.contains(target) && target !== keep.current)
+      target.focus();
+    else panel.current?.querySelector<HTMLElement>("button")?.focus();
+  }, []);
   useEffect(() => {
     if (!active) return;
     panel.current?.querySelector<HTMLElement>("button")?.focus();
     const key = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (event.key === "Escape" && !ownedByPicker(event)) {
         event.preventDefault();
-        close.current();
+        if (latest.current.confirming) keepEditing();
+        else requestClose();
       }
       if (event.key !== "Tab" || !panel.current) return;
       const items = [
@@ -98,7 +138,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [active]);
+  }, [active, keepEditing, requestClose]);
   useEffect(() => {
     if (!props.open) focusedSection.current = false;
     if (!active || props.loading || focusedSection.current || props.focusSection !== "autonomy")
@@ -127,7 +167,9 @@ export function SettingsSheet(props: SettingsSheetProps) {
         className="settings-backdrop"
         hidden={!active}
         aria-hidden="true"
-        onPointerDown={props.onClose}
+        onClick={(event) => {
+          if (event.target === event.currentTarget) requestClose();
+        }}
       />
       <section
         ref={panel}
@@ -142,7 +184,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
         <div className="settings-heading">
           <header>
             <h2 id="settings-title">Models and settings</h2>
-            <button type="button" onClick={props.onClose} aria-label="Close settings">
+            <button type="button" onClick={requestClose} aria-label="Close settings">
               ×
             </button>
           </header>
@@ -291,6 +333,19 @@ export function SettingsSheet(props: SettingsSheetProps) {
             )}
           </div>
         </div>
+        {confirming && (
+          <div className="settings-discard">
+            <p role="alert">Discard unsaved changes?</p>
+            <div>
+              <button ref={keep} type="button" onClick={keepEditing}>
+                Keep editing
+              </button>
+              <button type="button" onClick={props.onClose}>
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
       </section>
     </>
   );

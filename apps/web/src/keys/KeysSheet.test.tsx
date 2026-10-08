@@ -470,15 +470,68 @@ describe("KeysSheet", () => {
     expect(document.activeElement).toBe(save);
   });
 
-  it("closes on Escape and on the scrim, and is inert while closed", () => {
+  it("closes on Escape and on a full click on the scrim, and is inert while closed", () => {
     const onClose = vi.fn();
     const { container, rerender } = render(
       <KeysSheet open keys={controller()} onClose={onClose} />,
     );
     fireEvent.keyDown(window, { key: "Escape" });
-    fireEvent.pointerDown(container.querySelector(".scrim") as Element);
+    const scrim = container.querySelector(".scrim") as Element;
+    fireEvent.pointerDown(scrim);
+    expect(onClose).toHaveBeenCalledOnce();
+    fireEvent.click(scrim);
     expect(onClose).toHaveBeenCalledTimes(2);
     rerender(<KeysSheet open={false} keys={controller()} onClose={onClose} />);
     expect(container.querySelector(".sheet")?.hasAttribute("inert")).toBe(true);
+  });
+
+  it("keeps the sheet and the choice when Escape comes from the provider picker", () => {
+    const onClose = vi.fn();
+    render(<KeysSheet open keys={controller()} onClose={onClose} />);
+    const provider = screen.getByRole("combobox", { name: "Provider" }) as HTMLSelectElement;
+    provider.focus();
+    fireEvent.change(provider, { target: { value: "openai" } });
+    fireEvent.keyDown(provider, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+    expect(provider.value).toBe("openai");
+  });
+
+  it("asks before closing discards a typed key", () => {
+    const onClose = vi.fn();
+    render(<KeysSheet open keys={controller()} onClose={onClose} />);
+    type("Key", "fake-private-value");
+    fireEvent.click(screen.getByRole("button", { name: "Close keys" }));
+    expect(screen.getByRole("alert").textContent).toBe("Discard the key you entered?");
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep editing" }));
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByText("Discard the key you entered?")).toBeNull();
+    expect(document.activeElement).toBe(field("Key"));
+    expect(field("Key").value).toBe("fake-private-value");
+    fireEvent.keyDown(window, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("returns focus to its opener after a click outside", () => {
+    const onClose = vi.fn();
+    const sheet = (open: boolean) => (
+      <>
+        <button type="button">Open keys</button>
+        <KeysSheet open={open} keys={controller()} onClose={onClose} />
+      </>
+    );
+    const view = render(sheet(false));
+    const opener = screen.getByRole("button", { name: "Open keys" });
+    opener.focus();
+    view.rerender(sheet(true));
+    expect(document.activeElement).not.toBe(opener);
+    const scrim = view.container.querySelector(".scrim") as HTMLElement;
+    fireEvent.pointerDown(scrim);
+    // A pointer-down outside any control moves focus to the page body first.
+    (document.activeElement as HTMLElement).blur();
+    fireEvent.click(scrim);
+    expect(onClose).toHaveBeenCalledOnce();
+    view.rerender(sheet(false));
+    expect(document.activeElement).toBe(opener);
   });
 });
