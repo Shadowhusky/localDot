@@ -9,6 +9,8 @@ import { TicketRegistry } from "../../cells/secrets.ts";
 import { CellStore } from "../../cells/store.ts";
 import { startFakeDocker } from "../../cells/testing/fake-docker.ts";
 import type { DesktopdHealth } from "../../cells/types.ts";
+import { monotonicClock } from "../../clock.ts";
+import { DesktopdRegistry } from "../../desktopd/registry.ts";
 import { ShellCleanupUncertainError } from "../../desktopd/tools-client.ts";
 import { KillSwitch } from "../../gateway/kill-switch.ts";
 import { LiveSessions } from "../../gateway/live.ts";
@@ -153,12 +155,15 @@ async function fixture() {
     tickets,
     readyTimeoutMs: 1000,
   });
+  const clock = monotonicClock(),
+    registry = new DesktopdRegistry(cells, clock);
   const app = createApp({
     token: TOKEN,
     port: 4750,
     eventLog: h.eventLog,
     cells: { cells, tickets, replacement },
     desktop: { cells, tickets, vendorDir: "/private/tmp/unused-selkies" },
+    gateway: { registry, clock, live, killSwitch },
   });
   const request = (path: string, method = "GET", body?: unknown, token: string | null = TOKEN) =>
     app.request(`http://127.0.0.1:4750${path}`, {
@@ -180,6 +185,7 @@ async function fixture() {
   };
   const body = () => ({ requestId: ulid(), oldRevision: 1, home: "fresh" });
   owned.push(async () => {
+    registry.dispose();
     cells.dispose();
     h.session.stop();
     live.stop(h.session.id);
@@ -331,10 +337,44 @@ describe("replacement crosses real runner, lifecycle and public route boundaries
     expect(f.cells.endpoints(candidate)).toBeUndefined();
     expect((await f.request(`/api/cells/${candidate}/start`, "POST")).status).toBe(409);
     expect((await f.request(`/api/cells/${candidate}/stream-ticket`, "POST")).status).toBe(409);
+    const input = await f.request(`/api/cells/${candidate}/input`, "POST", {});
+    expect(input.status).toBe(409);
+    expect(await input.text()).toContain("awaiting replacement confirmation");
+    await expect(f.runner.start(candidate, "candidate task")).rejects.toThrow(
+      "paused or changing state",
+    );
     gate.resolve();
     expect((await pending).status).toBe(200);
     expect(f.cells.get(candidate)?.replacementPending).toBeUndefined();
     expect(f.cells.endpoints(candidate)).toBeDefined();
+  });
+  it("a computer fenced while its runtime is verified never reaches Ready", async () => {
+    const f = await fixture(),
+      id = ulid(),
+      checked = hold();
+    let fenced = false;
+    const cells = new CellOrchestrator({
+      docker: new DockerClient(f.fake.socketPath),
+      store: f.store,
+      keyd: f.keyd,
+      images: { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" },
+      permanentFence: (cell) => cell === id && fenced,
+      verifyRuntime: async (record) => {
+        if (record.id !== id || cells.get(id)?.state !== "starting") return;
+        fenced = true;
+        checked.resolve();
+      },
+      probeDesktopd: async () => f.health,
+      probeStream: async () => true,
+      watchEveryMs: 60000,
+      readyTimeoutMs: 1000,
+    });
+    owned.push(async () => cells.dispose());
+    await cells.create({ id, scale: 2 });
+    await checked.promise;
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(cells.get(id)?.state).toBe("starting");
+    expect(cells.endpoints(id)).toBeUndefined();
   });
   it("public replacement routes require daemon authorization and reject stale or caller-selected identities", async () => {
     const f = await fixture();
