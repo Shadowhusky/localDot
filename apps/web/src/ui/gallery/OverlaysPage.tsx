@@ -11,6 +11,10 @@ import "./atoms.css";
 import "./overlays-page.css";
 
 const PROVIDERS = ["Anthropic", "OpenAI", "Google", "A local model"] as const;
+const KEYS = [
+  { provider: "Anthropic", added: "Added 2 Oct" },
+  { provider: "OpenAI", added: "Added 28 Sep" },
+];
 const APPS = [
   "Browser",
   "Files",
@@ -59,11 +63,14 @@ function SettingsDemo({
   const [saved, setSaved] = useState(SAVED);
   const [draft, setDraft] = useState(SAVED);
   const [picked, setPicked] = useState("Nothing yet");
+  const [view, setView] = useState<"settings" | "keys">("settings");
   const dirty = draft.name !== saved.name || draft.provider !== saved.provider;
   const close = () => {
     setOpen(false);
     setDraft(saved);
+    setView("settings");
   };
+  const keys = view === "keys";
   return (
     <div className="overlays-demo">
       <Button ref={trigger} onClick={() => setOpen(true)}>
@@ -79,95 +86,124 @@ function SettingsDemo({
         modal={modal}
         dirty={dirty}
         returnFocus={trigger}
-        title="Models and settings"
-        description="Saved settings apply to the next task."
+        page={view}
+        back={keys ? { label: "Settings", onBack: () => setView("settings") } : undefined}
+        title={keys ? "Keys" : "Models and settings"}
+        description={
+          keys ? "Kept in this Mac's keychain." : "Saved settings apply to the next task."
+        }
         closeLabel="Close settings"
         footer={
-          <>
-            <Button variant="quiet" onClick={close}>
-              Cancel
-            </Button>
-            <Button
-              variant="primary"
-              disabledReason={dirty ? undefined : "Nothing to save yet"}
-              onClick={() => {
-                setSaved(draft);
-                setOpen(false);
-              }}
-            >
-              Save
-            </Button>
-          </>
+          keys ? (
+            <Button icon="key-round">Add a key</Button>
+          ) : (
+            <>
+              <Button variant="quiet" onClick={close}>
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                disabledReason={dirty ? undefined : "Nothing to save yet"}
+                onClick={() => {
+                  setSaved(draft);
+                  setOpen(false);
+                  setView("settings");
+                }}
+              >
+                Save
+              </Button>
+            </>
+          )
         }
       >
-        <div className="overlays-form">
-          <Field label="Name">
-            {(id) => (
-              <input
-                id={id}
-                className="overlays-input"
-                value={draft.name}
-                onChange={(event) => setDraft({ ...draft, name: event.target.value })}
-              />
-            )}
-          </Field>
-          <Field label="Provider">
-            {(id) => (
-              <span className="overlays-select">
-                <select
+        {keys ? (
+          <ul className="overlays-list">
+            {KEYS.map((key) => (
+              <li key={key.provider}>
+                <Icon name="key-round" />
+                <span className="overlays-key">
+                  {key.provider}
+                  <span>{key.added}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="overlays-form">
+            <Field label="Name">
+              {(id) => (
+                <input
                   id={id}
                   className="overlays-input"
-                  value={draft.provider}
-                  onChange={(event) => setDraft({ ...draft, provider: event.target.value })}
-                >
-                  {PROVIDERS.map((provider) => (
-                    <option key={provider}>{provider}</option>
-                  ))}
-                </select>
-                <Icon name="chevron-down" />
-              </span>
-            )}
-          </Field>
-          <div className="overlays-inline">
-            <div>
-              <p className="overlays-inline-title">Main model</p>
-              <p className="overlays-inline-note">{picked}</p>
+                  value={draft.name}
+                  onChange={(event) => setDraft({ ...draft, name: event.target.value })}
+                />
+              )}
+            </Field>
+            <Field label="Provider">
+              {(id) => (
+                <span className="overlays-select">
+                  <select
+                    id={id}
+                    className="overlays-input"
+                    value={draft.provider}
+                    onChange={(event) => setDraft({ ...draft, provider: event.target.value })}
+                  >
+                    {PROVIDERS.map((provider) => (
+                      <option key={provider}>{provider}</option>
+                    ))}
+                  </select>
+                  <Icon name="chevron-down" />
+                </span>
+              )}
+            </Field>
+            <button type="button" className="overlays-nav-row" onClick={() => setView("keys")}>
+              <Icon name="key-round" />
+              <span>Keys</span>
+              <span className="overlays-nav-meta">{KEYS.length} saved</span>
+              <Icon name="chevron-right" />
+            </button>
+            <div className="overlays-inline">
+              <div>
+                <p className="overlays-inline-title">Main model</p>
+                <p className="overlays-inline-note">{picked}</p>
+              </div>
+              <IconButton
+                ref={more}
+                label="Model actions"
+                icon="more-horizontal"
+                aria-haspopup="menu"
+                aria-expanded={menu}
+                onClick={() => setMenu(true)}
+              />
+              <Menu
+                open={menu}
+                onClose={() => setMenu(false)}
+                anchor={more}
+                align="end"
+                label="Model actions"
+              >
+                <MenuItem icon="copy" onSelect={() => setPicked("Copied the model name")}>
+                  Copy model name
+                </MenuItem>
+                <MenuItem icon="sliders-horizontal" onSelect={() => setPicked("Opened the limits")}>
+                  Set limits
+                </MenuItem>
+              </Menu>
             </div>
-            <IconButton
-              ref={more}
-              label="Model actions"
-              icon="more-horizontal"
-              aria-haspopup="menu"
-              aria-expanded={menu}
-              onClick={() => setMenu(true)}
-            />
-            <Menu
-              open={menu}
-              onClose={() => setMenu(false)}
-              anchor={more}
-              align="end"
-              label="Model actions"
-            >
-              <MenuItem icon="copy" onSelect={() => setPicked("Copied the model name")}>
-                Copy model name
-              </MenuItem>
-              <MenuItem icon="sliders-horizontal" onSelect={() => setPicked("Opened the limits")}>
-                Set limits
-              </MenuItem>
-            </Menu>
+            <div>
+              <p className="overlays-inline-title">Apps it may open</p>
+              <ul className="overlays-list">
+                {APPS.map((app) => (
+                  <li key={app}>
+                    <Icon name="app-window" />
+                    {app}
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
-          <div>
-            <p className="overlays-inline-title">Apps it may open</p>
-            <ul className="overlays-list">
-              {APPS.map((app) => (
-                <li key={app}>
-                  <Icon name="app-window" />
-                  {app}
-                </li>
-              ))}
-            </ul>
-          </div>
-        </div>
+        )}
       </Sheet>
     </div>
   );

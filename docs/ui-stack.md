@@ -277,8 +277,8 @@ under the production CSP.
   control); a sticky bar or panel that can cover kit controls in the same stacking context needs
   `z-index: 2` or its own stacking context. Today that is the Keys sheet's sticky `.keys-discard` bar,
   for T20.
-- **Icons.** 35 Lucide 1.31.0 outlines (the plan's list), drawn at 16 px with a 1.5 px stroke at any
-  size. The licence is in `vendor/lucide/LICENSE`.
+- **Icons.** 36 Lucide 1.31.0 outlines (the plan's list, and chevron-left for a sheet's Back), drawn
+  at 16 px with a 1.5 px stroke at any size. The licence is in `vendor/lucide/LICENSE`.
 - **Utilities minted by accident.** Words in kit sources mint `.grid`, `.hidden` and `.resize` into the
   app's utilities. No legacy class uses those names (the build test checks), so they are inert.
 - **Cost.** App CSS grows 63.1 → 72.4 kB (13.1 → 14.9 kB gzip, as Vite reports it); app JS is
@@ -337,6 +337,11 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
   `@localdot/stage` (ζ 1, or ζ .8 after a flick). A sheet still moving can be grabbed again from where
   it is. With unsaved changes it springs back and asks. Moves are followed on the window, since the first
   ones can leave the sheet before the drag takes the pointer.
+- **Nested pages.** `page` names the page on show and `back` gives it a Back above its title. A new
+  page slides 24 px in from the right over the old one, which slides 24 px left and fades; Back runs the
+  same path the other way. The pages are one keyed list, so the page sliding away keeps its state while
+  it goes; the new page takes focus (its first field, else Back). A bottom sheet eases between the
+  two pages' heights. Escape and the close button still dismiss the whole sheet.
 - **Phones.** `side="auto"` is a bottom sheet under 760 px. Menu rows grow to 44 px on coarse pointers
   and hide their shortcuts on touch screens.
 - **Cost.** App CSS 73.5 → 85.1 kB (15.1 → 16.5 kB gzip); app JS is unchanged, because no screen uses
@@ -345,9 +350,8 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
 - **Gallery.** The stand-in gallery switches pages with `?page=overlays` and loads `@localdot/protocol/csp`
   first, as the app does: the sheet's spring comes from `@localdot/stage`, which brings zod, whose
   `Function` probe the CSP otherwise reports.
-- **Not yet.** Nested sheet pages (Keys inside Settings, with Back), Select and Combobox, and the visual
-  baselines (`ui-sheet-inspector`, `ui-sheet-bottom`, `ui-dialog-destructive`), which wait for T01's
-  harness.
+- **Not yet.** Select and Combobox, and the visual baselines (`ui-sheet-inspector`, `ui-sheet-bottom`,
+  `ui-dialog-destructive`), which wait for T01's harness.
 
 ## Notes for the tasks that build on this
 

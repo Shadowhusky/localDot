@@ -191,6 +191,30 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await context.close();
       });
 
+      test("a nested page slides in with a Back and slides back out", async () => {
+        const { context, page, seen } = await open(browser, device);
+        const sheet = await openSheet(page);
+        await press(sheet.getByRole("button", { name: /^Keys/ }));
+        const keys = page.getByRole("dialog", { name: "Keys" });
+        await expect(keys).toBeVisible();
+        const back = keys.getByRole("button", { name: "Settings", exact: true });
+        await expect(back).toBeVisible();
+        if (!touch) await expect(back).toBeFocused();
+        await expect(page.locator(".ui-sheet-page")).toHaveCount(1);
+        await expect(keys.getByText("Added 2 Oct")).toBeVisible();
+        await press(back);
+        await expect(page.getByRole("dialog", { name: "Models and settings" })).toBeVisible();
+        await expect(page.locator(".ui-sheet-page")).toHaveCount(1);
+        await settled(sheetOf(page));
+        // Escape from a nested page still dismisses the whole sheet.
+        await press(sheetOf(page).getByRole("button", { name: /^Keys/ }));
+        await expect(keys).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      });
+
       test("the dim area closes the sheet only for a press that starts and ends on it", async () => {
         const { context, page, seen } = await open(browser, device);
         const sheet = await openSheet(page);
