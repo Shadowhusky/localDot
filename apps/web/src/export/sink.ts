@@ -52,17 +52,12 @@ function fileSink(stream: FileSystemWritableFileStream): ExportSink {
 }
 
 export function exportSupport(): { ok: true } | { ok: false; reason: string } {
-  if (typeof picker() !== "function")
-    return {
-      ok: false,
-      reason:
-        "This browser cannot save an export directly to a file. Open localDot in Chrome or Edge.",
-    };
-  if (typeof VideoEncoder === "undefined" || typeof OffscreenCanvas === "undefined")
-    return {
-      ok: false,
-      reason: "This browser does not support video export. Open localDot in Chrome or Edge.",
-    };
+  if (
+    typeof picker() !== "function" ||
+    typeof VideoEncoder === "undefined" ||
+    typeof OffscreenCanvas === "undefined"
+  )
+    return { ok: false, reason: "Export needs Chrome or Edge for now" };
   return { ok: true };
 }
 

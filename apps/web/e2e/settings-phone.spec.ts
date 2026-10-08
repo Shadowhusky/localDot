@@ -26,6 +26,7 @@ test.afterAll(async () => {
 async function phone(
   browser: Browser,
   path = "/",
+  init?: () => void,
 ): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
@@ -33,6 +34,7 @@ async function phone(
     isMobile: true,
     hasTouch: true,
   });
+  if (init) await context.addInitScript(init);
   const page = await context.newPage();
   await page.goto(`${origin}${path}#token=${TOKEN}`);
   return { context, page };
@@ -215,7 +217,10 @@ for (const [engine, launch] of Object.entries(ENGINES))
     });
 
     test("replay speed and export choices are tap-sized", async () => {
-      const { context, page } = await phone(browser, `/?replay=${replayId}`);
+      // WebKit has no save picker, so Export stays off there; lend it one to reach the sheet.
+      const { context, page } = await phone(browser, `/?replay=${replayId}`, () =>
+        Object.assign(window, { showSaveFilePicker: () => Promise.reject(new Error("unused")) }),
+      );
       const speed = page.getByRole("combobox", { name: "Playback speed" });
       await speed.scrollIntoViewIfNeeded();
       expect((await speed.boundingBox())?.height).toBeGreaterThanOrEqual(44);
