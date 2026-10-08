@@ -213,6 +213,34 @@ describe("Sheet", () => {
     expect(document.activeElement).toBe(close);
   });
 
+  it("stays until its exit transitions have run, however long the tokens make them", async () => {
+    let finish = () => {};
+    const exit = {
+      finished: new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+      effect: { getComputedTiming: () => ({ endTime: 600 }) },
+    };
+    // The test DOM has no animations to read, so the closing layer reports one that runs long.
+    Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+      configurable: true,
+      value(this: HTMLElement) {
+        return this.matches(".ui-layer[data-closing]") ? [exit] : [];
+      },
+    });
+    try {
+      render(<Harness />);
+      const sheet = open();
+      pressEscape();
+      wait(500);
+      expect(sheet.isConnected).toBe(true);
+      await act(async () => finish());
+      expect(sheet.isConnected).toBe(false);
+    } finally {
+      Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
+    }
+  });
+
   it("locks the page's scroll while modal and lets it go once closed", () => {
     render(<Harness />);
     open();
@@ -374,6 +402,23 @@ function pages() {
   }));
 }
 
+// The test DOM has no transitions, so a page sliding away reports one that runs until ended here.
+function slides(): () => Promise<void> {
+  const ends: (() => void)[] = [];
+  Object.defineProperty(HTMLElement.prototype, "getAnimations", {
+    configurable: true,
+    value(this: HTMLElement) {
+      if (!this.matches(".ui-sheet-page[data-leaving]")) return [];
+      const finished = new Promise<void>((resolve) => ends.push(resolve));
+      return [{ finished, effect: { getComputedTiming: () => ({ endTime: 300 }) } }];
+    },
+  });
+  return () =>
+    act(async () => {
+      for (const end of ends.splice(0)) end();
+    });
+}
+
 // Opens a page from a row, the way a keyboard user would: the row has focus as it is pressed.
 function go(name: string): HTMLElement {
   const row = screen.getByRole("button", { name });
@@ -391,7 +436,12 @@ function back(name: string) {
 }
 
 describe("Sheet pages", () => {
-  it("keeps the page it came from under a nested one, so Back finds it as it was", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(HTMLElement.prototype, "getAnimations");
+  });
+
+  it("keeps the page it came from under a nested one, so Back finds it as it was", async () => {
+    const end = slides();
     render(<Pages />);
     fireEvent.click(screen.getByRole("button", { name: "Count 0" }));
     const row = go("Open keys");
@@ -400,7 +450,7 @@ describe("Sheet pages", () => {
     const keys = { page: "keys", held: false, leaving: false, inert: false, direction: "forward" };
     expect(pages()).toEqual([under, keys]);
     expect(document.activeElement).toBe(screen.getByLabelText("Key name"));
-    wait(400);
+    await end();
     expect(pages()).toEqual([under, keys]);
     expect(document.querySelector("[data-page=main]")?.textContent).toContain("Count 1");
 
@@ -413,18 +463,19 @@ describe("Sheet pages", () => {
     expect(document.activeElement).toBe(row);
     expect(row.isConnected).toBe(true);
     expect(screen.getByRole("button", { name: "Count 1" })).toBeTruthy();
-    wait(400);
+    await end();
     expect(pages()).toEqual([
       { page: "main", held: false, leaving: false, inert: false, direction: "back" },
     ]);
   });
 
-  it("goes two pages deep and back one page at a time, each Back landing on its row", () => {
+  it("goes two pages deep and back one page at a time, each Back landing on its row", async () => {
+    const end = slides();
     render(<Pages />);
     const keysRow = go("Open keys");
-    wait(400);
+    await end();
     const keyRow = go("Anthropic");
-    wait(400);
+    await end();
     expect(pages().map(({ page, held }) => ({ page, held }))).toEqual([
       { page: "main", held: true },
       { page: "keys", held: true },
@@ -435,7 +486,7 @@ describe("Sheet pages", () => {
     expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
     expect(pages().find((view) => view.page === "keys")?.direction).toBe("back");
     expect(document.activeElement).toBe(keyRow);
-    wait(400);
+    await end();
     expect(pages().map(({ page, held }) => ({ page, held }))).toEqual([
       { page: "main", held: true },
       { page: "keys", held: false },
@@ -443,11 +494,12 @@ describe("Sheet pages", () => {
 
     back("Settings");
     expect(document.activeElement).toBe(keysRow);
-    wait(400);
+    await end();
     expect(pages().map(({ page }) => page)).toEqual(["main"]);
   });
 
   it("goes there and back before the first slide ends without doubling a page", () => {
+    slides();
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     render(<Pages />);
     go("Open keys");

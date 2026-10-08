@@ -148,6 +148,35 @@ describe("Menu", () => {
     expect(screen.queryByRole("menu")).toBeNull();
   });
 
+  it("stays on the page while the press that closed it is still down, so its release lands nowhere", () => {
+    render(<Harness />);
+    const menu = openWithKeyboard();
+    const layer = menu.closest(".ui-layer");
+    const catcher = layer?.querySelector(".ui-catcher");
+    if (!layer || !catcher) throw new Error("no catcher");
+    fireEvent.pointerDown(catcher, { pointerId: 7 });
+    expect(layer.hasAttribute("data-closing")).toBe(true);
+    wait(600);
+    expect(layer.isConnected).toBe(true);
+    fireEvent.pointerUp(document, { pointerId: 7 });
+    wait(100);
+    expect(layer.isConnected).toBe(false);
+  });
+
+  it("lets go of a press held too long", () => {
+    render(<Harness />);
+    const menu = openWithKeyboard();
+    const layer = menu.closest(".ui-layer");
+    const catcher = layer?.querySelector(".ui-catcher");
+    if (!layer || !catcher) throw new Error("no catcher");
+    fireEvent.pointerDown(catcher, { pointerId: 7 });
+    wait(900);
+    expect(layer.isConnected).toBe(true);
+    wait(400);
+    expect(layer.isConnected).toBe(false);
+    fireEvent.pointerUp(document, { pointerId: 7 });
+  });
+
   it("a press outside only closes it: the control beneath never gets it", () => {
     render(<Harness />);
     const menu = openWithKeyboard();

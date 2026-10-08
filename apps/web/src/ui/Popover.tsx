@@ -12,9 +12,6 @@ import { tabbables } from "./focus.ts";
 import { LayerPortal, useExit, useLayer } from "./LayerStack.tsx";
 import { type Align, place, type Side } from "./position.ts";
 
-// Longer than --dur-exit, so the fade finishes before the popup goes.
-const EXIT = 220;
-
 export interface AnchoredProps {
   kind: "popover" | "menu";
   open: boolean;
@@ -59,8 +56,9 @@ function put(element: HTMLElement, target: HTMLElement, side: Side, align: Align
 // A popup beside its anchor. A transparent catcher lies under it, so a press anywhere else only
 // closes it: the press never reaches the control beneath, and a tap's late click has nowhere to go.
 export function Anchored(props: AnchoredProps) {
-  const { mounted, closing } = useExit(props.open, EXIT);
-  return mounted ? <AnchoredLayer {...props} closing={closing} /> : null;
+  const root = useRef<HTMLDivElement>(null);
+  const { mounted, closing } = useExit(props.open, root);
+  return mounted ? <AnchoredLayer {...props} root={root} closing={closing} /> : null;
 }
 
 function AnchoredLayer({
@@ -74,9 +72,9 @@ function AnchoredLayer({
   panelRef,
   panelProps,
   children,
+  root,
   closing,
-}: AnchoredProps & { closing: boolean }) {
-  const root = useRef<HTMLDivElement>(null);
+}: AnchoredProps & { root: RefObject<HTMLDivElement | null>; closing: boolean }) {
   const own = useRef<HTMLDivElement>(null);
   const panel = panelRef ?? own;
   const placement = useRef({ side, align, closing });

@@ -7,8 +7,6 @@ import { place as placeBeside } from "./position.ts";
 import { useScrim } from "./scrim.ts";
 import { lockScroll } from "./scroll-lock.ts";
 
-const EXIT = 220;
-
 export interface DialogProps {
   open: boolean;
   onClose(): void;
@@ -48,8 +46,9 @@ function putDialog(element: HTMLElement, target: HTMLElement, beside: boolean) {
 
 // For a destructive, irreversible step only, such as deleting a recording.
 export function Dialog(props: DialogProps) {
-  const { mounted, closing } = useExit(props.open, EXIT);
-  return mounted ? <DialogLayer {...props} closing={closing} /> : null;
+  const root = useRef<HTMLDivElement>(null);
+  const { mounted, closing } = useExit(props.open, root);
+  return mounted ? <DialogLayer {...props} root={root} closing={closing} /> : null;
 }
 
 function DialogLayer({
@@ -58,9 +57,9 @@ function DialogLayer({
   description,
   anchor,
   children,
+  root,
   closing,
-}: DialogProps & { closing: boolean }) {
-  const root = useRef<HTMLDivElement>(null);
+}: DialogProps & { root: RefObject<HTMLDivElement | null>; closing: boolean }) {
   const panel = useRef<HTMLElement>(null);
   const titleId = useId();
   const descriptionId = useId();

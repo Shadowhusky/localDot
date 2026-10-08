@@ -9,6 +9,7 @@ import {
   useState,
 } from "react";
 import { Button } from "./Button.tsx";
+import { afterMotion } from "./finished.ts";
 import { canFocus, firstField, focusWithoutScroll } from "./focus.ts";
 import { IconButton } from "./IconButton.tsx";
 import { LayerPortal, useBehind, useExit, useLayer } from "./LayerStack.tsx";
@@ -17,10 +18,6 @@ import { useScrim } from "./scrim.ts";
 import { lockScroll } from "./scroll-lock.ts";
 import { attachSheetDrag } from "./sheet-drag.ts";
 
-// Longer than the slowest exit (--dur-sheet), so the sheet is gone from view before it unmounts.
-const EXIT = 320;
-// A page that slides away stays on the page this long.
-const PAGE_EXIT = 320;
 const CURRENT_BODY = ".ui-sheet-page:not([data-held], [data-leaving]) > .ui-sheet-body";
 
 // A phone keeps its keyboard down until a field is chosen.
@@ -77,8 +74,9 @@ interface PageView {
 }
 
 export function Sheet(props: SheetProps) {
-  const { mounted, closing } = useExit(props.open, EXIT);
-  return mounted ? <SheetLayer {...props} closing={closing} /> : null;
+  const root = useRef<HTMLDivElement>(null);
+  const { mounted, closing } = useExit(props.open, root);
+  return mounted ? <SheetLayer {...props} root={root} closing={closing} /> : null;
 }
 
 function SheetLayer({
@@ -94,9 +92,9 @@ function SheetLayer({
   back,
   footer,
   children,
+  root,
   closing,
-}: SheetProps & { closing: boolean }) {
-  const root = useRef<HTMLDivElement>(null);
+}: SheetProps & { root: RefObject<HTMLDivElement | null>; closing: boolean }) {
   const panel = useRef<HTMLElement>(null);
   const scrimRef = useRef<HTMLDivElement>(null);
   const keep = useRef<HTMLButtonElement>(null);
@@ -155,8 +153,11 @@ function SheetLayer({
 
   useEffect(() => {
     if (leaving.length === 0) return;
-    const done = window.setTimeout(() => setLeaving([]), PAGE_EXIT);
-    return () => window.clearTimeout(done);
+    const sheet = panel.current;
+    return afterMotion(
+      leaving.map((view) => pageOf(sheet, view.key)),
+      () => setLeaving([]),
+    );
   }, [leaving]);
 
   const requestClose = useCallback(() => {
@@ -233,11 +234,14 @@ function SheetLayer({
     void sheet.offsetHeight;
     sheet.dataset.resizing = "";
     sheet.style.height = `${after}px`;
-    const done = window.setTimeout(() => {
-      sheet.style.removeProperty("height");
-      delete sheet.dataset.resizing;
-    }, PAGE_EXIT);
-    return () => window.clearTimeout(done);
+    return afterMotion(
+      [sheet],
+      () => {
+        sheet.style.removeProperty("height");
+        delete sheet.dataset.resizing;
+      },
+      false,
+    );
   }, [shown.key, placement]);
 
   useEffect(() => {

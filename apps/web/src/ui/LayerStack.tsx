@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { ownedByPicker } from "../lib/dismiss.ts";
+import { afterMotion } from "./finished.ts";
 import { canFocus, focusWithoutScroll, tabbables } from "./focus.ts";
 
 // One stack orders every open overlay: Escape goes to the topmost layer only, and focus stays inside
@@ -221,11 +222,14 @@ export function useLayer(options: LayerOptions): LayerEntry | undefined {
   return entry;
 }
 
-// Keeps a closing layer on the page while it animates out, and while a press that closed it is
-// still down (up to a limit), so the release cannot land on whatever lies beneath.
+// Keeps a closing layer on the page until its exit transitions have run, then while a press that
+// closed it is still down (up to a limit), so the release cannot land on whatever lies beneath.
 const HOLD_LIMIT = 1000;
 
-export function useExit(open: boolean, duration: number): { mounted: boolean; closing: boolean } {
+export function useExit(
+  open: boolean,
+  root: RefObject<HTMLElement | null>,
+): { mounted: boolean; closing: boolean } {
   const [mounted, setMounted] = useState(open);
   if (open && !mounted) setMounted(true);
   useEffect(() => {
@@ -233,20 +237,19 @@ export function useExit(open: boolean, duration: number): { mounted: boolean; cl
     const timers: number[] = [];
     const stop = new AbortController();
     const unmount = () => setMounted(false);
-    timers.push(
-      window.setTimeout(() => {
-        if (pressed.size === 0) return unmount();
-        const release = () => timers.push(window.setTimeout(unmount, 100));
-        for (const type of ["pointerup", "pointercancel"])
-          document.addEventListener(type, release, { capture: true, signal: stop.signal });
-        timers.push(window.setTimeout(unmount, HOLD_LIMIT));
-      }, duration),
-    );
+    const cancel = afterMotion([root.current], () => {
+      if (pressed.size === 0) return unmount();
+      const release = () => timers.push(window.setTimeout(unmount, 100));
+      for (const type of ["pointerup", "pointercancel"])
+        document.addEventListener(type, release, { capture: true, signal: stop.signal });
+      timers.push(window.setTimeout(unmount, HOLD_LIMIT));
+    });
     return () => {
+      cancel();
       stop.abort();
       for (const timer of timers) window.clearTimeout(timer);
     };
-  }, [open, mounted, duration]);
+  }, [open, mounted, root]);
   return { mounted: open || mounted, closing: !open && mounted };
 }
 
