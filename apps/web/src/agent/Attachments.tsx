@@ -57,6 +57,7 @@ export function Attachments({
           ))}
         </ul>
       )}
+      {uploads.notice && <p role="status">{uploads.notice}</p>}
       {uploads.problem && <p role="alert">{uploads.problem}</p>}
       {uploads.rows.some((row) => row.phase === "uploading" || row.phase === "pending") && (
         <button type="button" onClick={uploads.cancel}>

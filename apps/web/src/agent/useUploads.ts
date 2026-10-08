@@ -17,7 +17,8 @@ interface Owner {
 }
 export function useUploads(props: Owner) {
   const [rows, setRows] = useState<readonly UploadRow[]>([]),
-    [problem, setProblem] = useState<string | null>(null);
+    [problem, setProblem] = useState<string | null>(null),
+    [notice, setNotice] = useState<string | null>(null);
   const list = useRef<UploadRow[]>([]),
     sources = useRef(new Map<number, File>()),
     current = useRef(props),
@@ -54,11 +55,13 @@ export function useUploads(props: Owner) {
     const old = current.current;
     current.current = { api, cellId, ready, enabled };
     if (old.api !== api || old.cellId !== cellId || (old.ready && !ready)) {
+      const removed = list.current.length > 0;
       interrupted();
       update([]);
-      setProblem(
-        "Attachments were removed from this draft because the computer changed. Files may remain in Downloads.",
-      );
+      if (removed)
+        setNotice(
+          "Your computer was interrupted, so the files you added were removed. Add them again.",
+        );
     } else if (old.enabled && !enabled) interrupted();
   }, [api, cellId, ready, enabled, interrupted, update]);
   useEffect(() => {
@@ -184,6 +187,7 @@ export function useUploads(props: Owner) {
       return { id, name: file.name, bytes: file.size, phase: "pending" as const };
     });
     setProblem(null);
+    setNotice(null);
     update([...list.current, ...added]);
     void pump();
   };
@@ -201,6 +205,7 @@ export function useUploads(props: Owner) {
   return {
     rows,
     problem,
+    notice,
     select,
     remove,
     cancel: interrupted,

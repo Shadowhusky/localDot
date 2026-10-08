@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
-import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
+import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
+import { Attachments } from "./Attachments.tsx";
 import { FILE_LIMITS } from "./file-transfer.ts";
 import { useUploads } from "./useUploads.ts";
 
@@ -127,5 +128,48 @@ describe("serial uploads owned by the ready computer", () => {
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(JSON.stringify(f.result.current.rows)).not.toContain(name);
     expect(f.result.current.problem).not.toContain(name);
+  });
+});
+describe("removed attachments notice", () => {
+  const REMOVED =
+    "Your computer was interrupted, so the files you added were removed. Add them again.";
+  it("says nothing when a computer starts, stops or changes with no attachments", () => {
+    const f = setup(vi.fn<typeof fetch>());
+    f.update({ cellId: null as unknown as string, ready: false });
+    f.update({ cellId: CELL, ready: true });
+    f.update({ ready: false });
+    f.update({ cellId: OTHER, ready: true });
+    expect(f.result.current.notice).toBeNull();
+    expect(f.result.current.problem).toBeNull();
+  });
+  it("tells the user to add files again only when attachments were removed", async () => {
+    const f = setup(async () => Response.json({ path: "~/Downloads/one.txt" }, { status: 201 }));
+    act(() => f.result.current.select([file("one.txt")]));
+    await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("complete"));
+    f.update({ cellId: OTHER });
+    expect(f.result.current.rows).toEqual([]);
+    expect(f.result.current.notice).toBe(REMOVED);
+    expect(f.result.current.problem).toBeNull();
+    act(() => f.result.current.select([file("two.txt")]));
+    expect(f.result.current.notice).toBeNull();
+  });
+  it("announces the removal politely rather than as an alert", async () => {
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4747",
+      fetchImpl: async () => Response.json({ path: "~/Downloads/one.txt" }, { status: 201 }),
+    });
+    let select: ReturnType<typeof useUploads>["select"] = () => {};
+    function Harness({ cellId }: { cellId: string }) {
+      const uploads = useUploads({ api, cellId, ready: true, enabled: true });
+      select = uploads.select;
+      return <Attachments uploads={uploads} disabled={false} />;
+    }
+    const view = render(<Harness cellId={CELL} />);
+    expect(screen.queryByText(REMOVED)).toBeNull();
+    act(() => select([file("one.txt")]));
+    await screen.findByText("Uploaded to Downloads");
+    view.rerender(<Harness cellId={OTHER} />);
+    expect(screen.getByText(REMOVED).getAttribute("role")).toBe("status");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });
