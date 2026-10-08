@@ -22,6 +22,7 @@ import { updatePlanTool } from "./plan.ts";
 import { rememberTool } from "./remember.ts";
 import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
+import { startWorkClock } from "./work-clock.ts";
 
 // Daemon-side cap on one task's tool calls: the brain has its own turn limit, but the brain is in a
 // cell, and enforcement lives outside the cells (trust rule 5); keyd's budget caps the spend.
@@ -34,6 +35,10 @@ export interface DispatchDeps {
 }
 
 export type DispatchOutcome = { status: 200 | 400 | 404; result: ToolResult };
+const outOfTime = (): DispatchOutcome => ({
+  status: 200,
+  result: fail("The tool was cancelled or could not complete."),
+});
 
 const STEP_KIND: Record<ToolName, string> = {
   computer: "gui",
@@ -87,19 +92,25 @@ export async function dispatchTool(
       };
     queuedInput = freezeExecutionInput(parsed.data);
   }
+  const clock = startWorkClock(session, name, queuedInput);
+  const signal = clock
+    ? AbortSignal.any([clock.signal, ...(requestSignal ? [requestSignal] : [])])
+    : requestSignal;
   try {
     // Takeover is a control interrupt. It must be able to cancel an approval or
     // policy wait and drain it through the existing ToolLease owner.
     const invoke = () =>
-      dispatchAdmitted(deps, session, name, callId, queuedInput, redact, generation, requestSignal);
+      dispatchAdmitted(deps, session, name, callId, queuedInput, redact, generation, signal);
     const outcome =
       name === "request_takeover"
         ? await invoke()
-        : await session.runAtomic(generation, requestSignal, invoke);
+        : await session.runAtomic(generation, signal, invoke);
+    if (clock?.expired && !outcome.result.ok && !session.stopped) return outOfTime();
     return session.safetyPause && !outcome.result.final
       ? { ...outcome, result: { ...outcome.result, pause: true } }
       : outcome;
   } catch (error) {
+    if (clock?.expired && !session.stopped) return outOfTime();
     if (error instanceof PausedStepError && !session.stopped)
       return {
         status: 200,
@@ -121,6 +132,8 @@ export async function dispatchTool(
         ...(session.stopped ? { final: true } : {}),
       },
     };
+  } finally {
+    clock?.stop();
   }
 }
 async function dispatchAdmitted(

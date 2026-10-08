@@ -137,13 +137,24 @@ export class ApprovalBroker {
   }
 }
 
-// Consumed immediately before a single exact effect; never cached by action class or label.
-export class OncePermit {
-  #used = false;
-  constructor(private readonly digest: string) {}
+// Consumed immediately before each exact effect it covers; never cached by action class or label.
+export class CountedPermit {
+  #left: number;
+  constructor(
+    private readonly digest: string,
+    uses: number,
+  ) {
+    if (!Number.isSafeInteger(uses) || uses < 1) throw new Error("invalid permit count");
+    this.#left = uses;
+  }
   consume(digest: string): boolean {
-    if (this.#used || digest !== this.digest) return false;
-    this.#used = true;
+    if (this.#left < 1 || digest !== this.digest) return false;
+    this.#left--;
     return true;
+  }
+}
+export class OncePermit extends CountedPermit {
+  constructor(digest: string) {
+    super(digest, 1);
   }
 }

@@ -111,7 +111,8 @@ const safeText = (limit: number) =>
     );
 const Id = z.string().regex(ULID_PATTERN);
 const Counter = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-export const APPROVAL_TIMEOUT_MS = 600000;
+// A card waits for the user; the ceiling matches the Codex path's 24-hour tool timeout.
+export const APPROVAL_TIMEOUT_MS = 86_400_000;
 export const ApprovalAnswer = z.strictObject({
   approvalId: Id,
   generation: Counter,

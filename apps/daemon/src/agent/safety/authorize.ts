@@ -1,10 +1,12 @@
 import { ApprovalCardDraft, type ToolName, UploadApproval } from "@localdot/protocol";
 import type { ToolCallContext } from "../tools/deps.ts";
-import { OncePermit } from "./approvals.ts";
+import { CountedPermit } from "./approvals.ts";
 import { decideAutonomy, screenOf } from "./autonomy.ts";
 import { actionDigest, buildApprovalCard, type RiskFacts } from "./risk.ts";
 
 export interface EffectPermit {
+  // The user approved a card for this exact effect, rather than the policy letting it act.
+  readonly approved: boolean;
   consume(input: unknown, target: unknown): boolean;
 }
 export interface PreparedEffect {
@@ -13,6 +15,8 @@ export interface PreparedEffect {
   readonly target: unknown;
   readonly facts: RiskFacts;
   readonly upload?: UploadApproval;
+  // Identical dispatches one decision covers, such as a key's repeat.
+  readonly count?: number;
   revalidate(): Promise<boolean>;
 }
 export function freezeExecutionInput<T>(input: T): T {
@@ -45,6 +49,8 @@ export async function authorizePrepared(
   const inputDigest = actionDigest(input),
     targetDigest = actionDigest(target);
   const digest = actionDigest({ tool: prepared.tool, input, target });
+  const uses = prepared.count ?? 1;
+  const permit = new CountedPermit(digest, uses);
   const decision = decideAutonomy(ctx, prepared.facts);
   const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
   if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
@@ -120,7 +126,7 @@ export async function authorizePrepared(
       },
       ApprovalCardDraft.parse({
         ...card,
-        fields,
+        fields: uses > 1 ? [...fields, ["Repeat", `× ${uses}`]] : fields,
         ...(upload ? { title: "Upload files", upload } : {}),
       }),
       {
@@ -149,8 +155,8 @@ export async function authorizePrepared(
     if (outcome !== "approve") return undefined;
   }
   ctx.check();
-  const permit = new OncePermit(digest);
   return Object.freeze({
+    approved: decision.mode === "ask",
     consume(nextInput: unknown, nextTarget: unknown): boolean {
       ctx.check();
       if (actionDigest(nextInput) !== inputDigest || actionDigest(nextTarget) !== targetDigest)

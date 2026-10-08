@@ -1,6 +1,10 @@
 import type { ComputerAction, ToolResult } from "@localdot/protocol";
-import type { ActionContext, GuiAction } from "../../gateway/gateway.ts";
-import { authorizePrepared } from "../safety/authorize.ts";
+import {
+  type ActionContext,
+  CHANGED_WHILE_DECIDING,
+  type GuiAction,
+} from "../../gateway/gateway.ts";
+import { authorizePrepared, type EffectPermit } from "../safety/authorize.ts";
 import { nativeActionFacts } from "../safety/classify.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
@@ -83,6 +87,9 @@ export async function computerTool(
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
   const repeat = a.action === "key" ? (a.repeat ?? 1) : 1;
+  let runs = 0;
+  // One card covers the whole repeat, for the exact input and target it showed and nothing else.
+  let approval: EffectPermit | undefined;
   const nativeContext: ActionContext = {
     ...selected,
     source: "agent",
@@ -90,18 +97,21 @@ export async function computerTool(
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();
-      // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-      const facts = nativeActionFacts(request.action, request.identity.target);
-      const boundInput = { toolInput: a, action: request.action };
-      const permit = await authorizePrepared(ctx, {
-        tool: "computer",
-        input: boundInput,
-        target: request.identity,
-        facts,
-        revalidate: request.revalidate,
-      });
+      const left = repeat - runs++;
+      const permit =
+        approval ??
+        (await authorizePrepared(ctx, {
+          tool: "computer",
+          input: { toolInput: a, action: request.action },
+          target: request.identity,
+          // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
+          facts: nativeActionFacts(request.action, request.identity.target),
+          revalidate: request.revalidate,
+          count: left,
+        }));
       ctx.check();
       if (!permit) return undefined;
+      if (permit.approved) approval = permit;
       return {
         consume: (current, identity) => permit.consume({ toolInput: a, action: current }, identity),
       };
@@ -118,7 +128,9 @@ export async function computerTool(
   if (outcome.cancelled === "stale") {
     content.push(
       text(
-        "Not clicked: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.",
+        outcome.error === CHANGED_WHILE_DECIDING
+          ? CHANGED_WHILE_DECIDING
+          : "Not clicked: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.",
       ),
     );
   } else if (!outcome.ok) {
