@@ -20,8 +20,9 @@ import { CODEX_VERSION, codexRelease } from "../harness/codex/src/version.ts";
 export { digest };
 
 // This is a developer/CI release gate, never a runtime feature toggle. Only --account signs in to a
-// real account, and only when an operator runs it. Schema equality alone cannot authorize a pin upgrade. The record also binds the current
-// implementation, measured manifest and every required actual-binary probe, with no passing skips.
+// real account, and only when an operator runs it. Schema equality alone cannot authorize a pin
+// upgrade. The record also binds the current implementation, measured manifest and every required
+// actual-binary probe, with no passing skips.
 export const REQUIRED_PROBES = Object.freeze([
   "regenerates all35 committed schema files from the independently verified pin",
   "sends store:false on both actual requests and carries encrypted reasoning into continuation",
@@ -209,8 +210,6 @@ export function makeRecord({ inputs, manifest, expectedSchema, generatedSchema, 
     generatedSchema,
     reportSha256: digest(report),
     exit,
-    nativeSandbox: "unverified",
-    realAccount: "not-run",
   };
 }
 export function verifyRecord(record, evidence) {
@@ -284,6 +283,18 @@ export function verifyAcceptance(record, { inputs, manifest, native, account }) 
     );
   } else assert.deepEqual(record.realAccount, UNSTAMPED);
   return true;
+}
+export function verifyAcceptanceFolder(folder, { inputs, manifest }) {
+  const record = JSON.parse(read(join(folder, "record.json")));
+  const report = (name, stamp) =>
+    stamp?.passed === false ? undefined : JSON.parse(read(join(folder, name)));
+  verifyAcceptance(record, {
+    inputs,
+    manifest,
+    native: report("native-report.json", record.nativeSandbox),
+    account: report("account-report.json", record.realAccount),
+  });
+  return record;
 }
 const manifestOf = (root) =>
   JSON.parse(read(join(root, `harness/codex/releases/${CODEX_VERSION}.json`)));
@@ -379,16 +390,8 @@ export async function main(argv) {
     const record = JSON.parse(read(join(folder, "offline-record.json")));
     const report = JSON.parse(read(join(folder, "offline-report.json")));
     const data = evidence(root, report, record.generatedSchema, record.exit);
+    const acceptance = verifyAcceptanceFolder(folder, data);
     verifyRecord(record, data);
-    const acceptance = JSON.parse(read(join(folder, "record.json")));
-    const stamped = (name, stamp) =>
-      stamp?.passed === false ? undefined : JSON.parse(read(join(folder, name)));
-    verifyAcceptance(acceptance, {
-      inputs: data.inputs,
-      manifest: data.manifest,
-      native: stamped("native-report.json", acceptance.nativeSandbox),
-      account: stamped("account-report.json", acceptance.realAccount),
-    });
     const state = (stamp) => (stamp.passed ? "passed" : "not run");
     console.log(
       `Pinned Codex ${CODEX_VERSION}: schemas and all ${REQUIRED_PROBES.length} offline probes match this source. Native sandbox ${state(acceptance.nativeSandbox)}; real account ${state(acceptance.realAccount)}.`,

@@ -1,10 +1,19 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODEX_VERSION } from "../harness/codex/src/version.ts";
 import {
   ACCOUNT_PROBES,
   digest,
+  main,
   makeRecord,
   NATIVE_PROBES,
   REQUIRED_PROBES,
@@ -13,6 +22,7 @@ import {
   stampNative,
   validateProbeReport,
   verifyAcceptance,
+  verifyAcceptanceFolder,
   verifyRecord,
 } from "./check-codex-release.mjs";
 
@@ -118,8 +128,8 @@ describe("pinned release gate", () => {
   it("requires a complete passing probe report, schema and source-bound record", () => {
     const { evidence, record } = fixture();
     expect(verifyRecord(record, evidence)).toBe(true);
-    expect(record.nativeSandbox).toBe("unverified");
-    expect(record.realAccount).toBe("not-run");
+    expect(record).not.toHaveProperty("nativeSandbox");
+    expect(record).not.toHaveProperty("realAccount");
   });
   it.each(["failed", "pending", "skipped", "todo"])(
     "refuses a %s pinned probe even if the report claims success",
@@ -243,6 +253,55 @@ describe("ChatGPT plan acceptance record", () => {
       realAccount: { passed: true, reportSha256: digest(evidence.account) },
     });
     expect(verifyAcceptance(record, evidence)).toBe(true);
+  });
+  it("verifies a committed folder against the reports stored beside its record", () => {
+    const { evidence, unstamped, record } = acceptance();
+    const bound = { inputs: evidence.inputs, manifest: evidence.manifest };
+    const folder = (claims, reports = {}) => {
+      const root = mkdtempSync("/tmp/ld-acceptance-");
+      owned.push(root);
+      writeFileSync(join(root, "record.json"), JSON.stringify(claims));
+      for (const [kind, report] of Object.entries(reports))
+        writeFileSync(join(root, `${kind}-report.json`), JSON.stringify(report));
+      return root;
+    };
+    const reports = { native: evidence.native, account: evidence.account };
+    expect(verifyAcceptanceFolder(folder(record, reports), bound)).toEqual(record);
+    expect(verifyAcceptanceFolder(folder(unstamped), bound)).toEqual(unstamped);
+    const forged = { ...unstamped, realAccount: { passed: true, reportSha256: "c".repeat(64) } };
+    expect(() => verifyAcceptanceFolder(folder(forged), bound)).toThrow();
+    const changed = clone(evidence.account);
+    changed.testResults[0].assertionResults[0].duration++;
+    expect(() =>
+      verifyAcceptanceFolder(folder(record, { ...reports, account: changed }), bound),
+    ).toThrow(/Rerun/);
+  });
+  it("checks the committed acceptance folder when verifying from the command line", async () => {
+    const root = mkdtempSync("/tmp/ld-acceptance-");
+    owned.push(root);
+    for (const name of ["offline-record.json", "offline-report.json"])
+      copyFileSync(
+        new URL(`../harness/codex/acceptance/${name}`, import.meta.url),
+        join(root, name),
+      );
+    const manifest = JSON.parse(
+      readFileSync(
+        new URL(`../harness/codex/releases/${CODEX_VERSION}.json`, import.meta.url),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      join(root, "record.json"),
+      JSON.stringify({
+        format: 1,
+        codexVersion: CODEX_VERSION,
+        platform: "darwin-arm64",
+        manifestSha256: digest(manifest),
+        nativeSandbox: { passed: false },
+        realAccount: { passed: true, reportSha256: "c".repeat(64) },
+      }),
+    );
+    await expect(main(["--verify", root])).rejects.toThrow(/account-report\.json/);
   });
   it("verifies an unstamped record without any report", () => {
     const { evidence, unstamped } = acceptance();
