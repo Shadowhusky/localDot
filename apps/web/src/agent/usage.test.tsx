@@ -114,11 +114,13 @@ it("shows reported plan usage with missing windows/reset time unknown and no USD
     }),
   );
   render(<UsageDetails model={model} selection={{ kind: "chatgpt", model: "fixture" }} />);
-  expect(
-    screen.getByRole("meter", { name: "Plan window used" }).getAttribute("aria-valuenow"),
-  ).toBe("99");
+  const meter = screen.getByRole("meter", { name: "Plan window" });
+  expect(meter.getAttribute("aria-valuenow")).toBe("99");
+  expect(meter.getAttribute("aria-valuetext")).toBe("99% used, almost at limit");
   expect(screen.getAllByRole("meter")).toHaveLength(1);
-  expect(document.body.textContent).toContain("99% used · Almost at limit");
+  expect(document.body.textContent).toContain("Almost at limit · 99% used");
+  expect(document.body.textContent?.match(/Plan window/g)).toHaveLength(1);
+  expect(document.body.textContent?.match(/Almost at limit/g)).toHaveLength(1);
   expect(document.body.textContent).toContain("The plan limit is reached.");
   expect(document.body.textContent).not.toContain("0% used");
   expect(document.body.textContent).not.toContain("$");

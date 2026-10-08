@@ -160,27 +160,6 @@
     outline-offset: calc(var(--focus-width) * -1);
   }
 
-  .ui-meter {
-    position: relative;
-    height: 4px;
-    overflow: hidden;
-    border-radius: var(--radius-full);
-    background-color: var(--color-control);
-  }
-
-  .ui-meter-fill {
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background-color: var(--color-fg-2);
-    transform-origin: left center;
-    transition: scale var(--dur-spring) var(--ease-spring);
-  }
-
-  .ui-meter[data-high] .ui-meter-fill {
-    background-color: var(--color-fg-1);
-  }
-
   .ui-scroll-area {
     min-height: 0;
     overflow-x: hidden;
@@ -246,21 +225,6 @@
 
     .ui-disclosure-chevron {
       transition: none;
-    }
-
-    .ui-meter-fill {
-      transition: none;
-    }
-  }
-
-  @media (forced-colors: active) {
-    .ui-meter {
-      border: 1px solid CanvasText;
-    }
-
-    .ui-meter-fill {
-      forced-color-adjust: none;
-      background-color: CanvasText;
     }
   }
 }

@@ -86,11 +86,11 @@ test("plan windows remain unknown when absent and explicit Resume never raises U
     await page.getByRole("button", { name: /^Usage:/ }).click();
     const usage = page.getByRole("region", { name: "Task usage" });
     await expect(usage).toContainText("owned-plan-model");
-    await expect(usage.getByRole("meter", { name: "Plan window used" })).toHaveAttribute(
+    await expect(usage.getByRole("meter", { name: "Plan window" })).toHaveAttribute(
       "aria-valuenow",
       "98",
     );
-    await expect(usage).toContainText("98% used · Almost at limit");
+    await expect(usage).toContainText("Almost at limit · 98% used");
     await expect(usage.getByRole("meter")).toHaveCount(1);
     await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: "Conversation", exact: true }).click();

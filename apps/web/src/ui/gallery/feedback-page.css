@@ -1,0 +1,181 @@
+/* The feedback gallery page: a stage with a HUD for the toasts, and panels for the rest. */
+@layer components {
+  .feedback-toasts {
+    display: grid;
+    gap: calc(var(--spacing) * 4);
+  }
+
+  .feedback-stage {
+    position: relative;
+    width: 100%;
+    max-width: calc(var(--spacing) * 210);
+    aspect-ratio: 16 / 10;
+  }
+
+  .feedback-screen {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    border-radius: var(--radius-lg);
+    background: var(--color-well);
+    box-shadow: var(--shadow-stage);
+  }
+
+  .feedback-screen canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+  }
+
+  .feedback-hud {
+    position: absolute;
+    top: calc(var(--spacing) * 3.5);
+    left: 0;
+    right: 0;
+    z-index: var(--layer-hud);
+    width: fit-content;
+    max-width: calc(100% - var(--spacing) * 8);
+    height: calc(var(--spacing) * 10);
+    margin-inline: auto;
+    -webkit-backdrop-filter: blur(var(--blur-hud)) saturate(160%);
+    backdrop-filter: blur(var(--blur-hud)) saturate(160%);
+  }
+
+  .feedback-controls,
+  .feedback-flow {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  }
+
+  .feedback-flow {
+    display: grid;
+    justify-items: start;
+    gap: 0;
+  }
+
+  .feedback-flow > .ui-banner-reveal {
+    justify-self: stretch;
+  }
+
+  /* Inside the part that folds, so the space folds away with it. */
+  .feedback-flow .ui-banner {
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  .feedback-note {
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .feedback-flow > .feedback-note {
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  .feedback-stack {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+    max-width: calc(var(--spacing) * 180);
+  }
+
+  .feedback-bars {
+    display: grid;
+    flex: 1;
+    grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing) * 36), 1fr));
+    gap: calc(var(--spacing) * 5) calc(var(--spacing) * 6);
+  }
+
+  .feedback-download {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 3);
+    width: min(100%, calc(var(--spacing) * 90));
+  }
+
+  .feedback-download-text {
+    display: grid;
+    flex: 1;
+    gap: calc(var(--spacing) * 1.5);
+    color: var(--color-fg-1);
+  }
+
+  .feedback-meters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing) * 60), 1fr));
+    gap: calc(var(--spacing) * 6);
+  }
+
+  .feedback-columns {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing) * 72), 1fr));
+    align-items: start;
+    gap: calc(var(--spacing) * 6);
+  }
+
+  .feedback-figure {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .feedback-figure figcaption {
+    color: var(--color-fg-3);
+    font: var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  }
+
+  .feedback-files {
+    display: grid;
+    gap: calc(var(--spacing) * 3);
+    list-style: none;
+  }
+
+  .feedback-files li {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: calc(var(--spacing) * 3);
+  }
+
+  .feedback-file-tile {
+    display: block;
+    width: calc(var(--spacing) * 8);
+    height: calc(var(--spacing) * 8);
+    border-radius: var(--radius-md);
+    background: var(--color-raised-2);
+    box-shadow: var(--shadow-edge);
+  }
+
+  .feedback-file-text {
+    display: grid;
+    min-width: 0;
+  }
+
+  .feedback-file-name {
+    display: block;
+    overflow: hidden;
+    color: var(--color-fg-1);
+    font-weight: var(--font-weight-medium);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .feedback-file-detail {
+    display: block;
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .feedback-file-text > .ui-skeleton:last-child {
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .feedback-paragraph {
+    color: var(--color-fg-1);
+    font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  }
+
+  .feedback-empty-panel {
+    min-height: calc(var(--spacing) * 64);
+    align-content: center;
+  }
+}

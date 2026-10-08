@@ -186,6 +186,12 @@
   --default-transition-duration: var(--dur-fade);
   --default-transition-timing-function: var(--ease-standard);
 
+  /* Stacking across the page. A kit control's face sits at 1 and anything drawn on a control at 2,
+     and the stage's own parts stay under the toasts, which hang over the page around the stage and
+     go back under the HUD they come out of. Overlays (50) and pickers (60) cover them all. */
+  --layer-toast: 10;
+  --layer-hud: 11;
+
   --breakpoint-tablet: 760px;
   --breakpoint-laptop: 1180px;
   --breakpoint-wide: 1680px;

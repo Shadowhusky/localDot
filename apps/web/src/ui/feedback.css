@@ -1,0 +1,708 @@
+/* Feedback: toasts that hang under the HUD, banners in a panel's flow, progress, meters, skeletons
+   and empty states. A toast comes out of its anchor and goes back into it, or leaves the way it was
+   swiped; a banner opens by sliding what follows down. Under reduced motion they only fade. */
+@layer kit {
+  /* The toaster sits in its anchor's positioned box, out of the flow, so it never moves anything. Its
+     own layer keeps it over the page's controls where it hangs past the stage. */
+  .ui-toaster {
+    --_width: min(calc(var(--spacing) * 90), 100% - var(--spacing) * 8);
+    position: absolute;
+    top: var(--_top, calc(var(--spacing) * 2));
+    left: clamp(
+      calc(var(--_width) / 2 + var(--spacing) * 2),
+      var(--_x, 50%),
+      calc(100% - var(--_width) / 2 - var(--spacing) * 2)
+    );
+    z-index: var(--layer-toast);
+    width: var(--_width);
+    height: var(--_extent, 0px);
+    translate: -50% 0;
+  }
+
+  .ui-toast-list {
+    position: relative;
+    height: 100%;
+    list-style: none;
+  }
+
+  .ui-toast {
+    position: absolute;
+    top: 0;
+    left: 0;
+    z-index: var(--_z, 1);
+    width: 100%;
+    height: var(--_height, auto);
+    overflow: hidden;
+    border-radius: var(--radius-xl);
+    background-color: var(--color-hud-solid);
+    -webkit-backdrop-filter: blur(var(--blur-hud)) saturate(160%);
+    backdrop-filter: blur(var(--blur-hud)) saturate(160%);
+    box-shadow: var(--shadow-raised);
+    color: var(--color-fg-1);
+    transform-origin: 50% 0;
+    translate: 0 var(--_y, 0px);
+    scale: var(--_scale, 1);
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      translate var(--dur-spring) var(--ease-spring),
+      scale var(--dur-spring) var(--ease-spring),
+      height var(--dur-spring) var(--ease-spring),
+      opacity var(--dur-fade) var(--ease-enter),
+      filter var(--dur-sheet) var(--ease-enter);
+  }
+
+  /* A toast further back is a thinner layer of the material, so its edge shows under the one in
+     front over any picture. */
+  .ui-toast::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-color: var(--color-fg-1);
+    opacity: var(--_veil, 0);
+    pointer-events: none;
+    transition: opacity var(--dur-spring) var(--ease-standard);
+  }
+
+  /* Inserted holding this, then let go (see Toast.tsx): it grows down out of the anchor and comes
+     into focus. One revealed behind the front only fades in where it stands. */
+  .ui-toast[data-entering] {
+    opacity: 0;
+    translate: 0 calc(var(--_y, 0px) - var(--spacing) * 2);
+    scale: calc(var(--_scale, 1) * 0.96);
+    filter: blur(4px);
+    transition: none;
+  }
+
+  .ui-toast[data-entering="behind"] {
+    translate: 0 var(--_y, 0px);
+    scale: var(--_scale, 1);
+    filter: none;
+  }
+
+  /* One sent away by hand stays on top as it goes; one that fades sinks under those sliding up. */
+  .ui-toast[data-leaving="swipe"] {
+    z-index: 4;
+  }
+
+  .ui-toast[data-leaving="fade"] {
+    z-index: 0;
+  }
+
+  .ui-toast[data-leaving="fade"] {
+    opacity: 0;
+    translate: 0 calc(var(--_y, 0px) - var(--spacing) * 2);
+    scale: calc(var(--_scale, 1) * 0.96);
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      translate var(--dur-exit) var(--ease-exit),
+      scale var(--dur-exit) var(--ease-exit);
+  }
+
+  /* Words coming out from behind start at once and slow down; covered, they go quickly. */
+  .ui-toast-body {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    min-height: calc(var(--spacing) * 11);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 2)
+      calc(var(--spacing) * 4);
+    transition: opacity var(--dur-fade) var(--ease-enter);
+  }
+
+  .ui-toast[data-covered] > .ui-toast-body {
+    opacity: 0;
+    transition: opacity var(--dur-press) var(--ease-exit);
+  }
+
+  /* A leading glyph carries its own side bearing, so the padding before it is optically smaller. */
+  .ui-toast-body:has(> .ui-toast-icon) {
+    padding-inline-start: calc(var(--spacing) * 3);
+  }
+
+  .ui-toast-icon {
+    color: var(--color-fg-2);
+  }
+
+  .ui-toast[data-tone="danger"] .ui-toast-icon {
+    color: var(--color-danger-fg);
+  }
+
+  .ui-toast-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ui-toast-title {
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    text-wrap: pretty;
+  }
+
+  /* Beside an action it often takes two short lines, best kept even. */
+  .ui-toast-description {
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    text-wrap: balance;
+  }
+
+  /* On touch the toast's buttons keep their size and reach 44 px past it, so the toast stays 44 tall. */
+  @media (--coarse) {
+    .ui-toast .ui-button {
+      min-height: 0;
+    }
+
+    .ui-toast .ui-button::after {
+      inset: calc((var(--spacing) * 7 - var(--spacing) * 11) / 2) calc(var(--spacing) * -1.5);
+    }
+
+    /* Room for the close button's whole reach, which the toast's rounded clip would cut. */
+    .ui-toast-body {
+      padding-inline-end: calc(var(--spacing) * 2.5);
+    }
+  }
+
+  /* Banner. It stays mounted: closing folds it to nothing and opening unfolds it. */
+  .ui-banner-reveal {
+    display: grid;
+    grid-template-rows: 0fr;
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      grid-template-rows var(--dur-exit) var(--ease-exit),
+      opacity var(--dur-exit) var(--ease-exit),
+      visibility 0s linear var(--dur-exit);
+  }
+
+  .ui-banner-reveal[data-open] {
+    grid-template-rows: 1fr;
+    opacity: 1;
+    visibility: visible;
+    transition:
+      grid-template-rows var(--dur-sheet) var(--ease-spring),
+      opacity var(--dur-fade) var(--ease-enter) 60ms,
+      visibility 0s;
+  }
+
+  .ui-banner-clip {
+    min-height: 0;
+    overflow: hidden;
+    container-type: inline-size;
+  }
+
+  .ui-banner {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    align-items: start;
+    padding: calc(var(--spacing) * 3);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-control);
+    color: var(--color-fg-1);
+  }
+
+  .ui-banner[data-tone="attention"] {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--color-attention);
+  }
+
+  .ui-banner[data-tone="danger"] {
+    background-color: var(--color-danger-bg);
+  }
+
+  .ui-banner-icon {
+    grid-area: 1 / 1;
+    margin: 1px calc(var(--spacing) * 3) 0 0;
+    color: var(--color-fg-2);
+  }
+
+  .ui-banner[data-tone="attention"] .ui-banner-icon {
+    color: var(--color-attention);
+  }
+
+  .ui-banner[data-tone="danger"] .ui-banner-icon {
+    color: var(--color-danger-fg);
+  }
+
+  .ui-banner-text {
+    grid-area: 1 / 2;
+    display: grid;
+    gap: 2px;
+  }
+
+  .ui-banner-title {
+    font:
+      var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+      var(--font-ui);
+    text-wrap: pretty;
+  }
+
+  .ui-banner-detail {
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    text-wrap: pretty;
+  }
+
+  .ui-banner-actions {
+    grid-area: 1 / 3;
+    align-self: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: calc(var(--spacing) * 2);
+    margin-inline-start: calc(var(--spacing) * 4);
+  }
+
+  .ui-banner-close {
+    grid-area: 1 / 4;
+    margin: calc(var(--spacing) * -0.75) calc(var(--spacing) * -1) 0 calc(var(--spacing) * 2);
+  }
+
+  /* Beside buttons, the close button lines up with them. */
+  @container (width >= 480px) {
+    .ui-banner-actions + .ui-banner-close {
+      align-self: center;
+      margin-top: 0;
+    }
+  }
+
+  /* Narrow, the buttons go under the text they act on. */
+  @container (width < 480px) {
+    .ui-banner-actions {
+      grid-area: 2 / 2 / 3 / 4;
+      align-self: start;
+      margin: calc(var(--spacing) * 3) 0 0;
+    }
+  }
+
+  /* Progress and meters: a 4 px bar whose fill slides along a sunken track. */
+  :is(.ui-progress[data-variant="bar"], .ui-meter-track) {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: var(--spacing);
+    overflow: hidden;
+    border-radius: var(--radius-full);
+    background-color: var(--color-control);
+  }
+
+  :is(.ui-progress-fill, .ui-meter-fill) {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-color: var(--color-fg-2);
+    translate: calc((var(--_value) - 1) * 100%) 0;
+    transition:
+      translate var(--dur-spring) var(--ease-standard),
+      background-color var(--dur-fade) var(--ease-standard);
+  }
+
+  /* Of unknown length: a 2 px line in the same 4 px of room, with a short stretch sweeping along. */
+  .ui-progress[data-variant="bar"][data-indeterminate] {
+    background-color: transparent;
+  }
+
+  .ui-progress[data-variant="bar"][data-indeterminate]::before {
+    content: "";
+    position: absolute;
+    inset: 1px 0;
+    border-radius: inherit;
+    background-color: var(--color-control);
+  }
+
+  .ui-progress[data-indeterminate] > .ui-progress-fill {
+    inset: 1px auto 1px 0;
+    width: 30%;
+    translate: none;
+    animation: ui-progress-sweep 1.4s var(--ease-standard) infinite;
+  }
+
+  @keyframes ui-progress-sweep {
+    from {
+      translate: -100% 0;
+    }
+
+    to {
+      translate: 334% 0;
+    }
+  }
+
+  .ui-progress[data-variant="ring"] {
+    display: inline-flex;
+    flex-shrink: 0;
+    color: var(--color-fg-2);
+    transition: color var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-progress-ring {
+    display: block;
+    overflow: visible;
+  }
+
+  .ui-progress[data-variant="ring"][data-complete] {
+    color: var(--color-fg-1);
+  }
+
+  .ui-progress-track {
+    opacity: 0.25;
+  }
+
+  /* Of unknown length, the arc turns on its own, with no track to be read as a share. */
+  .ui-progress[data-indeterminate] .ui-progress-track {
+    opacity: 0;
+  }
+
+  .ui-progress-arc {
+    stroke-dashoffset: calc(1 - var(--_value));
+    rotate: -90deg;
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: stroke-dashoffset var(--dur-spring) var(--ease-standard);
+  }
+
+  .ui-progress[data-indeterminate] > .ui-progress-ring {
+    animation: ui-spin 0.9s linear infinite;
+  }
+
+  .ui-progress[data-indeterminate] .ui-progress-arc {
+    stroke-dashoffset: 0;
+    transition: none;
+  }
+
+  /* Finished, the ring closes and a check draws inside it. */
+  .ui-progress-check {
+    stroke-dasharray: 1 1;
+    stroke-dashoffset: 0;
+    transition: stroke-dashoffset var(--dur-sheet) var(--ease-enter);
+  }
+
+  @starting-style {
+    .ui-progress-check {
+      stroke-dashoffset: 1;
+    }
+  }
+
+  .ui-meter {
+    display: grid;
+    gap: calc(var(--spacing) * 1.5);
+    min-width: 0;
+  }
+
+  /* Short of room, the amount goes under the name rather than cutting it short. */
+  .ui-meter-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    column-gap: calc(var(--spacing) * 3);
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .ui-meter-label {
+    min-width: 0;
+    overflow: hidden;
+    font-weight: var(--font-weight-medium);
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-meter-value {
+    flex-shrink: 0;
+    font-variant-numeric: tabular-nums;
+    transition: color var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-meter[data-near] .ui-meter-value {
+    color: var(--color-fg-1);
+  }
+
+  .ui-meter[data-near] .ui-meter-fill {
+    background-color: var(--color-fg-1);
+  }
+
+  /* Skeleton. The bones and the content share one cell, so the room is the same before and after. */
+  .ui-skeleton {
+    display: grid;
+    min-width: 0;
+  }
+
+  .ui-skeleton > * {
+    grid-area: 1 / 1;
+    min-width: 0;
+  }
+
+  /* Bones appear only if loading lasts, so a quick load shows no flash of grey. */
+  .ui-skeleton-bones {
+    display: grid;
+    animation: ui-skeleton-in var(--dur-fade) var(--ease-standard) 200ms backwards;
+  }
+
+  .ui-skeleton-bones[data-leaving] {
+    opacity: 0;
+    animation: none;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-skeleton-content {
+    min-width: 0;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  /* Loading again, the last content stays as long as the bones stay hidden, then crosses to them. */
+  .ui-skeleton-content[data-stale] {
+    opacity: 0;
+    visibility: hidden;
+    transition:
+      opacity var(--dur-fade) var(--ease-standard) 200ms,
+      visibility 0s linear calc(200ms + var(--dur-fade));
+  }
+
+  @starting-style {
+    .ui-skeleton-content[data-arrived] {
+      opacity: 0;
+    }
+  }
+
+  /* One line of the surrounding type: a bar about as tall as its capitals, in a line box as tall as
+     its lines. The last of several lines is shorter. */
+  .ui-skeleton[data-shape="text"] .ui-skeleton-bones {
+    width: var(--_width, 100%);
+    max-width: 100%;
+  }
+
+  .ui-skeleton[data-shape="text"] .ui-skeleton-bone {
+    display: flex;
+    align-items: center;
+    height: 1lh;
+  }
+
+  .ui-skeleton[data-shape="text"] .ui-skeleton-bone:last-child:not(:only-child) {
+    width: 60%;
+  }
+
+  .ui-skeleton[data-shape="text"] .ui-skeleton-bone::before {
+    content: "";
+    width: 100%;
+    height: 0.75em;
+    border-radius: var(--radius-xs);
+  }
+
+  .ui-skeleton:not([data-shape="text"]) .ui-skeleton-bone {
+    width: var(--_width, 100%);
+    height: var(--_height, var(--_width, 100%));
+    max-width: 100%;
+    border-radius: var(--radius-md);
+  }
+
+  .ui-skeleton[data-shape="circle"] .ui-skeleton-bone {
+    border-radius: var(--radius-full);
+  }
+
+  /* One sweep of light crosses every bone on the page together. */
+  .ui-skeleton[data-shape="text"] .ui-skeleton-bone::before,
+  .ui-skeleton:not([data-shape="text"]) .ui-skeleton-bone {
+    background-color: var(--color-control);
+    background-image: linear-gradient(
+      90deg,
+      transparent,
+      var(--color-state-hover) 50%,
+      transparent
+    );
+    background-attachment: fixed;
+    background-repeat: no-repeat;
+    background-size: 40vw 100%;
+    animation: ui-skeleton-sweep 1.8s var(--ease-standard) infinite;
+  }
+
+  @keyframes ui-skeleton-in {
+    from {
+      opacity: 0;
+    }
+  }
+
+  @keyframes ui-skeleton-sweep {
+    from {
+      background-position: -40vw 0;
+    }
+
+    to {
+      background-position: 100vw 0;
+    }
+  }
+
+  /* Empty state. */
+  .ui-empty {
+    display: grid;
+    justify-items: center;
+    align-content: center;
+    padding: calc(var(--spacing) * 8) calc(var(--spacing) * 4);
+    text-align: center;
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      translate var(--dur-spring) var(--ease-spring);
+  }
+
+  @starting-style {
+    .ui-empty {
+      opacity: 0;
+      translate: 0 var(--spacing);
+    }
+  }
+
+  .ui-empty-art {
+    display: grid;
+    place-items: center;
+    width: calc(var(--spacing) * 10);
+    height: calc(var(--spacing) * 10);
+    margin-bottom: calc(var(--spacing) * 3);
+    border-radius: var(--radius-full);
+    background-color: var(--color-control);
+    color: var(--color-fg-2);
+  }
+
+  .ui-empty-title {
+    font:
+      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+    letter-spacing: var(--text-title--letter-spacing);
+    text-wrap: balance;
+  }
+
+  .ui-empty-detail {
+    max-width: 36ch;
+    margin-top: var(--spacing);
+    color: var(--color-fg-2);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    text-wrap: balance;
+  }
+
+  .ui-empty-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: calc(var(--spacing) * 2);
+    margin-top: calc(var(--spacing) * 4);
+  }
+
+  /* A quiet line where the list would start, in the list's own reading size. */
+  .ui-empty[data-layout="start"] {
+    grid-template-columns: auto minmax(0, 1fr);
+    justify-items: start;
+    align-content: start;
+    padding: 0;
+    text-align: start;
+  }
+
+  .ui-empty[data-layout="start"] > :not(.ui-empty-art) {
+    grid-column: 2;
+  }
+
+  .ui-empty[data-layout="start"] .ui-empty-art {
+    width: auto;
+    height: var(--text-reading--line-height);
+    margin: 0 calc(var(--spacing) * 2) 0 0;
+    background: none;
+    color: var(--color-fg-3);
+  }
+
+  .ui-empty[data-layout="start"] .ui-empty-title {
+    color: var(--color-fg-3);
+    font:
+      var(--font-weight-normal) var(--text-reading) / var(--text-reading--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-reading--letter-spacing);
+  }
+
+  .ui-empty[data-layout="start"] .ui-empty-detail {
+    max-width: none;
+    color: var(--color-fg-3);
+  }
+
+  .ui-empty[data-layout="start"] .ui-empty-actions {
+    justify-content: flex-start;
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-toast,
+    .ui-toast[data-leaving="fade"] {
+      transition: opacity var(--dur-fade) var(--ease-standard);
+    }
+
+    .ui-toast[data-entering],
+    .ui-toast[data-leaving="fade"] {
+      translate: 0 var(--_y, 0px);
+      scale: var(--_scale, 1);
+      filter: none;
+    }
+
+    .ui-banner-reveal,
+    .ui-banner-reveal[data-open] {
+      transition:
+        grid-template-rows 0s,
+        opacity var(--dur-fade) var(--ease-standard),
+        visibility 0s linear var(--dur-fade);
+    }
+
+    .ui-banner-reveal[data-open] {
+      transition-delay: 0s;
+    }
+
+    /* Still: the line in a dimmer ink than a share, and the arc where it stands. */
+    .ui-progress[data-indeterminate] > .ui-progress-fill {
+      width: 100%;
+      background-color: var(--color-fg-3);
+      animation: none;
+    }
+
+    .ui-progress[data-indeterminate] > .ui-progress-ring {
+      animation: none;
+    }
+
+    .ui-progress-check {
+      transition: opacity var(--dur-fade) var(--ease-standard);
+    }
+
+    @starting-style {
+      .ui-progress-check {
+        stroke-dashoffset: 0;
+        opacity: 0;
+      }
+    }
+
+    .ui-skeleton[data-shape="text"] .ui-skeleton-bone::before,
+    .ui-skeleton:not([data-shape="text"]) .ui-skeleton-bone {
+      background-image: none;
+      animation: none;
+    }
+
+    .ui-empty {
+      transition: opacity var(--dur-fade) var(--ease-standard);
+    }
+
+    @starting-style {
+      .ui-empty {
+        translate: none;
+      }
+    }
+  }
+
+  @media (forced-colors: active) {
+    :is(.ui-toast, .ui-banner, .ui-progress[data-variant="bar"], .ui-meter-track) {
+      outline: 1px solid CanvasText;
+      outline-offset: -1px;
+    }
+
+    :is(.ui-progress-fill, .ui-meter-fill),
+    .ui-meter[data-near] .ui-meter-fill {
+      forced-color-adjust: none;
+      background-color: CanvasText;
+    }
+
+    .ui-skeleton[data-shape="text"] .ui-skeleton-bone::before,
+    .ui-skeleton:not([data-shape="text"]) .ui-skeleton-bone {
+      forced-color-adjust: none;
+      background-color: GrayText;
+    }
+  }
+}

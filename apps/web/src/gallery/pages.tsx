@@ -3,6 +3,7 @@ import { Dot } from "../dot/Dot.tsx";
 import type { DotState } from "../dot/engine/states.ts";
 import { Glyph } from "../dot/Glyph.tsx";
 import { StageColumn } from "../shell/StageColumn.tsx";
+import { FeedbackPage } from "../ui/gallery/FeedbackPage.tsx";
 import { OverlaysPage } from "../ui/gallery/OverlaysPage.tsx";
 import { StillFrame } from "./StillFrame.tsx";
 
@@ -84,5 +85,11 @@ export const GALLERY_PAGES: GalleryPage[] = [
     title: "Overlays",
     about: "The kit's sheet, menu, popover and dialog",
     Page: OverlaysPage,
+  },
+  {
+    id: "feedback",
+    title: "Feedback",
+    about: "The kit's toasts, banners, progress, meters, skeletons and empty states",
+    Page: FeedbackPage,
   },
 ];

@@ -123,16 +123,12 @@ export function UsageDetails({
             const resets = resetTime(window.resetsAt);
             return (
               <div key={name} className="usage-window">
-                <span className="usage-window-name">{windowName(window.windowMinutes)}</span>
                 <Meter
+                  label={windowName(window.windowMinutes)}
                   value={window.usedPercent}
-                  label={`${windowName(window.windowMinutes)} used`}
+                  valueText={`${window.usedPercent}% used`}
                 />
-                <span className="usage-line num">
-                  {window.usedPercent}% used
-                  {window.usedPercent >= 90 ? " · Almost at limit" : ""}
-                  {resets ? ` · ${resets}` : ""}
-                </span>
+                {resets && <span className="usage-line num">{resets}</span>}
               </div>
             );
           })}
