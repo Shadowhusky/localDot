@@ -293,6 +293,11 @@
   margin: 0;
   color: var(--color-text);
 }
+.settings-sheet .safety-rules-failed {
+  flex: 1 0 100%;
+  margin: 0;
+  color: var(--color-text);
+}
 @media (width < 600px) {
   .settings-sheet {
     inset: 0;

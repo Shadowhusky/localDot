@@ -14,10 +14,10 @@ const ROWS = [
   "system_settings",
   "purchase",
 ] as const satisfies readonly (keyof AutonomyPolicy)[];
-const LOCKED: readonly [ActionClass, string][] = [
-  ["upload", "Always needs you"],
+const locked = (policy: AutonomyPolicy): readonly [ActionClass, string][] => [
+  ["upload", policy.send === "handoff" ? "Hand off, like sending" : "Asks"],
   ["credentials", "Always handed to you"],
-  ["unknown", "Always asks"],
+  ["unknown", "Asks"],
 ];
 export function SafetySettings({
   value,
@@ -74,15 +74,18 @@ export function SafetySettings({
             </select>
           </label>
         ))}
-        <ul className="safety-locked" aria-label="Always the same">
-          {LOCKED.map(([key, mode]) => (
+        <ul className="safety-locked" aria-label="Can't be changed here">
+          {locked(parsed.data).map(([key, mode]) => (
             <li key={key}>
               <span>{CLASS_LABELS[key]}</span>
               <span>{mode}</span>
             </li>
           ))}
         </ul>
-        <p className="safety-hint">Commands always ask once you sign in on its computer.</p>
+        <p className="safety-hint">
+          Always allow can cover uploads and unclear steps for one task only. Once you sign in on
+          its computer, commands count as unclear steps.
+        </p>
       </fieldset>
       {rules && <AlwaysAllowed rules={rules} />}
     </>
@@ -90,6 +93,7 @@ export function SafetySettings({
 }
 
 function AlwaysAllowed({ rules }: { rules: RulesView }) {
+  const busy = rules.removing !== null || rules.resetting;
   return (
     <fieldset className="role-editor safety-rules">
       <legend>Always allowed</legend>
@@ -101,13 +105,16 @@ function AlwaysAllowed({ rules }: { rules: RulesView }) {
           </p>
           <button
             type="button"
-            aria-disabled={rules.resetting || undefined}
+            aria-disabled={busy || undefined}
             onClick={() => {
-              if (!rules.resetting) rules.reset();
+              if (!busy) rules.reset();
             }}
           >
             {rules.resetting ? "Starting over…" : "Start over"}
           </button>
+          {rules.resetFailed && (
+            <p className="safety-rules-failed">Couldn't start over. Try again.</p>
+          )}
         </div>
       )}
       {rules.phase === "error" && (
@@ -126,7 +133,6 @@ function AlwaysAllowed({ rules }: { rules: RulesView }) {
         <ul aria-label="Always allowed">
           {rules.rules.map((rule) => {
             const name = CLASS_LABELS[rule.actionClass];
-            const busy = rules.removing === rule.id;
             return (
               <li key={rule.id}>
                 <span className="safety-rule-text">
@@ -141,7 +147,7 @@ function AlwaysAllowed({ rules }: { rules: RulesView }) {
                     if (!busy) rules.remove(rule.id);
                   }}
                 >
-                  {busy ? "Removing…" : "Remove"}
+                  {rules.removing === rule.id ? "Removing…" : "Remove"}
                 </button>
                 {rules.failed === rule.id && <p role="status">Couldn't remove this. Try again.</p>}
               </li>

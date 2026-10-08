@@ -91,3 +91,23 @@ it("sets an unreadable file aside, then reads the list again", async () => {
   expect(call(1)).toEqual(["/api/agent/rules/reset", "POST"]);
   expect(call(2)).toEqual(["/api/agent/rules", "GET"]);
 });
+
+it("says when Start over failed, and forgets it once it works", async () => {
+  const unreadable = "Saved Always allow choices could not be read, so none are in use.";
+  const { hook, call } = setup([
+    { status: 200, body: { rules: [], error: unreadable } },
+    { status: 500 },
+    { status: 200, body: { rules: [], error: unreadable } },
+    { status: 204 },
+    { status: 200, body: { rules: [] } },
+  ]);
+  await waitFor(() => expect(hook.result.current.unreadable).toBe(unreadable));
+  await act(async () => hook.result.current.reset());
+  await waitFor(() => expect(hook.result.current.resetFailed).toBe(true));
+  await waitFor(() => expect(hook.result.current.phase).toBe("ready"));
+  expect(call(2)).toEqual(["/api/agent/rules", "GET"]);
+  expect(hook.result.current.unreadable).toBe(unreadable);
+  await act(async () => hook.result.current.reset());
+  await waitFor(() => expect(hook.result.current.unreadable).toBeNull());
+  expect(hook.result.current.resetFailed).toBe(false);
+});

@@ -11,6 +11,7 @@ export interface RulesView {
   removing: string | null;
   failed: string | null;
   resetting: boolean;
+  resetFailed: boolean;
   remove(id: string): void;
   reset(): void;
   reload(): void;
@@ -27,6 +28,7 @@ export function useRules(api: ApiClient, open: boolean): RulesView {
   const [removing, setRemoving] = useState<string | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  const [resetFailed, setResetFailed] = useState(false);
   const reading = useRef<AbortController | null>(null);
   const changing = useRef<AbortController | null>(null);
   const read = useCallback(async () => {
@@ -45,6 +47,7 @@ export function useRules(api: ApiClient, open: boolean): RulesView {
   useEffect(() => {
     if (!open) return;
     setFailed(null);
+    setResetFailed(false);
     void read();
     return () => {
       reading.current?.abort();
@@ -88,14 +91,27 @@ export function useRules(api: ApiClient, open: boolean): RulesView {
   const reset = () => {
     const abort = change(
       (signal) => resetRules(api, signal),
-      () => {
+      (error) => {
         if (abort?.signal.aborted || changing.current !== abort) return;
         changing.current = null;
         setResetting(false);
+        setResetFailed(!!error);
         void read();
       },
     );
-    if (abort) setResetting(true);
+    if (abort) {
+      setResetting(true);
+      setResetFailed(false);
+    }
   };
-  return { ...list, removing, failed, resetting, remove, reset, reload: () => void read() };
+  return {
+    ...list,
+    removing,
+    failed,
+    resetting,
+    resetFailed,
+    remove,
+    reset,
+    reload: () => void read(),
+  };
 }

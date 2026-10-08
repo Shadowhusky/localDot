@@ -58,14 +58,24 @@ it("lists the ten classes it can change, then the locked ones as plain text", ()
     "Change account settings",
     "Buy or pay",
   ]);
-  const locked = screen.getByRole("list", { name: "Always the same" });
+  const locked = screen.getByRole("list", { name: "Can't be changed here" });
   expect([...locked.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
-    "Upload your filesAlways needs you",
+    "Upload your filesAsks",
     "Passwords, codes and card detailsAlways handed to you",
-    "Unclear steps on signed-in sitesAlways asks",
+    "Unclear steps on signed-in sitesAsks",
   ]);
   expect(within(locked).queryByRole("combobox")).toBeNull();
-  expect(screen.getByText("Commands always ask once you sign in on its computer.")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Always allow can cover uploads and unclear steps for one task only. Once you sign in on its computer, commands count as unclear steps.",
+    ),
+  ).toBeTruthy();
+});
+
+it("hands uploads off when sending is handed off", () => {
+  render(<SafetySettings value={{ ...DEFAULT_AUTONOMY, send: "handoff" }} onChange={vi.fn()} />);
+  const locked = screen.getByRole("list", { name: "Can't be changed here" });
+  expect(locked.querySelector("li")?.textContent).toBe("Upload your filesHand off, like sending");
 });
 
 const rule = (id: string, over: Partial<AutonomyRule> = {}): AutonomyRule => ({
@@ -86,6 +96,7 @@ const rules = (over: Partial<RulesView> = {}): RulesView => ({
   removing: null,
   failed: null,
   resetting: false,
+  resetFailed: false,
   remove: vi.fn(),
   reset: vi.fn(),
   reload: vi.fn(),
@@ -148,6 +159,41 @@ it("keeps Remove usable while the rest of Settings is busy", () => {
   expect(remove.disabled).toBe(false);
   fireEvent.click(remove);
   expect(view.remove).toHaveBeenCalledOnce();
+});
+
+it("holds every Remove and Start over while one change runs", () => {
+  const one = rule("01J00000000000000000000010"),
+    two = rule("01J00000000000000000000011", { label: "On chat.example.test" });
+  const removing = rules({
+    rules: [one, two],
+    removing: one.id,
+    unreadable: "Saved Always allow choices could not be read, so none are in use.",
+  });
+  const view = render(
+    <SafetySettings value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={removing} />,
+  );
+  const other = screen.getByRole("button", { name: "Remove Send as you: On chat.example.test" });
+  expect(other.getAttribute("aria-disabled")).toBe("true");
+  expect(other.textContent).toBe("Remove");
+  fireEvent.click(other);
+  const restart = screen.getByRole("button", { name: "Start over" });
+  expect(restart.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(restart);
+  expect(removing.remove).not.toHaveBeenCalled();
+  expect(removing.reset).not.toHaveBeenCalled();
+  const resetting = rules({ rules: [two], resetting: true });
+  view.rerender(<SafetySettings value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={resetting} />);
+  fireEvent.click(screen.getByRole("button", { name: /^Remove/ }));
+  expect(resetting.remove).not.toHaveBeenCalled();
+});
+
+it("says when starting over failed", () => {
+  const view = rules({
+    unreadable: "Saved Always allow choices could not be read, so none are in use.",
+    resetFailed: true,
+  });
+  render(<SafetySettings value={DEFAULT_AUTONOMY} onChange={vi.fn()} rules={view} />);
+  expect(screen.getByRole("alert").textContent).toContain("Couldn't start over. Try again.");
 });
 
 it("offers to start over when the saved choices cannot be read", () => {
