@@ -15,6 +15,8 @@ const roleName = (role: string) => ROLES[role] ?? role;
 const providerName = (id: string) =>
   PROVIDERS[id] ?? `${id.slice(0, 1).toUpperCase()}${id.slice(1)}`;
 
+export type ModelName = (provider: string, model: string) => string | undefined;
+
 export function resetTime(seconds?: number, now = Date.now()): string | null {
   if (seconds === undefined) return null;
   const date = new Date(seconds * 1000);
@@ -33,13 +35,18 @@ function windowName(minutes?: number): string {
   return `${count(minutes, "minute", "minutes")} window`;
 }
 
-export function usageSummary(model: AgentModel, selection?: TaskModelSelection): string {
-  const main =
+export function usageSummary(
+  model: AgentModel,
+  selection?: TaskModelSelection,
+  modelName?: ModelName,
+): string {
+  const role =
     selection?.kind === "chatgpt"
-      ? selection.model
+      ? { provider: "chatgpt", model: selection.model }
       : selection?.kind === "api"
-        ? (selection.roles.find((role) => role.role === "main") ?? selection.roles[0])?.model
-        : model.usage[0]?.model;
+        ? (selection.roles.find((row) => row.role === "main") ?? selection.roles[0])
+        : model.usage[0] && { provider: model.usage[0].route, model: model.usage[0].model };
+  const main = role && (modelName?.(role.provider, role.model) ?? role.model);
   const tokens = model.usage.reduce((sum, row) => sum + row.inputTokens + row.outputTokens, 0);
   return [main, tokens ? `${compact.format(tokens)} tokens` : "No usage yet"]
     .filter(Boolean)
@@ -49,10 +56,13 @@ export function usageSummary(model: AgentModel, selection?: TaskModelSelection):
 export function UsageDetails({
   model,
   selection,
+  modelName,
 }: {
   model: AgentModel;
   selection?: TaskModelSelection;
+  modelName?: ModelName;
 }) {
+  const named = (provider: string, id: string) => modelName?.(provider, id) ?? id;
   const subscription = model.subscription;
   const reported = new Set(model.usage.map((row) => row.role));
   const waiting =
@@ -66,7 +76,7 @@ export function UsageDetails({
           <div key={`${row.role}:${row.route}:${row.model}`} className="usage-role">
             <dt>{roleName(row.role)}</dt>
             <dd>
-              <span className="usage-model">{row.model}</span>
+              <span className="usage-model">{named(row.route, row.model)}</span>
               <span className="usage-line num">
                 {whole(row.inputTokens)} in · {whole(row.outputTokens)} out
                 {row.reasoningTokens === undefined
@@ -83,7 +93,7 @@ export function UsageDetails({
           <div key={role.role} className="usage-role">
             <dt>{roleName(role.role)}</dt>
             <dd>
-              <span className="usage-model">{role.model}</span>
+              <span className="usage-model">{named(role.provider, role.model)}</span>
               <span className="usage-line">{providerName(role.provider)} · No calls yet</span>
             </dd>
           </div>
@@ -92,7 +102,7 @@ export function UsageDetails({
           <div className="usage-role">
             <dt>Main</dt>
             <dd>
-              <span className="usage-model">{selection.model}</span>
+              <span className="usage-model">{named("chatgpt", selection.model)}</span>
               <span className="usage-line">ChatGPT plan · No calls yet</span>
             </dd>
           </div>
@@ -145,16 +155,18 @@ export function UsageDetails({
   );
 }
 
-// A quiet line at the foot of the rail; the numbers open over the rail, so nothing moves.
 export function UsageFooter({
   model,
   selection,
+  modelName,
 }: {
   model: AgentModel;
   selection?: TaskModelSelection;
+  modelName?: ModelName;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
+  const summary = usageSummary(model, selection, modelName);
   return (
     <div className="activity-usage">
       <button
@@ -164,10 +176,10 @@ export function UsageFooter({
         className="activity-usage-trigger"
         aria-expanded={open}
         aria-haspopup="dialog"
-        aria-label={`Usage: ${usageSummary(model, selection)}`}
+        aria-label={`Usage: ${summary}`}
         onClick={() => setOpen((shown) => !shown)}
       >
-        <span className="activity-usage-text num">{usageSummary(model, selection)}</span>
+        <span className="activity-usage-text num">{summary}</span>
         <Icon name="chevron-up" size={12} className="activity-usage-chevron" />
       </button>
       <Popover
@@ -178,7 +190,7 @@ export function UsageFooter({
         side="top"
         matchWidth
       >
-        <UsageDetails model={model} selection={selection} />
+        <UsageDetails model={model} selection={selection} modelName={modelName} />
       </Popover>
     </div>
   );

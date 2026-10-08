@@ -146,3 +146,22 @@ it("keeps retry events informational and identifies accepted repairs without der
   expect(recoveryMessage("chatgpt sign-in expired", false)).toContain("explicitly resume");
   expect(recoveryMessage("chatgpt plan limit reached", false)).toContain("no localDot USD budget");
 });
+it("names the model as the catalog does, and keeps the id for a model it does not list", () => {
+  const model = projectAgentEvent(
+    emptyAgentModel(),
+    event(0, "model.usage", {
+      role: "main",
+      route: "anthropic",
+      model: "sample-large-2",
+      inputTokens: 1_200,
+      outputTokens: 300,
+    }),
+  );
+  const named = (provider: string, id: string) =>
+    provider === "anthropic" && id === "sample-large-2" ? "Sample Large 2" : undefined;
+  expect(usageSummary(model, undefined, named)).toBe("Sample Large 2 · 1.5K tokens");
+  expect(usageSummary(model)).toBe("sample-large-2 · 1.5K tokens");
+  render(<UsageFooter model={model} modelName={named} />);
+  fireEvent.click(screen.getByRole("button", { name: /^Usage:/ }));
+  expect(screen.getByRole("dialog", { name: "Usage" }).textContent).toContain("Sample Large 2");
+});

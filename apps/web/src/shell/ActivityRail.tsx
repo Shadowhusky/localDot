@@ -51,6 +51,7 @@ export interface ActivityRailProps {
   planSnapshot?: PlanItemState[];
   agent?: AgentModel;
   models?: TaskModelSelection;
+  modelName?(provider: string, model: string): string | undefined;
   knowledge?: ReactNode;
   memoryAction?: (change: AgentChange) => {
     status?: UndoStatus;
@@ -84,6 +85,7 @@ export function ActivityRail({
   agent,
   memoryAction,
   models,
+  modelName,
   knowledge,
   asOfMs,
   onSelect,
@@ -436,7 +438,7 @@ export function ActivityRail({
           )}
         </div>
       )}
-      {agent && sessionId && <UsageFooter model={model} selection={models} />}
+      {agent && sessionId && <UsageFooter model={model} selection={models} modelName={modelName} />}
     </aside>
   );
 }

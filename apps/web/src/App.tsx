@@ -223,6 +223,16 @@ function Theatre({ api }: { api: ApiClient }) {
   const keys = useKeys(api);
   const [keysOpen, setKeysOpen] = useState(false);
   const settings = useSettings(api, [], !keysOpen);
+  const providerIndex = settings.index;
+  const accountModels = settings.chatgpt.models;
+  const modelName = useCallback(
+    (provider: string, id: string) =>
+      (provider === "chatgpt"
+        ? accountModels
+        : providerIndex?.providers.find((row) => row.id === provider)?.models
+      )?.find((model) => model.id === id)?.name,
+    [providerIndex, accountModels],
+  );
   const mainChoice = settings.saved?.main;
   const mainProvider =
     mainChoice?.provider !== "chatgpt" && mainChoice
@@ -713,6 +723,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   !cell.replacementPending
                 }
                 models={agent.snapshot?.models}
+                modelName={modelName}
                 knowledge={<KnowledgeView knowledge={knowledge} />}
                 memoryAction={(change) => {
                   const status =
