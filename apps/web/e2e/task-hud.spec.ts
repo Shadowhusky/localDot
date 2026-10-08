@@ -119,6 +119,37 @@ test("Replay after Approve once shows dot back at work, not still waiting", asyn
   await expect(replay.locator(".replay-stage.control")).toHaveCount(1);
 });
 
+test("Replay reads a Pause as pausing until the step it waits on ends, as live does", async ({
+  page,
+}) => {
+  const { origin } = await open(page, { QA_PAUSE: "step" });
+  await page.getByRole("button", { name: "Pause after this step" }).click();
+  await expect(status(page)).toHaveText("Pausing after this step");
+  await expect(control(page)).toHaveCount(1);
+  await page.waitForTimeout(1000);
+  await qa(page, "step-end");
+  await expectWaiting(page, "Paused");
+  const { sessionId } = await (await page.request.get(`${origin}/__qa/state`)).json();
+  const log = await page.request.get(`${origin}/api/sessions/${sessionId}/events?fromSeq=0`, {
+    headers: { authorization: `Bearer ${TOKEN}` },
+  });
+  const events: { type: string; t: number; data: { state?: string } }[] = await log.json();
+  const pausedMs = (events.find((e) => e.data.state === "paused")?.t ?? 0) / 1000;
+  const endedMs = (events.findLast((e) => e.type === "step.end")?.t ?? 0) / 1000;
+  expect(endedMs - pausedMs).toBeGreaterThan(500);
+  const replay = page.getByRole("main", { name: "Session replay" });
+  const at = async (tMs: number) => {
+    await page.goto(`${origin}/?replay=${sessionId}&t=${Math.ceil(tMs)}#token=${TOKEN}`);
+    await expect(replay).toBeVisible();
+  };
+  await at((pausedMs + endedMs) / 2);
+  await expect(replay.locator(".replay-hud strong")).toHaveText("Pausing after this step");
+  await expect(replay.locator(".replay-stage.control")).toHaveCount(1);
+  await at(endedMs + 1);
+  await expect(replay.locator(".replay-hud strong")).toHaveText("Paused");
+  await expect(replay.locator(".replay-stage.control")).toHaveCount(0);
+});
+
 test("a question puts the question first", async ({ page }) => {
   await open(page);
   await qa(page, "ask");

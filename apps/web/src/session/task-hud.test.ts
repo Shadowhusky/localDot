@@ -1,4 +1,4 @@
-import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
+import { type LocalDotEvent, msToMicros, sessionMsOf } from "@localdot/protocol";
 import { emptyModel, foldEvents } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { emptyAgentModel } from "../agent/model.ts";
@@ -92,6 +92,12 @@ const approvalRequest = (tMs: number) =>
 // Replay has the timeline only, with no live facts.
 const replay = (events: LocalDotEvent[], nowMs: number) =>
   taskHud(foldEvents(emptyModel(), events), nowMs);
+// The live HUD at nowMs, from the events that had arrived by then.
+const liveAt = (events: LocalDotEvent[], nowMs: number) =>
+  view(
+    events.filter((e) => sessionMsOf(e) <= nowMs),
+    nowMs,
+  ).task;
 
 describe("the task HUD tells the task's state before its last action (QA-D6)", () => {
   it("says Done for a finished task in the follow-up window, with no clock and the computer's control", () => {
@@ -202,9 +208,90 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("safety.pause", 9000, { revision: 2 }),
       ev("step.start", 9100, { kind: "gui" }, "s2"),
     ];
-    expect(replay(resumed, 350).label).toBe("Paused");
+    expect(replay(resumed, 350)).toMatchObject({
+      label: "Pausing after this step",
+      control: true,
+    });
+    expect(replay(resumed, 415).label).toBe("Paused");
     expect(replay(resumed, 5000).label).toBe("Paused");
     expect(replay(resumed, 9200)).toMatchObject({ row: "working", control: true });
+  });
+
+  it("in Replay, reads Pausing after this step until the step a Pause waits on ends, as live does", () => {
+    const typing = [
+      ...start(),
+      ev("safety.pause", 300, pause("pausing")),
+      ev("agent.state", 300, { state: "paused", reason: "user" }),
+      ev("action.result", 3010, { ok: true }, "s1"),
+      ev("step.end", 3020, { status: "ok" }, "s1"),
+      ev("safety.pause", 3030, pause("paused")),
+    ];
+    expect(replay(typing, 2000)).toMatchObject({
+      row: "pausing",
+      phase: "running",
+      label: "Pausing after this step",
+      control: true,
+    });
+    expect(replay(typing, 3025)).toMatchObject({ label: "Paused", phase: "waiting" });
+    const shell = [
+      ev("session.start", 0, { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux" }),
+      ev("agent.state", 1, { state: "acting" }),
+      ev("step.start", 10, { kind: "shell" }, "s1"),
+      ev("tool.start", 20, { tool: "shell", title: "npm test" }, "s1"),
+      ev("safety.pause", 300, pause("pausing")),
+      ev("agent.state", 300, { state: "paused", reason: "user" }),
+      ev("tool.end", 90_000, { ok: true, exitCode: 0 }, "s1"),
+      ev("step.end", 90_010, { status: "ok" }, "s1"),
+      ev("safety.pause", 90_020, pause("paused")),
+    ];
+    expect(replay(shell, 60_000)).toMatchObject({
+      label: "Pausing after this step",
+      control: false,
+      elapsedS: 60,
+    });
+    // A step whose end never reached the log (a takeover cut it short) is pausing only until the
+    // Pause next changes.
+    const cut = [
+      ...start(),
+      ev("action.cancel", 100, { reason: "user" }, "s1"),
+      ev("takeover.request", 100, { requestId: ID, reason: "login", note: "Sign in" }),
+      ev("agent.state", 101, { state: "waiting_user", reason: "takeover" }),
+      ev("takeover.end", 4000, { requestId: ID, by: "user" }),
+      ev("safety.pause", 5000, pause("pausing")),
+      ev("agent.state", 5000, { state: "paused", reason: "user" }),
+      ev("safety.pause", 5010, pause("paused")),
+    ];
+    expect(replay(cut, 5005).label).toBe("Pausing after this step");
+    expect(replay(cut, 6000)).toMatchObject({ label: "Paused", phase: "waiting" });
+    // A recovery pause is no Pause request, even over a cut step or after an earlier Pause.
+    const recovery = [
+      ...cut.slice(0, 8),
+      ev("agent.state", 5000, { state: "paused", reason: "keyd unavailable" }),
+    ];
+    expect(replay(recovery, 6000)).toMatchObject({ label: "Paused", phase: "waiting" });
+    const afterPause = [
+      ...typed(),
+      ev("safety.pause", 1100, pause("pausing")),
+      ev("agent.state", 1100, { state: "paused", reason: "user" }),
+      ev("safety.pause", 1110, pause("paused")),
+      ev("safety.pause", 2000, { revision: 2 }),
+      ev("step.start", 2100, { kind: "gui" }, "s2"),
+      ev("agent.state", 5000, { state: "paused", reason: "keyd unavailable" }),
+    ];
+    expect(replay(afterPause, 6000).label).toBe("Paused");
+    for (const [events, at] of [
+      [typing, 2000],
+      [typing, 4000],
+      [shell, 60_000],
+      [shell, 95_000],
+      [cut, 5005],
+      [cut, 6000],
+      [recovery, 6000],
+      [afterPause, 6000],
+    ] as const) {
+      const { label, phase, control } = liveAt(events, at);
+      expect(replay(events, at)).toMatchObject({ label, phase, control });
+    }
   });
 
   it("leaves a recovery pause standing in Replay until a new step starts", () => {

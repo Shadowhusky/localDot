@@ -225,6 +225,8 @@ settingsStore.put(SETTINGS[settingsMode] ?? {});
 const memory = new MemoryStore(HOME);
 const ledger = { limit: 5, spent: 4 };
 let session: AgentSession | undefined;
+// The seeded running task's open step, which /__qa/step-end finishes.
+let liveStep: string | undefined;
 let teardown = false;
 
 function attachLive(owned: AgentSession) {
@@ -440,7 +442,7 @@ function seedTask(s: AgentSession, finished: boolean) {
   } else {
     s.setStatus("running");
     a("agent.state", { state: "acting" });
-    const liveStep = ulid();
+    liveStep = ulid();
     a("step.start", { kind: "gui", planItem: "calc" }, liveStep);
     a(
       "action.intent",
@@ -680,7 +682,8 @@ const agent: AgentRoutesDeps = {
     pauseTask: (taskId, requestId) => {
       if (!session || taskId !== session.id) throw new Error("no session");
       const pause = session.requestSafetyPause(requestId);
-      session.confirmSafetyPause(requestId, pause.revision);
+      // QA_PAUSE=step holds the Pause at pausing until /__qa/step-end, as a step in flight does.
+      if (env.QA_PAUSE !== "step") session.confirmSafetyPause(requestId, pause.revision);
       return session.safetyPause ?? pause;
     },
     resumeSafety: async (taskId, requestId, revision) => {
@@ -879,6 +882,15 @@ app.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);
   session.uncertainSafetyPause(pause.requestId, pause.revision);
+  return c.json({ ok: true });
+});
+app.post("/__qa/step-end", (c) => {
+  if (!session || !liveStep) return c.text("no open step", 409);
+  session.append("action.result", { ok: true }, liveStep);
+  session.append("step.end", { status: "ok" }, liveStep);
+  liveStep = undefined;
+  const pause = session.safetyPause;
+  if (pause?.phase === "pausing") session.confirmSafetyPause(pause.requestId, pause.revision);
   return c.json({ ok: true });
 });
 app.post("/__qa/heartbeat", (c) => {
