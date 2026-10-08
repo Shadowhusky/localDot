@@ -43,3 +43,30 @@ describe("whole agent settings and explicit accounting prices", () => {
       expect(AgentSettingsDocument.safeParse({ taskBudgetUSD }).success).toBe(false);
   });
 });
+
+describe("a custom endpoint's stated abilities", () => {
+  const custom = { provider: "anthropic-compatible", model: "glm-5.3-flash", key: "z" };
+  it("takes whether it sees images, its context window and a flat-rate plan", () => {
+    const stated = { ...custom, vision: false, contextTokens: 200_000, plan: true };
+    expect(AgentRoleChoice.parse(stated)).toEqual(stated);
+    for (const contextTokens of [4_096, 2_000_000])
+      expect(AgentRoleChoice.safeParse({ ...custom, contextTokens }).success).toBe(true);
+  });
+  it("keeps saved choices without them valid", () => {
+    expect(AgentRoleChoice.parse(custom)).toEqual(custom);
+    expect(AgentSettingsDocument.parse({ main: custom })).toEqual({ main: custom });
+  });
+  it.each([
+    { vision: "false" },
+    { vision: 0 },
+    { contextTokens: 4_095 },
+    { contextTokens: 2_000_001 },
+    { contextTokens: 32_768.5 },
+    { contextTokens: "32768" },
+    { plan: false },
+    { plan: "true" },
+    { flat: true },
+  ])("refuses %j", (field) => {
+    expect(AgentRoleChoice.safeParse({ ...custom, ...field }).success).toBe(false);
+  });
+});
