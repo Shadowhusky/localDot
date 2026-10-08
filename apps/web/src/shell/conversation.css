@@ -975,18 +975,24 @@
   color: var(--color-fg-2);
 }
 
-/* Controls that come and go along the row grow in from where they sit. */
-.composer-pop,
-.composer-count {
+/* Controls that come and go along the row grow in from where they sit, and shrink away there. */
+.composer-pop {
   display: inline-flex;
   transition:
     opacity var(--dur-fade) var(--ease-standard),
     scale var(--dur-spring) var(--ease-spring);
 }
 
+.composer-pop[data-leaving] {
+  opacity: 0;
+  scale: 0.8;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    scale var(--dur-exit) var(--ease-exit);
+}
+
 @starting-style {
-  .composer-pop,
-  .composer-count {
+  .composer-pop {
     opacity: 0;
     scale: 0.8;
   }
@@ -1138,6 +1144,10 @@
     scale: none;
   }
 
+  .composer-pop[data-leaving] {
+    scale: none;
+  }
+
   @starting-style {
     .thread-row[data-new],
     .thread-pending,
@@ -1145,8 +1155,7 @@
       translate: none;
     }
 
-    .composer-pop,
-    .composer-count {
+    .composer-pop {
       scale: none;
     }
   }

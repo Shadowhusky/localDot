@@ -111,13 +111,13 @@ describe("serial uploads owned by the ready computer", () => {
     expect(f.result.current.forMessage()).toBeNull();
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
-  it("drops confirmed draft attachments when Stop removes readiness", async () => {
+  it("drops confirmed draft attachments when Stop removes readiness, so a message cites none", async () => {
     const f = setup(async () => Response.json({ path: "~/Downloads/one.txt" }, { status: 201 }));
     act(() => f.result.current.select([file("one.txt")]));
     await waitFor(() => expect(f.result.current.rows[0]?.phase).toBe("complete"));
     f.update({ ready: false });
     expect(f.result.current.rows).toEqual([]);
-    expect(f.result.current.forMessage()).toBeNull();
+    expect(f.result.current.forMessage()).toEqual([]);
   });
   it("refuses key-shaped file metadata without retaining the name in observable rows", () => {
     const fetchImpl = vi.fn<typeof fetch>();

@@ -1,6 +1,7 @@
 import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
 import {
   type DragEvent,
+  type ReactNode,
   useContext,
   useEffect,
   useId,
@@ -17,6 +18,7 @@ import { announce } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { FileButton } from "../ui/FileButton.tsx";
+import { afterMotion } from "../ui/finished.ts";
 import { focusWithoutScroll } from "../ui/focus.ts";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -99,6 +101,14 @@ function computerReason(props: ComposerProps): string | undefined {
   if (props.controlBlocked) return "You can send once the task is ready.";
   return undefined;
 }
+// Why nothing can be sent now, as Send says it.
+function blockedReason(props: ComposerProps, online: boolean, mode: MessageMode) {
+  if (!online) return "You're offline.";
+  return (
+    computerReason(props) ??
+    (mode !== "new" && !props.agent.fresh ? "Reconnecting to the task…" : undefined)
+  );
+}
 const userIds = (props: ComposerProps) =>
   new Set(
     [...props.agent.model.messages.values()].flatMap((message) =>
@@ -109,6 +119,26 @@ const editable = (target: EventTarget | null) =>
   target instanceof HTMLElement &&
   !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])");
 const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+
+// A control that comes and goes along the row: it grows in where it sits, and on its way out it
+// shrinks away still showing what it last did, out of reach.
+function Pop({ shown, children }: { shown: boolean; children: ReactNode }) {
+  const root = useRef<HTMLSpanElement>(null);
+  const [kept, setKept] = useState(shown);
+  if (shown && !kept) setKept(true);
+  const last = useRef(children);
+  if (shown) last.current = children;
+  useEffect(() => {
+    if (shown || !kept) return;
+    return afterMotion([root.current], () => setKept(false));
+  }, [shown, kept]);
+  if (!shown && !kept) return null;
+  return (
+    <span ref={root} className="composer-pop" data-leaving={shown ? undefined : ""} inert={!shown}>
+      {shown ? children : last.current}
+    </span>
+  );
+}
 
 export function Composer(props: ComposerProps) {
   const [delivery, setDelivery] = useState<Delivery | null>(null);
@@ -231,10 +261,11 @@ export function Composer(props: ComposerProps) {
     readyCell(props) && online && !props.keysOpen && (mode === "new" || props.agent.fresh);
   const uncertain = delivery?.phase === "uncertain";
   const sending = delivery?.phase === "sending";
+  const takeover = !!props.agent.model.pendingTakeover;
   const uploads = useUploads({
     api: props.api,
     cellId: props.cell?.id ?? null,
-    ready: readyCell(props) && !props.agent.model.pendingTakeover,
+    ready: readyCell(props) && !takeover,
     enabled: permitted && !sending && !uncertain,
   });
 
@@ -381,9 +412,10 @@ export function Composer(props: ComposerProps) {
       now.keysOpen ||
       (chosen !== "new" && !now.agent.fresh)
     ) {
+      const why = blockedReason(now, navigator.onLine, chosen);
       setProblem(
-        chosen === "new" && computerReason(now)
-          ? `${computerReason(now)} Your message stays here.`
+        why
+          ? `${why} Your message stays here.`
           : "Reconnect and check the computer before sending.",
       );
       return;
@@ -455,9 +487,10 @@ export function Composer(props: ComposerProps) {
     setDelivery(null);
     setProblem("dot may already have that message. Sending again could repeat it.");
   };
-  // From the menu, focus goes back to the message once it is on its way.
+  // From the menu, focus goes back to the message once it is on its way; on a phone that would
+  // bring up the keyboard, so focus stays on the menu's button.
   const send = (later: boolean) => {
-    field()?.focus();
+    if (!touch) field()?.focus();
     submit(later);
   };
   const edit = () => {
@@ -466,12 +499,11 @@ export function Composer(props: ComposerProps) {
   };
 
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
+  if (!choosing && menu) setMenu(false);
   const connect = mode === "new" && props.configured === false;
+  const near = length > NEAR && length <= LIMIT;
   const unavailable = props.keysOpen || props.controlBlocked;
-  const reason = !online
-    ? "You're offline."
-    : (computerReason(props) ??
-      (mode !== "new" && !props.agent.fresh ? "Reconnecting to the task…" : undefined));
+  const reason = blockedReason(props, online, mode);
   const sendReason = sending
     ? "Sending…"
     : uncertain
@@ -488,13 +520,13 @@ export function Composer(props: ComposerProps) {
     ? "Discard the key or move it to Keys first."
     : sending || uncertain
       ? "Wait until your message is sent."
-      : reason;
+      : (reason ?? (takeover ? "Add files once you return control to dot." : undefined));
   const sendLabel =
     mode === "new" ? "Start task" : mode === "followup" ? "Send follow-up" : "Send now";
   const note =
     mode === "new"
       ? undefined
-      : props.agent.model.pendingTakeover
+      : takeover
         ? "You keep control of the computer"
         : props.agent.snapshot?.status === "paused"
           ? "Sending won't resume the task"
@@ -631,9 +663,9 @@ export function Composer(props: ComposerProps) {
               composing.current
             )
               return;
-            // Option-Return sends after this task, where that is a choice.
-            if (event.altKey && !choosing) return;
             event.preventDefault();
+            // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
+            if (event.altKey && !choosing) return;
             if (event.currentTarget.value.trim()) submit(event.altKey);
           }}
         />
@@ -661,11 +693,13 @@ export function Composer(props: ComposerProps) {
               note && <span className="composer-note">{note}</span>
             )}
           </div>
-          {length > NEAR && length <= LIMIT && (
-            <span className="composer-count num">{`${(LIMIT - length).toLocaleString()} left`}</span>
-          )}
-          {props.stop && (
-            <span className="composer-pop">
+          <Pop shown={near}>
+            {near && (
+              <span className="composer-count num">{`${(LIMIT - length).toLocaleString()} left`}</span>
+            )}
+          </Pop>
+          <Pop shown={!!props.stop}>
+            {props.stop && (
               <IconButton
                 className="composer-stop"
                 variant="secondary"
@@ -682,10 +716,10 @@ export function Composer(props: ComposerProps) {
                 }
                 onClick={props.stop.run}
               />
-            </span>
-          )}
-          {choosing && (
-            <span className="composer-pop">
+            )}
+          </Pop>
+          <Pop shown={choosing}>
+            {choosing && (
               <IconButton
                 ref={more}
                 className="composer-more"
@@ -696,25 +730,25 @@ export function Composer(props: ComposerProps) {
                 disabledReason={sendReason}
                 onClick={() => setMenu(true)}
               />
-              <Menu
-                open={menu}
-                onClose={() => setMenu(false)}
-                anchor={more}
-                side="top"
-                align="end"
-                label="Choose when to send"
-              >
-                <MenuItem kbd={["Enter"]} onSelect={() => send(false)}>
-                  Send now
-                </MenuItem>
-                <MenuItem kbd={["Alt", "Enter"]} onSelect={() => send(true)}>
-                  Send after this task
-                </MenuItem>
-              </Menu>
-            </span>
-          )}
-          {connect ? (
-            <span className="composer-pop">
+            )}
+          </Pop>
+          <Menu
+            open={menu}
+            onClose={() => setMenu(false)}
+            anchor={more}
+            side="top"
+            align="end"
+            label="Choose when to send"
+          >
+            <MenuItem kbd={touch ? undefined : ["Enter"]} onSelect={() => send(false)}>
+              Send now
+            </MenuItem>
+            <MenuItem kbd={touch ? undefined : ["Alt", "Enter"]} onSelect={() => send(true)}>
+              Send after this task
+            </MenuItem>
+          </Menu>
+          <Pop shown={connect}>
+            {connect && (
               <Button
                 variant="primary"
                 size="sm"
@@ -725,8 +759,9 @@ export function Composer(props: ComposerProps) {
               >
                 Connect a model
               </Button>
-            </span>
-          ) : (
+            )}
+          </Pop>
+          {!connect && (
             <IconButton
               type="submit"
               className="composer-send"
@@ -734,7 +769,7 @@ export function Composer(props: ComposerProps) {
               size={touch ? 32 : 28}
               icon="arrow-up"
               label={sendLabel}
-              kbd={["Enter"]}
+              kbd={touch ? undefined : ["Enter"]}
               disabledReason={sendReason}
               aria-describedby={guard.notice ? keyNotice : undefined}
             />

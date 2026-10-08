@@ -376,20 +376,22 @@ describe("composer delivery ownership and draft handling", () => {
     const f = setup(undefined, { agent: { ...agent, snapshot: { ...snapshot, status: "idle" } } });
     expect(screen.queryByRole("button", { name: "Choose when to send" })).toBeNull();
     f.input("next");
-    fireEvent.keyDown(f.field, { key: "Enter", altKey: true });
+    expect(fireEvent.keyDown(f.field, { key: "Enter", altKey: true })).toBe(false);
+    expect(f.field.value).toBe("next");
     expect(f.requests).toEqual([]);
     fireEvent.keyDown(f.field, { key: "Enter" });
     expect(f.requests[0]?.body).toEqual({ kind: "followup", text: "next" });
     await act(async () => {});
   });
+  // What it says is what Send already says, whichever way the message would go.
   it.each([
-    "stale",
-    "paused computer",
-    "pending computer",
-    "unknown computer",
-    "Keys modal",
-    "offline",
-  ] as const)("refuses even a forged submit while %s", async (reason) => {
+    ["stale", "Reconnecting to the task… Your message stays here."],
+    ["paused computer", "Resume your computer first. Your message stays here."],
+    ["pending computer", "Wait for your computer. Your message stays here."],
+    ["unknown computer", "Checking your computer… Your message stays here."],
+    ["Keys modal", "Reconnect and check the computer before sending."],
+    ["offline", "You're offline. Your message stays here."],
+  ] as const)("refuses even a forged submit while %s", async (reason, words) => {
     const f = setup();
     f.input("ordinary text");
     if (reason === "stale") f.update({ agent: { ...agent, fresh: false } });
@@ -402,6 +404,7 @@ describe("composer delivery ownership and draft handling", () => {
     await act(async () => {});
     expect(f.requests).toEqual([]);
     expect(f.field.value).toBe("ordinary text");
+    expect(screen.getByRole("alert").textContent).toBe(words);
   });
   it("checks pasted and synthetic-submit keys before delivery state, requests or a key preview", () => {
     const f = setup();
@@ -668,9 +671,73 @@ describe("the composer's controls", () => {
     f.input("Also add a chart");
     expect(fireEvent.keyDown(f.field, { key: "Enter" })).toBe(true);
     expect(f.requests).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Send now" }));
+    const send = screen.getByRole("button", { name: "Send now" });
+    expect(send.hasAttribute("aria-keyshortcuts")).toBe(false);
+    fireEvent.click(send);
     expect(f.requests).toHaveLength(1);
     await act(async () => {});
+    // Sent from the menu, the message goes without bringing up the keyboard.
+    f.input("Then the totals");
+    fireEvent.click(screen.getByRole("button", { name: "Choose when to send" }));
+    const later = screen.getByRole("menuitem", { name: "Send after this task" });
+    expect(later.hasAttribute("aria-keyshortcuts")).toBe(false);
+    fireEvent.click(later);
+    expect(f.requests[1]?.body).toEqual({ kind: "followup", text: "Then the totals" });
+    expect(document.activeElement).not.toBe(f.field);
+    await act(async () => {});
+  });
+  it("names Return as Send's shortcut where Return sends", () => {
+    setup();
+    expect(screen.getByRole("button", { name: "Send now" }).getAttribute("aria-keyshortcuts")).toBe(
+      "Enter",
+    );
+  });
+  it("lets Stop shrink away before it goes", async () => {
+    const finished = Promise.withResolvers<void>();
+    Object.defineProperty(Element.prototype, "getAnimations", {
+      configurable: true,
+      value(this: Element) {
+        return this.matches("[data-leaving]")
+          ? [
+              {
+                finished: finished.promise,
+                effect: { getComputedTiming: () => ({ endTime: 150 }) },
+              },
+            ]
+          : [];
+      },
+    });
+    try {
+      const run = vi.fn();
+      const f = setup(undefined, { stop: { run, busy: false, enabled: true } });
+      f.update({ stop: undefined });
+      const leaving = f.container.querySelector(".composer-stop")?.closest(".composer-pop");
+      expect(leaving?.hasAttribute("data-leaving")).toBe(true);
+      expect(leaving?.hasAttribute("inert")).toBe(true);
+      await act(async () => finished.resolve());
+      expect(f.container.querySelector(".composer-stop")).toBeNull();
+      expect(run).not.toHaveBeenCalled();
+    } finally {
+      Reflect.deleteProperty(Element.prototype, "getAnimations");
+    }
+  });
+  it("sends during a takeover with no files, and says when files can be added", async () => {
+    const f = setup(undefined, {
+      agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } },
+    });
+    expect(reasonOf(screen.getByRole("button", { name: "Attach files" }))).toContain(
+      "Add files once you return control to dot.",
+    );
+    f.input("Use the second sheet");
+    f.submit();
+    await act(async () => {});
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(f.requests).toEqual([
+      {
+        path: `/api/agent/sessions/${sessionId}/messages`,
+        body: { kind: "steer", text: "Use the second sheet" },
+      },
+    ]);
   });
   it("does nothing on Return with nothing written, and says why Send waits", () => {
     const f = setup();
