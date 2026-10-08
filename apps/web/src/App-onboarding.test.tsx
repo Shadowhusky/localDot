@@ -54,8 +54,42 @@ it("guides an empty authenticated workspace without starting tasks or saving pol
   ).toBe(true);
   fireEvent.click(within(dialog).getByRole("button", { name: "Close settings" }));
   expect(document.activeElement).toBe(screen.getByRole("button", { name: "Review autonomy" }));
-  expect(
-    (screen.getByRole("button", { name: "Start your computer" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
   expect(methods.every((method) => method === "GET")).toBe(true);
+});
+it("offers one Turn on control whose state the task bar and first-run footer share", async () => {
+  localStorage.setItem(TOKEN_KEY, "a".repeat(43));
+  const posts: string[] = [];
+  const created = Promise.withResolvers<Response>();
+  const fetchImpl = (async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    if (init?.method === "POST") {
+      posts.push(path);
+      return created.promise;
+    }
+    const data =
+      path === "/api/agent/settings"
+        ? {}
+        : path === "/api/agent/providers"
+          ? providerFixture()
+          : path === "/api/keys"
+            ? { keys: [] }
+            : path === "/api/session-index"
+              ? { sessions: [], next: null }
+              : [];
+    return Response.json(data);
+  }) as typeof fetch;
+  render(<App fetchImpl={fetchImpl} />);
+  await screen.findByRole("heading", { name: "Set up localDot" });
+  const [bar, footer] = screen.getAllByRole("button", { name: "Turn on" });
+  if (!bar || !footer) throw new Error("expected two Turn on controls");
+  expect(screen.queryByRole("button", { name: /^Start/ })).toBeNull();
+  expect(bar.getAttribute("aria-disabled")).toBeNull();
+  expect(footer.getAttribute("aria-disabled")).toBeNull();
+  fireEvent.click(footer);
+  expect(posts).toEqual(["/api/cells"]);
+  await waitFor(() => expect(bar.getAttribute("aria-disabled")).toBe("true"));
+  expect(footer.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(bar);
+  fireEvent.click(footer);
+  expect(posts).toEqual(["/api/cells"]);
 });

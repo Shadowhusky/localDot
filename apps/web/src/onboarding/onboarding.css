@@ -93,7 +93,7 @@
   font: inherit;
   cursor: pointer;
 }
-.welcome-setup button:disabled {
+.welcome-setup button:is(:disabled, [aria-disabled="true"]) {
   opacity: 0.5;
   cursor: default;
 }
@@ -102,7 +102,7 @@
   outline: 2px solid var(--color-xenon);
   outline-offset: 3px;
 }
-.welcome-setup button:active:not(:disabled) {
+.welcome-setup button:active:not(:disabled, [aria-disabled="true"]) {
   opacity: 0.8;
 }
 .welcome-setup footer {

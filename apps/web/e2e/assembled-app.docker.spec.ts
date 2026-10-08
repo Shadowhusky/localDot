@@ -77,7 +77,9 @@ for (const pending of ["wait", "shell"] as const)
         );
       };
       await page.goto(f.url);
-      await expect(page.getByRole("button", { name: "Start computer", exact: true })).toBeEnabled();
+      await expect(
+        page.getByRole("button", { name: "Turn on", exact: true }).first(),
+      ).toBeEnabled();
       checkpoint("sealed-key");
       await page.getByTestId("keys-button").click();
       const keys = page.getByRole("dialog", { name: "Keys", exact: true });
@@ -111,7 +113,7 @@ for (const pending of ["wait", "shell"] as const)
       await expect(settings).toContainText("Saved choices");
       await settings.getByRole("button", { name: "Close settings", exact: true }).click();
       checkpoint("start-computer");
-      await page.getByRole("button", { name: "Start computer", exact: true }).click();
+      await page.getByRole("button", { name: "Turn on", exact: true }).first().click();
       await showPane("Conversation");
       await expect(page.getByRole("textbox", { name: "New task", exact: true })).toBeEnabled({
         timeout: 120_000,

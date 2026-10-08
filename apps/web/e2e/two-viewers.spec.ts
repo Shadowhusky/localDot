@@ -88,7 +88,7 @@ async function checkViewers(browser: Browser, recordingEnabled: boolean) {
     (res) => res.request().method() === "POST" && new URL(res.url()).pathname === "/api/cells",
   );
   await expect(a.getByTestId("hud-status")).toHaveText("No computer");
-  await a.getByRole("button", { name: "Start computer" }).click();
+  await a.getByRole("button", { name: "Turn on" }).first().click();
   const cellId = ((await (await created).json()) as { id: string }).id;
   await expect(a.getByTestId("hud-status")).toHaveText("Live", { timeout: 300_000 });
 

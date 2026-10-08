@@ -41,7 +41,7 @@ export async function startSafetyTask(page: Page, f: Assembly) {
   await settings.getByRole("button", { name: "Save settings", exact: true }).click();
   await expect(settings).toContainText("Saved choices");
   await settings.getByRole("button", { name: "Close settings", exact: true }).click();
-  await page.getByRole("button", { name: "Start computer", exact: true }).click();
+  await page.getByRole("button", { name: "Turn on", exact: true }).first().click();
   await showPane(page, "Conversation");
   const task = page.getByRole("textbox", { name: "New task", exact: true });
   await expect(task).toBeEnabled({ timeout: 120000 });

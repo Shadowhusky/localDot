@@ -34,27 +34,30 @@ it("guides model and autonomy setup through the existing settings controls", () 
   const autonomy = screen.getByRole("button", { name: "Review autonomy" });
   fireEvent.click(autonomy);
   expect(p.onSettings).toHaveBeenCalledWith(autonomy, "autonomy");
-  expect(
-    (screen.getByRole("button", { name: "Start your computer" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
   expect(p.onStart).not.toHaveBeenCalled();
 });
-it("enables computer startup only after model readiness and lifecycle permission", () => {
+it("turns the computer on whenever it can start, with or without a model", () => {
   const p = props();
-  p.modelReady = true;
-  p.modelLabel = "Saved provider · saved model";
   const view = render(<WelcomeSetup {...p} />);
-  fireEvent.click(screen.getByRole("button", { name: "Start your computer" }));
+  const turnOn = screen.getByRole("button", { name: "Turn on" });
+  expect(screen.getByText("Turn on your computer while you choose a model.")).toBeTruthy();
+  expect(turnOn.getAttribute("aria-disabled")).toBeNull();
+  fireEvent.click(turnOn);
   expect(p.onStart).toHaveBeenCalledOnce();
+  view.rerender(
+    <WelcomeSetup {...p} modelReady modelLabel="Saved provider · saved model" loading />,
+  );
+  expect(screen.getByRole("status").textContent).toContain("Checking saved settings…");
+  expect(turnOn.getAttribute("aria-disabled")).toBeNull();
+  view.rerender(<WelcomeSetup {...p} modelReady modelLabel="Saved provider · saved model" />);
   expect(screen.getByRole("status").textContent).toContain("Saved provider · saved model");
-  view.rerender(<WelcomeSetup {...p} canStart={false} />);
-  expect(
-    (screen.getByRole("button", { name: "Start your computer" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
-  view.rerender(<WelcomeSetup {...p} loading />);
-  expect(
-    (screen.getByRole("button", { name: "Start your computer" }) as HTMLButtonElement).disabled,
-  ).toBe(true);
+  turnOn.focus();
+  view.rerender(<WelcomeSetup {...p} canStart={false} starting />);
+  expect(turnOn.textContent).toBe("Starting…");
+  expect(turnOn.getAttribute("aria-disabled")).toBe("true");
+  expect(document.activeElement).toBe(turnOn);
+  fireEvent.click(turnOn);
+  expect(p.onStart).toHaveBeenCalledOnce();
 });
 it("uses saved policy values without changing policy or storing keys", () => {
   const p = props();

@@ -52,9 +52,9 @@ test("installer progress hands off once to first-run setup and settings", async 
     await expect(settings.getByRole("combobox", { name: "Read information" })).toBeFocused();
     await settings.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByRole("button", { name: "Review autonomy" })).toBeFocused();
-    const start = page.getByRole("button", { name: "Start your computer" });
+    const start = page.locator(".welcome-setup").getByRole("button", { name: "Turn on" });
     await start.scrollIntoViewIfNeeded();
-    await expect(start).toBeDisabled();
+    await expect(start).toBeEnabled();
     const bounds = await start.boundingBox();
     expect(bounds).not.toBeNull();
     expect(bounds?.y).toBeGreaterThanOrEqual(0);

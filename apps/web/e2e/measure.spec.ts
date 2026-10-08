@@ -46,7 +46,7 @@ test("measure fps and CPU at 2x", async ({ page }) => {
   const created = page.waitForResponse(
     (res) => res.request().method() === "POST" && new URL(res.url()).pathname === "/api/cells",
   );
-  await page.getByRole("button", { name: "Start computer" }).click();
+  await page.getByRole("button", { name: "Turn on" }).first().click();
   const cellId = ((await (await created).json()) as { id: string }).id;
   await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 300_000 });
   const canvas = page.locator("canvas.stage-canvas");

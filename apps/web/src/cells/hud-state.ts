@@ -58,7 +58,7 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
   if (!cell) {
     // The create's answer brings the cell id that Stop needs.
     if (pending === "create") return hud("Starting…", STARTING, "stop", false);
-    return hud("No computer", "Start your computer to see it here.", "start");
+    return hud("No computer", "Turn on your computer to see it here.", "start");
   }
   if (cell.fenced)
     return hud(
