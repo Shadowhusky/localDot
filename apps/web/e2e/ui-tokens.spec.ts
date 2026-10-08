@@ -94,7 +94,7 @@ async function open(browser: Browser, appearance: "graphite" | "midnight", contr
   const page = await context.newPage();
   await page.emulateMedia({ contrast: contrast ? "more" : "no-preference" });
   await page.goto(`${origin}/`);
-  await expect(page.getByRole("heading", { name: "No access token" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to localDot" })).toBeVisible();
   await page.evaluate((value) => {
     document.documentElement.dataset.appearance = value;
   }, appearance);

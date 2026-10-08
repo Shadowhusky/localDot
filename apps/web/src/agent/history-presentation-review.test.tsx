@@ -4,6 +4,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
+import type { Status } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { Hud } from "../shell/Hud.tsx";
 import { Conversation } from "./Conversation.tsx";
@@ -130,15 +131,20 @@ it("completed announcements are bounded, key-guarded and retired on owner replac
 });
 
 it("HUD live status contains only phase while elapsed time and Stop remain outside it", () => {
+  const working: Status = {
+    row: "working",
+    computer: "live",
+    label: "Working",
+    caption: { speaker: "dot", text: "" },
+    elapsedS: 1,
+    actions: [{ kind: "stop-task", enabled: true }],
+    control: true,
+    dotPose: "acting",
+    attention: "working",
+    title: "localDot — Working",
+  };
   const props = {
-    hud: {
-      label: "Working",
-      caption: "",
-      action: { kind: "stop" as const, enabled: true },
-      live: true,
-      elapsedS: 1,
-      stop: true,
-    },
+    status: working,
     onStart: vi.fn(),
     onStop: vi.fn(),
     onStopSession: vi.fn(),
@@ -151,7 +157,7 @@ it("HUD live status contains only phase while elapsed time and Stop remain outsi
   expect(status.textContent).toBe("Working");
   expect(status.contains(stop)).toBe(false);
   expect(status.contains(screen.getByTestId("hud-elapsed"))).toBe(false);
-  v.rerender(<Hud {...props} hud={{ ...props.hud, elapsedS: 2 }} />);
+  v.rerender(<Hud {...props} status={{ ...working, elapsedS: 2 }} />);
   expect(screen.getByRole("status")).toBe(status);
   expect(status.textContent).toBe("Working");
 });
