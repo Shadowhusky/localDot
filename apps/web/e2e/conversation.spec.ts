@@ -1,4 +1,10 @@
-import { type BrowserContextOptions, expect, type Page, test } from "@playwright/test";
+import {
+  type BrowserContextOptions,
+  expect,
+  type Locator,
+  type Page,
+  test,
+} from "@playwright/test";
 import { startUiFixture, TOKEN, type UiFixture } from "./fixtures/start-ui-fixture.ts";
 import { ENGINES } from "./ui-fixture.ts";
 
@@ -8,6 +14,7 @@ import { ENGINES } from "./ui-fixture.ts";
 test.describe.configure({ timeout: 120_000 });
 
 const DESKTOP: BrowserContextOptions = { viewport: { width: 1440, height: 900 } };
+const LAPTOP: BrowserContextOptions = { viewport: { width: 1280, height: 800 } };
 const PHONE: BrowserContextOptions = {
   viewport: { width: 390, height: 844 },
   isMobile: true,
@@ -57,6 +64,111 @@ function scrollers(page: Page) {
 }
 
 const scroller = (page: Page) => page.locator(".thread-scroll");
+
+// Whether the whole element is inside the thread's view, not just rendered somewhere in it.
+async function onScreen(page: Page, target: Locator) {
+  const [box, view] = await Promise.all([target.boundingBox(), scroller(page).boundingBox()]);
+  return (
+    !!box && !!view && box.y >= view.y - 0.5 && box.y + box.height <= view.y + view.height + 0.5
+  );
+}
+
+// How far a control takes a touch, each way: its box, or the larger reach drawn around it, capped
+// at the 44 px a finger needs.
+function reach(control: Element) {
+  const box = control.getBoundingClientRect();
+  const own = getComputedStyle(control);
+  const around = getComputedStyle(control, "::after");
+  const drawn = around.content !== "none" && around.position === "absolute";
+  const across = (size: number, start: string, end: string, edges: number) =>
+    Math.min(
+      44,
+      Math.round(
+        Math.max(
+          size,
+          drawn ? size - edges - Number.parseFloat(start) - Number.parseFloat(end) : 0,
+        ),
+      ),
+    );
+  return {
+    width: across(
+      box.width,
+      around.left,
+      around.right,
+      Number.parseFloat(own.borderLeftWidth) + Number.parseFloat(own.borderRightWidth),
+    ),
+    height: across(
+      box.height,
+      around.top,
+      around.bottom,
+      Number.parseFloat(own.borderTopWidth) + Number.parseFloat(own.borderBottomWidth),
+    ),
+  };
+}
+
+const nextFrames = (page: Page) =>
+  page.evaluate(
+    () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+  );
+
+interface Frame {
+  // Where dot's first message sits under the top of the thread's view.
+  y: number;
+  // The column's height, which the task bar above it changes as it comes and goes.
+  column: number;
+  // Whether the answer panel has the composer's place.
+  asking: boolean;
+  // Where the composer sits: under the thread or at its end.
+  foot: string;
+}
+
+// One sample per drawn frame, taken just after the frame is drawn, while `act` runs.
+async function framesDuring(page: Page, act: () => Promise<unknown>): Promise<Frame[]> {
+  await page.evaluate(() => {
+    const frames: Frame[] = [];
+    (window as unknown as { threadFrames: Frame[] }).threadFrames = frames;
+    const drawn = new MessageChannel();
+    drawn.port1.onmessage = () => {
+      const view = document.querySelector(".thread-scroll")?.getBoundingClientRect();
+      const column = document.querySelector(".thread-body")?.getBoundingClientRect();
+      const message = document.querySelector(".thread-message[data-role=dot]");
+      if (!view || !column || !message) return;
+      frames.push({
+        y: message.getBoundingClientRect().top - view.top,
+        column: column.height,
+        asking: !!document.querySelector(".answer-panel"),
+        foot: document.querySelector(".thread-dock")?.parentElement?.className ?? "",
+      });
+    };
+    const tick = () => {
+      drawn.port2.postMessage(0);
+      if (frames.length < 150) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await page.waitForTimeout(200);
+  await act();
+  await page.waitForTimeout(1500);
+  return page.evaluate(() => (window as unknown as { threadFrames: Frame[] }).threadFrames);
+}
+
+// When the answer panel and the composer trade places, the rows are still about where they were in
+// the first frame drawn after it, and get to where they go over several frames rather than one. A
+// frame where the column itself changed height (the task bar above it coming and going in the same
+// frame) says nothing about the thread, so it is not judged.
+function expectEased(frames: Frame[]) {
+  const swap = frames.findIndex((frame, index) => index > 0 && frame.asking !== frames[0]?.asking);
+  expect(swap).toBeGreaterThan(0);
+  const at = (index: number) => frames[index]?.y ?? Number.NaN;
+  if (Math.abs((frames[swap]?.column ?? 0) - (frames[swap - 1]?.column ?? 0)) < 0.5)
+    expect(Math.abs(at(swap) - at(swap - 1))).toBeLessThanOrEqual(8);
+  const moving = frames.slice(swap).filter((frame, index, after) => {
+    const before = index ? after[index - 1] : frames[swap - 1];
+    return !!before && Math.abs(frame.y - before.y) > 0.5;
+  });
+  if (Math.abs(at(frames.length - 1) - at(swap - 1)) > 8)
+    expect(moving.length).toBeGreaterThanOrEqual(3);
+}
 
 for (const [engine, size, options] of MATRIX) {
   test(`dot's work shows under the thread, in the column's only scroller (${engine} ${size})`, async () => {
@@ -109,10 +221,8 @@ for (const [engine, size, options] of MATRIX) {
         .locator(".result-card, [aria-label='Question history']"),
     ).toHaveCount(0);
     if (size === "phone") {
-      for (const button of await card.getByRole("button").all()) {
-        const box = await button.boundingBox();
-        expect(box?.height ?? 0).toBeGreaterThanOrEqual(24);
-      }
+      for (const button of await card.getByRole("button").all())
+        expect(await button.evaluate(reach)).toEqual({ width: 44, height: 44 });
     }
     await browser.close();
   });
@@ -149,18 +259,91 @@ for (const [engine, size, options] of MATRIX) {
   });
 }
 
-test("recovery sits in the thread where the task paused", async () => {
-  const { browser, page, thread } = await open("chrome", DESKTOP);
-  await qa("budget");
-  const recovery = thread.getByRole("region", { name: "Task recovery" });
-  await expect(recovery).toContainText("Paused at the spending limit");
-  await expect(recovery).toContainText("$4 of $5 spent");
-  await expect(recovery.getByRole("button", { name: "Raise to $7 and continue" })).toBeVisible();
-  await expect(
-    page.locator(".thread-live").getByRole("button", { name: /^Paused · 6 steps/ }),
-  ).toBeVisible();
-  await browser.close();
-});
+for (const engine of ["chrome", "webkit"] as const) {
+  test(`a question that arrives while you type takes your focus to its choices (${engine} 1440x900)`, async () => {
+    const { browser, page } = await open(engine, DESKTOP);
+    await page.getByRole("textbox", { name: "Message", exact: true }).click();
+    await page.keyboard.type("Half a thought");
+    await qa("ask");
+    const answer = page.getByRole("form", { name: "Answer dot" });
+    await expect(answer.getByRole("radio").first()).toBeFocused();
+    await nextFrames(page);
+    await expect(answer.getByRole("radio").first()).toBeFocused();
+    await page.keyboard.press("2");
+    await expect(answer.getByRole("radio").nth(1)).toBeChecked();
+    await browser.close();
+  });
+
+  test(`a long answer in your own words keeps the focus and every line (${engine} 1440x900)`, async () => {
+    const { browser, page } = await open(engine, DESKTOP);
+    await qa("ask");
+    const answer = page.getByRole("form", { name: "Answer dot" });
+    await answer.getByRole("radio", { name: "Something else…" }).click();
+    const words = answer.getByRole("textbox", { name: "Your answer" });
+    await expect(words).toBeFocused();
+    const lines = Array.from({ length: 7 }, (_, index) => `Line ${index + 1} of my answer`);
+    for (const [index, line] of lines.entries()) {
+      if (index) await page.keyboard.press("Shift+Enter");
+      await page.keyboard.type(line);
+      await nextFrames(page);
+    }
+    await expect(words).toBeFocused();
+    await expect(words).toHaveValue(lines.join("\n"));
+    await browser.close();
+  });
+}
+
+for (const [engine, size, options] of [
+  ["chrome", "1440x900", DESKTOP],
+  ["chrome", "1280x800", LAPTOP],
+  ["webkit", "phone", PHONE],
+] as const) {
+  test(`recovery shows its title and main action where the task paused (${engine} ${size})`, async () => {
+    const { browser, page, thread } = await open(engine, options);
+    await qa("budget");
+    const recovery = thread.getByRole("region", { name: "Task recovery" });
+    await expect(recovery).toContainText("$4 of $5 spent");
+    const title = recovery.getByRole("heading", { name: "Paused at the spending limit" });
+    const raise = recovery.getByRole("button", { name: "Raise to $7 and continue" });
+    await expect.poll(() => onScreen(page, title)).toBe(true);
+    await expect.poll(() => onScreen(page, raise)).toBe(true);
+    // Only the composer lies past it, so there is nothing newer to jump to.
+    await expect(page.locator(".thread-jump")).not.toHaveAttribute("data-shown");
+    await expect(
+      page.locator(".thread-live").getByRole("button", { name: /^Paused · 6 steps/ }),
+    ).toBeVisible();
+    await raise.click();
+    await expect(recovery).toHaveCount(0);
+    await expect
+      .poll(() => scroller(page).evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
+      .toBeLessThan(2);
+    await browser.close();
+  });
+}
+
+for (const [engine, size, options] of [
+  ["chrome", "1440x900", DESKTOP],
+  ["webkit", "phone", PHONE],
+] as const) {
+  test(`a question, its answer and the task's end ease the thread rather than jump it (${engine} ${size})`, async () => {
+    const { browser, page } = await open(engine, options);
+    await expect(page.locator(".thread-live .thread-work")).toBeVisible();
+    await page.waitForTimeout(600);
+    const asked = await framesDuring(page, () => qa("ask"));
+    const answered = await framesDuring(page, async () => {
+      const answer = page.getByRole("form", { name: "Answer dot" });
+      await answer.getByRole("radio", { name: "Plain text" }).check();
+      await answer.getByRole("button", { name: "Send answer" }).click();
+    });
+    const ended = await framesDuring(page, () => qa("finish"));
+    await expect(page.getByRole("region", { name: "Task result" })).toBeVisible();
+    expectEased(asked);
+    expectEased(answered);
+    // Nothing that happens in the thread moves the composer in or out of it.
+    expect(new Set([...asked, ...answered, ...ended].map((frame) => frame.foot)).size).toBe(1);
+    await browser.close();
+  });
+}
 
 test("new rows and streaming words never shift the thread or what sits under it", async () => {
   // Tall enough that today's composer fits under the thread rather than joining its end.

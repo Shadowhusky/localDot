@@ -15,12 +15,15 @@ const message = (id: string, text = "Same message", role: "user" | "assistant" =
 const items = (messages: AgentMessage[], questions: AgentQuestion[] = []) =>
   threadItems(messages, questions);
 const history = () => screen.getByRole("region", { name: "Conversation history" });
-function scrolled(top: number, height = 1000, view = 200) {
+// `threadEnd` is where the thread's last row ends; below it there is only the foot.
+function scrolled(top: number, height = 1000, view = 200, threadEnd = height) {
   const scroller = history().closest(".thread-scroll") as HTMLElement;
   Object.defineProperties(scroller, {
     scrollHeight: { configurable: true, value: height },
     clientHeight: { configurable: true, value: view },
   });
+  scroller.getBoundingClientRect = () => ({ top: 0, bottom: view }) as DOMRect;
+  history().getBoundingClientRect = () => ({ top: -top, bottom: threadEnd - top }) as DOMRect;
   scroller.scrollTop = top;
   fireEvent.scroll(scroller);
   return scroller;
@@ -144,6 +147,16 @@ describe("the conversation thread", () => {
     expect(within(jump()).getByRole("button", { name: "1 new message" }).textContent).toBe("1 new");
     scrolled(800);
     expect(jump().hasAttribute("data-shown")).toBe(false);
+  });
+
+  it("offers nothing to jump to when only the composer lies past the view", () => {
+    render(<Conversation items={items([message("one")])} truncated={false} />);
+    const jump = () => document.querySelector(".thread-jump") as HTMLElement;
+    scrolled(500, 1000, 200, 650);
+    expect(jump().hasAttribute("data-shown")).toBe(false);
+    expect(jump().hasAttribute("inert")).toBe(true);
+    scrolled(400, 1000, 200, 650);
+    expect(jump().hasAttribute("data-shown")).toBe(true);
   });
 });
 

@@ -25,19 +25,36 @@ import { answerText, QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { type ThreadItem, type ThreadKind, type ThreadRow, threadRows } from "./thread.ts";
-import { useFollowScroll } from "./useFollowScroll.ts";
+import { reducedMotion, useFollowScroll } from "./useFollowScroll.ts";
 import { usePagedRows } from "./usePagedRows.ts";
 
 // The thread mounts at most this many items; scrolling to either end moves it by half.
 const WINDOW = 200;
 // The foot (the live work line and the composer) sits under the thread and stays put while it
-// scrolls, as long as the thread keeps this much room above it. A taller foot joins the end of the
-// thread instead, so the column keeps one scroller; it comes back under with a little to spare.
-const THREAD_ROOM = 200;
-const ROOM_BACK = 224;
+// scrolls. Today's composer is tall, so on a shorter column the foot joins the end of the thread
+// instead, which keeps one scroller and room to read. Only the column's height decides, so typing, a
+// question or a field unfolding never moves the foot; the gap between the two heights covers the
+// task bar coming and going.
+const FOOT_FROM = 800;
+const END_BELOW = 720;
+// A recovery card brought into view sits this far under the scroller's faded top edge.
+const REVEAL_MARGIN = 16;
 const itemKey = (item: ThreadItem) => item.key;
 // How long a newly shown task's history may take to arrive.
 const LOADING_MS = 600;
+
+// Rows that would drop start where they were drawn, this far above, and ease down to where they sit.
+function easeDown(element: HTMLElement, from: number) {
+  const style = getComputedStyle(element);
+  const frames = [{ transform: `translateY(${from}px)` }, { transform: "none" }];
+  const spring = style.getPropertyValue("--dur-spring").trim();
+  const duration = Number.parseFloat(spring) * (spring.endsWith("ms") ? 1 : 1000) || 360;
+  try {
+    element.animate(frames, { duration, easing: style.getPropertyValue("--ease-spring").trim() });
+  } catch {
+    element.animate(frames, { duration, easing: "ease-out" });
+  }
+}
 
 interface ThreadContext {
   announce(text: string): void;
@@ -185,8 +202,10 @@ export interface ConversationProps {
   sessionId?: string | null;
   recovery?: ReactNode;
   error?: string | null;
-  // The composer, or the answer panel while dot waits for one, under the thread.
-  dock?: ReactNode;
+  // Under the thread: the composer, and the answer panel, which takes its place while dot waits for
+  // one. The composer stays mounted, so a draft survives.
+  composer?: ReactNode;
+  answer?: ReactNode;
   onReplay?: () => void;
   computerReady?: boolean;
 }
@@ -203,7 +222,8 @@ export function Conversation({
   sessionId = null,
   recovery,
   error,
-  dock,
+  composer,
+  answer,
   onReplay,
   computerReady = false,
 }: ConversationProps) {
@@ -268,10 +288,17 @@ export function Conversation({
     for (const row of rows) known.current.keys.add(row.item.key);
   }, [rows]);
 
+  // A card brought into view holds the reader there; until they move on their own, what still
+  // arrives (history loading in batches) counts as read.
+  const [holding, setHolding] = useState<string | null>(null);
+  const holdsCard = holding === ownerKey;
   // What arrived since the reader left the end.
   const [left, setLeft] = useState<{ owner: string; keys: Set<string> } | null>(null);
   if (follow.pinned && left) setLeft(null);
-  else if (!follow.pinned && left?.owner !== ownerKey)
+  else if (
+    !follow.pinned &&
+    (left?.owner !== ownerKey || (holdsCard && left.keys.size !== items.length))
+  )
     setLeft({ owner: ownerKey, keys: new Set(items.map(itemKey)) });
   const unread = left
     ? items.filter((item) => item.kind !== "work" && !left.keys.has(item.key)).length
@@ -316,6 +343,7 @@ export function Conversation({
   }, [moveAt]);
   const reading = () => {
     follow.interrupt();
+    setHolding(null);
     if (!held.current) return;
     held.current = false;
     if (reached.current.older) moveAt("older");
@@ -337,36 +365,118 @@ export function Conversation({
   const body = useRef<HTMLDivElement>(null);
   const foot = useRef<HTMLDivElement>(null);
   const end = useRef<HTMLDivElement>(null);
+  const jump = useRef<HTMLSpanElement>(null);
   const [dockHost] = useState(() => {
     const host = document.createElement("div");
     host.className = "thread-dock";
     return host;
   });
-  const placeDock = useCallback(() => {
+  const footShown = useCallback(() => {
     const column = body.current;
-    const view = scroller.current?.getBoundingClientRect();
-    if (!column || !view || !foot.current || !end.current) return;
-    const inThread = dockHost.parentElement === end.current;
-    const room = column.clientHeight - dockHost.offsetHeight;
-    const target = room < (inThread ? ROOM_BACK : THREAD_ROOM) ? end.current : foot.current;
-    if (dockHost.parentElement !== target) target.append(dockHost);
+    if (!column || !jump.current) return;
     const top = dockHost.getBoundingClientRect().top;
     const bottom = column.getBoundingClientRect().bottom;
     const inView = Math.max(0, Math.min(dockHost.offsetHeight, bottom - top));
-    column.style.setProperty("--thread-foot-shown", `${Math.round(inView)}px`);
-    const gutter = scroller.current
-      ? scroller.current.offsetWidth - scroller.current.clientWidth
-      : 0;
-    column.style.setProperty("--thread-gutter", `${gutter}px`);
+    jump.current.style.setProperty("--thread-foot-shown", `${Math.round(inView)}px`);
   }, [dockHost]);
+  const placeDock = useCallback(() => {
+    const column = body.current;
+    if (!column || !foot.current || !end.current) return;
+    const height = column.clientHeight;
+    const under = dockHost.parentElement === foot.current;
+    const target =
+      height >= FOOT_FROM || (under && height >= END_BELOW) ? foot.current : end.current;
+    // Moving an element takes the focus out of it, so the foot moves once the focus has left it.
+    if (dockHost.parentElement !== target && !dockHost.contains(document.activeElement))
+      target.append(dockHost);
+    if (scroller.current)
+      foot.current.style.setProperty(
+        "--thread-gutter",
+        `${scroller.current.offsetWidth - scroller.current.clientWidth}px`,
+      );
+    footShown();
+  }, [dockHost, footShown]);
   useLayoutEffect(() => {
     placeDock();
-    if (typeof ResizeObserver === "undefined") return;
-    const observer = new ResizeObserver(placeDock);
-    if (body.current) observer.observe(body.current);
-    observer.observe(dockHost);
+    let frame = 0;
+    const left = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(placeDock);
+    };
+    dockHost.addEventListener("focusout", left);
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(placeDock);
+    if (body.current) observer?.observe(body.current);
+    const shown = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(footShown);
+    shown?.observe(dockHost);
+    return () => {
+      cancelAnimationFrame(frame);
+      dockHost.removeEventListener("focusout", left);
+      observer?.disconnect();
+      shown?.disconnect();
+    };
+  }, [placeDock, footShown, dockHost]);
+
+  // Whether the thread's last row is in view; below it there may only be the foot.
+  const history = useRef<HTMLElement>(null);
+  const [endSeen, setEndSeen] = useState(true);
+  const seeEnd = useCallback(() => {
+    const view = scroller.current,
+      thread = history.current;
+    if (view && thread)
+      setEndSeen(thread.getBoundingClientRect().bottom <= view.getBoundingClientRect().bottom + 1);
+  }, []);
+
+  // A recovery card that arrives while the reader follows the end is brought into view whole, title
+  // first, even when the composer below it fills the rest of the view.
+  const recoverySlot = useRef<HTMLDivElement>(null);
+  const revealCard = useRef(follow.reveal);
+  revealCard.current = follow.reveal;
+  const owner = useRef(ownerKey);
+  owner.current = ownerKey;
+  useLayoutEffect(() => {
+    const slot = recoverySlot.current;
+    if (!slot || !history.current || typeof ResizeObserver === "undefined") return;
+    let card: Element | null = null;
+    const observer = new ResizeObserver(() => {
+      const now = slot.firstElementChild;
+      if (now !== card) setHolding(null);
+      if (now instanceof HTMLElement && now !== card && revealCard.current(now, REVEAL_MARGIN))
+        setHolding(owner.current);
+      card = now;
+      seeEnd();
+    });
+    observer.observe(slot);
+    observer.observe(history.current);
     return () => observer.disconnect();
-  }, [placeDock, dockHost]);
+  }, [seeEnd]);
+  // The answer panel and the composer differ in height, so while the reader follows the end, one
+  // taking the other's place would move the rows above at once. Rows that would rise glide up to the
+  // new end instead, and rows that would drop ease down from where they were drawn.
+  const asking = !!answer;
+  const swapped = useRef(asking);
+  const drawnTop = useRef(0);
+  if (swapped.current !== asking) drawnTop.current = scroller.current?.scrollTop ?? 0;
+  const glideNext = follow.glideNext;
+  const following = follow.following;
+  useLayoutEffect(() => {
+    if (swapped.current === asking) return;
+    swapped.current = asking;
+    const view = scroller.current,
+      thread = history.current;
+    if (!view || !thread || !following() || reducedMotion()) return;
+    const end = Math.max(0, view.scrollHeight - view.clientHeight);
+    const rise = end - drawnTop.current;
+    if (rise > 0.5) {
+      view.scrollTop = drawnTop.current;
+      glideNext();
+    } else if (rise < -0.5) {
+      view.scrollTop = end;
+      easeDown(thread, rise);
+    }
+  }, [asking, following, glideNext]);
+
+  // Scrolled back only as far as the foot, the reader has nothing newer to jump to.
+  const jumpShown = !follow.pinned && (unread > 0 || !endSeen);
 
   const thread: ThreadContext = {
     announce,
@@ -387,7 +497,8 @@ export function Conversation({
         className="thread-scroll"
         fade="both"
         onScroll={() => {
-          placeDock();
+          seeEnd();
+          if (dockHost.parentElement === end.current) footShown();
           if (!visible) return;
           if (!follow.onScroll()) page.freeze();
           else if (!page.following && !page.hasNewer) page.latest();
@@ -400,6 +511,7 @@ export function Conversation({
         <div className="thread-content">
           <section
             className="thread"
+            ref={history}
             aria-label="Conversation history"
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users focus the history to scroll it.
             tabIndex={0}
@@ -452,7 +564,9 @@ export function Conversation({
                 Loading later…
               </p>
             )}
-            {recovery}
+            <div className="thread-recovery-slot" ref={recoverySlot}>
+              {recovery}
+            </div>
             {error && (
               <p className="thread-note thread-error" role="status">
                 {error}
@@ -462,7 +576,12 @@ export function Conversation({
           <div className="thread-end" ref={end} />
         </div>
       </ScrollArea>
-      <span className="thread-jump" data-shown={!follow.pinned || undefined} inert={follow.pinned}>
+      <span
+        className="thread-jump"
+        ref={jump}
+        data-shown={jumpShown || undefined}
+        inert={!jumpShown}
+      >
         <Button
           size="sm"
           icon="arrow-down"
@@ -488,7 +607,10 @@ export function Conversation({
               />
             )}
           </Collapse>
-          {dock}
+          {answer}
+          <div className="thread-composer" hidden={asking}>
+            {composer}
+          </div>
         </>,
         dockHost,
       )}

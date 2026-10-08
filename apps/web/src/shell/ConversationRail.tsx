@@ -25,7 +25,6 @@ export function ConversationRail({
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
-  // Takes the composer's place while dot waits for an answer; the composer stays mounted, draft and all.
   answer?: ReactNode;
   recovery?: ReactNode;
   visible?: boolean;
@@ -72,14 +71,8 @@ export function ConversationRail({
         error={agent?.error}
         onReplay={onReplay}
         computerReady={computerReady}
-        dock={
-          <>
-            {answer}
-            <div className="thread-composer" hidden={!!answer}>
-              {composer}
-            </div>
-          </>
-        }
+        composer={composer}
+        answer={answer}
       />
     </aside>
   );

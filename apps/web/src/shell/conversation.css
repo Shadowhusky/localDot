@@ -2,9 +2,6 @@
    its foot. Messages, questions, results and the work line are rows of one card map. */
 
 .thread-body {
-  --thread-foot-shown: 0px;
-  /* The scroller's bar keeps a gutter; the foot keeps the same, so their right edges line up. */
-  --thread-gutter: 0px;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -679,7 +676,9 @@
 }
 
 /* Under the thread: the live work line and the composer (or the answer panel). */
+/* The scroller's bar keeps a gutter; the foot keeps the same, so their right edges line up. */
 .thread-foot {
+  --thread-gutter: 0px;
   flex: none;
   min-width: 0;
   padding-right: var(--thread-gutter);
@@ -713,6 +712,8 @@
 }
 
 .thread-jump {
+  /* How much of the foot is in view, so the button keeps clear of it. */
+  --thread-foot-shown: 0px;
   position: absolute;
   z-index: 3;
   left: 50%;
@@ -745,7 +746,10 @@
   border-radius: var(--radius-xl);
   background-color: var(--color-raised);
   box-shadow: var(--shadow-raised);
-  animation: thread-line-in var(--dur-spring) var(--ease-spring);
+  /* It fades in as quickly as the composer it replaces went, and settles on the spring. */
+  animation:
+    thread-fade-in var(--dur-fade) var(--ease-standard),
+    thread-rise var(--dur-spring) var(--ease-spring);
 }
 
 .answer-panel > form {
@@ -841,6 +845,12 @@
   .thread-copy-slot [data-copy] > .ui-icon,
   .md-code-head [data-copy] > .ui-icon {
     animation-name: thread-fade-in;
+  }
+}
+
+@keyframes thread-rise {
+  from {
+    translate: 0 var(--spacing);
   }
 }
 

@@ -13,6 +13,8 @@ interface Tracking {
   // A jump scrolls smoothly; until it lands, its own scroll events must not end the following.
   jumping: boolean;
   glide: { frame: number; from: number; start: number; at: number } | null;
+  // Until then, the next growth glides even where growth is otherwise held at once.
+  glideUntil: number;
   height: number;
 }
 
@@ -57,6 +59,7 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
     frame: 0,
     jumping: false,
     glide: null,
+    glideUntil: 0,
     height: 0,
   });
 
@@ -65,6 +68,8 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       element = t.element;
     if (!element) return;
     t.height = element.scrollHeight;
+    const glideOnce = performance.now() < t.glideUntil;
+    t.glideUntil = 0;
     if (t.pinned) {
       const end = element.scrollHeight - element.clientHeight;
       const lift = end - element.scrollTop;
@@ -76,12 +81,15 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       }
       // A whole screen or more (a first load, a page) is taken at once; one or two rows glide, from
       // wherever a glide in flight has got to, toward the end as it is when each frame is drawn.
-      if (lift >= element.clientHeight || reducedMotion() || !glides.current) {
+      const starts = glides.current || glideOnce;
+      if (lift >= element.clientHeight || reducedMotion() || !(starts || t.glide)) {
         if (t.glide) cancelAnimationFrame(t.glide.frame);
         t.glide = null;
         element.scrollTop = end;
         return;
       }
+      // Where growth is held at once, a glide already under way keeps its pace to the end.
+      if (!starts) return;
       if (t.glide) cancelAnimationFrame(t.glide.frame);
       const glide = { frame: 0, from: element.scrollTop, start: performance.now(), at: -1 };
       const step = (now: number) => {
@@ -150,8 +158,10 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       element = t.element;
     if (!element) return t.pinned;
     const below = element.scrollHeight - element.clientHeight - element.scrollTop;
-    // Rows that arrived before their resize was observed moved the end, not the reader.
-    if (t.pinned && t.observer && element.scrollHeight > t.height + 0.5) {
+    // Rows that arrived before their resize was observed moved the end, not the reader; a reader who
+    // scrolled back further than they grew is reading.
+    const unseen = element.scrollHeight - t.height;
+    if (t.pinned && t.observer && unseen > 0.5 && below < unseen + PIN_SLACK) {
       settle();
       return true;
     }
@@ -189,11 +199,33 @@ export function useFollowScroll(owner: string, follow: boolean, { glide = true }
       t.jumping = true;
       scrollToEnd(t.element);
     },
+    // The growth about to be drawn glides to the end, for a change the reader should see happen.
+    glideNext() {
+      tracking.current.glideUntil = performance.now() + 250;
+    },
     interrupt() {
       const t = tracking.current;
       t.jumping = false;
       if (t.glide) cancelAnimationFrame(t.glide.frame);
       t.glide = null;
+    },
+    // Following the end, an element whose top the end would hide is brought to the top of the view,
+    // this far below it, and held there instead. Says whether it was.
+    reveal(element: HTMLElement, margin = 0): boolean {
+      const t = tracking.current,
+        view = t.element;
+      const content = view?.firstElementChild;
+      if (!view || !t.pinned || !(content instanceof HTMLElement)) return false;
+      const top = topOf(element, view) - topOf(content, view) - margin;
+      if (top >= view.scrollHeight - view.clientHeight - 0.5) return false;
+      t.jumping = false;
+      if (t.glide) cancelAnimationFrame(t.glide.frame);
+      t.glide = null;
+      view.scrollTop = top;
+      setPin(false);
+      t.anchor = element;
+      t.anchorTop = topOf(element, view);
+      return true;
     },
     // Stops following the end before the reader is moved elsewhere on purpose, such as a page.
     release() {
