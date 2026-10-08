@@ -484,7 +484,7 @@ const NOTES = "The quick brown fox\nA fox jumps over the lazy dog\n";
 const textKeyboard: EvalTask = {
   id: "text-keyboard",
   prompt:
-    "Mousepad is open on ~/eval/notes.txt. Using Find and Replace (Ctrl+R), replace every 'fox' with 'cat', then save the file.",
+    "Mousepad is open on ~/eval/notes.txt. Using Find and Replace (Ctrl+R), replace every 'fox' with 'cat'. Then delete the last word of the second line, 'dog', keeping the space before it, and save the file.",
   requires: [],
   maxHandoffs: 2,
   timeoutMs: 300_000,
@@ -524,16 +524,23 @@ const textKeyboard: EvalTask = {
         { name: "replace the rest", act: (v) => [at(v, 276, 236)] },
         { name: "close the dialog", act: (v) => [at(v, 394, 236)], done: (v) => !dialog(v) },
         {
+          name: "delete the last word of the second line",
+          act: () => [key("ctrl+Home"), key("Down"), key("End"), key("BackSpace", 3)],
+        },
+        {
           name: "save",
           act: () => [key("ctrl+s")],
           done: (v) => windowTitled(v, /notes\.txt - Mousepad$/)?.title.startsWith("*") === false,
         },
       ],
-      "Replaced every fox with cat and saved.",
+      "Replaced every fox with cat, deleted the last word and saved.",
     );
   },
   check: async (cell) =>
-    textVerdict(textOf(cell, "eval/notes.txt"), NOTES.replaceAll("fox", "cat")),
+    textVerdict(
+      textOf(cell, "eval/notes.txt"),
+      NOTES.replaceAll("fox", "cat").replace("lazy dog", "lazy "),
+    ),
 };
 
 export const TASKS: readonly EvalTask[] = [
