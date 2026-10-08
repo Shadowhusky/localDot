@@ -1,29 +1,10 @@
 @layer components {
-  .gallery {
+  .atoms {
     display: grid;
     gap: calc(var(--spacing) * 12);
-    max-width: 1120px;
-    margin: 0 auto;
-    padding: calc(var(--spacing) * 10) calc(var(--spacing) * 8) calc(var(--spacing) * 24);
   }
 
-  .gallery-head {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    justify-content: space-between;
-    gap: calc(var(--spacing) * 4);
-  }
-
-  .gallery h1 {
-    font:
-      var(--font-weight-semibold) var(--text-display) / var(--text-display--line-height)
-      var(--font-ui);
-    letter-spacing: var(--text-display--letter-spacing);
-  }
-
-  .gallery-head p,
-  .gallery-section header p {
+  .atoms-section header p {
     max-width: 64ch;
     margin-top: var(--spacing);
     color: var(--color-fg-2);
@@ -32,40 +13,18 @@
     letter-spacing: var(--text-reading--letter-spacing);
   }
 
-  .gallery-appearance {
-    display: flex;
-    gap: var(--spacing);
-    padding: 2px;
-    border-radius: var(--radius-md);
-    background: var(--color-control);
-  }
-
-  .gallery-appearance a {
-    padding: var(--spacing) calc(var(--spacing) * 3);
-    border-radius: var(--radius-sm);
-    color: var(--color-fg-2);
-    font-weight: var(--font-weight-medium);
-    text-decoration: none;
-  }
-
-  .gallery-appearance a[aria-current="page"] {
-    background: var(--color-raised-2);
-    box-shadow: var(--shadow-edge);
-    color: var(--color-fg-1);
-  }
-
-  .gallery-section {
+  .atoms-section {
     display: grid;
     gap: calc(var(--spacing) * 5);
   }
 
-  .gallery-section h2 {
+  .atoms-section h2 {
     font:
       var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
     letter-spacing: var(--text-title--letter-spacing);
   }
 
-  .gallery-panel {
+  .atoms-panel {
     display: grid;
     gap: calc(var(--spacing) * 6);
     padding: calc(var(--spacing) * 6);
@@ -74,14 +33,14 @@
     box-shadow: var(--shadow-raised);
   }
 
-  .gallery-row {
+  .atoms-row {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
     gap: calc(var(--spacing) * 4) calc(var(--spacing) * 6);
   }
 
-  .gallery-label {
+  .atoms-label {
     flex: 0 0 calc(var(--spacing) * 24);
     color: var(--color-fg-3);
     font-size: var(--text-footnote);
@@ -89,46 +48,46 @@
   }
 
   /* Specimens carry a caption, so their row's label lines up with the controls, not the middle. */
-  .gallery-row:has(.gallery-specimen) {
+  .atoms-row:has(.atoms-specimen) {
     align-items: flex-start;
   }
 
-  .gallery-row:has(.gallery-specimen) > .gallery-label {
+  .atoms-row:has(.atoms-specimen) > .atoms-label {
     display: flex;
     align-items: center;
     min-height: calc(var(--spacing) * 11);
   }
 
-  .gallery-specimen {
+  .atoms-specimen {
     display: grid;
     justify-items: start;
     gap: calc(var(--spacing) * 2);
   }
 
-  .gallery-stage {
+  .atoms-stage {
     display: flex;
     align-items: center;
     min-height: calc(var(--spacing) * 11);
   }
 
-  .gallery-specimen figcaption {
+  .atoms-specimen figcaption {
     color: var(--color-fg-3);
     font-size: var(--text-micro);
     line-height: var(--text-micro--line-height);
   }
 
-  .gallery-badged {
+  .atoms-badged {
     position: relative;
     display: inline-flex;
   }
 
-  .gallery-badged .ui-badge {
+  .atoms-badged .ui-badge {
     position: absolute;
     top: 3px;
     right: 3px;
   }
 
-  .gallery-hud {
+  .atoms-hud {
     display: flex;
     align-items: center;
     gap: calc(var(--spacing) * 2);
@@ -140,23 +99,23 @@
     color: var(--color-fg-2);
   }
 
-  .gallery-hud-label {
+  .atoms-hud-label {
     color: var(--color-fg-1);
     font-weight: var(--font-weight-medium);
   }
 
-  .gallery-hud-time {
+  .atoms-hud-time {
     margin-right: var(--spacing);
   }
 
-  .gallery-icons {
+  .atoms-icons {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(calc(var(--spacing) * 48), 1fr));
     gap: calc(var(--spacing) * 2);
     list-style: none;
   }
 
-  .gallery-icons li {
+  .atoms-icons li {
     display: flex;
     align-items: center;
     gap: calc(var(--spacing) * 3);
@@ -167,28 +126,27 @@
     color: var(--color-fg-1);
   }
 
-  .gallery-icons span {
+  .atoms-icons span {
     color: var(--color-fg-2);
     font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
   }
 
   @media (width < 760px) {
-    .gallery {
+    .atoms {
       gap: calc(var(--spacing) * 10);
-      padding: calc(var(--spacing) * 6) calc(var(--spacing) * 4) calc(var(--spacing) * 16);
     }
 
-    .gallery-panel {
+    .atoms-panel {
       padding: calc(var(--spacing) * 4);
     }
 
-    .gallery-label,
-    .gallery-row:has(.gallery-specimen) > .gallery-label {
+    .atoms-label,
+    .atoms-row:has(.atoms-specimen) > .atoms-label {
       flex-basis: 100%;
       min-height: 0;
     }
 
-    .gallery-icons {
+    .atoms-icons {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }

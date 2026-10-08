@@ -244,10 +244,14 @@ under the production CSP.
   selectors as they move a screen onto the kit (T04 guard rule 5). The legacy global
   `button:active{transform:scale(.97)}` is overridden because the kit owns `transform`, but under reduced
   motion its `opacity: .6` still dims a kit button while pressed until T29 deletes it.
-- **Gallery.** `src/ui/gallery/` is its own Vite root (`vite.gallery.config.ts`, output
-  `e2e/out/gallery`), like the spike, and never reaches `dist`. `?appearance=midnight` switches the
-  appearance. It shows every state: rest, hover, pressed, focus-visible, unavailable with a reason, busy,
-  touch, reduced motion and forced colours.
+- **Gallery.** The atoms are one gallery page, `AtomsPage` in `src/ui/gallery/`, which brings its own
+  styles (`atoms.css`, classes `atoms-*`). Until T01's gallery reaches this branch,
+  `vite.kit-gallery.config.ts` builds the page alone (output `e2e/out/kit-gallery`) inside a stand-in
+  shell that loads the same legacy styles T01's gallery does; `?appearance=midnight` switches the
+  appearance. None of it reaches `dist`. When T01's gallery is here, `AtomsPage` joins its page list and
+  the stand-in (`index.html`, `main.tsx`, `shell.css` and the config) goes. Rest, pressed, unavailable
+  and busy are on the page as specimens; hover, focus-visible and the open tooltip are live states, so a
+  screenshot spec drives them for each shot.
 - **Press.** `press.ts` writes `data-pressed` onto the element on pointer-down (and Space), so feedback is
   in the frame the pointer lands, without a render. It lets go when the pointer slides off and returns
   if it comes back. A control up to 120×44 px squeezes (`scale(.97)`); a wider one only darkens. The

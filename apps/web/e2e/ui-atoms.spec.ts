@@ -47,7 +47,7 @@ test.beforeAll(async () => {
   test.setTimeout(120_000);
   scratch = mkdtempSync(join(tmpdir(), "localdot-kit-atoms-"));
   await build({
-    configFile: join(WEB, "vite.gallery.config.ts"),
+    configFile: join(WEB, "vite.kit-gallery.config.ts"),
     logLevel: "warn",
     build: { outDir: scratch, emptyOutDir: true, sourcemap: false },
   });

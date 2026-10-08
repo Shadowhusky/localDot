@@ -8,6 +8,7 @@ import { Kbd } from "../Kbd.tsx";
 import { Separator } from "../Separator.tsx";
 import { Spinner } from "../Spinner.tsx";
 import { Tooltip } from "../Tooltip.tsx";
+import "./atoms.css";
 
 const VARIANTS = ["primary", "secondary", "quiet"] as const;
 const SIZES = ["sm", "md", "lg"] as const;
@@ -15,7 +16,7 @@ const BUSY_FOR = 1600;
 
 function Section({ title, note, children }: { title: string; note: string; children: ReactNode }) {
   return (
-    <section className="gallery-section" aria-label={title}>
+    <section className="atoms-section" aria-label={title}>
       <header>
         <h2>{title}</h2>
         <p>{note}</p>
@@ -36,8 +37,8 @@ function Specimen({
   children: ReactNode;
 }) {
   return (
-    <figure className="gallery-specimen">
-      <div className="gallery-stage" inert={still}>
+    <figure className="atoms-specimen">
+      <div className="atoms-stage" inert={still}>
         {children}
       </div>
       <figcaption>{caption}</figcaption>
@@ -48,8 +49,8 @@ function Specimen({
 function ButtonRow({ variant }: { variant: NonNullable<ButtonProps["variant"]> }) {
   const name = `${variant[0]?.toUpperCase()}${variant.slice(1)}`;
   return (
-    <div className="gallery-row" data-variant={variant}>
-      <span className="gallery-label">{name}</span>
+    <div className="atoms-row" data-variant={variant}>
+      <span className="atoms-label">{name}</span>
       {SIZES.map((size) => (
         <Specimen key={size} caption={size}>
           <Button variant={variant} size={size}>
@@ -90,8 +91,8 @@ function LiveButtons() {
     return () => window.clearTimeout(done);
   }, [busy]);
   return (
-    <div className="gallery-row">
-      <span className="gallery-label">Live</span>
+    <div className="atoms-row">
+      <span className="atoms-label">Live</span>
       <Specimen caption={`Pressed ${presses} ${presses === 1 ? "time" : "times"}`}>
         <Button onClick={() => setPresses((count) => count + 1)}>Press me</Button>
       </Specimen>
@@ -120,10 +121,10 @@ function LiveButtons() {
 function Toolbar() {
   const [paused, setPaused] = useState(false);
   return (
-    <div className="gallery-hud" role="toolbar" aria-label="Task controls">
+    <div className="atoms-hud" role="toolbar" aria-label="Task controls">
       <Spinner size={12} />
-      <span className="gallery-hud-label">{paused ? "Paused" : "Working"}</span>
-      <time className="gallery-hud-time">0:42</time>
+      <span className="atoms-hud-label">{paused ? "Paused" : "Working"}</span>
+      <time className="atoms-hud-time">0:42</time>
       <Separator orientation="vertical" />
       <IconButton
         label={paused ? "Continue" : "Pause after this step"}
@@ -135,30 +136,15 @@ function Toolbar() {
   );
 }
 
-export function Gallery() {
-  const midnight = document.documentElement.dataset.appearance === "midnight";
+// A gallery page: it brings its own styles and none of the page around it.
+export function AtomsPage() {
   return (
-    <main className="gallery">
-      <header className="gallery-head">
-        <div>
-          <h1>Actions and atoms</h1>
-          <p>Every state of the kit's buttons, tooltips, keys, badges and glyphs.</p>
-        </div>
-        <nav className="gallery-appearance" aria-label="Appearance">
-          <a href="?" aria-current={midnight ? undefined : "page"}>
-            Graphite
-          </a>
-          <a href="?appearance=midnight" aria-current={midnight ? "page" : undefined}>
-            Midnight
-          </a>
-        </nav>
-      </header>
-
+    <div className="atoms">
       <Section
         title="Button"
         note="Primary, secondary and quiet at 28, 32 and 40 px. One primary per surface; pressing squeezes a small button and only darkens a wide one."
       >
-        <div className="gallery-panel">
+        <div className="atoms-panel">
           {VARIANTS.map((variant) => (
             <ButtonRow key={variant} variant={variant} />
           ))}
@@ -170,9 +156,9 @@ export function Gallery() {
         title="Icon button"
         note="A 16 px glyph on a 24, 28 or 32 px button with a 44 px target. Its label shows as a tooltip, with the shortcut when there is one."
       >
-        <div className="gallery-panel">
-          <div className="gallery-row">
-            <span className="gallery-label">Sizes</span>
+        <div className="atoms-panel">
+          <div className="atoms-row">
+            <span className="atoms-label">Sizes</span>
             {([24, 28, 32] as const).map((size) => (
               <Specimen key={size} caption={`${size}`}>
                 <IconButton label={`Copy, ${size} px`} icon="copy" size={size} />
@@ -189,14 +175,14 @@ export function Gallery() {
               />
             </Specimen>
             <Specimen caption="With a badge">
-              <span className="gallery-badged">
+              <span className="atoms-badged">
                 <IconButton label="Keys, one needs attention" icon="key-round" />
                 <Badge kind="dot" tone="attention" label="Needs attention" />
               </span>
             </Specimen>
           </div>
-          <div className="gallery-row">
-            <span className="gallery-label">In a bar</span>
+          <div className="atoms-row">
+            <span className="atoms-label">In a bar</span>
             <Toolbar />
           </div>
         </div>
@@ -206,8 +192,8 @@ export function Gallery() {
         title="Tooltip"
         note="Opens after half a second, then at once while the pointer moves along a row. It repeats what the control says and is never the only place a fact appears."
       >
-        <div className="gallery-row">
-          <span className="gallery-label">Triggers</span>
+        <div className="atoms-row">
+          <span className="atoms-label">Triggers</span>
           <Tooltip content="Copies a link to this replay">
             <Button variant="quiet" icon="copy">
               Copy link
@@ -226,8 +212,8 @@ export function Gallery() {
         title="Keys"
         note="Command glyphs on Apple devices, spelled out elsewhere. Hidden on touch screens, where there is no keyboard to press."
       >
-        <div className="gallery-row">
-          <span className="gallery-label">Shortcuts</span>
+        <div className="atoms-row">
+          <span className="atoms-label">Shortcuts</span>
           <Kbd keys={["Mod", "Shift", "."]} />
           <Kbd keys={["Mod", "Enter"]} />
           <Kbd keys={["Escape"]} />
@@ -240,15 +226,15 @@ export function Gallery() {
         title="Badge"
         note="A dot, a count or a short label. Attention is a dot or a rim, never a fill."
       >
-        <div className="gallery-panel">
-          <div className="gallery-row">
-            <span className="gallery-label">Dot</span>
+        <div className="atoms-panel">
+          <div className="atoms-row">
+            <span className="atoms-label">Dot</span>
             <Badge kind="dot" label="Ready" />
             <Badge kind="dot" tone="attention" label="Needs you" />
             <Badge kind="dot" tone="danger" label="Failed" />
           </div>
-          <div className="gallery-row">
-            <span className="gallery-label">Count</span>
+          <div className="atoms-row">
+            <span className="atoms-label">Count</span>
             <Badge kind="count">{3}</Badge>
             <Badge kind="count" tone="attention" label="2 need you">
               {2}
@@ -257,8 +243,8 @@ export function Gallery() {
               {120}
             </Badge>
           </div>
-          <div className="gallery-row">
-            <span className="gallery-label">Label</span>
+          <div className="atoms-row">
+            <span className="atoms-label">Label</span>
             <Badge>Built-in</Badge>
             <Badge tone="attention">Needs you</Badge>
             <Badge tone="danger">Failed</Badge>
@@ -270,8 +256,8 @@ export function Gallery() {
         title="Spinner and separator"
         note="The spinner turns once every 0.9 s and breathes instead under reduced motion. Separators are hairlines."
       >
-        <div className="gallery-row">
-          <span className="gallery-label">Spinner</span>
+        <div className="atoms-row">
+          <span className="atoms-label">Spinner</span>
           <Spinner size={12} label="Loading, small" />
           <Spinner label="Loading" />
         </div>
@@ -279,7 +265,7 @@ export function Gallery() {
       </Section>
 
       <Section title="Icons" note="Lucide outlines at 16 px with a 1.5 px stroke.">
-        <ul className="gallery-icons">
+        <ul className="atoms-icons">
           {(Object.keys(ICONS) as IconName[]).map((name) => (
             <li key={name}>
               <Icon name={name} />
@@ -288,6 +274,6 @@ export function Gallery() {
           ))}
         </ul>
       </Section>
-    </main>
+    </div>
   );
 }
