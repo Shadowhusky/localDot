@@ -5,8 +5,15 @@ import { expect, keepBaselinesAt, test } from "./harness.ts";
 keepBaselinesAt("c14", "w39");
 
 async function conversation(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1180)
-    await page.getByRole("tab", { name: /^Conversation/ }).click();
+  if ((page.viewportSize()?.width ?? 0) < 1180) {
+    // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
+    const tab = page.getByRole("tab", { name: /^Conversation/ });
+    await expect(async () => {
+      await tab.click();
+      await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 1000 });
+    }).toPass();
+    await expect(page.locator(".thread-row").first()).toBeVisible();
+  }
   return page.getByRole("complementary", { name: "Conversation" });
 }
 
