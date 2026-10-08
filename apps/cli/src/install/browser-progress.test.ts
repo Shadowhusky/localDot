@@ -84,7 +84,7 @@ it.each([
   expect(result.status).toBe(404);
   expect(result.body).toBe("");
 });
-it("returns only fixed progress and bounded counters, never layer names or raw fields", () => {
+it("returns only fixed progress and one bounded share, never layer names or raw fields", () => {
   const channel = progressChannel(capability, 4750);
   expect(JSON.parse(request(channel).body)).toEqual({ phase: "release" });
   channel.report({
@@ -98,17 +98,37 @@ it("returns only fixed progress and bounded counters, never layer names or raw f
     phase: "images",
     role: "desktop",
     imagePhase: "downloading",
-    currentBytes: 10,
-    totalBytes: 20,
+    progress: 0.125,
   });
   channel.report({ role: "desktop", phase: "extracting", currentBytes: Infinity, totalBytes: 20 });
   expect(JSON.parse(request(channel).body)).toEqual({
     phase: "images",
     role: "desktop",
     imagePhase: "extracting",
+    progress: 0.125,
   });
+  expect(request(channel).body).not.toContain("private-secret");
   channel.starting();
   expect(JSON.parse(request(channel).body)).toEqual({ phase: "starting" });
+});
+it("counts bytes across every layer and image, so a new layer never moves progress back", () => {
+  const channel = progressChannel(capability, 4750);
+  const share = () => JSON.parse(request(channel).body).progress;
+  const layer = (layer: string, currentBytes: number, totalBytes = 20) =>
+    channel.report({ role: "desktop", phase: "downloading", layer, currentBytes, totalBytes });
+  layer("a", 10);
+  expect(share()).toBe(0.125);
+  layer("b", 0);
+  expect(share()).toBe(0.125);
+  layer("b", 15);
+  expect(share()).toBe(0.156);
+  channel.report({ role: "desktop", phase: "verifying", layer: "a" });
+  layer("b", 20);
+  expect(share()).toBe(0.25);
+  channel.report({ role: "desktop", phase: "ready" });
+  channel.report({ role: "gate", phase: "checking" });
+  channel.report({ role: "gate", phase: "ready" });
+  expect(share()).toBe(0.5);
 });
 it("only completes after valid exact-port sign-in and ignores progress after completion", async () => {
   const channel = progressChannel(capability, 4750);
