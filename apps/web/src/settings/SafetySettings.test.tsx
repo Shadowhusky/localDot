@@ -60,9 +60,9 @@ it("lists the ten classes it can change, then the locked ones as plain text", ()
   ]);
   const locked = screen.getByRole("list", { name: "Can't be changed here" });
   expect([...locked.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
-    "Upload your filesAsks",
+    "Upload your filesAsk",
     "Passwords, codes and card detailsAlways handed to you",
-    "Unclear steps on signed-in sitesAsks",
+    "Unclear steps on signed-in sitesAsk",
   ]);
   expect(within(locked).queryByRole("combobox")).toBeNull();
   expect(
