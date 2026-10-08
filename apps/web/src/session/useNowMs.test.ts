@@ -41,6 +41,16 @@ it.each([
       ev("step.end", 30_000, { status: "ok" }, "s9"),
     ],
   ],
+  [
+    "a timeline mark",
+    () => [
+      ev("approval.resolve", 30_000, {
+        approvalId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N",
+        decision: "approve",
+        by: "user",
+      }),
+    ],
+  ],
 ])("anchors on %s that comes after the latest state", (_, later) => {
   const m = model();
   foldEvents(m, later());

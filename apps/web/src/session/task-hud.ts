@@ -4,6 +4,7 @@ import {
   type AgentStateAt,
   agentStateAt,
   type SessionModel,
+  type StepState,
   screenAt,
   startedCount,
   stepAt,
@@ -103,29 +104,52 @@ function settled(state: string | undefined, facts: TaskFacts): string | undefine
 export const liveState = (model: AgentModel) => settled(model.state?.state, taskFacts(model));
 
 // Replay has only the timeline: a wait is over once the user settles it or a new step starts.
-// The step a Pause waits on may still be acting, so only a new step ends a pause.
 const SETTLES = new Set(["approval.resolve", "ask.answer", "takeover.end"]);
+function settledSince(model: SessionModel, at: AgentStateAt, nowMs: number): boolean {
+  for (let i = model.marks.length - 1; i >= 0; i--) {
+    const mark = model.marks[i];
+    if (!mark || mark.t <= at.t) return false;
+    if (mark.t <= nowMs && SETTLES.has(mark.type)) return true;
+  }
+  return false;
+}
+// A Pause publishes its paused state as soon as it is asked for, and the step in flight runs on.
+// Live shows pausing until the Pause next changes. Replay has no phase, so it shows pausing while
+// the step the Pause was asked in is still open and that request is the Pause's only change since
+// the step began. A held Pause republishes its paused state, so that state's time cannot tell.
+function pausing(model: SessionModel, step: StepState, at: AgentStateAt, nowMs: number): boolean {
+  if ((step.endT ?? Number.POSITIVE_INFINITY) <= nowMs) return false;
+  let requestT: number | undefined;
+  for (let i = model.marks.length - 1; i >= 0; i--) {
+    const mark = model.marks[i];
+    if (!mark || mark.t < step.startT) break;
+    if (mark.t > nowMs || mark.type !== "safety.pause") continue;
+    if (requestT !== undefined) return false;
+    requestT = mark.t;
+  }
+  return requestT !== undefined && requestT <= at.t;
+}
 function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): string {
   if (at.state !== "waiting_user" && at.state !== "paused") return at.state;
-  if ((stepAt(model, nowMs)?.startT ?? Number.NEGATIVE_INFINITY) > at.t) return "acting";
-  if (at.state === "waiting_user")
-    for (let i = model.marks.length - 1; i >= 0; i--) {
-      const mark = model.marks[i];
-      if (!mark || mark.t <= at.t) break;
-      if (mark.t <= nowMs && SETTLES.has(mark.type)) return "acting";
-    }
-  return at.state;
+  const step = stepAt(model, nowMs);
+  if ((step?.startT ?? Number.NEGATIVE_INFINITY) > at.t) return "acting";
+  if (at.state === "waiting_user") return settledSince(model, at, nowMs) ? "acting" : at.state;
+  return step && pausing(model, step, at, nowMs) ? "pausing" : at.state;
 }
 
 const PAST_HOLD_MS = 1200;
 const WORKING = new Set(["acting", "observing", "thinking"]);
-const ended = (a: ActionState) => a.cancel?.t ?? a.resultT;
+// Replay folds the whole recording, so an action's end may still lie ahead of nowMs.
+const ended = (a: ActionState, nowMs: number) => {
+  const t = a.cancel?.t ?? a.resultT;
+  return t !== undefined && t <= nowMs;
+};
 
 export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): TaskHud {
   const n = startedCount(model, nowMs);
   const first = screenAt(model, nowMs)?.firstAction ?? 0;
   const current = n > first ? model.actions[n - 1] : undefined;
-  const acting = current !== undefined && ended(current) === undefined;
+  const acting = current !== undefined && !ended(current, nowMs);
   const elapsedMs = model.startT === null ? 0 : Math.max(0, nowMs - model.startT);
   const elapsedS = elapsedMs >= 5000 ? Math.floor(msToSeconds(elapsedMs)) : null;
   const finished = (row: TaskRow, label: string, caption: string): TaskHud => ({
@@ -158,20 +182,20 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     if (model.ended.reason === "stopped") return finished("stopped", "Task stopped", "Stopped.");
     return finished("failed", "Task failed", "The task failed.");
   }
+  const at = agentStateAt(model, nowMs);
+  const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
   if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.");
   if (facts?.question != null)
     return waiting("question", "Has a question", facts.question || "Waiting for your answer.");
   if (facts?.takeover != null)
     return waiting("takeover", "Your turn", facts.takeover || "Your turn to use the computer.");
-  if (facts?.pause === "pausing")
+  if (facts?.pause === "pausing" || state === "pausing")
     return running("pausing", "Pausing after this step", "Pausing after this step.", acting);
   if (facts?.pause === "resuming") return running("resuming", "Resuming…", "Resuming…", false);
   if (facts?.pause === "uncertain")
     return waiting("paused", "Pause unconfirmed", "Pause is unconfirmed.");
   if (facts?.pause) return waiting("paused", "Paused", "Paused.");
 
-  const at = agentStateAt(model, nowMs);
-  const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
   if (state === "waiting_user") return waiting("waiting", "Waiting for you", "Waiting for you.");
   if (state === "paused")
     return facts?.reason === "budget"
