@@ -21,7 +21,7 @@ import { attachSheetDrag } from "./sheet-drag.ts";
 const EXIT = 320;
 // A page that slides away stays on the page this long.
 const PAGE_EXIT = 320;
-const CURRENT_BODY = ".ui-sheet-page:not([data-leaving]) > .ui-sheet-body";
+const CURRENT_BODY = ".ui-sheet-page:not([data-held], [data-leaving]) > .ui-sheet-body";
 
 // A phone keeps its keyboard down until a field is chosen.
 function fieldFor(element: HTMLElement): HTMLElement | undefined {
@@ -116,20 +116,42 @@ function SheetLayer({
   const [shown, setShown] = useState<{ key: string; direction?: PageView["direction"] }>({
     key: page,
   });
+  // The pages a nested page was opened from stay mounted under it, out of sight and inert, so Back
+  // finds each as it was: its state, its scroll, and the row that led on (kept in openers).
+  const [held, setHeld] = useState<PageView[]>([]);
   const [leaving, setLeaving] = useState<PageView[]>([]);
+  const openers = useRef(new Map<string, Element | null>());
   if (shown.key !== page) {
     const before = shownRef.current;
-    const direction = !back && before.back ? "back" : "forward";
+    const at = held.findIndex((view) => view.key === page);
+    const direction = at >= 0 ? "back" : "forward";
     setShown({ key: page, direction });
-    setLeaving((pages) => [
-      ...pages.filter((view) => view.key !== page && view.key !== before.key),
-      { ...before, direction },
-    ]);
+    if (direction === "forward") {
+      openers.current.set(before.key, document.activeElement);
+      setHeld([...held.filter((view) => view.key !== before.key), { ...before, direction }]);
+      setLeaving(leaving.filter((view) => view.key !== page));
+    } else {
+      setHeld(held.slice(0, at));
+      setLeaving([
+        ...leaving.filter((view) => view.key !== page && view.key !== before.key),
+        { ...before, direction },
+      ]);
+    }
   }
   current.direction = shown.key === page ? shown.direction : undefined;
   useLayoutEffect(() => {
     shownRef.current = current;
   });
+
+  // Pages keep the order they were first shown in, so none moves in the DOM, which would drop its
+  // scroll position and focus. A render that is about to restart with a new page leaves it alone.
+  const order = useRef<string[]>([]);
+  const views = [...held, ...leaving, current];
+  if (shown.key === page) {
+    for (const view of views) if (!order.current.includes(view.key)) order.current.push(view.key);
+    order.current = order.current.filter((key) => views.some((view) => view.key === key));
+  }
+  views.sort((a, b) => order.current.indexOf(a.key) - order.current.indexOf(b.key));
 
   useEffect(() => {
     if (leaving.length === 0) return;
@@ -178,7 +200,8 @@ function SheetLayer({
     if (asking) keep.current?.focus();
   }, [asking]);
 
-  // A new page takes focus from the one that slid away: its first field, else its Back.
+  // A new page takes focus from the one that slid away: its first field, else its Back. A page Back
+  // returns to gives it to the row that led on from it.
   const firstPage = useRef(true);
   useLayoutEffect(() => {
     if (firstPage.current) {
@@ -187,9 +210,14 @@ function SheetLayer({
     }
     const view = pageOf(panel.current, shown.key);
     if (!view) return;
-    const target = fieldFor(view) ?? view.querySelector<HTMLElement>(".ui-sheet-back");
+    const opener = openers.current.get(shown.key);
+    openers.current.delete(shown.key);
+    const target =
+      shown.direction === "back" && canFocus(opener) && view.contains(opener)
+        ? opener
+        : (fieldFor(view) ?? view.querySelector<HTMLElement>(".ui-sheet-back"));
     focusWithoutScroll(target ?? (panel.current as HTMLElement));
-  }, [shown.key]);
+  }, [shown]);
 
   // A bottom sheet eases between the heights of the pages it moves between.
   const sized = useRef({ key: page, height: 0 });
@@ -283,12 +311,13 @@ function SheetLayer({
           </div>
         )}
         <div className="ui-sheet-pages">
-          {/* One keyed list, so a page that starts leaving keeps its instance and state. */}
-          {[...leaving, current].map((view) => (
+          {/* One keyed list, so a page that is held or leaving keeps its instance and state. */}
+          {views.map((view) => (
             <SheetPage
               key={view.key}
               view={view}
-              leaving={view !== current}
+              held={held.includes(view)}
+              leaving={leaving.includes(view)}
               titleId={view === current ? titleId : undefined}
               descriptionId={view === current ? descriptionId : undefined}
               {...pageProps}
@@ -318,7 +347,8 @@ function SheetLayer({
 
 interface SheetPageProps {
   view: PageView;
-  leaving?: boolean;
+  held: boolean;
+  leaving: boolean;
   titleId?: string;
   descriptionId?: string;
   closeLabel: string;
@@ -326,10 +356,11 @@ interface SheetPageProps {
   asking: boolean;
 }
 
-// A page keeps its key as it slides away, so what it holds keeps its state until it is gone.
+// A page keeps its key while it is held or slides away, so what it holds keeps its state.
 function SheetPage({
   view,
-  leaving = false,
+  held,
+  leaving,
   titleId,
   descriptionId,
   closeLabel,
@@ -340,9 +371,10 @@ function SheetPage({
     <div
       className="ui-sheet-page"
       data-page={view.key}
+      data-held={held ? "" : undefined}
       data-leaving={leaving ? "" : undefined}
       data-direction={view.direction}
-      inert={leaving}
+      inert={held || leaving}
     >
       <header className="ui-sheet-header ui-sheet-handle">
         <div className="ui-sheet-heading">

@@ -191,23 +191,40 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await context.close();
       });
 
-      test("a nested page slides in with a Back and slides back out", async () => {
+      test("a nested page slides in with a Back, and Back returns to the row and the scroll it left", async () => {
         const { context, page, seen } = await open(browser, device);
         const sheet = await openSheet(page);
-        await press(sheet.getByRole("button", { name: /^Keys/ }));
+        const body = page.locator(".ui-sheet-page:not([inert]) > .ui-sheet-body");
+        await body.evaluate((element) => element.scrollTo(0, 60));
+        const row = sheet.getByRole("button", { name: /^Keys/ });
+        // From the keyboard on a desktop, so the row has focus as it opens the page.
+        if (touch) await row.tap();
+        else {
+          await row.focus();
+          await page.keyboard.press("Enter");
+        }
         const keys = page.getByRole("dialog", { name: "Keys" });
         await expect(keys).toBeVisible();
         const back = keys.getByRole("button", { name: "Settings", exact: true });
         await expect(back).toBeVisible();
         if (!touch) await expect(back).toBeFocused();
-        await expect(page.locator(".ui-sheet-page")).toHaveCount(1);
         await expect(keys.getByText("Added 2 Oct")).toBeVisible();
-        await press(back);
-        await expect(page.getByRole("dialog", { name: "Models and settings" })).toBeVisible();
-        await expect(page.locator(".ui-sheet-page")).toHaveCount(1);
+        await settled(keys);
+        // The page it came from waits underneath, out of sight and out of reach.
+        await expect(page.locator(".ui-sheet-page:not([inert])")).toHaveCount(1);
+        await expect(page.locator(".ui-sheet-page[data-held]")).toHaveCount(1);
+        await expect(page.locator(".ui-sheet-page[data-held]")).toHaveCSS("opacity", "0");
+
+        if (touch) await back.tap();
+        else await page.keyboard.press("Enter");
+        await expect(sheetOf(page)).toBeVisible();
         await settled(sheetOf(page));
+        await expect(page.locator(".ui-sheet-page")).toHaveCount(1);
+        expect(await body.evaluate((element) => element.scrollTop)).toBe(60);
+        if (!touch) await expect(row).toBeFocused();
+
         // Escape from a nested page still dismisses the whole sheet.
-        await press(sheetOf(page).getByRole("button", { name: /^Keys/ }));
+        await press(row);
         await expect(keys).toBeVisible();
         await page.keyboard.press("Escape");
         await expect(page.getByRole("dialog")).toHaveCount(0);

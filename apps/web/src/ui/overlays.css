@@ -312,7 +312,7 @@
     isolation: isolate;
   }
 
-  /* Pages slide over each other: the one leaving lies on top of the new one while it goes. */
+  /* Pages slide over each other. */
   .ui-sheet-pages {
     position: relative;
     display: flex;
@@ -344,7 +344,8 @@
     }
   }
 
-  .ui-sheet-page[data-leaving] {
+  /* A page under a nested one stays where it slid to, faded out, until Back brings it back. */
+  .ui-sheet-page:is([data-held], [data-leaving]) {
     position: absolute;
     inset: 0;
     opacity: 0;

@@ -329,29 +329,37 @@ function Counter() {
   );
 }
 
+const TITLES = { main: "Models and settings", keys: "Keys", key: "Anthropic key" };
+
 function Pages() {
-  const [page, setPage] = useState<"main" | "keys">("main");
+  const [page, setPage] = useState<keyof typeof TITLES>("main");
+  const back = {
+    main: undefined,
+    keys: { label: "Settings", onBack: () => setPage("main") },
+    key: { label: "Keys", onBack: () => setPage("keys") },
+  }[page];
   return (
-    <Sheet
-      open
-      onClose={() => {}}
-      title={page === "keys" ? "Keys" : "Models and settings"}
-      page={page}
-      back={page === "keys" ? { label: "Settings", onBack: () => setPage("main") } : undefined}
-    >
-      {page === "keys" ? (
-        <label>
-          Key name
-          <input />
-        </label>
-      ) : (
+    <Sheet open onClose={() => {}} title={TITLES[page]} page={page} back={back}>
+      {page === "main" && (
         <>
           <Counter />
           <button type="button" onClick={() => setPage("keys")}>
-            Keys
+            Open keys
           </button>
         </>
       )}
+      {page === "keys" && (
+        <>
+          <label>
+            Key name
+            <input />
+          </label>
+          <button type="button" onClick={() => setPage("key")}>
+            Anthropic
+          </button>
+        </>
+      )}
+      {page === "key" && <p>Added 2 Oct</p>}
     </Sheet>
   );
 }
@@ -359,43 +367,94 @@ function Pages() {
 function pages() {
   return [...document.querySelectorAll<HTMLElement>(".ui-sheet-page")].map((page) => ({
     page: page.dataset.page,
+    held: page.hasAttribute("data-held"),
     leaving: page.hasAttribute("data-leaving"),
     inert: page.hasAttribute("inert"),
     direction: page.dataset.direction,
   }));
 }
 
+// Opens a page from a row, the way a keyboard user would: the row has focus as it is pressed.
+function go(name: string): HTMLElement {
+  const row = screen.getByRole("button", { name });
+  row.focus();
+  fireEvent.click(row);
+  return row;
+}
+
+function back(name: string) {
+  const button = document.querySelector<HTMLElement>(
+    ".ui-sheet-page:not([data-held], [data-leaving]) .ui-sheet-back",
+  );
+  expect(button?.textContent).toBe(name);
+  if (button) fireEvent.click(button);
+}
+
 describe("Sheet pages", () => {
-  it("slides a nested page over the first, which keeps its state until it has gone", () => {
+  it("keeps the page it came from under a nested one, so Back finds it as it was", () => {
     render(<Pages />);
     fireEvent.click(screen.getByRole("button", { name: "Count 0" }));
-    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+    const row = go("Open keys");
     expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
-    expect(pages()).toEqual([
-      { page: "main", leaving: true, inert: true, direction: "forward" },
-      { page: "keys", leaving: false, inert: false, direction: "forward" },
-    ]);
-    expect(document.querySelector("[data-page=main]")?.textContent).toContain("Count 1");
+    const under = { page: "main", held: true, leaving: false, inert: true, direction: "forward" };
+    const keys = { page: "keys", held: false, leaving: false, inert: false, direction: "forward" };
+    expect(pages()).toEqual([under, keys]);
     expect(document.activeElement).toBe(screen.getByLabelText("Key name"));
     wait(400);
-    expect(pages()).toEqual([{ page: "keys", leaving: false, inert: false, direction: "forward" }]);
+    expect(pages()).toEqual([under, keys]);
+    expect(document.querySelector("[data-page=main]")?.textContent).toContain("Count 1");
 
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    back("Settings");
     expect(screen.getByRole("dialog", { name: "Models and settings" })).toBeTruthy();
     expect(pages()).toEqual([
-      { page: "keys", leaving: true, inert: true, direction: "back" },
-      { page: "main", leaving: false, inert: false, direction: "back" },
+      { page: "main", held: false, leaving: false, inert: false, direction: "back" },
+      { page: "keys", held: false, leaving: true, inert: true, direction: "back" },
     ]);
+    expect(document.activeElement).toBe(row);
+    expect(row.isConnected).toBe(true);
+    expect(screen.getByRole("button", { name: "Count 1" })).toBeTruthy();
+    wait(400);
+    expect(pages()).toEqual([
+      { page: "main", held: false, leaving: false, inert: false, direction: "back" },
+    ]);
+  });
+
+  it("goes two pages deep and back one page at a time, each Back landing on its row", () => {
+    render(<Pages />);
+    const keysRow = go("Open keys");
+    wait(400);
+    const keyRow = go("Anthropic");
+    wait(400);
+    expect(pages().map(({ page, held }) => ({ page, held }))).toEqual([
+      { page: "main", held: true },
+      { page: "keys", held: true },
+      { page: "key", held: false },
+    ]);
+
+    back("Keys");
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    expect(pages().find((view) => view.page === "keys")?.direction).toBe("back");
+    expect(document.activeElement).toBe(keyRow);
+    wait(400);
+    expect(pages().map(({ page, held }) => ({ page, held }))).toEqual([
+      { page: "main", held: true },
+      { page: "keys", held: false },
+    ]);
+
+    back("Settings");
+    expect(document.activeElement).toBe(keysRow);
+    wait(400);
+    expect(pages().map(({ page }) => page)).toEqual(["main"]);
   });
 
   it("goes there and back before the first slide ends without doubling a page", () => {
     const errors = vi.spyOn(console, "error").mockImplementation(() => {});
     render(<Pages />);
-    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
-    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    go("Open keys");
+    back("Settings");
     expect(pages()).toEqual([
-      { page: "keys", leaving: true, inert: true, direction: "back" },
-      { page: "main", leaving: false, inert: false, direction: "back" },
+      { page: "main", held: false, leaving: false, inert: false, direction: "back" },
+      { page: "keys", held: false, leaving: true, inert: true, direction: "back" },
     ]);
     expect(errors).not.toHaveBeenCalled();
     errors.mockRestore();
