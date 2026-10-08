@@ -137,9 +137,13 @@ export const WireTarget = Target.extend({
   url: z.string().optional(),
 });
 export type WireTarget = z.infer<typeof WireTarget>;
+// `windowFrame` is the window's frame: with the window id, the identity a lookup always has.
+// `unknown` says the element lookup did not finish in time, which is not the same as no element.
 export const HitTestResult = z.object({
   target: WireTarget.nullable(),
   window: z.number().int().nonnegative().nullable(),
+  windowFrame: Rect.optional(),
+  unknown: z.literal(true).optional(),
   ms: z.number().nonnegative(),
 });
 export type HitTestResult = z.infer<typeof HitTestResult>;

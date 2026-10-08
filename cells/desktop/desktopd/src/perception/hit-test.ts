@@ -9,9 +9,9 @@ import {
 import type { XHelper } from "../x/helper.ts";
 import type { Screenshots } from "./capture.ts";
 import type { ChromiumPerception } from "./cdp.ts";
-import type { CuaDriver, DriverElement } from "./driver.ts";
-import { appToolkit, elementToolkit, frameToDevice, menuBarHeight } from "./mapping.ts";
-import type { NativeAccessibility, NativeElement } from "./native.ts";
+import type { CuaDriver } from "./driver.ts";
+import { appToolkit, frameToDevice } from "./mapping.ts";
+import type { NativeAccessibility, NativeElement, NativeQuery } from "./native.ts";
 
 export interface HelperWindow {
   id: number;
@@ -38,13 +38,21 @@ export interface PerceptionDeps {
   readScaling(): Promise<number>;
 }
 
-const TREE_TIMEOUT_MS = 2500;
+// Each action reads its identity twice: past this the accessibility helper answers "unknown"
+// rather than hold the action.
+export const NATIVE_BUDGET_MS = 300;
 // find walks window after window; it stops inside the daemon client's 5 s find timeout.
 const FIND_BUDGET_MS = 4000;
+const TREE_BUDGET_MS = 1500;
 
 const contains = (r: Rect, p: Point) =>
   p.x >= r.x && p.y >= r.y && p.x < r.x + r.w && p.y < r.y + r.h;
-const area = (r: Rect) => r.w * r.h;
+const frameOf = (w: HelperWindow): Rect => ({
+  x: w.frame[0],
+  y: w.frame[1],
+  w: w.frame[2],
+  h: w.frame[3],
+});
 
 // Every window top first, open menus and popups included, and the screen's change generation,
 // which moves with every damage, map, unmap and move.
@@ -63,146 +71,24 @@ export const DECOR_CLASSES = new Set(["Xfce4-panel", "Plank", "Xfdesktop"]);
 
 // The top-most window at the point, open menus and popups included: input goes to it.
 export function windowUnder(windows: HelperWindow[], point: Point): HelperWindow | undefined {
-  return windows.find(
-    (w) =>
-      !DECOR_CLASSES.has(w.cls) &&
-      contains({ x: w.frame[0], y: w.frame[1], w: w.frame[2], h: w.frame[3] }, point),
-  );
+  return windows.find((w) => !DECOR_CLASSES.has(w.cls) && contains(frameOf(w), point));
 }
 
-interface Mapped {
-  el: DriverElement;
-  rect: Rect;
-}
-
-// Every frame through its toolkit's transform; web content is left to CDP (chromium-web throws).
-export function mapTree(
-  elements: DriverElement[],
-  cls: string,
-  params: { g: number; c: number; windowOrigin: Point },
-): Mapped[] {
-  const app = appToolkit(cls);
-  const byIndex = new Map(elements.map((e) => [e.element_index, e]));
-  const ancestorsOf = (e: DriverElement): string[] => {
-    const roles: string[] = [];
-    let p = e.parent_index === undefined ? undefined : byIndex.get(e.parent_index);
-    for (let i = 0; p && i < 64; i++) {
-      roles.push(p.role);
-      p = p.parent_index === undefined ? undefined : byIndex.get(p.parent_index);
-    }
-    return roles;
-  };
-  const m = menuBarHeight(elements);
-  const out: Mapped[] = [];
-  for (const el of elements) {
-    if (!el.frame) continue;
-    const toolkit = elementToolkit(
-      app,
-      { role: el.role, inWeb: el.in_web_content === true },
-      ancestorsOf(el),
-    );
-    if (toolkit === "chromium-web") continue;
-    out.push({ el, rect: frameToDevice(el.frame, toolkit, { ...params, m }) });
-  }
-  return out;
-}
-
-function targetFrom(
-  point: Point,
-  win: HelperWindow,
-  mapped: Mapped | undefined,
-  source: Target["source"],
-): Target {
-  const base: Target = {
-    point,
-    source,
-    app: clipText(win.cls, 128),
-    window: clipText(win.title, 256),
-  };
-  if (!mapped) return base;
-  const { el, rect } = mapped;
-  return {
-    ...base,
-    bbox: rect,
-    role: clipText(el.role, 64),
-    ...(el.label ? { name: clipText(el.label, 64) } : {}),
-    ...(el.role === "password text" ? { secret: true } : {}),
-  };
-}
-
-async function nativeTarget(
+async function nativeQuery(
   deps: PerceptionDeps,
   win: HelperWindow,
-  el: NativeElement,
-): Promise<Target> {
-  const toolkit = elementToolkit(
-    appToolkit(win.cls),
-    { role: el.role, inWeb: false },
-    el.ancestorRoles,
-  );
-  const frame = frameToDevice(el.frame, toolkit, {
+  windows: HelperWindow[],
+): Promise<NativeQuery> {
+  const parent =
+    win.overrideRedirect && win.transientFor !== null
+      ? windows.find((w) => w.id === win.transientFor)
+      : undefined;
+  return {
+    kit: appToolkit(win.cls),
     g: await deps.readScaling(),
-    c: deps.scale,
-    m: 25,
-    windowOrigin: { x: win.x, y: win.y },
-  });
-  return targetFrom(
-    { x: Math.round(frame.x + frame.w / 2), y: Math.round(frame.y + frame.h / 2) },
-    win,
-    { el: { element_index: 0, role: el.role, label: el.name, depth: el.depth }, rect: frame },
-    "ax",
-  );
-}
-
-// Keyboard focus, not the pointer, determines whether text can be logged. Unknown focus is
-// returned explicitly so the gateway can mask it conservatively.
-export async function focusedTarget(deps: PerceptionDeps): Promise<HitTestResult> {
-  const start = performance.now();
-  const win = (await listWindows(deps.x)).find((w) => w.active && !DECOR_CLASSES.has(w.cls));
-  let target: Target | null = null;
-  if (win) {
-    if (appToolkit(win.cls) === "chromium" && deps.cdp) {
-      target = await deps.cdp.focused(win).catch(() => null);
-    }
-    if (!target && deps.native) {
-      const el = await deps.native.query(win, "focused").catch(() => null);
-      if (el) target = await nativeTarget(deps, win, el);
-    }
-  }
-  return { target, window: win?.id ?? null, ms: Math.round(performance.now() - start) };
-}
-
-export async function hitTest(deps: PerceptionDeps, point: Point): Promise<HitTestResult> {
-  const t0 = performance.now();
-  const windows = await listWindows(deps.x);
-  const win = windowUnder(windows, point);
-  const done = (target: Target | null, window: number | null): HitTestResult => ({
-    target,
-    window,
-    ms: Math.round(performance.now() - t0),
-  });
-  if (!win) return done(null, null);
-  const client = { x: win.x, y: win.y, w: win.w, h: win.h };
-  if (!contains(client, point)) return done(targetFrom(point, win, undefined, "coords"), win.id);
-  if (appToolkit(win.cls) === "libreoffice" && deps.native) {
-    const el = await deps.native.query(win, "namebox").catch(() => null);
-    if (el) {
-      const target = await nativeTarget(deps, win, el);
-      if (target.bbox && contains(target.bbox, point)) return done({ ...target, point }, win.id);
-    }
-  }
-  if (appToolkit(win.cls) === "chromium" && deps.cdp) {
-    const web = await deps.cdp.hitTest(win, point).catch(() => null);
-    if (web) return done(web, win.id);
-  }
-  const g = await deps.readScaling();
-  const c = await chromeScale(deps, win);
-  const state = await deps.driver.windowState(win.pid, win.id, TREE_TIMEOUT_MS);
-  const mapped = mapTree(state.elements, win.cls, { g, c, windowOrigin: { x: win.x, y: win.y } });
-  const hits = mapped
-    .filter((m) => contains(m.rect, point))
-    .sort((a, b) => area(a.rect) - area(b.rect) || b.el.depth - a.el.depth);
-  return done(targetFrom(point, win, hits[0], hits[0] ? "ax" : "coords"), win.id);
+    c: await chromeScale(deps, win),
+    ...(parent ? { parent } : {}),
+  };
 }
 
 // Chromium's own chrome scales by its device scale factor (D13); every other toolkit ignores `c`,
@@ -212,57 +98,117 @@ async function chromeScale(deps: PerceptionDeps, win: HelperWindow): Promise<num
   return deps.cdp.deviceScaleFactor(win).catch(() => deps.scale);
 }
 
+function windowTarget(point: Point, win: HelperWindow): Target {
+  return {
+    point,
+    source: "coords",
+    app: clipText(win.cls, 128),
+    window: clipText(win.title, 256),
+  };
+}
+
+function elementTarget(win: HelperWindow, el: NativeElement, q: NativeQuery): Target {
+  const bbox = frameToDevice(el.frame, el.space, {
+    g: q.g,
+    c: q.c,
+    windowOrigin: { x: win.x, y: win.y },
+  });
+  return {
+    point: { x: Math.round(bbox.x + bbox.w / 2), y: Math.round(bbox.y + bbox.h / 2) },
+    bbox,
+    source: "ax",
+    app: clipText(win.cls, 128),
+    window: clipText(win.title, 256),
+    role: clipText(el.role, 64),
+    ...(el.name ? { name: clipText(el.name, 64) } : {}),
+    ...(el.secret ? { secret: true } : {}),
+    ...(el.editable ? { editable: true } : {}),
+  };
+}
+
+// Keyboard focus, not the pointer, determines whether text can be logged. A lookup that ran out of
+// time is reported as unknown, so the gateway can mask it conservatively.
+export async function focusedTarget(deps: PerceptionDeps): Promise<HitTestResult> {
+  const t0 = performance.now();
+  const windows = await listWindows(deps.x);
+  const win = windows.find((w) => w.active && !DECOR_CLASSES.has(w.cls));
+  const done = (target: Target | null, unknown = false): HitTestResult => ({
+    target,
+    window: win?.id ?? null,
+    ...(win ? { windowFrame: frameOf(win) } : {}),
+    ...(unknown ? { unknown: true as const } : {}),
+    ms: Math.round(performance.now() - t0),
+  });
+  if (!win) return done(null);
+  if (appToolkit(win.cls) === "chromium" && deps.cdp) {
+    const web = await deps.cdp.focused(win).catch(() => null);
+    if (web) return done(web);
+  }
+  if (!deps.native) return done(null);
+  const q = await nativeQuery(deps, win, windows);
+  const answer = await deps.native.focused(win, q, NATIVE_BUDGET_MS);
+  if ("unknown" in answer) return done(null, true);
+  return done(answer.element ? elementTarget(win, answer.element, q) : null);
+}
+
+export async function hitTest(deps: PerceptionDeps, point: Point): Promise<HitTestResult> {
+  const t0 = performance.now();
+  const windows = await listWindows(deps.x);
+  const win = windowUnder(windows, point);
+  const done = (target: Target | null, unknown = false): HitTestResult => ({
+    target,
+    window: win?.id ?? null,
+    ...(win ? { windowFrame: frameOf(win) } : {}),
+    ...(unknown ? { unknown: true as const } : {}),
+    ms: Math.round(performance.now() - t0),
+  });
+  if (!win) return done(null);
+  const client = { x: win.x, y: win.y, w: win.w, h: win.h };
+  if (!contains(client, point) || !deps.native) return done(windowTarget(point, win));
+  // Web content is CDP's and wins; Chromium's own UI is the helper's. Both run at once.
+  const web =
+    appToolkit(win.cls) === "chromium" && deps.cdp
+      ? deps.cdp.hitTest(win, point).catch(() => null)
+      : null;
+  const q = await nativeQuery(deps, win, windows);
+  const answer = await deps.native.at(win, point, q, NATIVE_BUDGET_MS);
+  const page = await web;
+  if (page) return done(page);
+  if ("unknown" in answer) return done(windowTarget(point, win), true);
+  const target = answer.element ? elementTarget(win, answer.element, q) : undefined;
+  if (!target?.bbox || !contains(target.bbox, point)) return done(windowTarget(point, win));
+  return done({ ...target, point });
+}
+
 export async function findTarget(deps: PerceptionDeps, req: FindRequest): Promise<HitTestResult> {
   const t0 = performance.now();
   const wanted = req.name.toLowerCase();
-  const windows = (await listWindows(deps.x)).filter(
+  const { windows, generation } = await windowStack(deps.x);
+  const searched = windows.filter(
     (w) => !DECOR_CLASSES.has(w.cls) && (!req.app || w.cls.toLowerCase() === req.app.toLowerCase()),
   );
-  const g = await deps.readScaling();
-  for (const win of windows) {
+  const found = (target: Target, win: HelperWindow): HitTestResult => ({
+    target,
+    window: win.id,
+    windowFrame: frameOf(win),
+    ms: Math.round(performance.now() - t0),
+  });
+  for (const win of searched) {
     const left = FIND_BUDGET_MS - (performance.now() - t0);
     if (left <= 0) break;
-    if (appToolkit(win.cls) === "libreoffice" && wanted === "name box" && deps.native) {
-      const el = await deps.native.query(win, "namebox").catch(() => null);
-      if (el && (!req.role || req.role === el.role)) {
-        return {
-          target: await nativeTarget(deps, win, el),
-          window: win.id,
-          ms: Math.round(performance.now() - t0),
-        };
-      }
-    }
     if (appToolkit(win.cls) === "chromium" && deps.cdp) {
       const web = await deps.cdp.find(win, req).catch(() => null);
-      if (web) return { target: web, window: win.id, ms: Math.round(performance.now() - t0) };
-      continue;
+      if (web) return found(web, win);
     }
-    const state = await deps.driver.windowState(win.pid, win.id, Math.min(TREE_TIMEOUT_MS, left));
-    const mapped = mapTree(state.elements, win.cls, {
-      g,
-      c: deps.scale,
-      windowOrigin: { x: win.x, y: win.y },
-    });
+    if (!deps.native) continue;
+    const q = await nativeQuery(deps, win, windows);
+    const tree = await deps.native.tree(win, q, Math.min(TREE_BUDGET_MS, left), generation);
+    if ("unknown" in tree) continue;
+    const role = (el: NativeElement) => !req.role || el.role === req.role;
     const match =
-      mapped.find(
-        (m) => (m.el.label ?? "").toLowerCase() === wanted && (!req.role || m.el.role === req.role),
-      ) ??
-      mapped.find(
-        (m) =>
-          (m.el.label ?? "").toLowerCase().startsWith(wanted) &&
-          (!req.role || m.el.role === req.role),
-      );
-    if (match) {
-      const point = {
-        x: Math.round(match.rect.x + match.rect.w / 2),
-        y: Math.round(match.rect.y + match.rect.h / 2),
-      };
-      return {
-        target: targetFrom(point, win, match, "ax"),
-        window: win.id,
-        ms: Math.round(performance.now() - t0),
-      };
-    }
+      tree.elements.find((el) => el.name.toLowerCase() === wanted && role(el)) ??
+      tree.elements.find((el) => el.name.toLowerCase().startsWith(wanted) && role(el));
+    if (match) return found(elementTarget(win, match, q), win);
   }
   return { target: null, window: null, ms: Math.round(performance.now() - t0) };
 }

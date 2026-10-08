@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { hidpiReport } from "./app.ts";
-import { type Run, readXsettings } from "./xsettings.ts";
+import { type Run, readXsettings, windowScaling } from "./xsettings.ts";
 
 const UID = 911;
 const SET = { "/Gdk/WindowScalingFactor": "2", "/Xft/DPI": "96" };
@@ -113,5 +113,37 @@ describe("readXsettings", () => {
       const read = intercept(run, "-c xsettings -l", async () => ({ stdout: listing }));
       expect(await readXsettings(UID, read), label).toBeNull();
     }
+  });
+});
+
+describe("windowScaling", () => {
+  it("reads the settings once per interval and falls back to the cell's scale when unknown", async () => {
+    let now = 1_000;
+    const reads: number[] = [];
+    let answer: { windowScalingFactor: number | null; xftDpi: number | null } | null = {
+      windowScalingFactor: 2,
+      xftDpi: 96,
+    };
+    const scaling = windowScaling(
+      async () => {
+        reads.push(now);
+        return answer;
+      },
+      2,
+      5000,
+      () => now,
+    );
+    expect(await scaling()).toBe(2);
+    now += 4000;
+    answer = { windowScalingFactor: null, xftDpi: 96 };
+    expect(await scaling()).toBe(2);
+    expect(reads).toEqual([1_000]);
+    now += 2000;
+    expect(await scaling()).toBe(1);
+    answer = null;
+    now += 6000;
+    expect(await windowScaling(async () => answer, 2)()).toBe(2);
+    expect(await windowScaling(async () => Promise.reject(new Error("no xfconfd")), 1)()).toBe(1);
+    expect(reads).toEqual([1_000, 7_000]);
   });
 });

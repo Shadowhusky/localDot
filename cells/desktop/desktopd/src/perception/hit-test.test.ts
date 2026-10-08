@@ -1,7 +1,23 @@
+import type { Point, Rect } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import type { XHelper } from "../x/helper.ts";
-import type { CuaDriver, DriverElement } from "./driver.ts";
-import { findTarget, hitTest, type PerceptionDeps } from "./hit-test.ts";
+import type { ChromiumPerception } from "./cdp.ts";
+import type { CuaDriver } from "./driver.ts";
+import {
+  findTarget,
+  focusedTarget,
+  type HelperWindow,
+  hitTest,
+  NATIVE_BUDGET_MS,
+  type PerceptionDeps,
+} from "./hit-test.ts";
+import type {
+  NativeAccessibility,
+  NativeAnswer,
+  NativeElement,
+  NativeQuery,
+  NativeTree,
+} from "./native.ts";
 
 const win = (
   id: number,
@@ -10,76 +26,117 @@ const win = (
   y: number,
   w: number,
   h: number,
-  pid = 10 * id,
-) => ({
+  over: Partial<HelperWindow> = {},
+): HelperWindow => ({
   id,
-  pid,
+  pid: 10 * id,
   cls,
   title: `${cls} window`,
   x,
   y,
   w,
   h,
-  frame: [x - 1, y - 24, w + 2, h + 25] as [number, number, number, number],
+  frame: [x - 1, y - 24, w + 2, h + 25],
   active: id === 1,
   overrideRedirect: false,
-  transientFor: null as number | null,
+  transientFor: null,
+  ...over,
 });
-
-function deps(
-  windows: ReturnType<typeof win>[],
-  trees: Record<number, DriverElement[]>,
-  scale: 1 | 2 = 2,
-): PerceptionDeps & { driverCalls: number[] } {
-  const driverCalls: number[] = [];
-  const x = {
-    call: async (cmd: string) => (cmd === "windows" ? { windows, generation: 1 } : {}),
-  } as unknown as XHelper;
-  const driver = {
-    windowState: async (_pid: number, id: number) => {
-      driverCalls.push(id);
-      return { elements: trees[id] ?? [] };
-    },
-  } as unknown as CuaDriver;
-  return { x, driver, scale, readScaling: async () => scale, driverCalls };
-}
 
 const el = (
-  index: number,
   role: string,
-  label: string,
-  frame: DriverElement["frame"],
-  depth: number,
-  parent?: number,
-  inWeb = false,
-): DriverElement => ({
-  element_index: index,
+  name: string,
+  frame: Rect,
+  over: Partial<NativeElement> = {},
+): NativeElement => ({
   role,
-  label,
+  name,
   frame,
-  depth,
-  parent_index: parent,
-  in_web_content: inWeb,
+  space: "gtk",
+  secret: false,
+  editable: false,
+  ...over,
 });
 
+interface Asked {
+  cmd: string;
+  win: number;
+  point?: Point;
+  q: NativeQuery;
+  budget: number;
+  generation?: number;
+}
+
+// A scripted accessibility helper: answers per window and records what it was asked.
+function fakeNative(answers: {
+  at?: (win: HelperWindow, point: Point) => NativeAnswer;
+  focused?: (win: HelperWindow) => NativeAnswer;
+  tree?: (win: HelperWindow) => NativeTree;
+}): NativeAccessibility & { asked: Asked[] } {
+  const asked: Asked[] = [];
+  return {
+    asked,
+    async at(w, point, q, budget) {
+      asked.push({ cmd: "at", win: w.id, point, q, budget });
+      return answers.at?.(w, point) ?? { element: null };
+    },
+    async focused(w, q, budget) {
+      asked.push({ cmd: "focused", win: w.id, q, budget });
+      return answers.focused?.(w) ?? { element: null };
+    },
+    async tree(w, q, budget, generation) {
+      asked.push({ cmd: "tree", win: w.id, q, budget, generation });
+      return answers.tree?.(w) ?? { elements: [] };
+    },
+    async content() {
+      return null;
+    },
+  };
+}
+
+function deps(
+  windows: HelperWindow[],
+  native?: NativeAccessibility,
+  extra: Partial<PerceptionDeps> = {},
+): PerceptionDeps & { stackCalls: Record<string, unknown>[] } {
+  const stackCalls: Record<string, unknown>[] = [];
+  const x = {
+    call: async (cmd: string, args: Record<string, unknown> = {}) => {
+      if (cmd !== "windows") return {};
+      stackCalls.push(args);
+      return { windows, generation: 41 };
+    },
+  } as unknown as XHelper;
+  return {
+    x,
+    driver: {} as CuaDriver,
+    ...(native ? { native } : {}),
+    scale: 2,
+    readScaling: async () => 2,
+    stackCalls,
+    ...extra,
+  };
+}
+
+const IMAGE = win(11, "Gimp", 2, 110, 1600, 1200);
+
 describe("hitTest", () => {
-  it("picks the top-most window under the point and the smallest mapped element containing it", async () => {
-    // The helper lists windows top-most first: the terminal (active, on top) overlaps Thunar.
-    const d = deps(
-      [win(1, "Xfce4-terminal", 500, 300, 800, 600), win(2, "Thunar", 1, 78, 1280, 960)],
-      {
-        2: [
-          el(0, "frame", "Thunar window", { x: 0, y: 0, w: 640, h: 480 }, 0),
-          el(1, "menu bar", "", { x: 0, y: 39, w: 640, h: 27 }, 1, 0),
-          el(2, "menu", "File", { x: 0, y: 39, w: 39, h: 27 }, 2, 1),
-        ],
-        1: [el(0, "frame", "Terminal", { x: 250, y: 150, w: 400, h: 300 }, 0)],
-      },
-    );
-    // (20,100) is outside the terminal's frame (x ≥ 499), so Thunar is the window under it;
-    // the File menu at frame (0,39,39,27) maps to device (1,78,78,54) with origin (1,78), g = 2.
+  it("asks the helper about the top-most window's point and maps its element to device pixels", async () => {
+    // The terminal (active, on top) overlaps Thunar.
+    const terminal = win(1, "Xfce4-terminal", 500, 300, 800, 600);
+    const thunar = win(2, "Thunar", 1, 78, 1280, 960);
+    const native = fakeNative({
+      at: (w) =>
+        w.id === 2
+          ? { element: el("menu", "File", { x: 0, y: 39, w: 39, h: 27 }) }
+          : { element: el("terminal", "", { x: 250, y: 150, w: 400, h: 300 }) },
+    });
+    const d = deps([terminal, thunar], native);
+    // (20,100) is outside the terminal's frame; the File menu at frame (0,39,39,27) maps to device
+    // (1,78,78,54) with origin (1,78), g = 2.
     const hit = await hitTest(d, { x: 20, y: 100 });
-    expect(hit.window).toBe(2);
+    expect(hit).toMatchObject({ window: 2, windowFrame: { x: 0, y: 54, w: 1282, h: 985 } });
+    expect(hit.unknown).toBeUndefined();
     expect(hit.target).toMatchObject({
       point: { x: 20, y: 100 },
       source: "ax",
@@ -89,101 +146,220 @@ describe("hitTest", () => {
       window: "Thunar window",
       bbox: { x: 1, y: 78, w: 78, h: 54 },
     });
-    expect(d.driverCalls).toEqual([2]);
-    // (600,400) is inside both; the top-most (terminal) wins.
-    const inTerminal = await hitTest(d, { x: 600, y: 400 });
-    expect(inTerminal.window).toBe(1);
-    expect(inTerminal.target?.app).toBe("Xfce4-terminal");
+    expect(native.asked).toEqual([
+      {
+        cmd: "at",
+        win: 2,
+        point: { x: 20, y: 100 },
+        q: { kit: "gtk", g: 2, c: 2 },
+        budget: NATIVE_BUDGET_MS,
+      },
+    ]);
+    expect(d.stackCalls).toEqual([{ stack: true }]);
+    expect((await hitTest(d, { x: 600, y: 400 })).window).toBe(1);
   });
 
-  it("names an open menu over its parent window as the window under the point", async () => {
-    const menu = {
-      ...win(30, "Gimp", -10, 150, 640, 1108),
-      frame: [-10, 150, 640, 1108] as [number, number, number, number],
+  it("reports an open menu over its parent window, and passes the parent along", async () => {
+    const menu = win(30, "Gimp", -10, 150, 640, 1108, {
+      frame: [-10, 150, 640, 1108],
       overrideRedirect: true,
-      transientFor: 2,
-    };
-    const d = deps([menu, win(2, "Gimp", 2, 110, 1600, 1200)], { 30: [], 2: [] });
-    const hit = await hitTest(d, { x: 115, y: 296 });
+      transientFor: 11,
+      title: "",
+    });
+    const native = fakeNative({
+      at: (w) =>
+        w.id === 30
+          ? { element: el("menu item", "Open...", { x: 7, y: 136, w: 296, h: 25 }) }
+          : { element: null },
+    });
+    const hit = await hitTest(deps([menu, IMAGE], native), { x: 115, y: 296 });
     expect(hit.window).toBe(30);
-    expect(d.driverCalls).toEqual([30]);
+    expect(hit.target).toMatchObject({ role: "menu item", name: "Open...", source: "ax" });
+    expect(native.asked[0]?.q.parent?.id).toBe(11);
+  });
+
+  it("names whatever window input would go to, a window another app holds over a button too", async () => {
+    // An override-redirect window over the image window takes the press, whatever it claims to be.
+    const cover = win(31, "Other", 100, 280, 300, 60, {
+      frame: [100, 280, 300, 60],
+      overrideRedirect: true,
+    });
+    const hit = await hitTest(deps([cover, IMAGE], fakeNative({})), { x: 115, y: 296 });
+    expect(hit.window).toBe(31);
+    expect(hit.target).toMatchObject({ app: "Other", source: "coords" });
+  });
+
+  it("keeps the window when the lookup runs out of time, and says it is unknown", async () => {
+    const native = fakeNative({ at: () => ({ unknown: true }) });
+    const hit = await hitTest(deps([IMAGE], native), { x: 40, y: 250 });
+    expect(hit).toMatchObject({
+      window: 11,
+      windowFrame: { x: 1, y: 86, w: 1602, h: 1225 },
+      unknown: true,
+      target: { source: "coords", app: "Gimp", point: { x: 40, y: 250 } },
+    });
+  });
+
+  it("treats no element, or one that misses the point, as a complete window-level answer", async () => {
+    for (const answer of [
+      { element: null },
+      { element: el("button", "Elsewhere", { x: 500, y: 500, w: 10, h: 10 }) },
+    ]) {
+      const native = fakeNative({ at: () => answer });
+      const hit = await hitTest(deps([IMAGE], native), { x: 40, y: 250 });
+      expect(hit.target).toMatchObject({ source: "coords" });
+      expect(hit.unknown).toBeUndefined();
+    }
   });
 
   it("returns a coordinates-only target on a window's decoration and nothing on empty desktop", async () => {
-    const d = deps([win(2, "Thunar", 1, 78, 1280, 960)], { 2: [] });
+    const native = fakeNative({});
+    const d = deps([win(2, "Thunar", 1, 78, 1280, 960)], native);
     const title = await hitTest(d, { x: 100, y: 60 });
     expect(title.target).toMatchObject({ source: "coords", app: "Thunar" });
     expect(title.target?.bbox).toBeUndefined();
     const nothing = await hitTest(d, { x: 2500, y: 1500 });
-    expect(nothing.target).toBeNull();
-    expect(nothing.window).toBeNull();
+    expect(nothing).toEqual({ target: null, window: null, ms: expect.any(Number) });
+    expect(native.asked).toEqual([]);
   });
 
   it("never names the panel, the dock or the desktop as the window under a point", async () => {
-    const d = deps([win(9, "Xfce4-panel", 0, 0, 2560, 54), win(2, "Thunar", 1, 78, 1280, 960)], {
-      2: [],
-      9: [],
+    const native = fakeNative({});
+    const panel = win(9, "Xfce4-panel", 0, 0, 2560, 54);
+    const onPanel = await hitTest(deps([panel, win(2, "Thunar", 1, 78, 1280, 960)], native), {
+      x: 100,
+      y: 20,
     });
-    const onPanel = await hitTest(d, { x: 100, y: 20 });
     expect(onPanel.target).toBeNull();
     expect(onPanel.window).toBeNull();
-    expect(d.driverCalls).toEqual([]);
+    expect(native.asked).toEqual([]);
   });
 
-  it("flags password fields as secret and clips long names", async () => {
-    const d = deps([win(3, "Mousepad", 0, 54, 1000, 800)], {
-      3: [el(0, "password text", "x".repeat(200), { x: 10, y: 40, w: 100, h: 20 }, 1)],
+  it("flags secret and editable fields and clips long names", async () => {
+    const native = fakeNative({
+      at: () => ({
+        element: el(
+          "password text",
+          "x".repeat(200),
+          { x: 10, y: 40, w: 100, h: 20 },
+          { secret: true, editable: true },
+        ),
+      }),
     });
     // GTK3 with origin (0,54), g = 2: device = (0,54) + ((10,40) − (0,27)) × 2 = (20,80), size 200×40.
-    const hit = await hitTest(d, { x: 50, y: 90 });
+    const hit = await hitTest(deps([win(3, "Mousepad", 0, 54, 1000, 800)], native), {
+      x: 50,
+      y: 90,
+    });
     expect(hit.target?.bbox).toEqual({ x: 20, y: 80, w: 200, h: 40 });
-    expect(hit.target?.secret).toBe(true);
+    expect(hit.target).toMatchObject({ secret: true, editable: true });
     expect(hit.target?.name?.length).toBe(64);
     expect(hit.target?.name?.endsWith("…")).toBe(true);
   });
 
-  it("applies the VCL shift inside LibreOffice tool bars", async () => {
-    const d = deps([win(4, "libreoffice-calc", 0, 77, 2560, 1523)], {
-      4: [
-        el(0, "frame", "Calc", { x: 0, y: 38, w: 1280, h: 762 }, 0),
-        el(1, "menu", "File", { x: 0, y: 38, w: 39, h: 27 }, 1, 0),
-        el(2, "tool bar", "Standard", { x: 0, y: 40, w: 1280, h: 36 }, 1, 0),
-        el(3, "button", "New", { x: 4, y: 40, w: 45, h: 36 }, 2, 2),
-      ],
+  it("maps Chromium's own UI by its device scale factor after CDP has looked", async () => {
+    const chromium = win(4, "Chromium", 0, 54, 2560, 1414, { frame: [0, 54, 2560, 1414] });
+    const native = fakeNative({
+      at: () => ({
+        element: el("button", "Reload", { x: 78, y: 73, w: 34, h: 34 }, { space: "chrome" }),
+      }),
     });
-    const hit = await hitTest(d, { x: 40, y: 150 });
+    const looked: Point[] = [];
+    const cdp = {
+      hitTest: async (_w: HelperWindow, p: Point) => {
+        looked.push(p);
+        return null;
+      },
+      deviceScaleFactor: async () => 2,
+    } as unknown as ChromiumPerception;
+    const hit = await hitTest(deps([chromium], native, { cdp }), { x: 189, y: 179 });
+    expect(looked).toEqual([{ x: 189, y: 179 }]);
     expect(hit.target).toMatchObject({
       role: "button",
-      name: "New",
-      bbox: { x: 8, y: 134, w: 90, h: 72 },
+      name: "Reload",
+      bbox: { x: 156, y: 146, w: 68, h: 68 },
     });
+    expect(native.asked[0]?.q).toEqual({ kit: "chromium", g: 2, c: 2 });
+    const link = { point: { x: 900, y: 700 }, source: "dom" as const, role: "link", name: "Docs" };
+    const page = {
+      hitTest: async () => link,
+      deviceScaleFactor: async () => 2,
+    } as unknown as ChromiumPerception;
+    expect(
+      (await hitTest(deps([chromium], native, { cdp: page }), { x: 900, y: 700 })).target,
+    ).toEqual(link);
+  });
+});
+
+describe("focusedTarget", () => {
+  const dialog = win(1, "Gimp", 2, 222, 1188, 734);
+
+  it("reports the focused element of the active window", async () => {
+    const native = fakeNative({
+      focused: () => ({
+        element: el("text", "", { x: 380, y: 355, w: 161, h: 28 }, { editable: true }),
+      }),
+    });
+    const focus = await focusedTarget(deps([dialog], native));
+    // origin (2,222): device = (2,222) + ((380,355) − (1,111)) × 2 = (760,710), size 322×56.
+    expect(focus).toMatchObject({
+      window: 1,
+      windowFrame: { x: 1, y: 198, w: 1190, h: 759 },
+      target: {
+        role: "text",
+        editable: true,
+        bbox: { x: 760, y: 710, w: 322, h: 56 },
+        point: { x: 921, y: 738 },
+      },
+    });
+    expect(focus.unknown).toBeUndefined();
+  });
+
+  it("keeps no focused element and an unfinished lookup apart", async () => {
+    const none = await focusedTarget(deps([dialog], fakeNative({})));
+    expect(none).toMatchObject({ target: null, window: 1 });
+    expect(none.unknown).toBeUndefined();
+    const late = await focusedTarget(
+      deps([dialog], fakeNative({ focused: () => ({ unknown: true }) })),
+    );
+    expect(late).toMatchObject({ target: null, window: 1, unknown: true });
   });
 });
 
 describe("findTarget", () => {
   it("finds an element by role and name in the top-most matching window", async () => {
-    const d = deps([win(4, "libreoffice-calc", 0, 77, 2560, 1523)], {
-      4: [
-        el(0, "frame", "Calc", { x: 0, y: 38, w: 1280, h: 762 }, 0),
-        el(1, "text", "Name Box", { x: 10, y: 80, w: 100, h: 24 }, 2, 0),
-      ],
+    const calc = win(4, "libreoffice-calc", 0, 110, 2560, 1358);
+    const native = fakeNative({
+      tree: () => ({
+        elements: [
+          el("frame", "Calc", { x: 0, y: 27, w: 1280, h: 707 }),
+          el("text", "Name Box", { x: 4, y: 161, w: 119, h: 26 }, { editable: true }),
+        ],
+      }),
     });
+    const d = deps([calc], native);
     const found = await findTarget(d, { name: "name box" });
     expect(found.target).toMatchObject({
       role: "text",
       name: "Name Box",
-      bbox: { x: 20, y: 161, w: 200, h: 48 },
+      bbox: { x: 8, y: 322, w: 238, h: 52 },
+      point: { x: 127, y: 348 },
     });
-    expect(found.target?.point).toEqual({ x: 120, y: 185 });
+    // The tree is asked for with the screen's change generation, which keys its cache.
+    expect(native.asked[0]).toMatchObject({ cmd: "tree", win: 4, generation: 41 });
     expect((await findTarget(d, { name: "Nope", role: "button" })).target).toBeNull();
   });
 
   it("never looks in the panel, the dock or the desktop window", async () => {
-    const d = deps([win(9, "Xfce4-panel", 0, 0, 2560, 54), win(4, "Thunar", 1, 78, 1280, 960)], {
-      9: [el(0, "push button", "Search", { x: 10, y: 5, w: 30, h: 20 }, 1)],
-      4: [],
+    const native = fakeNative({
+      tree: (w) =>
+        w.id === 9
+          ? { elements: [el("push button", "Search", { x: 10, y: 5, w: 30, h: 20 })] }
+          : { elements: [] },
     });
+    const panel = win(9, "Xfce4-panel", 0, 0, 2560, 54);
+    const d = deps([panel, win(4, "Thunar", 1, 78, 1280, 960)], native);
     expect((await findTarget(d, { name: "Search" })).target).toBeNull();
-    expect(d.driverCalls).toEqual([4]);
+    expect(native.asked.map((a) => a.win)).toEqual([4]);
   });
 });

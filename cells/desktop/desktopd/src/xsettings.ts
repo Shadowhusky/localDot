@@ -86,6 +86,28 @@ export async function readXsettings(
   }
 }
 
+// The window scaling factor the hit tests map with. It changes only with the session's settings,
+// and one read is three process spawns: it is read again at most every `ttlMs`. Unknown
+// settings mean the cell's own scale.
+export function windowScaling(
+  read: () => Promise<Xsettings | null>,
+  fallback: number,
+  ttlMs = 5000,
+  now: () => number = Date.now,
+): () => Promise<number> {
+  let kept: { at: number; value: Promise<number> } | undefined;
+  return () => {
+    if (!kept || now() - kept.at > ttlMs) {
+      const value = read().then(
+        (s) => (s === null ? fallback : (s.windowScalingFactor ?? 1)),
+        () => fallback,
+      );
+      kept = { at: now(), value };
+    }
+    return kept.value;
+  };
+}
+
 export async function readScreen(): Promise<Screen | null> {
   try {
     const { stdout } = await execFileAsync("xdpyinfo", []);
