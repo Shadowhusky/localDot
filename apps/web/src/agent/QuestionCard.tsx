@@ -1,38 +1,29 @@
-import type { ReactNode } from "react";
 import type { AgentQuestion } from "./model.ts";
 
-// The answer controller is separate. History cards never submit an answer or infer ownership.
-export function QuestionCard({
-  question,
-  pending,
-  children,
-}: {
-  question: AgentQuestion;
-  pending: boolean;
-  children?: ReactNode;
-}) {
+const UNANSWERED = {
+  timeout: "No answer in time, so dot carried on.",
+  stop: "The task stopped before an answer.",
+  pause: "The task paused before an answer.",
+} as const;
+
+// dot's question in the thread. The answer panel takes the composer's place while it waits; the
+// user's reply then shows as their own message under it.
+export function QuestionCard({ question, pending }: { question: AgentQuestion; pending: boolean }) {
   const answer = question.answer;
-  const selected = question.options.find((option) => option.key === answer?.option);
   return (
-    <section className="question-card" aria-label="Question">
-      <div className="activity-heading">
-        <h3>Question</h3>
-        <span>
-          {answer
-            ? answer.by === "stop"
-              ? "Stopped"
-              : answer.by === "timeout"
-                ? "Timed out"
-                : "Answered"
-            : pending
-              ? "Waiting for you"
-              : "No longer waiting"}
-        </span>
-      </div>
-      <p>{question.question}</p>
-      {answer?.option && <p>Answer: {selected?.text ?? answer.option}</p>}
-      {answer?.text && <p>{answer.text}</p>}
-      {children}
-    </section>
+    <article className="thread-question" aria-label="Question">
+      <p className="thread-question-text">{question.question}</p>
+      {answer && answer.by !== "user" ? (
+        <p className="thread-note">{UNANSWERED[answer.by]}</p>
+      ) : !answer && !pending ? (
+        <p className="thread-note">dot stopped waiting for an answer.</p>
+      ) : null}
+    </article>
   );
+}
+
+export function answerText(question: AgentQuestion): string {
+  const answer = question.answer;
+  const chosen = question.options.find((option) => option.key === answer?.option);
+  return [chosen?.text ?? answer?.option, answer?.text].filter(Boolean).join("\n\n");
 }

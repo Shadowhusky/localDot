@@ -8,12 +8,15 @@ export type AutonomyMode = z.infer<typeof AutonomyMode>;
 export const ActionClass = z.enum([
   "reading",
   "browsing",
+  "computer",
   "purchase",
   "send",
   "post",
   "delete",
   "download_execute",
   "system_settings",
+  "memory",
+  "upload",
   "credentials",
   "unknown",
 ]);
@@ -21,23 +24,41 @@ export type ActionClass = z.infer<typeof ActionClass>;
 export const EDITABLE_ACTION_CLASSES = [
   "reading",
   "browsing",
+  "computer",
   "purchase",
   "send",
   "post",
   "delete",
   "download_execute",
   "system_settings",
+  "memory",
 ] as const;
+const LEGACY_ACTION_CLASSES = EDITABLE_ACTION_CLASSES.filter(
+  (key) => key !== "computer" && key !== "memory",
+);
 const policyObject = z.strictObject({
   reading: AutonomyMode,
   browsing: AutonomyMode,
+  computer: AutonomyMode,
   purchase: AutonomyMode,
   send: AutonomyMode,
   post: AutonomyMode,
   delete: AutonomyMode,
   download_execute: AutonomyMode,
   system_settings: AutonomyMode,
+  memory: AutonomyMode,
 });
+// Policies saved before `computer` and `memory` existed must keep parsing, or one old safety.json
+// fences every computer. They take `computer` from the saved browsing choice.
+const legacyPolicyObject = policyObject
+  .omit({ computer: true, memory: true })
+  .transform(({ reading, browsing, ...rest }) => ({
+    reading,
+    browsing,
+    computer: browsing,
+    ...rest,
+    memory: "ask" as const,
+  }));
 // HTTP JSON and daemon-produced dictionaries have own data properties only. Refuse
 // inherited values/accessors before Zod can read them as authority.
 const ownPolicy = z.custom<Record<string, unknown>>((value) => {
@@ -46,25 +67,51 @@ const ownPolicy = z.custom<Record<string, unknown>>((value) => {
   if (prototype !== Object.prototype && prototype !== null) return false;
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const keys = Reflect.ownKeys(descriptors);
+  const shape =
+    keys.length === LEGACY_ACTION_CLASSES.length ? LEGACY_ACTION_CLASSES : EDITABLE_ACTION_CLASSES;
   return (
-    keys.length === EDITABLE_ACTION_CLASSES.length &&
-    EDITABLE_ACTION_CLASSES.every((key) => {
+    keys.length === shape.length &&
+    shape.every((key) => {
       const descriptor = descriptors[key];
       return descriptor !== undefined && Object.hasOwn(descriptor, "value");
     })
   );
 }, "autonomy must contain exactly the editable action classes as own data properties");
-export const AutonomyPolicy = ownPolicy.pipe(policyObject).readonly();
+export const AutonomyPolicy = ownPolicy
+  .pipe(z.union([policyObject, legacyPolicyObject]))
+  .readonly();
 export type AutonomyPolicy = z.infer<typeof AutonomyPolicy>;
-export const DEFAULT_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
+export const BALANCED_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
   reading: "act",
   browsing: "act",
+  computer: "act",
   purchase: "ask",
   send: "ask",
   post: "ask",
   delete: "ask",
   download_execute: "ask",
   system_settings: "ask",
+  memory: "ask",
+});
+export const CAREFUL_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
+  ...BALANCED_AUTONOMY,
+  computer: "ask",
+});
+export const DEFAULT_AUTONOMY = BALANCED_AUTONOMY;
+export const ACTION_CLASS_LABELS: Readonly<Record<ActionClass, string>> = Object.freeze({
+  reading: "Read and look",
+  browsing: "Browse websites",
+  computer: "Work in its computer",
+  download_execute: "Run downloaded programs",
+  memory: "Save to its memory",
+  send: "Send as you",
+  post: "Post or publish as you",
+  delete: "Delete your online data",
+  system_settings: "Change account settings",
+  purchase: "Buy or pay",
+  upload: "Upload your files",
+  credentials: "Passwords, codes and card details",
+  unknown: "Unclear steps on signed-in sites",
 });
 export function freezeAutonomy(value: unknown = DEFAULT_AUTONOMY): Readonly<AutonomyPolicy> {
   return AutonomyPolicy.parse(value);
@@ -79,13 +126,59 @@ const safeText = (limit: number) =>
     );
 const Id = z.string().regex(ULID_PATTERN);
 const Counter = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
-export const APPROVAL_TIMEOUT_MS = 600000;
-export const ApprovalAnswer = z.strictObject({
-  approvalId: Id,
-  generation: Counter,
-  revision: Counter,
-  decision: z.enum(["approve", "deny", "take_control"]),
-});
+// A card waits for the user; the ceiling matches the Codex path's 24-hour tool timeout.
+export const APPROVAL_TIMEOUT_MS = 86_400_000;
+export const AlwaysScope = z.enum(["task", "site", "app", "always"]);
+export type AlwaysScope = z.infer<typeof AlwaysScope>;
+const Origin = z
+  .string()
+  .max(300)
+  .refine(
+    (value) =>
+      URL.canParse(value) &&
+      ["http:", "https:"].includes(new URL(value).protocol) &&
+      new URL(value).origin === value,
+    "site must be an exact http(s) origin",
+  );
+const placed = (value: { scope: AlwaysScope; site?: string; app?: string }) =>
+  (value.scope === "site") === (value.site !== undefined) &&
+  (value.scope === "app") === (value.app !== undefined);
+export const AlwaysOption = z
+  .strictObject({
+    scope: AlwaysScope,
+    label: safeText(200),
+    site: Origin.optional(),
+    app: safeText(128).optional(),
+  })
+  .refine(placed, "a site or app goes only with its own scope");
+export type AlwaysOption = z.infer<typeof AlwaysOption>;
+export const AutonomyRule = z
+  .strictObject({
+    id: Id,
+    behavior: z.literal("act"),
+    actionClass: ActionClass,
+    scope: AlwaysScope.exclude(["task"]),
+    site: Origin.optional(),
+    app: safeText(128).optional(),
+    label: safeText(200),
+    createdAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    createdFrom: Id,
+  })
+  .refine(placed, "a site or app goes only with its own scope");
+export type AutonomyRule = z.infer<typeof AutonomyRule>;
+// The answer names a scope only; the site, app and class come from the card the daemon wrote.
+export const ApprovalAnswer = z
+  .strictObject({
+    approvalId: Id,
+    generation: Counter,
+    revision: Counter,
+    decision: z.enum(["approve", "deny", "take_control"]),
+    always: AlwaysScope.optional(),
+  })
+  .refine(
+    (value) => value.always === undefined || value.decision === "approve",
+    "only an approval can always allow",
+  );
 export type ApprovalAnswer = z.infer<typeof ApprovalAnswer>;
 export const UploadApproval = z.strictObject({
   destination: BrowserUploadDestination,
@@ -97,14 +190,44 @@ export const UploadApproval = z.strictObject({
     .refine((files) => new Set(files.map((file) => file.path)).size === files.length),
 });
 export type UploadApproval = z.infer<typeof UploadApproval>;
+// A card carries each value whole up to APPROVAL_FIELD_CHARS. A longer value (at most a whole
+// files write) carries its start, is listed in `partial` with its full length, and Approve needs
+// the rest to have been read from the daemon first.
+export const APPROVAL_FIELD_CHARS = 16_384;
+export const APPROVAL_VALUE_CHARS = 1_000_000;
+const approvalFields = (limit: number) => z.array(z.tuple([safeText(80), safeText(limit)])).max(16);
 export const ApprovalCardDraft = z.strictObject({
   actionClass: ActionClass,
   risk: z.enum(["medium", "high"]),
   title: safeText(200),
-  fields: z.array(z.tuple([safeText(80), safeText(512)])).max(16),
+  fields: approvalFields(APPROVAL_FIELD_CHARS),
+  partial: z
+    .array(
+      z.strictObject({
+        field: z.number().int().min(0).max(15),
+        length: z
+          .number()
+          .int()
+          .min(APPROVAL_FIELD_CHARS + 1)
+          .max(APPROVAL_VALUE_CHARS),
+      }),
+    )
+    .min(1)
+    .max(16)
+    .optional(),
   upload: UploadApproval.optional(),
+  always: z
+    .array(AlwaysOption)
+    .max(4)
+    .refine((options) => new Set(options.map((option) => option.scope)).size === options.length)
+    .optional(),
 });
 export type ApprovalCardDraft = z.infer<typeof ApprovalCardDraft>;
+export const ApprovalRequestDraft = ApprovalCardDraft.omit({ partial: true }).extend({
+  fields: approvalFields(APPROVAL_VALUE_CHARS),
+});
+export type ApprovalRequestDraft = z.infer<typeof ApprovalRequestDraft>;
+export const ApprovalFieldText = z.strictObject({ text: safeText(APPROVAL_VALUE_CHARS) });
 export const ApprovalCard = ApprovalCardDraft.extend({
   approvalId: Id,
   generation: Counter,
@@ -113,12 +236,16 @@ export const ApprovalCard = ApprovalCardDraft.extend({
 });
 export type ApprovalCard = z.infer<typeof ApprovalCard>;
 export const PauseReason = z.enum(["user", "repeated_action"]);
-// Reasons on the paused states a session publishes for its own Pause, approval or question. None is
-// a recovery pause such as the spending limit, so none may stand in for one.
+// The brain's own paused state while it waits for Resume of the session's Pause.
+export const RESUME_WAIT_REASON = "Waiting for explicit Resume";
+// Reasons on the paused states a session or its brain publishes for the session's own Pause,
+// approval or question. None is a recovery pause such as the spending limit, so none may stand in
+// for one.
 export const SESSION_PAUSE_REASONS: readonly string[] = [
   ...PauseReason.options,
   "approval",
   "question",
+  RESUME_WAIT_REASON,
 ];
 export const PauseSnapshot = z
   .strictObject({

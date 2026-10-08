@@ -1,4 +1,6 @@
 import {
+  type ActionClass,
+  type AlwaysOption,
   ApprovalAnswer,
   ApprovalCard,
   PauseSnapshot,
@@ -13,9 +15,12 @@ import { ControlFailure } from "./control-api.ts";
 import type { AgentFeed } from "./model.ts";
 import {
   answerSafety,
+  loadApprovalField,
   loadFence,
   loadReplacement,
   pauseSafety,
+  removeAllowance,
+  removeRule,
   replaceComputer,
   resumeSafety,
 } from "./safety-api.ts";
@@ -42,6 +47,14 @@ type Operation = {
   phase: "sending" | "checking" | "uncertain";
   explicit: boolean;
 };
+// An Always allow choice this page made, held so the status line can offer Undo.
+export interface AllowedChoice {
+  readonly session: string;
+  readonly approvalId: string;
+  readonly actionClass: ActionClass;
+  readonly option: AlwaysOption;
+  readonly undo: "idle" | "pending" | "done" | "failed";
+}
 function sameCard(a: unknown, b: unknown) {
   const x = ApprovalCard.safeParse(a),
     y = ApprovalCard.safeParse(b);
@@ -59,6 +72,8 @@ export function useSafety(props: SafetyProps) {
   const [localPause, setLocalPause] = useState<PauseSnapshot | null>(null);
   const [replacement, setReplacement] = useState<ReplacementRecord | null>(null);
   const [replacing, setReplacing] = useState(false);
+  const [allowed, setAllowed] = useState<AllowedChoice | null>(null);
+  const undoing = useRef<AbortController | null>(null);
   const replacementRequest = useRef<ReplacementRequest | null>(null);
   const replacementAttempt = useRef<object | null>(null);
   const replacementAbort = useRef<AbortController | null>(null);
@@ -76,9 +91,12 @@ export function useSafety(props: SafetyProps) {
     identity.current = { api: props.api, cell: props.cell?.id, session: props.agent.sessionId };
     operation.current?.abort.abort();
     operation.current = null;
+    undoing.current?.abort();
+    undoing.current = null;
     setPending(null);
     setError(null);
     setLocalPause(null);
+    setAllowed(null);
     if (old.api !== props.api || old.cell !== props.cell?.id) {
       replacementAbort.current?.abort();
       replacementRequest.current = null;
@@ -170,6 +188,7 @@ export function useSafety(props: SafetyProps) {
     return () => {
       mounted.current = false;
       operation.current?.abort.abort();
+      undoing.current?.abort();
       replacementAbort.current?.abort();
       off();
       window.removeEventListener("blur", blur);
@@ -260,11 +279,74 @@ export function useSafety(props: SafetyProps) {
       card.data.revision !== input.data.revision
     )
       return false;
+    const scope = input.data.always;
+    const option = card.data.always?.find((value) => value.scope === scope);
+    if (scope !== undefined && !option) return false;
+    // The reply can lose the race with the task's own record of the decision, so the status
+    // line waits for that record instead of this request's outcome.
     return perform(
       "approval",
       `${card.data.approvalId}:${card.data.generation}:${card.data.revision}`,
-      (op) => answerSafety(op.api, op.session, input.data, op.abort.signal),
+      (op) => {
+        if (option) {
+          undoing.current?.abort();
+          undoing.current = null;
+          setAllowed({
+            session: op.session,
+            approvalId: card.data.approvalId,
+            actionClass: card.data.actionClass,
+            option,
+            undo: "idle",
+          });
+        }
+        return answerSafety(op.api, op.session, input.data, op.abort.signal);
+      },
     );
+  };
+  const undoAllowed = async () => {
+    const p = current.current,
+      choice = allowed,
+      outcome = p.agent.model.approvalOutcome,
+      saved = outcome?.approvalId === choice?.approvalId ? outcome?.rule : undefined;
+    if (
+      !mounted.current ||
+      !choice ||
+      undoing.current ||
+      choice.undo === "pending" ||
+      choice.undo === "done" ||
+      p.agent.sessionId !== choice.session ||
+      saved?.scope !== choice.option.scope ||
+      outcome?.ruleRemoved ||
+      (choice.option.scope !== "task" && !saved.id)
+    )
+      return false;
+    const abort = new AbortController();
+    undoing.current = abort;
+    const settle = (undo: AllowedChoice["undo"]) => {
+      if (undoing.current !== abort) return;
+      undoing.current = null;
+      setAllowed((old) => (old?.approvalId === choice.approvalId ? { ...old, undo } : old));
+    };
+    setAllowed({ ...choice, undo: "pending" });
+    try {
+      if (saved.id) await removeRule(p.api, saved.id, abort.signal);
+      else await removeAllowance(p.api, choice.session, choice.actionClass, abort.signal);
+      settle("done");
+      return true;
+    } catch (error) {
+      const gone = error instanceof ControlFailure && error.status === 404;
+      settle(gone ? "done" : "failed");
+      return gone;
+    }
+  };
+  const dismissAllowed = () => {
+    undoing.current?.abort();
+    undoing.current = null;
+    setAllowed(null);
+  };
+  const readApprovalField = (approvalId: string, field: number, signal: AbortSignal) => {
+    const p = current.current;
+    return loadApprovalField(p.api, p.agent.sessionId ?? "", approvalId, field, signal);
   };
   const requestPause = async () => {
     if (
@@ -300,6 +382,7 @@ export function useSafety(props: SafetyProps) {
       p.agent.model.pendingAsk ||
       p.agent.model.pendingTakeover ||
       p.agent.snapshot?.approval ||
+      p.agent.snapshot?.budgetHold === "task" ||
       JSON.stringify(p.feed.read().model.safetyPause) !== JSON.stringify(value.data)
     )
       return false;
@@ -464,6 +547,14 @@ export function useSafety(props: SafetyProps) {
   };
   const approval = props.agent.snapshot?.approval ?? null;
   const pause = props.agent.snapshot?.pause ?? localPause;
+  // A newer decision replaces the last choice's status line.
+  const later = !!approval && !!allowed && approval.approvalId !== allowed.approvalId;
+  useEffect(() => {
+    if (!later) return;
+    undoing.current?.abort();
+    undoing.current = null;
+    setAllowed(null);
+  }, [later]);
   return {
     approval,
     pause,
@@ -471,11 +562,15 @@ export function useSafety(props: SafetyProps) {
     error,
     requestPause,
     answerApproval,
+    readApprovalField,
     resume,
     replacement,
     replace,
     replacing,
     checkAgain,
+    allowed,
+    undoAllowed,
+    dismissAllowed,
     canNotify:
       fresh(props, false) &&
       !!approval &&
@@ -505,7 +600,8 @@ export function useSafety(props: SafetyProps) {
       JSON.stringify(props.feed.read().model.safetyPause) === JSON.stringify(pause) &&
       !props.agent.model.pendingAsk &&
       !props.agent.model.pendingTakeover &&
-      !approval,
+      !approval &&
+      props.agent.snapshot?.budgetHold !== "task",
     canReplace:
       (!replacement || replacement.phase === "blocked") &&
       !!props.cell?.fenced &&

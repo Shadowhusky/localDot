@@ -1,13 +1,3 @@
-:root[data-appearance="midnight"] {
-  --color-void: #090e18;
-  --color-surface: #131b29;
-  --color-surface-2: #1b2638;
-  --color-line: #2c394e;
-  --color-text-2: #a3afc3;
-  --color-text-3: #909db4;
-  --color-hud: rgba(13, 20, 32, 0.74);
-  --color-hud-solid: rgba(13, 20, 32, 0.96);
-}
 /* Setup is a form, so use the workspace height instead of the computer's video aspect ratio. */
 .stage-col:has(.welcome-setup) {
   justify-content: stretch;
@@ -43,7 +33,7 @@
   font-size: 0.65rem;
   letter-spacing: 0.12em;
   font-weight: 650;
-  color: var(--color-xenon);
+  color: var(--color-text-2);
 }
 .welcome-setup h1 {
   font-size: clamp(1.5rem, 3vw, 2rem);
@@ -96,10 +86,6 @@
 .welcome-setup button:is(:disabled, [aria-disabled="true"]) {
   opacity: 0.5;
   cursor: default;
-}
-.welcome-setup button:focus-visible {
-  outline: 2px solid var(--color-xenon);
-  outline-offset: 3px;
 }
 .welcome-setup button:active:not(:disabled, [aria-disabled="true"]) {
   opacity: 0.8;
@@ -157,7 +143,7 @@
   color: var(--color-text);
 }
 .appearance-option:has(input:focus-visible) {
-  outline: 2px solid var(--color-text);
+  outline: var(--focus-width) solid var(--color-text);
   outline-offset: 2px;
 }
 .appearance-picker .appearance-option input {
@@ -183,13 +169,8 @@
   border-radius: 4px;
 }
 .appearance-tile.graphite {
-  background: linear-gradient(#3a3c43 0 5px, #0a0b0d 5px);
+  background: linear-gradient(var(--graphite-overlay) 0 5px, var(--graphite-void) 5px);
 }
 .appearance-tile.midnight {
-  background: linear-gradient(#2f4466 0 5px, #090e18 5px);
-}
-@media (prefers-reduced-transparency: reduce) {
-  :root[data-appearance="midnight"] {
-    --color-hud: var(--color-hud-solid);
-  }
+  background: linear-gradient(var(--midnight-overlay) 0 5px, var(--midnight-void) 5px);
 }

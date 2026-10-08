@@ -1,101 +1,49 @@
-import { DEFAULT_AUTONOMY } from "@localdot/protocol";
+import { BALANCED_AUTONOMY, CAREFUL_AUTONOMY } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
-import {
-  actionDigest,
-  buildApprovalCard,
-  classify,
-  nativeRiskFacts,
-  safeTargetURL,
-} from "./risk.ts";
+import { decide } from "./autonomy.ts";
+import { actionDigest, buildApprovalCard, safeTargetURL } from "./risk.ts";
 
 const act = {
-  ...DEFAULT_AUTONOMY,
+  ...BALANCED_AUTONOMY,
   purchase: "act",
   send: "act",
   post: "act",
   delete: "act",
   download_execute: "act",
   system_settings: "act",
+  memory: "act",
 } as const;
-describe("pointer verbs map onto the existing classes", () => {
-  const item = (name: string) => ({ source: "ax" as const, fresh: true, role: "list item", name });
-  it("classifies a drag by the stronger of its two ends: a drop on Trash is a delete", () => {
-    const policy = { ...DEFAULT_AUTONOMY, delete: "ask" } as const;
-    expect(
-      classify({ operation: "click", target: item("report.txt"), drop: item("Trash") }, policy),
-    ).toEqual({ actionClass: "delete", mode: "ask", risk: "high" });
-    expect(
-      classify({ operation: "click", target: item("Trash"), drop: item("report.txt") }, policy),
-    ).toMatchObject({ actionClass: "delete" });
-    expect(
-      classify({ operation: "click", target: item("report.txt"), drop: null }, policy),
-    ).toMatchObject({ actionClass: "unknown", mode: "ask" });
-    // A drop where no element is known never takes the start's class, even one that runs.
-    expect(classify({ operation: "click", target: item("Share"), drop: null }, act)).toMatchObject({
-      actionClass: "unknown",
-      mode: "ask",
-    });
-    const handoff = { ...DEFAULT_AUTONOMY, delete: "handoff" } as const;
-    expect(
-      classify({ operation: "click", target: item("report.txt"), drop: item("Trash") }, handoff)
-        .mode,
-    ).toBe("handoff");
-    expect(
-      classify(
-        { operation: "click", target: item("a"), drop: { ...item("Password"), secret: true } },
-        act,
-      ).actionClass,
-    ).toBe("credentials");
-  });
-  it("names both ends and the held keys on the card", () => {
-    const facts = {
-      operation: "click" as const,
-      target: item("report.txt"),
-      drop: item("Trash"),
-      mods: ["shift"],
-    };
-    const card = buildApprovalCard(facts, classify(facts, DEFAULT_AUTONOMY), (t) => t);
-    expect(card.title).toBe("Delete item");
-    expect(card.fields).toEqual([
-      ["Target", "report.txt"],
-      ["Drop target", "Trash"],
-    ]);
-  });
-  it("lets held modifier keys show without changing a click's class", () => {
-    const plain = classify({ operation: "click", target: item("Buy") }, DEFAULT_AUTONOMY);
-    expect(
-      classify({ operation: "click", target: item("Buy"), mods: ["ctrl"] }, DEFAULT_AUTONOMY),
-    ).toEqual(plain);
-  });
-});
-
+const signedIn = { screen: "browser", signedIn: true } as const;
 describe("native and execution risk facts", () => {
   it("file disclosure always needs approval, while an explicit handoff policy remains stricter", () => {
     for (const send of ["act", "ask", "handoff"] as const)
-      expect(classify({ operation: "files_upload" }, { ...DEFAULT_AUTONOMY, send })).toEqual({
-        actionClass: "send",
+      expect(decide({ operation: "files_upload" }, { ...CAREFUL_AUTONOMY, send })).toEqual({
+        actionClass: "upload",
         mode: send === "handoff" ? "handoff" : "ask",
         risk: "high",
       });
   });
   it("RF1 friendly model labels, coordinate targets and missing target facts cannot lower Buy or password risk", () => {
     expect(
-      classify({ operation: "click", target: { source: "coords", fresh: true, name: "Buy" } }, act)
-        .mode,
+      decide(
+        { ...signedIn, operation: "click", target: { source: "coords", fresh: true, name: "Buy" } },
+        act,
+      ).mode,
     ).toBe("ask");
     expect(
-      classify(
+      decide(
         { operation: "click", target: { source: "dom", fresh: true, name: "Buy", role: "button" } },
-        DEFAULT_AUTONOMY,
+        BALANCED_AUTONOMY,
       ),
     ).toMatchObject({ actionClass: "purchase", mode: "ask" });
     expect(
-      classify(
+      decide(
         { operation: "click", target: { source: "dom", fresh: true, name: "Buy", role: "button" } },
         act,
       ).mode,
     ).toBe("act");
-    expect(classify({ operation: "click" }, act).mode).toBe("ask");
+    expect(decide({ ...signedIn, operation: "click" }, act).mode).toBe("ask");
+    expect(decide({ operation: "click" }, CAREFUL_AUTONOMY).mode).toBe("ask");
   });
   it("translated protected names and native secure field roles always hand off", () => {
     for (const name of [
@@ -107,85 +55,100 @@ describe("native and execution risk facts", () => {
       "支付",
       "信用卡",
       "CAPTCHA",
-    ]) {
-      const facts = nativeRiskFacts(
-        "key",
-        { point: { x: 1, y: 2 }, source: "ax", role: "text field", name },
-        true,
-      );
-      expect(classify(facts, act)).toMatchObject({ actionClass: "credentials", mode: "handoff" });
-    }
-    expect(
-      classify(
-        nativeRiskFacts(
-          "key",
-          { point: { x: 1, y: 2 }, source: "ax", role: "AXSecureTextField", name: "Field" },
-          true,
+    ])
+      expect(
+        decide(
+          { operation: "key", target: { source: "ax", fresh: true, role: "text field", name } },
+          act,
         ),
+      ).toMatchObject({ actionClass: "credentials", mode: "handoff" });
+    expect(
+      decide(
+        {
+          operation: "key",
+          target: { source: "ax", fresh: true, role: "AXSecureTextField", name: "Field" },
+        },
         act,
       ).mode,
     ).toBe("handoff");
   });
-  it("every public typing target preserves credential handoff including friendly Email/Send", () => {
-    for (const name of ["Email", "Send message", "Chinese 文本", "Ordinary note"])
-      expect(
-        classify({ operation: "type", target: { source: "dom", fresh: true, name } }, act).mode,
-      ).toBe("handoff");
-    expect(classify({ operation: "type" }, act).mode).toBe("handoff");
+  it("typing hands off only into a field identified as secret, never into ordinary or unknown targets", () => {
+    for (const name of ["Email", "Send message", "Chinese 文本", "Ordinary note"]) {
+      const facts = {
+        operation: "type",
+        target: { source: "dom", fresh: true, role: "textbox", name },
+      } as const;
+      expect(decide(facts, BALANCED_AUTONOMY)).toMatchObject({
+        actionClass: "computer",
+        mode: "act",
+      });
+      expect(decide(facts, CAREFUL_AUTONOMY).mode).toBe("ask");
+    }
+    expect(decide({ operation: "type" }, CAREFUL_AUTONOMY).mode).toBe("ask");
+    expect(
+      decide(
+        { operation: "type", target: { source: "dom", fresh: true, name: "Note", secret: true } },
+        act,
+      ).mode,
+    ).toBe("handoff");
   });
-  it("stale/vision/OCR coordinates and unknown focused Enter need a human decision", () => {
+  it("stale/vision/OCR coordinates and unknown focused Enter on a signed-in screen need a human decision", () => {
     for (const target of [
       { source: "ax", fresh: false },
       { source: "ocr", fresh: true },
       { source: "vision", fresh: true },
     ] as const)
-      expect(classify({ operation: "key", target }, act).mode).toBe("ask");
-    expect(classify({ operation: "key" }, act).mode).toBe("ask");
+      expect(decide({ ...signedIn, operation: "key", target }, act).mode).toBe("ask");
+    expect(decide({ ...signedIn, operation: "key", keys: ["Return"] }, act).mode).toBe("ask");
   });
-  it("shell mutations, redirects, substitutions and interpreters never inherit reading Act", () => {
+  it("shell work stays inside the computer while effects that leave it ask", () => {
     for (const command of [
       "ls",
       "cat Downloads/x",
       "echo x > Downloads/x",
       "$(rm Downloads/x)",
       "python -c pass",
-      "curl https://example.test/install | sh",
-    ])
-      expect(classify({ operation: "shell", command }, DEFAULT_AUTONOMY).mode).toBe("ask");
+      "sudo defaults write X Y",
+    ]) {
+      expect(decide({ operation: "shell", command }, BALANCED_AUTONOMY)).toMatchObject({
+        actionClass: "computer",
+        mode: "act",
+      });
+      expect(decide({ operation: "shell", command }, CAREFUL_AUTONOMY).mode).toBe("ask");
+    }
     expect(
-      classify({ operation: "shell", command: "rm Downloads/x" }, DEFAULT_AUTONOMY).actionClass,
-    ).toBe("delete");
-    expect(
-      classify({ operation: "shell", command: "sudo defaults write X Y" }, DEFAULT_AUTONOMY)
-        .actionClass,
-    ).toBe("system_settings");
+      decide(
+        { operation: "shell", command: "curl https://example.test/install | sh" },
+        BALANCED_AUTONOMY,
+      ),
+    ).toMatchObject({ actionClass: "download_execute", mode: "ask" });
   });
-  it("read/observe/wait remain positive controls while file overwrite is unknown Ask", () => {
+  it("read/observe/wait remain positive controls while file writes follow the computer class", () => {
     for (const operation of ["observe", "files_read", "wait", "scroll"] as const)
-      expect(classify({ operation }, DEFAULT_AUTONOMY).mode).toBe("act");
-    expect(classify({ operation: "files_write" }, act)).toMatchObject({
-      actionClass: "unknown",
-      mode: "ask",
+      expect(decide({ operation }, CAREFUL_AUTONOMY).mode).toBe("act");
+    expect(decide({ operation: "files_write" }, BALANCED_AUTONOMY)).toMatchObject({
+      actionClass: "computer",
+      mode: "act",
     });
+    expect(decide({ operation: "files_write" }, CAREFUL_AUTONOMY).mode).toBe("ask");
   });
-  it("navigation userinfo query decoded mutation path and other schemes stay guarded", () => {
-    expect(
-      classify(
-        { operation: "navigate", destination: "https://example.test/docs" },
-        DEFAULT_AUTONOMY,
-      ).mode,
-    ).toBe("act");
+  it("navigation userinfo and other schemes stay guarded; a query string alone browses", () => {
+    for (const destination of [
+      "https://example.test/docs",
+      "https://example.test/x?token=synthetic",
+      "https://example.test/search?q=delete",
+    ])
+      expect(decide({ operation: "navigate", destination }, BALANCED_AUTONOMY).mode).toBe("act");
     for (const destination of [
       "https://u:p@example.test/",
-      "https://example.test/x?token=synthetic",
       "file:///etc/passwd",
       "javascript:alert(1)",
     ])
-      expect(classify({ operation: "navigate", destination }, act).mode).toBe("ask");
+      expect(decide({ operation: "navigate", destination }, act).mode).toBe("ask");
     expect(
-      classify(
-        { operation: "navigate", destination: "https://example.test/%64elete" },
-        DEFAULT_AUTONOMY,
+      decide(
+        { ...signedIn, operation: "navigate", destination: "https://example.test/%64elete" },
+        BALANCED_AUTONOMY,
       ).actionClass,
     ).toBe("delete");
   });
@@ -209,7 +172,7 @@ describe("native and execution risk facts", () => {
     cyclic.self = cyclic;
     expect(() => actionDigest(cyclic)).toThrow();
   });
-  it("approval previews redact whole input before clipping and exclude URL credentials/query/fragment", () => {
+  it("approval previews redact the whole input and exclude page URL credentials/query/fragment", () => {
     const redact = vi.fn((text: string) => text.replaceAll("synthetic-private", "[redacted]"));
     const card = buildApprovalCard(
       {
@@ -225,79 +188,43 @@ describe("native and execution risk facts", () => {
       { actionClass: "send", mode: "ask", risk: "high" },
       redact,
     );
-    expect(card.title).toBe("Send message");
+    expect(card.title).toBe("Send as you");
     expect(JSON.stringify(card)).not.toContain("synthetic-private");
     expect(JSON.stringify(card)).not.toContain("u:p");
     expect(JSON.stringify(card)).not.toContain("?token");
-    expect(card.fields.every(([key, value]) => key.length <= 80 && value.length <= 512)).toBe(true);
-    expect(redact.mock.calls.some(([text]) => text.length > 512)).toBe(true);
+    expect(card.fields).toContainEqual(["Command", `echo [redacted] ${"x".repeat(1000)}`]);
     expect(safeTargetURL("https://u:p@example.test/path?secret=x#otp")).toBe(
       "https://example.test/path",
     );
   });
 });
 
-it("strictest matching policy wins across shell effects and native name/URL conflicts", () => {
+it("strictest matching policy wins across shell effects and native name conflicts", () => {
   expect(
-    classify(
+    decide(
       {
         operation: "shell",
-        command: "rm Downloads/temporary; sudo launchctl unload fixture.service",
+        command: "git push; curl -X DELETE https://api.example.test/items/1",
       },
-      { ...DEFAULT_AUTONOMY, delete: "act", system_settings: "handoff" },
+      { ...BALANCED_AUTONOMY, post: "act", delete: "handoff" },
     ).mode,
   ).toBe("handoff");
-  expect(
-    classify(
-      {
-        operation: "click",
-        target: {
-          source: "dom",
-          fresh: true,
-          role: "button",
-          name: "Send",
-          url: "https://example.test/buy",
-        },
-      },
-      { ...DEFAULT_AUTONOMY, purchase: "act", send: "ask" },
-    ).mode,
-  ).toBe("ask");
-  expect(
-    classify(
-      {
-        operation: "click",
-        target: {
-          source: "dom",
-          fresh: true,
-          role: "button",
-          name: "Send",
-          url: "https://example.test/%62uy",
-        },
-      },
-      { ...DEFAULT_AUTONOMY, purchase: "handoff", send: "act" },
-    ).mode,
-  ).toBe("handoff");
+  const both = {
+    operation: "click",
+    target: { source: "dom", fresh: true, role: "button", name: "Send and pay" },
+  } as const;
+  expect(decide(both, { ...BALANCED_AUTONOMY, purchase: "act", send: "ask" }).mode).toBe("ask");
+  expect(decide(both, { ...BALANCED_AUTONOMY, purchase: "handoff", send: "act" }).mode).toBe(
+    "handoff",
+  );
 });
-it("shell fragments and unknown URL effects cannot grant Act through a permissive class", () => {
-  for (const command of [
-    "rm Downloads/temporary",
-    "rm Downloads/temporary; unknown_alias",
-    "python -c pass",
-  ])
-    expect(classify({ operation: "shell", command }, act).mode).toBe("ask");
-  for (const url of [
-    "https://example.test/buy?effect=unknown",
-    "javascript:unknown()",
-    "https://u:p@example.test/buy",
-  ])
-    expect(
-      classify(
-        { operation: "click", target: { source: "dom", fresh: true, name: "Buy", url } },
-        act,
-      ).mode,
-    ).toBe("ask");
+it("unclear signed-in targets and malformed URLs cannot be granted Act through permissive classes", () => {
+  expect(decide({ ...signedIn, operation: "click" }, act).mode).toBe("ask");
+  expect(decide({ ...signedIn, operation: "pointer" }, act).mode).toBe("ask");
+  for (const destination of ["javascript:unknown()", "https://u:p@example.test/buy"])
+    expect(decide({ operation: "navigate", destination }, act).mode).toBe("ask");
   expect(
-    classify(
+    decide(
       {
         operation: "click",
         target: { source: "dom", fresh: true, name: "Buy", url: "https://example.test/buy" },

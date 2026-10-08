@@ -163,7 +163,7 @@ ENV DBUS_SESSION_BUS_ADDRESS=unix:path=/tmp/localdot-session-bus \
     SELKIES_ENABLE_CURSORS="false|locked" \
     SELKIES_ENCODER=h264enc \
     SELKIES_FRAMERATE=60-60 \
-    SELKIES_VIDEO_FULLCOLOR="true|locked" \
+    SELKIES_VIDEO_FULLCOLOR="false|locked" \
     SELKIES_AUDIO_ENABLED="false|locked" \
     SELKIES_MICROPHONE_ENABLED="false|locked" \
     SELKIES_WEBCAM_ENABLED="false|locked" \

@@ -228,6 +228,37 @@ describe("ActionGateway admitted screen binding", () => {
     },
   );
 
+  it("returns an approval whose target changed while the user decided as stale, with a fresh frame", async () => {
+    const s = setup(),
+      b = boundScreen(s);
+    b.ctx.authorizeAgent = async (request) => {
+      b.fake.script.hitTest = (point) => ({
+        ...search(point),
+        target: { ...search(point).target, name: "Different action" },
+        window: null,
+      });
+      return (await request.revalidate()) ? { consume: () => true } : undefined;
+    };
+    const result = await s.gateway.run(b.ctx, {
+      verb: "click",
+      point: { x: 120, y: 80 },
+      speed: "instant",
+    });
+    expect(result).toMatchObject({
+      ok: false,
+      cancelled: "stale",
+      error: "The screen changed while the user was deciding. Look again before acting.",
+    });
+    expect(result.frameId).toBe(s.ofType("observe").at(-1)?.data.frameId);
+    expect(b.fake.calls.filter((c) => c.path === "/input")).toHaveLength(0);
+    b.ctx.authorizeAgent = async () => undefined;
+    expect(
+      await s.gateway.run(b.ctx, { verb: "click", point: { x: 120, y: 80 }, speed: "instant" }),
+    ).toMatchObject({ ok: false, cancelled: "user" });
+    s.registry.dispose();
+    s.eventLog.close();
+  });
+
   it.each(["live", "lease-aborted", "parent-paused"] as const)(
     "waits on the browser stream and handles %s",
     async (end) => {

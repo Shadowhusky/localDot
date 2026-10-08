@@ -107,8 +107,9 @@ function mount(takeover: boolean) {
   return { ...view, fetchImpl, receive, model, Parts };
 }
 it("respects Chinese composition, exact pending ask ID and shared answer exclusion", async () => {
-  const f = mount(false),
-    field = screen.getByRole("textbox", { name: "Your answer" }) as HTMLTextAreaElement;
+  const f = mount(false);
+  fireEvent.click(screen.getByRole("radio", { name: "Something else…" }));
+  const field = screen.getByRole("textbox", { name: "Your answer" }) as HTMLTextAreaElement;
   fireEvent.compositionStart(field);
   fireEvent.input(field, { target: { value: "中文" } });
   fireEvent.keyDown(field, { key: "Enter", isComposing: true });
@@ -119,30 +120,37 @@ it("respects Chinese composition, exact pending ask ID and shared answer exclusi
   await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
   expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, text: "中文" }));
   await waitFor(() => expect(field.value).toBe(""));
-  expect(screen.getByRole("button", { name: "Send answer" })).toHaveProperty("disabled", true);
+  expect(screen.getByRole("button", { name: "Send answer" }).getAttribute("aria-disabled")).toBe(
+    "true",
+  );
 });
 it("guards question and hand-back notes before a recognized key can enter a request", async () => {
   const sentinel = `sk-proj-${"z".repeat(80)}`;
   for (const takeover of [false, true]) {
-    const f = mount(takeover),
-      field = screen.getByRole("textbox", {
-        name: takeover ? "Optional note for dot" : "Your answer",
-      }) as HTMLTextAreaElement;
+    const f = mount(takeover);
+    if (!takeover) fireEvent.click(screen.getByRole("radio", { name: "Something else…" }));
+    const field = screen.getByRole("textbox", {
+      name: takeover ? "Optional note for dot" : "Your answer",
+    }) as HTMLTextAreaElement;
     fireEvent.input(field, { target: { value: sentinel } });
     expect(field.value).toBe("");
     expect(f.container.textContent).not.toContain(sentinel);
     const send = screen.getByRole("button", {
       name: takeover ? "Return control to dot" : "Send answer",
     }) as HTMLButtonElement;
-    expect(send.disabled).toBe(true);
-    expect(document.getElementById(send.getAttribute("aria-describedby") ?? "")?.textContent).toBe(
-      "1 recognised key was removed from your message. Discard it or move it to Keys before sending.",
-    );
+    expect(send.disabled || send.getAttribute("aria-disabled") === "true").toBe(true);
+    const notice =
+      "A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.";
+    const described = () =>
+      (send.getAttribute("aria-describedby") ?? "")
+        .split(" ")
+        .map((id) => document.getElementById(id)?.textContent);
+    expect(described()).toContain(notice);
     fireEvent.click(send);
     expect(f.fetchImpl).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(f.receive).toHaveBeenCalledOnce();
-    expect(send.hasAttribute("aria-describedby")).toBe(false);
+    expect(described()).not.toContain(notice);
     f.unmount();
     cleanup();
   }
@@ -173,4 +181,21 @@ it("sends credentials through the manual text route, clears before transport and
   field.value = "unsent";
   f.rerender(<f.Parts visible={false} />);
   expect(field.value).toBe("");
+});
+it("picks an answer by its number, writes one under Something else, and sends only the choice", async () => {
+  const f = mount(false);
+  const send = screen.getByRole("button", { name: "Send answer" });
+  expect(send.getAttribute("aria-disabled")).toBe("true");
+  expect(screen.queryByRole("textbox", { name: "Your answer" })).toBeNull();
+  const form = screen.getByRole("form", { name: "Answer dot" });
+  fireEvent.keyDown(form, { key: "2" });
+  expect(screen.getByRole("radio", { name: "Something else…" })).toHaveProperty("checked", true);
+  expect(screen.getByRole("textbox", { name: "Your answer" })).toBeTruthy();
+  expect(send.getAttribute("aria-disabled")).toBe("true");
+  fireEvent.keyDown(form, { key: "1" });
+  expect(screen.getByRole("radio", { name: "Text" })).toHaveProperty("checked", true);
+  expect(send.hasAttribute("aria-disabled")).toBe(false);
+  fireEvent.click(send);
+  await waitFor(() => expect(f.fetchImpl).toHaveBeenCalledOnce());
+  expect(f.fetchImpl.mock.calls[0]?.[1]?.body).toBe(JSON.stringify({ askId: ID, option: "A" }));
 });

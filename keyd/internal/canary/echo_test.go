@@ -124,6 +124,16 @@ func TestCertificateAndSNIRequired(t *testing.T) {
 			t.Fatal("wrong SNI trusted")
 		}
 		raw.Close()
+		// This client accepts any certificate, so only the echo's own pin can refuse the name.
+		raw, err = e.DialContext(context.Background(), "tcp", Host+":443")
+		if err != nil {
+			t.Fatal(err)
+		}
+		conn = tls.Client(raw, &tls.Config{InsecureSkipVerify: true, ServerName: name, MinVersion: tls.VersionTLS12})
+		if conn.Handshake() == nil {
+			t.Fatalf("the echo accepted the server name %q", name)
+		}
+		raw.Close()
 	}
 	c := client(e)
 	c.Transport.(*http.Transport).TLSClientConfig.RootCAs = nil

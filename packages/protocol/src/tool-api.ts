@@ -27,7 +27,8 @@ export type CoordSpaceName = z.infer<typeof CoordSpaceName>;
 
 // The SDK client a route needs. The first-class providers each have their official AI SDK package
 // (spec "First-class providers"); every other provider speaks OpenAI's chat completions, so it goes
-// through @ai-sdk/openai-compatible and keyd's openai-compatible kind (P5a-R4).
+// through @ai-sdk/openai-compatible and keyd's openai-compatible kind (P5a-R4), or Anthropic's
+// messages at a base URL the user names, through @ai-sdk/anthropic.
 export const ClientKind = z.enum([
   "anthropic",
   "openai",
@@ -39,6 +40,7 @@ export const ClientKind = z.enum([
   "openrouter",
   "openai-compatible",
   "azure",
+  "anthropic-compatible",
   "lmstudio",
   "ollama",
 ]);

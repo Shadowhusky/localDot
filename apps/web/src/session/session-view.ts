@@ -1,10 +1,11 @@
 import type { Rect } from "@localdot/protocol";
 import type { ActionState, SessionModel } from "@localdot/stage";
-import { past, progressive } from "./task-hud.ts";
+import { past, progressive } from "./status.ts";
 
 export interface StepRowView {
   id: string;
   label: string;
+  verb?: string;
   startT: number;
   status: "doing" | "ok" | "failed" | "cancelled";
   frameId?: string;
@@ -46,6 +47,7 @@ export function stepRows(model: SessionModel): StepRowView[] {
     rows.set(id, {
       id,
       startT: rows.get(id)?.startT ?? a.intentT,
+      verb: a.verb,
       // Past tense only for a step that finished: a delivered one that failed or was stopped
       // part-way says what it tried.
       label:

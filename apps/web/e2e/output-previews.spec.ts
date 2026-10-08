@@ -247,7 +247,10 @@ for (const width of [1280, 390]) {
     await expect(link).toHaveAttribute("href", "https://example.test/report");
     await expect(link).toHaveAttribute("rel", "noopener noreferrer");
     await expect(link).toHaveAttribute("referrerpolicy", "no-referrer");
-    expect(await markdown.locator("img,svg,iframe,object,embed,script,style").count()).toBe(0);
+    // Only the code block's own copy icon is a picture; nothing in the reply renders as one.
+    expect(
+      await markdown.locator("img,svg:not(.ui-icon),iframe,object,embed,script,style").count(),
+    ).toBe(0);
     expect(proof.external).toEqual([]);
     expect(
       await page.evaluate(
@@ -255,12 +258,12 @@ for (const width of [1280, 390]) {
       ),
     ).toBe(0);
     if (width < 1180) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const activity = page.locator("details.model-activity");
-    expect(await activity.getAttribute("open")).toBeNull();
-    const trigger = page.getByRole("button", { name: "Inspect Check report", exact: true });
+    const notes = page.getByRole("button", { name: "Thinking notes", exact: true });
+    await expect(notes).toHaveAttribute("aria-expanded", "false");
+    const trigger = page.getByRole("button", { name: /Check report/ });
     await trigger.click();
-    const detail = page.getByRole("region", { name: "Selected output", exact: true });
-    await expect(detail).toBeFocused();
+    await expect(trigger).toHaveAttribute("aria-expanded", "true");
+    const detail = page.locator(".activity-row", { has: trigger }).locator(".activity-detail");
     const stdout = detail.getByRole("region", { name: "Standard output text", exact: true });
     await expect(stdout).toHaveText("Checked 12 rows\nTotal: 12,480\nCompleted\n");
     await expect(
@@ -268,28 +271,25 @@ for (const width of [1280, 390]) {
     ).toHaveText("No validation errors.\n");
     expect((await stdout.textContent())?.includes("clipboard-sentinel")).toBe(false);
     expect(await detail.locator("input,textarea,a").count()).toBe(0);
-    await detail.getByRole("button", { name: "Copy stdout", exact: true }).click();
-    await expect(detail.getByRole("status")).toHaveText("Copied shown text.");
+    await detail.getByRole("button", { name: "Copy output", exact: true }).click();
+    await expect(detail.getByRole("status").first()).toHaveText("Copied");
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       "Checked 12 rows\nTotal: 12,480\nCompleted\n",
     );
-    await stdout.focus();
-    await expect(stdout).toBeFocused();
+    expect(await stdout.getAttribute("tabindex")).toBeNull();
     await fits(page);
     await page.screenshot({ path: info.outputPath(`output-${width}-sample.png`) });
-    await detail.getByRole("button", { name: "Close output" }).click();
-    await expect(trigger).toBeFocused();
-    await page
-      .getByRole("button", { name: "Inspect modify: monthly-summary.txt", exact: true })
-      .click();
-    const diff = page.getByRole("region", { name: "Unified text diff", exact: true });
+    const diff = detail.getByRole("region", { name: "Unified text diff", exact: true });
     await expect(diff).toContainText("Monthly total: 12,480");
     await expect(diff).toContainText("\\ No newline at end of file");
     expect(await diff.locator("img,svg,input,a").count()).toBe(0);
-    await page.getByRole("button", { name: "Copy shown diff", exact: true }).click();
+    await detail.getByRole("button", { name: "Copy diff", exact: true }).click();
     expect(await page.evaluate(() => navigator.clipboard.readText())).toBe(
       await diff.textContent(),
     );
+    await page.keyboard.press("Escape");
+    await expect(trigger).toHaveAttribute("aria-expanded", "false");
+    await expect(trigger).toBeFocused();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );

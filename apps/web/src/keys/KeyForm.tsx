@@ -1,4 +1,4 @@
-import type { SecretBinding } from "@localdot/protocol";
+import { CLAUDE_PLAN_REFUSAL, claudePlanToken, type SecretBinding } from "@localdot/protocol";
 import {
   type FormEvent,
   type Ref,
@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import {
+  baseURLHint,
   bindingOf,
   type DraftField,
   EMPTY_DRAFT,
@@ -19,6 +20,7 @@ import {
   needsBaseURL,
   PROVIDER_NAMES,
   type Provider,
+  valueHint,
   valueProblem,
 } from "./binding.ts";
 import { problemText } from "./keys-api.ts";
@@ -174,6 +176,8 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     };
   }, []);
   const check = bindingOf(draft);
+  const hint = valueHint(draft);
+  const urlHint = draft.kind === "llm" ? baseURLHint(draft.provider) : undefined;
   const shown: Problem | null = problem ?? (tried && !check.ok ? check : null);
   const set = (patch: Partial<KeyDraft>) => {
     revision.current++;
@@ -183,14 +187,25 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
   };
   const errorFor = (field: DraftField) =>
     shown?.field === field ? (
-      <p className="field-error" id={`key-${field}-error`}>
+      // A plan refusal wipes the field as it appears, so it is announced. A fresh node per
+      // message is read even when it replaces another error.
+      <p
+        key={shown.message}
+        className="field-error"
+        id={`key-${field}-error`}
+        role={shown.message === CLAUDE_PLAN_REFUSAL ? "alert" : undefined}
+      >
         {shown.message}
       </p>
     ) : null;
-  const invalid = (field: DraftField) =>
-    shown?.field === field
-      ? { "aria-invalid": true, "aria-describedby": `key-${field}-error` }
-      : {};
+  const invalid = (field: DraftField, described?: string) => {
+    const error = shown?.field === field ? `key-${field}-error` : undefined;
+    const ids = [error, described].filter(Boolean).join(" ");
+    return {
+      ...(error ? { "aria-invalid": true } : {}),
+      ...(ids ? { "aria-describedby": ids } : {}),
+    };
+  };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -205,6 +220,11 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
     const value = input.value.trim();
     // Clear before any callback, including one that throws synchronously.
     input.value = "";
+    // Refused for itself first: fixing another field would not make a plan token usable.
+    if (claudePlanToken(value)) {
+      setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+      return;
+    }
     if (!check.ok) {
       setProblem({
         ...check,
@@ -312,16 +332,25 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
                   <input
                     value={draft.baseURL}
                     onChange={(e) => set({ baseURL: e.target.value })}
-                    placeholder="https://api.example.com/v1"
+                    placeholder={
+                      draft.provider === "anthropic-compatible"
+                        ? "https://api.example.com/anthropic"
+                        : "https://api.example.com/v1"
+                    }
                     autoComplete="off"
                     autoCapitalize="none"
                     autoCorrect="off"
                     spellCheck={false}
                     inputMode="url"
-                    {...invalid("baseURL")}
+                    {...invalid("baseURL", urlHint && "key-baseURL-hint")}
                   />
                 </label>
                 {errorFor("baseURL")}
+                {urlHint && (
+                  <p className="field-hint" id="key-baseURL-hint">
+                    {urlHint}
+                  </p>
+                )}
               </>
             )}
           </>
@@ -386,10 +415,25 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
             spellCheck={false}
             data-1p-ignore="true"
             data-lpignore="true"
-            onChange={() => problem?.field === "value" && setProblem(null)}
-            {...invalid("value")}
+            onChange={(e) => {
+              if (claudePlanToken(e.currentTarget.value)) {
+                e.currentTarget.value = "";
+                setProblem({ field: "value", message: CLAUDE_PLAN_REFUSAL });
+              } else if (problem?.field === "value") setProblem(null);
+            }}
+            aria-invalid={shown?.field === "value" || undefined}
+            aria-describedby={
+              [shown?.field === "value" && "key-value-error", hint && "key-value-hint"]
+                .filter(Boolean)
+                .join(" ") || undefined
+            }
           />
         </label>
+        {hint && (
+          <p className="field-hint" id="key-value-hint">
+            Starts with <code>{hint}</code>
+          </p>
+        )}
         {errorFor("value")}
         {shown?.field === "form" && (
           <p className="field-error" role="alert">

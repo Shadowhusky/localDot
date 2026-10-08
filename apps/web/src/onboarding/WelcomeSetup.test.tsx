@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { DEFAULT_AUTONOMY } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, DEFAULT_AUTONOMY } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StageCanvas } from "../stage/StageCanvas.tsx";
@@ -74,13 +74,24 @@ it("keeps the first-task hint neutral while saved settings load", () => {
 });
 it("uses saved policy values without changing policy or storing keys", () => {
   const p = props();
-  p.autonomy = { ...DEFAULT_AUTONOMY, reading: "ask", browsing: "ask" };
+  p.autonomy = { ...DEFAULT_AUTONOMY, reading: "ask", browsing: "ask", computer: "ask" };
   render(<WelcomeSetup {...p} />);
-  expect(screen.getByText(/0 action types can act/)).toBeTruthy();
+  expect(screen.getByText(/^Custom/)).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "Midnight" }));
   expect(p.appearance.change).toHaveBeenCalledWith("midnight");
   expect(localStorage.length).toBe(0);
   expect(p.onStart).not.toHaveBeenCalled();
+});
+it("names the autonomy preset in one line instead of counting classes", () => {
+  const p = props();
+  const view = render(<WelcomeSetup {...p} />);
+  const line = () => screen.getByRole("heading", { name: "Your autonomy defaults" }).nextSibling;
+  expect(line()?.textContent).toMatch(/^Balanced \(recommended\) · /);
+  view.rerender(<WelcomeSetup {...p} autonomy={CAREFUL_AUTONOMY} />);
+  expect(line()?.textContent).toMatch(/^Careful · /);
+  view.rerender(<WelcomeSetup {...p} autonomy={{ ...DEFAULT_AUTONOMY, purchase: "handoff" }} />);
+  expect(line()?.textContent).toMatch(/^Custom · /);
+  expect(screen.queryByText(/action types/)).toBeNull();
 });
 it("persists only a bounded theme name and reacts to another tab's preference", () => {
   const hook = renderHook(() => useAppearance());

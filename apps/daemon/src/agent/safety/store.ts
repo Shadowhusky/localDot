@@ -31,6 +31,10 @@ const Intent = z.strictObject({
   executor: z.enum(["api", "native"]).optional(),
 });
 export type SafetyIntent = z.infer<typeof Intent>;
+export interface RefusedIntent {
+  sessionId: string;
+  cellId?: string;
+}
 export class SafetyIntentStore {
   constructor(private readonly home: string) {}
   #privateDirectory(path: string): void {
@@ -89,22 +93,60 @@ export class SafetyIntentStore {
       closeSync(fd);
     }
   }
-  list(): SafetyIntent[] {
+  // Session history shares this directory: only a session that holds safety.json is an owner.
+  scan(): { intents: SafetyIntent[]; refused: RefusedIntent[] } {
     const root = resolve(this.home);
     this.#privateDirectory(root);
     const sessions = join(root, "sessions");
-    if (!lstatSync(sessions, { throwIfNoEntry: false })) return [];
+    const intents: SafetyIntent[] = [],
+      refused: RefusedIntent[] = [];
+    if (!lstatSync(sessions, { throwIfNoEntry: false })) return { intents, refused };
     this.#privateDirectory(sessions);
-    const entries = readdirSync(sessions, { withFileTypes: true });
-    if (entries.length > 1024) throw new Error("safety intent capacity exhausted");
-    const out: SafetyIntent[] = [];
-    for (const entry of entries) {
-      if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name))
-        throw new Error("unexpected safety owner");
-      const record = this.read(entry.name);
-      if (record) out.push(record);
+    for (const entry of readdirSync(sessions, { withFileTypes: true })) {
+      if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name)) continue;
+      try {
+        if (!lstatSync(join(sessions, entry.name, "safety.json"), { throwIfNoEntry: false }))
+          continue;
+        const record = this.read(entry.name);
+        if (record) intents.push(record);
+      } catch {
+        const cellId = this.#namedCell(join(sessions, entry.name, "safety.json"));
+        refused.push({ sessionId: entry.name, ...(cellId ? { cellId } : {}) });
+      }
     }
-    return out;
+    return { intents, refused };
+  }
+  // A refused intent is never trusted, but the computer it names can still be fenced.
+  #namedCell(target: string): string | undefined {
+    try {
+      const st = lstatSync(target);
+      if (!st.isFile() || st.size > 8192) return undefined;
+      const fd = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        const bytes = Buffer.alloc(8192),
+          n = readSync(fd, bytes, 0, bytes.length, 0),
+          raw: unknown = JSON.parse(bytes.subarray(0, n).toString("utf8"));
+        const cellId = (raw as { cellId?: unknown } | null)?.cellId;
+        return typeof cellId === "string" && ULID_PATTERN.test(cellId) ? cellId : undefined;
+      } finally {
+        closeSync(fd);
+      }
+    } catch {
+      return undefined;
+    }
+  }
+  remove(sessionId: string, cellId: string): void {
+    const record = this.read(sessionId);
+    if (!record) return;
+    if (record.cellId !== cellId) throw new Error("safety intent owner mismatch");
+    const dir = join(resolve(this.home), "sessions", sessionId);
+    unlinkSync(join(dir, "safety.json"));
+    const parent = openSync(dir, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY);
+    try {
+      fsyncSync(parent);
+    } finally {
+      closeSync(parent);
+    }
   }
   write(
     sessionId: string,

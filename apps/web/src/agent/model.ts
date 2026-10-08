@@ -1,4 +1,10 @@
-import type { ApprovalCard, EventOf, ScreenSelectionSnapshot } from "@localdot/protocol";
+import type {
+  ActionClass,
+  ApprovalCard,
+  EventOf,
+  RuleChange,
+  ScreenSelectionSnapshot,
+} from "@localdot/protocol";
 import type { TerminalText } from "./terminal-text.ts";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -13,12 +19,17 @@ export const AGENT_LIMITS = Object.freeze({
   outputText: 65_536,
   patchText: 8192,
 });
+// seq orders the conversation; at is the session time (µs) it was first seen.
 export interface AgentMessage {
   readonly id: string;
+  readonly seq?: number;
+  readonly at?: number;
   readonly role: "user" | "assistant";
   readonly text: string;
   readonly final: boolean;
   readonly kind?: EventOf<"message.user">["data"]["kind"];
+  // A follow-up sent while dot was still working, so it waits for the task to finish.
+  readonly queued?: boolean;
   readonly files?: readonly string[];
   readonly truncated?: boolean;
 }
@@ -42,6 +53,8 @@ export interface AgentStep {
   readonly terminal?: TerminalText;
 }
 export type AgentQuestion = EventOf<"ask.request">["data"] & {
+  readonly seq?: number;
+  readonly at?: number;
   readonly answer?: EventOf<"ask.answer">["data"];
 };
 export type AgentTakeover = EventOf<"takeover.request">["data"] & {
@@ -60,6 +73,8 @@ export interface AgentChange {
 }
 export interface AgentResult {
   readonly id: string;
+  readonly seq?: number;
+  readonly at?: number;
   readonly summary: string;
   readonly files: readonly EventOf<"task.result">["data"]["files"][number][];
 }
@@ -71,6 +86,15 @@ export interface Reported<T> {
   readonly id: string;
   readonly at: number;
   readonly data: T;
+}
+// The last decision, its note, and the Always allow choice it saved, for the Undo line.
+export interface ApprovalOutcome {
+  readonly approvalId: string;
+  readonly decision: EventOf<"approval.resolve">["data"]["decision"];
+  readonly actionClass?: ActionClass;
+  readonly note?: string;
+  readonly rule?: RuleChange;
+  readonly ruleRemoved?: boolean;
 }
 export interface AgentModel {
   readonly screen?: ScreenSelectionSnapshot;
@@ -89,6 +113,7 @@ export interface AgentModel {
   readonly questions: ReadonlyMap<string, AgentQuestion>;
   readonly takeovers: ReadonlyMap<string, AgentTakeover>;
   readonly approval?: ApprovalCard | null;
+  readonly approvalOutcome?: ApprovalOutcome;
   readonly safetyPaused?: { readonly paused: boolean; readonly atStepBoundary: boolean };
   readonly safetyPause?: EventOf<"safety.pause">["data"]["pause"];
   readonly pendingAsk: string | null;

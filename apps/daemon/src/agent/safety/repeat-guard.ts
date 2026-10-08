@@ -58,7 +58,9 @@ function effect(action: GuiAction, identity: NativeActionIdentity): unknown {
 // repeat count or a hold: a combo is the same input however often or long it is pressed.
 // Observations/waits do not dispatch input and cannot reset a repeated-action streak.
 // An identical input repeats the last one only if that one changed nothing on the screen (settle);
-// an input whose settle never reported counts as one without effect.
+// an input whose settle never reported counts as one without effect. One tool call's own repeat
+// counts once. `call` is the daemon's id for that call: a model's call ids can repeat across
+// separate calls.
 function digestOf(action: GuiAction, identity: NativeActionIdentity): string | undefined {
   const input = effect(action, identity);
   if (input === undefined) return undefined;
@@ -68,16 +70,17 @@ function digestOf(action: GuiAction, identity: NativeActionIdentity): string | u
 }
 export class RepeatGuard {
   #digest: string | undefined;
+  #call: string | undefined;
   #streak = 0;
   #changed = false;
-  admit(action: GuiAction, identity: NativeActionIdentity): boolean {
+  admit(action: GuiAction, identity: NativeActionIdentity, call: string): boolean {
     const digest = digestOf(action, identity);
     if (digest === undefined) return true;
-    if (digest === this.#digest && !this.#changed) this.#streak++;
-    else {
+    if (digest !== this.#digest || this.#changed) {
       this.#digest = digest;
       this.#streak = 1;
-    }
+    } else if (call !== this.#call) this.#streak++;
+    this.#call = call;
     this.#changed = false;
     return this.#streak < 3;
   }
@@ -88,6 +91,7 @@ export class RepeatGuard {
   }
   reset(): void {
     this.#digest = undefined;
+    this.#call = undefined;
     this.#streak = 0;
     this.#changed = false;
   }

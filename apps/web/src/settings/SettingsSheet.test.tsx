@@ -24,7 +24,7 @@ describe("settings sheet presentation ownership", () => {
     const view = render(<SettingsSheet {...p} focusSection="autonomy" loading />);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close settings" }));
     view.rerender(<SettingsSheet {...p} focusSection="autonomy" />);
-    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: "Read information" }));
+    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: "Read and look" }));
     const browsing = screen.getByRole("combobox", { name: "Browse websites" });
     browsing.focus();
     view.rerender(<SettingsSheet {...p} focusSection="autonomy" dirty />);
@@ -130,10 +130,43 @@ describe("settings sheet presentation ownership", () => {
     expect(screen.queryByRole("group", { name: "Task spending ceiling" })).toBeNull();
     expect(screen.queryByText(/million tokens/)).toBeNull();
   });
+  it("says a plan uses its own limits instead of asking for a price or a ceiling", () => {
+    const p = props();
+    const budget = { value: "8", useDefault: false, defaultUSD: 2, change: vi.fn() };
+    const plan = { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" };
+    const view = render(
+      <SettingsSheet
+        {...p}
+        choices={{ main: plan, local: { provider: "ollama", model: "local-model" } }}
+        budget={budget}
+      />,
+    );
+    const ceiling = screen.getByRole("group", { name: "Task spending ceiling" });
+    expect(within(ceiling).getByText("Uses your plan's limits.")).toBeTruthy();
+    expect(within(ceiling).queryByRole("textbox")).toBeNull();
+    expect(within(ceiling).queryByRole("checkbox")).toBeNull();
+    const main = screen.getByRole("group", { name: "Main" });
+    expect(
+      within(main).getByText(
+        "Uses your plan's limits. Use a key from this plan, not a pay-as-you-go key.",
+      ),
+    ).toBeTruthy();
+    expect(screen.queryByText(/million tokens/)).toBeNull();
+    view.rerender(
+      <SettingsSheet
+        {...p}
+        choices={{ main: plan, fast: { provider: "zai", model: "glm-5v-turbo", key: "zai" } }}
+        budget={budget}
+      />,
+    );
+    const paid = screen.getByRole("group", { name: "Task spending ceiling" });
+    expect(within(paid).queryByText("Uses your plan's limits.")).toBeNull();
+    expect(within(paid).getByRole("textbox", { name: "Task ceiling — USD" })).toBeTruthy();
+  });
   it("keeps the sheet and the choice when Escape comes from a select", () => {
     const p = { ...props(), dirty: true, autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
     render(<SettingsSheet {...p} />);
-    const select = screen.getByRole("combobox", { name: "Send messages" });
+    const select = screen.getByRole("combobox", { name: "Send as you" });
     select.focus();
     fireEvent.change(select, { target: { value: "handoff" } });
     fireEvent.keyDown(select, { key: "Escape" });

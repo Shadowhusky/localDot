@@ -107,7 +107,8 @@
   padding: 0 6px;
   font-weight: 600;
 }
-.settings-sheet .role-enabled {
+.settings-sheet .role-enabled,
+.settings-sheet .role-switch {
   flex-direction: row;
   align-items: center;
   gap: 10px;
@@ -172,7 +173,134 @@
   gap: 8px;
   margin-left: auto;
 }
-.settings-sheet .model-capability {
+.settings-sheet .model-capability,
+.settings-sheet .provider-note {
+  color: var(--color-text);
+}
+.safety-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 3) 0 0;
+}
+.settings-sheet .safety-presets button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  min-height: 44px;
+  padding: 0 calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--color-text-2);
+  text-align: left;
+  transition:
+    background var(--duration-press) var(--ease-press),
+    border-color var(--duration-press) var(--ease-press),
+    color var(--duration-press) var(--ease-press);
+}
+.settings-sheet .safety-presets button::after {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 10px;
+  margin: calc(var(--spacing) * -0.75) 2px 0 0;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  visibility: hidden;
+}
+.settings-sheet .safety-presets button[aria-pressed="true"] {
+  border-color: var(--color-text-2);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-weight: 600;
+}
+.settings-sheet .safety-presets button[aria-pressed="true"]::after {
+  visibility: visible;
+}
+@media (hover: hover) {
+  .settings-sheet .safety-presets button:hover:not(:disabled, [aria-pressed="true"]) {
+    color: var(--color-text);
+    border-color: var(--color-text-3);
+  }
+}
+.settings-sheet .safety-preset-note {
+  margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 3);
+}
+.safety-locked {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin: calc(var(--spacing) * 3) 0 0;
+  padding: calc(var(--spacing) * 3) 0 0;
+  list-style: none;
+  border-top: 1px solid var(--color-line);
+}
+.settings-sheet .safety-locked li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  min-height: 36px;
+}
+.settings-sheet .safety-locked li span:last-child {
+  flex: none;
+  color: var(--color-text-2);
+  text-align: right;
+}
+.settings-sheet .safety-hint {
+  margin: calc(var(--spacing) * 2) 0 0;
+  color: var(--color-text-3);
+  font-size: var(--text-footnote);
+  line-height: var(--text-footnote--line-height);
+}
+.safety-rules ul {
+  margin: calc(var(--spacing) * 2) 0 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-sheet .safety-rules li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--spacing) calc(var(--spacing) * 3);
+  padding: calc(var(--spacing) * 2.5) 0;
+}
+.settings-sheet .safety-rules li + li {
+  border-top: 1px solid var(--color-line);
+}
+.safety-rule-text {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.safety-rule-where {
+  color: var(--color-text-2);
+  font-size: var(--text-footnote);
+  line-height: var(--text-footnote--line-height);
+}
+.settings-sheet .safety-rules li p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text);
+  font-size: var(--text-footnote);
+  line-height: var(--text-footnote--line-height);
+}
+.safety-rules-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  margin: calc(var(--spacing) * 2) 0;
+}
+.settings-sheet .safety-rules-message {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--color-text);
+}
+.settings-sheet .safety-rules-failed {
+  flex: 1 0 100%;
+  margin: 0;
   color: var(--color-text);
 }
 @media (width < 600px) {
@@ -192,20 +320,38 @@
   .settings-discard button {
     flex: 1;
   }
+  /* Two lines either way, so switching presets never moves the rows below. */
+  .settings-sheet .safety-preset-note {
+    min-height: 3.1em;
+  }
 }
 
 .chatgpt-panel h3 {
   margin: 0;
   font-size: 16px;
+  font-weight: 600;
 }
 .chatgpt-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin: 8px 0;
+}
+.chatgpt-panel > button {
+  margin: 4px 8px 4px 0;
+}
+.chatgpt-usage {
+  margin: 12px 0 0;
+  padding: 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  min-width: 0;
 }
 
 .chatgpt-panel progress {
-  max-width: 100%;
+  display: block;
+  width: 100%;
+  margin: 8px 0 16px;
 }
 .chatgpt-confirm {
   padding: 12px;
@@ -215,6 +361,7 @@
 }
 .chatgpt-confirm h4 {
   margin: 0;
+  font-weight: 600;
 }
 @media (pointer: coarse) {
   .settings-sheet select,
@@ -233,7 +380,11 @@
     height: 44px;
     min-height: 44px;
   }
-  .settings-sheet .role-enabled {
+  .settings-sheet .safety-settings select {
+    width: auto;
+  }
+  .settings-sheet .role-enabled,
+  .settings-sheet .role-switch {
     min-height: 44px;
   }
 }

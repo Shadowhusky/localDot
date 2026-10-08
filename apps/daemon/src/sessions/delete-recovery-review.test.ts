@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -70,6 +70,6 @@ describe("review: durable session deletion", () => {
     log.forget(id);
     expect(log.listSessions()).toEqual([]);
     expect(db.prepare("SELECT * FROM events WHERE session_id = ?").all(id)).toEqual([]);
-    expect(existsSync(join(home, "sessions", id))).toBe(false);
+    expect(readdirSync(join(home, "sessions"))).toEqual([]);
   });
 });

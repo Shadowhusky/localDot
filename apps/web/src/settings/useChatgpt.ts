@@ -417,6 +417,12 @@ export function useChatgpt(api: ApiClient, visible: boolean) {
       clearMaterial();
       unverify();
       const problem = failure instanceof ChatgptFailure ? failure : new ChatgptFailure(true);
+      if (action === "login" && problem.refusal) {
+        pendingKind.current = null;
+        await read(true, operation);
+        if (live() && known.current) setError(problem.refusal);
+        return;
+      }
       setUncertain(problem.uncertain);
       if (action === "install" && !problem.uncertain) {
         watchingInstall.current = false;

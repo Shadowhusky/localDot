@@ -1,4 +1,5 @@
 import {
+  APPROVAL_TIMEOUT_MS,
   BootConfig,
   type BrainEvent,
   BrainEvents,
@@ -22,6 +23,18 @@ export const MAX_REPLY_BYTES = 16 * 1024 * 1024;
 // shrinks it; reserve an additional 64 KiB for the HTTP JSON envelope without raising tool limits.
 export const MAX_TRANSCRIPT_REPLY_BYTES = 128 * 1024 * 1024 + 64 * 1024;
 const BASE_TIMEOUT_MS = 30_000;
+const TOOL_WORK_MS = 120_000;
+// An approval card or a hand-off can hold these calls; the daemon bounds their own work.
+const WAITS_ON_USER = new Set([
+  "computer",
+  "shell",
+  "files",
+  "browser_read",
+  "browser_navigate",
+  "browser_upload",
+  "remember",
+  "done",
+]);
 const transcriptReply = z.object({ messages: z.array(TranscriptMessage) });
 const regionSchema = z
   .object({
@@ -213,10 +226,11 @@ export class ToolClient {
   }
 
   tool(name: string, callId: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
-    let timeoutMs: number | undefined = 120_000;
+    let timeoutMs: number | undefined = TOOL_WORK_MS;
     if (name === "shell") timeoutMs = ((ShellInput.parse(input).timeout_sec ?? 120) + 10) * 1000;
     else if (name === "ask_user") timeoutMs = 30 * 60_000 + 10_000;
     else if (name === "request_takeover") timeoutMs = undefined;
+    if (timeoutMs !== undefined && WAITS_ON_USER.has(name)) timeoutMs += APPROVAL_TIMEOUT_MS;
     return this.#json(
       "POST",
       `/v1/tools/${encodeURIComponent(name)}`,

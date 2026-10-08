@@ -16,6 +16,12 @@ export const AgentRoleChoice = z.strictObject({
   model: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/),
   key: z.string().regex(SECRET_ID_PATTERN).optional(),
   price: AgentModelPrice.optional(),
+  // What a custom endpoint's model can do, as the user states it; the daemon refuses these for any
+  // other provider. Without them the model sees images and has a 32,768-token context.
+  vision: z.boolean().optional(),
+  contextTokens: z.number().int().min(4_096).max(2_000_000).optional(),
+  // A custom endpoint on a flat-rate plan: no per-token price, on a route keyd marks flat.
+  plan: z.literal(true).optional(),
 });
 export type AgentRoleChoice = z.infer<typeof AgentRoleChoice>;
 export const AgentDenyFolder = z

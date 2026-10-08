@@ -629,7 +629,7 @@ describe("session-owned screen authority", () => {
     if (!card) throw new Error("missing upload approval");
     expect(card).toMatchObject({
       title: "Upload files",
-      actionClass: "send",
+      actionClass: "upload",
       risk: "high",
       upload: {
         destination: { origin: f.offer.origin, embedded: true },

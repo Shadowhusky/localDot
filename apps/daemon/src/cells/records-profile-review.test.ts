@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { browserSpec } from "./browser-spec.ts";
 import { DockerClient } from "./docker.ts";
 import { CellOrchestrator } from "./orchestrator.ts";
+import { streamOptions } from "./spec.ts";
 import { CellStore } from "./store.ts";
 import { sampleBrowserRecord } from "./testing/sample-browser-record.ts";
 import { sampleRecord } from "./testing/sample-record.ts";
@@ -124,7 +125,7 @@ describe("independent records and profile boundaries", () => {
 
   it("only the named profile is persistent and inherited config is explicitly temporary", () => {
     const record = sampleBrowserRecord();
-    const spec = browserSpec(record, "fixture-image");
+    const spec = browserSpec(record, "fixture-image", streamOptions());
     expect(spec.HostConfig.Mounts).toEqual([
       { Type: "volume", Source: record.docker.profileVolume, Target: "/profile" },
     ]);

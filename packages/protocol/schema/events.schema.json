@@ -185,6 +185,120 @@
         },
         "type": {
           "type": "string",
+          "const": "screen.switch"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "screen": {
+              "type": "string",
+              "enum": [
+                "desktop",
+                "browser"
+              ]
+            },
+            "cellId": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            },
+            "geometry": {
+              "type": "object",
+              "properties": {
+                "w": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 8192
+                },
+                "h": {
+                  "type": "integer",
+                  "exclusiveMinimum": 0,
+                  "maximum": 8192
+                },
+                "scale": {
+                  "anyOf": [
+                    {
+                      "type": "number",
+                      "const": 1
+                    },
+                    {
+                      "type": "number",
+                      "const": 2
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "w",
+                "h",
+                "scale"
+              ],
+              "additionalProperties": false
+            },
+            "by": {
+              "type": "string",
+              "enum": [
+                "agent",
+                "daemon"
+              ]
+            },
+            "revision": {
+              "type": "integer",
+              "exclusiveMinimum": 0,
+              "maximum": 9007199254740991
+            }
+          },
+          "required": [
+            "screen",
+            "cellId",
+            "geometry",
+            "by",
+            "revision"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
           "const": "agent.state"
         },
         "data": {
@@ -910,6 +1024,9 @@
                   "maximum": 9007199254740991
                 },
                 "secret": {
+                  "type": "boolean"
+                },
+                "editable": {
                   "type": "boolean"
                 }
               },
@@ -2024,12 +2141,15 @@
               "enum": [
                 "reading",
                 "browsing",
+                "computer",
                 "purchase",
                 "send",
                 "post",
                 "delete",
                 "download_execute",
                 "system_settings",
+                "memory",
+                "upload",
                 "credentials",
                 "unknown"
               ]
@@ -2044,6 +2164,130 @@
             "title": {
               "type": "string",
               "maxLength": 200
+            },
+            "partial": {
+              "minItems": 1,
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 15
+                  },
+                  "length": {
+                    "type": "integer",
+                    "minimum": 16385,
+                    "maximum": 1000000
+                  }
+                },
+                "required": [
+                  "field",
+                  "length"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "upload": {
+              "type": "object",
+              "properties": {
+                "destination": {
+                  "type": "object",
+                  "properties": {
+                    "origin": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 512
+                    },
+                    "embedded": {
+                      "type": "boolean"
+                    }
+                  },
+                  "required": [
+                    "origin",
+                    "embedded"
+                  ],
+                  "additionalProperties": false
+                },
+                "files": {
+                  "minItems": 1,
+                  "maxItems": 10,
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 180
+                      },
+                      "bytes": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 104857600
+                      },
+                      "sha256": {
+                        "type": "string",
+                        "pattern": "^[0-9a-f]{64}$"
+                      },
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1024
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "bytes",
+                      "sha256",
+                      "path"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "destination",
+                "files"
+              ],
+              "additionalProperties": false
+            },
+            "always": {
+              "maxItems": 4,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "task",
+                      "site",
+                      "app",
+                      "always"
+                    ]
+                  },
+                  "label": {
+                    "type": "string",
+                    "maxLength": 200
+                  },
+                  "site": {
+                    "type": "string",
+                    "maxLength": 300
+                  },
+                  "app": {
+                    "type": "string",
+                    "maxLength": 128
+                  }
+                },
+                "required": [
+                  "scope",
+                  "label"
+                ],
+                "additionalProperties": false
+              }
             },
             "approvalId": {
               "type": "string",
@@ -2094,7 +2338,7 @@
                       },
                       {
                         "type": "string",
-                        "maxLength": 512
+                        "maxLength": 16384
                       }
                     ],
                     "items": false,
@@ -2190,6 +2434,9 @@
                   "maximum": 9007199254740991
                 },
                 "secret": {
+                  "type": "boolean"
+                },
+                "editable": {
                   "type": "boolean"
                 }
               },
@@ -2288,6 +2535,204 @@
             "approvalId",
             "decision",
             "by"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "rule.created"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "task",
+                "site",
+                "app",
+                "always"
+              ]
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "site": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "app": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "actionClass": {
+              "type": "string",
+              "enum": [
+                "reading",
+                "browsing",
+                "computer",
+                "purchase",
+                "send",
+                "post",
+                "delete",
+                "download_execute",
+                "system_settings",
+                "memory",
+                "upload",
+                "credentials",
+                "unknown"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          },
+          "required": [
+            "scope",
+            "label",
+            "actionClass"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "v",
+        "id",
+        "seq",
+        "t",
+        "agent",
+        "type",
+        "data"
+      ],
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "properties": {
+        "v": {
+          "type": "number",
+          "const": 1
+        },
+        "id": {
+          "type": "string",
+          "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+        },
+        "seq": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "t": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "step": {
+          "type": "string",
+          "minLength": 1
+        },
+        "type": {
+          "type": "string",
+          "const": "rule.removed"
+        },
+        "data": {
+          "type": "object",
+          "properties": {
+            "scope": {
+              "type": "string",
+              "enum": [
+                "task",
+                "site",
+                "app",
+                "always"
+              ]
+            },
+            "label": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "site": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "app": {
+              "type": "string",
+              "maxLength": 128
+            },
+            "actionClass": {
+              "type": "string",
+              "enum": [
+                "reading",
+                "browsing",
+                "computer",
+                "purchase",
+                "send",
+                "post",
+                "delete",
+                "download_execute",
+                "system_settings",
+                "memory",
+                "upload",
+                "credentials",
+                "unknown"
+              ]
+            },
+            "id": {
+              "type": "string",
+              "pattern": "^[0-9A-HJKMNP-TV-Z]{26}$"
+            }
+          },
+          "required": [
+            "scope",
+            "label",
+            "actionClass"
           ],
           "additionalProperties": false
         }

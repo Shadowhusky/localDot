@@ -116,10 +116,18 @@ it("never asks for the previous session's screenshots under the picked session",
   const f = fixture([newest, older]);
   window.history.replaceState(null, "", `/?replay=${newest.card.id}`);
   render(<App fetchImpl={f.fetchImpl} />);
+  // A step's screenshot loads when its row is unfolded in Activity.
+  const unfoldStep = async () =>
+    fireEvent.click(
+      within(await screen.findByTestId("step-row")).getByRole("button", { expanded: false }),
+    );
+  await unfoldStep();
   await waitFor(() =>
     expect(f.requests).toContain(`/api/sessions/${newest.card.id}/thumbs/${newest.frameId}`),
   );
   fireEvent.click(sessionCard("Older notes"));
+  await screen.findByRole("heading", { name: "Older notes" });
+  await unfoldStep();
   await waitFor(() =>
     expect(f.requests).toContain(`/api/sessions/${older.card.id}/thumbs/${older.frameId}`),
   );

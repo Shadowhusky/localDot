@@ -121,16 +121,14 @@ it.each(["hidden", "offline"] as const)(
     });
     render(<KnowledgeFixture api={api} />);
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Check skills" })).toHaveProperty(
-        "disabled",
-        false,
-      ),
+      expect(
+        screen.getByRole("button", { name: "Check skills" }).getAttribute("aria-busy"),
+      ).toBeNull(),
     );
     act(() => screen.getByRole("button", { name: "Read current memory" }).click());
-    expect(screen.getByRole("button", { name: "Read current memory" })).toHaveProperty(
-      "disabled",
-      true,
-    );
+    expect(
+      screen.getByRole("button", { name: "Read current memory" }).getAttribute("aria-disabled"),
+    ).toBe("true");
     expect(requests).toHaveLength(2);
     await act(async () => {
       if (kind === "hidden") {
@@ -152,8 +150,8 @@ it.each(["hidden", "offline"] as const)(
     expect(document.body.textContent).not.toContain("stale retired result");
     expect(requests, "no automatic replay of cancelled read").toHaveLength(2);
     expect(
-      screen.getByRole("button", { name: "Read current memory" }),
+      screen.getByRole("button", { name: "Read current memory" }).getAttribute("aria-disabled"),
       "the cancelled request must leave a usable explicit retry",
-    ).toHaveProperty("disabled", false);
+    ).toBeNull();
   },
 );

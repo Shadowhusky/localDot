@@ -7,8 +7,14 @@ interface Page<T> {
   snapshot: readonly T[];
 }
 // Render one measured page rather than keeping offscreen Markdown/output trees mounted.
-// A reader's explicit page remains anchored while the live projection receives more events.
-export function usePagedRows<T>(rows: readonly T[], keyOf: (row: T) => string, owner = "") {
+// A reader's explicit page remains anchored while the live projection receives more events. With a
+// step shorter than the page, a move keeps part of the old page, so the rows in view stay mounted.
+export function usePagedRows<T>(
+  rows: readonly T[],
+  keyOf: (row: T) => string,
+  owner = "",
+  { size = HISTORY_PAGE_ROWS, step = size }: { size?: number; step?: number } = {},
+) {
   const [page, setPage] = useState<Page<T>>({ owner, anchor: null, snapshot: [] });
   useLayoutEffect(() => {
     if (page.owner !== owner) setPage({ owner, anchor: null, snapshot: [] });
@@ -16,12 +22,12 @@ export function usePagedRows<T>(rows: readonly T[], keyOf: (row: T) => string, o
   const current = useMemo(() => {
     const anchor = page.owner === owner ? page.anchor : null;
     const found = anchor === null ? -1 : rows.findIndex((row) => keyOf(row) === anchor);
-    const start = anchor === null ? Math.max(0, rows.length - HISTORY_PAGE_ROWS) : found;
-    const visible = start < 0 ? page.snapshot : rows.slice(start, start + HISTORY_PAGE_ROWS);
+    const start = anchor === null ? Math.max(0, rows.length - size) : found;
+    const visible = start < 0 ? page.snapshot : rows.slice(start, start + size);
     return { rows: visible, start, following: anchor === null, retained: start < 0 };
-  }, [owner, page, rows, keyOf]);
+  }, [owner, page, rows, keyOf, size]);
   const move = (start: number) => {
-    const next = rows.slice(Math.max(0, start), Math.max(0, start) + HISTORY_PAGE_ROWS);
+    const next = rows.slice(Math.max(0, start), Math.max(0, start) + size);
     setPage({ owner, anchor: next[0] ? keyOf(next[0]) : null, snapshot: next });
   };
   return {
@@ -33,11 +39,11 @@ export function usePagedRows<T>(rows: readonly T[], keyOf: (row: T) => string, o
       if (current.following && current.rows[0])
         setPage({ owner, anchor: keyOf(current.rows[0]), snapshot: current.rows });
     },
-    older: () => move(Math.max(0, current.start - HISTORY_PAGE_ROWS)),
+    older: () => move(Math.max(0, current.start - step)),
     newer: () => {
-      if (current.retained || current.start + 2 * HISTORY_PAGE_ROWS >= rows.length)
+      if (current.retained || current.start + step + size >= rows.length)
         setPage({ owner, anchor: null, snapshot: [] });
-      else move(current.start + HISTORY_PAGE_ROWS);
+      else move(current.start + step);
     },
     latest: () => setPage({ owner, anchor: null, snapshot: [] }),
   };

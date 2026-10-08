@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { prepareOwnedCodexRoots } from "@localdot/codex-harness";
-import { DEFAULT_AUTONOMY, msToMicros, ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, msToMicros, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FakeOrchestrator } from "../../cells/testing/fake-orchestrator.ts";
 import { NO_STREAM } from "../../cells/types.ts";
@@ -61,7 +61,7 @@ function client(path: string) {
   return { socket, ready, call, request };
 }
 function fixture() {
-  const h = toolHarness({ autonomy: { ...DEFAULT_AUTONOMY, send: "act" } });
+  const h = toolHarness({ autonomy: { ...CAREFUL_AUTONOMY, send: "act" } });
   const initial = h.session.generation;
   assert.ok(initial);
   h.session.retireBrain(initial);

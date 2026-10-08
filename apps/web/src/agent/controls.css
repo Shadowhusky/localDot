@@ -28,7 +28,6 @@
   resize: vertical;
 }
 .takeover-panel button,
-.question-card form button,
 .control-status button {
   display: inline-flex;
   align-items: center;
@@ -45,19 +44,9 @@
   cursor: pointer;
 }
 .takeover-panel button:disabled,
-.question-card form button:disabled,
 .control-status button:disabled {
   cursor: default;
   opacity: 0.6;
-}
-.answer-option {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-}
-.answer-option input {
-  flex: none;
 }
 .takeover-panel {
   width: 100%;
@@ -71,6 +60,7 @@
 .takeover-panel h3 {
   margin: 0;
   font-size: 15px;
+  font-weight: 600;
 }
 .takeover-panel p {
   white-space: pre-wrap;
@@ -101,7 +91,7 @@
   z-index: 2;
 }
 .stage > .manual-surface:focus-visible {
-  outline: 2px solid var(--color-text);
+  outline: var(--focus-width) solid var(--color-text);
   outline-offset: -4px;
 }
 .stage > .manual-surface:disabled {

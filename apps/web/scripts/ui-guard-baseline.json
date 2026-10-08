@@ -1,0 +1,244 @@
+{
+  "src/agent/ActivityRow.tsx": {
+    "native-control": 1
+  },
+  "src/agent/AlwaysAllow.tsx": {
+    "native-control": 3,
+    "native-disabled": 3
+  },
+  "src/agent/ApprovalCard.tsx": {
+    "native-control": 5,
+    "native-disabled": 4
+  },
+  "src/agent/SafetyControls.tsx": {
+    "banned-copy": 4,
+    "native-control": 5,
+    "native-disabled": 4
+  },
+  "src/agent/StopControl.tsx": {
+    "native-control": 2
+  },
+  "src/agent/TakeoverPanel.tsx": {
+    "banned-copy": 1,
+    "native-control": 7,
+    "native-disabled": 7
+  },
+  "src/agent/UsageFooter.tsx": {
+    "native-control": 1
+  },
+  "src/agent/activity.css": {
+    "control-selector": 6,
+    "half-pixel": 2,
+    "stray-stylesheet": 1,
+    "type-literal": 1
+  },
+  "src/agent/controls.css": {
+    "control-selector": 4,
+    "radius-literal": 4,
+    "spacing-literal": 11,
+    "stray-stylesheet": 1,
+    "type-literal": 1
+  },
+  "src/agent/output.css": {
+    "stray-stylesheet": 1,
+    "type-literal": 1
+  },
+  "src/agent/safety.css": {
+    "control-selector": 10,
+    "half-pixel": 1,
+    "radius-literal": 6,
+    "raw-colour": 29,
+    "spacing-literal": 31,
+    "stray-stylesheet": 1,
+    "token-fallback": 4,
+    "type-literal": 17
+  },
+  "src/app.css": {
+    "control-selector": 12,
+    "half-pixel": 9,
+    "radius-literal": 10,
+    "spacing-literal": 25,
+    "stray-stylesheet": 1,
+    "type-literal": 18
+  },
+  "src/browser/BrowserDownloads.tsx": {
+    "native-control": 2,
+    "native-disabled": 2
+  },
+  "src/browser/downloads.css": {
+    "stray-stylesheet": 1
+  },
+  "src/cells/errors.ts": {
+    "banned-copy": 5
+  },
+  "src/cells/hud-state.ts": {
+    "banned-copy": 1
+  },
+  "src/dot/dot.css": {
+    "raw-colour": 4
+  },
+  "src/dot/render/DotView.ts": {
+    "raw-colour": 13
+  },
+  "src/export/ExportSheet.tsx": {
+    "banned-copy": 1,
+    "native-control": 13,
+    "native-disabled": 5
+  },
+  "src/export/export.css": {
+    "control-selector": 10,
+    "motion-literal": 2,
+    "radius-literal": 3,
+    "raw-colour": 2,
+    "spacing-literal": 14,
+    "stray-stylesheet": 1,
+    "type-literal": 11
+  },
+  "src/gallery/gallery.css": {
+    "half-pixel": 1,
+    "type-literal": 2
+  },
+  "src/keys/KeyForm.tsx": {
+    "native-control": 10,
+    "native-disabled": 2
+  },
+  "src/keys/KeyList.tsx": {
+    "native-control": 1,
+    "native-disabled": 1
+  },
+  "src/keys/KeysSheet.tsx": {
+    "banned-copy": 6,
+    "native-control": 4
+  },
+  "src/keys/keys-api.ts": {
+    "banned-copy": 2
+  },
+  "src/keys/keys.css": {
+    "control-selector": 11,
+    "half-pixel": 5,
+    "motion-literal": 5,
+    "radius-literal": 11,
+    "spacing-literal": 27,
+    "stray-stylesheet": 1,
+    "type-literal": 10
+  },
+  "src/keys/useKeys.ts": {
+    "banned-copy": 1
+  },
+  "src/onboarding/AppearancePicker.tsx": {
+    "native-control": 1
+  },
+  "src/onboarding/WelcomeSetup.tsx": {
+    "native-control": 3
+  },
+  "src/onboarding/onboarding.css": {
+    "control-selector": 6,
+    "half-pixel": 1,
+    "radius-literal": 3,
+    "spacing-literal": 15,
+    "stray-stylesheet": 1,
+    "type-literal": 10
+  },
+  "src/replay/CompareView.tsx": {
+    "native-control": 1
+  },
+  "src/replay/ReplayControls.tsx": {
+    "native-control": 7,
+    "native-disabled": 5
+  },
+  "src/replay/ReplayView.tsx": {
+    "banned-copy": 2,
+    "native-control": 2,
+    "native-disabled": 1
+  },
+  "src/replay/Scrubber.tsx": {
+    "banned-copy": 1
+  },
+  "src/replay/SessionsRail.tsx": {
+    "banned-copy": 12,
+    "native-control": 7,
+    "native-disabled": 3
+  },
+  "src/replay/recording-source.ts": {
+    "banned-copy": 1
+  },
+  "src/replay/replay-view.ts": {
+    "banned-copy": 2
+  },
+  "src/replay/replay.css": {
+    "control-selector": 6,
+    "half-pixel": 1,
+    "radius-literal": 12,
+    "spacing-literal": 34,
+    "stray-stylesheet": 1,
+    "type-literal": 14
+  },
+  "src/replay/useReplay.ts": {
+    "banned-copy": 2
+  },
+  "src/settings/ChatgptPanel.tsx": {
+    "native-control": 16,
+    "native-disabled": 11
+  },
+  "src/settings/ModelPicker.tsx": {
+    "native-control": 3,
+    "native-disabled": 5
+  },
+  "src/settings/ProviderPicker.tsx": {
+    "native-control": 2,
+    "native-disabled": 6
+  },
+  "src/settings/RoleEditor.tsx": {
+    "native-control": 8,
+    "native-disabled": 5
+  },
+  "src/settings/SafetySettings.tsx": {
+    "native-control": 5,
+    "native-disabled": 1
+  },
+  "src/settings/SettingsSheet.tsx": {
+    "native-control": 9,
+    "native-disabled": 3
+  },
+  "src/settings/SubscriptionPicker.tsx": {
+    "native-control": 2,
+    "native-disabled": 3
+  },
+  "src/settings/settings-form.ts": {
+    "banned-copy": 1
+  },
+  "src/settings/settings.css": {
+    "control-selector": 18,
+    "radius-literal": 4,
+    "spacing-literal": 31,
+    "stray-stylesheet": 1,
+    "type-literal": 3
+  },
+  "src/shell/ActivityRail.tsx": {
+    "native-control": 1
+  },
+  "src/shell/Hud.tsx": {
+    "banned-copy": 1,
+    "native-control": 1
+  },
+  "src/shell/PaneTabs.tsx": {
+    "native-control": 1
+  },
+  "src/shell/TopBar.tsx": {
+    "banned-copy": 1,
+    "native-control": 4,
+    "native-disabled": 1
+  },
+  "src/stage/Stage.tsx": {
+    "native-control": 1,
+    "native-disabled": 1
+  },
+  "src/theme.css": {
+    "control-selector": 2,
+    "half-pixel": 3,
+    "motion-literal": 7,
+    "raw-colour": 15,
+    "stray-stylesheet": 1,
+    "type-literal": 4
+  }
+}

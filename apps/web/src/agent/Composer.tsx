@@ -1,16 +1,48 @@
 import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import {
+  type DragEvent,
+  type ReactNode,
+  useContext,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
 import type { CellSummary } from "../cells/types.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
-import { Attachments } from "./Attachments.tsx";
-import { DeliveryState } from "./DeliveryState.tsx";
+import { announce } from "../ui/Announcer.tsx";
+import { Button } from "../ui/Button.tsx";
+import { Collapse } from "../ui/Disclosure.tsx";
+import { FileButton } from "../ui/FileButton.tsx";
+import { afterMotion } from "../ui/finished.ts";
+import { focusWithoutScroll } from "../ui/focus.ts";
+import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
+import { Menu, MenuItem } from "../ui/Menu.tsx";
+import { useMediaQuery } from "../ui/media.ts";
+import { triggerProps } from "../ui/Popover.tsx";
+import { TextArea } from "../ui/TextArea.tsx";
+import { AttachmentChips } from "./Attachments.tsx";
+import { fileName, withAttachments } from "./attachments.ts";
+import { PendingMessage } from "./DeliveryState.tsx";
 import { KeyFound } from "./KeyFound.tsx";
+import { Outbox } from "./outbox.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type KeyGuard, useKeyGuard } from "./useKeyGuard.ts";
 import { useUploads } from "./useUploads.ts";
 import { DeliveryFailure, deliverText, type MessageMode, type TextDelivery } from "./write-api.ts";
-import "./composer.css";
+
+const LIMIT = 8000;
+// A phone: Return starts a new line there, and Send sends.
+const TOUCH = "(hover: none) and (pointer: coarse)";
+// What is left shows from here on.
+const NEAR = 7000;
+// An accepted message holds its place in the thread this long at most while its own row arrives.
+const LANDING_MS = 10_000;
 
 export interface ComposerProps {
   api: ApiClient;
@@ -22,9 +54,12 @@ export interface ComposerProps {
   keysOpen: boolean;
   receiveKey: KeyIntake["receive"];
   configured?: boolean;
-  modelSummary?: string;
-  onSettings?(trigger: HTMLTextAreaElement): void;
+  // The main model's name, offered on a new task as the way to change it.
+  model?: string;
+  onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
+  // The running task's Stop, while there is one.
+  stop?: { run(): void; busy: boolean; enabled: boolean };
 }
 export interface Delivery {
   readonly id: number;
@@ -32,8 +67,15 @@ export interface Delivery {
   readonly revision: number;
   readonly draftText: string;
   readonly attachmentIDs: readonly number[];
+  readonly files: readonly string[];
+  // When it was sent, as its row will say: while dot worked, or for after the task.
+  readonly tag?: string;
+  // Your messages the thread already had, so the arrival of this one can be told apart.
+  readonly known: ReadonlySet<string>;
+  readonly session?: string;
+  // Wall-clock ms it was sent at.
+  readonly at: number;
   readonly phase: "sending" | "accepted" | "refused" | "uncertain";
-  readonly explanation?: string;
 }
 const readyCell = (props: ComposerProps) =>
   props.known &&
@@ -46,15 +88,70 @@ function modeFor(props: ComposerProps, selected: "steer" | "followup"): MessageM
   if (!props.agent.sessionId || props.agent.model.ended) return "new";
   return props.agent.snapshot?.status === "idle" ? "followup" : selected;
 }
+// Why nothing can be sent to the computer now, in the order someone would fix it.
+function computerReason(props: ComposerProps): string | undefined {
+  if (!props.known) return "Checking your computer…";
+  if (props.pending) return "Wait for your computer.";
+  const state = props.cell?.state;
+  if (state === "starting") return "Your computer is starting.";
+  if (state === "stopping") return "Your computer is shutting down.";
+  if (state !== "ready" || !props.cell || !ULID_PATTERN.test(props.cell.id))
+    return "Turn on your computer first.";
+  if (props.cell.paused) return "Resume your computer first.";
+  if (props.controlBlocked) return "You can send once the task is ready.";
+  return undefined;
+}
+// Why nothing can be sent now, as Send says it.
+function blockedReason(props: ComposerProps, online: boolean, mode: MessageMode) {
+  if (!online) return "You're offline.";
+  return (
+    computerReason(props) ??
+    (mode !== "new" && !props.agent.fresh ? "Reconnecting to the task…" : undefined)
+  );
+}
+const userIds = (props: ComposerProps) =>
+  new Set(
+    [...props.agent.model.messages.values()].flatMap((message) =>
+      message.role === "user" ? [message.id] : [],
+    ),
+  );
+const editable = (target: EventTarget | null) =>
+  target instanceof HTMLElement &&
+  !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable=false])");
+const carriesFiles = (event: DragEvent) => event.dataTransfer.types.includes("Files");
+
+// A control that comes and goes along the row: it grows in where it sits, and on its way out it
+// shrinks away still showing what it last did, out of reach.
+function Pop({ shown, children }: { shown: boolean; children: ReactNode }) {
+  const root = useRef<HTMLSpanElement>(null);
+  const [kept, setKept] = useState(shown);
+  if (shown && !kept) setKept(true);
+  const last = useRef(children);
+  if (shown) last.current = children;
+  useEffect(() => {
+    if (shown || !kept) return;
+    return afterMotion([root.current], () => setKept(false));
+  }, [shown, kept]);
+  if (!shown && !kept) return null;
+  return (
+    <span ref={root} className="composer-pop" data-leaving={shown ? undefined : ""} inert={!shown}>
+      {shown ? children : last.current}
+    </span>
+  );
+}
 
 export function Composer(props: ComposerProps) {
-  const [selected, setSelected] = useState<"steer" | "followup">("steer");
-  const selectedNow = useRef<"steer" | "followup">("steer");
   const [delivery, setDelivery] = useState<Delivery | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [online, setOnline] = useState(() => navigator.onLine);
   const [length, setLength] = useState(0);
-  const field = useRef<HTMLTextAreaElement>(null);
+  const [blank, setBlank] = useState(true);
+  const [menu, setMenu] = useState(false);
+  const [dragging, setDragging] = useState(false);
+  const form = useRef<HTMLFormElement>(null);
+  const more = useRef<HTMLButtonElement>(null);
+  const drags = useRef(0);
+  const field = () => form.current?.querySelector("textarea") ?? null;
   const current = useRef(props);
   const guard = useKeyGuard(true);
   const guardOwner = useRef<KeyGuard>(guard);
@@ -70,6 +167,11 @@ export function Composer(props: ComposerProps) {
   const composing = useRef(false);
   const mounted = useRef(true);
   const wasKeysOpen = useRef(props.keysOpen);
+  // Without a thread to wait in, a message waits above the composer.
+  const outbox = useContext(Outbox);
+  const touch = useMediaQuery(TOUCH);
+  // Where a lost message offers its two choices.
+  const lostChoice = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     current.current = props;
     guardOwner.current = guard;
@@ -90,6 +192,15 @@ export function Composer(props: ComposerProps) {
       pending.current?.request.mode === "new"
     )
       return; // Live polling can discover the new session before its HTTP reply arrives.
+    // A started task's first message waits in the thread until the new task's history shows it.
+    if (
+      previous.api === props.api &&
+      previous.cellId === props.cell?.id &&
+      delivery?.phase === "accepted" &&
+      delivery.request.mode === "new" &&
+      delivery.session === props.agent.sessionId
+    )
+      return;
     // Polling may retire the stopped task after a refused attempt to start its
     // replacement. Keep that refusal on this computer until another request or
     // a different task takes ownership; it grants no authority to retry.
@@ -123,22 +234,106 @@ export function Composer(props: ComposerProps) {
       window.removeEventListener("offline", changed);
     };
   }, []);
-  const mode = modeFor(props, selected);
+  // "/" anywhere outside a field starts a message, as long as the composer is in view.
+  useEffect(() => {
+    const key = (event: KeyboardEvent) => {
+      if (
+        event.key !== "/" ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        editable(event.target)
+      )
+        return;
+      const input = form.current?.querySelector("textarea");
+      if (!input || input.closest("[inert], [hidden]") || !input.getClientRects().length) return;
+      event.preventDefault();
+      input.focus();
+    };
+    document.addEventListener("keydown", key);
+    return () => document.removeEventListener("keydown", key);
+  }, []);
+
+  const mode = modeFor(props, "steer");
   const permitted =
     readyCell(props) && online && !props.keysOpen && (mode === "new" || props.agent.fresh);
   const uncertain = delivery?.phase === "uncertain";
   const sending = delivery?.phase === "sending";
+  const takeover = !!props.agent.model.pendingTakeover;
   const uploads = useUploads({
     api: props.api,
     cellId: props.cell?.id ?? null,
-    ready: readyCell(props) && !props.agent.model.pendingTakeover,
+    ready: readyCell(props) && !takeover,
     enabled: permitted && !sending && !uncertain,
   });
+
+  // The message's own row is in the thread: one of yours, in its words, that the thread did not
+  // have when it was sent.
+  const messages = props.agent.model.messages;
+  const arrived = useMemo(() => {
+    if (delivery?.phase !== "accepted" && delivery?.phase !== "uncertain") return false;
+    for (const message of messages.values())
+      if (
+        message.role === "user" &&
+        message.text === delivery.request.text &&
+        !delivery.known.has(message.id)
+      )
+        return true;
+    return false;
+  }, [delivery, messages]);
+
+  const measure = (input: HTMLTextAreaElement) => {
+    setLength(input.value.length);
+    setBlank(!input.value.trim());
+  };
+  // dot has the message: its files went with it, and the draft clears unless it changed since.
+  const delivered = (record: Delivery) => {
+    announce("composer", record.request.mode === "new" ? "Task started." : "Sent to dot.");
+    uploads.acknowledge(record.attachmentIDs);
+    const input = field();
+    if (revision.current === record.revision && input && input.value === record.draftText) {
+      input.value = "";
+      measure(input);
+    }
+  };
+  // An accepted message's stand-in gives way in the same frame its own row arrives in the thread.
+  useEffect(() => {
+    if (delivery?.phase !== "accepted") return;
+    const done = () => setDelivery((now) => (now === delivery ? null : now));
+    if (arrived) return done();
+    const timer = window.setTimeout(done, LANDING_MS);
+    return () => window.clearTimeout(timer);
+  }, [delivery, arrived]);
+  // A lost reply is checked against the task at once. Once the task shows the message, dot has it;
+  // until then only you decide whether to send it again.
+  const lostId = delivery?.phase === "uncertain" ? delivery.id : null;
+  useEffect(() => {
+    if (lostId !== null) current.current.agent.reconcile();
+  }, [lostId]);
+  // While a lost message waits on your choice, the thread's jump button leads to it.
+  useEffect(() => {
+    if (!outbox || !uncertain) return;
+    outbox.needs(() => {
+      const choice = lostChoice.current?.querySelector("button");
+      if (choice) focusWithoutScroll(choice);
+    });
+    return () => outbox.needs(null);
+  }, [outbox, uncertain]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the lost message's arrival is the trigger.
+  useEffect(() => {
+    if (delivery?.phase !== "uncertain" || !arrived) return;
+    const lost = pending.current;
+    if (lost?.phase !== "uncertain" || lost.id !== delivery.id) return;
+    pending.current = null;
+    setDelivery(null);
+    delivered(delivery);
+  }, [delivery, arrived]);
   const perform = async (
     request: TextDelivery,
     capturedRevision: number,
-    draftText = request.text,
-    attachmentIDs: readonly number[] = [],
+    shown: Pick<Delivery, "draftText" | "attachmentIDs" | "files" | "tag">,
   ) => {
     if (pending.current) return;
     const capturedApi = current.current.api;
@@ -146,13 +341,15 @@ export function Composer(props: ComposerProps) {
       id: ++nextId.current,
       request: Object.freeze(request),
       revision: capturedRevision,
-      draftText,
-      attachmentIDs,
+      ...shown,
+      known: userIds(current.current),
+      at: Date.now(),
       phase: "sending",
     };
     pending.current = record;
     setDelivery(record);
     setProblem(null);
+    outbox?.show();
     const owns = (acceptedSession?: string) =>
       mounted.current &&
       pending.current === record &&
@@ -171,17 +368,9 @@ export function Composer(props: ComposerProps) {
         }
         return;
       }
-      setDelivery({ ...record, phase: "accepted" });
+      setDelivery({ ...record, phase: "accepted", session: acceptedSession });
+      delivered(record);
       if (request.mode === "new") current.current.onTaskStarted?.();
-      uploads.acknowledge(record.attachmentIDs);
-      if (
-        revision.current === capturedRevision &&
-        field.current &&
-        field.current.value === draftText
-      ) {
-        field.current.value = "";
-        setLength(0);
-      }
     } catch (error) {
       if (
         !owns() &&
@@ -196,22 +385,23 @@ export function Composer(props: ComposerProps) {
         return;
       const failure = error instanceof DeliveryFailure ? error : new DeliveryFailure(true);
       const phase = failure.uncertain ? "uncertain" : "refused";
-      setDelivery({ ...record, phase, explanation: failure.message });
+      setDelivery({ ...record, phase });
+      announce("composer", failure.uncertain ? "Not sure dot got that." : "Not sent.");
       if (failure.uncertain) pending.current = { ...record, phase };
     } finally {
       if (pending.current === record) pending.current = null;
     }
   };
-  const submit = () => {
-    const input = field.current;
+  const submit = (later = false) => {
+    const input = field();
     if (!input || pending.current || composing.current) return;
     // Check the DOM before copying even ordinary text into delivery state or requests.
     if (!guardOwner.current.check(input)) {
-      setLength(input.value.length);
+      measure(input);
       return;
     }
     const now = current.current;
-    const chosen = modeFor(now, selectedNow.current);
+    const chosen = modeFor(now, later ? "followup" : "steer");
     if (chosen === "new" && now.configured === false) {
       now.onSettings?.(input);
       return;
@@ -222,12 +412,17 @@ export function Composer(props: ComposerProps) {
       now.keysOpen ||
       (chosen !== "new" && !now.agent.fresh)
     ) {
-      setProblem("Reconnect and check the computer before sending.");
+      const why = blockedReason(now, navigator.onLine, chosen);
+      setProblem(
+        why
+          ? `${why} Your message stays here.`
+          : "Reconnect and check the computer before sending.",
+      );
       return;
     }
     const text = input.value;
-    if (!text.trim() || text.length > 8000 || !text.isWellFormed() || text.includes("\0")) {
-      setProblem("Write a message of 1–8000 characters.");
+    if (!text.trim() || text.length > LIMIT || !text.isWellFormed() || text.includes("\0")) {
+      setProblem("Write a message of 1–8,000 characters.");
       return;
     }
     const attached = uploads.forMessage();
@@ -235,18 +430,28 @@ export function Composer(props: ComposerProps) {
       setProblem("Finish or remove unconfirmed uploads before sending.");
       return;
     }
-    const sent = attached.length
-      ? `${text}\n\nAttached files on this computer:\n${attached.map((row) => `- ${row.path}`).join("\n")}`
-      : text;
-    if (sent.length > 8000 || keyLikePresent(sent)) {
+    const sent = withAttachments(
+      text,
+      attached.map((row) => row.path),
+    );
+    if (sent.length > LIMIT || keyLikePresent(sent)) {
       setProblem("Shorten the message or attachment names before sending.");
       return;
     }
     void perform(
       { cellId: now.cell?.id as string, sessionId: now.agent.sessionId, mode: chosen, text: sent },
       revision.current,
-      text,
-      attached.map((row) => row.id),
+      {
+        draftText: text,
+        attachmentIDs: attached.map((row) => row.id),
+        files: attached.map((row) => fileName(row.path)),
+        tag:
+          chosen === "steer"
+            ? "Sent while working"
+            : chosen === "followup" && later
+              ? "After this task"
+              : undefined,
+      },
     );
   };
   const retry = () => {
@@ -265,165 +470,316 @@ export function Composer(props: ComposerProps) {
     )
       return;
     if (previous.request.mode === "new" && now.configured === false) return;
-    if (!field.current || !guardOwner.current.check(field.current)) return;
+    const input = field();
+    if (!input || !guardOwner.current.check(input)) return;
     pending.current = null;
     // Reuse the confirmed attachment IDs, while preserving any newer ordinary draft.
-    void perform(previous.request, -1, previous.draftText, previous.attachmentIDs);
+    void perform(previous.request, -1, {
+      draftText: previous.draftText,
+      attachmentIDs: previous.attachmentIDs,
+      files: previous.files,
+      tag: previous.tag,
+    });
   };
   const dismiss = () => {
     if (pending.current?.phase !== "uncertain" || pending.current.id !== delivery?.id) return;
     pending.current = null;
     setDelivery(null);
-    setProblem("Delivery is still unconfirmed. Sending this draft again may create a duplicate.");
+    setProblem("dot may already have that message. Sending again could repeat it.");
   };
+  // From the menu, focus goes back to the message once it is on its way; on a phone that would
+  // bring up the keyboard, so focus stays on the menu's button.
+  const send = (later: boolean) => {
+    if (!touch) field()?.focus();
+    submit(later);
+  };
+  const edit = () => {
+    if (delivery?.phase === "refused") setDelivery(null);
+    field()?.focus();
+  };
+
+  const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
+  if (!choosing && menu) setMenu(false);
+  const connect = mode === "new" && props.configured === false;
+  const near = length > NEAR && length <= LIMIT;
+  const unavailable = props.keysOpen || props.controlBlocked;
+  const reason = blockedReason(props, online, mode);
+  const sendReason = sending
+    ? "Sending…"
+    : uncertain
+      ? "Choose what to do with your last message first."
+      : guard.notice
+        ? "Discard the key or move it to Keys first."
+        : (reason ??
+          (uploads.blocked
+            ? "Wait for your files to finish uploading."
+            : blank
+              ? "Write a message first."
+              : undefined));
+  const attachReason = guard.notice
+    ? "Discard the key or move it to Keys first."
+    : sending || uncertain
+      ? "Wait until your message is sent."
+      : (reason ?? (takeover ? "Add files once you return control to dot." : undefined));
+  const sendLabel =
+    mode === "new" ? "Start task" : mode === "followup" ? "Send follow-up" : "Send now";
+  const note =
+    mode === "new"
+      ? undefined
+      : takeover
+        ? "You keep control of the computer"
+        : props.agent.snapshot?.status === "paused"
+          ? "Sending won't resume the task"
+          : undefined;
+  const notices = [
+    problem && { text: problem, alert: true },
+    uploads.problem && { text: uploads.problem, alert: true },
+    uploads.notice && { text: uploads.notice, alert: false },
+  ].filter((notice) => !!notice);
+  // The notices fold away holding their last words.
+  const shownNotices = useRef(notices);
+  if (notices.length) shownNotices.current = notices;
+  const rows = uploads.rows;
+  const shownRows = useRef(rows);
+  if (rows.length) shownRows.current = rows;
+
+  const waiting = delivery && !arrived && (
+    <PendingMessage
+      delivery={delivery}
+      choiceRef={lostChoice}
+      onRetry={retry}
+      onDismiss={dismiss}
+      onEdit={edit}
+      retryReason={
+        uncertain && props.agent.sessionId === delivery.request.sessionId && permitted
+          ? guard.notice
+            ? "Discard the key or move it to Keys first."
+            : undefined
+          : "Check the current task first."
+      }
+    />
+  );
+
   return (
     <div className="composer">
+      {waiting && (outbox ? createPortal(waiting, outbox.slot) : waiting)}
       <form
-        onDragOver={(event) => {
-          if (event.dataTransfer.types.includes("Files")) event.preventDefault();
-        }}
-        onDrop={(event) => {
-          event.preventDefault();
-          if (event.dataTransfer.files.length) uploads.select(event.dataTransfer.files);
-        }}
+        ref={form}
+        className="composer-card"
         aria-label="Message dot"
+        data-dragging={dragging || undefined}
         onSubmit={(event) => {
           event.preventDefault();
           submit();
         }}
+        onDragEnter={(event) => {
+          if (!carriesFiles(event)) return;
+          drags.current += 1;
+          setDragging(true);
+        }}
+        onDragOver={(event) => {
+          if (carriesFiles(event)) event.preventDefault();
+        }}
+        onDragLeave={(event) => {
+          if (!carriesFiles(event)) return;
+          drags.current = Math.max(0, drags.current - 1);
+          if (!drags.current) setDragging(false);
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          drags.current = 0;
+          setDragging(false);
+          if (event.dataTransfer.files.length) uploads.select(event.dataTransfer.files);
+        }}
       >
-        {mode === "new" && props.modelSummary && (
-          <p className="composer-model">{props.modelSummary}</p>
-        )}
-        {mode !== "new" && props.agent.snapshot?.status !== "idle" && (
-          <fieldset className="delivery-mode" disabled={sending || uncertain}>
-            <legend>When to send</legend>
-            <label>
-              <input
-                type="radio"
-                name="delivery-mode"
-                checked={selected === "steer"}
-                onChange={() => {
-                  selectedNow.current = "steer";
-                  setSelected("steer");
-                }}
-              />
-              Now
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="delivery-mode"
-                checked={selected === "followup"}
-                onChange={() => {
-                  selectedNow.current = "followup";
-                  setSelected("followup");
-                }}
-              />
-              After this task
-            </label>
-          </fieldset>
-        )}
-        <label className="draft-label">
-          <span>{mode === "new" ? "New task" : "Message"}</span>
-          <textarea
-            ref={field}
-            rows={3}
-            disabled={props.keysOpen || props.controlBlocked}
-            placeholder={mode === "new" ? "What would you like done?" : "Message dot…"}
-            autoComplete="off"
-            onCompositionStart={() => {
-              composing.current = true;
-            }}
-            onCompositionEnd={() => {
-              composing.current = false;
-            }}
-            onInput={(event) => {
-              revision.current += 1;
-              guardOwner.current.check(event.currentTarget);
-              setLength(event.currentTarget.value.length);
-              setProblem(null);
-            }}
-            onPaste={(event) => {
-              event.preventDefault();
-              const input = event.currentTarget;
-              const pasted = event.clipboardData.getData("text/plain");
-              if (
-                pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
-                8000
-              )
-                input.value = " ".repeat(8001); // Bounded overflow sentinel, never a truncated key.
-              else input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
-              revision.current += 1;
-              guardOwner.current.check(input);
-              setLength(input.value.length);
-              setProblem(null);
-            }}
-            onKeyDown={(event) => {
-              if (
-                event.key === "Enter" &&
-                !event.shiftKey &&
-                !event.ctrlKey &&
-                !event.metaKey &&
-                !event.altKey &&
-                !event.nativeEvent.isComposing &&
-                !composing.current
-              ) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-          />
-        </label>
-        <Attachments
-          uploads={uploads}
-          disabled={!permitted || sending || uncertain || !!guard.notice}
+        <KeyFound
+          className="composer-key"
+          guard={guard}
+          receive={props.receiveKey}
+          noticeId={keyNotice}
         />
-        <div className="composer-actions">
-          <span>{length}/8000</span>
-          {mode === "new" && props.configured === false ? (
-            <button
-              type="button"
-              onClick={() => {
-                if (field.current) props.onSettings?.(field.current);
-              }}
+        <Collapse open={notices.length > 0} className="composer-notices">
+          {shownNotices.current.map((notice) => (
+            <p
+              key={notice.text}
+              className="composer-notice"
+              role={notices.length ? (notice.alert ? "alert" : "status") : undefined}
             >
-              Connect a model
-            </button>
-          ) : (
-            <button
+              <Icon name="circle-alert" size={12} className="composer-notice-icon" />
+              <span>{notice.text}</span>
+            </p>
+          ))}
+        </Collapse>
+        <Collapse open={rows.length > 0} className="composer-files">
+          <AttachmentChips rows={shownRows.current} onRemove={uploads.remove} />
+        </Collapse>
+        <TextArea
+          bare
+          className="composer-field"
+          aria-label={mode === "new" ? "New task" : "Message"}
+          placeholder={mode === "new" ? "Ask dot to do something…" : "Message dot…"}
+          maxRows={8}
+          maxLength={LIMIT}
+          autoComplete="off"
+          readOnly={unavailable}
+          aria-disabled={unavailable || undefined}
+          aria-describedby={guard.notice ? keyNotice : undefined}
+          onCompositionStart={() => {
+            composing.current = true;
+          }}
+          onCompositionEnd={() => {
+            composing.current = false;
+          }}
+          onInput={(event) => {
+            revision.current += 1;
+            guardOwner.current.check(event.currentTarget);
+            measure(event.currentTarget);
+            setProblem(null);
+          }}
+          onPaste={(event) => {
+            const input = event.currentTarget;
+            if (input.readOnly) return;
+            event.preventDefault();
+            const pasted = event.clipboardData.getData("text/plain");
+            if (
+              pasted.length + input.value.length - (input.selectionEnd - input.selectionStart) >
+              LIMIT
+            )
+              input.value = " ".repeat(LIMIT + 1); // Bounded overflow sentinel, never a truncated key.
+            else input.setRangeText(pasted, input.selectionStart, input.selectionEnd, "end");
+            revision.current += 1;
+            guardOwner.current.check(input);
+            measure(input);
+            setProblem(null);
+          }}
+          onKeyDown={(event) => {
+            if (
+              touch ||
+              event.key !== "Enter" ||
+              event.shiftKey ||
+              event.ctrlKey ||
+              event.metaKey ||
+              event.nativeEvent.isComposing ||
+              composing.current
+            )
+              return;
+            event.preventDefault();
+            // Option-Return sends after this task, where that is a choice; elsewhere it does nothing.
+            if (event.altKey && !choosing) return;
+            if (event.currentTarget.value.trim()) submit(event.altKey);
+          }}
+        />
+        <div className="composer-bar">
+          <FileButton
+            label="Attach files"
+            icon="paperclip"
+            multiple
+            onFiles={(files) => uploads.select(files)}
+            disabledReason={attachReason}
+          />
+          <div className="composer-hint">
+            {mode === "new" && props.configured !== false && props.model ? (
+              <Button
+                variant="quiet"
+                size="sm"
+                className="composer-model"
+                aria-label={`Model: ${props.model}. Change in Settings`}
+                onClick={(event) => props.onSettings?.(event.currentTarget)}
+              >
+                <span className="composer-model-name">{props.model}</span>
+                <Icon name="chevron-down" size={12} />
+              </Button>
+            ) : (
+              note && <span className="composer-note">{note}</span>
+            )}
+          </div>
+          <Pop shown={near}>
+            {near && (
+              <span className="composer-count num">{`${(LIMIT - length).toLocaleString()} left`}</span>
+            )}
+          </Pop>
+          <Pop shown={!!props.stop}>
+            {props.stop && (
+              <IconButton
+                className="composer-stop"
+                variant="secondary"
+                size={touch ? 32 : 28}
+                icon="square"
+                label="Stop task"
+                kbd={["Mod", "Shift", "."]}
+                disabledReason={
+                  props.stop.busy
+                    ? "Stopping…"
+                    : props.stop.enabled
+                      ? undefined
+                      : "Reconnecting to the task…"
+                }
+                onClick={props.stop.run}
+              />
+            )}
+          </Pop>
+          <Pop shown={choosing}>
+            {choosing && (
+              <IconButton
+                ref={more}
+                className="composer-more"
+                icon="chevron-up"
+                size={24}
+                label="Choose when to send"
+                {...triggerProps("menu", menu)}
+                disabledReason={sendReason}
+                onClick={() => setMenu(true)}
+              />
+            )}
+          </Pop>
+          <Menu
+            open={menu}
+            onClose={() => setMenu(false)}
+            anchor={more}
+            side="top"
+            align="end"
+            label="Choose when to send"
+          >
+            <MenuItem kbd={touch ? undefined : ["Enter"]} onSelect={() => send(false)}>
+              Send now
+            </MenuItem>
+            <MenuItem kbd={touch ? undefined : ["Alt", "Enter"]} onSelect={() => send(true)}>
+              Send after this task
+            </MenuItem>
+          </Menu>
+          <Pop shown={connect}>
+            {connect && (
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => {
+                  const input = field();
+                  if (input) props.onSettings?.(input);
+                }}
+              >
+                Connect a model
+              </Button>
+            )}
+          </Pop>
+          {!connect && (
+            <IconButton
               type="submit"
-              disabled={!permitted || sending || uncertain || !!guard.notice || uploads.blocked}
+              className="composer-send"
+              variant="primary"
+              size={touch ? 32 : 28}
+              icon="arrow-up"
+              label={sendLabel}
+              kbd={touch ? undefined : ["Enter"]}
+              disabledReason={sendReason}
               aria-describedby={guard.notice ? keyNotice : undefined}
-            >
-              {sending
-                ? "Sending…"
-                : mode === "new"
-                  ? "Start task"
-                  : mode === "followup"
-                    ? "Send follow-up"
-                    : "Send now"}
-            </button>
+            />
           )}
         </div>
+        <div className="composer-drop" aria-hidden="true">
+          <Icon name="paperclip" />
+          Drop files to attach
+        </div>
       </form>
-      <KeyFound guard={guard} receive={props.receiveKey} noticeId={keyNotice} />
-      {problem && <p role="alert">{problem}</p>}
-      {(props.agent.snapshot?.status === "paused" || props.agent.model.pendingTakeover) && (
-        <p className="composer-note">A message does not resume the task or hand back control.</p>
-      )}
-      <DeliveryState
-        delivery={delivery}
-        onInspect={props.agent.reconcile}
-        onRetry={retry}
-        onDismiss={dismiss}
-        retryEnabled={
-          permitted &&
-          uncertain === true &&
-          !guard.notice &&
-          props.agent.sessionId === delivery.request.sessionId
-        }
-      />
     </div>
   );
 }

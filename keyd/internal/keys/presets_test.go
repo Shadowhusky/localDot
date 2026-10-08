@@ -62,3 +62,82 @@ func TestTheFirstClassBearerPresets(t *testing.T) {
 		tags[p.tag] = name
 	}
 }
+
+// Vendors' Anthropic routes (Z.ai, Kimi, MiniMax, Alibaba, DeepSeek) document ANTHROPIC_AUTH_TOKEN,
+// so the surrogate travels as a bearer token to the base URL the record names, under the same rules
+// as any other user base URL, and only for Anthropic's message, token count and model listing ops.
+func TestTheAnthropicCompatiblePreset(t *testing.T) {
+	rec := vault.Record{ID: "my-anc", Kind: vault.KindLLM, Provider: "anthropic-compatible", BaseURL: "https://api.z.ai/api/anthropic/v1/"}
+	b, err := FromRecord(rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.Route != "my-anc" || b.SecretID != "my-anc" || b.Upstream.String() != "https://api.z.ai/api/anthropic/v1" ||
+		b.Header != "Authorization" || b.Format != Bearer || b.Tag != "anc" || b.Local {
+		t.Fatalf("anthropic-compatible binding %+v", b)
+	}
+	for _, c := range []struct {
+		method, path, body, cap string
+		free                    bool
+	}{
+		{"POST", "messages", "anthropic", "max_tokens", false},
+		{"POST", "messages/count_tokens", "anthropic", "", true},
+		{"GET", "models", "", "", false},
+		{"GET", "models/glm-5.3-flash", "", "", false},
+	} {
+		if op, ok := b.Op(c.method, c.path); !ok || op.Body != c.body || op.Cap != c.cap || op.Free != c.free || op.Model {
+			t.Errorf("%s %s: %+v %v", c.method, c.path, op, ok)
+		}
+	}
+	for _, p := range []string{"chat/completions", "responses", "completions", "embeddings", "files", "messages/batches", "models"} {
+		if _, ok := b.Op("POST", p); ok {
+			t.Errorf("POST %s is allowed", p)
+		}
+	}
+	for _, p := range []string{"messages/batches", "files", "models/a/b"} {
+		if _, ok := b.Op("GET", p); ok {
+			t.Errorf("GET %s is allowed", p)
+		}
+	}
+
+	for _, base := range []string{
+		"",
+		"http://api.z.ai/api/anthropic/v1",
+		"https://api.z.ai:8443/api/anthropic/v1",
+		"https://api.z.ai:/api/anthropic/v1",
+		"https://127.0.0.1/v1",
+		"https://10.0.0.8/v1",
+		"https://localhost/v1",
+		"https://printer.local/v1",
+		"https://API.Z.AI/api/anthropic/v1",
+		"https://api.z.ai/api/anthropic/v1?beta=1",
+		"https://api.z.ai/api/anthropic/v1#x",
+		"https://user:pass@api.z.ai/api/anthropic/v1",
+		"https://token@api.z.ai/api/anthropic/v1",
+		"https://api.z.ai/api/../anthropic/v1",
+	} {
+		if _, err := FromRecord(vault.Record{ID: "x", Kind: vault.KindLLM, Provider: "anthropic-compatible", BaseURL: base}); err == nil {
+			t.Errorf("anthropic-compatible took base URL %q", base)
+		}
+	}
+
+	r := NewRegistry()
+	e, err := r.Mint("c1", b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Dest{Cell: "c1", Scheme: "gateway", Route: b.Route}
+	wantAllow(t, "anthropic-compatible as a bearer token", at(t, r, d, "POST", "/x", hdr("Authorization", "Bearer "+e.Token)), 1)
+	wantDeny(t, "anthropic-compatible in X-Api-Key", at(t, r, d, "POST", "/x", hdr("X-Api-Key", e.Token)), ReasonMisplacedSurrogate)
+	wantDeny(t, "anthropic-compatible in the query", at(t, r, d, "POST", "/x?key="+e.Token, http.Header{}), ReasonMisplacedSurrogate)
+
+	tags := 0
+	for _, p := range presets {
+		if p.tag == "anc" {
+			tags++
+		}
+	}
+	if tags != 1 {
+		t.Errorf("%d presets use the tag anc", tags)
+	}
+}

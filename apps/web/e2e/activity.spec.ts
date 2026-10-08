@@ -286,69 +286,81 @@ for (const width of [1280, 390]) {
     const proof = await load(page);
     if (width < 1180) await page.getByRole("tab", { name: "Activity", exact: true }).click();
     const rail = page.getByRole("complementary", { name: "Plan and steps" });
-    await expect(rail.getByRole("list", { name: "Task plan", exact: true })).toContainText(
-      "4. Skipped",
-    );
-    await expect(rail.getByText("1 of 4 completed", { exact: true })).toBeVisible();
-    await expect(rail.getByRole("region", { name: "Task result", exact: true })).toHaveCount(2);
+    const plan = rail.getByRole("list", { name: "Task plan", exact: true });
+    await expect(plan).toContainText("Send externally");
+    await expect(plan.getByRole("img", { name: "Skipped", exact: true })).toHaveCount(1);
+    await expect(rail.locator(".plan-count")).toHaveText("1 of 4 done");
+    // Results are dot's turn in the conversation now, not part of Activity.
+    await expect(rail.getByRole("region", { name: "Task result", exact: true })).toHaveCount(0);
+    const thread = page.getByRole("region", { name: "Conversation history", includeHidden: true });
     await expect(
-      rail.getByText(
+      thread.getByRole("region", { name: "Task result", exact: true, includeHidden: true }),
+    ).toHaveCount(2);
+    await expect(
+      thread.getByText(
         "Sample report prepared.\nOne command failed; inspect its output before continuing.",
         { exact: true },
       ),
-    ).toBeVisible();
+    ).toBeAttached();
     const steps = rail.getByRole("region", { name: "Recorded steps", exact: true });
+    // Allowed key uses fold into the step they follow, so each step is one row.
     expect(
       await steps
-        .locator(":scope > div")
+        .locator(".activity-row")
         .evaluateAll((items) => items.map((item) => item.getAttribute("data-testid"))),
-    ).toEqual(["step-row", "key-use", "tool-row", "key-use", "tool-row", "tool-row", "tool-row"]);
-    await expect(steps.getByText("Click Save", { exact: true })).toBeVisible();
-    await expect(steps.getByText("Input not delivered", { exact: true })).toBeVisible();
-    await expect(steps.getByText("Completion not confirmed", { exact: true })).toBeVisible();
-    await expect(steps.getByText("Tool failed. Exit code 2.", { exact: true })).toBeVisible();
-    const filter = rail.getByRole("group", { name: "Activity filter", exact: true });
-    await filter.getByRole("button", { name: "Computer", exact: true }).click();
+    ).toEqual(["step-row", "tool-row", "tool-row", "tool-row", "tool-row"]);
+    const stale = steps.getByTestId("step-row");
+    await expect(stale).toContainText("Click Save");
+    await expect(stale).toContainText("Not sent");
+    await expect(stale).toContainText("The target changed before input.");
+    await expect(steps.getByText("The task ended before this step finished.")).toHaveCount(1);
+    const filter = rail.getByRole("radiogroup", { name: "Activity filter", exact: true });
+    await filter.getByRole("radio", { name: "Screen", exact: true }).click();
     await expect(steps.getByTestId("step-row")).toHaveCount(1);
     await expect(steps.getByTestId("tool-row")).toHaveCount(0);
-    await filter.getByRole("button", { name: "Tools", exact: true }).click();
+    await filter.getByRole("radio", { name: "Tools", exact: true }).click();
     await expect(steps.getByTestId("tool-row")).toHaveCount(4);
-    await expect(steps.getByTestId("key-use")).toHaveCount(2);
-    await filter.getByRole("button", { name: "All", exact: true }).click();
-    const output = rail.getByRole("button", { name: "Inspect Check report", exact: true });
+    await expect(steps.getByTestId("key-use")).toHaveCount(0);
+    await filter.getByRole("radio", { name: "All", exact: true }).click();
+    const output = steps.getByRole("button", { name: /Check report/ });
     await output.click();
-    const detail = rail.getByRole("region", { name: "Selected output", exact: true });
-    await expect(detail).toBeFocused();
+    await expect(output).toHaveAttribute("aria-expanded", "true");
     await expect(
-      detail.getByRole("region", { name: "Standard error text", exact: true }),
+      steps.getByRole("region", { name: "Standard error text", exact: true }),
     ).toHaveText("Sample report needs another check.\n");
-    await detail.getByRole("button", { name: "Close output", exact: true }).click();
+    await page.keyboard.press("Escape");
+    await expect(output).toHaveAttribute("aria-expanded", "false");
     await expect(output).toBeFocused();
-    await rail.getByRole("button", { name: "Inspect create: report.txt", exact: true }).click();
+    const file = steps.getByRole("button", { name: /Created report\.txt/ });
+    await file.click();
     await expect(
-      detail.getByRole("region", { name: "Unified text diff", exact: true }),
+      steps.getByRole("region", { name: "Unified text diff", exact: true }),
     ).toContainText("中文 and English");
-    await detail.getByRole("button", { name: "Close output", exact: true }).click();
-    await rail.getByRole("button", { name: "Inspect memory diff", exact: true }).click();
+    await file.click();
+    const memory = rail.getByRole("region", { name: "Changes", exact: true });
+    await memory.getByRole("button", { name: /Updated memory in MEMORY\.md/ }).click();
     await expect(
-      detail.getByRole("region", { name: "Unified text diff", exact: true }),
+      memory.getByRole("region", { name: "Unified text diff", exact: true }),
     ).toContainText("Prefers concise reports");
-    await detail.getByRole("button", { name: "Close output", exact: true }).click();
-    await expect(rail.getByRole("region", { name: "Question history", exact: true })).toContainText(
-      "Answer: Text report",
-    );
-    await rail.evaluate((element) => {
+    await expect(rail.getByRole("region", { name: "Question history" })).toHaveCount(0);
+    await expect(
+      page.getByRole("article", { name: "Your answer", includeHidden: true }),
+    ).toContainText("Text report");
+    expect(
+      await page.evaluate(() =>
+        [...document.querySelectorAll(".pane-activity *")]
+          .filter((element) => /auto|scroll/.test(getComputedStyle(element).overflowY))
+          .map((element) => element.className),
+      ),
+    ).toEqual(["ui-scroll-area activity-scroll"]);
+    await rail.locator(".activity-scroll").evaluate((element) => {
       element.scrollTop = 0;
     });
     await fits(page);
     await page.screenshot({ path: info.outputPath(`activity-${width}-sample.png`) });
     await rail.getByRole("heading", { name: "Steps", exact: true }).scrollIntoViewIfNeeded();
+    await page.waitForTimeout(400);
     await page.screenshot({ path: info.outputPath(`steps-${width}-sample.png`) });
-    const filters = filter.getByRole("button");
-    for (const button of await filters.all()) {
-      const box = await button.boundingBox();
-      expect(box?.height).toBeGreaterThanOrEqual(44);
-    }
     expect(proof.errors).toEqual([]);
     expect(proof.external).toEqual([]);
     expect(

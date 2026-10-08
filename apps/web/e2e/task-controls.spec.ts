@@ -362,16 +362,14 @@ for (const width of [1280, 390])
       const p = await load(page, f);
       if (width < 1180) await page.getByRole("tab", { name: /^Conversation/ }).click();
       const askId = f.session.pendingAsk;
-      await expect(page.getByRole("button", { name: "Send answer" })).toBeEnabled();
+      await expect(page.getByRole("form", { name: "Answer dot" })).toBeVisible();
       await page.getByRole("radio", { name: "Markdown", exact: true }).check();
+      await expect(page.getByRole("button", { name: "Send answer" })).toBeEnabled();
+      await page.getByRole("radio", { name: "Something else…", exact: true }).check();
       await page.getByLabel("Your answer").fill("中文 and English, please");
       await page.screenshot({ path: info.outputPath(`question-${width}.png`), fullPage: true });
       await page.getByRole("button", { name: "Send answer" }).click();
-      expect(await answer).toMatchObject({
-        by: "user",
-        option: "A",
-        text: "中文 and English, please",
-      });
+      expect(await answer).toMatchObject({ by: "user", text: "中文 and English, please" });
       await expect(page.getByRole("form", { name: "Answer dot" })).toHaveCount(0);
       expect(f.log.read(f.id).filter((event) => event.type === "ask.answer")).toHaveLength(1);
       expect(f.log.read(f.id).find((event) => event.type === "ask.answer")?.data).toMatchObject({
@@ -381,7 +379,7 @@ for (const width of [1280, 390])
         .takeover("login", "Sign in on the sample computer, then return control.")
         .catch(() => ({ by: "stop" as const }));
       await expect.poll(() => f.session.manualControl).toBe("ready");
-      if (width < 1180) await page.getByRole("tab", { name: "Computer", exact: true }).click();
+      if (width < 1180) await page.getByRole("tab", { name: /^Computer/ }).click();
       await expect(page.getByRole("button", { name: "Type text", exact: true })).toBeEnabled();
       await page.reload(); // The held takeover is restored from the daemon, never released by reload.
       await expect(page.getByRole("region", { name: "Manual control" })).toBeVisible();

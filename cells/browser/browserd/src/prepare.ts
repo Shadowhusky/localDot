@@ -161,6 +161,7 @@ export async function prepareBrowserRuntime(
       streamToken: config.streamToken,
       gateAddress: config.gateAddress,
       scale: config.scale,
+      fullcolor: config.fullcolor,
     });
     browserProcessSpecs(captured);
     if (process.getuid?.() !== 1000) throw new BrowserPreparationError();

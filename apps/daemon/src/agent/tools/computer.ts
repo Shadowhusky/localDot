@@ -9,12 +9,14 @@ import { checkCombo, checkModifiers } from "@localdot/protocol/keys";
 import {
   type ActionContext,
   type ActionOutcome,
+  CHANGED_WHILE_DECIDING,
   type GuiAction,
   HELD_BUTTON_MS,
   type NativeActionIdentity,
 } from "../../gateway/gateway.ts";
 import { authorizePrepared } from "../safety/authorize.ts";
-import { classify, type NativeTargetFacts, type RiskFacts } from "../safety/risk.ts";
+import { decideAutonomy } from "../safety/autonomy.ts";
+import { nativeActionFacts } from "../safety/classify.ts";
 import type { AgentSession } from "../session.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
@@ -27,34 +29,15 @@ async function screenshot(deps: ToolDeps, ctx: ToolCallContext): Promise<ToolRes
   return { ok: true, content: [await frame(deps, ctx, o.frameId)] };
 }
 
-const targetFacts = (target: Target): NativeTargetFacts => ({
-  source: target.source,
-  fresh: true,
-  role: target.role,
-  name: target.name,
-  url: target.url,
-  secret: target.secret === true,
-});
-
 // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-// A hover browses like a scroll; a press or a release acts like a click where it lands. A drag is
-// as strong as the stronger of its two ends, and so is a move or a release while a button is down:
-// the gateway gives those the press as their start and their own point as the drop.
-function nativeFacts(action: GuiAction, identity: NativeActionIdentity): RiskFacts {
-  const mods = "mods" in action && action.mods?.length ? { mods: action.mods } : {};
-  if (action.verb === "wait") return { operation: "wait" };
-  if (action.verb === "scroll") return { operation: "scroll", ...mods };
-  if (action.verb === "move" && !identity.drop) return { operation: "scroll" };
-  const { target } = identity;
-  return {
-    operation: action.verb === "type" || action.verb === "key" ? action.verb : "click",
-    ...(target ? { target: targetFacts(target) } : {}),
-    ...(action.verb === "drag" || identity.drop
-      ? { drop: identity.drop?.target ? targetFacts(identity.drop.target) : null }
-      : {}),
-    ...mods,
-  };
-}
+// A drag, and a move, scroll or release while a button is down, has the press as its start and
+// what is under its own point as its drop.
+const factsOf = (action: GuiAction, identity: NativeActionIdentity) =>
+  nativeActionFacts(
+    action,
+    identity.target,
+    identity.drop ? identity.drop.target : action.verb === "drag" ? null : undefined,
+  );
 
 const modsOf = (a: ComputerAction): { mods?: string[] } | string =>
   a.mods ? (checkModifiers(a.mods) ?? { mods: a.mods }) : {};
@@ -274,19 +257,18 @@ export async function computerTool(
     ...selected,
     ...(hold ? { signal: hold.signal } : {}),
     source: "agent",
-    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
+    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity, ctx.step),
     afterEffect: (action, identity, changed) =>
       session.settleNativeEffect(action, identity, changed),
     holdInput: (release) => session.holdInput(release),
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();
-      const facts = nativeFacts(request.action, request.identity);
-      const approved = classify(facts, ctx.session.autonomy).actionClass;
-      const boundInput = { toolInput: a, action: request.action };
+      const facts = factsOf(request.action, request.identity);
+      const approved = decideAutonomy(ctx, facts).actionClass;
       const permit = await authorizePrepared(ctx, {
         tool: "computer",
-        input: boundInput,
+        input: { toolInput: a, action: request.action },
         target: request.identity,
         facts,
         revalidate: request.revalidate,
@@ -297,7 +279,7 @@ export async function computerTool(
         // An approval made without an element binds only its window, so the read at dispatch may
         // name one: it must fall in the approved class, or in one the policy runs without asking.
         consume: (current, identity, fresh) => {
-          const found = classify(nativeFacts(current, fresh), ctx.session.autonomy);
+          const found = decideAutonomy(ctx, factsOf(current, fresh));
           if (found.mode !== "act" && found.actionClass !== approved) return false;
           if (ctx.redact(JSON.stringify(fresh)) !== JSON.stringify(fresh)) return false;
           return permit.consume({ toolInput: a, action: current }, identity);
@@ -319,7 +301,9 @@ export async function computerTool(
   if (outcome.cancelled === "stale") {
     content.push(
       text(
-        `${STALE[a.action] ?? "Not done"}: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.`,
+        outcome.error === CHANGED_WHILE_DECIDING
+          ? CHANGED_WHILE_DECIDING
+          : `${STALE[a.action] ?? "Not done"}: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.`,
       ),
     );
   } else if (!outcome.ok && !outcome.partial) {

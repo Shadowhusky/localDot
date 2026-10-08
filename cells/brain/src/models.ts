@@ -57,6 +57,9 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
   switch (b.client) {
     case "anthropic":
       return createAnthropic({ baseURL, apiKey, fetch })(b.model);
+    case "anthropic-compatible":
+      // Vendors' Anthropic routes take the key as a bearer token (their ANTHROPIC_AUTH_TOKEN).
+      return createAnthropic({ baseURL, authToken: apiKey, fetch })(b.model);
     case "openai":
       return stateless(
         createOpenAI({ baseURL, apiKey, fetch }).responses(b.model),
@@ -107,7 +110,8 @@ export function languageModel(b: ModelBinding, fetch: typeof globalThis.fetch): 
 
 // Only Anthropic's tool results carry images (screenshots, as the computer tool expects); every
 // other client gets them in a user message after the results: the OpenAI-compatible client would
-// put the image's base64 into the tool message as text.
+// put the image's base64 into the tool message as text, and other vendors' Anthropic routes may
+// drop images inside tool results.
 export function imagesInToolResults(b: ModelBinding): boolean {
   return b.client === "anthropic";
 }

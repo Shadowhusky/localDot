@@ -1,0 +1,1226 @@
+/* The conversation: one scroller holding the thread, with the composer (or the answer panel) held at
+   its foot. Messages, questions, results and the work line are rows of one card map. */
+
+.thread-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.thread-scroll {
+  flex: 1;
+}
+
+.thread-content {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.thread {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding-block: var(--spacing) calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+}
+
+.thread:focus-visible {
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.thread-row {
+  display: grid;
+  min-width: 0;
+  margin-top: calc(var(--spacing) * 1.5);
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    translate var(--dur-spring) var(--ease-spring);
+}
+
+.thread-row[data-group-start] {
+  margin-top: calc(var(--spacing) * 5);
+}
+
+/* A card under dot's words keeps a little more air than a line of text. */
+.thread-row:is([data-kind="result"], [data-kind="question"]):not([data-group-start]) {
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.thread-row:first-child,
+.thread-start + .thread-row,
+.history-pages + .thread-row {
+  margin-top: 0;
+}
+
+/* Your own message takes its stand-in's place (see the outbox), so only the stand-in eases in. */
+@starting-style {
+  .thread-row[data-new]:not([data-kind="message"][data-speaker="user"]),
+  .thread-pending {
+    opacity: 0;
+    translate: 0 calc(var(--spacing) * 1.5);
+  }
+}
+
+.thread-time {
+  justify-self: center;
+  margin-bottom: calc(var(--spacing) * 3);
+  color: var(--color-fg-3);
+  font: var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  letter-spacing: var(--text-micro--letter-spacing);
+}
+
+.thread-who {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  margin-bottom: var(--spacing);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.thread-who > .dot-glyph {
+  color: var(--color-fg-2);
+}
+
+.thread-note {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.thread-start,
+.thread-older {
+  margin-bottom: calc(var(--spacing) * 5);
+  text-align: center;
+}
+
+.thread-newer {
+  margin-top: calc(var(--spacing) * 5);
+  text-align: center;
+}
+
+.thread-error {
+  margin-top: calc(var(--spacing) * 5);
+}
+
+.thread-empty {
+  margin-block: calc(var(--spacing) * 2) auto;
+  max-width: 40ch;
+}
+
+.thread-empty h3 {
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-title-2--letter-spacing);
+}
+
+.thread-empty p {
+  margin-top: var(--spacing);
+  color: var(--color-fg-3);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+/* Messages. You on the right in a bubble; dot as plain text under its name. */
+.thread-message {
+  position: relative;
+  min-width: 0;
+  color: var(--color-fg-1);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
+  overflow-wrap: anywhere;
+}
+
+/* Your message: the bubble with its copy button beside it, then any files and a word on when it
+   was sent. */
+.thread-message[data-role="user"] {
+  display: grid;
+  justify-items: end;
+  row-gap: calc(var(--spacing) * 1.5);
+}
+
+.thread-said {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  gap: calc(var(--spacing) * 2);
+  width: 100%;
+  min-width: 0;
+}
+
+.thread-tag {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.thread-bubble {
+  max-width: 85%;
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl);
+  background-color: var(--color-raised-2);
+  white-space: pre-wrap;
+}
+
+/* Copy shows on hover or focus; on touch it stays, half lit. Its place is kept either way, so it
+   never moves the text. */
+.thread-copy-slot {
+  display: inline-flex;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity var(--dur-hover) var(--ease-standard);
+}
+
+.thread-message[data-role="dot"] > .thread-copy-slot {
+  float: right;
+  margin: calc(var(--spacing) * -0.5) calc(var(--spacing) * -1) 0 calc(var(--spacing) * 2);
+}
+
+.thread-message:focus-within .thread-copy-slot {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .thread-message:hover .thread-copy-slot {
+    opacity: 1;
+  }
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .thread-copy-slot {
+    opacity: 0.5;
+  }
+}
+
+.thread-message[data-streaming] > .thread-copy-slot {
+  visibility: hidden;
+}
+
+/* Beside your bubble, the button sits level with its last line. */
+.thread-message[data-role="user"] > .thread-said > .thread-copy-slot {
+  margin-bottom: calc(var(--spacing) * 1.5);
+}
+
+/* The copy icon settles in when it turns into a check and back. */
+.thread-copy-slot [data-copy] > .ui-icon,
+.md-code-head [data-copy] > .ui-icon {
+  animation: thread-pop var(--dur-spring) var(--ease-spring);
+}
+
+@keyframes thread-pop {
+  from {
+    opacity: 0;
+    scale: 0.6;
+  }
+}
+
+/* dot's words, as Markdown. */
+.safe-markdown > * + * {
+  margin-top: calc(var(--spacing) * 2);
+}
+
+.safe-markdown p {
+  white-space: pre-wrap;
+}
+
+.safe-markdown a {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-color: var(--color-fg-3);
+  text-underline-offset: calc(var(--spacing) * 0.75);
+  transition: text-decoration-color var(--dur-hover) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .safe-markdown a:hover {
+    text-decoration-color: currentColor;
+  }
+}
+
+.safe-markdown h3 {
+  font:
+    var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+  letter-spacing: var(--text-title--letter-spacing);
+}
+
+.safe-markdown h4 {
+  font:
+    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+}
+
+.safe-markdown > :is(h3, h4):not(:first-child) {
+  margin-top: calc(var(--spacing) * 4);
+}
+
+.safe-markdown :is(ul, ol) {
+  display: grid;
+  gap: var(--spacing);
+  padding-left: calc(var(--spacing) * 5);
+}
+
+.safe-markdown li::marker {
+  color: var(--color-fg-3);
+}
+
+.safe-markdown code {
+  font-family: var(--font-mono);
+  font-size: var(--text-footnote);
+}
+
+.safe-markdown :not(pre) > code {
+  padding: 0 var(--spacing);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-control);
+}
+
+.safe-markdown blockquote {
+  padding-left: calc(var(--spacing) * 3);
+  box-shadow: inset 2px 0 0 var(--color-fg-4);
+  color: var(--color-fg-2);
+  white-space: pre-wrap;
+}
+
+.safe-markdown hr {
+  height: 1px;
+  border: 0;
+  background-color: var(--color-hairline);
+}
+
+.md-code {
+  min-width: 0;
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.md-code-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  padding: var(--spacing) var(--spacing) 0 calc(var(--spacing) * 3);
+}
+
+.md-code-language {
+  color: var(--color-fg-3);
+  font: var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  letter-spacing: var(--text-micro--letter-spacing);
+}
+
+.md-code pre,
+.md-table {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.md-code pre {
+  padding: var(--spacing) calc(var(--spacing) * 3) calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  font: var(--text-footnote) / var(--text-body--line-height) var(--font-mono);
+  white-space: pre;
+  tab-size: 2;
+}
+
+.md-code pre:focus-visible,
+.md-table:focus-visible {
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.md-table {
+  border-radius: var(--radius-md);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.md-table table {
+  min-width: 100%;
+  border-collapse: collapse;
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  font-variant-numeric: tabular-nums;
+}
+
+.md-table :is(th, td) {
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3);
+  text-align: start;
+  vertical-align: top;
+}
+
+.md-table th {
+  color: var(--color-fg-2);
+  font-size: var(--text-footnote);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
+.md-table tr + tr > td,
+.md-table tbody tr:first-child > td {
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+}
+
+.md-table [data-align="center"] {
+  text-align: center;
+}
+
+.md-table [data-align="right"] {
+  text-align: end;
+}
+
+/* dot's question, then your answer as your own message. */
+.thread-question {
+  display: grid;
+  gap: var(--spacing);
+}
+
+.thread-question-text {
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+  letter-spacing: var(--text-title--letter-spacing);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* What dot did this turn: what it is doing now, and the steps under a fold. */
+.thread-work {
+  display: grid;
+  min-width: 0;
+}
+
+.thread-work-line {
+  display: grid;
+  min-width: 0;
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.thread-work-text {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  animation: thread-line-in var(--dur-spring) var(--ease-spring);
+}
+
+.thread-work-text[data-leaving] {
+  animation: thread-line-out var(--dur-exit) var(--ease-exit) forwards;
+}
+
+.thread-work[data-running] .thread-work-text:not([data-leaving]) {
+  background-image: linear-gradient(
+    90deg,
+    var(--color-fg-2) 0%,
+    var(--color-fg-2) 35%,
+    var(--color-fg-1) 50%,
+    var(--color-fg-2) 65%,
+    var(--color-fg-2) 100%
+  );
+  background-size: 300% 100%;
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  animation:
+    thread-line-in var(--dur-spring) var(--ease-spring),
+    thread-shimmer 1.8s linear infinite;
+}
+
+/* The new line waits for the old one to leave, so the two never show over each other. */
+.thread-work .thread-work-text[data-leaving] + .thread-work-text {
+  animation-delay: var(--dur-exit);
+  animation-fill-mode: both;
+}
+
+@keyframes thread-line-in {
+  from {
+    opacity: 0;
+    translate: 0 var(--spacing);
+  }
+}
+
+@keyframes thread-line-out {
+  to {
+    opacity: 0;
+    translate: 0 calc(var(--spacing) * -0.75);
+  }
+}
+
+@keyframes thread-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: 0% 0;
+  }
+}
+
+/* The chevron's ink lines up with the text above it. */
+.thread-work-steps {
+  margin-inline: calc(var(--spacing) * -3) calc(var(--spacing) * -2);
+}
+
+.thread-work-steps > .ui-collapse {
+  margin-inline: calc(var(--spacing) * 3) calc(var(--spacing) * 2);
+}
+
+.thread-work-meta {
+  color: var(--color-fg-3);
+  font-weight: var(--font-weight-normal);
+}
+
+.thread-work-list {
+  display: grid;
+  gap: var(--spacing);
+  padding: var(--spacing) 0 calc(var(--spacing) * 2);
+  list-style: none;
+}
+
+.thread-work-step {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.thread-work-title {
+  overflow-wrap: anywhere;
+}
+
+.thread-work-metric {
+  color: var(--color-fg-3);
+}
+
+/* A result: what dot made, and the files to take away. */
+.result-card {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+  padding: calc(var(--spacing) * 3);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+}
+
+.result-summary {
+  color: var(--color-fg-1);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.result-files {
+  display: grid;
+  list-style: none;
+}
+
+.result-file {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 10);
+}
+
+.result-file + .result-file {
+  box-shadow: inset 0 1px 0 var(--color-hairline);
+}
+
+.result-file-tile {
+  display: grid;
+  place-items: center;
+  width: calc(var(--spacing) * 7);
+  height: calc(var(--spacing) * 7);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-raised-2);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-semibold) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  letter-spacing: var(--text-micro--letter-spacing);
+}
+
+.result-file-text {
+  display: grid;
+  min-width: 0;
+}
+
+/* A file's name on one line: the middle gives way, so its end (the extension) stays in view. */
+.file-name {
+  display: flex;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.file-name-head {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-name-tail {
+  flex-shrink: 0;
+}
+
+.result-file .file-name {
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.result-file-meta {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  transition: color var(--dur-fade) var(--ease-standard);
+}
+
+.result-file[data-state="failed"] .result-file-meta {
+  color: var(--color-fg-1);
+}
+
+.result-file-action {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+
+.result-file-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--color-fg-2);
+  stroke-width: 1;
+  pointer-events: none;
+}
+
+.result-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+}
+
+/* Quiet buttons line their ink up with the card's text. */
+.result-replay {
+  margin-left: calc(var(--spacing) * -2.5);
+}
+
+.result-all {
+  margin: 0 calc(var(--spacing) * -2.5) 0 auto;
+}
+
+/* Recovery sits in the thread where the task paused. */
+.thread-recovery {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+  margin-top: calc(var(--spacing) * 5);
+  padding: calc(var(--spacing) * 3);
+  border-radius: var(--radius-lg);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+  overflow-wrap: anywhere;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    translate var(--dur-spring) var(--ease-spring);
+}
+
+@starting-style {
+  .thread-recovery {
+    opacity: 0;
+    translate: 0 calc(var(--spacing) * 1.5);
+  }
+}
+
+.thread-recovery-title {
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+  letter-spacing: var(--text-title--letter-spacing);
+}
+
+.thread-recovery-text {
+  margin-top: calc(var(--spacing) * -2);
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.thread-recovery-reason {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.thread-recovery-meter {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.thread-recovery-raise {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.thread-recovery-raise > .ui-segmented {
+  width: 100%;
+}
+
+.answer-panel-problem {
+  min-height: var(--text-footnote--line-height);
+  color: var(--color-fg-1);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.thread-recovery-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--spacing) * 2);
+}
+
+.thread-recovery-options {
+  margin: calc(var(--spacing) * -1) calc(var(--spacing) * -2) calc(var(--spacing) * -2)
+    calc(var(--spacing) * -3);
+}
+
+.thread-recovery-options > .ui-collapse {
+  margin-inline: calc(var(--spacing) * 3) calc(var(--spacing) * 2);
+}
+
+.thread-recovery-options .thread-recovery-actions {
+  padding-block: var(--spacing) calc(var(--spacing) * 2);
+}
+
+/* Under the thread: the live work line and the composer (or the answer panel). */
+/* The scroller's bar keeps a gutter; the foot keeps the same, so their right edges line up. */
+.thread-foot {
+  --thread-gutter: 0px;
+  flex: none;
+  min-width: 0;
+  padding-right: var(--thread-gutter);
+}
+
+.thread-dock {
+  padding-top: calc(var(--spacing) * 2);
+}
+
+/* The composer comes back softly once an answer is sent. */
+.thread-composer:not([hidden]) {
+  animation: thread-fade-in var(--dur-fade) var(--ease-standard);
+}
+
+.thread-live .thread-work {
+  padding-bottom: calc(var(--spacing) * 2);
+}
+
+/* Under the thread the work line keeps one line each, so its changing words never move the
+   composer; the whole text is in the HUD and in Activity. */
+.thread-live :is(.thread-work-text, .ui-disclosure-summary) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.thread-jump {
+  /* How much of the foot is in view, so the button keeps clear of it. */
+  --thread-foot-shown: 0px;
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: calc(var(--thread-foot-shown) + var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-raised-2);
+  box-shadow: var(--shadow-overlay);
+  opacity: 0;
+  translate: -50% calc(var(--spacing) * 2);
+  scale: 0.96;
+  pointer-events: none;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    translate var(--dur-spring) var(--ease-spring),
+    scale var(--dur-spring) var(--ease-spring);
+}
+
+.thread-jump[data-shown] {
+  opacity: 1;
+  translate: -50% 0;
+  scale: 1;
+  pointer-events: auto;
+}
+
+/* A message on its way waits at the end of the thread, drawn as its own row will be, so the row
+   takes its place without a shift. */
+.thread:has(> .thread-outbox > *) > .thread-empty {
+  display: none;
+}
+
+.thread-outbox {
+  display: grid;
+}
+
+.thread-outbox > .thread-row {
+  margin-top: calc(var(--spacing) * 5);
+}
+
+/* First in a new task's thread, it carries the time its row will. */
+.thread-empty + .thread-outbox > .thread-row {
+  margin-top: 0;
+}
+
+.thread-row[data-speaker="user"] + .thread-outbox > .thread-row {
+  margin-top: calc(var(--spacing) * 1.5);
+}
+
+.thread-pending > .thread-time {
+  display: none;
+}
+
+.thread-empty + .thread-outbox .thread-time {
+  display: block;
+}
+
+.thread-pending-slot {
+  display: inline-grid;
+  place-items: center;
+  width: calc(var(--spacing) * 6);
+  height: calc(var(--spacing) * 6);
+  opacity: 1;
+  color: var(--color-fg-3);
+}
+
+.thread-pending .thread-bubble {
+  opacity: 0.6;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.thread-pending[data-phase="accepted"] .thread-bubble {
+  opacity: 1;
+}
+
+.thread-pending-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--spacing) calc(var(--spacing) * 2);
+  max-width: 85%;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  animation: thread-fade-in var(--dur-fade) var(--ease-standard);
+}
+
+.thread-pending-status > p {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(var(--spacing) * 1.5);
+  text-wrap: balance;
+}
+
+.thread-pending-actions {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+}
+
+.thread-pending-icon {
+  margin-top: calc(var(--spacing) * 0.5);
+}
+
+/* Files, as chips: over the field while they upload, and under the message that sent them. */
+.file-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+  max-width: 100%;
+  list-style: none;
+}
+
+.file-chips[data-sent] {
+  justify-content: flex-end;
+  max-width: 85%;
+}
+
+.file-chip {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+  max-width: 100%;
+  height: calc(var(--spacing) * 7);
+  padding-inline: calc(var(--spacing) * 2) var(--spacing);
+  border-radius: var(--radius-md);
+  background-color: var(--color-raised-2);
+  color: var(--color-fg-1);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.file-chips[data-sent] .file-chip {
+  padding-inline-end: calc(var(--spacing) * 2.5);
+}
+
+.file-chip .file-name {
+  max-width: calc(var(--spacing) * 40);
+}
+
+.file-chip-icon {
+  color: var(--color-fg-3);
+}
+
+.file-chip:is([data-phase="refused"], [data-phase="uncertain"]) .file-chip-icon {
+  color: var(--color-danger-fg);
+}
+
+.file-chip-meta {
+  flex-shrink: 0;
+  color: var(--color-fg-3);
+}
+
+.file-chips-note {
+  margin-top: calc(var(--spacing) * 1.5);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
+}
+
+/* The composer: one card, the field over a row of its controls. What comes and goes in it (a key
+   taken out, a problem, files) opens above the field, so the card grows upward and Send stays put. */
+.composer-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  padding: calc(var(--spacing) * 2);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-raised);
+  box-shadow:
+    inset 0 0 0 1px var(--color-field-line),
+    var(--shadow-raised);
+  transition: box-shadow var(--dur-hover) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .composer-card:hover {
+    box-shadow:
+      inset 0 0 0 1px var(--color-field-line-hover),
+      var(--shadow-raised);
+  }
+}
+
+.composer-card:focus-within {
+  box-shadow:
+    inset 0 0 0 1px var(--color-fg-2),
+    var(--shadow-raised);
+}
+
+.composer-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+  min-height: calc(var(--spacing) * 8);
+  margin-top: var(--spacing);
+}
+
+.composer-hint {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  min-width: 0;
+}
+
+.composer-note,
+.composer-count {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  white-space: nowrap;
+}
+
+.composer-note {
+  overflow: hidden;
+  padding-inline: var(--spacing);
+  text-overflow: ellipsis;
+}
+
+.composer-count {
+  padding-inline: var(--spacing);
+}
+
+.composer-model {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.composer-model > .ui-button-content {
+  min-width: 0;
+}
+
+.composer-model-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-bar .composer-stop > .ui-icon {
+  width: calc(var(--spacing) * 3);
+  height: calc(var(--spacing) * 3);
+  fill: currentColor;
+}
+
+.composer-notice-icon {
+  margin-top: calc(var(--spacing) * 0.5);
+  color: var(--color-fg-2);
+}
+
+/* Controls that come and go along the row grow in from where they sit, and shrink away there. */
+.composer-pop {
+  display: inline-flex;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    scale var(--dur-spring) var(--ease-spring);
+}
+
+.composer-pop[data-leaving] {
+  opacity: 0;
+  scale: 0.8;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    scale var(--dur-exit) var(--ease-exit);
+}
+
+@starting-style {
+  .composer-pop {
+    opacity: 0;
+    scale: 0.8;
+  }
+}
+
+.composer-key .ui-banner {
+  margin-bottom: calc(var(--spacing) * 2);
+}
+
+.key-found-text,
+.key-found-choice {
+  display: grid;
+  gap: var(--spacing);
+}
+
+.key-found-choice {
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.key-found-choice > p {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.composer-notices > .ui-collapse-inner,
+.composer-files > .ui-collapse-inner {
+  min-width: 0;
+}
+
+.composer-notice {
+  display: flex;
+  align-items: flex-start;
+  gap: calc(var(--spacing) * 1.5);
+  padding: var(--spacing) var(--spacing) calc(var(--spacing) * 2);
+  color: var(--color-fg-1);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-wrap: pretty;
+}
+
+.composer-files .file-chips-block {
+  padding: var(--spacing) 0 calc(var(--spacing) * 2);
+}
+
+.composer-drop {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--spacing) * 2);
+  border-radius: inherit;
+  background-color: var(--color-overlay);
+  box-shadow: inset 0 0 0 1px var(--color-fg-2);
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.composer-card[data-dragging] > .composer-drop {
+  opacity: 1;
+}
+
+/* On a touch screen every control in the row is a full-height target, whichever ones it holds. */
+@media (pointer: coarse) {
+  .composer-bar {
+    min-height: calc(var(--spacing) * 11);
+  }
+}
+
+/* The answer panel takes the composer's place while dot waits. */
+.answer-panel {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  padding: calc(var(--spacing) * 3);
+  border-radius: var(--radius-xl);
+  background-color: var(--color-raised);
+  box-shadow: var(--shadow-raised);
+  /* It fades in as quickly as the composer it replaces went, and settles on the spring. */
+  animation:
+    thread-fade-in var(--dur-fade) var(--ease-standard),
+    thread-rise var(--dur-spring) var(--ease-spring);
+}
+
+.answer-panel > form {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.answer-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  min-height: calc(var(--spacing) * 5);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.answer-panel-keys {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing);
+}
+
+.answer-other > .ui-collapse-inner,
+.thread-recovery-custom > .ui-collapse-inner {
+  padding-top: var(--spacing);
+}
+
+.answer-panel-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+}
+
+.history-pages {
+  display: flex;
+  justify-content: center;
+  gap: calc(var(--spacing) * 2);
+  margin-bottom: calc(var(--spacing) * 5);
+}
+
+.history-pages:not(:focus-within) {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-row,
+  .thread-recovery {
+    translate: none;
+  }
+
+  .thread-jump,
+  .thread-jump[data-shown] {
+    translate: -50% 0;
+    scale: none;
+  }
+
+  .composer-pop[data-leaving] {
+    scale: none;
+  }
+
+  @starting-style {
+    .thread-row[data-new],
+    .thread-pending,
+    .thread-recovery {
+      translate: none;
+    }
+
+    .composer-pop {
+      scale: none;
+    }
+  }
+
+  .thread-work-text,
+  .answer-panel {
+    animation-name: thread-fade-in;
+  }
+
+  .thread-work-text[data-leaving] {
+    animation-name: thread-fade-out;
+  }
+
+  .thread-work[data-running] .thread-work-text:not([data-leaving]) {
+    background-image: none;
+    color: var(--color-fg-2);
+    animation: thread-fade-in var(--dur-fade) var(--ease-standard);
+  }
+
+  .thread-work .thread-work-text[data-leaving] + .thread-work-text {
+    animation-delay: var(--dur-exit);
+    animation-fill-mode: both;
+  }
+
+  .thread-copy-slot [data-copy] > .ui-icon,
+  .md-code-head [data-copy] > .ui-icon {
+    animation-name: thread-fade-in;
+  }
+}
+
+@keyframes thread-rise {
+  from {
+    translate: 0 var(--spacing);
+  }
+}
+
+@keyframes thread-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes thread-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@media (forced-colors: active) {
+  .thread-bubble,
+  .result-card,
+  .thread-recovery,
+  .answer-panel,
+  .composer-card,
+  .composer-drop,
+  .file-chip {
+    border: 1px solid CanvasText;
+  }
+
+  .composer-card:focus-within {
+    outline: var(--focus-width) solid Highlight;
+  }
+
+  .thread-work[data-running] .thread-work-text:not([data-leaving]) {
+    background-image: none;
+    color: CanvasText;
+  }
+}

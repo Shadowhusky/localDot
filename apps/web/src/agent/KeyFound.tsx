@@ -1,66 +1,119 @@
-import { useState } from "react";
+import { CLAUDE_PLAN_REFUSAL } from "@localdot/protocol";
+import { clsx } from "clsx";
+import { useRef, useState } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
-import type { KeyGuard } from "./useKeyGuard.ts";
-import "./key-guard.css";
+import { Banner } from "../ui/Banner.tsx";
+import { Button } from "../ui/Button.tsx";
+import { Select } from "../ui/Select.tsx";
+import type { KeyGuard, KeyNotice } from "./useKeyGuard.ts";
 
+const PLAN = "Claude plan token";
+
+// Shown over the field a key was taken out of. It stays mounted, so it opens and closes in place,
+// and keeps the last notice's words while it folds away.
 export function KeyFound({
   guard,
   receive,
   noticeId,
+  className,
 }: {
   guard: KeyGuard;
   receive?: KeyIntake["receive"];
   noticeId?: string;
+  className?: string;
 }) {
-  const [selected, setSelected] = useState(0);
-  const notice = guard.notice;
-  if (!notice) return null;
-  const index = Math.min(selected, Math.max(0, notice.candidates.length - 1));
+  const [choice, setChoice] = useState<{ notice: KeyNotice | null; index: number }>({
+    notice: null,
+    index: 0,
+  });
+  const last = useRef<KeyNotice | null>(null);
+  if (guard.notice) last.current = guard.notice;
+  const open = guard.notice !== null;
+  const notice = guard.notice ?? last.current;
+  const count = notice?.candidates.length ?? 0;
+  const index = choice.notice === notice ? Math.min(choice.index, Math.max(0, count - 1)) : 0;
+  const planToken = notice?.candidates[index]?.hint === PLAN;
+  const onlyPlanTokens =
+    count > 0 && notice?.candidates.every((candidate) => candidate.hint === PLAN);
+  const choosing = count > 1 && !onlyPlanTokens;
+  const found = notice?.kind === "found";
+  const title = !notice
+    ? ""
+    : notice.kind === "overflow"
+      ? "Message cleared"
+      : notice.kind === "transfer_failed"
+        ? "Key not moved"
+        : onlyPlanTokens
+          ? count === 1
+            ? "Claude plan token removed"
+            : "Claude plan tokens removed"
+          : count === 1
+            ? "Key removed before sending"
+            : "Keys removed before sending";
   return (
-    <section className="key-found" aria-label="Key safeguard">
-      <p role="alert" id={noticeId}>
-        {notice.kind === "overflow"
-          ? "This text exceeded the key safeguard's limit and was cleared. Paste keys directly into Keys."
-          : notice.kind === "transfer_failed"
-            ? "Could not move the key. Open Keys and paste it again."
-            : notice.candidates.length === 1
-              ? "1 recognised key was removed from your message. Discard it or move it to Keys before sending."
-              : `${notice.candidates.length} recognised keys were removed from your message. Discard them or move one to Keys before sending.`}
-      </p>
-      {notice.candidates.length > 1 && (
-        <label>
-          <span>Key to move</span>
-          <select value={index} onChange={(event) => setSelected(Number(event.target.value))}>
-            {notice.candidates.map((candidate, i) => (
-              <option key={`${candidate.start}-${candidate.end}`} value={i}>
-                {candidate.hint} · character {candidate.start + 1}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {notice.candidates.length > 1 && <p>Moving one key discards the other detected keys.</p>}
-      <div className="key-found-actions">
-        <button type="button" onClick={guard.remove}>
-          {notice.kind !== "found"
-            ? "Edit message"
-            : notice.candidates.length === 1
-              ? "Discard key and edit"
-              : "Discard keys and edit"}
-        </button>
-        {notice.kind === "found" && (
-          <button
-            type="button"
-            disabled={!receive}
-            onClick={() => {
-              if (receive) guard.move(index, receive);
-            }}
-          >
-            Move to Keys
-          </button>
+    <section
+      className={clsx("key-found", className)}
+      aria-label={open ? "Key safeguard" : undefined}
+      aria-hidden={open ? undefined : true}
+    >
+      <Banner
+        open={open}
+        tone="attention"
+        icon="lock"
+        title={title}
+        actions={
+          notice && (
+            <>
+              {found && !planToken && (
+                <Button
+                  size="sm"
+                  variant="primary"
+                  disabledReason={receive ? undefined : "Open Keys to store a key safely."}
+                  onClick={() => {
+                    if (receive) guard.move(index, receive);
+                  }}
+                >
+                  Move to Keys
+                </Button>
+              )}
+              <Button size="sm" onClick={guard.remove}>
+                {!found ? "Edit message" : count === 1 ? "Discard key" : "Discard keys"}
+              </Button>
+            </>
+          )
+        }
+      >
+        {notice && (
+          <div className="key-found-text" role={open ? "alert" : undefined} id={noticeId}>
+            <p>
+              {notice.kind === "overflow"
+                ? "It was too long to check for keys. Paste keys straight into Keys."
+                : notice.kind === "transfer_failed"
+                  ? "Open Keys and paste it again."
+                  : onlyPlanTokens
+                    ? CLAUDE_PLAN_REFUSAL
+                    : count === 1
+                      ? "A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it."
+                      : `${count} keys in your message were taken out before anything was sent. Move one to Keys, or discard them.`}
+            </p>
+            {choosing && planToken && <p>{CLAUDE_PLAN_REFUSAL}</p>}
+          </div>
         )}
-      </div>
-      {!receive && notice.kind === "found" && <p>Open Keys to store a key securely.</p>}
+        {notice && choosing && (
+          <div className="key-found-choice">
+            <Select
+              aria-label="Key to move"
+              value={String(index)}
+              onValueChange={(value) => setChoice({ notice, index: Number(value) })}
+              items={notice.candidates.map((candidate, i) => ({
+                value: String(i),
+                label: `${candidate.hint} · character ${candidate.start + 1}`,
+              }))}
+            />
+            <p>Moving one key discards the others.</p>
+          </div>
+        )}
+      </Banner>
     </section>
   );
 }

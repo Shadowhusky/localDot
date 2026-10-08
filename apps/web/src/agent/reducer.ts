@@ -10,6 +10,8 @@ import {
 } from "./model.ts";
 import { appendTerminal, emptyTerminal, finishTerminal } from "./terminal-text.ts";
 
+// While dot is in one of these, a follow-up waits for the task to finish.
+const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
 const STREAM_ERROR = "Activity could not be verified. Reconnect to load it again.";
 const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
 const RELEVANT = new Set<LocalDotEvent["type"]>([
@@ -25,6 +27,8 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "safety.pause",
   "approval.request",
   "approval.resolve",
+  "rule.created",
+  "rule.removed",
   "budget.exceeded",
   "subscription.usage",
 ]);
@@ -42,6 +46,10 @@ function put<T>(
     next.delete(key);
   }
   return next;
+}
+// A message keeps its place in the conversation as later deltas and its final text arrive.
+function firstSeen(old: { seq?: number; at?: number } | undefined, e: LocalDotEvent) {
+  return { seq: old?.seq ?? e.seq, at: old?.at ?? e.t };
 }
 function step(model: AgentModel, id: string): AgentStep {
   return model.steps.get(id) ?? { id, output: [], outputTruncated: false };
@@ -99,9 +107,40 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       next = { ...next, approval: ApprovalCard.parse({ ...card, fields: preview.fields }) };
       break;
     }
-    case "approval.resolve":
-      if (model.approval?.approvalId === e.data.approvalId) next = { ...next, approval: null };
+    case "approval.resolve": {
+      const card = model.approval?.approvalId === e.data.approvalId ? model.approval : null;
+      next = {
+        ...next,
+        ...(card ? { approval: null } : {}),
+        approvalOutcome: {
+          approvalId: e.data.approvalId,
+          decision: e.data.decision,
+          ...(card ? { actionClass: card.actionClass } : {}),
+          ...(e.data.note ? { note: e.data.note } : {}),
+        },
+      };
       break;
+    }
+    // The daemon appends a choice's rule.created right after the approval.resolve that saved it.
+    case "rule.created": {
+      const outcome = model.approvalOutcome;
+      if (outcome && !outcome.rule && !outcome.note && outcome.actionClass === e.data.actionClass)
+        next = { ...next, approvalOutcome: { ...outcome, rule: { ...e.data } } };
+      break;
+    }
+    case "rule.removed": {
+      const outcome = model.approvalOutcome,
+        rule = outcome?.rule;
+      if (
+        outcome &&
+        rule &&
+        rule.id === e.data.id &&
+        rule.actionClass === e.data.actionClass &&
+        rule.scope === e.data.scope
+      )
+        next = { ...next, approvalOutcome: { ...outcome, ruleRemoved: true } };
+      break;
+    }
     case "pause.change":
       next = { ...next, safetyPaused: { ...e.data } };
       break;
@@ -156,7 +195,10 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "budget.exceeded":
       next = { ...next, budget: { id: e.id, at: e.t, data: { ...e.data } } };
       break;
-    case "message.user":
+    case "message.user": {
+      const seen = model.messages.get(e.data.messageId);
+      const queued =
+        seen?.queued ?? (e.data.kind === "followup" && WORKING.has(model.state?.state ?? "idle"));
       next = {
         ...next,
         messages: put(
@@ -164,10 +206,12 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           e.data.messageId,
           {
             id: e.data.messageId,
+            ...firstSeen(seen, e),
             role: "user",
             text: e.data.text,
             final: true,
             kind: e.data.kind,
+            ...(queued ? { queued } : {}),
             ...(e.data.files ? { files: [...e.data.files] } : {}),
           },
           L.messages,
@@ -177,6 +221,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           (!model.messages.has(e.data.messageId) && model.messages.size >= L.messages),
       };
       break;
+    }
     case "message.delta": {
       const old = model.messages.get(e.data.messageId);
       if (old?.final || old?.role === "user") break;
@@ -188,6 +233,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           e.data.messageId,
           {
             id: e.data.messageId,
+            ...firstSeen(old, e),
             role: "assistant",
             text: text.slice(0, L.messageText),
             final: false,
@@ -207,7 +253,13 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         messages: put(
           model.messages,
           e.data.messageId,
-          { id: e.data.messageId, role: "assistant", text: e.data.text, final: true },
+          {
+            id: e.data.messageId,
+            ...firstSeen(old, e),
+            role: "assistant",
+            text: e.data.text,
+            final: true,
+          },
           L.messages,
         ),
         historyTruncated: next.historyTruncated || (!old && model.messages.size >= L.messages),
@@ -269,7 +321,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         questions: put(
           model.questions,
           e.data.askId,
-          { ...e.data, options: e.data.options.map((option) => ({ ...option })) },
+          {
+            ...e.data,
+            ...firstSeen(model.questions.get(e.data.askId), e),
+            options: e.data.options.map((option) => ({ ...option })),
+          },
           L.questions,
         ),
         historyTruncated: next.historyTruncated || model.questions.size >= L.questions,
@@ -341,7 +397,13 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         ...next,
         results: [
           ...model.results,
-          { id: e.id, summary: e.data.summary, files: e.data.files.map((file) => ({ ...file })) },
+          {
+            id: e.id,
+            seq: e.seq,
+            at: e.t,
+            summary: e.data.summary,
+            files: e.data.files.map((file) => ({ ...file })),
+          },
         ].slice(-L.results),
         historyTruncated: next.historyTruncated || model.results.length >= L.results,
       };

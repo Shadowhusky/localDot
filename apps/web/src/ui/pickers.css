@@ -1,0 +1,384 @@
+/* Select and Combobox: a trigger drawn like a field, and a list that opens beside it on a desktop
+   or rises as a bottom sheet on a phone. */
+@layer kit {
+  .ui-select-trigger {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    width: 100%;
+    height: var(--_h);
+    padding: 0 calc(var(--spacing) * 2) 0 calc(var(--spacing) * 2.5);
+    text-align: start;
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    /* The legacy press rule would shrink the trigger just as the list measures it to open. */
+    opacity: 1;
+    transform: none;
+  }
+
+  .ui-select-trigger[data-open] {
+    background-color: var(--color-state-hover);
+  }
+
+  .ui-select-trigger[data-unavailable] {
+    cursor: default;
+  }
+
+  .ui-select-value {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-select-value[data-placeholder] {
+    color: var(--color-fg-3);
+  }
+
+  .ui-select-chevron {
+    color: var(--color-fg-2);
+    transition: rotate var(--dur-spring) var(--ease-spring);
+  }
+
+  .ui-select-trigger[data-open] .ui-select-chevron {
+    rotate: 180deg;
+  }
+
+  .ui-picker {
+    position: fixed;
+    z-index: 60;
+    display: flex;
+    flex-direction: column;
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  /* It grows out of its trigger and goes back the same way, faster. */
+  .ui-picker-popover {
+    min-height: 0;
+    padding: var(--spacing);
+    border-radius: var(--radius-lg);
+    background-color: var(--color-overlay);
+    box-shadow: var(--shadow-overlay);
+    transition:
+      opacity var(--dur-hover) var(--ease-standard),
+      scale var(--dur-sheet) var(--ease-spring);
+  }
+
+  @starting-style {
+    .ui-picker-popover {
+      opacity: 0;
+      scale: 0.97;
+    }
+  }
+
+  .ui-picker-popover[data-closing] {
+    opacity: 0;
+    scale: 0.97;
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      scale var(--dur-exit) var(--ease-exit);
+  }
+
+  .ui-listbox {
+    flex: 0 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    outline: none;
+    scroll-padding-block: var(--spacing);
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-scrollbar) transparent;
+  }
+
+  .ui-listbox-heading {
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2) var(--spacing);
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    letter-spacing: var(--text-micro--letter-spacing);
+  }
+
+  .ui-option {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    min-height: calc(var(--spacing) * 8);
+    padding: 0 calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 2);
+    border-radius: var(--radius-md);
+    cursor: default;
+    user-select: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ui-listbox-group + .ui-listbox-group,
+  .ui-listbox-group + .ui-option,
+  .ui-option + .ui-listbox-group {
+    margin-top: var(--spacing);
+    padding-top: var(--spacing);
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  /* The typed value sits apart from the matches, its rule drawn outside the row so the row lights
+     whole, with its corners. */
+  .ui-option[data-custom]:not(:first-child) {
+    position: relative;
+    margin-top: calc(var(--spacing) * 2 + 1px);
+  }
+
+  .ui-option[data-custom]:not(:first-child)::before {
+    content: "";
+    position: absolute;
+    top: calc(-1px - var(--spacing));
+    right: 0;
+    left: 0;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .ui-option[data-two-line] {
+    min-height: calc(var(--spacing) * 11);
+    padding-block: var(--spacing);
+  }
+
+  .ui-option[data-active] {
+    background-color: var(--color-state-pressed);
+  }
+
+  .ui-option-text {
+    display: grid;
+    flex: 1;
+    min-width: 0;
+  }
+
+  .ui-option-label,
+  .ui-option-note {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-option[aria-selected="true"] .ui-option-label {
+    font-weight: var(--font-weight-medium);
+  }
+
+  .ui-option-note {
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .ui-option[aria-disabled="true"] .ui-option-label {
+    color: color-mix(in oklab, var(--color-fg-1) calc(var(--opacity-disabled) * 100%), transparent);
+  }
+
+  .ui-option-check {
+    color: var(--color-fg-1);
+    opacity: 0;
+  }
+
+  .ui-option[aria-selected="true"] .ui-option-check {
+    opacity: 1;
+  }
+
+  /* While searching, the words that matched read brighter than the rest of the label. */
+  .ui-listbox:has(.ui-match) .ui-option-label {
+    color: var(--color-fg-2);
+  }
+
+  .ui-match {
+    background: none;
+    color: var(--color-fg-1);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .ui-listbox-empty {
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 2);
+    color: var(--color-fg-2);
+    text-align: center;
+  }
+
+  .ui-combobox-search {
+    flex-shrink: 0;
+    margin-bottom: var(--spacing);
+    padding-bottom: var(--spacing);
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .ui-picker-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 59;
+    background-color: var(--color-scrim);
+    touch-action: none;
+    transition: opacity var(--dur-sheet) var(--ease-standard);
+  }
+
+  @starting-style {
+    .ui-picker-scrim {
+      opacity: 0;
+    }
+  }
+
+  .ui-picker-scrim[data-closing] {
+    opacity: 0;
+    transition-timing-function: var(--ease-exit);
+  }
+
+  /* A bottom sheet rises from the edge and leaves the same way; a drag on its head moves it 1:1. */
+  .ui-picker-sheet {
+    right: 0;
+    bottom: 0;
+    left: 0;
+    max-height: calc(100dvh - var(--spacing) * 12);
+    padding-bottom: env(safe-area-inset-bottom);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-overlay);
+    transition: translate var(--dur-sheet) var(--ease-spring);
+  }
+
+  .ui-picker-sheet[data-full] {
+    top: calc(env(safe-area-inset-top) + var(--spacing) * 3);
+    max-height: none;
+  }
+
+  @starting-style {
+    .ui-picker-sheet {
+      translate: 0 100%;
+    }
+  }
+
+  .ui-picker-sheet[data-closing] {
+    translate: 0 100%;
+    transition: translate var(--dur-sheet) var(--ease-exit);
+  }
+
+  .ui-picker-sheet-head {
+    position: relative;
+    display: grid;
+    flex-shrink: 0;
+    justify-items: center;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 14) calc(var(--spacing) * 3);
+    touch-action: none;
+    cursor: grab;
+  }
+
+  .ui-picker-sheet-grabber {
+    width: calc(var(--spacing) * 9);
+    height: var(--spacing);
+    border-radius: var(--radius-full);
+    background-color: var(--color-fg-4);
+  }
+
+  .ui-picker-sheet-title {
+    color: var(--color-fg-1);
+    font:
+      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+    letter-spacing: var(--text-title--letter-spacing);
+    text-align: center;
+  }
+
+  .ui-picker-sheet-close {
+    position: absolute;
+    top: calc(var(--spacing) * 3);
+    right: calc(var(--spacing) * 3);
+  }
+
+  .ui-picker-sheet .ui-combobox-search {
+    margin-bottom: 0;
+    padding: 0 calc(var(--spacing) * 4) calc(var(--spacing) * 3);
+  }
+
+  .ui-picker-sheet .ui-listbox {
+    padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 2);
+  }
+
+  /* Rows at the system's reading size, as the trigger is on a touch screen. */
+  .ui-picker-sheet .ui-option {
+    min-height: calc(var(--spacing) * 12);
+    padding: 0 calc(var(--spacing) * 3);
+    font-size: var(--text-title-2);
+    line-height: var(--text-title-2--line-height);
+  }
+
+  .ui-picker-sheet .ui-option-note {
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+  }
+
+  .ui-picker-sheet .ui-option[data-two-line] {
+    min-height: calc(var(--spacing) * 14);
+  }
+
+  /* On a touch screen a row lights while pressed, not because it is the list's active row. */
+  .ui-picker-sheet .ui-option[data-active] {
+    background-color: transparent;
+  }
+
+  .ui-picker-sheet .ui-listbox:focus-visible .ui-option[data-active],
+  .ui-picker-sheet .ui-option:active {
+    background-color: var(--color-state-pressed);
+  }
+
+  .ui-picker-sheet .ui-listbox-heading {
+    padding-inline: calc(var(--spacing) * 3);
+  }
+
+  @media (--coarse) {
+    .ui-picker-popover .ui-option {
+      min-height: calc(var(--spacing) * 11);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-select-chevron {
+      transition: none;
+    }
+
+    .ui-picker-popover,
+    .ui-picker-popover[data-closing] {
+      scale: none;
+    }
+
+    .ui-picker-sheet {
+      transition: opacity var(--dur-sheet) var(--ease-standard);
+    }
+
+    @starting-style {
+      .ui-picker-sheet {
+        translate: none;
+        opacity: 0;
+      }
+    }
+
+    .ui-picker-sheet[data-closing] {
+      translate: none;
+      opacity: 0;
+      transition: opacity var(--dur-exit) var(--ease-exit);
+    }
+  }
+
+  @media (forced-colors: active) {
+    .ui-picker-popover,
+    .ui-picker-sheet {
+      border: 1px solid CanvasText;
+    }
+
+    .ui-option[data-active] {
+      outline: 2px solid Highlight;
+      outline-offset: -2px;
+    }
+
+    .ui-option-check {
+      forced-color-adjust: none;
+      color: Highlight;
+    }
+
+    .ui-option[aria-disabled="true"] :is(.ui-option-label, .ui-option-note) {
+      color: GrayText;
+    }
+  }
+}

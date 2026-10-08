@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
   type AgentLimits,
   BootConfig,
@@ -24,10 +25,12 @@ import {
   bindingOf,
   CHATGPT,
   checkChatgptChoice,
+  planOnly,
   pricingOf,
   type ResolvedRole,
   type Role,
   resolveRole,
+  taskSelection,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
 import type { CodexAccount } from "./codex/account.ts";
@@ -35,6 +38,7 @@ import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { MemoryStore } from "./memory.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
+import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -46,6 +50,7 @@ const RESTART_BACKOFF_MS = [2000, 4000, 8000];
 const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
+export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
 export interface TerminalTaskSnapshot {
   readonly sessionId: string;
   readonly cellId: string;
@@ -110,6 +115,7 @@ interface Runtime {
   initialized: boolean;
   serial: Promise<void>;
   pause?: "budget" | "keyd" | "model" | "auth";
+  budgetScope?: "task" | "day";
   authResumeAfter?: number;
   authGeneration?: number;
   idleWait?: AbortController;
@@ -127,6 +133,8 @@ function uncertain(error: unknown): boolean {
   );
 }
 const sleep = (ms: number, signal: AbortSignal) => delay(ms, undefined, { signal });
+const budgetHold = (rt: Runtime) =>
+  rt.pause === "budget" ? (rt.budgetScope ?? "task") : undefined;
 
 // One serialized lifecycle owns each task. Generation retirement is synchronous; Docker and
 // keyd settlement happen afterward, before a replacement can be admitted.
@@ -148,7 +156,10 @@ export class AgentRunner {
     this.#unsubscribe = deps.eventLog.subscribe((id, event) => {
       const rt = this.#runtime.get(id);
       if (!rt || rt.session.stopped) return;
-      if (event.type === "budget.exceeded") rt.pause = "budget";
+      if (event.type === "budget.exceeded") {
+        rt.pause = "budget";
+        rt.budgetScope = event.data.scope;
+      }
       if (event.type !== "agent.state") return;
       if (event.data.state === "paused") {
         if (rt.selection.kind === "chatgpt" && event.data.reason === "chatgpt account changed") {
@@ -164,6 +175,7 @@ export class AgentRunner {
             event.data.reason === "budget" ? "budget" : this.#health.online ? "model" : "keyd";
       } else if (["thinking", "acting", "observing"].includes(event.data.state)) {
         rt.pause = undefined;
+        rt.budgetScope = undefined;
         if (rt.session.generation && rt.session.isCurrent(rt.session.generation))
           rt.authResumeAfter = undefined;
       }
@@ -235,7 +247,7 @@ export class AgentRunner {
           }
         }
         const codex = this.deps.codex;
-        if (!codex) throw new AgentError(400, "The ChatGPT plan is not set up in this daemon.");
+        if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
         if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
         const status = await codex.account.status();
         signal?.throwIfAborted();
@@ -266,7 +278,14 @@ export class AgentRunner {
       if (this.deps.live.get(cellId))
         throw new AgentError(409, "a task is already running on this computer");
       const id = this.deps.eventLog.createSession(task.slice(0, 200));
-      const session = new AgentSession(id, cellId, task, this.deps.eventLog, settings.autonomy);
+      const session = new AgentSession(
+        id,
+        cellId,
+        task,
+        this.deps.eventLog,
+        settings.autonomy,
+        new RulesStore(this.deps.home),
+      );
       const rt: Runtime = {
         session,
         selection,
@@ -316,9 +335,14 @@ export class AgentRunner {
     if (!rt || rt.session.stopped) throw new AgentError(409, "task not available");
     return this.#safety(rt).request(requestId);
   }
+  budgetHoldOf(id: string): "task" | "day" | undefined {
+    const rt = this.#runtime.get(id);
+    return rt && !rt.session.stopped ? budgetHold(rt) : undefined;
+  }
   async resumeSafety(id: string, requestId: string, revision: number): Promise<void> {
     const rt = this.#runtime.get(id);
     if (!rt || rt.session.stopped) throw new AgentError(409, "task not available");
+    if (budgetHold(rt) === "task") throw new AgentError(409, RAISE_BUDGET_FIRST);
     try {
       await this.#safety(rt).resume(requestId, revision);
     } catch {
@@ -327,6 +351,10 @@ export class AgentRunner {
         "Pause could not be resumed",
       );
     }
+    // No task budget settles the shared daily limit, and only another model call can tell whether
+    // it has room again, so this Resume also retries the refused call.
+    if (budgetHold(rt) === "day" && !rt.session.stopped && !rt.session.controlHeld)
+      rt.session.post("resume", "");
   }
   #safety(rt: Runtime): SafetyController {
     if (rt.safety) return rt.safety;
@@ -345,7 +373,7 @@ export class AgentRunner {
           !this.#health.online ||
           rt.pause === "auth" ||
           rt.pause === "keyd" ||
-          rt.pause === "budget"
+          budgetHold(rt) === "task"
         )
           throw new Error("task readiness changed");
       },
@@ -403,14 +431,7 @@ export class AgentRunner {
     if (!selection) return undefined;
     return selection.kind === "chatgpt"
       ? { kind: "chatgpt" as const, model: selection.model }
-      : {
-          kind: "api" as const,
-          roles: selection.roles.map((role) => ({
-            role: role.role,
-            provider: role.providerId,
-            model: role.model.id,
-          })),
-        };
+      : taskSelection(selection.roles);
   }
   activeChatgptTasks(): number {
     return [...this.#runtime.values()].filter(
@@ -455,6 +476,8 @@ export class AgentRunner {
     if (!rt) throw new AgentError(404, "no such live task");
     if (rt.selection.kind === "chatgpt")
       throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
+    if (planOnly(rt.selection.roles))
+      throw new AgentError(409, "This task uses your plan's limits.");
     await this.#exclusive(rt, async () => {
       const { session, brain } = rt;
       const generation = session.generation;
@@ -476,6 +499,11 @@ export class AgentRunner {
       // An in-flight raise can finish after Stop/recovery; it must never resume obsolete work.
       if (!session.isCurrent(generation) || session.controlHeld || session.pendingAsk || !ready())
         throw new AgentError(409, "the task changed while updating its budget");
+      // The raised limit settles the budget pause; a held Pause still waits for its own Resume.
+      if (rt.pause === "budget") {
+        rt.pause = undefined;
+        rt.budgetScope = undefined;
+      }
       if (!session.controlHeld) session.post("resume", "");
     });
   }
@@ -831,6 +859,13 @@ export class AgentRunner {
         reason = "error";
         session.stop();
         await session.screensSettled().catch(() => {});
+      }
+      // Its tools have settled, so a Pause that Stop left unsettled must not fence the computer at
+      // the next start. Named cleanup uncertainty fenced it above; an unconfirmed Stop never fences.
+      try {
+        new SafetyIntentStore(this.deps.home).remove(session.id, session.cellId);
+      } catch {
+        console.error("agent safety intent could not be cleared");
       }
       try {
         session.append("session.end", { reason });

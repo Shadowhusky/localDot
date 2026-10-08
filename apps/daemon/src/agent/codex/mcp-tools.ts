@@ -47,11 +47,14 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   update_plan:
     "Replace the task's plan: the whole list of steps, each todo, doing, done or skipped.",
   ask_user:
-    "Ask the user a question and wait for the answer (up to 30 minutes). Give up to six short options, " +
-    "and set allow_text to accept a free answer.",
+    "Ask the user a question and wait for the answer (up to 30 minutes). Only when you cannot continue " +
+    "without the user's information or a choice that would change the result; otherwise pick a sensible " +
+    "default and mention it in your summary. Never ask for permission: the safety system asks the user " +
+    "before consequential steps. Give up to six short options, and set allow_text to accept a free answer.",
   request_takeover:
-    "Hand the screen to the user for a login, two-factor code, CAPTCHA or payment, and wait until they " +
-    "hand it back. Never type passwords or card numbers yourself.",
+    "Hand the screen to the user and wait until they hand it back. Only for a login, 2FA, a CAPTCHA or " +
+    "payment card entry, or after you have tried at least two different approaches and cannot continue; " +
+    "say in the note what you tried. Never type passwords or card numbers yourself.",
   remember:
     "Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping).",
   done: "Finish the task: a summary for the user, and the paths of any files in the home to hand over.",

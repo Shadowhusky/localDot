@@ -86,12 +86,12 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     ask_user: tool({
       description:
-        "Ask the user a question and wait for the answer. Offer up to six short options when you can.",
+        "Ask the user a question and wait for the answer. Only when you cannot continue without the user's information or a choice that would change the result; otherwise pick a sensible default and mention it in your summary. Never ask for permission: the safety system asks the user before consequential steps. Offer up to six short options when you can.",
       inputSchema: AskUserInput,
     }),
     request_takeover: tool({
       description:
-        "Hand the screen to the user for a login, 2FA, a CAPTCHA or a payment. You never type credentials or card numbers yourself.",
+        "Hand the screen to the user. Only for a login, 2FA, a CAPTCHA or payment card entry, or after you have tried at least two different approaches and cannot continue; say in the note what you tried. You never type credentials or card numbers yourself.",
       inputSchema: RequestTakeoverInput,
     }),
     remember: tool({

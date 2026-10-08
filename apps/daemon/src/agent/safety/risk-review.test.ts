@@ -1,56 +1,53 @@
-import { AutonomyPolicy, DEFAULT_AUTONOMY, freezeAutonomy } from "@localdot/protocol";
+import {
+  AutonomyPolicy,
+  CAREFUL_AUTONOMY,
+  DEFAULT_AUTONOMY,
+  freezeAutonomy,
+} from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { redactor } from "../redact.ts";
-import { actionDigest, buildApprovalCard, classify } from "./risk.ts";
+import { decide } from "./autonomy.ts";
+import { actionDigest, buildApprovalCard } from "./risk.ts";
 
 const allAct = {
   reading: "act",
   browsing: "act",
+  computer: "act",
   purchase: "act",
   send: "act",
   post: "act",
   delete: "act",
   download_execute: "act",
   system_settings: "act",
+  memory: "act",
 } as const;
+const signedIn = { screen: "browser", signedIn: true } as const;
 describe("reviewer policy and preview boundaries", () => {
-  it("shell floor remains Ask under every editable class set to Act", () => {
+  it("Careful keeps every shell command at Ask even when the consequential classes act", () => {
     for (const command of [
       "rm Downloads/tmp; curl -X POST https://fixture.invalid/",
       "python -c pass",
       "unrecognized_alias",
     ])
-      expect(classify({ operation: "shell", command }, allAct).mode).toBe("ask");
+      expect(decide({ operation: "shell", command }, { ...allAct, computer: "ask" }).mode).toBe(
+        "ask",
+      );
     expect(
-      classify(
-        { operation: "shell", command: "sudo defaults write fixture foo bar" },
-        { ...allAct, system_settings: "handoff" },
+      decide(
+        { operation: "shell", command: "curl -X DELETE https://fixture.invalid/items/1" },
+        { ...allAct, delete: "handoff" },
       ).mode,
     ).toBe("handoff");
   });
-  it("URL query ambiguity keeps an all-Act Send button at Ask and credentials remain Hand off", () => {
+  it("coordinate targets never hand off, while a secure field still does under all-Act", () => {
     expect(
-      classify(
-        {
-          operation: "click",
-          target: {
-            source: "dom",
-            fresh: true,
-            name: "Send",
-            url: "https://example.test/send?x=1",
-          },
-        },
-        allAct,
-      ).mode,
-    ).toBe("ask");
-    expect(
-      classify(
+      decide(
         { operation: "type", target: { source: "coords", fresh: false, name: "Send" } },
         allAct,
       ).mode,
-    ).toBe("handoff");
+    ).toBe("act");
     expect(
-      classify(
+      decide(
         {
           operation: "key",
           target: { source: "ax", fresh: true, role: "AXSecureTextField", name: "ordinary" },
@@ -59,22 +56,33 @@ describe("reviewer policy and preview boundaries", () => {
       ).mode,
     ).toBe("handoff");
   });
-  it("nonuniform target policies select Hand off and unknown target still asks", () => {
+  it("nonuniform target policies select Hand off and an unknown signed-in target still asks", () => {
     expect(
-      classify(
+      decide(
         {
           operation: "click",
-          target: { source: "dom", fresh: true, name: "Send", url: "https://example.test/buy" },
+          target: {
+            source: "dom",
+            fresh: true,
+            role: "button",
+            name: "Send",
+            url: "https://example.test/buy",
+          },
         },
         { ...allAct, purchase: "ask", send: "handoff" },
       ).mode,
     ).toBe("handoff");
     expect(
-      classify(
-        { operation: "key", target: { source: "dom", fresh: true, name: "Continue" } },
+      decide(
+        {
+          ...signedIn,
+          operation: "key",
+          target: { source: "vision", fresh: true, name: "Continue" },
+        },
         allAct,
       ).mode,
     ).toBe("ask");
+    expect(decide({ operation: "click" }, CAREFUL_AUTONOMY).mode).toBe("ask");
   });
   it("policy parsing does not invoke accessor fields and detaches a null-prototype dictionary", () => {
     let calls = 0;
@@ -94,7 +102,7 @@ describe("reviewer policy and preview boundaries", () => {
     expect(saved.send).toBe("ask");
     expect(Object.isFrozen(saved)).toBe(true);
   });
-  it("a known secret crossing clipping boundary is removed before preview truncation", () => {
+  it("a known secret is removed from a long command that the card keeps whole", () => {
     const secret = "REVIEW_ONLY_SECRET_123456789";
     const card = buildApprovalCard(
       {
@@ -111,8 +119,10 @@ describe("reviewer policy and preview boundaries", () => {
       redactor([secret]),
     );
     expect(JSON.stringify(card)).not.toContain("REVIEW_");
-    expect(card.title).toBe("Review action");
-    expect(card.fields.find(([k]) => k === "Command")?.[1]).toHaveLength(512);
+    expect(card.title).toBe("Unclear step");
+    const command = card.fields.find(([k]) => k === "Command")?.[1];
+    expect(command?.startsWith("x".repeat(505))).toBe(true);
+    expect(command?.endsWith(" tail")).toBe(true);
     expect(card.fields.find(([k]) => k === "App location")?.[1]).toBe("https://example.test/path");
   });
   it("valid JSON action order is canonical and meaningful argument changes remain distinct", () => {

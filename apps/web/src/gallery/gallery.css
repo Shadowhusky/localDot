@@ -1,0 +1,68 @@
+.gallery {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: var(--spacing-gutter) var(--spacing-edge);
+}
+
+.gallery h1 {
+  margin-bottom: var(--spacing-gutter);
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+.gallery figcaption,
+.gallery-index span {
+  color: var(--color-text-3);
+  font-size: 12.5px;
+}
+
+.gallery-index {
+  display: grid;
+  gap: var(--spacing-rail-gap);
+  list-style: none;
+}
+
+.gallery-index li {
+  display: grid;
+  gap: 2px;
+}
+
+.gallery-index a {
+  color: var(--color-text);
+}
+
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--spacing-gutter);
+}
+
+.gallery-dot {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: var(--spacing-rail-gap);
+  padding: var(--spacing-gutter) var(--spacing-edge);
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-stage);
+  background: var(--color-surface);
+}
+
+.gallery-dot .dot-glyph {
+  color: var(--color-text);
+}
+
+.gallery-stages {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 480px), 1fr));
+  gap: calc(var(--spacing-gutter) * 2) var(--spacing-gutter);
+}
+
+.gallery-stages .stage {
+  width: 100%;
+}
+
+.gallery-stages figcaption {
+  text-align: center;
+}

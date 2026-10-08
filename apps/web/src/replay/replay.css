@@ -47,7 +47,8 @@
   letter-spacing: 0.08em;
   color: var(--color-text-2);
 }
-.replay-house button,
+/* The Activity rail beside the replay draws its own rows. */
+.replay-house button:not(.activity-rail *),
 .replay-house select,
 .replay-delete-dialog button {
   border: 1px solid var(--color-line);
@@ -78,8 +79,8 @@
     font-size: 16px;
   }
 }
-.replay-house button:disabled,
-.replay-house button[aria-disabled="true"],
+.replay-house button:disabled:not(.activity-rail *),
+.replay-house button[aria-disabled="true"]:not(.activity-rail *),
 .replay-delete-dialog button:disabled {
   opacity: 0.5;
   cursor: default;
@@ -361,21 +362,6 @@
   font-size: 11px;
   color: var(--color-text-2);
 }
-.replay-house .step[data-future] {
-  opacity: 0.42;
-}
-.replay-house .step-cap button {
-  border: 0;
-  padding: 0;
-  background: none;
-  text-align: left;
-}
-.replay-thumb img {
-  position: static;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
 .replay-compare {
   position: absolute;
   z-index: 3;
@@ -472,6 +458,7 @@
 }
 .replay-delete-dialog h2 {
   font-size: 18px;
+  font-weight: 600;
   margin-bottom: 12px;
 }
 .replay-delete-content {

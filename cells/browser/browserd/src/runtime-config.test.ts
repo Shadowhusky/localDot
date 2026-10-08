@@ -85,10 +85,23 @@ describe("browser runtime bootstrap confinement", () => {
     ["LOCALDOT_STREAM_TOKEN", "malformed-secret\n".padEnd(43, "t")],
     ["LOCALDOT_SCALE", "3"],
     ["LOCALDOT_SCALE", undefined],
+    ["LOCALDOT_STREAM_FULLCOLOR", "true"],
+    ["LOCALDOT_STREAM_FULLCOLOR", ""],
   ])("rejects malformed bootstrap field %s without reflecting it", (name, value) => {
     expect(() => browserRuntimeConfig({ ...fixture(), [name]: value })).toThrow(
       /^Browser configuration is invalid$/u,
     );
+  });
+
+  it.each([
+    [undefined, "false|locked"],
+    ["0", "false|locked"],
+    ["1", "true|locked"],
+  ])("streams 4:2:0 unless LOCALDOT_STREAM_FULLCOLOR=1 (%s)", (value, expected) => {
+    const { stream } = browserProcessSpecs(
+      browserRuntimeConfig({ ...fixture(), LOCALDOT_STREAM_FULLCOLOR: value }),
+    );
+    expect(stream.env.SELKIES_VIDEO_FULLCOLOR).toBe(expected);
   });
 
   it("uses the real sandboxed Chromium binary, private pipe and forced loopback-excluding proxy", () => {

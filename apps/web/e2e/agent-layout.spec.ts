@@ -339,8 +339,8 @@ test("composer submits once and moves a recognised key without a task request", 
   });
   await page.getByRole("tab", { name: "Conversation" }).click();
   const draft = page.getByLabel("Message", { exact: true });
-  await expect(page.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
   await draft.fill("请继续 the sample report");
+  await expect(page.getByRole("button", { name: "Send follow-up" })).toBeEnabled();
   await draft.press("Enter");
   await expect.poll(() => bodies.length).toBe(1);
   await page.getByRole("form", { name: "Message dot" }).evaluate((element) => {
@@ -350,7 +350,11 @@ test("composer submits once and moves a recognised key without a task request", 
   expect(bodies).toEqual([JSON.stringify({ kind: "followup", text: "请继续 the sample report" })]);
   accepted.resolve();
   await expect(draft).toHaveValue("");
-  await expect(page.getByText("Sent to dot.")).toBeVisible();
+  await expect(
+    page
+      .getByRole("region", { name: "Conversation history" })
+      .getByText("请继续 the sample report"),
+  ).toBeVisible();
   const key = `sk-proj-${"a".repeat(156)}`;
   await draft.fill(`before ${key} after`);
   await expect(draft).toHaveValue("before  after");

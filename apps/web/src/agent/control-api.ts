@@ -47,7 +47,7 @@ export async function controlRequest<T>(
   status: number,
   signal: AbortSignal,
   parse: (body: string) => T,
-  method: "GET" | "POST" = "POST",
+  method: "GET" | "POST" | "DELETE" = "POST",
   maxBytes = 4096,
 ): Promise<T> {
   if (signal.aborted) throw new ControlFailure(false);

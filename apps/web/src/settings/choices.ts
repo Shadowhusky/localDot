@@ -1,5 +1,11 @@
 import type { AgentRoleChoice } from "@localdot/protocol";
-import { type Capability, PROVIDERS, type ProviderSpec, usableAs } from "@localdot/providers";
+import {
+  type Capability,
+  PROVIDERS,
+  type ProviderSpec,
+  providerById,
+  usableAs,
+} from "@localdot/providers";
 import type { KeyRecord } from "../keys/keys-api.ts";
 
 export type ModelRole = "main" | "fast" | "local";
@@ -23,21 +29,48 @@ export interface ProviderModels {
 export type ProviderGroup =
   | "API providers"
   | "Compatible providers"
+  | "Plans"
   | "Local servers"
+  | "Not available here"
   | "Later releases";
 export function groupOf(provider: ProviderSpec): ProviderGroup {
   if (provider.availableIn) return "Later releases";
+  if (provider.notOffered) return "Not available here";
   if (provider.local) return "Local servers";
-  return provider.client === "openai-compatible" ? "Compatible providers" : "API providers";
+  if (provider.plan) return "Plans";
+  return provider.client === "openai-compatible" || provider.custom
+    ? "Compatible providers"
+    : "API providers";
 }
 export const PROVIDER_GROUPS: readonly ProviderGroup[] = [
   "API providers",
   "Compatible providers",
+  "Plans",
   "Local servers",
+  "Not available here",
   "Later releases",
 ];
 export function providerAllowed(role: ModelRole, provider: ProviderSpec): boolean {
-  return !provider.availableIn && (role !== "local" || provider.local === true);
+  return (
+    !provider.availableIn && !provider.notOffered && (role !== "local" || provider.local === true)
+  );
+}
+// A registry plan, or a custom endpoint its user says is on a flat-rate plan.
+export function onPlan(choice: RoleChoice | undefined): boolean {
+  const provider = providerById(choice?.provider ?? "");
+  return !!provider?.plan || (!!provider?.custom && choice?.plan === true);
+}
+// No chosen role is billed per token and at least one runs on a plan.
+export function planOnly(choices: Partial<Record<ModelRole, RoleChoice>>): boolean {
+  const chosen = Object.values(choices);
+  return (
+    chosen.some(onPlan) &&
+    chosen.every((choice) => onPlan(choice) || providerById(choice?.provider ?? "")?.local)
+  );
+}
+// A plan that is not offered can still be picked, only to read why; it never saves.
+export function providerPickable(role: ModelRole, provider: ProviderSpec): boolean {
+  return providerAllowed(role, provider) || (!!provider.notOffered && role !== "local");
 }
 export function matchingProviders(search: string): readonly ProviderSpec[] {
   const query = search.trim().toLowerCase();
@@ -67,7 +100,7 @@ export function matchingKeys(
   provider: ProviderSpec,
   keys: readonly PickerKey[],
 ): readonly PickerKey[] {
-  if (provider.local || provider.availableIn) return [];
+  if (provider.local || provider.availableIn || provider.notOffered) return [];
   const bound = endpoint(provider.baseURL);
   return keys.filter(
     (key) =>
@@ -80,7 +113,7 @@ export function modelAllowed(role: ModelRole, model: PickerModel): boolean {
   return usableAs(role, model);
 }
 export function customModelAllowed(provider: ProviderSpec): boolean {
-  return !provider.availableIn && (provider.local === true || provider.id === "openai-compatible");
+  return !provider.availableIn && (provider.local === true || provider.custom === true);
 }
 export function modelIdProblem(id: string): string | null {
   return /^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/.test(id)

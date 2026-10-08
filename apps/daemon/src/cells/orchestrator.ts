@@ -978,7 +978,7 @@ export class CellOrchestrator {
     error?: string,
     frozen = false,
   ): Promise<boolean> {
-    if (this.deps.permanentFence?.(record.id) || this.deps.runtimeHold?.(record.id))
+    if (this.#fenced(record.id))
       throw new CellControlConflict("the computer is permanently fenced");
     // Refuse mismatched ownership/images before key wiring, starting, or failure cleanup by name.
     try {
@@ -992,7 +992,7 @@ export class CellOrchestrator {
       });
       throw error;
     }
-    if (this.deps.permanentFence?.(record.id) || this.deps.runtimeHold?.(record.id))
+    if (this.#fenced(record.id))
       throw new CellControlConflict("computer admission changed during runtime verification");
     const d = record.docker;
     const starting: Live = {
@@ -1086,7 +1086,9 @@ export class CellOrchestrator {
         if (!this.#current(record.id, live)) return;
         if (streaming) {
           await this.deps.verifyRuntime?.(record);
-          if (!this.#current(record.id, live) || this.#held(record.id)) return;
+          // A held replacement candidate still reaches Ready here: its owner waits for it, and
+          // input, Start and stream tickets keep refusing it until the owner publishes it.
+          if (!this.#current(record.id, live) || this.#fenced(record.id)) return;
           // The restart count survives a recovery: it resets only on a user start or stop, so a
           // cell that keeps dying runs out of attempts instead of flapping forever.
           this.#set(record.id, {
@@ -1536,10 +1538,11 @@ export class CellOrchestrator {
         : "This fenced computer needs cleanup attention before replacement.",
     });
   }
+  #fenced(id: string): boolean {
+    return !!this.deps.permanentFence?.(id) || !!this.deps.runtimeHold?.(id);
+  }
   #held(id: string): boolean {
-    return (
-      !!this.deps.permanentFence?.(id) || !!this.deps.runtimeHold?.(id) || this.#candidateHeld(id)
-    );
+    return this.#fenced(id) || this.#candidateHeld(id);
   }
   #candidateHeld(id: string): boolean {
     return this.#candidateHolds.has(id) || !!this.deps.candidateHold?.(id);

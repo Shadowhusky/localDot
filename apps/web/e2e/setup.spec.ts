@@ -49,7 +49,7 @@ test("installer progress hands off once to first-run setup and settings", async 
     await page.getByRole("button", { name: "Review autonomy" }).click();
     const settings = page.getByRole("dialog", { name: "Models and settings" });
     await expect(settings).toBeVisible();
-    await expect(settings.getByRole("combobox", { name: "Read information" })).toBeFocused();
+    await expect(settings.getByRole("combobox", { name: "Read and look" })).toBeFocused();
     await settings.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByRole("button", { name: "Review autonomy" })).toBeFocused();
     const start = page.locator(".welcome-setup").getByRole("button", { name: "Turn on" });

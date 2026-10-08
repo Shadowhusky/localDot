@@ -1,6 +1,6 @@
 import {
   type AutonomyPolicy,
-  DEFAULT_AUTONOMY,
+  CAREFUL_AUTONOMY,
   type HitTestResult,
   msToMicros,
   ulid,
@@ -208,7 +208,7 @@ describe("mandatory user approval at the real action boundary", () => {
     expect(f.effects()).toHaveLength(1);
   });
   it("the frozen Act class is a positive control while unowned native callers fail closed", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     expect((await f.call("computer", click)).body.ok).toBe(true);
     expect(f.session.pendingApproval).toBeUndefined();
     expect(f.effects()).toHaveLength(1);
@@ -442,13 +442,13 @@ describe("full native identity is revalidated", () => {
     expect((await pending).body.ok).toBe(true);
     expect(f.effects()).toHaveLength(1);
   });
-  it("unknown coordinate and vision targets keep Ask under otherwise permissive policy", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+  it("coordinate and vision targets ask under Careful even when sending acts", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     if (!f.target.value.target) throw new Error("missing native target");
     f.target.value.target.source = "vision";
     const pending = f.call("computer", click);
     await until(() => !!f.session.pendingApproval);
-    expect(f.session.pendingApproval?.actionClass).toBe("unknown");
+    expect(f.session.pendingApproval?.actionClass).toBe("computer");
     expect(f.effects()).toHaveLength(0);
     await f.post(f.answer("deny"));
     await pending;
@@ -463,17 +463,20 @@ describe("full native identity is revalidated", () => {
     expect(f.effects()).toHaveLength(1);
     expect(f.fake.calls.filter((c) => c.path === "/focused").length).toBeGreaterThanOrEqual(3);
   });
-  it("ordinary typing always hands off before text or native intent is published", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+  it("ordinary typing asks under Careful before text or native intent is published", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    if (!f.target.value.target) throw new Error("missing native target");
+    f.target.value.target.role = "textbox";
+    f.target.value.target.name = "Message";
     const literal = "private bilingual text 中文 English";
     const pending = f.call("computer", { action: "type", text: literal });
-    await until(() => f.events().some((e) => e.type === "takeover.request"));
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval?.actionClass).toBe("computer");
+    expect(f.events().some((e) => e.type === "takeover.request")).toBe(false);
     expect(f.effects()).toHaveLength(0);
     expect(JSON.stringify(f.events())).not.toContain(literal);
     expect(f.events().filter((e) => e.type === "action.intent")).toHaveLength(0);
-    const id = f.session.pendingTakeover;
-    if (!id) throw new Error("missing takeover");
-    f.session.endTakeover(id, "Ready");
+    await f.post(f.answer("deny"));
     expect((await pending).body.ok).toBe(false);
     expect(f.effects()).toHaveLength(0);
   });
@@ -516,7 +519,9 @@ describe("a window-level approval re-checks the element found at dispatch", () =
     ms: 300,
   };
   const noFocus: HitTestResult = { target: null, window: 77, windowFrame: FRAME, ms: 1 };
-  const element = (role: string, name: string, secret = false): HitTestResult => ({
+  // Inside the computer a Delete button is its own work; on a web page it deletes your data.
+  const PAGE = "https://mail.example.test/draft";
+  const element = (role: string, name: string, secret = false, url?: string): HitTestResult => ({
     target: {
       point: { x: 20, y: 40 },
       bbox: { x: 10, y: 20, w: 40, h: 40 },
@@ -525,6 +530,7 @@ describe("a window-level approval re-checks the element found at dispatch", () =
       name,
       app: "Chromium",
       window: "Draft",
+      ...(url ? { url } : {}),
       ...(secret ? { secret: true, editable: true } : {}),
     },
     window: 77,
@@ -542,7 +548,7 @@ describe("a window-level approval re-checks the element found at dispatch", () =
     f.target.value = before;
     const pending = f.call("computer", input);
     await until(() => !!f.session.pendingApproval);
-    expect(f.session.pendingApproval).toMatchObject({ actionClass: "unknown", risk: "medium" });
+    expect(f.session.pendingApproval).toMatchObject({ actionClass: "computer", risk: "medium" });
     await f.post(f.answer());
     await until(() => f.stage.entered);
     f.target.value = after;
@@ -583,17 +589,19 @@ describe("a window-level approval re-checks the element found at dispatch", () =
     const { f, result } = await approveThenFind(
       click,
       late,
-      element("push button", "Delete"),
-      DEFAULT_AUTONOMY,
+      element("push button", "Delete", false, PAGE),
+      CAREFUL_AUTONOMY,
     );
     expect(result.body).toMatchObject({ ok: false, cancelled: "stale" });
     expect(f.effects()).toHaveLength(0);
   });
   it("an element whose own class would act under the policy is still pressed", async () => {
-    const { f, result } = await approveThenFind(click, late, element("push button", "Delete"), {
-      ...DEFAULT_AUTONOMY,
-      delete: "act",
-    });
+    const { f, result } = await approveThenFind(
+      click,
+      late,
+      element("push button", "Delete", false, PAGE),
+      { ...CAREFUL_AUTONOMY, delete: "act" },
+    );
     expect(result.body.ok).toBe(true);
     expect(f.effects()).toHaveLength(1);
   });
@@ -719,7 +727,7 @@ describe("immediate effect ownership", () => {
     };
     expect(await cardFor({ action: "key", keys: ["]"], repeat: 5 })).toContainEqual([
       "Repeat",
-      "5 times",
+      "× 5",
     ]);
     expect(await cardFor({ action: "hold_key", keys: ["shift"], ms: 1500 })).toContainEqual([
       "Hold",
@@ -752,7 +760,7 @@ describe("immediate effect ownership", () => {
     });
     await until(() => !!f.session.pendingApproval);
     const fields = f.session.pendingApproval?.fields;
-    expect(f.session.pendingApproval?.title).toBe("Delete item");
+    expect(f.session.pendingApproval?.title).toBe("Work in its computer");
     expect(fields).toContainEqual(["Target", "report.txt"]);
     expect(fields).toContainEqual(["Drop target", "Trash"]);
     expect(fields).toContainEqual(["Action", "drag"]);
@@ -779,12 +787,12 @@ describe("immediate effect ownership", () => {
       return { card: f.session.pendingApproval, pending };
     };
     const press = await ask({ action: "mouse_down", point: { x: 10, y: 20 } });
-    expect(press.card?.title).toBe("Review action");
+    expect(press.card?.title).toBe("Work in its computer");
     expect(press.card?.fields).toContainEqual(["Target", "report.txt"]);
     await f.post(f.answer());
     expect((await press.pending).body.ok).toBe(true);
     const move = await ask({ action: "move", point: { x: 50, y: 20 } });
-    expect(move.card?.title).toBe("Delete item");
+    expect(move.card?.title).toBe("Work in its computer");
     for (const field of [
       ["Target", "report.txt"],
       ["Drop target", "Trash"],
@@ -795,7 +803,7 @@ describe("immediate effect ownership", () => {
     await f.post(f.answer());
     expect((await move.pending).body.ok).toBe(true);
     const release = await ask({ action: "mouse_up" });
-    expect(release.card?.title).toBe("Delete item");
+    expect(release.card?.title).toBe("Work in its computer");
     for (const field of [
       ["Target", "report.txt"],
       ["Drop target", "Trash"],
@@ -811,8 +819,9 @@ describe("immediate effect ownership", () => {
       "move",
     ]);
   });
-  it("a drag approved over no element at its drop is refused once Trash is found there", async () => {
+  it("a drag approved over no element at its drop on a signed-in screen is refused once Trash is found there", async () => {
     const f = setup();
+    f.session.taskAutonomy.signIn("desktop");
     const item = (name: string, x: number): HitTestResult => ({
       target: { point: { x, y: 40 }, source: "ax", role: "list item", name, app: "Thunar" },
       window: 77,
@@ -833,7 +842,7 @@ describe("immediate effect ownership", () => {
       ],
     });
     await until(() => !!f.session.pendingApproval);
-    expect(f.session.pendingApproval?.title).toBe("Review action");
+    expect(f.session.pendingApproval?.title).toBe("Unclear step");
     trash = true;
     await f.post(f.answer());
     const result = await pending;
@@ -968,8 +977,37 @@ function screenChanges(f: ReturnType<typeof setup>) {
   });
 }
 describe("repeat safety at actual native dispatch", () => {
-  it("third identical key that changed nothing pauses after exactly two physical effects", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+  it("one key call with repeat 5 in a native app asks once and presses five times in one input without pausing", async () => {
+    const f = setup(CAREFUL_AUTONOMY);
+    repeatController(f);
+    f.target.value = {
+      target: {
+        point: { x: 300, y: 200 },
+        bbox: { x: 0, y: 40, w: 800, h: 560 },
+        source: "ax",
+        role: "AXGroup",
+        name: "Canvas",
+        app: "Paint",
+        window: "Untitled",
+        mark: 1,
+        secret: false,
+      },
+      window: 77,
+      ms: 1,
+    };
+    const out = f.call("computer", { action: "key", keys: ["bracketright"], repeat: 5 });
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval).toMatchObject({ actionClass: "computer" });
+    expect(f.session.pendingApproval?.fields).toContainEqual(["Repeat", "× 5"]);
+    expect((await f.post(f.answer())).status).toBe(204);
+    expect((await out).body.ok).toBe(true);
+    expect(f.effects().map((c) => (c.body as { input: unknown }).input)).toEqual([
+      { kind: "key", combo: ["bracketright"], repeat: 5 },
+    ]);
+    expect(f.session.safetyPause).toBeUndefined();
+  });
+  it("a third identical call that changed nothing pauses after exactly two physical effects, whatever call id the model sends", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
@@ -984,7 +1022,7 @@ describe("repeat safety at actual native dispatch", () => {
     });
   });
   it("a repeated key is one admission and one physical input", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     expect((await f.call("computer", { ...repeatedKey, repeat: 5 })).body.ok).toBe(true);
     expect(f.effects().map((c) => (c.body as { input: unknown }).input)).toEqual([
@@ -1000,7 +1038,7 @@ describe("repeat safety at actual native dispatch", () => {
     await controller.settled();
   });
   it("identical inputs that change the screen each time never pause", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     repeatController(f);
     screenChanges(f);
     for (let i = 0; i < 5; i++)
@@ -1009,7 +1047,7 @@ describe("repeat safety at actual native dispatch", () => {
     expect(f.session.safetyPause).toBeUndefined();
   });
   it("a frame identical to the one before the input counts as no change", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     screenChanges(f);
     f.fake.script.observe = () => ({
@@ -1038,7 +1076,7 @@ describe("repeat safety at actual native dispatch", () => {
     expect(f.session.safetyPause?.reason).toBe("repeated_action");
   });
   it("a different actual native window resets the consecutive input identity", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     repeatController(f);
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
     expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
@@ -1048,7 +1086,7 @@ describe("repeat safety at actual native dispatch", () => {
     expect(f.session.safetyPause).toBeUndefined();
   });
   it("screenshot observations cannot conceal the third identical input", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     await f.call("computer", repeatedKey);
     await f.call("computer", { action: "screenshot" });
@@ -1063,7 +1101,7 @@ describe("repeat safety at actual native dispatch", () => {
     await controller.settled();
   });
   it("answering the daemon repeat question cannot Resume and explicit Resume resets the streak", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     await threeKeys(f);
     await controller.settled();

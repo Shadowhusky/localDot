@@ -12,8 +12,6 @@ import { Container, Graphics, Text, TextStyle } from "pixi.js";
 import { CURSOR_TILT_RAD, cursorPolygon, ringRadius } from "./geometry.ts";
 import type { StageTheme, ThemeColor } from "./theme.ts";
 
-const FONT = "-apple-system, 'Inter', system-ui, sans-serif";
-
 class Chip extends Container {
   readonly bg = new Graphics();
   readonly text: Text;
@@ -22,7 +20,7 @@ class Chip extends Container {
     this.text = new Text({
       text: "",
       style: new TextStyle({
-        fontFamily: FONT,
+        fontFamily: theme.font,
         fontSize: size,
         fontWeight: "500",
         fill: fill.color,
@@ -81,7 +79,7 @@ export class Overlays {
     this.#typingText = new Text({
       text: "",
       style: new TextStyle({
-        fontFamily: FONT,
+        fontFamily: theme.font,
         fontSize: 14,
         fontWeight: "500",
         fill: theme.text.color,
@@ -90,7 +88,7 @@ export class Overlays {
     });
     this.#typingMore = new Text({
       text: "",
-      style: new TextStyle({ fontFamily: FONT, fontSize: 11, fill: theme.text2.color }),
+      style: new TextStyle({ fontFamily: theme.font, fontSize: 11, fill: theme.text2.color }),
       resolution: dpr,
     });
     this.#typing.addChild(this.#typingBg, this.#typingText, this.#typingMore, this.#caret);

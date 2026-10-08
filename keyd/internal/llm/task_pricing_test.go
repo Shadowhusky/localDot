@@ -328,3 +328,99 @@ func TestPricedTaskConcurrentInitializersHaveOneImmutableWinner(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func flatSnapshot(t *testing.T) *TaskSnapshot {
+	t.Helper()
+	s, err := NewTaskSnapshot(TaskPricing{V: 1, Routes: []TaskPricingRoute{{Route: "plan", Flat: true, Models: []Price{{Model: "model", MaxOutput: 100}}}}}, map[string]string{"plan": strings.Repeat("c", 64)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+// A flat route is a plan billed outside localDot: every price it states is zero, and only true marks one.
+func TestFlatTaskPricingIsZeroOnly(t *testing.T) {
+	p := flatSnapshot(t).Pricing
+	if !p.Routes[0].Flat {
+		t.Fatal("canonical form dropped flat")
+	}
+	for name, change := range map[string]func(*Price){
+		"input":       func(m *Price) { m.Input = 1 },
+		"output":      func(m *Price) { m.Output = 0.5 },
+		"cache read":  func(m *Price) { m.CacheRead = 1 },
+		"cache write": func(m *Price) { m.CacheWrite = 1 },
+	} {
+		priced := flatSnapshot(t).Pricing
+		change(&priced.Routes[0].Models[0])
+		if _, err := CanonicalTaskPricing(priced); err == nil {
+			t.Errorf("flat route with a %s price accepted", name)
+		}
+	}
+	valid := `{"v":1,"routes":[{"route":"plan","flat":true,"models":[{"id":"m","inputUSDPerMTok":0,"outputUSDPerMTok":0,"maxOutputTokens":10}]}]}`
+	var wire TaskPricing
+	if err := json.Unmarshal([]byte(valid), &wire); err != nil || !wire.Routes[0].Flat {
+		t.Fatalf("flat wire: %+v %v", wire, err)
+	}
+	for _, raw := range []string{
+		strings.Replace(valid, `"flat":true`, `"flat":false`, 1),
+		strings.Replace(valid, `"flat":true`, `"flat":null`, 1),
+		strings.Replace(valid, `"flat":true`, `"flat":1`, 1),
+		strings.Replace(valid, `"flat":true`, `"flat":"true"`, 1),
+		strings.Replace(valid, `"outputUSDPerMTok":0`, `"outputUSDPerMTok":2`, 1),
+	} {
+		if err := json.Unmarshal([]byte(raw), &wire); err == nil {
+			t.Errorf("accepted %s", raw)
+		}
+	}
+}
+
+func TestFlatTaskSnapshotPersistsAndRestores(t *testing.T) {
+	c := &clock{time.Now()}
+	path := filepath.Join(t.TempDir(), "spend.json")
+	b := openBudget(t, path, c)
+	if err := b.BeginPriced("a", "session", 5, flatSnapshot(t)); err != nil {
+		t.Fatal(err)
+	}
+	if l, _ := b.Capture("a"); !l.Flat("plan") || l.Flat("other") {
+		t.Fatal("flat route not reported by the lease")
+	}
+	b.End("a")
+	reopened := openBudget(t, path, c)
+	if err := reopened.Begin("b", "session", 0); err != nil {
+		t.Fatal(err)
+	}
+	l, err := reopened.Capture("b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	price, ok := l.Price("plan", "model")
+	if !l.Snapshot() || !l.Flat("plan") || !ok || price.Input != 0 || price.Output != 0 || price.MaxOutput != 100 {
+		t.Fatalf("restored flat policy: %+v %v", price, ok)
+	}
+	reopened.End("b")
+	paid := flatSnapshot(t)
+	paid.Pricing.Routes[0].Flat = false
+	if err := reopened.BeginPriced("c", "session", 5, paid); !errors.Is(err, ErrTaskPricingConflict) {
+		t.Fatalf("flat mark changed on retry: %v", err)
+	}
+}
+
+func TestTaskPricingRecordWithoutFlatIsUnchanged(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "spend.json")
+	old := `{"v":2,"tasks":{"session":{"limitMicroUSD":5000000,"spentMicroUSD":0,"pricingMode":"snapshot","pricing":{"pricing":{"v":1,"routes":[{"route":"anthropic","models":[{"id":"model","inputUSDPerMTok":1,"outputUSDPerMTok":2,"maxOutputTokens":100}]}]},"bindings":{"anthropic":"` + strings.Repeat("a", 64) + `"}},"initialLimitMicroUSD":5000000}},"date":"` + time.Now().Format("2006-01-02") + `","microUSD":0}`
+	if err := os.WriteFile(path, []byte(old), 0600); err != nil {
+		t.Fatal(err)
+	}
+	b := openBudget(t, path, &clock{time.Now()})
+	if err := b.BeginPriced("a", "session", 5, priceSnapshot(t, 1)); err != nil {
+		t.Fatalf("an old record no longer equals its policy: %v", err)
+	}
+	l, _ := b.Capture("a")
+	if !l.Snapshot() || l.Flat("anthropic") {
+		t.Fatal("an old record became flat")
+	}
+	saved, _ := os.ReadFile(path)
+	if strings.Contains(string(saved), "flat") {
+		t.Fatalf("an old record gained a flat field: %s", saved)
+	}
+}

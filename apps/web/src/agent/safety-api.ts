@@ -1,5 +1,9 @@
 import {
+  ActionClass,
+  APPROVAL_VALUE_CHARS,
   ApprovalAnswer,
+  ApprovalFieldText,
+  AutonomyRule,
   ComputerFence,
   PauseRequest,
   PauseSnapshot,
@@ -8,6 +12,7 @@ import {
   ResumeSafetyRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
+import { z } from "zod";
 import type { ApiClient } from "../lib/api.ts";
 import { ControlFailure, controlRequest } from "./control-api.ts";
 
@@ -22,6 +27,62 @@ export function answerSafety(api: ApiClient, session: string, body: unknown, sig
   const input = ApprovalAnswer.safeParse(body);
   if (!input.success) throw new ControlFailure(false);
   return controlRequest(api, `${path(session)}/approvals/answer`, input.data, 204, signal, empty);
+}
+export function removeAllowance(
+  api: ApiClient,
+  session: string,
+  actionClass: string,
+  signal: AbortSignal,
+) {
+  const value = ActionClass.safeParse(actionClass);
+  if (!value.success) throw new ControlFailure(false);
+  const target = `${path(session)}/allowances/${value.data}`;
+  return controlRequest(api, target, undefined, 204, signal, empty, "DELETE");
+}
+export function removeRule(api: ApiClient, id: string, signal: AbortSignal) {
+  if (!ULID_PATTERN.test(id)) throw new ControlFailure(false);
+  return controlRequest(api, `/api/agent/rules/${id}`, undefined, 204, signal, empty, "DELETE");
+}
+const RulesList = z.strictObject({
+  rules: AutonomyRule.array().max(200),
+  error: z.string().max(500).optional(),
+});
+export function loadRules(api: ApiClient, signal: AbortSignal) {
+  return controlRequest(
+    api,
+    "/api/agent/rules",
+    undefined,
+    200,
+    signal,
+    (text) => RulesList.parse(JSON.parse(text)),
+    "GET",
+    262_144,
+  );
+}
+export function resetRules(api: ApiClient, signal: AbortSignal) {
+  return controlRequest(api, "/api/agent/rules/reset", undefined, 204, signal, empty);
+}
+// JSON spends at most six bytes on one character.
+const FIELD_BYTES = APPROVAL_VALUE_CHARS * 6 + 64;
+export async function loadApprovalField(
+  api: ApiClient,
+  session: string,
+  approvalId: string,
+  field: number,
+  signal: AbortSignal,
+): Promise<string> {
+  if (!ULID_PATTERN.test(approvalId) || !Number.isInteger(field) || field < 0 || field > 15)
+    throw new ControlFailure(false);
+  return controlRequest(
+    api,
+    `${path(session)}/approvals/${approvalId}/fields/${field}`,
+    undefined,
+    200,
+    signal,
+    (text) => ApprovalFieldText.parse(JSON.parse(text)).text,
+    "GET",
+    FIELD_BYTES,
+  );
 }
 export function pauseSafety(api: ApiClient, session: string, body: unknown, signal: AbortSignal) {
   const input = PauseRequest.safeParse(body);

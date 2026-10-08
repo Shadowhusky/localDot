@@ -14,7 +14,10 @@ import {
   matchingProviders,
   modelAllowed,
   modelIdProblem,
+  PROVIDER_GROUPS,
+  planOnly,
   providerAllowed,
+  providerPickable,
 } from "./choices.ts";
 
 const key = (provider: string, baseURL?: string): KeyRecord => ({
@@ -30,21 +33,81 @@ describe("provider and model choice rules", () => {
     expect(matchingProviders("")).toEqual(PROVIDERS);
     expect(matchingProviders("gemINI").map((p) => p.id)).toEqual(["google"]);
     expect(matchingProviders("fireworks-ai").map((p) => p.name)).toEqual(["Fireworks"]);
+    expect(matchingProviders("coding plan").map((p) => p.name)).toEqual([
+      "Alibaba Coding Plan",
+      "GLM Coding Plan",
+      "Ark Coding Plan",
+    ]);
+    expect(PROVIDER_GROUPS).toEqual([
+      "API providers",
+      "Compatible providers",
+      "Plans",
+      "Local servers",
+      "Not available here",
+      "Later releases",
+    ]);
     for (const provider of PROVIDERS) {
       expect(groupOf(provider)).toBe(
         provider.availableIn
           ? "Later releases"
-          : provider.local
-            ? "Local servers"
-            : provider.client === "openai-compatible"
-              ? "Compatible providers"
-              : "API providers",
+          : provider.notOffered
+            ? "Not available here"
+            : provider.local
+              ? "Local servers"
+              : provider.plan
+                ? "Plans"
+                : provider.client === "openai-compatible" || provider.custom
+                  ? "Compatible providers"
+                  : "API providers",
       );
-      expect(providerAllowed("main", provider)).toBe(!provider.availableIn);
-      expect(providerAllowed("local", provider)).toBe(
-        provider.local === true && !provider.availableIn,
-      );
+      const offered = !provider.availableIn && !provider.notOffered;
+      expect(providerAllowed("main", provider)).toBe(offered);
+      expect(providerAllowed("fast", provider)).toBe(offered);
+      expect(providerAllowed("local", provider)).toBe(provider.local === true && offered);
     }
+    expect(groupOf(providerById("anthropic-compatible") as never)).toBe("Compatible providers");
+    expect(PROVIDERS.filter((p) => groupOf(p) === "Plans").map((p) => p.id)).toEqual([
+      "minimax-coding-plan",
+      "alibaba-token-plan",
+      "alibaba-coding-plan",
+    ]);
+    expect(PROVIDERS.filter((p) => groupOf(p) === "Not available here").map((p) => p.id)).toEqual([
+      "zai-coding-plan",
+      "kimi-code-plan-global",
+      "volcengine-coding-plan",
+    ]);
+  });
+  it("lets a plan that is not offered be picked to read why, never for the local role", () => {
+    for (const provider of PROVIDERS.filter((p) => p.notOffered)) {
+      expect(providerPickable("main", provider)).toBe(true);
+      expect(providerPickable("fast", provider)).toBe(true);
+      expect(providerPickable("local", provider)).toBe(false);
+      expect(
+        matchingKeys(provider, [key("openai-compatible", "https://api.z.ai/api/coding/paas/v4")]),
+      ).toEqual([]);
+      expect(customModelAllowed(provider)).toBe(false);
+    }
+    for (const provider of PROVIDERS.filter((p) => !p.notOffered))
+      for (const role of ["main", "fast", "local"] as const)
+        expect(providerPickable(role, provider)).toBe(providerAllowed(role, provider));
+  });
+  it("calls a choice plan-only when no role is billed and one runs on a plan", () => {
+    const plan = { provider: "alibaba-token-plan", model: "qwen3.8-max", key: "plan" };
+    const local = { provider: "lmstudio", model: "local" };
+    expect(planOnly({ main: plan })).toBe(true);
+    expect(planOnly({ main: plan, local })).toBe(true);
+    expect(planOnly({ main: plan, fast: { provider: "openai", model: "m", key: "k" } })).toBe(
+      false,
+    );
+    expect(planOnly({ main: plan, fast: { provider: "", model: "" } })).toBe(false);
+    expect(planOnly({ main: local })).toBe(false);
+    expect(planOnly({})).toBe(false);
+    // A custom endpoint is on a plan when its user says so.
+    const custom = { provider: "anthropic-compatible", model: "glm-5.3-flash", key: "anc" };
+    expect(planOnly({ main: { ...custom, plan: true } })).toBe(true);
+    expect(planOnly({ main: { ...custom, plan: true }, local })).toBe(true);
+    expect(planOnly({ main: custom })).toBe(false);
+    expect(planOnly({ main: { ...plan, plan: true }, fast: { ...custom } })).toBe(false);
   });
   it("matches every compatible preset by kind AND canonical bound URL", () => {
     for (const provider of PROVIDERS.filter((p) => p.baseURL)) {
@@ -61,7 +124,9 @@ describe("provider and model choice rules", () => {
     }
   });
   it("keeps first-class names exact, permits bound Other/Azure metadata and never requires a local key", () => {
-    for (const provider of PROVIDERS.filter((p) => !p.baseURL && !p.local && !p.availableIn)) {
+    for (const provider of PROVIDERS.filter(
+      (p) => !p.baseURL && !p.local && !p.availableIn && !p.notOffered,
+    )) {
       expect(matchingKeys(provider, [key(provider.keyd, "https://owned.example/v1")])).toHaveLength(
         1,
       );
@@ -77,7 +142,10 @@ describe("provider and model choice rules", () => {
   it("supports custom IDs only where the accepted resolver supports them", () => {
     for (const provider of PROVIDERS)
       expect(customModelAllowed(provider)).toBe(
-        !provider.availableIn && (provider.local === true || provider.id === "openai-compatible"),
+        !provider.availableIn &&
+          (provider.local === true ||
+            provider.id === "openai-compatible" ||
+            provider.id === "anthropic-compatible"),
       );
     expect(modelIdProblem("Qwen/model:v2@preview+1")).toBeNull();
     for (const id of ["", " x", "../model", "x".repeat(129), "模型"])

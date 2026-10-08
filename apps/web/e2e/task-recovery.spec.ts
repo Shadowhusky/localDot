@@ -18,39 +18,43 @@ for (const width of [1280, 390])
     try {
       const p = await load(page, f);
       if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
+      await page.getByRole("button", { name: /^Usage:/ }).click();
       const usage = page.getByRole("region", { name: "Task usage" });
-      await expect(usage).toContainText("main · owned · sample-main");
-      await expect(usage).toContainText("30 input · 7 output tokens");
-      await expect(usage).toContainText("some calls did not report reasoning");
-      await expect(page.getByRole("region", { name: "Available skills" })).toContainText(
+      await expect(usage).toContainText("Mainsample-main");
+      await expect(usage).toContainText("30 in · 7 out");
+      await expect(usage).toContainText("(some calls didn't say)");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "What dot knows" }).click();
+      await expect(page.getByRole("list", { name: "Available skills" })).toContainText(
         "sample-tables",
       );
       if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
       const recovery = page.getByRole("region", { name: "Task recovery" });
-      await expect(recovery).toContainText("ceiling $5, spent $4");
-      const ceiling = page.getByLabel("New task ceiling (USD)");
-      await expect(ceiling).toBeEnabled();
+      await expect(recovery).toContainText("$4 of $5 spent");
       await page.screenshot({
         path: info.outputPath(`before-recovery-${width}.png`),
         fullPage: true,
       });
-      await ceiling.fill("0");
-      await page.getByRole("button", { name: "Set task budget and resume" }).click();
+      await recovery.getByRole("radio", { name: "Other" }).click();
+      const limit = recovery.getByRole("textbox", { name: "New limit" });
+      await limit.fill("0");
+      await recovery.getByRole("button", { name: "Raise and continue" }).click();
+      await expect(recovery).toContainText("Enter a limit above $5");
       expect(f.raises).toEqual([]);
-      await ceiling.fill("8");
-      await recovery.evaluate((element) => {
-        element.scrollTop = 0;
-      });
+      await limit.fill("8");
       await page.screenshot({ path: info.outputPath(`recovery-${width}.png`), fullPage: true });
-      await page.getByRole("button", { name: "Set task budget and resume" }).click();
+      await recovery.getByRole("button", { name: "Raise to $8 and continue" }).click();
       await expect.poll(() => f.raises).toEqual([{ id: f.id, ceiling: 8 }]);
       expect(f.ledger).toEqual({ taskId: f.id, limit: 8, spent: 4 });
       await expect(recovery).toHaveCount(0);
       f.session.stop();
       f.session.append("session.end", { reason: "done" });
       if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-      const card = page.getByRole("region", { name: "Memory change" }).first();
-      await expect(card.getByRole("button", { name: "Undo this change" })).toBeEnabled();
+      const card = page.getByTestId("change-row").first();
+      await card.getByRole("button", { name: /Updated memory/ }).click();
+      await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
+        "aria-disabled",
+      );
       await card.getByRole("button", { name: "Undo this change" }).click();
       await expect(card).toContainText("This change has already been undone.");
       expect(f.memory.readBoth().memory).not.toContain("Sample fact:");
@@ -79,25 +83,27 @@ test("plan windows remain unknown when absent and explicit Resume never raises U
     await page.setViewportSize({ width: 390, height: 850 });
     const p = await load(page, f);
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await page.getByRole("button", { name: /^Usage:/ }).click();
     const usage = page.getByRole("region", { name: "Task usage" });
-    await expect(usage).toContainText("Main · ChatGPT · owned-plan-model");
-    await expect(usage.getByRole("meter", { name: "primary plan usage" })).toHaveAttribute(
-      "value",
+    await expect(usage).toContainText("owned-plan-model");
+    await expect(usage.getByRole("meter", { name: "Plan window" })).toHaveAttribute(
+      "aria-valuenow",
       "98",
     );
-    await expect(usage).toContainText("Usage unavailable · Reset time unavailable");
-    await expect(page.getByLabel("New task ceiling (USD)")).toHaveCount(0);
+    await expect(usage).toContainText("Almost at limit · 98% used");
+    await expect(usage.getByRole("meter")).toHaveCount(1);
+    await page.keyboard.press("Escape");
     await page.getByRole("tab", { name: "Conversation", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Resume task" })).toBeEnabled();
-    await expect(page.getByRole("region", { name: "Task recovery" })).not.toContainText(
-      "ceiling $5",
-    );
+    const recovery = page.getByRole("region", { name: "Task recovery" });
+    await expect(recovery.getByRole("radio", { name: "Other" })).toHaveCount(0);
+    await expect(recovery.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
+    await expect(recovery).not.toContainText("$5");
     const before = f.session.inboxSequence;
     await page.screenshot({
       path: info.outputPath("subscription-recovery-390.png"),
       fullPage: true,
     });
-    await page.getByRole("button", { name: "Resume task" }).click();
+    await recovery.getByRole("button", { name: "Continue", exact: true }).click();
     await expect.poll(() => f.session.inboxSequence).toBe(before + 1);
     expect(f.raises).toEqual([]);
     expect(f.ledger.spent).toBe(4);
@@ -115,12 +121,15 @@ test("memory conflict preserves the newer durable file and offers an explicit re
   try {
     const p = await load(page, f);
     f.memory.apply(f.id, "MEMORY.md", "append", "Newer fact must remain.");
-    const card = page.getByRole("region", { name: "Memory change" }).first();
-    await expect(card.getByRole("button", { name: "Undo this change" })).toBeEnabled();
+    const card = page.getByTestId("change-row").first();
+    await card.getByRole("button", { name: /Updated memory/ }).click();
+    await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
+      "aria-disabled",
+    );
     await card.getByRole("button", { name: "Undo this change" }).click();
     await expect(card).toContainText("Memory changed since this update.");
     expect(f.memory.readBoth().memory).toContain("Newer fact must remain.");
-    await card.getByRole("button", { name: "Reread memory" }).click();
+    await card.getByRole("button", { name: "Read memory again" }).click();
     await expect(page.getByRole("region", { name: "Skills and memory" })).toContainText(
       "Newer fact must remain.",
     );
@@ -146,8 +155,11 @@ for (const width of [1280, 390])
       const p = await load(page, f);
       await f.finish();
       if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-      const card = page.getByRole("region", { name: "Memory change" }).first();
-      await expect(card.getByRole("button", { name: "Undo this change" })).toBeEnabled();
+      const card = page.getByTestId("change-row").first();
+      await card.getByRole("button", { name: /Updated memory/ }).click();
+      await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
+        "aria-disabled",
+      );
       expect(f.realRunner?.get(f.id)).toBeUndefined();
       await card.getByRole("button", { name: "Undo this change" }).click();
       await expect(card).toContainText("This change has already been undone.");
@@ -158,7 +170,7 @@ for (const width of [1280, 390])
       expect(f.realRunner?.get(f.id)).toBeUndefined();
       if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
       await expect(page.getByRole("textbox", { name: "New task", exact: true })).toHaveCount(1);
-      await expect(page.getByRole("button", { name: "Resume task", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("region", { name: "Task recovery" })).toHaveCount(0);
       await proof(page, p.errors, p.external);
     } finally {
       await context.close();

@@ -18,6 +18,7 @@
 .safety-controls h2,
 .approval-card h2 {
   font-size: 18px;
+  font-weight: 600;
   margin: 0 0 16px;
   overflow-wrap: anywhere;
 }
@@ -31,11 +32,17 @@
   inset: calc(112px + env(safe-area-inset-top, 0px)) 0 env(safe-area-inset-bottom, 0px);
   z-index: 24;
   display: flex;
-  align-items: center;
+  /* Anchored at the top so a card that grows (Always allow, file details) never moves up. */
+  align-items: flex-start;
   justify-content: center;
   padding: 12px 16px 16px;
   background: rgb(3 7 11 / 40%);
   pointer-events: none;
+}
+@media (min-height: 600px) {
+  .approval-overlay {
+    padding-top: clamp(calc(var(--spacing) * 3), 10vh, calc(var(--spacing) * 24));
+  }
 }
 .approval-overlay[hidden] {
   display: none;
@@ -95,9 +102,59 @@
   color: #b7c8d8;
 }
 .approval-card dd {
+  min-width: 0;
   margin: 0;
+}
+.approval-value {
+  max-height: min(16.5em, 36vh);
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font: 13px / 1.5 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+.approval-value[tabindex] {
+  padding: 6px 10px;
+  border: 1px solid #344654;
+  border-radius: 10px;
+  background: rgb(0 0 0 / 18%);
+}
+.approval-value:focus-visible {
+  outline: var(--focus-width) solid var(--color-text-2);
+  outline-offset: 2px;
+}
+.approval-blank {
+  color: #6f8597;
+}
+.approval-mark {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: #2c3d4c;
+  color: #d4e2ee;
+  font-size: 11.5px;
+  line-height: 1.5;
+  unicode-bidi: isolate;
+}
+.approval-hidden {
+  background: #4a3a17;
+  color: #ffd27a;
+}
+.approval-value-facts,
+.approval-value-warning {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #b7c8d8;
+}
+.approval-value-warning {
+  color: #ffd27a;
+}
+.approval-card .approval-show-all {
+  margin-top: 8px;
 }
 .safety-task-controls,
 .notification-control {
@@ -128,6 +185,7 @@
 .approval-upload h3 {
   margin: 20px 0 10px;
   font-size: 15px;
+  font-weight: 600;
 }
 .approval-upload-files {
   list-style: none;
@@ -194,7 +252,7 @@
 .safety-controls button:focus-visible,
 .approval-card button:focus-visible,
 .approval-card h2:focus-visible {
-  outline: 2px solid #afdfff;
+  outline: var(--focus-width) solid #afdfff;
   outline-offset: 4px;
 }
 .stop-hint {
@@ -218,6 +276,146 @@
   gap: 12px;
   margin: 12px 0;
 }
+.always-allow {
+  display: grid;
+  justify-items: start;
+  gap: calc(var(--spacing) * 2);
+  margin-top: calc(var(--spacing) * 5);
+}
+.approval-card .always-allow-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--spacing-button-glyph-gap);
+  margin-left: calc(var(--spacing) * -3);
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-text);
+}
+.approval-card .always-allow-toggle::after {
+  content: "";
+  width: 12px;
+  height: 12px;
+  background: var(--icon-chevron-down) no-repeat center / 12px 12px;
+  transition: transform var(--duration-veil) var(--ease-veil);
+}
+.approval-card .always-allow-toggle[aria-expanded="true"]::after {
+  transform: rotate(180deg);
+}
+.approval-card .always-allow-toggle:hover:not(:disabled) {
+  background: transparent;
+}
+@media (hover: hover) {
+  .approval-card .always-allow-toggle:hover:not(:disabled) {
+    background: var(--color-hud-button);
+  }
+}
+.always-allow-options {
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: calc(var(--spacing) * 3.5);
+  border: 0;
+  border-radius: var(--radius-stage);
+  background: var(--color-hud-button);
+}
+.always-allow-options:not([hidden]) {
+  animation: always-allow-in var(--duration-veil) var(--ease-veil);
+}
+.always-allow-options legend {
+  float: left;
+  width: 100%;
+  margin: 0 0 calc(var(--spacing) * 3);
+  padding: 0;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  color: var(--color-text-2);
+}
+.always-allow-choices {
+  clear: both;
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--spacing) * 2);
+}
+.approval-card .always-allow-options button {
+  flex: 1 1 160px;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.always-notice {
+  position: fixed;
+  z-index: 25;
+  left: 50%;
+  bottom: calc(var(--spacing-edge) + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  width: max-content;
+  max-width: calc(100% - 2 * var(--spacing-edge));
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 1.5) calc(var(--spacing) * 1.5)
+    calc(var(--spacing) * 4);
+  border-radius: var(--radius-stage);
+  /* Opaque: WebKit shows the page's text through a translucent line, even under a blur. */
+  background: var(--color-surface);
+  box-shadow: var(--shadow-hud);
+  color: var(--color-text);
+  transform: translateX(-50%);
+  animation: always-notice-in var(--duration-veil) var(--ease-veil);
+}
+.always-notice:not(:has(.always-notice-undo)) {
+  padding-block: calc(var(--spacing) * 3);
+  padding-right: calc(var(--spacing) * 4);
+}
+.always-notice.leaving {
+  opacity: 0;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity var(--duration-veil) var(--ease-veil),
+    transform var(--duration-veil) var(--ease-veil);
+}
+.always-notice p {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  line-height: var(--text-body--line-height);
+}
+.always-notice-undo {
+  flex: none;
+  min-height: 36px;
+  padding: 0 calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-md);
+  background: var(--color-hud-button);
+  font-weight: 600;
+}
+.always-notice-undo:hover:not(:disabled) {
+  background: var(--color-hud-line);
+}
+.always-notice-undo:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+@keyframes always-allow-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+}
+@keyframes always-notice-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+@keyframes always-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (pointer: coarse) {
+  .always-notice-undo {
+    min-height: 44px;
+  }
+}
 @media (width < 600px) {
   .safety-controls {
     width: calc(100% - 20px);
@@ -238,5 +436,15 @@
   .safety-controls button:active:not(:disabled),
   .approval-card button:active:not(:disabled) {
     transform: none;
+  }
+  .always-allow-options:not([hidden]),
+  .always-notice {
+    animation-name: always-fade-in;
+  }
+  .always-notice.leaving {
+    transform: translateX(-50%);
+  }
+  .approval-card .always-allow-toggle::after {
+    transition: none;
   }
 }

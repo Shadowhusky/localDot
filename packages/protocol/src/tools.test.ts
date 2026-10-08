@@ -314,6 +314,7 @@ describe("keyd model and budget replies", () => {
       "openrouter",
       "openai-compatible",
       "azure",
+      "anthropic-compatible",
     ]);
     const model = {
       id: "provider/model",

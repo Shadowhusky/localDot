@@ -1,4 +1,4 @@
-import { ReplacementRecord, SELFTEST_CHECKS, ulid } from "@localdot/protocol";
+import { DEFAULT_AUTONOMY, ReplacementRecord, SELFTEST_CHECKS, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,14 +9,17 @@ import { TicketRegistry } from "../../cells/secrets.ts";
 import { CellStore } from "../../cells/store.ts";
 import { startFakeDocker } from "../../cells/testing/fake-docker.ts";
 import type { DesktopdHealth } from "../../cells/types.ts";
+import { monotonicClock } from "../../clock.ts";
+import { DesktopdRegistry } from "../../desktopd/registry.ts";
 import { ShellCleanupUncertainError } from "../../desktopd/tools-client.ts";
 import { KillSwitch } from "../../gateway/kill-switch.ts";
 import { LiveSessions } from "../../gateway/live.ts";
 import { MemoryStore } from "../memory.ts";
-import { AgentRunner } from "../runner.ts";
+import { AgentRunner, type AgentRunnerDeps } from "../runner.ts";
 import { toolHarness } from "../testing/harness.ts";
 import { ComputerFences } from "./fences.ts";
 import { createReplacementController } from "./replacement-controller.ts";
+import { SafetyIntentStore } from "./store.ts";
 
 const owned: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -100,7 +103,7 @@ async function fixture() {
     tickets = new TicketRegistry(),
     killSwitch = new KillSwitch({ live, keyd, cells, settleMs: 200 });
   const retireBrain = vi.fn(async (_session: string) => {});
-  const runner = new AgentRunner({
+  const runnerDeps: AgentRunnerDeps = {
     home,
     fences,
     eventLog: h.eventLog,
@@ -133,7 +136,8 @@ async function fixture() {
     installSkills: async () => [],
     waitForUploads: async () => {},
     stopSession: (id) => killSwitch.stopSession(id),
-  });
+  };
+  const runner = new AgentRunner(runnerDeps);
   live.start(
     h.session.cellId,
     h.session.id,
@@ -151,12 +155,15 @@ async function fixture() {
     tickets,
     readyTimeoutMs: 1000,
   });
+  const clock = monotonicClock(),
+    registry = new DesktopdRegistry(cells, clock);
   const app = createApp({
     token: TOKEN,
     port: 4750,
     eventLog: h.eventLog,
     cells: { cells, tickets, replacement },
     desktop: { cells, tickets, vendorDir: "/private/tmp/unused-selkies" },
+    gateway: { registry, clock, live, killSwitch },
   });
   const request = (path: string, method = "GET", body?: unknown, token: string | null = TOKEN) =>
     app.request(`http://127.0.0.1:4750${path}`, {
@@ -178,6 +185,7 @@ async function fixture() {
   };
   const body = () => ({ requestId: ulid(), oldRevision: 1, home: "fresh" });
   owned.push(async () => {
+    registry.dispose();
     cells.dispose();
     h.session.stop();
     live.stop(h.session.id);
@@ -200,6 +208,7 @@ async function fixture() {
     tickets,
     killSwitch,
     runner,
+    runnerDeps,
     retireBrain,
     replacement,
     request,
@@ -328,10 +337,44 @@ describe("replacement crosses real runner, lifecycle and public route boundaries
     expect(f.cells.endpoints(candidate)).toBeUndefined();
     expect((await f.request(`/api/cells/${candidate}/start`, "POST")).status).toBe(409);
     expect((await f.request(`/api/cells/${candidate}/stream-ticket`, "POST")).status).toBe(409);
+    const input = await f.request(`/api/cells/${candidate}/input`, "POST", {});
+    expect(input.status).toBe(409);
+    expect(await input.text()).toContain("awaiting replacement confirmation");
+    await expect(f.runner.start(candidate, "candidate task")).rejects.toThrow(
+      "paused or changing state",
+    );
     gate.resolve();
     expect((await pending).status).toBe(200);
     expect(f.cells.get(candidate)?.replacementPending).toBeUndefined();
     expect(f.cells.endpoints(candidate)).toBeDefined();
+  });
+  it("a computer fenced while its runtime is verified never reaches Ready", async () => {
+    const f = await fixture(),
+      id = ulid(),
+      checked = hold();
+    let fenced = false;
+    const cells = new CellOrchestrator({
+      docker: new DockerClient(f.fake.socketPath),
+      store: f.store,
+      keyd: f.keyd,
+      images: { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" },
+      permanentFence: (cell) => cell === id && fenced,
+      verifyRuntime: async (record) => {
+        if (record.id !== id || cells.get(id)?.state !== "starting") return;
+        fenced = true;
+        checked.resolve();
+      },
+      probeDesktopd: async () => f.health,
+      probeStream: async () => true,
+      watchEveryMs: 60000,
+      readyTimeoutMs: 1000,
+    });
+    owned.push(async () => cells.dispose());
+    await cells.create({ id, scale: 2 });
+    await checked.promise;
+    await new Promise<void>((r) => setTimeout(r, 50));
+    expect(cells.get(id)?.state).toBe("starting");
+    expect(cells.endpoints(id)).toBeUndefined();
   });
   it("public replacement routes require daemon authorization and reject stale or caller-selected identities", async () => {
     const f = await fixture();
@@ -404,6 +447,62 @@ describe("replacement crosses real runner, lifecycle and public route boundaries
       f.fake.state.calls.filter((c) => c.method === "POST" && c.path === "/containers/create"),
     ).toHaveLength(before);
     expect(cold.endpoints(f.oldCellId)).toBeUndefined();
+  });
+  it("a computer fenced at start by a crashed Pause is replaced by a fresh Ready computer", async () => {
+    const f = await fixture();
+    f.h.session.stop();
+    f.live.stop(f.h.session.id);
+    await f.live.settled(f.h.session.id);
+    new SafetyIntentStore(f.home).write(
+      f.h.session.id,
+      f.oldCellId,
+      DEFAULT_AUTONOMY,
+      {
+        requestId: ulid(),
+        revision: 1,
+        reason: "user",
+        phase: "pausing",
+        atStepBoundary: false,
+        resumeAvailable: false,
+      },
+      "api",
+    );
+    f.cells.dispose();
+    const fences = new ComputerFences(f.home),
+      cells = new CellOrchestrator({
+        docker: new DockerClient(f.fake.socketPath),
+        store: f.store,
+        keyd: f.keyd,
+        images: { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" },
+        permanentFence: (id) => (fences.record(id) ? { revision: 1 } : fences.isFenced(id)),
+        probeDesktopd: async () => f.health,
+        probeStream: async () => true,
+        watchEveryMs: 60000,
+        readyTimeoutMs: 1000,
+      });
+    owned.push(async () => cells.dispose());
+    await cells.containFenced();
+    expect(cells.get(f.oldCellId)?.fenced).toEqual({ revision: 1 });
+    const live = new LiveSessions(),
+      runner = new AgentRunner({ ...f.runnerDeps, fences, live, cell: (id) => cells.get(id) });
+    owned.push(() => runner.close());
+    const restarted = createReplacementController({
+      home: f.home,
+      fences,
+      runner,
+      cells,
+      tickets: new TicketRegistry(),
+      readyTimeoutMs: 1000,
+    });
+    await restarted.owner.start();
+    await cells.reconcile();
+    const record = await restarted.owner.replace(f.oldCellId, f.body());
+    expect(record).toMatchObject({ phase: "ready", oldCellId: f.oldCellId });
+    if (!record.newCellId) throw new Error("fresh ID missing");
+    expect(cells.get(record.newCellId)).toMatchObject({ state: "ready" });
+    expect(cells.get(record.newCellId)?.replacementPending).toBeUndefined();
+    expect(cells.endpoints(record.newCellId)).toBeDefined();
+    expect(fences.isFenced(record.newCellId)).toBe(false);
   });
   it("startup containment stops only captured owned executors and leaves the old home for recovery", async () => {
     const f = await fixture();

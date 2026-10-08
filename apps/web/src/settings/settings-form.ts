@@ -10,7 +10,10 @@ import {
   matchingKeys,
   modelAllowed,
   modelIdProblem,
+  onPlan,
   type PickerKey,
+  planOnly,
+  providerAllowed,
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
@@ -55,8 +58,9 @@ export function pickerKeys(index: ProviderIndex): PickerKey[] {
 export function needsPrice(choice: RoleChoice | undefined, index: ProviderIndex | null): boolean {
   if (!choice) return false;
   const provider = providerById(choice.provider);
-  if (!provider || provider.local || provider.availableIn || !choice.model) return false;
-  if (provider.id === "openai-compatible") return true;
+  if (!provider || provider.local || onPlan(choice) || provider.availableIn || !choice.model)
+    return false;
+  if (provider.custom) return true;
   const model = index?.providers
     .find((p) => p.id === provider.id)
     ?.models.find((m) => m.id === choice.model);
@@ -109,14 +113,16 @@ export function validateForm(
     if (typeof checked === "string") problems.push(`${ROLE_NAMES[role]}: ${checked}`);
     else document[role] = checked;
   }
+  // A plan-only task shows no ceiling, so a ceiling it cannot show never blocks a save.
+  const plan = planOnly(draft.choices);
   if (draft.defaultBudget) {
-    if (!subscription && index.defaultTaskBudgetUSD === null)
+    if (!subscription && !plan && index.defaultTaskBudgetUSD === null)
       problems.push("The default task budget is unavailable. Enter an explicit ceiling.");
     delete document.taskBudgetUSD;
   } else {
     const budget = decimal(draft.budget);
-    if (budget === undefined) problems.push("Enter an explicit task ceiling in USD.");
-    else document.taskBudgetUSD = budget;
+    if (budget !== undefined) document.taskBudgetUSD = budget;
+    else if (!plan) problems.push("Enter an explicit task ceiling in USD.");
   }
   if (problems.length) return { ok: false, problems };
   if (
@@ -144,6 +150,7 @@ function checkRole(
   subscriptionModels: readonly SubscriptionModel[],
   accounting: Map<string, string>,
 ): RoleChoice | string {
+  if (providerById(value.provider)?.notOffered) return "choose a provider that is available here.";
   if (modelIdProblem(value.model)) return "choose a valid model ID.";
   if (value.provider === "chatgpt") {
     if (
@@ -160,18 +167,30 @@ function checkRole(
     return { provider: value.provider, model: value.model };
   }
   const provider = providerById(value.provider);
-  if (!provider || provider.availableIn || (role === "local" && !provider.local))
+  if (!provider || !providerAllowed(role, provider))
     return "choose a supported provider for this role.";
   if (isOpenRouterRouterId(provider.id, value.model))
     return "choose a specific model rather than a router ID.";
   const model = index.providers
     .find((p) => p.id === provider.id)
     ?.models.find((m) => m.id === value.model);
-  if (provider.id !== "openai-compatible" && !provider.local && !model)
+  if (!provider.custom && !provider.local && !model)
     return "this model is unavailable. Refresh the catalog or choose another model.";
-  if (provider.id !== "openai-compatible" && model && !modelAllowed(role, model))
+  if (!provider.custom && model && !modelAllowed(role, model))
     return "this model cannot call the required tools.";
   const next: RoleChoice = { provider: value.provider, model: value.model };
+  const flat = onPlan(value);
+  if (provider.custom) {
+    const context = value.contextTokens;
+    if (
+      context !== undefined &&
+      !(Number.isInteger(context) && context >= 4_096 && context <= 2_000_000)
+    )
+      return "enter a context window from 4,096 to 2,000,000 tokens, or leave it empty.";
+    if (value.vision === false) next.vision = false;
+    if (context !== undefined) next.contextTokens = context;
+    if (flat) next.plan = true;
+  }
   if (provider.local) {
     if (value.key !== undefined || value.price !== undefined)
       return "local servers use no stored key or manual price.";
@@ -186,15 +205,23 @@ function checkRole(
     if (!price)
       return "enter both input and output prices, from 0 to 10000 USD per million tokens, with at least one positive.";
     next.price = price;
-  } else {
+  } else if (!flat) {
     if (value.price !== undefined)
       return "the catalog already prices this model. Remove its manual price by choosing the model again.";
     if (model && (model.inputUSDPerMTok > 10_000 || model.outputUSDPerMTok > 10_000))
       return "this catalog price is unsupported.";
   }
-  const rate = next.price ?? model;
+  const route = routeFor(provider, next.key) ?? "";
+  const kind = flat ? "plan" : "paid";
+  const [billing, owner] = accounting.get(route)?.split("\0") ?? [];
+  if (billing && billing !== kind)
+    return flat
+      ? `this key is pay as you go for ${owner}. Use a key from this plan here.`
+      : `this key is a plan for ${owner}. Use a pay-as-you-go key here.`;
+  if (!billing) accounting.set(route, `${kind}\0${role}`);
+  const rate = flat ? { inputUSDPerMTok: 0, outputUSDPerMTok: 0 } : (next.price ?? model);
   if (rate) {
-    const id = `${routeFor(provider, next.key)}\0${next.model}`;
+    const id = `${route}\0${next.model}`;
     const pair = JSON.stringify([rate.inputUSDPerMTok, rate.outputUSDPerMTok]);
     if (accounting.has(id) && accounting.get(id) !== pair)
       return "one task cannot use conflicting prices for the same route and model.";

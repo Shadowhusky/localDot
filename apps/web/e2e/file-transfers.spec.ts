@@ -280,10 +280,10 @@ async function load(page: Page) {
   return { errors, external, downloads };
 }
 async function chooser(page: Page, name: string, buffer: Buffer) {
-  const input = page.getByLabel("Add files");
-  await input.focus();
+  const attach = page.getByRole("button", { name: "Attach files" });
+  await attach.focus();
   const opening = page.waitForEvent("filechooser");
-  await input.press("Enter");
+  await attach.press("Enter");
   await (await opening).setFiles({ name, mimeType: "text/plain", buffer });
 }
 for (const width of [1280, 390])
@@ -316,18 +316,23 @@ for (const width of [1280, 390])
     if (width >= 1180)
       await page.screenshot({ path: info.outputPath(`files-${width}-sample.png`) });
     await page.getByRole("button", { name: "Send follow-up", exact: true }).click();
-    await expect(page.getByText("Sent to dot.", { exact: true })).toBeVisible();
+    const history = page.getByRole("region", { name: "Conversation history" });
+    await expect(history.getByText("Read the two sample files", { exact: true })).toBeVisible();
+    await expect(history.getByRole("list", { name: "Attached files" })).toHaveText(
+      "one.txttwo.txt",
+    );
     expect(messages).toEqual([
       "Read the two sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
     ]);
     await expect(page.getByLabel("Message", { exact: true })).toHaveValue("");
     await expect(page.getByText("Uploaded to Downloads", { exact: true })).toHaveCount(0);
     await chooser(page, "one.txt", Buffer.from("must not replace"));
-    await expect(page.getByText("Upload refused", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not uploaded", { exact: true })).toBeVisible();
     expect(messages).toHaveLength(1);
     expect(readFileSync(join(desktopHome, "Downloads", "one.txt"))).toEqual(ONE);
-    if (width < 1180) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const files = page.getByRole("region", { name: "Result files", exact: true });
+    const files = page
+      .getByRole("region", { name: "Conversation history" })
+      .getByRole("region", { name: "Task result", exact: true });
     await expect(files).toContainText("report.html");
     expect(proof.downloads).toEqual([]);
     const reply = page.waitForResponse((r) => r.url().endsWith(`/files/report.html`));
@@ -349,10 +354,14 @@ for (const width of [1280, 390])
     expect(download.url().startsWith("blob:")).toBe(true);
     expect(download.url()).not.toContain(TOKEN);
     expect(proof.downloads).toEqual(["report.html"]);
-    await expect(files.getByRole("status")).toContainText("Download requested");
+    // Said through the page's one polite region.
+    await expect(page.locator(".app > [role=status]")).toHaveText("report.html downloaded.");
     expect(context.pages()).toHaveLength(1);
     expect(await page.evaluate(() => "artifactExecuted" in window)).toBe(false);
-    expect(await files.locator("iframe,img,svg,object,embed,script").count()).toBe(0);
+    // The card's own icons are the only pictures in it; the file itself never renders.
+    expect(
+      await files.locator("iframe,img,svg:not(.ui-icon, .ui-spinner),object,embed,script").count(),
+    ).toBe(0);
     await expect
       .poll(() =>
         page.evaluate(
