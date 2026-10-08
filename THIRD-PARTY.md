@@ -9,6 +9,7 @@ components retain their respective licenses and notices.
 | Tailwind CSS | 4.3.3 | MIT | Build-time stylesheet generator for the web app. Its license banner ships at the top of each built stylesheet. |
 | Base UI (`@base-ui/react`) | 1.8.0 | MIT (Copyright (c) 2019 Material-UI SAS) | Headless components under the web UI kit in `apps/web/src/ui/`. |
 | shadcn/ui component source | generator 4.21.0, `base-vega` style | MIT (Copyright (c) 2023 shadcn) | Generated source, adapted by hand into `apps/web/src/ui/`. |
+| Lucide icons | 1.31.0 (35 outlines) | ISC (Copyright (c) 2026 Lucide Icons and Contributors); the outlines Lucide derived from Feather are MIT (Copyright (c) 2013-present Cole Bemis) | Path data vendored unmodified in `apps/web/src/ui/icons.ts`. [License and notices](apps/web/vendor/lucide/LICENSE). |
 | Selkies client | Pinned vendored client | See its notice | [Client notice](apps/web/vendor/selkies/NOTICE.md). |
 | Desktop cell software | Pinned cell image | See individual components | [Desktop third-party list](cells/desktop/THIRD-PARTY.md). |
 
