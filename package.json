@@ -12,6 +12,7 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:docker": "vitest run --config vitest.docker.config.ts",
+    "test:eval": "vitest run --config vitest.eval.config.ts",
     "hygiene": "node scripts/check-hygiene.mjs",
     "check:pack": "node scripts/check-pack.mjs",
     "check:pack-archive": "node scripts/check-pack-archive.mjs",

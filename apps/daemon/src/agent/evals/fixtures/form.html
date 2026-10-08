@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Delivery form</title>
+    <style>
+      body {
+        margin: 0;
+        font: 18px/1.3 sans-serif;
+        color: #1b2330;
+        background: #ffffff;
+      }
+      header {
+        height: 40px;
+        background: #3b5bdb;
+        color: #ffffff;
+        font-weight: 600;
+        line-height: 40px;
+        padding-left: 40px;
+      }
+      form {
+        padding-top: 8px;
+      }
+      .row {
+        display: flex;
+        align-items: center;
+        height: 52px;
+        padding-left: 40px;
+      }
+      .row > :first-child {
+        width: 160px;
+        flex: none;
+      }
+      .list {
+        height: 160px;
+        align-items: flex-start;
+      }
+      .note {
+        height: 28px;
+        padding-left: 200px;
+        font-size: 15px;
+        color: #4a5568;
+      }
+      input[type="text"],
+      input[type="date"],
+      select {
+        width: 400px;
+        height: 36px;
+        box-sizing: border-box;
+        font: inherit;
+      }
+      input[type="checkbox"] {
+        width: 28px;
+        height: 28px;
+        margin: 0;
+      }
+      input[type="range"] {
+        width: 400px;
+        margin: 0;
+      }
+      #order {
+        width: 400px;
+        margin-top: 6px;
+      }
+      [role="option"] {
+        height: 32px;
+        line-height: 30px;
+        margin-bottom: 4px;
+        padding-left: 12px;
+        background: #e9eef5;
+        border: 1px solid #5b6b80;
+        box-sizing: border-box;
+        cursor: grab;
+      }
+      [role="option"]:focus {
+        outline: 3px solid #3b5bdb;
+      }
+      button {
+        width: 160px;
+        height: 40px;
+        font: inherit;
+      }
+    </style>
+  </head>
+  <body>
+    <header>Delivery form</header>
+    <form id="form">
+      <div class="row">
+        <label for="name">Name</label>
+        <input id="name" type="text" autocomplete="off" />
+      </div>
+      <div class="row">
+        <label for="country">Country</label>
+        <select id="country">
+          <option value="">Choose…</option>
+          <option>Canada</option>
+          <option>Japan</option>
+          <option>Norway</option>
+          <option>Peru</option>
+        </select>
+      </div>
+      <div class="row">
+        <label for="agree">Leave at door</label>
+        <input id="agree" type="checkbox" />
+      </div>
+      <div class="row">
+        <label for="date">Date</label>
+        <input id="date" type="date" />
+      </div>
+      <div class="row">
+        <label for="volume">Bell volume</label>
+        <input id="volume" type="range" min="0" max="10" step="1" value="0" />
+      </div>
+      <div class="row list">
+        <span id="order-label">Packing order</span>
+        <div id="order" role="listbox" aria-labelledby="order-label" aria-describedby="order-help">
+          <div role="option" aria-selected="false" tabindex="0" draggable="true">Apples</div>
+          <div role="option" aria-selected="false" tabindex="0" draggable="true">Bread</div>
+          <div role="option" aria-selected="false" tabindex="0" draggable="true">Cheese</div>
+          <div role="option" aria-selected="false" tabindex="0" draggable="true">Dates</div>
+        </div>
+      </div>
+      <div class="note" id="order-help">Drag to reorder, or press Alt+Up / Alt+Down.</div>
+      <div class="row">
+        <span></span>
+        <button type="submit">Submit</button>
+      </div>
+    </form>
+    <script>
+      const list = document.getElementById("order");
+      let dragged;
+      list.addEventListener("dragstart", (e) => {
+        dragged = e.target;
+        e.dataTransfer.effectAllowed = "move";
+      });
+      list.addEventListener("dragover", (e) => e.preventDefault());
+      list.addEventListener("drop", (e) => {
+        e.preventDefault();
+        const target = e.target.closest('[role="option"]');
+        if (!dragged || !target || target === dragged) return;
+        const after = e.clientY > target.getBoundingClientRect().top + target.offsetHeight / 2;
+        target.parentNode.insertBefore(dragged, after ? target.nextSibling : target);
+      });
+      list.addEventListener("keydown", (e) => {
+        const item = e.target.closest('[role="option"]');
+        if (!item || !e.altKey) return;
+        if (e.key === "ArrowUp" && item.previousElementSibling)
+          list.insertBefore(item, item.previousElementSibling);
+        else if (e.key === "ArrowDown" && item.nextElementSibling)
+          list.insertBefore(item.nextElementSibling, item);
+        else return;
+        e.preventDefault();
+        item.focus();
+      });
+      document.getElementById("form").addEventListener("submit", (e) => {
+        e.preventDefault();
+        const value = (id) => document.getElementById(id);
+        const answer = {
+          name: value("name").value,
+          country: value("country").value,
+          leaveAtDoor: value("agree").checked,
+          date: value("date").value,
+          bellVolume: Number(value("volume").value),
+          packingOrder: [...list.children].map((item) => item.textContent),
+        };
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(new Blob([JSON.stringify(answer)], { type: "application/json" }));
+        link.download = "form.json";
+        document.body.append(link);
+        link.click();
+      });
+    </script>
+  </body>
+</html>

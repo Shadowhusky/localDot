@@ -22,6 +22,7 @@ export default defineConfig({
       "**/*.docker.test.ts",
       "**/*.keyd.test.ts",
       "**/*.codex.test.ts",
+      "**/*.eval.test.ts",
     ],
   },
 });
