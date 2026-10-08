@@ -35,6 +35,7 @@ async function setup(scale: 1 | 2 = 2) {
     frame: "root",
     rawEvents: true,
     contentX: 20 * scale,
+    revision: 1,
   };
   const hooks = new Map<string, () => void | Promise<void>>();
   const counts = new Map<string, number>();
@@ -51,7 +52,10 @@ async function setup(scale: 1 | 2 = 2) {
       await checkpoint("geometry");
       if (tabId !== "tab") throw new Error("foreign tab");
       return {
-        document,
+        document:
+          state.revision === document.revision
+            ? document
+            : Object.freeze({ ...document, revision: state.revision }),
         content: [state.contentX, 100 * scale, 1000 * scale, 600 * scale],
         factor: scale * 1.25,
         width: 800,
@@ -92,6 +96,7 @@ async function setup(scale: 1 | 2 = 2) {
       return { changed: [[2, 4, 40, 50]], lastChange: clock, quiet: true, noVisibleChange: false };
     if (name === "move") return { mono: ++clock };
     if (name === "pointer") return { x: 40, y: 220 };
+    if (name === "cancel") return { buttons: 1, escaped: true };
     if (name === "down" || name === "up") {
       const event = {
         ev: name === "down" ? "press" : "release",
@@ -246,21 +251,18 @@ describe("browser drags", () => {
     await peer.control.close();
   });
 
-  it("lets go where it started when it is stopped part-way", async () => {
+  it("is cancelled where it is when it is stopped part-way, never moving back to the start", async () => {
     const peer = await setup();
     peer.hooks.set("native.move:3", () => peer.abort.abort());
     await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
       "aborted",
     );
-    expect(peer.effects().at(-1)).toEqual({
-      name: "up",
-      args: { ...native(100, 150), button: 1 },
-    });
-    expect(peer.effects().filter((e) => e.name === "up")).toHaveLength(1);
+    expect(peer.effects().at(-1)).toEqual({ name: "cancel", args: {} });
+    expect(peer.effects().filter((e) => e.name === "up")).toEqual([]);
     await peer.control.close();
   });
 
-  it("lets go where it started when the page moved before the drop", async () => {
+  it("is cancelled before its drop when the page moved", async () => {
     const peer = await setup();
     peer.hooks.set("geometry:6", () => {
       peer.state.contentX += 2;
@@ -268,10 +270,20 @@ describe("browser drags", () => {
     await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
       "target",
     );
-    expect(peer.effects().at(-1)).toEqual({
-      name: "up",
-      args: { ...native(100, 150), button: 1 },
+    expect(peer.effects().at(-1)).toEqual({ name: "cancel", args: {} });
+    expect(peer.effects().filter((e) => e.name === "up")).toEqual([]);
+    await peer.control.close();
+  });
+
+  it("refuses a drag whose page changed between reading its drop and its own snapshot", async () => {
+    const peer = await setup();
+    peer.hooks.set("geometry:5", () => {
+      peer.state.revision = 2;
     });
+    await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
+      "target",
+    );
+    expect(peer.effects()).toHaveLength(0);
     await peer.control.close();
   });
 

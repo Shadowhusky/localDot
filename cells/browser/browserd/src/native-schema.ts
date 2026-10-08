@@ -136,6 +136,8 @@ function requests(scale: 1 | 2) {
         .refine((values) => new Set(values).size === values.length),
     }),
     up: schema.strictObject({ ...position, button: schema.number().int().min(1).max(3) }),
+    // A stopped drag's button comes up where the pointer is, after Escape cancels the drag.
+    cancel: empty,
     char: schema.strictObject({
       ch: schema.string().refine(safeCharacter),
     }),
@@ -215,6 +217,10 @@ const replies = {
   up: schema.strictObject({
     button: schema.number().int().min(1).max(3),
     released: schema.boolean(),
+  }),
+  cancel: schema.strictObject({
+    buttons: schema.number().int().min(0).max(3),
+    escaped: schema.boolean(),
   }),
   char: schema.strictObject({
     keycode,

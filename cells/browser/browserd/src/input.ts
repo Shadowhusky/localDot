@@ -746,8 +746,8 @@ export class BrowserInput {
 
   // Press at the start, follow the path, let go at the end, all inside the checked page: both ends
   // pass the pointer checks (frame, secret fields, stable geometry) and every point maps into the
-  // page. The page must be unchanged before the drop, and a drag that stops early lets go where it
-  // started.
+  // page. The page must be unchanged before the drop, and a drag that stops early is cancelled
+  // where it is.
   async #drag(
     tabId: string,
     input: Extract<schema.infer<typeof pointerInput>, { kind: "drag" }>,
@@ -803,11 +803,9 @@ export class BrowserInput {
         injector: "xtest",
       };
     } finally {
-      // Without the request's signal: a stopped drag still lets go.
-      if (held)
-        await this.#options.native
-          .command("up", { ...start.point.native, button })
-          .catch(() => undefined);
+      // Without the request's signal: a stopped drag still lets go. Escape cancels it first, and
+      // nothing takes the pointer back with the button down, which would draw the way back.
+      if (held) await this.#options.native.command("cancel", {}).catch(() => undefined);
     }
   }
 
