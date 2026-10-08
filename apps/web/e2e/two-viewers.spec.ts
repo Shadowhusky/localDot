@@ -1,6 +1,9 @@
 import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { RecordingInfo } from "@localdot/protocol";
 import { type Browser, chromium, expect, type Page, test } from "@playwright/test";
 import { desktopContainer, type RunningDaemon, startDaemon } from "./daemon.ts";
+import { runPuppet, waitForSessionEnd } from "./puppet.ts";
 
 const DOCKER = process.env.LOCALDOT_DOCKER_TESTS === "1";
 let daemon: RunningDaemon;
@@ -8,16 +11,17 @@ let frozenBrowser: Browser | undefined;
 
 test.skip(!DOCKER, "needs LOCALDOT_DOCKER_TESTS=1, the images and Docker Desktop");
 
-test.beforeAll(async () => {
+test.beforeEach(async () => {
   daemon = await startDaemon();
 });
 
-test.afterAll(async () => {
-  await daemon?.stop();
-});
 test.afterEach(async () => {
-  await frozenBrowser?.close();
-  frozenBrowser = undefined;
+  try {
+    await frozenBrowser?.close();
+  } finally {
+    frozenBrowser = undefined;
+    await daemon?.stop();
+  }
 });
 
 // A patch of noise redrawn on every animation frame: nothing in it compresses, so the stream runs
@@ -74,7 +78,7 @@ async function rate(page: Page, ms: number): Promise<number> {
 
 // P3-C6: the relay may pause a slow viewer's upstream only because each viewer has its own, and
 // only if Selkies keeps serving its other clients meanwhile.
-test("a frozen viewer never stalls another viewer", async ({ browser }) => {
+async function checkViewers(browser: Browser, recordingEnabled: boolean) {
   test.setTimeout(600_000);
   // Independent processes also give each viewer independent renderer lifecycle scheduling.
   frozenBrowser = await chromium.launch({ channel: "chrome" });
@@ -107,7 +111,42 @@ test("a frozen viewer never stalls another viewer", async ({ browser }) => {
   const b = await (await browser.newContext()).newPage();
   await b.goto(`${daemon.origin}/#token=${daemon.token}`);
   await expect(b.getByTestId("hud-status")).toHaveText("Live", { timeout: 120_000 });
-  await expect.poll(() => rate(b, 2000), { timeout: 90_000 }).toBeGreaterThan(10);
+  await expect
+    .poll(
+      async () => {
+        const fps = await rate(b, 2000);
+        console.log(`viewer B before recording: ${fps.toFixed(1)} fps`);
+        return fps;
+      },
+      { timeout: 90_000 },
+    )
+    .toBeGreaterThan(10);
+  const sessionId = recordingEnabled
+    ? await runPuppet(daemon, cellId, {
+        v: 1,
+        title: "Recorder and viewer isolation",
+        steps: Array.from({ length: 4 }, () => ({
+          do: "wait",
+          ms: 60_000,
+          label: "Recording with two viewers",
+        })),
+      })
+    : undefined;
+  const recordingOf = async () => {
+    if (!sessionId) throw new Error("No recording session was started.");
+    const response = await daemon.request(`/api/sessions/${sessionId}/recording`);
+    expect(response.ok).toBe(true);
+    return RecordingInfo.parse(await response.json());
+  };
+  if (recordingEnabled)
+    await expect
+      .poll(async () => (await recordingOf()).manifest.fragments, { timeout: 30_000 })
+      .toBeGreaterThan(0);
+  const beforeFreeze = recordingEnabled ? await recordingOf() : undefined;
+  if (beforeFreeze) {
+    expect(beforeFreeze.manifest.state).toBe("recording");
+    expect(beforeFreeze.manifest.gaps).toEqual([]);
+  }
   const steady = await rate(b, 5000);
 
   await expect
@@ -121,6 +160,8 @@ test("a frozen viewer never stalls another viewer", async ({ browser }) => {
   await cdp.send("Emulation.setFocusEmulationEnabled", { enabled: false });
   await cdp.send("Page.setWebLifecycleState", { state: "frozen" });
   let backedUp = 0;
+  const windows: { fps: number; fragments: number; bytes: number; lastMicros: number | null }[] =
+    [];
 
   for (let n = 1; n <= 6; n++) {
     const r = await rate(b, 5000);
@@ -130,17 +171,65 @@ test("a frozen viewer never stalls another viewer", async ({ browser }) => {
       r,
       `viewer B's frames per second in window ${n} of A's freeze (steady ${steady.toFixed(1)})`,
     ).toBeGreaterThan(steady / 2);
-    await expect(b.getByTestId("hud-status")).toHaveText("Live");
+    await expect(b.getByTestId("hud-status")).toHaveText(
+      recordingEnabled ? "Recording with two viewers" : "Live",
+    );
     const summary = await (await daemon.request(`/api/cells/${cellId}`)).json();
     expect(summary.stream.viewers).toBe(2);
+    if (beforeFreeze) {
+      const recording = await recordingOf();
+      expect(recording.manifest.state).toBe("recording");
+      expect(recording.manifest.gaps).toEqual([]);
+      expect(recording.manifest.fragments).toBeGreaterThan(
+        windows.at(-1)?.fragments ?? beforeFreeze.manifest.fragments,
+      );
+      expect(recording.manifest.bytes).toBeGreaterThan(
+        windows.at(-1)?.bytes ?? beforeFreeze.manifest.bytes,
+      );
+      windows.push({
+        fps: r,
+        fragments: recording.manifest.fragments,
+        bytes: recording.manifest.bytes,
+        lastMicros: recording.manifest.lastMicros,
+      });
+    }
   }
   expect(backedUp, "the frozen viewer never backed up its cell socket").toBeGreaterThan(128 * 1024);
 
   // Thawed, viewer A reconnects to the current desktop rather than replaying its backlog.
   await cdp.send("Page.setWebLifecycleState", { state: "active" });
   await a.bringToFront();
-  await expect.poll(() => rate(a, 2000), { timeout: 60_000 }).toBeGreaterThan(10);
+  let recoveredFps = 0;
+  await expect
+    .poll(
+      async () => {
+        recoveredFps = await rate(a, 2000);
+        return recoveredFps;
+      },
+      { timeout: 60_000 },
+    )
+    .toBeGreaterThan(recordingEnabled ? steady / 2 : 10);
 
-  await a.getByRole("button", { name: "Stop computer" }).click();
+  if (sessionId) {
+    await a.getByTestId("hud-stop-session").click({ timeout: 10_000 });
+    const events = await waitForSessionEnd(daemon, sessionId);
+    expect(events.findLast((event) => event.type === "session.end")?.data.reason).toBe("stopped");
+    await expect.poll(async () => (await recordingOf()).manifest.state).toBe("complete");
+  }
+  const ended = recordingEnabled ? await recordingOf() : undefined;
+  await a.getByRole("button", { name: "Stop computer" }).click({ timeout: 10_000 });
   await expect(a.getByTestId("hud-status")).toHaveText("Stopped", { timeout: 60_000 });
-});
+  mkdirSync("e2e/out", { recursive: true });
+  writeFileSync(
+    `e2e/out/two-viewers-${recordingEnabled ? "recording" : "live"}.json`,
+    JSON.stringify({ beforeFreeze, steady, recoveredFps, backedUp, windows, ended }, null, 2),
+  );
+}
+
+for (const recordingEnabled of [false, true])
+  test(
+    recordingEnabled
+      ? "a frozen viewer never stalls another viewer or the active recorder"
+      : "a frozen viewer never stalls another viewer",
+    async ({ browser }) => checkViewers(browser, recordingEnabled),
+  );

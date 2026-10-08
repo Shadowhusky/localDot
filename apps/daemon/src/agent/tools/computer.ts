@@ -2,19 +2,13 @@ import type { ComputerAction, ToolResult } from "@localdot/protocol";
 import type { ActionContext, GuiAction } from "../../gateway/gateway.ts";
 import { authorizePrepared } from "../safety/authorize.ts";
 import type { RiskFacts } from "../safety/risk.ts";
-import { frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
 
 async function screenshot(deps: ToolDeps, ctx: ToolCallContext): Promise<ToolResult> {
   ctx.check();
-  const { session } = ctx;
-  const o = await deps.gateway.observe({
-    sessionId: session.id,
-    cellId: session.cellId,
-    step: ctx.step,
-    signal: ctx.signal,
-  });
+  const o = await deps.gateway.observe(screenContext(ctx));
   ctx.check();
   return { ok: true, content: [await frame(deps, ctx, o.frameId)] };
 }
@@ -64,14 +58,15 @@ export async function computerTool(
 ): Promise<ToolResult> {
   ctx.check();
   const { session } = ctx;
+  const selected = screenContext(ctx);
   if (a.action === "screenshot") {
     if (!ctx.permit?.consume(a, null))
       return { ok: false, content: [text("This screenshot was not authorized.")] };
     return screenshot(deps, ctx);
   }
   if (a.action === "cursor_position") {
-    const device = deps.gateway.cursorOf(session.cellId);
-    const scale = deps.scaleOf(session.cellId) ?? 1;
+    const device = deps.gateway.cursorOf(selected.cellId);
+    const scale = ctx.nativeScreen?.scale ?? deps.scaleOf(session.cellId) ?? 1;
     const p = device
       ? { x: Math.round(device.x / scale), y: Math.round(device.y / scale) }
       : { x: 640, y: 400 };
@@ -81,16 +76,7 @@ export async function computerTool(
     if (!ctx.permit?.consume(a, null))
       return { ok: false, content: [text("This screenshot was not authorized.")] };
     if (!a.region) return { ok: false, content: [text("zoom needs a region")] };
-    const frameId =
-      session.lastFrameId ??
-      (
-        await deps.gateway.observe({
-          sessionId: session.id,
-          cellId: session.cellId,
-          step: ctx.step,
-          signal: ctx.signal,
-        })
-      ).frameId;
+    const frameId = session.lastFrameId ?? (await deps.gateway.observe(selected)).frameId;
     ctx.check();
     return { ok: true, content: [await frame(deps, ctx, frameId, a.region)] };
   }
@@ -98,10 +84,7 @@ export async function computerTool(
   if (typeof action === "string") return { ok: false, content: [text(action)] };
   const repeat = a.action === "key" ? (a.repeat ?? 1) : 1;
   const nativeContext: ActionContext = {
-    sessionId: session.id,
-    cellId: session.cellId,
-    step: ctx.step,
-    signal: ctx.signal,
+    ...selected,
     source: "agent",
     beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
     redact: ctx.redact,

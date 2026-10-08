@@ -12,7 +12,13 @@ import {
 import { join } from "node:path";
 import { ULID_PATTERN } from "@localdot/protocol";
 import { KEYD_PORT_RANGE, type PortRange } from "./ports.ts";
-import type { CellDocker, CellRecord } from "./types.ts";
+import type {
+  BrowserCellDocker,
+  BrowserCellRecord,
+  CellDocker,
+  CellRecord,
+  StoredCellRecord,
+} from "./types.ts";
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 // Docker's own rule for container and volume names.
@@ -29,9 +35,23 @@ const DOCKER_FIELDS = Object.entries({
   gateEgressIp: "address",
   desktopIp: "address",
 } satisfies Record<keyof CellDocker, "name" | "address">);
+const BROWSER_DOCKER_FIELDS = Object.entries({
+  internalNetwork: "name",
+  egressNetwork: "name",
+  profileVolume: "name",
+  gate: "name",
+  browser: "name",
+  gateInternalIp: "address",
+  gateEgressIp: "address",
+  browserIp: "address",
+} satisfies Record<keyof BrowserCellDocker, "name" | "address">);
 
 const isObject = (value: unknown): value is Record<string, unknown> =>
-  typeof value === "object" && value !== null;
+  typeof value === "object" && value !== null && !Array.isArray(value);
+
+const exactKeys = (value: Record<string, unknown>, required: string[], optional: string[] = []) =>
+  required.every((key) => Object.hasOwn(value, key)) &&
+  Object.keys(value).every((key) => required.includes(key) || optional.includes(key));
 
 const matches = (pattern: RegExp, value: unknown) =>
   typeof value === "string" && pattern.test(value);
@@ -42,10 +62,26 @@ const isOwnName = (value: unknown, id: string) =>
 
 // cell.json can be edited by hand, and its fields end up in Docker API paths, container env and
 // keyd's port table, so a record counts only in the shape the daemon writes.
-function isCellRecord(value: unknown, id: string, ports: PortRange): value is CellRecord {
-  if (!isObject(value) || value.v !== 1 || value.id !== id) return false;
+export function decodeRecord(
+  value: unknown,
+  id: string,
+  ports: PortRange,
+): StoredCellRecord | undefined {
+  if (!isObject(value) || value.id !== id || !ULID_PATTERN.test(id)) return undefined;
+  const legacy = value.v === 1;
+  const browser = value.v === 2 && value.kind === "browser";
+  if (!legacy && !(value.v === 2 && value.kind === "desktop") && !browser) return undefined;
+  const keys = ["v", "id", "createdAt", "scale", "keydPort", "tokens", "docker"];
+  if (!legacy) keys.push("kind");
+  if (browser) keys.push("parentCellId");
+  if (!exactKeys(value, keys, ["ownership"])) return undefined;
+  if (browser && (!matches(ULID_PATTERN, value.parentCellId) || value.parentCellId === id))
+    return undefined;
+  const fields = browser ? BROWSER_DOCKER_FIELDS : DOCKER_FIELDS;
+  const service = browser ? "browserd" : "desktopd";
+  const executable = browser ? "browser" : "desktop";
   const { createdAt, scale, keydPort, tokens, docker, ownership } = value;
-  return (
+  const valid =
     typeof createdAt === "string" &&
     (scale === 1 || scale === 2) &&
     typeof keydPort === "number" &&
@@ -53,19 +89,26 @@ function isCellRecord(value: unknown, id: string, ports: PortRange): value is Ce
     keydPort >= ports.from &&
     keydPort <= ports.to &&
     isObject(tokens) &&
-    matches(TOKEN_PATTERN, tokens.desktopd) &&
+    exactKeys(tokens, [service, "stream"]) &&
+    matches(TOKEN_PATTERN, tokens[service]) &&
     matches(TOKEN_PATTERN, tokens.stream) &&
+    (!browser || tokens[service] !== tokens.stream) &&
     (ownership === undefined ||
       (isObject(ownership) &&
-        Object.keys(ownership).length === 4 &&
-        ["desktop", "gate", "internalNetwork", "egressNetwork"].every((field) =>
+        exactKeys(ownership, [executable, "gate", "internalNetwork", "egressNetwork"]) &&
+        [executable, "gate", "internalNetwork", "egressNetwork"].every((field) =>
           matches(/^[a-zA-Z0-9_-]{1,200}$/, ownership[field]),
         ))) &&
     isObject(docker) &&
-    DOCKER_FIELDS.every(([field, kind]) =>
+    exactKeys(
+      docker,
+      fields.map(([field]) => field),
+    ) &&
+    fields.every(([field, kind]) =>
       kind === "name" ? isOwnName(docker[field], id) : matches(DOTTED_QUAD, docker[field]),
-    )
-  );
+    );
+  if (!valid) return undefined;
+  return (legacy ? { ...value, v: 2, kind: "desktop" } : value) as unknown as StoredCellRecord;
 }
 
 // One cell.json per cell under <home>/cells/<id>/, mode 0600: it holds the per-cell tokens.
@@ -87,7 +130,17 @@ export class CellStore {
 
   // The cells that can't be used are reported by id: one may still have containers running.
   inventory(): { records: CellRecord[]; skipped: string[] } {
-    const records: CellRecord[] = [];
+    const inventory = this.inventoryAll();
+    return {
+      records: inventory.records.filter(
+        (record): record is CellRecord => record.kind === "desktop",
+      ),
+      skipped: inventory.skipped,
+    };
+  }
+
+  inventoryAll(): { records: StoredCellRecord[]; skipped: string[] } {
+    const records: StoredCellRecord[] = [];
     const skipped: string[] = [];
     for (const entry of readdirSync(this.#root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name)) continue;
@@ -100,6 +153,28 @@ export class CellStore {
   }
 
   get(id: string): CellRecord | undefined {
+    const record = this.getStored(id);
+    return record?.kind === "desktop" ? record : undefined;
+  }
+
+  getBrowser(id: string): BrowserCellRecord | undefined {
+    const record = this.getStored(id);
+    return record?.kind === "browser" ? record : undefined;
+  }
+
+  browserFor(parentCellId: string): BrowserCellRecord | undefined {
+    if (!ULID_PATTERN.test(parentCellId)) throw new Error("invalid browser parent");
+    const { records, skipped } = this.inventoryAll();
+    if (skipped.length) throw new Error("browser profile association cannot be confirmed");
+    const matches = records.filter(
+      (record): record is BrowserCellRecord =>
+        record.kind === "browser" && record.parentCellId === parentCellId,
+    );
+    if (matches.length > 1) throw new Error("browser profile association is ambiguous");
+    return matches[0];
+  }
+
+  getStored(id: string): StoredCellRecord | undefined {
     if (!ULID_PATTERN.test(id)) return undefined;
     let text: string;
     try {
@@ -116,14 +191,48 @@ export class CellStore {
       console.error(`cell ${id}: cell.json is not valid JSON, skipping it`);
       return undefined;
     }
-    if (!isCellRecord(value, id, this.keydPorts)) {
+    const record = decodeRecord(value, id, this.keydPorts);
+    if (!record) {
       console.error(`cell ${id}: cell.json does not hold a valid cell record, skipping it`);
       return undefined;
     }
-    return value;
+    if (isObject(value) && value.v === 1) this.#write(record);
+    return record;
   }
 
   save(record: CellRecord): void {
+    if (!ULID_PATTERN.test(record.id)) throw new Error("invalid cell id");
+    const checked = decodeRecord(record, record.id, this.keydPorts);
+    if (checked?.kind !== "desktop" || record.v !== 2)
+      throw new Error("invalid desktop cell record");
+    const existing = this.getStored(record.id);
+    if (!existing && existsSync(this.#file(record.id)))
+      throw new Error("cell identity cannot be confirmed");
+    if (existing?.kind === "browser") throw new Error("cell identity is already owned");
+    this.#write(checked);
+  }
+
+  saveBrowser(record: BrowserCellRecord): void {
+    const checked = decodeRecord(record, record.id, this.keydPorts);
+    if (checked?.kind !== "browser") throw new Error("invalid browser cell record");
+    const existing = this.getStored(record.id);
+    if (!existing && existsSync(this.#file(record.id)))
+      throw new Error("cell identity cannot be confirmed");
+    if (
+      existing &&
+      (existing.kind !== "browser" ||
+        existing.parentCellId !== record.parentCellId ||
+        existing.docker.profileVolume !== record.docker.profileVolume)
+    )
+      throw new Error("cell identity is already owned");
+    if (!this.get(record.parentCellId)) throw new Error("browser parent is unavailable");
+    const associated = this.browserFor(record.parentCellId);
+    if (associated && associated.id !== record.id)
+      throw new Error("browser profile already exists");
+    this.#write(checked);
+  }
+
+  #write(record: StoredCellRecord): void {
     mkdirSync(this.#dir(record.id), { recursive: true, mode: 0o700 });
     const file = this.#file(record.id);
     const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
@@ -144,9 +253,9 @@ export class CellStore {
     return this.#dir(id);
   }
 
-  #listed(id: string): CellRecord | undefined {
+  #listed(id: string): StoredCellRecord | undefined {
     try {
-      const record = this.get(id);
+      const record = this.getStored(id);
       if (!record && !existsSync(this.#file(id))) {
         console.error(`cell ${id}: cell.json is missing, skipping it`);
       }

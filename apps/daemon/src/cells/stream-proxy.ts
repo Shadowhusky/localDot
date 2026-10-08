@@ -73,10 +73,10 @@ const CLIENT_POLICY = {
     "local-fonts=()",
   ].join(", "),
 };
-const UNDER_TICKET = /^\/cells\/[^/]+\/desktop\/[^/]+(\/.*)$/;
+const UNDER_TICKET = /^\/cells\/[^/]+\/(?:desktop|browser)\/[^/]+(\/.*)$/;
 
 export interface StreamProxyDeps {
-  cells: CellApi;
+  cells: StreamCells;
   tickets: TicketRegistry;
   vendorDir: string;
   pingEveryMs?: number;
@@ -84,6 +84,10 @@ export interface StreamProxyDeps {
   upstreamTimeoutMs?: number;
   highWater?: number;
   lowWater?: number;
+}
+
+export interface StreamCells extends Pick<CellApi, "get" | "subscribe" | "updateStream"> {
+  endpoints(id: string): { stream: StreamEndpoint } | undefined;
 }
 
 // The ready check stands on its own: a revocation lost with a state event must not leave a
@@ -96,9 +100,13 @@ function cellFor(deps: StreamProxyDeps, id: string, ticket: string): string | un
     : undefined;
 }
 
-export function desktopRoutes(app: Hono, deps: StreamProxyDeps): void {
+export function desktopRoutes(
+  app: Hono,
+  deps: StreamProxyDeps,
+  surface: "desktop" | "browser" = "desktop",
+): void {
   // Hono answers HEAD from this route without the body; the client probes its page with HEAD.
-  app.get("/cells/:id/desktop/:ticket/*", async (c) => {
+  app.get(`/cells/:id/${surface}/:ticket/*`, async (c) => {
     const id = cellFor(deps, c.req.param("id") ?? "", c.req.param("ticket") ?? "");
     if (!id) return c.text("forbidden", 403, NOSNIFF);
     const rel = UNDER_TICKET.exec(new URL(c.req.url).pathname)?.[1] ?? "";
@@ -110,7 +118,7 @@ export function desktopRoutes(app: Hono, deps: StreamProxyDeps): void {
     if (!file) return c.text("not found", 404, NOSNIFF);
     return c.body(file.body, 200, { ...SERVED, ...CLIENT_POLICY, "content-type": file.type });
   });
-  app.all("/cells/:id/desktop/:ticket/*", (c) => c.text("method not allowed", 405, NOSNIFF));
+  app.all(`/cells/:id/${surface}/:ticket/*`, (c) => c.text("method not allowed", 405, NOSNIFF));
 }
 
 function vendored(dir: string, rel: string): StaticFile | undefined {
@@ -148,7 +156,10 @@ async function proxyApi(
   }
 }
 
-export function desktopStreamRoute(deps: StreamProxyDeps): UpgradeRoute {
+export function desktopStreamRoute(
+  deps: StreamProxyDeps,
+  surface: "desktop" | "browser" = "desktop",
+): UpgradeRoute {
   const wss = new WebSocketServer({ noServer: true });
   const streams = new CellStreams(deps.cells);
   // Leaving ready revokes the cell's ticket, and the streams it opened go with it.
@@ -157,7 +168,7 @@ export function desktopStreamRoute(deps: StreamProxyDeps): UpgradeRoute {
       streams.drop(cell.id);
   });
   return {
-    pattern: /^\/cells\/([^/]+)\/desktop\/([^/]+)\/api\/websockets$/,
+    pattern: new RegExp(`^/cells/([^/]+)/${surface}/([^/]+)/api/websockets$`),
     params: ["id", "ticket"],
     auth: "ticket",
     open({ req, socket, head, params }) {
@@ -304,9 +315,9 @@ const HEALTH: Record<RelayState, number> = { connecting: 0, stalled: 1, live: 2 
 // another's live stream.
 class CellStreams {
   readonly #viewers = new Map<string, Set<Viewer>>();
-  readonly #cells: CellApi;
+  readonly #cells: StreamCells;
 
-  constructor(cells: CellApi) {
+  constructor(cells: StreamCells) {
     this.#cells = cells;
   }
 

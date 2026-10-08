@@ -32,6 +32,13 @@ export class KillSwitch {
     return this.#busy.has(cellId);
   }
 
+  // Session cleanup may await the exact Stop already containing its computer.
+  // The receipt exists before abort listeners run, so they cannot race a second
+  // physical stop against this operation's freeze/resume path.
+  pendingStop(sessionId: string): Promise<StopOutcome> | undefined {
+    return this.#stops.get(sessionId);
+  }
+
   stopSession(sessionId: string): Promise<StopOutcome | undefined> {
     const existing = this.#stops.get(sessionId);
     if (existing) return existing;
@@ -39,8 +46,11 @@ export class KillSwitch {
     const cellId = live.cellOf(sessionId);
     if (!cellId) return Promise.resolve(undefined);
     const settled = live.settled(sessionId);
-    live.stop(sessionId);
-    const stopped = this.#track(cellId, () => {
+    const completion = Promise.withResolvers<StopOutcome>();
+    const stopped = completion.promise;
+    this.#stops.set(sessionId, stopped);
+    const work = this.#track(cellId, () => {
+      live.stop(sessionId);
       const errors: string[] = [];
       const attempt = async (what: string, fn: () => Promise<unknown>) => {
         try {
@@ -67,8 +77,17 @@ export class KillSwitch {
         const stopped = !paused && (await attempt("stop", () => controls.stop()));
         return { revoked, paused, closed, stopped, errors };
       });
-    }).finally(() => this.#stops.delete(sessionId));
-    this.#stops.set(sessionId, stopped);
+    });
+    void work.then(
+      (outcome) => {
+        this.#stops.delete(sessionId);
+        completion.resolve(outcome);
+      },
+      (error) => {
+        this.#stops.delete(sessionId);
+        completion.reject(error);
+      },
+    );
     return stopped;
   }
 

@@ -1,0 +1,13 @@
+{
+  "package": "@pixi/colord",
+  "version": "2.9.6",
+  "license": "MIT",
+  "repository": "https://github.com/pixijs/colord",
+  "tag": "v2.9.6",
+  "tagObject": "581b3907454aeff666dc667ad9e6af83e68ff14f",
+  "commit": "5344fbf77b736f81cd33c21050021bc09bc9dd1d",
+  "file": "LICENSE.md",
+  "gitBlob": "e437003733acd123c76c2a9df0c13a6f3b02b51e",
+  "packageJsonGitBlob": "93f3ca386429119f7df96742146242dece16f11a",
+  "reason": "The installed npm package omits its license file. Copy from its exact upstream release; builds never fetch a replacement. This records license-text provenance, not executable-release trust."
+}

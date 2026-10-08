@@ -23,6 +23,13 @@
   --color-edge-stage: rgba(255, 255, 255, 0.05);
   --color-shade-hud: rgba(0, 0, 0, 0.35);
   --color-cursor-fill: #ffffff;
+  --color-scrub-track: rgba(255, 255, 255, 0.1);
+  --color-scrub-played: rgba(255, 255, 255, 0.55);
+  --color-scrub-idle: rgba(255, 255, 255, 0.04);
+  --color-scrub-gap: rgba(255, 255, 255, 0.02);
+  --color-tick: rgba(255, 255, 255, 0.7);
+  --color-tick-quiet: rgba(255, 255, 255, 0.35);
+  --duration-scrub-settle: 120ms;
   --color-cursor-rim: #121316;
   --color-avatar-body: #ecedef;
   --color-avatar-eye: #0a0b0d;

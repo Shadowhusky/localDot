@@ -8,8 +8,10 @@
     "doctor": "tsx src/doctor-main.ts",
     "puppet": "tsx src/puppet-main.ts",
     "start": "tsx src/main.ts",
+    "open": "tsx src/open-main.ts",
     "typecheck": "tsc --noEmit -p .",
-    "stop": "tsx src/stop-main.ts"
+    "stop": "tsx src/stop-main.ts",
+    "seed-session": "tsx src/seed-main.ts"
   },
   "dependencies": {
     "@hono/node-server": "2.1.3",

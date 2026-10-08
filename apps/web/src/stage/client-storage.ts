@@ -40,5 +40,5 @@ export function forgetOldTickets(
 }
 
 // What follows "<origin>/cells/" in a client key: a cell id (a ULID), then its desktop path.
-const CLIENT_PAGE = /^([0-9A-Z]{26})_desktop_/;
+const CLIENT_PAGE = /^([0-9A-Z]{26})_(?:desktop|browser)_/;
 const clientPrefix = (url: string) => url.replace(/[^a-zA-Z0-9._-]/g, "_");

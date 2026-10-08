@@ -25,6 +25,8 @@ export interface FakeNetwork {
   Id: string;
   Name: string;
   Internal: boolean;
+  Driver: string;
+  EnableIPv6: boolean;
   Options: Record<string, string>;
   subnet: string;
   created: string;
@@ -46,11 +48,14 @@ export interface FakeDockerState {
   // "METHOD /path" prefixes answered with a 500, so a test can fail a start, a connect or an
   // inspect of an object whose cell id it does not know yet.
   failRequests: Set<string>;
+  // One-shot response loss after the matching operation has taken effect.
+  loseReplies: Set<string>;
   // A request whose "METHOD path" is held here is answered only once the promise settles, the way
   // a slow Docker operation keeps the caller waiting; the reply reflects the state at that moment.
   holds: Map<string, Promise<void>>;
   // Rewrites a network inspect reply, for an engine that answers in a shape localdot doesn't expect.
   networkInspect?: (reply: Record<string, unknown>) => unknown;
+  imageInspect?: (reference: string, reply: Record<string, unknown>) => unknown;
 }
 
 export interface FakeDocker {
@@ -93,6 +98,7 @@ export async function startFakeDocker(
     gatewayOnInternal: false,
     failCreate: new Set(),
     failRequests: new Set(),
+    loseReplies: new Set(),
     holds: new Map(),
     ...overrides,
   };
@@ -135,14 +141,31 @@ export async function startFakeDocker(
     raw: Buffer,
   ): { status: number; body?: unknown } {
     if (method === "GET" && path === "/version") return json(200, state.version);
+    if (method === "GET" && path === "/info")
+      return json(200, {
+        ID: "fake-docker-engine",
+        OSType: state.version.Os,
+        Architecture: state.version.Arch,
+      });
     const image = /^\/images\/(.+)\/json$/.exec(path);
     if (method === "GET" && image) {
-      return state.images.has(segment(image)) ? json(200, { Id: "sha256:img" }) : notFound("image");
+      const reference = segment(image);
+      const reply = {
+        Id: `sha256:${"a".repeat(64)}`,
+        Os: "linux",
+        Architecture: state.version.Arch,
+        RepoDigests: reference.includes("@") ? [reference] : [],
+      };
+      return state.images.has(reference)
+        ? json(200, state.imageInspect ? state.imageInspect(reference, reply) : reply)
+        : notFound("image");
     }
     if (method === "POST" && path === "/networks/create") {
       const spec = body as {
         Name: string;
         Internal?: boolean;
+        Driver?: string;
+        EnableIPv6?: boolean;
         Options?: Record<string, string>;
         Labels?: Record<string, string>;
       };
@@ -152,10 +175,12 @@ export async function startFakeDocker(
       }
       networkSeq += 1;
       const net: FakeNetwork = {
-        Id: `net-${networkSeq}`,
+        Id: networkSeq.toString(16).padStart(64, "0"),
         Name: spec.Name,
         Labels: spec.Labels,
         Internal: spec.Internal ?? false,
+        Driver: spec.Driver ?? "bridge",
+        EnableIPv6: spec.EnableIPv6 ?? false,
         Options: spec.Options ?? {},
         subnet: `172.${networkSeq}.0.0/16`,
         created: new Date().toISOString(),
@@ -210,6 +235,13 @@ export async function startFakeDocker(
         Labels: net.Labels,
         Created: net.created,
         Internal: net.Internal,
+        Driver: net.Driver,
+        EnableIPv6: net.EnableIPv6,
+        Containers: Object.fromEntries(
+          [...state.containers.entries()]
+            .filter(([, c]) => net.Name in c.networks)
+            .map(([name]) => [name, {}]),
+        ),
         Options: net.Options,
         IPAM: { Config: [{ Subnet: net.subnet, ...gateway }] },
       };
@@ -384,6 +416,12 @@ export async function startFakeDocker(
         (failed ? json(500, { message: `fake docker: refusing ${request}` }) : undefined) ??
         (api === undefined ? undefined : refusal(api, path)) ??
         handle(req.method ?? "", path, url.searchParams, body, raw);
+      const lost = [...state.loseReplies].find((prefix) => request.startsWith(prefix));
+      if (lost) {
+        state.loseReplies.delete(lost);
+        res.destroy();
+        return;
+      }
       if (out.body === undefined) {
         res.writeHead(out.status);
         res.end();

@@ -92,6 +92,10 @@ describe("desktopSpec", () => {
       NetworkMode: record.docker.internalNetwork,
       CapDrop: ["NET_RAW"],
       Mounts: [{ Type: "volume", Source: record.docker.homeVolume, Target: "/config" }],
+      Tmpfs: {
+        "/run/localdot-desktop-browser":
+          "rw,nosuid,nodev,noexec,size=256m,uid=1000,gid=1000,mode=0700",
+      },
       ShmSize: DESKTOP_LIMITS.shmBytes,
       Memory: DESKTOP_LIMITS.memoryBytes,
       MemorySwap: DESKTOP_LIMITS.memoryBytes,
@@ -191,6 +195,7 @@ describe("container spec keys", () => {
       "NetworkMode",
       "PidsLimit",
       "ShmSize",
+      "Tmpfs",
     ]);
   });
 });

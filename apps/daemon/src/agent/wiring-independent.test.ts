@@ -7,6 +7,7 @@ import { FrameStore } from "../gateway/frames.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import type { BrainCell, BrainCellsDeps, OpenBrain } from "./brain-cell.ts";
 import type { UploadAccess } from "./routes.ts";
+import { ComputerFences } from "./safety/fences.ts";
 import { AgentSession } from "./session.ts";
 import { Transfers } from "./transfers.ts";
 import { type AgentWiringDeps, createAgent } from "./wiring.ts";
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   sweep: vi.fn(async () => 0),
   opens: [] as BrainCell[],
   exits: new Map<string, (code: number) => void>(),
+  prepare: vi.fn(async (_taskId: string, _signal?: AbortSignal) => {}),
 }));
 vi.mock("../desktopd/tools-client.ts", () => ({
   DesktopdTools: class {
@@ -27,6 +29,10 @@ vi.mock("../desktopd/tools-client.ts", () => ({
     }
     async close() {
       this.closed = true;
+    }
+    async prepareBrowser(taskId: string, signal?: AbortSignal) {
+      signal?.throwIfAborted();
+      await mocks.prepare(taskId, signal);
     }
     async putFile(
       path: string,
@@ -103,12 +109,14 @@ afterEach(async () => {
   mocks.exits.clear();
   mocks.sweep.mockReset();
   mocks.sweep.mockResolvedValue(0);
+  mocks.prepare.mockReset();
+  mocks.prepare.mockResolvedValue(undefined);
 });
 function required<T>(x: T | undefined): T {
   if (x === undefined) throw new Error("fixture missing value");
   return x;
 }
-function setup() {
+function setup(transfers?: Transfers) {
   const home = mkdtempSync("/tmp/ld-agent-wiring-"),
     log = new EventLog(home),
     live = new LiveSessions(),
@@ -125,6 +133,7 @@ function setup() {
   const listeners = new Set<(cell: CellSummary) => void>();
   const deps: AgentWiringDeps = {
     home,
+    transfers,
     installToken: "i".repeat(43),
     eventLog: log,
     live,
@@ -179,6 +188,88 @@ function setup() {
     },
   };
 }
+
+it("scripted preparation shares the upload drain and holds Stop through physical completion", async () => {
+  const transfers = new Transfers();
+  const h = setup(transfers);
+  const fences = new ComputerFences(h.home);
+  h.deps.fences = fences;
+  await h.agent.start();
+  const sessionId = h.log.createSession("scripted browser task");
+  const upload = transfers.acquire(h.cellId, [], () => {});
+  const physical = Promise.withResolvers<void>();
+  mocks.prepare.mockImplementation(async () => physical.promise);
+  const stop = vi.spyOn(h.deps.killSwitch, "stopSession").mockImplementation(async (id) => {
+    h.live.stop(id);
+    return { revoked: true, paused: true, closed: false, stopped: false, errors: [] };
+  });
+  const beforeRun = vi.fn(async () => {});
+  const run = vi.fn(async (signal: AbortSignal) => {
+    expect(signal.aborted).toBe(true);
+  });
+  h.live.addHooks({ beforeRun });
+  h.live.start(h.cellId, sessionId, run, (signal) =>
+    h.agent.prepareDesktopTask(h.cellId, sessionId, signal),
+  );
+  try {
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(mocks.prepare).not.toHaveBeenCalled();
+    upload.release();
+    await until(() => mocks.prepare.mock.calls.length === 1);
+    expect(mocks.prepare).toHaveBeenCalledWith(sessionId, expect.any(AbortSignal));
+    h.live.stop(sessionId);
+    let drained = false;
+    const draining = transfers.wait(h.cellId).then(() => {
+      drained = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(drained).toBe(false);
+    expect(h.live.get(h.cellId)).toBe(sessionId);
+    expect(run).not.toHaveBeenCalled();
+    physical.resolve();
+    await h.live.settled(sessionId);
+    await draining;
+    expect(beforeRun).not.toHaveBeenCalled();
+    expect(run).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith(sessionId);
+    expect(fences.isFenced(h.cellId)).toBe(true);
+  } finally {
+    upload.release();
+    physical.resolve();
+    h.live.stop(sessionId);
+    await h.live.settled(sessionId);
+  }
+});
+
+it("lost scripted preparation replies fence the computer and cannot replay on another task", async () => {
+  const h = setup();
+  const fences = new ComputerFences(h.home);
+  h.deps.fences = fences;
+  await h.agent.start();
+  mocks.prepare.mockRejectedValue(new Error("fixture reply lost"));
+  const stop = vi.spyOn(h.deps.killSwitch, "stopSession").mockImplementation(async (id) => {
+    h.live.stop(id);
+    throw new Error("fixture containment reply lost");
+  });
+  const beforeRun = vi.fn(async () => {});
+  h.live.addHooks({ beforeRun });
+  for (const title of ["lost response", "attempted replacement"]) {
+    const sessionId = h.log.createSession(title);
+    const run = vi.fn(async (signal: AbortSignal) => {
+      expect(signal.aborted).toBe(true);
+    });
+    h.live.start(h.cellId, sessionId, run, (signal) =>
+      h.agent.prepareDesktopTask(h.cellId, sessionId, signal),
+    );
+    await h.live.settled(sessionId);
+    expect(run).toHaveBeenCalledOnce();
+    expect(stop).toHaveBeenCalledWith(sessionId);
+  }
+  expect(mocks.prepare).toHaveBeenCalledOnce();
+  expect(beforeRun).not.toHaveBeenCalled();
+  expect(fences.isFenced(h.cellId)).toBe(true);
+  expect(new ComputerFences(h.home).isFenced(h.cellId)).toBe(true);
+});
 
 it("shutdown still contains every session and closes clients when Stop journal publication fails", async () => {
   const h = setup();

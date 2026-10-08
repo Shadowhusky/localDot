@@ -1,9 +1,16 @@
 import { z } from "zod";
 import { ULID_PATTERN } from "./ids.ts";
+import type { ScreenName } from "./screens.ts";
 
 // One recording lives beneath <home>/sessions/<id>/recording/. Fragment bytes
 // commit before their JSONL entry; manifest.json is replaced atomically.
 export const RECORDING_DIR = "recording";
+export const BROWSER_RECORDING_DIR = "recording-browser";
+export function recordingDirectory(screen: ScreenName): string {
+  if (screen === "desktop") return RECORDING_DIR;
+  if (screen === "browser") return BROWSER_RECORDING_DIR;
+  throw new RangeError("Invalid recording screen.");
+}
 export const RECORDING_VIDEO = "video.mp4";
 export const RECORDING_FRAGMENTS = "fragments.jsonl";
 export const RECORDING_MANIFEST = "manifest.json";
@@ -119,6 +126,8 @@ export function emptyManifest(state: RecordingState, note?: string): RecordingMa
 export const SessionVerdict = z.enum(["live", "done", "stopped", "error", "interrupted"]);
 export type SessionVerdict = z.infer<typeof SessionVerdict>;
 
+const RecordingSummary = z.object({ state: RecordingState, bytes: z.number().int().nonnegative() });
+
 export const SessionCard = z.object({
   id: Ulid,
   title: z.string().max(200).nullable(),
@@ -135,7 +144,9 @@ export const SessionCard = z.object({
       scale: z.number().positive(),
     })
     .nullable(),
-  recording: z.object({ state: RecordingState, bytes: z.number().int().nonnegative() }),
+  recording: RecordingSummary,
+  // Older sessions and clients expose the desktop-only `recording` field.
+  recordings: z.object({ desktop: RecordingSummary, browser: RecordingSummary }).optional(),
 });
 export type SessionCard = z.infer<typeof SessionCard>;
 

@@ -2,6 +2,7 @@ package vault
 
 import (
 	"bytes"
+	"context"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -15,48 +16,26 @@ import (
 	"time"
 )
 
-// fakeSecurity mimics the /usr/bin/security calls Keychain makes, keeping items as files. Like the
-// real tool, security -i runs the first 4,095 characters of a line as one command and the rest as
-// another, names an unknown command in its error, and exits with the last command's status.
+// fakeSecurity mimics keyd's private item helper protocol, keeping fake items as files.
 // FAKE_FAIL=add makes every add fail after printing what it was given.
 const fakeSecurity = `#!/bin/sh
 printf '%s\n' "$*" >> "$FAKE_DIR/argv.log"
 store="$FAKE_DIR/store"
 mkdir -p "$store"
 run() {
-  cmd=$1
-  shift
-  svc= acct= pw=
-  while [ $# -gt 0 ]; do
-    case "$1" in
-      -s) svc=$2; shift 2 ;;
-      -a) acct=$2; shift 2 ;;
-      -w) if [ $# -ge 2 ]; then pw=$2; shift 2; else shift; fi ;;
-      -l) shift 2 ;;
-      *) shift ;;
-    esac
-  done
+  [ "$1" = keychain-item ] || return 45
+  cmd=$2 svc=$3 acct=$4 pw=
+  [ "$cmd" != store ] || pw=$(cat)
   item="$store/$svc.$acct"
   case "$cmd" in
-    add-generic-password)
-      if [ "$FAKE_FAIL" = add ]; then echo "add-generic-password: cannot store $pw" >&2; return 1; fi
+    store)
+      if [ "$FAKE_FAIL" = add ]; then echo "item helper: cannot store $pw" >&2; return 45; fi
       printf '%s' "$pw" > "$item" ;;
-    find-generic-password) [ -f "$item" ] || return 44; cat "$item"; echo ;;
-    delete-generic-password) [ -f "$item" ] || return 44; rm "$item" ;;
+    read) [ -f "$item" ] || return 44; cat "$item" ;;
+    delete) [ -f "$item" ] || return 44; rm "$item" ;;
     *) echo "security: unknown command \"$cmd\"" >&2; return 1 ;;
   esac
 }
-if [ "$1" = "-i" ]; then
-  fold -w 4095 | {
-    status=0
-    while IFS= read -r piece; do
-      run $piece
-      status=$?
-    done
-    exit $status
-  }
-  exit $?
-fi
 run "$@"
 `
 
@@ -68,7 +47,9 @@ func fakeKeychain(t *testing.T) (*Keychain, string) {
 		t.Fatal(err)
 	}
 	t.Setenv("FAKE_DIR", dir)
-	return &Keychain{Service: "localdot-keyd-test", Path: bin}, dir
+	return &Keychain{Service: "localdot-keyd-test", Path: bin, configureCommand: func(cmd *exec.Cmd) {
+		cmd.Env = append(cmd.Env, "FAKE_DIR="+dir, "FAKE_FAIL="+os.Getenv("FAKE_FAIL"))
+	}}, dir
 }
 
 // longValue is a fake printable value of n bytes.
@@ -98,7 +79,7 @@ func carries(text string, value []byte) bool {
 	return false
 }
 
-func TestKeychainRoundTripThroughTheSecurityTool(t *testing.T) {
+func TestKeychainRoundTripThroughTheItemHelper(t *testing.T) {
 	k, dir := fakeKeychain(t)
 	if err := k.Put("weather", fakeValue); err != nil {
 		t.Fatal(err)
@@ -184,13 +165,16 @@ func TestKeychainReportsToolFailures(t *testing.T) {
 	}
 }
 
-// Opt-in: writes and deletes fake items in the login keychain, the longest value included.
+// Opt-in only in a Developer ID signed test executable (same keyd identifier, hardened runtime).
+// Writes/deletes only unique fake items in the explicit test service; never run implicitly.
 func TestKeychainAgainstTheLoginKeychain(t *testing.T) {
 	if runtime.GOOS != "darwin" || os.Getenv("KEYD_KEYCHAIN_TEST") != "1" {
 		t.Skip("set KEYD_KEYCHAIN_TEST=1 on macOS to use the login keychain")
 	}
 	k := NewKeychain("localdot-keyd-test")
+	k.configureCommand = func(cmd *exec.Cmd) { cmd.Stderr = os.Stderr }
 	id := fmt.Sprintf("probe-%d", time.Now().UnixNano())
+	t.Logf("synthetic Keychain account: %s (service localdot-keyd-test)", id)
 	t.Cleanup(func() { _ = k.Delete(id) })
 	for _, value := range [][]byte{fakeValue, longValue(maxValueLen), []byte("second-fake-value-for-test")} {
 		if err := k.Put(id, value); err != nil {
@@ -206,7 +190,61 @@ func TestKeychainAgainstTheLoginKeychain(t *testing.T) {
 	if _, err := k.Get(id); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get after delete: %v", err)
 	}
-	if exec.Command(k.Path, "find-generic-password", "-s", k.Service).Run() == nil {
-		t.Fatal("an item of the test service outlived Delete")
+	for i := range maxChunks {
+		if _, err := k.find(context.Background(), chunkAccount(id, i)); !errors.Is(err, ErrNotFound) {
+			t.Fatal("a test chunk outlived Delete")
+		}
+	}
+}
+
+// A release update changes the executable path and code hash. Use a separately signed keyd
+// binary to prove the stored ACL permits that transition and a subsequent rollback. The test
+// runner must itself be signed; the production helper still checks both identities normally.
+func TestKeychainSurvivesSignedExecutableUpdate(t *testing.T) {
+	path := os.Getenv("KEYD_KEYCHAIN_UPDATE_BIN")
+	if runtime.GOOS != "darwin" || os.Getenv("KEYD_KEYCHAIN_TEST") != "1" || path == "" {
+		t.Skip("requires signed test runner and an explicit signed update binary")
+	}
+	if !filepath.IsAbs(path) || filepath.Clean(path) != path {
+		t.Fatal("update binary must have a canonical absolute path")
+	}
+	before := NewKeychain("localdot-keyd-test")
+	after := NewKeychain("localdot-keyd-test")
+	after.Path = path
+	if path == before.Path {
+		t.Fatal("update must use a different signed executable")
+	}
+	for _, k := range []*Keychain{before, after} {
+		k.configureCommand = func(cmd *exec.Cmd) { cmd.Stderr = os.Stderr }
+		if err := k.Check(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	id := fmt.Sprintf("probe-%d", time.Now().UnixNano())
+	t.Logf("synthetic update account: %s (service localdot-keyd-test)", id)
+	t.Cleanup(func() { _ = before.Delete(id); _ = after.Delete(id) })
+	if err := before.Put(id, fakeValue); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := after.Get(id); err != nil || !bytes.Equal(got, fakeValue) {
+		t.Fatalf("updated binary could not read existing fake value: %v", err)
+	}
+	updated := []byte("updated-fake-value-for-signed-release")
+	if err := after.Put(id, updated); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := before.Get(id); err != nil || !bytes.Equal(got, updated) {
+		t.Fatalf("rollback binary could not read updated fake value: %v", err)
+	}
+	if err := before.Delete(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := after.Get(id); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("updated binary did not observe deletion: %v", err)
+	}
+	for i := range maxChunks {
+		if _, err := after.find(context.Background(), chunkAccount(id, i)); !errors.Is(err, ErrNotFound) {
+			t.Fatal("a synthetic update chunk outlived Delete")
+		}
 	}
 }

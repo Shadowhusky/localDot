@@ -18,6 +18,14 @@ const act = {
   system_settings: "act",
 } as const;
 describe("native and execution risk facts", () => {
+  it("file disclosure always needs approval, while an explicit handoff policy remains stricter", () => {
+    for (const send of ["act", "ask", "handoff"] as const)
+      expect(classify({ operation: "files_upload" }, { ...DEFAULT_AUTONOMY, send })).toEqual({
+        actionClass: "send",
+        mode: send === "handoff" ? "handoff" : "ask",
+        risk: "high",
+      });
+  });
   it("RF1 friendly model labels, coordinate targets and missing target facts cannot lower Buy or password risk", () => {
     expect(
       classify({ operation: "click", target: { source: "coords", fresh: true, name: "Buy" } }, act)

@@ -20,7 +20,10 @@ export class ComputerFences {
   readonly #listeners = new Set<(id: string) => void>();
   #records?: PrivateRecords<FenceRecord>;
   #unavailable = false;
-  constructor(home: string) {
+  constructor(
+    home: string,
+    private readonly additionalFence: (id: string) => boolean = () => false,
+  ) {
     try {
       this.#records = new PrivateRecords(home, "fences", (raw, id) => {
         const record = FenceRecord.parse(raw);
@@ -59,7 +62,12 @@ export class ComputerFences {
     }
   }
   isFenced(id: string): boolean {
-    return this.#unavailable || this.#held.has(id);
+    try {
+      return this.#unavailable || this.#held.has(id) || this.additionalFence(id);
+    } catch {
+      this.#unavailable = true;
+      return true;
+    }
   }
   record(id: string): FenceRecord | undefined {
     if (this.#unavailable || !this.#durable.has(id)) return undefined;

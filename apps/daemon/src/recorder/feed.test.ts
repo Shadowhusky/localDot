@@ -17,18 +17,22 @@ async function server(): Promise<FakeSelkies> {
 function feedFor(s: FakeSelkies, extra: Partial<SelkiesFeedOptions> = {}) {
   const frames: FeedFrame[] = [];
   const states: { state: string; detail?: string }[] = [];
+  const resetPositions: number[] = [];
   const feed = new SelkiesFeed({
     endpoint: () => ({ baseUrl: s.baseUrl, authorization: AUTH }),
     clock: monotonicClock(),
     handlers: {
       onFrame: (frame) => frames.push(frame),
-      onState: (state, detail) => states.push({ state, ...(detail ? { detail } : {}) }),
+      onState: (state, detail) => {
+        if (detail === PIPELINE_RESET) resetPositions.push(frames.length);
+        states.push({ state, ...(detail ? { detail } : {}) });
+      },
     },
     ...extra,
   });
   feeds.push(feed);
   feed.start();
-  return { feed, frames, states };
+  return { feed, frames, states, resetPositions };
 }
 function raw(payload: Uint8Array, flags: number, region = 0): Uint8Array {
   const data = new Uint8Array(12 + payload.length);
@@ -62,14 +66,16 @@ describe("passive Selkies recording feed", () => {
   });
   it("stamps frames with the daemon clock and flags only real key frames", async () => {
     const s = await server();
+    // Disable automatic frames before connecting; stopping their timer after receipt cannot
+    // retract an already queued websocket frame and races the explicit frame below.
+    s.still(true);
     const { frames } = feedFor(s, { clock: { nowMicros: () => 7_123_456 } });
-    await until(() => expect(frames.length).toBeGreaterThan(2));
+    await s.waitForText("START_VIDEO");
+    s.sendRaw(raw(synthFrame({ widthMbs: 4, heightMbs: 4, keyEvery: 12 }, 0).data, 0x11));
+    s.sendRaw(raw(synthFrame({ widthMbs: 4, heightMbs: 4, keyEvery: 12 }, 1).data, 0x11));
+    await until(() => expect(frames).toHaveLength(2));
     expect(frames.every((frame) => frame.arrivalMicros === 7_123_456)).toBe(true);
     expect(frames[0]).toMatchObject({ key: true, width: 64, height: 64 });
-    s.still(true);
-    const before = frames.length;
-    s.sendRaw(raw(synthFrame({ widthMbs: 4, heightMbs: 4, keyEvery: 12 }, 1).data, 0x11));
-    await until(() => expect(frames.length).toBe(before + 1));
     expect(frames.at(-1)?.key).toBe(false);
   });
   it("asks for a key frame at most every 500 ms", async () => {
@@ -142,12 +148,15 @@ describe("passive Selkies recording feed", () => {
   });
   it("re-sends START_VIDEO after a pipeline reset stops the video, and the video resumes", async () => {
     const s = await server();
-    const { frames, states } = feedFor(s, { videoRestartAfterMs: 300 });
+    const { frames, states, resetPositions } = feedFor(s, { videoRestartAfterMs: 300 });
     await s.waitForText("START_VIDEO");
     await delay(1000);
-    const before = frames.length;
     s.resetPipeline();
     const resetAt = performance.now();
+    // The socket may still deliver a pre-reset frame before the ordered reset marker.
+    // Check the first frame after the feed actually consumed that marker.
+    await until(() => expect(resetPositions).toHaveLength(1));
+    const before = resetPositions[0] as number;
     await until(() => expect(frames.length).toBeGreaterThan(before));
     expect(frames[before]?.key).toBe(true);
     expect(performance.now() - resetAt).toBeGreaterThanOrEqual(250);

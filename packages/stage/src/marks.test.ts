@@ -14,6 +14,9 @@ const ev = (type: string, data: Record<string, unknown> = {}): LocalDotEvent =>
     data,
   }) as LocalDotEvent;
 const cases: [string, Record<string, unknown>, string, string, string][] = [
+  ["takeover.request", {}, "takeover", "Asked you to take control", "user"],
+  ["takeover.end", { by: "user" }, "handback", "Handed back to dot", "neutral"],
+  ["takeover.end", { by: "stop" }, "pause", "Stopped during your control", "attention"],
   [
     "approval.request",
     { title: "Send a message" },

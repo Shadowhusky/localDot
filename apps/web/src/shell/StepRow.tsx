@@ -1,6 +1,7 @@
 import { msToSeconds } from "@localdot/protocol";
 import { type ReactNode, useEffect, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import { ReplayImage } from "../replay/ReplayImage.tsx";
 import type { StepRowView } from "../session/session-view.ts";
 import { releaseThumbnail, thumbnailUrl } from "../session/thumbnails.ts";
 
@@ -13,6 +14,9 @@ export function StepRow({
   api,
   current,
   children,
+  future = false,
+  onSelect,
+  thumb = "live",
 }: {
   row: StepRowView;
   sessionId: string;
@@ -20,11 +24,14 @@ export function StepRow({
   api: ApiClient;
   current: boolean;
   children?: ReactNode;
+  future?: boolean;
+  onSelect?(stepId: string): void;
+  thumb?: "live" | "replay";
 }) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     setUrl(null);
-    if (!row.frameId) return;
+    if (!row.frameId || thumb === "replay") return;
     let cancelled = false;
     thumbnailUrl(api, sessionId, row.frameId).then(
       (u) => {
@@ -36,7 +43,7 @@ export function StepRow({
       cancelled = true;
       releaseThumbnail(api, sessionId, row.frameId as string);
     };
-  }, [api, sessionId, row.frameId]);
+  }, [api, sessionId, row.frameId, thumb]);
   const t = row.target
     ? {
         x: row.target.x / scale,
@@ -49,8 +56,21 @@ export function StepRow({
   const cx = t ? t.x + t.w / 2 : 640;
   const cy = t ? t.y + t.h / 2 : 400;
   return (
-    <div className={current ? "step now" : "step"} data-testid="step-row" data-status={row.status}>
-      <div className="step-cap">{row.label}</div>
+    <div
+      className={current ? "step now" : "step"}
+      data-testid="step-row"
+      data-status={row.status}
+      data-future={future || undefined}
+    >
+      <div className="step-cap">
+        {onSelect ? (
+          <button type="button" onClick={() => onSelect(row.id)}>
+            {row.label}
+          </button>
+        ) : (
+          row.label
+        )}
+      </div>
       {row.delivery && (
         <p className="input-delivery">
           {row.delivery === "delivered" ? "Input delivered" : "Input not delivered"}
@@ -58,7 +78,10 @@ export function StepRow({
       )}
       {row.reason && <p className="step-reason">{row.reason}</p>}
       <div className="step-row">
-        <div className="thumb">
+        <div className={thumb === "replay" ? "thumb replay-thumb" : "thumb"}>
+          {thumb === "replay" && (
+            <ReplayImage api={api} sessionId={sessionId} frameId={row.frameId ?? null} />
+          )}
           {url && (
             <img
               src={url}

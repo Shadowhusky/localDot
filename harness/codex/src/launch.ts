@@ -11,13 +11,15 @@ import { MCP_BRIDGE, srtArgv } from "./args.ts";
 import { CA_BUNDLE, codexEnv } from "./env.ts";
 import { prepareCodexHome } from "./home.ts";
 import { CodexInstallError, createCodexInstaller, type InstalledCodex } from "./install.ts";
-import { type CodexProcess, spawnCodex } from "./process.ts";
+import { nativeSupervisor } from "./native-supervisor.ts";
+import { type CodexProcess, type SpawnCodexInput, spawnCodex } from "./process.ts";
 import {
   type OwnedSandboxProfile,
   type SandboxPurpose,
   sandboxSettings,
   writeSettingsFile,
 } from "./profile.ts";
+import { type PreparedNativeRetirement, prepareNativeRetirement } from "./retirement-record.ts";
 import {
   assertOwnedCodexDirectory,
   assertOwnedCodexRoots,
@@ -27,6 +29,7 @@ import {
   removeOwnedCodexDirectory,
 } from "./roots.ts";
 import { AppServerRpc, type AppServerRpcOptions } from "./rpc.ts";
+import { spawnSupervisedCodex } from "./supervised-process.ts";
 import { codexBuild } from "./version.ts";
 
 export type CodexLaunchFailure =
@@ -104,6 +107,8 @@ export interface LaunchInput {
   readonly purpose: SandboxPurpose;
   readonly sessionId?: string;
   readonly mcp?: OwnedCodexDirectory;
+  /** Task owner closes its bridge server and durably removes the bridge directory. */
+  readonly retireBridge?: () => Promise<void>;
   readonly signal: AbortSignal;
   readonly owner: CodexLaunchOwner;
   readonly onFence: () => void;
@@ -185,11 +190,21 @@ export async function launchCodex(deps: LaunchDeps, input: LaunchInput): Promise
   if (request.purpose === "login-browser") throw new CodexLaunchError("browser_unavailable");
   const task = request.purpose === "task";
   if (!["task", "account"].includes(request.purpose)) throw new CodexLaunchError("invalid_request");
-  if (!task && (request.mcp !== undefined || request.sessionId !== undefined))
+  if (
+    !task &&
+    (request.mcp !== undefined ||
+      request.sessionId !== undefined ||
+      request.retireBridge !== undefined)
+  )
     throw new CodexLaunchError("invalid_request");
   if (task) {
     try {
-      if (!request.sessionId || !new RegExp(ULID_PATTERN).test(request.sessionId) || !request.mcp)
+      if (
+        !request.sessionId ||
+        !new RegExp(ULID_PATTERN).test(request.sessionId) ||
+        !request.mcp ||
+        typeof request.retireBridge !== "function"
+      )
         throw new Error();
       assertOwnedCodexDirectory(roots, request.mcp, "runRoot");
       const socket = join(request.mcp.path, "m.sock"),
@@ -221,7 +236,8 @@ export async function launchCodex(deps: LaunchDeps, input: LaunchInput): Promise
   let proc: CodexProcess | undefined,
     rpc: AppServerRpc | undefined,
     work: OwnedCodexDirectory | undefined,
-    profile: OwnedSandboxProfile | undefined;
+    profile: OwnedSandboxProfile | undefined,
+    retirementRecord: PreparedNativeRetirement | undefined;
   let workPath = "",
     firstFailure: CodexLaunchError | undefined,
     retirementFailed = false;
@@ -305,6 +321,8 @@ export async function launchCodex(deps: LaunchDeps, input: LaunchInput): Promise
     }
     const cleanup = Promise.all([startupDone.promise, retirement]).then(async () => {
       if (retirementFailed) throw new CodexLaunchError("shutdown_failed");
+      const receipt = await retirementRecord?.persist(retirement);
+      if (retirementFailed) throw new CodexLaunchError("shutdown_failed");
       if (profile) {
         await removeOwnedCodexDirectory(profile.directory);
         profile = undefined;
@@ -314,6 +332,10 @@ export async function launchCodex(deps: LaunchDeps, input: LaunchInput): Promise
         await removeOwnedCodexDirectory(work);
         work = undefined;
       }
+      if (retirementFailed) throw new CodexLaunchError("shutdown_failed");
+      await request.retireBridge?.();
+      if (retirementFailed) throw new CodexLaunchError("shutdown_failed");
+      await receipt?.finish();
     });
     void deadline(cleanup, 2000)
       .then(() => {
@@ -392,7 +414,22 @@ export async function launchCodex(deps: LaunchDeps, input: LaunchInput): Promise
       throw new CodexLaunchError("integrity_failed");
     const argv = srtArgv({ sandbox, profile });
     check();
-    proc = spawnCodex({
+    const supervisor = nativeSupervisor();
+    retirementRecord = await prepareNativeRetirement(
+      roots,
+      {
+        profile: profile.directory,
+        work,
+        ...(request.mcp ? { bridge: request.mcp } : {}),
+      },
+      Boolean(supervisor),
+    );
+    check();
+    const spawnProcess = supervisor
+      ? (input: SpawnCodexInput) => spawnSupervisedCodex(input, supervisor)
+      : spawnCodex;
+    proc = spawnProcess({
+      ...(retirementRecord.supervision ? { supervision: retirementRecord.supervision } : {}),
       command: argv.command,
       args: argv.args,
       cwd: work.path,

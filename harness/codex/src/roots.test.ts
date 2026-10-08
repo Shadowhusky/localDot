@@ -12,8 +12,9 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
+import * as fs from "node:fs/promises";
 import { basename, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   assertOwnedCodexDirectory,
   assertOwnedCodexRoots,
@@ -21,12 +22,16 @@ import {
   codexInstallDirectory,
   createOwnedCodexDirectory,
   type OwnedCodexRoots,
+  persistOwnedCodexProfile,
   prepareOwnedCodexRoots,
   publishOwnedCodexDirectory,
   removeOwnedCodexDirectory,
 } from "./roots.ts";
 
 const owned: string[] = [];
+vi.mock("node:fs/promises", async (original) => ({
+  ...(await original<typeof import("node:fs/promises")>()),
+}));
 function fixture() {
   const top = mkdtempSync("/tmp/localdot-codex-roots-");
   owned.push(top);
@@ -36,8 +41,244 @@ function fixture() {
   return { top, realHome, localdot };
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const path of owned.splice(0)) rmSync(path, { recursive: true, force: true });
 });
+
+it.each(["profilesRoot", "workRoot", "runRoot", "binRoot"] as const)(
+  "persists %s cleanup through the managed parents, including an absent-path retry",
+  async (area) => {
+    const f = fixture(),
+      roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+      directory = createOwnedCodexDirectory(roots, area);
+    const original = fs.open,
+      synced: string[] = [],
+      closed: string[] = [];
+    vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+      expect(existsSync(directory.path)).toBe(false);
+      const fd = await original(...args),
+        sync = fd.sync.bind(fd),
+        close = fd.close.bind(fd);
+      fd.sync = async () => {
+        await sync();
+        synced.push(String(args[0]));
+      };
+      fd.close = async () => {
+        await close();
+        closed.push(String(args[0]));
+      };
+      return fd;
+    });
+    await removeOwnedCodexDirectory(directory);
+    await removeOwnedCodexDirectory(directory);
+    const expected = [roots[area], roots.root, realpathSync(f.localdot)];
+    expect(synced).toEqual([...expected, ...expected]);
+    expect(closed).toEqual(synced);
+  },
+);
+
+it("does not acknowledge cleanup if a parent sync fails, closes the handle and permits a durable retry", async () => {
+  const f = fixture(),
+    roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+    profile = createOwnedCodexDirectory(roots, "profilesRoot");
+  const original = fs.open,
+    closed = vi.fn();
+  const spy = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const fd = await original(...args),
+      close = fd.close.bind(fd);
+    fd.sync = async () => {
+      throw new Error("disk sync failed");
+    };
+    fd.close = async () => {
+      await close();
+      closed();
+    };
+    return fd;
+  });
+  await expect(removeOwnedCodexDirectory(profile)).rejects.toThrow(CodexRootsError);
+  expect(closed).toHaveBeenCalledOnce();
+  expect(existsSync(profile.path)).toBe(false);
+  spy.mockRestore();
+  await removeOwnedCodexDirectory(profile);
+});
+
+it("rejects a parent replacement during removal without deleting from the replacement", async () => {
+  const f = fixture(),
+    roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+    profile = createOwnedCodexDirectory(roots, "profilesRoot"),
+    original = fs.rm;
+  vi.spyOn(fs, "rm").mockImplementation(async (...args) => {
+    await original(...args);
+    renameSync(roots.profilesRoot, `${roots.profilesRoot}-retained`);
+    mkdirSync(roots.profilesRoot, { mode: 0o700 });
+    mkdirSync(profile.path, { mode: 0o700 });
+    writeFileSync(join(profile.path, "keep"), "replacement");
+  });
+  await expect(removeOwnedCodexDirectory(profile)).rejects.toThrow(CodexRootsError);
+  expect(readFileSync(join(profile.path, "keep"), "utf8")).toBe("replacement");
+});
+
+it("flushes a staged bin before rename and all managed parents before publication resolves", async () => {
+  const f = fixture(),
+    roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+    staging = createOwnedCodexDirectory(roots, "binRoot"),
+    target = codexInstallDirectory(roots, `0.154.0-${"a".repeat(64)}`);
+  const original = fs.open,
+    synced: string[] = [],
+    closed: string[] = [];
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const fd = await original(...args),
+      sync = fd.sync.bind(fd),
+      close = fd.close.bind(fd);
+    fd.sync = async () => {
+      expect(existsSync(target)).toBe(String(args[0]) !== staging.path);
+      await sync();
+      synced.push(String(args[0]));
+    };
+    fd.close = async () => {
+      await close();
+      closed.push(String(args[0]));
+    };
+    return fd;
+  });
+  await publishOwnedCodexDirectory(staging, target);
+  expect(synced).toEqual([staging.path, roots.binRoot, roots.root, realpathSync(f.localdot)]);
+  expect(closed).toEqual(synced);
+  expect(existsSync(staging.path)).toBe(false);
+  expect(existsSync(target)).toBe(true);
+});
+
+it.each(["before", "after"])(
+  "reports sync failure %s rename and preserves the remaining inode",
+  async (when) => {
+    const f = fixture(),
+      roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+      staging = createOwnedCodexDirectory(roots, "binRoot"),
+      target = codexInstallDirectory(roots, `0.154.0-${"a".repeat(64)}`);
+    writeFileSync(join(staging.path, "keep"), "verified fixture");
+    const inode = lstatSync(staging.path).ino,
+      original = fs.open,
+      closed: string[] = [];
+    const spy = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+      const fd = await original(...args),
+        sync = fd.sync.bind(fd),
+        close = fd.close.bind(fd);
+      fd.sync = async () => {
+        if (String(args[0]) === (when === "before" ? staging.path : roots.binRoot))
+          throw new Error("disk sync failed");
+        await sync();
+      };
+      fd.close = async () => {
+        await close();
+        closed.push(String(args[0]));
+      };
+      return fd;
+    });
+    await expect(publishOwnedCodexDirectory(staging, target)).rejects.toThrow();
+    expect(existsSync(target)).toBe(when === "after");
+    const retained = when === "before" ? staging.path : target;
+    expect(lstatSync(retained).ino).toBe(inode);
+    expect(readFileSync(join(retained, "keep"), "utf8")).toBe("verified fixture");
+    expect(closed).toContain(when === "before" ? staging.path : roots.binRoot);
+    spy.mockRestore();
+    await removeOwnedCodexDirectory(staging);
+    expect(existsSync(target)).toBe(when === "after");
+  },
+);
+
+it.each(["before", "after"])(
+  "settles cancellation %s the publication point without undoing a rename",
+  async (when) => {
+    const f = fixture(),
+      roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+      staging = createOwnedCodexDirectory(roots, "binRoot"),
+      target = codexInstallDirectory(roots, `0.154.0-${"a".repeat(64)}`),
+      controller = new AbortController(),
+      original = fs.open;
+    vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+      const fd = await original(...args),
+        sync = fd.sync.bind(fd);
+      fd.sync = async () => {
+        await sync();
+        if (String(args[0]) === (when === "before" ? staging.path : roots.binRoot))
+          controller.abort(new Error("cancelled"));
+      };
+      return fd;
+    });
+    const publish = publishOwnedCodexDirectory(staging, target, controller.signal);
+    if (when === "before") await expect(publish).rejects.toThrow("cancelled");
+    else await publish;
+    expect(existsSync(target)).toBe(when === "after");
+  },
+);
+
+it("persists the protected launch breadcrumb and each managed parent before returning", async () => {
+  const f = fixture(),
+    roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+    profile = createOwnedCodexDirectory(roots, "profilesRoot");
+  const original = fs.open,
+    synced: string[] = [],
+    closed: string[] = [];
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const fd = await original(...args),
+      sync = fd.sync.bind(fd),
+      close = fd.close.bind(fd);
+    fd.sync = async () => {
+      await sync();
+      synced.push(String(args[0]));
+    };
+    fd.close = async () => {
+      await close();
+      closed.push(String(args[0]));
+    };
+    return fd;
+  });
+  await persistOwnedCodexProfile(roots, profile);
+  expect(synced).toEqual([profile.path, roots.profilesRoot, roots.root, realpathSync(f.localdot)]);
+  expect(closed).toEqual(synced);
+});
+
+it("retains the breadcrumb and closes its descriptor on durability failure", async () => {
+  const f = fixture(),
+    roots = prepareOwnedCodexRoots(f.localdot, f.realHome),
+    profile = createOwnedCodexDirectory(roots, "profilesRoot");
+  const original = fs.open,
+    closed = vi.fn();
+  vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+    const fd = await original(...args),
+      close = fd.close.bind(fd);
+    fd.sync = async () => {
+      throw new Error("private filesystem detail");
+    };
+    fd.close = async () => {
+      await close();
+      closed();
+    };
+    return fd;
+  });
+  await expect(persistOwnedCodexProfile(roots, profile)).rejects.toThrow(CodexRootsError);
+  expect(closed).toHaveBeenCalledOnce();
+  expect(existsSync(profile.path)).toBe(true);
+});
+
+it.each(["copy", "wrong-area", "replaced", "public"])(
+  "refuses %s profile ownership before persistence",
+  async (fault) => {
+    const f = fixture(),
+      roots = prepareOwnedCodexRoots(f.localdot, f.realHome);
+    let profile = createOwnedCodexDirectory(
+      roots,
+      fault === "wrong-area" ? "workRoot" : "profilesRoot",
+    );
+    if (fault === "copy") profile = { ...profile };
+    if (fault === "replaced") {
+      renameSync(profile.path, `${profile.path}-old`);
+      mkdirSync(profile.path, { mode: 0o700 });
+    }
+    if (fault === "public") chmodSync(profile.path, 0o755);
+    await expect(persistOwnedCodexProfile(roots, profile)).rejects.toThrow(CodexRootsError);
+  },
+);
 
 describe("canonical owned Codex roots", () => {
   it("refuses a dangling protected .codex alias before creating its target", () => {

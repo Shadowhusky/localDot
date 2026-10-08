@@ -1,5 +1,6 @@
 import type { LocalDotEvent, Point } from "@localdot/protocol";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
+import { APPEARANCE_EVENT } from "../onboarding/appearance.ts";
 import type { FrameSource } from "./frame-source.ts";
 import { manualPoint } from "./manual-point.ts";
 import type { Flip, ProbeRect } from "./probe.ts";
@@ -8,13 +9,31 @@ import { readTheme, type StageTheme } from "./theme.ts";
 import type {
   OracleCommand,
   OracleRequest,
+  ReplayProbeCommand,
+  ReplayProbeRequest,
+  ReplaySource,
+  ReplayTransport,
   StageClock,
   StageViewPatch,
   WorkerIn,
   WorkerOut,
 } from "./worker-protocol.ts";
 
+export type ReplayMessage = Extract<
+  WorkerOut,
+  { type: "replay-time" | "replay-status" | "replay-ended" }
+>;
+export interface ReplayHandle {
+  open(source: ReplaySource): void;
+  transport(transport: ReplayTransport): void;
+  seek(tMs: number, mode: "exact" | "preview"): void;
+  close(): void;
+  onReplay(listener: (message: ReplayMessage) => void): () => void;
+  probe(command: ReplayProbeRequest): Promise<unknown>;
+}
+
 export interface StageCanvasHandle {
+  replay: ReplayHandle;
   attach(source: FrameSource): void;
   detach(): void;
   probe(rect: ProbeRect | null, threshold?: number): void;
@@ -54,6 +73,18 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     >(),
   );
   const oracleSeq = useRef(0);
+  const replayListeners = useRef(new Set<(message: ReplayMessage) => void>());
+  const pendingReplay = useRef(
+    new Map<
+      number,
+      {
+        resolve(value: unknown): void;
+        reject(error: unknown): void;
+        timer: ReturnType<typeof setTimeout>;
+      }
+    >(),
+  );
+  const replaySeq = useRef(0);
   const [stats, setStats] = useState<PumpStats | null>(null);
 
   // The worker owns the canvas for the component's lifetime. It starts with the theme's colours,
@@ -100,7 +131,21 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
         }
         pendingOracle.current.delete(m.id);
       } else if (m.type === "warn") console.warn(`stage worker: ${m.message}`);
-      else console.error(`stage worker: ${m.message}`);
+      else if (m.type === "error") console.error(`stage worker: ${m.message}`);
+      else if (
+        m.type === "replay-time" ||
+        m.type === "replay-status" ||
+        m.type === "replay-ended"
+      ) {
+        for (const listener of replayListeners.current) listener(m);
+      } else if (m.type === "replay-probe-reply") {
+        const pending = pendingReplay.current.get(m.id);
+        if (pending) {
+          clearTimeout(pending.timer);
+          pending.resolve(m.reply);
+          pendingReplay.current.delete(m.id);
+        }
+      }
     };
     const onMotion = () =>
       worker.postMessage({
@@ -121,7 +166,14 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
     });
     observer.observe(canvas);
     workerRef.current = worker;
+    const onAppearance = () =>
+      worker.postMessage({
+        type: "theme",
+        theme: readTheme(getComputedStyle(document.documentElement)),
+      } satisfies WorkerIn);
+    window.addEventListener(APPEARANCE_EVENT, onAppearance);
     return () => {
+      window.removeEventListener(APPEARANCE_EVENT, onAppearance);
       motion.removeEventListener("change", onMotion);
       observer.disconnect();
       sourceRef.current?.stop();
@@ -131,12 +183,66 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
         pending.reject(new Error("stage closed"));
       }
       pendingOracle.current.clear();
+      for (const pending of pendingReplay.current.values()) {
+        clearTimeout(pending.timer);
+        pending.reject(new Error("stage closed"));
+      }
+      pendingReplay.current.clear();
+      replayListeners.current.clear();
+      worker.postMessage({ type: "replay-close" } satisfies WorkerIn);
       worker.terminate();
       workerRef.current = null;
     };
   }, []);
 
   useImperativeHandle(ref, () => ({
+    replay: {
+      open(source) {
+        sourceId.current++;
+        sourceRef.current?.stop();
+        sourceRef.current = null;
+        workerRef.current?.postMessage({ type: "replay-open", source } satisfies WorkerIn);
+      },
+      transport(transport) {
+        workerRef.current?.postMessage({ type: "replay-transport", transport } satisfies WorkerIn);
+      },
+      seek(tMs, mode) {
+        workerRef.current?.postMessage({ type: "replay-seek", tMs, mode } satisfies WorkerIn);
+      },
+      close() {
+        workerRef.current?.postMessage({ type: "replay-close" } satisfies WorkerIn);
+      },
+      onReplay(listener) {
+        replayListeners.current.add(listener);
+        return () => {
+          replayListeners.current.delete(listener);
+        };
+      },
+      probe(command) {
+        if (new URLSearchParams(window.location.search).get("replayProbe") !== "1")
+          return Promise.reject(new Error("Replay probe is disabled."));
+        const worker = workerRef.current;
+        if (!worker) return Promise.reject(new Error("stage not ready"));
+        const id = ++replaySeq.current;
+        return new Promise((resolve, reject) => {
+          const timer = setTimeout(() => {
+            pendingReplay.current.delete(id);
+            reject(new Error("Replay probe timed out."));
+          }, 10_000);
+          pendingReplay.current.set(id, { resolve, reject, timer });
+          try {
+            worker.postMessage({
+              type: "replay-probe",
+              command: { ...command, id } as ReplayProbeCommand,
+            } satisfies WorkerIn);
+          } catch (error) {
+            clearTimeout(timer);
+            pendingReplay.current.delete(id);
+            reject(error);
+          }
+        });
+      },
+    },
     attach(source) {
       const id = ++sourceId.current;
       sourceRef.current?.stop();

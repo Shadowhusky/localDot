@@ -5,6 +5,8 @@ import { DEFAULT_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionScreens } from "../browser/session-screens.ts";
+import { BrowserStreams } from "../browser/streams.ts";
 import { NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import { LiveSessions } from "../gateway/live.ts";
@@ -14,6 +16,7 @@ import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexCleanupError } from "./codex/driver.ts";
 import { MemoryStore } from "./memory.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { ComputerFences } from "./safety/fences.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
@@ -176,6 +179,104 @@ function setup(idleMs = 60_000) {
   };
 }
 
+describe("reset task retirement", () => {
+  function resetFixture() {
+    const f = setup();
+    let held = false;
+    const fences = new ComputerFences(f.home, (id) => held && id === f.cellId);
+    f.deps.fences = fences;
+    const retire = vi.fn(async () => {});
+    f.deps.brains.retireSession = retire;
+    return {
+      ...f,
+      fences,
+      retire,
+      hold: () => {
+        held = true;
+      },
+    };
+  }
+  it("requires the old computer fence and refuses pending idle operations", async () => {
+    const f = resetFixture();
+    expect(await f.runner.retireForReset(f.cellId)).toBe(false);
+    f.hold();
+    const operation = f.live.admitIdleOperation(f.cellId);
+    expect(await f.runner.retireForReset(f.cellId)).toBe(false);
+    operation?.release();
+    expect(await f.runner.retireForReset(f.cellId)).toBe(true);
+    expect(f.containment).not.toHaveBeenCalled();
+  });
+  it("does not treat unreadable fence state as successful retirement", async () => {
+    const f = resetFixture();
+    f.hold();
+    f.fences.closeAdmission();
+    expect(await f.runner.retireForReset(f.cellId)).toBe(false);
+  });
+  it("refuses destruction while a task preflight is pending and prevents its later admission", async () => {
+    const f = resetFixture(),
+      status = deferred<ChatgptStatus>();
+    f.account.status.mockImplementation(() => status.promise);
+    const starting = f.runner.start(f.cellId, "fixture task");
+    const rejected = expect(starting).rejects.toThrow("cleanup needs attention");
+    f.hold();
+    expect(await f.runner.retireForReset(f.cellId)).toBe(false);
+    status.resolve({ available: true, state: "signed_in", codexVersion: "0.154.0" });
+    await rejected;
+    expect(await f.runner.retireForReset(f.cellId)).toBe(true);
+    expect(f.run).not.toHaveBeenCalled();
+  });
+  it.each([true, false])(
+    "requires native retirement confirmation after stopping a task: %s",
+    async (confirmed) => {
+      const f = resetFixture();
+      if (!f.deps.codex) throw new Error("fixture missing driver");
+      f.deps.codex.driver.retirementConfirmed = () => confirmed;
+      const session = await f.runner.start(f.cellId, "fixture native task");
+      await until(() => session.status === "idle");
+      f.hold();
+      expect(await f.runner.retireForReset(f.cellId)).toBe(confirmed);
+      expect(f.containment).toHaveBeenCalledWith(session.id);
+      expect(f.live.get(f.cellId)).toBeUndefined();
+      expect(f.fences.record(f.cellId)?.nativeRetired).toBe(confirmed);
+      expect(f.retire).toHaveBeenCalledTimes(confirmed ? 1 : 0);
+    },
+  );
+  it("returns unconfirmed on a drain deadline without forgetting the still-live native owner", async () => {
+    const f = resetFixture(),
+      cleanup = deferred<void>();
+    if (!f.deps.codex) throw new Error("fixture missing driver");
+    f.deps.codex.driver.retirementConfirmed = () => true;
+    f.ended.mockImplementation(() => cleanup.promise);
+    const session = await f.runner.start(f.cellId, "fixture task with delayed cleanup");
+    await until(() => session.status === "idle");
+    f.hold();
+    vi.useFakeTimers();
+    try {
+      const retiring = f.runner.retireForReset(f.cellId);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(await retiring).toBe(false);
+      expect(f.live.get(f.cellId)).toBe(session.id);
+      expect(f.fences.record(f.cellId)?.nativeRetired).toBe(false);
+      expect(f.retire).not.toHaveBeenCalled();
+    } finally {
+      cleanup.resolve();
+      vi.useRealTimers();
+    }
+    await f.live.settled(session.id);
+    expect(await f.runner.retireForReset(f.cellId)).toBe(true);
+  });
+  it("keeps the reset unconfirmed when historical brain retirement fails, and permits an explicit retry", async () => {
+    const f = resetFixture();
+    f.hold();
+    const sessionId = ulid();
+    f.fences.capture(f.cellId, sessionId, "api");
+    f.retire.mockRejectedValueOnce(new Error("fixture uncertain cleanup"));
+    expect(await f.runner.retireForReset(f.cellId)).toBe(false);
+    expect(await f.runner.retireForReset(f.cellId)).toBe(true);
+    expect(f.retire.mock.calls).toEqual([[sessionId], [sessionId]]);
+  });
+});
+
 describe("ChatGPT provider selection", () => {
   it("accepts a valid main selection", () => {
     expect(() =>
@@ -226,6 +327,145 @@ describe("ChatGPT provider selection", () => {
 });
 
 describe("ChatGPT runner lifecycle", () => {
+  it("ends an idle successful task without stopping its desktop", async () => {
+    const f = setup(0);
+    const physicalStop = vi.fn(async () => {});
+    const browser = {
+      start: vi.fn(async () => {
+        throw new Error("unused browser start");
+      }),
+      endpoints: () => undefined,
+      stop: vi.fn(async () => {}),
+    };
+    const streams = new BrowserStreams({
+      parents: { get: f.deps.cell, list: () => [], subscribe: () => () => {} },
+      browser: { ...browser, subscribe: () => () => {} },
+      tickets: { revoke: () => {} },
+    });
+    const screens = new SessionScreens({
+      cells: { get: f.deps.cell, subscribe: () => () => {}, stop: physicalStop },
+      browser,
+      streams,
+      registry: { for: () => undefined },
+      recordings: { attach: async () => {}, fence: async () => {} },
+      now: () => 0,
+    });
+    f.deps.installSession = (session, cell) => screens.install(session, cell);
+    try {
+      const session = await f.runner.start(f.cellId, "Finish a local task");
+      await f.live.settled(session.id);
+      expect(
+        f.log.read(session.id).find((event) => event.type === "session.end")?.data,
+      ).toMatchObject({ reason: "done" });
+      expect(physicalStop).not.toHaveBeenCalled();
+      expect(f.containment).not.toHaveBeenCalled();
+      expect(browser.stop).toHaveBeenCalledOnce();
+      expect(f.runner.sessions.has(session.id)).toBe(false);
+    } finally {
+      streams.dispose();
+    }
+  });
+
+  it("prepares the desktop browser before skills or model execution, once per task", async () => {
+    const f = setup();
+    const pending = deferred<void>();
+    const prepare = vi.fn(async () => pending.promise);
+    f.deps.prepareDesktop = prepare;
+    const recording = vi.fn(async () => {});
+    f.live.addHooks({ beforeRun: recording });
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => prepare.mock.calls.length === 1);
+    expect(recording).not.toHaveBeenCalled();
+    expect(f.installSkills).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    pending.resolve();
+    await until(() => session.status === "idle");
+    expect(recording).toHaveBeenCalledExactlyOnceWith(f.cellId, session.id);
+    expect(prepare).toHaveBeenCalledExactlyOnceWith(session);
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("failed desktop profile retirement contains the computer without starting the model", async () => {
+    const f = setup();
+    const recording = vi.fn(async () => {});
+    f.live.addHooks({ beforeRun: recording });
+    f.deps.prepareDesktop = async () => {
+      throw new Error("retirement unconfirmed");
+    };
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await f.live.settled(session.id);
+    expect(f.containment).toHaveBeenCalledExactlyOnceWith(session.id);
+    expect(recording).not.toHaveBeenCalled();
+    expect(f.installSkills).not.toHaveBeenCalled();
+    expect(f.run).not.toHaveBeenCalled();
+    await expect(f.runner.start(f.cellId, "Retry")).rejects.toMatchObject({ status: 409 });
+  });
+  it("Stop during preparation waits for the operation and cannot start the model afterward", async () => {
+    const f = setup();
+    const pending = deferred<void>();
+    const prepare = vi.fn(async () => pending.promise);
+    f.deps.prepareDesktop = prepare;
+    const recording = vi.fn(async () => {});
+    f.live.addHooks({ beforeRun: recording });
+    const session = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => prepare.mock.calls.length === 1);
+    session.stop();
+    let ended = false;
+    const complete = f.live.settled(session.id).then(() => {
+      ended = true;
+    });
+    await new Promise<void>((r) => setImmediate(r));
+    expect(ended).toBe(false);
+    pending.resolve();
+    await complete;
+    expect(f.run).not.toHaveBeenCalled();
+    expect(recording).not.toHaveBeenCalled();
+    expect(f.runner.get(session.id)).toBeUndefined();
+    expect(f.containment).toHaveBeenCalledExactlyOnceWith(session.id);
+  });
+  it("installs session screens before live admission and waits for their terminal drain", async () => {
+    const f = setup(),
+      drain = deferred<void>();
+    const settled = vi.fn(() => drain.promise);
+    f.deps.installSession = (session, cell) => {
+      expect(cell.id).toBe(f.cellId);
+      expect(session.generation).toBeUndefined();
+      expect(f.live.get(cell.id)).toBeUndefined();
+      vi.spyOn(session, "screensSettled").mockImplementation(settled);
+    };
+    const session = await f.runner.start(f.cellId, "Screen factory lifecycle");
+    try {
+      await until(() => session.status === "idle");
+      session.stop();
+      await until(() => settled.mock.calls.length > 0);
+      expect(f.runner.get(session.id)).toBe(session);
+      let finished = false;
+      const done = f.live.settled(session.id).then(() => {
+        finished = true;
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(finished).toBe(false);
+      drain.resolve();
+      await done;
+    } finally {
+      drain.resolve();
+    }
+    expect(f.runner.get(session.id)).toBeUndefined();
+  });
+
+  it("does not start a brain when session screen installation fails", async () => {
+    const f = setup();
+    f.deps.installSession = () => {
+      throw new Error("screen ownership unavailable");
+    };
+    await expect(f.runner.start(f.cellId, "Refuse unowned screens")).rejects.toThrow(
+      "screen ownership",
+    );
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.runner.sessions.size).toBe(0);
+    expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+
   it("runs the subscription with no paid key lookup, brain cell or USD task account", async () => {
     const f = setup();
     f.secrets.mockResolvedValueOnce([]);

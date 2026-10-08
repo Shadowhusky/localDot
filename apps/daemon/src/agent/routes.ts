@@ -18,6 +18,8 @@ import {
 import { capabilityOf, PROVIDERS } from "@localdot/providers";
 import type { Context, Hono } from "hono";
 import { z } from "zod";
+import type { BrowserScope } from "../browser/client.ts";
+import { type QuarantineRoutesDeps, quarantineRoutes } from "../browser/quarantine-routes.ts";
 import { DesktopdError } from "../desktopd/client.ts";
 import type { DesktopdTools } from "../desktopd/tools-client.ts";
 import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
@@ -58,10 +60,11 @@ export interface AgentRoutesDeps {
   taskMutationReady?(session: AgentSession): boolean;
   // Root owns admission, control/cell lifetime and drain registration. No task is required.
   desktop(cellId: string, requestSignal: AbortSignal): UploadAccess | undefined;
-  manual?(session: AgentSession): ManualDesktop | undefined;
+  manual?(session: AgentSession, scope: BrowserScope): ManualDesktop | undefined;
   redactUserText(text: string, sessionId?: string, cellId?: string): string;
   appendTo(sessionId: string, type: "memory.change", data: Record<string, unknown>): void;
   home: string;
+  quarantine?: QuarantineRoutesDeps;
   harness?(): HarnessAvailability;
   chatgpt?: {
     account: CodexAccount;
@@ -203,6 +206,7 @@ function fail(error: unknown): Response {
 
 // Auth remains the application's existing /api guard; no route introduces another credential.
 export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
+  if (deps.quarantine) quarantineRoutes(app, deps.quarantine);
   const route = (handler: (c: Context) => Response | Promise<Response>) => async (c: Context) => {
     try {
       check(c.req.raw.signal);
@@ -446,6 +450,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         status: s.status,
         toolCalls: s.toolCalls,
         autonomy: s.autonomy,
+        ...(s.screens ? { screen: s.screens.selection } : {}),
         ...(s.pendingApproval ? { approval: s.pendingApproval } : {}),
         ...(s.safetyPause ? { pause: s.safetyPause } : {}),
         ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),

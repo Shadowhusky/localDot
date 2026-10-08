@@ -10,6 +10,7 @@ import {
   type OwnedCodexRoots,
   ownedCodexRealHome,
   PRIVATE_CREATE_FLAGS,
+  persistOwnedCodexProfile,
   removeOwnedCodexDirectory,
 } from "./roots.ts";
 import { CODEX_VERSION, codexRelease, releaseInstallKey } from "./version.ts";
@@ -246,6 +247,7 @@ export async function writeSettingsFile(
       await file.close();
     }
     assertOwnedCodexDirectory(roots, directory, "profilesRoot");
+    await persistOwnedCodexProfile(roots, directory);
     return Object.freeze({ path, directory });
   } catch {
     try {

@@ -9,10 +9,12 @@ import {
   writeFileSync,
 } from "node:fs";
 import { createServer, type Server } from "node:net";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { PassThrough } from "node:stream";
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { recoverNativeRetired } from "../../../apps/cli/src/install/native-recovery.ts";
+import { assertNativeRetired } from "../../../apps/cli/src/install/native-retirement.ts";
 import type { ApprovalContext, ApprovalIdentity } from "./approvals.ts";
 import * as installer from "./install.ts";
 import {
@@ -21,11 +23,14 @@ import {
   type LaunchInput,
   launchCodex,
 } from "./launch.ts";
+import * as supervisorLocation from "./native-supervisor.ts";
 import * as primitive from "./process.ts";
 import * as profiles from "./profile.ts";
+import * as retirementRecords from "./retirement-record.ts";
 import type { OwnedCodexRoots } from "./roots.ts";
 import * as directories from "./roots.ts";
 import { createOwnedCodexDirectory, prepareOwnedCodexRoots } from "./roots.ts";
+import * as supervised from "./supervised-process.ts";
 import { codexRelease, releaseInstallKey } from "./version.ts";
 
 const roots: string[] = [],
@@ -63,7 +68,17 @@ async function privateEndpoint(owned: OwnedCodexRoots) {
     });
   });
   chmodSync(socket, 0o600);
-  return { mcp, socket };
+  let closing: Promise<void> | undefined;
+  const close = () =>
+    (closing ??= (async () => {
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve())),
+      );
+      const at = servers.indexOf(server);
+      if (at !== -1) servers.splice(at, 1);
+      await directories.removeOwnedCodexDirectory(mcp);
+    })());
+  return { mcp, socket, close };
 }
 function fixture(
   options: {
@@ -178,6 +193,193 @@ function fixture(
   };
 }
 describe("owned Codex launch composition", () => {
+  it("uses the installed supervisor transport with the already-verified sandbox request", async () => {
+    const f = fixture();
+    vi.spyOn(supervisorLocation, "nativeSupervisor").mockReturnValue(
+      "/private/fixed-release/keyd/bin/keyd",
+    );
+    const legacyFixture = vi.mocked(primitive.spawnCodex).getMockImplementation();
+    if (!legacyFixture) throw new Error("missing process fixture");
+    vi.mocked(primitive.spawnCodex).mockImplementation(() => {
+      throw new Error("legacy backend used");
+    });
+    const transport = vi
+      .spyOn(supervised, "spawnSupervisedCodex")
+      .mockImplementation((input) => legacyFixture(input));
+    const c = await launchCodex({ roots: f.owned }, f.input);
+    expect(transport).toHaveBeenCalledOnce();
+    expect(transport.mock.calls[0]?.[1]).toBe("/private/fixed-release/keyd/bin/keyd");
+    expect(f.verify).toHaveBeenCalledTimes(2);
+    expect(f.launches[0]?.input.command).toBe(process.execPath);
+    await c.stop();
+    await c.closed;
+  });
+  it("retires a task whose captured bridge already closed independently", async () => {
+    const f = fixture(),
+      endpoint = await privateEndpoint(f.owned);
+    const c = await launchCodex(
+      { roots: f.owned },
+      {
+        ...f.input,
+        purpose: "task",
+        sessionId: ulid(),
+        mcp: endpoint.mcp,
+        retireBridge: endpoint.close,
+      },
+    );
+    await endpoint.close();
+    expect(existsSync(endpoint.mcp.path)).toBe(false);
+    await c.stop();
+    await c.closed;
+    await assertNativeRetired(dirname(f.owned.root), new AbortController().signal);
+  });
+
+  it("holds its receipt and closure until delayed bridge cleanup finishes", async () => {
+    const f = fixture(),
+      endpoint = await privateEndpoint(f.owned),
+      gate = deferred<void>(),
+      entered = deferred<void>();
+    const c = await launchCodex(
+      { roots: f.owned },
+      {
+        ...f.input,
+        purpose: "task",
+        sessionId: ulid(),
+        mcp: endpoint.mcp,
+        retireBridge: async () => {
+          entered.resolve();
+          await gate.promise;
+          await endpoint.close();
+        },
+      },
+    );
+    let closed = false;
+    void c.closed.then(() => {
+      closed = true;
+    });
+    const stopping = c.stop();
+    await entered.promise;
+    expect(closed).toBe(false);
+    expect(existsSync(endpoint.socket)).toBe(true);
+    expect(existsSync(c.workDir)).toBe(false);
+    expect(
+      readdirSync(f.owned.profilesRoot).filter((name) => name.startsWith(".retired-")),
+    ).toHaveLength(1);
+    gate.resolve();
+    await stopping;
+    await c.closed;
+    expect(existsSync(endpoint.socket)).toBe(false);
+    expect(readdirSync(f.owned.profilesRoot)).toEqual([]);
+  });
+
+  it("preserves recovery evidence after the bridge owner rejects cleanup", async () => {
+    const f = fixture(),
+      endpoint = await privateEndpoint(f.owned);
+    const c = await launchCodex(
+      { roots: f.owned },
+      {
+        ...f.input,
+        purpose: "task",
+        sessionId: ulid(),
+        mcp: endpoint.mcp,
+        retireBridge: async () => {
+          throw new Error("bridge uncertain");
+        },
+      },
+    );
+    await expect(c.stop()).rejects.toMatchObject({ code: "shutdown_failed" });
+    expect(existsSync(endpoint.socket)).toBe(true);
+    expect(
+      readdirSync(f.owned.profilesRoot).filter((name) => name.startsWith(".retired-")),
+    ).toHaveLength(1);
+    await endpoint.close();
+    await recoverNativeRetired(dirname(f.owned.root), new AbortController().signal);
+    await assertNativeRetired(dirname(f.owned.root), new AbortController().signal);
+  });
+
+  it("never spawns if retirement identity capture fails", async () => {
+    const f = fixture();
+    vi.spyOn(retirementRecords, "prepareNativeRetirement").mockRejectedValue(new Error("capture"));
+    await expect(launchCodex({ roots: f.owned }, f.input)).rejects.toMatchObject({
+      code: "startup_failed",
+    });
+    expect(f.launches).toEqual([]);
+    await assertNativeRetired(dirname(f.owned.root), new AbortController().signal);
+  });
+
+  it("publishes retirement before cleanup and leaves restart recovery evidence on cleanup failure", async () => {
+    const f = fixture(),
+      c = await launchCodex({ roots: f.owned }, f.input);
+    const remove = vi
+      .spyOn(directories, "removeOwnedCodexDirectory")
+      .mockImplementation(async () => {
+        const receipts = readdirSync(f.owned.profilesRoot).filter((name) =>
+          name.startsWith(".retired-"),
+        );
+        expect(receipts).toHaveLength(1);
+        throw new Error("cleanup interrupted");
+      });
+    await expect(c.stop()).rejects.toMatchObject({ code: "shutdown_failed" });
+    expect(existsSync(c.workDir)).toBe(true);
+    expect(
+      readdirSync(f.owned.profilesRoot).filter((name) => name.startsWith(".retired-")),
+    ).toHaveLength(1);
+    remove.mockRestore();
+    await recoverNativeRetired(dirname(f.owned.root), new AbortController().signal);
+    await assertNativeRetired(dirname(f.owned.root), new AbortController().signal);
+    await expect(c.stop()).rejects.toMatchObject({ code: "shutdown_failed" });
+  });
+
+  it("keeps both owned resources when retirement publication fails", async () => {
+    const f = fixture(),
+      prepare = retirementRecords.prepareNativeRetirement;
+    vi.spyOn(retirementRecords, "prepareNativeRetirement").mockImplementation(async (...args) => {
+      await prepare(...args);
+      return {
+        persist: async () => {
+          throw new Error("persistence");
+        },
+      };
+    });
+    const c = await launchCodex({ roots: f.owned }, f.input);
+    await expect(c.stop()).rejects.toMatchObject({ code: "shutdown_failed" });
+    expect(existsSync(c.workDir)).toBe(true);
+    expect(
+      readdirSync(f.owned.profilesRoot).filter((name) => name.startsWith(".owned-")),
+    ).toHaveLength(1);
+    expect(readdirSync(f.owned.profilesRoot).filter((name) => name.startsWith(".retir"))).toEqual(
+      [],
+    );
+  });
+
+  it("installer retirement observes live profiles and clears only after confirmed native closure", async () => {
+    const f = fixture(),
+      home = dirname(f.owned.root),
+      signal = new AbortController().signal;
+    await assertNativeRetired(home, signal);
+    const c = await launchCodex({ roots: f.owned }, f.input);
+    await expect(assertNativeRetired(home, signal)).rejects.toThrow("Native task retirement");
+    vi.mocked(f.proc.stop).mockResolvedValue(undefined);
+    const stopping = c.stop();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    await expect(assertNativeRetired(home, signal)).rejects.toThrow("Native task retirement");
+    f.exited.resolve({ code: 0, signal: null });
+    f.closed.resolve();
+    await stopping;
+    await assertNativeRetired(home, signal);
+  });
+  it("never spawns when the protected profile cannot be persisted", async () => {
+    const f = fixture();
+    const persist = vi
+      .spyOn(directories, "persistOwnedCodexProfile")
+      .mockRejectedValue(new Error("disk"));
+    await expect(launchCodex({ roots: f.owned }, f.input)).rejects.toMatchObject({
+      code: "startup_failed",
+    });
+    expect(persist).toHaveBeenCalledOnce();
+    expect(f.launches).toEqual([]);
+    await assertNativeRetired(dirname(f.owned.root), new AbortController().signal);
+  });
   it("registers before verification or resource creation, verifies twice, and never installs implicitly", async () => {
     const f = fixture(),
       verifications: { registered: number; spawned: number }[] = [];
@@ -227,10 +429,10 @@ describe("owned Codex launch composition", () => {
   });
   it("grants a task only its actual owned private socket and uses the fixed system nc bridge", async () => {
     const f = fixture(),
-      { mcp, socket } = await privateEndpoint(f.owned);
+      { mcp, socket, close } = await privateEndpoint(f.owned);
     const c = await launchCodex(
       { roots: f.owned },
-      { ...f.input, purpose: "task", sessionId: ulid(), mcp },
+      { ...f.input, purpose: "task", sessionId: ulid(), mcp, retireBridge: close },
     );
     const args = f.launches[0]?.input.args ?? [];
     expect(args).toContain('mcp_servers.localdot.command="/usr/bin/nc"');
@@ -247,7 +449,7 @@ describe("owned Codex launch composition", () => {
       },
     });
     await c.stop();
-    expect(existsSync(socket)).toBe(true);
+    expect(existsSync(socket)).toBe(false);
     expect(readdirSync(f.owned.workRoot)).toEqual([]);
     expect(readdirSync(f.owned.profilesRoot)).toEqual([]);
   });
@@ -528,7 +730,7 @@ describe("owned Codex launch composition", () => {
   });
   it("accepts only an owned task elicitation and discards approval when its epoch retires before writing", async () => {
     const f = fixture(),
-      { mcp } = await privateEndpoint(f.owned),
+      { mcp, close } = await privateEndpoint(f.owned),
       turn = new AbortController();
     const identity: ApprovalIdentity = Object.freeze({
       generation: Object.freeze({ id: 1, signal: new AbortController().signal }),
@@ -549,7 +751,14 @@ describe("owned Codex launch composition", () => {
     };
     const c = await launchCodex(
       { roots: f.owned },
-      { ...f.input, purpose: "task", sessionId: ulid(), mcp, approvalContext: () => approval },
+      {
+        ...f.input,
+        purpose: "task",
+        sessionId: ulid(),
+        mcp,
+        retireBridge: close,
+        approvalContext: () => approval,
+      },
     );
     let wire = "";
     f.stdin.on("data", (chunk) => {

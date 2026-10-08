@@ -2,6 +2,7 @@ import { userInfo } from "node:os";
 import { serve } from "@hono/node-server";
 import { createDesktopdApp, monoNow } from "./app.ts";
 import { MIN_TOKEN_LENGTH } from "./auth.ts";
+import { prepareDesktopBrowser } from "./browser-profile.ts";
 import { launchApp } from "./launch.ts";
 import { ChromiumPerception } from "./perception/cdp.ts";
 import { CuaDriver } from "./perception/driver.ts";
@@ -25,6 +26,9 @@ const port = Number(process.env.LOCALDOT_DESKTOPD_PORT ?? 7700);
 // desktopd runs as the session's user, so its own uid is the session's.
 const uid = userInfo().uid;
 const XHELPER = process.env.LOCALDOT_XHELPER ?? "/opt/localdot/xhelper.py";
+
+// Complete interrupted retirement before exposing desktopd or accepting a new task.
+await prepareDesktopBrowser(null);
 
 // The helper is restarted after a crash; routes answer 503 in between. One start at a time: the
 // 2 s retry must not spawn a second helper while the first is still inside its 5 s ready wait.
@@ -70,6 +74,7 @@ const scaling = async () => {
   return settings === null ? scale : (settings.windowScalingFactor ?? 1);
 };
 const app = createDesktopdApp({
+  prepareBrowser: prepareDesktopBrowser,
   tools: {
     home: process.env.LOCALDOT_HOME_DIR ?? "/config",
     env: process.env,

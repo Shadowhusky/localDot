@@ -13,6 +13,10 @@ import {
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { stream } from "hono/streaming";
+import {
+  DesktopBrowserReady,
+  DesktopBrowserTask,
+} from "../../../../packages/protocol/src/desktop-browser.ts";
 import { bearerMatches } from "./auth.ts";
 import {
   ActivationError,
@@ -45,6 +49,10 @@ export interface DesktopdDeps {
   perception?: PerceptionDeps;
   selfTest?: () => Promise<SelfTestReport>;
   tools?: ToolRouteDeps;
+  prepareBrowser?(
+    taskId: string,
+    signal: AbortSignal,
+  ): Promise<{ taskId: string | null; generation: string }>;
 }
 
 export interface HidpiReport {
@@ -112,6 +120,7 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
         "/files/edit",
         "/files/list",
         "/files/put",
+        "/downloads/place",
         "/browser/read",
         "/browser/navigate",
       ].includes(c.req.path)
@@ -120,6 +129,21 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     return standardBodyLimit(c, next);
   });
   if (deps.tools) addToolRoutes(app, deps.tools);
+
+  app.post("/browser/task", async (c) => {
+    const parsed = DesktopBrowserTask.safeParse(await c.req.json().catch(() => null));
+    if (!parsed.success) return c.text("invalid browser task", 400);
+    if (!deps.prepareBrowser) return c.text("browser task preparation is unavailable", 503);
+    try {
+      const receipt = DesktopBrowserReady.parse(
+        await deps.prepareBrowser(parsed.data.taskId, c.req.raw.signal),
+      );
+      if (receipt.taskId !== parsed.data.taskId) throw new Error("task changed");
+      return c.json(receipt);
+    } catch {
+      return c.text("desktop browser could not be prepared", 503);
+    }
+  });
 
   app.get("/selftest", async (c) => {
     const report: SelfTestReport = deps.selfTest

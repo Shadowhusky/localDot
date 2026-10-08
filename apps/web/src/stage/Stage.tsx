@@ -1,4 +1,4 @@
-import type { LocalDotEvent, ManualInput } from "@localdot/protocol";
+import type { LocalDotEvent, ManualInput, ScreenSelectionSnapshot } from "@localdot/protocol";
 import {
   forwardRef,
   useCallback,
@@ -13,20 +13,15 @@ import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { forgetOldTickets } from "./client-storage.ts";
 import { DesktopFrame } from "./DesktopFrame.tsx";
+import type { ProbeApi } from "./debug-hooks.ts";
 import { type FrameSource, frameTapSupport } from "./frame-source.ts";
 import { manualKey } from "./manual-point.ts";
-import type { Flip, ProbeRect } from "./probe.ts";
-import { StageCanvas, type StageCanvasHandle } from "./StageCanvas.tsx";
+import type { Flip } from "./probe.ts";
+import { type ReplayHandle, StageCanvas, type StageCanvasHandle } from "./StageCanvas.tsx";
 import type { OracleRequest, StageClock, StageViewPatch } from "./worker-protocol.ts";
 
-export interface ProbeApi {
-  start(rect: ProbeRect, threshold?: number): void;
-  stop(): void;
-  flips(): Flip[];
-  clear(): void;
-}
-
 export interface StageHandle {
+  replay: ReplayHandle;
   pushEvents(events: LocalDotEvent[]): void;
   resetSession(): void;
   setClock(clock: StageClock): void;
@@ -35,7 +30,10 @@ export interface StageHandle {
 }
 
 export interface StageProps {
+  mode?: "live" | "replay";
   cell: CellSummary | null;
+  parentId?: string;
+  selection?: ScreenSelectionSnapshot;
   api: ApiClient;
   // The agent has control: the stage wears the xenon rim.
   control?: boolean;
@@ -51,36 +49,49 @@ export interface StageProps {
   };
 }
 
-declare global {
-  interface Window {
-    __localdot?: { probe?: ProbeApi; oracle?: unknown };
-  }
-}
-
 export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
-  { cell, api, control = false, reconnects, listed, manual },
+  { cell, api, control = false, reconnects, listed, manual, mode = "live", parentId, selection },
   ref,
 ) {
-  const support = frameTapSupport();
+  const support =
+    mode === "live"
+      ? frameTapSupport()
+      : typeof VideoFrame !== "undefined" && typeof OffscreenCanvas !== "undefined"
+        ? { ok: true }
+        : {
+            ok: false,
+            reason: "This browser lacks WebCodecs. Open localDot in a current Chromium browser.",
+          };
   const canvas = useRef<StageCanvasHandle>(null);
   const presentedAt = useRef(0);
   const [generation, setGeneration] = useState(0);
   const cellId = cell?.id ?? null;
-  const ready = cell?.state === "ready" && !cell.paused;
+  const surface = selection?.screen ?? "desktop";
+  const revision = selection?.revision ?? 0;
+  const ready =
+    mode === "live" &&
+    cell?.state === "ready" &&
+    !cell.paused &&
+    !cell.fenced &&
+    !cell.replacementPending &&
+    (!selection || selection.cellId === cellId) &&
+    (surface !== "browser" || (!!parentId && parentId !== cellId));
   const owner = useMemo(
-    () => ({ api, cellId, ready, generation, reconnects }),
-    [api, cellId, ready, generation, reconnects],
+    () => ({ api, cellId, ready, generation, reconnects, mode, surface, revision, parentId }),
+    [api, cellId, ready, generation, reconnects, mode, surface, revision, parentId],
   );
   const currentOwner = useRef(owner);
   const sourceOwner = useRef<typeof owner | null>(null);
   const [ticket, setTicket] = useState<{ owner: typeof owner; src: string } | null>(null);
   const [displayOwner, setDisplayOwner] = useState<typeof owner | null>(null);
-  const src = ticket?.owner === owner ? ticket.src : null;
+  const src = mode === "live" && ticket?.owner === owner ? ticket.src : null;
   useLayoutEffect(() => {
+    const leavingReplay = currentOwner.current.mode === "replay" && owner.mode === "live";
     currentOwner.current = owner;
     sourceOwner.current = null;
     presentedAt.current = 0;
     setDisplayOwner(null);
+    if (leavingReplay) canvas.current?.replay.close();
     canvas.current?.detach();
   }, [owner]);
   const flips = useRef<Flip[]>([]);
@@ -99,13 +110,17 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     }
     let cancelled = false;
     api
-      .post<{ path: string }>(`/api/cells/${cellId}/stream-ticket?g=${generation}.${reconnects}`)
+      .post<{ path: string; cellId?: string }>(
+        `/api/cells/${surface === "browser" ? parentId : cellId}/${surface === "browser" ? "browser-stream-ticket" : "stream-ticket"}?g=${generation}.${reconnects}`,
+      )
       .then(
-        ({ path }) => {
+        ({ path, cellId: physicalId }) => {
           if (
             !cancelled &&
-            path.startsWith(`/cells/${cellId}/desktop/`) &&
-            /^\/cells\/[^/]+\/desktop\/[A-Za-z0-9_-]{22}\/$/.test(path)
+            typeof path === "string" &&
+            path.startsWith(`/cells/${cellId}/${surface}/`) &&
+            (surface !== "browser" || physicalId === cellId) &&
+            /^\/cells\/[^/]+\/(?:desktop|browser)\/[A-Za-z0-9_-]{22}\/$/.test(path)
           ) {
             forgetOldTickets({ cellId, livePath: path, listed: listedRef.current });
             setTicket({ owner, src: `${path}#shared` });
@@ -116,14 +131,18 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
     return () => {
       cancelled = true;
     };
-  }, [api, cellId, ready, support.ok, generation, reconnects, owner]);
+  }, [api, cellId, ready, support.ok, generation, reconnects, owner, parentId, surface]);
 
   // Overlays freeze while the stream is not live (spec, error handling); zoom comes from ?zoom= for tests.
   const reconnecting =
+    mode === "live" &&
     !cell?.paused &&
     (cell?.stream.connection === "stalled" || cell?.stream.connection === "disconnected");
-  const paused = !!cell?.paused || reconnecting;
+  const paused = mode === "live" && (!!cell?.paused || reconnecting);
   const manualActive = Boolean(manual);
+  useEffect(() => {
+    canvas.current?.setView({ selection: mode === "live" ? (selection ?? null) : null });
+  }, [mode, selection]);
   useEffect(() => {
     canvas.current?.setView({
       freeze: paused,
@@ -210,6 +229,15 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   }, [params]);
 
   useImperativeHandle(ref, () => ({
+    replay: {
+      open: (source) => canvas.current?.replay.open(source),
+      transport: (transport) => canvas.current?.replay.transport(transport),
+      seek: (tMs, seekMode) => canvas.current?.replay.seek(tMs, seekMode),
+      close: () => canvas.current?.replay.close(),
+      onReplay: (listener) => canvas.current?.replay.onReplay(listener) ?? (() => {}),
+      probe: (command) =>
+        canvas.current?.replay.probe(command) ?? Promise.reject(new Error("stage not ready")),
+    },
     pushEvents: (events) => canvas.current?.pushEvents(events),
     resetSession: () => canvas.current?.resetSession(),
     setClock: (clock) => canvas.current?.setClock(clock),
@@ -239,8 +267,8 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
       <div className={reconnecting ? "stage-veil on" : "stage-veil"} aria-hidden={!reconnecting}>
         <p>Reconnecting…</p>
       </div>
-      {control && <div className="rim" aria-hidden="true" />}
-      {manual && (
+      {mode === "live" && control && <div className="rim" aria-hidden="true" />}
+      {mode === "live" && manual && (
         <button
           type="button"
           className="manual-surface"

@@ -91,6 +91,8 @@ describe("handler generation and control fences", () => {
       computer: { action: "screenshot" },
       browser_read: {},
       browser_navigate: { url: "https://example.com" },
+      browser_upload: { files: ["~/report.txt"] },
+      switch_screen: { screen: "browser" },
       shell: { command: "pwd" },
       files: { op: "read", path: "a" },
       remember: { file: "USER.md", op: "append", text: "x" },

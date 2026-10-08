@@ -1,4 +1,10 @@
-import type { LocalDotEvent } from "@localdot/protocol";
+import type {
+  LocalDotEvent,
+  RecordingGap,
+  ScreenName,
+  ScreenSelectionSnapshot,
+} from "@localdot/protocol";
+import type { PlaybackMap, ReplaySpeed } from "@localdot/stage";
 import type { Flip, ProbeRect } from "./probe.ts";
 import type { PumpStats } from "./pump.ts";
 import type { StageTheme } from "./theme.ts";
@@ -9,10 +15,48 @@ export interface StageClock {
 }
 
 export interface StageViewPatch {
+  selection?: ScreenSelectionSnapshot | null;
   zoom?: number;
   freeze?: boolean;
   reducedMotion?: boolean;
 }
+
+export interface ReplaySource {
+  screen?: ScreenName;
+  geometry?: { w: number; h: number; scale: number };
+  owner?: number;
+  sessionId: string;
+  origin: string;
+  authorization: string;
+  video: { upto: number | null } | null;
+  gaps: RecordingGap[];
+}
+
+export interface ReplayTransport {
+  playing: boolean;
+  speed: ReplaySpeed;
+  map: PlaybackMap;
+  atPlayMs: number;
+}
+
+export type ReplayStatus =
+  | { state: "loading" }
+  | { state: "ready"; firstMs: number | null; lastMs: number | null }
+  | { state: "no-video" }
+  | { state: "error"; message: string };
+
+export type ReplayProbeCommand =
+  | { id: number; op: "enable" }
+  | { id: number; op: "mb-luma"; widthMbs: number; heightMbs: number }
+  | { id: number; op: "thumb"; w: number; h: number }
+  | { id: number; op: "overlay-hash"; tMs: number }
+  | { id: number; op: "stats" };
+
+export type ReplayProbeRequest = ReplayProbeCommand extends infer Command
+  ? Command extends unknown
+    ? Omit<Command, "id">
+    : never
+  : never;
 
 export type WorkerIn =
   | {
@@ -34,6 +78,11 @@ export type WorkerIn =
   | { type: "clock"; clock: StageClock }
   | { type: "view"; view: StageViewPatch }
   | { type: "theme"; theme: StageTheme }
+  | { type: "replay-open"; source: ReplaySource }
+  | { type: "replay-transport"; transport: ReplayTransport }
+  | { type: "replay-seek"; tMs: number; mode: "exact" | "preview" }
+  | { type: "replay-close" }
+  | { type: "replay-probe"; command: ReplayProbeCommand }
   | { type: "oracle"; command: OracleCommand };
 
 export type WorkerOut =
@@ -41,6 +90,10 @@ export type WorkerOut =
   | { type: "error"; message: string }
   | { type: "warn"; message: string }
   | { type: "flip"; flip: Flip }
+  | { type: "replay-time"; tMs: number; playing: boolean; idle: boolean; owner?: number }
+  | { type: "replay-status"; status: ReplayStatus; owner?: number }
+  | { type: "replay-ended"; owner?: number }
+  | { type: "replay-probe-reply"; id: number; reply: unknown }
   | { type: "oracle-reply"; id: number; reply: unknown };
 
 // Task 16 fills these in; declared here so the protocol has one home.

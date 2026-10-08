@@ -1,4 +1,4 @@
-import type { CellRecord } from "./types.ts";
+import type { BrowserCellRecord, CellRecord } from "./types.ts";
 
 export const ISOLATED_GATEWAY_OPTION = "com.docker.network.bridge.gateway_mode_ipv4";
 export const GATE_OFFSET = 10;
@@ -63,18 +63,23 @@ export function homeVolumeSpec(name: string, cellId?: string) {
   };
 }
 
-export function gateSpec(record: CellRecord, image: string) {
+export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) {
   const d = record.docker;
+  const address = record.kind === "browser" ? record.docker.browserIp : record.docker.desktopIp;
   return {
     Image: image,
     User: "nobody",
     Env: [
       `LD_INTERNAL_ADDR=${d.gateInternalIp}`,
       `LD_EGRESS_ADDR=${d.gateEgressIp}`,
-      `LD_DESKTOP_ADDR=${d.desktopIp}`,
+      `LD_DESKTOP_ADDR=${address}`,
       `LD_KEYD_PORT=${record.keydPort}`,
     ],
-    Labels: { "localdot.cell": record.id, "localdot.role": "gate" },
+    Labels: {
+      "localdot.cell": record.id,
+      "localdot.role": "gate",
+      ...(record.kind === "browser" ? { "localdot.parent": record.parentCellId } : {}),
+    },
     ExposedPorts: { [GATE_PORTS.desktopd]: {}, [GATE_PORTS.stream]: {} },
     HostConfig: {
       NetworkMode: d.egressNetwork,
@@ -159,6 +164,10 @@ export function desktopSpec(
     HostConfig: {
       NetworkMode: d.internalNetwork,
       Mounts: [{ Type: "volume", Source: d.homeVolume, Target: "/config" }],
+      Tmpfs: {
+        "/run/localdot-desktop-browser":
+          "rw,nosuid,nodev,noexec,size=256m,uid=1000,gid=1000,mode=0700",
+      },
       CapDrop: ["NET_RAW"],
       ShmSize: DESKTOP_LIMITS.shmBytes,
       Memory: DESKTOP_LIMITS.memoryBytes,

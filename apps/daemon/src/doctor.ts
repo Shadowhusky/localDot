@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import { createServer } from "node:net";
 import type { HairpinGuard, KeydStatus } from "@localdot/protocol";
 import {
@@ -9,7 +8,8 @@ import {
   type DockerVersion,
 } from "./cells/docker.ts";
 import type { Images } from "./cells/images.ts";
-import { ISOLATED_GATEWAY_OPTION, isolatedNetworkSpec } from "./cells/spec.ts";
+import { imageVerdict } from "./doctor-image.ts";
+import { runDoctorNetworkProbe } from "./doctor-network.ts";
 import type { DockerSocket } from "./doctor-socket.ts";
 import type { KeydClient } from "./keyd/client.ts";
 
@@ -32,6 +32,7 @@ export interface DoctorDeps {
   socket?: DockerSocket;
   // Docker tests name their probe localdot-test-*.
   probeNetwork?: string;
+  signal?: AbortSignal;
   // How long the first /version may take before the socket counts as not answering.
   versionDeadlineMs?: number;
   keyd?: Pick<KeydClient, "status">;
@@ -39,20 +40,19 @@ export interface DoctorDeps {
 
 // Isolated gateway mode for internal networks shipped with Engine 28; S3 verified it on 29.2.
 export const MIN_ENGINE_MAJOR = 28;
-const PROBE_NETWORK = "localdot-doctor-probe";
-// A probe this old belongs to no running doctor: a run takes seconds, so another doctor's probe
-// is never this old.
-const STALE_PROBE_MS = 5 * 60_000;
 const ENGINE_CHECKS = ["docker-engine", "isolated-gateway-mode", "image-desktop", "image-gate"];
 const TIMED_OUT = Symbol("timed out");
 
 export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
-  const checks = [
-    ...(await dockerChecks(deps)),
-    await portCheck(deps.port),
-    ...(deps.keyd ? await keydChecks(deps.keyd) : []),
-  ];
-  return { ok: checks.every((c) => c.ok), checks };
+  if (deps.signal?.aborted)
+    return {
+      ok: false,
+      checks: [{ name: "interrupted", ok: false, detail: "Diagnostics interrupted." }],
+    };
+  const checks = await dockerChecks(deps);
+  if (deps.signal?.aborted) return { ok: false, checks };
+  checks.push(await portCheck(deps.port), ...(deps.keyd ? await keydChecks(deps.keyd) : []));
+  return { ok: !deps.signal?.aborted && checks.every((c) => c.ok), checks };
 }
 
 async function keydChecks(keyd: Pick<KeydClient, "status">): Promise<DoctorCheck[]> {
@@ -110,6 +110,7 @@ async function dockerChecks({
   images,
   socket,
   probeNetwork,
+  signal,
   versionDeadlineMs = 10_000,
 }: DoctorDeps): Promise<DoctorCheck[]> {
   let v: DockerVersion;
@@ -138,7 +139,7 @@ async function dockerChecks({
     ];
   }
   const major = Number(v.Version.split(".")[0]);
-  return [
+  const checks = [
     socketCheck(docker, socket, `Engine ${v.Version}, API ${v.ApiVersion}`),
     {
       name: "docker-engine",
@@ -148,13 +149,16 @@ async function dockerChecks({
           ? `Engine ${v.Version}`
           : `Engine ${v.Version}; ${MIN_ENGINE_MAJOR}+ is required`,
     },
-    await isolatedGatewayCheck(
-      docker,
-      // A random suffix: a probe left behind by a crashed run must not make every later run a 409.
-      probeNetwork ?? `${PROBE_NETWORK}-${randomBytes(4).toString("hex")}`,
-    ),
-    await imageCheck(docker, "image-desktop", images.desktop, "cells/desktop/build.sh"),
-    await imageCheck(docker, "image-gate", images.gate, "cells/gate/build.sh"),
+    {
+      name: "isolated-gateway-mode",
+      ...(await runDoctorNetworkProbe(docker.socketPath, probeNetwork, signal)),
+    },
+  ];
+  if (signal?.aborted) return [...checks, ...skipped(["image-desktop", "image-gate"])];
+  return [
+    ...checks,
+    await imageCheck(docker, "image-desktop", images.desktop, "cells/desktop/build.sh", v),
+    await imageCheck(docker, "image-gate", images.gate, "cells/gate/build.sh", v),
   ];
 }
 
@@ -190,93 +194,6 @@ function skipped(names: string[]): DoctorCheck[] {
   return names.map((name) => ({ name, ok: false, detail: "skipped" }));
 }
 
-interface ProbeInspect {
-  Internal?: unknown;
-  Options?: Record<string, string> | null;
-  IPAM?: { Config?: { Subnet?: string; Gateway?: string }[] | null } | null;
-}
-
-async function isolatedGatewayCheck(docker: DockerClient, probe: string): Promise<DoctorCheck> {
-  const name = "isolated-gateway-mode";
-  await removeStaleProbes(docker);
-  let result: DoctorCheck;
-  let refused = false;
-  try {
-    // No localdot.cell label, so nothing that looks for cells ever finds the probe.
-    const created = await docker
-      .request<{ Id: string }>({
-        method: "POST",
-        path: "/networks/create",
-        body: isolatedNetworkSpec(probe),
-      })
-      .catch((err: unknown) => {
-        // A 4xx means Docker made nothing, and the name may be another doctor's probe.
-        refused = err instanceof DockerError && err.status >= 400 && err.status < 500;
-        throw err;
-      });
-    const info = await docker.request<ProbeInspect>({
-      method: "GET",
-      path: `/networks/${encodeURIComponent(created.Id)}`,
-    });
-    result = { name, ...gatewayVerdict(info) };
-  } catch (err) {
-    result = { name, ok: false, detail: messageOf(err) };
-  }
-  if (refused) return result;
-  // By name, and whatever else happened above: a create whose reply was lost may still have made it.
-  const leftover = await docker
-    .request({ method: "DELETE", path: `/networks/${encodeURIComponent(probe)}` })
-    .then(
-      () => undefined,
-      (err: unknown) => (err instanceof DockerError && err.status === 404 ? undefined : err),
-    );
-  if (leftover === undefined) return result;
-  return {
-    name,
-    ok: false,
-    detail: `${result.detail}; could not remove the probe network (docker network rm ${probe}): ${messageOf(leftover)}`,
-  };
-}
-
-function gatewayVerdict(info: ProbeInspect): { ok: boolean; detail: string } {
-  const config = info.IPAM?.Config?.[0];
-  if (!config?.Subnet) {
-    return { ok: false, detail: "the engine created the probe network with no IPv4 subnet" };
-  }
-  if (info.Internal !== true) {
-    return { ok: false, detail: "the engine made the probe network, but not internal" };
-  }
-  // The API serializes an unset gateway as "" (or leaves it out); the CLI prints "invalid IP".
-  const raw = config.Gateway;
-  const gateway = raw && raw !== "invalid IP" ? raw : undefined;
-  const honoured = info.Options?.[ISOLATED_GATEWAY_OPTION] === "isolated" && !gateway;
-  return {
-    ok: honoured,
-    detail: honoured
-      ? "internal networks get no gateway address"
-      : `the engine still assigns a gateway (${gateway ?? "option dropped"}) to an isolated internal network`,
-  };
-}
-
-// A doctor stopped mid-probe (killed, or the Mac slept) leaves its network behind.
-async function removeStaleProbes(docker: DockerClient): Promise<void> {
-  const prefix = `${PROBE_NETWORK}-`;
-  const networks = await docker
-    .request<{ Id: string; Name: string; Created: string }[]>({
-      method: "GET",
-      path: "/networks",
-      query: { filters: JSON.stringify({ name: [prefix] }) },
-    })
-    .catch(() => []);
-  for (const network of networks) {
-    const age = Date.now() - Date.parse(network.Created);
-    if (!network.Name.startsWith(prefix) || !(age > STALE_PROBE_MS)) continue;
-    await docker
-      .request({ method: "DELETE", path: `/networks/${encodeURIComponent(network.Id)}` })
-      .catch(() => {});
-  }
-}
-
 async function withDeadline<T>(work: Promise<T>, ms: number): Promise<T | typeof TIMED_OUT> {
   let timer: NodeJS.Timeout | undefined;
   const late = new Promise<typeof TIMED_OUT>((resolve) => {
@@ -294,10 +211,14 @@ async function imageCheck(
   name: string,
   image: string,
   buildScript: string,
+  engine: DockerVersion,
 ): Promise<DoctorCheck> {
   try {
-    await docker.request({ method: "GET", path: `/images/${encodeURIComponent(image)}/json` });
-    return { name, ok: true, detail: image };
+    const inspection = await docker.request<unknown>({
+      method: "GET",
+      path: `/images/${encodeURIComponent(image)}/json`,
+    });
+    return { name, ...imageVerdict(image, engine, inspection) };
   } catch (err) {
     if (err instanceof DockerError && err.status === 404) {
       return { name, ok: false, detail: `${image} is missing: build it with ${buildScript}` };

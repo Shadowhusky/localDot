@@ -3,6 +3,7 @@ import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
 import { ApprovalCard, PauseSnapshot } from "./safety.ts";
+import { ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
@@ -50,6 +51,7 @@ export const SessionEnd = event(
   "session.end",
   z.object({ reason: z.enum(["done", "stopped", "error"]) }),
 );
+export const ScreenSwitch = event("screen.switch", ScreenSwitchData);
 export const AgentState = event(
   "agent.state",
   z.object({
@@ -372,6 +374,7 @@ export const SubscriptionUsage = event("subscription.usage", SubscriptionUsageDa
 export const LocalDotEvent = z.discriminatedUnion("type", [
   SessionStart,
   SessionEnd,
+  ScreenSwitch,
   AgentState,
   Heartbeat,
   ThoughtDelta,

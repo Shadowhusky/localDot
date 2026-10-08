@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { chmod, type FileHandle, lstat, open, unlink } from "node:fs/promises";
+import { type FileHandle, lstat, open, unlink } from "node:fs/promises";
 import https from "node:https";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
@@ -18,6 +18,7 @@ import {
   type OwnedCodexRoots,
   PRIVATE_CREATE_FLAGS,
   PRIVATE_READ_FLAGS,
+  persistCodexInstallation,
   publishOwnedCodexDirectory,
   removeOwnedCodexDirectory,
 } from "./roots.ts";
@@ -267,6 +268,19 @@ export class VerifiedCodexInstaller implements CodexInstaller {
       signal.throwIfAborted();
       const old = await this.verifiedInstallation(signal);
       if (old) {
+        // A prior rename may have succeeded without a confirmed directory sync. A successful
+        // retry revalidates first and completes durability, without replacing the installation.
+        for (const binary of release.binaries) {
+          signal.throwIfAborted();
+          const file = await open(join(old.binDir, binary.installedName), PRIVATE_READ_FLAGS);
+          try {
+            await file.sync();
+          } finally {
+            await file.close();
+          }
+        }
+        signal.throwIfAborted();
+        await persistCodexInstallation(this.roots, old.binDir);
         return old;
       }
       assertOwnedCodexRoots(this.roots);
@@ -279,13 +293,23 @@ export class VerifiedCodexInstaller implements CodexInstaller {
       await unlink(archive);
       for (const binary of release.binaries) {
         signal.throwIfAborted();
-        await chmod(join(staging.path, binary.installedName), 0o555);
+        const file = await open(join(staging.path, binary.installedName), PRIVATE_READ_FLAGS);
+        try {
+          const stat = await file.stat();
+          if (!stat.isFile() || stat.nlink !== 1 || stat.uid !== process.getuid?.())
+            throw new CodexInstallError("storage_failed");
+          await file.chmod(0o555);
+          await file.sync();
+        } finally {
+          await file.close();
+        }
       }
       signal.throwIfAborted();
       assertOwnedCodexRoots(this.roots);
       const binDir = codexInstallDirectory(this.roots, releaseInstallKey(release));
       // Rename is the publication point. A cancellation before it publishes nothing; after
-      // successful rename the verified installation is committed and remains available.
+      // successful rename the verified installation remains available. Readiness additionally
+      // requires the directory change to be durable; a failed sync never removes that target.
       await publishOwnedCodexDirectory(staging, binDir, signal);
       const installed: InstalledCodex = Object.freeze({
         version: CODEX_VERSION,

@@ -2,10 +2,14 @@ import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
+  fsyncSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   statSync,
@@ -133,11 +137,58 @@ export class EventLog {
   }
 
   hasSession(sessionId: string): boolean {
-    return ULID_PATTERN.test(sessionId) && existsSync(join(this.#root, sessionId));
+    return (
+      ULID_PATTERN.test(sessionId) &&
+      !this.hasPendingDeletion(sessionId) &&
+      existsSync(join(this.#root, sessionId))
+    );
+  }
+
+  hasPendingDeletion(sessionId: string): boolean {
+    return ULID_PATTERN.test(sessionId) && existsSync(join(this.#root, ".deleting", sessionId));
   }
 
   read(sessionId: string, fromSeq = 0): LocalDotEvent[] {
     return readValid(this.#existingFileOf(sessionId)).events.filter((e) => e.seq >= fromSeq);
+  }
+
+  logFile(sessionId: string): string {
+    return this.#existingFileOf(sessionId);
+  }
+  forget(sessionId: string): void {
+    const pending = this.hasPendingDeletion(sessionId);
+    if (!pending) this.#existingFileOf(sessionId);
+    this.#states.delete(sessionId);
+    const staging = join(this.#root, ".deleting");
+    if (!pending) {
+      mkdirSync(staging, { recursive: true, mode: 0o700 });
+      syncDirectory(this.#root);
+      renameSync(join(this.#root, sessionId), join(staging, sessionId));
+      syncDirectory(staging);
+      syncDirectory(this.#root);
+    }
+    this.#finishDeletion(sessionId);
+  }
+
+  #finishDeletion(sessionId: string): void {
+    this.#db.exec("BEGIN IMMEDIATE");
+    try {
+      this.#deleteEvents.run(sessionId);
+      this.#db.prepare("DELETE FROM sessions WHERE id = ?").run(sessionId);
+      if (
+        this.#db
+          .prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'session_cards'")
+          .get()
+      )
+        this.#db.prepare("DELETE FROM session_cards WHERE id = ?").run(sessionId);
+      this.#db.exec("COMMIT");
+    } catch (error) {
+      if (this.#db.isTransaction) this.#db.exec("ROLLBACK");
+      throw error;
+    }
+    const staging = join(this.#root, ".deleting");
+    rmSync(join(staging, sessionId), { recursive: true, force: true });
+    syncDirectory(staging);
   }
 
   originOf(sessionId: string): number {
@@ -149,13 +200,14 @@ export class EventLog {
   }
 
   listSessions(): SessionSummary[] {
-    return this.#db
+    const sessions = this.#db
       .prepare(`
         SELECT s.id AS id, s.title AS title, s.started_at AS startedAt, COUNT(e.seq) AS events
         FROM sessions s LEFT JOIN events e ON e.session_id = s.id
         GROUP BY s.id ORDER BY s.started_at DESC, s.id DESC
       `)
       .all() as unknown as SessionSummary[];
+    return sessions.filter((session) => !this.hasPendingDeletion(session.id));
   }
 
   subscribe(listener: EventListener): () => void {
@@ -179,6 +231,17 @@ export class EventLog {
   }
 
   #recoverAll(): void {
+    const staging = join(this.#root, ".deleting");
+    if (existsSync(staging)) {
+      for (const entry of readdirSync(staging, { withFileTypes: true })) {
+        if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name)) continue;
+        try {
+          this.#finishDeletion(entry.name);
+        } catch {
+          console.warn("A pending session deletion will be retried.");
+        }
+      }
+    }
     for (const entry of readdirSync(this.#root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name)) continue;
       try {
@@ -194,10 +257,8 @@ export class EventLog {
     // Bytes this log did not write (a stray or torn write) send the session back through recovery.
     if (cached && sizeOf(cached.file) === cached.bytes) return cached;
     const file = this.#existingFileOf(sessionId);
-    const { events, validBytes } = readValid(file);
-    if (existsSync(file)) truncateSync(file, validBytes);
-    const lastSeq = events.reduce((max, e) => Math.max(max, e.seq), -1);
-    const lastT = events.reduce((max, e) => Math.max(max, e.t), 0);
+    const { validBytes, lastSeq, lastT } = readTail(file);
+    if (existsSync(file) && sizeOf(file) !== validBytes) truncateSync(file, validBytes);
     const state: SessionState = {
       file,
       bytes: validBytes,
@@ -207,7 +268,15 @@ export class EventLog {
       indexStale: false,
     };
     this.#states.set(sessionId, state);
-    this.#updateIndex(sessionId, state, () => this.#rebuildIndex(sessionId, events));
+    this.#updateIndex(sessionId, state, () => {
+      const row = this.#db
+        .prepare(
+          "SELECT (SELECT COUNT(*) FROM sessions WHERE id = ?) AS has, (SELECT MAX(seq) FROM events WHERE session_id = ?) AS last",
+        )
+        .get(sessionId, sessionId) as { has: number; last: number | null };
+      if (row.has !== 1 || (row.last ?? -1) !== lastSeq)
+        this.#rebuildIndex(sessionId, readValid(file).events);
+    });
     return state;
   }
 
@@ -265,6 +334,15 @@ export class EventLog {
   }
 }
 
+function syncDirectory(directory: string): void {
+  const descriptor = openSync(directory, "r");
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function sizeOf(file: string): number {
   return statSync(file, { throwIfNoEntry: false })?.size ?? 0;
 }
@@ -314,4 +392,44 @@ function readMeta(dir: string, id: string): SessionMeta {
   const meta: SessionMeta = { id, title: null, startedAt: new Date(ulidTime(id)).toISOString() };
   writeMeta(dir, meta);
   return meta;
+}
+
+function readTail(file: string): { validBytes: number; lastSeq: number; lastT: number } {
+  const size = sizeOf(file);
+  const empty = { validBytes: 0, lastSeq: -1, lastT: 0 };
+  if (!size) return empty;
+  const fd = openSync(file, "r");
+  try {
+    let window = Math.min(size, 64 * 1024);
+    while (true) {
+      const start = size - window;
+      const bytes = Buffer.alloc(window);
+      let read = 0;
+      while (read < window) {
+        const n = readSync(fd, bytes, read, window - read, start + read);
+        if (!n) break;
+        read += n;
+      }
+      const actual = bytes.subarray(0, read);
+      const end = actual.lastIndexOf(10);
+      if (end >= 0) {
+        const validBytes = start + end + 1;
+        let lineEnd = end;
+        while (lineEnd >= 0) {
+          const previous = lineEnd === 0 ? -1 : actual.lastIndexOf(10, lineEnd - 1);
+          const lineStart = previous + 1;
+          if (previous < 0 && start > 0) break;
+          const event = parseLine(actual.subarray(lineStart, lineEnd).toString("utf8"));
+          if (event) return { validBytes, lastSeq: event.seq, lastT: event.t };
+          if (previous < 0) break;
+          lineEnd = previous;
+        }
+        if (start === 0) return { ...empty, validBytes };
+      }
+      if (start === 0) return empty;
+      window = Math.min(size, window * 4);
+    }
+  } finally {
+    closeSync(fd);
+  }
 }

@@ -9,12 +9,9 @@ export interface TokenHost {
   history: { replaceState(data: unknown, unused: string, url?: string): void };
 }
 
-// The daemon opens http://127.0.0.1:4750/#token=<t>. The fragment never reaches the daemon, and it
-// leaves the address bar as soon as it is read. It does stay in the browser's history: the browser
-// records the visit when the navigation commits, before any script can run. That is an accepted
-// residual (the spec's risks): the token works only from this machine, so reading it from history
-// gives no more than reading the user's token file. The token is returned, not stored: the caller
-// keeps it once the daemon has accepted it.
+// Legacy development helper. Startup now generates an expiring #code link; App reads both via
+// takeInstallLink. Manually supplied reusable token links can remain in browser history, so
+// production startup/CLI output must never generate them.
 export function takeFragmentToken(host: TokenHost = window): string | null {
   const given = new URLSearchParams(host.location.hash.replace(/^#/, "")).get("token");
   if (given === null) return null;

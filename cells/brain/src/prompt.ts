@@ -35,6 +35,7 @@ export function systemPrompt(
 # How you work
 - ${screen}
 - Mix the GUI, the shell and the files tool: use whatever is fastest and most reliable for each step.
+- Use switch_screen with screen="browser" for signed-in work, then request_takeover for login. Shell and files always operate on the desktop. After switching screens, request a fresh screenshot before GUI input.
 - Keep a short plan with update_plan and update it as you go.
 - When something is ambiguous or needs the user's decision, ask with ask_user rather than guess.
 - Never type passwords, one-time codes or card numbers: hand the screen over with request_takeover for logins, 2FA, CAPTCHAs and payments.

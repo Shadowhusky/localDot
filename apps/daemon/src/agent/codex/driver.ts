@@ -937,6 +937,8 @@ export class CodexDriver {
     };
     const startup = (async () => {
       check();
+      await session.prepareScreens(generation);
+      check();
       if (session.safetyPause) throw new Error("Native startup is fenced by Pause.");
       endpoint = await d.openEndpoint({
         session,

@@ -10,13 +10,15 @@ import {
 } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { FakeOrchestrator } from "../cells/testing/fake-orchestrator.ts";
-import { NO_STREAM } from "../cells/types.ts";
+import { NO_STREAM, type StreamState } from "../cells/types.ts";
 import type { Clock } from "../clock.ts";
+import { DesktopdClient } from "../desktopd/client.ts";
+import { ClockMap } from "../desktopd/clock-map.ts";
 import { DesktopdRegistry } from "../desktopd/registry.ts";
 import { FakeDesktopd, type FakeScript } from "../desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "./frames.ts";
-import { ActionGateway } from "./gateway.ts";
+import { type ActionContext, ActionGateway, type NativeScreenBinding } from "./gateway.ts";
 import { DEFAULT_ONSET_TABLE } from "./onset-table.ts";
 import { keepPolicy } from "./ring-onset.ts";
 
@@ -104,6 +106,173 @@ const search = (point = { x: 300, y: 400 }) => ({
   },
   window: 77,
   ms: 12,
+});
+
+function boundScreen(s: ReturnType<typeof setup>) {
+  const fake = new FakeDesktopd({ hitTest: (point) => ({ ...search(point), window: null }) });
+  const client = new DesktopdClient(
+    { baseUrl: "http://127.0.0.1:3", token: fake.token },
+    fake.fetchImpl,
+  );
+  const abort = new AbortController();
+  const listeners = new Set<() => void>();
+  let stream: StreamState = {
+    ...NO_STREAM,
+    connection: "live" as const,
+    viewers: 1,
+  };
+  const screen: NativeScreenBinding = {
+    cellId: ulid(),
+    parentCellId: s.cellId,
+    scale: 2,
+    device: {
+      client,
+      clocks: new ClockMap(
+        async () => (await client.clock()).mono,
+        () => s.clock.nowMicros(),
+      ),
+    },
+    signal: abort.signal,
+    check: () => abort.signal.throwIfAborted(),
+    stream: () => stream,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    },
+  };
+  const ctx: ActionContext = {
+    source: "agent",
+    sessionId: s.sessionId,
+    cellId: screen.cellId,
+    screen,
+    authorizeAgent: async () => ({ consume: () => true }),
+    beforeEffect: () => true,
+  };
+  return {
+    fake,
+    abort,
+    screen,
+    ctx,
+    listeners,
+    update: (patch: Partial<typeof stream>) => {
+      stream = { ...stream, ...patch };
+      for (const listener of listeners) listener();
+    },
+  };
+}
+
+describe("ActionGateway admitted screen binding", () => {
+  it("routes a browser action to its bound device and uses its stream and scale", async () => {
+    const s = setup({}, { scale: 1 }),
+      b = boundScreen(s);
+    s.cells.updateStream(s.cellId, { connection: "stalled" });
+    const authorize = vi.fn(b.ctx.authorizeAgent!);
+    const result = await s.gateway.run(
+      { ...b.ctx, authorizeAgent: authorize },
+      { verb: "click", point: { x: 120, y: 80 }, speed: "instant" },
+    );
+    expect(result).toMatchObject({ ok: true });
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(s.fake.calls).toHaveLength(0);
+    expect(b.fake.calls.filter((c) => c.path === "/input").at(-1)?.body).toMatchObject({
+      input: { kind: "click", at: { x: 240, y: 160 } },
+    });
+    expect(s.gateway.cursorOf(b.screen.cellId)).toEqual({ x: 240, y: 160 });
+    s.registry.dispose();
+    s.eventLog.close();
+  });
+
+  it.each(["denied", "revoked", "changed", "parent-fenced", "effect-paused"] as const)(
+    "refuses %s approval before physical input",
+    async (mode) => {
+      const s = setup(),
+        b = boundScreen(s);
+      if (mode === "effect-paused") b.ctx.beforeEffect = () => false;
+      b.ctx.authorizeAgent = async () => {
+        if (mode === "denied") return undefined;
+        if (mode === "revoked") b.abort.abort();
+        if (mode === "changed")
+          b.fake.script.hitTest = (point) => ({
+            ...search(point),
+            target: { ...search(point).target, name: "Different action" },
+            window: null,
+          });
+        if (mode === "parent-fenced")
+          s.cells.emit({ ...s.cells.get(s.cellId)!, fenced: { revision: 1 } });
+        return { consume: () => true };
+      };
+      const result = await s.gateway.run(b.ctx, {
+        verb: "click",
+        point: { x: 120, y: 80 },
+        speed: "instant",
+      });
+      expect(result.ok).toBe(false);
+      expect(b.fake.calls.filter((c) => c.path === "/input")).toHaveLength(0);
+      expect(s.fake.calls).toHaveLength(0);
+      s.registry.dispose();
+      s.eventLog.close();
+    },
+  );
+
+  it.each(["live", "lease-aborted", "parent-paused"] as const)(
+    "waits on the browser stream and handles %s",
+    async (end) => {
+      const s = setup(),
+        b = boundScreen(s);
+      const baseListeners = s.cells.listeners.size;
+      b.update({ connection: "stalled" });
+      const running = s.gateway.run(b.ctx, {
+        verb: "click",
+        point: { x: 120, y: 80 },
+        speed: "instant",
+      });
+      for (let i = 0; i < 100 && b.listeners.size === 0; i++)
+        await new Promise((r) => setImmediate(r));
+      expect(b.listeners.size).toBe(1);
+      expect(b.fake.calls.filter((c) => c.path === "/input")).toHaveLength(0);
+      if (end === "live") b.update({ connection: "live" });
+      if (end === "lease-aborted") b.abort.abort();
+      if (end === "parent-paused") s.cells.emit({ ...s.cells.get(s.cellId)!, paused: true });
+      const result = await running;
+      expect(result.ok).toBe(end === "live");
+      expect(b.listeners.size).toBe(0);
+      expect(s.cells.listeners.size).toBe(baseListeners);
+      s.registry.dispose();
+      s.eventLog.close();
+    },
+  );
+
+  it("refuses a physical cell mismatch and a late screenshot from a revoked screen", async () => {
+    const s = setup(),
+      b = boundScreen(s);
+    expect(
+      (await s.gateway.run({ ...b.ctx, cellId: s.cellId }, { verb: "key", combo: ["ENTER"] })).ok,
+    ).toBe(false);
+    const waiting = Promise.withResolvers<Awaited<ReturnType<DesktopdClient["observe"]>>>();
+    let observingStarted = false;
+    b.screen.device.client.observe = () => {
+      observingStarted = true;
+      return waiting.promise;
+    };
+    const observing = s.gateway.observe(b.ctx);
+    for (let i = 0; i < 100 && !observingStarted; i++) await new Promise((r) => setImmediate(r));
+    expect(observingStarted).toBe(true);
+    b.abort.abort();
+    waiting.resolve({
+      frameId: ulid(),
+      width: 1280,
+      height: 800,
+      image: "",
+      pointer: { x: 0, y: 0 },
+      windows: [],
+    });
+    await expect(observing).rejects.toThrow();
+    expect(s.ofType("observe")).toHaveLength(0);
+    s.registry.dispose();
+    s.eventLog.close();
+  });
 });
 
 describe("ActionGateway click", () => {

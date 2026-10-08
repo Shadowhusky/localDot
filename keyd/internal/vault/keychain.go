@@ -9,26 +9,23 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// errSecItemNotFound is the exit status /usr/bin/security uses for a missing item.
-const errSecItemNotFound = 44
-
-// security -i runs the first 4,095 characters of a line as one command and the rest as another,
-// so a value is stored in chunks that fit one line: 1,536 bytes are 3,072 hex characters, after
-// at most about 230 of command.
+// Preserve the existing versioned item format while moving its ACL owner to signed keyd.
 const (
 	chunkBytes      = 1536
 	maxChunks       = (maxValueLen + chunkBytes - 1) / chunkBytes
 	keychainTimeout = 5 * time.Second
 )
 
-// Keychain stores values as generic passwords in the login keychain through /usr/bin/security.
-// Values travel hex-encoded on the tool's stdin, never on its command line. A value is split into
+// Keychain stores generic passwords through a bounded child of the same signed keyd executable.
+// Security.framework gives keyd the explicit trusted-app ACL. Values travel on stdin, never argv.
+// A value is split into
 // chunk items <id>.0, <id>.1, …; the item <id> names their count and the write that made them, so
 // a read never mixes two writes. The tool's output never leaves keyd: it can echo a value, so an
 // error names only the operation, the item and the exit status.
@@ -38,15 +35,26 @@ type Keychain struct {
 	// One deadline covers every chunk, verification and best-effort cleanup.
 	// Tests shorten it; production always uses keychainTimeout.
 	timeout time.Duration
+	// Package-local subprocess injection for offline fixtures; never populated by NewKeychain.
+	configureCommand func(*exec.Cmd)
 }
 
 func NewKeychain(service string) *Keychain {
-	return &Keychain{Service: service, Path: "/usr/bin/security"}
+	// An unavailable executable produces a closed failure, never a PATH-based fallback.
+	path, _ := os.Executable()
+	return &Keychain{Service: service, Path: path}
+}
+
+// Check verifies the native helper and its parent identity without opening a keychain.
+func (k *Keychain) Check() error {
+	ctx, cancel := k.deadline()
+	defer cancel()
+	return k.run(ctx, "check", "status", nil, nil)
 }
 
 // Put writes the chunks, then the item that names them, then reads the value back: a write the
-// tool split, cut short or refused is an error, never a stored fragment. The id reaches the
-// security -i line as text, so only a valid one is written, and only a value Delete can remove.
+// helper cut short or refused is an error, never a stored fragment. Only validated item IDs
+// and values Delete can remove whole are accepted.
 func (k *Keychain) Put(id string, value []byte) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("keychain: %q is not a secret id", id)
@@ -84,10 +92,10 @@ func (k *Keychain) Put(id string, value []byte) error {
 }
 
 // abandon ends a failed Put. Once the Put has written an item the old value no longer reads back,
-// so the whole item goes, best effort. A first command that failed normally
-// changed nothing, but a timed-out command may already have written its chunk.
+// so the whole item goes, best effort. Only a known pre-effect refusal may claim the previous
+// value is unchanged; a failed or timed-out helper may already have written its chunk.
 func (k *Keychain) abandon(ctx context.Context, id string, wrote bool, err error) error {
-	if !wrote && ctx.Err() == nil {
+	if !wrote && ctx.Err() == nil && errors.Is(err, errUnchanged) {
 		return fmt.Errorf("%w (%w)", err, errUnchanged)
 	}
 	_ = k.delete(ctx, id)
@@ -97,6 +105,9 @@ func (k *Keychain) abandon(ctx context.Context, id string, wrote bool, err error
 }
 
 func (k *Keychain) Get(id string) ([]byte, error) {
+	if !idPattern.MatchString(id) {
+		return nil, errors.New("keychain: invalid secret id")
+	}
 	ctx, cancel := k.deadline()
 	defer cancel()
 	return k.get(ctx, id)
@@ -130,6 +141,9 @@ func (k *Keychain) get(ctx context.Context, id string) ([]byte, error) {
 // Delete removes the item and every chunk it may have had. A chunk it cannot remove is an error even
 // when the item is already gone, so a retry never reports success over a fragment left behind.
 func (k *Keychain) Delete(id string) error {
+	if !idPattern.MatchString(id) {
+		return errors.New("keychain: invalid secret id")
+	}
 	ctx, cancel := k.deadline()
 	defer cancel()
 	return k.delete(ctx, id)
@@ -146,27 +160,35 @@ func (k *Keychain) delete(ctx context.Context, id string) error {
 	return err
 }
 
-// add writes one item in a security -i session of one line, so the exit status is that line's.
+// The child authenticates its signed parent before any Keychain access.
 func (k *Keychain) add(ctx context.Context, account, data string) error {
-	line := fmt.Sprintf("add-generic-password -U -s %s -a %s -l localDot-%s -w %s\n", k.Service, account, account, data)
-	return k.run(ctx, "store", account, strings.NewReader(line), nil, "-i")
+	return k.run(ctx, "store", account, strings.NewReader(data), nil)
 }
 
 func (k *Keychain) find(ctx context.Context, account string) (string, error) {
 	var out keychainOutput
-	if err := k.run(ctx, "read", account, nil, &out, "find-generic-password", "-s", k.Service, "-a", account, "-w"); err != nil {
+	if err := k.run(ctx, "read", account, nil, &out); err != nil {
 		return "", err
 	}
 	return strings.TrimSpace(out.String()), nil
 }
 
 func (k *Keychain) remove(ctx context.Context, account string) error {
-	return k.run(ctx, "delete", account, nil, nil, "delete-generic-password", "-s", k.Service, "-a", account)
+	return k.run(ctx, "delete", account, nil, nil)
 }
 
 // run reports only how the tool ended; what it printed is dropped.
-func (k *Keychain) run(ctx context.Context, op, account string, stdin io.Reader, stdout io.Writer, args ...string) error {
-	cmd := exec.CommandContext(ctx, k.Path, args...)
+func (k *Keychain) run(ctx context.Context, op, account string, stdin io.Reader, stdout io.Writer) error {
+	if (k.Service != "localdot-keyd" && k.Service != "localdot-keyd-test") || !accountPattern.MatchString(account) {
+		return fmt.Errorf("keychain: invalid item (%w)", errUnchanged)
+	}
+	cmd := exec.CommandContext(ctx, k.Path, "keychain-item", op, k.Service, account)
+	// Do not pass provider credentials, loader hooks, HOME overrides or other ambient secrets.
+	cmd.Env = []string{"PATH=/usr/bin:/bin", "LANG=en_US.UTF-8"}
+	cmd.Dir = "/"
+	if k.configureCommand != nil {
+		k.configureCommand(cmd)
+	}
 	// Do not wait indefinitely for an inherited stdout/stdin pipe after the
 	// process has exited or was killed at its deadline.
 	cmd.WaitDelay = 100 * time.Millisecond
@@ -175,18 +197,20 @@ func (k *Keychain) run(ctx context.Context, op, account string, stdin io.Reader,
 	var exit *exec.ExitError
 	switch {
 	case ctx.Err() != nil:
-		return fmt.Errorf("keychain: %s %s: security timed out", op, account)
+		return fmt.Errorf("keychain: %s %s: helper timed out", op, account)
 	case err == nil:
 		return nil
-	case errors.As(err, &exit) && exit.ExitCode() == errSecItemNotFound:
+	case errors.As(err, &exit) && exit.ExitCode() == helperNotFound && op != "store":
 		return ErrNotFound
+	case errors.As(err, &exit) && exit.ExitCode() == helperUnchanged:
+		return fmt.Errorf("keychain: %s %s: helper refused before changing the value (%w)", op, account, errUnchanged)
 	case errors.As(err, &exit):
-		return fmt.Errorf("keychain: %s %s: security exited with status %d", op, account, exit.ExitCode())
+		return fmt.Errorf("keychain: %s %s: helper exited with status %d", op, account, exit.ExitCode())
 	}
 	if cmd.Process == nil {
-		return fmt.Errorf("keychain: %s %s: security could not start (%w)", op, account, errUnchanged)
+		return fmt.Errorf("keychain: %s %s: helper could not start (%w)", op, account, errUnchanged)
 	}
-	return fmt.Errorf("keychain: %s %s: security failed", op, account)
+	return fmt.Errorf("keychain: %s %s: helper failed", op, account)
 }
 
 func (k *Keychain) deadline() (context.Context, context.CancelFunc) {

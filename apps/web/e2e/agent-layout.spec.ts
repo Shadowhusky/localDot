@@ -133,7 +133,8 @@ test.afterAll(async () => {
 });
 
 async function load(page: Page, activeComposer = false) {
-  const shownCell = activeComposer ? { ...pausedCell, paused: false } : pausedCell;
+  const { paused: _paused, ...activeCell } = pausedCell;
+  const shownCell = activeComposer ? activeCell : pausedCell;
   if (activeComposer)
     await page.route(`${origin}/api/cells`, (route) =>
       route.fulfill({

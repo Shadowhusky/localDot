@@ -21,7 +21,7 @@ import {
 import type { CellApi } from "../cells/orchestrator.ts";
 import type { StreamState } from "../cells/types.ts";
 import { DesktopdError } from "../desktopd/client.ts";
-import type { CellDesktopd, DesktopdRegistry } from "../desktopd/registry.ts";
+import type { DesktopdRegistry, NativeDevice } from "../desktopd/registry.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.ts";
@@ -72,6 +72,17 @@ export interface NativeActionRequest {
   readonly identity: NativeActionIdentity;
   revalidate(): Promise<boolean>;
 }
+// Daemon-owned binding to one admitted physical screen. Never accepted from a tool body.
+export interface NativeScreenBinding {
+  readonly cellId: string;
+  readonly parentCellId: string;
+  readonly scale: 1 | 2;
+  readonly device: NativeDevice;
+  readonly signal: AbortSignal;
+  check(): void;
+  stream(): StreamState;
+  subscribe(listener: () => void): () => void;
+}
 export interface ActionContext {
   // Constructed by the daemon caller; model tool bodies cannot select their authority.
   source?: "manual" | "agent";
@@ -84,6 +95,7 @@ export interface ActionContext {
   agent?: string;
   step?: string;
   signal?: AbortSignal;
+  screen?: NativeScreenBinding;
 }
 
 export interface ActionOutcome {
@@ -135,6 +147,7 @@ export class ActionGateway {
 
   // A fresh frame for the brain (M4) and for the step thumbnails; also where the cursor starts.
   async observe(ctx: ActionContext): Promise<{ frameId: string; pointer: Point }> {
+    ctx = this.#owner(ctx);
     const d = await this.#ready(ctx);
     const o = await d.client.observe(ctx.signal);
     this.#check(ctx);
@@ -145,7 +158,7 @@ export class ActionGateway {
   }
 
   async run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {
-    const owner = Object.freeze({ ...ctx });
+    const owner = this.#owner(ctx);
     const input = frozenSnapshot(action);
     const before = this.#queues.get(ctx.cellId) ?? Promise.resolve();
     const task = before.catch(() => {}).then(() => this.#run(owner, input));
@@ -158,18 +171,17 @@ export class ActionGateway {
   }
 
   async #run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {
-    const cell = this.deps.cells.get(ctx.cellId);
-    if (!cell) throw new Error(`unknown cell ${ctx.cellId}`);
-    const scale = cell.scale;
-    const speed: Speed =
-      "speed" in action && action.speed && action.speed !== "auto"
-        ? action.speed
-        : cell.stream.viewers > 0
-          ? "watch"
-          : "fast";
     let dispatched = false;
     try {
       this.#check(ctx);
+      const scale = ctx.screen?.scale ?? this.deps.cells.get(ctx.cellId)?.scale;
+      if (!scale) throw new Cancelled("preflight", "the selected screen is unavailable");
+      const speed: Speed =
+        "speed" in action && action.speed && action.speed !== "auto"
+          ? action.speed
+          : (this.#stream(ctx)?.viewers ?? 0) > 0
+            ? "watch"
+            : "fast";
       if (ctx.source !== "manual" && (ctx.source !== "agent" || !ctx.authorizeAgent))
         throw new Cancelled("preflight", "this native action has no admitted owner");
       switch (action.verb) {
@@ -300,7 +312,7 @@ export class ActionGateway {
           await this.#checkFresh(ctx, action.basedOn, point, scale, d, targetKnown);
         }
         this.#check(ctx);
-        const stream = this.deps.cells.get(ctx.cellId)?.stream;
+        const stream = this.#stream(ctx);
         if (!stream || !holding(stream)) break;
       }
       const input: Input =
@@ -481,7 +493,7 @@ export class ActionGateway {
     return { ok: true, frameId };
   }
 
-  async #lookup(ctx: ActionContext, d: CellDesktopd, point?: Point) {
+  async #lookup(ctx: ActionContext, d: NativeDevice, point?: Point) {
     const hit = await Promise.race([
       (point ? d.client.hitTest(point) : d.client.focused()).catch(() => ({
         target: null,
@@ -545,7 +557,7 @@ export class ActionGateway {
   }
 
   // settle → observe → result; returns this action's own frame, never a concurrent action's.
-  async #finish(ctx: ActionContext, d: CellDesktopd): Promise<string> {
+  async #finish(ctx: ActionContext, d: NativeDevice): Promise<string> {
     this.#check(ctx);
     const s = await d.client.settle({ quietMs: SETTLE_QUIET_MS, timeoutMs: SETTLE_CAP_MS });
     const frameT =
@@ -595,7 +607,7 @@ export class ActionGateway {
     basedOn: string,
     devicePoint: Point,
     scale: 1 | 2,
-    desktop: CellDesktopd,
+    desktop: NativeDevice,
     firstTarget: Promise<{ target: Target | null; window: number | null }>,
   ): Promise<void> {
     const basisPath = this.deps.frames.path(ctx.sessionId, basedOn);
@@ -649,7 +661,7 @@ export class ActionGateway {
     throw new Cancelled("stale", "the target changed since the model's screenshot", freshId);
   }
 
-  #desktopd(cellId: string): CellDesktopd {
+  #desktopd(cellId: string): NativeDevice {
     const d = this.deps.registry.for(cellId);
     if (!d) throw new Cancelled("preflight", `cell ${cellId} has no desktopd endpoint`);
     return d;
@@ -657,15 +669,15 @@ export class ActionGateway {
 
   // The clock map must be synced before a press time is mapped: the registry re-syncs on a timer,
   // the first action on a cell syncs here.
-  async #ready(ctx: ActionContext): Promise<CellDesktopd> {
+  async #ready(ctx: ActionContext): Promise<NativeDevice> {
     this.#check(ctx);
-    const d = this.#desktopd(ctx.cellId);
+    const d = ctx.screen?.device ?? this.#desktopd(ctx.cellId);
     if (!d.clocks.sample) await d.clocks.sync();
     this.#check(ctx);
     return d;
   }
 
-  #pressT(ctx: ActionContext, d: CellDesktopd, pressMono: number): number {
+  #pressT(ctx: ActionContext, d: NativeDevice, pressMono: number): number {
     if (!d.clocks.sample) throw new Cancelled("preflight", "desktopd clock not synced");
     // The press happened before this call returned; a mapping error of a millisecond must not put
     // it after the event that records it.
@@ -688,12 +700,14 @@ export class ActionGateway {
   // Spec, error handling: the gateway holds dispatch until the connection is back.
   async #waitForStream(ctx: ActionContext): Promise<void> {
     this.#check(ctx);
-    const stream = this.deps.cells.get(ctx.cellId)?.stream;
+    const stream = this.#stream(ctx);
     if (!stream || !holding(stream)) return;
     await new Promise<void>((resolve, reject) => {
-      let off = () => {};
+      const subscriptions: (() => void)[] = [];
+      let settled = false;
       const clean = () => {
-        off();
+        settled = true;
+        for (const off of subscriptions.splice(0)) off();
         ctx.signal?.removeEventListener("abort", abort);
       };
       const abort = () => {
@@ -701,10 +715,11 @@ export class ActionGateway {
         reject(new Cancelled("user", "stopped while holding for the stream"));
       };
       const check = () => {
+        if (settled) return;
         try {
           this.#check(ctx);
-          const current = this.deps.cells.get(ctx.cellId);
-          if (current && !holding(current.stream)) {
+          const current = this.#stream(ctx);
+          if (current && !holding(current)) {
             clean();
             resolve();
           }
@@ -713,17 +728,35 @@ export class ActionGateway {
           reject(err);
         }
       };
-      off = this.deps.cells.subscribe((cell) => {
-        if (cell.id === ctx.cellId) check();
-      });
-      ctx.signal?.addEventListener("abort", abort, { once: true });
-      check();
+      const add = (off: () => void) => {
+        if (settled) off();
+        else subscriptions.push(off);
+      };
+      try {
+        add(
+          this.deps.cells.subscribe((cell) => {
+            if (cell.id === (ctx.screen?.parentCellId ?? ctx.cellId)) check();
+          }),
+        );
+        if (ctx.screen) add(ctx.screen.subscribe(check));
+        ctx.signal?.addEventListener("abort", abort, { once: true });
+        check();
+        if (settled) ctx.signal?.removeEventListener("abort", abort);
+      } catch (error) {
+        clean();
+        reject(error);
+      }
     });
   }
 
   #check(ctx: ActionContext): void {
     if (ctx.signal?.aborted) throw new Cancelled("user", "session stopped");
-    const cell = this.deps.cells.get(ctx.cellId);
+    if (ctx.screen) {
+      if (ctx.screen.cellId !== ctx.cellId || ![1, 2].includes(ctx.screen.scale))
+        throw new Cancelled("preflight", "the screen does not match the admitted action");
+      ctx.screen.check();
+    }
+    const cell = this.deps.cells.get(ctx.screen?.parentCellId ?? ctx.cellId);
     if (cell?.state !== "ready")
       throw new Cancelled("preflight", `cell is ${cell?.state ?? "missing"}`);
     if (cell.fenced || cell.replacementPending)
@@ -732,6 +765,23 @@ export class ActionGateway {
         "the computer is fenced or awaiting replacement confirmation",
       );
     if (cell.paused) throw new Cancelled("preflight", "the computer is paused");
+  }
+
+  #owner(ctx: ActionContext): ActionContext {
+    const screen = ctx.screen ? Object.freeze({ ...ctx.screen }) : undefined;
+    return Object.freeze({
+      ...ctx,
+      ...(screen
+        ? {
+            screen,
+            signal: AbortSignal.any([screen.signal, ...(ctx.signal ? [ctx.signal] : [])]),
+          }
+        : {}),
+    });
+  }
+
+  #stream(ctx: ActionContext): StreamState | undefined {
+    return ctx.screen ? ctx.screen.stream() : this.deps.cells.get(ctx.cellId)?.stream;
   }
 
   #append(ctx: ActionContext, type: string, data: Record<string, unknown>): void {

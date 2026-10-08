@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { DockerClient } from "../cells/docker.ts";
 import { DOCKER_TESTS } from "../cells/testing/docker-cli.ts";
+import { type CanaryControls, canaryScanVerdict } from "../diagnostics/canary-verdict.ts";
 import { KillSwitch } from "../gateway/kill-switch.ts";
 import { LiveSessions } from "../gateway/live.ts";
 import { auditLines, type KeydCell, startKeydCell } from "./testing/keyd-cell.ts";
@@ -75,6 +76,7 @@ describe.skipIf(!DOCKER_TESTS)("the canary never reaches a cell", () => {
   // '?' makes base64 and base64url controls exercise different alphabets too.
   const marker = `marker-???-${randomBytes(12).toString("hex")}`;
   const markerHits: string[] = [];
+  const markerFiles: CanaryControls["files"] = [];
   const clipboardMarker = `clipboard-only-${randomBytes(12).toString("hex")}`;
   let proxyToken = "";
   let caPath = "";
@@ -128,23 +130,24 @@ describe.skipIf(!DOCKER_TESTS)("the canary never reaches a cell", () => {
     docker("cp", `${desktop}:/etc/localdot/cell/ca.pem`, caPath);
     docker("cp", SCAN, `${desktop}:/tmp/canary-scan.py`);
     expect(cell.sh(`mkdir -p ${CONTROL_DIR}`).status).toBe(0);
-    const control = (label: string, value: Buffer) => {
+    const control = (label: CanaryControls["files"][number]["form"], value: Buffer) => {
       const name = label.replace("+", "-");
       const source = join(work, name);
       const target = `${CONTROL_DIR}/${name}`;
       writeFileSync(source, value);
       docker("cp", source, `${desktop}:${target}`);
       markerHits.push(`${marker}|${label}|file ${target}`);
+      markerFiles.push({ form: label, path: target });
     };
     control("raw", Buffer.from(marker));
     control("hex", Buffer.from(Buffer.from(marker).toString("hex")));
     control("HEX", Buffer.from(Buffer.from(marker).toString("hex").toUpperCase()));
     control("utf16le", Buffer.from(marker, "utf16le"));
     for (const encoding of ["base64", "base64url"] as const) {
-      for (const shift of [0, 1, 2]) {
+      for (const shift of [0, 1, 2] as const) {
         const source = shift ? `${"x".repeat(shift)}${marker}tail` : marker;
         control(
-          encoding + (shift ? `+${shift}` : ""),
+          shift === 0 ? encoding : `${encoding}+${shift}`,
           Buffer.from(Buffer.from(source).toString(encoding)),
         );
       }
@@ -164,6 +167,7 @@ describe.skipIf(!DOCKER_TESTS)("the canary never reaches a cell", () => {
       );
       expect(planted).toBe(marker);
       markerHits.push(`${marker}|raw|file ${target}`);
+      markerFiles.push({ form: "raw", path: target });
     }
     markerHits.push(`${marker}|raw|environ`, `${marker}|raw|cmdline`, `${marker}|raw|memory`);
     docker(
@@ -291,6 +295,15 @@ describe.skipIf(!DOCKER_TESTS)("the canary never reaches a cell", () => {
 
   it("finds no canary in a cell scan whose controls and actual coverage pass in that same run", async () => {
     const result = await scan(CANARY, marker, surrogate, clipboardMarker);
+    expect(
+      canaryScanVerdict(result, {
+        canary: CANARY,
+        marker,
+        surrogate,
+        clipboard: clipboardMarker,
+        files: markerFiles,
+      }),
+    ).toMatchObject({ ok: true, reason: "passed" });
     console.info("canary scan coverage", {
       processes: result.processes,
       memoryBytes: result.bytes,

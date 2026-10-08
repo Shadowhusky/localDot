@@ -1,3 +1,4 @@
+import { finished } from "node:stream/promises";
 import {
   BrowserNavigateResult,
   BrowserReadResult,
@@ -11,8 +12,14 @@ import {
 } from "@localdot/protocol";
 import { Agent, fetch as transportFetch } from "undici";
 import { z } from "zod";
+import {
+  DesktopBrowserReady,
+  DesktopBrowserTask,
+} from "../../../../packages/protocol/src/desktop-browser.ts";
+import type { DesktopUploadFile } from "../../../../packages/protocol/src/desktop-uploads.ts";
 import type { DesktopdEndpoint } from "../cells/types.ts";
 import { DesktopdError } from "./client.ts";
+import { inspectDesktopUpload, readDesktopUpload } from "./upload-client.ts";
 
 export const MAX_TRANSFER_BYTES = 100 * 1024 * 1024;
 const JSON_BYTES = 32 * 1024 * 1024;
@@ -93,6 +100,7 @@ async function textBody(res: Response, signal: AbortSignal, limit: number): Prom
 export class DesktopdTools {
   readonly #dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
   readonly #lifetime = new AbortController();
+  readonly #uploads = new Set<Promise<unknown>>();
   readonly #fetch: typeof fetch;
 
   constructor(
@@ -120,7 +128,7 @@ export class DesktopdTools {
 
   async close(): Promise<void> {
     this.#lifetime.abort(new Error("desktop tools closed"));
-    await this.#dispatcher.destroy();
+    await Promise.all([this.#dispatcher.destroy(), Promise.allSettled([...this.#uploads])]);
   }
 
   #scope(timeoutMs: number, signal?: AbortSignal): Scope {
@@ -288,6 +296,18 @@ export class DesktopdTools {
   browserRead(maxChars?: number, signal?: AbortSignal): Promise<BrowserReadResult> {
     return this.#json("/browser/read", { maxChars }, BrowserReadResult.parse, signal, 20_000);
   }
+  async prepareBrowser(taskId: string, signal?: AbortSignal): Promise<void> {
+    const request = DesktopBrowserTask.parse({ taskId });
+    const receipt = await this.#json(
+      "/browser/task",
+      request,
+      DesktopBrowserReady.parse,
+      signal,
+      20_000,
+    );
+    if (receipt.taskId !== request.taskId)
+      throw new DesktopdError(502, "browser task changed", "/browser/task");
+  }
   browserNavigate(url: string, signal?: AbortSignal): Promise<BrowserNavigateResult> {
     return this.#json("/browser/navigate", { url }, BrowserNavigateResult.parse, signal, 20_000);
   }
@@ -303,6 +323,33 @@ export class DesktopdTools {
       scope.abort();
       throw error;
     }
+  }
+
+  inspectUpload(path: string, signal?: AbortSignal): Promise<DesktopUploadFile> {
+    const pending = inspectDesktopUpload(this.endpoint, path, {
+      signal: AbortSignal.any([this.#lifetime.signal, ...(signal ? [signal] : [])]),
+      check: () => this.#lifetime.signal.throwIfAborted(),
+    });
+    this.#trackUpload(pending);
+    return pending;
+  }
+
+  readUpload(file: DesktopUploadFile, signal?: AbortSignal) {
+    this.#lifetime.signal.throwIfAborted();
+    const source = readDesktopUpload(this.endpoint, file, {
+      signal: AbortSignal.any([this.#lifetime.signal, ...(signal ? [signal] : [])]),
+      check: () => this.#lifetime.signal.throwIfAborted(),
+    });
+    this.#trackUpload(finished(source, { cleanup: true }).catch(() => {}));
+    return source;
+  }
+
+  #trackUpload(pending: Promise<unknown>): void {
+    this.#uploads.add(pending);
+    void pending.then(
+      () => this.#uploads.delete(pending),
+      () => this.#uploads.delete(pending),
+    );
   }
 
   async putFile(

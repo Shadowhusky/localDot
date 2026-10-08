@@ -36,12 +36,31 @@ describe("findDockerSocket", () => {
     });
   });
 
-  it("uses the socket it found in place of a DOCKER_HOST that points nowhere", () => {
+  it("keeps an explicit missing socket without probing another engine", () => {
     const env = { HOME, DOCKER_HOST: "unix:///tmp/gone.sock" };
-    expect(findDockerSocket(env, machine([USER_SOCKET], desktopLinux))).toEqual({
-      path: USER_SOCKET,
-      source: "the docker context desktop-linux",
+    const probes = machine([USER_SOCKET], desktopLinux);
+    expect(findDockerSocket(env, probes)).toEqual({
+      path: "/tmp/gone.sock",
+      source: "DOCKER_HOST",
     });
+    expect(probes.context).not.toHaveBeenCalled();
+  });
+
+  it("refuses explicit remote endpoints instead of using an available default engine", () => {
+    const probes = machine(["/var/run/docker.sock", USER_SOCKET], desktopLinux);
+    expect(() => findDockerSocket({ HOME, DOCKER_HOST: "tcp://127.0.0.1:2375" }, probes)).toThrow(
+      "local Unix socket",
+    );
+    expect(probes.context).not.toHaveBeenCalled();
+  });
+
+  it("preserves an explicit selection of the default pathname even when absent", () => {
+    const probes = machine([USER_SOCKET], desktopLinux);
+    expect(findDockerSocket({ HOME, DOCKER_HOST: "unix:///var/run/docker.sock" }, probes)).toEqual({
+      path: "/var/run/docker.sock",
+      source: "DOCKER_HOST",
+    });
+    expect(probes.context).not.toHaveBeenCalled();
   });
 
   it("falls back to Docker Desktop's user socket without a Docker CLI or a Unix-socket context", () => {

@@ -29,6 +29,7 @@ export type RiskFacts = {
     | "shell"
     | "files_read"
     | "files_write"
+    | "files_upload"
     | "files_delete";
   target?: NativeTargetFacts;
   command?: string;
@@ -73,6 +74,10 @@ export function classify(facts: RiskFacts, rawPolicy: AutonomyPolicy): RiskDecis
   if (facts.operation === "wait" || facts.operation === "scroll") return risk("browsing", policy);
   if (facts.operation === "files_delete") return risk("delete", policy);
   if (facts.operation === "files_write") return risk("unknown", policy);
+  if (facts.operation === "files_upload") {
+    const decision = risk("send", policy);
+    return { ...decision, mode: decision.mode === "handoff" ? "handoff" : "ask", risk: "high" };
+  }
   if (facts.operation === "shell") {
     const command = facts.command ?? "";
     if (protectedField.test(command)) return risk("credentials", policy);

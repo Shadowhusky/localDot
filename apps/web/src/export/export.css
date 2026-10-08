@@ -1,0 +1,180 @@
+.export-sheet {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  width: min(440px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid var(--color-hud-line);
+  border-radius: 18px;
+  color: var(--color-text);
+  background: var(--color-hud-solid);
+  box-shadow: 0 24px 80px #0009;
+  animation: export-enter 150ms ease-out both;
+}
+.export-sheet[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.export-sheet::backdrop {
+  background: #0005;
+}
+.export-sheet.closing {
+  animation: export-exit 150ms ease-in both;
+}
+.export-sheet header,
+.export-sheet footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+}
+.export-sheet header {
+  border-bottom: 1px solid var(--color-hud-line);
+}
+.export-sheet h2,
+.export-sheet h3 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 550;
+}
+.export-eyebrow {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--color-text-2);
+}
+.export-sheet button,
+.export-sheet select {
+  border: 1px solid var(--color-hud-line);
+  border-radius: 9px;
+  padding: 9px 12px;
+  background: var(--color-void);
+  color: var(--color-text);
+  font: inherit;
+}
+.export-sheet button {
+  cursor: pointer;
+}
+.export-sheet button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.export-sheet button:focus-visible,
+.export-sheet select:focus-visible,
+.export-sheet input:focus-visible {
+  outline: 2px solid var(--color-text);
+  outline-offset: 3px;
+}
+.export-sheet header button {
+  border: 0;
+  background: transparent;
+  font-size: 22px;
+}
+.export-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px 24px;
+}
+.export-body > label,
+.export-option-row label {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 18px;
+  font-size: 13px;
+}
+.export-option-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  gap: 16px;
+}
+.export-option-row select {
+  min-width: 0;
+  width: 100%;
+}
+.export-body .export-check {
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+}
+.export-check input {
+  accent-color: var(--color-text);
+  width: 16px;
+  height: 16px;
+}
+.export-estimate {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.export-privacy {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--color-text-2);
+  margin-bottom: 0;
+}
+.export-sheet footer {
+  border-top: 1px solid var(--color-hud-line);
+}
+.export-sheet .export-save {
+  margin-left: auto;
+  background: var(--color-text);
+  color: var(--color-void);
+}
+.export-progress {
+  padding: 8px 0 16px;
+  font-variant-numeric: tabular-nums;
+}
+.export-progress progress {
+  display: block;
+  width: 100%;
+  margin: 24px 0 12px;
+  accent-color: var(--color-text);
+  height: 8px;
+}
+.export-progress p,
+.export-progress span,
+.export-result p {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--color-text-2);
+}
+.export-cancel-confirm {
+  padding: 14px;
+  border: 1px solid var(--color-hud-line);
+  border-radius: 10px;
+}
+.export-cancel-confirm p {
+  margin-top: 0;
+}
+.export-cancel-confirm button + button {
+  margin-left: 8px;
+}
+@keyframes export-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes export-exit {
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .export-sheet,
+  .export-sheet.closing {
+    animation: none;
+  }
+}

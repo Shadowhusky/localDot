@@ -3,7 +3,8 @@ import type { CellRecord } from "../types.ts";
 
 export function sampleRecord(id = ulid(), createdAt = "2026-10-01T10:00:00.000Z"): CellRecord {
   return {
-    v: 1,
+    v: 2,
+    kind: "desktop",
     id,
     createdAt,
     scale: 2,

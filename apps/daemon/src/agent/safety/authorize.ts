@@ -1,4 +1,4 @@
-import { ApprovalCardDraft, type ToolName } from "@localdot/protocol";
+import { ApprovalCardDraft, type ToolName, UploadApproval } from "@localdot/protocol";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { OncePermit } from "./approvals.ts";
 import { actionDigest, buildApprovalCard, classify, type RiskFacts } from "./risk.ts";
@@ -11,6 +11,7 @@ export interface PreparedEffect {
   readonly input: unknown;
   readonly target: unknown;
   readonly facts: RiskFacts;
+  readonly upload?: UploadApproval;
   revalidate(): Promise<boolean>;
 }
 export function freezeExecutionInput<T>(input: T): T {
@@ -44,12 +45,19 @@ export async function authorizePrepared(
     targetDigest = actionDigest(target);
   const digest = actionDigest({ tool: prepared.tool, input, target });
   const decision = classify(prepared.facts, ctx.session.autonomy);
+  const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
+  if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
+    throw new Error("Upload approval does not match this action.");
   // Known daemon credentials remain human-owned, even under a permissive editable class.
   const protectedInput =
     !(prepared.tool === "done" && prepared.facts.operation === "files_read") &&
     ctx.redact(JSON.stringify(input)) !== JSON.stringify(input);
   const protectedTarget = ctx.redact(JSON.stringify(target)) !== JSON.stringify(target);
-  if (decision.mode === "handoff" || protectedInput || protectedTarget) {
+  const protectedPreview = upload && ctx.redact(JSON.stringify(upload)) !== JSON.stringify(upload);
+  if (decision.mode === "handoff" || protectedInput || protectedTarget || protectedPreview) {
+    // No native effect has begun. Release this initiating tool's physical screen lease
+    // before takeover drains all screens; the old lease can never authorize a replay.
+    ctx.screen?.finish();
     await ctx.session.takeover(
       "other",
       "This action needs your control. Complete it on the computer, then hand control back.",
@@ -90,7 +98,7 @@ export async function authorizePrepared(
             key === "op" ? "Operation" : "Destination",
             boundedPreview(object[key], ctx),
           ]);
-      if (Array.isArray(object.files))
+      if (!upload && Array.isArray(object.files))
         fields.push(["Files", boundedPreview(object.files.join("\n"), ctx)]);
       if (typeof object.content === "string")
         fields.push(["Content", boundedPreview(object.content, ctx)]);
@@ -108,7 +116,11 @@ export async function authorizePrepared(
         digest,
         targetDigest,
       },
-      ApprovalCardDraft.parse({ ...card, fields }),
+      ApprovalCardDraft.parse({
+        ...card,
+        fields,
+        ...(upload ? { title: "Upload files", upload } : {}),
+      }),
       {
         signal: ctx.signal,
         check: () => ctx.check(),
@@ -122,6 +134,7 @@ export async function authorizePrepared(
     );
     ctx.check();
     if (outcome === "take_control") {
+      ctx.screen?.finish();
       await ctx.session.takeover(
         "other",
         "Complete this action yourself, then hand control back.",

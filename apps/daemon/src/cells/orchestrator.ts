@@ -1,11 +1,15 @@
+import { isDeepStrictEqual as equal } from "node:util";
 import { SELFTEST_CHECK_IDS, type SelfTestCheck, selfTestPassed, ulid } from "@localdot/protocol";
+import { ComputerResetRecord } from "../../../../packages/protocol/src/computer-reset.ts";
 import type { CellKeyd } from "../keyd/cell-wiring.ts";
 import { KeydUnavailableError } from "../keyd/client.ts";
+import { type DiagnosticSelfTest, probeDiagnosticSelfTest } from "./diagnostic-selftest.ts";
 import { type DockerClient, DockerError } from "./docker.ts";
 import { inspectOwnedCell, requireFreshNames, retireExactCell } from "./exact-retirement.ts";
 import type { Images } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
 import { allocateKeydPort } from "./ports.ts";
+import { captureComputerResetSource } from "./reset-source.ts";
 import { newCellToken } from "./secrets.ts";
 import {
   cellNames,
@@ -33,8 +37,23 @@ import {
 
 export interface OrchestratorDeps {
   keyd?: CellKeyd;
+  browser?: {
+    stop(parentCellId: string): Promise<void>;
+    remove(parentCellId: string, options?: { purgeProfile?: boolean }): Promise<void>;
+    reservedKeydPorts?(): Iterable<number>;
+  };
   externalKeydPorts?(): Iterable<number>;
   permanentFence?(id: string): { revision: number } | boolean | undefined;
+  // Independent reset ownership cannot be cleared by ordinary replacement publication.
+  candidateHold?(id: string): boolean;
+  runtimeHold?(id: string): boolean;
+  creationAllowed?(): boolean;
+  verifyRuntime?(record: CellRecord): Promise<void>;
+  diagnosticAdmission?(id: string): { release(): void } | undefined;
+  diagnosticProbe?(
+    endpoint: CellEndpoints["desktopd"],
+    signal: AbortSignal,
+  ): Promise<DiagnosticSelfTest>;
   docker: DockerClient;
   store: CellStore;
   images: Images;
@@ -106,6 +125,13 @@ export interface CellControls {
 }
 
 export class CellControlConflict extends Error {}
+
+// The result of one required retirement, independent of later recovery attempts.
+class BrowserShutdownConflict extends CellControlConflict {
+  constructor() {
+    super("browser shutdown could not be confirmed; retry Stop");
+  }
+}
 
 export class UnknownCellError extends Error {
   constructor(readonly cellId: string) {
@@ -180,6 +206,13 @@ export class CellOrchestrator {
   readonly #reservedKeydPorts = new Set<number>();
   readonly #externalKeydPorts: (() => Iterable<number>) | undefined;
   readonly #queues = new Map<string, Promise<void>>();
+  readonly #diagnostics = new Map<string, AbortController>();
+  readonly #browserHolds = new Map<string, number>();
+  readonly #browserStops = new Map<string, Promise<void>>();
+  readonly #browserFailures = new Set<string>();
+  #browserRecoveries = 0;
+  #browserRecoveryEpoch = 0;
+  #browserRecoveryFailed = false;
   #disposed = false;
 
   constructor(private readonly deps: OrchestratorDeps) {
@@ -208,7 +241,7 @@ export class CellOrchestrator {
   }
 
   reservedKeydPorts(): number[] {
-    const { records, skipped } = this.#store.inventory();
+    const { records, skipped } = this.#store.inventoryAll();
     if (skipped.length)
       throw new CellControlConflict("unreadable cell records may retain keyd ports");
     return [
@@ -218,12 +251,28 @@ export class CellOrchestrator {
           .filter((r) => !this.#retiredPortOwners.has(r.id))
           .map((r) => r.keydPort),
         ...this.#reservedKeydPorts,
+        ...(this.deps.browser?.reservedKeydPorts?.() ?? []),
       ]),
     ];
   }
 
   record(id: string): CellRecord | undefined {
     return this.#record(id);
+  }
+  hasStoredIdentity(id: string): boolean {
+    return !!this.#store.getStored(id) || this.#store.inventoryAll().skipped.includes(id);
+  }
+
+  browserAvailable(id: string): boolean {
+    return (
+      !this.#disposed &&
+      this.#browserRecoveries === 0 &&
+      !this.#browserRecoveryFailed &&
+      !this.#browserHolds.has(id) &&
+      !this.#browserStops.has(id) &&
+      !this.#browserFailures.has(id) &&
+      this.endpoints(id) !== undefined
+    );
   }
 
   // Only a ready cell's ports are its own: any other state may hold ports Docker has handed on.
@@ -249,22 +298,80 @@ export class CellOrchestrator {
   // Stops the background watch and readiness loops; the daemon's process exit does the rest.
   dispose(): void {
     this.#disposed = true;
+    for (const controller of this.#diagnostics.values()) controller.abort();
+    for (const id of this.#live.keys()) void this.#stopBrowser(id).catch(() => {});
   }
 
   // Restart counters live in memory, so a daemon restart starts them again at 0.
-  async reconcile(): Promise<void> {
-    const { records, skipped } = this.#store.inventory();
-    await this.#stopSkipped(skipped);
-    for (const { id } of records) {
-      await this.#queued(id, () => this.#reconcile(id)).catch((err: unknown) => {
-        console.error(`cell ${id}: not reconciled (${codeOf(err)})`);
+  async reconcile(options: { strict?: boolean } = {}): Promise<void> {
+    const epoch = ++this.#browserRecoveryEpoch;
+    this.#browserRecoveries++;
+    this.#browserRecoveryFailed = true;
+    const drains = new Map<string, Promise<void>>();
+    const fence = (id: string) => {
+      if (drains.has(id)) return;
+      const stopped = this.#stopBrowser(id);
+      drains.set(id, stopped);
+      void stopped.catch(() => {});
+    };
+    // Inventory and cleanup may fail or stall. Revoke every known owner first, including
+    // those queued behind a different operation; a global hold also covers newly found IDs.
+    for (const id of new Set([
+      ...this.#live.keys(),
+      ...this.#records.keys(),
+      ...this.#queues.keys(),
+      ...this.#reservedIds,
+      ...this.#candidateHolds,
+      ...this.#browserHolds.keys(),
+      ...this.#browserStops.keys(),
+      ...this.#browserFailures,
+    ]))
+      fence(id);
+    try {
+      const { records, skipped } = this.#store.inventory();
+      for (const id of [...records.map((record) => record.id), ...skipped]) fence(id);
+      let failed = false;
+      let incomplete = options.strict === true && skipped.length > 0;
+      await this.#stopSkipped(skipped).catch(() => {
+        failed = true;
       });
+      for (const { id } of records) {
+        await this.#withBrowser(id, () => this.#reconcile(id, options.strict)).catch(
+          (err: unknown) => {
+            incomplete = true;
+            // Keep the existing per-record diagnostic behavior for parent read errors,
+            // but a failed child retirement cannot become a successful recovery receipt.
+            if (err instanceof BrowserShutdownConflict) failed = true;
+            console.error(`cell ${id}: not reconciled (${codeOf(err)})`);
+          },
+        );
+      }
+      const results = await Promise.allSettled(drains.values());
+      if (failed || results.some((result) => result.status === "rejected"))
+        throw new CellControlConflict("browser shutdown could not be confirmed; retry Stop");
+      if (options.strict && incomplete)
+        throw new CellControlConflict("installed service recovery could not be confirmed");
+      if (epoch === this.#browserRecoveryEpoch) this.#browserRecoveryFailed = false;
+    } finally {
+      // A discovery error must still wait for already-started browser containment.
+      await Promise.allSettled(drains.values());
+      this.#browserRecoveries--;
     }
   }
 
-  async #reconcile(id: string): Promise<void> {
+  async #reconcile(id: string, strict = false): Promise<void> {
     const record = this.#record(id);
     if (!record) return;
+    if (this.deps.runtimeHold?.(id) && !this.deps.permanentFence?.(id)) {
+      this.#set(id, {
+        state: "failed",
+        restarts: 0,
+        stream: NO_STREAM,
+        error: "Computer runtime update recovery is incomplete.",
+      });
+      if (strict) throw new CellControlConflict("Computer runtime update recovery is incomplete.");
+      return;
+    }
     if (this.#held(id)) {
       if (this.deps.permanentFence?.(id)) await this.#containFenced(record);
       else
@@ -277,6 +384,9 @@ export class CellOrchestrator {
       return;
     }
     try {
+      await this.deps.verifyRuntime?.(record);
+      if (this.#held(id))
+        throw new CellControlConflict("computer admission changed during recovery");
       const desktop = await this.#inspect(record.docker.desktop);
       const gate = await this.#inspect(record.docker.gate);
       if (desktop.State.Running && desktop.State.Paused) {
@@ -307,13 +417,19 @@ export class CellOrchestrator {
         ? "containers missing: removed outside localDot"
         : messageOf(err);
       this.#set(id, { state: "failed", restarts: 0, error, stream: NO_STREAM });
+      // A missing container is an observed state; other failed observations cannot certify
+      // managed startup. Preserve per-cell diagnostics and continue recovering other records.
+      if (strict && !isStatus(err, 404)) throw err;
     }
   }
 
   async create(opts: { scale: Scale; id?: string }): Promise<CellSummary> {
+    if (this.deps.creationAllowed?.() === false)
+      throw new CellControlConflict("Computer runtime update recovery is incomplete.");
     const id = opts.id ?? ulid();
     if (
       !/^[0-9A-HJKMNP-TV-Z]{26}$/.test(id) ||
+      this.#store.getStored(id) ||
       this.#record(id) ||
       this.#queues.has(id) ||
       this.#reservedIds.has(id) ||
@@ -323,7 +439,7 @@ export class CellOrchestrator {
     this.#reservedIds.add(id);
     let keydPort: number | undefined;
     try {
-      const { records, skipped } = this.#store.inventory();
+      const { records, skipped } = this.#store.inventoryAll();
       if (skipped.length)
         throw new SkippedCellsError(skipped, {
           folder: (cell) => this.#store.folder(cell),
@@ -399,7 +515,8 @@ export class CellOrchestrator {
           }),
       });
       const record: CellRecord = {
-        v: 1,
+        v: 2,
+        kind: "desktop",
         ownership: {
           internalNetwork: internal.Id,
           egressNetwork: egress.Id,
@@ -480,7 +597,7 @@ export class CellOrchestrator {
   }
 
   start(id: string): Promise<void> {
-    return this.#queued(id, () => this.#start(id));
+    return this.#withBrowser(id, () => this.#start(id));
   }
 
   async #start(id: string): Promise<void> {
@@ -498,11 +615,161 @@ export class CellOrchestrator {
     if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
   }
 
+  /** An idle-only fresh observation. Lifecycle commands preempt its transport before waiting
+   * for the same queue. This deliberately avoids #withBrowser's destructive browser Stop. */
+  diagnoseSelfTest(id: string, caller: AbortSignal): Promise<DiagnosticSelfTest> {
+    const refused = () =>
+      new CellControlConflict("Computer diagnostics are unavailable or the computer changed.");
+    if (
+      caller.aborted ||
+      this.#disposed ||
+      this.#queues.has(id) ||
+      this.#held(id) ||
+      !this.deps.verifyRuntime ||
+      !this.#keyd
+    )
+      return Promise.reject(refused());
+    const admission = this.deps.diagnosticAdmission?.(id);
+    if (!admission) return Promise.reject(refused());
+    const controller = new AbortController(),
+      signal = AbortSignal.any([caller, controller.signal]);
+    const work = this.#queued(id, async () => {
+      const live = this.#live.get(id),
+        record = structuredClone(this.#require(id));
+      if (live?.state !== "ready" || live.paused || !live.ports || !record.ownership)
+        throw refused();
+      const ownership = { ...record.ownership };
+      if (![ownership.gate, ownership.desktop].every((value) => /^[a-f0-9]{64}$/.test(value)))
+        throw refused();
+      const active = () => {
+        signal.throwIfAborted();
+        if (
+          !this.#current(id, live) ||
+          this.#held(id) ||
+          this.#browserHolds.has(id) ||
+          !equal(this.#store.get(id), record)
+        )
+          throw refused();
+      };
+      const inspect = async (role: "gate" | "desktop", running: boolean) => {
+        const raw = await this.#docker.request<{
+          Id?: string;
+          Config?: { Labels?: Record<string, string> };
+          State?: { Running?: boolean; Paused?: boolean };
+          NetworkSettings?: {
+            Ports?: Record<string, { HostIp?: string; HostPort?: string }[] | null>;
+          };
+        }>({ method: "GET", path: objectPath("containers", ownership[role], "json") });
+        if (
+          raw?.Id !== ownership[role] ||
+          raw.Config?.Labels?.["localdot.cell"] !== id ||
+          raw.Config?.Labels?.["localdot.role"] !== role ||
+          raw.State?.Running !== running ||
+          (running && raw.State.Paused !== false)
+        )
+          throw refused();
+        return raw;
+      };
+      const fresh = async () => {
+        active();
+        await this.deps.verifyRuntime?.(record);
+        active();
+        await inspect("desktop", true);
+        const gate = await inspect("gate", true);
+        const port = (key: string) => {
+          const bindings = gate.NetworkSettings?.Ports?.[key],
+            binding = bindings?.[0];
+          if (
+            bindings?.length !== 1 ||
+            binding?.HostIp !== "127.0.0.1" ||
+            !/^[1-9][0-9]{3,4}$/.test(binding.HostPort ?? "")
+          )
+            throw refused();
+          const value = Number(binding.HostPort);
+          if (value < 1024 || value > 65535) throw refused();
+          return value;
+        };
+        const ports = { desktopd: port(GATE_PORTS.desktopd), stream: port(GATE_PORTS.stream) };
+        if (
+          JSON.stringify(ports) !== JSON.stringify(live.ports) ||
+          !(await this.#keyd?.isWired(record))
+        )
+          throw refused();
+        active();
+        return endpointsFor(record, ports).desktopd;
+      };
+      const endpoint = await fresh();
+      const result = await (this.deps.diagnosticProbe ?? probeDiagnosticSelfTest)(endpoint, signal);
+      await fresh();
+      if (!result.ok) {
+        // A failed fresh check closes admission immediately. Cleanup retains the queue and idle
+        // lease even if the diagnostic caller cancels now; only captured full IDs are stopped.
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          stream: NO_STREAM,
+          error:
+            "A fresh computer self-test failed. Stop and restart the computer before using it.",
+        });
+        const stops = await Promise.allSettled([
+          this.#stopBrowser(id),
+          (async () => {
+            if (!(await this.#closeInKeyd(id))) throw refused();
+          })(),
+          (async () => {
+            let failed = false;
+            for (const role of ["gate", "desktop"] as const) {
+              try {
+                try {
+                  await this.#docker.request({
+                    method: "POST",
+                    path: objectPath("containers", ownership[role], "stop"),
+                    query: { t: "0" },
+                  });
+                } catch (error) {
+                  if (!isStatus(error, 304, 404)) throw error;
+                }
+                try {
+                  await inspect(role, false);
+                } catch (error) {
+                  if (!isStatus(error, 404)) throw error;
+                }
+              } catch {
+                failed = true;
+              }
+            }
+            if (failed) throw refused();
+          })(),
+        ]);
+        if (stops.some((outcome) => outcome.status === "rejected")) throw refused();
+      }
+      signal.throwIfAborted();
+      return result;
+    });
+    // Register synchronously before the queued callback can begin. A Stop queued immediately
+    // after this method returns must cancel even a diagnostic that has not started probing yet.
+    this.#diagnostics.set(id, controller);
+    return work
+      .catch(() => {
+        throw refused();
+      })
+      .finally(async () => {
+        if (this.#diagnostics.get(id) === controller) this.#diagnostics.delete(id);
+        // A preempting Stop already owns the next queue position. Keep new task admission closed
+        // until that queued operation settles rather than exposing a gap between the two owners.
+        try {
+          await this.#queues.get(id);
+        } finally {
+          admission.release();
+        }
+      });
+  }
+
   // Keep the entire kill switch or Resume in the lifecycle queue, including
   // credential work. A concurrent Start cannot boot between revoke and freeze.
   withLifecycle<T>(id: string, op: (controls: CellControls) => Promise<T>): Promise<T> {
     const waitedForOperation = this.#queues.has(id);
-    return this.#queued(id, () =>
+    return this.#withBrowser(id, () =>
       op({
         waitedForOperation,
         pause: () => this.#pause(id),
@@ -514,7 +781,7 @@ export class CellOrchestrator {
   }
 
   pause(id: string): Promise<void> {
-    return this.#queued(id, () => this.#pause(id));
+    return this.#withBrowser(id, () => this.#pause(id));
   }
 
   async #pause(id: string): Promise<void> {
@@ -543,7 +810,7 @@ export class CellOrchestrator {
   }
 
   unpause(id: string): Promise<void> {
-    return this.#queued(id, () => this.#unpause(id));
+    return this.#withBrowser(id, () => this.#unpause(id));
   }
 
   async #unpause(id: string): Promise<void> {
@@ -556,6 +823,9 @@ export class CellOrchestrator {
     if (!live?.paused || live.state !== "ready") {
       throw new CellControlConflict("the computer must be ready and paused before resuming");
     }
+    await this.deps.verifyRuntime?.(record);
+    if (this.#held(id) || !this.#current(id, live))
+      throw new CellControlConflict("the computer changed before resuming");
     const state = (await this.#inspect(record.docker.desktop)).State;
     if (!state.Running) throw new CellControlConflict("the desktop stopped while it was paused");
     // Docker 29 answers 500 for an already thawed container. Inspect instead of
@@ -605,7 +875,7 @@ export class CellOrchestrator {
   }
 
   stop(id: string): Promise<void> {
-    return this.#queued(id, () => this.#stop(id));
+    return this.#withBrowser(id, () => this.#stop(id));
   }
 
   async #stop(id: string): Promise<void> {
@@ -643,8 +913,13 @@ export class CellOrchestrator {
     this.#set(id, { state: "stopped", restarts: 0, stream: NO_STREAM });
   }
 
-  remove(id: string, opts: { purgeHome?: boolean } = {}): Promise<void> {
-    return this.#queued(id, () => this.#remove(id, opts));
+  remove(
+    id: string,
+    opts: { purgeHome?: boolean; purgeBrowserProfile?: boolean } = {},
+  ): Promise<void> {
+    return this.#withBrowser(id, () => this.#remove(id, opts), {
+      purgeProfile: opts.purgeBrowserProfile === true,
+    });
   }
 
   async #remove(id: string, opts: { purgeHome?: boolean }): Promise<void> {
@@ -703,8 +978,22 @@ export class CellOrchestrator {
     error?: string,
     frozen = false,
   ): Promise<boolean> {
-    if (this.deps.permanentFence?.(record.id))
+    if (this.deps.permanentFence?.(record.id) || this.deps.runtimeHold?.(record.id))
       throw new CellControlConflict("the computer is permanently fenced");
+    // Refuse mismatched ownership/images before key wiring, starting, or failure cleanup by name.
+    try {
+      await this.deps.verifyRuntime?.(record);
+    } catch (error) {
+      this.#set(record.id, {
+        state: "failed",
+        restarts,
+        stream: NO_STREAM,
+        error: "Computer runtime does not match the installed release.",
+      });
+      throw error;
+    }
+    if (this.deps.permanentFence?.(record.id) || this.deps.runtimeHold?.(record.id))
+      throw new CellControlConflict("computer admission changed during runtime verification");
     const d = record.docker;
     const starting: Live = {
       state: "starting",
@@ -715,6 +1004,7 @@ export class CellOrchestrator {
     };
     this.#set(record.id, starting);
     try {
+      await this.#stopBrowser(record.id);
       const desktop = (await this.#inspect(d.desktop)).State;
       if (frozen && (!desktop.Running || !desktop.Paused)) {
         throw new Error("the frozen desktop changed; start the computer again");
@@ -795,6 +1085,8 @@ export class CellOrchestrator {
         const streaming = await this.#probeStream(endpoints.stream);
         if (!this.#current(record.id, live)) return;
         if (streaming) {
+          await this.deps.verifyRuntime?.(record);
+          if (!this.#current(record.id, live) || this.#held(record.id)) return;
           // The restart count survives a recovery: it resets only on a user start or stop, so a
           // cell that keeps dying runs out of attempts instead of flapping forever.
           this.#set(record.id, {
@@ -876,6 +1168,8 @@ export class CellOrchestrator {
     for (;;) {
       await this.#sleep(this.#watchEveryMs);
       if (this.#held(record.id) || !this.#current(record.id, live)) return;
+      await this.deps.verifyRuntime?.(record);
+      if (this.#held(record.id) || !this.#current(record.id, live)) return;
       const exited = await this.#exitedContainer(record);
       if (!this.#current(record.id, live)) return;
       if (exited === undefined) continue;
@@ -933,6 +1227,7 @@ export class CellOrchestrator {
   // they arrive, while other cells go on: a Start that lands during a Stop runs after it instead of
   // interleaving with it and being lost. Readiness and the restart backoff wait outside the queue.
   #queued<T>(id: string, op: () => Promise<T>): Promise<T> {
+    this.#diagnostics.get(id)?.abort();
     const run = (this.#queues.get(id) ?? Promise.resolve()).then(op);
     const settled = run.then(
       () => {},
@@ -943,6 +1238,61 @@ export class CellOrchestrator {
       if (this.#queues.get(id) === settled) this.#queues.delete(id);
     });
     return run;
+  }
+
+  #stopBrowser(id: string): Promise<void> {
+    if (!this.deps.browser) return Promise.resolve();
+    const pending = this.#browserStops.get(id);
+    if (pending) return pending;
+    let stop: Promise<void>;
+    try {
+      // Browser Stop fences synchronously, before any parent lifecycle queue can wait.
+      stop = this.deps.browser.stop(id);
+    } catch {
+      stop = Promise.reject(new CellControlConflict("browser shutdown could not be confirmed"));
+    }
+    this.#browserStops.set(id, stop);
+    const finish = () => {
+      if (this.#browserStops.get(id) === stop) this.#browserStops.delete(id);
+    };
+    void stop.then(
+      () => {
+        this.#browserFailures.delete(id);
+        finish();
+      },
+      () => {
+        this.#browserFailures.add(id);
+        finish();
+      },
+    );
+    return stop;
+  }
+
+  #withBrowser<T>(
+    id: string,
+    op: () => Promise<T>,
+    remove?: { purgeProfile: boolean },
+  ): Promise<T> {
+    if (!this.deps.browser) return this.#queued(id, op);
+    this.#browserHolds.set(id, (this.#browserHolds.get(id) ?? 0) + 1);
+    const stopped = this.#stopBrowser(id);
+    const child = remove ? stopped.then(() => this.deps.browser?.remove(id, remove)) : stopped;
+    void child.catch(() => {});
+    const operation = this.#queued(id, async () => {
+      // A failed child must not prevent physical containment of the desktop, or vice versa.
+      const [parentResult, browserResult] = await Promise.allSettled([
+        Promise.resolve().then(op),
+        child,
+      ]);
+      if (browserResult.status === "rejected") throw new BrowserShutdownConflict();
+      if (parentResult.status === "rejected") throw parentResult.reason;
+      return parentResult.value;
+    });
+    return operation.finally(() => {
+      const count = (this.#browserHolds.get(id) ?? 1) - 1;
+      if (count > 0) this.#browserHolds.set(id, count);
+      else this.#browserHolds.delete(id);
+    });
   }
 
   // Readiness and watch run with no caller to hand an error to: one that escapes fails the cell, if
@@ -1014,8 +1364,9 @@ export class CellOrchestrator {
 
   // Only unreadable folders in this home are ours to stop. Never scan by a shared prefix.
   async #stopSkipped(skipped: string[]): Promise<void> {
+    let failed = false;
     for (const id of skipped) {
-      await this.#queued(id, async () => {
+      await this.#withBrowser(id, async () => {
         const names = cellNames(id, this.#namePrefix);
         this.#invalidRecords.add(id);
         // Reconcile may run while a watch still holds a cached record that became unreadable.
@@ -1036,8 +1387,12 @@ export class CellOrchestrator {
         console.error(
           `cell ${id}: cell.json can't be used; ${closed && stopped ? "keyd closed the cell and its containers were stopped" : "cleanup could not be confirmed"}; fix or remove ${this.#store.folder(id)}`,
         );
+      }).catch(() => {
+        failed = true;
       });
     }
+    if (failed)
+      throw new CellControlConflict("browser shutdown could not be confirmed; retry Stop");
   }
 
   async #stopContainer(name: string, seconds = 10): Promise<void> {
@@ -1114,6 +1469,8 @@ export class CellOrchestrator {
 
   #set(id: string, live: Live): void {
     this.#live.set(id, live);
+    if (!this.#browserHolds.has(id) && (live.state !== "ready" || live.paused))
+      void this.#stopBrowser(id).catch(() => {});
     this.#emit(id);
   }
 
@@ -1135,7 +1492,7 @@ export class CellOrchestrator {
   async containFenced(): Promise<void> {
     for (const record of this.#store.inventory().records) {
       if (this.deps.permanentFence?.(record.id))
-        await this.#queued(record.id, () => this.#containFenced(record));
+        await this.#withBrowser(record.id, () => this.#containFenced(record));
     }
   }
   async #containFenced(record: CellRecord): Promise<void> {
@@ -1180,10 +1537,16 @@ export class CellOrchestrator {
     });
   }
   #held(id: string): boolean {
-    return !!this.deps.permanentFence?.(id) || this.#candidateHolds.has(id);
+    return (
+      !!this.deps.permanentFence?.(id) || !!this.deps.runtimeHold?.(id) || this.#candidateHeld(id)
+    );
+  }
+  #candidateHeld(id: string): boolean {
+    return this.#candidateHolds.has(id) || !!this.deps.candidateHold?.(id);
   }
   holdReplacement(id: string): void {
     this.#candidateHolds.add(id);
+    void this.#stopBrowser(id).catch(() => {});
     this.#emit(id);
   }
   publishReplacement(id: string): void {
@@ -1195,6 +1558,7 @@ export class CellOrchestrator {
   async inspectReplacement(id: string): Promise<"ready" | "owned" | "absent" | "foreign"> {
     const record = this.#record(id);
     try {
+      if (record) await this.deps.verifyRuntime?.(record);
       const objects = await inspectOwnedCell(
         this.#docker,
         id,
@@ -1228,8 +1592,38 @@ export class CellOrchestrator {
       return "foreign";
     }
   }
-  retireReplacement(id: string, purgeHome = false): Promise<{ absent: boolean; revoked: boolean }> {
+  retireReset(input: ComputerResetRecord, retire: () => Promise<void>): Promise<void> {
+    const reset = ComputerResetRecord.parse(input),
+      id = reset.oldCellId;
     return this.#queued(id, async () => {
+      if (!this.deps.permanentFence?.(id) || this.#disposed)
+        throw new CellControlConflict("reset admission is not held");
+      if (this.#store.inventoryAll().skipped.includes(id))
+        throw new CellControlConflict("reset record is unreadable");
+      const record = this.#record(id);
+      if (
+        record &&
+        JSON.stringify(captureComputerResetSource(record).desktop) !==
+          JSON.stringify(reset.source.desktop)
+      )
+        throw new CellControlConflict("reset desktop ownership changed");
+      if (!record && this.#store.getStored(id))
+        throw new CellControlConflict("reset identity changed");
+      this.#set(id, { state: "stopping", restarts: 0, stream: NO_STREAM });
+      if (!this.#keyd || !(await this.#closeInKeyd(id)))
+        throw new CellControlConflict("reset key closure is unconfirmed");
+      // The controller owns the browser queue, exact physical cleanup and post-close key proof.
+      // Do not use #withBrowser here: that would race a second browser resource deleter.
+      await retire();
+      this.#retiredPortOwners.add(id);
+      this.#set(id, { state: "removed", restarts: 0, stream: NO_STREAM });
+      this.#store.remove(id);
+      this.#records.delete(id);
+      this.#live.delete(id);
+    });
+  }
+  retireReplacement(id: string, purgeHome = false): Promise<{ absent: boolean; revoked: boolean }> {
+    return this.#withBrowser(id, async () => {
       const record = this.#record(id),
         names = record?.docker ?? cellNames(id, this.#namePrefix);
       this.#set(id, { state: "stopping", restarts: 0, stream: NO_STREAM });
@@ -1262,13 +1656,20 @@ export class CellOrchestrator {
                 : { revision: 1 },
           }
         : {}),
-      ...(this.#candidateHolds.has(record.id) ? { replacementPending: true as const } : {}),
+      ...(this.#candidateHeld(record.id) ? { replacementPending: true as const } : {}),
       state: live.state,
       scale: record.scale,
       createdAt: record.createdAt,
       stream: live.stream,
       ...(live.error ? { error: live.error } : {}),
       ...(live.paused ? { paused: true as const } : {}),
+      ...(this.deps.runtimeHold?.(record.id)
+        ? {
+            state: "failed" as const,
+            stream: NO_STREAM,
+            error: "Computer runtime update recovery is incomplete.",
+          }
+        : {}),
     };
   }
 }

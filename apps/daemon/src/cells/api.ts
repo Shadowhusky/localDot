@@ -1,6 +1,7 @@
 import { ReplacementRequest, ULID_PATTERN } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
+import { ComputerResetRequest } from "../../../../packages/protocol/src/computer-reset.ts";
 import { ReplacementConflict } from "../agent/safety/replacement.ts";
 import type { createReplacementController } from "../agent/safety/replacement-controller.ts";
 import { DockerError } from "./docker.ts";
@@ -10,15 +11,17 @@ import {
   SkippedCellsError,
   UnknownCellError,
 } from "./orchestrator.ts";
+import type { createComputerResetController } from "./reset-controller.ts";
 import type { TicketRegistry } from "./secrets.ts";
 
 export interface CellApiDeps {
   cells: CellApi;
   tickets: TicketRegistry;
   replacement?: ReturnType<typeof createReplacementController>;
+  reset?: ReturnType<typeof createComputerResetController>;
 }
 
-export function cellRoutes(app: Hono, { cells, tickets, replacement }: CellApiDeps): void {
+export function cellRoutes(app: Hono, { cells, tickets, replacement, reset }: CellApiDeps): void {
   // A stream ticket lives only while its cell is ready (P2-R2): stopping, failing or removing the
   // cell revokes it, so no stream path stays open for a computer that is off.
   cells.subscribe((cell) => {
@@ -27,6 +30,32 @@ export function cellRoutes(app: Hono, { cells, tickets, replacement }: CellApiDe
   });
 
   app.get("/api/cells", (c) => c.json(cells.list()));
+  app.get("/api/cells/:id/reset/:request", (c) =>
+    withCell(c, (id) => {
+      const request = c.req.param("request") ?? "";
+      if (request.length !== 26 || !ULID_PATTERN.test(request))
+        return c.text("invalid reset request id", 400);
+      if (!reset) return c.text("reset unavailable", 503);
+      try {
+        const record = reset.status(id, request);
+        return record ? c.json(record) : c.text("unknown reset request", 404);
+      } catch {
+        return c.text("reset status unavailable", 409);
+      }
+    }),
+  );
+  app.post("/api/cells/:id/reset", bodyLimit({ maxSize: 1024 }), (c) =>
+    withCell(c, async (id) => {
+      if (!reset) return c.text("reset unavailable", 503);
+      const request = ComputerResetRequest.safeParse(await c.req.json().catch(() => null));
+      if (!request.success) return c.text("invalid confirmed reset request", 400);
+      try {
+        return c.json(await reset.reset(id, request.data));
+      } catch {
+        return c.text("reset completion unconfirmed; retry the same request explicitly", 409);
+      }
+    }),
+  );
   app.get("/api/cells/:id/fence", (c) =>
     withCell(c, (id) =>
       replacement?.fence(id) ? c.json(replacement.fence(id)) : c.text("no replaceable fence", 404),

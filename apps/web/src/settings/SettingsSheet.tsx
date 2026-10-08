@@ -1,5 +1,6 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useEffect, useLayoutEffect, useRef } from "react";
+import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import type {
   ModelRole,
@@ -14,6 +15,8 @@ import type { ChatgptControls } from "./useChatgpt.ts";
 import "./settings.css";
 
 export interface SettingsSheetProps {
+  focusSection?: "models" | "autonomy";
+  appearance?: AppearanceControl;
   open: boolean;
   suspended?: boolean;
   choices: Partial<Record<ModelRole, RoleChoice>>;
@@ -59,6 +62,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
   const panel = useRef<HTMLElement>(null);
   const active = props.open && !props.suspended;
   const close = useRef(props.onClose);
+  const focusedSection = useRef(false);
   useLayoutEffect(() => {
     close.current = props.onClose;
   }, [props.onClose]);
@@ -95,6 +99,16 @@ export function SettingsSheet(props: SettingsSheetProps) {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [active]);
+  useEffect(() => {
+    if (!props.open) focusedSection.current = false;
+    if (!active || props.loading || focusedSection.current || props.focusSection !== "autonomy")
+      return;
+    const section = panel.current?.querySelector<HTMLElement>(".safety-settings");
+    if (!section) return;
+    section.scrollIntoView?.({ block: "start" });
+    section.querySelector<HTMLSelectElement>("select")?.focus();
+    focusedSection.current = true;
+  }, [active, props.open, props.loading, props.focusSection]);
   return (
     <>
       <div
@@ -137,6 +151,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
         </div>
         {active && props.taskControls}
         <div className="settings-body">
+          {props.appearance && <AppearancePicker appearance={props.appearance} />}
           <p>Saved settings apply to future tasks. The current task keeps its models.</p>
           <p role="status">{props.dirty ? "Unsaved choices" : "Saved choices"}</p>
           {props.loading && <p role="status">Loading saved settings…</p>}

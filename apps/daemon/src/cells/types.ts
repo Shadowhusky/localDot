@@ -47,7 +47,8 @@ export interface CellOwnership {
 
 export interface CellRecord {
   ownership?: CellOwnership;
-  v: 1;
+  v: 2;
+  kind: "desktop";
   id: string;
   createdAt: string;
   scale: Scale;
@@ -55,6 +56,39 @@ export interface CellRecord {
   tokens: { desktopd: string; stream: string };
   docker: CellDocker;
 }
+
+export interface BrowserCellDocker {
+  internalNetwork: string;
+  egressNetwork: string;
+  profileVolume: string;
+  gate: string;
+  browser: string;
+  gateInternalIp: string;
+  gateEgressIp: string;
+  browserIp: string;
+}
+
+export interface BrowserCellOwnership {
+  browser: string;
+  gate: string;
+  internalNetwork: string;
+  egressNetwork: string;
+}
+
+export interface BrowserCellRecord {
+  v: 2;
+  kind: "browser";
+  id: string;
+  parentCellId: string;
+  createdAt: string;
+  scale: Scale;
+  keydPort: number;
+  tokens: { browserd: string; stream: string };
+  docker: BrowserCellDocker;
+  ownership?: BrowserCellOwnership;
+}
+
+export type StoredCellRecord = CellRecord | BrowserCellRecord;
 
 export interface DesktopdEndpoint {
   baseUrl: string;

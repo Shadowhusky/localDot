@@ -25,6 +25,7 @@ export interface GatewayRoutesDeps {
   gateway?: ActionGateway;
   frames?: FrameStore;
   live?: LiveSessions;
+  prepareDesktopTask?(cellId: string, sessionId: string, signal: AbortSignal): Promise<void>;
   killSwitch?: Pick<KillSwitch, "stopSession" | "resume"> & Partial<Pick<KillSwitch, "isBusy">>;
 }
 
@@ -101,8 +102,9 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
 
   app.post("/api/cells/:id/puppet", (c) =>
     withReadyCell(c, cells, deps, async () => {
-      const { eventLog, gateway, live, registry } = deps;
-      if (!eventLog || !gateway || !live) return c.text("puppet not available", 503);
+      const { eventLog, gateway, live, registry, prepareDesktopTask } = deps;
+      if (!eventLog || !gateway || !live || !prepareDesktopTask)
+        return c.text("puppet not available", 503);
       const cellId = c.req.param("id") ?? "";
       const parsed = PuppetScript.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
@@ -112,17 +114,21 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
       if (live.idleOperationPending(cellId))
         return c.text("the computer has an operation in progress", 409);
       const sessionId = eventLog.createSession(parsed.data.title);
-      live.start(cellId, sessionId, (signal) =>
-        runPuppet(
-          {
-            gateway,
-            eventLog,
-            registry,
-            cells,
-            sleep: (ms, s) => sleep(ms, undefined, { signal: s }),
-          },
-          { cellId, sessionId, script: parsed.data, signal },
-        ),
+      live.start(
+        cellId,
+        sessionId,
+        (signal) =>
+          runPuppet(
+            {
+              gateway,
+              eventLog,
+              registry,
+              cells,
+              sleep: (ms, s) => sleep(ms, undefined, { signal: s }),
+            },
+            { cellId, sessionId, script: parsed.data, signal },
+          ),
+        (signal) => prepareDesktopTask(cellId, sessionId, signal),
       );
       return c.json({ sessionId }, 202);
     }),

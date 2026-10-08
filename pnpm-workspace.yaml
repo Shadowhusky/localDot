@@ -3,6 +3,7 @@ packages:
   - "packages/*"
   - "spikes/*"
   - "cells/desktop/desktopd"
+  - "cells/browser/browserd"
   - "cells/brain"
   - "harness/*"
 

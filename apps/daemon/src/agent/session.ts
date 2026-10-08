@@ -10,6 +10,8 @@ import {
   type TranscriptAppend,
   ulid,
 } from "@localdot/protocol";
+import type { ScreenName, ScreenSwitchData } from "../../../../packages/protocol/src/screens.ts";
+import type { ScreenController, ScreenLease, ScreenScope } from "../browser/screen-controller.ts";
 import type { EventLog } from "../event-log.ts";
 import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
 import {
@@ -131,6 +133,14 @@ export class AgentSession {
     | { askId: string; options: string[]; allowText: boolean; finish(a: AskAnswer): boolean }
     | undefined;
   #control: ControlRecord | undefined;
+  #screens: ScreenController | undefined;
+  #screenReady: BrainGeneration | undefined;
+  #screenPreparing: { generation: BrainGeneration; promise: Promise<void> } | undefined;
+  #screenRetiring: Promise<void> = Promise.resolve();
+  #screenClosing: Promise<void> | undefined;
+  #stopping = false;
+  #finishing = false;
+  #finishInterrupted = false;
 
   constructor(
     readonly id: string,
@@ -205,7 +215,7 @@ export class AgentSession {
     return this.#approvals.answer(this.id, value);
   }
   get stopped(): boolean {
-    return this.abort.signal.aborted;
+    return this.#stopping || this.abort.signal.aborted;
   }
   get delivered(): number {
     return this.#delivered;
@@ -398,6 +408,74 @@ export class AgentSession {
               : "ready";
   }
 
+  attachScreens(screens: ScreenController): void {
+    if (this.#screens || this.#brain || this.#control || this.stopped)
+      throw new SessionStoppedError();
+    this.#screens = screens;
+  }
+  get screens(): ScreenController | undefined {
+    return this.#screens;
+  }
+  #screenScope(
+    generation: BrainGeneration,
+    signal: AbortSignal,
+    allowControl = false,
+  ): ScreenScope {
+    return {
+      sessionId: this.id,
+      generation: generation.id,
+      signal: AbortSignal.any([this.abort.signal, generation.signal, signal]),
+      check: () => this.check(generation, signal, allowControl),
+    };
+  }
+  prepareScreens(generation: BrainGeneration): Promise<void> {
+    this.check(generation);
+    const screens = this.#screens;
+    if (!screens || this.#screenReady === generation) return Promise.resolve();
+    if (this.#screenPreparing?.generation === generation) return this.#screenPreparing.promise;
+    const promise = (async () => {
+      await this.#screenRetiring;
+      this.check(generation);
+      await screens.activate(this.#screenScope(generation, generation.signal));
+      this.check(generation);
+      this.lastFrameId = undefined;
+      this.#screenReady = generation;
+    })().catch(() => {
+      // Cancellation of an old generation must never stop a successfully installed replacement.
+      if (this.isCurrent(generation) && !this.controlHeld) this.stop();
+      throw new SessionStoppedError();
+    });
+    this.#screenPreparing = { generation, promise };
+    void promise.catch(() => {});
+    return promise;
+  }
+  screenLease(lease: ToolLease): ScreenLease {
+    lease.check();
+    if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)
+      throw new SessionStoppedError();
+    return this.#screens.lease(this.#screenScope(lease.generation, lease.signal));
+  }
+  async switchScreen(screen: ScreenName, lease: ToolLease): Promise<ScreenSwitchData> {
+    lease.check();
+    if (!this.#active.has(lease) || !this.#screens || this.#screenReady !== lease.generation)
+      throw new SessionStoppedError();
+    const result = await this.#screens.switchTo(
+      screen,
+      this.#screenScope(lease.generation, lease.signal),
+    );
+    lease.check();
+    this.lastFrameId = undefined;
+    return result;
+  }
+  async screensSettled(): Promise<void> {
+    for (;;) {
+      const pending = this.#screenClosing ?? this.#screenRetiring;
+      await pending;
+      // Stop may upgrade a normal-close receipt while its physical work drains.
+      if (pending === (this.#screenClosing ?? this.#screenRetiring)) return;
+    }
+  }
+
   beginBrain(): BrainGeneration {
     if (this.stopped) throw new SessionStoppedError();
     if (this.#control) throw new ControlHeldError();
@@ -423,6 +501,12 @@ export class AgentSession {
     for (const observer of this.#controlObservers)
       if (observer.generation === generation) this.#controlObservers.delete(observer);
     previous.abort.abort(new SessionStoppedError());
+    this.#screenReady = undefined;
+    if (this.#screens && !this.stopped) {
+      // takeOver fences synchronously, including physical grants that are still being prepared.
+      this.#screenRetiring = this.#screens.takeOver();
+      void this.#screenRetiring.catch(() => this.stop());
+    }
   }
   // Drivers must close model sampling before tool cancellation can return to the model.
   // The subscription belongs to this generation; retiring it never releases held control.
@@ -449,6 +533,7 @@ export class AgentSession {
   }
   admit(generation: BrainGeneration, requestSignal?: AbortSignal): ToolLease {
     this.check(generation, requestSignal);
+    if (this.#screens && this.#screenReady !== generation) throw new SessionStoppedError();
     const abort = new AbortController();
     const signal = AbortSignal.any([
       this.abort.signal,
@@ -765,6 +850,8 @@ export class AgentSession {
     };
     this.#approvals.cancel(this.id);
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
+    this.#screenReady = undefined;
+    const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
     const observers = [...this.#controlObservers].filter(
       (observer) => observer.generation === generation,
     );
@@ -775,7 +862,6 @@ export class AgentSession {
         // Keep control fenced and notify the other owners even if one observer fails.
       }
     }
-    const draining: Promise<void>[] = [];
     for (const [other, call] of this.#active)
       if (other !== lease) {
         draining.push(call.settled);
@@ -804,6 +890,7 @@ export class AgentSession {
   endTakeover(requestId: string, note: string | undefined): boolean {
     const record = this.#control;
     if (
+      this.#screens ||
       !record ||
       record.requestId !== requestId ||
       !record.held ||
@@ -850,6 +937,22 @@ export class AgentSession {
     }
     if (this.#control !== record || this.stopped || this.#manual.size || record.manualUnconfirmed)
       return false;
+    const generation = this.generation;
+    if (this.#screens && generation) {
+      try {
+        await this.#screens.handback(
+          this.#screenScope(generation, signal ?? generation.signal, true),
+        );
+        this.check(generation, signal, true);
+        if (this.#control !== record || this.#manual.size || record.manualUnconfirmed) return false;
+        this.#screenReady = generation;
+      } catch {
+        return false;
+      }
+    }
+    // Native takeover can retire its brain. With no current generation, keep the physical
+    // screens and recorder fenced until prepareScreens confirms the replacement's grant.
+    if (this.#screens) this.lastFrameId = undefined;
     return this.#endControl(record, note);
   }
   #endControl(record: ControlRecord, note: string | undefined): boolean {
@@ -906,14 +1009,57 @@ export class AgentSession {
     }
     this.status = status;
   }
+  async finish(): Promise<boolean> {
+    // Retirement may install a final user-owned download collector. Drain it before
+    // marking the session ended, so normal completion cannot invalidate its setup.
+    await this.screensSettled();
+    if (this.stopped) return false;
+    if (
+      this.#brain ||
+      this.#active.size ||
+      this.#manual.size ||
+      this.#control ||
+      this.pendingApproval ||
+      this.safetyPause
+    )
+      throw new SessionStoppedError();
+    this.#finishing = true;
+    try {
+      this.#end(false);
+      if (!this.#finishInterrupted) this.#screenClosing = this.#screens?.finish();
+      await this.screensSettled();
+      return !this.#finishInterrupted;
+    } catch (error) {
+      this.stop();
+      await this.screensSettled().catch(() => {});
+      throw error;
+    } finally {
+      this.#finishing = false;
+    }
+  }
   stop(): void {
+    if (this.#finishing) {
+      this.#finishInterrupted = true;
+      this.#screenClosing = this.#screens?.close();
+      void this.#screenClosing?.catch(() => {});
+      return;
+    }
+    this.#end(true);
+  }
+  #end(contain: boolean): void {
     this.#steps.stop();
     if (this.stopped) return;
+    this.#stopping = true;
     this.status = "ended";
     this.#approvals.cancel(this.id);
     const generation = this.generation;
     if (generation) this.retireBrain(generation);
     this.abort.abort(new SessionStoppedError());
+    this.#screenReady = undefined;
+    if (this.#screens && contain) {
+      this.#screenClosing = this.#screens.close();
+      void this.#screenClosing.catch(() => {});
+    }
     const record = this.#control;
     if (record) {
       try {

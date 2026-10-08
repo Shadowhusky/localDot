@@ -12,6 +12,10 @@
   "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } },
   "overrides": [
     {
+      "includes": ["apps/cli/src/install/sigstore-tuf-root.json"],
+      "formatter": { "enabled": false }
+    },
+    {
       "includes": ["**/*.config.ts", "**/*.config.mjs"],
       "linter": { "rules": { "style": { "noDefaultExport": "off" } } }
     }

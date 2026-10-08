@@ -3,6 +3,7 @@ import {
   AskUserInput,
   BrowserNavigateInput,
   BrowserReadInput,
+  BrowserUploadInput,
   DoneInput,
   FilesInput,
   GenericComputerInput,
@@ -10,6 +11,7 @@ import {
   RememberInput,
   RequestTakeoverInput,
   ShellInput,
+  SwitchScreenInput,
   UpdatePlanInput,
 } from "@localdot/protocol";
 import { type ToolSet, tool } from "ai";
@@ -41,7 +43,7 @@ function computerTool(b: ModelBinding) {
   }
 }
 
-// The v1 tool table (spec "Tools"), without M7's switch_screen. No tool has an execute function:
+// The v1 tool table (spec "Tools"). No tool has an execute function:
 // the loop runs every call through the daemon's tool API itself.
 export function toolSet(b: ModelBinding): ToolSet {
   const computer = b.vision ? computerTool(b) : undefined;
@@ -64,13 +66,23 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     browser_navigate: tool({
       description:
-        "Open a URL in the computer's Chromium (starting it if needed) and get a screenshot.",
+        "Open a URL on the selected screen (desktop or signed-in browser) and get a screenshot.",
       inputSchema: BrowserNavigateInput,
+    }),
+    browser_upload: tool({
+      description:
+        "Assign desktop files to the currently open file chooser on the isolated browser screen. First open the page's file picker. Supply 1–10 paths inside the desktop home, at most 100 MiB total. The user must approve the exact files and receiving page. This assigns the files; a page may still require Submit. Never retry an uncertain upload automatically.",
+      inputSchema: BrowserUploadInput,
     }),
     update_plan: tool({
       description:
         "Set the task's checklist: the whole list each time, with each item's status. Keep it short; update it as you go.",
       inputSchema: UpdatePlanInput,
+    }),
+    switch_screen: tool({
+      description:
+        "Switch between the desktop and the isolated signed-in browser. Use browser for signed-in work and request_takeover for login. After switching, request a screenshot before GUI input. Shell and files always remain on the desktop.",
+      inputSchema: SwitchScreenInput,
     }),
     ask_user: tool({
       description:

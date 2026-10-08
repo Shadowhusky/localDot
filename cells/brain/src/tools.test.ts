@@ -5,7 +5,7 @@ import { binding, bootConfig } from "./testing/scripted.ts";
 import { toolSet } from "./tools.ts";
 
 describe("the model's advertised tools and instructions", () => {
-  it("exposes exactly ten daemon-dispatched tools with no execute functions", () => {
+  it("exposes exactly twelve daemon-dispatched tools with no execute functions", () => {
     const tools = toolSet(binding());
     expect(Object.keys(tools).sort()).toEqual(
       [
@@ -13,7 +13,9 @@ describe("the model's advertised tools and instructions", () => {
         "shell",
         "files",
         "browser_read",
+        "browser_upload",
         "browser_navigate",
+        "switch_screen",
         "update_plan",
         "ask_user",
         "request_takeover",

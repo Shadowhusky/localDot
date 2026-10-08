@@ -13,12 +13,14 @@ import { PausedStepError } from "../safety/step-barrier.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import { askUserTool, requestTakeoverTool } from "./ask.ts";
 import { browserNavigateTool, browserReadTool } from "./browser.ts";
+import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
 import { append, fail, type ToolCallContext, type ToolDeps } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
 import { updatePlanTool } from "./plan.ts";
 import { rememberTool } from "./remember.ts";
+import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
 
 // Daemon-side cap on one task's tool calls: the brain has its own turn limit, but the brain is in a
@@ -39,6 +41,8 @@ const STEP_KIND: Record<ToolName, string> = {
   files: "file",
   browser_read: "browser",
   browser_navigate: "browser",
+  browser_upload: "browser",
+  switch_screen: "browser",
   update_plan: "think",
   ask_user: "ask",
   request_takeover: "ask",
@@ -203,6 +207,27 @@ async function dispatchAdmitted(
           "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
         ),
       };
+    if (
+      ["computer", "browser_read", "browser_navigate", "browser_upload"].includes(name) &&
+      session.screens
+    ) {
+      const screen = session.screenLease(lease);
+      ctx.screen = screen;
+      ctx.signal = AbortSignal.any([lease.signal, screen.signal]);
+      ctx.check = () => {
+        activeLease.check();
+        screen.check();
+      };
+      if (!deps.tools.bindScreen) throw new Error("The selected screen is unavailable.");
+      ctx.nativeScreen = deps.tools.bindScreen(session, screen);
+      if (
+        ctx.nativeScreen.cellId !== screen.selection.cellId ||
+        ctx.nativeScreen.parentCellId !== session.cellId ||
+        ctx.nativeScreen.scale !== screen.selection.geometry.scale
+      )
+        throw new Error("The selected screen does not match this tool call.");
+      ctx.check();
+    }
     const facts = toolRisk(name, frozen);
     if (facts) {
       ctx.permit = await authorizePrepared(ctx, {
@@ -242,6 +267,12 @@ async function dispatchAdmitted(
         break;
       case "browser_navigate":
         result = await browserNavigateTool(t, ctx, input);
+        break;
+      case "browser_upload":
+        result = await browserUploadTool(t, ctx, input);
+        break;
+      case "switch_screen":
+        result = await switchScreenTool(ctx, input);
         break;
       case "update_plan":
         result = updatePlanTool(ctx, input);
@@ -299,6 +330,7 @@ async function dispatchAdmitted(
       },
     };
   } finally {
+    ctx?.screen?.finish();
     lease?.finish();
   }
 }

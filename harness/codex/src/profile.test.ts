@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 import { loadConfigFromString } from "@anthropic-ai/sandbox-runtime/dist/utils/config-loader.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CODEX_HOME_DENY_WRITE,
   CODEX_HOSTS,
@@ -20,6 +20,7 @@ import {
   sandboxSettings,
   writeSettingsFile,
 } from "./profile.ts";
+import * as directories from "./roots.ts";
 import {
   codexInstallDirectory,
   createOwnedCodexDirectory,
@@ -60,7 +61,19 @@ function fixture() {
   return { top, realHome, roots, input, binDir, work, mcp };
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const path of owned.splice(0)) rmSync(path, { recursive: true, force: true });
+});
+
+it("does not publish a launchable profile when its directory cannot be persisted", async () => {
+  const f = fixture();
+  const persist = vi
+    .spyOn(directories, "persistOwnedCodexProfile")
+    .mockRejectedValue(new Error("disk"));
+  await expect(writeSettingsFile(f.roots, sandboxSettings(f.input))).rejects.toThrow(
+    "sandbox settings",
+  );
+  expect(persist).toHaveBeenCalledOnce();
 });
 
 describe("strict owned Codex profiles", () => {

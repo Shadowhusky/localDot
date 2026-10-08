@@ -1,6 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { constants, lstatSync, mkdirSync, mkdtempSync, realpathSync, type Stats } from "node:fs";
-import { lstat, rename, rm } from "node:fs/promises";
+import { lstat, open, rename, rm } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, normalize, relative, sep } from "node:path";
 
 export interface OwnedCodexRoots {
@@ -297,13 +297,127 @@ async function checkDirectory(directory: OwnedCodexDirectory): Promise<boolean> 
 }
 
 export async function removeOwnedCodexDirectory(directory: OwnedCodexDirectory): Promise<void> {
-  if (await checkDirectory(directory)) await rm(directory.path, { recursive: true });
+  const owner = directories.get(directory);
+  if (!owner) return refuse();
+  const present = await checkDirectory(directory);
+  const parent = owner.roots[owner.area],
+    before = lstatSync(parent);
+  if (present) await rm(directory.path, { recursive: true });
+  // Even an already-absent path can be a retry after removal or rename whose acknowledgement
+  // was lost. Persist that namespace change before reporting confirmed cleanup.
+  await persistManagedNamespace(owner.roots, parent, before);
+  try {
+    await lstat(directory.path);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+    throw error;
+  }
+  return refuse();
+}
+
+async function persistManagedNamespace(
+  roots: OwnedCodexRoots,
+  parent: string,
+  expected: Identity,
+): Promise<void> {
+  try {
+    assertOwnedCodexRoots(roots);
+    const owner = owners.get(roots);
+    if (!owner || !Object.values(roots).includes(parent)) return refuse();
+    for (const path of [parent, roots.root, owner.anchor]) {
+      assertOwnedCodexRoots(roots);
+      const before = lstatSync(path);
+      if (path === parent && (before.dev !== expected.dev || before.ino !== expected.ino))
+        return refuse();
+      const fd = await open(
+        path,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      try {
+        const opened = await fd.stat();
+        if (opened.dev !== before.dev || opened.ino !== before.ino || !opened.isDirectory())
+          return refuse();
+        await fd.sync();
+        const after = lstatSync(path);
+        if (after.dev !== before.dev || after.ino !== before.ino) return refuse();
+        assertOwnedCodexRoots(roots);
+      } finally {
+        await fd.close();
+      }
+    }
+    const after = lstatSync(parent);
+    if (after.dev !== expected.dev || after.ino !== expected.ino) return refuse();
+  } catch {
+    return refuse();
+  }
+}
+
+// The protected profile is the launcher's crash breadcrumb. Publish it durably before spawn;
+// only launch retirement may remove it after the process group and its pipes are confirmed gone.
+// An installer must also hold both service leases before interpreting an empty profiles root.
+export async function persistOwnedCodexProfile(
+  roots: OwnedCodexRoots,
+  directory: OwnedCodexDirectory,
+): Promise<void> {
+  try {
+    assertOwnedCodexDirectory(roots, directory, "profilesRoot");
+    const owner = owners.get(roots);
+    if (!owner) return refuse();
+    for (const path of [directory.path, roots.profilesRoot, roots.root, owner.anchor]) {
+      assertOwnedCodexDirectory(roots, directory, "profilesRoot");
+      const before = lstatSync(path);
+      const fd = await open(
+        path,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      try {
+        const opened = await fd.stat();
+        if (opened.dev !== before.dev || opened.ino !== before.ino || !opened.isDirectory())
+          return refuse();
+        await fd.sync();
+        const after = lstatSync(path);
+        if (after.dev !== before.dev || after.ino !== before.ino) return refuse();
+        assertOwnedCodexDirectory(roots, directory, "profilesRoot");
+      } finally {
+        await fd.close();
+      }
+    }
+  } catch {
+    return refuse();
+  }
 }
 
 export function codexInstallDirectory(roots: OwnedCodexRoots, key: string): string {
   assertOwnedCodexRoots(roots);
   if (!/^0\.154\.0-[a-f0-9]{64}$/.test(key)) return refuse();
   return join(roots.binRoot, key);
+}
+
+/** Called only after the installer rehashes the fixed binaries. Also completes directory
+ * persistence when a previous successful rename lost its durability acknowledgement. */
+export async function persistCodexInstallation(
+  roots: OwnedCodexRoots,
+  target: string,
+): Promise<void> {
+  assertOwnedCodexRoots(roots);
+  if (target !== codexInstallDirectory(roots, basename(target))) return refuse();
+  canonicalInput(target);
+  checkPrivate(target);
+  const before = lstatSync(target);
+  const parent = lstatSync(roots.binRoot);
+  const fd = await open(target, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW);
+  try {
+    const opened = await fd.stat();
+    if (opened.dev !== before.dev || opened.ino !== before.ino) return refuse();
+    await fd.sync();
+  } finally {
+    await fd.close();
+  }
+  await persistManagedNamespace(roots, roots.binRoot, parent);
+  canonicalInput(target);
+  checkPrivate(target);
+  const after = lstatSync(target);
+  if (after.dev !== before.dev || after.ino !== before.ino) return refuse();
 }
 
 export async function publishOwnedCodexDirectory(
@@ -326,8 +440,35 @@ export async function publishOwnedCodexDirectory(
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
   }
+  const parent = owner.roots.binRoot,
+    before = lstatSync(parent);
+  // Extracted file contents were synced by the archive writer. Persist their directory entries
+  // before rename, then the managed namespace after it. Do not delete a published target if any
+  // acknowledgement is lost; reopening still rehashes both pinned executable files.
+  const fd = await open(
+    directory.path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    const opened = await fd.stat();
+    if (opened.dev !== owner.identity.dev || opened.ino !== owner.identity.ino) return refuse();
+    await fd.sync();
+    if (!(await checkDirectory(directory))) return refuse();
+  } finally {
+    await fd.close();
+  }
+  const currentParent = lstatSync(parent);
+  if (currentParent.dev !== before.dev || currentParent.ino !== before.ino) return refuse();
   signal?.throwIfAborted();
   await rename(directory.path, target);
+  await persistManagedNamespace(owner.roots, parent, before);
+  const published = await lstat(target);
+  if (
+    !published.isDirectory() ||
+    published.dev !== owner.identity.dev ||
+    published.ino !== owner.identity.ino
+  )
+    return refuse();
 }
 
 export const PRIVATE_READ_FLAGS = constants.O_RDONLY | constants.O_NOFOLLOW;

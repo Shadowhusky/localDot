@@ -242,7 +242,8 @@ export async function fixture(
   );
   const registry = new DesktopdRegistry(cells, clock, native.fetchImpl);
   const record: CellRecord = {
-    v: 1,
+    v: 2,
+    kind: "desktop",
     id: cellId,
     scale: 2,
     createdAt: "2026-10-04T00:00:00Z",

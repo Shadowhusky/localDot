@@ -295,8 +295,8 @@ describe("CellOrchestrator lifecycle", () => {
     await stateOf(victim.id, "ready");
     const victimNetwork = store.get(victim.id)?.docker.internalNetwork ?? "";
     const edited = sampleRecord();
-    edited.docker.gate = `../networks/${victimNetwork}`;
     store.save(edited);
+    edited.docker.gate = `../networks/${victimNetwork}`;
     // The loader refuses such a name (store.test.ts); this store hands it over regardless, so the
     // encoding is tested on its own.
     const unchecked = new (class extends CellStore {
@@ -926,13 +926,13 @@ describe("CellOrchestrator records and endpoints", () => {
     // The first read lists the record; the next, a moment later, fails.
     let reads = 0;
     const flaky = new (class extends CellStore {
-      override get(id: string) {
+      override getStored(id: string) {
         if (id === first.id && ++reads > 1) {
           throw Object.assign(new Error(`EACCES: permission denied, open '${home}'`), {
             code: "EACCES",
           });
         }
-        return super.get(id);
+        return super.getStored(id);
       }
     })(home);
     const fresh = new CellOrchestrator({

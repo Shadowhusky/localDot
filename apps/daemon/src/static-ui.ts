@@ -1,11 +1,10 @@
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import type { Hono } from "hono";
+import { runtimeLayout } from "./runtime-layout.ts";
 import { readStatic } from "./static-files.ts";
 
-// apps/daemon/src → apps/web/<sub>; fileURLToPath keeps the apostrophe in the repo path intact.
 export function webDir(sub: string): string {
-  return join(dirname(fileURLToPath(import.meta.url)), "..", "..", "web", sub);
+  return join(runtimeLayout.web, sub);
 }
 
 const BUILD_HINT = "UI not built: run pnpm --filter @localdot/web build";
@@ -16,6 +15,7 @@ const NOSNIFF = { "x-content-type-options": "nosniff" };
 // URL (Selkies' settings handler assigns window[key] for each key the cell sends), and a Theatre
 // loaded there would act on a fragment token the cell chose.
 const UI_CSP = {
+  "referrer-policy": "no-referrer",
   "content-security-policy": [
     "default-src 'self'",
     "connect-src 'self'",

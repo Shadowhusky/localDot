@@ -17,8 +17,8 @@ func failingFake(t *testing.T) (*Keychain, string) {
 	k, dir := fakeKeychain(t)
 	s := fakeSecurity
 	for from, to := range map[string]string{
-		`if [ "$FAKE_FAIL" = add ]; then`:                       `[ "$FAKE_FAIL" = "add:$acct" ] && return 1; if [ "$FAKE_FAIL" = add ]; then`,
-		`delete-generic-password) [ -f "$item" ] || return 44;`: `delete-generic-password) [ "$FAKE_FAIL" = "del:$acct" ] && return 1; [ "$FAKE_FAIL" = del ] && return 1; [ -f "$item" ] || return 44;`,
+		`if [ "$FAKE_FAIL" = add ]; then`:      `[ "$FAKE_FAIL" = "add:$acct" ] && return 1; if [ "$FAKE_FAIL" = add ]; then`,
+		`delete) [ -f "$item" ] || return 44;`: `delete) [ "$FAKE_FAIL" = "del:$acct" ] && return 1; [ "$FAKE_FAIL" = del ] && return 1; [ -f "$item" ] || return 44;`,
 	} {
 		if !strings.Contains(s, from) {
 			t.Fatalf("the fake has no %q", from)
@@ -58,7 +58,7 @@ func TestKeychainRefusesAWriteThatDoesNotReadBack(t *testing.T) {
 	}
 }
 
-// Spaces, quotes and backslashes reach security -i only as hex, so its parser never splits a value.
+// Spaces, quotes and backslashes travel on bounded stdin as hex, without shell parsing.
 func TestKeychainKeepsEveryPrintableCharacter(t *testing.T) {
 	k, _ := fakeKeychain(t)
 	var value []byte
@@ -149,8 +149,7 @@ func TestKeychainDeleteReportsAChunkItCannotRemove(t *testing.T) {
 	}
 }
 
-// An id reaches the security -i line as text, so only a valid one may; and only a value Delete can
-// remove whole.
+// Only valid IDs and values that Delete can remove whole may reach the item helper.
 func TestKeychainPutRefusesWhatItCannotStoreSafely(t *testing.T) {
 	k, dir := fakeKeychain(t)
 	if err := k.Put("victim", fakeValue); err != nil {

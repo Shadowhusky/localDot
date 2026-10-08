@@ -44,10 +44,10 @@ export interface RunningDaemon {
 // A separate home and process group per run. No SSD bind mounts, no shared user's state.
 export async function startDaemon(
   env: Record<string, string> = {},
-  options: { calibrationFile?: string } = {},
+  options: { calibrationFile?: string; home?: string } = {},
 ): Promise<RunningDaemon> {
   const scratch = mkdtempSync(join(tmpdir(), "local dot's e2e-"));
-  const home = join(scratch, "home");
+  const home = options.home ?? join(scratch, "home");
   mkdirSync(home, { recursive: true, mode: 0o700 });
   if (options.calibrationFile) {
     mkdirSync(home, { recursive: true });

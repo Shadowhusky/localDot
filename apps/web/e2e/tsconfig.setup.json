@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@localdot/protocol": ["../../../packages/protocol/src/index.ts"],
+      "@localdot/protocol/*": ["../../../packages/protocol/src/*"],
+      "@localdot/providers": ["../../../packages/providers/src/index.ts"],
+      "@localdot/providers/testing": [
+        "../../../packages/providers/src/testing/models-dev-fixture.ts"
+      ],
+      "@localdot/codex-harness": ["../../../harness/codex/src/index.ts"]
+    }
+  },
+  "include": ["setup.spec.ts", "fixtures/setup-server.ts", "../playwright.setup.config.ts"]
+}

@@ -10,10 +10,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import * as fs from "node:fs/promises";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { createGzip, gzipSync } from "node:zlib";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   type CodexDownloadTransport,
   CodexInstallError,
@@ -39,6 +40,9 @@ type Entry = {
   declaredSize?: number;
   mutate?: (header: Buffer) => void;
 };
+vi.mock("node:fs/promises", async (original) => ({
+  ...(await original<typeof import("node:fs/promises")>()),
+}));
 const hex = (bytes: Buffer) => createHash("sha256").update(bytes).digest("hex");
 const archiveHash = (bytes: Buffer) => createHash("sha512").update(bytes).digest("base64");
 const names = ["codex", "codex-code-mode-host"] as const;
@@ -109,11 +113,69 @@ function fixture(bytes = gzipSync(ustar(regular()))) {
   return { top, roots, release, installer, transport, calls: () => calls, bytes };
 }
 afterEach(() => {
+  vi.restoreAllMocks();
   for (const path of owned.splice(0)) rmSync(path, { recursive: true, force: true });
 });
 const signal = () => new AbortController().signal;
 
 describe("verified on-demand Codex installation", () => {
+  it("syncs both executable modes before publication and rejects a metadata durability failure", async () => {
+    const f = fixture(),
+      original = fs.open,
+      synced: string[] = [];
+    const spy = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+      const fd = await original(...args),
+        sync = fd.sync.bind(fd);
+      fd.sync = async () => {
+        const stat = await fd.stat();
+        if (stat.isFile() && (stat.mode & 0o777) === 0o555) {
+          synced.push(String(args[0]).split("/").at(-1) ?? "");
+          if (synced.length === 2) throw new Error("disk sync failed");
+        }
+        await sync();
+      };
+      return fd;
+    });
+    await expect(f.installer.ensureInstalled(signal())).rejects.toMatchObject({
+      code: "storage_failed",
+    });
+    expect(synced).toEqual([...names]);
+    expect(f.installer.status()).toEqual({ state: "failed", code: "storage_failed" });
+    expect(readdirSync(f.roots.binRoot)).toEqual([]);
+    spy.mockRestore();
+    await f.installer.ensureInstalled(signal());
+    expect(f.installer.status()).toEqual({ state: "ready", version: CODEX_VERSION });
+  });
+  it("retains a renamed install after sync failure and completes durability on a rehashed retry", async () => {
+    const f = fixture(),
+      original = fs.open;
+    const target = join(f.roots.binRoot, releaseInstallKey(f.release));
+    const spy = vi.spyOn(fs, "open").mockImplementation(async (...args) => {
+      const fd = await original(...args),
+        sync = fd.sync.bind(fd);
+      fd.sync = async () => {
+        if (String(args[0]) === f.roots.binRoot && existsSync(target))
+          throw new Error("disk sync failed");
+        await sync();
+      };
+      return fd;
+    });
+    await expect(f.installer.ensureInstalled(signal())).rejects.toMatchObject({
+      code: "storage_failed",
+    });
+    expect(f.installer.status().state).toBe("failed");
+    const inode = lstatSync(target).ino;
+    expect(readdirSync(target).sort()).toEqual([...names].sort());
+    await expect(f.installer.ensureInstalled(signal())).rejects.toMatchObject({
+      code: "storage_failed",
+    });
+    expect(f.calls()).toBe(1);
+    spy.mockRestore();
+    const ready = await f.installer.ensureInstalled(signal());
+    expect(lstatSync(ready.binDir).ino).toBe(inode);
+    expect(f.calls()).toBe(1);
+    expect(f.installer.status()).toEqual({ state: "ready", version: CODEX_VERSION });
+  });
   it("status and local inspection never fetch, spawn or install; explicit installation is single-flight", async () => {
     const f = fixture();
     for (let i = 0; i < 20; i++) expect(f.installer.status()).toEqual({ state: "not_installed" });

@@ -206,7 +206,9 @@ describe("replay model indexes", () => {
       ev("plan.update", 60, { id: "p2", status: "done" }),
     ];
     const m = foldEvents(emptyModel(), events);
-    expect(m.observes).toEqual([{ t: 30, frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", step: "s1" }]);
+    expect(m.observes).toEqual([
+      { t: 30, frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", step: "s1", screen: "desktop" },
+    ]);
     expect(m.steps[0]).toEqual({
       id: "s1",
       kind: "gui",

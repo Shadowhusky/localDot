@@ -3,6 +3,7 @@ import { readSource } from "./testing/read-source.ts";
 
 const theme = await readSource(new URL("./theme.css", import.meta.url));
 const app = await readSource(new URL("./app.css", import.meta.url));
+const appearance = await readSource(new URL("./onboarding/onboarding.css", import.meta.url));
 
 function token(source: string, name: string): string {
   const match = new RegExp(`--${name}:\\s*(#[0-9a-fA-F]{6});`).exec(source);
@@ -25,6 +26,16 @@ function contrast(a: string, b: string): number {
 }
 
 describe("theme", () => {
+  it("keeps Midnight text at readable contrast on its surfaces", () => {
+    for (const text of ["color-text", "color-text-2", "color-text-3"]) {
+      const foreground = text === "color-text" ? token(theme, text) : token(appearance, text);
+      for (const ground of ["color-void", "color-surface", "color-surface-2"])
+        expect(
+          contrast(foreground, token(appearance, ground)),
+          `${text} on ${ground}`,
+        ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
   it("gives every text colour at least 4.5:1 on the void and on the surfaces text sits on", () => {
     for (const text of ["color-text", "color-text-2", "color-text-3"]) {
       for (const ground of ["color-void", "color-surface"]) {

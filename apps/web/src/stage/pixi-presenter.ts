@@ -41,6 +41,7 @@ export class PixiPresenter implements Presenter {
   #pending: VideoFrame | null = null;
   #frameSize: { w: number; h: number } | null = null;
   #screen: { w: number; h: number } | null = null;
+  #backdrop = false;
   readonly #warn: (message: string) => void;
 
   static async create(canvas: OffscreenCanvas, opts: PresenterOptions): Promise<PixiPresenter> {
@@ -77,7 +78,9 @@ export class PixiPresenter implements Presenter {
   }
 
   // Owns the frame: it is closed after its upload, or at once when a newer one supersedes it.
-  present(frame: VideoFrame): void {
+  present(frame: VideoFrame, options?: { backdrop?: boolean }): void {
+    this.#backdrop = options?.backdrop === true;
+    this.video.visible = true;
     const w = frame.displayWidth;
     const h = frame.displayHeight;
     if (!this.#source || this.#frameSize?.w !== w || this.#frameSize?.h !== h) {
@@ -105,13 +108,23 @@ export class PixiPresenter implements Presenter {
     this.#place();
   }
 
+  clearVideo(): void {
+    this.#pending?.close();
+    this.#pending = null;
+    this.video.visible = false;
+    this.video.texture = Texture.EMPTY;
+    this.#source?.destroy();
+    this.#source = null;
+    this.#frameSize = null;
+  }
+
   // The session's screen is the world; a frame of another size is drawn into it, not the reverse.
   #place(): void {
     if (!this.#frameSize) return;
     const screen = this.#screen ?? this.#frameSize;
     const p = videoPlacement(this.#frameSize, screen);
     this.video.scale.set(p.sx, p.sy);
-    if (p.mismatch && !this.warned) {
+    if (p.mismatch && !this.warned && !this.#backdrop) {
       this.warned = true;
       this.#warn(
         `frame ${this.#frameSize.w}x${this.#frameSize.h} drawn into a ${screen.w}x${screen.h} session screen`,
@@ -139,9 +152,9 @@ export class PixiPresenter implements Presenter {
 
   render(): void {
     this.app.renderer.render(this.app.stage);
-    const f = this.#pending;
+    const pending = this.#pending;
     this.#pending = null;
-    f?.close();
+    pending?.close();
   }
 
   // Oracle (Task 16): a crop of the composite, or of the overlays alone (the video sprite hidden),

@@ -146,6 +146,8 @@ RUN chmod 755 /defaults/startwm.sh /etc/s6-overlay/s6-rc.d/svc-session-bus/run \
       /etc/s6-overlay/s6-rc.d/init-gamepad-lock/run /usr/local/bin/localdot-plank \
       /etc/s6-overlay/s6-rc.d/svc-desktopd/run /usr/local/bin/localdot-chromium \
       /etc/s6-overlay/s6-rc.d/init-localdot-cell/run /etc/s6-overlay/s6-rc.d/svc-forwarder/run
+RUN ln -sfn localdot-chromium /usr/local/bin/chromium \
+ && ln -sfn localdot-chromium /usr/local/bin/chromium-browser
 
 # One session bus for XFCE, AT-SPI, Selkies' xfconf writes and desktopd (A10). The Selkies values
 # set here that a client could change are locked: "|locked" on bools, a one-value span on ranges,
@@ -196,7 +198,9 @@ FROM base AS desktop
 COPY desktopd/dist/desktopd.mjs /opt/localdot/desktopd.mjs
 COPY desktopd/x/xhelper.py /opt/localdot/xhelper.py
 COPY desktopd/x/native.py /opt/localdot/native.py
-RUN chmod 644 /opt/localdot/desktopd.mjs
+COPY desktopd/place-download.py /opt/localdot/place-download.py
+COPY desktopd/desktop-browser.py /opt/localdot/desktop-browser.py
+RUN chmod 644 /opt/localdot/desktopd.mjs /opt/localdot/place-download.py /opt/localdot/desktop-browser.py
 # The apt proxy must land after every build-time apt-get invocation.
 COPY desktopd/dist/forwarder.mjs /opt/localdot/forwarder.mjs
 COPY cell/apt-proxy.conf /etc/apt/apt.conf.d/95localdot-proxy

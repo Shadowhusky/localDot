@@ -197,7 +197,10 @@ function fixture(
     };
     return {
       sessionId: s.id,
-      endpoint: { directory: { path: "/private/tmp/inert-owner-mcp" } } as never,
+      endpoint: {
+        directory: { path: "/private/tmp/inert-owner-mcp" },
+        close: vi.fn(async () => {}),
+      } as never,
       signal: generation.signal,
       onRegister: vi.fn(),
       isCurrent: () => s.isCurrent(generation),
@@ -288,6 +291,11 @@ describe("one registered ChatGPT credential owner", () => {
     expect(input.onRegister).toHaveBeenCalledWith(conn);
     expect(f.holders[0]?.input.purpose).toBe("task");
     expect(f.holders[0]?.input.mcp).toBe(input.endpoint.directory);
+    const originalClose = input.endpoint.close;
+    input.endpoint.close = vi.fn(async () => {});
+    await f.holders[0]?.input.retireBridge?.();
+    expect(originalClose).toHaveBeenCalledOnce();
+    expect(input.endpoint.close).not.toHaveBeenCalled();
     expect(await f.owner.status({ fresh: true })).toMatchObject({ state: "signed_out" });
     expect(f.holders).toHaveLength(1);
     await lease.release();

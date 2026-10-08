@@ -15,10 +15,15 @@ export interface StatusSocket {
   on(event: "close" | "error", listener: () => void): void;
 }
 
-export function cellStatusRoute(cells: CellApi): UpgradeRoute {
+type StatusCells = Pick<CellApi, "get" | "subscribe">;
+
+export function cellStatusRoute(
+  cells: StatusCells,
+  surface: "cells" | "browsers" = "cells",
+): UpgradeRoute {
   const wss = tokenSocketServer();
   return {
-    pattern: /^\/api\/cells\/([^/]+)\/status$/,
+    pattern: new RegExp(`^/api/${surface}/([^/]+)/status$`),
     params: ["id"],
     auth: "token",
     open({ req, socket, head, params }) {
@@ -37,7 +42,7 @@ export function cellStatusRoute(cells: CellApi): UpgradeRoute {
   };
 }
 
-export function followCell(ws: StatusSocket, cells: CellApi, current: CellSummary): void {
+export function followCell(ws: StatusSocket, cells: StatusCells, current: CellSummary): void {
   const send = (cell: CellSummary) => {
     if (ws.bufferedAmount > MAX_BUFFERED_BYTES) ws.terminate();
     else ws.send(JSON.stringify(cell));

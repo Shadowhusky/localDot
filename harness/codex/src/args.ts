@@ -9,8 +9,11 @@ import {
 } from "node:fs";
 import { createRequire } from "node:module";
 import { isAbsolute, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { type OwnedSandboxProfile, type SandboxInput, sandboxSettings } from "./profile.ts";
 import { assertOwnedCodexDirectory } from "./roots.ts";
+
+declare const __LOCALDOT_PACKAGED__: boolean | undefined;
 export const MCP_SERVER_NAME = "localdot";
 export const MCP_BRIDGE = "/usr/bin/nc";
 export const MCP_TOOL_TIMEOUT_SEC = 86400;
@@ -86,10 +89,13 @@ export function codexArgs(input: CodexArgsInput): readonly string[] {
 }
 export function srtCli(): string {
   try {
-    const file = createRequire(import.meta.url).resolve(
-      "@anthropic-ai/sandbox-runtime/dist/cli.js",
-    );
+    const packaged = typeof __LOCALDOT_PACKAGED__ === "boolean" && __LOCALDOT_PACKAGED__;
+    const file = packaged
+      ? fileURLToPath(new URL("./sandbox-runtime/dist/cli.mjs", import.meta.url))
+      : createRequire(import.meta.url).resolve("@anthropic-ai/sandbox-runtime/dist/cli.js");
     if (!isAbsolute(file) || !lstatSync(file).isFile()) throw new CodexArgsError();
+    if (packaged && (realpathSync(file) !== file || lstatSync(file).nlink !== 1))
+      throw new CodexArgsError();
     return realpathSync(file);
   } catch {
     throw new CodexArgsError();

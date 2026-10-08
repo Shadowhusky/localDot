@@ -1,14 +1,18 @@
 import { z } from "zod";
+import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { SwitchScreenInput } from "./screens.ts";
 
 // The v1 tool table (spec "The agent"): the only tools a brain may declare and the only ones the
-// daemon's tool API runs. switch_screen arrives with the signed-in browser (M7).
+// daemon's tool API runs, including M7's isolated browser screen.
 export const TOOL_NAMES = [
   "computer",
   "shell",
   "files",
   "browser_read",
   "browser_navigate",
+  "browser_upload",
+  "switch_screen",
   "update_plan",
   "ask_user",
   "request_takeover",
@@ -119,6 +123,15 @@ export type BrowserReadInput = z.infer<typeof BrowserReadInput>;
 export const BrowserNavigateInput = z.object({ url: z.string().min(1).max(2048) });
 export type BrowserNavigateInput = z.infer<typeof BrowserNavigateInput>;
 
+export const BrowserUploadInput = z.strictObject({
+  files: z
+    .array(DesktopUploadPath)
+    .min(1)
+    .max(10)
+    .refine((files) => new Set(files).size === files.length),
+});
+export type BrowserUploadInput = z.infer<typeof BrowserUploadInput>;
+
 export const PlanItemStatus = z.enum(["todo", "doing", "done", "skipped"]);
 export const UpdatePlanInput = z.object({
   items: z
@@ -163,6 +176,8 @@ export const TOOL_INPUTS = {
   files: FilesInput,
   browser_read: BrowserReadInput,
   browser_navigate: BrowserNavigateInput,
+  browser_upload: BrowserUploadInput,
+  switch_screen: SwitchScreenInput,
   update_plan: UpdatePlanInput,
   ask_user: AskUserInput,
   request_takeover: RequestTakeoverInput,

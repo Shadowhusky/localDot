@@ -26,9 +26,12 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/audit"
 	"github.com/shadowhusky/localdot/keyd/internal/egress"
 	"github.com/shadowhusky/localdot/keyd/internal/events"
+	"github.com/shadowhusky/localdot/keyd/internal/installlock"
 	"github.com/shadowhusky/localdot/keyd/internal/keys"
 	"github.com/shadowhusky/localdot/keyd/internal/llm"
+	"github.com/shadowhusky/localdot/keyd/internal/nativewatch"
 	"github.com/shadowhusky/localdot/keyd/internal/netguard"
+	"github.com/shadowhusky/localdot/keyd/internal/servicelease"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
 )
 
@@ -37,12 +40,16 @@ const (
 	keychainService = "localdot-keyd"
 )
 
+// Keep the managed lease reachable until os.Exit, beyond daemon cleanup and handler drainage.
+var managedLifetimeLease *os.File
+
 type Config struct {
 	Home  string
 	Vault string
 	Ports egress.PortRange
 	// The zero value asks nobody, as the tests do.
 	Discovery netguard.Discovery
+	Service   *admin.ServiceIdentity
 }
 
 const (
@@ -55,6 +62,30 @@ func main() {
 }
 
 func run(args []string, stderr io.Writer) int {
+	if len(args) > 0 && args[0] == "native-lock" {
+		return nativewatch.RunResourceLock(args[1:], os.NewFile(3, "native-resource-lease"), os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "native-run" {
+		return nativewatch.Run(args[1:], os.NewFile(3, "native-control"), os.NewFile(4, "native-events"), os.Stdin, os.Stdout, os.Stderr, 5)
+	}
+	if len(args) > 0 && args[0] == "canary-run" {
+		return runCanary(args[1:], os.Stdin, os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "canary-lock" {
+		return runCanaryLock(args[1:], os.NewFile(3, "canary-directory"), os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "service-exec" {
+		return servicelease.RunExec(args[1:], stderr)
+	}
+	if len(args) > 0 && args[0] == "service-lock" {
+		return servicelease.RunLock(args[1:], os.NewFile(3, "service.lock"), os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "keychain-item" {
+		return vault.RunKeychainItem(args[1:], os.Stdin, os.Stdout)
+	}
+	if len(args) > 0 && args[0] == "install-lock" {
+		return installlock.Run(args[1:], os.NewFile(3, "install.lock"), os.Stdout, stderr)
+	}
 	if len(args) > 0 && args[0] == "verify-audit" {
 		return verifyAudit(args[1:], stderr)
 	}
@@ -73,6 +104,18 @@ func run(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "keyd: -ports wants MIN-MAX, -vault keychain or memory, -natpmp on or off")
 		return 2
 	}
+	service, err := managedServiceFromEnv(os.LookupEnv)
+	if err != nil {
+		fmt.Fprintln(stderr, "keyd: invalid installed service identity")
+		return 2
+	}
+	if service != nil {
+		managedLifetimeLease, err = servicelease.Adopt(*service, "keyd", os.Getenv)
+		if err != nil {
+			fmt.Fprintln(stderr, "keyd: managed service lifetime lease is missing or not admitted")
+			return 1
+		}
+	}
 	discovery := netguard.Discovery{Timeout: 3 * time.Second}
 	if *natpmp == "on" {
 		discovery.Router = netguard.DefaultGateway
@@ -80,7 +123,7 @@ func run(args []string, stderr io.Writer) int {
 	if *stun != "off" {
 		discovery.STUN = *stun
 	}
-	d, err := start(Config{Home: *home, Vault: *store, Ports: portRange, Discovery: discovery})
+	d, err := start(Config{Home: *home, Vault: *store, Ports: portRange, Discovery: discovery, Service: service})
 	if err != nil {
 		fmt.Fprintf(stderr, "keyd: %v\n", err)
 		return 1
@@ -114,6 +157,13 @@ func start(cfg Config) (*Daemon, error) {
 	if cfg.Vault != "memory" && cfg.Vault != "keychain" {
 		return nil, errors.New("keyd: unknown vault mode")
 	}
+	if cfg.Service != nil {
+		value := *cfg.Service
+		if !value.Valid() {
+			return nil, errors.New("keyd: invalid installed service identity")
+		}
+		cfg.Service = &value
+	}
 	dir := filepath.Join(cfg.Home, "keyd")
 	if err := privateDir(dir); err != nil {
 		return nil, err
@@ -135,10 +185,13 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if d.log, err = audit.Open(filepath.Join(dir, "audit.jsonl")); err != nil {
 		return err
 	}
-	var store vault.Store = vault.NewKeychain(keychainService)
+	keychain := vault.NewKeychain(keychainService)
+	var store vault.Store = keychain
 	index := filepath.Join(dir, "secrets.json")
 	if cfg.Vault == "memory" {
 		store, index = vault.NewMemory(), ""
+	} else if err := keychain.Check(); err != nil {
+		return errors.New("keyd: the Keychain vault requires a signed native keyd build")
 	}
 	v, err := vault.Open(store, index)
 	if err != nil {
@@ -181,6 +234,9 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	}
 	api := &admin.Server{Manager: d.manager, Vault: v, Registry: registry, Opener: opener, Settings: settings,
 		Budget: budget, Audit: d.log, Events: hub, BootID: d.BootID, Version: version, Hairpin: d.public}
+	if cfg.Service != nil {
+		api.Service = &admin.ServiceProcessIdentity{ServiceIdentity: *cfg.Service, PID: os.Getpid()}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	d.server = &http.Server{

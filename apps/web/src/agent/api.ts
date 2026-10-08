@@ -2,6 +2,7 @@ import {
   ApprovalCard,
   AutonomyPolicy,
   PauseSnapshot,
+  ScreenSelectionSnapshot,
   TaskModelSelection,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -21,6 +22,7 @@ export interface AgentSnapshot {
   readonly autonomy?: AutonomyPolicy;
   readonly approval?: ApprovalCard;
   readonly pause?: PauseSnapshot;
+  readonly screen?: ScreenSelectionSnapshot;
 }
 const statuses = new Set<string>([
   "starting",
@@ -43,6 +45,7 @@ const fields = new Set([
   "autonomy",
   "approval",
   "pause",
+  "screen",
 ]);
 export class AgentResponseError extends Error {
   constructor() {
@@ -103,11 +106,18 @@ export function parseAgentSnapshot(
     return fail();
   const models = Object.hasOwn(v, "models") ? TaskModelSelection.safeParse(v.models) : null;
   if (models && !models.success) return fail();
+  const screen = Object.hasOwn(v, "screen") ? ScreenSelectionSnapshot.safeParse(v.screen) : null;
+  if (
+    screen &&
+    (!screen.success || (screen.data.screen === "desktop") !== (screen.data.cellId === cellId))
+  )
+    return fail();
   return Object.freeze({
     sessionId,
     cellId,
     status: v.status as TaskStatus,
     toolCalls: v.toolCalls as number,
+    ...(screen?.success ? { screen: screen.data } : {}),
     ...(models?.success ? { models: models.data } : {}),
     ...(autonomy?.success ? { autonomy: autonomy.data } : {}),
     ...(approval?.success ? { approval: approval.data } : {}),

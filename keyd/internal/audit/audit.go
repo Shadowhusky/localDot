@@ -280,7 +280,7 @@ func (l *Log) append(raw []byte) error {
 	return nil
 }
 
-// Err is the last write's error, or nil once a write has succeeded again. keyd swaps no secret
+// Err is the last write's error, or ErrClosed after retirement. keyd swaps no secret
 // while it is set: a use of the secret would go unrecorded.
 func (l *Log) Err() error {
 	l.mu.Lock()
@@ -291,6 +291,9 @@ func (l *Log) Err() error {
 func (l *Log) Close() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	// Publish unavailability while holding the same lock as Err and Write. Otherwise a
+	// fresh credential request can pass its audit readiness check after the file closed.
+	l.err = os.ErrClosed
 	return l.f.Close()
 }
 

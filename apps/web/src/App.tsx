@@ -1,4 +1,4 @@
-import { LLM_PROVIDERS } from "@localdot/protocol";
+import { LLM_PROVIDERS, SessionIndexPage, ULID_PATTERN } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -15,12 +15,17 @@ import { useSafety } from "./agent/useSafety.ts";
 import { useStopHotkey } from "./agent/useStopHotkey.ts";
 import { useTaskControls } from "./agent/useTaskControls.ts";
 import { hudFor } from "./cells/hud-state.ts";
+import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
-import { forgetToken, keepToken, storedToken, takeFragmentToken } from "./lib/token.ts";
+import { exchangeInstallCode, type InstallLink, takeInstallLink } from "./lib/install-link.ts";
+import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
+import { useAppearance } from "./onboarding/appearance.ts";
+import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
+import { ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { mergeHud, sessionHud, stepRows } from "./session/session-view.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
@@ -42,47 +47,84 @@ export interface AppProps {
   fetchImpl?: typeof fetch;
 }
 
-type Rejected = "stored" | "link" | null;
+type Rejected = "stored" | "link" | "code" | null;
 
 const RETRY_CHECK_MS = 2000;
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
-  // A token from a link, used and stored only once the daemon accepts it, so a wrong link can't
-  // log the user out.
-  const [candidate, setCandidate] = useState(() => takeFragmentToken());
+  const [candidate, setCandidate] = useState<InstallLink | null>(null);
   const [rejected, setRejected] = useState<Rejected>(null);
   const tokenOwner = useRef(token);
+  const linkOwner = useRef<InstallLink | null>(null);
+  const exchange = useRef<{ code: string; promise: Promise<string> } | null>(null);
 
   // Opening the daemon's link in a tab that already shows this page changes only the fragment,
   // which the browser does not reload for.
   useEffect(() => {
     const onHashChange = () => {
-      const given = takeFragmentToken();
-      if (given) setCandidate(given);
+      const given = takeInstallLink();
+      if (given) {
+        // Fence old replies synchronously, before React commits the new candidate.
+        linkOwner.current = given;
+        setCandidate(given);
+      }
     };
     window.addEventListener("hashchange", onHashChange);
+    onHashChange();
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
   useEffect(() => {
     if (!candidate) return;
+    if (candidate.kind === "invalid") {
+      setRejected("code");
+      setCandidate(null);
+      return;
+    }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const current = () => !cancelled && linkOwner.current === candidate;
+    const accept = (accepted: string) => {
+      if (!current()) return;
+      keepToken(accepted);
+      tokenOwner.current = accepted;
+      setToken(accepted);
+      setRejected(null);
+      setCandidate(null);
+    };
+    if (candidate.kind === "code") {
+      // StrictMode replays effects; both runs must observe the same one-use exchange.
+      if (exchange.current?.code !== candidate.value) {
+        exchange.current = {
+          code: candidate.value,
+          promise: exchangeInstallCode(candidate.value, fetchImpl),
+        };
+      }
+      void exchange.current.promise
+        .then(async (accepted) => {
+          if (!current()) return;
+          await createApi(accepted, { fetchImpl }).get("/api/whoami");
+          accept(accepted);
+        })
+        .catch(() => {
+          if (!current()) return;
+          setRejected("code");
+          setCandidate(null);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     const check = () => {
-      createApi(candidate, { fetchImpl })
+      createApi(candidate.value, { fetchImpl })
         .get("/api/whoami")
         .then(
           () => {
-            if (cancelled) return;
-            keepToken(candidate);
-            tokenOwner.current = candidate;
-            setToken(candidate);
-            setRejected(null);
-            setCandidate(null);
+            accept(candidate.value);
           },
           (err: unknown) => {
-            if (cancelled) return;
+            if (!current()) return;
             if (err instanceof ApiError && err.status === 401) {
               setRejected("link");
               setCandidate(null);
@@ -130,6 +172,32 @@ export function App({ fetchImpl }: AppProps) {
 }
 
 function Theatre({ api }: { api: ApiClient }) {
+  const appearance = useAppearance();
+  const [replayId, setReplayId] = useState<string | null>(() => {
+    const selected = new URLSearchParams(window.location.search).get("replay");
+    return selected && ULID_PATTERN.test(selected) ? selected : null;
+  });
+  const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
+  const [historyRevision, setHistoryRevision] = useState(0);
+  const historyOwner = useRef(0);
+  const replayIdRef = useRef(replayId);
+  replayIdRef.current = replayId;
+  const selectReplay = (id: string | null) => {
+    const address = new URL(window.location.href);
+    if (id) address.searchParams.set("replay", id);
+    else address.searchParams.delete("replay");
+    if (id !== replayIdRef.current) address.searchParams.delete("t");
+    window.history.replaceState(null, "", address);
+    setReplayId(id);
+  };
+  useEffect(() => {
+    const restore = () => {
+      const selected = new URLSearchParams(window.location.search).get("replay");
+      setReplayId(selected && ULID_PATTERN.test(selected) ? selected : null);
+    };
+    window.addEventListener("popstate", restore);
+    return () => window.removeEventListener("popstate", restore);
+  }, []);
   const {
     cell,
     status,
@@ -165,6 +233,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const settingsOrigin = useRef<HTMLElement | null>(null);
+  const [settingsSection, setSettingsSection] = useState<"models" | "autonomy">("models");
   const keysOrigin = useRef<HTMLElement | null>(null);
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
   const keyRequest = useRef(0);
@@ -172,8 +241,9 @@ function Theatre({ api }: { api: ApiClient }) {
     request: number;
     capture: ReturnType<typeof settings.captureKey>;
   } | null>(null);
-  const showSettings = (trigger: HTMLElement) => {
+  const showSettings = (trigger: HTMLElement, section: "models" | "autonomy" = "models") => {
     settingsOrigin.current = trigger;
+    setSettingsSection(section);
     settings.show();
   };
   const receiveKey = useCallback<KeyIntake["receive"]>((source, provider) => {
@@ -212,7 +282,27 @@ function Theatre({ api }: { api: ApiClient }) {
   const hud = hudFor({ cell, status, pending });
   const stage = useRef<StageHandle>(null);
   const session = useLiveSession(api, cell, stage);
+  useEffect(() => {
+    if (session.sessionId && !session.ended) {
+      setNewestReplayId(session.sessionId);
+      return;
+    }
+    const controller = new AbortController();
+    void api
+      .get("/api/session-index?limit=1", { signal: controller.signal })
+      .then((data) => {
+        const page = SessionIndexPage.parse(data);
+        if (!controller.signal.aborted && historyRevision === historyOwner.current)
+          setNewestReplayId(page.sessions[0]?.id ?? null);
+      })
+      .catch(() => {});
+    return () => controller.abort();
+  }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  const selectedScreen = agent.model.screen ?? agent.snapshot?.screen;
+  const browserScreen = useBrowserScreen(api, cell, selectedScreen);
+  const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
+  const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
   const [pane, setPane] = useState<TheatrePane>("computer");
   const [narrow, setNarrow] = useState(
     () => window.matchMedia?.("(width < 1180px)").matches ?? false,
@@ -297,11 +387,14 @@ function Theatre({ api }: { api: ApiClient }) {
     void controls.stop();
   };
   const stageCell =
-    cell && controls.stopStatus.phase === "paused"
-      ? { ...cell, paused: true as const }
-      : cell && controls.stopStatus.phase === "stopped"
-        ? { ...cell, state: "stopped" as const }
-        : cell;
+    physicalStageCell && controls.stopStatus.phase === "paused"
+      ? { ...physicalStageCell, paused: true as const }
+      : physicalStageCell && controls.stopStatus.phase === "stopped"
+        ? { ...physicalStageCell, state: "stopped" as const }
+        : physicalStageCell;
+  // The displayed screen owns video visibility. Parent lifecycle controls still
+  // use the desktop HUD, even when only the separate browser has a live viewer.
+  const stageHud = hudFor({ cell: stageCell, status, pending });
   const containedHud =
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? hudFor({ cell: stageCell, status, pending })
@@ -347,11 +440,14 @@ function Theatre({ api }: { api: ApiClient }) {
     document.title = `localDot — ${merged.label}`;
   }, [merged.label]);
   return (
-    <div className={merged.control ? "app control" : "app"}>
+    <div className={replayId ? "app replaying" : merged.control ? "app control" : "app"}>
       <div className="theatre-content" inert={keysOpen || settings.open}>
         <TopBar
           title={session.model.title ?? "Your computer"}
-          live={hud.live}
+          live={stageHud.live}
+          mode={replayId ? "replay" : "watch"}
+          replayEnabled={!!(replayId || newestReplayId)}
+          onMode={(mode) => selectReplay(mode === "watch" ? null : (replayId ?? newestReplayId))}
           keys={keyStatus(keys.health)}
           keysOpen={keysOpen}
           onKeys={() => {
@@ -364,7 +460,7 @@ function Theatre({ api }: { api: ApiClient }) {
           settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
         />
         <div className="task-controls-area">
-          <div className="task-bar">
+          <div className="task-bar" hidden={!!replayId}>
             <Hud
               hud={merged}
               onStart={guardStart}
@@ -401,178 +497,243 @@ function Theatre({ api }: { api: ApiClient }) {
             visible={!keysOpen && !settings.open}
           />
         </div>
-        <PaneTabs
-          selected={pane}
-          onSelect={setPane}
-          waiting={Boolean(agent.model.pendingAsk || agent.model.pendingTakeover)}
-        />
-        <div className="house">
-          <div
-            className="pane pane-conversation"
-            id="pane-conversation"
-            role="tabpanel"
-            aria-label="Conversation"
-            data-selected={pane === "conversation"}
-            inert={narrow && pane !== "conversation"}
-            onFocusCapture={() => {
-              if (!narrow) setPane("conversation");
-            }}
-          >
-            <ConversationRail
-              visible={!narrow || pane === "conversation"}
-              agent={agent}
-              composer={
-                <>
-                  <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
-                  {question && !agent.model.ended && (
-                    <AskForm
-                      key={question.askId}
-                      question={question}
-                      controls={controls}
-                      visible={(!narrow || pane === "conversation") && !keysOpen && !settings.open}
-                      receiveKey={receiveKey}
-                    />
-                  )}
-                  <Composer
-                    api={api}
-                    cell={cell}
-                    known={status === "known"}
-                    pending={pending !== null}
-                    controlBlocked={
-                      controls.fenced ||
-                      controls.stopping ||
-                      !!cell?.fenced ||
-                      !!cell?.replacementPending ||
-                      !!safety.approval
-                    }
-                    agent={agent}
-                    keysOpen={keysOpen || settings.open}
-                    receiveKey={receiveKey}
-                    configured={mainReady}
-                    onSettings={showSettings}
-                    modelSummary={
-                      settings.saved?.main
-                        ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`
-                        : "Choose a main model in Settings before starting a task."
-                    }
-                  />
-                </>
-              }
-            />
-          </div>
-          <div
-            className={
-              takeover && !agent.model.ended
-                ? "pane pane-computer manual-pane"
-                : "pane pane-computer"
-            }
-            id="pane-computer"
-            role="tabpanel"
-            aria-label="Computer"
-            data-selected={pane === "computer"}
-            inert={narrow && pane !== "computer"}
-            onFocusCapture={() => {
-              if (!narrow) setPane("computer");
-            }}
-          >
-            <StageColumn
-              before={
-                takeover && !agent.model.ended ? (
-                  <TakeoverPanel
-                    key={takeover.requestId}
-                    takeover={takeover}
-                    controls={controls}
-                    visible={(!narrow || pane === "computer") && !keysOpen && !settings.open}
-                    manualStatus={agent.snapshot?.manualControl}
-                    receiveKey={receiveKey}
-                    screen={session.model.screen}
-                    pointerMode={pointerMode}
-                    onPointerMode={setPointerMode}
-                  />
-                ) : undefined
-              }
-              showHud={false}
-              hud={merged}
-              control={merged.control}
-              onStart={guardStart}
-              onStop={guardComputerStop}
-              onResume={guardResume}
-              onStopSession={taskStop}
-              onRetry={retry}
+        <div className="watch-content" hidden={!!replayId} inert={!!replayId}>
+          <PaneTabs
+            selected={pane}
+            onSelect={setPane}
+            waiting={Boolean(agent.model.pendingAsk || agent.model.pendingTakeover)}
+          />
+          <div className="house">
+            <div
+              className="pane pane-conversation"
+              id="pane-conversation"
+              role="tabpanel"
+              aria-label="Conversation"
+              data-selected={pane === "conversation"}
+              inert={narrow && pane !== "conversation"}
+              onFocusCapture={() => {
+                if (!narrow) setPane("conversation");
+              }}
             >
-              <Stage
-                ref={stage}
-                cell={stageCell}
-                api={api}
-                control={merged.control}
-                reconnects={reconnects}
-                listed={listed}
-                manual={
-                  takeover && session.model.screen && !agent.model.ended
-                    ? {
-                        requestId: takeover.requestId,
-                        enabled: controls.canInput,
-                        screen: session.model.screen,
-                        button: pointerMode === "right" ? "right" : "left",
-                        count: pointerMode === "double" ? 2 : 1,
-                        input: controls.input,
+              <ConversationRail
+                visible={!narrow || pane === "conversation"}
+                agent={agent}
+                composer={
+                  <>
+                    <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
+                    {question && !agent.model.ended && (
+                      <AskForm
+                        key={question.askId}
+                        question={question}
+                        controls={controls}
+                        visible={
+                          (!narrow || pane === "conversation") && !keysOpen && !settings.open
+                        }
+                        receiveKey={receiveKey}
+                      />
+                    )}
+                    <Composer
+                      api={api}
+                      cell={cell}
+                      known={status === "known"}
+                      pending={pending !== null}
+                      controlBlocked={
+                        controls.fenced ||
+                        controls.stopping ||
+                        !!cell?.fenced ||
+                        !!cell?.replacementPending ||
+                        !!safety.approval
                       }
-                    : undefined
+                      agent={agent}
+                      keysOpen={keysOpen || settings.open}
+                      receiveKey={receiveKey}
+                      configured={mainReady}
+                      onSettings={showSettings}
+                      modelSummary={
+                        settings.saved?.main
+                          ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`
+                          : "Choose a main model in Settings before starting a task."
+                      }
+                    />
+                  </>
                 }
               />
-            </StageColumn>
-          </div>
-          <div
-            className="pane pane-activity"
-            id="pane-activity"
-            role="tabpanel"
-            aria-label="Activity"
-            data-selected={pane === "activity"}
-            inert={narrow && pane !== "activity"}
-            onFocusCapture={() => {
-              if (!narrow) setPane("activity");
-            }}
-          >
-            <PlanRail
-              models={agent.snapshot?.models}
-              knowledge={<KnowledgeView knowledge={knowledge} />}
-              memoryAction={(change) => {
-                const status =
-                  controls.status?.kind === "memory" && controls.status.target === change.changeId
-                    ? controls.status
-                    : null;
-                return {
-                  status:
-                    change.changeId && controls.memoryUndone.has(change.changeId)
-                      ? "undone"
-                      : status?.phase === "sending" || status?.phase === "checking"
-                        ? "pending"
-                        : status?.phase === "uncertain"
-                          ? "uncertain"
-                          : status?.phase === "refused"
-                            ? status.code === 409
-                              ? "conflict"
-                              : "failed"
-                            : "ready",
-                  onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
-                  onReread: () => {
-                    controls.recheck();
-                    knowledge.rereadMemory();
-                  },
-                };
+            </div>
+            <div
+              className={
+                takeover && !agent.model.ended
+                  ? "pane pane-computer manual-pane"
+                  : "pane pane-computer"
+              }
+              id="pane-computer"
+              role="tabpanel"
+              aria-label="Computer"
+              data-selected={pane === "computer"}
+              inert={narrow && pane !== "computer"}
+              onFocusCapture={() => {
+                if (!narrow) setPane("computer");
               }}
-              agent={agent.model}
-              rows={rows}
-              keyUses={session.model.keyUses}
-              sessionId={session.sessionId}
-              scale={cell?.scale ?? 2}
-              api={api}
-              title={session.model.title}
-            />
+            >
+              <StageColumn
+                before={
+                  takeover && !agent.model.ended ? (
+                    <TakeoverPanel
+                      key={takeover.requestId}
+                      takeover={takeover}
+                      controls={{
+                        ...controls,
+                        canInput:
+                          controls.canInput &&
+                          physicalStageCell?.state === "ready" &&
+                          !physicalStageCell.paused,
+                      }}
+                      visible={
+                        !replayId && (!narrow || pane === "computer") && !keysOpen && !settings.open
+                      }
+                      manualStatus={agent.snapshot?.manualControl}
+                      receiveKey={receiveKey}
+                      screen={manualGeometry}
+                      pointerMode={pointerMode}
+                      onPointerMode={setPointerMode}
+                    />
+                  ) : undefined
+                }
+                showHud={false}
+                hud={{ ...merged, live: stageHud.live, paused: stageHud.paused }}
+                control={merged.control}
+                onStart={guardStart}
+                onStop={guardComputerStop}
+                onResume={guardResume}
+                onStopSession={taskStop}
+                onRetry={retry}
+              >
+                {!replayId && status === "known" && !cell && listed.length === 0 && (
+                  <WelcomeSetup
+                    modelReady={mainReady}
+                    loading={settings.phase === "loading" || !settings.saved}
+                    modelLabel={
+                      mainChoice
+                        ? `${mainProvider?.name ?? mainChoice.provider} · ${mainChoice.model}`
+                        : undefined
+                    }
+                    autonomy={settings.saved?.autonomy}
+                    appearance={appearance}
+                    starting={pending !== null}
+                    canStart={merged.action.kind === "start" && merged.action.enabled}
+                    onSettings={showSettings}
+                    onStart={guardStart}
+                  />
+                )}
+                {!replayId && selectedScreen && (
+                  <div className="screen-label" role="status">
+                    {selectedScreen.screen === "browser" ? "Signed-in browser" : "Desktop"}
+                    {selectedScreen.screen === "browser" && !browserScreen.cell && (
+                      <span> · {browserScreen.error ?? "Connecting…"}</span>
+                    )}
+                  </div>
+                )}
+                <Stage
+                  ref={stage}
+                  mode={replayId ? "replay" : "live"}
+                  cell={stageCell}
+                  parentId={cell?.id}
+                  selection={selectedScreen}
+                  api={api}
+                  control={merged.control}
+                  reconnects={reconnects + browserScreen.reconnects}
+                  listed={listed}
+                  manual={
+                    takeover && manualGeometry && !agent.model.ended
+                      ? {
+                          requestId: takeover.requestId,
+                          enabled:
+                            controls.canInput && stageCell?.state === "ready" && !stageCell.paused,
+                          screen: manualGeometry,
+                          button: pointerMode === "right" ? "right" : "left",
+                          count: pointerMode === "double" ? 2 : 1,
+                          input: controls.input,
+                        }
+                      : undefined
+                  }
+                />
+              </StageColumn>
+            </div>
+            <div
+              className="pane pane-activity"
+              id="pane-activity"
+              role="tabpanel"
+              aria-label="Activity"
+              data-selected={pane === "activity"}
+              inert={narrow && pane !== "activity"}
+              onFocusCapture={() => {
+                if (!narrow) setPane("activity");
+              }}
+            >
+              <PlanRail
+                cellId={cell?.id}
+                releaseReady={
+                  cell?.state === "ready" &&
+                  !cell.paused &&
+                  !cell.fenced &&
+                  !cell.replacementPending
+                }
+                models={agent.snapshot?.models}
+                knowledge={<KnowledgeView knowledge={knowledge} />}
+                memoryAction={(change) => {
+                  const status =
+                    controls.status?.kind === "memory" && controls.status.target === change.changeId
+                      ? controls.status
+                      : null;
+                  return {
+                    status:
+                      change.changeId && controls.memoryUndone.has(change.changeId)
+                        ? "undone"
+                        : status?.phase === "sending" || status?.phase === "checking"
+                          ? "pending"
+                          : status?.phase === "uncertain"
+                            ? "uncertain"
+                            : status?.phase === "refused"
+                              ? status.code === 409
+                                ? "conflict"
+                                : "failed"
+                              : "ready",
+                    onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
+                    onReread: () => {
+                      controls.recheck();
+                      knowledge.rereadMemory();
+                    },
+                  };
+                }}
+                agent={agent.model}
+                rows={rows}
+                keyUses={session.model.keyUses}
+                sessionId={session.sessionId}
+                scale={cell?.scale ?? 2}
+                api={api}
+                title={session.model.title}
+              />
+            </div>
           </div>
         </div>
+        {replayId && (
+          <ReplayView
+            api={api}
+            sessionId={replayId}
+            onSelect={selectReplay}
+            onGoLive={() => selectReplay(null)}
+            onDeleted={(id) => {
+              if (id === newestReplayId) setNewestReplayId(null);
+              historyOwner.current++;
+              setHistoryRevision(historyOwner.current);
+              if (id === replayId) selectReplay(null);
+            }}
+            visible={!keysOpen && !settings.open && !safety.approval}
+          />
+        )}
       </div>
       <SettingsSheet
+        focusSection={settingsSection}
+        appearance={appearance}
         taskControls={<StopControl controls={controls} />}
         open={settings.open}
         suspended={keysOpen}
@@ -690,6 +851,7 @@ function Theatre({ api }: { api: ApiClient }) {
 const REJECTED: Record<Exclude<Rejected, null>, string> = {
   stored: "The daemon rejected the stored token.",
   link: "The daemon rejected the token in the link.",
+  code: "This sign-in link could not be used. Open a fresh link and try again.",
 };
 
 function NoToken({ rejected }: { rejected: Rejected }) {
@@ -697,8 +859,8 @@ function NoToken({ rejected }: { rejected: Rejected }) {
     <section className="notice" role="alert">
       <h1>No access token</h1>
       <p>
-        {rejected ? REJECTED[rejected] : "This page needs the install token."} Open the link the
-        daemon printed at startup: <code>{window.location.origin}/#token=…</code>
+        {rejected ? REJECTED[rejected] : "Open a sign-in link from your local daemon."} The link
+        works once and expires after one minute: <code>{window.location.origin}/#code=…</code>
       </p>
     </section>
   );

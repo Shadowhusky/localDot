@@ -312,6 +312,7 @@ export class CodexAuthOwner {
             ? {
                 sessionId: task.sessionId,
                 mcp: task.endpoint.directory,
+                retireBridge: task.endpoint.close.bind(task.endpoint),
                 approvalContext: task.approvalContext,
                 onBlocked: task.onBlocked,
                 interruptTurn: task.interruptTurn,

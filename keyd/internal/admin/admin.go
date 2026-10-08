@@ -40,6 +40,7 @@ type Server struct {
 	BootID   string
 	Version  string
 	Hairpin  *netguard.Public
+	Service  *ServiceProcessIdentity
 }
 
 func (s *Server) Handler() http.Handler {
@@ -98,6 +99,7 @@ func (s *Server) status(w http.ResponseWriter, _ *http.Request) {
 	}
 	reply(w, http.StatusOK, map[string]any{
 		"bootId":  s.BootID,
+		"service": s.Service,
 		"version": s.Version,
 		"sealKey": s.Opener.PublicKey(),
 		"cells":   len(s.Manager.Cells()),

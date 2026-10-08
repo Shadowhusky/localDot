@@ -3,9 +3,16 @@ import type { Clock } from "../clock.ts";
 import { DesktopdClient } from "./client.ts";
 import { ClockMap } from "./clock-map.ts";
 
-export interface CellDesktopd {
-  client: DesktopdClient;
+export interface NativeDevice {
+  client: Pick<
+    DesktopdClient,
+    "clock" | "input" | "settle" | "observe" | "focused" | "hitTest" | "find" | "type"
+  >;
   clocks: ClockMap;
+}
+
+export interface CellDesktopd extends NativeDevice {
+  client: DesktopdClient;
 }
 
 // One client and clock map per cell, rebuilt whenever the published port changes (every start)

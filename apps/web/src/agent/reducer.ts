@@ -14,6 +14,7 @@ const STREAM_ERROR = "Activity could not be verified. Reconnect to load it again
 const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
 const RELEVANT = new Set<LocalDotEvent["type"]>([
   "agent.state",
+  "screen.switch",
   "ask.request",
   "ask.answer",
   "takeover.request",
@@ -79,6 +80,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
   let next: AgentModel = { ...model, lastSeq: event.seq };
   const e = event;
   switch (e.type) {
+    case "screen.switch": {
+      const { screen, cellId, geometry, revision } = e.data;
+      next = { ...next, screen: { screen, cellId, geometry, revision } };
+      break;
+    }
     case "thought.delta":
       next = { ...next, activity: ((model.activity ?? "") + e.data.text).slice(0, L.messageText) };
       break;

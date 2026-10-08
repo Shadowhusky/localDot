@@ -47,7 +47,13 @@ describe("the tool API's door", () => {
 describe("Review Focus 2: a tool outside the v1 table", () => {
   it("is refused with 404 and shown as a blocked step, and nothing reaches the computer", async () => {
     const h = toolHarness();
-    for (const name of ["switch_screen", "bash", "computer_20250124", "__proto__", "constructor"]) {
+    for (const name of [
+      "browser_script",
+      "bash",
+      "computer_20250124",
+      "__proto__",
+      "constructor",
+    ]) {
       const r = await h.call(name, { command: "rm -rf ~" });
       expect(r.status, name).toBe(404);
       expect(r.body.ok).toBe(false);

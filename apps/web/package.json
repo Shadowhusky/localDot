@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e",
     "shot": "tsx e2e/shot.ts",
     "e2e": "playwright test",
+    "e2e:setup": "vite build --config vite.setup.config.ts && playwright test --config playwright.setup.config.ts",
     "calibrate": "tsx e2e/calibrate.ts"
   },
   "dependencies": {

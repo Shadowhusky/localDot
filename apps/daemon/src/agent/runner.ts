@@ -70,6 +70,7 @@ export interface AgentRunnerDeps {
   >;
   cell(cellId: string): CellSummary | undefined;
   cellBusy?(cellId: string): boolean;
+  installSession?(session: AgentSession, cell: CellSummary): void;
   brains: Pick<BrainCells, "open" | "start" | "exited" | "close"> &
     Partial<Pick<BrainCells, "retireSession">>;
   keyd: Pick<KeydClient, "secrets" | "beginTask" | "modelAdmission" | "setModelAdmission">;
@@ -79,6 +80,7 @@ export interface AgentRunnerDeps {
   memory: Pick<MemoryStore, "readBoth">;
   transcripts: TranscriptStore;
   installSkills(cellId: string, signal: AbortSignal): Promise<SkillSummary[]>;
+  prepareDesktop?(session: AgentSession): Promise<void>;
   waitForUploads(cellId: string, signal?: AbortSignal): Promise<void>;
   // Must invoke M3's revoke/drain/freeze/fallback path, even if session.stop() already ran.
   stopSession(sessionId: string): Promise<StopOutcome | undefined>;
@@ -274,6 +276,7 @@ export class AgentRunner {
       this.sessions.set(id, session);
       this.#runtime.set(id, rt);
       try {
+        this.deps.installSession?.(session, cell);
         session.append("session.start", {
           screen: { w: 1280 * cell.scale, h: 800 * cell.scale, scale: cell.scale },
           os: "linux",
@@ -281,9 +284,15 @@ export class AgentRunner {
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
         this.#safety(rt);
-        this.deps.live.start(cellId, id, (stop) => this.#run(rt, stop));
+        this.deps.live.start(
+          cellId,
+          id,
+          (stop) => this.#run(rt, stop),
+          this.deps.prepareDesktop ? (stop) => this.#prepareDesktop(rt, stop) : undefined,
+        );
       } catch (error) {
         session.stop();
+        await session.screensSettled().catch(() => {});
         this.sessions.delete(id);
         this.#runtime.delete(id);
         throw error;
@@ -547,6 +556,73 @@ export class AgentRunner {
     }
     return this.replacementOwner(cellId).taskEnded;
   }
+  resetTaskDrained(cellId: string): boolean {
+    try {
+      if (!this.deps.fences?.isFenced(cellId)) return false;
+      this.deps.fences.records();
+      const fence = this.deps.fences.record(cellId);
+      return (
+        !this.#starting.has(cellId) &&
+        !this.deps.live.get(cellId) &&
+        !this.deps.live.idleOperationPending(cellId) &&
+        ![...this.#runtime.values()].some((rt) => rt.session.cellId === cellId) &&
+        (fence?.executor !== "native" || fence.nativeRetired)
+      );
+    } catch {
+      return false;
+    }
+  }
+  /** Called only after the reset owner durably fences the selected old identity. A successful
+   * receipt drains task/native ownership; the computer adapter must still close its key grants
+   * and independently verify container/browser retirement before erasing either volume. */
+  async retireForReset(cellId: string): Promise<boolean> {
+    if (!ULID_PATTERN.test(cellId) || !this.deps.fences?.isFenced(cellId)) return false;
+    this.#blockedCells.add(cellId);
+    // Preflight may still be awaiting account/key state. Its second #ready check will refuse
+    // this fence, but no resource deletion is allowed until that admission has actually ended.
+    if (this.#starting.has(cellId) || this.deps.live.idleOperationPending(cellId)) return false;
+    const tasks = [...this.#runtime.values()].filter((rt) => rt.session.cellId === cellId);
+    for (const rt of tasks) {
+      this.deps.fences.capture(
+        cellId,
+        rt.session.id,
+        rt.selection.kind === "chatgpt" ? "native" : "api",
+      );
+      rt.session.stop();
+    }
+    const retirement = (async () => {
+      for (const rt of tasks) {
+        const outcome = await this.deps.stopSession(rt.session.id);
+        if (
+          outcome &&
+          (!outcome.revoked || !(outcome.paused || (outcome.closed && outcome.stopped)))
+        )
+          return false;
+        await this.deps.live.settled(rt.session.id);
+      }
+      if (
+        this.#starting.has(cellId) ||
+        this.deps.live.get(cellId) ||
+        this.deps.live.idleOperationPending(cellId) ||
+        [...this.#runtime.values()].some((rt) => rt.session.cellId === cellId)
+      )
+        return false;
+      // A global closed-admission condition is not proof that historical execution retired.
+      this.deps.fences?.records();
+      // Native uncertainty and a brain cleanup failure survive task settlement in the fence.
+      if (this.deps.fences?.record(cellId)) return this.retireForReplacement(cellId);
+      return true;
+    })();
+    const deadline = new AbortController();
+    const timer = setTimeout(() => deadline.abort(), 10_000);
+    try {
+      return await abortable(retirement, deadline.signal);
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   async close(): Promise<void> {
     if (!this.#closing) {
       this.#closing = true;
@@ -590,6 +666,23 @@ export class AgentRunner {
   #changed(): void {
     for (const wake of [...this.#wake]) wake();
   }
+  async #prepareDesktop(rt: Runtime, liveSignal: AbortSignal): Promise<void> {
+    const { session } = rt;
+    const stop = () => session.stop();
+    liveSignal.addEventListener("abort", stop, { once: true });
+    if (liveSignal.aborted) stop();
+    try {
+      await this.deps.waitForUploads(session.cellId, session.abort.signal);
+      session.abort.signal.throwIfAborted();
+      await this.deps.prepareDesktop?.(session);
+      session.abort.signal.throwIfAborted();
+    } catch (error) {
+      await this.contain(session, "desktop_profile_uncertain").catch(() => {});
+      throw error;
+    } finally {
+      liveSignal.removeEventListener("abort", stop);
+    }
+  }
   async #run(rt: Runtime, liveSignal: AbortSignal): Promise<void> {
     const { session } = rt;
     const stop = () => session.stop();
@@ -598,6 +691,7 @@ export class AgentRunner {
     let reason: "done" | "stopped" | "error" = "done";
     try {
       await this.deps.waitForUploads(session.cellId, session.abort.signal);
+      session.abort.signal.throwIfAborted();
       const skills = await this.deps.installSkills(session.cellId, session.abort.signal);
       session.abort.signal.throwIfAborted();
       rt.skills = structuredClone(skills);
@@ -725,6 +819,18 @@ export class AgentRunner {
         this.deps.fences?.confirmNativeRetirement(session.cellId, session.id);
       if (session.stopped && reason === "done") reason = "stopped";
       try {
+        if (reason === "done") {
+          if (!(await session.finish())) reason = "stopped";
+        } else {
+          session.stop();
+          await session.screensSettled();
+        }
+      } catch {
+        reason = "error";
+        session.stop();
+        await session.screensSettled().catch(() => {});
+      }
+      try {
         session.append("session.end", { reason });
         const models = this.selectionOf(session.id);
         // Only a successfully recorded terminal event permits history authority. The public
@@ -743,7 +849,6 @@ export class AgentRunner {
       } catch {
         console.error("agent session end could not be recorded");
       }
-      session.stop();
       liveSignal.removeEventListener("abort", stop);
       this.sessions.delete(session.id);
       this.#runtime.delete(session.id);
@@ -773,6 +878,7 @@ export class AgentRunner {
     try {
       // beginBrain synchronously moves new uploads onto generation-owned ToolLeases. Drain any
       // idle upload admitted after the earlier wait before opening the replacement brain.
+      await session.prepareScreens(generation);
       await this.deps.waitForUploads(session.cellId, generation.signal);
       await this.#exclusive(rt, async () => {
         session.check(generation);

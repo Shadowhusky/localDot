@@ -9,10 +9,24 @@ export interface TopBarProps {
   keysOpen: boolean;
   onKeys(): void;
   keysRef?: Ref<HTMLButtonElement>;
+  mode?: "watch" | "replay";
+  replayEnabled?: boolean;
+  onMode?(mode: "watch" | "replay"): void;
   settings?: { open: boolean; run(trigger: HTMLButtonElement): void; ref?: Ref<HTMLButtonElement> };
 }
 
-export function TopBar({ title, live, keys, keysOpen, onKeys, keysRef, settings }: TopBarProps) {
+export function TopBar({
+  title,
+  live,
+  keys,
+  keysOpen,
+  onKeys,
+  keysRef,
+  settings,
+  mode = "watch",
+  replayEnabled = false,
+  onMode,
+}: TopBarProps) {
   const alert = keys.state === "offline" || keys.state === "audit" || keys.state === "guard";
   return (
     <header className="bar">
@@ -25,10 +39,24 @@ export function TopBar({ title, live, keys, keysOpen, onKeys, keysRef, settings 
       </div>
       <nav className="modes" aria-label="Mode">
         <span aria-disabled="true">Glance</span>
-        <span className="on" aria-current="page">
+        <button
+          type="button"
+          className={mode === "watch" ? "on" : undefined}
+          aria-current={mode === "watch" ? "page" : undefined}
+          onClick={() => onMode?.("watch")}
+        >
           Watch
-        </span>
-        <span aria-disabled="true">Replay</span>
+        </button>
+        <button
+          type="button"
+          className={mode === "replay" ? "on" : undefined}
+          aria-current={mode === "replay" ? "page" : undefined}
+          disabled={!replayEnabled}
+          title={replayEnabled ? undefined : "No sessions yet"}
+          onClick={() => onMode?.("replay")}
+        >
+          Replay
+        </button>
       </nav>
       <div className="bar-r">
         {settings && (

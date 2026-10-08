@@ -11,6 +11,7 @@ export default defineConfig({
       "apps/*/src/**/*.test.ts",
       "apps/*/src/**/*.test.tsx",
       "cells/*/desktopd/src/**/*.test.ts",
+      "cells/browser/browserd/src/**/*.test.ts",
       "cells/brain/src/**/*.test.ts",
       "apps/*/scripts/**/*.test.mjs",
       "cells/*/scripts/**/*.test.mjs",

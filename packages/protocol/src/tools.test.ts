@@ -18,13 +18,15 @@ const base = { v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: 0, t: 0, agent: "mai
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0M";
 
 describe("the v1 tool table", () => {
-  it("names exactly the spec's tools, without M7's switch_screen", () => {
+  it("names exactly the tools, including M7 screen switching and approved browser upload", () => {
     expect([...TOOL_NAMES]).toEqual([
       "computer",
       "shell",
       "files",
       "browser_read",
       "browser_navigate",
+      "browser_upload",
+      "switch_screen",
       "update_plan",
       "ask_user",
       "request_takeover",
@@ -32,7 +34,13 @@ describe("the v1 tool table", () => {
       "done",
     ]);
     expect(isToolName("shell")).toBe(true);
-    for (const name of ["switch_screen", "bash", "computer_20250124", "Shell", "__proto__"]) {
+    expect(isToolName("switch_screen")).toBe(true);
+    expect(isToolName("browser_upload")).toBe(true);
+    expect(TOOL_INPUTS.switch_screen.safeParse({ screen: "browser" }).success).toBe(true);
+    expect(TOOL_INPUTS.switch_screen.safeParse({ screen: "desktop" }).success).toBe(true);
+    for (const input of [{ screen: "other" }, { screen: "browser", cellId: ID }, { to: "browser" }])
+      expect(TOOL_INPUTS.switch_screen.safeParse(input).success).toBe(false);
+    for (const name of ["browser_script", "bash", "computer_20250124", "Shell", "__proto__"]) {
       expect(isToolName(name)).toBe(false);
     }
     expect(Object.keys(TOOL_INPUTS).sort()).toEqual([...TOOL_NAMES].sort());

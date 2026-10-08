@@ -1,5 +1,24 @@
+export interface LiveHooks {
+  beforeRun?(cellId: string, sessionId: string): Promise<void>;
+  afterRun?(cellId: string, sessionId: string): Promise<void>;
+}
 // Keep the settlement promise so Stop can drain work before freezing desktopd.
 export class LiveSessions {
+  readonly #hooks = new Set<LiveHooks>();
+  addHooks(hooks: LiveHooks): () => void {
+    this.#hooks.add(hooks);
+    return () => {
+      this.#hooks.delete(hooks);
+    };
+  }
+  async #callHook(hook: (() => Promise<void>) | undefined): Promise<void> {
+    try {
+      await hook?.();
+    } catch {
+      console.error("a recording lifecycle hook failed");
+    }
+  }
+
   readonly #aliases = new Map<string, string>();
   readonly #idleOperations = new Map<string, object>();
 
@@ -24,7 +43,12 @@ export class LiveSessions {
     { sessionId: string; controller: AbortController; done: Promise<void> }
   >();
 
-  start(cellId: string, sessionId: string, run: (signal: AbortSignal) => Promise<unknown>): void {
+  start(
+    cellId: string,
+    sessionId: string,
+    run: (signal: AbortSignal) => Promise<unknown>,
+    prepare?: (signal: AbortSignal) => Promise<void>,
+  ): void {
     if (this.#idleOperations.has(cellId)) throw new Error("computer operation is still settling");
     if (this.#byCell.has(cellId) || this.#aliases.has(cellId))
       throw new Error(`cell ${cellId} already has a live session`);
@@ -38,11 +62,48 @@ export class LiveSessions {
     // Register before invoking the callback, even if it throws or calls Stop
     // synchronously. The callback can subscribe to abort before start returns.
     this.#byCell.set(cellId, entry);
+    const hooks = [...this.#hooks];
     let pending: Promise<unknown>;
-    try {
-      pending = Promise.resolve(run(controller.signal));
-    } catch (err) {
-      pending = Promise.reject(err);
+    if (hooks.length || prepare) {
+      pending = (async () => {
+        // Preparation owns the cell before recording starts. A prepared caller must also
+        // receive an aborted run so it can finalize its session if preparation/Stop fails.
+        if (prepare) {
+          try {
+            await prepare(controller.signal);
+          } catch (error) {
+            controller.abort(error);
+          }
+        }
+        let hooksStarted = false;
+        try {
+          if (!controller.signal.aborted) {
+            hooksStarted = true;
+            for (const hook of hooks)
+              await this.#callHook(
+                hook.beforeRun
+                  ? () => hook.beforeRun?.(cellId, sessionId) ?? Promise.resolve()
+                  : undefined,
+              );
+          }
+          if (!controller.signal.aborted || prepare) await run(controller.signal);
+        } finally {
+          if (hooksStarted)
+            for (const hook of hooks)
+              await this.#callHook(
+                hook.afterRun
+                  ? () => hook.afterRun?.(cellId, sessionId) ?? Promise.resolve()
+                  : undefined,
+              );
+        }
+      })();
+    } else {
+      // Preserve synchronous callback admission when no lifecycle hook is installed.
+      try {
+        pending = Promise.resolve(run(controller.signal));
+      } catch (err) {
+        pending = Promise.reject(err);
+      }
     }
     void pending
       .catch(() => {

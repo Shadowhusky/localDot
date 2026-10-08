@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { DEFAULT_AUTONOMY } from "@localdot/protocol";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +19,18 @@ const props = (): SettingsSheetProps => ({
   onKeys: vi.fn(),
 });
 describe("settings sheet presentation ownership", () => {
+  it("focuses the requested autonomy section after loading without stealing later edits", () => {
+    const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
+    const view = render(<SettingsSheet {...p} focusSection="autonomy" loading />);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close settings" }));
+    view.rerender(<SettingsSheet {...p} focusSection="autonomy" />);
+    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: "Read information" }));
+    const browsing = screen.getByRole("combobox", { name: "Browse websites" });
+    browsing.focus();
+    view.rerender(<SettingsSheet {...p} focusSection="autonomy" dirty />);
+    expect(document.activeElement).toBe(browsing);
+    expect(p.onAutonomy).not.toHaveBeenCalled();
+  });
   it("keeps the active editor focused while the controlled close callback changes", () => {
     const latest = vi.fn();
     function Controller() {

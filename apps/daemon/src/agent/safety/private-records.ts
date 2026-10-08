@@ -22,7 +22,12 @@ export class PrivateRecords<T> {
   readonly dir: string;
   constructor(
     home: string,
-    name: "fences" | "replacements",
+    name:
+      | "fences"
+      | "replacements"
+      | "computer-resets"
+      | "computer-reset-holds"
+      | "computer-updates",
     private readonly parse: (value: unknown, id: string) => T,
   ) {
     let dir = resolve(home);

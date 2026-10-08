@@ -1,5 +1,5 @@
 import type { TaskModelSelection } from "@localdot/protocol";
-import type { KeyUseState } from "@localdot/stage";
+import type { KeyUseState, PlanItemState } from "@localdot/stage";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import { ActivityDetails, type InspectOutput } from "../agent/ActivityDetails.tsx";
 import {
@@ -20,7 +20,9 @@ import { type SkillSummary, SkillsView } from "../agent/SkillsView.tsx";
 import { ToolRow } from "../agent/ToolRow.tsx";
 import { UsageView } from "../agent/UsageView.tsx";
 import { usePagedRows } from "../agent/usePagedRows.ts";
+import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
 import type { ApiClient } from "../lib/api.ts";
+import { timeLabel } from "../replay/replay-view.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { KeyUseRow } from "./KeyUseRow.tsx";
@@ -31,9 +33,14 @@ export interface PlanRailProps {
   rows: TimelineRow<StepRowView>[];
   keyUses?: readonly KeyUseState[];
   sessionId: string | null;
+  cellId?: string;
+  releaseReady?: boolean;
   scale: number;
   api: ApiClient;
   title: string | null;
+  asOfMs?: number;
+  onSelect?(stepId: string): void;
+  planSnapshot?: PlanItemState[];
   agent?: AgentModel;
   skills?: readonly SkillSummary[];
   models?: TaskModelSelection;
@@ -51,6 +58,8 @@ export function PlanRail({
   rows,
   keyUses,
   sessionId,
+  cellId,
+  releaseReady = false,
   scale,
   api,
   title,
@@ -59,6 +68,9 @@ export function PlanRail({
   memoryAction,
   models,
   knowledge,
+  asOfMs,
+  onSelect,
+  planSnapshot,
 }: PlanRailProps) {
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const model = agent ?? emptyAgentModel();
@@ -98,13 +110,26 @@ export function PlanRail({
     >
       <div className="rail-h">
         <h2>Activity</h2>
+        {asOfMs !== undefined && <span>As of {timeLabel(asOfMs)}</span>}
       </div>
-      {model.plan.length ? (
+      {planSnapshot ? (
+        <ol className="task-plan" aria-label="Plan at replay time">
+          {planSnapshot.map((item) => (
+            <li key={item.id} className={`plan-${item.status}`}>
+              <span className="plan-state">{item.status}</span>
+              {item.text}
+            </li>
+          ))}
+        </ol>
+      ) : model.plan.length ? (
         <PlanView plan={model.plan} />
       ) : (
         <p className="say empty">{title ?? "No plan yet."}</p>
       )}
       {agent && <UsageView model={model} selection={models} />}
+      {cellId && asOfMs === undefined && (
+        <BrowserDownloads key={cellId} api={api} cellId={cellId} releaseReady={releaseReady} />
+      )}
       {agent && (
         <ResultFiles
           api={api}
@@ -180,7 +205,19 @@ export function PlanRail({
                       sessionId={sessionId}
                       scale={scale}
                       api={api}
-                      current={timeline[lastStep]?.id === row.id && row.computer.status === "doing"}
+                      current={
+                        asOfMs === undefined
+                          ? timeline[lastStep]?.id === row.id && row.computer.status === "doing"
+                          : timeline.findLast(
+                              (item) =>
+                                item.kind === "step" &&
+                                item.computer &&
+                                item.computer.startT <= asOfMs,
+                            )?.id === row.id
+                      }
+                      future={asOfMs !== undefined && row.computer.startT > asOfMs}
+                      onSelect={onSelect}
+                      thumb={asOfMs !== undefined ? "replay" : "live"}
                     >
                       {step && (
                         <p className="step-reason">

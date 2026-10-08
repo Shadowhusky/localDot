@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import { emptyManifest, type LocalDotEvent, type SessionCard, ulid } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
@@ -32,7 +34,7 @@ function daemon(answer: (call: Call) => Response | Promise<Response>) {
     calls.push(call);
     return keyReply(call.path) ?? answer(call);
   }) as typeof fetch;
-  // These assertions cover cell/token traffic; the key hook has its own suite.
+  // These assertions cover cell/token traffic; key and download polling have their own suites.
   const seen = () => calls.filter((c) => !keyReply(c.path)).map((c) => `${c.method} ${c.path}`);
   return { fetchImpl, calls, seen };
 }
@@ -54,6 +56,8 @@ const DOCKER_DOWN_CAPTION =
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json" } });
 const keyReply = (path: string): Response | undefined => {
+  if (path === `/api/cells/${CELL_ID}/quarantine`) return json({ items: [] });
+  if (path === "/api/session-index") return json({ sessions: [], next: null });
   if (path === "/api/agent/settings") return json({});
   if (path === "/api/agent/providers") return json(providerFixture());
   if (path === "/api/keyd")
@@ -83,6 +87,162 @@ const summary = (
   createdAt: "2026-10-01T10:00:00.000Z",
   stream: { connection, viewers: 0, lastUpstreamAt: null },
   ...(error ? { error } : {}),
+});
+
+describe("App Replay mode", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    window.history.replaceState(null, "", "/");
+    FakeWebSocket.instances = [];
+    vi.stubGlobal("WebSocket", FakeWebSocket);
+  });
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+    window.history.replaceState(null, "", "/");
+  });
+
+  function historyDaemon() {
+    const sessionId = ulid();
+    const card: SessionCard = {
+      id: sessionId,
+      title: "Organize my notes",
+      startedAt: "2026-10-02T10:12:00.000Z",
+      durationMs: 20_000,
+      verdict: "done",
+      steps: 2,
+      failedSteps: 0,
+      coverFrameId: null,
+      screen: { w: 1280, h: 800, scale: 1 },
+      recording: { state: "none", bytes: 0 },
+    };
+    const events: LocalDotEvent[] = [
+      {
+        v: 1,
+        id: ulid(),
+        seq: 0,
+        t: 0,
+        agent: "main",
+        type: "session.start",
+        data: {
+          screen: card.screen as { w: number; h: number; scale: number },
+          os: "linux",
+          title: card.title ?? "",
+        },
+      },
+      {
+        v: 1,
+        id: ulid(),
+        seq: 1,
+        t: 1_000_000,
+        agent: "main",
+        step: "first",
+        type: "step.start",
+        data: { kind: "think" },
+      },
+      {
+        v: 1,
+        id: ulid(),
+        seq: 2,
+        t: 5_000_000,
+        agent: "main",
+        step: "first",
+        type: "step.end",
+        data: { status: "ok" },
+      },
+      {
+        v: 1,
+        id: ulid(),
+        seq: 3,
+        t: 10_000_000,
+        agent: "main",
+        step: "second",
+        type: "step.start",
+        data: { kind: "file" },
+      },
+      {
+        v: 1,
+        id: ulid(),
+        seq: 4,
+        t: 15_000_000,
+        agent: "main",
+        step: "second",
+        type: "step.end",
+        data: { status: "ok" },
+      },
+      {
+        v: 1,
+        id: ulid(),
+        seq: 5,
+        t: 20_000_000,
+        agent: "main",
+        type: "session.end",
+        data: { reason: "done" },
+      },
+    ];
+    const historyCalls: { path: string; authorization: string | null }[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/session-index" || path.startsWith(`/api/sessions/${sessionId}`))
+        historyCalls.push({ path, authorization: new Headers(init?.headers).get("authorization") });
+      if (path === "/api/session-index") return json({ sessions: [card], next: null });
+      if (path.endsWith("/card")) return json(card);
+      if (path.endsWith("/recording"))
+        return json({ manifest: emptyManifest("none"), live: false, upto: 0, servedBytes: 0 });
+      if (path.endsWith("/events"))
+        return new Response(`${events.map((event) => JSON.stringify(event)).join("\n")}\n`, {
+          headers: { "content-type": "application/x-ndjson" },
+        });
+      return keyReply(path) ?? json([]);
+    }) as typeof fetch;
+    return { sessionId, fetchImpl, historyCalls };
+  }
+
+  it("enables Replay when a session exists and opens it from the top bar", async () => {
+    const fixture = historyDaemon();
+    render(<App fetchImpl={fixture.fetchImpl} />);
+    const replayButton = screen.getByRole("button", { name: "Replay" });
+    await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(replayButton);
+    expect(new URLSearchParams(window.location.search).get("replay")).toBe(fixture.sessionId);
+    expect(await screen.findByRole("complementary", { name: "Recorded sessions" })).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
+    expect(
+      within(screen.getByRole("main", { name: "Session replay" })).getByText(
+        /This browser lacks WebCodecs/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("slider", { name: "Replay timeline" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Play replay" })).toBeTruthy();
+    expect(fixture.historyCalls.length).toBeGreaterThanOrEqual(4);
+    expect(fixture.historyCalls.every((call) => call.authorization === `Bearer ${TOKEN}`)).toBe(
+      true,
+    );
+  });
+  it("Space toggles play and Escape goes back to Watch", async () => {
+    const fixture = historyDaemon();
+    window.history.replaceState(null, "", `/?replay=${fixture.sessionId}&t=12000`);
+    render(<App fetchImpl={fixture.fetchImpl} />);
+    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
+    expect(
+      screen.getByRole("slider", { name: "Replay timeline" }).getAttribute("aria-valuenow"),
+    ).toBe("12000");
+    fireEvent.keyDown(window, { key: " " });
+    expect(screen.getByRole("button", { name: "Pause replay" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(window.location.search).toBe("");
+    expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
+  });
+  it("keeps Watch working when no session exists", async () => {
+    render(<App fetchImpl={noCells as typeof fetch} />);
+    await screen.findByRole("button", { name: "Start computer" });
+    const replayButton = screen.getByRole("button", { name: "Replay" });
+    expect(replayButton.hasAttribute("disabled")).toBe(true);
+    expect(replayButton.title).toBe("No sessions yet");
+  });
 });
 
 describe("App token states", () => {
@@ -207,7 +367,7 @@ describe("App token states", () => {
     expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(4);
+    expect(fetchImpl).toHaveBeenCalledTimes(5);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
@@ -246,7 +406,8 @@ describe("App token states", () => {
     const retrying = render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     act(() => FakeWebSocket.instances[1]?.onclose?.());
-    expect(vi.getTimerCount()).toBe(2);
+    // Cell retry, live-session retry, and the mounted download-list poll.
+    expect(vi.getTimerCount()).toBe(3);
     retrying.unmount();
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(60_000);
@@ -717,7 +878,7 @@ describe("App token hardening", () => {
 
   it("points at the link on the origin the page was opened from", () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain(`${window.location.origin}/#token=…`);
+    expect(screen.getByRole("alert").textContent).toContain(`${window.location.origin}/#code=…`);
     expect(window.location.origin).not.toBe("http://127.0.0.1:4750");
   });
 });

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { ulid } from "@localdot/protocol";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { TicketRegistry } from "../cells/secrets.ts";
 import { FakeOrchestrator } from "../cells/testing/fake-orchestrator.ts";
@@ -17,13 +17,16 @@ import { ActionGateway } from "./gateway.ts";
 import { LiveSessions } from "./live.ts";
 import { DEFAULT_ONSET_TABLE } from "./onset-table.ts";
 import { keepPolicy } from "./ring-onset.ts";
+import type { GatewayRoutesDeps } from "./routes.ts";
 
 const PORT = 4750;
 const TOKEN = "t".repeat(43);
 const bearer = { authorization: `Bearer ${TOKEN}` };
 const url = (path: string) => `http://127.0.0.1:${PORT}${path}`;
 
-function setup() {
+function setup(
+  prepareDesktopTask: GatewayRoutesDeps["prepareDesktopTask"] | null = async () => {},
+) {
   const cells = new FakeOrchestrator();
   const fake = new FakeDesktopd();
   const clock = monotonicClock();
@@ -47,7 +50,15 @@ function setup() {
     port: PORT,
     eventLog,
     cells: { cells, tickets: new TicketRegistry() },
-    gateway: { registry, clock, eventLog, gateway, frames, live },
+    gateway: {
+      registry,
+      clock,
+      eventLog,
+      gateway,
+      frames,
+      live,
+      prepareDesktopTask: prepareDesktopTask ?? undefined,
+    },
   });
   const id = ulid();
   cells.emit({
@@ -201,6 +212,76 @@ describe("raw desktopd routes", () => {
 });
 
 describe("puppet, live and frame routes", () => {
+  it("does not start a scripted task without a profile preparation owner", async () => {
+    const h = setup(null);
+    try {
+      const response = await h.app.request(url(`/api/cells/${h.id}/puppet`), {
+        method: "POST",
+        headers: { ...bearer, "content-type": "application/json" },
+        body: JSON.stringify({ v: 1, title: "missing owner", steps: [{ do: "wait", ms: 0 }] }),
+      });
+      expect(response.status).toBe(503);
+      expect(h.live.get(h.id)).toBeUndefined();
+      expect(h.fake.calls).toEqual([]);
+    } finally {
+      h.registry.dispose();
+      h.eventLog.close();
+    }
+  });
+
+  it.each(["complete", "stop", "fail"] as const)(
+    "keeps scripted-task recording and observation behind profile preparation: %s",
+    async (outcome) => {
+      const gate = Promise.withResolvers<void>();
+      const prepare = vi.fn(async (_cellId: string, _sessionId: string, signal: AbortSignal) => {
+        await gate.promise;
+        signal.throwIfAborted();
+      });
+      const h = setup(prepare);
+      const beforeRun = vi.fn(async () => {});
+      const afterRun = vi.fn(async () => {});
+      h.live.addHooks({ beforeRun, afterRun });
+      let sessionId: string | undefined;
+      try {
+        const response = await h.app.request(url(`/api/cells/${h.id}/puppet`), {
+          method: "POST",
+          headers: { ...bearer, "content-type": "application/json" },
+          body: JSON.stringify({ v: 1, title: "fresh profile", steps: [{ do: "wait", ms: 0 }] }),
+        });
+        expect(response.status).toBe(202);
+        sessionId = ((await response.json()) as { sessionId: string }).sessionId;
+        expect(prepare).toHaveBeenCalledWith(h.id, sessionId, expect.any(AbortSignal));
+        expect(h.live.get(h.id)).toBe(sessionId);
+        expect(beforeRun).not.toHaveBeenCalled();
+        expect(h.fake.calls).toEqual([]);
+        expect(h.eventLog.read(sessionId)).toEqual([]);
+        if (outcome === "stop") {
+          h.live.stop(sessionId);
+          expect(h.live.get(h.id)).toBe(sessionId);
+        }
+        if (outcome === "fail") gate.reject(new Error("fixture preparation failed"));
+        else gate.resolve();
+        await h.live.settled(sessionId);
+        expect(beforeRun).toHaveBeenCalledTimes(outcome === "complete" ? 1 : 0);
+        expect(afterRun).toHaveBeenCalledTimes(outcome === "complete" ? 1 : 0);
+        const events = h.eventLog.read(sessionId);
+        expect(events.some((event) => event.type === "observe")).toBe(outcome === "complete");
+        expect(events.at(-1)).toMatchObject({
+          type: "session.end",
+          data: { reason: outcome === "complete" ? "done" : "stopped" },
+        });
+      } finally {
+        gate.resolve();
+        if (sessionId) {
+          h.live.stop(sessionId);
+          await h.live.settled(sessionId);
+        }
+        h.registry.dispose();
+        h.eventLog.close();
+      }
+    },
+  );
+
   it("serves a session's clock origin and refuses an unknown session", async () => {
     const { app, eventLog } = setup();
     const id = eventLog.createSession("c");

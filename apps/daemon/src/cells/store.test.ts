@@ -91,7 +91,7 @@ const malformed: [string, (r: CellRecord) => unknown][] = [
   ["a Docker field is not a string", (r) => ({ ...r, docker: { ...r.docker, desktopIp: 17 } })],
   ["a Docker field is missing", (r) => ({ ...r, docker: { ...r.docker, homeVolume: undefined } })],
   ["docker is null", (r) => ({ ...r, docker: null })],
-  ["the version is not 1", (r) => ({ ...r, v: 2 })],
+  ["the version is unknown", (r) => ({ ...r, v: 3 })],
   ["the id is another cell's", (r) => ({ ...r, id: ulid() })],
   ["the file holds null", () => null],
   [

@@ -70,3 +70,149 @@ it("keeps idle admission until the actual operation settles, then allows exactly
   expect(idle).toBeDefined();
   idle?.release();
 });
+
+it("registers synchronously and drains both lifecycle hooks before releasing Stop ownership", async () => {
+  const live = new LiveSessions();
+  const calls: string[] = [];
+  let finishBefore: () => void = () => {};
+  let finishAfter: () => void = () => {};
+  const before = new Promise<void>((r) => {
+    finishBefore = r;
+  });
+  const after = new Promise<void>((r) => {
+    finishAfter = r;
+  });
+  live.addHooks({
+    beforeRun: async () => {
+      calls.push("before");
+      await before;
+    },
+    afterRun: async () => {
+      calls.push("after");
+      await after;
+    },
+  });
+  live.start("cell", "session", async () => {
+    calls.push("run");
+  });
+  expect(live.get("cell")).toBe("session");
+  expect(calls).toEqual(["before"]);
+  finishBefore();
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(calls).toContain("run");
+  expect(live.admitIdleOperation("cell")).toBeUndefined();
+  finishAfter();
+  await live.settled("session");
+  expect(calls).toEqual(["before", "run", "after"]);
+  expect(live.get("cell")).toBeUndefined();
+});
+it("does not start a run after Stop while beforeRun is still awaiting", async () => {
+  const live = new LiveSessions();
+  let release: () => void = () => {};
+  const wait = new Promise<void>((r) => {
+    release = r;
+  });
+  let runs = 0;
+  let finalized = 0;
+  live.addHooks({
+    beforeRun: () => wait,
+    afterRun: async () => {
+      finalized++;
+    },
+  });
+  live.start("cell", "session", async () => {
+    runs++;
+  });
+  expect(live.stop("session")).toBe(true);
+  release();
+  await live.settled("session");
+  expect(runs).toBe(0);
+  expect(finalized).toBe(1);
+  expect(live.get("cell")).toBeUndefined();
+});
+it("uses the hook snapshot for a live run and safely unregisters it for the next", async () => {
+  const live = new LiveSessions();
+  let finalized = 0;
+  const remove = live.addHooks({
+    afterRun: async () => {
+      finalized++;
+    },
+  });
+  live.start("cell", "one", async () => {});
+  remove();
+  await live.settled("one");
+  expect(finalized).toBe(1);
+  live.start("cell", "two", async () => {});
+  await live.settled("two");
+  expect(finalized).toBe(1);
+});
+
+it("retains preparation ownership and never records a failed preparation", async () => {
+  const live = new LiveSessions();
+  const calls: string[] = [];
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  live.addHooks({
+    beforeRun: async () => {
+      calls.push("record");
+    },
+  });
+  live.start(
+    "cell",
+    "task",
+    async (signal) => {
+      expect(signal.aborted).toBe(true);
+      calls.push("finalize");
+    },
+    async () => {
+      await pending;
+      throw new Error("preparation failed");
+    },
+  );
+  expect(live.get("cell")).toBe("task");
+  expect(live.admitIdleOperation("cell")).toBeUndefined();
+  expect(calls).toEqual([]);
+  finish();
+  await live.settled("task");
+  expect(calls).toEqual(["finalize"]);
+  expect(live.get("cell")).toBeUndefined();
+});
+
+it("a prepared task finalizes after Stop even when the recording hook was still starting", async () => {
+  const live = new LiveSessions();
+  let entered!: () => void, finish!: () => void;
+  const ready = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const calls: string[] = [];
+  live.addHooks({
+    beforeRun: async () => {
+      entered();
+      await pending;
+    },
+    afterRun: async () => {
+      calls.push("recording closed");
+    },
+  });
+  live.start(
+    "cell",
+    "task",
+    async (signal) => {
+      expect(signal.aborted).toBe(true);
+      calls.push("finalize");
+    },
+    async () => {},
+  );
+  await ready;
+  live.stop("task");
+  finish();
+  await live.settled("task");
+  expect(calls).toEqual(["finalize", "recording closed"]);
+});

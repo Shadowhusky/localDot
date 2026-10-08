@@ -24,8 +24,11 @@ export function findDockerSocket(
   probes: SocketProbes = hostProbes(env),
 ): DockerSocket {
   const path = dockerSocketPath(env);
-  const fromEnv = path !== dockerSocketPath({});
+  const fromEnv = env.DOCKER_HOST !== undefined;
   const source = fromEnv ? "DOCKER_HOST" : "the default socket";
+  // An installer-selected engine must remain selected even when its socket disappears. Falling
+  // back could send cell tokens or lifecycle operations to an unrelated Docker engine.
+  if (fromEnv) return { path, source };
   if (probes.exists(path)) return { path, source };
   // With Docker Desktop's "Allow the default Docker socket to be used" off, /var/run/docker.sock is
   // missing and only the CLI's context knows where the engine listens.

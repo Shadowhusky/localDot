@@ -1,6 +1,5 @@
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
 import {
   CODEX_VERSION,
@@ -12,6 +11,12 @@ import {
   prepareOwnedCodexRoots,
 } from "@localdot/codex-harness";
 import { type SkillSummary, TOOL_API_PORT } from "@localdot/protocol";
+import type { BrowserScope } from "../browser/client.ts";
+import { desktopPlacement } from "../browser/placement.ts";
+import type { QuarantineStore } from "../browser/quarantine.ts";
+import { quarantineAccess } from "../browser/quarantine-access.ts";
+import type { ScreenLease } from "../browser/screen-controller.ts";
+import type { SessionScreens } from "../browser/session-screens.ts";
 import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
@@ -24,6 +29,7 @@ import type { KillSwitch } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import type { KeydMonitor } from "../keyd/monitor.ts";
+import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
@@ -66,17 +72,13 @@ export interface AgentWiringDeps {
   policy?: ToolPolicy;
   toolPort?: number;
   codex?: { realHome: string; user: string };
+  sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
+  transfers?: Transfers;
+  quarantine?: QuarantineStore;
 }
 const CODEX_ACCEPTANCE_PENDING =
   "The ChatGPT plan is awaiting pinned privacy and native safety checks.";
-export const BUILTIN_SKILLS = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "..",
-  "..",
-  "..",
-  "..",
-  "skills",
-);
+export const BUILTIN_SKILLS = runtimeLayout.skills;
 export function createAgent(d: AgentWiringDeps) {
   const memory = new MemoryStore(d.home),
     settings = new SettingsStore(d.home),
@@ -84,7 +86,7 @@ export function createAgent(d: AgentWiringDeps) {
   const transcripts = new TranscriptStore(d.home),
     png = new FramePng(d.frames),
     outputs = new OutputStore(d.home),
-    transfers = new Transfers();
+    transfers = d.transfers ?? new Transfers();
   const clients = new Map<string, DesktopdTools>();
   const retiring = new Set<Promise<void>>();
   let ready = false,
@@ -115,12 +117,47 @@ export function createAgent(d: AgentWiringDeps) {
     clients.set(cellId, created);
     return created;
   };
+  const failedPreparations = new Set<string>();
+  const prepareDesktop = async (cellId: string, sessionId: string, signal: AbortSignal) => {
+    await transfers.wait(cellId, signal);
+    signal.throwIfAborted();
+    const tools = desktop(cellId);
+    if (!tools) throw new AgentError(409, "the computer is not ready");
+    const check = () => {
+      signal.throwIfAborted();
+      const cell = d.cells.get(cellId);
+      if (
+        !ready ||
+        closing ||
+        failedPreparations.has(cellId) ||
+        d.fences?.isFenced(cellId) ||
+        !cell ||
+        cell.state !== "ready" ||
+        cell.paused ||
+        cell.fenced ||
+        cell.replacementPending ||
+        d.killSwitch.isBusy(cellId) ||
+        d.live.get(cellId) !== sessionId ||
+        desktop(cellId) !== tools
+      )
+        throw new AgentError(409, "the computer changed");
+    };
+    const lease = transfers.acquire(cellId, [signal], check);
+    try {
+      await tools.prepareBrowser(sessionId, lease.signal);
+      lease.check();
+    } finally {
+      lease.release();
+    }
+  };
   const unsubscribe = d.cells.subscribe((cell) => {
     const prior = clients.get(cell.id),
       endpoint = d.cells.endpoints(cell.id)?.desktopd;
     if (
       cell.state !== "ready" ||
       cell.paused ||
+      cell.fenced ||
+      cell.replacementPending ||
       (prior &&
         (endpoint?.token !== prior.endpoint.token || endpoint.baseUrl !== prior.endpoint.baseUrl))
     ) {
@@ -218,7 +255,9 @@ export function createAgent(d: AgentWiringDeps) {
   const dispatch: DispatchDeps = {
     ...(d.policy ? { policy: d.policy } : {}),
     tools: {
+      uploads: { desktop, transfers },
       gateway: d.gateway,
+      bindScreen: d.sessionScreens?.bind.bind(d.sessionScreens),
       scaleOf: (id) => d.cells.get(id)?.scale,
       desktop,
       launcher: (id) => d.registry.for(id)?.client,
@@ -252,9 +291,11 @@ export function createAgent(d: AgentWiringDeps) {
             }),
           observe: async (session, generation, signal) => {
             const lease = session.admit(generation, signal);
+            let screen: ScreenLease | undefined;
             const endpoint = d.cells.endpoints(session.cellId)?.desktopd;
             const check = () => {
               lease.check();
+              screen?.check();
               const cell = d.cells.get(session.cellId),
                 current = d.cells.endpoints(session.cellId)?.desktopd;
               if (
@@ -271,19 +312,28 @@ export function createAgent(d: AgentWiringDeps) {
                 throw new AgentError(409, "The task computer changed during observation.");
             };
             try {
+              screen = session.screens ? session.screenLease(lease) : undefined;
+              const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
+              if (screen && !binding)
+                throw new AgentError(409, "The selected screen is unavailable.");
+              const observationSignal = screen
+                ? AbortSignal.any([lease.signal, screen.signal])
+                : lease.signal;
               check();
               const frame = await d.gateway.observe({
                 sessionId: session.id,
-                cellId: session.cellId,
-                signal: lease.signal,
+                cellId: binding?.cellId ?? session.cellId,
+                signal: observationSignal,
+                ...(binding ? { screen: binding } : {}),
               });
               check();
-              const full = await png.png(session.id, frame.frameId, undefined, lease.signal);
+              const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
               check();
               session.tainted = true;
               session.lastFrameId = frame.frameId;
               return { frameId: frame.frameId, full: true, png: full };
             } finally {
+              screen?.finish();
               lease.finish();
             }
           },
@@ -299,6 +349,7 @@ export function createAgent(d: AgentWiringDeps) {
       : undefined;
   const runner = new AgentRunner({
     home: d.home,
+    installSession: d.sessionScreens?.install.bind(d.sessionScreens),
     fences: d.fences,
     eventLog: d.eventLog,
     live: d.live,
@@ -312,6 +363,7 @@ export function createAgent(d: AgentWiringDeps) {
     memory,
     transcripts,
     installSkills,
+    prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),
     stopSession: (id) => d.killSwitch.stopSession(id),
     ...(driver && auth
@@ -402,13 +454,15 @@ export function createAgent(d: AgentWiringDeps) {
       },
     };
   };
-  const manual = (session: AgentSession): ManualDesktop | undefined => {
+  const manual = (session: AgentSession, scope: BrowserScope): ManualDesktop | undefined => {
     const cell = d.cells.get(session.cellId);
     if (!cell) throw new AgentError(404, "the computer is unavailable");
-    const target = d.registry.for(session.cellId);
-    if (!target) return undefined;
-    const endpoint = target.client.endpoint;
+    const browser = session.screens?.selection.screen === "browser";
+    const target = browser ? undefined : d.registry.for(session.cellId);
+    if (!browser && !target) return undefined;
+    const endpoint = target?.client.endpoint;
     const check = () => {
+      scope.check();
       const current = d.cells.get(session.cellId);
       const now = d.cells.endpoints(session.cellId)?.desktopd;
       if (
@@ -419,10 +473,11 @@ export function createAgent(d: AgentWiringDeps) {
         d.live.get(session.cellId) !== session.id ||
         current?.state !== "ready" ||
         current.paused ||
+        current.fenced ||
+        current.replacementPending ||
         current.scale !== cell.scale ||
         d.killSwitch.isBusy(session.cellId) ||
-        now?.baseUrl !== endpoint.baseUrl ||
-        now.token !== endpoint.token
+        (!browser && (now?.baseUrl !== endpoint?.baseUrl || now?.token !== endpoint?.token))
       )
         throw new AgentError(409, "manual control changed");
     };
@@ -435,6 +490,29 @@ export function createAgent(d: AgentWiringDeps) {
         session.cancelManual();
       }
     });
+    if (browser) {
+      try {
+        const access = d.sessionScreens?.manual(session, { signal: scope.signal, check });
+        if (!access) throw new AgentError(503, "manual browser control is unavailable");
+        return {
+          ...access,
+          release: () => {
+            try {
+              access.release();
+            } finally {
+              unsubscribe();
+            }
+          },
+        };
+      } catch (error) {
+        unsubscribe();
+        throw error;
+      }
+    }
+    if (!target) {
+      unsubscribe();
+      throw new AgentError(503, "manual control is unavailable");
+    }
     return {
       screen: { w: 1280 * cell.scale, h: 800 * cell.scale },
       client: target.client,
@@ -453,6 +531,29 @@ export function createAgent(d: AgentWiringDeps) {
     redactorFor: (session) => forText(session),
   });
   const routes: AgentRoutesDeps = {
+    quarantine: d.quarantine
+      ? {
+          store: d.quarantine,
+          exists: (id) => !!d.cells.get(id),
+          place: desktopPlacement((id) => d.cells.endpoints(id)?.desktopd),
+          access: (id, signal) =>
+            quarantineAccess(
+              {
+                transfers,
+                available: () => ready && !closing,
+                cell: (id) => d.cells.get(id),
+                endpoint: (id) => d.cells.endpoints(id)?.desktopd,
+                session: (id) => {
+                  const live = d.live.get(id);
+                  return live ? runner.get(live) : undefined;
+                },
+                busy: (id) => d.killSwitch.isBusy(id),
+              },
+              id,
+              signal,
+            ),
+        }
+      : undefined,
     runner,
     settings,
     catalog,
@@ -488,6 +589,18 @@ export function createAgent(d: AgentWiringDeps) {
   return {
     runner,
     routes,
+    // Legacy scripted tasks share the same client/transfer owner and pre-recording boundary.
+    // Unlike agent tasks, they have no AgentSession whose runner can contain a lost reply.
+    async prepareDesktopTask(cellId: string, sessionId: string, signal: AbortSignal) {
+      try {
+        await prepareDesktop(cellId, sessionId, signal);
+      } catch (error) {
+        failedPreparations.add(cellId);
+        d.fences?.capture(cellId, sessionId, "api");
+        await d.killSwitch.stopSession(sessionId).catch(() => undefined);
+        throw error;
+      }
+    },
     reservedPorts(): Iterable<number> {
       if (!ready || closing) throw new CellControlConflict("agent cleanup is still in progress");
       return brains.reservedPorts();

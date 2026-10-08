@@ -1,4 +1,5 @@
 import { type ClientRequest, request as httpRequest } from "node:http";
+import { isAbsolute, normalize } from "node:path";
 
 // Engine 29.2 serves 1.53 and accepts 1.44+; 1.47 (Engine 27) is the oldest this code is written against.
 export const DOCKER_API = "v1.47";
@@ -42,8 +43,19 @@ export function compareApiVersions(a: string, b: string): number {
 
 export function dockerSocketPath(env: NodeJS.ProcessEnv = process.env): string {
   const host = env.DOCKER_HOST;
-  const path = host?.startsWith("unix://") ? host.slice("unix://".length) : "";
-  return path || "/var/run/docker.sock";
+  if (host === undefined) return "/var/run/docker.sock";
+  if (!host.startsWith("unix:///")) throw new Error("DOCKER_HOST must select a local Unix socket");
+  const path = host.slice("unix://".length);
+  if (
+    path === "/" ||
+    path.length > 1024 ||
+    !isAbsolute(path) ||
+    normalize(path) !== path ||
+    /[?#]/.test(path) ||
+    [...path].some((c) => c.charCodeAt(0) < 32 || c.charCodeAt(0) === 127)
+  )
+    throw new Error("DOCKER_HOST contains an invalid local Unix socket path");
+  return path;
 }
 
 export class DockerClient {

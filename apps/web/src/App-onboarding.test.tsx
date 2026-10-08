@@ -1,0 +1,61 @@
+// @vitest-environment jsdom
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, expect, it } from "vitest";
+import { App } from "./App.tsx";
+import { TOKEN_KEY } from "./lib/token.ts";
+import { APPEARANCE_KEY } from "./onboarding/appearance.ts";
+import { providerFixture } from "./settings/testing.ts";
+
+afterEach(() => {
+  cleanup();
+  localStorage.clear();
+  delete document.documentElement.dataset.appearance;
+});
+it("guides an empty authenticated workspace without starting tasks or saving policy", async () => {
+  localStorage.setItem(TOKEN_KEY, "a".repeat(43));
+  const methods: string[] = [];
+  const fetchImpl = (async (input, init) => {
+    const path = new URL(String(input)).pathname;
+    methods.push(init?.method ?? "GET");
+    const data =
+      path === "/api/agent/settings"
+        ? {}
+        : path === "/api/agent/providers"
+          ? providerFixture()
+          : path === "/api/keys"
+            ? { keys: [] }
+            : path === "/api/keyd"
+              ? {
+                  online: true,
+                  bootId: "test",
+                  sealKey: "test",
+                  audit: { ok: true },
+                  hairpin: { state: "active", addresses: 1 },
+                }
+              : path === "/api/session-index"
+                ? { sessions: [], next: null }
+                : [];
+    return Response.json(data);
+  }) as typeof fetch;
+  render(<App fetchImpl={fetchImpl} />);
+  expect(await screen.findByRole("heading", { name: "Set up localDot" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("radio", { name: "Midnight" }));
+  await waitFor(() => expect(document.documentElement.dataset.appearance).toBe("midnight"));
+  expect(localStorage.getItem(APPEARANCE_KEY)).toBe("midnight");
+  fireEvent.click(screen.getByRole("button", { name: "Review autonomy" }));
+  const dialog = await screen.findByRole("dialog", { name: "Models and settings" });
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      within(dialog).getByRole("combobox", { name: "Read information" }),
+    ),
+  );
+  expect(
+    (within(dialog).getByRole("radio", { name: "Midnight" }) as HTMLInputElement).checked,
+  ).toBe(true);
+  fireEvent.click(within(dialog).getByRole("button", { name: "Close settings" }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Review autonomy" }));
+  expect(
+    (screen.getByRole("button", { name: "Start your computer" }) as HTMLButtonElement).disabled,
+  ).toBe(true);
+  expect(methods.every((method) => method === "GET")).toBe(true);
+});

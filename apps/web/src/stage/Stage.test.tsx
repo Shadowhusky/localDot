@@ -2,11 +2,12 @@
 
 import type { ManualInput } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { createRef } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
 import { FakeWorker, fakeChromium, playInClient } from "../testing/fake-chromium.ts";
-import { Stage } from "./Stage.tsx";
+import { Stage, type StageHandle } from "./Stage.tsx";
 
 const CELL = "01JXYZ0000000000000000ABCD";
 const ready: CellSummary = {
@@ -59,6 +60,68 @@ describe("Stage in a Chromium browser", () => {
     }) as typeof fetch;
     return { api: createApi("a".repeat(43), { fetchImpl }), calls };
   }
+
+  it("renders replay with no cell, ticket, iframe, or live track processor", async () => {
+    const { api, calls } = daemon();
+    const stage = createRef<StageHandle>();
+    vi.stubGlobal("MediaStreamTrackProcessor", undefined);
+    render(<Stage ref={stage} mode="replay" cell={null} api={api} reconnects={0} listed={[]} />);
+    expect(screen.getByLabelText("The virtual computer")).toBeTruthy();
+    expect(client()).toBeNull();
+    expect(calls).toHaveLength(0);
+    const listener = vi.fn();
+    const unsubscribe = stage.current?.replay.onReplay(listener);
+    stage.current?.replay.open({
+      sessionId: CELL,
+      origin: "http://127.0.0.1:4750",
+      authorization: "Bearer fixture",
+      video: null,
+      gaps: [],
+    });
+    stage.current?.replay.seek(120, "exact");
+    const worker = FakeWorker.instances[0];
+    expect(worker?.sent.some((entry) => entry.message.type === "replay-open")).toBe(true);
+    act(() =>
+      worker?.onmessage?.({ data: { type: "replay-time", tMs: 120, playing: false, idle: false } }),
+    );
+    expect(listener).toHaveBeenCalledWith({
+      type: "replay-time",
+      tMs: 120,
+      playing: false,
+      idle: false,
+    });
+    unsubscribe?.();
+    await expect(stage.current?.replay.probe({ op: "stats" })).rejects.toThrow("disabled");
+  });
+
+  it("detaches the live viewer for replay and mints a fresh ticket on return", async () => {
+    const { api, calls } = daemon();
+    const stage = createRef<StageHandle>();
+    const view = render(
+      <Stage ref={stage} cell={ready} api={api} reconnects={0} listed={[CELL]} />,
+    );
+    await waitFor(() => expect(client()).not.toBeNull());
+    const first = client()?.src;
+    playInClient(client() as HTMLIFrameElement, "replay-switch-track");
+    await waitFor(() =>
+      expect(FakeWorker.instances[0]?.sent.some((entry) => entry.message.type === "frames")).toBe(
+        true,
+      ),
+    );
+    view.rerender(
+      <Stage ref={stage} mode="replay" cell={ready} api={api} reconnects={0} listed={[CELL]} />,
+    );
+    expect(client()).toBeNull();
+    expect(calls).toHaveLength(1);
+    expect(FakeWorker.instances[0]?.sent.at(-1)?.message.type).not.toBe("frames");
+    view.rerender(
+      <Stage ref={stage} mode="live" cell={ready} api={api} reconnects={0} listed={[CELL]} />,
+    );
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await waitFor(() => expect(client()).not.toBeNull());
+    expect(client()?.src).not.toBe(first);
+    expect(FakeWorker.instances).toHaveLength(1);
+  });
 
   it("commits atomic input on click against the current takeover and real backing viewport without another worker", async () => {
     vi.stubGlobal("devicePixelRatio", 2);
@@ -170,6 +233,101 @@ describe("Stage in a Chromium browser", () => {
     expect(FakeWorker.instances).toHaveLength(1);
     expect(FakeWorker.instances[0]?.sent[0]?.message.type).toBe("init");
   });
+
+  it("follows the browser ticket and refuses a stale response after switching back to desktop", async () => {
+    const browserId = "01JXYZ0000000000000000ABCE";
+    let finish: (response: Response) => void = () => {};
+    const calls: string[] = [];
+    const api = createApi("a".repeat(43), {
+      fetchImpl: async (input) => {
+        const path = new URL(String(input)).pathname;
+        calls.push(path);
+        if (path.endsWith("browser-stream-ticket"))
+          return new Promise<Response>((resolve) => {
+            finish = resolve;
+          });
+        return new Response(JSON.stringify({ path: ticketPath(1) }));
+      },
+    });
+    const selection = {
+      screen: "browser" as const,
+      cellId: browserId,
+      revision: 2,
+      geometry: { w: 2560, h: 1600, scale: 2 as const },
+    };
+    const browserCell = { ...ready, id: browserId };
+    const ui = render(
+      <Stage
+        cell={browserCell}
+        parentId={CELL}
+        selection={selection}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+      />,
+    );
+    expect(client()).toBeNull();
+    expect(calls).toEqual([`/api/cells/${CELL}/browser-stream-ticket`]);
+    ui.rerender(
+      <Stage
+        cell={ready}
+        parentId={CELL}
+        selection={{ ...selection, screen: "desktop", cellId: CELL, revision: 3 }}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+      />,
+    );
+    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(1)}#shared`));
+    await act(async () =>
+      finish(
+        new Response(
+          JSON.stringify({
+            cellId: browserId,
+            path: `/cells/${browserId}/browser/${"B".repeat(22)}/`,
+          }),
+        ),
+      ),
+    );
+    expect(client()?.getAttribute("src")).toBe(`${ticketPath(1)}#shared`);
+  });
+
+  it.each(["browser", "wrong-id", "desktop-path"])(
+    "checks the physical owner and surface of a %s ticket",
+    async (kind) => {
+      const browserId = "01JXYZ0000000000000000ABCE",
+        path = `/cells/${browserId}/${kind === "desktop-path" ? "desktop" : "browser"}/${"B".repeat(22)}/`;
+      const api = createApi("a".repeat(43), {
+        fetchImpl: async () =>
+          new Response(JSON.stringify({ cellId: kind === "wrong-id" ? CELL : browserId, path })),
+      });
+      const selection = {
+        screen: "browser" as const,
+        cellId: browserId,
+        revision: 1,
+        geometry: { w: 2560, h: 1600, scale: 2 as const },
+      };
+      render(
+        <Stage
+          cell={{ ...ready, id: browserId }}
+          parentId={CELL}
+          selection={selection}
+          api={api}
+          reconnects={0}
+          listed={[CELL]}
+        />,
+      );
+      await act(async () => {});
+      expect(client()?.getAttribute("src") ?? null).toBe(
+        kind === "browser" ? `${path}#shared` : null,
+      );
+      expect(FakeWorker.instances[0]?.sent).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ message: { type: "view", view: { selection } } }),
+        ]),
+      );
+    },
+  );
 
   it("drops what the client stored under the cell's earlier tickets when it mints", async () => {
     const page = (path: string) => `${window.location.origin}${path}`.replace(/[^\w.-]/g, "_");

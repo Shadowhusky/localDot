@@ -260,8 +260,17 @@ describe("DockerClient", () => {
     expect(dockerSocketPath({ DOCKER_HOST: "unix:///Users/me/.docker/run/docker.sock" })).toBe(
       "/Users/me/.docker/run/docker.sock",
     );
-    expect(dockerSocketPath({ DOCKER_HOST: "tcp://1.2.3.4:2375" })).toBe("/var/run/docker.sock");
-    expect(dockerSocketPath({ DOCKER_HOST: "unix://" })).toBe("/var/run/docker.sock");
+    for (const host of [
+      "tcp://1.2.3.4:2375",
+      "unix://",
+      "",
+      "unix://relative",
+      "unix:///",
+      "unix:///tmp/../sock",
+      "unix:///tmp/sock?x",
+      "unix:///tmp/sock\n",
+    ])
+      expect(() => dockerSocketPath({ DOCKER_HOST: host })).toThrow();
   });
 
   it("refuses an empty socket path, which Node would trade for TCP to localhost:80", () => {

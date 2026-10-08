@@ -83,8 +83,8 @@ func TestTimedOutFirstChunkDoesNotClaimTheOldValueIsUnchanged(t *testing.T) {
 	// Simulate a tool that changed its first chunk and then hung before
 	// reporting success. The next invocation works so rollback can restore it.
 	preamble := `#!/bin/sh
-if [ "$1" = "-i" ] && [ ! -f "$FAKE_DIR/stalled" ]; then
-  IFS= read -r line
+if [ "$2" = store ] && [ ! -f "$FAKE_DIR/stalled" ]; then
+  cat > /dev/null
   printf 'interrupted-new-value' > "$FAKE_DIR/store/localdot-keyd-test.weather.0"
   touch "$FAKE_DIR/stalled"
   exec sleep 5

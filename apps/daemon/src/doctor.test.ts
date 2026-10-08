@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { afterEach, describe, expect, it } from "vitest";
-import { DockerClient, DockerError, type DockerRequest } from "./cells/docker.ts";
+import { DockerClient, DockerError } from "./cells/docker.ts";
 import { type FakeDocker, startFakeDocker } from "./cells/testing/fake-docker.ts";
 import { runDoctor } from "./doctor.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
@@ -112,7 +112,9 @@ describe("runDoctor", () => {
       (c) => c.method === "POST" && c.path === "/networks/create",
     );
     expect(probe?.body).toMatchObject({ Internal: true });
-    expect(probe?.body).not.toHaveProperty("Labels");
+    expect(probe?.body).toMatchObject({
+      Labels: { "localdot.doctor-probe": expect.stringMatching(/^[a-f0-9]{32}$/) },
+    });
   });
 
   it("fails when the engine does not honour isolated gateway mode and removes its probe", async () => {
@@ -125,6 +127,43 @@ describe("runDoctor", () => {
     expect(report.ok).toBe(false);
     expect(byName(report)["isolated-gateway-mode"]).toMatchObject({ ok: false });
     expect(byName(report)["isolated-gateway-mode"]?.detail).toContain("gateway");
+    expect(fake.state.networks.size).toBe(0);
+  });
+
+  it("reports the installed image architecture instead of trusting its tag", async () => {
+    fake = await startFakeDocker();
+    fake.state.imageInspect = (reference, reply) =>
+      reference === images.desktop ? { ...reply, Architecture: "amd64" } : reply;
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images,
+      port: await freePort(),
+    });
+    expect(report.ok).toBe(false);
+    expect(byName(report)["image-desktop"]).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("linux/amd64"),
+    });
+    expect(byName(report)["image-gate"]?.ok).toBe(true);
+    expect(fake.state.networks.size).toBe(0);
+  });
+
+  it("refuses a missing repository digest even when the image inspect request succeeds", async () => {
+    fake = await startFakeDocker();
+    const desktop = `ghcr.io/localdot/desktop@sha256:${"a".repeat(64)}`;
+    fake.state.images.add(desktop);
+    fake.state.imageInspect = (reference, reply) =>
+      reference === desktop ? { ...reply, RepoDigests: [] } : reply;
+    const report = await runDoctor({
+      docker: new DockerClient(fake.socketPath),
+      images: { ...images, desktop },
+      port: await freePort(),
+    });
+    expect(report.ok).toBe(false);
+    expect(byName(report)["image-desktop"]).toMatchObject({
+      ok: false,
+      detail: expect.stringContaining("repository digest"),
+    });
     expect(fake.state.networks.size).toBe(0);
   });
 
@@ -180,19 +219,6 @@ describe("runDoctor", () => {
     await new Promise<void>((r) => holder.close(() => r()));
   });
 });
-
-// Rejects the requests `fail` picks: "before" never reaches Docker; "after" does, the way a reply
-// lost on its way back leaves Docker's change made.
-function failing(socketPath: string, fail: (req: DockerRequest) => "before" | "after" | undefined) {
-  return new (class extends DockerClient {
-    override async request<T = undefined>(req: DockerRequest): Promise<T> {
-      const when = fail(req);
-      if (when === "after") await super.request(req);
-      if (when) throw new DockerError(0, "ECONNRESET; is Docker Desktop running?", req.path);
-      return super.request<T>(req);
-    }
-  })(socketPath);
-}
 
 const details = (report: Awaited<ReturnType<typeof runDoctor>>) =>
   report.checks.map((c) => c.detail).join("\n");
@@ -381,7 +407,7 @@ describe("runDoctor's probe network", () => {
     body: { Name: name, Driver: "bridge" },
   });
 
-  it("removes probe networks a killed doctor left behind, and none another doctor may use", async () => {
+  it("never removes older networks by a shared prefix or age", async () => {
     fake = await startFakeDocker();
     const docker = new DockerClient(fake.socketPath);
     for (const name of ["localdot-doctor-probe-stale", "localdot-doctor-probe-fresh", "other"]) {
@@ -396,6 +422,7 @@ describe("runDoctor's probe network", () => {
     await runDoctor({ docker, images, port: await freePort() });
     expect([...fake.state.networks.keys()].sort()).toEqual([
       "localdot-doctor-probe-fresh",
+      "localdot-doctor-probe-stale",
       "other",
     ]);
   });
@@ -414,7 +441,7 @@ describe("runDoctor's probe network", () => {
     expect(fake.state.networks.has("localdot-doctor-probe-taken")).toBe(true);
   });
 
-  it("still removes the probe by name when the create failed with a 5xx", async () => {
+  it("does not delete anything when the failed create left no owned network", async () => {
     fake = await startFakeDocker();
     fake.state.failRequests.add("POST /networks/create");
     await runDoctor({
@@ -424,7 +451,7 @@ describe("runDoctor's probe network", () => {
       probeNetwork: "localdot-doctor-probe-maybe",
     });
     const deletes = fake.state.calls.filter((c) => c.method === "DELETE").map((c) => c.path);
-    expect(deletes).toEqual(["/networks/localdot-doctor-probe-maybe"]);
+    expect(deletes).toEqual([]);
   });
 
   const creates = (f: FakeDocker) =>
@@ -442,28 +469,26 @@ describe("runDoctor's probe network", () => {
       probeNetwork: "localdot-test-doctor-x",
     });
     const [generated, given] = creates(fake);
-    expect(generated).toMatch(/^localdot-doctor-probe-[0-9a-f]{8}$/);
+    expect(generated).toMatch(/^localdot-doctor-probe-[0-9a-f]{32}$/);
     expect(given).toBe("localdot-test-doctor-x");
     expect(fake.state.networks.size).toBe(0);
   });
 
   it("is removed even when the create's reply or the inspect is lost", async () => {
     fake = await startFakeDocker();
-    for (const lost of ["POST /networks/create", "GET /networks/"]) {
-      const docker = failing(fake.socketPath, (req) =>
-        `${req.method} ${req.path}`.startsWith(lost) ? "after" : undefined,
-      );
+    for (const lost of ["POST /networks/create", `GET /networks/${"2".padStart(64, "0")}`]) {
+      fake.state.loseReplies.add(lost);
+      const docker = new DockerClient(fake.socketPath);
       const report = await runDoctor({ docker, images, port: await freePort() });
       expect(byName(report)["isolated-gateway-mode"], lost).toMatchObject({ ok: false });
       expect(fake.state.networks.size, lost).toBe(0);
     }
   });
 
-  it("is reported, with the command that removes it, when Docker would not remove it", async () => {
+  it("reports uncertain cleanup without instructing deletion of a possibly replaced name", async () => {
     fake = await startFakeDocker();
-    const docker = failing(fake.socketPath, (req) =>
-      req.method === "DELETE" ? "before" : undefined,
-    );
+    fake.state.failRequests.add("DELETE /networks/");
+    const docker = new DockerClient(fake.socketPath);
     const report = await runDoctor({
       docker,
       images,
@@ -472,7 +497,7 @@ describe("runDoctor's probe network", () => {
     });
     expect(byName(report)["isolated-gateway-mode"]).toMatchObject({ ok: false });
     expect(byName(report)["isolated-gateway-mode"]?.detail).toBe(
-      "internal networks get no gateway address; could not remove the probe network (docker network rm localdot-doctor-probe-left): docker unreachable on /networks/localdot-doctor-probe-left: ECONNRESET; is Docker Desktop running?",
+      "Diagnostic network cleanup could not be confirmed. Check Docker Desktop; no other network was removed.",
     );
   });
 });

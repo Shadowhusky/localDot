@@ -102,6 +102,38 @@ const open = () =>
     });
   });
 const send = (data: string) => act(() => socket().onmessage?.({ data }));
+
+it("requires the selected screen event and snapshot to agree before any manual control", async () => {
+  const selected = {
+    screen: "browser",
+    cellId: NEXT_CELL,
+    revision: 1,
+    geometry: { w: 1280, h: 800, scale: 1 },
+  };
+  let current = {
+    ...snapshot(),
+    screen: { ...selected, screen: "desktop", cellId: CELL, revision: 0 },
+  };
+  const f = server(() => json(current));
+  const { result } = hook(f.api);
+  await flush();
+  open();
+  await flush();
+  expect(result.current.agent.fresh).toBe(true);
+  send(ev(0, "screen.switch", { ...selected, by: "agent" }));
+  await flush();
+  expect(result.current.agent.fresh).toBe(false);
+  expect(result.current.agent.model.screen?.cellId).toBe(NEXT_CELL);
+  current = { ...snapshot(), screen: selected };
+  await advance(1000);
+  expect(result.current.agent.fresh).toBe(true);
+  current = { ...snapshot(), screen: { ...selected, revision: 2 } };
+  await advance(1000);
+  expect(result.current.agent.fresh).toBe(false);
+  send(ev(1, "screen.switch", { ...selected, revision: 2, by: "daemon" }));
+  await flush();
+  expect(result.current.agent.fresh).toBe(true);
+});
 beforeEach(() => {
   vi.useFakeTimers();
   FakeWebSocket.instances = [];

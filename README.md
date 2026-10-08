@@ -5,7 +5,26 @@ computer and shows exactly what it is doing, action by action.
 
 Status: early development.
 
+The [browser workspace guide](docs/browser-workspace.md) covers the M7 author draft's separate
+signed-in browser, manual sign-in, reviewed downloads and approved uploads. Final integration
+and independent review are pending.
+
 ## Development
+
+The shipping CLI is an author draft pending independent review and installed acceptance.
+For a managed installation, `localdot update` checks for the latest stable release;
+`localdot update --to 1.2.3-rc.2` selects an exact version (including a release candidate).
+Both recover interrupted updates first and authenticate the exact release before activation.
+Updates preserve recorded installation settings and refuse downgrades. An already-current
+release is checked through `localdot up` before reporting readiness. After an interrupted
+update, run `localdot up` to check or recover the installed app before retrying.
+
+Managed `localdot doctor` currently verifies installation authority, resources, all four image
+pins, gateway isolation and the authenticated app port. It requests fresh self-tests for idle,
+running computers and rejects incomplete or changing computer inventories. Failed checks contain
+the affected computer. The synthetic credential-canary exercise is implemented in the author
+candidate, including owned cleanup and leak-scanner controls; independent review and a successful
+live installed diagnostic run are still required.
 
 Needs Node 24+ and pnpm 10. After `pnpm install`, the root scripts are:
 
@@ -13,6 +32,9 @@ Needs Node 24+ and pnpm 10. After `pnpm install`, the root scripts are:
 - `pnpm typecheck`: `tsc --noEmit` in each app and package
 - `pnpm format`, then `pnpm lint`: Biome
 - `pnpm hygiene`: scans the files git tracks or would add for key-shaped secrets and private names
+- `pnpm build:app-package <input.json> <new-output-directory>`: builds and audits a local app
+  archive; see the [release packaging guide](docs/release-packaging.md) for inputs and remaining
+  release gates
 
 Run the daemon with `pnpm --filter @localdot/daemon start`. It listens on `http://127.0.0.1:4750`
 (`LOCALDOT_PORT` sets another port) and keeps its state in `~/.localdot` (`LOCALDOT_HOME` sets
@@ -47,6 +69,23 @@ subprotocols `localdot.v1, localdot.token.<token>`.
 
 The token fragment is removed from the visible URL after loading. Browser history may retain
 the original install link, so treat that link as a credential.
+
+## Replay
+
+Sessions record locally even when nobody is watching. Open **Replay** and choose a session in
+the history rail to scrub its video, inspect the step timeline, compare before/after screenshots,
+change speed, or skip idle stretches. A running session offers **Jump to live**.
+
+Space plays or pauses; K pauses; Left/Right choose steps; J/L move ten seconds; `[`/`]` change
+speed from ½× to 8×; B opens the before/after comparison. **Export MP4** saves the chosen range
+with the pointer and overlays, optional captions, and the selected speed. Use desktop Chrome
+with file-picker and H.264 encoding support.
+
+Recordings live in `~/.localdot/sessions/<id>/recording/`. Takeover stretches are never recorded.
+By default, finalized videos expire after 30 days or when the completed-video budget exceeds
+20 GiB, oldest first; events and captured screenshots remain. `LOCALDOT_RECORDING=0` disables
+new video recordings. See [the Replay guide](docs/replay.md) for privacy, retention settings,
+recovery, export details, and the browser acceptance commands.
 
 ## keyd
 

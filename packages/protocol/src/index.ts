@@ -1,5 +1,6 @@
 export * from "./agent-controls.ts";
 export * from "./agent-settings.ts";
+export * from "./computer-reset.ts";
 export * from "./desktopd.ts";
 export * from "./desktopd-tools.ts";
 export * from "./events.ts";
@@ -11,7 +12,9 @@ export * from "./keyd.ts";
 export * from "./manual-input.ts";
 export * from "./patch.ts";
 export * from "./recording.ts";
+export * from "./release.ts";
 export * from "./safety.ts";
+export * from "./screens.ts";
 export * from "./seal.ts";
 export * from "./selftest.ts";
 export * from "./subscription.ts";

@@ -65,6 +65,45 @@ export function ApprovalCard({
               </div>
             ))}
           </dl>
+          {value.data.upload && (
+            <section className="approval-upload" aria-label="Files to upload">
+              <p className="approval-upload-destination">
+                <span>
+                  Page receiving files
+                  {value.data.upload.destination.embedded ? " · embedded frame" : ""}
+                </span>
+                <strong>
+                  <bdi>{value.data.upload.destination.origin}</bdi>
+                </strong>
+              </p>
+              <p className="approval-upload-note">
+                This page will be able to read these files and may send them elsewhere.
+              </p>
+              <h3>
+                {value.data.upload.files.length} file
+                {value.data.upload.files.length === 1 ? "" : "s"} to upload
+              </h3>
+              <ul className="approval-upload-files">
+                {value.data.upload.files.map((file) => (
+                  <li key={file.path}>
+                    <div className="approval-upload-file-heading">
+                      <strong>
+                        <bdi>{file.name}</bdi>
+                      </strong>
+                      <span>{file.bytes.toLocaleString()} bytes</span>
+                    </div>
+                    <p className="approval-upload-path">
+                      <bdi>{file.path}</bdi>
+                    </p>
+                    <details>
+                      <summary>File checksum</summary>
+                      <p className="approval-upload-digest">SHA-256: {file.sha256}</p>
+                    </details>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {children}
         </div>
         <div className="approval-footer">

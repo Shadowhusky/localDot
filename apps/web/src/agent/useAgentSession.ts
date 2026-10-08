@@ -130,6 +130,15 @@ export function useAgentSession(
   const snapshot = owned ? view.snapshot : null;
   const matches = current.cellId === cellId && current.sessionId === sessionId;
   const ownershipAligned =
+    (current.model.screen
+      ? snapshot?.screen?.screen === current.model.screen.screen &&
+        snapshot.screen.cellId === current.model.screen.cellId &&
+        snapshot.screen.revision === current.model.screen.revision &&
+        snapshot.screen.geometry.w === current.model.screen.geometry.w &&
+        snapshot.screen.geometry.h === current.model.screen.geometry.h &&
+        snapshot.screen.geometry.scale === current.model.screen.geometry.scale
+      : !snapshot?.screen ||
+        (snapshot.screen.screen === "desktop" && snapshot.screen.revision === 0)) &&
     (snapshot?.pendingAsk ?? null) === current.model.pendingAsk &&
     (snapshot?.pendingTakeover ?? null) === current.model.pendingTakeover &&
     JSON.stringify(snapshot?.approval ?? null) === JSON.stringify(current.model.approval ?? null) &&

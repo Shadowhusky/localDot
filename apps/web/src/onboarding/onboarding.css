@@ -1,0 +1,185 @@
+:root[data-appearance="midnight"] {
+  --color-void: #090e18;
+  --color-surface: #131b29;
+  --color-surface-2: #1b2638;
+  --color-line: #2c394e;
+  --color-text-2: #a3afc3;
+  --color-text-3: #909db4;
+  --color-hud: rgba(13, 20, 32, 0.74);
+  --color-hud-solid: rgba(13, 20, 32, 0.96);
+}
+/* Setup is a form, so use the workspace height instead of the computer's video aspect ratio. */
+.stage-col:has(.welcome-setup) {
+  justify-content: stretch;
+}
+.stage:has(> .welcome-setup) {
+  width: 100%;
+  aspect-ratio: auto;
+  flex: 1;
+  min-height: 0;
+}
+.stage-col:has(.welcome-setup) > .caption {
+  display: none;
+}
+.welcome-setup {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  padding: clamp(1.25rem, 3vw, 2.5rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: 0.875rem / 1.5 var(--font-ui);
+  scrollbar-gutter: stable;
+}
+.welcome-setup header,
+.welcome-steps,
+.welcome-setup footer {
+  max-width: 44rem;
+  margin-inline: auto;
+}
+.welcome-setup .welcome-eyebrow {
+  font-size: 0.65rem;
+  letter-spacing: 0.12em;
+  font-weight: 650;
+  color: var(--color-xenon);
+}
+.welcome-setup h1 {
+  font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.15;
+  margin: 0.4rem 0 0.65rem;
+}
+.welcome-setup h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.35;
+}
+.welcome-setup p {
+  color: var(--color-text-2);
+  margin: 0.35rem 0 0.7rem;
+}
+.welcome-steps {
+  list-style: none;
+  padding: 0;
+  margin-block: 1.5rem;
+}
+.welcome-steps li {
+  display: grid;
+  grid-template-columns: 1.7rem minmax(0, 1fr);
+  gap: 0.9rem;
+  border-top: 1px solid var(--color-line);
+  padding: 1.1rem 0;
+}
+.welcome-number {
+  display: grid;
+  place-items: center;
+  width: 1.6rem;
+  height: 1.6rem;
+  border: 1px solid var(--color-line);
+  border-radius: 50%;
+  color: var(--color-text-2);
+  font-size: 0.75rem;
+}
+.welcome-setup button {
+  min-height: 2.75rem;
+  padding: 0.55rem 0.85rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.55rem;
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+.welcome-setup button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.welcome-setup button:focus-visible,
+.appearance-picker input:focus-visible {
+  outline: 2px solid var(--color-xenon);
+  outline-offset: 3px;
+}
+.welcome-setup button:active:not(:disabled) {
+  opacity: 0.8;
+}
+.welcome-setup footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border-top: 1px solid var(--color-line);
+  padding-top: 1.15rem;
+}
+.welcome-setup footer > div {
+  flex: 1 1 14rem;
+}
+.welcome-setup .welcome-primary {
+  background: var(--color-text);
+  color: var(--color-void);
+  font-weight: 600;
+}
+.appearance-picker {
+  border: 0;
+  padding: 0;
+  margin: 0.65rem 0 0;
+  min-width: 0;
+}
+.appearance-picker legend {
+  font-size: 0.8rem;
+  color: var(--color-text-2);
+}
+.appearance-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-top: 0.4rem;
+}
+.appearance-picker .appearance-options label {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  margin: 0;
+  min-height: 2.75rem;
+  border: 1px solid var(--color-line);
+  border-radius: 0.55rem;
+  cursor: pointer;
+}
+.appearance-options label:has(input:checked) {
+  border-color: var(--color-xenon);
+  background: var(--color-xenon-a08);
+}
+.appearance-picker input {
+  accent-color: var(--color-xenon);
+  min-width: 0;
+  min-height: 0;
+  width: 1rem;
+  height: 1rem;
+}
+.appearance-picker p {
+  font-size: 0.75rem;
+  color: var(--color-text-2);
+  margin-top: 0.55rem;
+}
+.appearance-swatch {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 0.25rem;
+  border: 1px solid #7c7f87;
+}
+.appearance-swatch.graphite {
+  background: #15161a;
+}
+.appearance-swatch.midnight {
+  background: #131b29;
+}
+@media (prefers-reduced-transparency: reduce) {
+  :root[data-appearance="midnight"] {
+    --color-hud: var(--color-hud-solid);
+  }
+}

@@ -1,4 +1,4 @@
-import type { ApprovalCard, EventOf } from "@localdot/protocol";
+import type { ApprovalCard, EventOf, ScreenSelectionSnapshot } from "@localdot/protocol";
 import type { TerminalText } from "./terminal-text.ts";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -73,6 +73,7 @@ export interface Reported<T> {
   readonly data: T;
 }
 export interface AgentModel {
+  readonly screen?: ScreenSelectionSnapshot;
   readonly lastSeq: number;
   readonly state: EventOf<"agent.state">["data"] | null;
   readonly ended: EventOf<"session.end">["data"] | null;

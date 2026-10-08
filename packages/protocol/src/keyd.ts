@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ServiceProcessIdentity } from "./install-services.ts";
 
 // keyd's admin API as the daemon and the UI see it (Part 4a, "Interfaces Part 4b builds on").
 // Replies are parsed loosely (unknown fields dropped) so a newer keyd stays readable; what the
@@ -99,6 +100,7 @@ export const HairpinGuard = z.object({
 export type HairpinGuard = z.infer<typeof HairpinGuard>;
 
 export const KeydStatus = z.object({
+  service: ServiceProcessIdentity.nullish(),
   bootId: z.string().min(1),
   version: z.string(),
   sealKey: base64url(87, 87),

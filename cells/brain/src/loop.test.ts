@@ -66,6 +66,21 @@ function agent(
 }
 
 describe("Agent", () => {
+  it("dispatches a selected-screen switch through the daemon before requesting its screenshot", async () => {
+    const t = agent([
+      call("switch_screen", { screen: "browser" }),
+      call("computer", { action: "screenshot" }),
+      call("done", { summary: "Ready" }),
+    ]);
+    expect(await t.run()).toBe("done");
+    expect(t.f.toolCalls.map((c) => c.name)).toEqual([
+      "computer",
+      "switch_screen",
+      "computer",
+      "done",
+    ]);
+    expect(t.f.toolCalls[1]?.input).toEqual({ screen: "browser" });
+  });
   it("takes a first screenshot, runs each tool call through the tool API, and ends on done", async () => {
     const t = agent([
       call("computer", { action: "left_click", coordinate: [640, 400] }),
@@ -119,27 +134,27 @@ describe("Agent", () => {
     it("sends an unknown tool to the daemon, which refuses it, and answers bad input itself", async () => {
       const t = agent(
         [
-          calls(["switch_screen", { to: "browser" }], ["shell", { cmd: "ls" }]),
+          calls(["browser_script", { code: "document.cookie" }], ["shell", { cmd: "ls" }]),
           call("done", { summary: "x" }),
         ],
         {
           answer: (name) =>
-            name === "switch_screen"
+            name === "browser_script"
               ? {
                   ok: false,
-                  content: [{ type: "text", text: "There is no tool named switch_screen." }],
+                  content: [{ type: "text", text: "There is no tool named browser_script." }],
                 }
               : undefined,
         },
       );
       expect(await t.run()).toBe("done");
-      expect(t.f.toolCalls.map((c) => c.name)).toEqual(["computer", "switch_screen", "done"]);
+      expect(t.f.toolCalls.map((c) => c.name)).toEqual(["computer", "browser_script", "done"]);
       const prompt = JSON.stringify(t.main.prompts[1]);
-      expect(prompt).toContain("There is no tool named switch_screen.");
+      expect(prompt).toContain("There is no tool named browser_script.");
       expect(prompt).toContain("Invalid input for shell");
     });
 
-    it("never declares switch_screen or any tool outside the table", async () => {
+    it("declares switch_screen but never a tool outside the table", async () => {
       const t = agent([call("done", { summary: "x" })]);
       await t.run();
       const tools = (t.main.model.doStreamCalls[0]?.tools ?? []).map((tool) => tool.name);
@@ -147,12 +162,14 @@ describe("Agent", () => {
         "ask_user",
         "browser_navigate",
         "browser_read",
+        "browser_upload",
         "computer",
         "done",
         "files",
         "remember",
         "request_takeover",
         "shell",
+        "switch_screen",
         "update_plan",
       ]);
     });

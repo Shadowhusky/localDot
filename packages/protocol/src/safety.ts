@@ -1,5 +1,8 @@
 import { z } from "zod";
+import { DesktopUploadFile } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { UPLOAD_BYTES } from "./quarantine.ts";
+import { BrowserUploadDestination } from "./upload-metadata.ts";
 export const AutonomyMode = z.enum(["act", "ask", "handoff"]);
 export type AutonomyMode = z.infer<typeof AutonomyMode>;
 export const ActionClass = z.enum([
@@ -84,11 +87,22 @@ export const ApprovalAnswer = z.strictObject({
   decision: z.enum(["approve", "deny", "take_control"]),
 });
 export type ApprovalAnswer = z.infer<typeof ApprovalAnswer>;
+export const UploadApproval = z.strictObject({
+  destination: BrowserUploadDestination,
+  files: DesktopUploadFile.omit({ identity: true })
+    .array()
+    .min(1)
+    .max(10)
+    .refine((files) => files.reduce((total, file) => total + file.bytes, 0) <= UPLOAD_BYTES)
+    .refine((files) => new Set(files.map((file) => file.path)).size === files.length),
+});
+export type UploadApproval = z.infer<typeof UploadApproval>;
 export const ApprovalCardDraft = z.strictObject({
   actionClass: ActionClass,
   risk: z.enum(["medium", "high"]),
   title: safeText(200),
   fields: z.array(z.tuple([safeText(80), safeText(512)])).max(16),
+  upload: UploadApproval.optional(),
 });
 export type ApprovalCardDraft = z.infer<typeof ApprovalCardDraft>;
 export const ApprovalCard = ApprovalCardDraft.extend({

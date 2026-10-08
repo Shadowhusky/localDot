@@ -1,15 +1,23 @@
 import type { ToolResult } from "@localdot/protocol";
+import type { ScreenLease } from "../../browser/screen-controller.ts";
 import type { DesktopdClient } from "../../desktopd/client.ts";
 import type { DesktopdTools } from "../../desktopd/tools-client.ts";
-import type { ActionGateway } from "../../gateway/gateway.ts";
+import type { ActionContext, ActionGateway, NativeScreenBinding } from "../../gateway/gateway.ts";
 import type { FramePng } from "../frame-png.ts";
 import type { MemoryStore } from "../memory.ts";
 import type { Redactor } from "../redact.ts";
 import type { EffectPermit } from "../safety/authorize.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
+import type { Transfers } from "../transfers.ts";
 
 export interface ToolDeps {
+  uploads?: {
+    desktop(cellId: string): Pick<DesktopdTools, "inspectUpload" | "readUpload"> | undefined;
+    transfers: Pick<Transfers, "acquire">;
+  };
   gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf">;
+  // Installed with the session's screen controller; one private binding per admitted tool.
+  bindScreen?(session: AgentSession, lease: ScreenLease): NativeScreenBinding;
   // The cell's scale, to bring the gateway's device-pixel cursor back to model pixels.
   scaleOf(cellId: string): 1 | 2 | undefined;
   desktop(
@@ -56,10 +64,25 @@ export interface ToolCallContext {
   redact: Redactor;
   signal: AbortSignal;
   permit?: EffectPermit;
+  screen?: ScreenLease;
+  nativeScreen?: NativeScreenBinding;
 }
 
 export function text(t: string): ToolResult["content"][number] {
   return { type: "text", text: t };
+}
+
+export function screenContext(ctx: ToolCallContext): ActionContext {
+  ctx.check();
+  if (ctx.session.screens && (!ctx.screen || !ctx.nativeScreen))
+    throw new Error("The selected screen is unavailable.");
+  return {
+    sessionId: ctx.session.id,
+    cellId: ctx.nativeScreen?.cellId ?? ctx.session.cellId,
+    step: ctx.step,
+    signal: ctx.signal,
+    ...(ctx.nativeScreen ? { screen: ctx.nativeScreen } : {}),
+  };
 }
 
 export function fail(message: string): ToolResult {

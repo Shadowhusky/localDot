@@ -11,7 +11,7 @@ import type { CellSummary, DesktopdHealth } from "../cells/types.ts";
 import { CELL_FILES_DIR, CellKeydWiring } from "../keyd/cell-wiring.ts";
 import { KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import { type FakeKeyd, startFakeKeyd } from "../keyd/testing/fake-keyd.ts";
-import { KillSwitch } from "./kill-switch.ts";
+import { KillSwitch, type StopOutcome } from "./kill-switch.ts";
 import { LiveSessions } from "./live.ts";
 
 const healthy: DesktopdHealth = {
@@ -96,6 +96,34 @@ async function readyCell(settleMs = 200, opts: Partial<OrchestratorDeps> = {}) {
 }
 
 describe("KillSwitch.stopSession", () => {
+  it("publishes one physical Stop receipt before aborting session cleanup that awaits it", async () => {
+    const { live, killSwitch, id, desktop } = await readyCell(30);
+    let observed: Promise<StopOutcome> | undefined;
+    live.start(id, SESSION, async (signal) => {
+      await new Promise<void>((resolve) =>
+        signal.addEventListener(
+          "abort",
+          () => {
+            observed = killSwitch.pendingStop(SESSION);
+            resolve();
+          },
+          { once: true },
+        ),
+      );
+      await observed;
+    });
+    const stopping = killSwitch.stopSession(SESSION);
+    expect(observed).toBe(stopping);
+    expect(killSwitch.pendingStop(SESSION)).toBe(stopping);
+    expect(killSwitch.pendingStop("unrelated")).toBeUndefined();
+    expect(killSwitch.stopSession(SESSION)).toBe(stopping);
+    expect(await stopping).toMatchObject({ revoked: true, paused: true, stopped: false });
+    await live.settled(SESSION);
+    expect(desktop()?.paused).toBe(true);
+    expect(killSwitch.pendingStop(SESSION)).toBeUndefined();
+    expect(killSwitch.isBusy(id)).toBe(false);
+  });
+
   it("aborts the session, revokes the cell's keys, lets the run finish, then freezes the desktop", async () => {
     const { cells, live, killSwitch, id, desktop } = await readyCell();
     const timeline: string[] = [];

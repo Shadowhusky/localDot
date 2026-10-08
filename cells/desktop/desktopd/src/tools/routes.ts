@@ -11,6 +11,11 @@ import {
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
 import type { z } from "zod";
+import {
+  DesktopUploadInspect,
+  DesktopUploadRead,
+} from "../../../../../packages/protocol/src/desktop-uploads.ts";
+import { PlacementError, parsePlacementHeader, placeDownload } from "../place-download.ts";
 import { NavigationError, NoPageError, type PageBrowser } from "./browser.ts";
 import {
   editFile,
@@ -24,6 +29,7 @@ import {
 } from "./files.ts";
 import { resolveInHome } from "./home.ts";
 import { runShell, ShellTerminationError, shellEnv } from "./shell.ts";
+import { inspectUploadSource, readUploadSource } from "./upload-source.ts";
 
 export interface ToolRouteDeps {
   home: string;
@@ -32,6 +38,7 @@ export interface ToolRouteDeps {
   maxFetchBytes?: number;
   maxPutBytes?: number;
   runShell?: typeof runShell;
+  placeDownload?: typeof placeDownload;
 }
 
 const JSON_FILE_BYTES = 4 * 1024 * 1024 + 64 * 1024;
@@ -77,6 +84,17 @@ async function body<T extends z.ZodType>(
 
 function failure(c: Context, error: unknown): Response {
   if (c.req.raw.signal.aborted) return c.text("request aborted", 408);
+  if (error instanceof PlacementError) {
+    const status =
+      error.code === "request"
+        ? 400
+        : error.code === "aborted"
+          ? 408
+          : error.code === "refused"
+            ? 409
+            : 503;
+    return c.text(error.message, status);
+  }
   if (error instanceof FileToolError) return c.text(error.message, error.status);
   if (error instanceof NoPageError) return c.text(error.message, 409);
   if (error instanceof NavigationError) return c.text(error.message, 502);
@@ -89,6 +107,47 @@ function transferPath(c: Context): string | Response {
 }
 
 export function addToolRoutes(app: Hono, deps: ToolRouteDeps): void {
+  app.post("/files/upload-info", async (c) => {
+    const request = await body(c, DesktopUploadInspect, 8192);
+    if (request instanceof Response) return request;
+    try {
+      return c.json(await inspectUploadSource(deps.home, request.path, c.req.raw.signal));
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+  app.post("/files/upload-read", async (c) => {
+    const request = await body(c, DesktopUploadRead, 8192);
+    if (request instanceof Response) return request;
+    try {
+      return c.body(await readUploadSource(deps.home, request.file, c.req.raw.signal), 200, {
+        "content-type": "application/octet-stream",
+        "transfer-encoding": "chunked",
+        "cache-control": "no-store",
+      });
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
+  app.post("/downloads/place", async (c) => {
+    try {
+      const command = parsePlacementHeader(c.req.header("x-localdot-placement"));
+      const size = c.req.header("content-length");
+      const expected = command.reconcileOnly ? 0 : command.bytes;
+      if (size !== undefined && (!/^\d+$/.test(size) || Number(size) !== expected))
+        return c.text("invalid download size", 400);
+      return c.json(
+        await (deps.placeDownload ?? placeDownload)(
+          deps.home,
+          command,
+          c.req.raw.body,
+          c.req.raw.signal,
+        ),
+      );
+    } catch (error) {
+      return failure(c, error);
+    }
+  });
   app.post("/shell", async (c) => {
     const req = await body(c, ShellRequest);
     if (req instanceof Response) return req;

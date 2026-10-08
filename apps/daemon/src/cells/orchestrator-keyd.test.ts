@@ -263,7 +263,7 @@ describe("CellOrchestrator with keyd", () => {
       expect(keyd.cells.has(cell.id)).toBe(false);
       expect(orchestrator.get(cell.id)?.state).toBe("failed");
       await expect(orchestrator.start(cell.id)).rejects.toThrow("fix the cell record");
-      store.save(record);
+      writeFileSync(join(home, "cells", cell.id, "cell.json"), JSON.stringify(record));
       await orchestrator.start(cell.id);
       expect(keyd.cells.has(cell.id)).toBe(true);
     } finally {

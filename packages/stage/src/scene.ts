@@ -5,6 +5,7 @@ import {
   msToSeconds,
   type Point,
   type Rect,
+  type ScreenName,
 } from "@localdot/protocol";
 import {
   type ActionState,
@@ -12,6 +13,7 @@ import {
   emptyModel,
   foldEvents,
   type SessionModel,
+  screenAt,
   startedCount,
 } from "./model.ts";
 import { pointerAt } from "./pointer-path.ts";
@@ -64,6 +66,8 @@ const KEYCAP_RISE_PX = 20;
 
 export interface View {
   reducedMotion: boolean;
+  screen?: ScreenName;
+  screenRevision?: number;
 }
 
 export interface CursorScene {
@@ -156,19 +160,26 @@ export function sceneAt(
 ): Scene {
   if (!Number.isFinite(t)) throw new RangeError("scene time must be finite");
   const n = startedCount(model, t);
-  const current = model.actions[n - 1];
+  const selected = screenAt(model, t);
+  const matches =
+    (view.screen === undefined || view.screen === (selected?.screen ?? "desktop")) &&
+    (view.screenRevision === undefined || view.screenRevision === (selected?.revision ?? 0));
+  const first = matches ? (selected?.firstAction ?? 0) : n;
+  const current = n > first ? model.actions[n - 1] : undefined;
   const lookback = opts.ringLookback ?? RING_LOOKBACK;
   if (lookback !== Number.POSITIVE_INFINITY && !(Number.isInteger(lookback) && lookback >= 0))
     throw new RangeError("ring lookback must be a nonnegative integer or Infinity");
   const control = controlAt(model, t);
   return {
     control,
-    cursor: cursorAt(model, n, current, t, view, control),
+    cursor: cursorAt(model, n, current, t, view, control, first),
     target: current ? targetAt(current, t, view) : null,
-    rings: ringsAt(model, n, t, lookback),
+    rings: ringsAt(model, n, t, lookback, first),
     typing: current ? typingAt(current, t, view) : null,
     keycaps: current ? keycapsAt(current, t, view) : null,
-    cancel: current ? cancelAt(current, model.actions[n - 2], t, view) : null,
+    cancel: current
+      ? cancelAt(current, n - 2 >= first ? model.actions[n - 2] : undefined, t, view)
+      : null,
     hud: hudAt(model, current, t, control),
   };
 }
@@ -192,11 +203,12 @@ function cursorAt(
   t: number,
   view: View,
   control: boolean,
+  first: number,
 ): CursorScene | null {
   if (!current) return null;
   let pos: Point | undefined;
   let floating = false;
-  for (let i = n - 1; i >= 0 && !pos; i--) {
+  for (let i = n - 1; i >= first && !pos; i--) {
     const a = model.actions[i];
     if (!a) continue;
     pos = a === current && a.plan ? positionOnPlan(a, t, view) : restingPoint(a);
@@ -319,9 +331,15 @@ function targetAt(a: ActionState, t: number, view: View): TargetScene | null {
   return { style: "acting", rect, point, alpha, ...(chip ? { chip } : {}) };
 }
 
-function ringsAt(model: SessionModel, n: number, t: number, lookback: number): RingScene[] {
+function ringsAt(
+  model: SessionModel,
+  n: number,
+  t: number,
+  lookback: number,
+  first: number,
+): RingScene[] {
   const rings: RingScene[] = [];
-  for (let i = Math.max(0, n - lookback); i < n; i++) {
+  for (let i = Math.max(first, n - lookback); i < n; i++) {
     const a = model.actions[i];
     if (!a) continue;
     const d = a.dispatch;

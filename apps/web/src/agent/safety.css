@@ -109,6 +109,60 @@
 .approval-card .notification-control {
   margin-top: 20px;
 }
+.approval-upload {
+  margin-top: 20px;
+  overflow-wrap: anywhere;
+}
+.approval-upload-destination {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+.approval-upload-destination span,
+.approval-upload-note,
+.approval-upload-path {
+  color: #b7c8d8;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.approval-upload h3 {
+  margin: 20px 0 10px;
+  font-size: 15px;
+}
+.approval-upload-files {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  gap: 10px;
+}
+.approval-upload-files li {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid #344654;
+  border-radius: 10px;
+}
+.approval-upload-file-heading {
+  display: flex;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.approval-upload-file-heading span {
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #b7c8d8;
+}
+.approval-upload-path {
+  margin: 6px 0;
+}
+.approval-upload-files summary {
+  cursor: pointer;
+  font-size: 12px;
+}
+.approval-upload-digest {
+  font: 12px / 1.5 monospace;
+}
 .safety-task-controls p {
   flex: 1 1 280px;
   margin: 0;

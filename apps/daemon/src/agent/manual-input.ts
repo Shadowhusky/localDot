@@ -1,4 +1,5 @@
-import type { TakeoverInputRequest } from "@localdot/protocol";
+import type { ManualInput, TakeoverInputRequest } from "@localdot/protocol";
+import type { BrowserScope } from "../browser/client.ts";
 import type { DesktopdClient } from "../desktopd/client.ts";
 import { AgentError } from "./runner.ts";
 import { type AgentSession, ControlHeldError } from "./session.ts";
@@ -6,7 +7,7 @@ import { type AgentSession, ControlHeldError } from "./session.ts";
 export interface ManualDesktop {
   screen: { w: number; h: number };
   client: Pick<DesktopdClient, "input" | "type">;
-  prepare(): Promise<void>;
+  prepare(input: ManualInput): Promise<void>;
   check(): void;
   release(): void;
 }
@@ -15,7 +16,7 @@ export async function sendManualInput(
   session: AgentSession,
   request: TakeoverInputRequest,
   signal: AbortSignal,
-  desktop: ((session: AgentSession) => ManualDesktop | undefined) | undefined,
+  desktop: ((session: AgentSession, scope: BrowserScope) => ManualDesktop | undefined) | undefined,
 ): Promise<void> {
   const lease = session.admitManual(request.requestId, signal);
   const operation = AbortSignal.any([lease.signal, AbortSignal.timeout(30_000)]);
@@ -29,7 +30,13 @@ export async function sendManualInput(
     access?.check();
   };
   try {
-    access = desktop?.(session);
+    access = desktop?.(session, {
+      signal: operation,
+      check: () => {
+        operation.throwIfAborted();
+        lease.check();
+      },
+    });
     if (!access) throw new AgentError(503, "manual control is unavailable");
     check();
     if (
@@ -37,7 +44,7 @@ export async function sendManualInput(
       (request.input.at.x >= access.screen.w || request.input.at.y >= access.screen.h)
     )
       throw new AgentError(400, "input is outside the desktop");
-    await access.prepare();
+    await access.prepare(request.input);
     check(); // Hand-back, Stop or endpoint replacement during preflight cannot deliver input.
     const input = request.input;
     dispatched = true;
@@ -59,11 +66,13 @@ export async function sendManualInput(
   } catch (error) {
     failure = dispatched
       ? new ManualInputUncertain()
-      : error instanceof AgentError
-        ? error
-        : operation.aborted || session.stopped || error instanceof ControlHeldError
-          ? new ControlHeldError()
-          : new AgentError(503, "manual control is unavailable");
+      : error instanceof ManualInputRejected
+        ? new AgentError(400, "manual control does not support that input")
+        : error instanceof AgentError
+          ? error
+          : operation.aborted || session.stopped || error instanceof ControlHeldError
+            ? new ControlHeldError()
+            : new AgentError(503, "manual control is unavailable");
   } finally {
     try {
       access?.release();
@@ -80,3 +89,4 @@ export class ManualInputUncertain extends Error {
     super("manual input completion could not be confirmed; use Stop");
   }
 }
+export class ManualInputRejected extends Error {}

@@ -5,6 +5,8 @@ import {
   microsToMs,
   type Point,
   type PointerPlan,
+  type ScreenName,
+  type ScreenSwitchData,
   sessionMsOf,
   type Target,
 } from "@localdot/protocol";
@@ -65,6 +67,7 @@ export interface KeyUseState {
 export interface ObserveAt {
   t: number;
   frameId: string;
+  screen?: ScreenName;
   step?: string;
 }
 export interface StepState {
@@ -86,6 +89,7 @@ export interface PlanSnapshot {
 }
 
 export interface SessionModel {
+  screenChanges: (ScreenSwitchData & { t: number; firstAction: number })[];
   screen: { w: number; h: number; scale: number } | null;
   title: string | null;
   startT: number | null;
@@ -107,6 +111,7 @@ export interface SessionModel {
 
 export function emptyModel(): SessionModel {
   return {
+    screenChanges: [],
     screen: null,
     title: null,
     startT: null,
@@ -141,11 +146,43 @@ function upperBound<T>(items: T[], t: number, time: (item: T) => number): number
 const intentTime = (a: ActionState) => a.intentT;
 const atTime = (a: { t: number }) => a.t;
 const stepTime = (s: StepState) => s.startT;
+const observationIndexes = new WeakMap<
+  SessionModel,
+  {
+    source: ObserveAt[];
+    count: number;
+    desktop: ObserveAt[];
+    browser: ObserveAt[];
+  }
+>();
+export function screenAt(
+  model: SessionModel,
+  t: number,
+): SessionModel["screenChanges"][number] | undefined {
+  return model.screenChanges[upperBound(model.screenChanges, t, atTime) - 1];
+}
 export function startedCount(model: SessionModel, t: number): number {
   return upperBound(model.actions, t, intentTime);
 }
-export function observeAt(model: SessionModel, t: number): ObserveAt | undefined {
-  return model.observes[upperBound(model.observes, t, atTime) - 1];
+export function observeAt(
+  model: SessionModel,
+  t: number,
+  screen?: ScreenName,
+): ObserveAt | undefined {
+  if (screen === undefined) return model.observes[upperBound(model.observes, t, atTime) - 1];
+  let index = observationIndexes.get(model);
+  if (!index || index.source !== model.observes || index.count > model.observes.length) {
+    index = { source: model.observes, count: 0, desktop: [], browser: [] };
+    observationIndexes.set(model, index);
+  }
+  // The event model is append-only. Build once per model/worker, then extend as live history arrives.
+  // An inactive track must not scan the whole log on every exported frame.
+  while (index.count < model.observes.length) {
+    const observation = model.observes[index.count++];
+    if (observation) index[observation.screen ?? "desktop"].push(observation);
+  }
+  const observations = index[screen];
+  return observations[upperBound(observations, t, atTime) - 1];
 }
 export function stepAt(model: SessionModel, t: number): StepState | undefined {
   return model.steps[upperBound(model.steps, t, stepTime) - 1];
@@ -166,7 +203,12 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
     const t = sessionMsOf(e);
     switch (e.type) {
       case "observe":
-        model.observes.push({ t, frameId: e.data.frameId, ...(e.step ? { step: e.step } : {}) });
+        model.observes.push({
+          t,
+          frameId: e.data.frameId,
+          screen: model.screenChanges.at(-1)?.screen ?? "desktop",
+          ...(e.step ? { step: e.step } : {}),
+        });
         if (e.step) model.frames.set(e.step, e.data.frameId);
         break;
       case "step.start":
@@ -205,6 +247,9 @@ export function foldEvents(model: SessionModel, events: Iterable<LocalDotEvent>)
         model.screen = e.data.screen;
         model.title = e.data.title ?? null;
         model.startT = t;
+        break;
+      case "screen.switch":
+        model.screenChanges.push({ ...e.data, t, firstAction: model.actions.length });
         break;
       case "session.end":
         model.ended = { t, reason: e.data.reason };

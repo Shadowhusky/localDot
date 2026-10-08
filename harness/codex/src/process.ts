@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import type { EventEmitter } from "node:events";
 import type { Readable, Writable } from "node:stream";
+import type { NativeSupervision } from "./retirement-record.ts";
 export type CodexProcessFailure =
   | "cancelled"
   | "process_startup_failed"
@@ -40,6 +41,7 @@ export interface SpawnCodexInput {
   readonly register: (process: CodexProcess) => void;
   readonly fence?: () => void;
   readonly interrupt?: () => void | Promise<void>;
+  readonly supervision?: NativeSupervision;
   // Internal test seams, never caller/model-controlled launch options.
   readonly spawnImpl?: typeof spawn;
   readonly killImpl?: (pid: number, signal: NodeJS.Signals | 0) => void;
