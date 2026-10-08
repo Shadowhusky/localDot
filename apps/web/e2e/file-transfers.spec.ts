@@ -326,8 +326,9 @@ for (const width of [1280, 390])
     await expect(page.getByText("Upload refused", { exact: true })).toBeVisible();
     expect(messages).toHaveLength(1);
     expect(readFileSync(join(desktopHome, "Downloads", "one.txt"))).toEqual(ONE);
-    if (width < 1180) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const files = page.getByRole("region", { name: "Result files", exact: true });
+    const files = page
+      .getByRole("region", { name: "Conversation history" })
+      .getByRole("region", { name: "Task result", exact: true });
     await expect(files).toContainText("report.html");
     expect(proof.downloads).toEqual([]);
     const reply = page.waitForResponse((r) => r.url().endsWith(`/files/report.html`));
@@ -349,10 +350,15 @@ for (const width of [1280, 390])
     expect(download.url().startsWith("blob:")).toBe(true);
     expect(download.url()).not.toContain(TOKEN);
     expect(proof.downloads).toEqual(["report.html"]);
-    await expect(files.getByRole("status")).toContainText("Download requested");
+    await expect(page.locator(".thread-body > [role=status]")).toContainText(
+      "report.html downloaded.",
+    );
     expect(context.pages()).toHaveLength(1);
     expect(await page.evaluate(() => "artifactExecuted" in window)).toBe(false);
-    expect(await files.locator("iframe,img,svg,object,embed,script").count()).toBe(0);
+    // The card's own icons are the only pictures in it; the file itself never renders.
+    expect(
+      await files.locator("iframe,img,svg:not(.ui-icon, .ui-spinner),object,embed,script").count(),
+    ).toBe(0);
     await expect
       .poll(() =>
         page.evaluate(

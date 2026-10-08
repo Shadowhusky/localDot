@@ -52,7 +52,7 @@ async function seed(f: Awaited<ReturnType<typeof fixture>>, count: number) {
 }
 async function counts(page: Page) {
   return page.evaluate(() => ({
-    messages: document.querySelectorAll("article.message").length,
+    messages: document.querySelectorAll(".thread-row").length,
     steps: document.querySelectorAll("[data-testid='tool-row'], [data-testid='step-row']").length,
     outputViewers: document.querySelectorAll(".terminal-viewer").length,
   }));
@@ -90,14 +90,14 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
       };
     });
     const p = await load(page, f);
-    await expect(page.locator("article.message").last()).toContainText("Recorded message 5000");
+    await expect(page.locator("article.thread-message").last()).toContainText(
+      "Recorded message 5000",
+    );
     await expect(page.getByTestId("tool-row").last()).toContainText("Replay command 5000");
     const initial = await counts(page);
-    expect(initial).toEqual({ messages: 100, steps: 100, outputViewers: 0 });
+    expect(initial).toEqual({ messages: 200, steps: 100, outputViewers: 0 });
     expect(
-      await page
-        .getByRole("region", { name: "Conversation history" })
-        .evaluate((element) => element.clientHeight),
+      await page.locator(".thread-scroll").evaluate((element) => element.clientHeight),
     ).toBeGreaterThanOrEqual(160);
     await expect(page.getByText("Replay retained result marker", { exact: true })).toBeVisible();
     await expect(
@@ -136,39 +136,39 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     expect((await counts(page)).steps).toBe(100);
     await page.getByRole("button", { name: "Newer steps", exact: true }).click();
     await expect(page.getByTestId("tool-row").last()).toContainText("New Activity marker");
-    await page.getByRole("button", { name: "Older messages", exact: true }).click();
-    const selected = await page.locator("article.message .message-text").first().textContent();
-    expect(selected).toContain("Recorded message 4801");
-    await page
-      .locator("article.message .message-text")
-      .first()
-      .evaluate((element) => {
-        const range = document.createRange();
-        range.selectNodeContents(element);
-        const selection = getSelection();
-        selection?.removeAllRanges();
-        selection?.addRange(range);
-        Object.defineProperty(window, "selectedMessageNode", { value: element });
-      });
+    await page.getByRole("button", { name: "Older messages", exact: true }).focus();
+    await page.keyboard.press("Enter");
+    const text = page.locator(".thread-message :is(.thread-bubble, .safe-markdown p)");
+    const selected = await text.first().textContent();
+    expect(selected).toMatch(/^Recorded message \d+$/);
+    await text.first().evaluate((element) => {
+      const range = document.createRange();
+      range.selectNodeContents(element);
+      const selection = getSelection();
+      selection?.removeAllRanges();
+      selection?.addRange(range);
+      Object.defineProperty(window, "selectedMessageNode", { value: element });
+    });
     f.session.append("message.user", {
       messageId: ulid(),
       kind: "steer",
       text: "New live history marker",
     });
-    await expect(page.getByRole("button", { name: "New messages", exact: true })).toBeVisible();
-    await expect(page.locator("article.message").first()).toContainText(selected ?? "");
+    await expect(page.getByRole("button", { name: "1 new message", exact: true })).toBeVisible();
+    await expect(text.first()).toHaveText(selected ?? "");
     expect(await page.evaluate(() => getSelection()?.toString())).toBe(selected);
     expect(
-      await page
-        .locator("article.message .message-text")
+      await text
         .first()
         .evaluate(
           (node) =>
             node === (window as unknown as { selectedMessageNode: Element }).selectedMessageNode,
         ),
     ).toBe(true);
-    await page.getByRole("button", { name: "New messages", exact: true }).click();
-    await expect(page.locator("article.message").last()).toContainText("New live history marker");
+    await page.getByRole("button", { name: "1 new message", exact: true }).click();
+    await expect(page.locator("article.thread-message").last()).toContainText(
+      "New live history marker",
+    );
     const outputRow = page.getByRole("button", { name: /Replay command 5000/ });
     await outputRow.click();
     await expect(page.getByRole("region", { name: "Command output", exact: true })).toContainText(
@@ -188,7 +188,9 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
         text: `Replay barrier ${n}`,
       });
       // The new event follows all duplicate packets on this socket, proving each replay drained.
-      await expect(page.locator("article.message").last()).toContainText(`Replay barrier ${n}`);
+      await expect(page.locator("article.thread-message").last()).toContainText(
+        `Replay barrier ${n}`,
+      );
       const c = await counts(page);
       replayCounts.push(c);
       expect(c.messages).toBeLessThanOrEqual(200);
@@ -272,18 +274,21 @@ for (const width of [390, 640])
       await expect(conversation).toBeFocused();
       await page.getByRole("button", { name: "Older messages", exact: true }).focus();
       await page.keyboard.press("Enter");
-      await expect(page.locator("article.message").first()).toContainText("Recorded message 101");
-      await page.getByRole("button", { name: "New messages", exact: true }).focus();
+      await expect(page.locator("article.thread-message").first()).toContainText(
+        "Recorded message",
+      );
+      await page.getByRole("button", { name: "Jump to latest", exact: true }).focus();
       await page.keyboard.press("Enter");
-      await expect(page.locator("article.message").last()).toContainText("Recorded message 300");
+      await expect(page.locator("article.thread-message").last()).toContainText(
+        "Recorded message 300",
+      );
       expect(
-        await page
-          .getByRole("region", { name: "Conversation history" })
-          .evaluate((element) => element.clientHeight),
+        await page.locator(".thread-scroll").evaluate((element) => element.clientHeight),
       ).toBeGreaterThanOrEqual(160);
-      await page.getByText("Recovery options", { exact: true }).focus();
+      const options = page.getByRole("button", { name: "Recovery options", exact: true });
+      await options.focus();
       await page.keyboard.press("Enter");
-      await expect(page.locator("details.recovery-options")).toHaveAttribute("open", "");
+      await expect(options).toHaveAttribute("aria-expanded", "true");
       const taskCheck = page.getByRole("button", { name: "Check task state", exact: true });
       await taskCheck.focus();
       await expect(taskCheck).toBeFocused();

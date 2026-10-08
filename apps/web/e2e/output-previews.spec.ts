@@ -247,7 +247,10 @@ for (const width of [1280, 390]) {
     await expect(link).toHaveAttribute("href", "https://example.test/report");
     await expect(link).toHaveAttribute("rel", "noopener noreferrer");
     await expect(link).toHaveAttribute("referrerpolicy", "no-referrer");
-    expect(await markdown.locator("img,svg,iframe,object,embed,script,style").count()).toBe(0);
+    // Only the code block's own copy icon is a picture; nothing in the reply renders as one.
+    expect(
+      await markdown.locator("img,svg:not(.ui-icon),iframe,object,embed,script,style").count(),
+    ).toBe(0);
     expect(proof.external).toEqual([]);
     expect(
       await page.evaluate(

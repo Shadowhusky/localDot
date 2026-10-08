@@ -1249,6 +1249,30 @@ routes.post("/__qa/steps", (c) => {
   }
   return c.json({ ok: true });
 });
+// dot says something in the thread: n messages at once, or one sent word by word (stream=1).
+routes.post("/__qa/say", (c) => {
+  if (!session) return c.text("no session", 409);
+  const owned = session;
+  const text = c.req.query("text") ?? "Checking the next part of the sheet.";
+  if (c.req.query("stream") === "1") {
+    const messageId = ulid();
+    const words = text.split(" ");
+    let sent = 0;
+    const timer = setInterval(() => {
+      if (sent < words.length)
+        owned.append("message.delta", { messageId, text: `${sent ? " " : ""}${words[sent++]}` });
+      else {
+        clearInterval(timer);
+        owned.append("message.assistant", { messageId, text });
+      }
+    }, 120);
+    return c.json({ ok: true });
+  }
+  const n = Number(c.req.query("n") ?? 1);
+  for (let k = 1; k <= n; k++)
+    owned.append("message.assistant", { messageId: ulid(), text: n > 1 ? `${text} (${k})` : text });
+  return c.json({ ok: true });
+});
 routes.post("/__qa/heartbeat", (c) => {
   if (!session) return c.text("no session", 409);
   session.append("heartbeat", { ongoing: true, everyMs: 500 });

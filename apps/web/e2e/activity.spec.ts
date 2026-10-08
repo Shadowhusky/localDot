@@ -290,13 +290,18 @@ for (const width of [1280, 390]) {
     await expect(plan).toContainText("Send externally");
     await expect(plan.getByRole("img", { name: "Skipped", exact: true })).toHaveCount(1);
     await expect(rail.locator(".plan-count")).toHaveText("1 of 4 done");
-    await expect(rail.getByRole("region", { name: "Task result", exact: true })).toHaveCount(2);
+    // Results are dot's turn in the conversation now, not part of Activity.
+    await expect(rail.getByRole("region", { name: "Task result", exact: true })).toHaveCount(0);
+    const thread = page.getByRole("region", { name: "Conversation history", includeHidden: true });
     await expect(
-      rail.getByText(
+      thread.getByRole("region", { name: "Task result", exact: true, includeHidden: true }),
+    ).toHaveCount(2);
+    await expect(
+      thread.getByText(
         "Sample report prepared.\nOne command failed; inspect its output before continuing.",
         { exact: true },
       ),
-    ).toBeVisible();
+    ).toBeAttached();
     const steps = rail.getByRole("region", { name: "Recorded steps", exact: true });
     // Allowed key uses fold into the step they follow, so each step is one row.
     expect(
@@ -337,9 +342,10 @@ for (const width of [1280, 390]) {
     await expect(
       memory.getByRole("region", { name: "Unified text diff", exact: true }),
     ).toContainText("Prefers concise reports");
-    await expect(rail.getByRole("region", { name: "Question history", exact: true })).toContainText(
-      "Answer: Text report",
-    );
+    await expect(rail.getByRole("region", { name: "Question history" })).toHaveCount(0);
+    await expect(
+      page.getByRole("article", { name: "Your answer", includeHidden: true }),
+    ).toContainText("Text report");
     expect(
       await page.evaluate(() =>
         [...document.querySelectorAll(".pane-activity *")]
