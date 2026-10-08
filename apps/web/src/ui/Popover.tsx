@@ -14,6 +14,24 @@ const EDGE = 8;
 // Longer than --dur-exit, so the fade finishes before the element goes.
 const EXIT = 220;
 
+interface Placement {
+  side: "top" | "bottom";
+  align: "start" | "end";
+  matchWidth: boolean;
+}
+
+function place(element: HTMLElement, trigger: HTMLElement, { side, align, matchWidth }: Placement) {
+  const box = trigger.getBoundingClientRect();
+  if (matchWidth) element.style.width = `${Math.round(box.width)}px`;
+  const { offsetWidth: width, offsetHeight: height } = element;
+  const top = side === "top" ? box.top - GAP - height : box.bottom + GAP;
+  const wanted = align === "start" ? box.left : box.right - width;
+  const left = Math.min(Math.max(wanted, EDGE), window.innerWidth - EDGE - width);
+  element.style.top = `${Math.round(Math.max(EDGE, top))}px`;
+  element.style.left = `${Math.round(left)}px`;
+  element.style.transformOrigin = `${Math.round(box.left + box.width / 2 - left)}px ${side === "top" ? "100%" : "0"}`;
+}
+
 export interface PopoverProps {
   open: boolean;
   onClose(): void;
@@ -21,14 +39,12 @@ export interface PopoverProps {
   label: string;
   side?: "top" | "bottom";
   align?: "start" | "end";
-  // As wide as its trigger, like a menu that belongs to a bar.
   matchWidth?: boolean;
   className?: string;
   children: ReactNode;
 }
 
-// Non-modal and anchored: it grows out of its trigger, takes focus while open, and gives it back on
-// Escape. An outside press closes it without stealing that press.
+// Non-modal: an outside press closes it without stealing that press.
 export function Popover({
   open,
   onClose,
@@ -66,30 +82,26 @@ export function Popover({
       close.current();
       if (inside) anchor.current?.focus({ preventScroll: true });
     };
-    const lost = () => close.current();
+    // A phone's toolbar showing or hiding changes only the height: follow the trigger, stay open.
+    const width = window.innerWidth;
+    const resized = () => {
+      if (window.innerWidth !== width) close.current();
+      else if (popup.current && anchor.current)
+        place(popup.current, anchor.current, { side, align, matchWidth });
+    };
     document.addEventListener("pointerdown", away, true);
     document.addEventListener("keydown", dismiss, true);
-    window.addEventListener("resize", lost);
+    window.addEventListener("resize", resized);
     return () => {
       document.removeEventListener("pointerdown", away, true);
       document.removeEventListener("keydown", dismiss, true);
-      window.removeEventListener("resize", lost);
+      window.removeEventListener("resize", resized);
     };
-  }, [open, anchor]);
+  }, [open, anchor, side, align, matchWidth]);
 
   useLayoutEffect(() => {
-    const element = popup.current,
-      trigger = anchor.current;
-    if (!shown || !element || !trigger) return;
-    const box = trigger.getBoundingClientRect();
-    if (matchWidth) element.style.width = `${Math.round(box.width)}px`;
-    const { offsetWidth: width, offsetHeight: height } = element;
-    const top = side === "top" ? box.top - GAP - height : box.bottom + GAP;
-    const wanted = align === "start" ? box.left : box.right - width;
-    const left = Math.min(Math.max(wanted, EDGE), window.innerWidth - EDGE - width);
-    element.style.top = `${Math.round(Math.max(EDGE, top))}px`;
-    element.style.left = `${Math.round(left)}px`;
-    element.style.transformOrigin = `${Math.round(box.left + box.width / 2 - left)}px ${side === "top" ? "100%" : "0"}`;
+    if (shown && popup.current && anchor.current)
+      place(popup.current, anchor.current, { side, align, matchWidth });
   });
 
   if (!shown) return null;

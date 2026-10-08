@@ -128,6 +128,24 @@ describe("Popover", () => {
     fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }));
     expect(screen.getByRole("dialog").hasAttribute("data-closing")).toBe(true);
   });
+
+  it("stays open while only the height changes, as a phone's toolbar hides, and closes on a new width", () => {
+    render(<Anchored />);
+    fireEvent.click(screen.getByRole("button", { name: "Usage" }));
+    const dialog = screen.getByRole("dialog");
+    const width = window.innerWidth;
+    act(() => {
+      window.innerHeight -= 60;
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(dialog.hasAttribute("data-closing")).toBe(false);
+    act(() => {
+      window.innerWidth = width + 200;
+      window.dispatchEvent(new Event("resize"));
+    });
+    expect(dialog.hasAttribute("data-closing")).toBe(true);
+    window.innerWidth = width;
+  });
 });
 
 describe("Meter", () => {
