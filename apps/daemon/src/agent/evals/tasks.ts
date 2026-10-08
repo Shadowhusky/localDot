@@ -154,6 +154,27 @@ function exportGimp(name: string): Step[] {
   ];
 }
 
+// The ellipse's right edge is read on the canvas it was drawn on: the white area found afterwards
+// is cut by the outline itself.
+function drawEllipse(): Step {
+  let drawn: Rect | undefined;
+  return {
+    name: "draw the ellipse",
+    ready: (v) => !!canvas(v),
+    act: (v) => {
+      const c = canvas(v) as Rect;
+      drawn = c;
+      const centre = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
+      return stroke(ellipse(centre, c.w * 0.3, c.h * 0.3, 40));
+    },
+    done: (v) => {
+      if (!drawn || !v.frame) return false;
+      const [r, g, b] = pixel(v.frame, drawn.x + drawn.w * 0.8, drawn.y + drawn.h / 2);
+      return r + g + b < 300;
+    },
+  };
+}
+
 const gimpDrawShape: EvalTask = {
   id: "gimp-draw-shape",
   prompt:
@@ -168,21 +189,7 @@ const gimpDrawShape: EvalTask = {
         closeGimpWelcome,
         fitCanvas,
         { name: "pick the paintbrush", act: () => [key("p")] },
-        {
-          name: "draw the ellipse",
-          ready: (v) => !!canvas(v),
-          act: (v) => {
-            const c = canvas(v) as Rect;
-            const centre = { x: c.x + c.w / 2, y: c.y + c.h / 2 };
-            return stroke(ellipse(centre, c.w * 0.3, c.h * 0.3, 40));
-          },
-          done: (v) => {
-            const c = canvas(v);
-            if (!c || !v.frame) return false;
-            const [r, g, b] = pixel(v.frame, c.x + c.w * 0.8, c.y + c.h / 2);
-            return r + g + b < 300;
-          },
-        },
+        drawEllipse(),
         ...exportGimp("shape.png"),
       ],
       "Drew the ellipse and exported ~/eval/shape.png.",
