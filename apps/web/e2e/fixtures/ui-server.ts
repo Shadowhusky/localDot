@@ -860,12 +860,14 @@ app.post("/__qa/approval", (c) => {
     .catch((e) => effects.push(`approval-error:${String(e)}`));
   return c.json({ ok: true });
 });
-// Two keyboard steps with the gateway's own labels: a key pressed five times and a held key.
+// Keyboard steps with the gateway's own labels: a key pressed five times, a held key, and a held
+// key stopped part-way (delivered, then failed).
 app.post("/__qa/keys", (c) => {
   if (!session) return c.text("no session", 409);
-  for (const [combo, how] of [
-    [["]"], { repeat: 5 }],
-    [["shift"], { holdMs: 1500 }],
+  for (const [combo, how, error] of [
+    [["]"], { repeat: 5 }, undefined],
+    [["shift"], { holdMs: 1500 }, undefined],
+    [["Delete"], { holdMs: 10_000 }, "Stopped after holding for 3.1 s of 10 s: stopped"],
   ] as const) {
     const step = ulid();
     session.append("step.start", { kind: "gui", planItem: "calc" }, step);
@@ -879,8 +881,8 @@ app.post("/__qa/keys", (c) => {
       { input: { kind: "key", combo, ...how }, pressT: 0, ringAt: 0, injector: "xtest" },
       step,
     );
-    session.append("action.result", { ok: true }, step);
-    session.append("step.end", { status: "ok" }, step);
+    session.append("action.result", error ? { ok: false, error } : { ok: true }, step);
+    session.append("step.end", { status: error ? "failed" : "ok" }, step);
   }
   return c.json({ ok: true });
 });

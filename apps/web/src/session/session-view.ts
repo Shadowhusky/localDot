@@ -32,10 +32,12 @@ export function stepRows(model: SessionModel): StepRowView[] {
     rows.set(id, {
       id,
       startT: rows.get(id)?.startT ?? a.intentT,
+      // Past tense only for a step that finished: a delivered one that failed or was stopped
+      // part-way says what it tried.
       label:
         done === undefined
           ? progressive(a.label)
-          : a.dispatch || (a.verb === "wait" && a.resultT !== undefined && a.ok && !a.cancel)
+          : status === "ok" && (a.dispatch || a.verb === "wait")
             ? past(a.label)
             : a.label,
       status,

@@ -109,3 +109,21 @@ it("completes a successful wait without claiming input, while cancelled waits re
     });
   }
 });
+
+it("says what a delivered step tried, not that it finished, when it stopped part-way", () => {
+  const events = [
+    ev("action.intent", 0, { verb: "key", label: "Hold Delete for 10 s", risk: "none" }),
+    ev("action.dispatch", 100, {
+      input: { kind: "key", combo: ["Delete"], holdMs: 10_000 },
+      pressT: 90_000,
+      ringAt: 120_000,
+      injector: "xtest",
+    }),
+    ev("action.result", 3200, { ok: false, error: "Stopped after holding for 3.1 s of 10 s" }),
+  ];
+  expect(stepRows(foldEvents(emptyModel(), events))[0]).toMatchObject({
+    label: "Hold Delete for 10 s",
+    delivery: "delivered",
+    status: "failed",
+  });
+});
