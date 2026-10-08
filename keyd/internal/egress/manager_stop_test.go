@@ -174,7 +174,9 @@ func (s *stalledReadStore) Get(id, binding string) ([]byte, error) {
 	return s.Memory.Get(id, binding)
 }
 
-func TestCredentialLookupDoesNotHoldTheStopLock(t *testing.T) {
+// A Keychain read can run to its deadline. Issuing credentials only looks records up, so neither
+// it nor Stop may wait for a read of the value.
+func TestCredentialIssuanceAndStopDoNotWaitForAValueRead(t *testing.T) {
 	for _, operation := range []string{"open", "mint"} {
 		t.Run(operation, func(t *testing.T) {
 			m, _ := newManager(t)
@@ -185,8 +187,7 @@ func TestCredentialLookupDoesNotHoldTheStopLock(t *testing.T) {
 			if err := v.Put(rec, []byte(realValue)); err != nil {
 				t.Fatal(err)
 			}
-			// Reopen without the value cache: the first live request will need
-			// the backend while credential issuance reads the metadata.
+			// Reopen without the value cache: the first live request will need the backend.
 			m.d.Vault, _ = vault.Open(store, path)
 			if _, err := m.Open(OpenRequest{CellID: "c1", Role: "desktop", Secrets: []string{"weather"}}); err != nil {
 				t.Fatal(err)
@@ -209,8 +210,11 @@ func TestCredentialLookupDoesNotHoldTheStopLock(t *testing.T) {
 			}()
 			select {
 			case err := <-issued:
-				t.Fatalf("issuance did not wait for the vault read: %v", err)
-			case <-time.After(100 * time.Millisecond):
+				if err != nil {
+					t.Fatal(err)
+				}
+			case <-time.After(500 * time.Millisecond):
+				t.Fatal("credential issuance waited for a value read")
 			}
 			stopped := make(chan error, 1)
 			go func() { _, err := m.Revoke("c1"); stopped <- err }()
@@ -220,17 +224,10 @@ func TestCredentialLookupDoesNotHoldTheStopLock(t *testing.T) {
 					t.Fatal(err)
 				}
 			case <-time.After(500 * time.Millisecond):
-				t.Fatal("credential lookup held Stop behind the vault")
+				t.Fatal("Stop waited for a value read")
 			}
 			unblock()
 			if err := <-read; err != nil {
-				t.Fatal(err)
-			}
-			err := <-issued
-			if operation == "mint" && !errors.Is(err, ErrCellChanged) {
-				t.Fatalf("the earlier mint request outlived Stop: %v", err)
-			}
-			if operation == "open" && err != nil {
 				t.Fatal(err)
 			}
 		})
