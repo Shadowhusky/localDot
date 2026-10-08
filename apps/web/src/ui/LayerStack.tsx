@@ -176,9 +176,14 @@ export function useLayer(options: LayerOptions): LayerEntry | undefined {
   const [entry, setEntry] = useState<LayerEntry>();
   const { active, trap, modal, beside = false } = options;
 
+  // Only when it opens: a layer that changes kind while open (a sheet widened from bottom to
+  // inspector) registers again, by when focus is already inside it.
+  useLayoutEffect(() => {
+    if (active) opener.current = document.activeElement;
+  }, [active]);
+
   useLayoutEffect(() => {
     if (!active) return;
-    opener.current = document.activeElement;
     const own: LayerEntry = {
       root: () => latest.current.root.current,
       panel: () => latest.current.panel.current,

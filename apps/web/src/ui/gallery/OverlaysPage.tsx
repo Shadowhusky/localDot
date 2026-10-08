@@ -356,7 +356,7 @@ export function OverlaysPage() {
           </div>
           <div className="atoms-row">
             <span className="atoms-label">Beside the page</span>
-            <SettingsDemo side="inspector" modal={false} label="Open beside the page" />
+            <SettingsDemo side="inspector" label="Open beside the page" />
           </div>
         </div>
       </Section>

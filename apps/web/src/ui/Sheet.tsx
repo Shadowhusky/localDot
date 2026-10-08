@@ -51,7 +51,9 @@ export interface SheetProps {
   // While set, Escape, the close button, the dim area and a swipe ask before closing.
   dirty?: boolean;
   // A modal sheet dims the page and keeps focus. A non-modal one sits beside the page, which stays
-  // live; the close button, and Escape pressed inside the sheet, still close it.
+  // live; the close button, and Escape pressed inside the sheet, still close it. By default an
+  // inspector sits beside the page, so the HUD's Stop and approvals stay in reach, and a bottom sheet,
+  // which covers a phone's screen, is modal.
   modal?: boolean;
   // Where focus goes back to when the sheet closes; by default what had it before opening.
   returnFocus?: RefObject<HTMLElement | null>;
@@ -85,7 +87,7 @@ function SheetLayer({
   description,
   side = "auto",
   dirty = false,
-  modal = true,
+  modal: asked,
   returnFocus,
   closeLabel = "Close",
   page = "main",
@@ -104,6 +106,7 @@ function SheetLayer({
   const promptId = useId();
   const phone = useMediaQuery(PHONE);
   const placement = side === "auto" ? (phone ? "bottom" : "inspector") : side;
+  const modal = asked ?? placement === "bottom";
   const [asking, setAsking] = useState(false);
   const latest = useRef({ dirty, asking, onClose, closing });
   latest.current = { dirty, asking, onClose, closing };

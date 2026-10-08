@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { useRef, useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Menu, MenuItem } from "./Menu.tsx";
+import { PHONE } from "./media.ts";
 import { Sheet } from "./Sheet.tsx";
 import { Tooltip } from "./Tooltip.tsx";
 
@@ -249,6 +250,73 @@ describe("Sheet", () => {
     open();
     pressEscape(screen.getByLabelText("Name"));
     expect(closedCount()).toBe("Closed 1");
+  });
+});
+
+// A screen that can change between phone and wide while a sheet is open.
+function screenWidth(phone: boolean) {
+  let now = phone;
+  const listeners = new Set<() => void>();
+  window.matchMedia = ((query: string) => ({
+    media: query,
+    get matches() {
+      return query === PHONE && now;
+    },
+    addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+    removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+  })) as unknown as typeof window.matchMedia;
+  return (next: boolean) => {
+    now = next;
+    act(() => {
+      for (const listener of listeners) listener();
+    });
+  };
+}
+
+function Defaults({ side }: { side?: "auto" | "inspector" | "bottom" }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setOpen(true)}>
+        Open settings
+      </button>
+      <Sheet open={open} side={side} title="Models and settings" onClose={() => setOpen(false)}>
+        <label>
+          Name
+          <input />
+        </label>
+      </Sheet>
+    </>
+  );
+}
+
+describe("Sheet defaults", () => {
+  afterEach(() => {
+    Reflect.deleteProperty(window, "matchMedia");
+  });
+
+  it("sits beside the page as an inspector, so the page stays live, and is modal as a bottom sheet", () => {
+    const { unmount } = render(<Defaults side="inspector" />);
+    expect(open().getAttribute("aria-modal")).toBe("false");
+    expect(document.querySelector(".ui-scrim")).toBeNull();
+    expect(document.documentElement.style.overflow).toBe("");
+    unmount();
+    render(<Defaults side="bottom" />);
+    expect(open().getAttribute("aria-modal")).toBe("true");
+    expect(document.querySelector(".ui-scrim")).not.toBeNull();
+  });
+
+  it("gives focus back to what opened it after the screen widened it into an inspector", () => {
+    const resize = screenWidth(true);
+    render(<Defaults />);
+    const sheet = open();
+    expect(sheet.dataset.side).toBe("bottom");
+    expect(sheet.getAttribute("aria-modal")).toBe("true");
+    resize(false);
+    expect(sheet.dataset.side).toBe("inspector");
+    expect(sheet.getAttribute("aria-modal")).toBe("false");
+    pressEscape(screen.getByLabelText("Name"));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Open settings" }));
   });
 });
 
