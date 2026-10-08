@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { assembledProcess } from "./fixtures/assembled-process.ts";
+import { roleCard, saveFixtureModel } from "./settings-ui.ts";
 
 // Real daemon routes, keyd, Docker desktop/brain and browser UI; only the model script is synthetic.
 test("approval card, atomic Pause, matching Resume and in-dialog Stop remain honest", async ({
@@ -62,19 +63,12 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
     await expect(keys).toContainText("Saved fixture.");
     await keys.getByRole("button", { name: "Close keys", exact: true }).click();
     await page.getByRole("button", { name: "Settings", exact: true }).click();
-    const settings = page.getByRole("dialog", { name: "Models and settings", exact: true });
-    await settings.getByLabel("main provider", { exact: true }).selectOption("openai-compatible");
-    await settings.getByLabel("main model", { exact: true }).selectOption("fixture-assembled-v1");
-    await settings.getByLabel("main key", { exact: true }).selectOption("fixture");
-    await settings.getByLabel("main Input — USD per million tokens", { exact: true }).fill("1");
-    await settings.getByLabel("main Output — USD per million tokens", { exact: true }).fill("1");
-    await settings
-      .getByRole("checkbox", { name: "Use the configured default", exact: true })
-      .uncheck();
-    await settings.getByLabel("Task ceiling — USD", { exact: true }).fill("0.05");
-    await expect(settings.getByLabel("Send messages", { exact: true })).toHaveValue("ask");
-    await settings.getByRole("button", { name: "Save settings", exact: true }).click();
-    await expect(settings).toContainText("Saved choices");
+    const settings = await saveFixtureModel(page);
+    await expect(
+      settings
+        .getByRole("radiogroup", { name: "Send messages" })
+        .getByRole("radio", { name: "Ask me" }),
+    ).toHaveAttribute("aria-checked", "true");
     await page.screenshot({ path: info.outputPath("safety-settings.png"), fullPage: true });
     await settings.getByRole("button", { name: "Close settings", exact: true }).click();
     await page.getByRole("button", { name: "Turn on", exact: true }).first().click();
@@ -178,7 +172,7 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
     await page.getByRole("button", { name: "Settings", exact: true }).click();
     await expect(settings).toBeVisible();
     await expect(page.locator(".approval-card")).toBeHidden();
-    await settings.getByLabel("main model", { exact: true }).focus();
+    await roleCard(settings, "main").getByRole("combobox", { name: "Model", exact: true }).focus();
     const stop = page.waitForResponse(
       (response) =>
         response.request().method() === "POST" &&

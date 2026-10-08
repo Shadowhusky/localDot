@@ -6,6 +6,7 @@ import {
   type Page,
   test,
 } from "@playwright/test";
+import { choose, roleCard, search, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // Settings and Keys on a phone, in Chrome and in WebKit (Safari and Chrome on iOS), and in Chrome
@@ -42,10 +43,13 @@ async function phone(
 
 async function openSettings(page: Page) {
   await page.getByRole("button", { name: "Settings", exact: true }).tap();
-  const sheet = page.getByRole("dialog", { name: "Models and settings" });
-  await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
+  const sheet = settingsSheet(page);
+  await expect(sheet.getByText("All changes saved", { exact: true })).toBeVisible();
   return sheet;
 }
+
+const prompt = (sheet: Locator) =>
+  sheet.getByRole("group", { name: "Discard unsaved changes?", includeHidden: true });
 
 // Playwright cannot switch apps, so hide and show the page the way the browser reports it.
 async function background(page: Page, whileHidden?: () => Promise<void>) {
@@ -63,24 +67,32 @@ async function background(page: Page, whileHidden?: () => Promise<void>) {
   await flip(false);
 }
 
-async function expectAutonomyRow(sheet: Locator) {
-  const row = sheet.locator(".safety-settings label").first();
+// A wide screen keeps an autonomy row's label and its three choices on one line; a phone puts the
+// choices under the label, all three on one line.
+async function expectAutonomyRow(sheet: Locator, wide: boolean) {
+  const row = sheet.getByRole("radiogroup", { name: "Read information" });
   await row.scrollIntoViewIfNeeded();
-  const [text, select] = await Promise.all([
-    row.locator("span").boundingBox(),
-    row.locator("select").boundingBox(),
-  ]);
-  if (!text || !select) throw new Error("autonomy row missing");
-  expect(Math.abs(text.y + text.height / 2 - (select.y + select.height / 2))).toBeLessThan(2);
-  expect(select.x).toBeGreaterThan(text.x + text.width);
+  const label = sheet.locator(".settings-autonomy-row").first().locator(".ui-field-label");
+  const [text, control] = await Promise.all([label.boundingBox(), row.boundingBox()]);
+  if (!text || !control) throw new Error("autonomy row missing");
+  if (wide) {
+    expect(Math.abs(text.y + text.height / 2 - (control.y + control.height / 2))).toBeLessThan(2);
+    expect(control.x).toBeGreaterThan(text.x + text.width);
+  } else {
+    expect(control.y).toBeGreaterThanOrEqual(text.y + text.height);
+  }
+  const tops = await row
+    .getByRole("radio")
+    .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)));
+  expect(new Set(tops).size).toBe(1);
 }
 
 async function expectThemeTiles(sheet: Locator) {
   await expect(sheet.getByText("Change it in Settings")).toHaveCount(0);
   const graphite = sheet.getByRole("radio", { name: "Graphite" });
   expect(await graphite.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
-  const tile = sheet.locator(".appearance-tile.graphite");
-  expect(await tile.boundingBox()).toMatchObject({ width: 20, height: 14 });
+  const tile = sheet.locator('.settings-swatch[data-appearance="graphite"]');
+  expect(await tile.boundingBox()).toMatchObject({ width: 40, height: 28 });
 }
 
 async function savedModel(): Promise<string | undefined> {
@@ -108,35 +120,39 @@ for (const [engine, launch] of Object.entries(ENGINES))
           puts.push(request.url());
       });
       const sheet = await openSettings(page);
-      const model = sheet.getByRole("combobox", { name: "main model" });
-      const before = await model.inputValue();
-      const target = before === "claude-opus-5-5" ? "claude-sonnet-5-5" : "claude-opus-5-5";
-      await model.selectOption(target);
-      await expect(sheet.getByText("Unsaved choices", { exact: true })).toBeVisible();
-      const save = sheet.getByRole("button", { name: "Save settings" });
+      const model = roleCard(sheet, "main").getByRole("combobox", { name: "Model", exact: true });
+      const before = await model.innerText();
+      const target = before === "Claude Opus 5.5" ? "Claude Sonnet 5.5" : "Claude Opus 5.5";
+      await choose(page, model, target, { tap: true });
+      await expect(model).toHaveText(target);
+      await expect(sheet.getByText("Unsaved changes", { exact: true })).toBeVisible();
+      const save = sheet.getByRole("button", { name: "Save", exact: true });
       await background(page, () => expect(save).toBeDisabled());
       await expect(save).toBeEnabled();
-      await expect(model).toHaveValue(target);
-      await expect(sheet.getByText("Unsaved choices", { exact: true })).toBeVisible();
+      await expect(model).toHaveText(target);
+      await expect(sheet.getByText("Unsaved changes", { exact: true })).toBeVisible();
       await save.tap();
-      await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
+      await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
       expect(puts).toHaveLength(1);
-      expect(await savedModel()).toBe(target);
+      expect(await savedModel()).toBe(
+        target === "Claude Opus 5.5" ? "claude-opus-5-5" : "claude-sonnet-5-5",
+      );
       await sheet.getByRole("button", { name: "Close settings" }).tap();
       await expect(sheet).toBeHidden();
       await openSettings(page);
-      await expect(model).toHaveValue(target);
+      await expect(model).toHaveText(target);
       await context.close();
     });
 
     test("a key saved after switching apps to copy it is listed and chosen", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      await sheet.getByRole("combobox", { name: "main provider" }).selectOption("google");
-      const model = sheet.getByRole("combobox", { name: "main model" });
-      const first = model.locator("option:not([disabled]):not([value=''])").first();
-      await model.selectOption((await first.getAttribute("value")) as string);
-      await sheet.getByRole("button", { name: "Add key for main" }).tap();
+      const main = roleCard(sheet, "main");
+      await search(page, main.getByRole("combobox", { name: "Provider", exact: true }), "google");
+      await choose(page, main.getByRole("combobox", { name: "Model", exact: true }), /./, {
+        tap: true,
+      });
+      await main.getByRole("button", { name: "Add key", exact: true }).tap();
       const keys = page.getByRole("dialog", { name: "Keys" });
       await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue("google");
       const reread = page.waitForResponse((r) => r.url().endsWith("/api/agent/providers"));
@@ -148,58 +164,82 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await keys.getByRole("button", { name: "Save key" }).tap();
       await expect(keys.getByText(`Saved ${name}.`)).toBeVisible();
       await keys.getByRole("button", { name: "Close keys" }).tap();
-      await expect(sheet.getByRole("combobox", { name: "main key" })).toHaveValue(name);
-      await expect(sheet.locator("#settings-problems")).toHaveCount(0);
-      await expect(sheet.getByRole("button", { name: "Save settings" })).toBeEnabled();
+      await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(name);
+      await expect(sheet.getByText("Before you can save:")).toHaveCount(0);
+      await expect(sheet.getByRole("button", { name: "Save", exact: true })).toBeEnabled();
       await context.close();
     });
 
-    test("Escape after a select change keeps the sheet and the choice", async () => {
+    test("Escape from a picker keeps the sheet and the choice", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      const send = sheet.getByRole("combobox", { name: "Send messages" });
-      const saved = await send.inputValue();
-      const choice = saved === "handoff" ? "act" : "handoff";
-      await send.focus();
-      await send.selectOption(choice);
+      const main = roleCard(sheet, "main");
+      const model = main.getByRole("combobox", { name: "Model", exact: true });
+      const saved = await model.innerText();
+      const choice = saved === "Claude Opus 5.5" ? "Claude Sonnet 5.5" : "Claude Opus 5.5";
+      await choose(page, model, choice, { tap: true });
+      const provider = main.getByRole("combobox", { name: "Provider", exact: true });
+      await provider.tap();
+      await expect(provider).toHaveAttribute("aria-expanded", "true");
       await page.keyboard.press("Escape");
+      await expect(provider).toHaveAttribute("aria-expanded", "false");
       await expect(sheet).toBeVisible();
-      await expect(sheet.getByText("Discard unsaved changes?")).toBeHidden();
-      await expect(send).toHaveValue(choice);
+      await expect(prompt(sheet)).not.toHaveAttribute("data-shown", "");
+      await expect(model).toHaveText(choice);
       await sheet.getByRole("button", { name: "Close settings" }).tap();
-      await expect(sheet.getByText("Discard unsaved changes?")).toBeVisible();
+      await expect(prompt(sheet)).toHaveAttribute("data-shown", "");
       await sheet.getByRole("button", { name: "Keep editing" }).tap();
-      await expect(send).toHaveValue(choice);
+      await expect(model).toHaveText(choice);
       await sheet.getByRole("button", { name: "Close settings" }).tap();
       await sheet.getByRole("button", { name: "Discard" }).tap();
       await expect(sheet).toBeHidden();
       await openSettings(page);
-      await expect(send).toHaveValue(saved);
+      await expect(model).toHaveText(saved);
 
       await sheet.getByRole("button", { name: "Close settings" }).tap();
+      await expect(sheet).toBeHidden();
       await page.getByTestId("keys-button").tap();
       const keys = page.getByRole("dialog", { name: "Keys" });
-      const provider = keys.getByRole("combobox", { name: "Provider" });
-      await provider.focus();
-      await provider.selectOption("openai");
+      const keyProvider = keys.getByRole("combobox", { name: "Provider" });
+      await keyProvider.focus();
+      await keyProvider.selectOption("openai");
       await page.keyboard.press("Escape");
       await expect(keys).toBeVisible();
-      await expect(provider).toHaveValue("openai");
+      await expect(keyProvider).toHaveValue("openai");
       await context.close();
     });
 
-    test("selects and fields are tap-sized and never zoom the page", async () => {
+    test("pickers and choices are tap-sized and never zoom the page", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      for (const name of ["main provider", "main model", "main key", "Send messages"]) {
-        const control = sheet.getByRole("combobox", { name });
+      const main = roleCard(sheet, "main");
+      for (const name of ["Provider", "Model", "Key"]) {
+        const control = main.getByRole("combobox", { name, exact: true });
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
-        expect(await control.evaluate((el) => getComputedStyle(el).fontSize), name).toBe("16px");
+        const size = await control.evaluate((el) =>
+          Number.parseFloat(getComputedStyle(el).fontSize),
+        );
+        expect(size, name).toBeGreaterThanOrEqual(16);
       }
-      const search = sheet.getByRole("searchbox", { name: "Search main providers" });
-      expect(await search.evaluate((el) => getComputedStyle(el).fontSize)).toBe("16px");
+      const segment = sheet
+        .getByRole("radiogroup", { name: "Send messages" })
+        .getByRole("radio", { name: "Ask me" });
+      await segment.scrollIntoViewIfNeeded();
+      expect((await segment.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      const provider = main.getByRole("combobox", { name: "Provider", exact: true });
+      await provider.scrollIntoViewIfNeeded();
+      await provider.tap();
+      const searchField = page.getByRole("combobox", { name: "Search: Provider" });
+      await expect(searchField).toBeVisible();
+      const size = await searchField.evaluate((el) =>
+        Number.parseFloat(getComputedStyle(el).fontSize),
+      );
+      expect(size).toBeGreaterThanOrEqual(16);
+      await page.getByRole("button", { name: "Close", exact: true }).tap();
+      await expect(provider).toHaveAttribute("aria-expanded", "false");
       await sheet.getByRole("button", { name: "Close settings" }).tap();
+      await expect(sheet).toBeHidden();
       await page.getByTestId("keys-button").tap();
       const keys = page.getByRole("dialog", { name: "Keys" });
       for (const control of [
@@ -235,28 +275,30 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await context.close();
     });
 
-    test("theme choices are preview tiles and autonomy rows sit on one line", async () => {
+    test("theme choices are preview tiles and autonomy choices sit under their labels", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
       await expectThemeTiles(sheet);
-      const option = sheet.locator(".appearance-option").filter({ hasText: "Graphite" });
+      const option = sheet.locator(".ui-radio-card").filter({ hasText: "Graphite" });
       expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-      await expectAutonomyRow(sheet);
+      await expectAutonomyRow(sheet, false);
       await context.close();
     });
   });
 
-test("chrome at 1440: theme tiles, autonomy rows and pointer-sized selects", async () => {
+test("chrome at 1440: theme tiles, autonomy rows and pointer-sized pickers", async () => {
   const browser = await ENGINES.chrome();
   const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
   await page.goto(`${origin}/#token=${TOKEN}`);
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Models and settings" });
-  await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
+  const sheet = settingsSheet(page);
+  await expect(sheet.getByText("All changes saved", { exact: true })).toBeVisible();
   await expectThemeTiles(sheet);
-  await expectAutonomyRow(sheet);
-  for (const name of ["main provider", "main model", "main key", "Send messages"]) {
-    const height = (await sheet.getByRole("combobox", { name }).boundingBox())?.height ?? 0;
+  await expectAutonomyRow(sheet, true);
+  const main = roleCard(sheet, "main");
+  for (const name of ["Provider", "Model", "Key"]) {
+    const height =
+      (await main.getByRole("combobox", { name, exact: true }).boundingBox())?.height ?? 0;
     expect(height, name).toBeGreaterThanOrEqual(32);
     expect(height, name).toBeLessThan(44);
   }

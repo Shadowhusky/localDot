@@ -1,4 +1,5 @@
 import { type Browser, type BrowserContext, expect, type Locator, test } from "@playwright/test";
+import { roleCard, settingsSheet } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // A custom Anthropic-compatible endpoint, from an empty setup: its key with the vendor's base URL,
@@ -57,15 +58,22 @@ for (const run of runs) {
       await expect(welcome).toHaveText("Choose a main model and connect its provider in Settings.");
 
       await press(page.getByRole("button", { name: "Choose model" }));
-      const sheet = page.getByRole("dialog", { name: "Models and settings" });
-      const provider = sheet.getByRole("combobox", { name: "main provider" });
+      const sheet = settingsSheet(page);
+      const main = roleCard(sheet, "main");
+      const provider = main.getByRole("combobox", { name: "Provider", exact: true });
       await expect(provider).toBeEnabled();
+      await press(provider);
       await expect(
-        provider.locator('optgroup[label="Compatible providers"] > option'),
+        page
+          .getByRole("listbox", { name: "Provider" })
+          .getByRole("group", { name: "Compatible providers" })
+          .getByRole("option"),
       ).toContainText(["Other (OpenAI-compatible)", "Other (Anthropic-compatible)"]);
-      await provider.selectOption({ label: "Other (Anthropic-compatible)" });
+      await page.getByRole("combobox", { name: "Search: Provider" }).fill("anthropic-compatible");
+      await page.getByRole("combobox", { name: "Search: Provider" }).press("Enter");
+      await expect(provider).toHaveText("Other (Anthropic-compatible)");
 
-      await press(sheet.getByRole("button", { name: "Add key for main" }));
+      await press(main.getByRole("button", { name: "Add key", exact: true }));
       const keys = page.getByRole("dialog", { name: "Keys" });
       await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue(
         "anthropic-compatible",
@@ -94,24 +102,22 @@ for (const run of runs) {
         }),
       ]);
       await press(keys.getByRole("button", { name: "Close keys" }));
-      await expect(sheet.getByRole("combobox", { name: "main key" })).toHaveValue(MODEL.key);
+      await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(MODEL.key);
 
-      const main = sheet.getByRole("group", { name: "Main" });
-      await main.getByLabel("main custom model ID").fill(MODEL.model);
-      const vision = main.getByRole("checkbox", {
-        name: "Can see images (needed to use the screen)",
-      });
+      await main.getByRole("textbox", { name: "Model ID", exact: true }).fill(MODEL.model);
+      const vision = main.getByRole("switch", { name: "Can see images" });
       await expect(vision).toBeChecked();
       await press(vision);
       await expect(vision).not.toBeChecked();
-      await main.getByLabel("main context window — tokens").fill("128,000");
-      await expect(main.getByLabel("main context window — tokens")).toHaveValue("128000");
-      await main.getByLabel("main Input — USD per million tokens").fill("0.6");
-      await main.getByLabel("main Output — USD per million tokens").fill("2.2");
-      const save = sheet.getByRole("button", { name: "Save settings" });
+      const contextWindow = main.getByRole("textbox", { name: "Context window" });
+      await contextWindow.fill("128,000");
+      await expect(contextWindow).toHaveValue("128000");
+      await main.getByRole("textbox", { name: "Input price" }).fill("0.6");
+      await main.getByRole("textbox", { name: "Output price" }).fill("2.2");
+      const save = sheet.getByRole("button", { name: "Save", exact: true });
       await expect(save).toBeEnabled();
       await press(save);
-      await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
+      await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
       expect((await (await api("/api/agent/settings")).json()).main).toEqual({
         ...MODEL,
         vision: false,
@@ -123,18 +129,16 @@ for (const run of runs) {
 
       // On a flat-rate plan: no per-token price, no dollar ceiling, and still ready.
       await press(page.getByRole("button", { name: "Change model" }));
-      await press(main.getByRole("checkbox", { name: "Flat-rate plan (no per-token price)" }));
-      await expect(
-        main.getByText("Uses your plan's limits, not a spending ceiling."),
-      ).toBeVisible();
-      await expect(sheet.getByText(/USD per million tokens/)).toHaveCount(0);
+      await press(main.getByRole("switch", { name: "Flat-rate plan" }));
+      await expect(main.getByText("Uses the plan's limits, not a spending limit.")).toBeVisible();
+      await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
       await expect(
         sheet
-          .getByRole("group", { name: "Task spending ceiling" })
-          .getByText("Uses your plan's limits.", { exact: true }),
+          .getByRole("region", { name: "Spending" })
+          .getByText("Your plan's own limits apply, so no limit is needed."),
       ).toBeAttached();
       await press(save);
-      await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
+      await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
       expect((await (await api("/api/agent/settings")).json()).main).toEqual({
         ...MODEL,
         vision: false,

@@ -42,6 +42,11 @@ export const UI_SCENARIOS = {
     step: "cell/starting",
   },
   ready: { about: "The computer is on with no task", boot: { QA_SESSION: "0" }, step: "cell/live" },
+  "chatgpt-plan": {
+    about: "The main model runs on a signed-in ChatGPT plan; the computer is on with no task",
+    boot: { QA_SESSION: "0", QA_SETTINGS: "chatgpt", QA_CHATGPT: "signed_in" },
+    step: "cell/live",
+  },
   running: { about: "dot is working on the sample task" },
   approval: {
     about: "dot waits for a decision before sending",

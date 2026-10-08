@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { assembledProcess } from "./fixtures/assembled-process.ts";
 import { approveCurrent, fixtureRequest } from "./fixtures/safety-flow.ts";
+import { saveFixtureModel } from "./settings-ui.ts";
 
 const CANARY = "task15-local-canary-never-real";
 for (const pending of ["wait", "shell"] as const)
@@ -96,21 +97,7 @@ for (const pending of ["wait", "shell"] as const)
       await keys.getByRole("button", { name: "Close keys", exact: true }).click();
       checkpoint("settings");
       await page.getByRole("button", { name: "Settings", exact: true }).click();
-      const settings = page.getByRole("dialog", { name: "Models and settings", exact: true });
-      await settings.getByLabel("main provider", { exact: true }).selectOption("openai-compatible");
-      await settings.getByLabel("main model", { exact: true }).selectOption("fixture-assembled-v1");
-      await settings.getByLabel("main key", { exact: true }).selectOption("fixture");
-      await settings.getByLabel("main Input — USD per million tokens", { exact: true }).fill("1");
-      await settings.getByLabel("main Output — USD per million tokens", { exact: true }).fill("1");
-      await settings
-        .getByRole("checkbox", { name: "Use the configured default", exact: true })
-        .uncheck();
-      await settings.getByLabel("Task ceiling — USD", { exact: true }).fill("0.05");
-      await expect(
-        settings.getByRole("button", { name: "Save settings", exact: true }),
-      ).toBeEnabled();
-      await settings.getByRole("button", { name: "Save settings", exact: true }).click();
-      await expect(settings).toContainText("Saved choices");
+      const settings = await saveFixtureModel(page);
       await settings.getByRole("button", { name: "Close settings", exact: true }).click();
       checkpoint("start-computer");
       await page.getByRole("button", { name: "Turn on", exact: true }).first().click();
@@ -211,14 +198,18 @@ for (const pending of ["wait", "shell"] as const)
       expect(oldTicketSrc).toBeTruthy();
       const oldTicketPath = (oldTicketSrc as string).split("#")[0] as string;
       expect((await page.request.get(origin + oldTicketPath)).status()).toBe(200);
-      const stopSheet = phone ? "Keys" : "Models and settings";
+      // Keys covers the page and carries its own Stop; Settings sits beside the page, whose
+      // Stop stays in reach.
       checkpoint(phone ? "keys-stop" : "settings-stop");
       if (phone) await page.getByTestId("keys-button").click();
       else await page.getByRole("button", { name: "Settings", exact: true }).click();
       await expect(page.getByTestId("hud-stop-session")).toBeVisible();
-      const stopButton = page
-        .getByRole("dialog", { name: stopSheet, exact: true })
-        .getByRole("button", { name: "Stop", exact: true });
+      const stopButton = phone
+        ? page
+            .getByRole("dialog", { name: "Keys", exact: true })
+            .getByRole("button", { name: "Stop", exact: true })
+        : page.getByTestId("hud-stop-session");
+      const stopStatus = phone ? page.getByRole("dialog", { name: "Keys", exact: true }) : page;
       if (pending === "wait") {
         const stopPath = `${origin}/api/sessions/${owner}/stop`;
         let intercepted = 0;
@@ -227,9 +218,7 @@ for (const pending of ["wait", "shell"] as const)
           await route.fulfill({ status: 503, body: "owned Stop transport unavailable" });
         });
         await stopButton.click();
-        await expect(page.getByRole("dialog", { name: stopSheet, exact: true })).toContainText(
-          "Could not confirm stopped.",
-        );
+        await expect(stopStatus.getByText(/^Could not confirm stopped\./)).toBeVisible();
         expect(intercepted).toBe(1);
         const uncertain = (await f.state(owner))[0];
         expect(uncertain?.cell.paused).not.toBe(true);
@@ -522,7 +511,7 @@ for (const pending of ["wait", "shell"] as const)
               "stream",
             ],
             viewport: page.viewportSize(),
-            stopSheet,
+            stopFrom: phone ? "Keys" : "Settings beside the page",
             images: f.images,
             owner,
             beforeManual,

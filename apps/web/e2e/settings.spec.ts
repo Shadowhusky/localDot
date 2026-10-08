@@ -20,6 +20,7 @@ import { MemoryStore } from "../../daemon/src/agent/memory.ts";
 import { type AgentRoutesDeps, agentRoutes } from "../../daemon/src/agent/routes.ts";
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { roleCard, search, settingsSheet } from "./settings-ui.ts";
 
 // Production UI/CSP, real settings routes/private store and real browser ECDH/AES-GCM. The
 // computer, keyd metadata and catalog are owned stand-ins; no model/account/shared service runs.
@@ -246,10 +247,12 @@ for (const width of [1280, 390])
     const draft = page.getByLabel("New task");
     await draft.fill("Prepare a sample report later.");
     await page.getByRole("button", { name: "Connect a model" }).click();
-    const sheet = page.getByRole("dialog", { name: "Models and settings" });
+    const sheet = settingsSheet(page);
     await expect(sheet).toBeVisible();
-    await expect(page.locator(".theatre-content")).toHaveAttribute("inert", "");
-    const provider = page.getByLabel("main provider", { exact: true });
+    // Beside the page on a wide screen, so the page stays live; a phone's sheet covers it.
+    await expect(page.locator(".theatre-content")).not.toHaveAttribute("inert", "");
+    const main = roleCard(sheet, "main");
+    const provider = main.getByRole("combobox", { name: "Provider", exact: true });
     try {
       await expect(provider).toBeVisible();
     } catch (failure) {
@@ -264,20 +267,20 @@ for (const width of [1280, 390])
       });
       throw failure;
     }
-    await provider.selectOption("openai-compatible");
-    const custom = page.getByLabel("main custom model ID");
+    await search(page, provider, "openai-compatible");
+    await expect(provider).toHaveText("Other (OpenAI-compatible)");
+    const custom = main.getByRole("textbox", { name: "Model ID", exact: true });
     await custom.fill("fixture-custom");
     await custom.press("-");
     await custom.press("x");
     await expect(custom).toBeFocused();
     await expect(custom).toHaveValue("fixture-custom-x");
-    const input = page.getByLabel("main Input — USD per million tokens"),
-      output = page.getByLabel("main Output — USD per million tokens");
+    const input = main.getByRole("textbox", { name: "Input price", exact: true }),
+      output = main.getByRole("textbox", { name: "Output price", exact: true });
     await expect(input).toHaveValue("");
     await expect(output).toHaveValue("");
-    const addKey = page.getByRole("button", { name: "Add key for main" });
-    await addKey.click();
-    await expect(sheet).not.toBeVisible();
+    await main.getByRole("button", { name: "Add key", exact: true }).click();
+    await expect(sheet).toBeHidden();
     const keySheet = page.getByRole("dialog", { name: "Keys" });
     await expect(keySheet).toBeVisible();
     await expect(page.getByLabel("Provider", { exact: true })).toHaveValue("openai-compatible");
@@ -289,9 +292,13 @@ for (const width of [1280, 390])
     await expect(keySheet.getByRole("status")).toContainText("Saved fixture-gateway.");
     await page.getByRole("button", { name: "Close keys" }).click();
     await expect(page.locator("#keys-sheet")).toBeHidden();
-    await expect(addKey).toBeFocused();
-    await expect(page.getByLabel("main key", { exact: true })).toHaveValue("fixture-gateway");
-    const save = page.getByRole("button", { name: "Save settings", exact: true });
+    await expect(sheet).toBeVisible();
+    await expect(main.getByRole("button", { name: "Add key", exact: true })).toBeFocused();
+    await expect(main.getByRole("combobox", { name: "Key", exact: true })).toHaveText(
+      "fixture-gateway",
+    );
+    await expect(custom).toHaveValue("fixture-custom-x");
+    const save = sheet.getByRole("button", { name: "Save", exact: true });
     await expect(save).toBeDisabled();
     await input.fill("0");
     await expect(save).toBeDisabled();
@@ -300,28 +307,28 @@ for (const width of [1280, 390])
     await output.fill("2");
     await expect(save).toBeEnabled();
     await save.click();
-    await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
-    expect(settings.get()).toEqual({
-      main: {
-        provider: "openai-compatible",
-        model: "fixture-custom-x",
-        key: "fixture-gateway",
-        price: { inputUSDPerMTok: 0, outputUSDPerMTok: 2 },
-      },
-    });
+    await expect
+      .poll(() => settings.get())
+      .toEqual({
+        main: {
+          provider: "openai-compatible",
+          model: "fixture-custom-x",
+          key: "fixture-gateway",
+          price: { inputUSDPerMTok: 0, outputUSDPerMTok: 2 },
+        },
+      });
+    await expect(sheet.getByText(/^(Saved|All changes saved)$/)).toBeVisible();
     await input.scrollIntoViewIfNeeded();
-    const heading = await sheet.locator(".settings-heading").boundingBox(),
-      field = await input.boundingBox(),
-      stop = sheet.getByRole("button", { name: "Stop computer", exact: true });
+    const heading = await sheet.locator(".ui-sheet-header").boundingBox(),
+      field = await input.boundingBox();
     expect(heading).not.toBeNull();
     expect(field).not.toBeNull();
     expect(field?.y).toBeGreaterThanOrEqual((heading?.y ?? 0) + (heading?.height ?? 0));
-    await expect(stop).toBeInViewport();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
       true,
     );
     if (width === 1280)
-      await sheet.locator(".settings-body").evaluate((body) => {
+      await sheet.locator(".ui-sheet-body").evaluate((body) => {
         body.scrollTop = 0;
       });
     await page.screenshot({ path: info.outputPath(`settings-${width}-sample.png`) });

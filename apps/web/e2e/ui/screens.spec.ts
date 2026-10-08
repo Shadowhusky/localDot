@@ -44,7 +44,7 @@ test("settings", async ({ page, ui }) => {
   await ui.open("ready");
   await ui.picture();
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await expect(page.getByRole("combobox", { name: /main model/i })).toBeVisible();
+  await expect(page.getByText("All changes saved", { exact: true })).toBeVisible();
   await ui.settle();
   await ui.still();
   await expect(page).toHaveScreenshot("settings.png");
