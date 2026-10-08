@@ -3,6 +3,7 @@ import {
   type Ref,
   useCallback,
   useId,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
@@ -10,7 +11,7 @@ import {
 import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
-import { Sheet } from "../ui/Sheet.tsx";
+import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
@@ -199,11 +200,19 @@ export function KeysPanel({
 export interface KeysSheetProps extends Omit<KeysPanelProps, "active" | "onHolding"> {
   open: boolean;
   onClose(): void;
+  // Runs `then` once nothing typed would be lost: at once, or after the sheet's Discard.
+  discardRef?: Ref<((then: () => void) => void) | null>;
+}
+
+function DiscardHandle({ handle }: { handle: Ref<((then: () => void) => void) | null> }) {
+  const confirmDiscard = useConfirmDiscard();
+  useImperativeHandle(handle, () => confirmDiscard, [confirmDiscard]);
+  return null;
 }
 
 // Keys on a sheet of its own, from the top bar or a key moved out of a message. Closing with a key
 // typed asks first.
-export function KeysSheet({ open, onClose, ...panel }: KeysSheetProps) {
+export function KeysSheet({ open, onClose, discardRef, ...panel }: KeysSheetProps) {
   const [holding, setHolding] = useState(false);
   return (
     <Sheet
@@ -214,6 +223,7 @@ export function KeysSheet({ open, onClose, ...panel }: KeysSheetProps) {
       description={KEYS_DESCRIPTION}
       closeLabel="Close keys"
     >
+      {discardRef && <DiscardHandle handle={discardRef} />}
       <KeysPanel {...panel} active={open} onHolding={setHolding} />
     </Sheet>
   );

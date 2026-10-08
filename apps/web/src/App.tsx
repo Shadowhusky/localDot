@@ -276,15 +276,20 @@ function Theatre({ api }: { api: ApiClient }) {
     request: number;
     capture: ReturnType<typeof settings.captureKey>;
   } | null>(null);
+  const keysDiscard = useRef<((then: () => void) => void) | null>(null);
   const showSettings = (trigger: HTMLElement, section: SettingsSection = "models") => {
-    settingsOrigin.current = trigger;
-    setSettingsSection(section);
-    // One sheet at a time: Keys on its own gives way to Settings.
-    if (keysIn === "sheet") {
-      keysOrigin.current = null;
-      setKeysIn(null);
-    }
-    settings.show();
+    const open = () => {
+      settingsOrigin.current = trigger;
+      setSettingsSection(section);
+      if (keysIn === "sheet") {
+        keysOrigin.current = null;
+        setKeysIn(null);
+      }
+      settings.show();
+    };
+    // One sheet at a time: Keys on its own gives way to Settings, after asking if a key is typed.
+    if (keysIn === "sheet" && keysDiscard.current) keysDiscard.current(open);
+    else open();
   };
   const receiveKey = useCallback<KeyIntake["receive"]>(
     (source, provider) => {
@@ -923,7 +928,12 @@ function Theatre({ api }: { api: ApiClient }) {
             : undefined
         }
       />
-      <KeysSheet {...keysPanel} open={keysIn === "sheet"} onClose={closeKeys} />
+      <KeysSheet
+        {...keysPanel}
+        open={keysIn === "sheet"}
+        onClose={closeKeys}
+        discardRef={keysDiscard}
+      />
       <Announcer />
     </div>
   );

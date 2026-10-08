@@ -328,6 +328,57 @@ describe("App token states", () => {
     expect(within(page).getByRole("button", { name: "Settings" })).toBeTruthy();
   });
 
+  it("asks before Keys with a typed key gives way to Settings", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    render(<App fetchImpl={noCells as typeof fetch} />);
+    await screen.findAllByRole("button", { name: "Turn on" });
+    fireEvent.click(screen.getByTestId("keys-button"));
+    const keys = screen.getByRole("dialog", { name: "Keys" });
+    const value = within(keys).getByRole("textbox", { name: "Key" }) as HTMLInputElement;
+    fireEvent.change(value, { target: { value: "sk-typed-but-not-saved" } });
+    const review = screen.getByRole("button", { name: "Review autonomy" });
+    fireEvent.click(review);
+    const prompt = within(keys).getByRole("group", { name: "Discard unsaved changes?" });
+    expect(prompt.hasAttribute("data-shown")).toBe(true);
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    fireEvent.click(within(keys).getByRole("button", { name: "Keep editing" }));
+    expect(value.value).toBe("sk-typed-but-not-saved");
+    expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
+    fireEvent.click(review);
+    fireEvent.click(within(keys).getByRole("button", { name: "Discard" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
+    expect(screen.getByRole("dialog", { name: "Settings" })).toBeTruthy();
+  });
+
+  it("keeps the memory Settings showed while Keys is slid over it", async () => {
+    window.localStorage.setItem(TOKEN_KEY, TOKEN);
+    const memoryReads: string[] = [];
+    const fetchImpl = (async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === "/api/agent/skills") return json([]);
+      if (path === "/api/agent/memory") {
+        memoryReads.push(path);
+        return json({ user: "", memory: "Prefers short replies." });
+      }
+      return noCells(input);
+    }) as typeof fetch;
+    render(<App fetchImpl={fetchImpl} />);
+    await screen.findAllByRole("button", { name: "Turn on" });
+    const bar = screen.getByTestId("keys-button").closest("header") as HTMLElement;
+    fireEvent.click(within(bar).getByRole("button", { name: "Settings" }));
+    const knows = await screen.findByRole("region", { name: "What dot knows" });
+    fireEvent.click(await within(knows).findByRole("button", { name: "Show memory" }));
+    await waitFor(() => expect(knows.textContent).toContain("Prefers short replies."));
+    fireEvent.click(screen.getByTestId("keys-button"));
+    const page = document.querySelector<HTMLElement>("[data-page='keys']") as HTMLElement;
+    fireEvent.click(within(page).getByRole("button", { name: "Settings" }));
+    await waitFor(() => expect(document.querySelector("[data-page='keys']")).toBeNull());
+    expect(screen.getByRole("region", { name: "What dot knows" }).textContent).toContain(
+      "Prefers short replies.",
+    );
+    expect(memoryReads).toHaveLength(1);
+  });
+
   it("keeps Stop computer inside Keys on a phone, where the sheet covers the page's Stop", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: /width < (760|1180)px/.test(query),
