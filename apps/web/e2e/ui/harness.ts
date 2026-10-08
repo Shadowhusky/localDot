@@ -15,8 +15,13 @@ export interface Probe {
 }
 
 export interface Harness {
-  // Boots a fixture daemon in `scenario` and opens the app on it, at `path` when given.
-  open(scenario: UiScenarioName, path?: (fixture: UiFixture) => string): Promise<UiFixture>;
+  // Boots a fixture daemon in `scenario` and opens the app on it, at `path` when given, with a
+  // sign-in link in the address (`link`, "" for none).
+  open(
+    scenario: UiScenarioName,
+    path?: (fixture: UiFixture) => string,
+    link?: string,
+  ): Promise<UiFixture>;
   // Moves the running fixture into a scenario that has a control-plane step.
   step(scenario: UiScenarioName): Promise<void>;
   // Opens a gallery page served by a fixture daemon, under the production page policy, with the
@@ -26,7 +31,7 @@ export interface Harness {
   picture(stage?: Locator): Promise<void>;
   // Waits for web fonts and images, then for two frames.
   settle(): Promise<void>;
-  // Hides what moves on its own before a screenshot: the live dot badge, which blinks. The gallery
+  // Hides what moves on its own before a screenshot: the live dot, which blinks. The gallery
   // compares the dot itself, on a paused clock.
   still(): Promise<void>;
 }
@@ -76,9 +81,9 @@ export const test = base.extend<{ ui: Harness }>({
       return fixture;
     };
     await use({
-      async open(scenario, path) {
+      async open(scenario, path, link = `#token=${TOKEN}`) {
         const opened = await boot(scenario);
-        await page.goto(`${opened.origin}${path?.(opened) ?? "/"}#token=${TOKEN}`);
+        await page.goto(`${opened.origin}${path?.(opened) ?? "/"}${link}`);
         return opened;
       },
       async step(scenario) {
@@ -101,9 +106,11 @@ export const test = base.extend<{ ui: Harness }>({
       },
       settle: () => settle(page),
       async still() {
-        await page.locator(".hud .mascot .dot").evaluateAll((dots) => {
-          for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
-        });
+        await page
+          .locator(".hud .mascot .dot, .welcome-hero .dot, .sign-in .dot")
+          .evaluateAll((dots) => {
+            for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
+          });
       },
     });
     // Taken before the fixture stops: requests cut off by the shutdown are not the page's fault.
