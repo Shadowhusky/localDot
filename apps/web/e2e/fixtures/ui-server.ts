@@ -1005,9 +1005,11 @@ const agent: AgentRoutesDeps = {
       if (!session || taskId !== session.id) throw new Error("no session");
       session.beginSafetyResume(requestId, revision);
       session.resumeSafety(requestId, revision);
-      // The brain takes the Resume a raise posted during the Pause and calls its model again.
-      if (raisedDuringPause) {
+      // The brain takes the Resume a raise posted during the Pause and calls its model again; at
+      // the daily limit the daemon's Resume retries the refused call, which finds room here.
+      if (raisedDuringPause || budgetHold === "day") {
         raisedDuringPause = false;
+        budgetHold = undefined;
         session.setStatus("running");
         session.append("agent.state", { state: "thinking" });
       }
