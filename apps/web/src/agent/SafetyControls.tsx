@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
+import { AllowedNotice, AlwaysAllow } from "./AlwaysAllow.tsx";
 import { ApprovalCard } from "./ApprovalCard.tsx";
 import { notifyApproval } from "./approval-notification.ts";
 import { taskStalled } from "./heartbeat.ts";
@@ -65,39 +66,63 @@ export function SafetyControls({
     }
   };
   const pause = safety.pause;
+  const approval = safety.approval;
   const status = agent.snapshot?.status;
+  const budgetHold = agent.snapshot?.budgetHold;
   const taskOpen = !replaying && !!agent.sessionId && status !== "ended" && status !== "idle";
   return (
     <div className="safety-controls">
-      {safety.approval && (
+      {approval && (
         <ApprovalCard
-          key={`${safety.approval.approvalId}:${safety.approval.generation}:${safety.approval.revision}`}
-          card={safety.approval}
+          key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
+          card={approval}
           enabled={visible && safety.canApprove}
           visible={visible}
           pending={safety.pending === "approval"}
           onDecision={safety.answerApproval}
           loadField={safety.readApprovalField}
         >
-          <div className="notification-control">
-            <button
-              type="button"
-              disabled={permission === "granted" || permission === "unsupported" || !visible}
-              onClick={() => void enable()}
-            >
-              {permission === "granted" ? "Notifications enabled" : "Enable decision notifications"}
-            </button>
-            {notificationError && <p role="status">{notificationError}</p>}
-          </div>
+          {(canApprove) => (
+            <>
+              <AlwaysAllow
+                card={approval}
+                canApprove={canApprove}
+                onDecision={safety.answerApproval}
+              />
+              <div className="notification-control">
+                <button
+                  type="button"
+                  disabled={permission === "granted" || permission === "unsupported" || !visible}
+                  onClick={() => void enable()}
+                >
+                  {permission === "granted"
+                    ? "Notifications enabled"
+                    : "Enable decision notifications"}
+                </button>
+                {notificationError && <p role="status">{notificationError}</p>}
+              </div>
+            </>
+          )}
         </ApprovalCard>
       )}
+      <AllowedNotice
+        choice={approval ? null : safety.allowed}
+        outcome={agent.model.approvalOutcome}
+        visible={visible}
+        onUndo={() => void safety.undoAllowed()}
+        onDismiss={safety.dismissAllowed}
+      />
       {taskOpen && (
         <div className="safety-task-controls">
           {pause ? (
             <>
               <p role="status">
                 {pause.phase === "paused"
-                  ? "Paused at the next step. Your task and files are retained."
+                  ? budgetHold === "task"
+                    ? "Paused at the next step. The task also reached its spending limit: set a new task budget in Conversation, then resume."
+                    : budgetHold === "day"
+                      ? "Paused at the next step. Today's spending limit is used up; if you resume before it resets at midnight, the task pauses again."
+                      : "Paused at the next step. Your task and files are retained."
                   : pause.phase === "uncertain"
                     ? "Pause is unconfirmed. Resume is unavailable; use Stop to contain the computer."
                     : pause.phase === "resuming"

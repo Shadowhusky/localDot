@@ -56,8 +56,10 @@ describe("settings inspector", () => {
     const p = { ...props(), autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
     const later = render(<SettingsSheet {...p} focusSection="autonomy" loading />);
     later.rerender(<SettingsSheet {...p} focusSection="autonomy" />);
-    const reading = screen.getByRole("radiogroup", { name: "Read information" });
-    expect(document.activeElement).toBe(within(reading).getByRole("radio", { name: "Just do it" }));
+    const preset = screen.getByRole("radiogroup", { name: "Start from" });
+    expect(document.activeElement).toBe(
+      within(preset).getByRole("radio", { name: "Balanced (recommended)" }),
+    );
     const browsing = within(screen.getByRole("radiogroup", { name: "Browse websites" })).getByRole(
       "radio",
       { name: "Just do it" },
@@ -339,7 +341,7 @@ describe("settings inspector", () => {
     const view = render(
       <SettingsSheet {...props()} autonomy={saved} savedAutonomy={saved} onAutonomy={onAutonomy} />,
     );
-    const send = screen.getByRole("radiogroup", { name: "Send messages" });
+    const send = screen.getByRole("radiogroup", { name: "Send as you" });
     fireEvent.click(within(send).getByRole("radio", { name: "Just do it" }));
     expect(onAutonomy).toHaveBeenCalledWith({ ...DEFAULT_AUTONOMY, send: "act" });
     expect(screen.queryByRole("img", { name: "Changed" })).toBeNull();

@@ -51,8 +51,8 @@ test("installer progress hands off once to first-run setup and settings", async 
     await expect(settings).toBeVisible();
     await expect(
       settings
-        .getByRole("radiogroup", { name: "Read information" })
-        .getByRole("radio", { name: "Just do it" }),
+        .getByRole("radiogroup", { name: "Start from" })
+        .getByRole("radio", { name: "Balanced (recommended)" }),
     ).toBeFocused();
     await settings.getByRole("button", { name: "Close settings" }).click();
     await expect(page.getByRole("button", { name: "Review autonomy" })).toBeFocused();

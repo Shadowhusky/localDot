@@ -9,6 +9,7 @@ import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import {
+  CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
   type KeydRecord,
   type TaskModelSelection,
@@ -32,8 +33,14 @@ import {
 } from "../../../daemon/src/agent/codex/account.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
-import { approvalDraft, toolRisk } from "../../../daemon/src/agent/safety/authorize.ts";
-import { classify } from "../../../daemon/src/agent/safety/risk.ts";
+import {
+  approvalDraft,
+  authorizePrepared,
+  toolRisk,
+} from "../../../daemon/src/agent/safety/authorize.ts";
+import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
+import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
@@ -122,6 +129,7 @@ let deviceCodeOff = false,
   signingIn: ChatgptLogin | undefined;
 let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
 const replays = Number(env.QA_REPLAYS ?? 2);
+const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
 
 rmSync(HOME, { recursive: true, force: true });
 mkdirSync(HOME, { recursive: true, mode: 0o700 });
@@ -289,6 +297,8 @@ const settingsStore = new SettingsStore(HOME);
 settingsStore.put(SETTINGS[settingsMode] ?? {});
 const memory = new MemoryStore(HOME);
 const ledger = { limit: 5, spent: 4 };
+let budgetHold: "task" | "day" | undefined;
+let raisedDuringPause = false;
 let session: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
 let liveStep: string | undefined;
@@ -329,7 +339,14 @@ function attachLive(owned: AgentSession) {
   );
 }
 function newSession(title: string, task: string): AgentSession {
-  const s = new AgentSession(log.createSession(title), cellId, task, log);
+  const s = new AgentSession(
+    log.createSession(title),
+    cellId,
+    task,
+    log,
+    autonomy,
+    new RulesStore(HOME),
+  );
   s.beginBrain();
   log.append(s.id, {
     agent: "main",
@@ -939,10 +956,15 @@ const agent: AgentRoutesDeps = {
     !killSwitch.isBusy(cellId),
   runner: {
     get: (key) => (session && key === session.id ? session : undefined),
+    get sessions() {
+      return new Map(session ? [[session.id, session]] : []);
+    },
     start: async (key, task) => {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       session = newSession(task.slice(0, 60), task);
+      budgetHold = undefined;
+      raisedDuringPause = false;
       selection = planSelection();
       attachLive(session);
       session.append("message.user", { messageId: ulid(), kind: "task", text: task });
@@ -978,15 +1000,26 @@ const agent: AgentRoutesDeps = {
       if (env.QA_PAUSE !== "step") session.confirmSafetyPause(requestId, pause.revision);
       return session.safetyPause ?? pause;
     },
+    budgetHoldOf: (taskId) => (session && taskId === session.id ? budgetHold : undefined),
     resumeSafety: async (taskId, requestId, revision) => {
       if (!session || taskId !== session.id) throw new Error("no session");
       session.beginSafetyResume(requestId, revision);
       session.resumeSafety(requestId, revision);
+      // The brain takes the Resume a raise posted during the Pause and calls its model again.
+      if (raisedDuringPause) {
+        raisedDuringPause = false;
+        session.setStatus("running");
+        session.append("agent.state", { state: "thinking" });
+      }
     },
     raiseBudget: async (taskId, ceiling) => {
       if (!session || taskId !== session.id) throw new Error("no session");
       ledger.limit = ceiling;
+      budgetHold = undefined;
       session.post("resume", "");
+      // A held Pause keeps the task paused until its own Resume.
+      raisedDuringPause = !!session.safetyPause;
+      if (raisedDuringPause) return;
       session.setStatus("running");
       session.append("agent.state", { state: "thinking" });
     },
@@ -1122,11 +1155,70 @@ interface ToolCall {
   input: unknown;
 }
 // With a tool call, the card is the one the daemon builds for that call.
-function requestApproval(risk: "medium" | "high", call?: ToolCall): string | undefined {
+// `always` and `repeat` go through the real authorization instead, for the card the daemon builds.
+function requestApproval(
+  risk: "medium" | "high",
+  call?: ToolCall,
+  { always = false, repeat = 1 } = {},
+): string | undefined {
   if (!session?.generation) return "no brain";
   const facts = call && toolRisk(call.tool, call.input);
   const controller = new AbortController();
   pendingApprovals.push(controller);
+  const ctx = {
+    session,
+    generation: session.generation,
+    check() {},
+    callId: ulid(),
+    step: ulid(),
+    redact: (value: string) => value,
+    signal: controller.signal,
+  } as never;
+  if (always) {
+    // A Send button on a mail page in the browser screen's own target shape, through the real
+    // authorization, so the card carries the daemon's options: this task and the mail site.
+    const target = {
+      point: { x: 1180, y: 96 },
+      source: "ax" as const,
+      role: "button",
+      name: "Send",
+      app: "Chromium",
+      url: "https://mail.example.test/compose",
+    };
+    const action = { verb: "click" as const, find: { name: "Send" }, speed: "auto" as const };
+    const onBrowser = {
+      ...(ctx as object),
+      screen: { selection: { screen: "browser" }, finish() {} },
+    } as never;
+    void authorizePrepared(onBrowser, {
+      tool: "computer",
+      input: { toolInput: { action: "click", target: "Send" }, action },
+      target: { target, window: null, point: target.point },
+      facts: nativeActionFacts(action, target),
+      revalidate: async () => true,
+    })
+      .then((permit) =>
+        effects.push(`approval:${permit ? (permit.approved ? "approve" : "act") : "refused"}`),
+      )
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
+  if (repeat > 1) {
+    // The card a repeated key press gets under QA_AUTONOMY=careful, from the real authorization.
+    const keys = ["bracketright"];
+    const action = { verb: "key" as const, combo: keys, speed: "auto" as const };
+    void authorizePrepared(ctx, {
+      tool: "computer",
+      input: { toolInput: { action: "key", keys, repeat }, action },
+      target: { target: null, window: 9, point: null },
+      facts: nativeActionFacts(action, null),
+      revalidate: async () => true,
+      count: repeat,
+    })
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return;
+  }
   void session
     .requestApproval(
       {
@@ -1142,7 +1234,7 @@ function requestApproval(risk: "medium" | "high", call?: ToolCall): string | und
             call.tool,
             call.input,
             facts,
-            classify(facts, session.autonomy),
+            decide(facts, session.autonomy),
             (text) => text,
           )
         : ({
@@ -1167,22 +1259,59 @@ function ask(allowText: boolean): string | undefined {
     .then((a) => effects.push(`ask:${JSON.stringify(a)}`))
     .catch((e) => effects.push(`ask-error:${String(e)}`));
 }
-function takeover(): string | undefined {
+// A field name, or a known localDot key, types into it through the real authorization.
+function takeover(field?: string, known = false): string | undefined {
   if (!session) return "no session";
+  if ((field || known) && session.generation) {
+    // Typing into a secret field, or a localDot key into a plain one, through the real
+    // authorization, so the hand-off carries the daemon's own reason and copy.
+    const key = "fixture-private-key-0123";
+    const text = known ? `token ${key}` : "sample";
+    const target = {
+      point: { x: 640, y: 320 },
+      source: "dom" as const,
+      role: "textbox",
+      name: field ?? "Notes",
+      url: "https://account.example.test/sign-in",
+      secret: !known,
+    };
+    const action = { verb: "type" as const, text, speed: "auto" as const };
+    void authorizePrepared(
+      {
+        session,
+        generation: session.generation,
+        check() {},
+        callId: ulid(),
+        step: ulid(),
+        redact: (value: string) => value.replaceAll(key, "[key]"),
+        signal: new AbortController().signal,
+      } as never,
+      {
+        tool: "computer",
+        input: { toolInput: { action: "type", text }, action },
+        target: { target, window: null, point: target.point },
+        facts: nativeActionFacts(action, target),
+        revalidate: async () => true,
+      },
+    )
+      .then((permit) => effects.push(`takeover:${permit ? "permitted" : "handed-off"}`))
+      .catch((e) => effects.push(`takeover-error:${String(e)}`));
+    return;
+  }
   void session
     .takeover("login", "Please sign in to the sample site, then hand control back.")
     .then((o) => effects.push(`takeover:${JSON.stringify(o)}`))
     .catch((e) => effects.push(`takeover-error:${String(e)}`));
 }
-function budget(): string | undefined {
+function budget(scope: "task" | "day" = "task"): string | undefined {
   if (!session) return "no session";
-  session.append("budget.exceeded", {
-    scope: "task",
-    taskId: session.id,
-    limitUSD: 5,
-    spentUSD: 4,
-    needUSD: 2,
-  });
+  session.append(
+    "budget.exceeded",
+    scope === "task"
+      ? { scope, taskId: session.id, limitUSD: 5, spentUSD: 4, needUSD: 2 }
+      : { scope, limitUSD: 20, spentUSD: 20 },
+  );
+  budgetHold = scope;
   session.setStatus("paused");
   session.append("agent.state", { state: "paused", reason: "budget" });
 }
@@ -1207,8 +1336,8 @@ function setCell(kind: CellKind): undefined {
 const STEPS: Record<ScenarioStep, () => string | undefined> = {
   approval: () => requestApproval("high"),
   ask: () => ask(true),
-  takeover,
-  budget,
+  takeover: () => takeover(),
+  budget: () => budget(),
   finish,
   "cell/starting": () => setCell("starting"),
   "cell/connecting": () => setCell("connecting"),
@@ -1226,11 +1355,18 @@ routes.post("/__qa/approval", async (c) => {
   const call = c.req.header("content-type")?.startsWith("application/json")
     ? ((await c.req.json()) as ToolCall)
     : undefined;
-  return reply(requestApproval((c.req.query("risk") ?? "high") as "medium" | "high", call));
+  return reply(
+    requestApproval((c.req.query("risk") ?? "high") as "medium" | "high", call, {
+      always: c.req.query("always") === "1",
+      repeat: Number(c.req.query("repeat") ?? 1),
+    }),
+  );
 });
 routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
-routes.post("/__qa/takeover", () => reply(takeover()));
-routes.post("/__qa/budget", () => reply(budget()));
+routes.post("/__qa/takeover", (c) =>
+  reply(takeover(c.req.query("field"), c.req.query("known") === "1")),
+);
+routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
 routes.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);

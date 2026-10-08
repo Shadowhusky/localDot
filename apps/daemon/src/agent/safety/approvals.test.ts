@@ -1,6 +1,6 @@
 import { APPROVAL_TIMEOUT_MS, ulid } from "@localdot/protocol";
 import { afterEach, expect, it, vi } from "vitest";
-import { type ActionBinding, ApprovalBroker, OncePermit } from "./approvals.ts";
+import { type ActionBinding, ApprovalBroker, CountedPermit, OncePermit } from "./approvals.ts";
 
 function fixture() {
   let now = 1000,
@@ -110,13 +110,31 @@ it("exact server expiry refuses an already clicked card and releases the pending
   expect(await waiting).toBe("deny");
   expect(h.broker.pending(h.sessionId)).toBeUndefined();
 });
-it("automatic ten-minute timeout settles closed without extending the deadline", async () => {
+it("waits 24 hours for an answer, as long as the Codex tool timeout", () => {
+  expect(APPROVAL_TIMEOUT_MS).toBe(86_400_000);
+});
+it("a card left unanswered for fifteen minutes still authorizes when approved", async () => {
+  vi.useFakeTimers();
+  const h = fixture(),
+    waiting = h.start();
+  await vi.advanceTimersByTimeAsync(15 * 60_000);
+  h.setNow(1000 + 15 * 60_000);
+  expect(h.broker.pending(h.sessionId)).toBeDefined();
+  expect(h.broker.answer(h.sessionId, h.answer())).toBe(true);
+  expect(await waiting).toBe("approve");
+});
+it("automatic timeout settles closed without extending the deadline", async () => {
   vi.useFakeTimers();
   const h = fixture(),
     waiting = h.start();
   await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS);
   expect(await waiting).toBe("deny");
   expect(h.revalidate).not.toHaveBeenCalled();
+});
+it("a counted permit covers its exact effect that many times and nothing else", () => {
+  const permit = new CountedPermit("exact-input", 3);
+  expect(permit.consume("changed")).toBe(false);
+  expect([1, 2, 3, 4].map(() => permit.consume("exact-input"))).toEqual([true, true, true, false]);
 });
 it("Deny and Take control consume the card and never revalidate an executable effect", async () => {
   for (const decision of ["deny", "take_control"] as const) {

@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { connect, type Socket } from "node:net";
 import { join } from "node:path";
 import { prepareOwnedCodexRoots } from "@localdot/codex-harness";
-import { DEFAULT_AUTONOMY, msToMicros, ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, msToMicros, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { FakeOrchestrator } from "../../cells/testing/fake-orchestrator.ts";
 import { NO_STREAM } from "../../cells/types.ts";
@@ -61,7 +61,7 @@ function client(path: string) {
   return { socket, ready, call, request };
 }
 function fixture() {
-  const h = toolHarness({ autonomy: { ...DEFAULT_AUTONOMY, send: "act" } });
+  const h = toolHarness({ autonomy: { ...CAREFUL_AUTONOMY, send: "act" } });
   const initial = h.session.generation;
   assert.ok(initial);
   h.session.retireBrain(initial);
@@ -288,7 +288,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const pause = f.session.safetyPause;
     const ask = f.session.pendingAsk;
@@ -341,7 +341,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const pause = f.session.safetyPause,
       ask = f.session.pendingAsk;
@@ -375,7 +375,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const ask = f.session.pendingAsk;
     assert.ok(ask);
@@ -393,7 +393,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const pause = f.session.safetyPause,
       ask = f.session.pendingAsk;

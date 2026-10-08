@@ -70,7 +70,7 @@ async function background(page: Page, whileHidden?: () => Promise<void>) {
 // A wide screen keeps an autonomy row's label and its three choices on one line; a phone puts the
 // choices under the label, all three on one line.
 async function expectAutonomyRow(sheet: Locator, wide: boolean) {
-  const row = sheet.getByRole("radiogroup", { name: "Read information" });
+  const row = sheet.getByRole("radiogroup", { name: "Read and look" });
   await row.scrollIntoViewIfNeeded();
   const label = sheet.locator(".settings-autonomy-row").first().locator(".ui-field-label");
   const [text, control] = await Promise.all([label.boundingBox(), row.boundingBox()]);
@@ -85,6 +85,17 @@ async function expectAutonomyRow(sheet: Locator, wide: boolean) {
     .getByRole("radio")
     .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().top)));
   expect(new Set(tops).size).toBe(1);
+  const wrapped = await sheet
+    .locator(".settings-autonomy-row > .ui-field-label, .settings-locked li > span")
+    .evaluateAll((spans) =>
+      spans.flatMap((span) =>
+        span.getBoundingClientRect().height >
+        1.5 * Number.parseFloat(getComputedStyle(span).lineHeight)
+          ? [span.textContent]
+          : [],
+      ),
+    );
+  expect(wrapped).toEqual([]);
 }
 
 async function expectThemeTiles(sheet: Locator) {
@@ -226,7 +237,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
         expect(size, name).toBeGreaterThanOrEqual(16);
       }
       const segment = sheet
-        .getByRole("radiogroup", { name: "Send messages" })
+        .getByRole("radiogroup", { name: "Send as you" })
         .getByRole("radio", { name: "Ask me" });
       await segment.scrollIntoViewIfNeeded();
       expect((await segment.boundingBox())?.height).toBeGreaterThanOrEqual(44);
@@ -290,12 +301,14 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await context.close();
     });
 
-    test("theme choices are preview tiles and autonomy choices sit under their labels", async () => {
+    test("theme choices are preview tiles and autonomy choices sit under their labels down to 360", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
       await expectThemeTiles(sheet);
       const option = sheet.locator(".ui-radio-card").filter({ hasText: "Graphite" });
       expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expectAutonomyRow(sheet, false);
+      await page.setViewportSize({ width: 360, height: 780 });
       await expectAutonomyRow(sheet, false);
       await context.close();
     });

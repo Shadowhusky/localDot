@@ -75,6 +75,10 @@ export async function saveFixtureModel(page: Page): Promise<Locator> {
     .getByRole("radio", { name: "Custom" })
     .click();
   await sheet.getByRole("textbox", { name: "Custom limit", exact: true }).fill("0.05");
+  await sheet
+    .getByRole("radiogroup", { name: "Work in its computer" })
+    .getByRole("radio", { name: "Ask me" })
+    .click();
   const save = sheet.getByRole("button", { name: "Save", exact: true });
   await expect(save).toBeEnabled();
   await save.click();

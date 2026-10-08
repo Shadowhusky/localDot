@@ -163,6 +163,92 @@ describe("bounded agent projection", () => {
     expect(model.changes[0]?.truncated).toBe(true);
     expect(model.historyTruncated).toBe(true);
   });
+  it("keeps the last decision's note and the Always allow choice it saved, until removed", () => {
+    const approval = id(30000),
+      rule = id(30001);
+    const request = ev(0, "approval.request", {
+      approvalId: approval,
+      generation: 1,
+      revision: 1,
+      expiresAt: 9_000_000,
+      actionClass: "send",
+      risk: "high",
+      title: "Send as you",
+      kind: "send",
+      preview: { fields: [] },
+    });
+    const site = {
+      scope: "site",
+      label: "On mail.example.test",
+      site: "https://mail.example.test",
+      actionClass: "send",
+      id: rule,
+    };
+    const saved = reduce([
+      request,
+      ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user" }),
+      ev(2, "rule.created", site),
+    ]);
+    expect(saved.approval).toBeNull();
+    expect(saved.approvalOutcome).toEqual({
+      approvalId: approval,
+      decision: "approve",
+      actionClass: "send",
+      rule: site,
+    });
+    const other = { ...site, id: id(30002), site: "https://other.example.test" };
+    expect(projectAgentEvent(saved, ev(3, "rule.removed", other)).approvalOutcome).toEqual(
+      saved.approvalOutcome,
+    );
+    expect(projectAgentEvent(saved, ev(3, "rule.removed", site)).approvalOutcome).toEqual({
+      ...saved.approvalOutcome,
+      ruleRemoved: true,
+    });
+    const note = "Approved once. Your Always allow choice was not saved. Try again later.";
+    const task = { scope: "task", label: "For this task", actionClass: "send" };
+    const unsaved = reduce([
+      request,
+      ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user", note }),
+      ev(2, "rule.created", task),
+    ]);
+    expect(unsaved.approvalOutcome).toEqual({
+      approvalId: approval,
+      decision: "approve",
+      actionClass: "send",
+      note,
+    });
+    const otherClass = reduce([
+      request,
+      ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user" }),
+      ev(2, "rule.created", { ...task, actionClass: "post" }),
+    ]);
+    expect(otherClass.approvalOutcome).toEqual({
+      approvalId: approval,
+      decision: "approve",
+      actionClass: "send",
+    });
+    const second = projectAgentEvent(saved, ev(3, "rule.created", task));
+    expect(second.approvalOutcome?.rule).toEqual(site);
+    const allowed = reduce([
+      request,
+      ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user" }),
+      ev(2, "rule.created", task),
+      ev(3, "rule.removed", task),
+    ]);
+    expect(allowed.approvalOutcome?.ruleRemoved).toBe(true);
+    const kept = reduce([
+      request,
+      ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user" }),
+      ev(2, "rule.created", task),
+    ]);
+    for (const removed of [
+      { ...task, actionClass: "post" },
+      { scope: "always", label: "Always", actionClass: "send" },
+    ])
+      expect(
+        projectAgentEvent(kept, ev(3, "rule.removed", removed)).approvalOutcome?.ruleRemoved,
+      ).toBeUndefined();
+  });
 });
 describe("single event feed boundary", () => {
   it("does not notify for token deltas or duplicates, but synchronously invalidates authority events", () => {
@@ -181,6 +267,12 @@ describe("single event feed boundary", () => {
     );
     expect(calls).toBe(1);
     expect(feed.read().model.pendingAsk).toBe(ask);
+    feed.accept(
+      JSON.stringify(
+        ev(2, "rule.removed", { scope: "task", label: "For this task", actionClass: "send" }),
+      ),
+    );
+    expect(calls).toBe(2);
   });
   it("rejects malformed, oversized or unbounded-identity events with fixed errors and no partial projection", () => {
     for (const data of [

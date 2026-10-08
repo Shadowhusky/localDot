@@ -8,7 +8,7 @@ import type {
   ShellChunk,
   ShellDone,
 } from "@localdot/protocol";
-import { ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, ulid } from "@localdot/protocol";
 import { EventLog } from "../../event-log.ts";
 import type { ActionContext, ActionOutcome, GuiAction } from "../../gateway/gateway.ts";
 import { MemoryStore } from "../memory.ts";
@@ -25,6 +25,7 @@ export const SURROGATE = "ld_web_0123456789abcdefghijkl_abcdef";
 
 export interface FakeDesktop {
   shellCalls: string[];
+  editCalls: string[];
   shellOutput: ShellChunk[];
   shellDone: Partial<ShellDone>;
   files: Map<string, string>;
@@ -45,7 +46,14 @@ export function toolHarness(
   const home = mkdtempSync(join(tmpdir(), "local dot's tool api-"));
   const eventLog = new EventLog(home);
   const sessionId = eventLog.createSession("task");
-  const session = new AgentSession(sessionId, ulid(), "Find the weather", eventLog, opts.autonomy);
+  // Suites here exercise the approval machinery, so they run under the preset that asks for it.
+  const session = new AgentSession(
+    sessionId,
+    ulid(),
+    "Find the weather",
+    eventLog,
+    opts.autonomy ?? CAREFUL_AUTONOMY,
+  );
   session.beginBrain();
   session.toolToken = TOOL_TOKEN;
   session.status = "running";
@@ -74,6 +82,7 @@ export function toolHarness(
   let nextOutcome: (a: GuiAction) => ActionOutcome = () => ({ ok: true, frameId: ulid() });
   const desktop: FakeDesktop = {
     shellCalls: [],
+    editCalls: [],
     shellOutput: [],
     shellDone: {},
     files: new Map(),
@@ -127,7 +136,10 @@ export function toolHarness(
         desktop.files.set(path, content);
         return { path: `~/${path}`, op, patch: `+${content}`, bytes: content.length };
       },
-      editFile: async (path) => ({ path: `~/${path}`, op: "modify", patch: "", bytes: 0 }),
+      editFile: async (path) => {
+        desktop.editCalls.push(path);
+        return { path: `~/${path}`, op: "modify", patch: "", bytes: 0 };
+      },
       listDir: async (path) => ({ path: `~/${path}`, entries: [], truncated: false }),
       fetchFile: async (path) =>
         new ReadableStream({

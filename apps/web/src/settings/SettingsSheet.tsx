@@ -33,6 +33,7 @@ import { CHATGPT } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { RoleCard } from "./RoleCard.tsx";
 import type { ChatgptControls } from "./useChatgpt.ts";
+import type { RulesView } from "./useRules.ts";
 import "./settings.css";
 
 // How long "Saved" stays in the footer after a save.
@@ -71,6 +72,7 @@ export interface SettingsSheetProps {
   autonomy?: AutonomyPolicy;
   savedAutonomy?: AutonomyPolicy;
   onAutonomy?(value: AutonomyPolicy): void;
+  rules?: RulesView;
   manualPrices?: Partial<Record<ModelRole, { input: string; output: string }>>;
   onPrice?(role: ModelRole, value: { input: string; output: string }): void;
   budget?: {
@@ -370,6 +372,7 @@ function SettingsSections(props: SettingsSheetProps) {
             value={props.autonomy}
             saved={props.savedAutonomy}
             onChange={props.onAutonomy}
+            rules={props.rules}
           />
         </Section>
       )}

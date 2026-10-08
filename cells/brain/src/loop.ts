@@ -7,7 +7,7 @@ import type {
   TranscriptMessage,
   UpdatePlanInput,
 } from "@localdot/protocol";
-import { isToolName } from "@localdot/protocol";
+import { isToolName, RESUME_WAIT_REASON } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
 import { APICallError, generateText, type LanguageModel, type ModelMessage, streamText } from "ai";
 import { toComputerAction } from "./computer.ts";
@@ -181,7 +181,7 @@ export class Agent {
     signal.throwIfAborted();
     while (state.pause) {
       this.#o.sink.busy(false);
-      this.#o.sink.state("paused", "Waiting for explicit Resume");
+      this.#o.sink.state("paused", RESUME_WAIT_REASON);
       state = await this.#o.api.control(state.revision, 25000, signal);
       signal.throwIfAborted();
     }
@@ -524,6 +524,8 @@ export class Agent {
       };
       this.#o.onEvent?.({ type: "tool_execution_start", callId: info.callId, name: info.name });
       let result: ToolResult;
+      // A skipped call never ran, so it is not another failed action.
+      let skipped = false;
       if (signal.aborted) result = { ok: false, content: [{ type: "text", text: "Stopped." }] };
       else if (batchPaused)
         result = {
@@ -533,17 +535,19 @@ export class Agent {
             { type: "text", text: "Skipped: the task was paused before this call executed." },
           ],
         };
-      else if (final)
+      else if (final) {
+        skipped = true;
         result = {
           ok: false,
           content: [{ type: "text", text: "Skipped: the task already ended." }],
         };
-      else if (batchFailed && call.toolName === "computer")
+      } else if (batchFailed && call.toolName === "computer") {
+        skipped = true;
         result = {
           ok: false,
           content: [{ type: "text", text: "Skipped: an earlier action in this batch failed." }],
         };
-      else if (call.toolName === "done" && this.#hasFollowUps())
+      } else if (call.toolName === "done" && this.#hasFollowUps())
         result = {
           ok: false,
           content: [
@@ -555,7 +559,7 @@ export class Agent {
         };
       else result = await this.#execute(call, info, binding, basedOn, signal);
       signal.throwIfAborted();
-      if (!result.ok && result.pause !== true) {
+      if (!result.ok && result.pause !== true && !skipped) {
         this.#failed += 1;
         if (call.toolName === "computer") batchFailed = true;
       } else if (result.ok) this.#failed = 0;

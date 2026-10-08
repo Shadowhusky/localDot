@@ -23,7 +23,7 @@ export function ApprovalCard({
   enabled?: boolean;
   visible?: boolean;
   loadField?(approvalId: string, field: number, signal: AbortSignal): Promise<string>;
-  children?: ReactNode;
+  children?: ReactNode | ((canApprove: boolean) => ReactNode);
 }) {
   const value = CardSchema.safeParse(card);
   const heading = useRef<HTMLHeadingElement>(null);
@@ -54,6 +54,7 @@ export function ApprovalCard({
     return <p role="alert">This decision could not be verified. Check task status again.</p>;
   const expired = now >= value.data.expiresAt;
   const unread = [...partial.keys()].some((field) => !whole.has(field));
+  const canApprove = visible && enabled && !pending && !expired && !unread;
   const showAll = async (field: number, preview: string, length: number) => {
     if (!loadField || loading) return;
     const abort = new AbortController();
@@ -173,7 +174,7 @@ export function ApprovalCard({
               </ul>
             </section>
           )}
-          {children}
+          {typeof children === "function" ? children(canApprove) : children}
         </div>
         <div className="approval-footer">
           <p role="status">
@@ -186,11 +187,7 @@ export function ApprovalCard({
                   : "Approve this action once, decline it, or take control yourself."}
           </p>
           <div className="safety-actions">
-            <button
-              type="button"
-              disabled={!visible || !enabled || pending || expired || unread}
-              onClick={() => decide("approve")}
-            >
+            <button type="button" disabled={!canApprove} onClick={() => decide("approve")}>
               Approve once
             </button>
             <button

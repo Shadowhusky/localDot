@@ -52,7 +52,8 @@ func (s *assembledScenario) respond(w http.ResponseWriter, r *http.Request, requ
 		calls[2].args = map[string]any{"command": "/usr/local/bin/localdot-chromium \"file://$HOME/Downloads/fixture-demo.html\" >/tmp/task14-browser.log 2>&1 &", "timeout_sec": 10}
 		calls[6].args = map[string]any{"command": "printf 'task14 pending tool %0128d\\n' 0; sleep 0.3; printf 'task14 waiting %0128d\\n' 0; sleep 30; printf 'atomic output complete\\n'; printf 'late effect' > \"$HOME/Downloads/late-effect.txt\"; xdotool key Tab", "timeout_sec": 60}
 		// A high-risk simulated Send uses an actual finite local file effect.
-		// Native repeat stays in one unchanged focus identity and must stop before dispatch three.
+		// Three separate identical key calls on one unchanged focus identity: the third must stop
+		// before its dispatch. One call's own repeat counts once, so it cannot stand in for them.
 		calls = append(calls[:2], append([]struct {
 			name string
 			args any
@@ -63,7 +64,9 @@ func (s *assembledScenario) respond(w http.ResponseWriter, r *http.Request, requ
 			name string
 			args any
 		}{
-			{"computer", map[string]any{"action": "key", "text": "Down", "repeat": 3}},
+			{"computer", map[string]any{"action": "key", "text": "Down"}},
+			{"computer", map[string]any{"action": "key", "text": "Down"}},
+			{"computer", map[string]any{"action": "key", "text": "Down"}},
 		}, calls[8:]...)...)
 	}
 	if !s.shell {
