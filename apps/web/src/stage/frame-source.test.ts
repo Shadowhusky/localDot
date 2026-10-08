@@ -92,93 +92,43 @@ describe("frame source", () => {
   });
 });
 
-// Safari has no MediaStreamTrackProcessor; frames come from the client's <video> instead.
-function stubCallbackVideo(trackId = "t9") {
+// Safari has no MediaStreamTrackProcessor on the page; the render worker reads the track instead.
+function stubSafari() {
   vi.stubGlobal("OffscreenCanvas", class {});
-  const made: { close: ReturnType<typeof vi.fn> }[] = [];
+  vi.stubGlobal("MediaStreamTrack", class {});
   vi.stubGlobal(
     "VideoFrame",
     class {
       readonly close = vi.fn();
-      constructor(readonly source: unknown) {
-        made.push(this);
-      }
     },
   );
-  let pending: ((now: number, meta: unknown) => void) | undefined;
-  const cancelled: number[] = [];
-  let next = 0;
-  const video = {
-    srcObject: { getVideoTracks: () => [{ id: trackId }] },
-    readyState: 0,
-    requestVideoFrameCallback: (cb: (now: number, meta: unknown) => void) => {
-      pending = cb;
-      return ++next;
-    },
-    cancelVideoFrameCallback: (id: number) => cancelled.push(id),
-  };
-  const fire = () => {
-    const cb = pending;
-    pending = undefined;
-    cb?.(0, {});
-  };
-  return { video, made, fire, cancelled, armed: () => pending !== undefined };
+  const stopped: string[] = [];
+  const clone = { id: "s1-clone", stop: () => stopped.push("clone") };
+  const track = { id: "s1", clone: () => clone };
+  return { video: { srcObject: { getVideoTracks: () => [track] }, readyState: 0 }, clone, stopped };
 }
 
-describe("frame source without MediaStreamTrackProcessor", () => {
-  it("is supported where a <video> reports its frames", () => {
-    const { video } = stubCallbackVideo();
-    vi.stubGlobal("HTMLVideoElement", { prototype: { requestVideoFrameCallback: () => 0 } });
+describe("frame source in Safari", () => {
+  it("is supported where tracks can be handed to a worker", () => {
+    stubSafari();
     expect(frameTapSupport()).toEqual({ ok: true });
-    expect(tapVideoTrack(video)?.trackId).toBe("t9");
   });
 
   it("explains itself when neither path exists", () => {
-    stubCallbackVideo();
-    vi.stubGlobal("HTMLVideoElement", { prototype: {} });
+    stubSafari();
+    vi.stubGlobal("MediaStreamTrack", undefined);
     const support = frameTapSupport();
     expect(support.ok).toBe(false);
     if (!support.ok) expect(support.reason).toMatch(/Safari|Chrome/);
   });
 
-  it("copies each presented frame into the stream", async () => {
-    const { video, made, fire } = stubCallbackVideo();
+  it("hands the worker a clone of the client's track instead of a stream", () => {
+    const { video, clone, stopped } = stubSafari();
     const source = tapVideoTrack(video);
-    if (!source) throw new Error("no source");
-    const reader = source.readable.getReader();
-    fire();
-    const first = await reader.read();
-    expect(first.value).toBe(made[0]);
-    fire();
-    expect((await reader.read()).value).toBe(made[1]);
-    source.stop();
-  });
-
-  it("drops frames instead of queueing them while the worker is behind", async () => {
-    const { video, made, fire } = stubCallbackVideo();
-    const source = tapVideoTrack(video);
-    if (!source) throw new Error("no source");
-    fire();
-    fire();
-    fire();
-    // Only the first frame fits the queue; the others are never made, so nothing leaks.
-    expect(made).toHaveLength(1);
-    const reader = source.readable.getReader();
-    expect((await reader.read()).value).toBe(made[0]);
-    fire();
-    expect(made).toHaveLength(2);
-    source.stop();
-  });
-
-  it("stops asking for frames and ends the stream on stop", async () => {
-    const { video, fire, cancelled, armed } = stubCallbackVideo();
-    const source = tapVideoTrack(video);
-    if (!source) throw new Error("no source");
-    const reader = source.readable.getReader();
-    expect(armed()).toBe(true);
-    source.stop();
-    expect(cancelled).toHaveLength(1);
-    fire();
-    expect((await reader.read()).done).toBe(true);
+    expect(source?.trackId).toBe("s1");
+    expect(source?.track).toBe(clone);
+    expect(source?.readable).toBeUndefined();
+    source?.stop();
+    expect(stopped).toEqual(["clone"]);
   });
 });

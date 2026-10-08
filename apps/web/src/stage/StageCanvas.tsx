@@ -253,16 +253,21 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
         sourceRef.current = null;
         return;
       }
-      // S8's seed frame travels with the readable; both are transferred.
-      const transfer: Transferable[] = source.first
-        ? [source.readable, source.first]
-        : [source.readable];
+      // S8's seed frame travels with the readable or track; all are transferred.
+      const feed = source.readable ?? source.track;
+      if (!feed) {
+        source.stop();
+        sourceRef.current = null;
+        return;
+      }
+      const transfer: Transferable[] = source.first ? [feed, source.first] : [feed];
       try {
         worker.postMessage(
           {
             type: "frames",
             sourceId: id,
             readable: source.readable,
+            track: source.track,
             first: source.first,
           } satisfies WorkerIn,
           transfer,
@@ -270,7 +275,7 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
       } catch (err) {
         source.stop();
         sourceRef.current = null;
-        void source.readable.cancel().catch(() => {});
+        void source.readable?.cancel().catch(() => {});
         console.warn("could not attach desktop frames", err);
       }
     },

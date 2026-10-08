@@ -70,7 +70,13 @@ export type WorkerIn =
     }
   | { type: "resize"; width: number; height: number }
   // S8's seed travels with the readable (Part 2's Task 14): the <video>'s frame at tap time.
-  | { type: "frames"; sourceId?: number; readable: ReadableStream<VideoFrame>; first?: VideoFrame }
+  | {
+      type: "frames";
+      sourceId?: number;
+      readable?: ReadableStream<VideoFrame>;
+      track?: MediaStreamTrack;
+      first?: VideoFrame;
+    }
   | { type: "stop" }
   | { type: "probe"; rect: ProbeRect | null; threshold: number }
   | { type: "events"; events: LocalDotEvent[] }
