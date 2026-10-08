@@ -157,6 +157,8 @@ var presets = map[string]preset{
 	"openrouter":        {"https://openrouter.ai/api/v1", "Authorization", Bearer, "orr", openRouterOps},
 	"openai-compatible": {"", "Authorization", Bearer, "llm", compatibleOps},
 	"azure":             {"", "Api-Key", Raw, "azr", openAIOps},
+	// Vendors' Anthropic routes take the key as a bearer token (their ANTHROPIC_AUTH_TOKEN).
+	"anthropic-compatible": {"", "Authorization", Bearer, "anc", anthropicOps},
 }
 
 // The first-class bearer providers' operations: the one their package calls, with the cap field it

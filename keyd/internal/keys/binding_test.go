@@ -52,6 +52,8 @@ func TestEachOperationNamesItsOutputCap(t *testing.T) {
 		{"azure", "https://res.openai.azure.com/openai/v1", "POST", "chat/completions", "chat", "max_completion_tokens", false},
 		{"openai-compatible", "https://llm.example.test/v1", "POST", "chat/completions", "chat", "max_tokens", false},
 		{"openai-compatible", "https://llm.example.test/v1", "POST", "responses", "responses", "max_output_tokens", false},
+		{"anthropic-compatible", "https://llm.example.test/anthropic/v1", "POST", "messages", "anthropic", "max_tokens", false},
+		{"anthropic-compatible", "https://llm.example.test/anthropic/v1", "POST", "messages/count_tokens", "anthropic", "", true},
 		{"google", "", "POST", "models/gemini-3.6-flash:streamGenerateContent", "gemini", "generationConfig.maxOutputTokens", false},
 		{"google", "", "POST", "models/gemini-3.6-flash:generateContent", "gemini", "generationConfig.maxOutputTokens", false},
 		{"google", "", "POST", "models/gemini-3.6-flash:countTokens", "gemini", "", true},
@@ -85,6 +87,10 @@ func TestLLMRecordsAreValidated(t *testing.T) {
 		{ID: "x", Kind: vault.KindLLM, Provider: "openai-compatible", BaseURL: "https://api.example.test/v1?x=1"},
 		{ID: "x", Kind: vault.KindLLM, Provider: "openai-compatible", BaseURL: "https://u:p@api.example.test/v1"},
 		{ID: "x", Kind: vault.KindLLM, Provider: "azure", BaseURL: "https://res.openai.azure.com/openai/../v1"},
+		{ID: "x", Kind: vault.KindLLM, Provider: "anthropic-compatible"},
+		{ID: "x", Kind: vault.KindLLM, Provider: "anthropic-compatible", BaseURL: "http://api.example.test/anthropic/v1"},
+		{ID: "x", Kind: vault.KindLLM, Provider: "anthropic-compatible", BaseURL: "https://192.168.1.20/anthropic/v1"},
+		{ID: "x", Kind: vault.KindLLM, Provider: "anthropic-compatible", BaseURL: "https://api.example.test:8080/anthropic/v1"},
 		{ID: "x", Kind: vault.KindLLM, Provider: "anthropic", Hosts: []string{"api.anthropic.com"}},
 	}
 	for _, rec := range bad {
