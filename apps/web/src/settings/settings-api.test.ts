@@ -5,6 +5,7 @@ import {
   loadProviderIndex,
   loadSettings,
   type ProviderIndex,
+  refreshCatalog,
   saveSettings,
 } from "./settings-api.ts";
 import { providerFixture } from "./testing.ts";
@@ -64,6 +65,14 @@ describe("bounded authenticated settings wire", () => {
       }),
     ])
       await expect(attempt).rejects.toMatchObject({ uncertain: false });
+  });
+  it("accepts a refresh of the whole catalog, which lists far more providers than localDot", async () => {
+    const reply = { fetchedAt: "2026-10-08T11:38:41.404Z", providers: 226, skipped: 281 };
+    await expect(refreshCatalog(apiFor(async () => Response.json(reply)))).resolves.toBeUndefined();
+    for (const providers of [-1, 1.5, "226"])
+      await expect(
+        refreshCatalog(apiFor(async () => Response.json({ ...reply, providers }))),
+      ).rejects.toMatchObject({ uncertain: false });
   });
   it("sends a snapshotted PUT once, with the bearer header and no unknown fields", async () => {
     const data = {

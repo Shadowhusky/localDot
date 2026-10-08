@@ -207,7 +207,7 @@ export async function refreshCatalog(api: ApiClient, signal?: AbortSignal): Prom
   const parsed = z
     .strictObject({
       fetchedAt: z.iso.datetime({ offset: true }).max(64),
-      providers: z.number().int().min(0).max(64),
+      providers: z.number().int().nonnegative(),
       skipped: z.number().int().nonnegative(),
     })
     .safeParse(await request(api, "POST", "/api/agent/catalog/refresh", 4096, signal));
