@@ -4,6 +4,7 @@ export const KEY_SCAN_CHARS = 8000;
 export const KEY_SCAN_MATCHES = 16;
 export type KeyHint =
   | "Anthropic"
+  | "Claude plan token"
   | "OpenAI"
   | "Google"
   | "Groq"
@@ -27,6 +28,8 @@ const RULES: readonly { pattern: RegExp; hint: KeyHint; provider?: KeyMatch["pro
     hint: "Anthropic",
     provider: "anthropic",
   },
+  // A Claude plan's sign-in token: Anthropic lets no other app hold one, so it has no provider.
+  { pattern: /^sk-ant-oat\d{2}-[A-Za-z0-9_-]{32,8000}$/, hint: "Claude plan token" },
   {
     pattern: /^sk-(?:proj|svcacct|admin)-[A-Za-z0-9_-]{32,8000}$/,
     hint: "OpenAI",
