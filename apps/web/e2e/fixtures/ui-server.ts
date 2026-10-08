@@ -926,18 +926,21 @@ app.post("/__qa/ask", (c) => {
 app.post("/__qa/takeover", (c) => {
   if (!session) return c.text("no session", 409);
   const field = c.req.query("field");
-  if (field && session.generation) {
-    // Typing into a secret field through the real authorization, so the hand-off carries the
-    // daemon's own reason and copy for that field.
+  const known = c.req.query("known") === "1";
+  if ((field || known) && session.generation) {
+    // Typing into a secret field, or a localDot key into a plain one, through the real
+    // authorization, so the hand-off carries the daemon's own reason and copy.
+    const key = "fixture-private-key-0123";
+    const text = known ? `token ${key}` : "sample";
     const target = {
       point: { x: 640, y: 320 },
       source: "dom" as const,
       role: "textbox",
-      name: field,
+      name: field ?? "Notes",
       url: "https://account.example.test/sign-in",
-      secret: true,
+      secret: !known,
     };
-    const action = { verb: "type" as const, text: "sample", speed: "auto" as const };
+    const action = { verb: "type" as const, text, speed: "auto" as const };
     void authorizePrepared(
       {
         session,
@@ -945,12 +948,12 @@ app.post("/__qa/takeover", (c) => {
         check() {},
         callId: ulid(),
         step: ulid(),
-        redact: (value: string) => value,
+        redact: (value: string) => value.replaceAll(key, "[key]"),
         signal: new AbortController().signal,
       } as never,
       {
         tool: "computer",
-        input: { toolInput: { action: "type", text: "sample" }, action },
+        input: { toolInput: { action: "type", text }, action },
         target: { target, window: null, point: target.point },
         facts: nativeActionFacts(action, target),
         revalidate: async () => true,
