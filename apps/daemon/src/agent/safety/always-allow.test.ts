@@ -786,9 +786,19 @@ describe("Always allow on this site, end to end", () => {
     [
       "a full rules.json",
       (dir) => {
-        const rules = new RulesStore(dir);
-        for (let n = 0; n < MAX_RULES; n++)
-          rules.add("post", site(`https://${n}.example.test`), ulid());
+        const rules = Array.from({ length: MAX_RULES }, (_, n) => ({
+          id: ulid(),
+          behavior: "act",
+          actionClass: "post",
+          scope: "site",
+          site: `https://${n}.example.test`,
+          label: `On ${n}.example.test`,
+          createdAt: 1,
+          createdFrom: ulid(),
+        }));
+        writeFileSync(join(dir, "rules.json"), JSON.stringify({ version: 1, rules }), {
+          mode: 0o600,
+        });
       },
       /up to 200/,
     ],

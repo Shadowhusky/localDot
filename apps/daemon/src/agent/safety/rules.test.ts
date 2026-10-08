@@ -110,19 +110,26 @@ describe("saved Always allow rules", () => {
 
   it("keeps at most 200 rules", () => {
     const dir = home();
+    const file = join(dir, "rules.json");
+    const rules = Array.from({ length: MAX_RULES - 1 }, (_, n) => ({
+      id: ulid(),
+      behavior: "act",
+      actionClass: "send",
+      scope: "site",
+      site: `https://${n}.example.test`,
+      label: `On ${n}.example.test`,
+      createdAt: 1,
+      createdFrom: ulid(),
+    }));
+    writeFileSync(file, JSON.stringify({ version: 1, rules }), { mode: 0o600 });
     const store = new RulesStore(dir);
-    for (let n = 0; n < MAX_RULES; n++)
-      store.add(
-        "send",
-        { scope: "site", label: `On ${n}.example.test`, site: `https://${n}.example.test` },
-        ulid(),
-      );
+    store.add("send", onMail, ulid());
     expect(store.list().rules).toHaveLength(MAX_RULES);
     expect(() => store.add("post", onMail, ulid())).toThrow(RuleError);
     expect(store.list().rules).toHaveLength(MAX_RULES);
-    const saved = JSON.parse(readFileSync(join(dir, "rules.json"), "utf8"));
-    saved.rules.push({ ...saved.rules[0], id: ulid(), site: MAIL });
-    writeFileSync(join(dir, "rules.json"), JSON.stringify(saved), { mode: 0o600 });
+    const full = JSON.parse(readFileSync(file, "utf8"));
+    full.rules.push({ ...rules[0], id: ulid(), site: "https://extra.example.test" });
+    writeFileSync(file, JSON.stringify(full), { mode: 0o600 });
     expect(store.list()).toMatchObject({ rules: [], error: expect.any(String) });
   });
 
