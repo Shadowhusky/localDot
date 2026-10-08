@@ -322,6 +322,7 @@
   "src/theme.css": {
     "control-selector": 2,
     "half-pixel": 3,
+    "motion-literal": 7,
     "raw-colour": 15,
     "stray-stylesheet": 1,
     "type-literal": 4

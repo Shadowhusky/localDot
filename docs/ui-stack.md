@@ -373,22 +373,27 @@ around the design system. It runs in `pnpm lint`, alone as `pnpm check:ui`, and 
 | `raw-colour` | `#hex`, `rgb()`, `hsl()`, `oklch()` and other colour functions in CSS or a script string; a named colour in a colour property |
 | `undeclared-token` | `var(--x)` where no token, legacy alias, script (`setProperty`, a style key) or the same stylesheet declares `--x` |
 | `token-fallback` | `var(--x, …)`; a private `--_x` may fall back |
-| `type-literal` | a literal `font-size`, `line-height` or `font` size; a weight outside 400, 500 and 600 |
+| `type-literal` | a literal `font-size`, `line-height` or `font` size; a weight outside 400, 500 and 600; a bare `leading-6` utility |
 | `half-pixel` | any `.5px` length |
 | `radius-literal` | a radius in px, rem or em |
-| `motion-literal` | a literal transition duration; `ease*`, `cubic-bezier()`, `steps()` or `linear()` in a transition or animation |
+| `motion-literal` | a literal duration in a transition or a finite animation; `ease*`, `cubic-bezier()`, `steps()` or `linear()` in a transition or animation; a time or an easing in a custom property; a `duration-300` or `delay-150` utility |
 | `spacing-literal` | a margin, padding or gap in px or rem beyond a 1–2 px optical nudge |
-| `arbitrary-value` | a Tailwind arbitrary value or variant (`min-h-[44px]`, `data-[open]:…`) |
+| `arbitrary-value` | a Tailwind arbitrary value, variant or property (`min-h-[44px]`, `data-[open]:…`, `[&>svg]:size-4`, `[mask-type:luminance]`) |
 | `control-selector` | a `button`, `input`, `select` or `textarea` element selector outside `src/ui/` |
 | `base-ui-import` | `@base-ui/react` imported outside `src/ui/` |
 | `native-control` | `<button>`, `<input>` (but hidden), `<select>`, `<textarea>`, `<progress>`, `<meter>`, `<dialog>` or `<details>` outside `src/ui/` |
 | `native-disabled` | native `disabled` on a form element outside `src/ui/` |
 | `csp-inline` | a `<style>` or inline `<script>` element, `setAttribute("style")`, `createElement("style")`, markup with a `style` attribute in a string, or any of these in an HTML page; the page's policy blocks them all |
-| `stray-stylesheet` | a stylesheet outside `src/ui/`, the galleries and `src/dot/dot.css` |
+| `stray-stylesheet` | a stylesheet outside `src/ui/`, the galleries and the sheets the UI plan names: `src/dot/dot.css` (T24) and, in `src/shell/`, `stage-frame`, `hud`, `layout`, `bar`, `rails`, `phone`, `conversation` and `decision.css` (T11–T18) |
 | `banned-copy` | a word from `src/copy/banned.ts` in a string a screen can show |
 
 - **Scope.** The HTML pages and `src/**/*.{css,ts,tsx,html}`, without tests, `src/testing/` and the spike.
-  `src/ui/tokens.css` is the one place raw values live. The kit may style and render native controls.
+  The token layer (`src/ui/tokens.css`, and `src/ui/motion.css` for reduced motion) is the one place raw
+  values live. The kit may style and render native controls.
+- **Parameters.** A custom property that only one stylesheet declares (`--_pad`, `--_h`) is read
+  through: the spacing, radius and type rules check every value the stylesheet gives it, and every
+  `var()` fallback. A literal in a JSX `style` object is checked like a declaration, a number as px;
+  a computed value passes.
 - **Ratchet.** `apps/web/scripts/ui-guard-baseline.json` gives each legacy file the count it may hold of
   each rule; more fails. A count that falls fails too, until it is written down with
   `pnpm check:ui --update`, which only ever lowers counts, so a fix cannot be undone quietly. Raising a
@@ -396,14 +401,17 @@ around the design system. It runs in `pnpm lint`, alone as `pnpm check:ui`, and 
   deletes the file.
 - **Copy.** A string counts as copy when it is JSX text, a string prop other than class names, ids and
   other code attributes, or a literal that reads like prose (it has a space or starts with a capital).
-  Comparisons, `switch` cases, literal types, selectors, class lists, attribute names and logs are code.
-  Words are matched whole, so `cell-row`, `/api/cells` and `obj.session` pass. "verified",
-  "unconfirmed" and "retained" are banned only in headings and on buttons. The check covers `.ts`
+  Comparisons, `switch` cases, literal types, selectors, class lists, attribute names, `console`
+  calls and the URLs given to `fetch` and `new URL` are code; `defaultValue` is copy. Words are matched
+  whole, so `cell-row`, `/api/cells` and `obj.session` pass. "verified", "unconfirmed" and "retained"
+  are banned only in headings and on buttons, including the elements inside them. A link's `href` and
+  a selector are not read for hex colours, so `#feed` passes there. The check covers `.ts`
   modules as well as `.tsx`: most of the jargon people meet (`cells/errors.ts`, `keys/keys-api.ts`) is
   built there. The galleries are exempt.
-- **Allowed on purpose.** An animation's period (a spinner's loop is not a transition) and a
-  transition's delay may be literal, and `linear` is a keyword, not a curve. Spacing allows a 1 or 2 px
-  nudge for optical alignment.
+- **Allowed on purpose.** The period of an `animation` item that says `infinite` (a spinner's loop is
+  not an enter or exit) and a delay may be literal where they are used; a custom property outside the
+  token layer may hold neither a time nor an easing. `linear` is a keyword, not a curve. Spacing allows
+  a 1 or 2 px nudge for optical alignment.
 - **Why in `scripts/`.** Tailwind scans `src/ui/`, and the rule tables would mint utilities there; the
   checker is Node tooling, like `notices.mjs`. It parses scripts with Vite's own parser (`parseSync`),
   so it adds no dependency.
@@ -436,7 +444,9 @@ around the design system. It runs in `pnpm lint`, alone as `pnpm check:ui`, and 
   kit CSS must carry it from the task that first ships a Base UI Select (T07's own Select needs none) or
   ScrollArea (T09), and that task adds the part to the CSP check.
 - **Every React root inside `KitProvider`:** without it, Base UI's Select and ScrollArea render a
-  `<style>` the CSP blocks. T04's guard can check that each `createRoot(…).render` is wrapped.
+  `<style>` the CSP blocks. T04 left this check out, because no Base UI part ships outside the spike
+  yet. The task that ships the first one (T08 on L8, or T09's ScrollArea on L9 if it lands first) adds
+  a guard rule that each `createRoot(…).render` is wrapped.
 - **Motion:** the generated `animate-in`/`zoom-in-95` classes need `tw-animate-css`. The spike replaced
   them with transitions on Base UI's `data-starting-style`/`data-ending-style`.
 - **Touch targets:** the spike's controls use `pointer-coarse:min-h-11`; text inputs use 16 px type on

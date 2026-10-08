@@ -81,6 +81,24 @@ const CASES = [
     good: ".a { font: inherit; }",
   },
   {
+    rule: "type-literal",
+    path: "src/ui/a.css",
+    bad: ".a { --_fs: 13px; font-size: var(--_fs); }",
+    good: ".a { --_lh: var(--text-body--line-height); line-height: var(--_lh); }",
+  },
+  {
+    rule: "type-literal",
+    path: "src/agent/A.tsx",
+    bad: "const a = <p style={{ fontSize: 13 }} />;",
+    good: "const a = <p style={{ fontSize: size, fontWeight: 600 }} />;",
+  },
+  {
+    rule: "type-literal",
+    path: "src/ui/A.tsx",
+    bad: 'const a = <p className="leading-6" />;',
+    good: 'const a = <p className="gap-6 p-4" />;',
+  },
+  {
     rule: "half-pixel",
     path: "src/agent/a.css",
     bad: ".a { width: 12.5px; }",
@@ -91,6 +109,18 @@ const CASES = [
     path: "src/agent/a.css",
     bad: ".a { border-radius: 10px; }",
     good: ".a { border-radius: var(--radius-lg); border-top-left-radius: 50%; }",
+  },
+  {
+    rule: "radius-literal",
+    path: "src/ui/a.css",
+    bad: ".a { --_r: 10px; border-radius: var(--_r); }",
+    good: ".a { --_r: var(--radius-lg); border-radius: var(--_r); }",
+  },
+  {
+    rule: "radius-literal",
+    path: "src/agent/A.tsx",
+    bad: "const a = <div style={{ borderRadius: 10 }} />;",
+    good: "const a = <div style={{ borderRadius: 0 }} />;",
   },
   {
     rule: "motion-literal",
@@ -105,16 +135,94 @@ const CASES = [
     good: ".a { animation: spin 900ms linear infinite; }",
   },
   {
+    rule: "motion-literal",
+    path: "src/agent/a.css",
+    bad: ".a { animation: fade 220ms var(--ease-standard) both; }",
+    good: ".a { animation: fade var(--dur-fade) var(--ease-standard) both, spin 0.9s linear infinite; }",
+  },
+  {
+    rule: "motion-literal",
+    path: "src/agent/a.css",
+    bad: ".a { animation-duration: 220ms; }",
+    good: ".a { animation-duration: var(--dur-fade); animation-delay: 40ms; }",
+  },
+  {
+    rule: "motion-literal",
+    path: "src/ui/a.css",
+    bad: ".a { --_d: 220ms; transition: opacity var(--_d) var(--ease-standard); }",
+    good: ".a { --_i: 2; transition: opacity var(--dur-fade) var(--ease-standard) calc(var(--_i) * 40ms); }",
+  },
+  {
+    rule: "motion-literal",
+    path: "src/ui/a.css",
+    bad: ".a { --_e: cubic-bezier(0.2, 0.8, 0.2, 1); }",
+    good: ".a { --_e: var(--ease-standard); transition: transform var(--dur-spring) var(--_e); }",
+  },
+  {
+    rule: "motion-literal",
+    path: "src/agent/A.tsx",
+    bad: 'const a = <div style={{ transition: "opacity 200ms ease-out" }} />;',
+    good: "const a = <div style={{ transition: fade }} />;",
+  },
+  {
+    rule: "motion-literal",
+    path: "src/ui/A.tsx",
+    bad: 'const a = <div className="transition-opacity duration-300 delay-150" />;',
+    good: 'const a = <div className="transition-opacity duration-(--dur-fade)" />;',
+  },
+  {
     rule: "spacing-literal",
     path: "src/agent/a.css",
     bad: ".a { padding: 12px var(--spacing-gutter); }",
     good: ".a { padding: calc(var(--spacing) * 3) 2px; margin: 0 auto; gap: 1em; }",
   },
   {
+    rule: "spacing-literal",
+    path: "src/ui/a.css",
+    bad: ".a { --_pad: 13px; padding: var(--_pad); }",
+    good: ".a { --_pad: calc(var(--spacing) * 3); padding: 0 var(--_pad); }",
+  },
+  {
+    rule: "spacing-literal",
+    path: "src/ui/a.css",
+    bad: ".a { --_pad: calc(var(--spacing) * 3); } .b { --_pad: 13px; } .c { padding: var(--_pad); }",
+    good: ".a { --_h: calc(var(--spacing) * 5); --_knob: calc(var(--_h) - 4px); width: var(--_knob); }",
+  },
+  {
+    rule: "spacing-literal",
+    path: "src/theme.css",
+    bad: ".a { --notice-pad: 13px; padding: var(--notice-pad); }",
+    good: ":root { --spacing-edge: 20px; } .a { padding: 0 var(--spacing-edge); }",
+  },
+  {
+    rule: "spacing-literal",
+    path: "src/ui/a.css",
+    bad: ".a { padding-inline-end: var(--_gutter, 13px); }",
+    good: ".a { padding-inline-end: var(--_gutter, 0px); }",
+  },
+  {
+    rule: "spacing-literal",
+    path: "src/agent/A.tsx",
+    bad: "const a = <div style={{ padding: 13 }} />;",
+    good: "const a = <div style={{ margin: -BADGE / 8, padding: 0, width: 13 }} />;",
+  },
+  {
     rule: "arbitrary-value",
     path: "src/ui/A.tsx",
     bad: 'const a = <div className="min-h-[44px]" />;',
     good: 'const a = <div className="min-h-11" data-x="a[0]" />;',
+  },
+  {
+    rule: "arbitrary-value",
+    path: "src/ui/A.tsx",
+    bad: 'const a = <div className="flex [&>svg]:size-4" />;',
+    good: 'const open = el.closest("[data-open]:focus-within");',
+  },
+  {
+    rule: "arbitrary-value",
+    path: "src/ui/A.tsx",
+    bad: 'const a = <div className="[mask-type:luminance]" />;',
+    good: "const a = el.matches('[aria-label=\"a:b\"]');",
   },
   {
     rule: "control-selector",
@@ -188,6 +296,36 @@ const CASES = [
     bad: "const a = <h2>Verified</h2>;",
     good: "const a = <p>Verified by your bank</p>;",
   },
+  {
+    rule: "banned-copy",
+    path: "src/agent/A.tsx",
+    bad: "const a = <h2><span>Verified</span></h2>;",
+    good: "const a = <h2><span>Checked</span></h2>;",
+  },
+  {
+    rule: "banned-copy",
+    path: "src/agent/A.tsx",
+    bad: 'const a = <TextField defaultValue="My session" />;',
+    good: 'const a = <TextField value="session" />;',
+  },
+  {
+    rule: "banned-copy",
+    path: "src/agent/a.ts",
+    bad: 'toast.warn("We lost the session");',
+    good: 'console.warn("lost the session");',
+  },
+  {
+    rule: "banned-copy",
+    path: "src/agent/a.ts",
+    bad: `const title = \`Your \${n} sessions\`;`,
+    good: `fetch(\`/api/x?session=\${id}\`); new URL(\`/api/x?session=\${id}\`, base);`,
+  },
+  {
+    rule: "raw-colour",
+    path: "src/agent/A.tsx",
+    bad: 'const a = <i data-tone="#feed" />;',
+    good: 'const a = <a href="#feed">Feed</a>; document.querySelector("#add");',
+  },
 ];
 
 describe("ui guard rules", () => {
@@ -203,16 +341,26 @@ describe("ui guard rules", () => {
     expect([...seeded].sort()).toEqual(Object.keys(RULES).sort());
   });
 
-  it("allows a stylesheet only in the kit, the galleries and the dot", () => {
+  it("allows a stylesheet only in the kit, the galleries and the planned shell and dot sheets", () => {
     for (const path of [
       "src/ui/a.css",
       "src/ui/gallery/a.css",
       "src/gallery/a.css",
       "src/dot/dot.css",
+      "src/shell/stage-frame.css",
+      "src/shell/hud.css",
+      "src/shell/layout.css",
+      "src/shell/bar.css",
+      "src/shell/rails.css",
+      "src/shell/phone.css",
+      "src/shell/conversation.css",
+      "src/shell/decision.css",
     ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual([]);
     }
-    expect(rulesIn("src/agent/a.css", ".a {}")).toEqual(["stray-stylesheet"]);
+    for (const path of ["src/agent/a.css", "src/shell/misc.css", "src/shell/x/hud.css"]) {
+      expect(rulesIn(path, ".a {}"), path).toEqual(["stray-stylesheet"]);
+    }
   });
 
   it("lets the kit style and render native controls, and the token layer hold raw values", () => {

@@ -22,14 +22,18 @@ export const RULES = {
   "native-control": "native control outside src/ui; use the kit",
   "native-disabled": "native disabled outside src/ui; use the kit's disabledReason",
   "csp-inline": "inline <style>, style attribute or <script> that the page's CSP blocks",
-  "stray-stylesheet": "stylesheet outside src/ui, src/gallery and src/dot/dot.css",
+  "stray-stylesheet":
+    "stylesheet outside src/ui, src/gallery and the shell and dot sheets the UI plan names",
   "banned-copy": "word people should not read (src/copy/banned.ts)",
 };
 
 const KIT = "src/ui/";
 const TOKENS = "src/ui/tokens.css";
-const DECLARING = [TOKENS, "src/ui/motion.css", "src/theme.css"];
-const STYLESHEET_HOMES = /^src\/(?:ui\/|gallery\/|dot\/dot\.css$)/;
+const TOKEN_LAYER = [TOKENS, "src/ui/motion.css"];
+const DECLARING = [...TOKEN_LAYER, "src/theme.css"];
+// The kit, the galleries, and the stylesheets the UI plan gives the shell (T11-T18) and the dot (T24).
+const STYLESHEET_HOMES =
+  /^src\/(?:ui\/|gallery\/|dot\/dot\.css$|shell\/(?:stage-frame|hud|layout|bar|rails|phone|conversation|decision)\.css$)/;
 // Dev-only pages, and the list of banned words itself.
 const NOT_COPY = /^src\/(?:ui\/)?gallery\/|^src\/copy\/banned\.ts$/;
 
@@ -39,11 +43,22 @@ const NAMED_COLOUR =
   /(?<![\w-])(?:white|black|red|green|blue|gr[ae]y|silver|yellow|orange|purple|pink|navy|teal|maroon|olive|lime|aqua|cyan|magenta|fuchsia)(?![\w-])/i;
 const COLOUR_PROPERTY = /^--|color|background|border|outline|fill|stroke|shadow/;
 const LENGTH = /(?<![\w.-])-?(\d*\.?\d+)(px|rem|em)\b/g;
+const TIME = /(?<![\w.-])(\d*\.?\d+)m?s\b/g;
 const EASING = /(?<![\w-])(?:ease(?:-in|-out|-in-out)?|cubic-bezier\(|steps\(|linear\()/;
 const HALF_PIXEL = /(?<![\d.])\d*\.5px\b/;
-const ARBITRARY = /\b[a-z-]+-\[[^\]]+\]/;
+const SPACING_PROPERTY =
+  /^(?:(?:scroll-)?(?:margin|padding)(?:-[a-z]+)*|(?:grid-)?(?:row-|column-)?gap)$/;
+const URL_FUNCTION = /url\([^)]*\)/g;
+// An arbitrary value (min-h-[44px]), variant ([&>svg]:size-4) or property ([mask-type:luminance]).
+const ARBITRARY =
+  /\b[a-z-]+-\[[^\]]+\]|(?<![^\s:])\[(?:[^\]\s]*[&@][^\]\s]*\]:|-{0,2}[a-z][a-z-]*:[^\]\s]+\])/;
+// Bare-value utilities that bypass the tokens: a raw duration or delay, a line height off the scale.
+const TAILWIND_MOTION = /(?<![\w-])(?:duration|delay)-\d+(?![\w-])/;
+const TAILWIND_LEADING = /(?<![\w-])leading-\d+(?![\w-])/;
 const INLINE_MARKUP = /<style[\s>]|\sstyle\s*=\s*["']/i;
 const WEIGHTS = /^(?:400|500|600|normal|inherit|initial|unset)$/;
+// React writes a number as px, except for these.
+const UNITLESS = /^(?:--|line-height$|font-weight$)/;
 
 const NATIVE_CONTROLS = new Set([
   "button",
@@ -71,7 +86,7 @@ const CODE_ATTRIBUTES = new Set([
   "target",
   "htmlFor",
   "value",
-  "defaultValue",
+  "style",
   "autoComplete",
   "inputMode",
   "enterKeyHint",
@@ -80,12 +95,11 @@ const CODE_ATTRIBUTES = new Set([
   "lang",
   "dir",
 ]);
-// Arguments of these calls are class lists, selectors, attribute names, event types or logs.
+// Arguments of these calls are logs, URLs, class lists, selectors, attribute names or event types.
 const CODE_CALLS = new Set([
-  "log",
-  "debug",
-  "warn",
-  "trace",
+  "console",
+  "fetch",
+  "URL",
   "clsx",
   "cn",
   "querySelector",
@@ -104,6 +118,8 @@ const CODE_CALLS = new Set([
   "setProperty",
   "removeProperty",
 ]);
+// A fragment link or an id selector can read as a hex colour ("#feed", "#add").
+const REFERENCES = new Set(["href", "querySelector", "querySelectorAll", "closest", "matches"]);
 
 const stripVars = (value) => value.replace(/var\([^()]*(?:\([^()]*\)[^()]*)*\)/g, "");
 const nonzero = (matches) => [...matches].some((m) => Number(m[1]) !== 0);
@@ -163,14 +179,57 @@ function walkCss(css, onRule, onDeclaration) {
   }
 }
 
-export function declaredIn(css) {
-  const names = new Set();
+function customProperties(css) {
+  const values = new Map();
   walkCss(
     css,
     () => {},
-    (property) => property.startsWith("--") && names.add(property),
+    (property, value) => {
+      if (!property.startsWith("--")) return;
+      values.set(property, [...(values.get(property) ?? []), value.replace(URL_FUNCTION, "url()")]);
+    },
   );
-  return names;
+  return values;
+}
+
+export function declaredIn(css) {
+  return new Set(customProperties(css).keys());
+}
+
+function nextVar(value, from) {
+  const start = value.indexOf("var(", from);
+  if (start === -1) return undefined;
+  let depth = 0;
+  let comma = -1;
+  for (let i = start + 3; i < value.length; i++) {
+    if (value[i] === "(") depth++;
+    else if (value[i] === ")" && --depth === 0) {
+      const name = value.slice(start + 4, comma === -1 ? i : comma).trim();
+      return {
+        start,
+        end: i + 1,
+        name,
+        fallback: comma === -1 ? undefined : value.slice(comma + 1, i),
+      };
+    } else if (value[i] === "," && depth === 1 && comma === -1) comma = i;
+  }
+  return undefined;
+}
+
+// Every way a stylesheet's parameters and the var() fallbacks can fill a value, so a literal cannot
+// hide behind either.
+function expansions(value, parameters, seen = new Set()) {
+  for (let ref = nextVar(value, 0); ref; ref = nextVar(value, ref.end)) {
+    const options = seen.has(ref.name) ? [] : [...(parameters.get(ref.name) ?? [])];
+    if (ref.fallback !== undefined) options.push(ref.fallback);
+    if (!options.length) continue;
+    const inner = new Set(seen).add(ref.name);
+    const [before, after] = [value.slice(0, ref.start), value.slice(ref.end)];
+    return options
+      .flatMap((option) => expansions(before + option + after, parameters, inner))
+      .slice(0, 64);
+  }
+  return [value];
 }
 
 // A component's private property (--_*) may default through a fallback; a token may not, because
@@ -195,12 +254,12 @@ function topLevelItems(value) {
   return items;
 }
 
-// A transition's first time is its duration and a later one its delay; a --dur-* token counts as a
-// time. Only a literal duration is flagged: a delay staggers parts, and an animation's period is
-// a loop, not a transition.
+// An item's first time is its duration and a later one its delay; a --dur-* token counts as a time.
+// A delay may be literal, and so may the period of an animation that loops forever.
 function literalDuration(property, value) {
-  if (property !== "transition" && property !== "transition-duration") return false;
+  if (!/^(?:transition|animation)(?:-duration)?$/.test(property)) return false;
   return topLevelItems(value).some((item) => {
+    if (property === "animation" && /(?<![\w-])infinite(?![\w-])/.test(item)) return false;
     const first = item.match(/var\(\s*--dur[\w-]*\s*\)|(?<![\w.-])\d*\.?\d+m?s\b/)?.[0];
     return first !== undefined && !first.startsWith("var") && Number.parseFloat(first) !== 0;
   });
@@ -212,10 +271,61 @@ function spacingLengths(value) {
     .map((m) => Number(m[1]) * (m[2] === "rem" ? 16 : 1));
 }
 
+function typeLiteral(property, literal) {
+  if (/^(?:font-size|line-height)$/.test(property)) return /\d/.test(literal);
+  if (property === "font-weight") return !WEIGHTS.test(literal.trim() || "inherit");
+  if (property !== "font") return false;
+  return (
+    /\d(?:px|rem|em|%)|\/\s*\d/.test(literal) ||
+    /^(?!400|500|600)\d{3}\b|\bbold(?:er)?\b|\blighter\b/.test(literal.trim())
+  );
+}
+
+// A custom property outside the token layer is a parameter whose use the guard may not see, so it
+// may hold neither a time nor an easing; a delay or a loop's period is written where it is used.
+function motionParameter(value) {
+  const literal = stripVars(value);
+  return EASING.test(literal) || nonzero(literal.matchAll(TIME));
+}
+
+// fills are the value with its parameters and fallbacks put in, and fallbacks with the fallbacks
+// only: a parameter's own time or easing is flagged where it is declared.
+function literalRules(property, fills, fallbacks) {
+  const literals = fills.map(stripVars);
+  const any = (test) => literals.some(test);
+  const rules = [];
+  if (any((literal) => typeLiteral(property, literal))) rules.push("type-literal");
+  if (
+    /^border(?:-[a-z]+)*-radius$/.test(property) &&
+    any((literal) => nonzero(literal.matchAll(LENGTH)))
+  ) {
+    rules.push("radius-literal");
+  }
+  if (
+    fallbacks.some((value) => literalDuration(property, value)) ||
+    (/^(?:transition|animation)/.test(property) &&
+      fallbacks.some((value) => EASING.test(stripVars(value))))
+  ) {
+    rules.push("motion-literal");
+  }
+  // A 1 or 2 px nudge is optical alignment, not spacing.
+  if (
+    SPACING_PROPERTY.test(property) &&
+    any((literal) => spacingLengths(literal).some((px) => Math.abs(px) > 2))
+  ) {
+    rules.push("spacing-literal");
+  }
+  return rules;
+}
+
 function scanCss(path, css, declared, report) {
-  if (path === TOKENS) return;
+  if (TOKEN_LAYER.includes(path)) return;
   const kit = path.startsWith(KIT);
-  const local = new Set([...declared, ...declaredIn(css)]);
+  const own = customProperties(css);
+  const local = new Set([...declared, ...own.keys()]);
+  // A custom property only this stylesheet declares is a parameter, read through where it is used;
+  // a token or alias is judged where it is declared.
+  const parameters = new Map([...own].filter(([name]) => !declared.has(name)));
   if (!STYLESHEET_HOMES.test(path)) report("stray-stylesheet", 0, path);
   walkCss(
     css,
@@ -228,8 +338,7 @@ function scanCss(path, css, declared, report) {
     },
     (property, raw, offset, source) => {
       const flag = (rule) => report(rule, offset, source.replace(/\s+/g, " "));
-      const value = raw.replace(/url\([^)]*\)/g, "url()");
-      const literal = stripVars(value);
+      const value = raw.replace(URL_FUNCTION, "url()");
       tokenFindings(value, local, (rule, name) => report(rule, offset, name));
       if (
         HEX.test(value) ||
@@ -239,32 +348,12 @@ function scanCss(path, css, declared, report) {
         flag("raw-colour");
       }
       if (HALF_PIXEL.test(value)) flag("half-pixel");
-      if (property.startsWith("--")) return;
-      const typeLiteral =
-        (/^(?:font-size|line-height)$/.test(property) && /\d/.test(literal)) ||
-        (property === "font-weight" && !WEIGHTS.test(literal.trim() || "inherit")) ||
-        (property === "font" &&
-          (/\d(?:px|rem|em|%)|\/\s*\d/.test(literal) ||
-            /^(?!400|500|600)\d{3}\b|\bbold(?:er)?\b|\blighter\b/.test(literal.trim())));
-      if (typeLiteral) flag("type-literal");
-      if (/^border(?:-[a-z]+)*-radius$/.test(property) && nonzero(literal.matchAll(LENGTH))) {
-        flag("radius-literal");
+      if (property.startsWith("--")) {
+        if (motionParameter(value)) flag("motion-literal");
+        return;
       }
-      if (
-        literalDuration(property, value) ||
-        (/^(?:transition|animation)/.test(property) && EASING.test(literal))
-      ) {
-        flag("motion-literal");
-      }
-      // A 1 or 2 px nudge is optical alignment, not spacing.
-      if (
-        /^(?:(?:scroll-)?(?:margin|padding)(?:-[a-z]+)*|(?:grid-)?(?:row-|column-)?gap)$/.test(
-          property,
-        ) &&
-        spacingLengths(literal).some((px) => Math.abs(px) > 2)
-      ) {
-        flag("spacing-literal");
-      }
+      const fills = expansions(value, parameters);
+      for (const rule of literalRules(property, fills, expansions(value, new Map()))) flag(rule);
     },
   );
 }
@@ -286,7 +375,39 @@ function calleeName(node) {
   const callee = node.callee;
   if (callee?.type === "Identifier") return callee.name;
   if (callee?.type !== "MemberExpression" || callee.computed) return undefined;
-  return callee.object.name === "console" ? "log" : callee.property.name;
+  return callee.object.name === "console" ? "console" : callee.property.name;
+}
+
+function staticValue(node) {
+  if (node.type === "Literal" && /^(?:number|string)$/.test(typeof node.value)) return node.value;
+  if (node.type === "UnaryExpression" && node.operator === "-") {
+    const number = staticValue(node.argument);
+    return typeof number === "number" ? -number : undefined;
+  }
+  if (node.type === "TemplateLiteral" && !node.expressions.length)
+    return node.quasis[0].value.cooked;
+  return undefined;
+}
+
+// Literal values in a JSX style object, as CSS declarations; anything computed passes.
+function styleDeclarations(expression) {
+  let object = expression;
+  while (/^TS(?:As|Satisfies)Expression$/.test(object?.type)) object = object.expression;
+  if (object?.type !== "ObjectExpression") return [];
+  return object.properties.flatMap((node) => {
+    if (node.type !== "Property" || node.computed) return [];
+    const key = node.key.type === "Identifier" ? node.key.name : String(node.key.value);
+    const value = staticValue(node.value);
+    if (value === undefined) return [];
+    const property = key.startsWith("--")
+      ? key
+      : key
+          .replace(/^(?:Webkit|Moz|ms)(?=[A-Z])/, "-$&")
+          .replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+    const text =
+      typeof value === "number" && !UNITLESS.test(property) ? `${value}px` : String(value);
+    return [{ property, value: text, node }];
+  });
 }
 
 function attributeName(node) {
@@ -312,8 +433,12 @@ function scanScript(path, text, declared, report) {
 
   const checkString = (value, node, context) => {
     const at = node.start;
-    if (HEX.test(value) || COLOUR_FUNCTION.test(value)) report("raw-colour", at, value);
+    if ((!context.reference && HEX.test(value)) || COLOUR_FUNCTION.test(value)) {
+      report("raw-colour", at, value);
+    }
     if (ARBITRARY.test(value)) report("arbitrary-value", at, value.match(ARBITRARY)[0]);
+    if (TAILWIND_MOTION.test(value)) report("motion-literal", at, value.match(TAILWIND_MOTION)[0]);
+    if (TAILWIND_LEADING.test(value)) report("type-literal", at, value.match(TAILWIND_LEADING)[0]);
     if (INLINE_MARKUP.test(value)) report("csp-inline", at, value);
     tokenFindings(value, declared, (rule, name) => report(rule, at, name));
     if (!copy || context.code) return;
@@ -358,7 +483,10 @@ function scanScript(path, text, declared, report) {
       case "JSXElement": {
         const name = elementName(node);
         visit(node.openingElement, context);
-        visit(node.children, { ...context, label: LABEL_ELEMENTS.test(name ?? "") });
+        visit(node.children, {
+          ...context,
+          label: context.label || LABEL_ELEMENTS.test(name ?? ""),
+        });
         return;
       }
       case "JSXOpeningElement": {
@@ -381,9 +509,23 @@ function scanScript(path, text, declared, report) {
         if (name === "style" || (name === "script" && !attributes.has("src"))) {
           report("csp-inline", node.start, `<${name}>`);
         }
+        for (const { property, value, node: at } of styleDeclarations(
+          attributes.get("style")?.value?.expression,
+        )) {
+          const rules = property.startsWith("--")
+            ? motionParameter(value)
+              ? ["motion-literal"]
+              : []
+            : literalRules(property, [value], [value]);
+          for (const rule of rules) report(rule, at.start, `${property}: ${value}`);
+        }
         for (const [attribute, value] of attributes) {
-          const label = LABEL_ELEMENTS.test(name) || attribute === "heading";
-          visit(value.value, { code: isCodeAttribute(attribute), label });
+          const label = context.label || LABEL_ELEMENTS.test(name) || attribute === "heading";
+          visit(value.value, {
+            code: isCodeAttribute(attribute),
+            label,
+            reference: REFERENCES.has(attribute),
+          });
         }
         visit(
           node.attributes.filter((a) => a.type !== "JSXAttribute"),
@@ -419,7 +561,7 @@ function scanScript(path, text, declared, report) {
         }
         if (CODE_CALLS.has(name)) {
           visit(node.callee, context);
-          visit(node.arguments, { ...context, code: true });
+          visit(node.arguments, { ...context, code: true, reference: REFERENCES.has(name) });
           return;
         }
         break;
