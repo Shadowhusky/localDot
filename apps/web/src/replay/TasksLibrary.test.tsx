@@ -170,3 +170,54 @@ it("says when there is nothing recorded yet", async () => {
   render(<Library api={api} />);
   expect(await screen.findByText("No tasks yet")).toBeTruthy();
 });
+
+it("asks once for a page a search needs when it fails, then waits for Try again", async () => {
+  let failing = true;
+  const asked: string[] = [];
+  const fetchImpl = (async (input: RequestInfo | URL) => {
+    const url = new URL(String(input));
+    asked.push(url.search);
+    if (url.searchParams.has("before"))
+      return failing
+        ? new Response("down", { status: 500 })
+        : Response.json({ sessions: [card("Email the monthly totals", 2000)], next: null });
+    return Response.json({ sessions: [card("Monthly report", 0)], next: "1" });
+  }) as typeof fetch;
+  render(<Library api={createApi("a".repeat(43), { fetchImpl, origin: "http://127.0.0.1" })} />);
+  await screen.findByRole("link", { name: /^Monthly report/ });
+  fireEvent.change(screen.getByRole("textbox", { name: "Search tasks" }), {
+    target: { value: "monthly" },
+  });
+  const alert = await screen.findByRole("alert");
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(asked).toEqual(["", "?before=1"]);
+  failing = false;
+  fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
+  await screen.findByRole("link", { name: /^Email the monthly totals/ });
+  expect(asked).toEqual(["", "?before=1", "?before=1"]);
+});
+
+it("keeps the delete confirmation open while the recording is being deleted", async () => {
+  let finish = () => {};
+  const { api } = daemon([[card("Old notes", 0)]], () => new Response(null, { status: 204 }));
+  const slow = {
+    ...api,
+    del: (path: string) =>
+      new Promise<void>((resolve, reject) => {
+        finish = () => void api.del(path).then(resolve, reject);
+      }),
+  };
+  const onDeleted = vi.fn();
+  render(<Library api={slow} onDeleted={onDeleted} />);
+  const row = await screen.findByRole("link", { name: /^Old notes/ });
+  row.focus();
+  fireEvent.keyDown(row, { key: "Backspace" });
+  const confirm = await screen.findByRole("alertdialog", { name: "Delete this task's recording?" });
+  fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
+  const cancel = within(confirm).getByRole("button", { name: "Cancel" });
+  await waitFor(() => expect(cancel.getAttribute("aria-disabled")).toBe("true"));
+  fireEvent.click(cancel);
+  expect(screen.getByRole("alertdialog", { name: "Delete this task's recording?" })).toBe(confirm);
+  await act(async () => finish());
+  await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+});

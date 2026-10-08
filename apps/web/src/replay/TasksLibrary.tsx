@@ -143,12 +143,13 @@ export function TaskList({
   const now = useMemo(() => new Date(), []);
   const searching = search.trim() !== "";
   const shown = searching ? index.cards.filter((card) => matchesSearch(card, search)) : index.cards;
-  const { more, loading, loadMore } = index;
+  const { more, loading, failed, loadMore } = index;
 
-  // A search looks through every task, so it reads the pages a scroll has not reached yet.
+  // A search looks through every task, so it reads the pages a scroll has not reached yet. A page
+  // that failed waits for Try again.
   useEffect(() => {
-    if (searching && more && !loading) loadMore();
-  }, [searching, more, loading, loadMore]);
+    if (searching && more && !loading && !failed) loadMore();
+  }, [searching, more, loading, failed, loadMore]);
 
   useEffect(() => {
     const target = sentinel.current;
@@ -419,7 +420,11 @@ function DeleteTask({
         )
       }
     >
-      <Button variant="quiet" onClick={onClose}>
+      <Button
+        variant="quiet"
+        disabledReason={busy ? "Deleting the recording…" : undefined}
+        onClick={onClose}
+      >
         Cancel
       </Button>
       <Button busy={busy} onClick={() => void remove()}>
