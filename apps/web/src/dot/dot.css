@@ -80,6 +80,10 @@
   stop-color: var(--dot-eye-lo);
 }
 
+.dot-stop-xenon {
+  stop-color: var(--color-xenon);
+}
+
 /* Until the neutral plate decodes, the SVG body stands in for it; if a plate fails, for good. */
 .dot[data-skin="svg"] .dot-plate,
 .dot[data-skin="plate"] .dot-svgbody {

@@ -169,12 +169,15 @@ export class DotView implements Frameable {
       [0.97, "#ffffff", 0.55],
       [1, "#ffffff", 0],
     ]);
-    stops(svg("radialGradient", { id: `dot${this.id}-xenon`, ...edge }, defs), [
-      [0, "#3fb5de", 0],
-      [0.84, "#3fb5de", 0],
-      [0.97, "#3fb5de", 0.85],
-      [1, "#3fb5de", 0],
-    ]);
+    const xenon = svg("radialGradient", { id: `dot${this.id}-xenon`, ...edge }, defs);
+    for (const [offset, opacity] of [
+      [0, 0],
+      [0.84, 0],
+      [0.97, 0.85],
+      [1, 0],
+    ] as const) {
+      svg("stop", { offset, class: "dot-stop-xenon", "stop-opacity": opacity }, xenon);
+    }
     const disc = { cx: 32, cy: 32, r: 24 };
     const svgBody = svg("g", { class: "dot-svgbody" }, face);
     svg("circle", { ...disc, class: "dot-flat" }, svgBody);
