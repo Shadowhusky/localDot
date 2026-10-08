@@ -30,4 +30,5 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --up
   `dist-gallery/` (never `dist`); the fixture serves it at `/gallery/` under the app's own page
   policy. Add a page to `GALLERY_PAGES` in `src/gallery/pages.tsx`.
 - **Before capture:** `node --import tsx e2e/ui/plan-capture.ts` and `e2e/ui/plan-states.ts` write
-  reference screenshots and control notes of today's app to `e2e/out/ui/before` (or `$OUT`).
+  reference screenshots and control notes of today's app to `e2e/out/before` (or `$OUT`), outside
+  the harness's own output, which Playwright empties on every run.

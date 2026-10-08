@@ -5,7 +5,7 @@ import { setupServer } from "../fixtures/setup-server.ts";
 // The "before" capture: today's sign-in, installer, first run, Settings, Keys and computer states
 // in Chrome and WebKit at 1440, 1280 and 390, with a probe of every visible control. It writes
 // screenshots and notes.txt for reference; it asserts nothing.
-const OUT = process.env.OUT ?? "e2e/out/ui/before";
+const OUT = process.env.OUT ?? "e2e/out/before";
 mkdirSync(OUT, { recursive: true });
 const notes: string[] = [];
 const note = (line: string) => {

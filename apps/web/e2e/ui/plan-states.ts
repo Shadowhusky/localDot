@@ -5,7 +5,7 @@ import { setupServer } from "../fixtures/setup-server.ts";
 // The "before" capture of the computer's lifecycle in Chrome at 1440 and 390: from first run
 // through starting, live, reconnecting, paused, failed, fenced and stopped, logging the stage box,
 // its classes, the HUD status and the caption at each step to notes-states.txt.
-const OUT = process.env.OUT ?? "e2e/out/ui/before";
+const OUT = process.env.OUT ?? "e2e/out/before";
 mkdirSync(OUT, { recursive: true });
 const log = (line: string) => {
   console.log(line);
