@@ -159,3 +159,17 @@ it.each(["symlink", "oversize", "public", "wrong-owner"])(
     expect(fences.isFenced(ulid())).toBe(kind === "symlink" || kind === "oversize");
   },
 );
+it("removing an intent refuses a tampered file or another computer and keeps it", () => {
+  const f = fixture();
+  f.store.write(f.sessionId, f.cellId, DEFAULT_AUTONOMY, f.pause, "api");
+  const before = lstatSync(f.path).ino;
+  expect(() => f.store.remove(f.sessionId, ulid())).toThrow("owner mismatch");
+  expect(lstatSync(f.path).ino).toBe(before);
+  chmodSync(f.path, 0o644);
+  expect(() => f.store.remove(f.sessionId, f.cellId)).toThrow("unsafe safety intent");
+  expect(lstatSync(f.path).ino).toBe(before);
+  expect(new ComputerFences(f.home).isFenced(f.cellId)).toBe(true);
+  chmodSync(f.path, 0o600);
+  f.store.remove(f.sessionId, f.cellId);
+  expect(lstatSync(f.path, { throwIfNoEntry: false })).toBeUndefined();
+});

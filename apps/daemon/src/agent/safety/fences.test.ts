@@ -99,7 +99,27 @@ it("a refused intent fences only the computer it names", () => {
   const fences = new ComputerFences(dir);
   expect(fences.isFenced(named)).toBe(true);
   expect(fences.isFenced(other)).toBe(false);
-  expect(fences.record(named)).toMatchObject({ cellId: named, sessionId: session });
+  // Its executor cannot be trusted, so the fence never admits Replace computer as an API task.
+  expect(fences.record(named)).toEqual({
+    cellId: named,
+    sessionId: session,
+    revision: 1,
+    executor: "native",
+    nativeRetired: false,
+  });
+});
+
+it("a refused intent fences its computer even after its task recorded its end", () => {
+  const dir = home(),
+    log = open(dir),
+    cellId = ulid(),
+    session = log.createSession("tampered after stop");
+  new SafetyIntentStore(dir).write(session, cellId, DEFAULT_AUTONOMY, pause("pausing"), "api");
+  log.append(session, { type: "session.end", agent: "main", data: { reason: "stopped" } });
+  chmodSync(join(dir, "sessions", session, "safety.json"), 0o644);
+  const fences = restart(dir);
+  expect(fences.isFenced(cellId)).toBe(true);
+  expect(fences.record(cellId)).toMatchObject({ executor: "native", nativeRetired: false });
 });
 
 it("an unsettled intent fences after a crash but not once its task recorded its end", () => {
@@ -112,6 +132,7 @@ it("an unsettled intent fences after a crash but not once its task recorded its 
     ended = log.createSession("stopped mid-pause");
   store.write(crashed, crashedCell, DEFAULT_AUTONOMY, pause("pausing"), "api");
   store.write(ended, endedCell, DEFAULT_AUTONOMY, pause("pausing"), "api");
+  log.append(crashed, { type: "agent.state", agent: "main", data: { state: "thinking" } });
   log.append(ended, { type: "session.end", agent: "main", data: { reason: "stopped" } });
   const fences = restart(dir);
   expect(fences.isFenced(crashedCell)).toBe(true);
