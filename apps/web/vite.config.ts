@@ -5,7 +5,7 @@ import { defineConfig, type Plugin } from "vite";
 
 const SRC = fileURLToPath(new URL("./src/", import.meta.url));
 const KIT = `${SRC}ui/`;
-const LAYERS = "@layer theme, base, components, utilities;";
+const LAYERS = "@layer theme, base, components, kit, utilities;";
 const CUSTOM_MEDIA = /^@custom-media [^;]+;$/gm;
 
 // Stylesheets written before the Tailwind stack join its components layer, so the kit's utilities

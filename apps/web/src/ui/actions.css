@@ -1,0 +1,439 @@
+/* The kit layer sits above the legacy components, so a kit control keeps its look inside an older
+   screen whatever that screen's element selectors say, and below utilities, so callers can place it. */
+@layer kit {
+  .ui-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    border: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .ui-icon {
+    display: block;
+    flex-shrink: 0;
+  }
+
+  :is(.ui-button, .ui-icon-button) {
+    position: relative;
+    flex-shrink: 0;
+    border: 1px solid transparent;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    cursor: pointer;
+    transform: none;
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      color var(--dur-hover) var(--ease-standard),
+      transform var(--dur-exit) var(--ease-enter);
+  }
+
+  /* Hover and focus reach past the edge: the ::after sits in the padding box, inside the border. */
+  :is(.ui-button, .ui-icon-button)::after {
+    content: "";
+    position: absolute;
+  }
+
+  :is(.ui-button, .ui-icon-button):focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: var(--focus-offset);
+  }
+
+  :is(.ui-button, .ui-icon-button)[data-pressed] {
+    transition-duration: var(--dur-press);
+  }
+
+  :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"] {
+    transform: scale(0.97);
+  }
+
+  :is(.ui-button, .ui-icon-button)[aria-disabled="true"] {
+    cursor: default;
+  }
+
+  .ui-button {
+    --_bg: var(--color-control);
+    --_bg-hover: var(--color-control-hover);
+    --_bg-pressed: var(--color-control-pressed);
+    --_fg: var(--color-fg-1);
+    --_fg-hover: var(--color-fg-1);
+    --_pad: calc(var(--spacing) * 3);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: calc(var(--spacing) * 8);
+    padding: 0 var(--_pad);
+    border-radius: var(--radius-md);
+    background-color: var(--_bg);
+    color: var(--_fg);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    white-space: nowrap;
+  }
+
+  .ui-button::after {
+    inset: calc(-1px - var(--spacing) * 1.5);
+  }
+
+  .ui-button[data-size="sm"] {
+    --_pad: calc(var(--spacing) * 2.5);
+    height: calc(var(--spacing) * 7);
+    font-size: var(--text-footnote);
+    line-height: var(--text-footnote--line-height);
+  }
+
+  .ui-button[data-size="lg"] {
+    --_pad: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 10);
+    font-size: var(--text-reading);
+    line-height: var(--text-reading--line-height);
+    letter-spacing: var(--text-reading--letter-spacing);
+  }
+
+  /* A leading glyph carries its own side bearing, so the padding before it is optically smaller. */
+  .ui-button[data-icon] {
+    padding-inline-start: calc(var(--_pad) - 2px);
+  }
+
+  .ui-button[data-variant="primary"] {
+    --_bg: var(--color-fg-1);
+    --_bg-hover: color-mix(in oklab, var(--color-fg-1) 92%, var(--color-void));
+    --_bg-pressed: color-mix(in oklab, var(--color-fg-1) 84%, var(--color-void));
+    --_fg: var(--color-void);
+    --_fg-hover: var(--color-void);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .ui-button[data-variant="quiet"] {
+    --_bg: transparent;
+    --_bg-hover: var(--color-state-hover);
+    --_bg-pressed: var(--color-state-pressed);
+    --_fg: var(--color-fg-2);
+    --_fg-hover: var(--color-fg-1);
+  }
+
+  @media (hover: hover) {
+    .ui-button:not([aria-disabled="true"], [data-pressed]):hover {
+      background-color: var(--_bg-hover);
+      color: var(--_fg-hover);
+    }
+  }
+
+  .ui-button[data-pressed] {
+    background-color: var(--_bg-pressed);
+    color: var(--_fg-hover);
+  }
+
+  .ui-button[aria-disabled="true"]:not([aria-busy="true"]) {
+    background-color: color-mix(
+      in oklab,
+      var(--_bg) calc(var(--opacity-disabled) * 100%),
+      transparent
+    );
+  }
+
+  .ui-button[aria-busy="true"] {
+    cursor: progress;
+  }
+
+  .ui-button-content {
+    display: inline-flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 1.5);
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  /* The label stays in place while busy, so the button keeps its width. */
+  .ui-button[aria-busy="true"] > .ui-button-content {
+    opacity: 0;
+  }
+
+  .ui-button[aria-disabled="true"]:not([aria-busy="true"]) > .ui-button-content {
+    opacity: var(--opacity-disabled);
+  }
+
+  .ui-button-spinner {
+    position: absolute;
+    inset: 0;
+    margin: auto;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  @starting-style {
+    .ui-button-spinner {
+      opacity: 0;
+    }
+  }
+
+  .ui-icon-button {
+    --_size: calc(var(--spacing) * 7);
+    display: inline-grid;
+    place-items: center;
+    width: var(--_size);
+    height: var(--_size);
+    border-radius: var(--radius-md);
+    background-color: transparent;
+    color: var(--color-fg-2);
+  }
+
+  /* A 44 px target around every size. */
+  .ui-icon-button::after {
+    inset: calc((var(--_size) - 2px - var(--spacing) * 11) / 2);
+  }
+
+  .ui-icon-button[data-size="24"] {
+    --_size: calc(var(--spacing) * 6);
+    border-radius: var(--radius-sm);
+  }
+
+  .ui-icon-button[data-size="32"] {
+    --_size: calc(var(--spacing) * 8);
+  }
+
+  @media (hover: hover) {
+    .ui-icon-button:not([aria-disabled="true"], [data-pressed]):hover {
+      background-color: var(--color-state-hover);
+      color: var(--color-fg-1);
+    }
+  }
+
+  .ui-icon-button[data-pressed] {
+    background-color: var(--color-state-pressed);
+    color: var(--color-fg-1);
+  }
+
+  .ui-icon-button[aria-disabled="true"] > .ui-icon {
+    opacity: var(--opacity-disabled);
+  }
+
+  @media (--coarse) {
+    .ui-button {
+      min-width: calc(var(--spacing) * 11);
+      min-height: calc(var(--spacing) * 11);
+    }
+
+    .ui-button::after {
+      inset: -1px;
+    }
+  }
+
+  .ui-kbd {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-width: calc(var(--spacing) * 5);
+    height: calc(var(--spacing) * 5);
+    /* The bevel is the bottom 2 px of the key, so the face above it centres the glyphs. */
+    padding: 0 calc(var(--spacing) * 1.5) 2px;
+    border: 1px solid transparent;
+    border-radius: var(--radius-xs);
+    background-color: var(--color-raised-2);
+    box-shadow: inset 0 -2px 0 var(--color-key-bevel);
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    letter-spacing: var(--text-micro--letter-spacing);
+    white-space: nowrap;
+    vertical-align: middle;
+  }
+
+  @media (hover: none) and (pointer: coarse) {
+    .ui-kbd {
+      display: none;
+    }
+  }
+
+  .ui-badge {
+    --_tone: var(--color-fg-2);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font:
+      var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    letter-spacing: var(--text-micro--letter-spacing);
+    white-space: nowrap;
+  }
+
+  .ui-badge[data-tone="attention"] {
+    --_tone: var(--color-attention);
+  }
+
+  .ui-badge[data-tone="danger"] {
+    --_tone: var(--color-danger-fg);
+  }
+
+  .ui-badge[data-kind="dot"] {
+    width: calc(var(--spacing) * 2);
+    height: calc(var(--spacing) * 2);
+    border-radius: var(--radius-full);
+    background-color: var(--_tone);
+    box-shadow: 0 0 0 2px var(--color-void);
+  }
+
+  .ui-badge:is([data-kind="count"], [data-kind="label"]) {
+    border: 1px solid transparent;
+    background-color: var(--color-control);
+    color: var(--color-fg-2);
+  }
+
+  .ui-badge[data-kind="count"] {
+    min-width: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 4);
+    padding: 0 var(--spacing);
+    border-radius: var(--radius-full);
+    background-color: var(--color-control-hover);
+    color: var(--color-fg-1);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ui-badge[data-kind="label"] {
+    height: calc(var(--spacing) * 5);
+    padding: 0 calc(var(--spacing) * 1.5);
+    border-radius: var(--radius-sm);
+  }
+
+  /* Attention is a rim, never a fill. */
+  .ui-badge:is([data-kind="count"], [data-kind="label"])[data-tone="attention"] {
+    background-color: transparent;
+    box-shadow: inset 0 0 0 1px var(--color-attention);
+    color: var(--color-fg-1);
+  }
+
+  .ui-badge:is([data-kind="count"], [data-kind="label"])[data-tone="danger"] {
+    background-color: var(--color-danger-bg);
+    color: var(--color-danger-fg);
+  }
+
+  .ui-separator {
+    flex-shrink: 0;
+    align-self: stretch;
+    border: 0;
+    border-top: 1px solid var(--color-hairline);
+  }
+
+  .ui-separator[data-orientation="vertical"] {
+    align-self: center;
+    height: calc(var(--spacing) * 4);
+    border-top: 0;
+    border-left: 1px solid var(--color-hairline);
+  }
+
+  .ui-spinner {
+    flex-shrink: 0;
+    animation: ui-spin 0.9s linear infinite;
+  }
+
+  .ui-spinner-track {
+    opacity: 0.25;
+  }
+
+  @keyframes ui-spin {
+    to {
+      rotate: 1turn;
+    }
+  }
+
+  @keyframes ui-breathe {
+    50% {
+      opacity: 0.4;
+    }
+  }
+
+  .ui-tooltip {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    width: max-content;
+    max-width: calc(var(--spacing) * 60);
+    padding: var(--spacing) calc(var(--spacing) * 2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    background-color: var(--color-overlay);
+    box-shadow: var(--shadow-raised);
+    color: var(--color-fg-1);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    text-wrap: balance;
+    pointer-events: none;
+    transform-origin: 50% 100%;
+    transition:
+      opacity var(--dur-fade) var(--ease-enter),
+      scale var(--dur-spring) var(--ease-spring),
+      translate var(--dur-spring) var(--ease-spring);
+  }
+
+  .ui-tooltip[data-side="bottom"] {
+    transform-origin: 50% 0;
+  }
+
+  .ui-tooltip-text {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .ui-tooltip-reason {
+    color: var(--color-fg-2);
+  }
+
+  .ui-tooltip[data-instant] {
+    transition: none;
+  }
+
+  .ui-tooltip[data-closing] {
+    opacity: 0;
+    transition: opacity var(--dur-exit) var(--ease-exit);
+  }
+
+  /* It grows out of its trigger: up from below when above it, down from above when under it. */
+  @starting-style {
+    .ui-tooltip {
+      opacity: 0;
+      scale: 0.96;
+      translate: 0 2px;
+    }
+
+    .ui-tooltip[data-side="bottom"] {
+      translate: 0 -2px;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"] {
+      transform: none;
+    }
+
+    .ui-tooltip {
+      transition-property: opacity;
+    }
+
+    .ui-spinner {
+      animation: ui-breathe 1.6s var(--ease-standard) infinite;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :is(.ui-button, .ui-icon-button) {
+      border-color: ButtonText;
+    }
+
+    :is(.ui-button, .ui-icon-button)[aria-disabled="true"]:not([aria-busy="true"]) {
+      border-color: GrayText;
+      color: GrayText;
+    }
+
+    .ui-badge[data-kind="dot"] {
+      forced-color-adjust: none;
+      background-color: CanvasText;
+      box-shadow: none;
+    }
+  }
+}

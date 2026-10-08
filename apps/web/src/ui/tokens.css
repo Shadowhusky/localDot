@@ -79,6 +79,12 @@
   --color-state-selected: rgba(255, 255, 255, 0.12);
   --opacity-disabled: 0.45;
 
+  /* Filled controls (secondary buttons, chips): rest, hover and pressed. */
+  --color-control: rgba(255, 255, 255, 0.08);
+  --color-control-hover: rgba(255, 255, 255, 0.12);
+  --color-control-pressed: rgba(255, 255, 255, 0.16);
+  --color-key-bevel: rgba(255, 255, 255, 0.06);
+
   --color-scrim: rgba(0, 0, 0, 0.45);
   --color-stage-dim: var(--graphite-stage-dim);
 

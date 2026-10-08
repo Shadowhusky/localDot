@@ -196,7 +196,7 @@ function bundle(dir: string): { css: string; js: string } {
 // (base-ui.com/production-error), and tailwind-merge's class-group table names overscroll-x.
 const KIT_LIBRARIES = ["base-ui", "overscroll-x"];
 
-test("the production build orders the layers with the legacy styles in components", async () => {
+test("the production build orders the layers with the legacy styles in components, under the kit", async () => {
   const out = join(scratch, "dist");
   await build({
     root: WEB,
@@ -214,9 +214,11 @@ test("the production build orders the layers with the legacy styles in component
     "theme",
     "base",
     "components",
+    "kit",
     "utilities",
   ]);
   expect(layerRules(css, "components")).toContain(".app{");
+  expect(layerRules(css, "kit")).toContain(".ui-button{");
   expect(css).not.toContain("--rails-collapse");
   const legacy = classNames(layerRules(css, "components"));
   expect([...classNames(layerRules(css, "utilities"))].filter((name) => legacy.has(name))).toEqual(
