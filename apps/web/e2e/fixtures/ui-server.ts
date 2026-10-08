@@ -30,6 +30,7 @@ import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
 import { FrameStore } from "../../../daemon/src/gateway/frames.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
+import { keyLabel } from "../../../daemon/src/gateway/text.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
@@ -810,9 +811,25 @@ app.get("/owned-preview.js", (c) => c.body(DESKTOP_JS, 200, { "content-type": "t
 
 // QA control plane (no auth; loopback only, scratch fixture).
 const pendingApprovals: AbortController[] = [];
+// A keyboard approval as the daemon builds it: a repeated key (?kind=repeat) or a hold (?kind=hold).
+const KEY_CARDS: Record<string, [string, string][]> = {
+  repeat: [
+    ["Tool", "computer"],
+    ["Action", "key"],
+    ["Keys", "]"],
+    ["Repeat", "5 times"],
+  ],
+  hold: [
+    ["Tool", "computer"],
+    ["Action", "key"],
+    ["Keys", "shift"],
+    ["Hold", "1.5 s"],
+  ],
+};
 app.post("/__qa/approval", (c) => {
   if (!session?.generation) return c.text("no brain", 409);
   const risk = (c.req.query("risk") ?? "high") as "medium" | "high";
+  const keys = KEY_CARDS[c.req.query("kind") ?? ""];
   const controller = new AbortController();
   pendingApprovals.push(controller);
   void session
@@ -825,20 +842,46 @@ app.post("/__qa/approval", (c) => {
         digest: "d".repeat(64),
         targetDigest: "t".repeat(64),
       } as never,
-      {
-        actionClass: "send",
-        risk,
-        title: "Send the monthly report to team@example.test",
-        fields: [
-          ["To", "team@example.test"],
-          ["Subject", "Monthly report (sample)"],
-          ["Attachment", "summary.md"],
-        ],
-      } as never,
+      (keys
+        ? { actionClass: "unknown", risk: "medium", title: "Review action", fields: keys }
+        : {
+            actionClass: "send",
+            risk,
+            title: "Send the monthly report to team@example.test",
+            fields: [
+              ["To", "team@example.test"],
+              ["Subject", "Monthly report (sample)"],
+              ["Attachment", "summary.md"],
+            ],
+          }) as never,
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
     .catch((e) => effects.push(`approval-error:${String(e)}`));
+  return c.json({ ok: true });
+});
+// Two keyboard steps with the gateway's own labels: a key pressed five times and a held key.
+app.post("/__qa/keys", (c) => {
+  if (!session) return c.text("no session", 409);
+  for (const [combo, how] of [
+    [["]"], { repeat: 5 }],
+    [["shift"], { holdMs: 1500 }],
+  ] as const) {
+    const step = ulid();
+    session.append("step.start", { kind: "gui", planItem: "calc" }, step);
+    session.append(
+      "action.intent",
+      { verb: "key", label: keyLabel([...combo], how), risk: "none" },
+      step,
+    );
+    session.append(
+      "action.dispatch",
+      { input: { kind: "key", combo, ...how }, pressT: 0, ringAt: 0, injector: "xtest" },
+      step,
+    );
+    session.append("action.result", { ok: true }, step);
+    session.append("step.end", { status: "ok" }, step);
+  }
   return c.json({ ok: true });
 });
 app.post("/__qa/ask", (c) => {
