@@ -3,7 +3,7 @@ import {
   type ApprovalCard as Card,
   ApprovalCard as CardSchema,
 } from "@localdot/protocol";
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { type KeyboardEvent, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { allowedLine, allowWithoutAsking } from "../copy/autonomy.ts";
 import type { ApprovalOutcome } from "./model.ts";
@@ -40,6 +40,12 @@ export function AlwaysAllow({
       always: scope,
     });
   };
+  const close = (event: KeyboardEvent) => {
+    if (event.key !== "Escape" || !open) return;
+    event.stopPropagation();
+    setOpen(false);
+    toggle.current?.focus();
+  };
   return (
     <div className="always-allow">
       <button
@@ -50,6 +56,7 @@ export function AlwaysAllow({
         aria-controls={list}
         disabled={!canApprove}
         onClick={() => setOpen((old) => !old)}
+        onKeyDown={close}
       >
         Always allow…
       </button>
@@ -62,12 +69,7 @@ export function AlwaysAllow({
               type="button"
               disabled={!canApprove}
               onClick={() => choose(option.scope)}
-              onKeyDown={(event) => {
-                if (event.key !== "Escape") return;
-                event.stopPropagation();
-                setOpen(false);
-                toggle.current?.focus();
-              }}
+              onKeyDown={close}
             >
               {option.label}
             </button>

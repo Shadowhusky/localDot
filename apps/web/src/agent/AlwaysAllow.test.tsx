@@ -97,6 +97,16 @@ it("checks the card has not expired at the moment you choose", () => {
   expect(onDecision).not.toHaveBeenCalled();
 });
 
+it("closes with Escape from its own button", () => {
+  render(<AlwaysAllow card={card} canApprove onDecision={vi.fn()} />);
+  open();
+  const toggle = screen.getByRole("button", { name: "Always allow…" });
+  toggle.focus();
+  fireEvent.keyDown(toggle, { key: "Escape" });
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(document.activeElement).toBe(toggle);
+});
+
 it("closes with Escape and returns focus to its button", () => {
   render(<AlwaysAllow card={card} canApprove onDecision={vi.fn()} />);
   open();
