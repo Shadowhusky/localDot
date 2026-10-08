@@ -7,6 +7,7 @@ import { redactor } from "../redact.ts";
 import { SettingsStore } from "../settings.ts";
 import { PROXY_TOKEN, TOOL_TOKEN, toolHarness } from "../testing/harness.ts";
 import { ApprovalBroker } from "./approvals.ts";
+import { approvalDraft } from "./authorize.ts";
 
 const UI_TOKEN = "i".repeat(43);
 // The reviewer's hidden-tail command: the visible start, a run of spaces, then the real effect.
@@ -63,7 +64,7 @@ function setup() {
     return value;
   };
   const field = (label: string) => card().fields.find(([key]) => key === label)?.[1];
-  const answer = (decision: "approve" | "deny" = "approve") =>
+  const answer = (decision: "approve" | "deny" | "take_control" = "approve") =>
     ui.request(`http://127.0.0.1:4750/api/agent/sessions/${h.session.id}/approvals/answer`, {
       method: "POST",
       headers: { authorization: `Bearer ${UI_TOKEN}`, "content-type": "application/json" },
@@ -163,6 +164,79 @@ describe("the approval card carries the complete value being approved", () => {
     expect((await f.answer()).status).toBe(204);
     expect((await result).body.ok).toBe(true);
     expect(f.h.desktop.files.get("report.md")).toBe(content);
+  });
+
+  it("asks for every long value to be read before Approve counts", async () => {
+    const f = setup();
+    const old_text = `${"old line\n".repeat(3000)}keep`;
+    const new_text = `${"new line\n".repeat(3000)}${TAIL}`;
+    let settled = false;
+    const result = f.call("files", { op: "edit", path: "notes.md", old_text, new_text });
+    void result.then(() => {
+      settled = true;
+    });
+    await until(() => !!f.h.session.pendingApproval);
+    const labels = f.card().fields.map(([key]) => key);
+    const [old, next, tool] = ["Old text", "New text", "Tool"].map((key) => labels.indexOf(key));
+    expect(labels.length).toBeLessThan(15);
+    expect(f.card().partial).toEqual([
+      { field: old, length: old_text.length },
+      { field: next, length: new_text.length },
+    ]);
+
+    expect((await f.read(tool ?? 0)).status).toBe(404);
+    expect((await f.answer()).status).toBe(409);
+    expect((await f.read(15)).status).toBe(404);
+    expect((await f.answer()).status).toBe(409);
+    expect(await (await f.read(old ?? 0)).json()).toEqual({ text: old_text });
+    expect((await f.answer()).status).toBe(409);
+    expect(settled).toBe(false);
+
+    expect(await (await f.read(next ?? 0)).json()).toEqual({ text: new_text });
+    expect((await f.answer()).status).toBe(204);
+    expect((await result).body.ok).toBe(true);
+  });
+
+  it.each([
+    ["deny", "deny"],
+    ["take control of", "take_control"],
+  ] as const)("lets the user %s a long value without reading it", async (_, decision) => {
+    const f = setup();
+    const content = `${"report line\n".repeat(4000)}${TAIL}`;
+    f.call("files", { op: "write", path: "report.md", content });
+    await until(() => !!f.h.session.pendingApproval);
+    expect(f.card().partial).toHaveLength(1);
+    expect((await f.answer(decision)).status).toBe(204);
+    expect(f.h.session.pendingApproval).toBeUndefined();
+    expect(f.h.desktop.files.has("report.md")).toBe(false);
+  });
+
+  it("never splits a character where the start of a long value ends", async () => {
+    const f = setup();
+    const content = `${"x".repeat(APPROVAL_FIELD_CHARS - 1)}\u{1f600}${TAIL}`;
+    f.call("files", { op: "write", path: "report.md", content });
+    await until(() => !!f.h.session.pendingApproval);
+    const index = f.card().fields.findIndex(([key]) => key === "Content");
+    expect(f.field("Content")).toBe("x".repeat(APPROVAL_FIELD_CHARS - 1));
+    expect(f.card().partial).toEqual([{ field: index, length: content.length }]);
+    expect(await (await f.read(index)).json()).toEqual({ text: content });
+  });
+
+  it("redacts a known secret that the input's JSON form hides from the takeover check", () => {
+    const secret = 'review"secret\\value';
+    const redact = redactor([secret]);
+    const input = { op: "edit", path: "notes.md", old_text: `token=${secret}`, new_text: secret };
+    expect(redact(JSON.stringify(input))).toBe(JSON.stringify(input));
+    const draft = approvalDraft(
+      "files",
+      input,
+      { operation: "files_write" },
+      { actionClass: "unknown", mode: "ask", risk: "medium" },
+      redact,
+    );
+    expect(draft.fields.filter(([, text]) => text.includes("review"))).toEqual([]);
+    expect(draft.fields).toContainEqual(["Old text", "token=[redacted]"]);
+    expect(draft.fields).toContainEqual(["New text", "[redacted]"]);
   });
 
   it("refuses a value longer than any card can show instead of cutting it", async () => {
