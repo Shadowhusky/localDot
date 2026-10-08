@@ -358,12 +358,41 @@ describe("composer delivery ownership and draft handling", () => {
     f.submit();
     expect(f.requests).toEqual([]);
     expect(document.body.innerHTML).not.toContain(key);
-    fireEvent.click(screen.getByRole("button", { name: "Discard detected keys" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
     f.field.value = key;
     f.submit();
     expect(f.field.value).toBe("");
     expect(f.requests).toEqual([]);
     expect(screen.queryByLabelText("Message delivery")).toBeNull();
+  });
+  it("lets a draft with a detected key reach Send only by discarding the key", async () => {
+    const f = setup();
+    const key = `sk-ant-api03-${"x".repeat(40)}`;
+    f.input(`token ${key} please`);
+    const send = screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    const reason = document.getElementById(send.getAttribute("aria-describedby") ?? "");
+    expect(reason?.textContent).toContain("1 recognised key was removed from your message");
+    expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+    f.input(`${f.field.value} continue`);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    f.submit();
+    expect(f.requests).toEqual([]);
+    expect(send.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+    expect(screen.queryByRole("region", { name: "Key safeguard" })).toBeNull();
+    expect(document.activeElement).toBe(f.field);
+    expect(send.disabled).toBe(false);
+    expect(send.hasAttribute("aria-describedby")).toBe(false);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    await act(async () => {});
+    expect(f.requests).toEqual([
+      {
+        path: `/api/agent/sessions/${sessionId}/messages`,
+        body: { kind: "steer", text: "token  please continue" },
+      },
+    ]);
+    expect(JSON.stringify(f.requests)).not.toContain("sk-ant-api03");
   });
   it("rejects empty and oversized drafts, with an exact 8000-character positive", async () => {
     const f = setup();
@@ -372,7 +401,7 @@ describe("composer delivery ownership and draft handling", () => {
       f.submit();
     }
     expect(f.requests).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Review message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     f.input("x".repeat(8000));
     f.submit();
     expect(f.requests).toHaveLength(1);

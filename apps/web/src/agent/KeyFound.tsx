@@ -3,19 +3,29 @@ import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { KeyGuard } from "./useKeyGuard.ts";
 import "./key-guard.css";
 
-export function KeyFound({ guard, receive }: { guard: KeyGuard; receive?: KeyIntake["receive"] }) {
+export function KeyFound({
+  guard,
+  receive,
+  noticeId,
+}: {
+  guard: KeyGuard;
+  receive?: KeyIntake["receive"];
+  noticeId?: string;
+}) {
   const [selected, setSelected] = useState(0);
   const notice = guard.notice;
   if (!notice) return null;
   const index = Math.min(selected, Math.max(0, notice.candidates.length - 1));
   return (
     <section className="key-found" aria-label="Key safeguard">
-      <p role="alert">
+      <p role="alert" id={noticeId}>
         {notice.kind === "overflow"
           ? "This text exceeded the key safeguard's limit and was cleared. Paste keys directly into Keys."
           : notice.kind === "transfer_failed"
             ? "Could not move the key. Open Keys and paste it again."
-            : `${notice.candidates.length} recognised ${notice.candidates.length === 1 ? "key was" : "keys were"} removed from your message. Review the remaining text before sending.`}
+            : notice.candidates.length === 1
+              ? "1 recognised key was removed from your message. Discard it or move it to Keys before sending."
+              : `${notice.candidates.length} recognised keys were removed from your message. Discard them or move one to Keys before sending.`}
       </p>
       {notice.candidates.length > 1 && (
         <label>
@@ -31,11 +41,8 @@ export function KeyFound({ guard, receive }: { guard: KeyGuard; receive?: KeyInt
       )}
       {notice.candidates.length > 1 && <p>Moving one key discards the other detected keys.</p>}
       <div className="key-found-actions">
-        <button type="button" onClick={guard.edit}>
-          Edit message
-        </button>
         <button type="button" onClick={guard.remove}>
-          {notice.kind === "found" ? "Discard detected keys" : "Review message"}
+          {notice.kind === "found" ? "Discard keys and edit" : "Edit message"}
         </button>
         {notice.kind === "found" && (
           <button

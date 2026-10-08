@@ -9,7 +9,6 @@ export interface KeyGuard {
   readonly notice: KeyNotice | null;
   // Call on input/paste and again before copying text to delivery state or a request.
   check(field: HTMLTextAreaElement): boolean;
-  edit(): void;
   remove(): void;
   cancel(): void;
   move(
@@ -114,9 +113,6 @@ export function useKeyGuard(active = true): KeyGuard {
         raw = "";
       }
       return false;
-    },
-    edit() {
-      if (available.current && !document.hidden) owner.current?.focus();
     },
     remove() {
       clear();

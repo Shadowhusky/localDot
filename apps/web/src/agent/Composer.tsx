@@ -1,5 +1,5 @@
 import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
@@ -57,6 +57,7 @@ export function Composer(props: ComposerProps) {
   const current = useRef(props);
   const guard = useKeyGuard(true);
   const guardOwner = useRef<KeyGuard>(guard);
+  const keyNotice = useId();
   const revision = useRef(0);
   const nextId = useRef(0);
   const pending = useRef<Delivery | null>(null);
@@ -391,6 +392,7 @@ export function Composer(props: ComposerProps) {
             <button
               type="submit"
               disabled={!permitted || sending || uncertain || !!guard.notice || uploads.blocked}
+              aria-describedby={guard.notice ? keyNotice : undefined}
             >
               {sending
                 ? "Sending…"
@@ -403,7 +405,7 @@ export function Composer(props: ComposerProps) {
           )}
         </div>
       </form>
-      <KeyFound guard={guard} receive={props.receiveKey} />
+      <KeyFound guard={guard} receive={props.receiveKey} noticeId={keyNotice} />
       {problem && <p role="alert">{problem}</p>}
       {(props.agent.snapshot?.status === "paused" || props.agent.model.pendingTakeover) && (
         <p className="composer-note">A message does not resume the task or hand back control.</p>
