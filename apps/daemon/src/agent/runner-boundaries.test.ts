@@ -611,8 +611,8 @@ it("a keyd boot change cannot reopen a saved user Pause or claim an old model ow
   expect(writes.mock.calls.filter(([, input]) => input.state === "open")).toHaveLength(before);
 });
 
-it.each(["the Pause itself", "an approval", "a question"] as const)(
-  "a budget pause still holds Resume after a user Pause publishes a paused state for %s",
+it.each(["the Pause itself", "a repeated action", "an approval", "a question"] as const)(
+  "a budget pause still holds Resume after a Pause publishes a paused state for %s",
   async (wait) => {
     const h = setup();
     const session = await h.runner.start(h.cellId, "Budget, then Pause");
@@ -624,8 +624,16 @@ it.each(["the Pause itself", "an approval", "a question"] as const)(
       spentUSD: 5,
       needUSD: 1,
     });
-    const pause = h.runner.pauseTask(session.id, ulid());
+    // The third identical input trips the repeat guard, which asks for its own Pause.
+    if (wait === "a repeated action")
+      for (let i = 0; i < 3; i++)
+        session.admitNativeEffect(
+          { verb: "key", combo: ["Ctrl", "c"] },
+          { target: null, window: 1, point: null },
+        );
+    else h.runner.pauseTask(session.id, ulid());
     await until(() => session.safetyPause?.phase === "paused");
+    const pause = required(session.safetyPause);
     const generation = required(session.generation);
     if (wait === "an approval") {
       void session
