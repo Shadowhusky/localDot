@@ -167,6 +167,11 @@ int main(void) {
   code[4]=datum((void *)CFDataGetBytePtr(broad),CFDataGetLength(broad));
   if (SecAccessCreateFromOwnerAndACL(&owner,1,&entry,&access) || keyd_acl_policy(access,pinned)==0) return 1;
   CFRelease(access); printf("PASS framework wide requirement refusal\n");
+  // A delegated read grant lets its holder pass the grant on, so the pinned subject alone is not enough.
+  code[4]=datum((void *)CFDataGetBytePtr(expected),CFDataGetLength(expected));
+  entry.EntryPublicInfo.Delegate=CSSM_TRUE;
+  if (SecAccessCreateFromOwnerAndACL(&owner,1,&entry,&access) || keyd_acl_policy(access,pinned)==0) return 1;
+  CFRelease(access); printf("PASS framework delegated grant refusal\n");
   CFRelease(expected);CFRelease(broad);CFRelease(changed);
   CFRelease(generated);CFRelease(weakened);CFRelease(wrongTeam);return migration();
 }

@@ -11,6 +11,7 @@ package vault
 #include <string.h>
 #include <unistd.h>
 #include "keychain_acl_darwin.h"
+#include "keychain_identity_darwin.h"
 #ifdef KEYD_NATIVE_TRACE
 #include <stdio.h>
 #define KEYD_TRACE(phase) fprintf(stderr, "keychain-native %s status=%d\n", phase, (int)status)
@@ -32,49 +33,47 @@ static OSStatus keyd_check_code(SecCodeRef code, SecRequirementRef requirement) 
   CFDictionaryRef info = NULL;
   if (status == errSecSuccess) status = SecCodeCopyStaticCode(code, kSecCSDefaultFlags, &file);
   if (status == errSecSuccess) status = SecCodeCopySigningInformation(file, kSecCSSigningInformation, &info);
-  if (status == errSecSuccess) {
-    CFTypeRef flags = CFDictionaryGetValue(info, kSecCodeInfoFlags);
-    CFTypeRef entitlements = CFDictionaryGetValue(info, kSecCodeInfoEntitlementsDict);
-    int value = 0;
-    if (!flags || CFGetTypeID(flags) != CFNumberGetTypeID() ||
-        !CFNumberGetValue((CFNumberRef)flags, kCFNumberIntType, &value) ||
-        !(value & kSecCodeSignatureRuntime) ||
-        (entitlements && (CFGetTypeID(entitlements) != CFDictionaryGetTypeID() ||
-         CFDictionaryGetCount((CFDictionaryRef)entitlements) != 0))) status = errSecAuthFailed;
-  }
+  if (status == errSecSuccess) status = keyd_signing_info(info);
   if (info) CFRelease(info);
   if (file) CFRelease(file);
   return status;
 }
 
-// Identity checks are deliberately before even selecting the default keychain. No PID argument,
-// environment override, development bypass, generic security tool or unsigned fallback exists.
-static OSStatus keyd_authorized(void) {
-  pid_t parentPID = getppid();
-  if (parentPID <= 1 || getuid() != geteuid()) return errSecAuthFailed;
-  CFStringRef text = CFStringCreateWithCString(NULL, keyd_requirement, kCFStringEncodingUTF8);
-  SecRequirementRef requirement = NULL;
-  SecCodeRef self = NULL, parent = NULL;
-  CFNumberRef pid = NULL;
-  CFDictionaryRef attributes = NULL;
-  OSStatus status = text ? SecRequirementCreateWithString(text, kSecCSDefaultFlags, &requirement) : errSecAllocate;
-  if (status == errSecSuccess) status = SecCodeCopySelf(kSecCSDefaultFlags, &self);
+static OSStatus keyd_check_self(SecRequirementRef requirement) {
+  SecCodeRef self = NULL;
+  OSStatus status = SecCodeCopySelf(kSecCSDefaultFlags, &self);
   if (status == errSecSuccess) status = keyd_check_code(self, requirement);
-  if (status == errSecSuccess) {
-    pid = CFNumberCreate(NULL, kCFNumberIntType, &parentPID);
+  if (self) CFRelease(self);
+  return status;
+}
+
+static OSStatus keyd_check_process(pid_t parentPID, SecRequirementRef requirement) {
+  SecCodeRef parent = NULL;
+  CFDictionaryRef attributes = NULL;
+  CFNumberRef pid = CFNumberCreate(NULL, kCFNumberIntType, &parentPID);
+  OSStatus status = errSecAllocate;
+  if (pid) {
     const void *keys[] = { kSecGuestAttributePid };
     const void *values[] = { pid };
-    if (!pid) status = errSecAllocate;
-    else attributes = CFDictionaryCreate(NULL, keys, values, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
-    if (!attributes) status = errSecAllocate;
+    attributes = CFDictionaryCreate(NULL, keys, values, 1, &kCFTypeDictionaryKeyCallBacks, &kCFTypeDictionaryValueCallBacks);
   }
-  if (status == errSecSuccess) status = SecCodeCopyGuestWithAttributes(NULL, attributes, kSecCSDefaultFlags, &parent);
+  if (attributes) status = SecCodeCopyGuestWithAttributes(NULL, attributes, kSecCSDefaultFlags, &parent);
   if (status == errSecSuccess) status = keyd_check_code(parent, requirement);
-  if (getppid() != parentPID) status = errSecAuthFailed;
   if (attributes) CFRelease(attributes);
   if (pid) CFRelease(pid);
   if (parent) CFRelease(parent);
-  if (self) CFRelease(self);
+  return status;
+}
+
+static const keyd_identity_checks keyd_process_checks = { getppid, keyd_check_self, keyd_check_process };
+
+// Identity checks are deliberately before even selecting the default keychain. No PID argument,
+// environment override, development bypass, generic security tool or unsigned fallback exists.
+static OSStatus keyd_authorized(void) {
+  CFStringRef text = CFStringCreateWithCString(NULL, keyd_requirement, kCFStringEncodingUTF8);
+  SecRequirementRef requirement = NULL;
+  OSStatus status = text ? SecRequirementCreateWithString(text, kSecCSDefaultFlags, &requirement) : errSecAllocate;
+  if (status == errSecSuccess) status = keyd_identity_check(&keyd_process_checks, requirement);
   if (requirement) CFRelease(requirement);
   if (text) CFRelease(text);
   return status;
@@ -193,14 +192,8 @@ func nativeKeychainItem(operation, service, account string, data []byte) ([]byte
 	var mayHaveChanged C.int
 	status := C.keyd_item(op, svc, acct, input, C.uint(len(data)), &output, &length, &mayHaveChanged)
 	defer C.keyd_free_output(output, length)
-	if status == C.errSecItemNotFound {
-		return nil, helperNotFound
-	}
-	if status != C.errSecSuccess {
-		if mayHaveChanged == 0 {
-			return nil, helperUnchanged
-		}
-		return nil, 1
+	if code := nativeExit(int32(status), mayHaveChanged != 0); code != 0 {
+		return nil, code
 	}
 	if length > helperItemLimit {
 		return nil, 1
@@ -212,6 +205,22 @@ func nativeKeychainItem(operation, service, account string, data []byte) ([]byte
 		return nil, 1
 	}
 	return C.GoBytes(output, C.int(length)), 0
+}
+
+const nativeItemNotFound = int32(C.errSecItemNotFound)
+
+// nativeExit is the helper's status for a native result. Only a failure before any write began may
+// claim the old value is whole.
+func nativeExit(status int32, mayHaveChanged bool) int {
+	switch {
+	case status == nativeItemNotFound:
+		return helperNotFound
+	case status == 0:
+		return 0
+	case mayHaveChanged:
+		return 1
+	}
+	return helperUnchanged
 }
 
 // Used by an unsigned test executable to check the denial path without opening any keychain.
