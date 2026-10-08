@@ -198,7 +198,9 @@ describe("hitTest", () => {
     });
     const native = fakeNative({
       at: (w) =>
-        w.id === 11 ? { element: el("list item", "Trash", { x: 50, y: 140, w: 30, h: 20 }) } : {},
+        w.id === 11
+          ? { element: el("list item", "Trash", { x: 50, y: 140, w: 30, h: 20 }) }
+          : { element: null },
     });
     const d = deps([icon, IMAGE], native);
     expect((await hitTest(d, { x: 115, y: 296 })).window).toBe(90);
