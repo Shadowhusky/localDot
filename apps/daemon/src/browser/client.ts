@@ -20,8 +20,8 @@ import {
   TypeResult,
   ULID_PATTERN,
 } from "@localdot/protocol";
+import { keyName } from "@localdot/protocol/keys";
 import { z } from "zod";
-import { keyName } from "../../../../cells/desktop/desktopd/src/x/keys.ts";
 import {
   BrowserActionPermit,
   BrowserControlReply,

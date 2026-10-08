@@ -39,6 +39,12 @@ export const InputResult = z.object({
 });
 export type InputResult = z.infer<typeof InputResult>;
 
+export const ReleaseResult = z.object({
+  keys: z.number().int().nonnegative(),
+  buttons: z.number().int().nonnegative(),
+});
+export type ReleaseResult = z.infer<typeof ReleaseResult>;
+
 export const TypePace = z.object({
   firstMs: z.number().nonnegative(),
   firstCount: z.number().int().nonnegative(),

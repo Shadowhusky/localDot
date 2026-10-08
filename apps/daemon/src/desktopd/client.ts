@@ -8,6 +8,7 @@ import {
   LaunchResult,
   ObserveResult,
   type Point,
+  ReleaseResult,
   type SettleRequest,
   SettleResult,
   TypeProgress,
@@ -49,7 +50,13 @@ export class DesktopdClient {
   }
 
   input(req: InputRequest, signal?: AbortSignal): Promise<InputResult> {
-    return this.#json("POST", "/input", req, TIMEOUT_MS.input, InputResult.parse, signal);
+    const held = req.input.kind === "key" ? (req.input.holdMs ?? 0) : 0;
+    return this.#json("POST", "/input", req, TIMEOUT_MS.input + held, InputResult.parse, signal);
+  }
+
+  // Releases every key and button that is down on the desktop.
+  release(): Promise<ReleaseResult> {
+    return this.#json("POST", "/release", {}, TIMEOUT_MS.input, ReleaseResult.parse);
   }
 
   settle(req: Partial<SettleRequest> = {}): Promise<SettleResult> {

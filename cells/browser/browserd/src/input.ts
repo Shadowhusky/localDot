@@ -7,9 +7,9 @@ import {
   type TypeProgress,
   type TypeResult,
 } from "@localdot/protocol";
+import { keyName } from "@localdot/protocol/keys";
 import { z as schema } from "zod";
 import type { BrowserManualReply } from "../../../../packages/protocol/src/browser-control.ts";
-import { keyName } from "../../../desktop/desktopd/src/x/keys.ts";
 import type { BrowserActionLease, BrowserControl } from "./control.ts";
 import type { BrowserGeometry, BrowserGeometrySnapshot, BrowserPoint } from "./geometry.ts";
 import type { BrowserNative } from "./native.ts";

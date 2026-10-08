@@ -8,7 +8,7 @@ export interface NativeDevice {
     DesktopdClient,
     "clock" | "input" | "settle" | "observe" | "focused" | "hitTest" | "find" | "type"
   > &
-    Partial<Pick<DesktopdClient, "zoom">>;
+    Partial<Pick<DesktopdClient, "zoom" | "release">>;
   clocks: ClockMap;
 }
 

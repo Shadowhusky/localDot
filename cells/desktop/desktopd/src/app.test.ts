@@ -174,6 +174,12 @@ function fakeX(): XHelper & {
         for (const l of listeners) l({ ev: "press", kind: "key", detail: 30, mono });
         return { keycode: 30, mods: [] } as never;
       }
+      if (cmd === "hold") {
+        for (const l of listeners) l({ ev: "press", kind: "key", detail: 50, mono });
+        return { keycodes: [50] } as never;
+      }
+      if (cmd === "release") return { keycodes: [50] } as never;
+      if (cmd === "release_all") return { keys: 2, buttons: 1 } as never;
       if (cmd === "settle")
         return {
           changed: [[1, 2, 3, 4]],
@@ -343,6 +349,42 @@ describe("desktopd input routes", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  it("releases held keys when the request that holds them is stopped", async () => {
+    const x = fakeX();
+    const stop = new AbortController();
+    const holding = fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["shift"], holdMs: 10_000 } }),
+      signal: stop.signal,
+    });
+    await new Promise((r) => setTimeout(r, 30));
+    expect(x.calls).toEqual(["arm", "hold"]);
+    stop.abort();
+    await Promise.resolve(holding).catch(() => undefined);
+    await new Promise((r) => setTimeout(r, 10));
+    expect(x.calls).toEqual(["arm", "hold", "release"]);
+  });
+
+  it("releases every key and button that is down", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/release", { method: "POST", headers: bearer });
+    expect(await res.json()).toMatchObject({ keys: 2, buttons: 1 });
+    expect(x.calls).toEqual(["release_all"]);
+  });
+
+  it("answers an unknown key name with 400 and its close matches", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["ctrl", "Retrun"] } }),
+    });
+    expect(res.status).toBe(400);
+    expect(await res.text()).toMatch(/unknown key "Retrun"; did you mean Return/);
+    expect(x.calls).toEqual([]);
   });
 
   it("answers 503 on the input routes when the helper is missing", async () => {

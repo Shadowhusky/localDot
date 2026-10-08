@@ -185,9 +185,14 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     withX(async (x) => {
       const parsed = InputRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      const result: InputResult = await inject(x, parsed.data, deps.injectors);
+      const result: InputResult = await inject(x, parsed.data, deps.injectors, c.req.raw.signal);
       return c.json(result);
     })(),
+  );
+
+  // Every key and button the X server has down, whoever pressed them: after a Stop or a failure.
+  app.post("/release", async (c) =>
+    withX(async (x) => c.json(await x.call<{ keys: number; buttons: number }>("release_all")))(),
   );
 
   app.post("/type", async (c) =>

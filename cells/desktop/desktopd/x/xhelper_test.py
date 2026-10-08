@@ -1,8 +1,11 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -519,6 +522,247 @@ class Capture(unittest.TestCase):
             with self.assertRaises(OSError):
                 cmds.cmd_capture({"path": os.path.join(tmp, "frame.raw")})
             self.assertEqual(Path(target).read_bytes(), b"keep")
+
+
+# A US layout: keysym -> [(keycode, level)]. Level 1 needs Shift.
+US_KEYS = {
+    0xffe3: [(37, 0)], 0xffe1: [(50, 0)], 0xffe9: [(64, 0)], 0xfe03: [(92, 0)],
+    0x2f: [(61, 0)], 0x3f: [(61, 1)], 0x3d: [(21, 0)], 0x2b: [(21, 1)], 0x61: [(38, 0)],
+    0x5d: [(35, 0)], 0x7e: [(49, 1)], 0xff0d: [(36, 0)], 0x40: [(11, 2)], 0xff7f: [(77, 0)],
+    0xff9c: [(87, 0)], 0xffb1: [(87, 1)], 0xffab: [(86, 0)],
+}
+# Both levels of the keypad keys (KP_End/KP_1, KP_Add/KP_Add).
+KEYPAD_LEVELS = {(87, 0): 0xff9c, (87, 1): 0xffb1, (86, 0): 0xffab, (86, 1): 0xffab}
+
+
+class Keyboard:
+    """A fake X keyboard: XTest presses and releases, and the keys the server holds down."""
+
+    def __init__(self, fail_on=None, numlock=False):
+        self.events = []
+        self.down = set()
+        self.buttons = set()
+        self.fail_on = fail_on
+        self.numlock = numlock
+
+    def xtest_fake_input(self, kind, detail=0, x=0, y=0):
+        if self.fail_on is not None and kind == X.KeyPress and detail == self.fail_on:
+            raise RuntimeError("BadValue")
+        self.events.append((kind, detail))
+        if kind == X.KeyPress:
+            self.down.add(detail)
+            if detail == 77:
+                self.numlock = not self.numlock
+        elif kind == X.KeyRelease:
+            self.down.discard(detail)
+        elif kind == X.ButtonRelease:
+            self.buttons.discard(detail)
+
+    def sync(self):
+        pass
+
+    def pending_events(self):
+        return 0
+
+    def keysym_to_keycodes(self, keysym):
+        return iter(US_KEYS.get(keysym, []))
+
+    def keycode_to_keysym(self, keycode, index):
+        return KEYPAD_LEVELS.get((keycode, index), 0)
+
+    def get_modifier_mapping(self):
+        return [[50], [66], [37], [64], [77], [], [], [92]]
+
+    def query_keymap(self):
+        return [sum(1 << b for b in range(8) if i * 8 + b in self.down) for i in range(32)]
+
+
+def keyboard(fail_on=None, numlock=False):
+    cmds = xhelper.Commands.__new__(xhelper.Commands)
+    kb = Keyboard(fail_on, numlock)
+    cmds.d = kb
+    cmds.held = []
+    cmds.held_taps = []
+    cmds.hold_until = None
+    cmds.remapped = {}
+    cmds.paused = []
+    cmds.pause = cmds.paused.append
+    cmds.root = types.SimpleNamespace(
+        query_pointer=lambda: types.SimpleNamespace(
+            mask=sum(1 << (7 + b) for b in kb.buttons) | (1 << 4 if kb.numlock else 0),
+            root_x=0, root_y=0))
+    return cmds, kb
+
+
+def presses(kb):
+    return [(("down" if k == X.KeyPress else "up"), d) for k, d in kb.events]
+
+
+class Keys(unittest.TestCase):
+    def test_a_shifted_symbol_presses_its_level_modifier_around_its_own_key(self):
+        cmds, kb = keyboard()
+        reply = cmds.cmd_keys({"combo": ["Control_L", 0x3f]})
+        self.assertEqual(reply, {"keycodes": [37, 61]})
+        self.assertEqual(presses(kb), [("down", 37), ("down", 50), ("down", 61),
+                                       ("up", 61), ("up", 50), ("up", 37)])
+
+    def test_plus_is_shift_and_equal_and_altgr_symbols_press_altgr(self):
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": [0xffe3, 0x2b]})
+        self.assertEqual(presses(kb)[:3], [("down", 37), ("down", 50), ("down", 21)])
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": [0x40]})
+        self.assertEqual(presses(kb), [("down", 92), ("down", 11), ("up", 11), ("up", 92)])
+
+    def test_a_combo_that_holds_shift_already_does_not_press_it_twice(self):
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": ["Shift_L", 0x7e]})
+        self.assertEqual(presses(kb), [("down", 50), ("down", 49), ("up", 49), ("up", 50)])
+
+    def test_names_still_work_for_the_browser_helper(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_keys({"combo": ["Control_L", "a"]}), {"keycodes": [37, 38]})
+
+    def test_repeats_the_combo_with_a_gap_between_presses(self):
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": [0x5d], "repeat": 3})
+        self.assertEqual(presses(kb), [("down", 35), ("up", 35)] * 3)
+        self.assertEqual(len(cmds.paused), 2)
+        for bad in (0, 101, 2.5, True):
+            with self.assertRaises(ValueError):
+                cmds.cmd_keys({"combo": [0x5d], "repeat": bad})
+
+    def test_a_failure_mid_combo_releases_what_went_down(self):
+        cmds, kb = keyboard(fail_on=61)
+        with self.assertRaises(RuntimeError):
+            cmds.cmd_keys({"combo": [0xffe3, 0x2f]})
+        self.assertEqual(kb.down, set())
+        self.assertEqual(presses(kb), [("down", 37), ("up", 37)])
+
+    def test_a_keypad_digit_turns_numlock_on_around_it_rather_than_pressing_shift(self):
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": [0xffb1]})
+        self.assertEqual(presses(kb), [("down", 77), ("up", 77), ("down", 87), ("up", 87),
+                                       ("down", 77), ("up", 77)])
+        self.assertFalse(kb.numlock)
+
+    def test_numlock_already_right_is_left_alone(self):
+        cmds, kb = keyboard(numlock=True)
+        cmds.cmd_keys({"combo": [0xffb1]})
+        self.assertEqual(presses(kb), [("down", 87), ("up", 87)])
+        cmds, kb = keyboard(numlock=True)
+        cmds.cmd_keys({"combo": [0xff9c]})
+        self.assertEqual(presses(kb)[2:4], [("down", 87), ("up", 87)])
+        self.assertTrue(kb.numlock)
+        cmds, kb = keyboard(numlock=True)
+        cmds.cmd_keys({"combo": [0xffab]})
+        self.assertEqual(presses(kb), [("down", 86), ("up", 86)])
+
+    def test_refuses_keysyms_outside_x(self):
+        cmds, _ = keyboard()
+        for bad in (0, -1, 0x20000000, True):
+            with self.assertRaises(ValueError):
+                cmds.cmd_keys({"combo": [bad]})
+
+
+class Holds(unittest.TestCase):
+    def test_holds_keys_down_until_released(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_hold({"combo": [0xffe1, 0x61], "ms": 500}), {"keycodes": [50, 38]})
+        self.assertEqual(kb.down, {50, 38})
+        self.assertIsNotNone(cmds.hold_until)
+        self.assertEqual(cmds.cmd_release({}), {"keycodes": [50, 38]})
+        self.assertEqual(kb.down, set())
+        self.assertEqual(presses(kb)[-2:], [("up", 38), ("up", 50)])
+        self.assertIsNone(cmds.hold_until)
+        self.assertEqual(cmds.cmd_release({}), {"keycodes": []})
+
+    def test_a_new_hold_releases_the_last_one_first(self):
+        cmds, kb = keyboard()
+        cmds.cmd_hold({"combo": [0xffe1], "ms": 500})
+        cmds.cmd_hold({"combo": [0x61], "ms": 500})
+        self.assertEqual(kb.down, {38})
+
+    def test_refuses_holds_out_of_range_and_releases_a_hold_that_failed(self):
+        cmds, kb = keyboard()
+        for ms in (0, 30_001, "1"):
+            with self.assertRaises(ValueError):
+                cmds.cmd_hold({"combo": [0xffe1], "ms": ms})
+        cmds, kb = keyboard(fail_on=38)
+        with self.assertRaises(RuntimeError):
+            cmds.cmd_hold({"combo": [0xffe1, 0x61], "ms": 500})
+        self.assertEqual((kb.down, cmds.held), (set(), []))
+
+    def test_a_held_keypad_digit_turns_numlock_back_once_released(self):
+        cmds, kb = keyboard()
+        cmds.cmd_hold({"combo": [0xffb1], "ms": 500})
+        self.assertEqual((kb.down, kb.numlock), ({87}, True))
+        cmds.cmd_release({})
+        self.assertEqual((kb.down, kb.numlock), (set(), False))
+
+    def test_release_all_lets_go_of_every_key_and_button_the_server_has_down(self):
+        cmds, kb = keyboard()
+        cmds.cmd_hold({"combo": [0xffe3], "ms": 500})
+        kb.down.update({50, 64})
+        kb.buttons.add(1)
+        reply = cmds.cmd_release_all({})
+        self.assertEqual(reply, {"keys": 3, "buttons": 1})
+        self.assertEqual((kb.down, kb.buttons, cmds.held), (set(), set(), []))
+
+
+class Serve(unittest.TestCase):
+    def serve(self, lines, close_after=0.0, slack=None):
+        cmds, kb = keyboard()
+        read, write = os.pipe()
+        out = []
+        released_at = []
+        release = cmds.release_held
+
+        def tracked():
+            if cmds.held:
+                released_at.append(xhelper.mono())
+            return release()
+        cmds.release_held = tracked
+
+        def feed():
+            for line in lines:
+                os.write(write, (json.dumps(line) + "\n").encode())
+            time.sleep(close_after)
+            os.close(write)
+        threading.Thread(target=feed).start()
+        with patch.object(xhelper, "emit", out.append), \
+                patch.object(xhelper, "HOLD_SLACK_MS", 0 if slack is None else slack):
+            start = xhelper.mono()
+            xhelper.serve(cmds, read)
+            end = xhelper.mono()
+        os.close(read)
+        return cmds, kb, out, [t - start for t in released_at], end - start
+
+    def test_answers_each_request_line(self):
+        _, kb, out, _, _ = self.serve([{"id": 1, "cmd": "keys", "combo": [0x61]},
+                                       {"id": 2, "cmd": "nope"}])
+        self.assertEqual(out[0], {"keycodes": [38], "id": 1, "ok": True})
+        self.assertEqual((out[1]["id"], out[1]["ok"]), (2, False))
+
+    def test_a_hold_nobody_ends_is_released_when_its_time_is_up(self):
+        _, kb, _, released, took = self.serve([{"id": 1, "cmd": "hold", "combo": [0xffe1], "ms": 50}],
+                                              close_after=0.4)
+        self.assertEqual(kb.down, set())
+        self.assertEqual(len(released), 1)
+        self.assertLess(released[0], 300)
+        self.assertGreater(took, 350)
+
+    def test_held_keys_are_released_when_desktopd_goes_away(self):
+        _, kb, _, released, _ = self.serve([{"id": 1, "cmd": "hold", "combo": [0xffe1], "ms": 20_000}],
+                                           close_after=0.05, slack=1000)
+        self.assertEqual(kb.down, set())
+        self.assertEqual(len(released), 1)
+
+    def test_quit_releases_held_keys(self):
+        _, kb, out, _, _ = self.serve([{"id": 1, "cmd": "hold", "combo": [0xffe1], "ms": 20_000},
+                                       {"id": 2, "cmd": "quit"}], close_after=0.3, slack=1000)
+        self.assertEqual(kb.down, set())
+        self.assertEqual(out[-1], {"id": 2, "ok": True})
 
 
 if __name__ == "__main__":

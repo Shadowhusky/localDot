@@ -163,8 +163,9 @@ describe("inject", () => {
         if (cmd === "windows") return { windows, generation: 1 };
         if (cmd === "activate") return { active: args.window, changed: true, waitedMs: 3 };
         if (cmd === "click") emit(press("button", 1, 500));
-        if (cmd === "keys") emit(press("key", 36, 500));
-        return {};
+        if (cmd !== "keys") return {};
+        emit(press("key", 36, 500));
+        return { keycodes: [36] };
       });
       return { s, done: inject(s.helper, req) };
     };
@@ -251,16 +252,105 @@ describe("inject", () => {
     expect(s.calls.find((c) => c.cmd === "click")?.args).toMatchObject({ button: 3, count: 2 });
   });
 
-  it("presses key combos and takes the last key's press time", async () => {
+  it("presses key combos as keysyms and takes the last key's press time", async () => {
     const s = scripted((_cmd, _args, emit) => {
       emit(press("key", 37, 10));
       emit(press("key", 46, 12));
       return { keycodes: [37, 46] };
     });
     const res = await inject(s.helper, { ...click, input: { kind: "key", combo: ["ctrl", "L"] } });
-    expect(s.calls.find((c) => c.cmd === "keys")?.args).toEqual({ combo: ["Control_L", "l"] });
+    expect(s.calls.find((c) => c.cmd === "keys")?.args).toEqual({ combo: [0xffe3, 0x6c] });
     expect(res.pressMono).toBe(12);
-    expect(res.presses).toEqual([10, 12]);
+    expect(res.presses).toEqual([12]);
+  });
+
+  it("times a shifted symbol from its own key, not from the Shift the helper adds", async () => {
+    const s = scripted((_cmd, _args, emit) => {
+      emit(press("key", 37, 10));
+      emit(press("key", 50, 11));
+      emit(press("key", 61, 12));
+      return { keycodes: [37, 61] };
+    });
+    const res = await inject(s.helper, {
+      ...click,
+      input: { kind: "key", combo: ["ctrl", "Page_Up", "?"] },
+    });
+    expect(s.calls.find((c) => c.cmd === "keys")?.args).toEqual({ combo: [0xffe3, 0xff55, 0x3f] });
+    expect(res.presses).toEqual([12]);
+  });
+
+  it("presses a repeated combo in one helper call and returns one press per repeat", async () => {
+    const s = scripted((_cmd, args, emit) => {
+      for (let i = 0; i < Number(args.repeat); i++) emit(press("key", 35, 20 + i));
+      return { keycodes: [35] };
+    });
+    const res = await inject(s.helper, {
+      ...click,
+      input: { kind: "key", combo: ["bracketright"], repeat: 5 },
+    });
+    expect(s.calls.filter((c) => c.cmd === "keys").map((c) => c.args)).toEqual([
+      { combo: [0x5d], repeat: 5 },
+    ]);
+    expect(res).toMatchObject({ pressMono: 20, presses: [20, 21, 22, 23, 24] });
+  });
+
+  it("refuses an unknown key before arming, naming the close ones", async () => {
+    const s = scripted(() => ({}));
+    await expect(
+      inject(s.helper, { ...click, input: { kind: "key", combo: ["ctrl", "PageUpp"] } }),
+    ).rejects.toThrow(/unknown key "PageUpp"; did you mean/);
+    await expect(
+      inject(s.helper, { ...click, input: { kind: "key", combo: ["a"], repeat: 2, holdMs: 5 } }),
+    ).rejects.toThrow(RangeError);
+    expect(s.calls).toHaveLength(0);
+  });
+
+  describe("held keys", () => {
+    const held = (holdMs: number, opts: { silent?: boolean } = {}) => {
+      const s = scripted((cmd, _args, emit) => {
+        if (cmd === "hold") {
+          if (!opts.silent) emit(press("key", 50, 30));
+          return { keycodes: [50] };
+        }
+        if (cmd === "release") return { keycodes: [50] };
+        return {};
+      });
+      const at: Record<string, number> = {};
+      const call = s.helper.call.bind(s.helper);
+      s.helper.call = (cmd, args, timeoutMs) => {
+        at[cmd] = performance.now();
+        return call(cmd, args, timeoutMs);
+      };
+      const req: InputRequest = {
+        ...click,
+        input: { kind: "key", combo: ["shift"], holdMs },
+      };
+      return { s, at, req };
+    };
+
+    it("keeps the keys down for their time, then releases them", async () => {
+      const { s, at, req } = held(60);
+      const res = await inject(s.helper, req);
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "hold", "release"]);
+      expect(s.calls[1]?.args).toEqual({ combo: [0xffe1], ms: 60 });
+      expect((at.release as number) - (at.hold as number)).toBeGreaterThanOrEqual(55);
+      expect(res.presses).toEqual([30]);
+    });
+
+    it("releases them at once when the request is stopped", async () => {
+      const { s, at, req } = held(10_000);
+      const stop = new AbortController();
+      setTimeout(() => stop.abort(), 20);
+      await expect(inject(s.helper, req, { xtest: true }, stop.signal)).rejects.toThrow(/abort/);
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "hold", "release"]);
+      expect((at.release as number) - (at.hold as number)).toBeLessThan(1000);
+    });
+
+    it("releases them when their press is never seen", async () => {
+      const { s, req } = held(10_000, { silent: true });
+      await expect(inject(s.helper, req)).rejects.toThrow(NoPressError);
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "hold", "release"]);
+    });
   });
 
   it("scrolls in notches and times the first notch", async () => {

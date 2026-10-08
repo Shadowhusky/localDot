@@ -7,13 +7,16 @@ import type {
   TypeRequest,
   TypeResult,
 } from "@localdot/protocol";
+import { keyName, keysymOf } from "@localdot/protocol/keys";
 import { type HelperWindow, listWindows } from "./perception/hit-test.ts";
 import type { XEvent, XHelper } from "./x/helper.ts";
-import { keyName } from "./x/keys.ts";
 
 export const PRESS_TIMEOUT_MS = 150;
 const PROGRESS_EVERY = 8;
 const BUTTONS = { left: 1, middle: 2, right: 3 } as const;
+// xhelper waits this long between the presses of a repeated combo.
+const REPEAT_GAP_MS = 20;
+const HELPER_CALL_MS = 5000;
 
 export class NoPressError extends Error {
   constructor(what: string) {
@@ -65,26 +68,33 @@ async function activate(x: XHelper, window: number | undefined, keyboard: boolea
 
 // The subscription opens before the helper call, so a raw press that lands before the reply is
 // still seen; resolves with the first `count` matching presses or fails loudly (Review Focus 2).
-export async function withPress(
+// `match` may read the helper's reply: presses before it arrives are kept until it does.
+export async function withPress<R>(
   x: XHelper,
-  match: (e: XEvent) => boolean,
+  match: (e: XEvent, reply: R) => boolean,
   count: number,
-  act: () => Promise<unknown>,
+  act: () => Promise<R>,
   timeoutMs = PRESS_TIMEOUT_MS,
 ): Promise<XEvent[]> {
+  const early: XEvent[] = [];
   const hits: XEvent[] = [];
+  let reply: { value: R } | undefined;
   let done!: () => void;
   const complete = new Promise<void>((resolve) => {
     done = resolve;
   });
   const off = x.onEvent((e) => {
-    if (e.ev === "press" && match(e)) {
+    if (e.ev !== "press") return;
+    if (!reply) early.push(e);
+    else if (match(e, reply.value)) {
       hits.push(e);
       if (hits.length >= count) done();
     }
   });
   try {
-    await act();
+    const value = await act();
+    reply = { value };
+    hits.push(...early.filter((e) => match(e, value)));
     if (hits.length < count) {
       const ac = new AbortController();
       const timeout = sleep(timeoutMs, undefined, { signal: ac.signal }).then(
@@ -124,16 +134,31 @@ function driverFor(injectors: Injectors, what: string): DriverInjector {
   return injectors.driver;
 }
 
+// A combo's keys as the keysyms xhelper presses; an unknown name fails before anything is armed.
+const keysyms = (names: readonly string[]) => names.map((name) => keysymOf(keyName(name)));
+
+// Presses of a combo's last key, one per repeat: a shifted symbol's level modifier, which the
+// helper adds, is not one of them.
+const lastKey = (e: XEvent, reply: { keycodes: number[] }) =>
+  e.kind === "key" && e.detail === reply.keycodes.at(-1);
+
+// `signal` is the request's: a Stop closes it, and held keys are released at once.
 export async function inject(
   x: XHelper,
   req: InputRequest,
   injectors: Injectors = { xtest: true },
+  signal?: AbortSignal,
 ): Promise<InputResult> {
+  signal?.throwIfAborted();
   const { input } = req;
   if (input.kind === "drag") throw new UnsupportedInputError("drag");
   if (input.kind === "wait" || input.kind === "type")
     throw new UnsupportedInputError(`${input.kind} through /input`);
   const driver = req.injector === "driver" ? driverFor(injectors, input.kind) : undefined;
+  const combo = input.kind === "key" ? keysyms(input.combo) : [];
+  if (input.kind === "key" && input.repeat && input.holdMs)
+    throw new RangeError("keys are either repeated or held");
+  const mods = input.kind === "click" ? keysyms(input.mods ?? []) : [];
   const { mono: armedMono } = await x.call<{ mono: number }>("arm");
   await activate(x, req.window, input.kind === "key");
   const injector: Injector = req.injector;
@@ -149,7 +174,7 @@ export async function inject(
         x,
         (e) => e.kind === "button" && e.detail === button,
         input.count,
-        () =>
+        (): Promise<unknown> =>
           driver
             ? driver.click(req)
             : x.call("click", {
@@ -158,7 +183,7 @@ export async function inject(
                 button,
                 count: input.count,
                 holdMs: req.holdMs,
-                mods: (input.mods ?? []).map(keyName),
+                mods,
               }),
       );
       await sleep(5);
@@ -202,15 +227,37 @@ export async function inject(
       armedMono,
     };
   }
-  const combo = input.combo.map(keyName);
+  if (input.holdMs) {
+    try {
+      const presses = await withPress(x, lastKey, 1, () =>
+        x.call<{ keycodes: number[] }>("hold", { combo, ms: input.holdMs }),
+      );
+      await sleep(input.holdMs, undefined, { signal });
+      return {
+        pressMono: (presses[0] as XEvent).mono,
+        presses: presses.map((p) => p.mono),
+        injector,
+        armedMono,
+      };
+    } finally {
+      await x.call("release");
+    }
+  }
+  const repeat = input.repeat ?? 1;
   const presses = await withPress(
     x,
-    (e) => e.kind === "key",
-    combo.length,
-    () => x.call("keys", { combo }),
+    lastKey,
+    repeat,
+    () =>
+      x.call<{ keycodes: number[] }>(
+        "keys",
+        { combo, ...(repeat > 1 ? { repeat } : {}) },
+        HELPER_CALL_MS + repeat * REPEAT_GAP_MS,
+      ),
+    PRESS_TIMEOUT_MS + repeat * 5,
   );
   return {
-    pressMono: (presses.at(-1) as XEvent).mono,
+    pressMono: (presses[0] as XEvent).mono,
     presses: presses.map((p) => p.mono),
     injector,
     armedMono,
