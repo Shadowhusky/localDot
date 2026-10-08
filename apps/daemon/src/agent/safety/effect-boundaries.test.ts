@@ -745,7 +745,8 @@ describe("immediate effect ownership", () => {
     await until(() => !!f.session.pendingApproval);
     const fields = f.session.pendingApproval?.fields;
     expect(fields).toContainEqual(["Action", "drag"]);
-    expect(fields).toContainEqual(["Drag", "(10, 20) to (50, 60), through 1 more point"]);
+    expect(fields).toContainEqual(["Drag", "(10, 20) to (50, 60)"]);
+    expect(fields).toContainEqual(["Path", "3 points"]);
     expect(fields).toContainEqual(["Button", "left"]);
     expect(fields).toContainEqual(["Keys held", "shift"]);
     await f.post(f.answer("deny"));

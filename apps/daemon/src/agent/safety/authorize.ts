@@ -87,12 +87,12 @@ export async function authorizePrepared(
           const { x, y } = p as { x: unknown; y: unknown };
           return `(${String(x)}, ${String(y)})`;
         };
-        const more = action.path.length - 2;
-        const via = more ? `, through ${more} more point${more === 1 ? "" : "s"}` : "";
         fields.push([
           "Drag",
-          boundedPreview(`${at(action.path[0])} to ${at(action.path.at(-1))}${via}`, ctx),
+          boundedPreview(`${at(action.path[0])} to ${at(action.path.at(-1))}`, ctx),
         ]);
+        if (action.path.length > 2)
+          fields.push(["Path", boundedPreview(`${action.path.length} points`, ctx)]);
       }
       if (["drag", "down", "up"].includes(verb))
         fields.push(["Button", boundedPreview(String(action.button ?? "left"), ctx)]);
