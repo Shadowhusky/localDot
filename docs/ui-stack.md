@@ -381,9 +381,11 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
 - **Gallery.** The stand-in gallery switches pages with `?page=overlays` and loads `@localdot/protocol/csp`
   first, as the app does: the sheet's spring comes from `@localdot/stage`, which brings zod, whose
   `Function` probe the CSP otherwise reports.
+- **Visual baselines.** `e2e/ui/overlays.spec.ts` runs on T01's harness over the Overlays page of its
+  gallery (`/gallery/#overlays`) and keeps `ui-sheet-inspector` (c14), `ui-sheet-bottom` (w39) and
+  `ui-dialog-destructive` (both).
 - **Not yet.** Select and Combobox on this stack (see "Pickers open through this stack"), with T08's
-  Playwright scenarios (a), (b) and (f). The visual baselines (`ui-sheet-inspector`, `ui-sheet-bottom`,
-  `ui-dialog-destructive`) need the kit's gallery pages in T01's gallery (`src/gallery/pages.tsx`).
+  Playwright scenarios (a), (b) and (f) and the `ui-select-*` and `ui-combobox-search` baselines.
   G3a on iOS Safari: Playwright's WebKit sends no touch moves, so a content drag from the top, the
   `<html>` scroll lock against rubber-banding, the fixed bottom sheet with the keyboard up and the 48 px
   bleed have been seen only in Chrome's touch emulation.
