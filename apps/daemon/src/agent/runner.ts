@@ -5,7 +5,7 @@ import {
   DEFAULT_AGENT_LIMITS,
   type KeydRecord,
   type ModelBinding,
-  PauseReason,
+  SESSION_PAUSE_REASONS,
   type SkillSummary,
   type TaskModelSelection,
   type TaskPricing,
@@ -45,9 +45,7 @@ export const BRAIN_GAVE_UP = 3;
 const RESTART_BACKOFF_MS = [2000, 4000, 8000];
 const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
-// States the session publishes for a user Pause or a waiting approval. The step barrier and the
-// approval broker own those waits, so they never stand in for a budget, key-layer or auth pause.
-const SESSION_PAUSES = new Set<string | undefined>([...PauseReason.options, "approval"]);
+const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
 export interface TerminalTaskSnapshot {
   readonly sessionId: string;
   readonly cellId: string;

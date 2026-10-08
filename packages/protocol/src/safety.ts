@@ -113,6 +113,13 @@ export const ApprovalCard = ApprovalCardDraft.extend({
 });
 export type ApprovalCard = z.infer<typeof ApprovalCard>;
 export const PauseReason = z.enum(["user", "repeated_action"]);
+// Reasons on the paused states a session publishes for its own Pause, approval or question. None is
+// a recovery pause such as the spending limit, so none may stand in for one.
+export const SESSION_PAUSE_REASONS: readonly string[] = [
+  ...PauseReason.options,
+  "approval",
+  "question",
+];
 export const PauseSnapshot = z
   .strictObject({
     requestId: Id,
