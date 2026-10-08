@@ -20,9 +20,7 @@
   font-size: inherit;
   font-weight: 600;
 }
-.safe-markdown .code-block,
-.terminal-text,
-.diff-text {
+.safe-markdown .code-block {
   max-width: 100%;
   max-height: 320px;
   overflow: auto;
@@ -38,79 +36,189 @@
 .safe-markdown code {
   font-family: var(--font-mono);
 }
-.activity-details {
-  border-top: 1px solid var(--color-line);
-  padding: 12px;
-  min-width: 0;
-}
-.activity-details section,
-.output-detail {
-  min-width: 0;
-}
-.activity-details h3,
-.activity-details h4 {
-  margin: 12px 0 8px;
-  font-size: inherit;
-  font-weight: 600;
-}
-.activity-details button {
-  min-width: 44px;
-  min-height: 44px;
-  max-width: 100%;
-  color: var(--color-text);
-  background: var(--color-surface-2);
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  padding: 8px 12px;
-  margin: 4px 0;
-  overflow-wrap: anywhere;
-  font: inherit;
-}
-.activity-details button:disabled {
-  opacity: 0.5;
-}
-.activity-details button:focus-visible,
 .safe-markdown a:focus-visible,
-.terminal-text:focus-visible,
-.diff-text:focus-visible {
-  outline: var(--focus-width) solid var(--color-text-2);
-  outline-offset: 2px;
-}
-.output-detail {
-  border-top: 1px solid var(--color-line);
-  margin-top: 12px;
-  padding-top: 8px;
-}
-.output-copy {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-.model-activity summary {
-  min-height: 44px;
-  cursor: pointer;
-  padding: 12px 0;
-}
-.model-activity p {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  color: var(--color-text-2);
-}
-.diff-hunk {
-  font-weight: 600;
-}
-.diff-add,
-.diff-remove {
-  color: var(--color-text);
-}
-
-.code-block pre,
-.terminal-text pre,
-.diff-text pre {
-  margin: 0;
-}
 .code-block:focus-visible {
   outline: var(--focus-width) solid var(--color-text-2);
   outline-offset: 2px;
+}
+.code-block pre {
+  margin: 0;
+}
+
+.terminal-viewer,
+.diff-viewer {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+}
+
+.terminal-well,
+.diff-text {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+  padding: calc(var(--spacing) * 3) 0;
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.terminal-stream {
+  display: grid;
+  gap: var(--spacing);
+  min-width: 0;
+}
+
+.terminal-stream-name {
+  padding: 0 calc(var(--spacing) * 3);
+  color: var(--color-fg-3);
+  font: var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  letter-spacing: var(--text-micro--letter-spacing);
+}
+
+.terminal-text {
+  min-width: 0;
+  padding: 0 calc(var(--spacing) * 3);
+}
+
+/* Error lines carry a rule as well as a colour, so they read without colour. */
+.terminal-stream[data-stream="stderr"] .terminal-text {
+  margin-left: calc(var(--spacing) * 3);
+  padding-left: calc(var(--spacing) * 2.5);
+  box-shadow: inset 2px 0 0 var(--color-fg-4);
+}
+
+.terminal-stream[data-stream="stderr"][data-failed] .terminal-text {
+  box-shadow: inset 2px 0 0 var(--color-danger-fg);
+}
+
+.terminal-text pre,
+.diff-text pre {
+  margin: 0;
+  color: var(--color-fg-1);
+  font: var(--text-footnote) / 19px var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.terminal-stream[data-stream="stderr"] pre {
+  color: var(--color-fg-2);
+}
+
+.terminal-stream[data-stream="stderr"][data-failed] pre {
+  color: var(--color-danger-fg);
+}
+
+.terminal-empty {
+  padding: 0 calc(var(--spacing) * 3);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.terminal-foot,
+.diff-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--spacing) calc(var(--spacing) * 2);
+  min-height: calc(var(--spacing) * 7);
+}
+
+.terminal-notes,
+.diff-shortened {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+/* A quiet button that starts a line sits on the text edge, not on its padding. */
+.diff-foot > .output-copy:first-child {
+  margin-left: calc(var(--spacing) * -2.5);
+}
+
+.output-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.output-copy-status {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.diff-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px calc(var(--spacing) * 2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.diff-op {
+  color: var(--color-fg-2);
+}
+
+.diff-path {
+  min-width: 0;
+  color: var(--color-fg-1);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.diff-viewer[data-compact] .diff-path {
+  color: var(--color-fg-2);
+}
+
+.diff-stat {
+  color: var(--color-fg-3);
+}
+
+.diff-empty {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.diff-text {
+  padding: var(--spacing) 0;
+  overflow: hidden;
+}
+
+/* One full-width row per line; its number is generated content, so a copy takes the patch alone. */
+.diff-text pre > span {
+  display: inline-block;
+  width: 100%;
+  padding: 0 calc(var(--spacing) * 3) 0 calc(var(--spacing) * 11);
+  text-indent: calc(var(--spacing) * -9);
+}
+
+.diff-text pre > span::before {
+  content: attr(data-line);
+  display: inline-block;
+  width: calc(var(--spacing) * 7);
+  margin-right: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+  text-align: right;
+  text-indent: 0;
+  user-select: none;
+}
+
+.diff-text .diff-add {
+  background-color: var(--color-diff-add-bg);
+  color: var(--color-diff-add-fg);
+}
+
+.diff-text .diff-remove {
+  background-color: var(--color-diff-del-bg);
+  color: var(--color-diff-del-fg);
+}
+
+.diff-text .diff-hunk {
+  background-color: var(--color-state-hover);
+  color: var(--color-fg-3);
+}
+
+.diff-text .diff-eol {
+  color: var(--color-fg-3);
 }

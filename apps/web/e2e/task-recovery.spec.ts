@@ -18,11 +18,14 @@ for (const width of [1280, 390])
     try {
       const p = await load(page, f);
       if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
+      await page.getByRole("button", { name: /^Usage:/ }).click();
       const usage = page.getByRole("region", { name: "Task usage" });
-      await expect(usage).toContainText("main · owned · sample-main");
-      await expect(usage).toContainText("30 input · 7 output tokens");
-      await expect(usage).toContainText("some calls did not report reasoning");
-      await expect(page.getByRole("region", { name: "Available skills" })).toContainText(
+      await expect(usage).toContainText("Mainsample-main");
+      await expect(usage).toContainText("30 in · 7 out");
+      await expect(usage).toContainText("(some calls didn't say)");
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "What dot knows" }).click();
+      await expect(page.getByRole("list", { name: "Available skills" })).toContainText(
         "sample-tables",
       );
       if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
@@ -49,8 +52,11 @@ for (const width of [1280, 390])
       f.session.stop();
       f.session.append("session.end", { reason: "done" });
       if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-      const card = page.getByRole("region", { name: "Memory change" }).first();
-      await expect(card.getByRole("button", { name: "Undo this change" })).toBeEnabled();
+      const card = page.getByTestId("change-row").first();
+      await card.getByRole("button", { name: /Updated memory/ }).click();
+      await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
+        "aria-disabled",
+      );
       await card.getByRole("button", { name: "Undo this change" }).click();
       await expect(card).toContainText("This change has already been undone.");
       expect(f.memory.readBoth().memory).not.toContain("Sample fact:");
@@ -79,13 +85,16 @@ test("plan windows remain unknown when absent and explicit Resume never raises U
     await page.setViewportSize({ width: 390, height: 850 });
     const p = await load(page, f);
     await page.getByRole("tab", { name: "Activity", exact: true }).click();
+    await page.getByRole("button", { name: /^Usage:/ }).click();
     const usage = page.getByRole("region", { name: "Task usage" });
-    await expect(usage).toContainText("Main · ChatGPT · owned-plan-model");
-    await expect(usage.getByRole("meter", { name: "primary plan usage" })).toHaveAttribute(
-      "value",
+    await expect(usage).toContainText("owned-plan-model");
+    await expect(usage.getByRole("meter", { name: "Plan window used" })).toHaveAttribute(
+      "aria-valuenow",
       "98",
     );
-    await expect(usage).toContainText("Usage unavailable · Reset time unavailable");
+    await expect(usage).toContainText("98% used · Almost at limit");
+    await expect(usage.getByRole("meter")).toHaveCount(1);
+    await page.keyboard.press("Escape");
     await expect(page.getByLabel("New task ceiling (USD)")).toHaveCount(0);
     await page.getByRole("tab", { name: "Conversation", exact: true }).click();
     await expect(page.getByRole("button", { name: "Resume task" })).toBeEnabled();
@@ -115,12 +124,15 @@ test("memory conflict preserves the newer durable file and offers an explicit re
   try {
     const p = await load(page, f);
     f.memory.apply(f.id, "MEMORY.md", "append", "Newer fact must remain.");
-    const card = page.getByRole("region", { name: "Memory change" }).first();
-    await expect(card.getByRole("button", { name: "Undo this change" })).toBeEnabled();
+    const card = page.getByTestId("change-row").first();
+    await card.getByRole("button", { name: /Updated memory/ }).click();
+    await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
+      "aria-disabled",
+    );
     await card.getByRole("button", { name: "Undo this change" }).click();
     await expect(card).toContainText("Memory changed since this update.");
     expect(f.memory.readBoth().memory).toContain("Newer fact must remain.");
-    await card.getByRole("button", { name: "Reread memory" }).click();
+    await card.getByRole("button", { name: "Read memory again" }).click();
     await expect(page.getByRole("region", { name: "Skills and memory" })).toContainText(
       "Newer fact must remain.",
     );
@@ -146,8 +158,11 @@ for (const width of [1280, 390])
       const p = await load(page, f);
       await f.finish();
       if (width === 390) await page.getByRole("tab", { name: "Activity", exact: true }).click();
-      const card = page.getByRole("region", { name: "Memory change" }).first();
-      await expect(card.getByRole("button", { name: "Undo this change" })).toBeEnabled();
+      const card = page.getByTestId("change-row").first();
+      await card.getByRole("button", { name: /Updated memory/ }).click();
+      await expect(card.getByRole("button", { name: "Undo this change" })).not.toHaveAttribute(
+        "aria-disabled",
+      );
       expect(f.realRunner?.get(f.id)).toBeUndefined();
       await card.getByRole("button", { name: "Undo this change" }).click();
       await expect(card).toContainText("This change has already been undone.");

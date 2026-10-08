@@ -8,7 +8,7 @@ import type { ApiClient } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import { type StepRowView, stepRows } from "../session/session-view.ts";
 import { taskHud } from "../session/status.ts";
-import { PlanRail } from "../shell/PlanRail.tsx";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
 import { CompareView } from "./CompareView.tsx";
 import { GapCard } from "./GapCard.tsx";
@@ -177,12 +177,11 @@ export function ReplayView({
           }}
         />
       </main>
-      <PlanRail
+      <ActivityRail
         rows={timelineRows(chapterRows, replay.model.keyUses)}
         api={api}
         sessionId={sessionId}
         scale={replay.model.screen?.scale ?? 1}
-        title={replay.model.title}
         asOfMs={replay.tMs}
         onSelect={replay.selectStep}
         planSnapshot={planAt(replay.model, replay.tMs)}

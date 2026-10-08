@@ -1,20 +1,13 @@
-.attachments,
-.result-files {
+.attachments {
   padding: 8px 0;
   min-width: 0;
 }
-.result-files h3 {
-  font-size: 15px;
-  font-weight: 600;
-}
-.attachments ul,
-.result-files ul {
+.attachments ul {
   list-style: none;
   padding: 0;
   margin: 8px 0;
 }
-.attachments li,
-.result-files li {
+.attachments li {
   display: flex;
   flex-wrap: wrap;
   gap: 6px 10px;
@@ -32,13 +25,11 @@
   margin: 10px 0 0;
 }
 .attachments button,
-.result-files button,
 .file-picker input {
   min-height: 44px;
   max-width: 100%;
 }
-.attachments button,
-.result-files button {
+.attachments button {
   font: inherit;
   padding: 8px 12px;
   background: var(--color-surface-2);
@@ -58,7 +49,6 @@
   width: 100%;
 }
 .attachments button:focus-visible,
-.result-files button:focus-visible,
 .file-picker input:focus-visible {
   outline: var(--focus-width) solid var(--color-text-2);
   outline-offset: 2px;
