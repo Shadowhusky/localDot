@@ -232,7 +232,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       label: "Pausing after this step",
       control: true,
     });
-    expect(replay(typing, 3025)).toMatchObject({ label: "Paused", phase: "waiting" });
+    expect(replay(typing, 3020)).toMatchObject({ label: "Paused", phase: "waiting" });
     const shell = [
       ev("session.start", 0, { screen: { w: 2560, h: 1600, scale: 2 }, os: "linux" }),
       ev("agent.state", 1, { state: "acting" }),
@@ -533,6 +533,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       label: "Typing =SUM(F2:F13)",
       control: true,
     });
+    expect(replay(typed(), 1010).label).toBe("Typed =SUM(F2:F13)");
     expect(replay(typed(), 1500).label).toBe("Typed =SUM(F2:F13)");
     const cancelled = [...start(), ev("action.cancel", 900, { reason: "user" }, "s1")];
     expect(replay(cancelled, 700).label).toBe("Typing =SUM(F2:F13)");
