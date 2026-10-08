@@ -94,6 +94,31 @@ test("after Approve once, dot has control again and a late heartbeat still warns
   ).toBeVisible();
 });
 
+test("Replay after Approve once shows dot back at work, not still waiting", async ({ page }) => {
+  await open(page);
+  await qa(page, "approval?risk=medium");
+  await expectWaiting(page, "Needs your OK");
+  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await expect(status(page)).toHaveText("Select the Net total cell");
+  await page
+    .getByRole("navigation", { name: "Mode" })
+    .getByRole("button", { name: "Replay", exact: true })
+    .click();
+  const replay = page.getByRole("main", { name: "Session replay" });
+  await expect(replay).toBeVisible();
+  const time = replay.locator(".replay-hud span").last();
+  await expect(time).not.toHaveText(/\/ 0:00$/);
+  // Jump to the end of the recording, which is after the approval.
+  await expect(async () => {
+    await page.keyboard.press("l");
+    await expect(time).toHaveText(/^(\d+:\d\d) \/ \1$/, { timeout: 500 });
+  }).toPass();
+  await expect(replay.locator(".replay-hud strong")).toHaveText(
+    /^(Working|Select the Net total cell)$/,
+  );
+  await expect(replay.locator(".replay-stage.control")).toHaveCount(1);
+});
+
 test("a question puts the question first", async ({ page }) => {
   await open(page);
   await qa(page, "ask");
