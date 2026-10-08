@@ -228,7 +228,6 @@ interface HeldButton {
   device: NativeDevice;
   // Where it went down and what was there: a move or a release while it is down drags from it.
   press: NativeActionIdentity;
-  scale: 1 | 2;
   owner: Pick<ActionContext, "sessionId" | "agent" | "redact">;
   // None runs while an approval for the next pointer action waits.
   timer?: NodeJS.Timeout;
@@ -321,7 +320,6 @@ export class ActionGateway {
     device: NativeDevice,
     button: HeldButton["button"],
     press: NativeActionIdentity,
-    scale: 1 | 2,
   ): void {
     this.#forget(ctx.cellId);
     const owner = {
@@ -329,7 +327,7 @@ export class ActionGateway {
       ...(ctx.agent ? { agent: ctx.agent } : {}),
       ...(ctx.redact ? { redact: ctx.redact } : {}),
     };
-    const held: HeldButton = { button, device, press, scale, owner };
+    const held: HeldButton = { button, device, press, owner };
     this.#held.set(ctx.cellId, held);
     this.#touch(ctx.cellId);
     // The owner may let go at once (the task stopped as the button went down): set it first.
@@ -679,7 +677,6 @@ export class ActionGateway {
           d,
           action.button ?? "left",
           identity ?? frozenSnapshot({ target: null, window: null, point }),
-          scale,
         );
       else if (action.verb === "up") {
         this.#forget(ctx.cellId);
