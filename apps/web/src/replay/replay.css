@@ -22,7 +22,16 @@
   gap: 12px;
 }
 .replay-heading {
+  flex-wrap: wrap;
   justify-content: space-between;
+  row-gap: 8px;
+}
+.replay-title {
+  flex: 1 1 240px;
+  min-width: 0;
+}
+.replay-heading-actions {
+  margin-left: auto;
 }
 .replay-heading h1 {
   font-size: 14px;
@@ -61,6 +70,7 @@
 @media (pointer: coarse) {
   .replay-house select,
   .replay-controls button,
+  .replay-heading button,
   .replay-session-card .replay-session-delete {
     min-height: 44px;
   }
@@ -495,6 +505,10 @@
     flex-direction: column;
     gap: 16px;
   }
+  .replay-heading-actions {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
   .rail.replay-sessions {
     flex: none;
     overflow: visible;
@@ -549,7 +563,6 @@
 .replay-screen-picker {
   display: flex;
   gap: 4px;
-  margin-left: auto;
   padding: 3px;
   border: 1px solid var(--color-line);
   border-radius: 10px;

@@ -106,28 +106,30 @@ export function ReplayView({
       <SessionsRail api={api} selectedId={sessionId} onSelect={onSelect} onDeleted={onDeleted} />
       <main className="replay-main" aria-label="Session replay">
         <header className="replay-heading">
-          <div>
+          <div className="replay-title">
             <span className="replay-tag">Replay</span>
             <h1>{replay.card?.title ?? "Recorded session"}</h1>
           </div>
-          <fieldset className="replay-screen-picker" aria-label="Recording screen">
-            {(["desktop", "browser"] as const).map((screen) => (
-              <button
-                key={screen}
-                type="button"
-                aria-pressed={replay.screen === screen}
-                disabled={exporting !== null}
-                onClick={() => replay.setScreen(screen)}
-              >
-                {screen === "desktop" ? "Desktop" : "Browser"}
-              </button>
-            ))}
-          </fieldset>
-          <button type="button" onClick={onGoLive}>
-            {replay.info?.live || replay.card?.verdict === "live"
-              ? "Jump to live"
-              : "Back to Watch"}
-          </button>
+          <div className="replay-heading-actions">
+            <fieldset className="replay-screen-picker" aria-label="Recording screen">
+              {(["desktop", "browser"] as const).map((screen) => (
+                <button
+                  key={screen}
+                  type="button"
+                  aria-pressed={replay.screen === screen}
+                  disabled={exporting !== null}
+                  onClick={() => replay.setScreen(screen)}
+                >
+                  {screen === "desktop" ? "Desktop" : "Browser"}
+                </button>
+              ))}
+            </fieldset>
+            <button type="button" onClick={onGoLive}>
+              {replay.info?.live || replay.card?.verdict === "live"
+                ? "Jump to live"
+                : "Back to Watch"}
+            </button>
+          </div>
         </header>
         <div className={`stage lit replay-stage${hud.control ? " control" : ""}`}>
           <Stage
