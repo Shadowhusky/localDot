@@ -62,6 +62,15 @@ test("Pause after this step reads Paused, and Resume hands control back to dot",
   await expect(page.getByRole("region", { name: "Task recovery" })).toHaveCount(0);
 });
 
+test("a Pause the computer cannot confirm says so", async ({ page }) => {
+  await open(page);
+  await page.getByRole("button", { name: "Pause after this step" }).click();
+  await expectWaiting(page, "Paused");
+  await qa(page, "pause-uncertain");
+  await expectWaiting(page, "Pause unconfirmed");
+  await expect(page.getByRole("button", { name: "Resume task" })).toBeDisabled();
+});
+
 test("an approval puts the decision first and takes control from dot", async ({ page }) => {
   await open(page);
   await expect(control(page)).toHaveCount(1);
