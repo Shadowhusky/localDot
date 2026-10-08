@@ -382,6 +382,7 @@ export function useSafety(props: SafetyProps) {
       p.agent.model.pendingAsk ||
       p.agent.model.pendingTakeover ||
       p.agent.snapshot?.approval ||
+      p.agent.snapshot?.budgetHold === "task" ||
       JSON.stringify(p.feed.read().model.safetyPause) !== JSON.stringify(value.data)
     )
       return false;
@@ -599,7 +600,8 @@ export function useSafety(props: SafetyProps) {
       JSON.stringify(props.feed.read().model.safetyPause) === JSON.stringify(pause) &&
       !props.agent.model.pendingAsk &&
       !props.agent.model.pendingTakeover &&
-      !approval,
+      !approval &&
+      props.agent.snapshot?.budgetHold !== "task",
     canReplace:
       (!replacement || replacement.phase === "blocked") &&
       !!props.cell?.fenced &&

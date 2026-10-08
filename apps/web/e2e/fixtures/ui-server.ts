@@ -297,6 +297,8 @@ const settingsStore = new SettingsStore(HOME);
 settingsStore.put(SETTINGS[settingsMode] ?? {});
 const memory = new MemoryStore(HOME);
 const ledger = { limit: 5, spent: 4 };
+let budgetHold: "task" | "day" | undefined;
+let raisedDuringPause = false;
 let session: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
 let liveStep: string | undefined;
@@ -961,6 +963,8 @@ const agent: AgentRoutesDeps = {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       session = newSession(task.slice(0, 60), task);
+      budgetHold = undefined;
+      raisedDuringPause = false;
       selection = planSelection();
       attachLive(session);
       session.append("message.user", { messageId: ulid(), kind: "task", text: task });
@@ -996,15 +1000,26 @@ const agent: AgentRoutesDeps = {
       if (env.QA_PAUSE !== "step") session.confirmSafetyPause(requestId, pause.revision);
       return session.safetyPause ?? pause;
     },
+    budgetHoldOf: (taskId) => (session && taskId === session.id ? budgetHold : undefined),
     resumeSafety: async (taskId, requestId, revision) => {
       if (!session || taskId !== session.id) throw new Error("no session");
       session.beginSafetyResume(requestId, revision);
       session.resumeSafety(requestId, revision);
+      // The brain takes the Resume a raise posted during the Pause and calls its model again.
+      if (raisedDuringPause) {
+        raisedDuringPause = false;
+        session.setStatus("running");
+        session.append("agent.state", { state: "thinking" });
+      }
     },
     raiseBudget: async (taskId, ceiling) => {
       if (!session || taskId !== session.id) throw new Error("no session");
       ledger.limit = ceiling;
+      budgetHold = undefined;
       session.post("resume", "");
+      // A held Pause keeps the task paused until its own Resume.
+      raisedDuringPause = !!session.safetyPause;
+      if (raisedDuringPause) return;
       session.setStatus("running");
       session.append("agent.state", { state: "thinking" });
     },
@@ -1288,15 +1303,15 @@ function takeover(field?: string, known = false): string | undefined {
     .then((o) => effects.push(`takeover:${JSON.stringify(o)}`))
     .catch((e) => effects.push(`takeover-error:${String(e)}`));
 }
-function budget(): string | undefined {
+function budget(scope: "task" | "day" = "task"): string | undefined {
   if (!session) return "no session";
-  session.append("budget.exceeded", {
-    scope: "task",
-    taskId: session.id,
-    limitUSD: 5,
-    spentUSD: 4,
-    needUSD: 2,
-  });
+  session.append(
+    "budget.exceeded",
+    scope === "task"
+      ? { scope, taskId: session.id, limitUSD: 5, spentUSD: 4, needUSD: 2 }
+      : { scope, limitUSD: 20, spentUSD: 20 },
+  );
+  budgetHold = scope;
   session.setStatus("paused");
   session.append("agent.state", { state: "paused", reason: "budget" });
 }
@@ -1322,7 +1337,7 @@ const STEPS: Record<ScenarioStep, () => string | undefined> = {
   approval: () => requestApproval("high"),
   ask: () => ask(true),
   takeover: () => takeover(),
-  budget,
+  budget: () => budget(),
   finish,
   "cell/starting": () => setCell("starting"),
   "cell/connecting": () => setCell("connecting"),
@@ -1351,7 +1366,7 @@ routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),
 );
-routes.post("/__qa/budget", () => reply(budget()));
+routes.post("/__qa/budget", (c) => reply(budget(c.req.query("scope") === "day" ? "day" : "task")));
 routes.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);

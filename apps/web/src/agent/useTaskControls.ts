@@ -187,9 +187,12 @@ export function useTaskControls(props: Props) {
             ? props.agent.model.pendingTakeover !== record.target
             : record.kind === "memory"
               ? props.agent.model.changes.some((change) => change.undoes === record.target)
-              : record.kind === "budget" || record.kind === "resume"
+              : record.kind === "resume"
                 ? props.agent.snapshot?.status !== "paused"
-                : false);
+                : record.kind === "budget"
+                  ? props.agent.snapshot?.status !== "paused" ||
+                    (!!props.agent.snapshot?.pause && props.agent.snapshot.budgetHold !== "task")
+                  : false);
       const reread = record.recheck !== undefined && record.recheck !== props.agent.snapshot;
       if (
         absent ||
@@ -388,23 +391,31 @@ export function useTaskControls(props: Props) {
       }
     }
   };
-  const recoverable = (now = current.current) =>
+  const quiet = (now = current.current) =>
     available(now) &&
-    !now.agent.snapshot?.pause &&
     !now.agent.snapshot?.approval &&
     !operation.current &&
     !now.agent.model.pendingAsk &&
     !now.agent.model.pendingTakeover &&
     !now.agent.snapshot?.pendingAsk &&
-    !now.agent.snapshot?.pendingTakeover &&
+    !now.agent.snapshot?.pendingTakeover;
+  const recoverable = (now = current.current) =>
+    quiet(now) &&
+    !now.agent.snapshot?.pause &&
     now.agent.snapshot?.status === "paused" &&
     now.agent.model.state?.state === "paused";
+  // A held Pause keeps its own Resume, which waits until this task's budget is raised.
+  const pausedAtBudget = (now = current.current) =>
+    quiet(now) &&
+    now.agent.snapshot?.pause?.phase === "paused" &&
+    now.agent.snapshot.budgetHold === "task";
   const budgetReady = (now = current.current) =>
-    recoverable(now) &&
     now.agent.snapshot?.models?.kind !== "chatgpt" &&
     !now.agent.model.subscription &&
-    now.agent.model.budget?.data.scope === "task" &&
-    now.agent.model.budget.data.taskId === now.agent.sessionId;
+    (pausedAtBudget(now) ||
+      (recoverable(now) &&
+        now.agent.model.budget?.data.scope === "task" &&
+        now.agent.model.budget.data.taskId === now.agent.sessionId));
   const raiseBudget = (budgetUSD: number) => {
     if (!budgetReady() || !BudgetRaiseRequest.safeParse({ budgetUSD }).success)
       return Promise.resolve(false);

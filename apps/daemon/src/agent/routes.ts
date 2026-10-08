@@ -41,7 +41,7 @@ import { chatgptRoutes } from "./codex/routes.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
-import { AgentError, type AgentRunner } from "./runner.ts";
+import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
 import { AgentSettings, SettingsError, type SettingsStore } from "./settings.ts";
@@ -56,7 +56,10 @@ export interface UploadAccess {
 export interface AgentRoutesDeps {
   runner: Pick<AgentRunner, "start" | "get" | "raiseBudget"> &
     Partial<
-      Pick<AgentRunner, "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety" | "sessions">
+      Pick<
+        AgentRunner,
+        "selectionOf" | "terminalOf" | "pauseTask" | "resumeSafety" | "budgetHoldOf" | "sessions"
+      >
     >;
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
@@ -460,6 +463,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         if (terminal) return c.json(terminal);
       }
       const s = session(id);
+      const budgetHold = deps.runner.budgetHoldOf?.(s.id);
       return c.json({
         sessionId: s.id,
         cellId: s.cellId,
@@ -469,6 +473,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(s.screens ? { screen: s.screens.selection } : {}),
         ...(s.pendingApproval ? { approval: s.pendingApproval } : {}),
         ...(s.safetyPause ? { pause: s.safetyPause } : {}),
+        ...(budgetHold ? { budgetHold } : {}),
         ...(deps.runner.selectionOf?.(s.id) ? { models: deps.runner.selectionOf(s.id) } : {}),
         ...(s.brainCellId ? { brainCellId: s.brainCellId } : {}),
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
@@ -626,6 +631,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         const input = await json(c.req.raw, ResumeSafetyRequest);
         check(c.req.raw.signal);
         if (!deps.runner.resumeSafety) throw new RouteError(503, "Safety Resume is unavailable");
+        if (deps.runner.budgetHoldOf?.(s.id) === "task")
+          throw new RouteError(409, RAISE_BUDGET_FIRST);
         await deps.runner.resumeSafety(s.id, input.requestId, input.revision);
         return c.body(null, 204);
       }

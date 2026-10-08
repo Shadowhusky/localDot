@@ -22,6 +22,8 @@ export interface AgentSnapshot {
   readonly autonomy?: AutonomyPolicy;
   readonly approval?: ApprovalCard;
   readonly pause?: PauseSnapshot;
+  // The spending limit that holds the task: its own budget, or the daily limit all tasks share.
+  readonly budgetHold?: "task" | "day";
   readonly screen?: ScreenSelectionSnapshot;
 }
 const statuses = new Set<string>([
@@ -45,6 +47,7 @@ const fields = new Set([
   "autonomy",
   "approval",
   "pause",
+  "budgetHold",
   "screen",
 ]);
 export class AgentResponseError extends Error {
@@ -101,7 +104,8 @@ export function parseAgentSnapshot(
   if (
     (autonomy && !autonomy.success) ||
     (approval && !approval.success) ||
-    (pause && !pause.success)
+    (pause && !pause.success) ||
+    (Object.hasOwn(v, "budgetHold") && v.budgetHold !== "task" && v.budgetHold !== "day")
   )
     return fail();
   const models = Object.hasOwn(v, "models") ? TaskModelSelection.safeParse(v.models) : null;
@@ -122,6 +126,7 @@ export function parseAgentSnapshot(
     ...(autonomy?.success ? { autonomy: autonomy.data } : {}),
     ...(approval?.success ? { approval: approval.data } : {}),
     ...(pause?.success ? { pause: pause.data } : {}),
+    ...(Object.hasOwn(v, "budgetHold") ? { budgetHold: v.budgetHold as "task" | "day" } : {}),
     ...(Object.hasOwn(v, "brainCellId") ? { brainCellId: v.brainCellId as string } : {}),
     ...(Object.hasOwn(v, "pendingAsk") ? { pendingAsk: v.pendingAsk as string } : {}),
     ...(Object.hasOwn(v, "pendingTakeover")

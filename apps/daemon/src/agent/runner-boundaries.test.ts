@@ -8,6 +8,7 @@ import {
 } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
+import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
@@ -15,10 +16,11 @@ import { LiveSessions } from "../gateway/live.ts";
 import type { KeydHealth } from "../keyd/monitor.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { MemoryStore } from "./memory.ts";
+import { agentRoutes } from "./routes.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
-import type { AgentSettings } from "./settings.ts";
+import { type AgentSettings, SettingsStore } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
 
@@ -696,6 +698,94 @@ it("the brain's wait for Resume keeps a budget pause, and Resume waits until the
   await h.runner.raiseBudget(session.id, 8);
   await h.runner.resumeSafety(session.id, pause.requestId, pause.revision);
   expect(session.safetyPause).toBeUndefined();
+});
+
+function routesOf(h: ReturnType<typeof setup>) {
+  const app = new Hono();
+  agentRoutes(app, {
+    home: h.home,
+    runner: h.runner,
+    memory: new MemoryStore(h.home),
+    settings: new SettingsStore(h.home),
+    catalog: { get: h.deps.catalog, refresh: async () => required(h.deps.catalog()) },
+    keyd: { secrets: async () => [] },
+    skills: () => [],
+    desktop: () => undefined,
+    redactUserText: (text) => text,
+    appendTo: () => {},
+  });
+  const post = (path: string, body: unknown) =>
+    app.request(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  return {
+    snapshot: async (id: string) =>
+      (await (await app.request(`/api/agent/sessions/${id}`)).json()) as {
+        budgetHold?: "task" | "day";
+        pause?: { requestId: string; revision: number; phase: string };
+      },
+    pause: (id: string) => post(`/api/agent/sessions/${id}/pause`, { requestId: ulid() }),
+    resume: (id: string, pause: { requestId: string; revision: number }) =>
+      post(`/api/agent/sessions/${id}/resume`, {
+        requestId: pause.requestId,
+        revision: pause.revision,
+      }),
+    raise: (id: string, budgetUSD: number) =>
+      post(`/api/agent/sessions/${id}/budget`, { budgetUSD }),
+  };
+}
+
+it("a Pause held at the task's spending limit resumes once its budget is raised through the routes", async () => {
+  const h = setup();
+  const api = routesOf(h);
+  const session = await h.runner.start(h.cellId, "Budget, then Pause, through the routes");
+  await h.ready();
+  expect((await api.pause(session.id)).status).toBe(202);
+  await until(() => session.safetyPause?.phase === "paused");
+  session.append("budget.exceeded", {
+    scope: "task",
+    taskId: session.id,
+    limitUSD: 5,
+    spentUSD: 5,
+    needUSD: 1,
+  });
+  session.append("agent.state", { state: "paused", reason: "budget" });
+  const held = await api.snapshot(session.id);
+  expect(held).toMatchObject({ budgetHold: "task", pause: { phase: "paused" } });
+  const refused = await api.resume(session.id, required(held.pause));
+  expect(refused.status).toBe(409);
+  expect(await refused.text()).toBe("Raise this task's budget before resuming it.");
+  expect(session.safetyPause?.phase).toBe("paused");
+  expect((await api.raise(session.id, 8)).status).toBe(204);
+  expect(h.ledger.get(session.id)?.limit).toBe(8);
+  const raised = await api.snapshot(session.id);
+  expect(raised.budgetHold).toBeUndefined();
+  expect(raised.pause).toEqual(held.pause);
+  expect((await api.resume(session.id, required(raised.pause))).status).toBe(204);
+  expect(session.safetyPause).toBeUndefined();
+  expect((await api.snapshot(session.id)).pause).toBeUndefined();
+});
+
+it("a Pause held at the shared daily limit resumes and retries the refused call", async () => {
+  const h = setup();
+  const api = routesOf(h);
+  const session = await h.runner.start(h.cellId, "Daily limit, then Pause, through the routes");
+  await h.ready();
+  expect((await api.pause(session.id)).status).toBe(202);
+  await until(() => session.safetyPause?.phase === "paused");
+  session.append("budget.exceeded", { scope: "day", limitUSD: 20, spentUSD: 20 });
+  session.append("agent.state", { state: "paused", reason: "budget" });
+  const held = await api.snapshot(session.id);
+  expect(held).toMatchObject({ budgetHold: "day", pause: { phase: "paused" } });
+  const inbox = session.inboxSequence;
+  expect((await api.resume(session.id, required(held.pause))).status).toBe(204);
+  expect(session.safetyPause).toBeUndefined();
+  expect(session.inboxSequence, "Resume retries the refused call").toBe(inbox + 1);
+  expect((await api.snapshot(session.id)).budgetHold).toBe("day");
+  session.append("agent.state", { state: "thinking" });
+  expect((await api.snapshot(session.id)).budgetHold).toBeUndefined();
 });
 
 it.each(["pausing", "uncertain"] as const)(

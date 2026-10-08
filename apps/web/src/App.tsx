@@ -546,7 +546,8 @@ function Theatre({ api }: { api: ApiClient }) {
             attention={
               agent.model.pendingTakeover
                 ? "computer"
-                : agent.model.pendingAsk
+                : agent.model.pendingAsk ||
+                    (agent.snapshot?.pause && agent.snapshot.budgetHold === "task")
                   ? "conversation"
                   : undefined
             }

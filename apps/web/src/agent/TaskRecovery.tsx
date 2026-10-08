@@ -25,6 +25,8 @@ function knownReason(reason: string | undefined, local: boolean): string | undef
       : "The selected model could not continue. Check its provider and access before resuming.";
   return undefined;
 }
+const DAY_LIMIT =
+  "All tasks share one daily spending limit, and today's is used up. It resets at midnight; resume the task after that. Raising this task's ceiling does not change it.";
 const dollars = (value: number) =>
   `$${value.toLocaleString(undefined, { maximumFractionDigits: 6 })}`;
 export function TaskRecovery({
@@ -39,14 +41,17 @@ export function TaskRecovery({
   const [validation, setValidation] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
   const state = agent.model.state;
+  // While a Pause holds the task, only a spending limit that still holds it needs this panel.
+  const hold = agent.snapshot?.pause ? agent.snapshot.budgetHold : undefined;
   if (
     controls.fenced ||
-    agent.snapshot?.pause ||
+    (agent.snapshot?.pause && !hold) ||
     !agent.sessionId ||
     agent.model.ended ||
     !state ||
-    !["paused", "error"].includes(state.state) ||
-    (state.state === "paused" && ownedPause(state.reason))
+    (!hold &&
+      (!["paused", "error"].includes(state.state) ||
+        (state.state === "paused" && ownedPause(state.reason))))
   )
     return null;
   const subscription = agent.snapshot?.models?.kind === "chatgpt" || !!agent.model.subscription;
@@ -57,22 +62,30 @@ export function TaskRecovery({
     );
   const budget = agent.model.budget;
   const taskBudget =
-    !subscription && budget?.data.scope === "task" && budget.data.taskId === agent.sessionId;
+    !subscription &&
+    (hold
+      ? hold === "task"
+      : state.state === "paused" &&
+        budget?.data.scope === "task" &&
+        budget.data.taskId === agent.sessionId);
+  const dayLimit = hold
+    ? hold === "day"
+    : state.reason === "budget" && budget?.data.scope === "day";
   return (
     <section className="task-recovery" aria-label="Task recovery">
-      <h3>{state.state === "paused" ? "Task paused" : "Task needs attention"}</h3>
-      <p>{recoveryMessage(state.reason, local)}</p>
+      <h3>{hold || state.state === "paused" ? "Task paused" : "Task needs attention"}</h3>
+      <p>{dayLimit ? DAY_LIMIT : recoveryMessage(hold ? "budget" : state.reason, local)}</p>
       {!subscription && budget && (
         <p>
-          Last {budget.data.scope} budget refusal: ceiling {dollars(budget.data.limitUSD)}, spent{" "}
-          {dollars(budget.data.spentUSD)}
+          Last {budget.data.scope === "day" ? "daily" : "task"} budget refusal: ceiling{" "}
+          {dollars(budget.data.limitUSD)}, spent {dollars(budget.data.spentUSD)}
           {budget.data.needUSD === undefined
             ? ""
             : `, next request needed ${dollars(budget.data.needUSD)}`}
           . Recorded at the last refusal.
         </p>
       )}
-      {taskBudget && state.state === "paused" && (
+      {taskBudget && (
         <form
           aria-label="Set task budget"
           onSubmit={(event) => {
@@ -102,27 +115,25 @@ export function TaskRecovery({
             />
           </label>
           <button type="submit" disabled={!controls.canRaiseBudget}>
-            Set task budget and resume
+            {hold ? "Set task budget" : "Set task budget and resume"}
           </button>
           {validation && <p role="status">{validation}</p>}
         </form>
       )}
-      {budget?.data.scope === "day" && (
-        <p>
-          A task ceiling cannot raise the day limit. Check the key layer configuration before
-          resuming.
-        </p>
+      {hold ? (
+        <p>The task stays paused until you press Resume task.</p>
+      ) : (
+        <button
+          type="button"
+          disabled={!controls.canResumeTask}
+          onClick={() => void controls.resume()}
+        >
+          Resume task
+        </button>
       )}
-      <button
-        type="button"
-        disabled={!controls.canResumeTask}
-        onClick={() => void controls.resume()}
-      >
-        Resume task
-      </button>
       <details className="recovery-options">
         <summary>Recovery options</summary>
-        {state.reason && !knownReason(state.reason, local) && (
+        {!hold && state.reason && !knownReason(state.reason, local) && (
           <p>Reported reason: {state.reason}</p>
         )}
         <div className="recovery-actions">
