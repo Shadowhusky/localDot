@@ -2,8 +2,9 @@
 
 Results of the T02 stack spike (UI plan, decision D2), measured on 2026-10-08 at `80ac538`.
 
-**Status: not accepted.** Gate 4 (bundle cost) fails, and the JS budget it calls for must be decided
-before T06, the first task that ships kit code into the app. See "Gate 4" below.
+**Status:** gates 1–3 and 5 pass. Gate 4 (bundle cost) failed against 45 kB, and the controller settled it
+on 2026-10-08 with a 110 kB gz budget for the kit, overlays and pickers code-split; see "Gate 4" below.
+Gate 6 waits for T01's harness.
 
 ## What is installed
 
@@ -75,7 +76,7 @@ Chrome and WebKit). Unit check: `pnpm exec vitest run apps/web/src/ui`.
 | 2b | Scroll lock without injected styles | **Pass.** Base UI locks through CSSOM inline styles on `<html>`/`<body>` (and a `data-base-ui-scroll-locked` attribute). Wheel input does not move the page under an open dialog; the position is restored on close; no `<style>` is added. |
 | 2c | Focus trap and return | **Pass** for Dialog, Sheet (Dialog) and Drawer in both engines: Tab and Shift+Tab stay inside (no page element receives focus), Escape closes, focus returns to the trigger. Base UI wraps through focus guards beside the popup for one frame, so tests poll the active element. |
 | 3 | WebKit (and Chrome) 390 touch: tap the Select trigger, tap an option, the value commits; no click-through; Escape and outside taps inside an open Sheet close only the popup and keep the Sheet's state | **Pass** in both engines. A button lying under the open list stays at 0 presses after an option is tapped (and counts a direct tap). Inside the Sheet, a non-default choice ("Never ask") is made first; then Escape, a tap on the Sheet outside the list, and a tap on the dim area outside the Sheet each close only the list, and the typed note and that choice survive each one. The same dim-area tap with no list open closes the Sheet. |
-| 4 | The kit adds ≤45 kB gz JS and ≤12 kB gz CSS | **CSS pass, JS fail; open.** See below. |
+| 4 | The kit adds ≤45 kB gz JS and ≤12 kB gz CSS | **CSS pass, JS fail; decided.** The controller replaced the 45 kB limit with 110 kB gz for the kit, with heavy overlays and pickers code-split (2026-10-08). See below. |
 | 5 | Typecheck (TS 7), Biome (`noDefaultExport`), Vitest with jsdom | **Pass.** `KitProvider.test.tsx` renders an open Select in jsdom: no `<style>` with the provider, one without it. |
 | 6 | Preflight before/after on FS10 and FS24 | Not run: needs the T01 harness. Measured informally below. |
 
@@ -140,29 +141,35 @@ Options, cheapest first:
 Recommendation: option 1 (with tailwind-merge dropped), plus option 2 in T08 if first-load time on the
 phone matters.
 
-**Decide before T06.** T06 is the first task that ships kit code into `dist`: its Tooltip is Base UI
-and loads on first paint with every `IconButton` (so option 2 cannot help it), and its `cn` is where
-tailwind-merge (8.4 kB) would first ship. T07 then wraps Base UI Checkbox, Switch, RadioGroup and Tabs.
-So the JS budget and whether tailwind-merge stays must be settled before T06 starts; T06 work begun
-earlier is redone if the choice is option 3. A failed T02 gate is a user decision (UI plan,
-Appendix B, item 4), and T02 stays not accepted until it is made. T03 (tokens and base layer) ships no
-kit code and can go ahead.
+**Decision (controller, 2026-10-08, binding).** The 45 kB limit is replaced by 110 kB gz for the kit.
+localDot loads over loopback or the tailnet, so a larger kit is acceptable; heavy overlays and pickers
+are still code-split so the first paint loads only what it shows. That is option 1 with option 2. It
+came after T06 and before T07 started.
 
-**What T06 did while the decision is open.** T06 ships no Base UI code and no tailwind-merge, so it holds
-under every option: its atoms (Tooltip included) are zero-dependency and use `clsx` directly, not `cn`.
-App JS is unchanged, because no screen uses the kit yet, and the build test's "no kit libraries" check
-still holds. Owning Tooltip is option 2's "about 21 kB" first paint; if option 1 is chosen, Tooltip can
-move onto Base UI behind the same `Tooltip`/`useTooltip` API. See "Kit atoms" below.
+**What T06 and T07 shipped.** Neither ships Base UI code or tailwind-merge; app JS is unchanged, because
+no screen uses the kit yet, and the build test's "no kit libraries" check still holds.
+
+- T06's atoms, Tooltip included, are zero-dependency and use `clsx` directly, not `cn`. Owning Tooltip is
+  option 2's "about 21 kB" first paint.
+- T07's drawn controls (Checkbox, Switch, radio cards, segments, tabs) are own by design: native inputs
+  and buttons carry their semantics, so Base UI would add first-paint JS for no accessibility gain.
+- T07's Select and Combobox are own too. They were written on the premise that gate 4 was still open,
+  which it was not. Both pass gates 2 and 3, and the T07 task puts a part that passes on Base UI, so they
+  need an explicit ruling: move onto Base UI behind the same props (a lazy chunk of about 40–53 kB gz,
+  inside `KitProvider` with `disableStyleElements` and `.base-ui-disable-scrollbar`, keeping the own
+  bottom sheet on phones), or stay own. Until the ruling they stay own. Their unit and e2e specs drive
+  them only through roles, keys, taps and the gallery, so they carry over to a port unchanged.
+- Tooltip has the same open question, without the code-split: it renders on first paint.
 
 ### Decision table
 
 | Component | Gates 2–3 | Plan |
 | --- | --- | --- |
-| Select | pass | own for now (T07, zero-dependency), pending gate 4; Base UI remains possible behind the same API |
-| Combobox | pass | own for now (T07, zero-dependency), pending gate 4; Base UI remains possible behind the same API |
+| Select | pass | own (T07, zero-dependency) until the controller rules; Base UI as a lazy chunk behind the same props is the alternative |
+| Combobox | pass | own (T07, zero-dependency) until the controller rules; Base UI as a lazy chunk behind the same props is the alternative |
 | Popover | pass | Base UI |
 | Menu | pass | Base UI |
-| Tooltip | pass | own for now (T06, zero-dependency, first paint), pending gate 4; Base UI remains possible behind the same API |
+| Tooltip | pass | own (T06, zero-dependency, first paint) until the controller rules; Base UI behind the same API is the alternative |
 | Dialog / Sheet | pass | Base UI Dialog |
 | Drawer (bottom sheet) | pass | own drag over Dialog, so the budget can hold |
 | Toast | pass | own, so the budget can hold |
@@ -295,16 +302,18 @@ styles in `fields.css` and `pickers.css`, in the kit layer. Unit tests sit besid
 `e2e/ui-fields.spec.ts` drives the gallery's Fields page (`?page=fields`) in Chrome and WebKit, on a
 desktop and on a touch phone, under the production CSP. No screen uses them yet; T19 moves Settings.
 
-- **Zero-dependency, like the atoms.** Gate 4 is still open, so nothing here ships Base UI. Checkbox,
-  Switch and radio cards are native inputs under a drawn control (the input lies over the drawing, so
-  touch exploration finds it where it shows); segments and tabs are buttons with roving focus. Select
-  and Combobox follow the ARIA combobox pattern with `aria-activedescendant`, so focus stays on the
-  trigger or the search field. If gate 4 goes to Base UI, Select and Combobox can move onto it behind
-  the same props; the drawn controls have nothing to gain.
+- **Zero-dependency, like the atoms.** Nothing here ships Base UI; "What T06 and T07 shipped" above
+  says why, and which ruling Select and Combobox wait on. Checkbox, Switch and radio cards are native
+  inputs under a drawn control (the input lies over the drawing, so touch exploration finds it where it
+  shows); segments and tabs are buttons with roving focus. Select and Combobox follow the ARIA combobox
+  pattern with `aria-activedescendant`, so focus stays on the trigger or the search field.
 - **Field.** Label above (footnote 500, fg-2), and one message cell below: the description, an error
   (with an alert glyph, never colour alone) and an unavailable reason share it, so swapping one for
-  another moves nothing under the field. The control takes its id, description, `aria-invalid` and
-  availability from the Field. A click on the label focuses the control and never opens a picker.
+  another moves nothing under the field. A Field that can show an error (`validates`, on whenever an
+  `error` prop is passed, even an empty one) holds that cell open at one line before any message
+  exists, so the first error moves nothing either; an error longer than a line still grows it. The
+  control takes its id, label, description, `aria-invalid` and availability from the Field. A click on
+  the label focuses the control and never opens a picker.
 - **Unavailable** follows the atoms: `aria-disabled`, focusable, a reason in place of the description
   (text fields become read-only; a segment gives its reason as a tooltip). React still reports the
   change of a checkbox whose click was cancelled, so the choice hook drops it.
@@ -313,18 +322,23 @@ desktop and on a touch phone, under the production CSP. No screen uses them yet;
   radio cards, segments and picker triggers reach 44 on touch; sheet rows are 48.
 - **Motion.** The switch knob springs and stretches toward its side while held; the check draws in;
   the segmented thumb slides on `--ease-spring` and, being a CSS transition, an interruption sets off
-  from where it is (the spec samples it every frame and finds no step over half a segment). A popover
+  from where it is (the spec samples it every frame and finds no step over half a segment a frame,
+  weighing a step by the frames it spans, so a dropped frame is not a jump). A popover
   grows out of its trigger and shrinks back faster; a sheet rises from the bottom and leaves the same
   way. Under reduced motion every one of these is an opacity change or a cut.
 - **Pickers.** A mouse opens the list on press, so press, drag and release on a row chooses it, as a
   desktop pop-up menu does; a tap opens it on release, so a scroll that starts on the trigger never
   does. A row is chosen on release (or on a click from assistive technology), and the closing surface
   keeps taking taps until it is gone, so the click a touch sends afterwards never reaches the page.
-  Escape and a press outside close only the list and are kept from whatever is beneath it (a sheet that
-  closes on Escape stays open). On a phone (`width < 760px` and a coarse pointer) the list is a bottom
-  sheet with a grabber and a close button; its head follows a drag 1:1 and a release projected past a
-  third of its height (deceleration .998) closes it, while a finger that stopped before lifting carries
-  no speed. The Combobox adds a search field (every word must match the label, keywords or value;
+  Escape and a press outside close only the list and are kept from whatever is beneath it: a sheet that
+  closes on Escape stays open, and an outside press is spent whole (its `pointerup`, mouse events and
+  click are swallowed until the next press or key), so a backdrop that closes on a click never sees it
+  and a button under the press is not activated. While an input method composes, Enter and Escape are
+  its own: neither chooses, closes or reaches a parent. On a phone (`width < 760px` and a coarse
+  pointer) the list is a bottom sheet with a grabber and a close button; its head follows a drag 1:1
+  and a release projected past a third of its height (deceleration .998) closes it, while a finger that
+  stopped before lifting carries no speed. A flung sheet leaves within `--dur-sheet`, so it is gone
+  before the surface unmounts. The Combobox adds a search field (every word must match the label, keywords or value;
   matches are marked), can offer the typed text as a value of its own, pinned last, and never moves
   the search field while the list filters: a popover below its trigger is anchored at the top, one above
   it holds its height, and the phone sheet is full height. Focus returns to the trigger after React's
@@ -333,12 +347,20 @@ desktop and on a touch phone, under the production CSP. No screen uses them yet;
   segments hold `transform: none`: in WebKit the rule shrank the trigger just as the list measured it
   to open, and the popover came out 3 % narrower than its trigger.
 - **Gallery.** The stand-in gallery has a page switch (Atoms, Fields); `parts.tsx` holds the shared
-  section and specimen frames. The Fields page has a stand-in settings panel that closes on Escape, to
-  show the list keeping Escape from it, and RadioCards stands in for the theme picker.
+  section and specimen frames. The Fields page has a stand-in settings panel that closes on Escape or a
+  click on its dimmed backdrop, to show the list keeping both from it, and RadioCards stands in for the
+  theme picker. The page shows live specimens only; still hover, pressed and focus-visible specimens,
+  and the `ui-<primitive>` VR baselines, wait for T01's gallery and harness.
+- **Forced colours.** Field edges, checks, switches, chosen cards and segments, the focused field or
+  trigger (a Highlight outline, since the ring is a shadow the mode drops), the chosen row's check
+  (Highlight) and unavailable rows and fields (GrayText) all keep their state.
 - **Utilities minted by accident.** Kit sources now also mint `.fixed`, `.block` and `.transition`. No
   legacy class or markup uses those names, so they stay inert.
 - **Cost.** App CSS grows 74.2 → 93.3 kB (15.4 → 18.1 kB gzip, as Vite reports it); app JS is
-  unchanged, since no screen imports the kit yet.
+  unchanged, since no screen imports the kit yet. The review fixes (the held message line and the
+  forced-colour states) add 0.4 kB (94.5 → 94.9 kB, 18.4 kB gzip, on top of the approval-card work
+  merged since). `stack.css` loads `fields.css` and `pickers.css` on first paint for now; when the first
+  screen adopts the pickers, `pickers.css` moves into their code-split chunk, per the gate 4 decision.
 
 ## Notes for the tasks that build on this
 
