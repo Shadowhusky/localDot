@@ -116,8 +116,14 @@ export class DesktopdClient {
     return this.#json("POST", "/focused", {}, TIMEOUT_MS.hitTest, HitTestResult.parse);
   }
 
-  hitTest(point: Point): Promise<HitTestResult> {
-    return this.#json("POST", "/hitTest", { point }, TIMEOUT_MS.hitTest, HitTestResult.parse);
+  hitTest(point: Point, opts: { managed?: boolean } = {}): Promise<HitTestResult> {
+    return this.#json(
+      "POST",
+      "/hitTest",
+      { point, ...(opts.managed ? { managed: true } : {}) },
+      TIMEOUT_MS.hitTest,
+      HitTestResult.parse,
+    );
   }
 
   find(req: FindRequest): Promise<HitTestResult> {

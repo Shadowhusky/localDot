@@ -141,7 +141,9 @@ export type ObserveResult = z.infer<typeof ObserveResult>;
 export const ZoomRequest = z.object({ frameId: z.string().regex(ULID_PATTERN), region: Rect });
 export type ZoomRequest = z.infer<typeof ZoomRequest>;
 
-export const HitTestRequest = z.object({ point: Point });
+// `managed`: only managed windows count, so popups over the point (a drag's own icon) are looked
+// through.
+export const HitTestRequest = z.object({ point: Point, managed: z.boolean().optional() });
 export type HitTestRequest = z.infer<typeof HitTestRequest>;
 // desktopd clips names at the source and the gateway's clipTarget cuts to the event limits before
 // it appends, so the wire repeats neither limit: an over-long name is cut, never a failed call.

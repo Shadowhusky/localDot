@@ -15,7 +15,8 @@ export interface FakeScript {
   ) => { progress: TypeProgress[]; result: TypeResult } | { status: number; body: string };
   settle?: () => SettleResult;
   observe?: () => ObserveResult;
-  hitTest?: (point: { x: number; y: number }) => HitTestResult;
+  // `managed`: the lookup looks through popups (a drag's own icon).
+  hitTest?: (point: { x: number; y: number }, managed?: boolean) => HitTestResult;
   focused?: () => HitTestResult;
   find?: (req: unknown) => HitTestResult;
   launch?: (body: unknown) => { pid: number };
@@ -169,9 +170,11 @@ export class FakeDesktopd {
         : c.text("that frame is no longer kept", 404);
     });
     this.app.post("/hitTest", async (c) => {
-      const body = (await c.req.json()) as { point: { x: number; y: number } };
+      const body = (await c.req.json()) as { point: { x: number; y: number }; managed?: boolean };
       this.calls.push({ path: "/hitTest", body });
-      return c.json(this.script.hitTest?.(body.point) ?? { target: null, window: null, ms: 1 });
+      return c.json(
+        this.script.hitTest?.(body.point, body.managed) ?? { target: null, window: null, ms: 1 },
+      );
     });
     this.app.post("/focused", (c) => {
       this.calls.push({ path: "/focused", body: null });

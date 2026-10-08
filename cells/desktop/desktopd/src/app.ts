@@ -296,7 +296,7 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     withPerception(async (p) => {
       const parsed = HitTestRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      return c.json(await hitTest(p, parsed.data.point));
+      return c.json(await hitTest(p, parsed.data.point, parsed.data.managed));
     })(),
   );
   app.post("/find", (c) =>
