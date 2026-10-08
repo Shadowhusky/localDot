@@ -56,7 +56,7 @@ import {Hono} from ${JSON.stringify(requireDaemon.resolve("hono"))};
 const app = new Hono(); serveUi(app, webDir('dist'));
 const page = await app.request('http://127.0.0.1/');
 const notice = await app.request('http://127.0.0.1/assets/licenses/mediabunny-1.61.0.txt');
-const spec = browserSpec(sampleBrowserRecord(), 'local-fixture-image');
+const spec = browserSpec(sampleBrowserRecord(), 'local-fixture-image', {fullcolor: false});
 const policy = spec.HostConfig.SecurityOpt.find(value => value.startsWith('seccomp=')).slice(8);
 console.log(JSON.stringify({layout:runtimeLayout,html:await page.text(),pageStatus:page.status,noticeStatus:notice.status,notice:await notice.text(),skill:readFileSync(join(runtimeLayout.skills,'office-files/SKILL.md'),'utf8'),policySHA256:createHash('sha256').update(policy).digest('hex')}));
 `;

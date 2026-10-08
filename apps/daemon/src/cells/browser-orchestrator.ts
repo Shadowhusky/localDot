@@ -64,6 +64,7 @@ export interface BrowserOrchestratorDeps {
   docker: Docker;
   keyd: BrowserKeydClient;
   images: BrowserImages;
+  streamFullcolor?: boolean;
   parentAvailable(parentCellId: string): boolean;
   externalKeydPorts?(): Iterable<number>;
   namePrefix?: string;
@@ -458,7 +459,12 @@ export class BrowserOrchestrator {
       stage = "container creation";
       for (const [field, spec] of [
         ["gate", gateSpec(cell, this.deps.images.gate)],
-        ["browser", browserSpec(cell, this.deps.images.browser)],
+        [
+          "browser",
+          browserSpec(cell, this.deps.images.browser, {
+            fullcolor: this.deps.streamFullcolor ?? false,
+          }),
+        ],
       ] as const) {
         check();
         const created = await this.deps.docker.request<{ Id?: unknown }>({

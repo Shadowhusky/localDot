@@ -100,8 +100,16 @@ export function gateSpec(record: CellRecord | BrowserCellRecord, image: string) 
   };
 }
 
-export interface DesktopOptions {
+export interface StreamOptions {
   fullcolor: boolean;
+}
+
+// iPhones and iPads cannot decode H.264 4:4:4, so the sharper 4:4:4 stream is opt-in. Installed
+// services run with a fixed environment, so they always take the 4:2:0 default.
+export function streamOptions(
+  env: Readonly<Record<string, string | undefined>> = {},
+): StreamOptions {
+  return { fullcolor: env.LOCALDOT_STREAM_FULLCOLOR === "1" };
 }
 
 // Every program in the desktop reaches keyd through the forwarder on the cell's loopback, which adds
@@ -129,10 +137,7 @@ export function keydEnv(record: CellRecord): string[] {
   ];
 }
 
-export function desktopEnv(
-  record: CellRecord,
-  opts: DesktopOptions = { fullcolor: true },
-): string[] {
+export function desktopEnv(record: CellRecord, stream: StreamOptions): string[] {
   const [w, h] = record.scale === 2 ? [2560, 1600] : [1280, 800];
   return [
     "PUID=1000",
@@ -143,7 +148,7 @@ export function desktopEnv(
     `SELKIES_MANUAL_HEIGHT=${h}`,
     `LOCALDOT_DESKTOPD_TOKEN=${record.tokens.desktopd}`,
     `PASSWORD=${record.tokens.stream}`,
-    `SELKIES_VIDEO_FULLCOLOR=${opts.fullcolor}|locked`,
+    `SELKIES_VIDEO_FULLCOLOR=${stream.fullcolor}|locked`,
     ...keydEnv(record),
   ];
 }
@@ -151,15 +156,11 @@ export function desktopEnv(
 // The desktop keeps the default capability set minus NET_RAW and no no-new-privileges: the agent
 // installs software with passwordless sudo (spec, Hardening). Neither container gets a Docker
 // restart policy: the orchestrator restarts them itself and re-reads the ports (P2-R14).
-export function desktopSpec(
-  record: CellRecord,
-  image: string,
-  opts: DesktopOptions = { fullcolor: true },
-) {
+export function desktopSpec(record: CellRecord, image: string, stream: StreamOptions) {
   const d = record.docker;
   return {
     Image: image,
-    Env: desktopEnv(record, opts),
+    Env: desktopEnv(record, stream),
     Labels: { "localdot.cell": record.id, "localdot.role": "desktop" },
     HostConfig: {
       NetworkMode: d.internalNetwork,

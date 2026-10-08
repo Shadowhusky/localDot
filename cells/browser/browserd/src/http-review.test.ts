@@ -79,6 +79,7 @@ async function fixture(overrides: Partial<BrowserHttpOptions> = {}) {
       streamToken: "S".repeat(43),
       gateAddress: "10.0.0.2",
       scale: 1,
+      fullcolor: false,
     },
     instance: identity.instance,
     control,
