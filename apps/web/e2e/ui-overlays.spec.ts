@@ -455,6 +455,153 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await context.close();
         });
 
+      test("a destructive dialog opens by what asked, holds the safe choice and acts only when told", async () => {
+        const { context, page, seen } = await open(browser, device);
+        const trigger = page.getByRole("button", { name: "Delete recording" });
+        const dialog = page.getByRole("alertdialog", { name: "Delete this recording?" });
+        const cancel = dialog.getByRole("button", { name: "Cancel" });
+        const count = page.getByText(/^Deleted \d/);
+        const openDialog = async () => {
+          await press(trigger);
+          await expect(dialog).toBeVisible();
+          await settled(dialog);
+          await expect(cancel).toBeFocused();
+        };
+        // Room below the control on a tall desktop window; none once it sits near the bottom.
+        if (!touch) await page.setViewportSize({ width: 1440, height: 1500 });
+        await trigger.scrollIntoViewIfNeeded();
+        await openDialog();
+        expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflow)).toBe(
+          "hidden",
+        );
+        const asked = await box(trigger);
+        const shown = await box(dialog);
+        if (touch) {
+          expect(Math.abs(shown.x + shown.width / 2 - 195)).toBeLessThanOrEqual(1);
+          expect(Math.abs(shown.y + shown.height / 2 - 422)).toBeLessThanOrEqual(1);
+        } else {
+          await expect(dialog).toHaveAttribute("data-side", "bottom");
+          expect(shown.y).toBeGreaterThanOrEqual(asked.y + asked.height);
+          expect(shown.y - asked.y - asked.height).toBeLessThanOrEqual(12);
+          expect(
+            Math.abs(shown.x + shown.width / 2 - (asked.x + asked.width / 2)),
+          ).toBeLessThanOrEqual(1);
+        }
+
+        // The dim area closes it without acting, and focus goes back to what asked.
+        if (touch) await page.touchscreen.tap(195, 40);
+        else await page.mouse.click(1300, 120);
+        await expect(dialog).toHaveCount(0);
+        await expect(count).toHaveText("Deleted 0 recordings");
+        await expect(trigger).toBeFocused();
+
+        if (!touch) {
+          await page.setViewportSize({ width: 1440, height: 900 });
+          await page.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight));
+          await openDialog();
+          await expect(dialog).toHaveAttribute("data-side", "top");
+          const above = await box(dialog);
+          const low = await box(trigger);
+          expect(above.y + above.height).toBeLessThanOrEqual(low.y);
+          await page.keyboard.press("Escape");
+          await expect(dialog).toHaveCount(0);
+          await expect(trigger).toBeFocused();
+          await expect(count).toHaveText("Deleted 0 recordings");
+        }
+
+        await openDialog();
+        await press(dialog.getByRole("button", { name: "Delete", exact: true }));
+        await expect(dialog).toHaveCount(0);
+        await expect(count).toHaveText("Deleted 1 recording");
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      });
+
+      test("a popover grows from its trigger, holds focus, flips near the bottom and gives focus back", async () => {
+        const { context, page, seen } = await open(browser, device);
+        const trigger = page.getByRole("button", { name: "Share" });
+        const popover = page.getByRole("dialog", { name: "Share this replay" });
+        const copy = popover.getByRole("button", { name: "Copy link" });
+        await trigger.evaluate((element) => element.scrollIntoView({ block: "center" }));
+        await expect(trigger).toHaveAttribute("aria-haspopup", "dialog");
+        await press(trigger);
+        await expect(popover).toBeVisible();
+        await settled(popover);
+        await expect(popover).toHaveAttribute("aria-modal", "true");
+        await expect(trigger).toHaveAttribute("aria-expanded", "true");
+        await expect(copy).toBeFocused();
+        const at = await box(trigger);
+        const below = await box(popover);
+        await expect(popover).toHaveAttribute("data-side", "bottom");
+        expect(below.y).toBeGreaterThanOrEqual(at.y + at.height);
+        expect(below.y - at.y - at.height).toBeLessThanOrEqual(12);
+        if (!touch) {
+          await page.keyboard.press("Tab");
+          await expect(copy).toBeFocused();
+        }
+        await page.keyboard.press("Escape");
+        await expect(popover).toHaveCount(0);
+        await expect(trigger).toBeFocused();
+        await expect(trigger).toHaveAttribute("aria-expanded", "false");
+
+        // A press outside only closes it: the control it lands on is not pressed.
+        await press(trigger);
+        await settled(popover);
+        const other = await box(page.getByRole("button", { name: "Delete recording" }));
+        const point = { x: other.x + 12, y: other.y + other.height / 2 };
+        if (touch) await page.touchscreen.tap(point.x, point.y);
+        else await page.mouse.click(point.x, point.y);
+        await expect(popover).toHaveCount(0);
+        await page.waitForTimeout(400);
+        await expect(page.getByRole("alertdialog")).toHaveCount(0);
+
+        // Near the bottom of the window it opens above, growing up from the trigger.
+        await page.evaluate(
+          ({ y, height }) => window.scrollTo(0, y + window.scrollY + height + 24 - innerHeight),
+          { y: (await box(trigger)).y, height: at.height },
+        );
+        await press(trigger);
+        await settled(popover);
+        await expect(popover).toHaveAttribute("data-side", "top");
+        const low = await box(trigger);
+        const above = await box(popover);
+        expect(above.y + above.height).toBeLessThanOrEqual(low.y);
+        expect(low.y - above.y - above.height).toBeLessThanOrEqual(12);
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      });
+
+      if (!touch)
+        test("a sheet beside the page leaves the page live and an Escape pressed there to it", async () => {
+          const { context, page, seen } = await open(browser, device);
+          const opener = page.getByRole("button", { name: "Open beside the page" });
+          await opener.click();
+          const sheet = sheetOf(page);
+          await expect(sheet).toBeVisible();
+          await settled(sheet);
+          await expect(sheet).toHaveAttribute("aria-modal", "false");
+          await expect(page.locator(".ui-scrim")).toHaveCount(0);
+          expect(
+            await page.evaluate(() => getComputedStyle(document.documentElement).overflow),
+          ).not.toBe("hidden");
+
+          const under = page.getByRole("button", { name: /^Pressed/ });
+          await under.click();
+          await expect(under).toHaveText("Pressed 1 time");
+          await expect(sheet).toBeVisible();
+          await under.focus();
+          await page.keyboard.press("Escape");
+          await page.waitForTimeout(300);
+          await expect(sheet).toBeVisible();
+
+          await sheet.getByLabel("Name").focus();
+          await page.keyboard.press("Escape");
+          await expect(sheet).toHaveCount(0);
+          await expect(opener).toBeFocused();
+          expect(await seen()).toEqual({ violations: [], styles: 0 });
+          await context.close();
+        });
+
       test("a modal sheet holds the page still without a style element", async () => {
         const { context, page, seen } = await open(browser, device);
         await page.evaluate(() => window.scrollTo(0, 120));
