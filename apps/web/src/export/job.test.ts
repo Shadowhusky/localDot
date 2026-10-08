@@ -70,17 +70,18 @@ afterEach(() => {
 });
 
 describe("an export without a save picker", () => {
-  it("makes the video, then saves it as a download when asked", async () => {
+  it("makes the video, then saves it as a download when asked, as often as asked", async () => {
     vi.stubGlobal("showSaveFilePicker", undefined);
     const names: string[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
       this: HTMLAnchorElement,
     ) {
-      names.push(this.download);
+      names.push(`${this.download} ${this.href}`);
     });
+    const revoke = vi.fn();
     vi.stubGlobal(
       "URL",
-      Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL() {} }),
+      Object.assign(URL, { createObjectURL: () => "blob:x", revokeObjectURL: revoke }),
     );
     const job = createExportJob();
     const seen: string[] = [];
@@ -100,10 +101,22 @@ describe("an export without a save picker", () => {
     });
     expect(names).toEqual([]);
     job.save();
-    expect(names).toEqual(["localdot-2026-10-08-0901.mp4"]);
-    expect(job.snapshot().phase).toBe("saved");
+    expect(names).toEqual(["localdot-2026-10-08-0901.mp4 blob:x"]);
+    expect(job.snapshot().phase).toBe("downloaded");
+    // Safari on a phone asks first and the person may say no, so the file stays to be saved again.
+    vi.useFakeTimers();
+    vi.advanceTimersByTime(10 * 60_000);
+    expect(revoke).not.toHaveBeenCalled();
+    job.save();
+    expect(names).toEqual([
+      "localdot-2026-10-08-0901.mp4 blob:x",
+      "localdot-2026-10-08-0901.mp4 blob:x",
+    ]);
     job.dismiss();
+    expect(revoke).toHaveBeenCalledWith("blob:x");
     expect(job.snapshot().phase).toBe("options");
+    job.save();
+    expect(names).toHaveLength(2);
     expect(seen).toContain("ready");
   });
 

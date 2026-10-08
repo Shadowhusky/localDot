@@ -161,22 +161,20 @@ describe("the download path's in-memory file", () => {
     await expect(sink.close()).rejects.toMatchObject({ name: "AbortError" });
   });
 
-  it("downloads the file under its name and lets the link go after the browser has read it", () => {
+  it("downloads the file under its name and leaves its address to the caller", () => {
     vi.useFakeTimers();
-    const create = vi.fn(() => "blob:video");
     const revoke = vi.fn();
-    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: create, revokeObjectURL: revoke }));
+    vi.stubGlobal("URL", Object.assign(URL, { revokeObjectURL: revoke }));
     const clicked: { href: string; download: string }[] = [];
     vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
       this: HTMLAnchorElement,
     ) {
       clicked.push({ href: this.href, download: this.download });
     });
-    downloadFile(new Blob([Uint8Array.of(1)]), "localdot-2026-10-08-0901.mp4");
+    downloadFile("blob:video", "localdot-2026-10-08-0901.mp4");
     expect(clicked).toEqual([{ href: "blob:video", download: "localdot-2026-10-08-0901.mp4" }]);
     expect(document.querySelector("a[download]")).toBeNull();
+    vi.advanceTimersByTime(10 * 60_000);
     expect(revoke).not.toHaveBeenCalled();
-    vi.advanceTimersByTime(60_000);
-    expect(revoke).toHaveBeenCalledWith("blob:video");
   });
 });

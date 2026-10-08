@@ -102,8 +102,9 @@ test("export, saved", async ({ page, ui }) => {
   if (await ready.isVisible()) {
     const [download] = await Promise.all([page.waitForEvent("download"), ready.click()]);
     expect(download.suggestedFilename()).toBe("localdot-2026-10-08-0901.mp4");
-  }
-  await expect(saved).toBeVisible();
+    await expect(panel.getByText("Downloaded", { exact: true })).toBeVisible();
+    await expect(panel.getByRole("button", { name: "Save again" })).toBeVisible();
+  } else await expect(saved).toBeVisible();
   await expect(panel.getByText("2.3 MB · 1:38", { exact: true })).toBeVisible();
   await still(ui);
   await expect(page).toHaveScreenshot("export-saved.png");
@@ -150,6 +151,11 @@ test.describe("in WebKit", () => {
     const head = readFileSync(await download.path());
     expect(head.length).toBeGreaterThan(1000);
     expect(head.subarray(4, 8).toString("latin1")).toBe("ftyp");
-    await expect(panel.getByText("Video saved", { exact: true })).toBeVisible();
+    await expect(panel.getByText("Downloaded", { exact: true })).toBeVisible();
+    const [again] = await Promise.all([
+      page.waitForEvent("download"),
+      panel.getByRole("button", { name: "Save again" }).click(),
+    ]);
+    expect(again.suggestedFilename()).toBe(download.suggestedFilename());
   });
 });

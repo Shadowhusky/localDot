@@ -145,8 +145,9 @@ export function memorySink(limit = DOWNLOAD_LIMIT): MemorySink {
   };
 }
 
-export function downloadFile(blob: Blob, name: string): void {
-  const url = URL.createObjectURL(blob);
+// The caller keeps `url` until the person is done with the file: a browser that asks first (Safari
+// on a phone) reads it only after the answer, and the answer may be no.
+export function downloadFile(url: string, name: string): void {
   const link = document.createElement("a");
   link.href = url;
   link.download = name;
@@ -154,8 +155,6 @@ export function downloadFile(blob: Blob, name: string): void {
   document.body.append(link);
   link.click();
   link.remove();
-  // A browser that asks first (Safari on a phone) reads the file only after the answer.
-  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 export async function opfsSink(name: string): Promise<ExportSink> {

@@ -47,6 +47,11 @@ const NO_STEP = "The playhead isn't on a step";
 const NO_SELECTION = "Press I and O on the timeline to mark a stretch";
 // The elapsed time and the estimate of what is left move on this beat while a video is saved.
 const TICK_MS = 500;
+const RESULT_TITLE = {
+  ready: "Your video is ready",
+  downloaded: "Downloaded",
+  saved: "Video saved",
+} as const;
 
 // The picture the export opens on: the moment at the playhead when it is in range, else the range's
 // first, else the first after it.
@@ -331,16 +336,14 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
     return () => clearInterval(timer);
   }, [exporting, open]);
 
-  if (state.phase === "ready" || state.phase === "saved") {
+  if (state.phase === "ready" || state.phase === "downloaded" || state.phase === "saved") {
     const file = state.file;
     return (
       <div className="export-result" role="status">
         <span className="export-result-mark" aria-hidden="true">
-          <Icon name={state.phase === "saved" ? "check" : "download"} size={16} />
+          <Icon name={state.phase === "ready" ? "download" : "check"} size={16} />
         </span>
-        <p className="export-status-title">
-          {state.phase === "saved" ? "Video saved" : "Your video is ready"}
-        </p>
+        <p className="export-status-title">{RESULT_TITLE[state.phase]}</p>
         {file && (
           <>
             <p className="export-file">{file.name}</p>
@@ -426,9 +429,14 @@ function ExportActions({
         </Button>
       </div>
     );
-  if (state.phase === "saved")
+  if (state.phase === "downloaded" || state.phase === "saved")
     return (
       <div className="export-actions">
+        {state.phase === "downloaded" && (
+          <Button variant="quiet" icon="download" onClick={() => job.save()}>
+            Save again
+          </Button>
+        )}
         <Button
           onClick={() => {
             job.reset();

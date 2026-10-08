@@ -12,9 +12,10 @@ import {
   pickFileSink,
 } from "./sink.ts";
 
-// options → (picking) → exporting → saved, or → ready → saved where the browser has no save
-// picker and the finished file waits for the person to save it.
-export type ExportPhase = "options" | "picking" | "exporting" | "ready" | "saved";
+// options → (picking) → exporting → saved, or → ready → downloaded where the browser has no save
+// picker and the finished file waits for the person to save it. A download can be cancelled at the
+// browser's prompt, so the file stays to be saved again until the popover is put away.
+export type ExportPhase = "options" | "picking" | "exporting" | "ready" | "downloaded" | "saved";
 
 export interface ExportFile {
   name: string;
@@ -42,8 +43,8 @@ export interface ExportJob {
   start(context: ExportContext, request: ExportRequest, durationS: number): Promise<void>;
   cancel(): void;
   save(): void;
-  // The popover was put away: a saved file or a note has been seen and goes; a running export or a
-  // video waiting to be saved stays.
+  // The popover was put away: a saved or downloaded file or a note has been seen and goes; a running
+  // export or a video waiting to be saved stays.
   dismiss(): void;
   reset(): void;
   dispose(): void;
@@ -69,6 +70,7 @@ export function createExportJob(): ExportJob {
   let state = IDLE;
   let handle: ExportHandle | null = null;
   let held: Blob | null = null;
+  let heldUrl: string | null = null;
   // Each start and each dispose takes a new run; a run that is no longer current goes quiet.
   let run = 0;
   const listeners = new Set<() => void>();
@@ -76,9 +78,14 @@ export function createExportJob(): ExportJob {
     state = { ...state, ...next };
     for (const listener of listeners) listener();
   };
+  const release = () => {
+    if (heldUrl) URL.revokeObjectURL(heldUrl);
+    heldUrl = null;
+    held = null;
+  };
   const reset = () => {
     if (busy(state.phase)) return;
-    held = null;
+    release();
     set(IDLE);
   };
   return {
@@ -95,7 +102,7 @@ export function createExportJob(): ExportJob {
         return;
       }
       const mine = ++run;
-      held = null;
+      release();
       const suggested = suggestedExportName(new Date());
       let name =
         context.source.screen === "browser"
@@ -147,19 +154,20 @@ export function createExportJob(): ExportJob {
       handle?.cancel();
     },
     save() {
-      if (state.phase !== "ready" || !held || !state.file) return;
-      downloadFile(held, state.file.name);
-      set({ phase: "saved" });
+      if ((state.phase !== "ready" && state.phase !== "downloaded") || !held || !state.file) return;
+      heldUrl ??= URL.createObjectURL(held);
+      downloadFile(heldUrl, state.file.name);
+      set({ phase: "downloaded" });
     },
     dismiss() {
-      if (state.phase === "saved" || state.note) reset();
+      if (state.phase === "saved" || state.phase === "downloaded" || state.note) reset();
     },
     reset,
     dispose() {
       run++;
       handle?.cancel();
       handle = null;
-      held = null;
+      release();
       state = IDLE;
     },
   };

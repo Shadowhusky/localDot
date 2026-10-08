@@ -235,4 +235,19 @@ describe("Export MP4", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save video" }));
     expect(job.save).toHaveBeenCalledOnce();
   });
+
+  it("offers a downloaded video again, since the browser's prompt may have been cancelled", async () => {
+    vi.stubGlobal("showSaveFilePicker", undefined);
+    const job = fakeJob({
+      phase: "downloaded",
+      file: { name: "localdot-2026-10-08-0901.mp4", bytes: 2048, durationS: 0.6 },
+    });
+    await show(job);
+    expect(screen.getByRole("status").textContent).toContain("Downloaded");
+    expect(screen.getByRole("status").textContent).not.toContain("saved");
+    fireEvent.click(screen.getByRole("button", { name: "Save again" }));
+    expect(job.save).toHaveBeenCalledOnce();
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+    expect(job.reset).toHaveBeenCalledOnce();
+  });
 });

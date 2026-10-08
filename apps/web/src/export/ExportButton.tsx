@@ -21,7 +21,7 @@ export function ExportButton({
 }) {
   const { phase, done, total } = useExportJob(job);
   const ring = !open && phase !== "options";
-  const finished = phase === "ready" || phase === "saved";
+  const finished = phase === "ready" || phase === "downloaded" || phase === "saved";
   return (
     <Button
       ref={ref}
