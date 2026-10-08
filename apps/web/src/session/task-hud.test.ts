@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { emptyAgentModel } from "../agent/model.ts";
 import { projectAgentEvent } from "../agent/reducer.ts";
 import { type HudState, hudFor } from "../cells/hud-state.ts";
-import { mergeHud, type TaskFacts, taskFacts, taskHud } from "./task-hud.ts";
+import { liveState, mergeHud, type TaskFacts, taskFacts, taskHud } from "./task-hud.ts";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
 let seq = 0;
@@ -327,6 +327,44 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       task: { row: "paused", phase: "waiting", label: "Pause unconfirmed" },
       merged: { stop: true, control: false, elapsedS: null },
     });
+  });
+
+  it("keeps a live wait while its control is pending, and ends it once that control settles", () => {
+    const stateOf = (events: LocalDotEvent[]) =>
+      liveState(events.reduce(projectAgentEvent, emptyAgentModel()));
+    const approval = [
+      ...typed(),
+      approvalRequest(1500),
+      ev("agent.state", 1501, { state: "waiting_user", reason: "approval" }),
+    ];
+    const question = [
+      ...typed(),
+      ev("ask.request", 1500, { askId: ID, question: "Which?", options: [], allowText: true }),
+      ev("agent.state", 1501, { state: "waiting_user", reason: "question" }),
+    ];
+    const takeover = [
+      ...typed(),
+      ev("takeover.request", 1500, { requestId: ID, reason: "login", note: "Sign in" }),
+      ev("agent.state", 1501, { state: "waiting_user", reason: "takeover" }),
+    ];
+    const paused = [
+      ...typed(),
+      ev("safety.pause", 1500, pause("pausing")),
+      ev("agent.state", 1500, { state: "paused", reason: "user" }),
+    ];
+    for (const [pending, state, settle] of [
+      [
+        approval,
+        "waiting_user",
+        ev("approval.resolve", 2000, { approvalId: ID, decision: "approve", by: "user" }),
+      ],
+      [question, "waiting_user", ev("ask.answer", 2000, { askId: ID, text: "This", by: "user" })],
+      [takeover, "waiting_user", ev("takeover.end", 2000, { requestId: ID, by: "user" })],
+      [paused, "paused", ev("safety.pause", 2000, { revision: 2 })],
+    ] as const) {
+      expect(stateOf(pending)).toBe(state);
+      expect(stateOf([...pending, settle])).toBe("acting");
+    }
   });
 
   it("names a budget pause and shows no clock", () => {
