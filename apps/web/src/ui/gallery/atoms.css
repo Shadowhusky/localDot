@@ -85,6 +85,8 @@
     position: absolute;
     top: 3px;
     right: 3px;
+    z-index: 2;
+    pointer-events: none;
   }
 
   .atoms-hud {
@@ -106,6 +108,12 @@
 
   .atoms-hud-time {
     margin-right: var(--spacing);
+  }
+
+  .atoms-pair {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing);
   }
 
   .atoms-icons {

@@ -185,6 +185,25 @@ export function AtomsPage() {
             <span className="atoms-label">In a bar</span>
             <Toolbar />
           </div>
+          <div className="atoms-row">
+            <span className="atoms-label">Close together</span>
+            {([24, 28] as const).map((size) => (
+              <Specimen key={size} caption={`${size} px, 4 px apart`}>
+                <div className="atoms-pair" role="toolbar" aria-label={`${size} px, 4 px apart`}>
+                  <IconButton label="Pause after this step" icon="pause" size={size} />
+                  <IconButton label="Stop" icon="square" size={size} />
+                </div>
+              </Specimen>
+            ))}
+            <Specimen caption="Buttons, 4 px apart">
+              <div className="atoms-pair" role="toolbar" aria-label="Buttons, 4 px apart">
+                <Button size="sm">Back</Button>
+                <Button size="sm" variant="primary">
+                  Next
+                </Button>
+              </div>
+            </Specimen>
+          </div>
         </div>
       </Section>
 

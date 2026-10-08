@@ -19,21 +19,42 @@
   }
 
   :is(.ui-button, .ui-icon-button) {
+    --_face: transparent;
     position: relative;
     flex-shrink: 0;
     border: 1px solid transparent;
+    background: none;
     user-select: none;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     cursor: pointer;
+    /* Scaled or faded, the button would form a stacking context and sink its face (below), so the
+       legacy :active rules that do either are held off. */
+    opacity: 1;
     transform: none;
-    transition:
-      background-color var(--dur-hover) var(--ease-standard),
-      color var(--dur-hover) var(--ease-standard),
-      transform var(--dur-exit) var(--ease-enter);
+    transition: color var(--dur-hover) var(--ease-standard);
   }
 
-  /* Hover and focus reach past the edge: the ::after sits in the padding box, inside the border. */
+  /* The face (::before) and what sits on it are raised above every control's reach (::after), so a
+     press just inside an edge lands on that control, not on a close neighbour. Anything drawn over a
+     control, such as a badge, needs z-index 2. */
+  :is(.ui-button, .ui-icon-button)::before,
+  :is(.ui-button, .ui-icon-button) > * {
+    z-index: 1;
+  }
+
+  :is(.ui-button, .ui-icon-button)::before {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    background-color: var(--_face);
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      scale var(--dur-exit) var(--ease-enter);
+  }
+
+  /* The reach: a larger pointer target, in the padding box, inside the 1 px border. */
   :is(.ui-button, .ui-icon-button)::after {
     content: "";
     position: absolute;
@@ -44,12 +65,15 @@
     outline-offset: var(--focus-offset);
   }
 
-  :is(.ui-button, .ui-icon-button)[data-pressed] {
+  :is(.ui-button, .ui-icon-button)[data-pressed],
+  :is(.ui-button, .ui-icon-button)[data-pressed]::before,
+  :is(.ui-button, .ui-icon-button)[data-pressed] > * {
     transition-duration: var(--dur-press);
   }
 
-  :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"] {
-    transform: scale(0.97);
+  :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"]::before,
+  :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"] > * {
+    scale: 0.97;
   }
 
   :is(.ui-button, .ui-icon-button)[aria-disabled="true"] {
@@ -63,13 +87,13 @@
     --_fg: var(--color-fg-1);
     --_fg-hover: var(--color-fg-1);
     --_pad: calc(var(--spacing) * 3);
+    --_face: var(--_bg);
     display: inline-flex;
     align-items: center;
     justify-content: center;
     height: calc(var(--spacing) * 8);
     padding: 0 var(--_pad);
     border-radius: var(--radius-md);
-    background-color: var(--_bg);
     color: var(--_fg);
     font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
     white-space: nowrap;
@@ -118,22 +142,18 @@
 
   @media (hover: hover) {
     .ui-button:not([aria-disabled="true"], [data-pressed]):hover {
-      background-color: var(--_bg-hover);
+      --_face: var(--_bg-hover);
       color: var(--_fg-hover);
     }
   }
 
   .ui-button[data-pressed] {
-    background-color: var(--_bg-pressed);
+    --_face: var(--_bg-pressed);
     color: var(--_fg-hover);
   }
 
   .ui-button[aria-disabled="true"]:not([aria-busy="true"]) {
-    background-color: color-mix(
-      in oklab,
-      var(--_bg) calc(var(--opacity-disabled) * 100%),
-      transparent
-    );
+    --_face: color-mix(in oklab, var(--_bg) calc(var(--opacity-disabled) * 100%), transparent);
   }
 
   .ui-button[aria-busy="true"] {
@@ -144,7 +164,9 @@
     display: inline-flex;
     align-items: center;
     gap: calc(var(--spacing) * 1.5);
-    transition: opacity var(--dur-fade) var(--ease-standard);
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      scale var(--dur-exit) var(--ease-enter);
   }
 
   /* The label stays in place while busy, so the button keeps its width. */
@@ -176,8 +198,11 @@
     width: var(--_size);
     height: var(--_size);
     border-radius: var(--radius-md);
-    background-color: transparent;
     color: var(--color-fg-2);
+  }
+
+  .ui-icon-button > .ui-icon {
+    transition: scale var(--dur-exit) var(--ease-enter);
   }
 
   /* A 44 px target around every size. */
@@ -196,13 +221,13 @@
 
   @media (hover: hover) {
     .ui-icon-button:not([aria-disabled="true"], [data-pressed]):hover {
-      background-color: var(--color-state-hover);
+      --_face: var(--color-state-hover);
       color: var(--color-fg-1);
     }
   }
 
   .ui-icon-button[data-pressed] {
-    background-color: var(--color-state-pressed);
+    --_face: var(--color-state-pressed);
     color: var(--color-fg-1);
   }
 
@@ -407,8 +432,9 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"] {
-      transform: none;
+    :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"]::before,
+    :is(.ui-button, .ui-icon-button)[data-pressed="squeeze"] > * {
+      scale: none;
     }
 
     .ui-tooltip {
@@ -423,6 +449,11 @@
   @media (forced-colors: active) {
     :is(.ui-button, .ui-icon-button) {
       border-color: ButtonText;
+    }
+
+    /* A forced face is opaque and would hide the border. */
+    :is(.ui-button, .ui-icon-button)::before {
+      background-color: transparent;
     }
 
     :is(.ui-button, .ui-icon-button)[aria-disabled="true"]:not([aria-busy="true"]) {
