@@ -93,7 +93,7 @@ it("asks for the rest of a long value before Approve", async () => {
   fireEvent.click(approve());
   expect(decide).not.toHaveBeenCalled();
   await act(async () => {
-    fireEvent.click(within(dialog).getByRole("button", { name: "Show all" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Show all of Content" }));
   });
   expect(loadField).toHaveBeenCalledExactlyOnceWith(
     "01J00000000000000000000003",
@@ -101,11 +101,56 @@ it("asks for the rest of a long value before Approve", async () => {
     expect.any(AbortSignal),
   );
   expect(dialog.textContent).toContain(TAIL);
-  expect(within(dialog).queryByRole("button", { name: "Show all" })).toBeNull();
+  expect(within(dialog).queryByRole("button", { name: /^Show all/ })).toBeNull();
   expect(approve().disabled).toBe(false);
 });
 
-it("refuses loaded text that is not the text on the card", async () => {
+it("moves focus to each value it loads and names each Show all by its field", async () => {
+  const old = `${"old line\n".repeat(3000)}keep`;
+  const next = `${"new line\n".repeat(3000)}${TAIL}`;
+  const full = new Map([
+    [1, old],
+    [2, next],
+  ]);
+  render(
+    <ApprovalCard
+      card={card(
+        [
+          ["Tool", "files"],
+          ["Old text", old.slice(0, APPROVAL_FIELD_CHARS)],
+          ["New text", next.slice(0, APPROVAL_FIELD_CHARS)],
+        ],
+        {
+          partial: [
+            { field: 1, length: old.length },
+            { field: 2, length: next.length },
+          ],
+        },
+      )}
+      pending={false}
+      onDecision={vi.fn()}
+      loadField={async (_id, field) => full.get(field) ?? ""}
+    />,
+  );
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Show all of Old text" }));
+  });
+  expect(document.activeElement).toBe(screen.getByRole("region", { name: "Old text" }));
+  expect(document.activeElement?.textContent).toContain("keep");
+  expect(approve().disabled).toBe(true);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Show all of New text" }));
+  });
+  expect(document.activeElement).toBe(screen.getByRole("region", { name: "New text" }));
+  expect(document.activeElement?.textContent).toContain(TAIL);
+  expect(approve().disabled).toBe(false);
+});
+
+it.each([
+  ["a different first character", (full: string) => `y${full.slice(1)}`],
+  ["the right start but more text", (full: string) => `${full} && reboot`],
+  ["the right start but less text", (full: string) => full.slice(0, -TAIL.length)],
+])("refuses loaded text with %s", async (_, change) => {
   const full = `${"x".repeat(APPROVAL_FIELD_CHARS)}${TAIL}`;
   render(
     <ApprovalCard
@@ -114,17 +159,36 @@ it("refuses loaded text that is not the text on the card", async () => {
       })}
       pending={false}
       onDecision={vi.fn()}
-      loadField={async () => `y${full.slice(1)}`}
+      loadField={async () => change(full)}
     />,
   );
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all of Content" }));
   });
   expect(screen.getByRole("alert").textContent).toBe(
     "The full text could not be checked. Deny, or take control.",
   );
-  expect(screen.getByRole("dialog").textContent).not.toContain(TAIL);
+  expect(screen.getByRole("dialog").textContent).not.toContain("curl");
   expect(approve().disabled).toBe(true);
+});
+
+it("does not trust a card that lists one partial value twice", () => {
+  const full = `${"x".repeat(APPROVAL_FIELD_CHARS)}${TAIL}`;
+  render(
+    <ApprovalCard
+      card={card([["Content", full.slice(0, APPROVAL_FIELD_CHARS)]], {
+        partial: [
+          { field: 0, length: full.length },
+          { field: 0, length: full.length },
+        ],
+      })}
+      pending={false}
+      onDecision={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("alert").textContent).toBe(
+    "This decision could not be verified. Check task status again.",
+  );
 });
 
 it("does not trust a partial value that names no field", () => {

@@ -42,10 +42,12 @@ export const ApprovalValue = memo(function ApprovalValue({
   label,
   text,
   total,
+  focusOnMount = false,
 }: {
   label: string;
   text: string;
   total?: number;
+  focusOnMount?: boolean;
 }) {
   const value = useMemo(() => revealText(text), [text]);
   const drawn = useMemo(() => draw(value.parts), [value]);
@@ -56,6 +58,9 @@ export const ApprovalValue = memo(function ApprovalValue({
     if (element) setScrolls(element.scrollHeight > element.clientHeight + 1);
   }, []);
   useLayoutEffect(measure);
+  useEffect(() => {
+    if (focusOnMount) block.current?.focus({ preventScroll: true });
+  }, [focusOnMount]);
   useEffect(() => {
     const element = block.current;
     if (!element || typeof ResizeObserver === "undefined") return;
@@ -79,7 +84,9 @@ export const ApprovalValue = memo(function ApprovalValue({
         ref={block}
         className="approval-value"
         dir="ltr"
-        {...(scrolls ? { tabIndex: 0, role: "region", "aria-label": label } : {})}
+        {...(scrolls || focusOnMount
+          ? { tabIndex: scrolls ? 0 : -1, role: "region", "aria-label": label }
+          : {})}
       >
         {drawn}
       </pre>

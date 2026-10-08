@@ -162,10 +162,11 @@ for (const view of VIEWS)
       const read = page.waitForResponse((r) =>
         /\/approvals\/[0-9A-Z]{26}\/fields\/3$/.test(r.url()),
       );
-      await card.getByRole("button", { name: "Show all" }).click();
+      await card.getByRole("button", { name: "Show all of Content", exact: true }).click();
       expect((await read).status()).toBe(200);
       const value = card.locator(".approval-value").nth(3);
       await expect(value).toContainText("200 blank lines");
+      await expect(value).toBeFocused();
       await value.evaluate((element) => {
         element.scrollTop = element.scrollHeight;
       });

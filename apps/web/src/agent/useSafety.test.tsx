@@ -405,7 +405,7 @@ it("Show all reads the rest of a long value from the card's own approval, then a
   const approve = screen.getByRole("button", { name: "Approve once" }) as HTMLButtonElement;
   expect(approve.disabled).toBe(true);
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Show all" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show all of Content" }));
   });
   expect(fetchImpl).toHaveBeenCalledOnce();
   const [url, init] = fetchImpl.mock.calls[0] ?? [];

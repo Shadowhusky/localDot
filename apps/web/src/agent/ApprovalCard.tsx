@@ -77,7 +77,6 @@ export function ApprovalCard({
   };
   const decide = (decision: ApprovalAnswer["decision"]) => {
     if (!visible || !enabled || pending || Date.now() >= value.data.expiresAt) return;
-    if (decision === "approve" && unread) return;
     void onDecision({
       approvalId: value.data.approvalId,
       generation: value.data.generation,
@@ -112,11 +111,13 @@ export function ApprovalCard({
                       label={label}
                       text={whole.get(index) ?? text}
                       total={length}
+                      focusOnMount={whole.has(index)}
                     />
                     {length !== undefined && loadField && (
                       <button
                         type="button"
                         className="approval-show-all"
+                        aria-label={`Show all of ${label}`}
                         disabled={!visible || expired || loading}
                         onClick={() => void showAll(index, text, length)}
                       >
