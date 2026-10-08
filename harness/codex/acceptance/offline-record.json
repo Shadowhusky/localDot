@@ -3,7 +3,7 @@
   "codexVersion": "0.154.0",
   "platform": "darwin-arm64",
   "manifestSha256": "d830b4ab0702b5855f81424cf9eb81c167e79023a3feba49e39b980ea1934f08",
-  "inputSha256": "90bc77f91d997787b9eb41c9f31e96c39293a84cc7ad4f47ae6bc3d3ae18dc96",
+  "inputSha256": "5467f89435a967ec6b4df2bdea982c712920de207cf88343406f1e9db3051ffc",
   "inputs": {
     ".github/workflows/ci.yml": "0f8a2a489a14325e0e73496e8927288124cc136afec546a7fc203778e8b8bf0a",
     "apps/daemon/src/agent/bindings-boundaries.test.ts": "973d2b4950edf7cf440ed9b48a27e2f8849b75239352062933dd166af006b599",
@@ -21,7 +21,7 @@
     "apps/daemon/src/agent/codex/account.test.ts": "f342252c8910977aa259465606b658d99758ca07905e9d02e9b86e736469854c",
     "apps/daemon/src/agent/codex/account.ts": "0cf31ee2aa52046a09eff42648955d64cc22d82f7cea96ad4b6b4d8fd5f1d86f",
     "apps/daemon/src/agent/codex/auth-owner.test.ts": "1856fdc5ed3dddeed1316e74df76631955aae51d95a031b4f0931e203e0533c2",
-    "apps/daemon/src/agent/codex/auth-owner.ts": "51880d3679c30811e372c3d2a6372c6d0144b48c3e1af31e1bfc71b7b764af19",
+    "apps/daemon/src/agent/codex/auth-owner.ts": "cf4d9f0eb8fe157ab876e6807951647e8d5eae609ad72d29f4397f61df37d26a",
     "apps/daemon/src/agent/codex/codex-harness.codex.test.ts": "ff696ccbe12cea046f6cf0e277bc456e8b7733d5b5e0c1e85b61fa1454ec356a",
     "apps/daemon/src/agent/codex/driver.test.ts": "c7812f4ece231a32e989131027374751f89680d42852f580cb543b7f5e4b2ffa",
     "apps/daemon/src/agent/codex/driver.ts": "f913a3fee71cfeecae7bb7a1c70f30de3ee18617a819520f392cf3b60dc3c59f",
@@ -69,7 +69,7 @@
     "apps/daemon/src/agent/runner-boundaries.test.ts": "192f07738acd3f77d40692763c12b8bc803c63f362f0da0760d693ee7152b53a",
     "apps/daemon/src/agent/runner-independent.test.ts": "260fe6664833ad93b9eb508f77e62234a442dc70e149603a7ed6231291b15b5c",
     "apps/daemon/src/agent/runner-review.test.ts": "496b15050684e8c9e82c5d2061b0322c44a48375f363fc54554804fdc4eeefbf",
-    "apps/daemon/src/agent/runner.test.ts": "65acc67283fcfa9a36d2b0c91984faa180cba13497076125674dd75b37d7221f",
+    "apps/daemon/src/agent/runner.test.ts": "a236c0b383863f8da55955ffc4ea7e0c6f32df49664cb3f0fb185c5b1ccb8985",
     "apps/daemon/src/agent/runner.ts": "28cbf75fc6e5fc43108a97000d617013ffd7d067a7bbfa1457bc28821cfc19d5",
     "apps/daemon/src/agent/safety/acceptance.docker.test.ts": "d86ac6c61604bf677b426d04e9abfb17790a2021649bcd02771a4675fc26bfe7",
     "apps/daemon/src/agent/safety/approvals.test.ts": "1246aa5c70ffa8c4bcbadb81f95e8c211274247e2ae13f55c193fe6fdda31dcb",
@@ -149,7 +149,7 @@
     "apps/daemon/src/agent/untrusted.ts": "bc78f1bb495b518e0b0f43e9b8c46fdb042c6a9ec64cde8cd0eb1f4668a586ca",
     "apps/daemon/src/agent/wiring-boundaries.test.ts": "e85e90ce74586e2a0285102815e6578967bf80045e6ae18f053a222adc7ba3e5",
     "apps/daemon/src/agent/wiring-independent.test.ts": "f9fe3be6d5428a3ba14b846f183f84b8f17b9941ecc7b534f45a103c3626002a",
-    "apps/daemon/src/agent/wiring.test.ts": "c1c7aef22a71f52ff06a5cb1171c23c90e3f1c012bd5cffce62f8ead62d0b07e",
+    "apps/daemon/src/agent/wiring.test.ts": "efa3eb992d5968cf0daf8ce2ad6cd35869a24fa53e011ac14c232c775baf8bad",
     "apps/daemon/src/agent/wiring.ts": "c90e4d48562f3743bdf68fcc6daff2665dc654a16eb44ced785759eb85443e5e",
     "apps/daemon/src/app.test.ts": "a291709dfeaa2fa674db0cfc5cd26e31a34087ca4967018aef354533d1d20f2d",
     "apps/daemon/src/app.ts": "c06526e81df5a0818e6ac2c7958384c1ed3b147eec38bb630f3c42e9511f876f",
@@ -455,7 +455,7 @@
     "harness/codex/package.json": "3d55143f3938df8274c9188764b2e0fb26a2ffe64c03d6a07d9ce5183452caf9",
     "harness/codex/releases/0.154.0.json": "e9a8a9bfc949017e5e403cb4953ab08fd07982e7ac8757a879c82b95a4f3e6a2",
     "harness/codex/schema/contract-0.154.0.json": "e4b07d9100e186c1d83d5c6189509730310f15cc0ab74dfd974589b95f7cbb3e",
-    "harness/codex/src/acceptance.test.ts": "29f9dc16a6bee609376806afd20cab7058ae0f43123b76cab8e632f97c319848",
+    "harness/codex/src/acceptance.test.ts": "08ee40735a46fd05ac8acd67fbbbf6ca3c8168286e2950382ab14703e40b4bce",
     "harness/codex/src/acceptance.ts": "e5ef634e55efb07256f61af78af8d2571d1a13e21ade719350e30e8a7bc341a5",
     "harness/codex/src/approvals.test.ts": "780f6e0253549d865be0755f0629f7f3150afd200ab7bad6d1e62c7dd537dd31",
     "harness/codex/src/approvals.ts": "c6ed07d2f719246d3b363bcb7d8faa69a36dea269f844279c4ffc8a1b356df3d",
@@ -469,7 +469,7 @@
     "harness/codex/src/env.ts": "591b46b4ff1573737bb5d8b3f53590cdd349fcd4354bf1bf4564d7c807fb253f",
     "harness/codex/src/home.test.ts": "3c3823466c2222ce600719fe18595c2307f8a704a42f5ec19207f7da9ebaefb1",
     "harness/codex/src/home.ts": "94df5ab4392b446eb1fdbee629b25d185ba8c3bd417f2e5af86a2f6ccbbe68d1",
-    "harness/codex/src/index.ts": "86beedcb60ec120182d3ea1f39ea8e53c1cc06afea53ad63791f42b29796ba2c",
+    "harness/codex/src/index.ts": "ae94a9137f26e4da4027a6c4803082a813032c6740d05d3a8a2a350eba771edd",
     "harness/codex/src/install.test.ts": "1cc33940b97fb9dc9cb0f90b198ff56c28ec44d1284175d09f5f181845536c14",
     "harness/codex/src/install.ts": "9309916b8ed05f56b971cbf9378c68ef0eb38be7b7cc7fcce818741eb3c05a70",
     "harness/codex/src/launch.test.ts": "1633dead9112b8da0685c1b45aaaf128b217a15566058a95e0cb4675af5e49e6",
@@ -556,7 +556,7 @@
     "packages/protocol/src/selftest.test.ts": "3c4230586e9f657a0c311857a13d0a6313c4a36acb4ff57804b4fa2698d21121",
     "packages/protocol/src/selftest.ts": "8f662f6525addcc30e17a50578d9028468d7f01b992eb3b3514f83f124f48f4d",
     "packages/protocol/src/subscription.test.ts": "d1b5336c0df8b9c0678a894f210ccd7907798d22cb7fb18400eb85859a7091ad",
-    "packages/protocol/src/subscription.ts": "b2a93e72d3538bd459fb4042ad536882508c91c76d934339c54fa708c9d6946a",
+    "packages/protocol/src/subscription.ts": "1a4f89b961d15be6b1859985ef3b04e5dbcf7af97c6503fcae3269d07a1d0bcc",
     "packages/protocol/src/target.ts": "643b18f80101c4eca56bea1d2451d63575ca194219249496ef31630b266e3805",
     "packages/protocol/src/task-pricing.test.ts": "b8e2dffc706e733ed4f54803b18bb974f4c506b9b871e79d6733615bf3d8b825",
     "packages/protocol/src/testing/sample-release.ts": "a9ab3c6f8b58309ceb91837582bb45de5ea6caeba215f9671dd1f02411287273",
@@ -570,8 +570,8 @@
     "packages/protocol/src/upload-metadata.ts": "0f2f6891b20252f3609730718d2f3485baea7f94dd539fc02d60c21c7b12a575",
     "pnpm-lock.yaml": "fe7450e59c1624223e10a9bdc16b543d4496f1d274d73a67cf243e5e6009e4d5",
     "pnpm-workspace.yaml": "e434c1ac610808ba17a56a5cc45d11a98830332228b4298f2ceb1af0e2b1f4b0",
-    "scripts/check-codex-release.mjs": "9a4814271cae87a7f4c9ae07c75b8c40dc77155aa6b95a4d8b14266cf03e4bdd",
-    "scripts/check-codex-release.test.mjs": "9a08ae1c58a5c0937ed67fa475cb9bb089ce5cee3ac8b04edeb16d145b1410d6",
+    "scripts/check-codex-release.mjs": "6681769f03c1f57cf15177522d7b2c4f711a70d4309f4e2ee4687f5703a5fc7a",
+    "scripts/check-codex-release.test.mjs": "5059f6f5cfec1e1a7c05c9990399059ad87db1a8ae8c21dc98d93869a5cef5ac",
     "vitest.codex-signin.config.ts": "bfd0b18169a8c3ec68c6fb8010492c9e74a2e2d04853c8f49f628dd964568606",
     "vitest.codex.config.ts": "f71b4a2d58b66941f3a310f61aee317977af404468d5b57dbf782ac28624c134",
     "vitest.config.ts": "16373d0fefe9ddbcc77356fc3230b703a771a0a091a2aeb0e7325e9d844fe1c6"
@@ -628,11 +628,9 @@
       "v2/ModelListResponse.json": "8016839b895a43fa9ebdeb1403edf4bb8399b069585d5ddefbc22e4997323ecc"
     }
   },
-  "reportSha256": "16bbdc744cfce53362a6ce29f2acab0be0b8d13ec29042763b1a5386a3b4c7df",
+  "reportSha256": "bc14949154d3ac46823d5c4fd35bc47b8de96c2cf36fc53807c985f717577215",
   "exit": {
     "code": 0,
     "signal": null
-  },
-  "nativeSandbox": "unverified",
-  "realAccount": "not-run"
+  }
 }
