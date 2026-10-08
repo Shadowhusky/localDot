@@ -367,7 +367,19 @@ describe("gateway freshness", () => {
       await s.gateway.run(s.ctx, between);
       expect(await s.gateway.run(s.ctx, { verb: "down", basedOn })).toMatchObject(stale);
     }
+    // The desktop reports the pointer where the move left it, yet a press at a point of its own
+    // is checked there.
+    const covered = await png(paint(base(), overlay));
+    s.fake.script.observe = () => ({
+      frameId: ulid(),
+      width: 1280,
+      height: 800,
+      image: covered.toString("base64"),
+      pointer: { ...s.fake.pointer },
+      windows: [],
+    });
     await s.gateway.run(s.ctx, { verb: "move", point: { x: 100, y: 100 }, basedOn });
+    expect(s.gateway.cursorOf(s.ctx.cellId)).toEqual({ x: 100, y: 100 });
     expect(await s.gateway.run(s.ctx, { verb: "down", point, basedOn })).toMatchObject(stale);
     const away = { x: 300, y: 300 };
     const moved = await png(paint(paint(base(), overlay), { x: 280, y: 280, w: 40, h: 40 }));
