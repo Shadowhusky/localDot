@@ -45,8 +45,7 @@
   "src/agent/activity.css": {
     "control-selector": 6,
     "half-pixel": 2,
-    "stray-stylesheet": 1,
-    "type-literal": 1
+    "stray-stylesheet": 1
   },
   "src/agent/composer.css": {
     "control-selector": 3,

@@ -24,10 +24,12 @@ for (const width of [1280, 390])
       await expect(usage).toContainText("30 in · 7 out");
       await expect(usage).toContainText("(some calls didn't say)");
       await page.keyboard.press("Escape");
-      await page.getByRole("button", { name: "What dot knows" }).click();
-      await expect(page.getByRole("list", { name: "Available skills" })).toContainText(
-        "sample-tables",
-      );
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      const settings = page.getByRole("dialog", { name: "Settings", exact: true });
+      const knows = settings.getByRole("region", { name: "What dot knows" });
+      await expect(knows.getByRole("list", { name: "Skills" })).toContainText("sample-tables");
+      await settings.getByRole("button", { name: "Close settings" }).click();
+      await expect(settings).toHaveCount(0);
       if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
       const recovery = page.getByRole("region", { name: "Task recovery" });
       await expect(recovery).toContainText("$4 of $5 spent");
@@ -61,10 +63,9 @@ for (const width of [1280, 390])
       expect(f.log.read(f.id).findLast((e) => e.type === "memory.change")?.data).toMatchObject({
         undoes: f.remembered.changeId,
       });
-      await page.getByRole("button", { name: "Read current memory" }).click();
-      await expect(page.getByRole("region", { name: "Skills and memory" })).toContainText(
-        "# Things worth remembering",
-      );
+      await page.getByRole("button", { name: "Settings", exact: true }).click();
+      await knows.getByRole("button", { name: "Show memory" }).click();
+      await expect(knows).toContainText("# Things worth remembering");
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
         true,
       );
@@ -130,9 +131,11 @@ test("memory conflict preserves the newer durable file and offers an explicit re
     await expect(card).toContainText("Memory changed since this update.");
     expect(f.memory.readBoth().memory).toContain("Newer fact must remain.");
     await card.getByRole("button", { name: "Read memory again" }).click();
-    await expect(page.getByRole("region", { name: "Skills and memory" })).toContainText(
-      "Newer fact must remain.",
-    );
+    const knows = page
+      .getByRole("dialog", { name: "Settings", exact: true })
+      .getByRole("region", { name: "What dot knows" });
+    await expect(knows.getByRole("heading", { name: "What dot knows" })).toBeFocused();
+    await expect(knows).toContainText("Newer fact must remain.");
     await proof(page, p.errors, p.external);
   } finally {
     await page.close();

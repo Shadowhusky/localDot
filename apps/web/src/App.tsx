@@ -9,7 +9,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
-import { KnowledgeView } from "./agent/KnowledgeView.tsx";
 import { SafetyControls } from "./agent/SafetyControls.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { type PointerMode, TakeoverPanel } from "./agent/TakeoverPanel.tsx";
@@ -38,7 +37,7 @@ import { statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys, providerName } from "./settings/choices.ts";
-import { SettingsSheet } from "./settings/SettingsSheet.tsx";
+import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
@@ -269,7 +268,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const keysIntake = useRef<KeyIntake>(null);
   const settingsButton = useRef<HTMLButtonElement>(null);
   const settingsOrigin = useRef<HTMLElement | null>(null);
-  const [settingsSection, setSettingsSection] = useState<"models" | "autonomy">("models");
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>("models");
   const keysOrigin = useRef<HTMLElement | null>(null);
   const [keyPreset, setKeyPreset] = useState<KeyFormPreset | undefined>();
   const keyRequest = useRef(0);
@@ -277,7 +276,7 @@ function Theatre({ api }: { api: ApiClient }) {
     request: number;
     capture: ReturnType<typeof settings.captureKey>;
   } | null>(null);
-  const showSettings = (trigger: HTMLElement, section: "models" | "autonomy" = "models") => {
+  const showSettings = (trigger: HTMLElement, section: SettingsSection = "models") => {
     settingsOrigin.current = trigger;
     setSettingsSection(section);
     // One sheet at a time: Keys on its own gives way to Settings.
@@ -380,12 +379,15 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   useStopHotkey(() => void controls.stop(), controls.canStop && !controls.stopping);
   const [pointerMode, setPointerMode] = useState<PointerMode>("click");
-  const knowledge = useKnowledge(
-    api,
-    agent.sessionId,
-    !!agent.sessionId && (!narrow || pane === "activity") && !keysOpen && !settings.open,
-  );
-  const settingsKnowledge = useKnowledge(api, null, settings.open && !keysOpen);
+  const settingsKnowledge = useKnowledge(api, null, settings.open);
+  const { rereadMemory } = settingsKnowledge;
+  // A memory change's "Read memory again" opens Settings on what dot knows, read afresh.
+  const [readMemory, setReadMemory] = useState(false);
+  useEffect(() => {
+    if (!readMemory || !settings.open) return;
+    setReadMemory(false);
+    rereadMemory();
+  }, [readMemory, settings.open, rereadMemory]);
   useEffect(() => {
     if (agent.model.pendingTakeover) setPointerMode("click");
   }, [agent.model.pendingTakeover]);
@@ -781,7 +783,6 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
                 models={agent.snapshot?.models}
                 modelName={modelName}
-                knowledge={<KnowledgeView knowledge={knowledge} />}
                 memoryAction={(change) => {
                   const status =
                     controls.status?.kind === "memory" && controls.status.target === change.changeId
@@ -801,9 +802,10 @@ function Theatre({ api }: { api: ApiClient }) {
                                 : "failed"
                               : "ready",
                     onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
-                    onReread: () => {
+                    onReread: (trigger) => {
                       controls.recheck();
-                      knowledge.rereadMemory();
+                      setReadMemory(true);
+                      showSettings(trigger, "knowledge");
                     },
                   };
                 }}

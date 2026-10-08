@@ -39,6 +39,8 @@ import "./settings.css";
 // How long "Saved" stays in the footer after a save.
 const SAVED_MS = 1200;
 
+export type SettingsSection = "models" | "autonomy" | "knowledge";
+
 export type CatalogState = "loading" | "ready" | "empty" | "stale" | "refreshing" | "offline";
 
 // Keys slid over Settings, with a Back to it.
@@ -47,7 +49,7 @@ export type KeysPage = Omit<KeysPanelProps, "active" | "onHolding"> & { onBack()
 export interface SettingsSheetProps {
   open: boolean;
   keysPage?: KeysPage;
-  focusSection?: "models" | "autonomy";
+  focusSection?: SettingsSection;
   appearance?: AppearanceControl;
   choices: Partial<Record<ModelRole, RoleChoice>>;
   providers: readonly ProviderModels[];
@@ -122,7 +124,7 @@ function catalogLine(state: CatalogState, at: string | undefined): string {
 function Section({ id, title, children }: { id: string; title: string; children: ReactNode }) {
   return (
     <section id={id} className="settings-section" aria-labelledby={`${id}-title`}>
-      <h3 id={`${id}-title`} className="settings-section-title">
+      <h3 id={`${id}-title`} className="settings-section-title" tabIndex={-1}>
         {title}
       </h3>
       {children}
@@ -182,7 +184,11 @@ export function SettingsSheet(props: SettingsSheetProps) {
     const moved = now !== placed.current && now !== sheet && sheet.contains(now);
     placed.current = null;
     if (moved) return;
-    if (props.focusSection === "autonomy") {
+    if (props.focusSection === "knowledge") {
+      const title = sheet.querySelector<HTMLElement>("#settings-knowledge-title");
+      title?.scrollIntoView?.({ block: "start" });
+      title?.focus();
+    } else if (props.focusSection === "autonomy") {
       const section = sheet.querySelector<HTMLElement>("#settings-autonomy");
       section?.scrollIntoView?.({ block: "start" });
       section?.querySelector<HTMLElement>("[role=radio][tabindex='0']")?.focus();

@@ -69,6 +69,21 @@ describe("settings inspector", () => {
     expect(document.activeElement).toBe(browsing);
     expect(p.onAutonomy).not.toHaveBeenCalled();
   });
+  it("opens on what dot knows when asked", () => {
+    const knowledge = {
+      skills: [],
+      skillsPhase: "ready" as const,
+      memory: { user: "", memory: "Prefers short replies." },
+      memoryPhase: "ready" as const,
+      reloadSkills: vi.fn(),
+      rereadMemory: vi.fn(),
+    };
+    render(<SettingsSheet {...props()} knowledge={knowledge} focusSection="knowledge" />);
+    expect(document.activeElement).toBe(screen.getByRole("heading", { name: "What dot knows" }));
+    expect(screen.getByRole("region", { name: "What dot knows" }).textContent).toContain(
+      "Prefers short replies.",
+    );
+  });
   it("chooses a provider, a model and a key from the keyboard alone, then saves", () => {
     const save = vi.fn();
     function Controller() {

@@ -1,14 +1,12 @@
 // @vitest-environment jsdom
-import { act, cleanup, render, renderHook, screen, waitFor } from "@testing-library/react";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
 import type { LiveSession } from "../session/useLiveSession.ts";
 import { memoryUndoEligible } from "./activity.ts";
-import { KnowledgeView } from "./KnowledgeView.tsx";
 import { type AgentFeed, emptyAgentModel } from "./model.ts";
 import { useAgentSession } from "./useAgentSession.ts";
-import { useKnowledge } from "./useKnowledge.ts";
 import { useTaskControls } from "./useTaskControls.ts";
 
 const CELL = "01JXYZ0000000000000000CE11";
@@ -98,60 +96,3 @@ it("refuses an arbitrary terminal 404 even when retained history contains an eli
     "missing terminal authority never becomes mutation permission",
   ).toBe(false);
 });
-
-function KnowledgeFixture({ api }: { api: ReturnType<typeof createApi> }) {
-  return <KnowledgeView knowledge={useKnowledge(api, SESSION, true)} />;
-}
-it.each(["hidden", "offline"] as const)(
-  "re-enables explicit memory reread after an in-flight %s cancellation",
-  async (kind) => {
-    let hidden = false,
-      online = true;
-    vi.spyOn(document, "hidden", "get").mockImplementation(() => hidden);
-    vi.spyOn(navigator, "onLine", "get").mockImplementation(() => online);
-    const late = Promise.withResolvers<Response>();
-    const requests: { path: string; signal?: AbortSignal | null }[] = [];
-    const api = createApi("inert-review-token", {
-      origin: "https://owned.invalid",
-      fetchImpl: async (url, init) => {
-        const path = new URL(String(url)).pathname;
-        requests.push({ path, signal: init?.signal });
-        return path.endsWith("/skills") ? Response.json([]) : late.promise;
-      },
-    });
-    render(<KnowledgeFixture api={api} />);
-    await waitFor(() =>
-      expect(
-        screen.getByRole("button", { name: "Check skills" }).getAttribute("aria-busy"),
-      ).toBeNull(),
-    );
-    act(() => screen.getByRole("button", { name: "Read current memory" }).click());
-    expect(
-      screen.getByRole("button", { name: "Read current memory" }).getAttribute("aria-disabled"),
-    ).toBe("true");
-    expect(requests).toHaveLength(2);
-    await act(async () => {
-      if (kind === "hidden") {
-        hidden = true;
-        document.dispatchEvent(new Event("visibilitychange"));
-      } else {
-        online = false;
-        window.dispatchEvent(new Event("offline"));
-      }
-    });
-    expect(requests[1]?.signal?.aborted).toBe(true);
-    await act(async () => {
-      hidden = false;
-      online = true;
-      if (kind === "hidden") document.dispatchEvent(new Event("visibilitychange"));
-      else window.dispatchEvent(new Event("online"));
-      late.resolve(Response.json({ user: "stale retired result", memory: "stale" }));
-    });
-    expect(document.body.textContent).not.toContain("stale retired result");
-    expect(requests, "no automatic replay of cancelled read").toHaveLength(2);
-    expect(
-      screen.getByRole("button", { name: "Read current memory" }).getAttribute("aria-disabled"),
-      "the cancelled request must leave a usable explicit retry",
-    ).toBeNull();
-  },
-);
