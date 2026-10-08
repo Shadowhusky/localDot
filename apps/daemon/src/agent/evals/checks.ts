@@ -29,10 +29,56 @@ function luma(image: Image, i: number): number {
   return value * alpha + 255 * (1 - alpha);
 }
 
-const ANGLE_BINS = 36;
+// Ink widened by this many pixels on each side bridges anti-aliasing seams, not a gap the eye sees.
+const SEAM_PX = 2;
+
+// Whether the background reaches the shape's middle from the canvas edge, around or through it.
+function opensToMiddle(
+  width: number,
+  height: number,
+  ink: readonly [number, number][],
+  middle: (x: number, y: number) => boolean,
+): boolean {
+  const seen = new Uint8Array(width * height);
+  for (const [x, y] of ink)
+    for (let dy = -SEAM_PX; dy <= SEAM_PX; dy++)
+      for (let dx = -SEAM_PX; dx <= SEAM_PX; dx++) {
+        const nx = x + dx;
+        const ny = y + dy;
+        if (nx >= 0 && ny >= 0 && nx < width && ny < height) seen[ny * width + nx] = 1;
+      }
+  const queue = new Int32Array(width * height);
+  let head = 0;
+  let tail = 0;
+  const visit = (x: number, y: number) => {
+    const i = y * width + x;
+    if (seen[i]) return;
+    seen[i] = 1;
+    queue[tail++] = i;
+  };
+  for (let x = 0; x < width; x++) {
+    visit(x, 0);
+    visit(x, height - 1);
+  }
+  for (let y = 0; y < height; y++) {
+    visit(0, y);
+    visit(width - 1, y);
+  }
+  while (head < tail) {
+    const i = queue[head++] as number;
+    const x = i % width;
+    const y = (i - x) / width;
+    if (middle(x, y)) return true;
+    if (x > 0) visit(x - 1, y);
+    if (x < width - 1) visit(x + 1, y);
+    if (y > 0) visit(x, y - 1);
+    if (y < height - 1) visit(x, y + 1);
+  }
+  return false;
+}
 
 // A closed ellipse outline: ink that is neither empty nor a filled shape, that lies on an
-// elliptical band around its own bounding box, and that covers every 10° sector of that band.
+// elliptical band around its own bounding box, and that walls the middle off from the canvas edge.
 export function ellipseVerdict(image: Image): Verdict {
   const { width, height } = image;
   const ink: [number, number][] = [];
@@ -59,26 +105,18 @@ export function ellipseVerdict(image: Image): Verdict {
     reasons.push("the shape is too small to be a drawn ellipse");
   const cx = (x0 + x1) / 2;
   const cy = (y0 + y1) / 2;
+  const radius = (x: number, y: number) => Math.hypot((x - cx) / a, (y - cy) / b);
   let onBand = 0;
   let inside = 0;
-  const sectors = new Set<number>();
   for (const [x, y] of ink) {
-    const dx = (x - cx) / a;
-    const dy = (y - cy) / b;
-    const r = Math.hypot(dx, dy);
+    const r = radius(x, y);
     if (r < 0.45) inside += 1;
-    if (r >= 0.45 && r <= 1.05) {
-      onBand += 1;
-      const angle = Math.atan2(dy, dx) + Math.PI;
-      sectors.add(Math.min(ANGLE_BINS - 1, Math.floor((angle / (2 * Math.PI)) * ANGLE_BINS)));
-    }
+    if (r >= 0.45 && r <= 1.05) onBand += 1;
   }
   if (inside / ink.length > 0.05) reasons.push("the shape is filled, not an outline");
   if (onBand / ink.length < 0.9) reasons.push("the ink does not follow an ellipse");
-  if (sectors.size < ANGLE_BINS)
-    reasons.push(
-      `the outline is open: ${ANGLE_BINS - sectors.size} of ${ANGLE_BINS} sectors are empty`,
-    );
+  if (opensToMiddle(width, height, ink, (x, y) => radius(x, y) < 0.45))
+    reasons.push("the outline is open");
   return verdict(reasons);
 }
 

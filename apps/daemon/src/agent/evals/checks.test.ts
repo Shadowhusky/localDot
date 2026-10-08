@@ -31,6 +31,15 @@ const pngOf = async (body: string) =>
   );
 const ring = (extra = "") =>
   `<ellipse cx="320" cy="200" rx="192" ry="120" fill="none" stroke="#000" stroke-width="40" ${extra}/>`;
+// The same ellipse traced every half degree, leaving out `gap` degrees around `at`.
+const openRing = (gap: number, width: number, at = 0) => {
+  const points: string[] = [];
+  for (let d = gap / 2; d <= 360 - gap / 2; d += 0.5) {
+    const t = ((at + d) * Math.PI) / 180;
+    points.push(`${(320 + 192 * Math.cos(t)).toFixed(2)},${(200 + 120 * Math.sin(t)).toFixed(2)}`);
+  }
+  return `<polyline points="${points.join(" ")}" fill="none" stroke="#000" stroke-width="${width}"/>`;
+};
 
 describe("ellipseVerdict", () => {
   it("accepts a closed ellipse outline drawn with a thick soft brush", async () => {
@@ -58,6 +67,23 @@ describe("ellipseVerdict", () => {
     );
     expect(v.ok).toBe(false);
     expect(v.reasons.join()).toMatch(/open/);
+  });
+
+  it("rejects outlines left open by 5 or 10 degrees, whatever the brush", async () => {
+    for (const width of [10, 20, 40])
+      for (const gap of [5, 10])
+        for (const at of [0, 45, 90, 180]) {
+          const v = ellipseVerdict(await svg(openRing(gap, width, at)));
+          expect(v.reasons.join(), `${gap}° gap at ${at}°, ${width} px`).toMatch(/open/);
+        }
+  });
+
+  it("accepts the traced outline when nothing is left out", async () => {
+    for (const width of [10, 20, 40])
+      expect(ellipseVerdict(await svg(openRing(0, width))), `${width} px`).toEqual({
+        ok: true,
+        reasons: [],
+      });
   });
 
   it("rejects a rectangle outline and a small dot", async () => {
