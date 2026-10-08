@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
-import { ApprovalCard, PauseSnapshot } from "./safety.ts";
+import { ActionClass, AlwaysOption, ApprovalCard, PauseSnapshot } from "./safety.ts";
 import { ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
@@ -213,6 +213,15 @@ export const ApprovalResolve = event(
     note: z.string().max(500).optional(),
   }),
 );
+// A task allowance has no id; a saved rule carries the id that removes it.
+export const RuleChange = z.object({
+  ...AlwaysOption.shape,
+  actionClass: ActionClass,
+  id: z.string().regex(ULID_PATTERN).optional(),
+});
+export type RuleChange = z.infer<typeof RuleChange>;
+export const RuleCreated = event("rule.created", RuleChange);
+export const RuleRemoved = event("rule.removed", RuleChange);
 export const ControlChange = event(
   "control.change",
   z.object({
@@ -397,6 +406,8 @@ export const LocalDotEvent = z.discriminatedUnion("type", [
   FileChange,
   ApprovalRequest,
   ApprovalResolve,
+  RuleCreated,
+  RuleRemoved,
   ControlChange,
   PauseChange,
   MemoryChange,

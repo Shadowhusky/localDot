@@ -126,4 +126,23 @@ describe("parseEvent", () => {
       expect(schema).toContain(type);
     }
   });
+
+  it("records Always allow changes with a class, a scope and at most an origin", () => {
+    const site = {
+      id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N",
+      scope: "site",
+      actionClass: "send",
+      label: "On mail.example.test",
+      site: "https://mail.example.test",
+    };
+    const task = { scope: "task", actionClass: "upload", label: "For this task" };
+    for (const type of ["rule.created", "rule.removed"]) {
+      expect(parseEvent({ ...base, type, data: site }).type).toBe(type);
+      expect(parseEvent({ ...base, type, data: task }).type).toBe(type);
+      expect(() =>
+        parseEvent({ ...base, type, data: { ...site, site: "https://mail.example.test/inbox" } }),
+      ).toThrow();
+      expect(() => parseEvent({ ...base, type, data: { ...task, actionClass: "x" } })).toThrow();
+    }
+  });
 });

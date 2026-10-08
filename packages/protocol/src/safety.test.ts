@@ -5,6 +5,7 @@ import {
   ApprovalAnswer,
   ApprovalCard,
   AutonomyPolicy,
+  AutonomyRule,
   BALANCED_AUTONOMY,
   CAREFUL_AUTONOMY,
   DEFAULT_AUTONOMY,
@@ -143,6 +144,88 @@ describe("safety protocol authority boundaries", () => {
       { ...card, title: "\ud800" },
     ])
       expect(ApprovalCard.safeParse(changed).success).toBe(false);
+  });
+  it("an answer picks an Always allow scope only when it approves, and names nothing else", () => {
+    const body = { approvalId: ulid(), generation: 1, revision: 1, decision: "approve" };
+    for (const always of ["task", "site", "app", "always"])
+      expect(ApprovalAnswer.safeParse({ ...body, always }).success).toBe(true);
+    for (const changed of [
+      { ...body, decision: "deny", always: "task" },
+      { ...body, decision: "take_control", always: "site" },
+      { ...body, always: "forever" },
+      { ...body, always: "site", site: "https://evil.example.test" },
+      { ...body, always: "app", app: "Terminal" },
+      { ...body, always: "task", actionClass: "purchase" },
+      { ...body, always: { scope: "site", site: "https://evil.example.test" } },
+    ])
+      expect(ApprovalAnswer.safeParse(changed).success).toBe(false);
+  });
+  it("card options name an exact origin or an app only for their own scope", () => {
+    const card = {
+      approvalId: ulid(),
+      generation: 1,
+      revision: 1,
+      expiresAt: 1000,
+      actionClass: "send",
+      risk: "high",
+      title: "Send as you",
+      fields: [],
+    };
+    const task = { scope: "task", label: "For this task" };
+    const site = {
+      scope: "site",
+      label: "On mail.example.test",
+      site: "https://mail.example.test",
+    };
+    const app = { scope: "app", label: "In Notes", app: "Notes" };
+    const always = { scope: "always", label: "Always" };
+    expect(ApprovalCard.safeParse({ ...card, always: [task, site, app, always] }).success).toBe(
+      true,
+    );
+    expect(ApprovalCard.safeParse({ ...card, always: [] }).success).toBe(true);
+    expect(
+      ApprovalCard.safeParse({ ...card, always: [{ ...site, site: "http://127.0.0.1:8080" }] })
+        .success,
+    ).toBe(true);
+    for (const options of [
+      [{ ...site, site: "https://mail.example.test/inbox" }],
+      [{ ...site, site: "https://mail.example.test/" }],
+      [{ ...site, site: "https://MAIL.example.test" }],
+      [{ ...site, site: "https://user@mail.example.test" }],
+      [{ ...site, site: "javascript:alert(1)" }],
+      [{ ...site, site: "file:///etc" }],
+      [{ scope: "site", label: "On a site" }],
+      [{ ...task, site: "https://mail.example.test" }],
+      [{ ...always, app: "Notes" }],
+      [{ scope: "app", label: "In an app" }],
+      [{ ...task, label: "x".repeat(201) }],
+      [{ ...task, extra: true }],
+      [task, task],
+      [task, site, app, always, { ...task, label: "Again" }],
+    ])
+      expect(ApprovalCard.safeParse({ ...card, always: options }).success).toBe(false);
+  });
+  it("saved Always allow rules are strict and never hold a task scope", () => {
+    const rule = {
+      id: ulid(),
+      behavior: "act",
+      actionClass: "send",
+      scope: "site",
+      site: "https://mail.example.test",
+      label: "On mail.example.test",
+      createdAt: 1,
+      createdFrom: ulid(),
+    };
+    expect(AutonomyRule.safeParse(rule).success).toBe(true);
+    for (const changed of [
+      { ...rule, scope: "task", site: undefined },
+      { ...rule, behavior: "ask" },
+      { ...rule, site: "https://mail.example.test/x" },
+      { ...rule, scope: "always" },
+      { ...rule, extra: 1 },
+      { ...rule, id: "1" },
+    ])
+      expect(AutonomyRule.safeParse(changed).success).toBe(false);
   });
   it("Pause/Resume DTOs and snapshots refuse optimistic or extra grants", () => {
     const requestId = ulid();

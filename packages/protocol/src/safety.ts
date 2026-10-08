@@ -113,12 +113,57 @@ const Id = z.string().regex(ULID_PATTERN);
 const Counter = z.number().int().positive().max(Number.MAX_SAFE_INTEGER);
 // A card waits for the user; the ceiling matches the Codex path's 24-hour tool timeout.
 export const APPROVAL_TIMEOUT_MS = 86_400_000;
-export const ApprovalAnswer = z.strictObject({
-  approvalId: Id,
-  generation: Counter,
-  revision: Counter,
-  decision: z.enum(["approve", "deny", "take_control"]),
-});
+export const AlwaysScope = z.enum(["task", "site", "app", "always"]);
+export type AlwaysScope = z.infer<typeof AlwaysScope>;
+const Origin = z
+  .string()
+  .max(300)
+  .refine(
+    (value) =>
+      URL.canParse(value) &&
+      ["http:", "https:"].includes(new URL(value).protocol) &&
+      new URL(value).origin === value,
+    "site must be an exact http(s) origin",
+  );
+const placed = (value: { scope: AlwaysScope; site?: string; app?: string }) =>
+  (value.scope === "site") === (value.site !== undefined) &&
+  (value.scope === "app") === (value.app !== undefined);
+export const AlwaysOption = z
+  .strictObject({
+    scope: AlwaysScope,
+    label: safeText(200),
+    site: Origin.optional(),
+    app: safeText(128).optional(),
+  })
+  .refine(placed, "a site or app goes only with its own scope");
+export type AlwaysOption = z.infer<typeof AlwaysOption>;
+export const AutonomyRule = z
+  .strictObject({
+    id: Id,
+    behavior: z.literal("act"),
+    actionClass: ActionClass,
+    scope: AlwaysScope.exclude(["task"]),
+    site: Origin.optional(),
+    app: safeText(128).optional(),
+    label: safeText(200),
+    createdAt: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    createdFrom: Id,
+  })
+  .refine(placed, "a site or app goes only with its own scope");
+export type AutonomyRule = z.infer<typeof AutonomyRule>;
+// The answer names a scope only; the site, app and class come from the card the daemon wrote.
+export const ApprovalAnswer = z
+  .strictObject({
+    approvalId: Id,
+    generation: Counter,
+    revision: Counter,
+    decision: z.enum(["approve", "deny", "take_control"]),
+    always: AlwaysScope.optional(),
+  })
+  .refine(
+    (value) => value.always === undefined || value.decision === "approve",
+    "only an approval can always allow",
+  );
 export type ApprovalAnswer = z.infer<typeof ApprovalAnswer>;
 export const UploadApproval = z.strictObject({
   destination: BrowserUploadDestination,
@@ -136,6 +181,11 @@ export const ApprovalCardDraft = z.strictObject({
   title: safeText(200),
   fields: z.array(z.tuple([safeText(80), safeText(512)])).max(16),
   upload: UploadApproval.optional(),
+  always: z
+    .array(AlwaysOption)
+    .max(4)
+    .refine((options) => new Set(options.map((option) => option.scope)).size === options.length)
+    .optional(),
 });
 export type ApprovalCardDraft = z.infer<typeof ApprovalCardDraft>;
 export const ApprovalCard = ApprovalCardDraft.extend({
