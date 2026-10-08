@@ -181,7 +181,7 @@ function pointerNote(a: ComputerAction, outcome: ActionOutcome): string | undefi
     return `The ${button} button is down. It stays down until mouse up, or ${BUTTON_HELD_S} s without another mouse action. A mouse move, a scroll and the mouse up while it is down drag from where it went down.`;
   if (a.action === "mouse_up" && outcome.notDown) return `The ${button} button was not down.`;
   if (outcome.dropCancelled)
-    return "The drag was cancelled before its drop: Escape was pressed while the button was down, then the button came up where the pointer was.";
+    return "The drag was cancelled before its drop: Escape was pressed if the pointer had moved, then the button came up where the pointer was. Some apps keep what the drag did so far.";
   return undefined;
 }
 

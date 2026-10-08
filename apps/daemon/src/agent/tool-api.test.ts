@@ -374,7 +374,7 @@ describe("the tools", () => {
         dropCancelled: true,
       }));
       expect((await h.call("computer", action)).body.content.map((c) => c.text)).toEqual([
-        "The drag was cancelled before its drop: Escape was pressed while the button was down, then the button came up where the pointer was.",
+        "The drag was cancelled before its drop: Escape was pressed if the pointer had moved, then the button came up where the pointer was. Some apps keep what the drag did so far.",
         "Failed: another window is at the drop point now",
       ]);
     }
