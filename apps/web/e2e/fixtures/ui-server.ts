@@ -925,6 +925,41 @@ app.post("/__qa/ask", (c) => {
 });
 app.post("/__qa/takeover", (c) => {
   if (!session) return c.text("no session", 409);
+  const field = c.req.query("field");
+  if (field && session.generation) {
+    // Typing into a secret field through the real authorization, so the hand-off carries the
+    // daemon's own reason and copy for that field.
+    const target = {
+      point: { x: 640, y: 320 },
+      source: "dom" as const,
+      role: "textbox",
+      name: field,
+      url: "https://account.example.test/sign-in",
+      secret: true,
+    };
+    const action = { verb: "type" as const, text: "sample", speed: "auto" as const };
+    void authorizePrepared(
+      {
+        session,
+        generation: session.generation,
+        check() {},
+        callId: ulid(),
+        step: ulid(),
+        redact: (value: string) => value,
+        signal: new AbortController().signal,
+      } as never,
+      {
+        tool: "computer",
+        input: { toolInput: { action: "type", text: "sample" }, action },
+        target: { target, window: null, point: target.point },
+        facts: nativeActionFacts(action, target),
+        revalidate: async () => true,
+      },
+    )
+      .then((permit) => effects.push(`takeover:${permit ? "permitted" : "handed-off"}`))
+      .catch((e) => effects.push(`takeover-error:${String(e)}`));
+    return c.json({ ok: true });
+  }
   void session
     .takeover("login", "Please sign in to the sample site, then hand control back.")
     .then((o) => effects.push(`takeover:${JSON.stringify(o)}`))
