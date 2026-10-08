@@ -1,7 +1,7 @@
 @import "tailwindcss" source(none);
 @source "./";
 
-/* A preview of the T03 roles (UI plan §4.1), and the names the generated components use. */
+/* The colour roles, under the names the generated components use. */
 @theme {
   --color-void: #0a0b0d;
   --color-raised: #1a1c1f;

@@ -16,7 +16,7 @@ import { build } from "vite";
 import { serveUi } from "../../daemon/src/static-ui.ts";
 import { ENGINES } from "./ui-fixture.ts";
 
-// T02 gates for the Tailwind + Base UI stack: the kit spike gallery, served by the daemon's own
+// Gates for the Tailwind + Base UI stack: the kit spike gallery, served by the daemon's own
 // static route so it runs under the production CSP, in Chrome and WebKit. Nothing here takes a
 // screenshot: Playwright's WebKit screenshots inject a <style> the CSP reports.
 const require = createRequire(new URL("../../daemon/package.json", import.meta.url));

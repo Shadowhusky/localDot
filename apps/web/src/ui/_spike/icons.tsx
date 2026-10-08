@@ -1,6 +1,5 @@
 import type { SVGProps } from "react";
 
-// Stand-ins until T06 vendors the icon set.
 function Glyph({ d, ...props }: SVGProps<SVGSVGElement> & { d: string }) {
   return (
     <svg
