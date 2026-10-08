@@ -6,7 +6,8 @@ import { ServiceProcessIdentity } from "./install-services.ts";
 // daemon sends is strict, because keyd refuses unknown fields.
 
 export const SECRET_ID_PATTERN = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-export const RESERVED_SECRET_IDS: readonly string[] = ["lmstudio", "ollama"];
+// "webpush-vapid" is keyd's own phone-notification key (keyd/internal/vault PushKeyID).
+export const RESERVED_SECRET_IDS: readonly string[] = ["lmstudio", "ollama", "webpush-vapid"];
 export const SURROGATE_PATTERN = /^ld_[a-z0-9]{2,12}_[0-9A-Za-z]{22}_[0-9A-Za-z]{6}$/;
 export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 export const LLM_PROVIDERS = [
