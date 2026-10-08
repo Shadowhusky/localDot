@@ -1,0 +1,109 @@
+:root {
+  --dot-body: #ecedef;
+  --dot-eye: #0b0c0f;
+  --dot-eye-hi: #23262c;
+  --dot-eye-lo: #050607;
+}
+
+.dot {
+  position: relative;
+  display: block;
+  flex: none;
+  width: var(--dot-size);
+  height: var(--dot-size);
+  contain: layout paint;
+  user-select: none;
+  pointer-events: none;
+}
+
+.dot-shadow,
+.dot-body,
+.dot-plate,
+.dot-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+
+.dot-body {
+  display: block;
+  transform-origin: 50% 87.5%;
+}
+
+.dot-shadow {
+  display: none;
+  transform-origin: 50% 92%;
+}
+
+.dot[data-lod="glance"] .dot-shadow,
+.dot[data-lod="hero"] .dot-shadow {
+  display: block;
+}
+
+.dot-plate {
+  display: block;
+}
+
+.dot-plate-xenon,
+.dot-plate-dim {
+  opacity: 0;
+}
+
+.dot-face {
+  overflow: visible;
+}
+
+.dot-flat {
+  fill: var(--dot-body);
+}
+
+.dot-eye {
+  fill: var(--dot-eye);
+}
+
+.dot-arc {
+  fill: none;
+  stroke: var(--dot-eye);
+  stroke-linecap: round;
+}
+
+.dot-stop-hi {
+  stop-color: var(--dot-eye-hi);
+}
+
+.dot-stop-mid {
+  stop-color: var(--dot-eye);
+}
+
+.dot-stop-lo {
+  stop-color: var(--dot-eye-lo);
+}
+
+.dot-stop-xenon {
+  stop-color: var(--color-xenon);
+}
+
+/* Until the neutral plate decodes, the SVG body stands in for it; if a plate fails, for good. */
+.dot[data-skin="svg"] .dot-plate,
+.dot[data-skin="plate"] .dot-svgbody {
+  display: none;
+}
+
+.dot[data-lod="badge"] .dot-pearl,
+.dot:not([data-lod="badge"]) .dot-flat {
+  display: none;
+}
+
+.dot-glyph {
+  display: block;
+  flex: none;
+}
+
+.dot-glyph-body {
+  fill: currentColor;
+}
+
+.dot-glyph-eye {
+  fill: var(--dot-eye);
+}
