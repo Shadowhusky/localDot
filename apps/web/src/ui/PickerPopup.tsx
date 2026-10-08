@@ -28,6 +28,8 @@ const DECELERATION = 0.998;
 const STILL_MS = 80;
 // The ease a flung sheet leaves on starts at about this multiple of its average speed.
 const EASE_ENTER_SLOPE = 4.35;
+// A flung sheet leaves within the sheet's own exit (--dur-sheet), so it is gone before the surface.
+const FLING_MS = [160, 280] as const;
 const REST_OF_PRESS = ["pointerup", "mousedown", "mouseup", "click", "auxclick", "contextmenu"];
 const NEXT_GESTURE = ["pointerdown", "pointercancel", "keydown"];
 
@@ -301,8 +303,8 @@ export function PickerPopup({
     if (event.type === "pointerup" && moving.y + project(velocity) > height * DISMISS_SHARE) {
       const speed = Math.max(velocity, 1);
       const duration = Math.min(
-        Math.max((EASE_ENTER_SLOPE * (height - moving.y) * 1000) / speed, 160),
-        360,
+        Math.max((EASE_ENTER_SLOPE * (height - moving.y) * 1000) / speed, FLING_MS[0]),
+        FLING_MS[1],
       );
       panel.style.transition = `translate ${Math.round(duration)}ms var(--ease-enter)`;
       panel.style.translate = "0 100%";

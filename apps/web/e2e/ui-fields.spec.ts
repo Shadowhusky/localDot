@@ -66,6 +66,29 @@ async function press(locator: Locator, phone: boolean) {
   else await locator.click();
 }
 
+// Drives a finger through Chrome's DevTools protocol, a move every `gap` ms, so the sheet sees a real
+// touch with real timing. Without `lift`, the finger stays down until the returned function lifts it.
+async function touchDrag(
+  page: Page,
+  from: { x: number; y: number },
+  dy: number,
+  { steps, gap, lift = true }: { steps: number; gap: number; lift?: boolean },
+) {
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: "touchStart" | "touchMove" | "touchEnd", y: number) =>
+    cdp.send("Input.dispatchTouchEvent", {
+      type,
+      touchPoints: type === "touchEnd" ? [] : [{ x: from.x, y }],
+    });
+  await touch("touchStart", from.y);
+  for (let step = 1; step <= steps; step++) {
+    await page.waitForTimeout(gap);
+    await touch("touchMove", from.y + (dy * step) / steps);
+  }
+  if (lift) await touch("touchEnd", from.y + dy);
+  return () => touch("touchEnd", from.y + dy);
+}
+
 // The top of every field after the one named, so a test can see whether anything below it moved.
 function fieldsBelow(page: Page, label: string) {
   return page.evaluate((name) => {
@@ -317,6 +340,73 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await page.mouse.up();
       await expect(page.locator(".ui-picker")).toHaveCount(0);
       await expect(autonomy).toHaveText("Ask before risky steps");
+      expect(await seen()).toEqual({ violations: [], styles: 0 });
+      await context.close();
+    });
+
+    test("a finger drags the sheet 1:1, and a short flick or a slow drag past a third closes it", async () => {
+      test.skip(engine !== "chrome", "touch is driven through Chrome's DevTools protocol");
+      const { context, page, seen } = await open(browser, PHONE);
+      const autonomy = picker(page, "Autonomy");
+      await autonomy.scrollIntoViewIfNeeded();
+      await autonomy.tap();
+      const sheet = page.locator(".ui-sheet");
+      await settled(page);
+      const rest = await sheet.boundingBox();
+      const head = await page.locator(".ui-sheet-head").boundingBox();
+      if (!rest || !head) throw new Error("no sheet");
+      const grab = { x: head.x + head.width / 2, y: head.y + head.height / 2 };
+      // It follows the finger exactly, and a finger that stopped lets it spring back.
+      const lift = await touchDrag(page, grab, 48, { steps: 6, gap: 16, lift: false });
+      await expect
+        .poll(async () => Math.round(((await sheet.boundingBox())?.y ?? 0) - rest.y))
+        .toBe(48);
+      await page.waitForTimeout(150);
+      await lift();
+      await expect.poll(async () => (await sheet.boundingBox())?.y).toBe(rest.y);
+      // A flick well short of a third of its height closes it by where it would come to rest.
+      expect(60).toBeLessThan(rest.height * 0.3);
+      await touchDrag(page, grab, 60, { steps: 3, gap: 8 });
+      await expect(page.locator(".ui-picker")).toHaveCount(0);
+      await expect(autonomy).toHaveText("Ask before risky steps");
+      // A slow drag past a third closes it too, and its exit never outlasts the sheet.
+      await autonomy.tap();
+      await settled(page);
+      await touchDrag(page, grab, rest.height * 0.5, { steps: 12, gap: 30 });
+      const exit = await sheet.evaluate((element) =>
+        Number.parseFloat(/translate (\d+)ms/.exec(element.style.transition)?.[1] ?? "NaN"),
+      );
+      expect(exit).toBeLessThanOrEqual(280);
+      await expect(page.locator(".ui-picker")).toHaveCount(0);
+      expect(await seen()).toEqual({ violations: [], styles: 0 });
+      await context.close();
+    });
+
+    test("a finger scrolls a long list in the sheet without choosing the row it lands on", async () => {
+      test.skip(engine !== "chrome", "touch is driven through Chrome's DevTools protocol");
+      const short = { ...PHONE, viewport: { width: 390, height: 520 } };
+      const { context, page, seen } = await open(browser, short);
+      const model = picker(page, "Main model");
+      await model.scrollIntoViewIfNeeded();
+      await model.tap();
+      await settled(page);
+      const list = page.getByRole("listbox", { name: "Main model" });
+      expect(
+        await list.evaluate((element) => element.scrollHeight - element.clientHeight),
+      ).toBeGreaterThan(150);
+      const box = await list.boundingBox();
+      if (!box) throw new Error("no list");
+      const pageAt = await page.evaluate(() => window.scrollY);
+      await touchDrag(page, { x: box.x + box.width / 2, y: box.y + box.height - 40 }, -150, {
+        steps: 10,
+        gap: 16,
+      });
+      await expect.poll(() => list.evaluate((element) => element.scrollTop)).toBeGreaterThan(100);
+      await page.waitForTimeout(400);
+      await expect(list).toBeVisible();
+      await expect(model).toHaveText("Claude Sonnet 4.5");
+      // The page under the sheet stays where it was.
+      expect(await page.evaluate(() => window.scrollY)).toBe(pageAt);
       expect(await seen()).toEqual({ violations: [], styles: 0 });
       await context.close();
     });
