@@ -365,6 +365,16 @@
     translate: calc(var(--_nudge) * 6) 0;
   }
 
+  /* Once it has slid away, a held page is hidden outright, so assistive tech and find in page skip
+     it; it keeps its layout, so its scroll position survives. Back shows it again at once. */
+  .ui-sheet-page[data-held] {
+    visibility: hidden;
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      translate var(--dur-sheet) var(--ease-spring),
+      visibility 0s linear var(--dur-sheet);
+  }
+
   .ui-sheet[data-side="bottom"][data-resizing] {
     transition:
       height var(--dur-sheet) var(--ease-spring),
@@ -450,6 +460,10 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--spacing) calc(var(--spacing) * 5) calc(var(--spacing) * 5);
+    /* The gutter is kept whether or not the content overflows, so nothing shifts when it starts to,
+       and comes out of the padding beside it (Sheet.tsx measures it), so the content ends where the
+       header's and footer's do. */
+    padding-inline-end: max(0px, calc(var(--spacing) * 5 - var(--_gutter, 0px)));
     scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: var(--color-control-pressed) transparent;

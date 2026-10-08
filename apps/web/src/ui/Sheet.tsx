@@ -259,6 +259,7 @@ function SheetLayer({
     const sheet = panel.current;
     const scroller = pageOf(sheet, shown.key)?.querySelector<HTMLElement>(".ui-sheet-body");
     if (!scroller || !sheet) return;
+    scroller.style.setProperty("--_gutter", `${scroller.offsetWidth - scroller.clientWidth}px`);
     const mark = () => {
       const { scrollTop, scrollHeight, clientHeight } = scroller;
       sheet.toggleAttribute("data-under-top", scrollTop > 0);

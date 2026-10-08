@@ -301,7 +301,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await context.close();
       });
 
-      test("a menu lines up a label without an icon, and the sheet keeps room for its scrollbar", async () => {
+      test("a menu lines up a label without an icon, and a sheet's content keeps its edge beside its scrollbar", async () => {
         const { context, page, seen } = await open(browser, device);
         // A cross reads as close, so the destructive controls carry no icon.
         await expect(
@@ -320,12 +320,24 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await page.keyboard.press("Escape");
         await expect(menu).toHaveCount(0);
 
+        // The gutter is kept whether or not the content overflows, and taken out of the padding
+        // beside it, so the content ends where the footer's buttons do.
         const sheet = await openSheet(page);
         expect(
           await sheet
             .locator(".ui-sheet-body")
             .evaluate((body) => getComputedStyle(body).scrollbarGutter),
         ).toBe("stable");
+        const field = await box(sheet.getByLabel("Name"));
+        const save = await box(sheet.getByRole("button", { name: "Save", exact: true }));
+        expect(Math.abs(field.x + field.width - save.x - save.width)).toBeLessThanOrEqual(1);
+        await press(sheet.getByRole("button", { name: /^Keys/ }));
+        const keys = page.getByRole("dialog", { name: "Keys" });
+        await settled(keys);
+        await expect(keys.getByRole("listitem")).toHaveCount(2);
+        const row = await box(keys.getByRole("listitem").first());
+        const add = await box(keys.getByRole("button", { name: "Add a key" }));
+        expect(Math.abs(row.x + row.width - add.x - add.width)).toBeLessThanOrEqual(1);
         expect(await seen()).toEqual({ violations: [], styles: 0 });
         await context.close();
       });
