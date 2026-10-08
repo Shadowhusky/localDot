@@ -24,6 +24,7 @@ const IDLE_POLL_MS = 5000;
 const QUICK_POLLS = 5;
 const REACT_HZ_MS = 100;
 const CLOCK_EVERY_MS = 20_000;
+const NO_MODEL = emptyModel();
 
 // The worker gets every event at once; React sees the model at most ten times a second.
 export function useLiveSession(
@@ -36,6 +37,8 @@ export function useLiveSession(
   const [version, setVersion] = useState(0);
   const [ended, setEnded] = useState(false);
   const modelRef = useRef<SessionModel>(emptyModel());
+  // The render that adopts a new session runs before the effect that resets the model.
+  const modelOwner = useRef<string | null>(null);
   const dirty = useRef(false);
   const cellId = cell?.id ?? null;
   const ready = cell?.state === "ready";
@@ -47,6 +50,7 @@ export function useLiveSession(
     if (previousCell.current === cellId) return;
     previousCell.current = cellId;
     modelRef.current = emptyModel();
+    modelOwner.current = null;
     dirty.current = false;
     stage.current?.resetSession();
     setIdentity(null);
@@ -100,6 +104,7 @@ export function useLiveSession(
     if (prior.cellId !== cellId || prior.sessionId !== sessionId) {
       agentFeed.reset(cellId, sessionId);
       modelRef.current = emptyModel();
+      modelOwner.current = sessionId;
       stage.current?.resetSession();
       setEnded(false);
       setVersion((v) => v + 1);
@@ -181,5 +186,14 @@ export function useLiveSession(
   }, [api, sessionId]);
   const check = useCallback(() => lookNow.current(), []);
 
-  return { sessionId, agentFeed, model: modelRef.current, version, ended, stop, check };
+  const owned = modelOwner.current === sessionId;
+  return {
+    sessionId,
+    agentFeed,
+    model: owned ? modelRef.current : NO_MODEL,
+    version,
+    ended: owned && ended,
+    stop,
+    check,
+  };
 }
