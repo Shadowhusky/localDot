@@ -26,7 +26,6 @@ let presenter: PixiPresenter | undefined;
 let replay: WorkerReplay | undefined;
 let pump: { stop(): Promise<void> } | undefined;
 let sourceGeneration = 0;
-let workerTrack: MediaStreamTrack | undefined;
 let pendingStats: { generation: number; sourceId?: number; stats: PumpStats } | undefined;
 let probe: { rect: ProbeRect; threshold: number; last: boolean | null } | null = null;
 let model: SessionModel = emptyModel();
@@ -261,26 +260,19 @@ async function handle(m: WorkerIn): Promise<void> {
         await pump?.stop();
         pump = undefined;
         oracle.dispose();
-        workerTrack?.stop();
-        workerTrack = undefined;
         if (m.type === "frames") {
-          const readable = m.readable ?? (m.track ? readTrack(m.track) : undefined);
-          if (replay || !readable) {
+          if (replay) {
             m.first?.close();
-            m.track?.stop();
-            void readable?.cancel().catch(() => {});
-            if (!readable && !replay) throw new Error("This browser can't show the live desktop.");
+            void m.readable.cancel().catch(() => {});
             return;
           }
           if (!presenter) {
             m.first?.close();
-            m.track?.stop();
-            await readable.cancel();
+            await m.readable.cancel();
             throw new Error("frames before init");
           }
-          workerTrack = m.track;
           pump = pumpFrames(
-            readable,
+            m.readable,
             probing(presenter),
             (stats) => {
               if (generation !== sourceGeneration) return;
@@ -302,13 +294,6 @@ async function handle(m: WorkerIn): Promise<void> {
     report(err);
   }
 }
-// Safari transfers the client's track here: it has MediaStreamTrackProcessor only in workers.
-function readTrack(track: MediaStreamTrack): ReadableStream<VideoFrame> | undefined {
-  if (typeof MediaStreamTrackProcessor === "undefined") return undefined;
-  return new MediaStreamTrackProcessor({ track: track as MediaStreamTrack & MediaStreamVideoTrack })
-    .readable;
-}
-
 function report(err: unknown): void {
   scope.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
 }
