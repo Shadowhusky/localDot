@@ -138,3 +138,29 @@ test("browser Back from Replay returns to Watch", async ({ page }) => {
   await page.goForward();
   await expect(page).toHaveURL(new RegExp(`replay=${older}`));
 });
+
+test("Replay hides the live task's Pause and Stop shortcut", async ({ page }) => {
+  await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+  const pause = page.getByRole("button", { name: "Pause after this step" });
+  const hint = page.getByText("Stop: Ctrl/Cmd + Shift + .");
+  await expect(pause).toBeVisible();
+  await expect(hint).toBeVisible();
+  await modes(page).getByRole("button", { name: "Replay", exact: true }).click();
+  await expect(page.getByRole("main", { name: "Session replay" })).toBeVisible();
+  await expect(pause).toHaveCount(0);
+  await expect(hint).toHaveCount(0);
+});
+
+for (const engine of ["chrome", "webkit"] as const satisfies Engine[])
+  test(`a ${engine} phone shows Pause without the keyboard shortcut`, async ({ browser }) => {
+    const owned = engine === "webkit" ? await webkit.launch({ channel: undefined }) : null;
+    const page = await phonePage(owned ?? browser, 390);
+    try {
+      await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+      await expect(page.getByRole("button", { name: "Pause after this step" })).toBeVisible();
+      await expect(page.getByText("Stop: Ctrl/Cmd + Shift + .")).toBeHidden();
+    } finally {
+      await page.context().close();
+      await owned?.close();
+    }
+  });

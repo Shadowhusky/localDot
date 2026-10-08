@@ -498,6 +498,7 @@ function Theatre({ api }: { api: ApiClient }) {
             agent={agent}
             cell={cell}
             visible={!keysOpen && !settings.open}
+            replaying={!!replayId}
           />
         </div>
         <div className="watch-content" hidden={!!replayId} inert={!!replayId}>

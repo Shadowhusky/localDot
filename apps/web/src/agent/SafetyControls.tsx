@@ -11,11 +11,13 @@ export function SafetyControls({
   agent,
   cell,
   visible = true,
+  replaying = false,
 }: {
   safety: SafetyView;
   agent: AgentSessionView;
   cell: CellSummary | null;
   visible?: boolean;
+  replaying?: boolean;
 }) {
   const seen = useRef(new Set<string>());
   const [notificationError, setNotificationError] = useState<string | null>(null);
@@ -86,7 +88,7 @@ export function SafetyControls({
           </div>
         </ApprovalCard>
       )}
-      {!!agent.sessionId && agent.snapshot?.status !== "ended" && (
+      {!replaying && !!agent.sessionId && agent.snapshot?.status !== "ended" && (
         <div className="safety-task-controls">
           {pause ? (
             <>
@@ -119,7 +121,7 @@ export function SafetyControls({
           <span className="stop-hint">Stop: Ctrl/Cmd + Shift + .</span>
         </div>
       )}
-      {taskStalled(agent, now) && (
+      {!replaying && taskStalled(agent, now) && (
         <p role="status">The task heartbeat is late. You can use Stop if you want to contain it.</p>
       )}
       {cell?.fenced && (
