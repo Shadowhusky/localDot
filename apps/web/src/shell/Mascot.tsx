@@ -7,8 +7,8 @@ const BADGE = 24;
 
 // dot's mark. In the HUD it is the live badge, whose ball fills the slot while the frame's
 // transparent margin (an eighth of its size on each side) overflows it; elsewhere it is the static
-// glyph. Until the status model feeds dot directly, the badge follows the shell's own signals: it
-// acts under the xenon rim while dot has control and rests while the computer is paused.
+// glyph. The badge reads the shell's classes: it acts under the xenon rim while dot has control and
+// rests while the computer is paused.
 export function Mascot() {
   const slot = useRef<HTMLSpanElement>(null);
   const [badge, setBadge] = useState<{ state: DotState; control: boolean } | null>(null);
