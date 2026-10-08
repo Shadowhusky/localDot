@@ -1,0 +1,621 @@
+/* Fields and choices: labelled fields, text entry, checkboxes, switches, radio cards and segmented
+   controls. In the kit layer, like the atoms, so older screens' element selectors cannot reach them. */
+@layer kit {
+  .ui-field {
+    display: grid;
+    gap: calc(var(--spacing) * 1.5);
+    min-width: 0;
+  }
+
+  .ui-field-label {
+    justify-self: start;
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+  }
+
+  /* The description, an error and an unavailable reason share one cell: the tallest sets its height,
+     so swapping one for another never moves what sits below. */
+  .ui-field-message {
+    display: grid;
+  }
+
+  .ui-field-message > * {
+    grid-area: 1 / 1;
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      visibility var(--dur-fade);
+  }
+
+  .ui-field-message > [data-inactive] {
+    opacity: 0;
+    visibility: hidden;
+  }
+
+  .ui-field-description,
+  .ui-field-error {
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .ui-field-description {
+    color: var(--color-fg-3);
+  }
+
+  .ui-field-error {
+    display: flex;
+    gap: calc(var(--spacing) * 1.5);
+    color: var(--color-fg-1);
+  }
+
+  .ui-field-error > .ui-icon {
+    margin-top: 2px;
+    color: var(--color-danger-fg);
+  }
+
+  @starting-style {
+    .ui-field-error {
+      opacity: 0;
+    }
+  }
+
+  /* The edge every text-like control draws: a text field, a text area and a picker's trigger. */
+  .ui-field-box {
+    --_h: calc(var(--spacing) * 8);
+    --_lh: var(--text-body--line-height);
+    min-width: 0;
+    border: 1px solid var(--color-field-line);
+    border-radius: var(--radius-md);
+    background-color: var(--color-field);
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--_lh) var(--font-ui);
+    transition:
+      border-color var(--dur-hover) var(--ease-standard),
+      background-color var(--dur-hover) var(--ease-standard),
+      box-shadow var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-field-box[data-size="lg"] {
+    --_h: calc(var(--spacing) * 9);
+  }
+
+  @media (hover: hover) {
+    .ui-field-box:not([data-unavailable]):hover {
+      border-color: var(--color-field-line-hover);
+    }
+  }
+
+  .ui-text-field:focus-within,
+  .ui-text-area:focus,
+  .ui-select-trigger:is(:focus-visible, [data-open]) {
+    border-color: var(--color-fg-2);
+    box-shadow: 0 0 0 3px var(--color-field-ring);
+  }
+
+  .ui-input:focus-visible,
+  .ui-text-area:focus-visible,
+  .ui-select-trigger:focus-visible {
+    outline: none;
+  }
+
+  .ui-field-box[data-invalid],
+  .ui-field-box[data-invalid]:hover {
+    border-color: var(--color-danger-fg);
+  }
+
+  .ui-field-box[data-unavailable] {
+    border-color: var(--color-hairline);
+    background-color: transparent;
+    cursor: default;
+  }
+
+  .ui-text-field {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    height: var(--_h);
+    padding: 0 calc(var(--spacing) * 2.5);
+    cursor: text;
+  }
+
+  .ui-input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    padding: 0;
+    border: 0;
+    appearance: none;
+    background: none;
+    color: inherit;
+    font: inherit;
+    outline: none;
+  }
+
+  .ui-input::placeholder,
+  .ui-text-area::placeholder {
+    color: var(--color-fg-3);
+    opacity: 1;
+  }
+
+  .ui-input::-webkit-search-decoration,
+  .ui-input::-webkit-search-cancel-button {
+    appearance: none;
+  }
+
+  .ui-field-box[data-unavailable] :is(.ui-input, .ui-field-affix, .ui-select-value),
+  .ui-text-area[data-unavailable] {
+    color: color-mix(in oklab, var(--color-fg-1) calc(var(--opacity-disabled) * 100%), transparent);
+  }
+
+  .ui-field-affix {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    color: var(--color-fg-3);
+  }
+
+  .ui-money-field .ui-field-affix {
+    color: var(--color-fg-2);
+  }
+
+  .ui-money-field .ui-input {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* One line to start, growing with its text to --_rows lines, then scrolling. */
+  .ui-text-area {
+    --_pad: calc(var(--spacing) * 1.5);
+    display: block;
+    width: 100%;
+    min-height: var(--_h);
+    max-height: calc(var(--_rows) * var(--_lh) + var(--_pad) * 2 + 2px);
+    padding: var(--_pad) calc(var(--spacing) * 2.5);
+    field-sizing: content;
+    overflow-y: auto;
+    resize: none;
+    outline: none;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-scrollbar) transparent;
+  }
+
+  /* A row with a checkbox or switch and its label; the whole row is the target. */
+  .ui-choice {
+    display: flex;
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 3);
+    min-height: calc(var(--spacing) * 8);
+    padding-block: calc(var(--spacing) * 1.5);
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ui-choice[data-control="switch"] {
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .ui-choice[data-unavailable] {
+    cursor: default;
+  }
+
+  /* The real input lies over the drawn control, so touch exploration finds it where it shows. */
+  .ui-choice-input {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    appearance: none;
+    cursor: inherit;
+  }
+
+  .ui-choice-input:focus-visible {
+    outline: none;
+  }
+
+  .ui-choice-text {
+    display: grid;
+    flex: 1;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  .ui-choice-label {
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    transition: color var(--dur-hover) var(--ease-standard);
+  }
+
+  .ui-choice-note {
+    color: var(--color-fg-3);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  :is(.ui-choice, .ui-radio-card)[data-unavailable] .ui-choice-label {
+    color: color-mix(in oklab, var(--color-fg-1) calc(var(--opacity-disabled) * 100%), transparent);
+  }
+
+  .ui-checkbox {
+    position: relative;
+    flex-shrink: 0;
+    width: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 4);
+    margin-top: 1px;
+    border-radius: var(--radius-xs);
+    background-color: var(--color-field);
+    box-shadow: inset 0 0 0 1px var(--color-field-line);
+    color: var(--color-void);
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      box-shadow var(--dur-hover) var(--ease-standard),
+      scale var(--dur-exit) var(--ease-enter);
+  }
+
+  @media (hover: hover) {
+    .ui-choice:not([data-unavailable]):hover .ui-checkbox:not(:has(> :checked)) {
+      box-shadow: inset 0 0 0 1px var(--color-field-line-hover);
+    }
+  }
+
+  .ui-checkbox:has(> :is(:checked, [data-indeterminate])) {
+    background-color: var(--color-fg-1);
+    box-shadow: inset 0 0 0 1px var(--color-fg-1);
+  }
+
+  .ui-checkbox-mark {
+    position: absolute;
+    inset: 0;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    pointer-events: none;
+  }
+
+  /* The check draws itself in when ticked and goes at once when cleared. */
+  /* A gap longer than the path, so a hidden stroke leaves no round cap behind (WebKit draws one for
+     a dash that begins exactly at the path's end). */
+  .ui-checkbox-check,
+  .ui-checkbox-dash {
+    stroke-dasharray: 1 2;
+    stroke-dashoffset: 1;
+  }
+
+  .ui-checkbox > :checked:not([data-indeterminate]) ~ .ui-checkbox-mark .ui-checkbox-check,
+  .ui-checkbox > [data-indeterminate] ~ .ui-checkbox-mark .ui-checkbox-dash {
+    stroke-dashoffset: 0;
+    transition: stroke-dashoffset var(--dur-sheet) var(--ease-enter) 40ms;
+  }
+
+  .ui-choice[data-unavailable] :is(.ui-checkbox, .ui-switch) {
+    opacity: var(--opacity-disabled);
+  }
+
+  .ui-switch {
+    --_w: calc(var(--spacing) * 8);
+    --_h: calc(var(--spacing) * 5);
+    --_knob: calc(var(--_h) - 4px);
+    --_stretch: calc(var(--spacing) * 1);
+    position: relative;
+    flex-shrink: 0;
+    width: var(--_w);
+    height: var(--_h);
+    border-radius: var(--radius-full);
+    background-color: var(--color-control-hover);
+    transition: background-color var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-switch-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: var(--_knob);
+    height: var(--_knob);
+    border-radius: var(--radius-full);
+    background-color: var(--color-fg-1);
+    box-shadow: var(--shadow-thumb);
+    pointer-events: none;
+    transition:
+      translate var(--dur-spring) var(--ease-spring),
+      width var(--dur-spring) var(--ease-spring),
+      background-color var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-switch:has(> :checked) {
+    background-color: var(--color-fg-1);
+  }
+
+  .ui-switch > :checked ~ .ui-switch-knob {
+    translate: calc(var(--_w) - var(--_knob) - 4px) 0;
+    background-color: var(--color-void);
+  }
+
+  /* While held, the knob stretches toward the side it would go to, as a physical switch gives. */
+  .ui-choice[data-pressed]:not([data-unavailable]) .ui-switch-knob {
+    width: calc(var(--_knob) + var(--_stretch));
+  }
+
+  .ui-choice[data-pressed]:not([data-unavailable]) .ui-switch > :checked ~ .ui-switch-knob {
+    translate: calc(var(--_w) - var(--_knob) - var(--_stretch) - 4px) 0;
+  }
+
+  .ui-choice[data-pressed]:not([data-unavailable]) .ui-checkbox {
+    scale: 0.9;
+    transition-duration: var(--dur-press);
+  }
+
+  .ui-checkbox:has(> :focus-visible),
+  .ui-switch:has(> :focus-visible),
+  .ui-radio-card:has(> :focus-visible) {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: var(--focus-offset);
+  }
+
+  .ui-radio-cards {
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .ui-radio-cards[data-layout="tiles"] {
+    grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing) * 36), 1fr));
+  }
+
+  .ui-radio-card {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 3);
+    min-height: calc(var(--spacing) * 11);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+    border-radius: var(--radius-md);
+    background-color: var(--color-field);
+    box-shadow: inset 0 0 0 1px var(--color-hairline);
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      box-shadow var(--dur-fade) var(--ease-standard);
+  }
+
+  @media (hover: hover) {
+    .ui-radio-card:not([data-unavailable]):hover {
+      background-color: var(--color-state-hover);
+    }
+  }
+
+  .ui-radio-card[data-pressed]:not([data-unavailable]) {
+    background-color: var(--color-state-pressed);
+    transition-duration: var(--dur-press);
+  }
+
+  .ui-radio-card:has(> :checked) {
+    box-shadow: inset 0 0 0 1px var(--color-fg-2);
+  }
+
+  .ui-radio-card[data-unavailable] {
+    cursor: default;
+  }
+
+  .ui-radio-card-preview {
+    display: flex;
+    flex-shrink: 0;
+  }
+
+  .ui-radio-card-check {
+    color: var(--color-fg-1);
+    opacity: 0;
+    scale: 0.6;
+    transition:
+      opacity var(--dur-fade) var(--ease-standard),
+      scale var(--dur-spring) var(--ease-spring);
+  }
+
+  .ui-radio-card > :checked ~ .ui-radio-card-check {
+    opacity: 1;
+    scale: 1;
+  }
+
+  /* Segmented control and tabs: equal segments on a sunken track, and a thumb that slides under the
+     chosen one. A thumb interrupted mid-slide sets off again from where it is. */
+  /* Segments fill the track edge to edge, so all of it takes a press; the thumb sits 2 px inside
+     the chosen one. */
+  .ui-segmented {
+    --_h: calc(var(--spacing) * 7);
+    position: relative;
+    display: inline-grid;
+    grid-auto-columns: 1fr;
+    grid-auto-flow: column;
+    height: var(--_h);
+    border-radius: var(--radius-md);
+    background-color: var(--color-track);
+    isolation: isolate;
+  }
+
+  .ui-segmented[data-size="24"] {
+    --_h: calc(var(--spacing) * 6);
+  }
+
+  .ui-segmented-thumb {
+    position: absolute;
+    top: 2px;
+    bottom: 2px;
+    left: 2px;
+    width: calc(100% / var(--_count) - 4px);
+    border-radius: var(--radius-sm);
+    background-color: var(--color-control-hover);
+    box-shadow: var(--shadow-thumb);
+    translate: calc(var(--_index) * (100% + 4px)) 0;
+    transition:
+      translate var(--dur-spring) var(--ease-spring),
+      scale var(--dur-exit) var(--ease-enter),
+      opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-segmented-thumb[data-hidden] {
+    opacity: 0;
+  }
+
+  .ui-segmented:has(> .ui-segment[data-pressed]:is([aria-checked="true"], [aria-selected="true"]))
+    > .ui-segmented-thumb {
+    scale: 0.96;
+    transition-duration: var(--dur-spring), var(--dur-press), var(--dur-fade);
+  }
+
+  .ui-segment {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: calc(var(--spacing) * 1.5);
+    min-width: 0;
+    padding: 0 calc(var(--spacing) * 3);
+    border: 0;
+    border-radius: var(--radius-md);
+    background: none;
+    color: var(--color-fg-2);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    /* The thumb gives the press; the legacy rule that shrinks a pressed button stays off. */
+    transform: none;
+    transition:
+      color var(--dur-hover) var(--ease-standard),
+      opacity var(--dur-press) var(--ease-standard);
+  }
+
+  .ui-segmented[data-size="24"] > .ui-segment {
+    font-size: var(--text-footnote);
+    line-height: var(--text-footnote--line-height);
+  }
+
+  .ui-segment:is([aria-checked="true"], [aria-selected="true"]) {
+    color: var(--color-fg-1);
+  }
+
+  @media (hover: hover) {
+    .ui-segment:not([aria-disabled="true"]):hover {
+      color: var(--color-fg-1);
+    }
+  }
+
+  .ui-segment[data-pressed]:not([aria-checked="true"], [aria-selected="true"]) {
+    opacity: 0.7;
+  }
+
+  .ui-segment[aria-disabled="true"] {
+    color: color-mix(in oklab, var(--color-fg-2) calc(var(--opacity-disabled) * 100%), transparent);
+    cursor: default;
+  }
+
+  .ui-segment:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: 0;
+  }
+
+  .ui-segment-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  @media (--coarse) {
+    .ui-field-box,
+    .ui-field-box[data-size] {
+      --_h: calc(var(--spacing) * 11);
+      --_lh: var(--text-title-2--line-height);
+      /* 17 px, the system's reading size, so iOS does not zoom into a focused field. */
+      font-size: var(--text-title-2);
+    }
+
+    .ui-text-area {
+      --_pad: calc(var(--spacing) * 2.5);
+    }
+
+    .ui-choice {
+      min-height: calc(var(--spacing) * 11);
+      align-items: center;
+    }
+
+    .ui-switch {
+      --_w: calc(var(--spacing) * 10);
+      --_h: calc(var(--spacing) * 6);
+    }
+
+    .ui-radio-card {
+      min-height: calc(var(--spacing) * 12);
+    }
+
+    .ui-segmented,
+    .ui-segmented[data-size] {
+      --_h: calc(var(--spacing) * 11);
+    }
+
+    .ui-segmented[data-size] > .ui-segment {
+      font-size: var(--text-reading);
+      line-height: var(--text-reading--line-height);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-switch-knob,
+    .ui-segmented-thumb {
+      transition-property: background-color, opacity;
+    }
+
+    .ui-choice[data-pressed] .ui-checkbox,
+    .ui-segmented > .ui-segmented-thumb {
+      scale: none;
+    }
+
+    .ui-checkbox > :checked:not([data-indeterminate]) ~ .ui-checkbox-mark .ui-checkbox-check,
+    .ui-checkbox > [data-indeterminate] ~ .ui-checkbox-mark .ui-checkbox-dash {
+      transition: none;
+    }
+  }
+
+  @media (forced-colors: active) {
+    .ui-field-box,
+    .ui-radio-card,
+    .ui-segmented {
+      border: 1px solid ButtonText;
+    }
+
+    .ui-checkbox,
+    .ui-switch {
+      forced-color-adjust: none;
+      border: 1px solid ButtonText;
+      background-color: Canvas;
+    }
+
+    .ui-checkbox:has(> :checked),
+    .ui-switch:has(> :checked) {
+      background-color: Highlight;
+    }
+
+    .ui-checkbox {
+      color: HighlightText;
+    }
+
+    .ui-switch-knob {
+      background-color: ButtonText;
+    }
+
+    .ui-switch > :checked ~ .ui-switch-knob {
+      background-color: HighlightText;
+    }
+
+    .ui-radio-card:has(> :checked),
+    .ui-segmented-thumb {
+      outline: 2px solid Highlight;
+    }
+  }
+}
