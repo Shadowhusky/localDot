@@ -362,6 +362,55 @@ desktop and on a touch phone, under the production CSP. No screen uses them yet;
   merged since). `stack.css` loads `fields.css` and `pickers.css` on first paint for now; when the first
   screen adopts the pickers, `pickers.css` moves into their code-split chunk, per the gate 4 decision.
 
+## Guards
+
+T04 (UI plan). `apps/web/scripts/ui-guard.mjs` reads the web sources and fails on anything that goes
+around the design system. It runs in `pnpm lint`, alone as `pnpm check:ui`, and as a Vitest suite
+(`ui-guard.test.mjs` beside it) in `pnpm test`; a full scan takes about 0.4 s.
+
+| Rule | Fails on |
+| --- | --- |
+| `raw-colour` | `#hex`, `rgb()`, `hsl()`, `oklch()` and other colour functions in CSS or a script string; a named colour in a colour property |
+| `undeclared-token` | `var(--x)` where no token, legacy alias, script (`setProperty`, a style key) or the same stylesheet declares `--x` |
+| `token-fallback` | `var(--x, …)`; a private `--_x` may fall back |
+| `type-literal` | a literal `font-size`, `line-height` or `font` size; a weight outside 400, 500 and 600 |
+| `half-pixel` | any `.5px` length |
+| `radius-literal` | a radius in px, rem or em |
+| `motion-literal` | a literal transition duration; `ease*`, `cubic-bezier()`, `steps()` or `linear()` in a transition or animation |
+| `spacing-literal` | a margin, padding or gap in px or rem beyond a 1–2 px optical nudge |
+| `arbitrary-value` | a Tailwind arbitrary value or variant (`min-h-[44px]`, `data-[open]:…`) |
+| `control-selector` | a `button`, `input`, `select` or `textarea` element selector outside `src/ui/` |
+| `base-ui-import` | `@base-ui/react` imported outside `src/ui/` |
+| `native-control` | `<button>`, `<input>` (but hidden), `<select>`, `<textarea>`, `<progress>`, `<meter>`, `<dialog>` or `<details>` outside `src/ui/` |
+| `native-disabled` | native `disabled` on a form element outside `src/ui/` |
+| `csp-inline` | a `<style>` or inline `<script>` element, `setAttribute("style")`, `createElement("style")`, markup with a `style` attribute in a string, or any of these in an HTML page; the page's policy blocks them all |
+| `stray-stylesheet` | a stylesheet outside `src/ui/`, the galleries and `src/dot/dot.css` |
+| `banned-copy` | a word from `src/copy/banned.ts` in a string a screen can show |
+
+- **Scope.** The HTML pages and `src/**/*.{css,ts,tsx,html}`, without tests, `src/testing/` and the spike.
+  `src/ui/tokens.css` is the one place raw values live. The kit may style and render native controls.
+- **Ratchet.** `apps/web/scripts/ui-guard-baseline.json` gives each legacy file the count it may hold of
+  each rule; more fails. A count that falls fails too, until it is written down with
+  `pnpm check:ui --update`, which only ever lowers counts, so a fix cannot be undone quietly. Raising a
+  count is a hand edit a reviewer sees. The kit is never on the baseline (a test holds this), and T29
+  deletes the file.
+- **Copy.** A string counts as copy when it is JSX text, a string prop other than class names, ids and
+  other code attributes, or a literal that reads like prose (it has a space or starts with a capital).
+  Comparisons, `switch` cases, literal types, selectors, class lists, attribute names and logs are code.
+  Words are matched whole, so `cell-row`, `/api/cells` and `obj.session` pass. "verified",
+  "unconfirmed" and "retained" are banned only in headings and on buttons. The check covers `.ts`
+  modules as well as `.tsx`: most of the jargon people meet (`cells/errors.ts`, `keys/keys-api.ts`) is
+  built there. The galleries are exempt.
+- **Allowed on purpose.** An animation's period (a spinner's loop is not a transition) and a
+  transition's delay may be literal, and `linear` is a keyword, not a curve. Spacing allows a 1 or 2 px
+  nudge for optical alignment.
+- **Why in `scripts/`.** Tailwind scans `src/ui/`, and the rule tables would mint utilities there; the
+  checker is Node tooling, like `notices.mjs`. It parses scripts with Vite's own parser (`parseSync`),
+  so it adds no dependency.
+- **Kit cleanup.** The `::selection` colour became a token (`--color-selection`) and the summary chevron's
+  gap `calc(var(--spacing) * 1.5)`, both the same values as before; the screen baselines at c14 and w39
+  still match.
+
 ## Notes for the tasks that build on this
 
 - **Generator:** shadcn 4.21.0 writes `import { cn } from "cn"` and installs the unrelated npm package
