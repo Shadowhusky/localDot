@@ -1,0 +1,62 @@
+{
+  "elevation_deg": 9.0,
+  "hover_units": 3.0,
+  "body": {
+    "base": [0.8, 0.812, 0.83],
+    "roughness": 0.5,
+    "subsurface": 0.3,
+    "subsurface_radius": [0.9, 0.95, 1.0],
+    "subsurface_scale": 0.15,
+    "coat": 0.12,
+    "coat_roughness": 0.4,
+    "sheen": 0.25,
+    "specular_level": 0.5
+  },
+  "world": [0.01, 0.0105, 0.012],
+  "lights": {
+    "key": { "loc": [-3.2, -4.2, 3.4], "size": [7.0, 5.0], "power": 560, "color": [1, 1, 1] },
+    "fill": {
+      "loc": [5.0, -3.0, 0.4],
+      "size": [6.0, 6.0],
+      "power": 170,
+      "color": [0.97, 0.985, 1.0]
+    },
+    "rim": {
+      "loc": [0.0, 7.0, 3.4],
+      "size": [9.0, 3.0],
+      "power": 1500,
+      "color": [0.96, 0.98, 1.0]
+    },
+    "top": { "loc": [0.0, 0.6, 5.0], "size": [4.0, 4.0], "power": 40, "color": [1, 1, 1] },
+    "bounce": {
+      "loc": [0.0, -2.4, -3.6],
+      "size": [7.0, 2.5],
+      "power": 140,
+      "color": [0.96, 0.975, 1.0]
+    }
+  },
+  "variants": {
+    "xenon": {
+      "rim": {
+        "loc": [2.4, 6.6, 1.2],
+        "size": [7.0, 3.0],
+        "power": 1700,
+        "color": [0.05, 0.46, 0.73]
+      },
+      "kick": {
+        "loc": [-2.6, 5.6, -2.4],
+        "size": [6.0, 2.0],
+        "power": 500,
+        "color": [0.05, 0.46, 0.73]
+      }
+    },
+    "dim": {
+      "key": { "power": 175 },
+      "fill": { "power": 58 },
+      "rim": { "power": 150 },
+      "top": { "power": 12 },
+      "bounce": { "power": 38 }
+    }
+  },
+  "floor": { "albedo": 0.18, "proxy_radius": 0.62 }
+}
