@@ -59,6 +59,9 @@ describe("independent fixed browser runtime configuration", () => {
     expect(() =>
       browserProcessSpecs({ ...config, scale: "2" } as unknown as typeof config),
     ).toThrow(/^Browser configuration is invalid$/u);
+    expect(() =>
+      browserProcessSpecs({ ...config, fullcolor: "true" } as unknown as typeof config),
+    ).toThrow(/^Browser configuration is invalid$/u);
   });
 
   it("pins the private front to authenticated GET endpoints with discarded upstream auth and logs", () => {

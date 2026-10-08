@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
 import { createApi } from "../lib/api.ts";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { BrowserDownloads } from "./BrowserDownloads.tsx";
 import { changeDownload, listDownloads, releaseRequest } from "./download-api.ts";
 
@@ -165,10 +166,12 @@ describe("browser download review controls", () => {
     const f = fixture();
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady={false} />);
     const button = await screen.findByRole("button", { name: "Review & release" });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Discard" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Discard" }).getAttribute("aria-disabled"),
+    ).toBeNull();
   });
   it("rejects a forged ownership reply before displaying or trusting it", async () => {
     const f = fixture({ ...held, parentCellId: other });
@@ -186,7 +189,7 @@ describe("browser download review controls", () => {
 it("counts one kept download as one file", async () => {
   const f = fixture(released);
   render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
-  await screen.findByText("Saved to ~/Downloads/report.pdf");
+  await screen.findByText(/Saved to ~\/Downloads\/report\.pdf/);
   expect(screen.getByText("1 file")).toBeTruthy();
 });
 describe("download list refresh", () => {
@@ -244,4 +247,29 @@ describe("download list refresh", () => {
     await wait(2_100);
     expect(screen.queryByText(FAILED)).toBeNull();
   });
+});
+it("shows a held download in Activity before any task has started", async () => {
+  const f = fixture();
+  render(<ActivityRail rows={[]} sessionId={null} cellId={parent} scale={1} api={f.api} />);
+  expect(screen.getByText("Plan and steps appear here once dot starts.")).toBeTruthy();
+  const downloads = await screen.findByRole("region", { name: "Browser downloads" });
+  expect(within(downloads).getByText("report.pdf")).toBeTruthy();
+  expect(within(downloads).getByText("1 waiting")).toBeTruthy();
+});
+it("keeps an open download decision, in one scroller, when a task starts", async () => {
+  const f = fixture();
+  const view = render(
+    <ActivityRail rows={[]} sessionId={null} cellId={parent} releaseReady scale={1} api={f.api} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Review & release" }));
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  view.rerender(
+    <ActivityRail rows={[]} sessionId="task" cellId={parent} releaseReady scale={1} api={f.api} />,
+  );
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(f.fetchImpl.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
+  expect(view.container.querySelectorAll(".ui-scroll-area")).toHaveLength(1);
+  expect(
+    view.container.querySelector(".ui-scroll-area")?.contains(screen.getByTestId("download-row")),
+  ).toBe(true);
 });

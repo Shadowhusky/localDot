@@ -1,13 +1,28 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CODEX_VERSION } from "../harness/codex/src/version.ts";
 import {
+  ACCOUNT_PROBES,
   digest,
+  main,
   makeRecord,
+  NATIVE_PROBES,
   REQUIRED_PROBES,
   releaseInputs,
+  stampAccount,
+  stampNative,
   validateProbeReport,
+  verifyAcceptance,
+  verifyAcceptanceFolder,
   verifyRecord,
 } from "./check-codex-release.mjs";
 
@@ -42,6 +57,29 @@ function sourceTree() {
   }
   return root;
 }
+const passedReport = (probes, scope) => ({
+  success: true,
+  numTotalTests: probes.length,
+  numPassedTests: probes.length,
+  numFailedTests: 0,
+  numPendingTests: 0,
+  numTodoTests: 0,
+  numFailedTestSuites: 0,
+  numPendingTestSuites: 0,
+  testResults: [
+    {
+      status: "passed",
+      message: "",
+      assertionResults: probes.map((title) => ({
+        title,
+        fullName: scope ? `${scope} ${title}` : title,
+        status: "passed",
+        failureMessages: [],
+        duration: 1,
+      })),
+    },
+  ],
+});
 function fixture() {
   const schema = JSON.parse(
     readFileSync(
@@ -49,29 +87,10 @@ function fixture() {
       "utf8",
     ),
   );
-  const report = {
-    success: true,
-    numTotalTests: REQUIRED_PROBES.length,
-    numPassedTests: REQUIRED_PROBES.length,
-    numFailedTests: 0,
-    numPendingTests: 0,
-    numTodoTests: 0,
-    numFailedTestSuites: 0,
-    numPendingTestSuites: 0,
-    testResults: [
-      {
-        status: "passed",
-        message: "",
-        assertionResults: REQUIRED_PROBES.map((title) => ({
-          title,
-          fullName: `actual pinned Codex ${CODEX_VERSION} offline acceptance ${title}`,
-          status: "passed",
-          failureMessages: [],
-          duration: 1,
-        })),
-      },
-    ],
-  };
+  const report = passedReport(
+    REQUIRED_PROBES,
+    `actual pinned Codex ${CODEX_VERSION} offline acceptance`,
+  );
   const evidence = {
     inputs: { "harness/codex/src/args.ts": "a".repeat(64) },
     manifest: { fixture: true },
@@ -109,8 +128,8 @@ describe("pinned release gate", () => {
   it("requires a complete passing probe report, schema and source-bound record", () => {
     const { evidence, record } = fixture();
     expect(verifyRecord(record, evidence)).toBe(true);
-    expect(record.nativeSandbox).toBe("unverified");
-    expect(record.realAccount).toBe("not-run");
+    expect(record).not.toHaveProperty("nativeSandbox");
+    expect(record).not.toHaveProperty("realAccount");
   });
   it.each(["failed", "pending", "skipped", "todo"])(
     "refuses a %s pinned probe even if the report claims success",
@@ -196,4 +215,200 @@ it("binds the native C executable source to the release inventory", () => {
   expect(first[relative] ?? "").toMatch(/^[a-f0-9]{64}$/);
   writeFileSync(join(root, relative), "int main(void) { return 1; }\n");
   expect(releaseInputs(root)[relative]).not.toBe(first[relative]);
+});
+
+const exited = { code: 0, signal: null };
+function acceptance() {
+  const evidence = {
+    inputs: { "harness/codex/src/args.ts": "a".repeat(64) },
+    manifest: { fixture: true },
+    native: passedReport(NATIVE_PROBES, "native macOS Codex confinement"),
+    account: passedReport(ACCOUNT_PROBES, ""),
+  };
+  const unstamped = {
+    format: 1,
+    codexVersion: CODEX_VERSION,
+    platform: "darwin-arm64",
+    manifestSha256: digest(evidence.manifest),
+    nativeSandbox: { passed: false },
+    realAccount: { passed: false },
+  };
+  const native = stampNative(unstamped, { ...evidence, report: evidence.native, exit: exited });
+  const record = stampAccount(native, { ...evidence, report: evidence.account, exit: exited });
+  return { evidence, unstamped, native, record };
+}
+describe("ChatGPT plan acceptance record", () => {
+  it("stamps native and account runs into one record that verifies", () => {
+    const { evidence, record } = acceptance();
+    expect(record).toEqual({
+      format: 1,
+      codexVersion: CODEX_VERSION,
+      platform: "darwin-arm64",
+      manifestSha256: digest(evidence.manifest),
+      nativeSandbox: {
+        passed: true,
+        inputSha256: digest(evidence.inputs),
+        reportSha256: digest(evidence.native),
+      },
+      realAccount: { passed: true, reportSha256: digest(evidence.account) },
+    });
+    expect(verifyAcceptance(record, evidence)).toBe(true);
+  });
+  it("verifies a committed folder against the reports stored beside its record", () => {
+    const { evidence, unstamped, record } = acceptance();
+    const bound = { inputs: evidence.inputs, manifest: evidence.manifest };
+    const folder = (claims, reports = {}) => {
+      const root = mkdtempSync("/tmp/ld-acceptance-");
+      owned.push(root);
+      writeFileSync(join(root, "record.json"), JSON.stringify(claims));
+      for (const [kind, report] of Object.entries(reports))
+        writeFileSync(join(root, `${kind}-report.json`), JSON.stringify(report));
+      return root;
+    };
+    const reports = { native: evidence.native, account: evidence.account };
+    expect(verifyAcceptanceFolder(folder(record, reports), bound)).toEqual(record);
+    expect(verifyAcceptanceFolder(folder(unstamped), bound)).toEqual(unstamped);
+    const forged = { ...unstamped, realAccount: { passed: true, reportSha256: "c".repeat(64) } };
+    expect(() => verifyAcceptanceFolder(folder(forged), bound)).toThrow();
+    const changed = clone(evidence.account);
+    changed.testResults[0].assertionResults[0].duration++;
+    expect(() =>
+      verifyAcceptanceFolder(folder(record, { ...reports, account: changed }), bound),
+    ).toThrow(/Rerun/);
+  });
+  it("checks the committed acceptance folder when verifying from the command line", async () => {
+    const root = mkdtempSync("/tmp/ld-acceptance-");
+    owned.push(root);
+    for (const name of ["offline-record.json", "offline-report.json"])
+      copyFileSync(
+        new URL(`../harness/codex/acceptance/${name}`, import.meta.url),
+        join(root, name),
+      );
+    const manifest = JSON.parse(
+      readFileSync(
+        new URL(`../harness/codex/releases/${CODEX_VERSION}.json`, import.meta.url),
+        "utf8",
+      ),
+    );
+    writeFileSync(
+      join(root, "record.json"),
+      JSON.stringify({
+        format: 1,
+        codexVersion: CODEX_VERSION,
+        platform: "darwin-arm64",
+        manifestSha256: digest(manifest),
+        nativeSandbox: { passed: false },
+        realAccount: { passed: true, reportSha256: "c".repeat(64) },
+      }),
+    );
+    await expect(main(["--verify", root])).rejects.toThrow(/account-report\.json/);
+  });
+  it("verifies an unstamped record without any report", () => {
+    const { evidence, unstamped } = acceptance();
+    expect(
+      verifyAcceptance(unstamped, { inputs: evidence.inputs, manifest: evidence.manifest }),
+    ).toBe(true);
+  });
+  it("binds the native stamp to the release sources", () => {
+    const { evidence, record } = acceptance();
+    evidence.inputs["apps/daemon/src/agent/wiring.ts"] = "b".repeat(64);
+    expect(() => verifyAcceptance(record, evidence)).toThrow(/Rerun native/);
+  });
+  it("binds the account stamp to the pin and manifest only", () => {
+    const { evidence, unstamped } = acceptance();
+    const record = stampAccount(unstamped, { ...evidence, report: evidence.account, exit: exited });
+    evidence.inputs["apps/daemon/src/agent/wiring.ts"] = "b".repeat(64);
+    expect(verifyAcceptance(record, evidence)).toBe(true);
+    expect(() => verifyAcceptance(record, { ...evidence, manifest: { changedPin: true } })).toThrow(
+      /another pin/,
+    );
+  });
+  it.each(["nativeSandbox", "realAccount"])(
+    "refuses a passed %s stamp whose report is missing or changed",
+    (stamp) => {
+      const { evidence, record } = acceptance();
+      const report = stamp === "nativeSandbox" ? "native" : "account";
+      expect(() => verifyAcceptance(record, { ...evidence, [report]: undefined })).toThrow();
+      evidence[report].testResults[0].assertionResults[0].duration++;
+      expect(() => verifyAcceptance(record, evidence)).toThrow(/Rerun/);
+    },
+  );
+  it.each(["native", "account"])(
+    "refuses a %s stamp re-digested over an incomplete report",
+    (kind) => {
+      const { evidence, record } = acceptance();
+      evidence[kind].testResults[0].assertionResults[0].status = "skipped";
+      const forged =
+        kind === "native"
+          ? {
+              ...record,
+              nativeSandbox: {
+                passed: true,
+                inputSha256: digest(evidence.inputs),
+                reportSha256: digest(evidence.native),
+              },
+            }
+          : { ...record, realAccount: { passed: true, reportSha256: digest(evidence.account) } };
+      expect(() => verifyAcceptance(forged, evidence)).toThrow();
+    },
+  );
+  it.each([
+    ["a truthy native stamp", { nativeSandbox: { passed: "true" } }],
+    [
+      "a failed native stamp with leftover digests",
+      { nativeSandbox: { passed: false, inputSha256: "a".repeat(64) } },
+    ],
+    ["a native stamp without its digests", { nativeSandbox: { passed: true } }],
+    [
+      "a failed stamp with leftover digests",
+      { realAccount: { passed: false, reportSha256: "c".repeat(64) } },
+    ],
+    ["a missing stamp", { realAccount: undefined }],
+    ["another platform", { platform: "linux-x64" }],
+    ["another version", { codexVersion: "0.155.0" }],
+    ["another format", { format: 2 }],
+    ["an extra claim", { accepted: true }],
+  ])("refuses a record with %s", (_name, patch) => {
+    const { evidence, record } = acceptance();
+    expect(() => verifyAcceptance({ ...record, ...patch }, evidence)).toThrow();
+  });
+  it.each(["failed", "pending", "skipped", "todo"])(
+    "refuses to stamp a %s native or account probe",
+    (status) => {
+      const { evidence, unstamped } = acceptance();
+      evidence.native.testResults[0].assertionResults[3].status = status;
+      expect(() =>
+        stampNative(unstamped, { ...evidence, report: evidence.native, exit: exited }),
+      ).toThrow();
+      evidence.account.testResults[0].assertionResults[0].status = status;
+      expect(() =>
+        stampAccount(unstamped, { ...evidence, report: evidence.account, exit: exited }),
+      ).toThrow();
+    },
+  );
+  it("refuses another suite's report and an unclean worker exit", () => {
+    const { evidence, unstamped } = acceptance();
+    expect(() =>
+      stampNative(unstamped, { ...evidence, report: evidence.account, exit: exited }),
+    ).toThrow(/failures or skips|Missing, duplicate|Expected/);
+    expect(() =>
+      stampAccount(unstamped, { ...evidence, report: evidence.native, exit: exited }),
+    ).toThrow();
+    expect(() =>
+      stampNative(unstamped, {
+        ...evidence,
+        report: evidence.native,
+        exit: { code: null, signal: "SIGTERM" },
+      }),
+    ).toThrow(/worker/);
+  });
+  it("keeps a same-pin stamp and drops the stamps of another pin when stamping", () => {
+    const { evidence, record } = acceptance();
+    const again = stampNative(record, { ...evidence, report: evidence.native, exit: exited });
+    expect(again.realAccount).toEqual(record.realAccount);
+    const otherPin = { ...record, manifestSha256: "0".repeat(64) };
+    const fresh = stampNative(otherPin, { ...evidence, report: evidence.native, exit: exited });
+    expect(fresh.realAccount).toEqual({ passed: false });
+    expect(fresh.manifestSha256).toBe(digest(evidence.manifest));
+  });
 });

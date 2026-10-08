@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import { isProxy } from "node:util/types";
 import {
   type ActionClass,
-  type ApprovalCardDraft,
+  type ApprovalRequestDraft,
   type AutonomyMode,
-  ApprovalCardDraft as CardSchema,
+  ApprovalRequestDraft as DraftSchema,
   type ScreenName,
 } from "@localdot/protocol";
 export interface NativeTargetFacts {
@@ -134,23 +134,16 @@ export function buildApprovalCard(
   facts: RiskFacts,
   decision: RiskDecision,
   redact: (text: string) => string,
-): ApprovalCardDraft {
+): ApprovalRequestDraft {
   const fields: [string, string][] = [];
   const add = (key: string, value: string | undefined) => {
-    if (value) {
-      const redacted = redact(value);
-      let clipped = "";
-      for (const point of redacted) {
-        if (clipped.length + point.length > 512) break;
-        clipped += point;
-      }
-      fields.push([key, clipped]);
-    }
+    if (value) fields.push([key, redact(value)]);
   };
   add("Target", facts.target?.name);
-  add("App location", safeTargetURL(facts.target?.url ?? facts.destination));
+  add("App location", safeTargetURL(facts.target?.url));
+  add("Web address", facts.destination);
   add("Command", facts.command);
-  return CardSchema.parse({
+  return DraftSchema.parse({
     actionClass: decision.actionClass,
     risk: decision.risk === "high" ? "high" : "medium",
     title: titles[decision.actionClass],

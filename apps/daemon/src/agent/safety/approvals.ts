@@ -1,12 +1,13 @@
 import {
   type ActionClass,
   type AlwaysOption,
+  APPROVAL_FIELD_CHARS,
   APPROVAL_TIMEOUT_MS,
   ApprovalAnswer,
   type ApprovalCard,
-  type ApprovalCardDraft,
+  type ApprovalRequestDraft,
   ApprovalCard as CardSchema,
-  ApprovalCardDraft as DraftSchema,
+  ApprovalRequestDraft as DraftSchema,
   ulid,
 } from "@localdot/protocol";
 
@@ -35,10 +36,26 @@ export interface ApprovalResolution {
 interface Pending {
   readonly binding: ActionBinding;
   readonly card: ApprovalCard;
+  // Values longer than the card carries, by field, and the ones nobody has read in full yet.
+  readonly whole: ReadonlyMap<number, string>;
+  readonly unread: Set<number>;
   readonly signal: AbortSignal;
   readonly timer: ReturnType<typeof setTimeout>;
   abort(): void;
   finish(outcome: ApprovalOutcome, by: ApprovalResolution["by"], always?: AlwaysOption): void;
+}
+
+function cardFields(draft: ApprovalRequestDraft) {
+  const whole = new Map<number, string>();
+  const fields = draft.fields.map(([label, text], field): [string, string] => {
+    if (text.length <= APPROVAL_FIELD_CHARS) return [label, text];
+    whole.set(field, text);
+    const last = text.charCodeAt(APPROVAL_FIELD_CHARS - 1);
+    const end = last >= 0xd800 && last <= 0xdbff ? APPROVAL_FIELD_CHARS - 1 : APPROVAL_FIELD_CHARS;
+    return [label, text.slice(0, end)];
+  });
+  const partial = [...whole].map(([field, text]) => ({ field, length: text.length }));
+  return { fields, whole, ...(partial.length ? { partial } : {}) };
 }
 
 // Authority lives only in this daemon owner. Cards never contain permits or execution inputs.
@@ -54,9 +71,17 @@ export class ApprovalBroker {
     const card = this.#pending.get(sessionId)?.card;
     return card ? structuredClone(card) : undefined;
   }
+  // The full text of a value the card carries only in part; reading it is what lets Approve count.
+  field(sessionId: string, approvalId: string, field: number): string | undefined {
+    const pending = this.#pending.get(sessionId);
+    if (pending?.card.approvalId !== approvalId) return undefined;
+    const text = pending.whole.get(field);
+    if (text !== undefined) pending.unread.delete(field);
+    return text;
+  }
   async request(
     binding: ActionBinding,
-    draft: ApprovalCardDraft,
+    draft: ApprovalRequestDraft,
     checks: ApprovalChecks,
   ): Promise<ApprovalOutcome> {
     checks.signal.throwIfAborted();
@@ -64,8 +89,11 @@ export class ApprovalBroker {
     if (this.#pending.has(binding.sessionId)) throw new Error("approval already pending");
     if (this.#revision >= Number.MAX_SAFE_INTEGER) throw new Error("approval owner exhausted");
     const privateBinding = Object.freeze(structuredClone(binding));
+    const parsed = DraftSchema.parse(draft);
+    const { whole, ...shown } = cardFields(parsed);
     const card = CardSchema.parse({
-      ...DraftSchema.parse(draft),
+      ...parsed,
+      ...shown,
       approvalId: ulid(),
       generation: binding.generation,
       revision: ++this.#revision,
@@ -104,6 +132,8 @@ export class ApprovalBroker {
       this.#pending.set(binding.sessionId, {
         binding: privateBinding,
         card,
+        whole,
+        unread: new Set(whole.keys()),
         signal: checks.signal,
         timer,
         abort,
@@ -133,7 +163,8 @@ export class ApprovalBroker {
       !pending ||
       answer.data.approvalId !== pending.card.approvalId ||
       answer.data.generation !== pending.card.generation ||
-      answer.data.revision !== pending.card.revision
+      answer.data.revision !== pending.card.revision ||
+      (answer.data.decision === "approve" && pending.unread.size > 0)
     )
       return false;
     const scope = answer.data.always;

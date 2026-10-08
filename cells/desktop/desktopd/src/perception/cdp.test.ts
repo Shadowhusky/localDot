@@ -15,6 +15,8 @@ const win: HelperWindow = {
   h: 1546,
   frame: [0, 54, 2560, 1546],
   active: true,
+  overrideRedirect: false,
+  transientFor: null,
 };
 
 describe("pure CDP geometry", () => {

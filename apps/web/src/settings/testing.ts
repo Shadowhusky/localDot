@@ -24,8 +24,13 @@ export function providerFixture(): ProviderIndex {
       local: p.local === true,
       ...(p.baseURL ? { baseURL: p.baseURL } : {}),
       ...(p.availableIn ? { availableIn: p.availableIn } : {}),
+      ...(p.plan ? { plan: p.plan } : {}),
+      ...(p.rule ? { rule: p.rule } : {}),
+      ...(p.notOffered ? { notOffered: p.notOffered } : {}),
       models: Object.values(
-        Object.hasOwn(catalog.providers, p.id) ? (catalog.providers[p.id]?.models ?? {}) : {},
+        !p.notOffered && Object.hasOwn(catalog.providers, p.id)
+          ? (catalog.providers[p.id]?.models ?? {})
+          : {},
       ).map((m) => ({
         id: m.id,
         name: m.name,

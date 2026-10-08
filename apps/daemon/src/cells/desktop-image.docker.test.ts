@@ -385,7 +385,7 @@ describe.skipIf(!DOCKER_TESTS)("desktop image: session bus, HiDPI and Selkies", 
     for (const name of lockedOff) {
       expect(settings[name], name).toMatchObject({ value: false, locked: true });
     }
-    expect(settings.video_fullcolor).toMatchObject({ value: true, locked: true });
+    expect(settings.video_fullcolor).toMatchObject({ value: false, locked: true });
     expect(settings.manual_resolution).toMatchObject({ value: true, locked: true });
     expect(settings.scaling_dpi).toMatchObject({ value: "96", locked: true });
     // A range is locked when its span is one value, an enum when it allows one item.

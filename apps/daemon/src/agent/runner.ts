@@ -1,4 +1,5 @@
 import { setTimeout as delay } from "node:timers/promises";
+import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
   type AgentLimits,
   BootConfig,
@@ -24,10 +25,12 @@ import {
   bindingOf,
   CHATGPT,
   checkChatgptChoice,
+  planOnly,
   pricingOf,
   type ResolvedRole,
   type Role,
   resolveRole,
+  taskSelection,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
 import type { CodexAccount } from "./codex/account.ts";
@@ -236,7 +239,7 @@ export class AgentRunner {
           }
         }
         const codex = this.deps.codex;
-        if (!codex) throw new AgentError(400, "The ChatGPT plan is not set up in this daemon.");
+        if (!codex) throw new AgentError(400, CHATGPT_SWITCHED_OFF);
         if (!this.#health.online) throw new AgentError(503, "The desktop key layer is offline.");
         const status = await codex.account.status();
         signal?.throwIfAborted();
@@ -411,14 +414,7 @@ export class AgentRunner {
     if (!selection) return undefined;
     return selection.kind === "chatgpt"
       ? { kind: "chatgpt" as const, model: selection.model }
-      : {
-          kind: "api" as const,
-          roles: selection.roles.map((role) => ({
-            role: role.role,
-            provider: role.providerId,
-            model: role.model.id,
-          })),
-        };
+      : taskSelection(selection.roles);
   }
   activeChatgptTasks(): number {
     return [...this.#runtime.values()].filter(
@@ -463,6 +459,8 @@ export class AgentRunner {
     if (!rt) throw new AgentError(404, "no such live task");
     if (rt.selection.kind === "chatgpt")
       throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
+    if (planOnly(rt.selection.roles))
+      throw new AgentError(409, "This task uses your plan's limits.");
     await this.#exclusive(rt, async () => {
       const { session, brain } = rt;
       const generation = session.generation;
@@ -839,6 +837,13 @@ export class AgentRunner {
         reason = "error";
         session.stop();
         await session.screensSettled().catch(() => {});
+      }
+      // Its tools have settled, so a Pause that Stop left unsettled must not fence the computer at
+      // the next start. Named cleanup uncertainty fenced it above; an unconfirmed Stop never fences.
+      try {
+        new SafetyIntentStore(this.deps.home).remove(session.id, session.cellId);
+      } catch {
+        console.error("agent safety intent could not be cleared");
       }
       try {
         session.append("session.end", { reason });

@@ -15,6 +15,7 @@ import { ControlFailure } from "./control-api.ts";
 import type { AgentFeed } from "./model.ts";
 import {
   answerSafety,
+  loadApprovalField,
   loadFence,
   loadReplacement,
   pauseSafety,
@@ -343,6 +344,10 @@ export function useSafety(props: SafetyProps) {
     undoing.current = null;
     setAllowed(null);
   };
+  const readApprovalField = (approvalId: string, field: number, signal: AbortSignal) => {
+    const p = current.current;
+    return loadApprovalField(p.api, p.agent.sessionId ?? "", approvalId, field, signal);
+  };
   const requestPause = async () => {
     if (
       !fresh() ||
@@ -556,6 +561,7 @@ export function useSafety(props: SafetyProps) {
     error,
     requestPause,
     answerApproval,
+    readApprovalField,
     resume,
     replacement,
     replace,

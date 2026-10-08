@@ -65,3 +65,7 @@ export const CodexInstallState = z.discriminatedUnion("state", [
   z.object({ state: z.literal("failed"), code: CodexInstallFailure }).strict(),
 ]);
 export type CodexInstallState = z.infer<typeof CodexInstallState>;
+
+// ChatGPT ships device code sign-in switched off for personal accounts.
+export const CHATGPT_DEVICE_CODE_OFF =
+  "Turn on device code sign-in in ChatGPT under Settings → Security first.";

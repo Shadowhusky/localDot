@@ -1,5 +1,6 @@
 // biome-ignore-all lint/suspicious/noArrayIndexKey: Read-only diff lines have no child state; line position identifies each span.
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
+import { diffStat } from "./activity.ts";
 import type { AgentChange } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
 import "./output.css";
@@ -35,50 +36,91 @@ export function diffPreview(patch: string | undefined) {
     unavailable: false,
   };
 }
-export function DiffViewer({ change }: { change: AgentChange }) {
+
+const KINDS = {
+  hunk: "diff-hunk",
+  add: "diff-add",
+  remove: "diff-remove",
+  line: "diff-line",
+  note: "diff-eol",
+} as const;
+interface Numbered {
+  kind: keyof typeof KINDS;
+  line?: number;
+}
+
+// Each line takes its number from the hunk headers: the new file's for added and kept lines, the
+// old file's for removed ones.
+export function numberLines(lines: readonly string[]): Numbered[] {
+  let old = 0,
+    next = 0;
+  return lines.map((line) => {
+    const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
+    if (hunk) {
+      old = Number(hunk[1]);
+      next = Number(hunk[2]);
+      return { kind: "hunk" };
+    }
+    if (line.startsWith("@@")) return { kind: "hunk" };
+    if (line.startsWith("+")) return { kind: "add", line: next++ };
+    if (line.startsWith("-")) return { kind: "remove", line: old++ };
+    if (line.startsWith("\\")) return { kind: "note" };
+    old++;
+    return { kind: "line", line: next++ };
+  });
+}
+
+// Inside a row that already says what changed, only the full path is repeated.
+export function DiffViewer({
+  change,
+  compact = false,
+}: {
+  change: AgentChange;
+  compact?: boolean;
+}) {
   const preview = useMemo(() => diffPreview(change.patch), [change.patch]);
+  const numbered = useMemo(() => numberLines(preview.lines), [preview.lines]);
+  const stat = diffStat([preview.text]);
   return (
-    <section className="diff-viewer" aria-label="File change">
-      <h3>{change.path.slice(0, DIFF_LIMITS.path)}</h3>
-      <p>
-        {change.type === "memory"
-          ? "Memory change"
-          : change.op === "create"
-            ? "Created file"
-            : change.op === "delete"
-              ? "Deleted file"
-              : "Modified file"}
+    <section className="diff-viewer" data-compact={compact || undefined} aria-label="File change">
+      <p className="diff-head">
+        <span className="diff-op" hidden={compact}>
+          {change.type === "memory"
+            ? "Memory"
+            : change.op === "create"
+              ? "Created"
+              : change.op === "delete"
+                ? "Deleted"
+                : "Changed"}
+        </span>
+        <span className="diff-path">{change.path.slice(0, DIFF_LIMITS.path)}</span>
+        {stat && !compact && <span className="diff-stat num">{stat}</span>}
       </p>
-      {change.truncated || preview.truncated ? (
-        <p className="history-note">Diff preview shortened.</p>
-      ) : null}
       {preview.unavailable ? (
-        <p>No text diff available.</p>
+        <p className="diff-empty">No text diff available.</p>
       ) : (
         <>
-          {/* biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users need to scroll the bounded diff. */}
-          <section className="diff-text" tabIndex={0} aria-label="Unified text diff">
+          <section className="diff-text" aria-label="Unified text diff">
             <pre>
-              {preview.lines.map((line, index) => (
-                <span
-                  key={index}
-                  className={
-                    line.startsWith("@@")
-                      ? "diff-hunk"
-                      : line.startsWith("+")
-                        ? "diff-add"
-                        : line.startsWith("-")
-                          ? "diff-remove"
-                          : "diff-line"
-                  }
-                >
-                  {line}
-                  {index < preview.lines.length - 1 ? "\n" : ""}
-                </span>
-              ))}
+              {preview.lines.map((line, index) => {
+                const row = numbered[index];
+                return (
+                  <Fragment key={index}>
+                    <span className={KINDS[row?.kind ?? "line"]} data-line={row?.line}>
+                      {line}
+                    </span>
+                    {index < preview.lines.length - 1 ? "\n" : ""}
+                  </Fragment>
+                );
+              })}
             </pre>
           </section>
-          <OutputCopy text={preview.text} label="Copy shown diff" />
+          <div className="diff-foot">
+            {(change.truncated || preview.truncated) && (
+              <span className="diff-shortened">Shortened to the kept text.</span>
+            )}
+            <OutputCopy text={preview.text} label="Copy diff" />
+          </div>
         </>
       )}
     </section>

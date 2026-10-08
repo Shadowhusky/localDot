@@ -118,6 +118,9 @@ export class SessionRecorder {
         await this.#end("recorder-error", event.t, "the stream dropped too often");
       });
   }
+  get #gapCount(): number {
+    return this.#ownGaps.length + this.#gate.gaps.length + this.#authority.gaps.length;
+  }
   get manifest(): RecordingManifest {
     const gaps = [...this.#ownGaps, ...this.#gate.gaps, ...this.#authority.gaps]
       .map((gap) => ({ ...gap }))
@@ -242,7 +245,7 @@ export class SessionRecorder {
     }
     // Control changes are observed synchronously; evaluate each queued frame's own time before any disk write.
     if (!this.#gate.admit(t, frame.key) || !this.#authority.admit(t, frame.key)) return;
-    if (this.manifest.gaps.length > MAX_GAPS) {
+    if (this.#gapCount > MAX_GAPS) {
       await this.#end("recorder-error", t, "the stream dropped too often");
       return;
     }
@@ -352,7 +355,7 @@ export class SessionRecorder {
         await this.#end("size-cap", now);
         return;
       }
-      if (this.manifest.gaps.length > MAX_GAPS) {
+      if (this.#gapCount > MAX_GAPS) {
         await this.#end("recorder-error", now, "the stream dropped too often");
         return;
       }

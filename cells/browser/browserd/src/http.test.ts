@@ -170,6 +170,7 @@ async function setup(enableNavigation = true) {
       streamToken: "b".repeat(43),
       gateAddress: "10.0.0.2",
       scale: 2,
+      fullcolor: false,
     },
     instance,
     control,

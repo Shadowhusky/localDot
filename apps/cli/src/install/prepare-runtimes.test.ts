@@ -1,14 +1,18 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { imageRef, ReleaseManifest } from "../../../../packages/protocol/src/release.ts";
+import { DEFAULT_AUTONOMY } from "../../../../packages/protocol/src/safety.ts";
 import { sampleManifest } from "../../../../packages/protocol/src/testing/sample-release.ts";
 import { ComputerFences } from "../../../daemon/src/agent/safety/fences.ts";
+import { SafetyIntentStore } from "../../../daemon/src/agent/safety/store.ts";
 import { DockerError, type DockerRequest } from "../../../daemon/src/cells/docker.ts";
 import type { runtimeCandidateSpec } from "../../../daemon/src/cells/runtime-update-candidate.ts";
 import { RuntimeUpdateStore } from "../../../daemon/src/cells/runtime-update-store.ts";
 import { cellNames } from "../../../daemon/src/cells/spec.ts";
 import type { CellRecord } from "../../../daemon/src/cells/types.ts";
+import { EventLog } from "../../../daemon/src/event-log.ts";
 import { prepareInstalledRuntimes } from "./prepare-runtimes.ts";
 import { serviceConfigurationId } from "./service-definition.ts";
 
@@ -56,7 +60,7 @@ function required<T>(value: T | undefined): T {
   if (value === undefined) throw new Error("fixture value missing");
   return value;
 }
-async function fixture(count = 1) {
+async function fixture(count = 1, fullcolor = false) {
   const home = await realpath(await mkdtemp("/private/tmp/localdot-runtime-host-"));
   homes.push(home);
   const state = join(home, "install");
@@ -169,6 +173,7 @@ async function fixture(count = 1) {
         Config: {
           Image: imageRef(previous.images[role]),
           Labels: { "localdot.cell": id, "localdot.role": role },
+          ...(role === "desktop" ? { Env: [`SELKIES_VIDEO_FULLCOLOR=${fullcolor}|locked`] } : {}),
         },
         State: { ...off },
         volume: role === "desktop" ? source.docker.homeVolume : undefined,
@@ -255,6 +260,8 @@ async function fixture(count = 1) {
   mock.docker.mockReturnValue({ request });
   const saved = async (id: string) =>
     JSON.parse(await readFile(join(home, "cells", id, "cell.json"), "utf8")) as CellRecord;
+  const desktop = async (id: string) =>
+    objects.get(`/containers/${(await saved(id)).ownership?.desktop}`);
   return {
     home,
     target,
@@ -267,6 +274,7 @@ async function fixture(count = 1) {
     controls,
     controller,
     saved,
+    desktop,
     engine,
     inspect,
     pull,
@@ -285,6 +293,9 @@ it("prepares multiple retained computers under leases and is idempotent", async 
     expect({ ...saved, ownership: source.ownership }).toEqual(source);
     expect(saved.ownership?.desktop).not.toBe(source.ownership?.desktop);
     expect(f.objects.get(`/volumes/${source.docker.homeVolume}`)?.Sentinel).toMatch(/^files-/);
+    expect((await f.desktop(source.id))?.Config?.Env).toContain(
+      "SELKIES_VIDEO_FULLCOLOR=false|locked",
+    );
   }
   expect(f.objects.get("/volumes/browser-profile")).toEqual({ Sentinel: "browser cookies" });
   await f.run();
@@ -311,12 +322,77 @@ it("finishes an interrupted candidate before preparing all computers for rollbac
     ),
   ).toBe(true);
 });
+it("moves a computer still streaming 4:4:4 to 4:2:0 even when its images already match", async () => {
+  const f = await fixture(1, true),
+    source = required(f.sources[0]);
+  await f.run(f.old);
+  expect(f.mutations).toHaveLength(4);
+  expect((await f.desktop(source.id))?.Config).toMatchObject({
+    Image: imageRef(f.previous.images.desktop),
+    Env: expect.arrayContaining(["SELKIES_VIDEO_FULLCOLOR=false|locked"]),
+  });
+  await f.run(f.old);
+  expect(f.mutations).toHaveLength(4);
+});
+it("leaves a computer alone when its images and 4:2:0 stream already match", async () => {
+  const f = await fixture();
+  await f.run(f.old);
+  expect(f.mutations).toHaveLength(0);
+});
+it("finishes an interrupted 4:4:4 preparation, then moves that computer to 4:2:0", async () => {
+  const f = await fixture(),
+    source = required(f.sources[0]);
+  new RuntimeUpdateStore(f.home).write({
+    v: 1,
+    operationId: randomUUID(),
+    source,
+    images: { gate: imageRef(f.next.images.gate), desktop: imageRef(f.next.images.desktop) },
+    fullcolor: true,
+    phase: "retiring",
+    candidates: { gate: null, desktop: null },
+  });
+  await f.run();
+  expect(f.mutations).toHaveLength(8);
+  expect(new RuntimeUpdateStore(f.home).read(source.id)).toMatchObject({
+    fullcolor: false,
+    phase: "prepared",
+  });
+  expect((await f.desktop(source.id))?.Config?.Env).toContain(
+    "SELKIES_VIDEO_FULLCOLOR=false|locked",
+  );
+});
 it("keeps a durable native-fenced identity untouched while updating another computer", async () => {
   const f = await fixture(2),
     retired = required(f.sources[0]);
   new ComputerFences(f.home).capture(retired.id, "01JXYZ00000000000000000009", "native");
   await f.run();
   expect(await f.saved(retired.id)).toEqual(retired);
+  expect(f.mutations).toHaveLength(4);
+});
+it("updates a computer whose finished task left a Pause intent, but not one that crashed mid-Pause", async () => {
+  const f = await fixture(2),
+    stale = required(f.sources[0]),
+    crashed = required(f.sources[1]);
+  const log = new EventLog(f.home),
+    intents = new SafetyIntentStore(f.home),
+    pause = {
+      requestId: "01JXYZ0000000000000000000A",
+      revision: 1,
+      reason: "user" as const,
+      phase: "pausing" as const,
+      atStepBoundary: false,
+      resumeAvailable: false,
+    };
+  const finished = log.createSession("paused, then stopped by an older build"),
+    running = log.createSession("crashed mid-pause");
+  intents.write(finished, stale.id, DEFAULT_AUTONOMY, pause, "native");
+  intents.write(running, crashed.id, DEFAULT_AUTONOMY, pause, "native");
+  log.append(finished, { type: "session.end", agent: "main", data: { reason: "stopped" } });
+  log.close();
+  await f.run();
+  expect(new ComputerFences(f.home).records().map((r) => r.cellId)).toEqual([crashed.id]);
+  expect(await f.saved(crashed.id)).toEqual(crashed);
+  expect((await f.saved(stale.id)).ownership?.desktop).not.toBe(stale.ownership?.desktop);
   expect(f.mutations).toHaveLength(4);
 });
 it("rolls back a batch containing both completed and interrupted computer migrations", async () => {

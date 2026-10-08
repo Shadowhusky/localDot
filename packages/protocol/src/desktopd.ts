@@ -16,6 +16,9 @@ export const WindowInfo = z.object({
   rect: Rect,
   frame: Rect,
   active: z.boolean(),
+  // Menus, popups and tooltips: never managed, never active, stacked above their parent.
+  overrideRedirect: z.boolean().optional(),
+  transientFor: z.number().int().nonnegative().nullable().optional(),
 });
 export type WindowInfo = z.infer<typeof WindowInfo>;
 
@@ -66,10 +69,15 @@ export const TypeResult = z.object({
 });
 export type TypeResult = z.infer<typeof TypeResult>;
 
+// The input settle follows. After a click, scroll, key or typing, settle also waits until the
+// app that took the input has handled it (_NET_WM_PING), so a slow dialog still reaches the frame.
+export const SettleVerb = z.enum(["click", "scroll", "key", "type", "launch"]);
+export type SettleVerb = z.infer<typeof SettleVerb>;
 export const SettleRequest = z.object({
   quietMs: z.number().positive().max(5000).default(250),
   firstMs: z.number().positive().max(10_000).default(1500),
   timeoutMs: z.number().positive().max(30_000).default(3000),
+  verb: SettleVerb.optional(),
 });
 export type SettleRequest = z.infer<typeof SettleRequest>;
 export const SettleResult = z.object({
@@ -113,6 +121,10 @@ export const ObserveResult = z.object({
 });
 export type ObserveResult = z.infer<typeof ObserveResult>;
 
+// A region of an observed frame in model pixels, read back at the screen's device resolution.
+export const ZoomRequest = z.object({ frameId: z.string().regex(ULID_PATTERN), region: Rect });
+export type ZoomRequest = z.infer<typeof ZoomRequest>;
+
 export const HitTestRequest = z.object({ point: Point });
 export type HitTestRequest = z.infer<typeof HitTestRequest>;
 // desktopd clips names at the source and the gateway's clipTarget cuts to the event limits before
@@ -125,9 +137,13 @@ export const WireTarget = Target.extend({
   url: z.string().optional(),
 });
 export type WireTarget = z.infer<typeof WireTarget>;
+// `windowFrame` is the window's frame: with the window id, the identity a lookup always has.
+// `unknown` says the element lookup did not finish in time, which is not the same as no element.
 export const HitTestResult = z.object({
   target: WireTarget.nullable(),
   window: z.number().int().nonnegative().nullable(),
+  windowFrame: Rect.optional(),
+  unknown: z.literal(true).optional(),
   ms: z.number().nonnegative(),
 });
 export type HitTestResult = z.infer<typeof HitTestResult>;

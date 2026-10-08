@@ -193,7 +193,7 @@
 .key-form input:focus-visible,
 .key-form select:focus-visible,
 .sheet button:focus-visible {
-  outline: 2px solid var(--color-text-2);
+  outline: var(--focus-width) solid var(--color-text-2);
   outline-offset: 1px;
 }
 
@@ -236,6 +236,18 @@
 .kind[aria-pressed="true"] {
   background: var(--color-surface-2);
   color: var(--color-text);
+}
+
+.field-hint {
+  margin-top: calc(var(--spacing) * -1);
+  font-size: var(--text-footnote);
+  color: var(--color-text-3);
+}
+
+.field-hint code {
+  font-family: var(--font-mono);
+  font-size: var(--text-micro);
+  color: var(--color-text-2);
 }
 
 .field-error {

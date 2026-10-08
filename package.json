@@ -7,12 +7,14 @@
     "node": ">=24"
   },
   "scripts": {
-    "lint": "biome check .",
+    "lint": "biome check . && node apps/web/scripts/ui-guard.mjs",
     "format": "biome format --write .",
     "typecheck": "pnpm -r --if-present typecheck",
     "test": "vitest run",
     "test:docker": "vitest run --config vitest.docker.config.ts",
+    "test:eval": "vitest run --config vitest.eval.config.ts",
     "hygiene": "node scripts/check-hygiene.mjs",
+    "check:ui": "node apps/web/scripts/ui-guard.mjs",
     "check:pack": "node scripts/check-pack.mjs",
     "check:pack-archive": "node scripts/check-pack-archive.mjs",
     "build:app-package": "node --experimental-transform-types apps/cli/scripts/pack-app-release.mjs",

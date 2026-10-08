@@ -52,6 +52,116 @@ describe("provider/model/role presentation", () => {
     fireEvent.change(screen.getByLabelText("Search main providers"), { target: { value: "chat" } });
     expect(screen.getByRole("option", { name: "ChatGPT plan" })).toBeTruthy();
   });
+  it("groups plans and the plans not offered, and says why when one is chosen or searched", () => {
+    const change = vi.fn();
+    const view = render(<ProviderPicker modelRole="main" value="" onChange={change} />);
+    const plans = screen.getByRole("group", { name: "Plans" });
+    expect([...plans.querySelectorAll("option")].map((o) => [o.textContent, o.disabled])).toEqual([
+      ["MiniMax Token Plan", false],
+      ["Alibaba Token Plan", false],
+      ["Alibaba Coding Plan", false],
+    ]);
+    const refused = screen.getByRole("group", { name: "Not available here" });
+    expect([...refused.querySelectorAll("option")].map((o) => [o.textContent, o.disabled])).toEqual(
+      [
+        ["GLM Coding Plan — not available here", false],
+        ["Kimi For Coding — not available here", false],
+        ["Ark Coding Plan — not available here", false],
+      ],
+    );
+    const GLM =
+      "Z.ai lets this plan run only in the coding tools it lists. Use a Z.ai API key here instead.";
+    expect(screen.queryByText(GLM)).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "main provider" }), {
+      target: { value: "zai-coding-plan" },
+    });
+    expect(change).toHaveBeenCalledWith("zai-coding-plan");
+    view.rerender(<ProviderPicker modelRole="main" value="zai-coding-plan" onChange={change} />);
+    const select = screen.getByRole("combobox", { name: "main provider" });
+    expect(screen.getByText(GLM).id).toBe(select.getAttribute("aria-describedby"));
+    view.rerender(
+      <ProviderPicker modelRole="main" value="alibaba-coding-plan" onChange={change} />,
+    );
+    expect(screen.queryByText(GLM)).toBeNull();
+    expect(
+      screen.getByText("Alibaba allows this plan only for tasks you start and watch."),
+    ).toBeTruthy();
+    view.rerender(<ProviderPicker modelRole="main" value="" onChange={change} />);
+    fireEvent.change(screen.getByLabelText("Search main providers"), { target: { value: "kimi" } });
+    expect(
+      screen.getByText(
+        "Kimi For Coding: Kimi lets this plan run only in coding tools it recognises. Use a Moonshot API key here instead.",
+      ),
+    ).toBeTruthy();
+    cleanup();
+    render(<ProviderPicker modelRole="local" value="" onChange={vi.fn()} />);
+    expect(
+      screen.getByRole("option", { name: "GLM Coding Plan — not available here" }),
+    ).toHaveProperty("disabled", true);
+  });
+  it("says Claude plans can't be used here, under Anthropic, on a search and in Subscription", () => {
+    const SENTENCE =
+      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    const PLAN = "Claude Pro or Max — not available here";
+    const view = render(<ProviderPicker modelRole="main" value="" onChange={vi.fn()} />);
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    const plan = screen.getByRole("option", { name: PLAN }) as HTMLOptionElement;
+    expect(plan.disabled).toBe(true);
+    expect(plan.closest("optgroup")?.label).toBe("Subscription");
+    view.rerender(<ProviderPicker modelRole="main" value="anthropic" onChange={vi.fn()} />);
+    const select = screen.getByRole("combobox", { name: "main provider" });
+    expect(screen.getByText(SENTENCE).id).toBe(select.getAttribute("aria-describedby"));
+    view.rerender(<ProviderPicker modelRole="main" value="openai" onChange={vi.fn()} />);
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    const search = screen.getByLabelText("Search main providers");
+    for (const text of ["claude", "Claude Code", "pro", "MAX", "subscription"]) {
+      fireEvent.change(search, { target: { value: text } });
+      expect(screen.getAllByText(SENTENCE), text).toHaveLength(1);
+      expect(screen.getByRole("option", { name: PLAN })).toBeTruthy();
+    }
+    fireEvent.change(search, { target: { value: "minimax" } });
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    expect(screen.queryByRole("option", { name: PLAN })).toBeNull();
+    fireEvent.change(search, { target: { value: "claude" } });
+    view.rerender(<ProviderPicker modelRole="main" value="anthropic" onChange={vi.fn()} />);
+    expect(screen.getAllByText(SENTENCE)).toHaveLength(1);
+    cleanup();
+    render(<ProviderPicker modelRole="fast" value="anthropic" onChange={vi.fn()} />);
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+  });
+  it("offers Anthropic on a Claude plan search, so the sentence's next step is one pick away", () => {
+    for (const role of ["main", "fast"] as const) {
+      const change = vi.fn();
+      render(<ProviderPicker modelRole={role} value="" onChange={change} />);
+      const search = screen.getByLabelText(`Search ${role} providers`);
+      for (const text of ["claude", "claude code token", "pro", "gemini pro", "subscription"]) {
+        fireEvent.change(search, { target: { value: text } });
+        const anthropic = screen.getByRole("option", { name: "Anthropic" }) as HTMLOptionElement;
+        expect(anthropic.disabled, `${role} ${text}`).toBe(false);
+        expect(anthropic.closest("optgroup")?.label).toBe("API providers");
+      }
+      fireEvent.change(screen.getByRole("combobox", { name: `${role} provider` }), {
+        target: { value: "anthropic" },
+      });
+      expect(change).toHaveBeenCalledWith("anthropic");
+      fireEvent.change(search, { target: { value: "groq" } });
+      expect(screen.queryByRole("option", { name: "Anthropic" })).toBeNull();
+      cleanup();
+    }
+  });
+  it("leaves out provider groups a search leaves empty", () => {
+    render(<ProviderPicker modelRole="main" value="" onChange={vi.fn()} />);
+    const groups = () => screen.getAllByRole("group").map((group) => group.getAttribute("label"));
+    expect(groups()).toContain("Plans");
+    fireEvent.change(screen.getByLabelText("Search main providers"), {
+      target: { value: "claude" },
+    });
+    expect(groups()).toEqual(["API providers", "Subscription"]);
+    fireEvent.change(screen.getByLabelText("Search main providers"), {
+      target: { value: "groq" },
+    });
+    expect(groups()).toEqual(["API providers"]);
+  });
   it("retains the canonical selected provider through filtered searches", () => {
     const change = vi.fn();
     render(<ProviderPicker modelRole="main" value="google" onChange={change} />);
@@ -137,6 +247,21 @@ describe("provider/model/role presentation", () => {
       target: { value: "custom-next" },
     });
     expect(change).toHaveBeenCalledWith("custom-next");
+    // Nothing in the catalog to search or pick: only the typed ID.
+    expect(screen.queryByRole("combobox", { name: "main model" })).toBeNull();
+    expect(screen.queryByLabelText("Search main models")).toBeNull();
+    expect(screen.queryByText(/No models are available/)).toBeNull();
+    view.rerender(
+      <ModelPicker
+        modelRole="main"
+        providerId="anthropic-compatible"
+        models={models}
+        value="text-a"
+        onChange={change}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "main model" })).toBeTruthy();
+    expect(screen.getByLabelText("main custom model ID")).toBeTruthy();
     view.rerender(
       <ModelPicker
         modelRole="main"
@@ -193,6 +318,107 @@ describe("provider/model/role presentation", () => {
     const button = screen.getByRole("button", { name: "Add key for main" });
     fireEvent.click(button);
     expect(onKeys).toHaveBeenCalledWith("main", "azure", button);
+  });
+  it("lets a custom endpoint say whether its model sees images, its context and a flat-rate plan", () => {
+    const anc: KeyRecord = {
+      ...stored,
+      id: "anc",
+      provider: "anthropic-compatible",
+      baseURL: "https://api.z.ai/api/anthropic/v1",
+    };
+    function Form({ provider }: { provider: string }) {
+      const [value, set] = useState<RoleChoice | undefined>({
+        provider,
+        model: "glm-5.3-flash",
+        key: provider === "anthropic" ? stored.id : "anc",
+      });
+      return (
+        <>
+          <RoleEditor
+            modelRole="main"
+            value={value}
+            providers={[]}
+            keys={[anc, { ...stored, provider: "anthropic" }]}
+            keyLayer="online"
+            onChange={set}
+            onKeys={vi.fn()}
+          />
+          <output>{JSON.stringify(value)}</output>
+        </>
+      );
+    }
+    const state = () => JSON.parse(screen.getByRole("status").textContent ?? "") as RoleChoice;
+    const view = render(<Form provider="anthropic-compatible" />);
+    expect(screen.getByText("Configure the endpoint under Keys.")).toBeTruthy();
+    const vision = screen.getByRole("checkbox", {
+      name: "Can see images (needed to use the screen)",
+    }) as HTMLInputElement;
+    expect(vision.checked).toBe(true);
+    fireEvent.click(vision);
+    expect(state().vision).toBe(false);
+    fireEvent.click(vision);
+    expect(state()).not.toHaveProperty("vision");
+
+    const context = screen.getByRole("textbox", {
+      name: "main context window — tokens",
+    }) as HTMLInputElement;
+    expect(context.placeholder).toBe("32768");
+    expect(context.getAttribute("inputmode")).toBe("numeric");
+    const help = screen.getByText("Optional. Leave empty for 32,768.");
+    expect(context.getAttribute("aria-describedby")).toBe(help.id);
+    fireEvent.change(context, { target: { value: "128,000" } });
+    expect(state().contextTokens).toBe(128_000);
+    expect(context.value).toBe("128000");
+    fireEvent.change(context, { target: { value: "" } });
+    expect(state()).not.toHaveProperty("contextTokens");
+
+    const plan = screen.getByRole("checkbox", {
+      name: "Flat-rate plan (no per-token price)",
+    }) as HTMLInputElement;
+    expect(plan.checked).toBe(false);
+    expect(screen.queryByText(/not a spending ceiling/)).toBeNull();
+    fireEvent.click(plan);
+    expect(state().plan).toBe(true);
+    expect(screen.getByText("Uses your plan's limits, not a spending ceiling.")).toBeTruthy();
+    fireEvent.click(plan);
+    expect(state()).not.toHaveProperty("plan");
+
+    view.unmount();
+    render(<Form provider="anthropic" />);
+    expect(screen.queryByRole("checkbox", { name: /Can see images/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Flat-rate plan/ })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /context window/ })).toBeNull();
+  });
+  it("shows only the reason for a plan that is not offered, and a plan's key and rule otherwise", () => {
+    const onKeys = vi.fn();
+    const props = {
+      modelRole: "main" as const,
+      value: { provider: "zai-coding-plan", model: "" },
+      providers: [],
+      keys: [{ ...stored, provider: "openai-compatible", baseURL: "https://api.minimax.io/v1" }],
+      keyLayer: "online" as const,
+      onChange: vi.fn(),
+      onKeys,
+    };
+    const view = render(<RoleEditor {...props} />);
+    expect(screen.getByText(/^Z\.ai lets this plan run only/)).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "main model" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "main key" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add key for main" })).toBeNull();
+    view.rerender(
+      <RoleEditor
+        {...props}
+        value={{ provider: "minimax-coding-plan", model: "MiniMax-M3", key: stored.id }}
+        providers={[{ id: "minimax-coding-plan", models }]}
+      />,
+    );
+    expect((screen.getByRole("combobox", { name: "main key" }) as HTMLSelectElement).value).toBe(
+      stored.id,
+    );
+    expect(screen.getByRole("combobox", { name: "main model" })).toBeTruthy();
+    const button = screen.getByRole("button", { name: "Add key for main" });
+    fireEvent.click(button);
+    expect(onKeys).toHaveBeenCalledWith("main", "minimax-coding-plan", button);
   });
   it("turns optional roles off explicitly, clears old provider-bound selection on a provider change and refuses local remote rows", () => {
     function Form() {

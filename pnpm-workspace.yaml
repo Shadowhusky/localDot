@@ -9,3 +9,5 @@ packages:
 
 patchedDependencies:
   '@anthropic-ai/sandbox-runtime@0.0.78': patches/sandbox-runtime-0.0.78.patch
+
+minimumReleaseAge: 20160

@@ -110,6 +110,151 @@ describe("configuration validation before explicit save", () => {
       expect(validateForm(d, {}, index)).toMatchObject({ ok: false });
     }
   });
+  it("saves what a custom endpoint's model can do, and no price when it is on a flat-rate plan", () => {
+    const index = providerFixture();
+    index.keys.push({
+      id: "anc",
+      provider: "anthropic-compatible",
+      baseURL: "https://api.z.ai/api/anthropic/v1",
+    });
+    const choice = { provider: "anthropic-compatible", model: "glm-5.3-flash", key: "anc" };
+    const d = formOf({ main: { ...choice, vision: false, contextTokens: 128_000 } });
+    expect(needsPrice(d.choices.main, index)).toBe(true);
+    d.prices.main = { input: "0.6", output: "2.2" };
+    expect(validateForm(d, {}, index)).toEqual({
+      ok: true,
+      document: {
+        main: {
+          ...choice,
+          vision: false,
+          contextTokens: 128_000,
+          price: { inputUSDPerMTok: 0.6, outputUSDPerMTok: 2.2 },
+        },
+      },
+    });
+    // On a plan, the price typed before is kept in the form but never saved.
+    d.choices.main = { ...choice, plan: true };
+    expect(needsPrice(d.choices.main, index)).toBe(false);
+    expect(validateForm(d, {}, index)).toEqual({
+      ok: true,
+      document: { main: { ...choice, plan: true } },
+    });
+    for (const contextTokens of [1, 4_095, 2_000_001])
+      expect(
+        validateForm(
+          { ...d, choices: { main: { ...choice, plan: true, contextTokens } } },
+          {},
+          index,
+        ),
+      ).toEqual({
+        ok: false,
+        problems: [
+          "Main: enter a context window from 4,096 to 2,000,000 tokens, or leave it empty.",
+        ],
+      });
+  });
+
+  it("states abilities only for custom endpoints", () => {
+    const claude = { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" };
+    const d = formOf({ main: claude });
+    d.choices.main = { ...claude, vision: false, contextTokens: 9_000, plan: true };
+    // Only a custom endpoint's plan makes an unpriced model need no price.
+    const free = { provider: "openrouter", model: "meta-llama/llama-4-maverick:free", key: "k" };
+    expect(needsPrice({ ...free, plan: true }, providerFixture())).toBe(true);
+    expect(validateForm(d, {}, providerFixture())).toEqual({
+      ok: true,
+      document: { main: claude },
+    });
+  });
+
+  it("saves a plan with a key bound to its address and refuses a plan that is not offered", () => {
+    const index = providerFixture();
+    index.keys.push({
+      id: "token-plan",
+      provider: "openai-compatible",
+      baseURL: "https://api.minimax.io/v1",
+    });
+    const plan = formOf({
+      main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+    });
+    // A plan uses its own limits: no manual rate, and a rate saved before is dropped.
+    expect(needsPrice(plan.choices.main, index)).toBe(false);
+    expect(validateForm(plan, {}, index)).toEqual({
+      ok: true,
+      document: {
+        main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      },
+    });
+    const stored = formOf({
+      main: {
+        provider: "minimax-coding-plan",
+        model: "MiniMax-M3",
+        key: "token-plan",
+        price: { inputUSDPerMTok: 0.3, outputUSDPerMTok: 1.2 },
+      },
+    });
+    expect(validateForm(stored, {}, index)).toEqual({
+      ok: true,
+      document: {
+        main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      },
+    });
+    // A plan-only task shows no ceiling, so a ceiling it cannot show never blocks the save.
+    const noCeiling = formOf({
+      main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      taskBudgetUSD: 4,
+    });
+    noCeiling.budget = "";
+    expect(validateForm(noCeiling, { taskBudgetUSD: 4 }, index)).toMatchObject({
+      ok: true,
+      document: { taskBudgetUSD: 4 },
+    });
+    noCeiling.defaultBudget = true;
+    expect(validateForm(noCeiling, {}, { ...index, defaultTaskBudgetUSD: null })).toMatchObject({
+      ok: true,
+    });
+    noCeiling.choices.fast = {
+      provider: "anthropic",
+      model: "claude-sonnet-5-5",
+      key: "anthropic",
+    };
+    expect(validateForm(noCeiling, {}, { ...index, defaultTaskBudgetUSD: null })).toEqual({
+      ok: false,
+      problems: ["The default task budget is unavailable. Enter an explicit ceiling."],
+    });
+    // One key cannot be the plan for main and pay as you go for fast.
+    const shared = formOf({
+      main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+      fast: { provider: "minimax", model: "MiniMax-M3", key: "token-plan" },
+    });
+    expect(validateForm(shared, {}, index)).toEqual({
+      ok: false,
+      problems: ["Fast: this key is a plan for main. Use a pay-as-you-go key here."],
+    });
+    shared.choices = { main: shared.choices.fast, fast: shared.choices.main };
+    expect(validateForm(shared, {}, index)).toEqual({
+      ok: false,
+      problems: ["Fast: this key is pay as you go for main. Use a key from this plan here."],
+    });
+    // Even an index that listed models for it, with any compatible key, cannot save the row.
+    index.providers
+      .find((p) => p.id === "zai-coding-plan")
+      ?.models.push(...(index.providers.find((p) => p.id === "zai")?.models ?? []));
+    const refused = formOf({
+      main: { provider: "zai-coding-plan", model: "glm-5v-turbo", key: "gateway" },
+    });
+    refused.prices.main = { input: "1", output: "1" };
+    expect(validateForm(refused, {}, index)).toEqual({
+      ok: false,
+      problems: ["Main: choose a provider that is available here."],
+    });
+    // As the picker leaves it: the row chosen, with no model.
+    refused.choices.main = { provider: "zai-coding-plan", model: "" };
+    expect(validateForm(refused, {}, index)).toEqual({
+      ok: false,
+      problems: ["Main: choose a provider that is available here."],
+    });
+  });
   it("does not override catalog prices and keeps local routes keyless and free", () => {
     const index = providerFixture();
     expect(

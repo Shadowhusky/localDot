@@ -1,5 +1,7 @@
 import {
   AccountRead,
+  CHATGPT_INSTALL_FIRST,
+  CHATGPT_NEEDS_APPLE_SILICON,
   type ClientMethod,
   CODEX_VERSION,
   type CodexConnection,
@@ -16,7 +18,7 @@ import {
   RateLimitsRead,
   type RpcRequestOptions,
 } from "@localdot/codex-harness";
-import { ULID_PATTERN } from "@localdot/protocol";
+import { CHATGPT_DEVICE_CODE_OFF, ULID_PATTERN } from "@localdot/protocol";
 import type { AgentSession } from "../session.ts";
 import {
   AccountError,
@@ -172,9 +174,8 @@ export class CodexAuthOwner {
     if (!available.available)
       return available.reason === "The system certificate bundle is unavailable."
         ? available.reason
-        : "The ChatGPT plan needs macOS on Apple silicon for now.";
-    if (this.installer.status().state !== "ready")
-      return "Install the ChatGPT harness before signing in.";
+        : CHATGPT_NEEDS_APPLE_SILICON;
+    if (this.installer.status().state !== "ready") return CHATGPT_INSTALL_FIRST;
   }
   #usable(): void {
     const reason = this.#reason();
@@ -618,11 +619,7 @@ export class CodexAuthOwner {
         if (entry) await this.#retire(entry);
         if (this.#generation === mutation.generation && this.#mutation === mutation) {
           this.#invalidateAttempt();
-          this.#cache = {
-            ...this.#base(),
-            lastError:
-              "Sign-in with a code could not start. Check whether your account allows device codes.",
-          };
+          this.#cache = { ...this.#base(), lastError: CHATGPT_DEVICE_CODE_OFF };
         }
         if (cause instanceof AccountError) throw cause;
         if (
@@ -630,7 +627,7 @@ export class CodexAuthOwner {
           ["install_required", "integrity_failed", "browser_unavailable"].includes(cause.code)
         )
           throw new AccountError(503, cause.message);
-        throw new AccountError(503, "The ChatGPT sign-in could not start.");
+        throw new AccountError(503, CHATGPT_DEVICE_CODE_OFF);
       } finally {
         this.#endMutation(mutation);
       }

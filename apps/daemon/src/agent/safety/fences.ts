@@ -1,5 +1,6 @@
 import { ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
+import { sessionEnded } from "../../event-file.ts";
 import { PrivateRecords } from "./private-records.ts";
 import { SafetyIntentStore } from "./store.ts";
 
@@ -35,9 +36,19 @@ export class ComputerFences {
         this.#durable.add(record.cellId);
       }
       // A crashed unsettled Pause is deny-only recovery. No recorded snapshot can mint a Resume permit.
-      for (const intent of new SafetyIntentStore(home).list())
-        if (intent.pause && intent.pause.phase !== "paused")
+      // An intent left by a task that recorded its end is stale: that task settled its own tools.
+      const { intents, refused } = new SafetyIntentStore(home).scan();
+      for (const intent of intents)
+        if (
+          intent.pause &&
+          intent.pause.phase !== "paused" &&
+          !sessionEnded(home, intent.sessionId)
+        )
           this.capture(intent.cellId, intent.sessionId, intent.executor ?? "native");
+      for (const intent of refused) {
+        if (!intent.cellId) throw new Error("unattributable safety intent");
+        this.capture(intent.cellId, intent.sessionId, "native");
+      }
     } catch {
       this.#unavailable = true;
     }

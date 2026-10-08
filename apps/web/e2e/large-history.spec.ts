@@ -91,7 +91,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     });
     const p = await load(page, f);
     await expect(page.locator("article.message").last()).toContainText("Recorded message 5000");
-    await expect(page.getByTestId("tool-row").last()).toContainText("Recorded step 5000");
+    await expect(page.getByTestId("tool-row").last()).toContainText("Replay command 5000");
     const initial = await counts(page);
     expect(initial).toEqual({ messages: 100, steps: 100, outputViewers: 0 });
     expect(
@@ -103,12 +103,14 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     await expect(
       page.getByText("Keep the recorded report?", { exact: true }).first(),
     ).toBeVisible();
-    const activityPane = page.getByRole("complementary", { name: "Plan and steps" });
+    const activityPane = page
+      .getByRole("complementary", { name: "Plan and steps" })
+      .locator(".activity-scroll");
     await activityPane.evaluate((pane) => {
       pane.scrollTop = 100;
       pane.dispatchEvent(new Event("scroll"));
     });
-    const selectedStep = page.getByTestId("tool-row").first().locator(".tool-title");
+    const selectedStep = page.getByTestId("tool-row").first().locator(".activity-row-title");
     const selectedStepText = await selectedStep.textContent();
     await selectedStep.evaluate((element) => {
       const range = document.createRange();
@@ -167,16 +169,16 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     ).toBe(true);
     await page.getByRole("button", { name: "New messages", exact: true }).click();
     await expect(page.locator("article.message").last()).toContainText("New live history marker");
-    await page.getByRole("button", { name: "Inspect Replay command 5000", exact: true }).click();
+    const outputRow = page.getByRole("button", { name: /Replay command 5000/ });
+    await outputRow.click();
     await expect(page.getByRole("region", { name: "Command output", exact: true })).toContainText(
-      "Output preview shortened",
+      "Shortened to the kept text.",
     );
     expect(await page.locator(".terminal-text").innerText()).toContain("Long recorded line");
     expect((await page.locator(".terminal-text").innerText()).length).toBeLessThanOrEqual(65_536);
-    await page.getByRole("button", { name: "Close output", exact: true }).click();
-    await expect(
-      page.getByRole("button", { name: "Inspect Replay command 5000", exact: true }),
-    ).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(outputRow).toBeFocused();
+    await expect(page.locator(".terminal-viewer")).toHaveCount(0);
     const replayCounts = [];
     for (let n = 0; n < 3; n++) {
       await p.replay();
@@ -264,7 +266,7 @@ for (const width of [390, 640])
       await expect(page.getByRole("tab", { name: "Activity", exact: true })).toBeFocused();
       await page.getByRole("button", { name: "Older steps", exact: true }).focus();
       await page.keyboard.press("Enter");
-      await expect(page.getByTestId("tool-row").first()).toContainText("Recorded step 101");
+      await expect(page.getByTestId("tool-row").first()).toContainText("Replay command 101");
       await page.getByRole("tab", { name: "Activity", exact: true }).focus();
       await page.keyboard.press("Home");
       await expect(conversation).toBeFocused();

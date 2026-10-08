@@ -5,6 +5,7 @@ import {
   type GuiAction,
 } from "../../gateway/gateway.ts";
 import { authorizePrepared, type EffectPermit } from "../safety/authorize.ts";
+import { decideAutonomy } from "../safety/autonomy.ts";
 import { nativeActionFacts } from "../safety/classify.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
@@ -98,14 +99,16 @@ export async function computerTool(
     authorizeAgent: async (request) => {
       ctx.check();
       const left = repeat - runs++;
+      // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
+      const facts = nativeActionFacts(request.action, request.identity.target);
+      const approved = decideAutonomy(ctx, facts).actionClass;
       const permit =
         approval ??
         (await authorizePrepared(ctx, {
           tool: "computer",
           input: { toolInput: a, action: request.action },
           target: request.identity,
-          // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-          facts: nativeActionFacts(request.action, request.identity.target),
+          facts,
           revalidate: request.revalidate,
           count: left,
         }));
@@ -113,7 +116,14 @@ export async function computerTool(
       if (!permit) return undefined;
       if (permit.approved) approval = permit;
       return {
-        consume: (current, identity) => permit.consume({ toolInput: a, action: current }, identity),
+        // An approval made without an element binds only its window, so the read at dispatch may
+        // name one: it must fall in the approved class, or in one the policy runs without asking.
+        consume: (current, identity, fresh) => {
+          const found = decideAutonomy(ctx, nativeActionFacts(current, fresh.target));
+          if (found.mode !== "act" && found.actionClass !== approved) return false;
+          if (ctx.redact(JSON.stringify(fresh)) !== JSON.stringify(fresh)) return false;
+          return permit.consume({ toolInput: a, action: current }, identity);
+        },
       };
     },
   };

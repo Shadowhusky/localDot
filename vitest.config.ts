@@ -3,8 +3,10 @@ import { defineConfig } from "vitest/config";
 // No `esbuild` block: Vite 8 (under Vitest 5) deprecates it in favour of oxc, and its default JSX
 // runtime is already automatic.
 export default defineConfig({
+  // apps/web resolves its @/ alias from its tsconfig.
+  resolve: { tsconfigPaths: true },
   test: {
-    css: { include: [/theme\.css/] },
+    css: { include: [/theme\.css/, /tokens\.css/] },
     include: [
       "packages/*/src/**/*.test.ts",
       "harness/*/src/**/*.test.ts",
@@ -22,6 +24,7 @@ export default defineConfig({
       "**/*.docker.test.ts",
       "**/*.keyd.test.ts",
       "**/*.codex.test.ts",
+      "**/*.eval.test.ts",
     ],
   },
 });

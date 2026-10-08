@@ -1,4 +1,4 @@
-import type { ApprovalCardDraft, PauseSnapshot, RuleChange } from "@localdot/protocol";
+import type { ApprovalRequestDraft, PauseSnapshot, RuleChange } from "@localdot/protocol";
 import {
   type ApprovalCard,
   type AutonomyPolicy,
@@ -196,9 +196,12 @@ export class AgentSession {
   get pendingApproval(): ApprovalCard | undefined {
     return this.#approvals.pending(this.id);
   }
+  approvalField(approvalId: string, field: number): string | undefined {
+    return this.#approvals.field(this.id, approvalId, field);
+  }
   requestApproval(
     binding: ActionBinding,
-    draft: ApprovalCardDraft,
+    draft: ApprovalRequestDraft,
     checks: ApprovalChecks,
   ): Promise<ApprovalOutcome> {
     const generation = this.generation;
@@ -996,7 +999,7 @@ export class AgentSession {
     );
     this.#control = undefined;
     this.tainted = false;
-    this.status = "running";
+    this.status = this.safetyPause ? "paused" : "running";
     record.resolve({ ...(note ? { note } : {}), by: "user" });
     this.#wake();
     return true;

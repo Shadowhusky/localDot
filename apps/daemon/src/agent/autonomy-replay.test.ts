@@ -54,7 +54,8 @@ function paintApp(h: Harness) {
         revalidate: async () => true,
       });
       if (!permit) return { ok: false, cancelled: "user", error: "not authorized" };
-      if (!permit.consume(action, identity(action)))
+      const fresh = identity(action);
+      if (!permit.consume(action, fresh, fresh))
         return { ok: false, cancelled: "stale", error: "changed" };
       if (ctx.beforeEffect?.(action, seen) !== true)
         return { ok: false, cancelled: "user", error: "paused" };

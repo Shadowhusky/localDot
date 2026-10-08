@@ -1,34 +1,47 @@
-import { execFile } from "node:child_process";
-import { readFile, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { promisify } from "node:util";
+import { spawn } from "node:child_process";
 import { clipText, type ObserveResult, ulid, type WindowInfo } from "@localdot/protocol";
 import type { XHelper } from "../x/helper.ts";
+import { MODEL_SCREEN, modelPixels, type RootCapture, type Screenshots } from "./capture.ts";
 import type { CuaDriver } from "./driver.ts";
 import { type HelperWindow, listWindows } from "./hit-test.ts";
-
-const run = promisify(execFile);
-const SHM = "/dev/shm";
 
 export interface ObserveDeps {
   driver: Pick<CuaDriver, "desktopShot">;
   x: XHelper;
-  encode?: (png: Buffer) => Promise<Buffer>;
+  screenshots?: Screenshots;
+  encode?: (image: Buffer) => Promise<Buffer>;
 }
 
-// cwebp (Ubuntu's webp package) through tmpfs: the driver's PNG in, WebP q80 out.
-export async function encodeWebp(png: Buffer, tmp = SHM): Promise<Buffer> {
-  const id = ulid();
-  const input = join(tmp, `localdot-${id}.png`);
-  const output = join(tmp, `localdot-${id}.webp`);
-  try {
-    await writeFile(input, png, { mode: 0o600, flag: "wx" });
-    await run("cwebp", ["-quiet", "-q", "80", input, "-o", output], { timeout: 2000 });
-    return await readFile(output);
-  } finally {
-    await rm(input, { force: true });
-    await rm(output, { force: true });
-  }
+export function ppm(rgb: Buffer, width: number, height: number): Buffer {
+  return Buffer.concat([Buffer.from(`P6\n${width} ${height}\n255\n`, "ascii"), rgb]);
+}
+
+// cwebp (Ubuntu's webp package), lossless, so the model's frames keep small text exact: a PNG or
+// a binary PPM on stdin, the WebP on stdout.
+export function encodeWebp(image: Buffer): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(
+      "cwebp",
+      ["-quiet", "-lossless", "-z", "0", "-metadata", "none", "-o", "-", "--", "-"],
+      { stdio: ["pipe", "pipe", "ignore"], timeout: 2000 },
+    );
+    const chunks: Buffer[] = [];
+    child.stdout.on("data", (d: Buffer) => chunks.push(d));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      const out = Buffer.concat(chunks);
+      if (
+        code === 0 &&
+        out.toString("latin1", 0, 4) === "RIFF" &&
+        out.toString("latin1", 8, 12) === "WEBP"
+      )
+        resolve(out);
+      else reject(new Error(`cwebp failed (${code})`));
+    });
+    // cwebp can exit before reading everything; its exit status is the error that counts.
+    child.stdin.on("error", () => {});
+    child.stdin.end(image);
+  });
 }
 
 export function windowInfo(w: HelperWindow): WindowInfo {
@@ -40,21 +53,41 @@ export function windowInfo(w: HelperWindow): WindowInfo {
     rect: { x: w.x, y: w.y, w: w.w, h: w.h },
     frame: { x: w.frame[0], y: w.frame[1], w: w.frame[2], h: w.frame[3] },
     active: w.active,
+    overrideRedirect: w.overrideRedirect,
+    transientFor: w.transientFor,
   };
 }
 
+// The X helper's capture of the root; the driver's screenshot only when that fails.
+async function screenImage(deps: ObserveDeps): Promise<{ image: Buffer; capture?: RootCapture }> {
+  const encode = deps.encode ?? encodeWebp;
+  if (deps.screenshots) {
+    try {
+      const capture = await deps.screenshots.capture(deps.x);
+      const rgb = modelPixels(capture);
+      return { image: await encode(ppm(rgb, MODEL_SCREEN.width, MODEL_SCREEN.height)), capture };
+    } catch (err) {
+      console.error(
+        `desktopd: root capture failed, using the driver: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+  }
+  return { image: await encode(await deps.driver.desktopShot(MODEL_SCREEN.width)) };
+}
+
 export async function observe(deps: ObserveDeps): Promise<ObserveResult> {
-  const [png, pointer, windows] = await Promise.all([
-    deps.driver.desktopShot(1280),
+  const [shot, pointer, windows] = await Promise.all([
+    screenImage(deps),
     deps.x.call<{ x: number; y: number }>("pointer"),
     listWindows(deps.x),
   ]);
-  const webp = await (deps.encode ?? encodeWebp)(png);
+  const frameId = ulid();
+  if (shot.capture) deps.screenshots?.keep(frameId, shot.capture);
   return {
-    frameId: ulid(),
-    width: 1280,
-    height: 800,
-    image: webp.toString("base64"),
+    frameId,
+    width: MODEL_SCREEN.width,
+    height: MODEL_SCREEN.height,
+    image: shot.image.toString("base64"),
     pointer: { x: pointer.x, y: pointer.y },
     windows: windows.map(windowInfo),
   };

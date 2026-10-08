@@ -10,6 +10,7 @@
     "rules": { "preset": "recommended", "style": { "noDefaultExport": "error" } }
   },
   "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "always" } },
+  "css": { "parser": { "tailwindDirectives": true } },
   "overrides": [
     {
       "includes": ["apps/cli/src/install/sigstore-tuf-root.json"],

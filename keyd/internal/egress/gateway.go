@@ -153,8 +153,10 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 	line.Model = model
 	var price llm.Price
 	if model != "" {
+		flat := false
 		if lease.Snapshot() {
 			price, ok = lease.Price(name, model)
+			flat = lease.Flat(name)
 		} else {
 			price, ok = c.deps.Settings.Price(name, model)
 		}
@@ -163,8 +165,9 @@ func (c *Cell) serveGateway(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// No price, no route (Part 5a's amendment, P5a-R32): a model priced at nothing both ways
-		// would spend outside the budget wherever the provider bills; only a local server's is free.
-		if !b.Local && price.Input == 0 && price.Output == 0 {
+		// would spend outside the budget wherever the provider bills. Only a local server's is free,
+		// and a route the task's own snapshot marks flat: a plan the provider bills at a flat rate.
+		if !b.Local && !flat && price.Input == 0 && price.Output == 0 {
 			c.deny(w, line, http.StatusForbidden, ReasonModelUnpriced)
 			return
 		}

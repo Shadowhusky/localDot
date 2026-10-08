@@ -62,6 +62,27 @@ describe("Dot", () => {
     expect(root?.style.getPropertyValue("--dot-size")).toBe("224px");
   });
 
+  it("moves the same way for the same seed, however many dots came before", () => {
+    vi.spyOn(performance, "now").mockReturnValue(1000);
+    const setState = vi.spyOn(DotView.prototype, "setState");
+    const first = render(<Dot size={96} seed={42} />);
+    render(<Dot size={96} />);
+    const second = render(<Dot size={96} seed={42} />);
+    const [a, , b] = setState.mock.contexts as DotView[];
+    const pose = (root: Element) =>
+      [
+        root.querySelector<HTMLElement>(".dot-body")?.style.transform,
+        ...[...root.querySelectorAll("[transform], path")].map(
+          (node) => node.getAttribute("transform") ?? node.getAttribute("d"),
+        ),
+      ].join(" ");
+    for (let t = 1016; t <= 6000; t += 16) {
+      a?.frame(t);
+      b?.frame(t);
+      expect(pose(second.container), `at ${t} ms`).toBe(pose(first.container));
+    }
+  });
+
   it("passes state and control changes to the view", () => {
     const setState = vi.spyOn(DotView.prototype, "setState");
     const setControl = vi.spyOn(DotView.prototype, "setControl");

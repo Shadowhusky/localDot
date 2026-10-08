@@ -26,6 +26,7 @@ const configSchema = schema
     streamToken: token,
     gateAddress: privateAddress,
     scale: schema.union([schema.literal(1), schema.literal(2)]),
+    fullcolor: schema.boolean(),
   })
   .refine((value) => value.browserCellId !== value.parentCellId)
   .refine((value) => value.serviceToken !== value.streamToken);
@@ -36,6 +37,12 @@ export class BrowserConfigurationError extends Error {
   constructor() {
     super("Browser configuration is invalid");
   }
+}
+
+// iPhones and iPads cannot decode H.264 4:4:4, so the stream is 4:2:0 unless the daemon opts in.
+function streamFullcolor(value: string | undefined): boolean | undefined {
+  if (value === undefined || value === "0") return false;
+  return value === "1" ? true : undefined;
 }
 
 export function browserRuntimeConfig(
@@ -49,6 +56,7 @@ export function browserRuntimeConfig(
     gateAddress: environment.LOCALDOT_GATE_ADDR,
     scale:
       environment.LOCALDOT_SCALE === "1" ? 1 : environment.LOCALDOT_SCALE === "2" ? 2 : undefined,
+    fullcolor: streamFullcolor(environment.LOCALDOT_STREAM_FULLCOLOR),
   });
   if (!parsed.success) throw new BrowserConfigurationError();
   return Object.freeze(parsed.data);
@@ -118,7 +126,7 @@ export function browserProcessSpecs(
     SELKIES_SCALING_DPI: "96",
     SELKIES_ENCODER: "h264enc",
     SELKIES_FRAMERATE: "60-60",
-    SELKIES_VIDEO_FULLCOLOR: "true|locked",
+    SELKIES_VIDEO_FULLCOLOR: `${checked.data.fullcolor}|locked`,
     SELKIES_ENABLE_CLIPBOARD: "false",
     SELKIES_FILE_TRANSFERS: "none",
     SELKIES_MANUAL_RESOLUTION: "true|locked",

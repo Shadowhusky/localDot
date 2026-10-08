@@ -10,6 +10,8 @@ import type { KeydHealth } from "../keyd/monitor.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { MemoryStore } from "./memory.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import { ComputerFences } from "./safety/fences.ts";
+import { SafetyIntentStore } from "./safety/store.ts";
 import type { AgentSettings } from "./settings.ts";
 import { fixtureModelAdmission } from "./testing/model-admission.ts";
 import { TranscriptStore } from "./transcript.ts";
@@ -41,13 +43,13 @@ afterEach(async () => {
     rmSync(h.home, { recursive: true, force: true });
   }
 });
-function setup(options: { settings?: AgentSettings } = {}) {
+function setup(options: { settings?: AgentSettings; keys?: KeydRecord[] } = {}) {
   const home = mkdtempSync("/tmp/ld-runner-");
   const log = new EventLog(home);
   const live = new LiveSessions();
   const cellId = ulid(),
     at = "2026-10-02T00:00:00Z";
-  const keys: KeydRecord[] = [
+  const keys: KeydRecord[] = options.keys ?? [
     { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: at, updatedAt: at },
   ];
   let settings: AgentSettings = options.settings ?? {
@@ -105,7 +107,9 @@ function setup(options: { settings?: AgentSettings } = {}) {
         proxyUrl: "http://172.30.4.10:3128",
         proxyToken: `p${opens.length}`.padEnd(43, "p"),
         toolToken: `t${opens.length}`.padEnd(43, "t"),
-        surrogates: { anthropic: `ld_llm_${String(opens.length).padStart(22, "0")}_abcdef` },
+        surrogates: Object.fromEntries(
+          keys.map((key) => [key.id, `ld_llm_${String(opens.length).padStart(22, "0")}_abcdef`]),
+        ),
       };
     },
     start: async (brain: BrainCell) => {
@@ -611,8 +615,8 @@ it("a keyd boot change cannot reopen a saved user Pause or claim an old model ow
   expect(writes.mock.calls.filter(([, input]) => input.state === "open")).toHaveLength(before);
 });
 
-it.each(["the Pause itself", "an approval", "a question"] as const)(
-  "a budget pause still holds Resume after a user Pause publishes a paused state for %s",
+it.each(["the Pause itself", "a repeated action", "an approval", "a question"] as const)(
+  "a budget pause still holds Resume after a Pause publishes a paused state for %s",
   async (wait) => {
     const h = setup();
     const session = await h.runner.start(h.cellId, "Budget, then Pause");
@@ -624,8 +628,17 @@ it.each(["the Pause itself", "an approval", "a question"] as const)(
       spentUSD: 5,
       needUSD: 1,
     });
-    const pause = h.runner.pauseTask(session.id, ulid());
+    // The third identical input trips the repeat guard, which asks for its own Pause.
+    if (wait === "a repeated action")
+      for (let i = 0; i < 3; i++)
+        session.admitNativeEffect(
+          { verb: "key", combo: ["Ctrl", "c"] },
+          { target: null, window: 1, point: null },
+          ulid(),
+        );
+    else h.runner.pauseTask(session.id, ulid());
     await until(() => session.safetyPause?.phase === "paused");
+    const pause = required(session.safetyPause);
     const generation = required(session.generation);
     if (wait === "an approval") {
       void session
@@ -654,3 +667,108 @@ it.each(["the Pause itself", "an approval", "a question"] as const)(
     expect(session.safetyPause?.phase).toBe("paused");
   },
 );
+
+it.each(["pausing", "uncertain"] as const)(
+  "Stop after a %s Pause leaves no intent that fences the computer at the next start",
+  async (phase) => {
+    const h = setup();
+    const store = new SafetyIntentStore(h.home);
+    const session = await h.runner.start(h.cellId, "Pause, then Stop");
+    await h.ready();
+    const step = deferred<void>();
+    let started = false;
+    const running = session.runAtomic(required(session.generation), undefined, () => {
+      started = true;
+      return step.promise;
+    });
+    await until(() => started);
+    h.runner.pauseTask(session.id, ulid());
+    await until(() => store.read(session.id)?.pause?.phase === "pausing");
+    if (phase === "uncertain") {
+      step.resolve();
+      await until(() => session.safetyPause?.phase === "paused");
+      await h.health({ online: true, bootId: "boot-restarted" });
+      await until(() => store.read(session.id)?.pause?.phase === "uncertain");
+    }
+    const stopped = h.deps.stopSession(session.id);
+    step.resolve();
+    await running.catch(() => {});
+    await stopped;
+    await h.live.settled(session.id);
+    expect(new ComputerFences(h.home).isFenced(h.cellId)).toBe(false);
+    expect(store.read(session.id)).toBeUndefined();
+  },
+);
+
+describe("plan tasks", () => {
+  const at = "2026-10-02T00:00:00Z";
+  const bound = (id: string, baseURL: string): KeydRecord => ({
+    id,
+    kind: "llm",
+    provider: "openai-compatible",
+    baseURL,
+    createdAt: at,
+    updatedAt: at,
+  });
+  const keys = [
+    bound("minimax", "https://api.minimax.io/v1"),
+    bound("zai", "https://api.z.ai/api/paas/v4"),
+  ];
+  const plan = { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "minimax" };
+
+  it("runs a plan with no price on a flat route and has no dollar budget to raise", async () => {
+    const h = setup({ settings: { main: plan, taskBudgetUSD: 5 }, keys });
+    const session = await h.runner.start(h.cellId, "Task");
+    await h.ready();
+    expect(required(h.opens[0]).pricing).toEqual({
+      v: 1,
+      routes: [
+        {
+          route: "minimax",
+          flat: true,
+          models: [
+            { id: "MiniMax-M3", inputUSDPerMTok: 0, outputUSDPerMTok: 0, maxOutputTokens: 16_000 },
+          ],
+        },
+      ],
+    });
+    expect(h.runner.selectionOf(session.id)).toEqual({
+      kind: "api",
+      roles: [{ role: "main", provider: "minimax-coding-plan", model: "MiniMax-M3" }],
+      plan: true,
+    });
+    await expect(h.runner.raiseBudget(session.id, 8)).rejects.toMatchObject({
+      status: 409,
+      message: "This task uses your plan's limits.",
+    });
+    expect(h.raiseCalls).toHaveLength(0);
+    h.live.stop(session.id);
+    await h.live.settled(session.id);
+  });
+
+  it("keeps the dollar budget for a paid fast role beside a plan main", async () => {
+    const h = setup({
+      settings: {
+        main: plan,
+        fast: { provider: "zai", model: "glm-5v-turbo", key: "zai" },
+        taskBudgetUSD: 5,
+      },
+      keys,
+    });
+    const session = await h.runner.start(h.cellId, "Task");
+    await h.ready();
+    expect(required(h.opens[0]).budgetUSD).toBe(5);
+    expect(required(h.opens[0]).pricing.routes).toEqual([
+      expect.objectContaining({ route: "minimax", flat: true }),
+      {
+        route: "zai",
+        models: [expect.objectContaining({ inputUSDPerMTok: 1.2, outputUSDPerMTok: 4 })],
+      },
+    ]);
+    expect(h.runner.selectionOf(session.id)).not.toHaveProperty("plan");
+    await h.runner.raiseBudget(session.id, 8);
+    expect(h.raiseCalls).toHaveLength(1);
+    h.live.stop(session.id);
+    await h.live.settled(session.id);
+  });
+});

@@ -79,6 +79,7 @@ export function SafetyControls({
           visible={visible}
           pending={safety.pending === "approval"}
           onDecision={safety.answerApproval}
+          loadField={safety.readApprovalField}
         >
           {(canApprove) => (
             <>

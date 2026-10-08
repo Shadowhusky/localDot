@@ -2,9 +2,11 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import {
+  CHATGPT_SWITCHED_OFF,
   CODEX_VERSION,
   CodexInstallError,
   type CodexInstaller,
+  codexAccepted,
   type HarnessAvailability,
   harnessAvailability,
   type OwnedCodexRoots,
@@ -76,15 +78,13 @@ export interface AgentWiringDeps {
   transfers?: Transfers;
   quarantine?: QuarantineStore;
 }
-const CODEX_ACCEPTANCE_PENDING =
-  "The ChatGPT plan is awaiting pinned privacy and native safety checks.";
 export const BUILTIN_SKILLS = runtimeLayout.skills;
 export function createAgent(d: AgentWiringDeps) {
   const memory = new MemoryStore(d.home),
     settings = new SettingsStore(d.home),
     catalog = new CatalogStore(d.home);
   const transcripts = new TranscriptStore(d.home),
-    png = new FramePng(d.frames),
+    png = new FramePng(d.frames, d.gateway),
     outputs = new OutputStore(d.home),
     transfers = d.transfers ?? new Transfers();
   const clients = new Map<string, DesktopdTools>();
@@ -212,18 +212,15 @@ export function createAgent(d: AgentWiringDeps) {
     }
   }
   const platform = (): HarnessAvailability => {
-    if (!d.codex)
-      return { available: false, reason: "The ChatGPT plan is not set up in this daemon." };
+    if (!d.codex) return { available: false, reason: CHATGPT_SWITCHED_OFF };
     if (!roots) return { available: false, reason: "The ChatGPT storage could not be validated." };
     if (closing) return { available: false, reason: "The ChatGPT account service is closed." };
     return harnessAvailability();
   };
   const harness = (): HarnessAvailability => {
     const availability = platform();
-    // Tasks13/14 must supply the pinned privacy/protocol and native acceptance evidence
-    // before this gate changes. Neither installation nor an environment flag opens it.
-    return availability.available
-      ? { available: false, reason: CODEX_ACCEPTANCE_PENDING }
+    return availability.available && !codexAccepted()
+      ? { available: false, reason: CHATGPT_SWITCHED_OFF }
       : availability;
   };
   const auth = roots

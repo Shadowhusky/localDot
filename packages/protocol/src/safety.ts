@@ -190,11 +190,31 @@ export const UploadApproval = z.strictObject({
     .refine((files) => new Set(files.map((file) => file.path)).size === files.length),
 });
 export type UploadApproval = z.infer<typeof UploadApproval>;
+// A card carries each value whole up to APPROVAL_FIELD_CHARS. A longer value (at most a whole
+// files write) carries its start, is listed in `partial` with its full length, and Approve needs
+// the rest to have been read from the daemon first.
+export const APPROVAL_FIELD_CHARS = 16_384;
+export const APPROVAL_VALUE_CHARS = 1_000_000;
+const approvalFields = (limit: number) => z.array(z.tuple([safeText(80), safeText(limit)])).max(16);
 export const ApprovalCardDraft = z.strictObject({
   actionClass: ActionClass,
   risk: z.enum(["medium", "high"]),
   title: safeText(200),
-  fields: z.array(z.tuple([safeText(80), safeText(512)])).max(16),
+  fields: approvalFields(APPROVAL_FIELD_CHARS),
+  partial: z
+    .array(
+      z.strictObject({
+        field: z.number().int().min(0).max(15),
+        length: z
+          .number()
+          .int()
+          .min(APPROVAL_FIELD_CHARS + 1)
+          .max(APPROVAL_VALUE_CHARS),
+      }),
+    )
+    .min(1)
+    .max(16)
+    .optional(),
   upload: UploadApproval.optional(),
   always: z
     .array(AlwaysOption)
@@ -203,6 +223,11 @@ export const ApprovalCardDraft = z.strictObject({
     .optional(),
 });
 export type ApprovalCardDraft = z.infer<typeof ApprovalCardDraft>;
+export const ApprovalRequestDraft = ApprovalCardDraft.omit({ partial: true }).extend({
+  fields: approvalFields(APPROVAL_VALUE_CHARS),
+});
+export type ApprovalRequestDraft = z.infer<typeof ApprovalRequestDraft>;
+export const ApprovalFieldText = z.strictObject({ text: safeText(APPROVAL_VALUE_CHARS) });
 export const ApprovalCard = ApprovalCardDraft.extend({
   approvalId: Id,
   generation: Counter,

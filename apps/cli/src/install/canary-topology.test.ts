@@ -224,6 +224,14 @@ it("provisions the normal hardened topology with durable IDs before every depend
   expect(result.record.keydPort).toBe(49123);
 });
 
+it("streams the diagnostic desktop in 4:2:0 like every installed computer", async () => {
+  const f = fixture();
+  await createCanaryTopology(f.journal, f.ready, f.client, signal());
+  expect(f.resources.get("desktop")?.Config).toMatchObject({
+    Env: expect.arrayContaining(["SELKIES_VIDEO_FULLCOLOR=false|locked"]),
+  });
+});
+
 it.each(["run", "cell", "phase", "used", "cancelled", "engine", "image", "name-collision"])(
   "refuses %s before any create",
   async (fault) => {

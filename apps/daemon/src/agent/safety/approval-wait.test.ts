@@ -66,7 +66,8 @@ function contractGateway(
         revalidate: async () => same(identity, read(run)),
       });
       if (!permit) return { ok: false, cancelled: "user", error: "not authorized" };
-      if (!permit.consume(action, read(run)))
+      const fresh = read(run);
+      if (!permit.consume(action, fresh, fresh))
         return { ok: false, cancelled: "stale", error: "changed" };
       dispatched.push(action);
       if (opts.hang)

@@ -3,12 +3,13 @@ import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useSta
 import { ownedByPicker } from "../lib/dismiss.ts";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
-import type {
-  ModelRole,
-  PickerKey,
-  ProviderModels,
-  RoleChoice,
-  SubscriptionModel,
+import {
+  type ModelRole,
+  type PickerKey,
+  type ProviderModels,
+  planOnly,
+  type RoleChoice,
+  type SubscriptionModel,
 } from "./choices.ts";
 import { RoleEditor } from "./RoleEditor.tsx";
 import { SafetySettings } from "./SafetySettings.tsx";
@@ -275,41 +276,48 @@ export function SettingsSheet(props: SettingsSheetProps) {
           {props.budget && props.choices.main?.provider !== "chatgpt" && (
             <fieldset className="role-editor" disabled={props.busy || props.loading}>
               <legend>Task spending ceiling</legend>
-              <p>
-                The ceiling applies to a new API task. It does not guarantee a provider's final
-                bill. Existing tasks keep their ceiling.
-              </p>
-              <label className="role-enabled">
-                <input
-                  type="checkbox"
-                  checked={props.budget.useDefault}
-                  onChange={(event) =>
-                    props.budget?.change(props.budget.value, event.target.checked)
-                  }
-                />
-                Use the configured default
-              </label>
-              <p>
-                {props.budget.defaultUSD === null
-                  ? "The configured default is unavailable."
-                  : `Configured default: $${props.budget.defaultUSD} USD per task.`}
-              </p>
-              {!props.budget.useDefault && (
-                <label>
-                  <span>Task ceiling — USD</span>
-                  <input
-                    inputMode="decimal"
-                    required
-                    maxLength={64}
-                    value={props.budget.value}
-                    onChange={(event) => props.budget?.change(event.target.value, false)}
-                  />
-                </label>
-              )}
-              {props.choices.main?.provider === "chatgpt" && (
-                <p>
-                  The ChatGPT plan uses subscription limits. This stored API ceiling is inactive.
-                </p>
+              {planOnly(props.choices) ? (
+                <p>Uses your plan's limits.</p>
+              ) : (
+                <>
+                  <p>
+                    The ceiling applies to a new API task. It does not guarantee a provider's final
+                    bill. Existing tasks keep their ceiling.
+                  </p>
+                  <label className="role-enabled">
+                    <input
+                      type="checkbox"
+                      checked={props.budget.useDefault}
+                      onChange={(event) =>
+                        props.budget?.change(props.budget.value, event.target.checked)
+                      }
+                    />
+                    Use the configured default
+                  </label>
+                  <p>
+                    {props.budget.defaultUSD === null
+                      ? "The configured default is unavailable."
+                      : `Configured default: $${props.budget.defaultUSD} USD per task.`}
+                  </p>
+                  {!props.budget.useDefault && (
+                    <label>
+                      <span>Task ceiling — USD</span>
+                      <input
+                        inputMode="decimal"
+                        required
+                        maxLength={64}
+                        value={props.budget.value}
+                        onChange={(event) => props.budget?.change(event.target.value, false)}
+                      />
+                    </label>
+                  )}
+                  {props.choices.main?.provider === "chatgpt" && (
+                    <p>
+                      The ChatGPT plan uses subscription limits. This stored API ceiling is
+                      inactive.
+                    </p>
+                  )}
+                </>
               )}
             </fieldset>
           )}

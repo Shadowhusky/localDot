@@ -725,12 +725,26 @@ describe("one registered ChatGPT credential owner", () => {
     expect(f.holder(0).closed).toBe(true);
     expect(JSON.stringify(await f.owner.status())).not.toContain("private-token");
   });
+  it("tells the user to turn on device code sign-in when a code cannot be issued", async () => {
+    const f = fixture();
+    f.options.hook = (_h, name) =>
+      name === "account/login/start"
+        ? Promise.reject(new Error("device code sign-in is disabled for this account"))
+        : undefined;
+    const failure = await f.owner.login().catch((error: unknown) => error);
+    expect(failure).toMatchObject({
+      status: 503,
+      message: "Turn on device code sign-in in ChatGPT under Settings → Security first.",
+    });
+    expect(String(failure)).not.toContain("disabled for this account");
+    expect(f.holder(0).closed).toBe(true);
+  });
   it("unsupported host status never launches or echoes an untrusted availability error", async () => {
     const f = fixture();
     mocks.availability.mockReturnValue({ available: false, reason: "/private/credential-token" });
     expect(await f.owner.status()).toMatchObject({
       state: "unavailable",
-      reason: "The ChatGPT plan needs macOS on Apple silicon for now.",
+      reason: "ChatGPT plan needs a Mac with Apple silicon.",
     });
     expect(f.holders).toHaveLength(0);
   });

@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   cellNames,
@@ -9,6 +10,7 @@ import {
   internalNetworkSpec,
   isolatedNetworkSpec,
   keydEnv,
+  streamOptions,
 } from "./spec.ts";
 import { sampleRecord } from "./testing/sample-record.ts";
 
@@ -85,7 +87,7 @@ describe("gateSpec", () => {
 });
 
 describe("desktopSpec", () => {
-  const spec = desktopSpec(record, "localdot/desktop:dev");
+  const spec = desktopSpec(record, "localdot/desktop:dev", streamOptions());
 
   it("drops NET_RAW, keeps sudo possible, limits resources and mounts only the named home volume", () => {
     expect(spec.HostConfig).toMatchObject({
@@ -128,12 +130,32 @@ describe("desktopSpec", () => {
     expect(spec.Env).toContain(`LOCALDOT_DESKTOPD_TOKEN=${record.tokens.desktopd}`);
     expect(spec.Env).toContain(`PASSWORD=${record.tokens.stream}`);
     expect(spec.Env).toContain("SELKIES_MANUAL_WIDTH=2560");
-    expect(spec.Env).toContain("SELKIES_VIDEO_FULLCOLOR=true|locked");
-    expect(desktopSpec(record, "i", { fullcolor: false }).Env).toContain(
-      "SELKIES_VIDEO_FULLCOLOR=false|locked",
+    expect(desktopSpec({ ...record, scale: 1 }, "i", streamOptions()).Env).toContain(
+      "SELKIES_MANUAL_HEIGHT=800",
     );
-    expect(desktopSpec({ ...record, scale: 1 }, "i").Env).toContain("SELKIES_MANUAL_HEIGHT=800");
     expect(spec.Env.join("\n")).not.toMatch(/ld_[a-z0-9]{2,12}_|BEGIN CERTIFICATE/);
+  });
+
+  it("streams 4:2:0 unless LOCALDOT_STREAM_FULLCOLOR=1 opts in to 4:4:4", () => {
+    expect(spec.Env).toContain("SELKIES_VIDEO_FULLCOLOR=false|locked");
+    expect(streamOptions()).toEqual({ fullcolor: false });
+    for (const value of [undefined, "0", "", "true", "yes"])
+      expect(streamOptions({ LOCALDOT_STREAM_FULLCOLOR: value })).toEqual({ fullcolor: false });
+    const fullcolor = streamOptions({ LOCALDOT_STREAM_FULLCOLOR: "1" });
+    expect(fullcolor).toEqual({ fullcolor: true });
+    expect(desktopSpec(record, "i", fullcolor).Env).toContain(
+      "SELKIES_VIDEO_FULLCOLOR=true|locked",
+    );
+  });
+
+  it("builds the desktop image with the same 4:2:0 default", () => {
+    const dockerfile = readFileSync(
+      new URL("../../../../cells/desktop/Dockerfile", import.meta.url),
+      "utf8",
+    );
+    expect(dockerfile.match(/SELKIES_VIDEO_FULLCOLOR=\S+/gu)).toEqual([
+      'SELKIES_VIDEO_FULLCOLOR="false|locked"',
+    ]);
   });
 
   it("routes desktop programs through the forwarder with only loopback exempt", () => {
@@ -158,7 +180,7 @@ describe("container spec keys", () => {
   // Nothing beyond these reaches Docker: no Privileged, CapAdd, Binds, Devices or RestartPolicy.
   it("sets exactly the gate's and the desktop's chosen keys", () => {
     const gate = gateSpec(record, "g");
-    const desktop = desktopSpec(record, "d");
+    const desktop = desktopSpec(record, "d", streamOptions());
     expect(Object.keys(gate).sort()).toEqual([
       "Env",
       "ExposedPorts",
@@ -204,6 +226,6 @@ describe("container logs", () => {
   it("rotates both containers' json-file logs at 10 MB, keeping 3 files", () => {
     const bounded = { Type: "json-file", Config: { "max-size": "10m", "max-file": "3" } };
     expect(gateSpec(record, "g").HostConfig.LogConfig).toEqual(bounded);
-    expect(desktopSpec(record, "d").HostConfig.LogConfig).toEqual(bounded);
+    expect(desktopSpec(record, "d", streamOptions()).HostConfig.LogConfig).toEqual(bounded);
   });
 });

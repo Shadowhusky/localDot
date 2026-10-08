@@ -1,74 +1,27 @@
-.browser-downloads {
-  margin: 14px 0;
-  font-size: 13px;
+.download-row > .activity-row-head {
+  min-height: calc(var(--spacing) * 7);
+  padding-block: calc(var(--spacing) * 2) 0;
 }
-.browser-downloads details {
-  border: 1px solid var(--line, #344654);
-  border-radius: 12px;
-  padding: 12px;
-}
-.browser-downloads summary {
-  cursor: pointer;
-  font-weight: 600;
-}
-.browser-downloads summary span {
-  margin-left: 8px;
-  color: var(--text-muted, #92a7b8);
-  font-weight: 400;
-}
-.browser-downloads p {
-  line-height: 1.5;
-}
-.download-intro,
-.download-meta {
-  color: var(--text-muted, #92a7b8);
-}
-.browser-downloads ul {
-  list-style: none;
-  margin: 0 0 12px;
-  padding: 0;
-}
-.browser-downloads li {
+
+.download-detail {
   display: grid;
-  gap: 7px;
-  padding: 12px 0;
-  border-bottom: 1px solid var(--line, #344654);
-  overflow-wrap: anywhere;
+  gap: calc(var(--spacing) * 2);
+  padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 8);
 }
-.download-state {
-  color: #c5d5e1;
-}
-.download-released {
-  color: #9bcdb7;
-}
-.download-failed {
-  color: #edb7a7;
-}
+
 .download-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  margin-top: var(--spacing);
 }
-.browser-downloads button {
-  padding: 8px 10px;
-  border: 1px solid #526875;
-  border-radius: 8px;
-  color: inherit;
-  background: var(--surface, #19212b);
-  font: inherit;
-  cursor: pointer;
-  min-height: 36px;
+
+/* A quiet button that starts the line sits on the text edge, not on its padding. */
+.download-actions > .ui-button[data-variant="quiet"]:first-child {
+  margin-left: calc(var(--spacing) * -2.5);
 }
-.browser-downloads button:disabled {
-  opacity: 0.5;
-  cursor: default;
-}
-.download-message {
-  overflow-wrap: anywhere;
-}
+
 .download-decision-actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
+
 .download-overlay {
   z-index: 25;
 }

@@ -65,6 +65,7 @@ describe("the model's advertised tools and instructions", () => {
     );
     expect(imagesInToolResults(binding())).toBe(true);
     expect(imagesInToolResults(binding({ client: "google" }))).toBe(false);
+    expect(imagesInToolResults(binding({ client: "anthropic-compatible" }))).toBe(false);
   });
   it("works inside its computer without asking, and asks or hands over only when blocked", () => {
     const prompt = systemPrompt(bootConfig(), binding(), [], new Date("2026-10-08T00:00:00Z"));

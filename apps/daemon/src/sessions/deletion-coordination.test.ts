@@ -99,6 +99,7 @@ describe("session deletion across database and filesystem failures", () => {
     faults.removePath = "";
     expect((await request(`/api/sessions/${sessionId}`, "DELETE")).status).toBe(204);
     expect(existsSync(stagedPath)).toBe(false);
+    expect(existsSync(join(home, "sessions", ".deleting"))).toBe(false);
     expect(log.hasPendingDeletion(sessionId)).toBe(false);
   });
 
@@ -113,6 +114,7 @@ describe("session deletion across database and filesystem failures", () => {
     expect(restarted.hasSession(sessionId)).toBe(false);
     expect(existsSync(stagedPath)).toBe(false);
     expect(existsSync(join(home, "sessions", sessionId))).toBe(false);
+    expect(existsSync(join(home, "sessions", ".deleting"))).toBe(false);
   });
 
   it("hides pending deletions across a persistent database failure and still accepts their retry", async () => {

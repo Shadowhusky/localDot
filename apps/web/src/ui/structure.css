@@ -1,0 +1,230 @@
+/* Registered so a scroll edge's fade can ease in and out instead of snapping. */
+@property --ui-fade-top {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@property --ui-fade-bottom {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+@layer kit {
+  .ui-status-glyph {
+    display: block;
+    flex-shrink: 0;
+    overflow: visible;
+    color: var(--color-fg-3);
+  }
+
+  .ui-status-glyph[data-state="done"] {
+    color: var(--color-fg-2);
+  }
+
+  .ui-status-glyph[data-state="doing"] {
+    color: var(--color-fg-1);
+  }
+
+  .ui-status-glyph[data-state="doing"] .ui-status-ring {
+    opacity: 0.25;
+  }
+
+  .ui-status-glyph[data-state="failed"] {
+    color: var(--color-danger-fg);
+  }
+
+  /* Xenon belongs to dot having control, so the turning arc takes it only then. */
+  :where(.app.control) .ui-status-glyph[data-state="doing"] {
+    color: var(--color-xenon);
+  }
+
+  .ui-status-arc {
+    transform-box: view-box;
+    transform-origin: 8px 8px;
+    animation: ui-spin 1.2s linear infinite;
+  }
+
+  .ui-status-check {
+    stroke-dasharray: 1;
+    stroke-dashoffset: 0;
+    transition: stroke-dashoffset var(--dur-sheet) var(--ease-enter);
+  }
+
+  @starting-style {
+    .ui-status-check {
+      stroke-dashoffset: 1;
+    }
+  }
+
+  .ui-collapse {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows var(--dur-sheet) var(--ease-standard);
+  }
+
+  .ui-collapse[data-open] {
+    grid-template-rows: 1fr;
+  }
+
+  .ui-collapse-inner {
+    min-height: 0;
+    overflow: hidden;
+    opacity: 0;
+    transition: opacity var(--dur-fade) var(--ease-exit);
+  }
+
+  .ui-collapse[data-open] > .ui-collapse-inner {
+    opacity: 1;
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  /* Once open, focus rings and shadows inside may reach past the edge. */
+  .ui-collapse[data-settled] > .ui-collapse-inner {
+    overflow: visible;
+  }
+
+  .ui-disclosure-trigger {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    width: 100%;
+    min-height: calc(var(--spacing) * 8);
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    background-color: transparent;
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    text-align: start;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transform: none;
+    transition:
+      background-color var(--dur-hover) var(--ease-standard),
+      color var(--dur-hover) var(--ease-standard);
+  }
+
+  .ui-disclosure-chevron {
+    color: var(--color-fg-3);
+    transition: rotate var(--dur-spring) var(--ease-spring);
+  }
+
+  .ui-disclosure[data-open] > .ui-disclosure-trigger .ui-disclosure-chevron {
+    rotate: 90deg;
+  }
+
+  /* The meta sits at the end of the line, or drops under the summary when both don't fit. */
+  .ui-disclosure-label {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    justify-content: space-between;
+    column-gap: calc(var(--spacing) * 3);
+  }
+
+  .ui-disclosure-summary {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .ui-disclosure-meta {
+    flex-shrink: 0;
+    color: var(--color-fg-3);
+    font-weight: var(--font-weight-normal);
+    font-variant-numeric: tabular-nums;
+  }
+
+  @media (hover: hover) {
+    .ui-disclosure-trigger:not([data-pressed]):hover {
+      background-color: var(--color-state-hover);
+      color: var(--color-fg-1);
+    }
+  }
+
+  .ui-disclosure-trigger[data-pressed] {
+    background-color: var(--color-state-pressed);
+    color: var(--color-fg-1);
+    transition-duration: var(--dur-press);
+  }
+
+  .ui-disclosure-trigger:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: calc(var(--focus-width) * -1);
+  }
+
+  .ui-scroll-area {
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    overflow-anchor: none;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-control-pressed) transparent;
+    scrollbar-gutter: stable;
+    mask-image: linear-gradient(
+      to bottom,
+      transparent,
+      black var(--ui-fade-top),
+      black calc(100% - var(--ui-fade-bottom)),
+      transparent
+    );
+    transition:
+      --ui-fade-top var(--dur-fade) var(--ease-standard),
+      --ui-fade-bottom var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-scroll-area[data-edge-top]:not([data-fade="bottom"]) {
+    --ui-fade-top: calc(var(--spacing) * 4);
+  }
+
+  .ui-scroll-area[data-edge-bottom] {
+    --ui-fade-bottom: calc(var(--spacing) * 4);
+  }
+
+  .ui-scroll-area::-webkit-scrollbar {
+    width: 8px;
+  }
+
+  .ui-scroll-area::-webkit-scrollbar-thumb {
+    border: 2px solid transparent;
+    border-radius: var(--radius-full);
+    background-color: var(--color-control-pressed);
+    background-clip: padding-box;
+  }
+
+  @media (--coarse) {
+    .ui-disclosure-trigger {
+      min-height: calc(var(--spacing) * 11);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ui-status-arc {
+      animation: none;
+    }
+
+    .ui-status-check {
+      transition: none;
+    }
+
+    .ui-collapse {
+      transition: none;
+    }
+
+    .ui-collapse[data-open] > .ui-collapse-inner {
+      overflow: visible;
+    }
+
+    .ui-disclosure-chevron {
+      transition: none;
+    }
+  }
+}

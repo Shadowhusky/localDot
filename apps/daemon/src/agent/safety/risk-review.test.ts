@@ -102,7 +102,7 @@ describe("reviewer policy and preview boundaries", () => {
     expect(saved.send).toBe("ask");
     expect(Object.isFrozen(saved)).toBe(true);
   });
-  it("a known secret crossing clipping boundary is removed before preview truncation", () => {
+  it("a known secret is removed from a long command that the card keeps whole", () => {
     const secret = "REVIEW_ONLY_SECRET_123456789";
     const card = buildApprovalCard(
       {
@@ -120,7 +120,9 @@ describe("reviewer policy and preview boundaries", () => {
     );
     expect(JSON.stringify(card)).not.toContain("REVIEW_");
     expect(card.title).toBe("Unclear step");
-    expect(card.fields.find(([k]) => k === "Command")?.[1]).toHaveLength(512);
+    const command = card.fields.find(([k]) => k === "Command")?.[1];
+    expect(command?.startsWith("x".repeat(505))).toBe(true);
+    expect(command?.endsWith(" tail")).toBe(true);
     expect(card.fields.find(([k]) => k === "App location")?.[1]).toBe("https://example.test/path");
   });
   it("valid JSON action order is canonical and meaningful argument changes remain distinct", () => {

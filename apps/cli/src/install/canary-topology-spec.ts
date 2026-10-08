@@ -17,6 +17,7 @@ import {
   gateSpec,
   ISOLATED_GATEWAY_OPTION,
   internalNetworkSpec,
+  streamOptions,
 } from "../../../daemon/src/cells/spec.ts";
 import type { CellRecord } from "../../../daemon/src/cells/types.ts";
 
@@ -189,7 +190,7 @@ export function canaryContainerSpec(
   const spec =
     role === "gate"
       ? gateSpec(record, operation.images.gate.ref)
-      : desktopSpec(record, operation.images.desktop.ref, { fullcolor: true });
+      : desktopSpec(record, operation.images.desktop.ref, streamOptions());
   return { ...spec, Labels: canaryResourceLabels(operation, role) };
 }
 export function privateCanaryAddress(address: string) {

@@ -1,26 +1,15 @@
 :root {
-  color-scheme: dark;
-  --color-void: #0a0b0d;
-  --color-surface: #15161a;
-  --color-surface-2: #1d1e23;
-  --color-line: #25272c;
-  --color-text: #eeeff1;
-  --color-text-2: #999ca4;
-  /* 4.9:1 on the void, 4.5:1 on the surface. */
-  --color-text-3: #7c7f87;
-  --color-xenon: #3fb5de;
-  --color-xenon-a08: rgba(63, 181, 222, 0.08);
-  --color-xenon-a10: rgba(63, 181, 222, 0.1);
+  --color-surface: var(--color-raised);
+  --color-surface-2: var(--color-raised-2);
+  /* Dividers and field edges alike, so it keeps its old step on the ramp: one above raised-2. */
+  --color-line: var(--color-overlay);
+  --color-text: var(--color-fg-1);
+  --color-text-2: var(--color-fg-2);
+  --color-text-3: var(--color-fg-3);
   --color-halo-target: rgba(10, 11, 13, 0.35);
   --color-shade-cursor: rgba(0, 0, 0, 0.4);
-  --color-key-bevel: rgba(255, 255, 255, 0.06);
-  --color-xenon-a40: rgba(63, 181, 222, 0.4);
-  --color-hud: rgba(14, 15, 18, 0.74);
-  --color-hud-solid: rgba(14, 15, 18, 0.92);
-  --color-hud-line: rgba(255, 255, 255, 0.1);
   --color-hud-button: rgba(255, 255, 255, 0.08);
   --color-edge: rgba(0, 0, 0, 0.55);
-  --color-edge-stage: rgba(255, 255, 255, 0.05);
   --color-shade-hud: rgba(0, 0, 0, 0.35);
   --color-cursor-fill: #ffffff;
   --color-scrub-track: rgba(255, 255, 255, 0.1);
@@ -34,8 +23,6 @@
   --color-avatar-body: #ecedef;
   --color-avatar-eye: #0a0b0d;
   --icon-chevron-down: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 4.5 6 7.5 9 4.5' fill='none' stroke='%23a8abb0' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
-  --font-ui: -apple-system, "Inter", system-ui, sans-serif;
-  --font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --spacing-app-min: 600px;
   --spacing-bar: 44px;
   --spacing-gutter: 20px;
@@ -68,17 +55,13 @@
   --spacing-caption: 640px;
   --spacing-caption-top: 26px;
   --spacing-caption-gap: 8px;
-  --spacing-focus-offset: 2px;
   --spacing-notice: 480px;
   --spacing-notice-gap: 8px;
   --spacing-client-frame: 2px;
   --spacing-client-frame-off: -20px;
-  --radius-stage: 12px;
-  --radius-full: 9999px;
+  --radius-stage: var(--radius-lg);
   --radius-stop: 1.5px;
-  --shadow-stage: 0 30px 80px var(--color-edge), 0 0 0 1px var(--color-edge-stage);
   --shadow-hud: inset 0 0 0 1px var(--color-hud-line), 0 8px 24px var(--color-shade-hud);
-  --blur-hud: 16px;
   --duration-press: 100ms;
   --duration-lit: 400ms;
   --duration-veil: 240ms;
@@ -87,42 +70,15 @@
   --ease-veil: ease-out;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-html,
-body,
-#root {
-  height: 100%;
-}
-
+/* The legacy screens keep their body size until they move onto the type scale. */
 body {
-  background: var(--color-void);
-  color: var(--color-text);
-  font: 13.5px / 1.55 var(--font-ui);
-  font-optical-sizing: auto;
-  -webkit-font-smoothing: antialiased;
-}
-
-button {
-  font: inherit;
-  color: inherit;
-  background: none;
-  border: 0;
-  cursor: pointer;
+  font-size: 13.5px;
+  line-height: 1.55;
 }
 
 button:not([aria-disabled="true"]):active {
   transform: scale(0.97);
   transition: transform var(--duration-press) var(--ease-press);
-}
-
-:focus-visible {
-  outline: 2px solid var(--color-text);
-  outline-offset: var(--spacing-focus-offset);
 }
 
 .notice {
@@ -146,15 +102,15 @@ button:not([aria-disabled="true"]):active {
   color: var(--color-text);
 }
 
+@media (prefers-contrast: more) {
+  :root {
+    --color-line: var(--color-field-line);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   button:not([aria-disabled="true"]):active {
     transform: none;
     opacity: 0.6;
-  }
-}
-
-@media (prefers-reduced-transparency: reduce) {
-  :root {
-    --color-hud: var(--color-hud-solid);
   }
 }

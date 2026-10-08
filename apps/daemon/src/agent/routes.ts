@@ -1,4 +1,6 @@
 import {
+  CHATGPT_INSTALL_FIRST,
+  CHATGPT_SWITCHED_OFF,
   CODEX_VERSION,
   type CodexInstaller,
   type HarnessAvailability,
@@ -7,12 +9,13 @@ import {
   ActionClass,
   ApprovalAnswer,
   BudgetRaiseRequest,
+  CLAUDE_PLAN_REFUSAL,
   HandbackRequest,
   type KeydRecord,
-  keyLikePresent,
   PauseRequest,
   QuestionAnswerRequest,
   ResumeSafetyRequest,
+  scanKeyLike,
   TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -223,13 +226,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   const harness = () =>
     deps.harness?.() ?? {
       available: false,
-      reason: "The ChatGPT plan is not set up in this daemon.",
+      reason: CHATGPT_SWITCHED_OFF,
     };
   if (deps.chatgpt) {
     const { account, installer } = deps.chatgpt;
     const installed = () => {
-      if (installer.status().state !== "ready")
-        throw new AccountError(409, "Install the ChatGPT harness before signing in.");
+      if (installer.status().state !== "ready") throw new AccountError(409, CHATGPT_INSTALL_FIRST);
       const availability = harness();
       if (!availability.available)
         throw new AccountError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
@@ -249,7 +251,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           if (install.state !== "ready")
             return {
               available: true,
-              reason: "Install the ChatGPT harness before signing in.",
+              reason: CHATGPT_INSTALL_FIRST,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
               install,
@@ -278,7 +280,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         await empty(c.req.raw);
         check(c.req.raw.signal);
         if (!deps.chatgpt?.availability().available)
-          throw new RouteError(503, "The ChatGPT harness cannot be installed on this computer.");
+          throw new RouteError(503, "ChatGPT support can't be installed on this computer.");
         // Installation is explicitly requested and daemon-owned; a disconnected HTTP caller
         // does not cancel the shared flight. Its separate cancel action remains available.
         if (!flight) {
@@ -315,8 +317,14 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   };
   const redact = (value: string, sessionId?: string, cellId?: string, max = 8000) => {
     // Refuse before redaction, allocation, event/inbox dispatch or model-bound persistence.
-    if (keyLikePresent(value))
-      throw new RouteError(400, "Recognised API keys belong in Keys, not task text.");
+    const scan = scanKeyLike(value);
+    if (scan.overflow || scan.matches.length > 0)
+      throw new RouteError(
+        400,
+        scan.matches.some((match) => match.hint === "Claude plan token")
+          ? CLAUDE_PLAN_REFUSAL
+          : "Recognised API keys belong in Keys, not task text.",
+      );
     const clean = deps.redactUserText(value, sessionId, cellId);
     if (!text(max).safeParse(clean).success) throw new RouteError(400, "invalid user text");
     return clean;
@@ -364,8 +372,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           local: provider.local === true,
           ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
           ...(provider.availableIn ? { availableIn: provider.availableIn } : {}),
+          ...(provider.plan ? { plan: true } : {}),
+          ...(provider.rule ? { rule: provider.rule } : {}),
+          ...(provider.notOffered ? { notOffered: provider.notOffered } : {}),
           models: Object.values(
-            catalog && Object.hasOwn(catalog.providers, provider.id)
+            catalog && !provider.notOffered && Object.hasOwn(catalog.providers, provider.id)
               ? (catalog.providers[provider.id]?.models ?? {})
               : {},
           ).map((model) => ({
@@ -530,6 +541,19 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!change) throw new RouteError(404, "nothing is allowed for that in this task");
       s.append("rule.removed", change);
       return c.body(null, 204);
+    }),
+  );
+  app.get(
+    "/api/agent/sessions/:id/approvals/:approvalId/fields/:field",
+    route((c) => {
+      const s = session(c.req.param("id") ?? "");
+      const field = c.req.param("field") ?? "";
+      const text = /^(?:\d|1[0-5])$/.test(field)
+        ? s.approvalField(c.req.param("approvalId") ?? "", Number(field))
+        : undefined;
+      if (text === undefined) throw new RouteError(404, "that approval text is not waiting");
+      c.header("cache-control", "no-store");
+      return c.json({ text });
     }),
   );
   app.post(

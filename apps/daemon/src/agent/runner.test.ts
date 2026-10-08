@@ -500,7 +500,10 @@ describe("ChatGPT runner lifecycle", () => {
       "Pinned acceptance is pending.",
     );
     f.deps.codex = undefined;
-    await expect(f.runner.start(f.cellId, "Fixture task")).rejects.toThrow("not set up");
+    await expect(f.runner.start(f.cellId, "Fixture task")).rejects.toMatchObject({
+      status: 400,
+      message: "ChatGPT plan support isn't switched on in this version yet.",
+    });
     expect(f.open).not.toHaveBeenCalled();
     expect(f.secrets).not.toHaveBeenCalled();
   });

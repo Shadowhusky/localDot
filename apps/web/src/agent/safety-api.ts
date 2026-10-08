@@ -1,6 +1,8 @@
 import {
   ActionClass,
+  APPROVAL_VALUE_CHARS,
   ApprovalAnswer,
+  ApprovalFieldText,
   AutonomyRule,
   ComputerFence,
   PauseRequest,
@@ -59,6 +61,28 @@ export function loadRules(api: ApiClient, signal: AbortSignal) {
 }
 export function resetRules(api: ApiClient, signal: AbortSignal) {
   return controlRequest(api, "/api/agent/rules/reset", undefined, 204, signal, empty);
+}
+// JSON spends at most six bytes on one character.
+const FIELD_BYTES = APPROVAL_VALUE_CHARS * 6 + 64;
+export async function loadApprovalField(
+  api: ApiClient,
+  session: string,
+  approvalId: string,
+  field: number,
+  signal: AbortSignal,
+): Promise<string> {
+  if (!ULID_PATTERN.test(approvalId) || !Number.isInteger(field) || field < 0 || field > 15)
+    throw new ControlFailure(false);
+  return controlRequest(
+    api,
+    `${path(session)}/approvals/${approvalId}/fields/${field}`,
+    undefined,
+    200,
+    signal,
+    (text) => ApprovalFieldText.parse(JSON.parse(text)).text,
+    "GET",
+    FIELD_BYTES,
+  );
 }
 export function pauseSafety(api: ApiClient, session: string, body: unknown, signal: AbortSignal) {
   const input = PauseRequest.safeParse(body);

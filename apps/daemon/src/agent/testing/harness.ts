@@ -65,13 +65,16 @@ export function toolHarness(
           if (id !== session.id || event.type !== "approval.request") return;
           queueMicrotask(() => {
             const card = session.pendingApproval;
-            if (card?.approvalId === event.data.approvalId)
-              session.answerApproval({
-                approvalId: card.approvalId,
-                generation: card.generation,
-                revision: card.revision,
-                decision: "approve",
-              });
+            if (card?.approvalId !== event.data.approvalId) return;
+            // Like the card, read every value it carries only in part before approving.
+            for (const { field } of card.partial ?? [])
+              session.approvalField(card.approvalId, field);
+            session.answerApproval({
+              approvalId: card.approvalId,
+              generation: card.generation,
+              revision: card.revision,
+              decision: "approve",
+            });
           });
         });
 

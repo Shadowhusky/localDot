@@ -292,7 +292,7 @@ func (m *Manager) beginTask(cellID, taskID string, budgetUSD float64, pricing *l
 				return badRequest("task pricing route has no current cell credential")
 			}
 			for _, model := range r.Models {
-				if !binding.Local && model.Input == 0 && model.Output == 0 {
+				if !binding.Local && !r.Flat && model.Input == 0 && model.Output == 0 {
 					return badRequest("remote task models require a price")
 				}
 			}

@@ -17,9 +17,9 @@ export interface Capability {
 const ANTHROPIC_TOOLSET = /^claude-(opus|sonnet|fable)-5(?:[-.]\d+)?(?:-\d{8})?$|^claude-opus-4-8/;
 const ANTHROPIC_LEGACY = /^claude-(haiku-4-5|sonnet-4|opus-4-[0-7]|3-7-sonnet)/;
 // S5 and D9: Gemini and Qwen answer on the 0–1000 grid even when told pixels, whoever serves them
-// (OpenRouter names them google/gemini-… and qwen/…).
+// (OpenRouter names them google/gemini-… and qwen/…). GLM vision models do too (the GLM-V paper).
 const PER1000 = (provider: ProviderSpec, model: CatalogModel) =>
-  provider.client === "google" || /gemini|qwen/i.test(model.id);
+  provider.client === "google" || /gemini|qwen|glm/i.test(model.id);
 
 export function capabilityOf(provider: ProviderSpec, model: CatalogModel): Capability {
   if (!model.toolCall) {

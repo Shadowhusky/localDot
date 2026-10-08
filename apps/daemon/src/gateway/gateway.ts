@@ -25,12 +25,18 @@ import type { DesktopdRegistry, NativeDevice } from "../desktopd/registry.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.ts";
+import { type NativeActionIdentity, sameNativeIdentity } from "./identity.ts";
 import { type OnsetTable, onsetKind } from "./onset-table.ts";
 import type { RingOnsetPolicy } from "./ring-onset.ts";
 import { clickLabel, clipTarget, keyLabel, scrollLabel, typeLabel } from "./text.ts";
 
 export const DEFAULT_AGENT = "main";
 const MODEL_SCREEN = { width: 1280, height: 800 } as const;
+// How long settle waits for a first screen change before it reports none, by verb: a key shows
+// its effect within a frame or two, a click may first have to open a menu or a dialog.
+const SETTLE_FIRST_MS = { key: 400, type: 400, click: 800, scroll: 800 } as const;
+// A backstop for desktopd's own lookup budget; a lookup past it is unknown, not "no element".
+const LOOKUP_TIMEOUT_MS = 1000;
 // Fitts' W in CSS px, multiplied by the cell's scale: the distance it divides is in device px.
 const UNKNOWN_TARGET_PX = 24;
 const MIN_TARGET_PX = 16;
@@ -61,13 +67,14 @@ export type GuiAction =
     }
   | { verb: "wait"; label?: string; ms: number };
 
-export interface NativeActionIdentity {
-  readonly target: Target | null;
-  readonly window: number | null;
-  readonly point: Point | null;
-}
+export type { NativeActionIdentity } from "./identity.ts";
+
+type Lookup = Omit<NativeActionIdentity, "point">;
+const UNKNOWN: Lookup = { target: null, window: null, unknown: true };
+
 export interface NativeActionPermit {
-  consume(action: GuiAction, identity: NativeActionIdentity): boolean;
+  // `fresh` is the read just before input: it may name an element the approved read did not.
+  consume(action: GuiAction, approved: NativeActionIdentity, fresh: NativeActionIdentity): boolean;
 }
 export interface NativeActionRequest {
   readonly action: GuiAction;
@@ -140,6 +147,11 @@ const holding = (s: StreamState) =>
 export class ActionGateway {
   readonly #cursor = new Map<string, Point>();
   readonly #queues = new Map<string, Promise<unknown>>();
+  // Each screen's newest frame: its desktopd keeps that frame's device-resolution pixels.
+  readonly #lastFrame = new Map<
+    string,
+    { frameId: string; sessionId: string; device: NativeDevice }
+  >();
 
   constructor(private readonly deps: GatewayDeps) {}
 
@@ -156,7 +168,31 @@ export class ActionGateway {
     this.deps.frames.save(ctx.sessionId, o.frameId, Buffer.from(o.image, "base64"));
     this.#append(ctx, "observe", { frameId: o.frameId, width: o.width, height: o.height });
     this.#cursor.set(ctx.cellId, o.pointer);
+    this.#lastFrame.set(ctx.cellId, { frameId: o.frameId, sessionId: ctx.sessionId, device: d });
     return { frameId: o.frameId, pointer: o.pointer };
+  }
+
+  // A model-pixel region of the session's frame at the screen's device resolution (PNG), while
+  // that frame is still its screen's newest; undefined otherwise or on a screen without one.
+  async zoom(
+    sessionId: string,
+    frameId: string,
+    region: Rect,
+    signal?: AbortSignal,
+  ): Promise<Buffer | undefined> {
+    for (const [cellId, last] of this.#lastFrame) {
+      if (last.frameId !== frameId) continue;
+      const cell = this.deps.cells.get(cellId);
+      if (!cell) {
+        this.#lastFrame.delete(cellId);
+        return undefined;
+      }
+      if (last.sessionId !== sessionId || !last.device.client.zoom) return undefined;
+      if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
+        return undefined;
+      return await last.device.client.zoom({ frameId, region }, signal);
+    }
+    return undefined;
   }
 
   async run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {
@@ -227,7 +263,7 @@ export class ActionGateway {
     mark: (v: boolean) => void,
   ): Promise<ActionOutcome> {
     const d = await this.#ready(ctx);
-    let found: { target: Target | null; window: number | null } | undefined;
+    let found: Lookup | undefined;
     let point: Point;
     if (action.verb === "click" && action.find) {
       found = await d.client.find(action.find);
@@ -238,15 +274,13 @@ export class ActionGateway {
       point = toDevice(action.point, { ...MODEL_SCREEN, scale });
     } else throw new Cancelled("preflight", "click needs a point or a find");
 
-    const readIdentity = async (): Promise<NativeActionIdentity> => {
-      const hit = await this.#lookup(ctx, d, point);
-      return frozenSnapshot({ ...hit, point });
-    };
+    const readIdentity = async (): Promise<NativeActionIdentity> =>
+      frozenSnapshot({ ...(await this.#lookup(ctx, d, point)), point });
     const identity = ctx.source === "agent" ? await readIdentity() : undefined;
     const permit = identity
       ? await this.#authorize(ctx, action, identity, readIdentity)
       : undefined;
-    if (identity) found = { target: identity.target, window: identity.window };
+    if (identity) found = identity;
     const t0 = this.deps.now();
     const from = this.#cursor.get(ctx.cellId) ?? {
       x: (MODEL_SCREEN.width * scale) / 2,
@@ -286,16 +320,8 @@ export class ActionGateway {
     // The hit test runs beside the travel: it often takes longer than the cursor (S2), so the
     // target box may arrive after the cursor; a result after the action has ended is dropped.
     let ended = false;
-    const lookup: Promise<{ target: Target | null; window: number | null }> = found
-      ? Promise.resolve(found)
-      : Promise.race([
-          d.client.hitTest(point).catch(() => ({ target: null, window: null })),
-          timeoutAfter<{ target: Target | null; window: number | null }>(
-            this.deps.hitTestTimeoutMs ?? 2500,
-            { target: null, window: null },
-          ),
-        ]);
-    let known: { target: Target | null; window: number | null } | undefined = found;
+    const lookup = found ? Promise.resolve(found) : this.#read(d, point);
+    let known: Lookup | undefined = found;
     const targetKnown = lookup.then((r) => {
       known = r;
       if (r.target && !ended) this.#append(ctx, "action.target", { target: clipTarget(r.target) });
@@ -343,7 +369,7 @@ export class ActionGateway {
       });
       this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
       this.#cursor.set(ctx.cellId, point);
-      frameId = await this.#finish(ctx, d);
+      frameId = await this.#finish(ctx, d, verb);
     } finally {
       ended = true;
     }
@@ -364,26 +390,15 @@ export class ActionGateway {
       y: (MODEL_SCREEN.height * scale) / 2,
     };
     // Tab and keyboard navigation can move focus without moving the cursor.
-    const hit = await Promise.race([
-      d.client.focused().catch(() => ({ target: null, window: null })),
-      timeoutAfter<{ target: Target | null; window: number | null }>(
-        this.deps.hitTestTimeoutMs ?? 2500,
-        { target: null, window: null },
-      ),
-    ]);
-    this.#check(ctx);
     const readIdentity = async (): Promise<NativeActionIdentity> => {
       const fresh = await this.#lookup(ctx, d);
       return frozenSnapshot({ ...fresh, point: fresh.target?.point ?? null });
     };
-    const identity = frozenSnapshot({
-      target: hit.target,
-      window: hit.window,
-      point: hit.target?.point ?? null,
-    });
+    const identity = await readIdentity();
     const permit = await this.#authorize(ctx, action, identity, readIdentity);
-    const masked = action.masked === true || hit.target === null || hit.target.secret === true;
-    if (hit.target) at = hit.target.point;
+    const masked =
+      action.masked === true || identity.target === null || identity.target.secret === true;
+    if (identity.target) at = identity.target.point;
     const chars = [...action.text].length;
     this.#append(ctx, "action.intent", {
       verb: "type",
@@ -394,7 +409,8 @@ export class ActionGateway {
       point: at,
       risk: "none",
     });
-    if (hit.target) this.#append(ctx, "action.target", { target: clipTarget(hit.target) });
+    if (identity.target)
+      this.#append(ctx, "action.target", { target: clipTarget(identity.target) });
     await this.#waitForStream(ctx);
     const pace = {
       firstMs: typingPaceMs(speed, 0),
@@ -408,7 +424,7 @@ export class ActionGateway {
       masked,
       pace,
       injector: "xtest" as const,
-      ...(hit.window ? { window: hit.window } : {}),
+      ...(identity.window ? { window: identity.window } : {}),
     };
     await this.#consume(ctx, action, identity, permit, readIdentity);
     this.#check(ctx);
@@ -441,8 +457,8 @@ export class ActionGateway {
       ctx.signal,
     );
     if (result.count === 0) throw new Cancelled("timeout", "nothing was typed");
-    const frameId = await this.#finish(ctx, d);
-    return { ok: true, frameId, ...(hit.target ? { target: hit.target } : {}) };
+    const frameId = await this.#finish(ctx, d, "type");
+    return { ok: true, frameId, ...(identity.target ? { target: identity.target } : {}) };
   }
 
   async #keyAction(
@@ -491,23 +507,29 @@ export class ActionGateway {
       scale,
     });
     this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
-    const frameId = await this.#finish(ctx, d);
+    const frameId = await this.#finish(ctx, d, "key");
     return { ok: true, frameId };
   }
 
-  async #lookup(ctx: ActionContext, d: NativeDevice, point?: Point) {
+  // The element under a point, or keyboard focus without one. A lookup that failed or ran out of
+  // time is unknown: it never reads as "no element".
+  async #read(d: NativeDevice, point?: Point): Promise<Lookup> {
     const hit = await Promise.race([
-      (point ? d.client.hitTest(point) : d.client.focused()).catch(() => ({
-        target: null,
-        window: null,
-      })),
-      timeoutAfter<{ target: Target | null; window: number | null }>(
-        this.deps.hitTestTimeoutMs ?? 2500,
-        { target: null, window: null },
-      ),
+      (point ? d.client.hitTest(point) : d.client.focused()).catch(() => UNKNOWN),
+      timeoutAfter(this.deps.hitTestTimeoutMs ?? LOOKUP_TIMEOUT_MS, UNKNOWN),
     ]);
+    return {
+      target: hit.target,
+      window: hit.window,
+      ...(hit.windowFrame ? { windowFrame: hit.windowFrame } : {}),
+      ...(hit.unknown ? { unknown: true as const } : {}),
+    };
+  }
+
+  async #lookup(ctx: ActionContext, d: NativeDevice, point?: Point): Promise<Lookup> {
+    const hit = await this.#read(d, point);
     this.#check(ctx);
-    return { target: hit.target, window: hit.window };
+    return hit;
   }
 
   async #authorize(
@@ -558,12 +580,13 @@ export class ActionGateway {
     if (ctx.source === "manual") return;
     const fresh = await read();
     this.#check(ctx);
-    if (!sameNativeIdentity(identity, fresh) || !permit?.consume(action, fresh))
+    // The permit and the repeat guard bind the approved identity; the fresh read only confirms it.
+    if (!sameNativeIdentity(identity, fresh) || !permit?.consume(action, identity, fresh))
       throw new Cancelled(
         "stale",
         "the approved action or target changed; look again before acting",
       );
-    if (ctx.beforeEffect?.(action, fresh) !== true)
+    if (ctx.beforeEffect?.(action, identity) !== true)
       throw new Cancelled(
         "user",
         "this input was paused before dispatch; wait for explicit Resume",
@@ -571,9 +594,18 @@ export class ActionGateway {
   }
 
   // settle → observe → result; returns this action's own frame, never a concurrent action's.
-  async #finish(ctx: ActionContext, d: NativeDevice): Promise<string> {
+  async #finish(
+    ctx: ActionContext,
+    d: NativeDevice,
+    verb: keyof typeof SETTLE_FIRST_MS,
+  ): Promise<string> {
     this.#check(ctx);
-    const s = await d.client.settle({ quietMs: SETTLE_QUIET_MS, timeoutMs: SETTLE_CAP_MS });
+    const s = await d.client.settle({
+      verb,
+      quietMs: SETTLE_QUIET_MS,
+      firstMs: SETTLE_FIRST_MS[verb],
+      timeoutMs: SETTLE_CAP_MS,
+    });
     const frameT =
       s.lastChangeMono === null
         ? this.#sessionT(ctx.sessionId, this.deps.now())
@@ -622,7 +654,7 @@ export class ActionGateway {
     devicePoint: Point,
     scale: 1 | 2,
     desktop: NativeDevice,
-    firstTarget: Promise<{ target: Target | null; window: number | null }>,
+    firstTarget: Promise<Lookup>,
   ): Promise<void> {
     const basisPath = this.deps.frames.path(ctx.sessionId, basedOn);
     if (!basisPath) return; // Preserve the original optional, best-effort basis contract.
@@ -660,9 +692,14 @@ export class ActionGateway {
       if (!secondPath) throw new Error("missing second freshness frame");
       const second = await readFile(secondPath).then(frameLuma);
       this.#check(ctx);
-      const nextTarget = await desktop.client.hitTest(devicePoint);
-      this.#check(ctx);
-      if (!sameTarget(initialTarget, nextTarget)) throw new Error("the target changed");
+      const nextTarget = await this.#lookup(ctx, desktop, devicePoint);
+      if (
+        !sameNativeIdentity(
+          { ...initialTarget, point: devicePoint },
+          { ...nextTarget, point: devicePoint },
+        )
+      )
+        throw new Error("the target changed");
       const bounds = initialTarget.target?.bbox;
       const modelBounds = bounds
         ? { x: bounds.x / scale, y: bounds.y / scale, w: bounds.w / scale, h: bounds.h / scale }
@@ -828,21 +865,6 @@ function timeoutAfter<T>(ms: number, value: T): Promise<T> {
   return new Promise((resolve) => setTimeout(() => resolve(value), ms).unref());
 }
 
-// Target identity is the desktop's own accessibility result, not an untrusted model label.
-function sameTarget(
-  a: { target: Target | null; window: number | null },
-  b: { target: Target | null; window: number | null },
-): boolean {
-  if (!a.target || !b.target) return a.target === b.target && a.window === b.window;
-  return (
-    a.window === b.window &&
-    ["source", "role", "name", "app", "window", "url", "secret"].every(
-      (key) => a.target?.[key as keyof Target] === b.target?.[key as keyof Target],
-    ) &&
-    JSON.stringify(a.target.bbox) === JSON.stringify(b.target.bbox)
-  );
-}
-
 function frozenSnapshot<T>(value: T): T {
   const copy = structuredClone(value);
   const freeze = (item: unknown): void => {
@@ -853,8 +875,4 @@ function frozenSnapshot<T>(value: T): T {
   };
   freeze(copy);
   return copy;
-}
-function sameNativeIdentity(a: NativeActionIdentity, b: NativeActionIdentity): boolean {
-  // Target.parse constructs a fixed schema order; every native field, mark and coordinate binds.
-  return JSON.stringify(a) === JSON.stringify(b);
 }

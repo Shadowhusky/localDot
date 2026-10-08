@@ -1025,6 +1025,9 @@
                 },
                 "secret": {
                   "type": "boolean"
+                },
+                "editable": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -2162,6 +2165,31 @@
               "type": "string",
               "maxLength": 200
             },
+            "partial": {
+              "minItems": 1,
+              "maxItems": 16,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "field": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 15
+                  },
+                  "length": {
+                    "type": "integer",
+                    "minimum": 16385,
+                    "maximum": 1000000
+                  }
+                },
+                "required": [
+                  "field",
+                  "length"
+                ],
+                "additionalProperties": false
+              }
+            },
             "upload": {
               "type": "object",
               "properties": {
@@ -2310,7 +2338,7 @@
                       },
                       {
                         "type": "string",
-                        "maxLength": 512
+                        "maxLength": 16384
                       }
                     ],
                     "items": false,
@@ -2406,6 +2434,9 @@
                   "maximum": 9007199254740991
                 },
                 "secret": {
+                  "type": "boolean"
+                },
+                "editable": {
                   "type": "boolean"
                 }
               },

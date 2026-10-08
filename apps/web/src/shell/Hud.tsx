@@ -1,85 +1,65 @@
-import type { HudState } from "../cells/hud-state.ts";
+import type { HudAction, Status } from "../session/status.ts";
 import { Mascot } from "./Mascot.tsx";
 
 export interface HudProps {
-  hud: HudState & { control?: boolean; elapsedS?: number | null; stop?: boolean };
+  status: Status;
   onStart(): void;
   onStop(): void;
   onResume(): void;
   onStopSession(): void;
   onRetry(): void;
-  stopping?: boolean;
-  stopEnabled?: boolean;
 }
 
-export function Hud({
-  hud,
-  onStart,
-  onStop,
-  onStopSession,
-  onResume,
-  onRetry,
-  stopping = false,
-  stopEnabled = true,
-}: HudProps) {
-  return (
-    <div className={hud.action.kind === "resume" && !hud.stop ? "hud paused" : "hud"}>
-      <span className="st">
-        <Mascot />
-        <span data-testid="hud-status" role="status" aria-live="polite" aria-atomic="true">
-          {hud.label}
-        </span>
-        {hud.elapsedS != null && (
-          <span className="t num" data-testid="hud-elapsed" aria-live="off">
-            {hud.elapsedS} s
-          </span>
-        )}
-      </span>
+const LABELS: Record<HudAction["kind"], string> = {
+  "stop-task": "Stop",
+  start: "Turn on",
+  stop: "Stop computer",
+  resume: "Resume computer",
+  retry: "Try again",
+};
+
+export function Hud({ status, onStart, onStop, onStopSession, onResume, onRetry }: HudProps) {
+  const run: Record<HudAction["kind"], () => void> = {
+    "stop-task": onStopSession,
+    start: onStart,
+    stop: onStop,
+    resume: onResume,
+    retry: onRetry,
+  };
+  // The first control stays the same element as its action changes, so focus stays on it.
+  const button = (action: HudAction | undefined) =>
+    action && (
       <button
         type="button"
         className="a"
-        aria-disabled={
-          (hud.stop ? !stopEnabled || stopping : !hud.action.enabled) ? true : undefined
-        }
-        aria-busy={stopping || undefined}
-        data-testid={hud.stop ? "hud-stop-session" : undefined}
+        aria-disabled={action.enabled ? undefined : true}
+        aria-busy={action.busy}
+        data-testid={action.kind === "stop-task" ? "hud-stop-session" : undefined}
         onClick={() => {
-          if (hud.stop) {
-            if (stopEnabled && !stopping) onStopSession();
-          } else if (hud.action.enabled) {
-            if (hud.action.kind === "start") onStart();
-            else if (hud.action.kind === "stop") onStop();
-            else if (hud.action.kind === "resume") onResume();
-            else onRetry();
-          }
+          if (action.enabled) run[action.kind]();
         }}
       >
-        {(hud.stop || hud.action.kind === "stop") && <span className="sq" aria-hidden="true" />}
-        {hud.stop
-          ? stopping
-            ? "Stopping…"
-            : "Stop"
-          : hud.action.kind === "start"
-            ? "Turn on"
-            : hud.action.kind === "stop"
-              ? "Stop computer"
-              : hud.action.kind === "resume"
-                ? "Resume computer"
-                : "Try again"}
-      </button>
-      {!hud.stop && hud.action.kind === "resume" && (
-        <button
-          type="button"
-          className="a"
-          aria-disabled={!hud.action.enabled ? true : undefined}
-          onClick={() => {
-            if (hud.action.enabled) onStop();
-          }}
-        >
+        {(action.kind === "stop-task" || action.kind === "stop") && (
           <span className="sq" aria-hidden="true" />
-          Stop computer
-        </button>
-      )}
+        )}
+        {action.busy ? "Stopping…" : LABELS[action.kind]}
+      </button>
+    );
+  return (
+    <div className={status.actions[0]?.kind === "resume" ? "hud paused" : "hud"}>
+      <span className="st">
+        <Mascot state={status.dotPose} control={status.control} />
+        <span data-testid="hud-status" role="status" aria-live="polite" aria-atomic="true">
+          {status.label}
+        </span>
+        {status.elapsedS != null && (
+          <span className="t num" data-testid="hud-elapsed" aria-live="off">
+            {status.elapsedS} s
+          </span>
+        )}
+      </span>
+      {button(status.actions[0])}
+      {button(status.actions[1])}
     </div>
   );
 }

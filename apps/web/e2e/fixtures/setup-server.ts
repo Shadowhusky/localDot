@@ -41,6 +41,7 @@ async function close(server: Server) {
 // Real production HTTP guards, code exchange, static UI, settings and progress page. Only the
 // computer/key inventory/catalog are inert fixture data. No Docker, account or Keychain access.
 export async function setupServer() {
+  const orchestrator = new FakeOrchestrator();
   const home = mkdtempSync(join(tmpdir(), "localdot-setup-browser-"));
   const log = new EventLog(home);
   const token = randomBytes(32).toString("base64url");
@@ -72,7 +73,7 @@ export async function setupServer() {
       eventLog: log,
       installCodes: codes,
       ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
-      cells: { cells: new FakeOrchestrator(), tickets: new TicketRegistry() },
+      cells: { cells: orchestrator, tickets: new TicketRegistry() },
       agent: {
         home,
         settings: new SettingsStore(home),
@@ -103,6 +104,7 @@ export async function setupServer() {
       progressOrigin,
       url: `${progressOrigin}/#progress=${capability}`,
       channel,
+      orchestrator,
       requests,
       issue: () => `${origin}/#code=${codes.issue().code}`,
       async close() {

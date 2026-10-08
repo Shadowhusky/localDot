@@ -56,6 +56,13 @@ func TestShutdownKeepsTheHomeLockUntilAdmittedHandlersFinish(t *testing.T) {
 		t.Fatal("shutdown released its state while an admitted mutation still ran")
 	case <-time.After(100 * time.Millisecond):
 	}
+	late := httptest.NewRecorder()
+	d.handle(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("a request that arrived after shutdown began was admitted")
+	})).ServeHTTP(late, httptest.NewRequest("GET", "/", nil))
+	if late.Code != http.StatusServiceUnavailable {
+		t.Fatalf("a request that arrived after shutdown began got %d", late.Code)
+	}
 	if next, err := start(Config{Home: home, Vault: "memory"}); err == nil {
 		next.Close()
 		t.Fatal("a second process acquired the state before the handler finished")

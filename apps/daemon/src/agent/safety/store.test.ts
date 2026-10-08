@@ -104,14 +104,16 @@ it("reads typed bounded private intent but never restores a permit or live gener
     executor: "api",
     pause: f.pause,
   });
-  expect(f.store.list()).toHaveLength(1);
+  expect(f.store.scan().intents).toHaveLength(1);
   expect(new ComputerFences(f.home).isFenced(f.cellId)).toBe(false);
   writeFileSync(
     f.path,
     JSON.stringify({ ...JSON.parse(readFileSync(f.path, "utf8")), permit: "injected" }) + "\n",
   );
   expect(() => f.store.read(f.sessionId)).toThrow();
-  expect(new ComputerFences(f.home).isFenced(ulid())).toBe(true);
+  const fences = new ComputerFences(f.home);
+  expect(fences.isFenced(f.cellId)).toBe(true);
+  expect(fences.isFenced(ulid())).toBe(false);
 });
 it("a crashed uncertain API pause becomes a permanent deny before startup effects", () => {
   const f = fixture();
@@ -151,7 +153,10 @@ it.each(["symlink", "oversize", "public", "wrong-owner"])(
     const before = lstatSync(f.path);
     expect(() => f.store.read(f.sessionId)).toThrow();
     expect(lstatSync(f.path).ino).toBe(before.ino);
-    expect(new ComputerFences(f.home).isFenced(ulid())).toBe(true);
+    const fences = new ComputerFences(f.home);
+    expect(fences.isFenced(f.cellId)).toBe(true);
+    // Only an intent that names no computer still closes every computer's admission.
+    expect(fences.isFenced(ulid())).toBe(kind === "symlink" || kind === "oversize");
   },
 );
 
@@ -198,7 +203,7 @@ it("reads legacy eight-class intents as upgraded policies beside new ones", () =
     memory: "ask",
   });
   expect(f.store.read(current.sessionId)?.policy.computer).toBe("ask");
-  expect(f.store.list()).toHaveLength(3);
+  expect(f.store.scan().intents).toHaveLength(3);
 });
 it("old and new intents together never fence every computer at startup", () => {
   const f = fixture();
@@ -209,4 +214,18 @@ it("old and new intents together never fence every computer at startup", () => {
   expect(fences.isFenced(current.cellId)).toBe(false);
   expect(fences.isFenced(ulid())).toBe(false);
   expect(fences.isFenced(crashed.cellId)).toBe(true);
+});
+it("removing an intent refuses a tampered file or another computer and keeps it", () => {
+  const f = fixture();
+  f.store.write(f.sessionId, f.cellId, DEFAULT_AUTONOMY, f.pause, "api");
+  const before = lstatSync(f.path).ino;
+  expect(() => f.store.remove(f.sessionId, ulid())).toThrow("owner mismatch");
+  expect(lstatSync(f.path).ino).toBe(before);
+  chmodSync(f.path, 0o644);
+  expect(() => f.store.remove(f.sessionId, f.cellId)).toThrow("unsafe safety intent");
+  expect(lstatSync(f.path).ino).toBe(before);
+  expect(new ComputerFences(f.home).isFenced(f.cellId)).toBe(true);
+  chmodSync(f.path, 0o600);
+  f.store.remove(f.sessionId, f.cellId);
+  expect(lstatSync(f.path, { throwIfNoEntry: false })).toBeUndefined();
 });

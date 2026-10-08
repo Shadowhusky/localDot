@@ -2,8 +2,11 @@ import { describe, expect, it } from "vitest";
 import { AgentSettingsDocument } from "./agent-settings.ts";
 import { ulid } from "./ids.ts";
 import {
+  APPROVAL_FIELD_CHARS,
+  APPROVAL_VALUE_CHARS,
   ApprovalAnswer,
   ApprovalCard,
+  ApprovalRequestDraft,
   AutonomyPolicy,
   AutonomyRule,
   BALANCED_AUTONOMY,
@@ -135,15 +138,34 @@ describe("safety protocol authority boundaries", () => {
     expect(ApprovalCard.safeParse(card).success).toBe(true);
     for (const actionClass of ["computer", "memory", "upload"])
       expect(ApprovalCard.safeParse({ ...card, actionClass }).success).toBe(true);
+    const long = { ...card, fields: [["Command", "x".repeat(APPROVAL_FIELD_CHARS)]] };
+    expect(ApprovalCard.safeParse(long).success).toBe(true);
+    expect(
+      ApprovalCard.safeParse({ ...long, partial: [{ field: 0, length: APPROVAL_VALUE_CHARS }] })
+        .success,
+    ).toBe(true);
     for (const changed of [
       { ...card, html: "<script>approve()</script>" },
       { ...card, image: "https://evil.test/" },
       { ...card, title: "x".repeat(201) },
-      { ...card, fields: [["key", "x".repeat(513)]] },
+      { ...card, fields: [["key", "x".repeat(APPROVAL_FIELD_CHARS + 1)]] },
+      { ...long, partial: [] },
+      { ...long, partial: [{ field: 0, length: APPROVAL_FIELD_CHARS }] },
+      { ...long, partial: [{ field: 0, length: APPROVAL_VALUE_CHARS + 1 }] },
+      { ...long, partial: [{ field: 16, length: APPROVAL_VALUE_CHARS }] },
       { ...card, fields: Array.from({ length: 17 }, () => ["k", "v"]) },
       { ...card, title: "\ud800" },
     ])
       expect(ApprovalCard.safeParse(changed).success).toBe(false);
+    const { approvalId: _id, generation: _g, revision: _r, expiresAt: _e, ...draft } = card;
+    const whole = { ...draft, fields: [["Content", "x".repeat(APPROVAL_VALUE_CHARS)]] };
+    expect(ApprovalRequestDraft.safeParse(whole).success).toBe(true);
+    expect(
+      ApprovalRequestDraft.safeParse({
+        ...draft,
+        fields: [["Content", "x".repeat(APPROVAL_VALUE_CHARS + 1)]],
+      }).success,
+    ).toBe(false);
   });
   it("an answer picks an Always allow scope only when it approves, and names nothing else", () => {
     const body = { approvalId: ulid(), generation: 1, revision: 1, decision: "approve" };

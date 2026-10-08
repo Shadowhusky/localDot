@@ -124,7 +124,7 @@ describe("bounded ChatGPT account transport", () => {
       expect(f.calls).toHaveLength(1);
     }
   });
-  it("copies only public metadata into a summary and keeps missing usage unknown", async () => {
+  it("copies only public metadata and the plain reason into a summary and keeps missing usage unknown", async () => {
     const f = fixture(() =>
       Response.json({
         ...installed(),
@@ -136,7 +136,8 @@ describe("bounded ChatGPT account transport", () => {
     );
     const summary = chatgptSummary(await readChatgpt(f.api, signal()));
     const text = JSON.stringify(summary);
-    expect(text).not.toMatch(/TEST-DEVICE-CODE|auth.openai.com|TEST-DIAGNOSTIC|TEST-ERROR/);
+    expect(text).not.toMatch(/TEST-DEVICE-CODE|auth.openai.com|TEST-ERROR/);
+    expect(summary.reason).toBe("TEST-DIAGNOSTIC");
     expect(summary.login).toEqual({ loginId: "test-attempt", startedAt: expect.any(Number) });
     expect(summary.usage).toBeUndefined();
   });
@@ -159,6 +160,26 @@ describe("bounded ChatGPT account transport", () => {
     const g = fixture(() => new Response(null, { status: 401 }));
     await expect(readChatgpt(g.api, signal())).rejects.toMatchObject({ status: 401 });
     expect(g.rejected).toHaveBeenCalledOnce();
+  });
+  it("recognises only the exact device code refusal of a code start", async () => {
+    const off = "Turn on device code sign-in in ChatGPT under Settings → Security first.";
+    const f = fixture(() => new Response(off, { status: 503 }));
+    const failure = await loginChatgpt(f.api, signal()).catch((e: unknown) => e);
+    expect(failure).toBeInstanceOf(ChatgptFailure);
+    expect(failure).toMatchObject({ uncertain: false, status: 503, refusal: off, message: off });
+    for (const [status, body, send] of [
+      [503, `${off} TEST-DEVICE-CODE`, loginChatgpt],
+      [503, "Account process could not be stopped.", loginChatgpt],
+      [503, `${off}${" ".repeat(2048)}`, loginChatgpt],
+      [409, off, loginChatgpt],
+      [503, off, refreshChatgpt],
+    ] as const) {
+      const g = fixture(() => new Response(body, { status }));
+      const other = await send(g.api, signal()).catch((e: unknown) => e);
+      expect(other).toMatchObject({ status, refusal: undefined });
+      expect(String(other)).not.toContain("Settings → Security");
+      expect(String(other)).not.toContain("TEST-DEVICE-CODE");
+    }
   });
   it("requires empty, positively verified cancel/logout acknowledgements", async () => {
     const f = fixture(() => new Response(null, { status: 204 }));

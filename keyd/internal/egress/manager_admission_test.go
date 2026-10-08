@@ -245,3 +245,28 @@ func TestManagerAdmissionTaskReplacementCannotInheritAnOpenGate(t *testing.T) {
 		t.Fatal("prior generation opened replacement")
 	}
 }
+
+// The budget lets one unpriced task replace another on a live cell without a new generation. The
+// gate the first task held must not carry into the second: a new identity is opened explicitly.
+func TestReplacingATaskInPlaceRetiresItsAdmissionGate(t *testing.T) {
+	m, _ := newManager(t)
+	if _, err := m.Open(OpenRequest{CellID: "a", Role: "brain", Secrets: []string{"anthropic"}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginTask("a", "first-task", 5); err != nil {
+		t.Fatal(err)
+	}
+	gate := m.cells["a"].cell.current().model
+	if err := m.BeginTask("a", "first-task", 5); err != nil {
+		t.Fatal(err)
+	}
+	if gate.Snapshot().Retired {
+		t.Fatal("beginning the same task again retired its gate")
+	}
+	if err := m.BeginTask("a", "second-task", 5); err != nil {
+		t.Fatal(err)
+	}
+	if !gate.Snapshot().Retired {
+		t.Fatal("the replaced task's gate is still live")
+	}
+}

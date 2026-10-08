@@ -3,8 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   type EventOf,
+  type HitTestResult,
   type LocalDotEvent,
   msToMicros,
+  type Point,
   sessionMsOf,
   ulid,
 } from "@localdot/protocol";
@@ -18,7 +20,12 @@ import { DesktopdRegistry } from "../desktopd/registry.ts";
 import { FakeDesktopd, type FakeScript } from "../desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "./frames.ts";
-import { type ActionContext, ActionGateway, type NativeScreenBinding } from "./gateway.ts";
+import {
+  type ActionContext,
+  ActionGateway,
+  type NativeActionIdentity,
+  type NativeScreenBinding,
+} from "./gateway.ts";
 import { DEFAULT_ONSET_TABLE } from "./onset-table.ts";
 import { keepPolicy } from "./ring-onset.ts";
 
@@ -774,5 +781,214 @@ describe("ActionGateway type and key", () => {
     expect(s.events().map((e) => e.type)).toEqual(["action.intent", "action.result"]);
     expect(s.sleeps).toEqual([500]);
     expect(s.fake.calls).toEqual([]);
+  });
+});
+
+describe("ActionGateway settle and zoom", () => {
+  it("settles each input with its verb and that verb's wait for a first change", async () => {
+    const s = setup(
+      {
+        hitTest: () => ({ target: null, window: null, ms: 2 }),
+        type: () => ({
+          progress: [{ count: 1, chunk: "h", pressMono: 60_000 }],
+          result: { done: true, count: 1, firstPressMono: 60_000, injector: "xtest", armedMono: 1 },
+        }),
+      },
+      { viewers: 0 },
+    );
+    const ctx = { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId };
+    await s.gateway.run(ctx, { verb: "click", point: { x: 10, y: 10 } });
+    await s.gateway.run(ctx, { verb: "scroll", point: { x: 10, y: 10 }, dx: 0, dy: 2 });
+    await s.gateway.run(ctx, { verb: "key", combo: ["Escape"] });
+    await s.gateway.run(ctx, { verb: "type", text: "h" });
+    expect(s.fake.calls.filter((c) => c.path === "/settle").map((c) => c.body)).toEqual([
+      { verb: "click", quietMs: 250, firstMs: 800, timeoutMs: 3000 },
+      { verb: "scroll", quietMs: 250, firstMs: 800, timeoutMs: 3000 },
+      { verb: "key", quietMs: 250, firstMs: 400, timeoutMs: 3000 },
+      { verb: "type", quietMs: 250, firstMs: 400, timeoutMs: 3000 },
+    ]);
+    // The result frame is observed right after the settle, with nothing in between.
+    const paths = s.fake.calls.map((c) => c.path);
+    for (const [i, path] of paths.entries())
+      if (path === "/settle") expect(paths[i + 1]).toBe("/observe");
+  });
+
+  it("zooms the session's newest frame through its desktop, and nothing else", async () => {
+    let next = 0;
+    const ids = ["01J9ZQ3V8Y7X6W5T4S3R2Q1P0A", "01J9ZQ3V8Y7X6W5T4S3R2Q1P0B"];
+    const s = setup({
+      observe: () => ({
+        frameId: ids[next++] as string,
+        width: 1280,
+        height: 800,
+        image: Buffer.from("RIFF....WEBP").toString("base64"),
+        pointer: { x: 0, y: 0 },
+        windows: [],
+      }),
+      zoom: (body) => Buffer.from(`png of ${(body as { frameId: string }).frameId}`),
+    });
+    const ctx = { sessionId: s.sessionId, cellId: s.cellId };
+    const region = { x: 100, y: 50, w: 40, h: 20 };
+    const { frameId } = await s.gateway.observe(ctx);
+    expect((await s.gateway.zoom(s.sessionId, frameId, region))?.toString()).toBe(
+      `png of ${frameId}`,
+    );
+    expect(s.fake.calls.at(-1)).toEqual({ path: "/zoom", body: { frameId, region } });
+    expect(
+      await s.gateway.zoom(s.eventLog.createSession("other"), frameId, region),
+    ).toBeUndefined();
+    expect(await s.gateway.zoom(s.sessionId, "01J9ZQ3V8Y7X6W5T4S3R2Q1P0Z", region)).toBeUndefined();
+    const cell = s.cells.get(s.cellId);
+    if (!cell) throw new Error("no cell");
+    s.cells.emit({ ...cell, paused: true });
+    expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
+    s.cells.emit(cell);
+    await s.gateway.observe(ctx);
+    expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
+    expect(s.fake.calls.filter((c) => c.path === "/zoom")).toHaveLength(1);
+  });
+});
+
+describe("ActionGateway native identity", () => {
+  const frame = { x: 0, y: 54, w: 1604, h: 1258 };
+  const element =
+    (name = "Search", dx = 0) =>
+    (point: Point): HitTestResult => {
+      const hit = search(point);
+      return {
+        ...hit,
+        target: { ...hit.target, name, bbox: { ...hit.target.bbox, x: hit.target.bbox.x + dx } },
+        windowFrame: frame,
+      };
+    };
+  // desktopd's answer when the element lookup ran out of time: the window and its frame only.
+  const timedOut = (point: Point): HitTestResult => ({
+    target: { point, source: "coords", app: "Chromium", window: "Example" },
+    window: 77,
+    windowFrame: frame,
+    unknown: true,
+    ms: 300,
+  });
+  // A reply the client cannot read: the lookup failed, so nothing at all is known.
+  const broken = () => ({ target: "?" }) as unknown as HitTestResult;
+  const click = { verb: "click", point: { x: 150, y: 200 }, speed: "instant" } as const;
+
+  function agent(reads: ((point: Point) => HitTestResult)[], revalidate = false) {
+    const s = setup();
+    let n = 0;
+    s.fake.script.hitTest = (point) => (reads[Math.min(n++, reads.length - 1)] ?? broken)(point);
+    const consumed: NativeActionIdentity[] = [];
+    const found: NativeActionIdentity[] = [];
+    const admitted: NativeActionIdentity[] = [];
+    const revalidated: boolean[] = [];
+    const ctx: ActionContext = {
+      source: "agent",
+      sessionId: s.sessionId,
+      cellId: s.cellId,
+      authorizeAgent: async (request) => {
+        if (revalidate) revalidated.push(await request.revalidate());
+        return {
+          consume: (_action, identity, fresh) => {
+            consumed.push(identity);
+            found.push(fresh);
+            return true;
+          },
+        };
+      },
+      beforeEffect: (_action, identity) => {
+        admitted.push(identity);
+        return true;
+      },
+    };
+    const inputs = () => s.fake.calls.filter((c) => c.path === "/input");
+    return { s, ctx, consumed, found, admitted, revalidated, inputs };
+  }
+
+  it("acts on a window-level approval when the next read finds an element in that window", async () => {
+    const a = agent([timedOut, element()]);
+    const outcome = await a.s.gateway.run(a.ctx, click);
+    expect(outcome.ok).toBe(true);
+    expect(a.inputs()).toHaveLength(1);
+    expect(a.inputs()[0]?.body).toMatchObject({ window: 77 });
+    // The permit and the repeat guard see what was approved, not the later read.
+    expect(a.consumed).toEqual([expect.objectContaining({ unknown: true, window: 77 })]);
+    expect(a.admitted).toEqual(a.consumed);
+    // The permit also gets the later read, to classify the element it found.
+    expect(a.found).toEqual([
+      expect.objectContaining({ target: expect.objectContaining({ name: "Search" }) }),
+    ]);
+  });
+
+  it("refuses a window-level approval once that window has moved", async () => {
+    const moved = (point: Point) => ({
+      ...timedOut(point),
+      windowFrame: { ...frame, x: frame.x + 40 },
+    });
+    const a = agent([timedOut, moved]);
+    expect(await a.s.gateway.run(a.ctx, click)).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.inputs()).toHaveLength(0);
+    const resized = agent([
+      timedOut,
+      (point) => ({ ...moved(point), windowFrame: { ...frame, h: 900 } }),
+    ]);
+    expect((await resized.s.gateway.run(resized.ctx, click)).ok).toBe(false);
+    expect(resized.inputs()).toHaveLength(0);
+  });
+
+  it("refuses a secret field that a window-level approval finds at dispatch", async () => {
+    const password = (point: Point): HitTestResult => {
+      const hit = search(point);
+      return {
+        ...hit,
+        target: { ...hit.target, role: "password text", secret: true },
+        windowFrame: frame,
+      };
+    };
+    const a = agent([timedOut, password]);
+    expect(await a.s.gateway.run(a.ctx, click)).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.found).toHaveLength(0);
+    expect(a.inputs()).toHaveLength(0);
+  });
+
+  it("refuses an approved element that a later read can no longer confirm", async () => {
+    const a = agent([element(), timedOut]);
+    const outcome = await a.s.gateway.run(a.ctx, click);
+    expect(outcome).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.inputs()).toHaveLength(0);
+  });
+
+  it("refuses a button swapped under the cursor after approval", async () => {
+    const a = agent([element("Search"), element("Send")]);
+    expect(await a.s.gateway.run(a.ctx, click)).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.inputs()).toHaveLength(0);
+  });
+
+  it("acts through a pixel of layout jitter and binds the approved box", async () => {
+    const a = agent([element("Search", 0), element("Search", 1)]);
+    expect((await a.s.gateway.run(a.ctx, click)).ok).toBe(true);
+    expect(a.consumed[0]?.target?.bbox?.x).toBe(280);
+    const far = agent([element("Search", 0), element("Search", 3)]);
+    expect((await far.s.gateway.run(far.ctx, click)).ok).toBe(false);
+  });
+
+  it("revalidates an approval by the same rule", async () => {
+    const lost = agent([element(), timedOut], true);
+    await lost.s.gateway.run(lost.ctx, click);
+    expect(lost.revalidated).toEqual([false]);
+    expect(lost.inputs()).toHaveLength(0);
+    const found = agent([timedOut, element()], true);
+    expect((await found.s.gateway.run(found.ctx, click)).ok).toBe(true);
+    expect(found.revalidated).toEqual([true]);
+  });
+
+  it("treats a failed lookup as unknown, never as an empty answer", async () => {
+    const appeared = agent([broken, element()]);
+    expect(await appeared.s.gateway.run(appeared.ctx, click)).toMatchObject({
+      ok: false,
+      cancelled: "stale",
+    });
+    const silent = agent([broken, broken]);
+    expect((await silent.s.gateway.run(silent.ctx, click)).ok).toBe(true);
+    expect(silent.consumed[0]).toMatchObject({ target: null, window: null, unknown: true });
   });
 });

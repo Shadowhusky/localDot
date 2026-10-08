@@ -4,6 +4,7 @@ export interface ThemeColor {
 }
 
 export interface StageTheme {
+  font: string;
   xenon: ThemeColor;
   xenonA10: ThemeColor;
   cursorFill: ThemeColor;
@@ -18,15 +19,17 @@ export interface StageTheme {
   void: ThemeColor;
 }
 
-const TOKENS: Record<keyof StageTheme, string> = {
+type ColorKey = Exclude<keyof StageTheme, "font">;
+
+const TOKENS: Record<ColorKey, string> = {
   xenon: "--color-xenon",
   xenonA10: "--color-xenon-a10",
   cursorFill: "--color-cursor-fill",
   cursorRim: "--color-cursor-rim",
   hudSolid: "--color-hud-solid",
   hudLine: "--color-hud-line",
-  text: "--color-text",
-  text2: "--color-text-2",
+  text: "--color-fg-1",
+  text2: "--color-fg-2",
   haloTarget: "--color-halo-target",
   shadeCursor: "--color-shade-cursor",
   keyBevel: "--color-key-bevel",
@@ -58,10 +61,13 @@ export function parseCssColor(value: string): ThemeColor {
   throw new RangeError(`unsupported CSS colour ${JSON.stringify(value)}`);
 }
 
-// Every overlay colour comes from theme.css, so a theme pack restyles the stage too.
+// Every overlay colour and the label font come from the CSS tokens, so an appearance restyles the
+// stage too.
 export function readTheme(style: CSSStyleDeclaration): StageTheme {
-  const out = {} as StageTheme;
-  for (const [key, token] of Object.entries(TOKENS) as [keyof StageTheme, string][]) {
+  const font = style.getPropertyValue("--font-ui").trim();
+  if (!font) throw new RangeError("no --font-ui token");
+  const out = { font } as StageTheme;
+  for (const [key, token] of Object.entries(TOKENS) as [ColorKey, string][]) {
     out[key] = parseCssColor(style.getPropertyValue(token));
   }
   return out;
