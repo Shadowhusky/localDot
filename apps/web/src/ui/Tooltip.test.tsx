@@ -10,6 +10,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 function popup(): HTMLElement | null {
@@ -159,8 +160,67 @@ describe("Tooltip", () => {
     const copy = screen.getByRole("button", { name: "Copy link" });
     fireEvent.pointerEnter(copy, { pointerType: "mouse" });
     wait(500);
-    fireEvent.scroll(window);
+    fireEvent.scroll(document);
     expect(document.querySelector(".ui-tooltip")).toBeNull();
+  });
+
+  it("closes when a scroller around the trigger scrolls", () => {
+    render(
+      <div data-testid="rail">
+        <Pair />
+      </div>,
+    );
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Copy link" }), {
+      pointerType: "mouse",
+    });
+    wait(500);
+    fireEvent.scroll(screen.getByTestId("rail"));
+    expect(document.querySelector(".ui-tooltip")).toBeNull();
+  });
+
+  it("stays open while another part of the page scrolls", () => {
+    render(
+      <>
+        <Pair />
+        <div data-testid="conversation" />
+      </>,
+    );
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Copy link" }), {
+      pointerType: "mouse",
+    });
+    wait(500);
+    fireEvent.scroll(screen.getByTestId("conversation"));
+    expect(popup()?.textContent).toBe("Copies a link to this replay");
+  });
+
+  it("stays centred on its trigger when what it says changes while open", () => {
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(
+      new DOMRect(300, 200, 28, 28),
+    );
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return (this.textContent?.length ?? 0) * 8;
+    });
+    const pause = (content: string) => (
+      <Tooltip content={content}>
+        <button type="button">Pause</button>
+      </Tooltip>
+    );
+    const { rerender } = render(pause("Pause after this step"));
+    fireEvent.pointerEnter(screen.getByRole("button", { name: "Pause" }), {
+      pointerType: "mouse",
+    });
+    wait(500);
+    const centre = () => {
+      const element = popup();
+      if (!element) throw new Error("no tooltip");
+      return Number.parseFloat(element.style.left) + element.offsetWidth / 2;
+    };
+    expect(centre()).toBe(314);
+    rerender(pause("Continue"));
+    expect(popup()?.textContent).toBe("Continue");
+    expect(centre()).toBe(314);
   });
 
   it("keeps the trigger's own handlers", () => {

@@ -136,24 +136,32 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
     const dismiss = (event: globalThis.KeyboardEvent) => {
       if (event.key === "Escape") control.close();
     };
+    // Only a scroll that can move the trigger closes it: a rail streaming lines beside it does not.
+    const scrolled = (event: Event) => {
+      const { target } = event;
+      if (!(target instanceof Node) || (control.trigger && target.contains(control.trigger)))
+        control.hide();
+    };
     const hold = control.held ? window.setTimeout(control.close, HOLD) : 0;
-    window.addEventListener("scroll", control.hide, { capture: true, passive: true });
+    window.addEventListener("scroll", scrolled, { capture: true, passive: true });
     window.addEventListener("resize", control.hide);
     document.addEventListener("pointerdown", away, true);
     document.addEventListener("keydown", dismiss);
     return () => {
       window.clearTimeout(hold);
-      window.removeEventListener("scroll", control.hide, { capture: true });
+      window.removeEventListener("scroll", scrolled, { capture: true });
       window.removeEventListener("resize", control.hide);
       document.removeEventListener("pointerdown", away, true);
       document.removeEventListener("keydown", dismiss);
     };
   }, [view.phase, control]);
 
+  // After every render while open: a label that changes under the pointer resizes the tooltip and
+  // often moves its trigger.
   useLayoutEffect(() => {
     const element = popup.current;
-    const anchor = control.trigger?.getBoundingClientRect();
-    if (view.phase !== "open" || !element || !anchor) return;
+    if (view.phase !== "open" || !element || !control.trigger) return;
+    const anchor = control.trigger.getBoundingClientRect();
     const { offsetWidth: width, offsetHeight: height } = element;
     const top = view.side === "top" ? anchor.top - GAP - height : anchor.bottom + GAP;
     const centre = anchor.left + anchor.width / 2;
@@ -161,7 +169,7 @@ export function useTooltip({ content, kbd, description, showOnPress = false }: T
     element.style.top = `${Math.round(top)}px`;
     element.style.left = `${Math.round(left)}px`;
     element.style.transformOrigin = `${Math.round(centre - left)}px ${view.side === "top" ? "100%" : "0"}`;
-  }, [view.phase, view.side, control]);
+  });
 
   const descriptionId = `${id}-description`;
   const triggerProps = {
