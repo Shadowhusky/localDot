@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { msToMicros, type Rect, ulid } from "@localdot/protocol";
 import sharp from "sharp";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { FakeOrchestrator } from "../cells/testing/fake-orchestrator.ts";
 import { NO_STREAM } from "../cells/types.ts";
 import { DesktopdRegistry } from "../desktopd/registry.ts";
@@ -11,7 +11,7 @@ import { FakeDesktopd } from "../desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../event-log.ts";
 import { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged, regionChanged } from "./freshness.ts";
-import { ActionGateway } from "./gateway.ts";
+import { ActionGateway, type GuiAction } from "./gateway.ts";
 import { DEFAULT_ONSET_TABLE } from "./onset-table.ts";
 import { keepPolicy } from "./ring-onset.ts";
 
@@ -163,7 +163,11 @@ async function setup(scale: 1 | 2 = 1) {
   setFrames(await png(base()));
   const basis = await gateway.observe(ctx);
   const clicks = () => fake.calls.filter((call) => call.path === "/input");
+  // The gateway listens to the cells only while it holds an input for the stream.
+  const idle = cells.listeners.size;
+  const holding = () => vi.waitFor(() => expect(cells.listeners.size).toBe(idle + 1));
   return {
+    holding,
     fake,
     log,
     cells,
@@ -347,6 +351,41 @@ describe("gateway freshness", () => {
       "down",
     ]);
   });
+  it("checks a press after any other action since the move, at a point of its own, or once the pointer moved away", async () => {
+    const s = await setup();
+    const overlay = { x: 620, y: 380, w: 40, h: 40 };
+    s.setFrames(await png(paint(base(), overlay)));
+    const basedOn = s.basis.frameId;
+    const stale = { ok: false, cancelled: "stale" };
+    const actions: GuiAction[] = [
+      { verb: "key", combo: ["Return"] },
+      { verb: "type", text: "a" },
+      { verb: "wait", ms: 10 },
+    ];
+    for (const between of actions) {
+      await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+      await s.gateway.run(s.ctx, between);
+      expect(await s.gateway.run(s.ctx, { verb: "down", basedOn })).toMatchObject(stale);
+    }
+    await s.gateway.run(s.ctx, { verb: "move", point: { x: 100, y: 100 }, basedOn });
+    expect(await s.gateway.run(s.ctx, { verb: "down", point, basedOn })).toMatchObject(stale);
+    const away = { x: 300, y: 300 };
+    const moved = await png(paint(paint(base(), overlay), { x: 280, y: 280, w: 40, h: 40 }));
+    s.fake.script.observe = () => ({
+      frameId: ulid(),
+      width: 1280,
+      height: 800,
+      image: moved.toString("base64"),
+      pointer: away,
+      windows: [],
+    });
+    await s.gateway.run(s.ctx, { verb: "move", point, basedOn });
+    expect(s.gateway.cursorOf(s.ctx.cellId)).toEqual(away);
+    expect(await s.gateway.run(s.ctx, { verb: "down", basedOn })).toMatchObject(stale);
+    expect(
+      s.clicks().filter((c) => (c.body as { input: { kind: string } }).input.kind === "down"),
+    ).toEqual([]);
+  });
   it("checks a drag's start against the screenshot, not the canvas it is about to change", async () => {
     const s = await setup();
     s.setFrames(await png(paint(base(), { x: 80, y: 80, w: 40, h: 40 })));
@@ -395,7 +434,7 @@ describe("freshness after a renewed stream hold", () => {
       };
       const running = s.gateway.run(s.ctx, { verb: "click", point, basedOn: s.basis.frameId });
       try {
-        await new Promise((resolve) => setTimeout(resolve, 150));
+        await s.holding();
         expect(s.cells.get(s.ctx.cellId)?.stream.connection).toBe("stalled");
         expect(s.clicks()).toHaveLength(0);
         recovered = true;
@@ -426,7 +465,7 @@ describe("freshness after a renewed stream hold", () => {
     };
     const running = s.gateway.run(s.ctx, { verb: "click", point, basedOn: s.basis.frameId });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await s.holding();
       expect(s.clicks()).toHaveLength(0);
       s.abort.abort();
       expect((await running).cancelled).toBe("user");
@@ -457,7 +496,7 @@ describe("freshness after a renewed stream hold", () => {
     };
     const running = s.gateway.run(s.ctx, { verb: "click", point, basedOn: s.basis.frameId });
     try {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      await s.holding();
       expect(s.clicks()).toHaveLength(0);
       s.cells.updateStream(s.ctx.cellId, { viewers: 1, connection: "live" });
       expect((await running).ok).toBe(true);

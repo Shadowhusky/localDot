@@ -1597,6 +1597,150 @@ describe("ActionGateway drags, moves and held buttons", () => {
     expect(ctx.holdInput).not.toHaveBeenCalled();
   });
 
+  it("asks for a scroll while the button is down as a drag to its point, glides there and raises no window", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx } = agentCtx(s);
+    await s.gateway.run(ctx, { verb: "down", point: { x: 100, y: 200 } });
+    const out = await s.gateway.run(ctx, {
+      verb: "scroll",
+      point: { x: 600, y: 300 },
+      dx: 1,
+      dy: 0,
+    });
+    expect(out.ok).toBe(true);
+    const request = ctx.authorizeAgent.mock.calls[1]?.[0];
+    expect(request?.action).toEqual({
+      verb: "scroll",
+      point: { x: 600, y: 300 },
+      dx: 1,
+      dy: 0,
+      drag: { from: { x: 100, y: 200 }, to: { x: 600, y: 300 } },
+    });
+    expect(request?.identity).toMatchObject({
+      target: { name: "report.txt" },
+      drop: { target: { name: "Trash" }, window: 88, point: { x: 1200, y: 600 } },
+    });
+    const [, glide, scroll] = inputs(s);
+    expect(glide?.input).toMatchObject({ kind: "move", to: { x: 1200, y: 600 } });
+    expect(scroll?.input).toMatchObject({ kind: "scroll", at: { x: 1200, y: 600 }, dx: 1 });
+    expect(scroll).not.toHaveProperty("window");
+    expect(s.gateway.cursorOf(s.cellId)).toEqual({ x: 1200, y: 600 });
+  });
+
+  it("refuses a scroll whose approval waited while the button was let go", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx, release } = agentCtx(s);
+    await s.gateway.run(ctx, { verb: "down", point: { x: 100, y: 200 } });
+    ctx.authorizeAgent.mockImplementation(async () => {
+      await release();
+      return { consume: () => true };
+    });
+    expect(
+      await s.gateway.run(ctx, { verb: "scroll", point: { x: 600, y: 300 }, dx: 0, dy: 1 }),
+    ).toMatchObject({ ok: false, error: "the left button is no longer down" });
+    expect(inputs(s).map((i) => i.input.kind)).toEqual(["down"]);
+  });
+
+  it("lets go of a pressed button after its time when no other action follows", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const s = setup({ hitTest: desk }, { heldButtonMs: 60_000 });
+      const releases = () => s.fake.calls.filter((c) => c.path === "/release");
+      await s.gateway.run(agentCtx(s).ctx, { verb: "down", point: { x: 10, y: 10 } });
+      await vi.advanceTimersByTimeAsync(59_000);
+      expect(releases()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1000);
+      expect(releases()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps desktopd from letting go of a held button while any approval waits, then refuses a move once it is gone", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    try {
+      const s = setup({ hitTest: desk }, { heldButtonMs: 60_000 });
+      const calls = (path: string) => s.fake.calls.filter((c) => c.path === path);
+      const { ctx } = agentCtx(s);
+      let answer!: (permit: { consume(): boolean } | undefined) => void;
+      await s.gateway.run(ctx, { verb: "down", point: { x: 10, y: 10 } });
+      ctx.authorizeAgent.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      );
+      // A key's card, then a move's: each waits ten minutes.
+      for (const action of [
+        { verb: "key" as const, combo: ["shift"] },
+        { verb: "move" as const, point: { x: 600, y: 300 } },
+      ]) {
+        const before = calls("/held").length;
+        const run = s.gateway.run(ctx, action);
+        await vi.waitFor(() => expect(answer).toBeDefined());
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+        expect(calls("/held").length - before).toBeGreaterThanOrEqual(20);
+        expect(calls("/release")).toEqual([]);
+        if (action.verb === "move") s.fake.script.held = () => ({ buttons: [] });
+        answer({ consume: () => true });
+        const out = await run;
+        answer = undefined as never;
+        if (action.verb === "key") expect(out.ok).toBe(true);
+        else
+          expect(out).toMatchObject({
+            ok: false,
+            cancelled: "preflight",
+            error: "the left button is no longer down",
+          });
+      }
+      expect(inputs(s).map((i) => i.input.kind)).toEqual(["down", "key"]);
+      // The gateway forgot the button desktopd let go of: a click goes through.
+      ctx.authorizeAgent.mockImplementation(async () => ({ consume: () => true }));
+      expect((await s.gateway.run(ctx, { verb: "click", point: { x: 5, y: 5 } })).ok).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("refuses a release whose button was let go after its approval, during its travel", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx, release } = agentCtx(s);
+    await s.gateway.run(ctx, { verb: "down", point: { x: 100, y: 200 } });
+    ctx.authorizeAgent.mockImplementation(async () => ({
+      consume: () => {
+        void release();
+        return true;
+      },
+    }));
+    expect(await s.gateway.run(ctx, { verb: "up", point: { x: 600, y: 300 } })).toMatchObject({
+      ok: false,
+      cancelled: "preflight",
+      error: "the left button is no longer down",
+    });
+    expect(inputs(s).map((i) => i.input.kind)).toEqual(["down"]);
+  });
+
+  it("calls a drag refused before its press a failure, not a drag cancelled before its drop", async () => {
+    const s = setup({
+      hitTest: desk,
+      input: () => ({ status: 409, body: "the window could not be raised" }),
+    });
+    const { ctx } = agentCtx(s);
+    const out = await s.gateway.run(ctx, {
+      verb: "drag",
+      path: [
+        { x: 100, y: 200 },
+        { x: 600, y: 300 },
+      ],
+    });
+    expect(out.ok).toBe(false);
+    expect(out.dropCancelled).toBeUndefined();
+    expect(s.ofType("action.dispatch")).toEqual([]);
+    expect(s.ofType("action.cancel").map((e) => e.data.detail)).not.toContainEqual(
+      expect.stringContaining("before its drop"),
+    );
+  });
+
   it("moves the cursor without a glide when no button is down, and checks no basis for it", async () => {
     const s = setup({ hitTest: desk });
     const { ctx } = agentCtx(s);
