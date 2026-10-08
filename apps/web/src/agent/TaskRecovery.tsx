@@ -1,6 +1,6 @@
 import { BudgetRaiseRequest } from "@localdot/protocol";
 import { useRef, useState } from "react";
-import { ownedPause } from "../session/task-hud.ts";
+import { ownedPause } from "../session/status.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 import "./usage.css";

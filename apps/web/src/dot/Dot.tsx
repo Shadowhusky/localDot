@@ -13,6 +13,8 @@ export interface DotProps {
   control?: boolean;
   // Defaults to the system preference.
   reducedMotion?: boolean;
+  // Fixes how this dot moves; by default each dot moves its own way.
+  seed?: number;
   style?: CSSProperties;
 }
 
@@ -33,12 +35,12 @@ export function Dot({ size, ...props }: DotProps) {
   return lodFor(size) === "glyph" ? <Glyph size={size} /> : <LiveDot size={size} {...props} />;
 }
 
-function LiveDot({ size, state = "idle", control = false, reducedMotion, style }: DotProps) {
+function LiveDot({ size, state = "idle", control = false, reducedMotion, seed, style }: DotProps) {
   const prefersReduced = useSyncExternalStore(subscribe, prefersReducedMotion, () => false);
   const reduced = reducedMotion ?? prefersReduced;
   const host = useRef<HTMLSpanElement>(null);
   const view = useRef<DotView | null>(null);
-  const initial = useRef({ size, state, control, reducedMotion: reduced });
+  const initial = useRef({ size, state, control, reducedMotion: reduced, seed });
   useEffect(() => {
     if (!host.current) return;
     const v = new DotView(host.current, initial.current);

@@ -2,7 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 export default defineConfig({
   testDir: "e2e",
-  testIgnore: "**/*.docker.spec.ts",
+  // e2e/ui runs under playwright.ui.config.ts, with its own matrix and build check.
+  testIgnore: ["**/*.docker.spec.ts", "ui/**"],
   timeout: 420_000,
   retries: 0,
   workers: 1,
