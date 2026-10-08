@@ -15,6 +15,10 @@ interface Options {
 }
 
 const SHELL: Options = { code: "c", value: "oO", stdin: "s", long: /^--(?:rcfile|init-file)$/ };
+// The long options of su and runuser that take a value.
+const SWITCH_USER_LONG = /^--(?:user|group|supp-group|shell|whitelist-environment)$/;
+// The nesting a command string may have (bash -c "eval '…'") before it counts as unclear.
+const MAX_NESTING = 4;
 
 // Inside the computer the agent acts. Only a positive match here (a consequential name on a page, a
 // command that reaches past the computer, a secret field) or an unidentified target on a signed-in
@@ -53,8 +57,6 @@ const PATTERNS = {
     /^(?:[^@\s/]+@)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:\/\S*)?$/i,
   remotePath: /^(?:[^@\s/:]+@)?(\[[0-9a-f:]+\]|[^\s/:]+):/i,
   assignment: /^\w+=/,
-  // A redirection before the program, with its target attached (2>/dev/null) or as the next word.
-  redirect: /^\d*[<>]+(.*)$/,
   // Reserved words that open or continue a compound command: the command follows them.
   keywords: /^(?:if|then|elif|else|do|while|until|!|\{)$/,
   // These name a word before what they run (`for x do …`, `function f { …`); `for x in a b` only
@@ -82,6 +84,7 @@ const PATTERNS = {
     ["command", {}],
     ["builtin", {}],
     ["eval", {}],
+    ["chroot", { long: /^--(?:userspec|groups)$/, operands: 1 }],
     ["exec", { value: "a" }],
     [
       "xargs",
@@ -160,7 +163,7 @@ export function nativeActionFacts(action: GuiAction, target: Target | null): Ris
   return {
     operation: action.verb,
     ...(action.verb === "key" ? { keys: action.combo } : {}),
-    ...(action.verb === "type" ? { newline: /[\r\n]/.test(action.text) } : {}),
+    ...(action.verb === "type" ? { newline: endsLine(action.text) } : {}),
     ...(action.verb === "type" && terminal ? { command: action.text } : {}),
     ...(target
       ? {
@@ -201,7 +204,7 @@ function input(facts: RiskFacts): ActionClass[] {
   const terminal = PATTERNS.terminal.test(identified.role ?? "");
   const keys = facts.operation === "key" ? (facts.keys ?? []) : [];
   const submits =
-    keys.some((key) => PATTERNS.enter.test(key)) ||
+    keys.some((key) => PATTERNS.enter.test(key) || endsLine(key)) ||
     (terminal && runsLine(keys)) ||
     (facts.operation === "type" && facts.newline === true);
   // A line run in a terminal is a command that can drive the signed-in browser, like the shell
@@ -213,6 +216,12 @@ function input(facts: RiskFacts): ActionClass[] {
     !PATTERNS.searchRole.test(identified.role ?? "") &&
     !PATTERNS.search.test(name);
   return submits && compose ? ["send"] : ["computer"];
+}
+
+// A C0 control character other than Tab ends or runs a line: Enter is ^M and ^J, and bash runs the
+// line on ^O.
+function endsLine(text: string): boolean {
+  return [...text].some((c) => c.charCodeAt(0) < 0x20 && c !== "\t");
 }
 
 // Besides Enter, a terminal runs its line on ctrl+J, ctrl+M or ctrl+O, and on a paste that ends a
@@ -265,12 +274,182 @@ function decodePath(value: string): string {
   }
 }
 
-function words(text: string): string[] {
-  return text
-    .trim()
-    .split(/\s+/)
-    .map((word) => word.replace(/^["']+|["']+$/g, ""))
-    .filter(Boolean);
+interface Token {
+  readonly kind: "word" | "operator" | "redirect";
+  readonly text: string;
+  readonly start: number;
+  readonly end: number;
+}
+
+// The words and operators of a command line as the shell reads them: quotes and backslashes join a
+// word, and only unquoted characters are operators. A substitution, even inside double quotes, opens
+// a group of its own. A redirection is a `redirect` token before its target, which for a descriptor
+// copy (2>&1) is the descriptor.
+function lex(source: string): Token[] {
+  const tokens: Token[] = [];
+  const modes: ("quote" | "group" | "tick")[] = [];
+  let word = "";
+  let started = -1;
+  const begin = (at: number) => {
+    if (started < 0) started = at;
+  };
+  const flush = (at: number) => {
+    if (started >= 0) tokens.push({ kind: "word", text: word, start: started, end: at });
+    word = "";
+    started = -1;
+  };
+  const emit = (kind: Token["kind"], text: string, at: number, length: number) => {
+    flush(at);
+    tokens.push({ kind, text, start: at, end: at + length });
+  };
+  for (let i = 0; i < source.length; ) {
+    const c = source[i] ?? "";
+    const rest = source.slice(i);
+    const mode = modes.at(-1);
+    if (mode === "quote") {
+      if (c === '"') modes.pop();
+      else if (rest.startsWith("$(")) {
+        emit("operator", "(", i, 2);
+        modes.push("group");
+        i += 2;
+        continue;
+      } else if (c === "`") {
+        emit("operator", "(", i, 1);
+        modes.push("tick");
+      } else if (c === "\\" && /^[$`"\\\n]/.test(source[i + 1] ?? "")) {
+        begin(i);
+        word += source[i + 1];
+        i += 2;
+        continue;
+      } else {
+        begin(i);
+        word += c;
+      }
+      i++;
+      continue;
+    }
+    if (c === "\\") {
+      if (source[i + 1] !== "\n") {
+        begin(i);
+        word += source[i + 1] ?? "";
+      }
+      i += 2;
+      continue;
+    }
+    if (c === "'") {
+      begin(i);
+      const close = source.indexOf("'", i + 1);
+      const end = close < 0 ? source.length : close;
+      word += source.slice(i + 1, end);
+      i = end + 1;
+      continue;
+    }
+    if (c === '"') {
+      begin(i);
+      modes.push("quote");
+      i++;
+      continue;
+    }
+    if (c === "`") {
+      if (mode === "tick") modes.pop();
+      else modes.push("tick");
+      emit("operator", mode === "tick" ? ")" : "(", i, 1);
+      i++;
+      continue;
+    }
+    const opening = /^(?:\$\(|[<>]\(|\()/.exec(rest)?.[0];
+    if (opening) {
+      emit("operator", "(", i, opening.length);
+      modes.push("group");
+      i += opening.length;
+      continue;
+    }
+    if (c === ")") {
+      if (mode === "group") modes.pop();
+      emit("operator", ")", i, 1);
+      i++;
+      continue;
+    }
+    if (c === " " || c === "\t") {
+      flush(i);
+      i++;
+      continue;
+    }
+    if (endsLine(c)) {
+      emit("operator", ";", i, 1);
+      i++;
+      continue;
+    }
+    const redirect = /^(?:&>>?|[<>]&|<<<|<<-?|<>|>>|>\||[<>])/.exec(rest)?.[0];
+    if (redirect) {
+      // Digits right before it name the descriptor, not a word.
+      if (started >= 0 && /^\d+$/.test(source.slice(started, i))) {
+        word = "";
+        started = -1;
+      }
+      emit("redirect", redirect, i, redirect.length);
+      i += redirect.length;
+      continue;
+    }
+    const control = /^(?:&&|\|\||;;|\|&|[;&|])/.exec(rest)?.[0];
+    if (control) {
+      emit("operator", control, i, control.length);
+      i += control.length;
+      continue;
+    }
+    begin(i);
+    word += c;
+    i++;
+  }
+  flush(source.length);
+  return tokens;
+}
+
+interface Stage {
+  readonly words: readonly string[];
+  // A here-string's text, which the stage reads as its input.
+  readonly input?: string;
+}
+interface Line {
+  readonly text: string;
+  readonly stages: readonly Stage[];
+}
+
+// The commands of a command line, each a list of the stages its pipes, groups and substitutions
+// separate, with redirections taken out.
+function parse(source: string): Line[] {
+  const lines: Line[] = [];
+  let tokens: Token[] = [];
+  const close = () => {
+    const first = tokens[0];
+    const last = tokens.at(-1);
+    if (!first || !last) return;
+    const stages: Stage[] = [];
+    let words: string[] = [];
+    let input: string | undefined;
+    const end = () => {
+      if (words.length) stages.push({ words, ...(input === undefined ? {} : { input }) });
+      words = [];
+      input = undefined;
+    };
+    for (let k = 0; k < tokens.length; k++) {
+      const token = tokens[k];
+      if (token?.kind === "operator") end();
+      else if (token?.kind === "redirect") {
+        const target = tokens[k + 1]?.kind === "word" ? tokens[++k] : undefined;
+        if (token.text === "<<<" && target) input = target.text;
+      } else if (token) words.push(token.text);
+    }
+    end();
+    lines.push({ text: source.slice(first.start, last.end), stages });
+    tokens = [];
+  };
+  for (const token of lex(source)) {
+    if (token.kind === "operator" && [";", ";;", "&&", "||", "&"].includes(token.text)) close();
+    else tokens.push(token);
+  }
+  close();
+  return lines;
 }
 
 function base(token: string | undefined): string {
@@ -305,27 +484,94 @@ function unwrap(args: readonly string[], options: Options): string[] | undefined
   return options.code && !code ? undefined : args.slice(i);
 }
 
-// The words a stage runs, after its assignments, redirections, shell keywords and wrappers.
-function program(stage: string): string[] {
-  let tokens = words(stage);
+interface Run {
+  readonly words: readonly string[];
+  // Command strings the stage runs besides: a shell's -c string or here-string, eval's words, su's
+  // -c string and find's -exec commands.
+  readonly nested: readonly string[];
+}
+
+// The words a stage runs, after its assignments, shell keywords and wrappers.
+function program(stage: Stage): Run {
+  let tokens = stage.words;
+  const nested: string[] = [];
   for (;;) {
     const first = tokens[0] ?? "";
-    const redirect = PATTERNS.redirect.exec(first);
-    if (redirect) tokens = tokens.slice(redirect[1] ? 1 : 2);
-    else if (PATTERNS.assignment.test(first) || PATTERNS.keywords.test(first))
-      tokens = tokens.slice(1);
+    if (PATTERNS.assignment.test(first) || PATTERNS.keywords.test(first)) tokens = tokens.slice(1);
     // `coproc NAME { …; }` names the coprocess; otherwise coproc runs a plain command.
     else if (first === "coproc") tokens = tokens.slice(tokens[2] === "{" ? 2 : 1);
     else if (PATTERNS.headers.test(first)) tokens = tokens.slice(2);
     else {
       const name = base(first);
-      const options =
-        PATTERNS.wrappers.get(name) ?? (interpreter(name) === SHELL ? SHELL : undefined);
-      const rest = options && unwrap(tokens.slice(1), options);
-      if (!rest) return tokens;
+      const args = tokens.slice(1);
+      if (name === "eval") nested.push(args.join(" "));
+      if (name === "find") nested.push(...execs(args));
+      if (name === "su" || name === "runuser") {
+        const { code, command } = switchUser(args);
+        if (code !== undefined) return { words: [], nested: [...nested, code] };
+        if (!command) return { words: tokens, nested };
+        tokens = command;
+        continue;
+      }
+      if (interpreter(name) === SHELL) {
+        const rest = unwrap(args, SHELL);
+        if (rest)
+          return { words: [], nested: rest[0] === undefined ? nested : [...nested, rest[0]] };
+        if (stage.input !== undefined && readsProgram(tokens)) nested.push(stage.input);
+        return { words: tokens, nested };
+      }
+      const options = PATTERNS.wrappers.get(name);
+      const rest = options && unwrap(args, options);
+      if (!rest) return { words: tokens, nested };
       tokens = rest;
     }
   }
+}
+
+// su and runuser read their options up to the first operand. -c runs a shell's command string and
+// runuser -u runs the command after the options; past su's user, the words go to its shell.
+function switchUser(args: readonly string[]): { code?: string; command?: readonly string[] } {
+  let asUser = false;
+  const after = (i: number) => {
+    if (asUser) return { command: args.slice(i) };
+    const code = unwrap(args.slice(i + 1), SHELL)?.[0];
+    return code === undefined ? {} : { code };
+  };
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (!arg.startsWith("-")) return after(i);
+    if (arg.startsWith("--")) {
+      const [option = "", inline] = arg.split(/=(.*)/s, 2);
+      if (option === "--command") return { code: inline ?? args[i + 1] ?? "" };
+      if (option === "--user") asUser = true;
+      if (inline === undefined && SWITCH_USER_LONG.test(option)) i++;
+      continue;
+    }
+    for (let j = 1; j < arg.length; j++) {
+      const flag = arg[j] ?? "";
+      const value = arg.slice(j + 1);
+      if (flag === "c") return { code: value || (args[i + 1] ?? "") };
+      if ("ugGsw".includes(flag)) {
+        if (flag === "u") asUser = true;
+        if (!value) i++;
+        break;
+      }
+    }
+  }
+  return {};
+}
+
+// The commands find runs with -exec, -execdir, -ok and -okdir, each up to its ; or +.
+function execs(args: readonly string[]): string[] {
+  const found: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    if (!/^-(?:exec|ok)(?:dir)?$/.test(args[i] ?? "")) continue;
+    const end = args.findIndex((arg, k) => k > i && (arg === ";" || arg === "+"));
+    found.push(args.slice(i + 1, end < 0 ? undefined : end).join(" "));
+    if (end < 0) break;
+    i = end;
+  }
+  return found;
 }
 
 // Whether an interpreter takes its program from stdin: no option names the code and no script
@@ -467,30 +713,46 @@ function stageClass(tokens: readonly string[]): ActionClass | undefined {
 // On a signed-in desktop any command can drive the signed-in browser (xdotool, XTest, DevTools).
 function shell(command: string, signedIn: boolean): ActionClass[] {
   const classes = new Set<ActionClass>(signedIn ? ["computer", "unknown"] : ["computer"]);
-  // A descriptor copy (2>&1) is dropped and a file redirect (&>f, >&f) kept, so neither splits on &.
-  const commands = command
-    .replace(/\|&/g, "|")
-    .replace(/\d*[<>]&(?:\d+|-)/g, " ")
-    .replace(/&>|>&/g, ">")
-    .split(/&&|\|\||[;\r\n]|&(?!&)/);
-  for (const text of commands) {
-    if (PATTERNS.substitution.test(text) && remote(words(text))) classes.add("download_execute");
-    const stages = text
-      .split(/\||[()`]|\$\(/)
-      .map(program)
-      .filter((stage) => stage.length);
-    stages.forEach((stage, index) => {
-      const effect = stageClass(stage);
-      if (effect) classes.add(effect);
-      const next = stages[index + 1];
-      if (
-        ["curl", "wget"].includes(base(stage[0])) &&
-        next &&
-        readsProgram(next) &&
-        remote(stage.slice(1))
-      )
-        classes.add("download_execute");
+  for (const effect of effects(command, 0)) classes.add(effect);
+  return [...classes];
+}
+
+function effects(command: string, depth: number): ActionClass[] {
+  if (depth > MAX_NESTING) return ["unknown"];
+  const found: ActionClass[] = [];
+  for (const line of parse(command)) {
+    const words = line.stages.flatMap((stage) => stage.words);
+    if (PATTERNS.substitution.test(line.text) && remote(words)) found.push("download_execute");
+    const runs = line.stages.map(program);
+    runs.forEach((run, index) => {
+      for (const code of run.nested) found.push(...effects(code, depth + 1));
+      const effect = stageClass(run.words);
+      if (effect) found.push(effect);
+      const next = runs[index + 1];
+      if (!next || !reads(next, depth)) return;
+      const name = base(run.words[0]);
+      if ((name === "curl" || name === "wget") && remote(run.words.slice(1)))
+        found.push("download_execute");
+      // echo "git push" | sh runs what it echoes.
+      if ((name === "echo" || name === "printf") && interpreter(base(next.words[0])) === SHELL)
+        found.push(...effects(echoed(run.words), depth + 1));
     });
   }
-  return [...classes];
+  return found;
+}
+
+// Whether a stage runs a program it reads from stdin, itself or in a command string it runs.
+function reads(run: Run, depth: number): boolean {
+  if (readsProgram(run.words)) return true;
+  if (depth >= MAX_NESTING) return false;
+  return run.nested.some((code) =>
+    parse(code).some((line) => line.stages.some((stage) => reads(program(stage), depth + 1))),
+  );
+}
+
+function echoed(tokens: readonly string[]): string {
+  const args = tokens.slice(1);
+  if (base(tokens[0]) === "printf") return (args.length > 1 ? args.slice(1) : args).join(" ");
+  const start = args.findIndex((arg) => !/^-[neE]+$/.test(arg));
+  return start < 0 ? "" : args.slice(start).join(" ");
 }
