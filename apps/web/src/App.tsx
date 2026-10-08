@@ -42,6 +42,7 @@ import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import { Announcer } from "./ui/Announcer.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -881,6 +882,7 @@ function Theatre({ api }: { api: ApiClient }) {
         }}
         stop={sheetStopControl}
       />
+      <Announcer />
     </div>
   );
 }

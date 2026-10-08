@@ -1,10 +1,17 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Conversation } from "./Conversation.tsx";
 import type { AgentMessage, AgentQuestion } from "./model.ts";
 import { threadItems } from "./thread.ts";
 
+const spoken = vi.hoisted(() => ({ announce: vi.fn(), withdraw: vi.fn() }));
+vi.mock("../ui/Announcer.tsx", () => spoken);
+
+beforeEach(() => {
+  spoken.announce.mockClear();
+  spoken.withdraw.mockClear();
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
@@ -93,7 +100,7 @@ describe("the conversation thread", () => {
     await act(async () => fireEvent.click(plain as HTMLElement));
     expect(writeText).toHaveBeenCalledExactlyOnceWith("可见 text");
     expect(screen.getByRole("button", { name: "Copied" })).toBeTruthy();
-    expect(screen.getByRole("status").textContent).toContain("Copied.");
+    expect(spoken.announce).toHaveBeenLastCalledWith("thread", "Copied.");
     await act(async () => vi.advanceTimersByTime(1600));
     expect(screen.getAllByRole("button", { name: "Copy your message" })).toHaveLength(2);
   });
@@ -216,14 +223,15 @@ it("announces completed replies without reading each streaming delta", () => {
     final,
   });
   const v = render(<Conversation items={items([reply("First", false)])} truncated={false} />);
-  const live = screen.getByRole("status");
-  expect(live.textContent).toBe("");
   v.rerender(<Conversation items={items([reply("First second", false)])} truncated={false} />);
-  expect(live.textContent).toBe("");
+  expect(spoken.announce).not.toHaveBeenCalled();
   v.rerender(
     <Conversation items={items([reply("First second complete", true)])} truncated={false} />,
   );
-  expect(live.textContent).toBe("dot replied: First second complete");
+  expect(spoken.announce).toHaveBeenCalledExactlyOnceWith(
+    "thread",
+    "dot replied: First second complete",
+  );
   v.rerender(
     <Conversation
       items={items([
@@ -233,15 +241,29 @@ it("announces completed replies without reading each streaming delta", () => {
       truncated={false}
     />,
   );
-  expect(live.textContent).toBe("dot replied: First second complete");
+  expect(spoken.announce).toHaveBeenCalledOnce();
+});
+
+it("says nothing while the conversation is out of view", () => {
+  render(
+    <Conversation
+      items={items([message("reply", "Done.", "assistant")])}
+      truncated={false}
+      visible={false}
+    />,
+  );
+  expect(spoken.announce).not.toHaveBeenCalled();
 });
 
 it("retires the previous task's reply announcement when the conversation owner changes", () => {
   const reply = message("previous-reply", "Previous task result", "assistant");
   const v = render(<Conversation items={items([reply])} truncated={false} ownerKey="first-task" />);
-  expect(screen.getByRole("status").textContent).toBe("dot replied: Previous task result");
+  expect(spoken.announce).toHaveBeenLastCalledWith("thread", "dot replied: Previous task result");
+  expect(spoken.withdraw).not.toHaveBeenCalled();
   v.rerender(<Conversation items={[]} truncated={false} ownerKey="second-task" />);
-  expect(screen.getByRole("status").textContent).toBe("");
+  expect(spoken.withdraw).toHaveBeenCalledExactlyOnceWith("thread");
+  // The thread has no live region of its own; the page's one is the Announcer's.
+  expect(screen.queryByRole("status")).toBeNull();
 });
 
 it("says earlier history lives in the task log when the projection dropped it", () => {

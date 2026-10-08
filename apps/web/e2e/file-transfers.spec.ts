@@ -350,9 +350,8 @@ for (const width of [1280, 390])
     expect(download.url().startsWith("blob:")).toBe(true);
     expect(download.url()).not.toContain(TOKEN);
     expect(proof.downloads).toEqual(["report.html"]);
-    await expect(page.locator(".thread-body > [role=status]")).toContainText(
-      "report.html downloaded.",
-    );
+    // Said through the page's one polite region.
+    await expect(page.locator(".app > [role=status]")).toHaveText("report.html downloaded.");
     expect(context.pages()).toHaveLength(1);
     expect(await page.evaluate(() => "artifactExecuted" in window)).toBe(false);
     // The card's own icons are the only pictures in it; the file itself never renders.

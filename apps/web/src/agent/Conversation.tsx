@@ -13,10 +13,10 @@ import { createPortal } from "react-dom";
 import { count } from "../copy/format.ts";
 import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
+import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
-import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { CopyButton } from "./CopyButton.tsx";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
@@ -306,16 +306,15 @@ export function Conversation({
   // Following the end, the end is held in the same frame as anything arrives, so nothing at the
   // end moves; a new row eases in where it lands instead.
   const follow = useFollowScroll(ownerKey, true, { glide: false });
-  const [announcement, setAnnouncement] = useState({ owner: ownerKey, text: "" });
-  const announce = useCallback(
-    (text: string) =>
-      setAnnouncement((old) => ({
-        owner: ownerKey,
-        // The same words twice still count as news.
-        text: old.text === text ? `${text} ` : text,
-      })),
-    [ownerKey],
-  );
+  // The thread speaks through the page's one polite region, only while it is on show; a task left
+  // behind takes back what it had not said yet.
+  const heard = useRef(visible);
+  heard.current = visible;
+  const announce = useCallback((text: string) => {
+    if (heard.current) speak("thread", text);
+  }, []);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the owner is the trigger.
+  useEffect(() => () => withdraw("thread"), [ownerKey]);
   const results = useMemo(
     () => items.flatMap((item) => (item.kind === "result" ? [item.result] : [])) as AgentResult[],
     [items],
@@ -335,12 +334,10 @@ export function Conversation({
     const message = completed.message;
     if (announced.current.owner === ownerKey && announced.current.id === message.id) return;
     announced.current = { owner: ownerKey, id: message.id };
-    setAnnouncement({
-      owner: ownerKey,
-      text: keyLikePresent(message.text)
-        ? "dot replied."
-        : `dot replied: ${message.text.slice(0, 200)}`,
-    });
+    speak(
+      "thread",
+      keyLikePresent(message.text) ? "dot replied." : `dot replied: ${message.text.slice(0, 200)}`,
+    );
   }, [completed, ownerKey, visible]);
 
   // Items that arrive at the end once the thread has drawn its history ease in; history, which may
@@ -558,9 +555,6 @@ export function Conversation({
   const empty = !shown.length && !liveWork;
   return (
     <div className="thread-body" ref={body}>
-      <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
-        {visible && announcement.owner === ownerKey ? announcement.text : ""}
-      </VisuallyHidden>
       <ScrollArea
         ref={attach}
         className="thread-scroll"
