@@ -347,6 +347,11 @@
     opacity: 0.25;
   }
 
+  /* Of unknown length, the arc turns on its own, with no track to be read as a share. */
+  .ui-progress[data-indeterminate] .ui-progress-track {
+    opacity: 0;
+  }
+
   .ui-progress-arc {
     stroke-dashoffset: calc(1 - var(--_value));
     rotate: -90deg;
@@ -383,11 +388,13 @@
     min-width: 0;
   }
 
+  /* Short of room, the amount goes under the name rather than cutting it short. */
   .ui-meter-head {
     display: flex;
+    flex-wrap: wrap;
     align-items: baseline;
     justify-content: space-between;
-    gap: calc(var(--spacing) * 3);
+    column-gap: calc(var(--spacing) * 3);
     color: var(--color-fg-2);
     font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
   }
@@ -641,13 +648,15 @@
       transition-delay: 0s;
     }
 
+    /* Still: the line in a dimmer ink than a share, and the arc where it stands. */
     .ui-progress[data-indeterminate] > .ui-progress-fill {
       width: 100%;
-      animation: ui-breathe 1.6s var(--ease-standard) infinite;
+      background-color: var(--color-fg-3);
+      animation: none;
     }
 
     .ui-progress[data-indeterminate] > .ui-progress-ring {
-      animation: ui-breathe 1.6s var(--ease-standard) infinite;
+      animation: none;
     }
 
     .ui-progress-check {
@@ -684,7 +693,8 @@
       outline-offset: -1px;
     }
 
-    :is(.ui-progress-fill, .ui-meter-fill) {
+    :is(.ui-progress-fill, .ui-meter-fill),
+    .ui-meter[data-near] .ui-meter-fill {
       forced-color-adjust: none;
       background-color: CanvasText;
     }

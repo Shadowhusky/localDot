@@ -646,6 +646,73 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await context.close();
         });
 
+      test("under reduced motion work of unknown length stands still, and its ring has no track", async () => {
+        const { context, page, seen } = await open(browser, device, "reduce");
+        const unknown = page.locator(".ui-progress[data-indeterminate]");
+        await unknown.first().scrollIntoViewIfNeeded();
+        expect(
+          await unknown.evaluateAll((elements) =>
+            elements.flatMap((element) =>
+              element.getAnimations({ subtree: true }).map((animation) => animation.id || "a"),
+            ),
+          ),
+        ).toEqual([]);
+        const tracks = await page
+          .locator(".ui-progress[data-variant='ring'] .ui-progress-track")
+          .evaluateAll((elements) =>
+            elements.map((element) => [
+              element.closest("[data-indeterminate]") !== null,
+              getComputedStyle(element).opacity,
+            ]),
+          );
+        expect(tracks).toContainEqual([true, "0"]);
+        expect(tracks.filter(([unknownLength]) => unknownLength)).toEqual([[true, "0"]]);
+        expect(tracks).toContainEqual([false, "0.25"]);
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      });
+
+      test("a meter short of room puts its amount under its name rather than cutting the name", async () => {
+        const { context, page, seen } = await open(browser, device);
+        const meter = page.locator(".ui-meter[data-near]").first();
+        await meter.scrollIntoViewIfNeeded();
+        await meter.evaluate((element) => element.style.setProperty("width", "240px"));
+        const [label, value] = await Promise.all(
+          [".ui-meter-label", ".ui-meter-value"].map((selector) =>
+            meter.locator(selector).evaluate((element) => {
+              const { x, y, width } = element.getBoundingClientRect();
+              return { x, y, width, cut: element.scrollWidth > element.clientWidth };
+            }),
+          ),
+        );
+        expect(label?.cut).toBe(false);
+        expect(value?.y).toBeGreaterThan(label?.y ?? 0);
+        const track = await box(meter.getByRole("meter"));
+        expect((value?.x ?? 0) + (value?.width ?? 0)).toBeLessThanOrEqual(
+          track.x + track.width + 0.5,
+        );
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      });
+
+      if (engine === "chrome" && !touch)
+        test("in light forced colours a meter near its limit still shows its fill", async () => {
+          const { context, page, seen } = await open(browser, device);
+          await page.emulateMedia({ forcedColors: "active", colorScheme: "light" });
+          const near = page.locator(".ui-meter[data-near] .ui-meter-fill").first();
+          await near.scrollIntoViewIfNeeded();
+          await settled(page.locator(".feedback-meters"));
+          const fill = (locator: Locator) =>
+            locator.evaluate((element) => getComputedStyle(element).backgroundColor);
+          const ground = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+          expect(await fill(near)).not.toBe(ground);
+          expect(await fill(near)).toBe(
+            await fill(page.locator(".ui-meter:not([data-near]) .ui-meter-fill").first()),
+          );
+          expect(await seen()).toEqual({ violations: [], styles: 0 });
+          await context.close();
+        });
+
       test("a download ring fills, then closes with a check", async () => {
         const { context, page, seen } = await open(browser, device);
         const live = page.locator(".feedback-download");
