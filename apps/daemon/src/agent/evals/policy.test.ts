@@ -125,6 +125,21 @@ describe("tasks", () => {
     ]);
   });
 
+  it("keeps every hand-off ceiling at or below the baseline", () => {
+    // One hand-off per typed text in the 2026-10-08 baseline; gimp-draw-shape types one name.
+    const baseline: Record<string, number> = {
+      "gimp-draw-shape": 1,
+      "gimp-pick-colour": 2,
+      "calc-fill": 2,
+      "web-form": 2,
+      "files-drag-drop": 0,
+      "files-multi-select": 0,
+      "text-keyboard": 2,
+    };
+    expect(TASKS.map((t) => t.id).sort()).toEqual(Object.keys(baseline).sort());
+    for (const t of TASKS) expect(t.maxHandoffs, t.id).toBeLessThanOrEqual(baseline[t.id] ?? 0);
+  });
+
   it("has a no-op policy that only finishes", async () => {
     expect(await noopPolicy(view())).toEqual([["done", { summary: "Nothing to do." }]]);
   });

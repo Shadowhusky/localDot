@@ -40,6 +40,9 @@ export interface EvalTask {
   prompt: string;
   // Capabilities a task cannot pass without; until they land it runs as an expected failure.
   requires: readonly Capability[];
+  // The most inputs the simulated user may do for the agent. Today every typed text is handed
+  // over; lower this as hand-offs go away, never raise it.
+  maxHandoffs: number;
   timeoutMs: number;
   setup(cell: EvalCell): Promise<void>;
   oracle(): Policy;
@@ -156,6 +159,7 @@ const gimpDrawShape: EvalTask = {
   prompt:
     "GIMP is open with a blank canvas. Draw a closed ellipse outline by hand with the paintbrush, then export the image as ~/eval/shape.png.",
   requires: ["drag"],
+  maxHandoffs: 1,
   timeoutMs: 600_000,
   setup: startGimp,
   oracle: () =>
@@ -191,6 +195,7 @@ const gimpPickColour: EvalTask = {
   id: "gimp-pick-colour",
   prompt: `GIMP is open with a blank canvas. Set the foreground colour to ${BROWN} by typing it into the colour dialog's hex field, fill the whole canvas with it and export the image as ~/eval/colour.png.`,
   requires: [],
+  maxHandoffs: 2,
   timeoutMs: 600_000,
   setup: startGimp,
   oracle: () => {
@@ -294,6 +299,7 @@ const calcFill: EvalTask = {
   id: "calc-fill",
   prompt: `LibreOffice Calc is open on a new spreadsheet. Enter this table starting at A1, one row per line and columns separated by commas, then save it as ~/eval/table.ods:\n${TABLE.map((r) => r.join(", ")).join("\n")}`,
   requires: [],
+  maxHandoffs: 2,
   timeoutMs: 300_000,
   setup: async (cell) => {
     cell.exec(["mkdir", "-p", `${HOME}/eval`]);
@@ -349,6 +355,7 @@ const webForm: EvalTask = {
   prompt:
     "Fill in the delivery form open in Chromium: name Robin Hale, country Norway, leave at door ticked, date 8 October 2026, bell volume 7, packing order Cheese, Apples, Bread, Dates. Then submit it.",
   requires: [],
+  maxHandoffs: 2,
   timeoutMs: 300_000,
   setup: async (cell) => {
     cell.write(`${HOME}/eval/form.html`, fixture("form.html"));
@@ -393,6 +400,7 @@ const filesDragDrop: EvalTask = {
   prompt:
     "The file manager shows ~/eval/desk. Drag report.txt onto the archive folder to move it there.",
   requires: ["drag"],
+  maxHandoffs: 0,
   timeoutMs: 180_000,
   setup: async (cell) => {
     cell.exec(["mkdir", "-p", `${HOME}/eval/desk/archive`]);
@@ -429,6 +437,7 @@ const filesMultiSelect: EvalTask = {
   prompt:
     "The file manager shows ~/eval/inbox. Select 2-beta.txt to 4-delta.txt with click and Shift+click, add 5-epsilon.txt with Ctrl+click, then move the selection into the done folder.",
   requires: ["modifier_click"],
+  maxHandoffs: 0,
   timeoutMs: 180_000,
   setup: async (cell) => {
     cell.exec(["mkdir", "-p", `${HOME}/eval/inbox/done`]);
@@ -477,6 +486,7 @@ const textKeyboard: EvalTask = {
   prompt:
     "Mousepad is open on ~/eval/notes.txt. Using Find and Replace (Ctrl+R), replace every 'fox' with 'cat', then save the file.",
   requires: [],
+  maxHandoffs: 2,
   timeoutMs: 300_000,
   setup: async (cell) => {
     cell.write(`${HOME}/eval/notes.txt`, NOTES);

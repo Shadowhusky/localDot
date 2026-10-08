@@ -33,7 +33,7 @@ describe("callsOf", () => {
     output: { type, value },
   });
 
-  it("separates failed calls from skipped ones", () => {
+  it("separates refused and failed calls from skipped ones", () => {
     expect(
       callsOf([
         { role: "user", content: "task" },
@@ -47,9 +47,9 @@ describe("callsOf", () => {
         { role: "tool", content: [result("done", "text", "Task finished.")] },
       ]),
     ).toEqual([
-      { name: "computer", ok: false, skipped: false },
-      { name: "computer", ok: false, skipped: true },
-      { name: "done", ok: true, skipped: false },
+      { name: "computer", ok: false, skipped: false, refused: true },
+      { name: "computer", ok: false, skipped: true, refused: false },
+      { name: "done", ok: true, skipped: false, refused: false },
     ]);
   });
 });

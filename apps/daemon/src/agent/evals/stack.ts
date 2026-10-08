@@ -61,6 +61,8 @@ export interface CallRecord {
   name: string;
   ok: boolean;
   skipped: boolean;
+  // The brain refused an action it does not support yet.
+  refused: boolean;
 }
 
 export interface AgentRun {
@@ -122,7 +124,12 @@ export function callsOf(transcript: readonly TranscriptMessage[]): CallRecord[] 
             const output = part.output ?? { type: "text", value: "" };
             const ok = !output.type.startsWith("error");
             const text = typeof output.value === "string" ? output.value : "";
-            return { name: part.toolName ?? "", ok, skipped: !ok && text.startsWith("Skipped:") };
+            return {
+              name: part.toolName ?? "",
+              ok,
+              skipped: !ok && text.startsWith("Skipped:"),
+              refused: !ok && /\bnot supported yet\b/.test(text),
+            };
           }),
   );
 }

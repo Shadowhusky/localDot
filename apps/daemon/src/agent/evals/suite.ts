@@ -55,8 +55,6 @@ export interface SuiteOptions {
   log?(line: string): void;
 }
 
-const failed = (reason: string): Verdict => ({ ok: false, reasons: [reason] });
-
 async function saveScreen(cell: EvalCell, path: string): Promise<void> {
   try {
     const res = await fetch(`${cell.baseUrl}/observe`, {
@@ -87,9 +85,9 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
   const log = o.log ?? (() => {});
   let cell: EvalCell | undefined;
   let run: AgentRun | undefined;
-  let noop: Verdict = failed("the no-op run did not happen");
-  let verdict: Verdict = failed("the run did not happen");
-  let error: string | undefined;
+  let noop: Verdict | undefined;
+  let verdict: Verdict | undefined;
+  let harnessError: string | undefined;
   let session: ModelSession | undefined;
   try {
     if (o.model && o.model.capUSD - spentUSD <= 0) throw new Error("the spend cap is used up");
@@ -127,9 +125,8 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
       `${task.id}: ${run.outcome} in ${(run.wallMs / 1000).toFixed(1)} s, ${verdict.ok ? "passed" : `failed (${verdict.reasons.join("; ")})`}`,
     );
   } catch (caught) {
-    error = caught instanceof Error ? caught.message : String(caught);
-    verdict = failed(error);
-    log(`${task.id}: ${error}`);
+    harnessError = caught instanceof Error ? caught.message : String(caught);
+    log(`${task.id}: ${harnessError}`);
   } finally {
     await session?.end().catch(() => log(`${task.id}: the model session did not close cleanly`));
     if (cell) removeEvalContainers(o.cell, cell.name);
@@ -139,10 +136,12 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
     id: task.id,
     requires: task.requires,
     landed,
-    verdict,
-    noop,
-    run: run ?? { outcome: "error", error, wallMs: 0, calls: [] },
+    verdict: verdict ?? { ok: false, reasons: [] },
+    ...(noop ? { noop } : {}),
+    run: run ?? { outcome: "error", wallMs: 0, calls: [] },
     analysis: analyseEvents(events),
+    maxHandoffs: task.maxHandoffs,
+    ...(harnessError ? { harnessError } : {}),
     ...(o.model?.prices ? { prices: o.model.prices } : {}),
   });
 }
