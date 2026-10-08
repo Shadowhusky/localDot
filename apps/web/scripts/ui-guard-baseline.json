@@ -198,39 +198,8 @@
     "stray-stylesheet": 1,
     "type-literal": 10
   },
-  "src/replay/CompareView.tsx": {
-    "native-control": 1
-  },
-  "src/replay/ReplayControls.tsx": {
-    "native-control": 7,
-    "native-disabled": 5
-  },
-  "src/replay/ReplayView.tsx": {
-    "banned-copy": 2,
-    "native-control": 2,
-    "native-disabled": 1
-  },
-  "src/replay/Scrubber.tsx": {
-    "banned-copy": 1
-  },
-  "src/replay/SessionsRail.tsx": {
-    "banned-copy": 12,
-    "native-control": 7,
-    "native-disabled": 3
-  },
   "src/replay/recording-source.ts": {
     "banned-copy": 1
-  },
-  "src/replay/replay-view.ts": {
-    "banned-copy": 2
-  },
-  "src/replay/replay.css": {
-    "control-selector": 6,
-    "half-pixel": 1,
-    "radius-literal": 12,
-    "spacing-literal": 34,
-    "stray-stylesheet": 1,
-    "type-literal": 14
   },
   "src/replay/useReplay.ts": {
     "banned-copy": 2

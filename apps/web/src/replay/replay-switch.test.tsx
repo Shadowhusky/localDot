@@ -90,10 +90,11 @@ function fixture(sessions: ReturnType<typeof recorded>[]) {
 
 const replayTime = () => screen.findByRole("status", { name: "Replay time" });
 const query = (name: string) => new URLSearchParams(window.location.search).get(name);
-const sessionCard = (title: string) =>
-  within(screen.getByRole("complementary", { name: "Recorded sessions" }))
-    .getByText(title)
-    .closest("button") as HTMLButtonElement;
+const sessionCard = async (title: string) => {
+  fireEvent.click(await screen.findByRole("button", { name: /^All tasks/ }));
+  const tasks = await screen.findByRole("dialog", { name: "Tasks" });
+  return within(tasks).findByRole("link", { name: new RegExp(`^${title}`) });
+};
 
 it("opens a picked session at its own start, while a deep link still opens at its time", async () => {
   const newest = recorded("Newest notes", 120_000);
@@ -103,7 +104,7 @@ it("opens a picked session at its own start, while a deep link still opens at it
   render(<App fetchImpl={f.fetchImpl} />);
   const time = await replayTime();
   await waitFor(() => expect(time.textContent).toBe("1:30 / 2:00"));
-  fireEvent.click(sessionCard("Older notes"));
+  fireEvent.click(await sessionCard("Older notes"));
   await screen.findByRole("heading", { name: "Older notes" });
   await waitFor(() => expect(time.textContent).toBe("0:00 / 1:00"));
   expect(query("replay")).toBe(older.card.id);
@@ -125,7 +126,7 @@ it("never asks for the previous session's screenshots under the picked session",
   await waitFor(() =>
     expect(f.requests).toContain(`/api/sessions/${newest.card.id}/thumbs/${newest.frameId}`),
   );
-  fireEvent.click(sessionCard("Older notes"));
+  fireEvent.click(await sessionCard("Older notes"));
   await screen.findByRole("heading", { name: "Older notes" });
   await unfoldStep();
   await waitFor(() =>
@@ -144,11 +145,25 @@ it("leads back to Watch from a finished session and offers Jump to live for a li
   expect(screen.queryByRole("button", { name: "Jump to live" })).toBeNull();
   fireEvent.click(back);
   await waitFor(() => expect(query("replay")).toBeNull());
-  expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+  expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
 
   cleanup();
   window.history.replaceState(null, "", `/?replay=${live.card.id}`);
   render(<App fetchImpl={f.fetchImpl} />);
   await screen.findByRole("button", { name: "Jump to live" });
   expect(screen.queryByRole("button", { name: "Back to Watch" })).toBeNull();
+});
+
+it("names the recorded task in the top bar and puts nothing over the top of its picture", async () => {
+  const newest = recorded("Newest notes", 120_000);
+  const f = fixture([newest]);
+  window.history.replaceState(null, "", `/?replay=${newest.card.id}`);
+  const { container } = render(<App fetchImpl={f.fetchImpl} />);
+  const bar = container.querySelector("header.bar") as HTMLElement;
+  await waitFor(() => expect(within(bar).getByText("Newest notes")).toBeTruthy());
+  expect(within(bar).getByText(/^Recorded · /)).toBeTruthy();
+  const stage = container.querySelector(".replay-stage") as HTMLElement;
+  expect(stage.querySelector(".replay-hud")).toBeNull();
+  expect(within(stage).queryByText("Replay")).toBeNull();
+  expect(within(stage).queryByText(/\d:\d\d \/ \d:\d\d/)).toBeNull();
 });

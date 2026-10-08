@@ -206,10 +206,10 @@ describe("App Replay mode", () => {
     await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
     fireEvent.click(replayButton);
     expect(new URLSearchParams(window.location.search).get("replay")).toBe(fixture.sessionId);
-    expect(await screen.findByRole("complementary", { name: "Recorded sessions" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /^All tasks/ })).toBeTruthy();
     await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
     expect(
-      within(screen.getByRole("main", { name: "Session replay" })).getByText(
+      within(screen.getByRole("main", { name: "Replay" })).getByText(
         /This browser lacks WebCodecs/,
       ),
     ).toBeTruthy();
@@ -236,14 +236,14 @@ describe("App Replay mode", () => {
       await waitFor(() => expect(new URLSearchParams(window.location.search).has("t")).toBe(true));
       leave();
       await waitFor(() => expect(window.location.search).toBe(""));
-      expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+      expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
       expect(window.history.length).toBe(entries + 1);
     }
     fireEvent.click(replayButton);
     expect(window.history.length).toBe(entries + 1);
-    await screen.findByRole("main", { name: "Session replay" });
+    await screen.findByRole("main", { name: "Replay" });
     window.history.back();
-    await waitFor(() => expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("main", { name: "Replay" })).toBeNull());
     expect(window.location.search).toBe("");
     expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
   });
@@ -259,7 +259,7 @@ describe("App Replay mode", () => {
     expect(screen.getByRole("button", { name: "Pause replay" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(window.location.search).toBe("");
-    expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+    expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
     expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
     expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
   });

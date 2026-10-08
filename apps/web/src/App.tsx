@@ -25,7 +25,7 @@ import { exchangeInstallCode, type InstallLink, takeInstallLink } from "./lib/in
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
-import { ReplayView } from "./replay/ReplayView.tsx";
+import { type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
 import { statusFor, taskFacts, taskHud } from "./session/status.ts";
@@ -180,6 +180,7 @@ function Theatre({ api }: { api: ApiClient }) {
     return selected && ULID_PATTERN.test(selected) ? selected : null;
   });
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
+  const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const [historyRevision, setHistoryRevision] = useState(0);
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
@@ -484,7 +485,8 @@ function Theatre({ api }: { api: ApiClient }) {
     <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
       <div className="theatre-content" inert={keysOpen || settings.open}>
         <TopBar
-          title={session.model.title ?? "Your computer"}
+          title={(replayId && recorded?.title) || (session.model.title ?? "Your computer")}
+          note={replayId ? recorded?.note : undefined}
           live={stageHud.live}
           mode={replayId ? "replay" : "watch"}
           replayEnabled={!!(replayId || newestReplayId)}
@@ -772,6 +774,7 @@ function Theatre({ api }: { api: ApiClient }) {
               setHistoryRevision(historyOwner.current);
               if (id === replayId) selectReplay(null, "replace");
             }}
+            onTitle={setRecorded}
             visible={!keysOpen && !settings.open && !safety.approval}
           />
         )}

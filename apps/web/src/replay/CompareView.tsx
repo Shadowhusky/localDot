@@ -1,16 +1,21 @@
 import { useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 
 export function CompareView({
   api,
   sessionId,
   frames,
+  label,
   onClose,
 }: {
   api: ApiClient;
   sessionId: string;
   frames: { before: string | null; after: string | null };
+  // The step being compared.
+  label?: string;
   onClose(): void;
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -22,11 +27,12 @@ export function CompareView({
   };
   return (
     <section className="replay-compare" aria-label="Before and after comparison">
-      <header>
-        <strong>Before / after</strong>
-        <button type="button" onClick={onClose}>
-          Close comparison
-        </button>
+      <header className="replay-compare-head">
+        <p className="replay-compare-title">
+          {label && <span className="replay-compare-step">{label}</span>}
+          <span>Before → After</span>
+        </p>
+        <IconButton label="Close comparison" icon="x" kbd={["Escape"]} onClick={onClose} />
       </header>
       <div
         ref={panel}
@@ -85,7 +91,10 @@ export function CompareView({
           />
         </div>
         <div className="replay-compare-divider" style={{ left: `${position}%` }}>
-          <span aria-hidden="true">↔</span>
+          <span className="replay-compare-handle" aria-hidden="true">
+            <Icon name="chevron-left" size={12} />
+            <Icon name="chevron-right" size={12} />
+          </span>
         </div>
         <span className="replay-compare-label before">Before</span>
         <span className="replay-compare-label after">After</span>

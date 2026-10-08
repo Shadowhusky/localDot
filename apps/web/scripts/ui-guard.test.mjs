@@ -341,12 +341,13 @@ describe("ui guard rules", () => {
     expect([...seeded].sort()).toEqual(Object.keys(RULES).sort());
   });
 
-  it("allows a stylesheet only in the kit, the galleries and the planned shell and dot sheets", () => {
+  it("allows a stylesheet only in the kit, the galleries and the planned shell, Replay and dot sheets", () => {
     for (const path of [
       "src/ui/a.css",
       "src/ui/gallery/a.css",
       "src/gallery/a.css",
       "src/dot/dot.css",
+      "src/replay/replay.css",
       "src/shell/stage-frame.css",
       "src/shell/hud.css",
       "src/shell/layout.css",
@@ -358,7 +359,12 @@ describe("ui guard rules", () => {
     ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual([]);
     }
-    for (const path of ["src/agent/a.css", "src/shell/misc.css", "src/shell/x/hud.css"]) {
+    for (const path of [
+      "src/agent/a.css",
+      "src/shell/misc.css",
+      "src/shell/x/hud.css",
+      "src/replay/other.css",
+    ]) {
       expect(rulesIn(path, ".a {}"), path).toEqual(["stray-stylesheet"]);
     }
   });

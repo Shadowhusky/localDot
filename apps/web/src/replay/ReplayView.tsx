@@ -10,14 +10,37 @@ import { type StepRowView, stepRows } from "../session/session-view.ts";
 import { taskHud } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
+import { Button } from "../ui/Button.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { useMediaQuery } from "../ui/media.ts";
+import { triggerProps } from "../ui/Popover.tsx";
+import { ScrollArea } from "../ui/ScrollArea.tsx";
+import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { Sheet } from "../ui/Sheet.tsx";
 import { CompareView } from "./CompareView.tsx";
-import { GapCard } from "./GapCard.tsx";
+import { GapCard, type GapKind } from "./GapCard.tsx";
 import { ReplayControls } from "./ReplayControls.tsx";
-import { replayKey, timeLabel } from "./replay-view.ts";
+import { recordedLabel, replayKey, taskTitle } from "./replay-view.ts";
 import { Scrubber } from "./Scrubber.tsx";
-import { SessionsRail } from "./SessionsRail.tsx";
+import { TaskList, TasksSearch, useTaskIndex } from "./TasksLibrary.tsx";
 import { useReplay } from "./useReplay.ts";
 import "./replay.css";
+
+// The task list keeps a rail of its own only where the picture keeps its size beside it; elsewhere
+// it opens as a sheet from the bar.
+const LIBRARY_RAIL = "(width >= 1680px)";
+// A recording with no video says so on the picture for this long, then as a chip in the transport.
+const NOTICE_MS = 3000;
+const SCREENS = [
+  { value: "desktop", label: "Desktop" },
+  { value: "browser", label: "Browser" },
+] as const;
+const NO_VIDEO = new Set(["none", "failed", "expired"]);
+
+export interface RecordedTitle {
+  title: string;
+  note: string;
+}
 
 export function ReplayView({
   api,
@@ -25,6 +48,7 @@ export function ReplayView({
   onSelect,
   onGoLive,
   onDeleted,
+  onTitle,
   visible = true,
 }: {
   api: ApiClient;
@@ -32,17 +56,28 @@ export function ReplayView({
   onSelect(id: string): void;
   onGoLive(): void;
   onDeleted(id: string): void;
+  // What the top bar names while this recording plays; null once Replay closes.
+  onTitle?(title: RecordedTitle | null): void;
   visible?: boolean;
 }) {
   const stage = useRef<StageHandle>(null);
   const replay = useReplay(api, sessionId, stage, { onGoLive });
+  const tasks = useTaskIndex(api);
+  const [search, setSearch] = useState("");
+  const railed = useMediaQuery(LIBRARY_RAIL);
+  const [library, setLibrary] = useState(false);
+  const libraryTrigger = useRef<HTMLButtonElement>(null);
   const [exporting, setExporting] = useState<{
     context: ExportContext;
     anchor: HTMLButtonElement;
   } | null>(null);
+  const [notice, setNotice] = useState({ key: "", over: false });
   useExportProbe(api, sessionId, replay);
   const commands = useRef(replay.run);
   commands.current = replay.run;
+  const titled = useRef(onTitle);
+  titled.current = onTitle;
+
   useEffect(() => {
     if (!visible || exporting !== null) return;
     const key = (event: KeyboardEvent) => {
@@ -67,6 +102,7 @@ export function ReplayView({
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [visible, exporting]);
+
   useEffect(() => {
     if (replay.playing || !replay.map) return;
     const address = new URL(window.location.href);
@@ -74,6 +110,23 @@ export function ReplayView({
     address.searchParams.set("t", String(Math.round(replay.tMs)));
     window.history.replaceState(window.history.state, "", address);
   }, [replay.tMs, replay.playing, replay.map, sessionId]);
+
+  const card = replay.card;
+  useEffect(() => {
+    if (card) titled.current?.({ title: taskTitle(card), note: recordedLabel(card, new Date()) });
+  }, [card]);
+  useEffect(() => () => titled.current?.(null), []);
+
+  const recording = replay.info?.manifest.state;
+  const whole = recording && NO_VIDEO.has(recording) ? (recording as GapKind) : undefined;
+  const noticeKey = `${sessionId}/${replay.screen}`;
+  const noticeOver = notice.key === noticeKey && notice.over;
+  useEffect(() => {
+    if (!whole) return;
+    const timer = setTimeout(() => setNotice({ key: noticeKey, over: true }), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [whole, noticeKey]);
+
   const hud = taskHud(replay.model, replay.tMs);
   const endedAt = replay.map?.endMs ?? 0;
   const baseRows = stepRows(replay.model);
@@ -95,82 +148,120 @@ export function ReplayView({
       replay.tMs >= microsToMs(entry.from) &&
       (entry.to === null || replay.tMs < microsToMs(entry.to)),
   );
-  const recording = replay.info?.manifest.state;
-  const gapKind =
-    gap?.reason ??
-    (recording === "none" || recording === "failed" || recording === "expired"
-      ? recording
-      : undefined);
+  const gapKind = gap?.reason ?? (noticeOver ? undefined : whole);
   const activeStep = stepAt(replay.model, replay.tMs);
+  const title = card ? taskTitle(card) : "Recorded task";
+  const browser = card?.recordings?.browser;
+  const twoScreens =
+    replay.screen === "browser" || (!!browser && browser.bytes > 0 && !NO_VIDEO.has(browser.state));
+  const live = replay.info?.live || card?.verdict === "live";
+  const select = (id: string) => {
+    setLibrary(false);
+    if (id !== sessionId) onSelect(id);
+  };
+  const list = (
+    <TaskList
+      api={api}
+      index={tasks}
+      search={search}
+      selectedId={sessionId}
+      onSelect={select}
+      onDeleted={onDeleted}
+    />
+  );
+
   return (
-    <div className="house replay-house">
-      <SessionsRail api={api} selectedId={sessionId} onSelect={onSelect} onDeleted={onDeleted} />
-      <main className="replay-main" aria-label="Session replay">
-        <header className="replay-heading">
-          <div className="replay-title">
-            <span className="replay-tag">Replay</span>
-            <h1>{replay.card?.title ?? "Recorded session"}</h1>
+    <div className="replay" data-library={railed ? "rail" : "sheet"}>
+      {railed && (
+        <aside className="rail replay-library" aria-label="Tasks">
+          <div className="rail-h">
+            <h2>Tasks</h2>
+            {tasks.cards.length > 0 && (
+              <span className="num">
+                {tasks.cards.length}
+                {tasks.more ? "+" : ""}
+              </span>
+            )}
           </div>
-          <div className="replay-heading-actions">
-            <fieldset className="replay-screen-picker" aria-label="Recording screen">
-              {(["desktop", "browser"] as const).map((screen) => (
-                <button
-                  key={screen}
-                  type="button"
-                  aria-pressed={replay.screen === screen}
-                  disabled={exporting !== null}
-                  onClick={() => replay.setScreen(screen)}
-                >
-                  {screen === "desktop" ? "Desktop" : "Browser"}
-                </button>
-              ))}
-            </fieldset>
-            <button type="button" onClick={onGoLive}>
-              {replay.info?.live || replay.card?.verdict === "live"
-                ? "Jump to live"
-                : "Back to Watch"}
-            </button>
+          <ScrollArea className="replay-library-scroll" fade="bottom">
+            <div className="replay-library-search">
+              <TasksSearch value={search} onChange={setSearch} />
+            </div>
+            {list}
+          </ScrollArea>
+        </aside>
+      )}
+      <main className="replay-main" aria-label="Replay">
+        <h1 className="ui-visually-hidden">{title}</h1>
+        <div className="replay-bar">
+          <Button variant="quiet" icon="chevron-left" className="replay-back" onClick={onGoLive}>
+            {live ? "Jump to live" : "Back to Watch"}
+          </Button>
+          <div className="replay-bar-end">
+            {twoScreens && (
+              <SegmentedControl
+                size={24}
+                aria-label="Recording screen"
+                items={SCREENS}
+                value={replay.screen}
+                onValueChange={(screen) => replay.setScreen(screen as "desktop" | "browser")}
+              />
+            )}
+            {!railed && (
+              <Button
+                ref={libraryTrigger}
+                variant="secondary"
+                className="replay-library-trigger"
+                aria-label={`All tasks, showing ${title}`}
+                {...triggerProps("dialog", library)}
+                onClick={() => setLibrary(true)}
+              >
+                <span className="replay-library-trigger-text" data-phone="">
+                  {title}
+                </span>
+                <span className="replay-library-trigger-text" data-phone="hidden">
+                  All tasks
+                </span>
+                <Icon name="chevron-down" size={14} />
+              </Button>
+            )}
           </div>
-        </header>
-        <div className={`stage lit replay-stage${hud.control ? " control" : ""}`}>
-          <Stage
-            key={sessionId}
-            ref={stage}
-            mode="replay"
-            api={api}
-            cell={null}
-            reconnects={0}
-            listed={[]}
-            control={hud.control}
-          />
-          {hud.control && <div className="rim" aria-hidden="true" />}
-          <div className="replay-hud">
-            <span>Replay</span>
-            <strong>{hud.label}</strong>
-            <span>
-              {timeLabel(replay.tMs)} / {timeLabel(endedAt)}
-            </span>
-          </div>
-          {gapKind && <GapCard kind={gapKind} />}
-          {replay.status === "error" && !gapKind && (
-            <p className="replay-error" role="alert">
-              Replay could not load all media. Recorded steps remain available.
-            </p>
-          )}
-          {replay.compare && (
-            <CompareView
-              key={activeStep?.id ?? "compare"}
-              api={api}
-              sessionId={sessionId}
-              frames={replay.compare}
-              onClose={() => replay.run({ kind: "exit" })}
-            />
-          )}
         </div>
-        <p className="replay-caption">{hud.caption}</p>
+        <div className="replay-frame">
+          <div className={`stage lit replay-stage${hud.control ? " control" : ""}`}>
+            <Stage
+              key={sessionId}
+              ref={stage}
+              mode="replay"
+              api={api}
+              cell={null}
+              reconnects={0}
+              listed={[]}
+            />
+            <GapCard kind={gapKind} />
+            {replay.status === "error" && !gapKind && (
+              <p className="replay-error" role="alert">
+                Some of the recording couldn't load. The steps are still here.
+              </p>
+            )}
+            {replay.compare && (
+              <CompareView
+                key={activeStep?.id ?? "compare"}
+                api={api}
+                sessionId={sessionId}
+                frames={replay.compare}
+                label={chapterRows.find((row) => row.id === activeStep?.id)?.label}
+                onClose={() => replay.run({ kind: "exit" })}
+              />
+            )}
+          </div>
+          <div className="replay-rim" data-on={hud.control ? "" : undefined} aria-hidden="true" />
+        </div>
         <Scrubber api={api} sessionId={sessionId} replay={replay} />
         <ReplayControls
           replay={replay}
+          label={hud.label}
+          noVideo={!!whole && noticeOver}
           onExport={(anchor) => {
             replay.run({ kind: "pause" });
             setExporting({ context: exportContext(api, sessionId, replay), anchor });
@@ -186,6 +277,20 @@ export function ReplayView({
         onSelect={replay.selectStep}
         planSnapshot={planAt(replay.model, replay.tMs)}
       />
+      {!railed && (
+        <Sheet
+          open={library}
+          onClose={() => setLibrary(false)}
+          title="Tasks"
+          modal
+          returnFocus={libraryTrigger}
+        >
+          <div className="replay-library-search">
+            <TasksSearch value={search} onChange={setSearch} />
+          </div>
+          {list}
+        </Sheet>
+      )}
       {exporting && (
         <ExportSheet
           context={exporting.context}
