@@ -3,6 +3,7 @@ import type { Server } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import {
+  type ActionClass,
   type AgentLimits,
   type BootConfig,
   type ComputerAction,
@@ -72,10 +73,23 @@ export interface AgentRun {
   wallMs: number;
   events: RecordedEvent[];
   calls: CallRecord[];
-  assisted: { approvals: number; handoffs: number; answers: number };
+  assisted: { approvals: number; denied: ActionClass[]; handoffs: number; answers: number };
 }
 
 const MODEL_SCREEN = { width: 1280, height: 800 } as const;
+const DENIED: ReadonlySet<ActionClass> = new Set([
+  "purchase",
+  "send",
+  "post",
+  "download_execute",
+  "system_settings",
+  "credentials",
+]);
+
+// The simulated user approves the desktop work a task needs and denies anything that could reach
+// past the throwaway desktop: in model mode a real model drives it with open internet.
+export const simulatedAnswer = (actionClass: ActionClass): "approve" | "deny" =>
+  DENIED.has(actionClass) ? "deny" : "approve";
 const HUMAN_PAUSE_MS = 150;
 
 // What a person does for the input the product handed over: typed text with Return and Tab
@@ -137,8 +151,8 @@ export function callsOf(transcript: readonly TranscriptMessage[]): CallRecord[] 
 // One task on one desktop through the product's own path: the brain loop (in process, with the
 // given model) calls the daemon's tool API over HTTP, whose handlers authorize under the eval
 // home's autonomy policy and drive the action gateway, desktopd and the real apps in the cell.
-// A simulated user answers what a person would: it approves every card, and when the product
-// hands the screen over, it does the pending input itself and hands control back.
+// A simulated user answers what a person would: it answers every card (simulatedAnswer), and when
+// the product hands the screen over, it does the pending input itself and hands control back.
 export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
   const clock = monotonicClock();
   const eventLog = new EventLog(o.home, clock);
@@ -223,7 +237,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
   const address = server.address();
   const apiUrl = `http://127.0.0.1:${typeof address === "object" && address ? address.port : 0}`;
 
-  const assisted = { approvals: 0, handoffs: 0, answers: 0 };
+  const assisted: AgentRun["assisted"] = { approvals: 0, denied: [], handoffs: 0, answers: 0 };
   const mut =
     typeof o.model === "function"
       ? o.model(() => ({ windows, handoffs: assisted.handoffs }))
@@ -272,15 +286,18 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
       setTimeout(() => {
         const card = session.pendingApproval;
         if (!card || card.approvalId !== data.approvalId) return;
+        const decision = simulatedAnswer(card.actionClass);
         if (
-          session.answerApproval({
+          !session.answerApproval({
             approvalId: card.approvalId,
             generation: card.generation,
             revision: card.revision,
-            decision: "approve",
+            decision,
           })
         )
-          assisted.approvals += 1;
+          return;
+        if (decision === "approve") assisted.approvals += 1;
+        else assisted.denied.push(card.actionClass);
       }, o.approvalDelayMs ?? 0);
     else if (event.type === "takeover.request")
       // The control record is marked held right after this event is written.

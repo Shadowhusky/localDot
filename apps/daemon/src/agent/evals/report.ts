@@ -31,6 +31,8 @@ export interface TaskReport {
   guiActions: number;
   approvals: number;
   approvalTimeouts: number;
+  // Classes of the cards the simulated user denied.
+  denied: string[];
   handoffs: number;
   maxHandoffs: number;
   staleCancels: number;
@@ -60,6 +62,7 @@ export function taskReport(input: {
   run: Pick<AgentRun, "outcome" | "error" | "wallMs" | "calls">;
   analysis: RunAnalysis;
   maxHandoffs: number;
+  denied?: readonly string[];
   harnessError?: string;
   // What keyd metered for the task's model calls.
   costUSD?: number;
@@ -102,6 +105,7 @@ export function taskReport(input: {
     guiActions: analysis.guiActions,
     approvals: analysis.approvals,
     approvalTimeouts: analysis.approvalTimeouts,
+    denied: [...(input.denied ?? [])],
     handoffs: analysis.handoffs,
     maxHandoffs: input.maxHandoffs,
     staleCancels: analysis.staleCancels,
@@ -127,6 +131,9 @@ export function suiteReport(
       : []),
     ...(t.status === "unexpected-pass"
       ? [`${t.id} passed although it requires ${t.requires.join(", ")}; make it required`]
+      : []),
+    ...(t.denied.length
+      ? [`${t.id} asked to approve ${[...new Set(t.denied)].join(", ")} actions; they were denied`]
       : []),
     ...(t.handoffs > t.maxHandoffs
       ? [`${t.id} needed ${plural(t.handoffs, "hand-off")}; its ceiling is ${t.maxHandoffs}`]

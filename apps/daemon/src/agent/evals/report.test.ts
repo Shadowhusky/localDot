@@ -134,6 +134,11 @@ describe("suiteReport", () => {
     });
   });
 
+  it("fails when the simulated user had to deny a risky action", () => {
+    const r = suiteReport([report({ id: "a", denied: ["post", "post", "send"] })], meta);
+    expect(r.problems).toEqual(["a asked to approve post, send actions; they were denied"]);
+  });
+
   it("fails when the no-op run did not happen", () => {
     const r = suiteReport([report({ id: "a", noop: undefined })], meta);
     expect(r.problems).toEqual(["a: the no-op run did not happen"]);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { callsOf, manualInputsFor } from "./stack.ts";
+import { callsOf, manualInputsFor, simulatedAnswer } from "./stack.ts";
 
 describe("manualInputsFor", () => {
   it("types text and presses Return and Tab as keys", () => {
@@ -22,6 +22,22 @@ describe("manualInputsFor", () => {
     ]);
     expect(manualInputsFor({ action: "screenshot" }, 2)).toEqual([]);
     expect(manualInputsFor(undefined, 2)).toEqual([]);
+  });
+});
+
+describe("simulatedAnswer", () => {
+  it("approves desktop work and denies what could reach past the throwaway desktop", () => {
+    for (const actionClass of ["unknown", "reading", "browsing", "delete"] as const)
+      expect(simulatedAnswer(actionClass), actionClass).toBe("approve");
+    for (const actionClass of [
+      "purchase",
+      "send",
+      "post",
+      "download_execute",
+      "system_settings",
+      "credentials",
+    ] as const)
+      expect(simulatedAnswer(actionClass), actionClass).toBe("deny");
   });
 });
 

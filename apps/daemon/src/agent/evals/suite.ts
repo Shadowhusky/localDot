@@ -145,6 +145,7 @@ async function runTask(task: EvalTask, o: SuiteOptions): Promise<TaskReport> {
     run: run ?? { outcome: "error", wallMs: 0, calls: [] },
     analysis: analyseEvents(events),
     maxHandoffs: task.maxHandoffs,
+    ...(run ? { denied: run.assisted.denied } : {}),
     ...(harnessError ? { harnessError } : {}),
     costUSD: (o.model?.spentUSD ?? 0) - spentBefore,
   });
