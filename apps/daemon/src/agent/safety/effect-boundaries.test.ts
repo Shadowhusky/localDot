@@ -1,5 +1,6 @@
 import {
   type AutonomyPolicy,
+  BALANCED_AUTONOMY,
   CAREFUL_AUTONOMY,
   type HitTestResult,
   msToMicros,
@@ -185,6 +186,152 @@ function setup(autonomy?: AutonomyPolicy) {
     pending,
   };
 }
+
+// Every card a call shows, answered at once (denied unless `answer` says otherwise), so a call
+// that asks never waits.
+function answerEveryCard(
+  f: ReturnType<typeof setup>,
+  answer: (n: number) => "approve" | "deny" = () => "deny",
+) {
+  const cards: { title: string; fields: [string, string][] }[] = [];
+  f.eventLog.subscribe((id, event) => {
+    if (id !== f.session.id || event.type !== "approval.request") return;
+    const card = f.session.pendingApproval;
+    if (!card) return;
+    const decision = answer(cards.length);
+    cards.push({ title: card.title, fields: card.fields as [string, string][] });
+    queueMicrotask(() => void f.post(f.answer(decision)));
+  });
+  return cards;
+}
+const kinds = (f: ReturnType<typeof setup>) =>
+  f.effects().map((c) => (c.body as { input: { kind: string } }).input.kind);
+
+describe("drawing and dragging by hand under Balanced", () => {
+  // The user's paint app had no accessibility tree: every read under the canvas is a bare point.
+  const canvas = (): HitTestResult => ({ target: null, window: 7, ms: 1 });
+  const shape = Array.from({ length: 40 }, (_, i) => {
+    const angle = (2 * Math.PI * (i + 1)) / 40;
+    return {
+      x: Math.round(640 + 200 * Math.cos(angle)),
+      y: Math.round(400 + 150 * Math.sin(angle)),
+    };
+  });
+
+  it("draws a closed shape with a held button and 40 moves on a paint canvas without one card", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    f.fake.script.hitTest = canvas;
+    f.fake.script.focused = canvas;
+    const cards = answerEveryCard(f);
+    const results = [await f.call("computer", { action: "mouse_down", point: { x: 840, y: 400 } })];
+    for (const point of shape) results.push(await f.call("computer", { action: "move", point }));
+    results.push(await f.call("computer", { action: "mouse_up" }));
+    expect(cards).toEqual([]);
+    expect(results.filter((r) => !r.body.ok)).toEqual([]);
+    expect(kinds(f)).toEqual(["down", ...shape.map(() => "move"), "up"]);
+    expect(f.session.safetyPause).toBeUndefined();
+  }, 30_000);
+
+  it("asks for a held move on a signed-in screen where no element is known", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    f.fake.script.hitTest = canvas;
+    f.session.taskAutonomy.signIn("desktop");
+    const cards = answerEveryCard(f, (n) => (n === 0 ? "approve" : "deny"));
+    expect((await f.call("computer", { action: "move", point: { x: 840, y: 400 } })).body.ok).toBe(
+      true,
+    );
+    const pressed = await f.call("computer", { action: "mouse_down" });
+    const moved = await f.call("computer", { action: "move", point: { x: 900, y: 450 } });
+    expect(cards.map((card) => card.title)).toEqual(["Unclear step", "Unclear step"]);
+    expect([pressed.body.ok, moved.body.ok]).toEqual([true, false]);
+    expect(kinds(f)).toEqual(["move", "down"]);
+  });
+
+  it("asks before a held drag drops a file onto a web page, and drops nothing when denied", async () => {
+    const f = setup(BALANCED_AUTONOMY);
+    const file: HitTestResult = {
+      target: { point: { x: 20, y: 40 }, source: "ax", role: "list item", name: "report.txt" },
+      window: 7,
+      ms: 1,
+    };
+    const zone: HitTestResult = {
+      target: {
+        point: { x: 1200, y: 600 },
+        source: "dom",
+        role: "button",
+        name: "Attach files",
+        url: "https://mail.example.test/compose",
+      },
+      window: 9,
+      ms: 1,
+    };
+    f.fake.script.hitTest = (point) => (point.x > 1000 ? zone : file);
+    const cards = answerEveryCard(f);
+    expect(
+      (await f.call("computer", { action: "mouse_down", point: { x: 10, y: 20 } })).body.ok,
+    ).toBe(true);
+    expect((await f.call("computer", { action: "move", point: { x: 300, y: 20 } })).body.ok).toBe(
+      true,
+    );
+    for (const action of [
+      { action: "move", point: { x: 600, y: 300 } },
+      { action: "scroll", point: { x: 600, y: 300 }, dy: 1 },
+      { action: "mouse_up", point: { x: 600, y: 300 } },
+    ])
+      expect((await f.call("computer", action)).body.ok).toBe(false);
+    expect(cards.map((card) => card.title)).toEqual([
+      "Upload your files",
+      "Upload your files",
+      "Upload your files",
+    ]);
+    for (const field of [
+      ["Target", "report.txt"],
+      ["Drop target", "Attach files"],
+      ["Drag", "(10, 20) to (600, 300)"],
+    ])
+      expect(cards[0]?.fields).toContainEqual(field);
+    expect(kinds(f)).toEqual(["down", "move"]);
+  });
+
+  it("refuses a drag approved over no element once a web page is found at its drop", async () => {
+    const f = setup();
+    let page = false;
+    f.fake.script.hitTest = (point) =>
+      point.x <= 60
+        ? {
+            target: { point, source: "ax", role: "list item", name: "report.txt" },
+            window: 7,
+            ms: 1,
+          }
+        : page
+          ? {
+              target: {
+                point,
+                source: "dom",
+                role: "button",
+                name: "Attach files",
+                url: "https://mail.example.test/compose",
+              },
+              window: 7,
+              ms: 1,
+            }
+          : { target: null, window: 7, ms: 1 };
+    const pending = f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 50, y: 20 },
+      ],
+    });
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval?.title).toBe("Work in its computer");
+    page = true;
+    await f.post(f.answer());
+    const result = await pending;
+    expect(result.body.ok).toBe(false);
+    expect(f.effects()).toHaveLength(0);
+  });
+});
 
 const click = { action: "click", point: { x: 10, y: 20 } };
 describe("mandatory user approval at the real action boundary", () => {

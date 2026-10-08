@@ -207,13 +207,20 @@ function targetFacts(target: Target): NativeTargetFacts {
 
 // A drag acts at both ends: where it picks up and where it lets go. A drop with no element known
 // there is a press on nothing, which runs in the computer and is unclear on a signed-in screen.
+// Something carried onto a web page from outside any page, such as a file from the file manager,
+// is uploaded to it.
 function drag({ target, drop, ...facts }: RiskFacts): ActionClass[] {
-  return [
-    ...new Set([
-      ...input({ ...facts, ...(target ? { target } : {}) }),
-      ...input({ ...facts, ...(drop ? { target: drop } : {}) }),
-    ]),
-  ];
+  const classes = new Set([
+    ...input({ ...facts, ...(target ? { target } : {}) }),
+    ...input({ ...facts, ...(drop ? { target: drop } : {}) }),
+  ]);
+  if (facts.screen !== "browser" && target && drop && !onPage(target) && onPage(drop))
+    classes.add("upload");
+  return [...classes];
+}
+
+function onPage(target: NativeTargetFacts): boolean {
+  return target.fresh && (target.source === "dom" || isWebUrl(target.url));
 }
 
 function named(text: string): ActionClass[] {
