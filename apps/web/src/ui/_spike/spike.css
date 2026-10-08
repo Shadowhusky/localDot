@@ -1,0 +1,80 @@
+@import "tailwindcss" source(none);
+@source "./";
+
+/* A preview of the T03 roles (UI plan §4.1), and the names the generated components use. */
+@theme {
+  --color-void: #0a0b0d;
+  --color-raised: #1a1c1f;
+  --color-raised-2: #25262a;
+  --color-overlay: #2c2e31;
+  --color-fg-1: #eeeff1;
+  --color-fg-2: #a8abb0;
+  --color-fg-3: #83868b;
+  --color-hairline: rgba(255, 255, 255, 0.07);
+  --color-field-line: #6b6e75;
+  --color-field-line-hover: #83868b;
+  --color-state-hover: rgba(255, 255, 255, 0.06);
+  --color-state-selected: rgba(255, 255, 255, 0.12);
+  --color-scrim: rgba(0, 0, 0, 0.45);
+  --font-sans:
+    system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI Variable Text", Inter, sans-serif;
+  --text-xs: 12px;
+  --text-xs--line-height: 16px;
+  --text-sm: 13px;
+  --text-sm--line-height: 18px;
+  --text-base: 15px;
+  --text-base--line-height: 20px;
+  --text-xl: 22px;
+  --text-xl--line-height: 28px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-overlay: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 64px rgba(0, 0, 0, 0.55);
+  --ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+}
+
+@theme inline {
+  --color-background: var(--color-void);
+  --color-foreground: var(--color-fg-1);
+  --color-card: var(--color-raised);
+  --color-popover: var(--color-overlay);
+  --color-popover-foreground: var(--color-fg-1);
+  --color-primary: var(--color-fg-1);
+  --color-primary-foreground: var(--color-void);
+  --color-secondary: rgba(255, 255, 255, 0.08);
+  --color-secondary-hover: rgba(255, 255, 255, 0.12);
+  --color-secondary-foreground: var(--color-fg-1);
+  --color-muted: var(--color-state-hover);
+  --color-muted-foreground: var(--color-fg-2);
+  --color-accent: var(--color-state-selected);
+  --color-accent-foreground: var(--color-fg-1);
+  --color-border: var(--color-hairline);
+  --color-input: var(--color-field-line);
+  --color-input-hover: var(--color-field-line-hover);
+  --color-field: rgba(255, 255, 255, 0.04);
+  --color-ring: var(--color-fg-1);
+}
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  body {
+    background: var(--color-void);
+    color: var(--color-fg-1);
+    font: 13px / 18px var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* What Base UI's own <style> element would carry; the KitProvider turns that element off. */
+  .base-ui-disable-scrollbar {
+    scrollbar-width: none;
+  }
+
+  .base-ui-disable-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+}
