@@ -156,6 +156,23 @@ describe("DotView", () => {
     expect(Math.max(...steps(slopes))).toBeLessThan(0.15);
   });
 
+  it("keeps a speaking dot near its calm frame rate: no talk-bob on a badge, 30 fps above", () => {
+    const pose = vi.spyOn(DotEngine.prototype, "pose");
+    const badge = mount({ state: "speaking" });
+    const body = badge.root.querySelector(".dot-body") as HTMLElement;
+    const scales = new Set<string>();
+    drive(badge.view, T0, T0 + 20_000, () =>
+      scales.add(body.style.transform.split("scale")[1] ?? ""),
+    );
+    expect(scales.size).toBe(1);
+    expect(pose.mock.calls.length / 20).toBeLessThan(20);
+
+    pose.mockClear();
+    const hero = mount({ state: "speaking", size: 224 }).view;
+    drive(hero, clock, clock + 20_000);
+    expect(pose.mock.calls.length / 20).toBeLessThan(40);
+  });
+
   it("removes everything it drew when destroyed", () => {
     const { root, view } = mount();
     view.destroy();

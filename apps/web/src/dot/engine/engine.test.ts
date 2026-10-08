@@ -197,6 +197,13 @@ describe("dot engine", () => {
     expect(peak(true)).toBeGreaterThan(0.3);
   });
 
+  it("drops the talk-bob at badge size", () => {
+    const e = new DotEngine({ seed: 4, t: 0, state: "speaking", lod: "badge" });
+    let peak = 0;
+    for (let t = 0; t < 6000; t += 5) peak = Math.max(peak, e.pose(t).talk);
+    expect(peak).toBe(0);
+  });
+
   it("crossfades the xenon rim only while dot has control", () => {
     const e = new DotEngine({ seed: 2, t: 0, state: "acting" });
     expect(e.pose(500).plate.rim).toBe(0);

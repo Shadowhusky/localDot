@@ -226,7 +226,9 @@ export class DotEngine {
     const v = (k: keyof Pose | Motion) => this.ch[k].value(t);
     const rich = this.rich && !this.reduced;
     const b = rich ? v("breath") * this.breathValue(t) : 0;
-    const talk = this.current === "speaking" ? this.talk(t) * (this.reduced ? 0.5 : 1) : 0;
+    // Like breath, the talk-bob shows only where the body animates.
+    const talk =
+      this.rich && this.current === "speaking" ? this.talk(t) * (this.reduced ? 0.5 : 1) : 0;
     const cap = SQUASH_CAP[this.lod];
     const squash = rich ? clamp(v("squash"), -cap, cap) : 0;
     const size = v("size");
@@ -272,7 +274,7 @@ export class DotEngine {
   }
 
   // An upper bound on how fast anything visible is moving, in frame units per second; a renderer
-  // slows down while it is calm.
+  // slows down while it is calm. Breathing and the talk-bob render at the calm frame rate.
   activity(t: number): number {
     this.advance(t);
     const rich = this.rich && !this.reduced;
@@ -280,7 +282,7 @@ export class DotEngine {
     for (const k of SPEED_KEYS) {
       if (rich || !RICH_ONLY.has(k)) m = Math.max(m, this.ch[k].speed(t) * SPEED_UNITS[k]);
     }
-    return m + this.blinkAmount(t) * 50 + this.talk(t) * 50;
+    return m + this.blinkAmount(t) * 50;
   }
 
   private get rich(): boolean {
