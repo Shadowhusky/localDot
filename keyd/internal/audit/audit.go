@@ -27,6 +27,7 @@ const (
 	KindRequest = "request"
 	KindAdmin   = "admin"
 	KindKeyd    = "keyd"
+	KindPush    = "push"
 
 	Allow = "allow"
 	Deny  = "deny"

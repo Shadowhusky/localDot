@@ -41,6 +41,7 @@ type Server struct {
 	Version  string
 	Hairpin  *netguard.Public
 	Service  *ServiceProcessIdentity
+	Push     Pusher
 }
 
 func (s *Server) Handler() http.Handler {
@@ -64,6 +65,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/llm/routes/{route}/models", s.getModels)
 	mux.HandleFunc("PUT /v1/llm/routes/{route}/models", s.setModels)
 	mux.HandleFunc("GET /v1/events", s.events)
+	mux.HandleFunc("GET /v1/push/key", s.pushKey)
+	mux.HandleFunc("POST /v1/push/send", s.pushSend)
 	return mux
 }
 

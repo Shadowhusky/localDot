@@ -33,6 +33,7 @@ import (
 	"github.com/shadowhusky/localdot/keyd/internal/netguard"
 	"github.com/shadowhusky/localdot/keyd/internal/servicelease"
 	"github.com/shadowhusky/localdot/keyd/internal/vault"
+	"github.com/shadowhusky/localdot/keyd/internal/webpush"
 )
 
 const (
@@ -237,6 +238,9 @@ func (d *Daemon) init(dir string, cfg Config) error {
 	if cfg.Service != nil {
 		api.Service = &admin.ServiceProcessIdentity{ServiceIdentity: *cfg.Service, PID: os.Getpid()}
 	}
+	pushDialer := &netguard.Dialer{Guard: guard, Resolver: net.DefaultResolver}
+	taken := func(id string) bool { _, ok := v.Record(id); return ok }
+	api.Push = webpush.NewSender(webpush.NewSigner(store, taken, time.Now), webpush.Client(pushDialer.DialContext), d.log)
 	ctx, cancel := context.WithCancel(context.Background())
 	d.cancel = cancel
 	d.server = &http.Server{
