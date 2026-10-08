@@ -53,6 +53,15 @@ describe("Dot", () => {
     expect(reduce).not.toHaveBeenCalledWith(true);
   });
 
+  it("resizes the live view in place", () => {
+    const view = render(<Dot size={24} />);
+    const root = view.container.querySelector<HTMLElement>(".dot");
+    view.rerender(<Dot size={224} />);
+    expect(view.container.querySelector(".dot")).toBe(root);
+    expect(root?.dataset.lod).toBe("hero");
+    expect(root?.style.getPropertyValue("--dot-size")).toBe("224px");
+  });
+
   it("passes state and control changes to the view", () => {
     const setState = vi.spyOn(DotView.prototype, "setState");
     const setControl = vi.spyOn(DotView.prototype, "setControl");

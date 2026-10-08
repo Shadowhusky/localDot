@@ -204,6 +204,40 @@ describe("dot engine", () => {
     expect(peak).toBe(0);
   });
 
+  it("turns annoyed at a second error within a minute, with or without reduced motion", () => {
+    for (const reducedMotion of [false, true]) {
+      const e = new DotEngine({ seed: 8, t: 0, state: "idle", reducedMotion });
+      e.setState("error", 1000);
+      expect(e.pose(3000).state, `reduced ${reducedMotion}`).toBe("error");
+      e.setState("idle", 3000);
+      e.react("error", 5000);
+      expect(e.pose(5899).state, `reduced ${reducedMotion}`).toBe("idle");
+      expect(e.pose(5900).state, `reduced ${reducedMotion}`).toBe("annoyed");
+    }
+  });
+
+  it("celebrates success at most once per 5 s", () => {
+    const happyAt = (e: DotEngine, t: number) => e.pose(t).eyes[0].happy;
+    const e = new DotEngine({ seed: 5, t: 0, state: "idle" });
+    e.react("success", 1000);
+    expect(happyAt(e, 1500)).toBeGreaterThan(0.9);
+    expect(happyAt(e, 2600)).toBeLessThan(0.05);
+    e.react("success", 3000);
+    expect(happyAt(e, 3500)).toBeLessThan(0.05);
+    e.react("success", 6000);
+    expect(happyAt(e, 6500)).toBeGreaterThan(0.9);
+  });
+
+  it("wakes from sleep with two quick blinks, then looks at the user", () => {
+    const e = new DotEngine({ seed: 6, t: 0, state: "sleeping", lod: "badge" });
+    e.setState("idle", 1000);
+    expect(e.pose(1040 + 70).blink).toBeGreaterThan(0.85);
+    expect(e.pose(1170).blink).toBeLessThan(0.3);
+    expect(e.pose(1190 + 70).blink).toBeGreaterThan(0.85);
+    const { x, y } = e.pose(1700).gaze;
+    expect(Math.hypot(x, y)).toBeLessThan(0.2);
+  });
+
   it("crossfades the xenon rim only while dot has control", () => {
     const e = new DotEngine({ seed: 2, t: 0, state: "acting" });
     expect(e.pose(500).plate.rim).toBe(0);

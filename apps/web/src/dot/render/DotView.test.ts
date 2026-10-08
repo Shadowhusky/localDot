@@ -50,6 +50,12 @@ function lid(root: HTMLElement) {
   return { open: bottom - (y1 + y2) / 2, slope: (y2 - y1) / (2 * w) };
 }
 
+function translate(root: HTMLElement): [number, number] {
+  const body = root.querySelector(".dot-body") as HTMLElement;
+  const m = body.style.transform.match(/translate\((-?[\d.]+)px, (-?[\d.]+)px\)/);
+  return [Number(m?.[1]), Number(m?.[2])];
+}
+
 const steps = (values: number[]) => values.slice(1).map((v, i) => Math.abs(v - (values[i] ?? v)));
 const between = (values: number[], lo: number, hi: number) =>
   new Set(values.filter((v) => v > lo && v < hi)).size;
@@ -91,11 +97,28 @@ describe("DotView", () => {
     const { root, view } = mount();
     expect(root.dataset.lod).toBe("badge");
     expect(root.querySelectorAll(".dot-eye")).toHaveLength(2);
+    expect(root.querySelector(".dot-eye")?.getAttribute("height")).toBe("12.500");
     expect(root.querySelector<HTMLImageElement>(".dot-shadow")?.srcset).toBe("");
     view.setSize(224);
     expect(root.dataset.lod).toBe("hero");
+    expect(root.querySelector(".dot-eye")?.getAttribute("height")).toBe("10.000");
     expect(root.querySelector<HTMLImageElement>(".dot-shadow")?.srcset).toMatch(/shadow-96/);
     expect((root.querySelector(".dot-eye") as SVGRectElement).style.fill).toMatch(/^url\(/);
+  });
+
+  it("snaps a badge's body to device pixels and its eyes to half device pixels", () => {
+    vi.stubGlobal("devicePixelRatio", 2);
+    const { root, view } = mount({ state: "listening" });
+    const halfDevPerUnit = (24 / 64) * 2 * 2;
+    const offGrid = (v: number, per: number) => Math.abs(v * per - Math.round(v * per));
+    drive(view, T0, T0 + 6000, () => {
+      for (const v of translate(root)) expect(offGrid(v, 2)).toBeLessThan(1e-6);
+      for (const g of root.querySelectorAll(".dot-face > g > g")) {
+        const m = (g.getAttribute("transform")?.match(/-?[\d.]+/g) ?? []).map(Number);
+        for (const v of m.slice(4)) expect(offGrid(v, halfDevPerUnit)).toBeLessThan(0.01);
+      }
+    });
+    expect(translate(root)[0]).toBe(-0.5);
   });
 
   it("catches every blink at its peak while calm frames are skipped, never closing below a device pixel", () => {
@@ -171,6 +194,16 @@ describe("DotView", () => {
     const hero = mount({ state: "speaking", size: 224 }).view;
     drive(hero, clock, clock + 20_000);
     expect(pose.mock.calls.length / 20).toBeLessThan(40);
+  });
+
+  it("jumps ahead instead of replaying a gap of more than 10 s", () => {
+    const skip = vi.spyOn(DotEngine.prototype, "skipTo");
+    const { view } = mount();
+    drive(view, T0, T0 + 9000);
+    expect(skip).not.toHaveBeenCalled();
+    clock += 10_001;
+    view.frame(clock);
+    expect(skip).toHaveBeenCalledWith(clock);
   });
 
   it("removes everything it drew when destroyed", () => {
