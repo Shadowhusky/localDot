@@ -49,11 +49,6 @@ export interface EvalReport {
   tasks: TaskReport[];
 }
 
-export interface Prices {
-  inputUSDPerMTok: number;
-  outputUSDPerMTok: number;
-}
-
 export function taskReport(input: {
   id: string;
   requires: readonly string[];
@@ -64,7 +59,8 @@ export function taskReport(input: {
   analysis: RunAnalysis;
   maxHandoffs: number;
   harnessError?: string;
-  prices?: Prices;
+  // What keyd metered for the task's model calls.
+  costUSD?: number;
 }): TaskReport {
   const { verdict, run, analysis } = input;
   const refusedCalls = run.calls.filter((c) => c.refused).length;
@@ -83,11 +79,6 @@ export function taskReport(input: {
         : neverTried
           ? "fail"
           : "expected-fail";
-  const costUSD = input.prices
-    ? (analysis.inputTokens * input.prices.inputUSDPerMTok +
-        analysis.outputTokens * input.prices.outputUSDPerMTok) /
-      1e6
-    : 0;
   return {
     id: input.id,
     requires: [...input.requires],
@@ -114,7 +105,7 @@ export function taskReport(input: {
     staleCancels: analysis.staleCancels,
     repeatPauses: analysis.repeatPauses,
     phases: analysis.phases,
-    costUSD,
+    costUSD: input.costUSD ?? 0,
   };
 }
 

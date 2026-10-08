@@ -10,11 +10,11 @@ import {
   startEvalCell,
 } from "./cell.ts";
 import type { Verdict } from "./checks.ts";
+import { ModelModeRefused } from "./model-mode.ts";
 import { type DesktopFacts, oracleModel } from "./oracle.ts";
 import {
   type EvalReport,
   markdownReport,
-  type Prices,
   suiteReport,
   type TaskReport,
   taskReport,
@@ -41,10 +41,11 @@ export interface ModelSession {
 
 export interface ModelMode {
   label: string;
-  prices: Prices;
   capUSD: number;
+  // What keyd has metered across the suite so far.
+  readonly spentUSD: number;
   limits?: AgentLimits;
-  begin(budgetUSD: number): Promise<ModelSession>;
+  begin(): Promise<ModelSession>;
 }
 
 export interface SuiteOptions {
@@ -77,7 +78,7 @@ function saveRun(dir: string, run: AgentRun): void {
   );
 }
 
-async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promise<TaskReport> {
+async function runTask(task: EvalTask, o: SuiteOptions): Promise<TaskReport> {
   const dir = join(o.outDir, task.id);
   mkdirSync(join(dir, "noop"), { recursive: true });
   mkdirSync(join(dir, "run"), { recursive: true });
@@ -89,8 +90,9 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
   let verdict: Verdict | undefined;
   let harnessError: string | undefined;
   let session: ModelSession | undefined;
+  const spentBefore = o.model?.spentUSD ?? 0;
   try {
-    if (o.model && o.model.capUSD - spentUSD <= 0) throw new Error("the spend cap is used up");
+    if (o.model && o.model.spentUSD >= o.model.capUSD) throw new Error("the spend cap is used up");
     cell = await startEvalCell(task.id, o.cell);
     log(`${task.id}: desktop ready`);
     await task.setup(cell);
@@ -109,7 +111,7 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
     saveRun(join(dir, "noop"), idle);
     noop = await task.check(cell);
     log(`${task.id}: no-op ${noop.ok ? "ACCEPTED" : "rejected"}`);
-    session = o.model ? await o.model.begin(o.model.capUSD - spentUSD) : undefined;
+    session = o.model ? await o.model.begin() : undefined;
     run = await runAgent({
       cell,
       home: join(dir, "run"),
@@ -125,6 +127,7 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
       `${task.id}: ${run.outcome} in ${(run.wallMs / 1000).toFixed(1)} s, ${verdict.ok ? "passed" : `failed (${verdict.reasons.join("; ")})`}`,
     );
   } catch (caught) {
+    if (caught instanceof ModelModeRefused) throw caught;
     harnessError = caught instanceof Error ? caught.message : String(caught);
     log(`${task.id}: ${harnessError}`);
   } finally {
@@ -142,7 +145,7 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
     analysis: analyseEvents(events),
     maxHandoffs: task.maxHandoffs,
     ...(harnessError ? { harnessError } : {}),
-    ...(o.model?.prices ? { prices: o.model.prices } : {}),
+    costUSD: (o.model?.spentUSD ?? 0) - spentBefore,
   });
 }
 
@@ -150,12 +153,7 @@ export async function runSuite(o: SuiteOptions): Promise<EvalReport> {
   mkdirSync(o.outDir, { recursive: true });
   const tasks = TASKS.filter((t) => !o.only?.length || o.only.includes(t.id));
   const reports: TaskReport[] = [];
-  let spent = 0;
-  for (const task of tasks) {
-    const report = await runTask(task, o, spent);
-    spent += report.costUSD;
-    reports.push(report);
-  }
+  for (const task of tasks) reports.push(await runTask(task, o));
   const report = suiteReport(reports, {
     mode: o.model ? "model" : "oracle",
     ...(o.model ? { model: o.model.label } : {}),

@@ -20,8 +20,6 @@ const analysis = {
   modelTurns: 4,
   approvals: 3,
   handoffs: 1,
-  inputTokens: 2_000_000,
-  outputTokens: 100_000,
 };
 const report = (over: Partial<Parameters<typeof taskReport>[0]>) =>
   taskReport({
@@ -37,8 +35,8 @@ const report = (over: Partial<Parameters<typeof taskReport>[0]>) =>
   });
 
 describe("taskReport", () => {
-  it("counts calls, keeps the safety counts and prices the tokens", () => {
-    const t = report({ prices: { inputUSDPerMTok: 1, outputUSDPerMTok: 10 } });
+  it("counts calls, keeps the safety counts and the metered cost", () => {
+    const t = report({ costUSD: 3 });
     expect(t).toMatchObject({
       status: "pass-assisted",
       noopRejected: true,
@@ -52,7 +50,7 @@ describe("taskReport", () => {
       handoffs: 1,
       maxHandoffs: 2,
     });
-    expect(t.costUSD).toBeCloseTo(3);
+    expect(t.costUSD).toBe(3);
     expect(report({}).costUSD).toBe(0);
   });
 
