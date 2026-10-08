@@ -694,6 +694,14 @@ button.activity-usage-trigger:active {
   rotate: 180deg;
 }
 
+/* The kit's popover is as wide as its content: kept to the rail it opens from (less the popover's
+   own padding), so it never reaches over the stage. */
+@media (width >= 1180px) {
+  .activity-usage-popover > .usage-details {
+    width: calc(var(--spacing-rail) - var(--spacing) * 8);
+  }
+}
+
 .usage-details {
   display: grid;
   gap: calc(var(--spacing) * 3);

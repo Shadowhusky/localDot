@@ -182,7 +182,14 @@ export function UsageFooter({
         <span className="activity-usage-text num">{summary}</span>
         <Icon name="chevron-up" size={12} className="activity-usage-chevron" />
       </button>
-      <Popover open={open} onClose={() => setOpen(false)} anchor={trigger} label="Usage" side="top">
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchor={trigger}
+        label="Usage"
+        side="top"
+        className="activity-usage-popover"
+      >
         <UsageDetails model={model} selection={selection} modelName={modelName} />
       </Popover>
     </div>
