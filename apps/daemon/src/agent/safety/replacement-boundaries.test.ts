@@ -1,4 +1,4 @@
-import { ReplacementRecord, SELFTEST_CHECKS, ulid } from "@localdot/protocol";
+import { DEFAULT_AUTONOMY, ReplacementRecord, SELFTEST_CHECKS, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -13,10 +13,11 @@ import { ShellCleanupUncertainError } from "../../desktopd/tools-client.ts";
 import { KillSwitch } from "../../gateway/kill-switch.ts";
 import { LiveSessions } from "../../gateway/live.ts";
 import { MemoryStore } from "../memory.ts";
-import { AgentRunner } from "../runner.ts";
+import { AgentRunner, type AgentRunnerDeps } from "../runner.ts";
 import { toolHarness } from "../testing/harness.ts";
 import { ComputerFences } from "./fences.ts";
 import { createReplacementController } from "./replacement-controller.ts";
+import { SafetyIntentStore } from "./store.ts";
 
 const owned: (() => Promise<void>)[] = [];
 afterEach(async () => {
@@ -100,7 +101,7 @@ async function fixture() {
     tickets = new TicketRegistry(),
     killSwitch = new KillSwitch({ live, keyd, cells, settleMs: 200 });
   const retireBrain = vi.fn(async (_session: string) => {});
-  const runner = new AgentRunner({
+  const runnerDeps: AgentRunnerDeps = {
     home,
     fences,
     eventLog: h.eventLog,
@@ -133,7 +134,8 @@ async function fixture() {
     installSkills: async () => [],
     waitForUploads: async () => {},
     stopSession: (id) => killSwitch.stopSession(id),
-  });
+  };
+  const runner = new AgentRunner(runnerDeps);
   live.start(
     h.session.cellId,
     h.session.id,
@@ -200,6 +202,7 @@ async function fixture() {
     tickets,
     killSwitch,
     runner,
+    runnerDeps,
     retireBrain,
     replacement,
     request,
@@ -404,6 +407,62 @@ describe("replacement crosses real runner, lifecycle and public route boundaries
       f.fake.state.calls.filter((c) => c.method === "POST" && c.path === "/containers/create"),
     ).toHaveLength(before);
     expect(cold.endpoints(f.oldCellId)).toBeUndefined();
+  });
+  it("a computer fenced at start by a crashed Pause is replaced by a fresh Ready computer", async () => {
+    const f = await fixture();
+    f.h.session.stop();
+    f.live.stop(f.h.session.id);
+    await f.live.settled(f.h.session.id);
+    new SafetyIntentStore(f.home).write(
+      f.h.session.id,
+      f.oldCellId,
+      DEFAULT_AUTONOMY,
+      {
+        requestId: ulid(),
+        revision: 1,
+        reason: "user",
+        phase: "pausing",
+        atStepBoundary: false,
+        resumeAvailable: false,
+      },
+      "api",
+    );
+    f.cells.dispose();
+    const fences = new ComputerFences(f.home),
+      cells = new CellOrchestrator({
+        docker: new DockerClient(f.fake.socketPath),
+        store: f.store,
+        keyd: f.keyd,
+        images: { desktop: "localdot/desktop:dev", gate: "localdot/gate:dev" },
+        permanentFence: (id) => (fences.record(id) ? { revision: 1 } : fences.isFenced(id)),
+        probeDesktopd: async () => f.health,
+        probeStream: async () => true,
+        watchEveryMs: 60000,
+        readyTimeoutMs: 1000,
+      });
+    owned.push(async () => cells.dispose());
+    await cells.containFenced();
+    expect(cells.get(f.oldCellId)?.fenced).toEqual({ revision: 1 });
+    const live = new LiveSessions(),
+      runner = new AgentRunner({ ...f.runnerDeps, fences, live, cell: (id) => cells.get(id) });
+    owned.push(() => runner.close());
+    const restarted = createReplacementController({
+      home: f.home,
+      fences,
+      runner,
+      cells,
+      tickets: new TicketRegistry(),
+      readyTimeoutMs: 1000,
+    });
+    await restarted.owner.start();
+    await cells.reconcile();
+    const record = await restarted.owner.replace(f.oldCellId, f.body());
+    expect(record).toMatchObject({ phase: "ready", oldCellId: f.oldCellId });
+    if (!record.newCellId) throw new Error("fresh ID missing");
+    expect(cells.get(record.newCellId)).toMatchObject({ state: "ready" });
+    expect(cells.get(record.newCellId)?.replacementPending).toBeUndefined();
+    expect(cells.endpoints(record.newCellId)).toBeDefined();
+    expect(fences.isFenced(record.newCellId)).toBe(false);
   });
   it("startup containment stops only captured owned executors and leaves the old home for recovery", async () => {
     const f = await fixture();
