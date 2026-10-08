@@ -212,6 +212,22 @@ describe("Select", () => {
     expect(clicked).toHaveBeenCalledTimes(1);
   });
 
+  it("leaves the keys to an input method while it composes", () => {
+    const onChange = vi.fn();
+    render(<Autonomy onChange={onChange} />);
+    trigger().focus();
+    fireEvent.keyDown(trigger(), { key: "ArrowDown" });
+    fireEvent.keyDown(trigger(), { key: "End" });
+    fireEvent.keyDown(trigger(), { key: "Enter", keyCode: 229, isComposing: true });
+    fireEvent.keyDown(trigger(), { key: " ", keyCode: 229 });
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    fireEvent.keyDown(trigger(), { key: "Escape", isComposing: true });
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    expect(onChange).not.toHaveBeenCalled();
+    fireEvent.keyDown(trigger(), { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("watch");
+  });
+
   it("takes focus from its label without opening", () => {
     render(<Autonomy />);
     fireEvent.click(screen.getByText("Autonomy"));

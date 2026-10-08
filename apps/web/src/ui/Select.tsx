@@ -11,7 +11,7 @@ import {
   type PickerOption,
   typeahead,
 } from "./listbox.ts";
-import { PickerPopup } from "./PickerPopup.tsx";
+import { composing, PickerPopup } from "./PickerPopup.tsx";
 import { usePicker } from "./picker.ts";
 
 // Typed letters within this long of each other make one search.
@@ -74,7 +74,7 @@ export function Select({
     event.timeStamp - typed.current.at < TYPEAHEAD_MS && typed.current.text !== "";
 
   const onKeyDown = (event: KeyboardEvent<HTMLElement>) => {
-    if (unavailable) return;
+    if (unavailable || composing(event.nativeEvent)) return;
     const { key } = event;
     if (!open) {
       if (["ArrowDown", "ArrowUp", "Enter", " "].includes(key)) {

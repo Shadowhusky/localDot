@@ -12,7 +12,7 @@ import {
   type PickerSection,
   searchTerms,
 } from "./listbox.ts";
-import { PickerPopup } from "./PickerPopup.tsx";
+import { composing, PickerPopup } from "./PickerPopup.tsx";
 import { usePicker } from "./picker.ts";
 import { pickerTitle, printable, type SelectProps } from "./Select.tsx";
 import { TextField } from "./TextField.tsx";
@@ -85,7 +85,7 @@ export function Combobox({
   };
 
   const onTriggerKeyDown = (event: KeyboardEvent<HTMLButtonElement>) => {
-    if (unavailable || open) return;
+    if (unavailable || open || composing(event.nativeEvent)) return;
     if (["ArrowDown", "ArrowUp", "Enter", " "].includes(event.key)) {
       event.preventDefault();
       show();
@@ -96,6 +96,7 @@ export function Combobox({
   };
 
   const onListKeyDown = (event: KeyboardEvent<HTMLElement>) => {
+    if (composing(event.nativeEvent)) return;
     if (event.key === "Tab") {
       picker.hide();
       picker.trigger.current?.focus();

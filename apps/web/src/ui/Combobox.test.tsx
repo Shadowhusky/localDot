@@ -71,6 +71,27 @@ describe("Combobox", () => {
     expect(document.activeElement).toBe(trigger());
   });
 
+  it("leaves Enter and Escape to an input method while it composes a search", () => {
+    const onChange = vi.fn();
+    const sheetSaw = vi.fn();
+    const escapes = (event: KeyboardEvent) => {
+      if (event.key === "Escape") sheetSaw();
+    };
+    render(<Model onChange={onChange} />);
+    fireEvent.keyDown(trigger(), { key: "Enter" });
+    fireEvent.change(search(), { target: { value: "son" } });
+    window.addEventListener("keydown", escapes);
+    fireEvent.keyDown(search(), { key: "Enter", keyCode: 229, isComposing: true });
+    fireEvent.keyDown(search(), { key: "Escape", keyCode: 229, isComposing: true });
+    window.removeEventListener("keydown", escapes);
+    expect(onChange).not.toHaveBeenCalled();
+    expect(sheetSaw).not.toHaveBeenCalled();
+    expect(trigger().getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(search());
+    fireEvent.keyDown(search(), { key: "Enter" });
+    expect(onChange).toHaveBeenCalledWith("claude-sonnet-4-5");
+  });
+
   it("matches keywords as well as labels", () => {
     render(<Model />);
     fireEvent.keyDown(trigger(), { key: "ArrowDown" });

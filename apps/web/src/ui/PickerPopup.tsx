@@ -57,6 +57,11 @@ function swallowRestOfPress() {
   for (const type of NEXT_GESTURE) window.addEventListener(type, release, true);
 }
 
+// An input method owns the keys while it composes: Enter commits its text and Escape cancels it.
+export function composing(event: KeyboardEvent): boolean {
+  return event.isComposing || event.keyCode === 229;
+}
+
 function project(velocity: number): number {
   return ((velocity / 1000) * DECELERATION) / (1 - DECELERATION);
 }
@@ -197,6 +202,7 @@ export function PickerPopup({
     const escaped = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       event.stopPropagation();
+      if (composing(event)) return;
       event.preventDefault();
       dismiss.current();
     };
