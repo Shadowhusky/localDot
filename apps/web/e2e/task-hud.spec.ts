@@ -70,6 +70,21 @@ test("an approval puts the decision first and takes control from dot", async ({ 
   await expect(page.locator(".task-connection")).toHaveText("Waiting for you");
 });
 
+test("after Approve once, dot has control again and a late heartbeat still warns", async ({
+  page,
+}) => {
+  await open(page);
+  await qa(page, "approval?risk=medium");
+  await expectWaiting(page, "Needs your OK");
+  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await expect(status(page)).toHaveText("Select the Net total cell");
+  await expect(control(page)).toHaveCount(1);
+  await qa(page, "heartbeat");
+  await expect(
+    page.getByText("The task heartbeat is late. You can use Stop if you want to contain it."),
+  ).toBeVisible();
+});
+
 test("a question puts the question first", async ({ page }) => {
   await open(page);
   await qa(page, "ask");
