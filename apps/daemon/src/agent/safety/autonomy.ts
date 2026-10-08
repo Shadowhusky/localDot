@@ -13,7 +13,6 @@ import { ALWAYS_SCOPES, type Place } from "./rules.ts";
 const MODE_RANK = { act: 0, ask: 1, handoff: 2 } as const;
 const DESKTOP_ONLY = new Set<RiskFacts["operation"]>(["shell", "files_write", "files_delete"]);
 const RISK_RANK = { none: 0, medium: 1, high: 2 } as const;
-const PLAIN_URL = /^https?:\/\/[^\s"'`$\\{}()<>|;&*?[\]!^~]+$/i;
 
 function mode(actionClass: ActionClass, policy: AutonomyPolicy): AutonomyMode {
   if (actionClass === "credentials") return "handoff";
@@ -59,28 +58,13 @@ function siteOf(value: string | undefined): string | undefined {
     : undefined;
 }
 
-// A URL names a command's site only when the shell cannot rewrite it: a plain or wholly quoted
-// word with no expansion or escape. Any other URL-like word leaves the command without a site.
-function commandSites(command: string): string[] {
-  const sites = new Set<string>();
-  for (const word of command.split(/\s+/)) {
-    if (!word.includes("://")) continue;
-    const bare = /^(["'])(.*)\1$/.exec(word)?.[2] ?? word;
-    const site = PLAIN_URL.test(bare) ? siteOf(bare) : undefined;
-    if (!site) return [];
-    sites.add(site);
-  }
-  return [...sites];
-}
-
+// A command's destination depends on the shell, its config files and the hosts file, all of which
+// the agent can change, so a command never names a site.
 export function placeOf(facts: RiskFacts): Place {
   const target = facts.target;
-  const sites =
-    facts.operation === "shell"
-      ? commandSites(facts.command ?? "")
-      : [siteOf(target?.url ?? facts.destination)].filter((site) => site !== undefined);
+  const site = facts.operation === "shell" ? undefined : siteOf(target?.url ?? facts.destination);
   return {
-    ...(sites.length === 1 ? { site: sites[0] } : {}),
+    ...(site ? { site } : {}),
     ...(target?.source === "ax" && target.app ? { app: target.app } : {}),
   };
 }
