@@ -1,13 +1,16 @@
 import {
+  createContext,
   type ReactNode,
   type RefObject,
   useCallback,
+  useContext,
   useEffect,
   useId,
   useLayoutEffect,
   useRef,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import { Button } from "./Button.tsx";
 import { afterMotion } from "./finished.ts";
 import { canFocus, firstField, focusWithoutScroll } from "./focus.ts";
@@ -29,6 +32,14 @@ function pageOf(sheet: HTMLElement | null, key: string): HTMLElement | null {
   return (
     sheet?.querySelector<HTMLElement>(`.ui-sheet-page[data-page="${CSS.escape(key)}"]`) ?? null
   );
+}
+
+const DiscardContext = createContext<(then: () => void) => void>((then) => then());
+
+// Inside a sheet: runs `then` at once while nothing is unsaved, otherwise after the sheet's own
+// "Discard unsaved changes?" prompt is answered with Discard.
+export function useConfirmDiscard(): (then: () => void) => void {
+  return useContext(DiscardContext);
 }
 
 export interface SheetBack {
@@ -163,16 +174,33 @@ function SheetLayer({
     );
   }, [leaving]);
 
-  const requestClose = useCallback(() => {
+  // What Discard runs: closing, unless something in the sheet asked to drop its edits another way.
+  const discarding = useRef<(() => void) | null>(null);
+  const confirmDiscard = useCallback((then: (() => void) | null) => {
     const now = latest.current;
     if (now.closing) return;
-    if (!now.dirty) return now.onClose();
+    if (!now.dirty) return (then ?? now.onClose)();
     if (!now.asking) resume.current = document.activeElement;
+    discarding.current = then;
     setAsking(true);
   }, []);
+  const requestClose = useCallback(() => confirmDiscard(null), [confirmDiscard]);
+  const askThen = useCallback((then: () => void) => confirmDiscard(then), [confirmDiscard]);
+
+  const discard = () => {
+    const then = discarding.current;
+    if (!then) return latest.current.onClose();
+    discarding.current = null;
+    resume.current = null;
+    setAsking(false);
+    if (panel.current) focusWithoutScroll(panel.current);
+    then();
+  };
 
   const keepEditing = useCallback(() => {
-    setAsking(false);
+    discarding.current = null;
+    // The footer is inert while the prompt shows; it must not be by the time focus goes back to it.
+    flushSync(() => setAsking(false));
     const target = resume.current;
     resume.current = null;
     if (canFocus(target) && panel.current?.contains(target) && target !== keep.current)
@@ -319,18 +347,20 @@ function SheetLayer({
           </div>
         )}
         <div className="ui-sheet-pages">
-          {/* One keyed list, so a page that is held or leaving keeps its instance and state. */}
-          {views.map((view) => (
-            <SheetPage
-              key={view.key}
-              view={view}
-              held={held.includes(view)}
-              leaving={leaving.includes(view)}
-              titleId={view === current ? titleId : undefined}
-              descriptionId={view === current ? descriptionId : undefined}
-              {...pageProps}
-            />
-          ))}
+          <DiscardContext.Provider value={askThen}>
+            {/* One keyed list, so a page that is held or leaving keeps its instance and state. */}
+            {views.map((view) => (
+              <SheetPage
+                key={view.key}
+                view={view}
+                held={held.includes(view)}
+                leaving={leaving.includes(view)}
+                titleId={view === current ? titleId : undefined}
+                descriptionId={view === current ? descriptionId : undefined}
+                {...pageProps}
+              />
+            ))}
+          </DiscardContext.Provider>
         </div>
         <fieldset
           aria-labelledby={promptId}
@@ -345,7 +375,7 @@ function SheetLayer({
             <Button ref={keep} variant="primary" onClick={keepEditing}>
               Keep editing
             </Button>
-            <Button onClick={() => latest.current.onClose()}>Discard</Button>
+            <Button onClick={discard}>Discard</Button>
           </div>
         </fieldset>
       </section>

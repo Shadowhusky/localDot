@@ -138,6 +138,27 @@ describe("settings inspector", () => {
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(p.onClose).toHaveBeenCalledOnce();
   });
+  it("asks before Revert drops unsaved changes", () => {
+    const p = props();
+    const view = render(<SettingsSheet {...p} dirty />);
+    const revert = screen.getByRole("button", { name: "Revert" });
+    revert.focus();
+    fireEvent.click(revert);
+    expect(asking()).toBe(true);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Keep editing" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keep editing" }));
+    expect(asking()).toBe(false);
+    expect(p.onReload).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(revert);
+    fireEvent.click(revert);
+    fireEvent.click(screen.getByRole("button", { name: "Discard" }));
+    expect(p.onReload).toHaveBeenCalledOnce();
+    expect(p.onClose).not.toHaveBeenCalled();
+    expect(asking()).toBe(false);
+    expect(document.activeElement).toBe(sheet());
+    view.rerender(<SettingsSheet {...p} dirty={false} />);
+    expect(screen.queryByRole("button", { name: "Revert" })).toBeNull();
+  });
   it("says in the footer what saving needs, and ties Save's reason to it", () => {
     vi.useFakeTimers();
     const p = props();
@@ -149,8 +170,7 @@ describe("settings inspector", () => {
     view.rerender(<SettingsSheet {...p} dirty />);
     expect(status()?.textContent).toBe("Unsaved changes");
     expect(save().getAttribute("aria-disabled")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Revert" }));
-    expect(p.onReload).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Revert" })).toBeTruthy();
     view.rerender(
       <SettingsSheet
         {...p}

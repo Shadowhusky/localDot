@@ -17,7 +17,7 @@ import { MoneyField } from "../ui/MoneyField.tsx";
 import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
-import { Sheet } from "../ui/Sheet.tsx";
+import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
@@ -247,9 +247,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
         </div>
       )}
       {props.dirty && props.onReload && (
-        <Button variant="quiet" disabledReason={lockReason} onClick={props.onReload}>
-          Revert
-        </Button>
+        <Revert disabledReason={lockReason} onRevert={props.onReload} />
       )}
       {props.save && (
         <Button
@@ -399,6 +397,19 @@ function SettingsSections(props: SettingsSheetProps) {
         </Section>
       )}
     </>
+  );
+}
+
+function Revert({ disabledReason, onRevert }: { disabledReason?: string; onRevert(): void }) {
+  const confirmDiscard = useConfirmDiscard();
+  return (
+    <Button
+      variant="quiet"
+      disabledReason={disabledReason}
+      onClick={() => confirmDiscard(onRevert)}
+    >
+      Revert
+    </Button>
   );
 }
 
