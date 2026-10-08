@@ -28,6 +28,8 @@ const DECELERATION = 0.998;
 const STILL_MS = 80;
 // The ease a flung sheet leaves on starts at about this multiple of its average speed.
 const EASE_ENTER_SLOPE = 4.35;
+const REST_OF_PRESS = ["pointerup", "mousedown", "mouseup", "click", "auxclick", "contextmenu"];
+const NEXT_GESTURE = ["pointerdown", "pointercancel", "keydown"];
 
 export type Presentation = "popover" | "sheet";
 
@@ -37,6 +39,22 @@ export function presentationNow(): Presentation {
     matchMedia("(width < 760px) and (pointer: coarse)").matches
     ? "sheet"
     : "popover";
+}
+
+// A press that closed a popup is spent: the rest of it, its click included, never reaches the page or
+// a sheet that closes on a click of its backdrop. The next press, or a key, is the page's again.
+function swallowRestOfPress() {
+  const swallow = (event: Event) => {
+    event.stopPropagation();
+    event.preventDefault();
+    if (event.type === "click") release();
+  };
+  const release = () => {
+    for (const type of REST_OF_PRESS) window.removeEventListener(type, swallow, true);
+    for (const type of NEXT_GESTURE) window.removeEventListener(type, release, true);
+  };
+  for (const type of REST_OF_PRESS) window.addEventListener(type, swallow, true);
+  for (const type of NEXT_GESTURE) window.addEventListener(type, release, true);
 }
 
 function project(velocity: number): number {
@@ -173,6 +191,7 @@ export function PickerPopup({
     const pressed = (event: globalThis.PointerEvent) => {
       if (inside(event.target)) return;
       event.stopPropagation();
+      swallowRestOfPress();
       dismiss.current();
     };
     const escaped = (event: KeyboardEvent) => {

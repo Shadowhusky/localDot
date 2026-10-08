@@ -2,6 +2,9 @@ import { type Browser, expect, type Locator, type Page, test } from "@playwright
 import { DESKTOP, openKitPage, PHONE, startKitGallery } from "./kit-gallery.ts";
 import { ENGINES } from "./ui-fixture.ts";
 
+// A touch tablet with room for a popover beside the trigger.
+const TABLET = { ...PHONE, viewport: { width: 820, height: 1180 } };
+
 // The T07 fields and pickers in the kit gallery, under the production CSP, in Chrome and WebKit,
 // on a desktop and on a touch phone.
 let gallery: Awaited<ReturnType<typeof startKitGallery>>;
@@ -20,7 +23,7 @@ test.afterAll(async () => {
 
 function open(
   browser: Browser,
-  options: typeof DESKTOP | typeof PHONE,
+  options: typeof DESKTOP | typeof PHONE | typeof TABLET,
   reducedMotion: "reduce" | "no-preference" = "no-preference",
 ) {
   return openKitPage(
@@ -127,6 +130,67 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await expect(
           page.getByRole("button", { name: "Taps that reached the page: 0" }),
         ).toBeVisible();
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      }
+    });
+
+    test("a press outside an open list closes only the list, and its click reaches nothing", async () => {
+      for (const options of [DESKTOP, TABLET]) {
+        const touch = options === TABLET;
+        const { context, page, seen } = await open(browser, options);
+        const autonomy = picker(page, "Autonomy");
+        const taps = page.locator(".fields-under");
+        await autonomy.scrollIntoViewIfNeeded();
+        await press(autonomy, touch);
+        await expect(page.getByRole("listbox", { name: "Autonomy" })).toBeVisible();
+        await settled(page);
+        await press(taps, touch);
+        await expect(page.locator(".ui-picker")).toHaveCount(0);
+        await expect(autonomy).toHaveAttribute("aria-expanded", "false");
+        await expect(autonomy).toHaveText("Ask before risky steps");
+        await expect(taps).toHaveText("Taps that reached the page: 0");
+        // With the list gone, the next press is the page's.
+        await press(taps, touch);
+        await expect(taps).toHaveText("Taps that reached the page: 1");
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      }
+    });
+
+    test("a click on a panel's backdrop with a list open closes only the list", async () => {
+      for (const options of [DESKTOP, TABLET, PHONE]) {
+        const touch = options !== DESKTOP;
+        const { context, page, seen } = await open(browser, options);
+        const state = page.getByTestId("panel-state");
+        const backdrop = page.getByTestId("panel-backdrop");
+        const select = picker(page, "Autonomy in the panel");
+        await backdrop.scrollIntoViewIfNeeded();
+        await press(select, touch);
+        await press(page.getByRole("option", { name: "Watch only" }), touch);
+        await expect(page.locator(".ui-picker")).toHaveCount(0);
+        await press(select, touch);
+        await expect(page.getByRole("listbox")).toBeVisible();
+        await settled(page);
+        // A corner of the dimmed backdrop, clear of the panel and of a popover under its trigger. A
+        // phone's sheet lays its own scrim over the page, so there the press lands on the dim area
+        // above the sheet.
+        const box = await backdrop.boundingBox();
+        const sheetTop = await page.evaluate(
+          () => document.querySelector(".ui-sheet")?.getBoundingClientRect().top ?? Infinity,
+        );
+        if (!box) throw new Error("no backdrop");
+        const corner = { x: box.x + 12, y: box.y + 12 };
+        const outside = { x: corner.x, y: Math.min(corner.y, sheetTop - 24) };
+        if (touch) await page.touchscreen.tap(outside.x, outside.y);
+        else await page.mouse.click(outside.x, outside.y);
+        await expect(page.locator(".ui-picker")).toHaveCount(0);
+        await expect(state).toHaveText("Panel open · closed 0 times");
+        await expect(select).toHaveText("Watch only");
+        // With no list open, a click on the backdrop closes the panel.
+        if (touch) await page.touchscreen.tap(corner.x, corner.y);
+        else await page.mouse.click(corner.x, corner.y);
+        await expect(state).toHaveText("Panel closed · closed 1 time");
         expect(await seen()).toEqual({ violations: [], styles: 0 });
         await context.close();
       }

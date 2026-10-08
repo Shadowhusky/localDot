@@ -310,12 +310,16 @@ function Pickers() {
   );
 }
 
-// Stands in for a settings sheet that closes on Escape or a press on its backdrop: neither may
-// reach it while a list inside is open.
+// Stands in for a settings sheet that closes on Escape or a click on its backdrop: neither may reach it
+// while a list inside is open.
 function Panel() {
   const [open, setOpen] = useState(true);
   const [closed, setClosed] = useState(0);
   const [autonomy, setAutonomy] = useState("ask");
+  const close = () => {
+    setOpen(false);
+    setClosed((count) => count + 1);
+  };
   useEffect(() => {
     if (!open) return;
     const dismiss = (event: KeyboardEvent) => {
@@ -327,20 +331,30 @@ function Panel() {
     return () => window.removeEventListener("keydown", dismiss);
   }, [open]);
   return (
-    <section className="atoms-panel fields-sheet" aria-label="Settings panel">
-      <p className="fields-sheet-state" data-testid="panel-state">
-        {open ? "Panel open" : "Panel closed"} · closed {closed} {closed === 1 ? "time" : "times"}
-      </p>
-      {open ? (
-        <Field label="Autonomy in the panel">
-          <Select value={autonomy} onValueChange={setAutonomy} items={AUTONOMY} />
-        </Field>
-      ) : (
-        <Button size="sm" onClick={() => setOpen(true)}>
-          Open the panel
-        </Button>
-      )}
-    </section>
+    <div className="fields-stage">
+      <div
+        className="fields-backdrop"
+        data-testid="panel-backdrop"
+        aria-hidden="true"
+        onClick={(event) => {
+          if (open && event.target === event.currentTarget) close();
+        }}
+      />
+      <section className="atoms-panel fields-sheet" aria-label="Settings panel">
+        <p className="fields-sheet-state" data-testid="panel-state">
+          {open ? "Panel open" : "Panel closed"} · closed {closed} {closed === 1 ? "time" : "times"}
+        </p>
+        {open ? (
+          <Field label="Autonomy in the panel">
+            <Select value={autonomy} onValueChange={setAutonomy} items={AUTONOMY} />
+          </Field>
+        ) : (
+          <Button size="sm" onClick={() => setOpen(true)}>
+            Open the panel
+          </Button>
+        )}
+      </section>
+    </div>
   );
 }
 
@@ -400,7 +414,7 @@ export function FieldsPage() {
 
       <Section
         title="Inside a panel"
-        note="Escape or a press outside closes only the open list. The panel around it, which closes on Escape, stays open with its choices."
+        note="Escape or a press outside closes only the open list. The panel around it, which closes on Escape or a click on the dimmed backdrop, stays open with its choices."
       >
         <Panel />
       </Section>

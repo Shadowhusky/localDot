@@ -158,20 +158,58 @@ describe("Select", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("true");
   });
 
-  it("closes on a press outside and keeps that press from the page beneath", () => {
+  it("closes on a press outside and keeps the whole press, click included, from the page", () => {
     const pageSaw = vi.fn();
+    const clicked = vi.fn();
     render(
       <>
         <Autonomy />
-        <button type="button" onPointerDown={pageSaw}>
+        <button
+          type="button"
+          onPointerDown={pageSaw}
+          onPointerUp={pageSaw}
+          onMouseDown={pageSaw}
+          onMouseUp={pageSaw}
+          onClick={clicked}
+        >
           Elsewhere
         </button>
       </>,
     );
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
     fireEvent.keyDown(trigger(), { key: "ArrowDown" });
-    fireEvent.pointerDown(screen.getByRole("button", { name: "Elsewhere" }), { button: 0 });
+    fireEvent.pointerDown(elsewhere, { button: 0, pointerType: "mouse" });
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    fireEvent.mouseDown(elsewhere, { button: 0 });
+    fireEvent.pointerUp(elsewhere, { button: 0, pointerType: "mouse" });
+    fireEvent.mouseUp(elsewhere, { button: 0 });
+    expect(fireEvent.click(elsewhere, { detail: 1 })).toBe(false);
     expect(pageSaw).not.toHaveBeenCalled();
+    expect(clicked).not.toHaveBeenCalled();
+    // The next press is the page's again.
+    fireEvent.pointerDown(elsewhere, { button: 0, pointerType: "mouse" });
+    fireEvent.click(elsewhere, { detail: 1 });
+    expect(clicked).toHaveBeenCalledTimes(1);
+  });
+
+  it("lets a key's click through after an outside touch that turned into a scroll", () => {
+    const clicked = vi.fn();
+    render(
+      <>
+        <Autonomy />
+        <button type="button" onClick={clicked}>
+          Elsewhere
+        </button>
+      </>,
+    );
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    fireEvent.keyDown(trigger(), { key: "ArrowDown" });
+    fireEvent.pointerDown(elsewhere, { button: 0, pointerType: "touch" });
+    fireEvent.pointerCancel(elsewhere, { pointerType: "touch" });
+    expect(trigger().getAttribute("aria-expanded")).toBe("false");
+    fireEvent.keyDown(elsewhere, { key: "Enter" });
+    fireEvent.click(elsewhere, { detail: 0 });
+    expect(clicked).toHaveBeenCalledTimes(1);
   });
 
   it("takes focus from its label without opening", () => {

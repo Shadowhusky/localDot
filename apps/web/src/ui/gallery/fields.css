@@ -67,7 +67,21 @@
     justify-self: start;
   }
 
+  .fields-stage {
+    position: relative;
+    display: grid;
+    padding: calc(var(--spacing) * 8);
+  }
+
+  .fields-backdrop {
+    position: absolute;
+    inset: 0;
+    border-radius: var(--radius-xl);
+    background-color: var(--color-scrim);
+  }
+
   .fields-sheet {
+    position: relative;
     max-width: calc(var(--spacing) * 100);
   }
 
@@ -81,6 +95,10 @@
     .fields-grid,
     .fields-columns {
       grid-template-columns: minmax(0, 1fr);
+    }
+
+    .fields-stage {
+      padding: calc(var(--spacing) * 6) calc(var(--spacing) * 4);
     }
   }
 }
