@@ -31,6 +31,9 @@ import { clickLabel, clipTarget, keyLabel, scrollLabel, typeLabel } from "./text
 
 export const DEFAULT_AGENT = "main";
 const MODEL_SCREEN = { width: 1280, height: 800 } as const;
+// How long settle waits for a first screen change before it reports none, by verb: a key shows
+// its effect within a frame or two, a click may first have to open a menu or a dialog.
+const SETTLE_FIRST_MS = { key: 400, type: 400, click: 800, scroll: 800 } as const;
 // Fitts' W in CSS px, multiplied by the cell's scale: the distance it divides is in device px.
 const UNKNOWN_TARGET_PX = 24;
 const MIN_TARGET_PX = 16;
@@ -138,6 +141,11 @@ const holding = (s: StreamState) =>
 export class ActionGateway {
   readonly #cursor = new Map<string, Point>();
   readonly #queues = new Map<string, Promise<unknown>>();
+  // Each screen's newest frame: its desktopd keeps that frame's device-resolution pixels.
+  readonly #lastFrame = new Map<
+    string,
+    { frameId: string; sessionId: string; device: NativeDevice }
+  >();
 
   constructor(private readonly deps: GatewayDeps) {}
 
@@ -154,7 +162,31 @@ export class ActionGateway {
     this.deps.frames.save(ctx.sessionId, o.frameId, Buffer.from(o.image, "base64"));
     this.#append(ctx, "observe", { frameId: o.frameId, width: o.width, height: o.height });
     this.#cursor.set(ctx.cellId, o.pointer);
+    this.#lastFrame.set(ctx.cellId, { frameId: o.frameId, sessionId: ctx.sessionId, device: d });
     return { frameId: o.frameId, pointer: o.pointer };
+  }
+
+  // A model-pixel region of the session's frame at the screen's device resolution (PNG), while
+  // that frame is still its screen's newest; undefined otherwise or on a screen without one.
+  async zoom(
+    sessionId: string,
+    frameId: string,
+    region: Rect,
+    signal?: AbortSignal,
+  ): Promise<Buffer | undefined> {
+    for (const [cellId, last] of this.#lastFrame) {
+      if (last.frameId !== frameId) continue;
+      const cell = this.deps.cells.get(cellId);
+      if (!cell) {
+        this.#lastFrame.delete(cellId);
+        return undefined;
+      }
+      if (last.sessionId !== sessionId || !last.device.client.zoom) return undefined;
+      if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
+        return undefined;
+      return await last.device.client.zoom({ frameId, region }, signal);
+    }
+    return undefined;
   }
 
   async run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {
@@ -341,7 +373,7 @@ export class ActionGateway {
       });
       this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
       this.#cursor.set(ctx.cellId, point);
-      frameId = await this.#finish(ctx, d);
+      frameId = await this.#finish(ctx, d, verb);
     } finally {
       ended = true;
     }
@@ -439,7 +471,7 @@ export class ActionGateway {
       ctx.signal,
     );
     if (result.count === 0) throw new Cancelled("timeout", "nothing was typed");
-    const frameId = await this.#finish(ctx, d);
+    const frameId = await this.#finish(ctx, d, "type");
     return { ok: true, frameId, ...(hit.target ? { target: hit.target } : {}) };
   }
 
@@ -489,7 +521,7 @@ export class ActionGateway {
       scale,
     });
     this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
-    const frameId = await this.#finish(ctx, d);
+    const frameId = await this.#finish(ctx, d, "key");
     return { ok: true, frameId };
   }
 
@@ -557,9 +589,18 @@ export class ActionGateway {
   }
 
   // settle → observe → result; returns this action's own frame, never a concurrent action's.
-  async #finish(ctx: ActionContext, d: NativeDevice): Promise<string> {
+  async #finish(
+    ctx: ActionContext,
+    d: NativeDevice,
+    verb: keyof typeof SETTLE_FIRST_MS,
+  ): Promise<string> {
     this.#check(ctx);
-    const s = await d.client.settle({ quietMs: SETTLE_QUIET_MS, timeoutMs: SETTLE_CAP_MS });
+    const s = await d.client.settle({
+      verb,
+      quietMs: SETTLE_QUIET_MS,
+      firstMs: SETTLE_FIRST_MS[verb],
+      timeoutMs: SETTLE_CAP_MS,
+    });
     const frameT =
       s.lastChangeMono === null
         ? this.#sessionT(ctx.sessionId, this.deps.now())

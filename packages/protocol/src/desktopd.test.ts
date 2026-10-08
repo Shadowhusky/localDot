@@ -5,6 +5,7 @@ import {
   LaunchRequest,
   SettleRequest,
   TypeRequest,
+  ZoomRequest,
 } from "./desktopd.ts";
 
 describe("desktopd wire schemas", () => {
@@ -30,6 +31,22 @@ describe("desktopd wire schemas", () => {
 
   it("defaults settle to 250 ms quiet, 1500 ms first change, 3 s cap", () => {
     expect(SettleRequest.parse({})).toEqual({ quietMs: 250, firstMs: 1500, timeoutMs: 3000 });
+  });
+
+  it("names the input a settle follows from a fixed set", () => {
+    expect(SettleRequest.parse({ verb: "key", firstMs: 400 })).toMatchObject({
+      verb: "key",
+      firstMs: 400,
+    });
+    expect(() => SettleRequest.parse({ verb: "drag" })).toThrow();
+  });
+
+  it("zooms a frame by its id and a region", () => {
+    const region = { x: 10, y: 20, w: 100, h: 50 };
+    expect(ZoomRequest.parse({ frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", region }).region).toEqual(
+      region,
+    );
+    expect(() => ZoomRequest.parse({ frameId: "../frame", region })).toThrow();
   });
 
   it("carries a target name of any length for the gateway to cut", () => {

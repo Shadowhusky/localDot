@@ -19,6 +19,8 @@ export interface FakeScript {
   focused?: () => HitTestResult;
   find?: (req: unknown) => HitTestResult;
   launch?: (body: unknown) => { pid: number };
+  // The PNG for a /zoom request, or undefined for a frame the fake no longer keeps (404).
+  zoom?: (body: unknown) => Buffer | undefined;
   clockDelayMs?: number;
   // A long string still typing: /type sends its progress lines, then nothing until the request ends.
   typeHolds?: boolean;
@@ -91,8 +93,8 @@ export class FakeDesktopd {
       });
       return new Response(held, { headers });
     });
-    this.app.post("/settle", (c) => {
-      this.calls.push({ path: "/settle", body: null });
+    this.app.post("/settle", async (c) => {
+      this.calls.push({ path: "/settle", body: await c.req.json().catch(() => null) });
       return c.json(
         this.script.settle?.() ?? {
           changed: [],
@@ -120,6 +122,14 @@ export class FakeDesktopd {
           windows: [],
         },
       );
+    });
+    this.app.post("/zoom", async (c) => {
+      const body = await c.req.json();
+      this.calls.push({ path: "/zoom", body });
+      const png = this.script.zoom?.(body);
+      return png
+        ? c.body(new Uint8Array(png), 200, { "content-type": "image/png" })
+        : c.text("that frame is no longer kept", 404);
     });
     this.app.post("/hitTest", async (c) => {
       const body = (await c.req.json()) as { point: { x: number; y: number } };

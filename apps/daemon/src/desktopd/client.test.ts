@@ -130,4 +130,31 @@ describe("DesktopdClient", () => {
     );
     await expect(bad.clock()).rejects.toMatchObject({ status: 401 });
   });
+
+  it("reads a zoom as PNG bytes, undefined once the frame is gone, and fails on an error", async () => {
+    const fake = new FakeDesktopd({
+      zoom: (body) =>
+        (body as { frameId: string }).frameId === "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N"
+          ? Buffer.from([0x89, 0x50, 0x4e, 0x47])
+          : undefined,
+    });
+    const region = { x: 1, y: 2, w: 30, h: 40 };
+    expect(await client(fake).zoom({ frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", region })).toEqual(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47]),
+    );
+    expect(
+      await client(fake).zoom({ frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0P", region }),
+    ).toBeUndefined();
+    expect(fake.calls.map((c) => c.body)).toEqual([
+      { frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", region },
+      { frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0P", region },
+    ]);
+    const broken = new DesktopdClient(
+      { baseUrl: "http://127.0.0.1:1", token: "t" },
+      (async () => new Response("perception not available", { status: 503 })) as typeof fetch,
+    );
+    await expect(
+      broken.zoom({ frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", region }),
+    ).rejects.toBeInstanceOf(DesktopdError);
+  });
 });

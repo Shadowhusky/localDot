@@ -1,13 +1,18 @@
-"""localDot desktopd X helper: XTest injection, window activation, XI2 raw-press stamps and DAMAGE.
+"""localDot desktopd X helper: XTest injection, window activation, XI2 raw-press stamps, settle
+(DAMAGE, window changes, app pings) and root capture.
 
 Runs as the desktop user with DISPLAY set. JSON lines over stdio:
   request  {"id": 1, "cmd": "click", ...} -> {"id": 1, "ok": true, ...} | {"id": 1, "ok": false, "error": "..."}
   event    {"ev": "press"|"release", "kind": "button"|"key", "detail": 1, "mono": 12345.678}
 Times are CLOCK_MONOTONIC milliseconds (time.monotonic_ns() / 1e6), the clock desktopd's Node
 process reads through process.hrtime, so nothing inside the cell needs a clock mapping.
-Two X connections: `cmd` serves requests on the main thread, `evt` feeds the listener thread.
+X connections: `cmd` serves requests on the main thread, `evt` feeds the listener thread, and
+`capture` opens an Xlib one for MIT-SHM on first use.
 """
+import collections
+import ctypes
 import json
+import os
 import select
 import sys
 import threading
@@ -20,6 +25,22 @@ from Xlib.protocol import rq
 
 ACTIVATE_TIMEOUT_MS = 300
 DOUBLE_CLICK_GAP_MS = 90
+# Damage inside a rect that was already changing this long before arm() (a spinner, a clock) is
+# ambient. Settle's quiet window is 250 ms, so the previous action's own changes have stopped
+# before the next arm and are not mistaken for ambient ones.
+AMBIENT_MS = 300
+# A rect that changed again and again in this window, AMBIENT_MS or more apart, is ambient too:
+# a caret blinks every 400-800 ms, so the short window alone catches it only half the time.
+PERIODIC_MS = 1500
+# Damage inside an ambient rect up to this share of the screen is ambient. A larger rect masks only
+# damage of exactly its size and place, and only when it repeats: GIMP's marching ants repaint a
+# third of the screen every 200 ms, while a brush dab inside them must still count.
+AMBIENT_MAX_SHARE = 1 / 16
+HISTORY_LIMIT = 1024
+# Inputs an app handles on its main loop: settle pings that app and waits for the answer, so a
+# dialog it spends a second building after the click is not missed.
+PING_VERBS = ("click", "scroll", "key", "type")
+TINY_WINDOW_PX = 16
 
 RAW_EVENTS = {
     xinput.RawKeyPress: ("press", "key"),
@@ -102,41 +123,134 @@ def merge_rects(rects, limit=8):
     return boxes
 
 
-class Damage:
-    """Rectangles damaged since the last arm(), filled by the listener thread."""
+def intersects(a, b):
+    return a[0] < b[0] + b[2] and b[0] < a[0] + a[2] and a[1] < b[1] + b[3] and b[1] < a[1] + a[3]
 
-    def __init__(self):
+
+def same(a, b, slack=2):
+    return all(abs(a[i] - b[i]) <= slack for i in range(4))
+
+
+def contains(outer, inner, slack=2):
+    return (inner[0] >= outer[0] - slack and inner[1] >= outer[1] - slack
+            and inner[0] + inner[2] <= outer[0] + outer[2] + slack
+            and inner[1] + inner[3] <= outer[1] + outer[3] + slack)
+
+
+def clip(rect, size):
+    """The part of `rect` on a `size` screen, or None when too little of it is on the screen."""
+    if rect is None:
+        return None
+    x0, y0 = max(0, rect[0]), max(0, rect[1])
+    x1, y1 = min(size[0], rect[0] + rect[2]), min(size[1], rect[1] + rect[3])
+    if x1 <= x0 or y1 <= y0 or (x1 - x0) * (y1 - y0) < TINY_WINDOW_PX:
+        return None
+    return [x0, y0, x1 - x0, y1 - y0]
+
+
+Snapshot = collections.namedtuple("Snapshot", "rects last count unpainted pong")
+
+
+class Screen:
+    """Damage, window changes and app pongs since the last arm(), filled by the listener thread.
+
+    Damage inside a rect that was ambient at arm() neither counts nor holds settle open. A window
+    mapped after arm() holds settle until damage lands inside it, that is until it has painted.
+    """
+
+    def __init__(self, clock=mono):
         self.lock = threading.Lock()
+        self.clock = clock
+        self.size = (2560, 1600)
+        self.recent = []
+        self.ambient = []
         self.rects = []
         self.last = None
         self.count = 0
+        self.unpainted = {}
+        self.pongs = {}
 
-    def add(self, rect, t):
-        with self.lock:
+    def _change(self, rect, t):
+        if rect is not None:
             self.rects.append(rect)
             if len(self.rects) > 256:
                 self.rects = merge_rects(self.rects)
-            self.last = t
-            self.count += 1
+        self.last = t
+        self.count += 1
+
+    def add(self, rect, t):
+        with self.lock:
+            self.recent.append((t, rect))
+            if len(self.recent) > HISTORY_LIMIT:
+                self.recent = [(at, r) for at, r in self.recent if at >= t - PERIODIC_MS]
+                del self.recent[:-HISTORY_LIMIT]
+            if any(same(a, rect) if large else contains(a, rect) for a, large in self.ambient):
+                return
+            self._change(rect, t)
+            for wid, (area, since) in list(self.unpainted.items()):
+                if t >= since and intersects(area, rect):
+                    del self.unpainted[wid]
+
+    def mapped(self, wid, rect, t):
+        with self.lock:
+            self._change(rect, t)
+            self.unpainted[wid] = (rect, t)
+
+    def unmapped(self, wid, rect, t):
+        with self.lock:
+            self._change(rect, t)
+            self.unpainted.pop(wid, None)
+
+    def moved(self, rect, t):
+        with self.lock:
+            self._change(rect, t)
+
+    def expect(self, token):
+        with self.lock:
+            self.pongs[token] = None
+
+    def pong(self, token, t):
+        with self.lock:
+            if token in self.pongs and self.pongs[token] is None:
+                self.pongs[token] = t
 
     def arm(self):
         with self.lock:
+            now = self.clock()
+            self.recent = [(t, r) for t, r in self.recent if t >= now - PERIODIC_MS]
+            seen = {}
+            for t, r in self.recent:
+                first, _ = seen.get(tuple(r), (t, t))
+                seen[tuple(r)] = (first, t)
+            limit = self.size[0] * self.size[1] * AMBIENT_MAX_SHARE
+            self.ambient = []
+            for r, (first, last) in seen.items():
+                large = r[2] * r[3] > limit
+                periodic = last - first >= AMBIENT_MS
+                if periodic or (last >= now - AMBIENT_MS and not large):
+                    self.ambient.append((list(r), large))
+            del self.ambient[256:]
             self.rects = []
             self.last = None
             self.count = 0
-            return mono()
+            self.unpainted = {}
+            self.pongs = {}
+            return now
 
-    def snapshot(self):
+    def snapshot(self, token=None):
         with self.lock:
-            return merge_rects(self.rects), self.last, self.count
+            return Snapshot(list(self.rects), self.last, self.count, bool(self.unpainted),
+                            self.pongs.get(token))
 
 
 class Listener(threading.Thread):
-    def __init__(self, dmg):
+    def __init__(self, screen):
         super().__init__(daemon=True)
-        self.dmg = dmg
+        self.screen = screen
         self.ready = threading.Event()
         self.error = None
+        self.geometry = {}
+        self.viewable = set()
 
     def run(self):
         try:
@@ -152,6 +266,18 @@ class Listener(threading.Thread):
                     | xinput.RawButtonPressMask | xinput.RawButtonReleaseMask)
             root.xinput_select_events([(xinput.AllDevices, mask)])
             damage_id = root.damage_create(damage.DamageReportRawRectangles)
+            # Window frames and override-redirect popups are the root's children; an app answers
+            # _NET_WM_PING by sending the message back to the root.
+            root.change_attributes(event_mask=X.SubstructureNotifyMask)
+            self.WM_PROTOCOLS = d.intern_atom("WM_PROTOCOLS")
+            self.NET_WM_PING = d.intern_atom("_NET_WM_PING")
+            g = root.get_geometry()
+            self.screen.size = (g.width, g.height)
+            for child in root.query_tree().children:
+                rect = self.visible_rect(child)
+                if rect is not None:
+                    self.viewable.add(child.id)
+                    self.geometry[child.id] = rect
             d.sync()
             self.ready.set()
             seen = 0
@@ -169,22 +295,207 @@ class Listener(threading.Thread):
                     emit({"ev": what, "kind": kind, "detail": int(ev.data.detail), "mono": t})
                 elif ev.type == d.extension_event.DamageNotify:
                     a = ev.area
-                    self.dmg.add([a.x, a.y, a.width, a.height], t)
+                    self.screen.add([a.x, a.y, a.width, a.height], t)
                     seen += 1
                     # Raw rectangles arrive without a subtract; the server's region still grows.
                     if seen % 32 == 0:
                         d.damage_subtract(damage_id, X.NONE, X.NONE)
+                else:
+                    self.window_event(ev, t)
         except Exception as err:  # noqa: BLE001 - reported to desktopd, which restarts the helper
             self.error = "%s: %s" % (type(err).__name__, err)
             self.ready.set()
             emit({"ev": "fatal", "error": "listener: " + self.error})
 
+    def visible_rect(self, win):
+        """A viewable InputOutput window's rect on the screen; None for any other window."""
+        try:
+            attrs = win.get_attributes()
+            if attrs.win_class == X.InputOnly or attrs.map_state != X.IsViewable:
+                return None
+            g = win.get_geometry()
+        except Exception:  # noqa: BLE001 - a window that vanished before the query
+            return None
+        return clip([g.x, g.y, g.width + 2 * g.border_width, g.height + 2 * g.border_width],
+                    self.screen.size)
+
+    def window_event(self, ev, t):
+        if ev.type == X.ClientMessage:
+            fmt, data = ev.data
+            if ev.client_type == self.WM_PROTOCOLS and fmt == 32 and data[0] == self.NET_WM_PING:
+                self.screen.pong(int(data[1]), t)
+            return
+        window = getattr(ev, "window", None)
+        wid = getattr(window, "id", None)
+        if ev.type == X.MapNotify:
+            rect = self.visible_rect(window)
+            if rect is not None:
+                self.viewable.add(wid)
+                self.geometry[wid] = rect
+                self.screen.mapped(wid, rect, t)
+        elif ev.type == X.UnmapNotify:
+            if wid in self.viewable:
+                self.viewable.discard(wid)
+                self.screen.unmapped(wid, self.geometry.get(wid), t)
+        elif ev.type == X.ConfigureNotify:
+            rect = clip([ev.x, ev.y, ev.width + 2 * ev.border_width, ev.height + 2 * ev.border_width],
+                        self.screen.size)
+            before = self.geometry.get(wid)
+            # A restack without a move or a resize changes no pixels by itself.
+            if before == rect:
+                return
+            self.geometry[wid] = rect
+            if wid in self.viewable:
+                for r in (before, rect):
+                    if r is not None:
+                        self.screen.moved(r, t)
+        elif ev.type == X.DestroyNotify:
+            self.viewable.discard(wid)
+            self.geometry.pop(wid, None)
+
+
+class RootShm:
+    """The root window through MIT-SHM: the server copies its pixels into a shared segment."""
+
+    class Segment(ctypes.Structure):
+        _fields_ = [("shmseg", ctypes.c_ulong), ("shmid", ctypes.c_int),
+                    ("shmaddr", ctypes.c_void_p), ("readOnly", ctypes.c_int)]
+
+    class Image(ctypes.Structure):
+        _fields_ = [("width", ctypes.c_int), ("height", ctypes.c_int), ("xoffset", ctypes.c_int),
+                    ("format", ctypes.c_int), ("data", ctypes.c_void_p), ("byte_order", ctypes.c_int),
+                    ("bitmap_unit", ctypes.c_int), ("bitmap_bit_order", ctypes.c_int),
+                    ("bitmap_pad", ctypes.c_int), ("depth", ctypes.c_int),
+                    ("bytes_per_line", ctypes.c_int), ("bits_per_pixel", ctypes.c_int),
+                    ("red_mask", ctypes.c_ulong), ("green_mask", ctypes.c_ulong),
+                    ("blue_mask", ctypes.c_ulong)]
+
+    class Error(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_int), ("display", ctypes.c_void_p),
+                    ("resourceid", ctypes.c_ulong), ("serial", ctypes.c_ulong),
+                    ("error_code", ctypes.c_ubyte), ("request_code", ctypes.c_ubyte),
+                    ("minor_code", ctypes.c_ubyte)]
+
+    def __init__(self):
+        x11 = ctypes.CDLL("libX11.so.6")
+        xext = ctypes.CDLL("libXext.so.6")
+        libc = ctypes.CDLL(None, use_errno=True)
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
+        x11.XDefaultVisual.restype = ctypes.c_void_p
+        x11.XDefaultVisual.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XFree.argtypes = [ctypes.c_void_p]
+        xext.XShmQueryExtension.argtypes = [ctypes.c_void_p]
+        xext.XShmCreateImage.restype = ctypes.POINTER(RootShm.Image)
+        xext.XShmCreateImage.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_int,
+                                         ctypes.c_char_p, ctypes.POINTER(RootShm.Segment),
+                                         ctypes.c_uint, ctypes.c_uint]
+        xext.XShmAttach.argtypes = [ctypes.c_void_p, ctypes.POINTER(RootShm.Segment)]
+        xext.XShmDetach.argtypes = [ctypes.c_void_p, ctypes.POINTER(RootShm.Segment)]
+        xext.XShmGetImage.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(RootShm.Image),
+                                      ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        libc.shmget.argtypes = [ctypes.c_int, ctypes.c_size_t, ctypes.c_int]
+        libc.shmat.restype = ctypes.c_void_p
+        libc.shmat.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+        libc.shmdt.argtypes = [ctypes.c_void_p]
+        libc.shmctl.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+        self.x11, self.xext, self.libc = x11, xext, libc
+        self.errors = []
+
+        # Xlib's default error handler ends the process; record the error and fail the capture.
+        def on_error(_dpy, err):
+            self.errors.append(err.contents.error_code)
+            return 0
+        self.on_error = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(RootShm.Error))(on_error)
+        x11.XSetErrorHandler(self.on_error)
+        self.dpy = x11.XOpenDisplay(None)
+        if not self.dpy:
+            raise RuntimeError("capture: cannot open the display")
+        if not xext.XShmQueryExtension(self.dpy):
+            raise RuntimeError("capture: the server has no MIT-SHM")
+        self.root = x11.XDefaultRootWindow(self.dpy)
+        self.visual = x11.XDefaultVisual(self.dpy, x11.XDefaultScreen(self.dpy))
+        self.segment = RootShm.Segment()
+        self.image = None
+        self.size = None
+
+    def _free(self, image):
+        image.contents.data = None
+        self.x11.XFree(image)
+
+    def _release(self):
+        if self.image is None:
+            return
+        self.xext.XShmDetach(self.dpy, ctypes.byref(self.segment))
+        self.x11.XSync(self.dpy, 0)
+        self.libc.shmdt(self.segment.shmaddr)
+        self._free(self.image)
+        self.image = None
+        self.size = None
+
+    def _create(self, width, height):
+        self._release()
+        image = self.xext.XShmCreateImage(self.dpy, self.visual, 24, X.ZPixmap, None,
+                                          ctypes.byref(self.segment), width, height)
+        if not image:
+            raise RuntimeError("capture: XShmCreateImage failed")
+        im = image.contents
+        if (im.bits_per_pixel != 32 or im.byte_order != X.LSBFirst
+                or (im.red_mask, im.green_mask, im.blue_mask) != (0xFF0000, 0xFF00, 0xFF)):
+            self._free(image)
+            raise RuntimeError("capture: unsupported pixel format")
+        shmid = self.libc.shmget(0, im.bytes_per_line * height, 0o1600)
+        if shmid < 0:
+            self._free(image)
+            raise RuntimeError("capture: shmget failed (errno %d)" % ctypes.get_errno())
+        addr = self.libc.shmat(shmid, None, 0)
+        if addr in (None, ctypes.c_void_p(-1).value):
+            self.libc.shmctl(shmid, 0, None)
+            self._free(image)
+            raise RuntimeError("capture: shmat failed (errno %d)" % ctypes.get_errno())
+        self.segment.shmid = shmid
+        self.segment.shmaddr = addr
+        self.segment.readOnly = 0
+        im.data = addr
+        self.errors.clear()
+        attached = self.xext.XShmAttach(self.dpy, ctypes.byref(self.segment))
+        self.x11.XSync(self.dpy, 0)
+        # IPC_RMID at once: the segment goes when both the server and this process detach.
+        self.libc.shmctl(shmid, 0, None)
+        if not attached or self.errors:
+            self.libc.shmdt(addr)
+            self._free(image)
+            raise RuntimeError("capture: XShmAttach failed")
+        self.image = image
+        self.size = (width, height)
+
+    def grab(self, width, height):
+        """The root's BGRX pixels in the shared segment (valid until the next grab) and their stride."""
+        if self.size != (width, height):
+            self._create(width, height)
+        self.errors.clear()
+        ok = self.xext.XShmGetImage(self.dpy, self.root, self.image, 0, 0, ctypes.c_ulong(-1).value)
+        if not ok or self.errors:
+            raise RuntimeError("capture: XShmGetImage failed")
+        stride = self.image.contents.bytes_per_line
+        return (ctypes.c_char * (stride * height)).from_address(self.segment.shmaddr), stride
+
 
 class Commands:
-    def __init__(self, dmg):
+    pause = staticmethod(time.sleep)
+
+    def __init__(self, screen):
         self.d = display.Display()
         self.root = self.d.screen().root
-        self.dmg = dmg
+        self.screen = screen
+        self.shm = None
+        self.pings = 0
+        self.WM_PROTOCOLS = self.d.intern_atom("WM_PROTOCOLS")
+        self.NET_WM_PING = self.d.intern_atom("_NET_WM_PING")
         self.NET_ACTIVE = self.d.intern_atom("_NET_ACTIVE_WINDOW")
         self.NET_STACK = self.d.intern_atom("_NET_CLIENT_LIST_STACKING")
         self.NET_PID = self.d.intern_atom("_NET_WM_PID")
@@ -379,33 +690,100 @@ class Commands:
         return {"keycodes": codes}
 
     def cmd_arm(self, a):
-        return {"mono": self.dmg.arm()}
+        return {"mono": self.screen.arm()}
 
+    def ping(self):
+        """Sends _NET_WM_PING to the active window; its token, or None when nothing would answer."""
+        try:
+            wid = self.active_window()
+            if not wid:
+                return None
+            w = self.window(wid)
+            if self.NET_WM_PING not in (w.get_wm_protocols() or []):
+                return None
+            self.pings += 1
+            token = self.pings
+            self.screen.expect(token)
+            msg = xevent.ClientMessage(window=w, client_type=self.WM_PROTOCOLS,
+                                       data=(32, [self.NET_WM_PING, token, wid, 0, 0]))
+            w.send_event(msg, event_mask=0)
+            self.d.flush()
+            return token
+        except Exception:  # noqa: BLE001 - a window that vanished just settles without the ping
+            return None
+
+    # Returns after `quietMs` without a change, or after `firstMs` when nothing changed at all,
+    # but never while a window mapped since arm has not painted, nor before the pinged app has
+    # answered and then had `quietMs` to draw what it did.
     def cmd_settle(self, a):
         quiet = float(a.get("quietMs", 250))
         first = float(a.get("firstMs", 1500))
         timeout = float(a.get("timeoutMs", 3000))
-        t0 = mono()
+        t0 = self.screen.clock()
+        token = self.ping() if a.get("verb") in PING_VERBS else None
         while True:
-            rects, last, count = self.dmg.snapshot()
-            now = mono()
-            if count and now - last >= quiet:
-                return {"changed": rects, "lastChange": last, "quiet": True, "noVisibleChange": False}
-            if not count and now - t0 >= first:
-                return {"changed": [], "lastChange": None, "quiet": True, "noVisibleChange": True}
+            s = self.screen.snapshot(token)
+            now = self.screen.clock()
             if now - t0 >= timeout:
-                return {"changed": rects, "lastChange": last, "quiet": False, "noVisibleChange": count == 0}
-            time.sleep(0.01)
+                return {"changed": merge_rects(s.rects), "lastChange": s.last, "quiet": False,
+                        "noVisibleChange": s.count == 0}
+            busy = s.unpainted or (token is not None and (s.pong is None or now - s.pong < quiet))
+            if not busy and s.count and now - s.last >= quiet:
+                return {"changed": merge_rects(s.rects), "lastChange": s.last, "quiet": True,
+                        "noVisibleChange": False}
+            if not busy and not s.count and now - t0 >= first:
+                return {"changed": [], "lastChange": None, "quiet": True, "noVisibleChange": True}
+            self.pause(0.01)
+
+    def grab(self, width, height):
+        if self.shm is None:
+            try:
+                self.shm = RootShm()
+            except Exception as err:  # noqa: BLE001 - the protocol path below still works
+                sys.stderr.write("capture: MIT-SHM unavailable, using GetImage (%s)\n" % err)
+                self.shm = False
+        if self.shm:
+            return self.shm.grab(width, height)
+        info = self.d.display.info
+        visual = self.d.screen().root_visual
+        formats = [f for f in info.pixmap_formats if f.depth == 24]
+        masks = [(v.red_mask, v.green_mask, v.blue_mask) for depth in self.d.screen().allowed_depths
+                 for v in depth.visuals if v.visual_id == visual]
+        if (len(formats) != 1 or formats[0].bits_per_pixel != 32 or info.image_byte_order != X.LSBFirst
+                or masks != [(0xFF0000, 0xFF00, 0xFF)]):
+            raise RuntimeError("capture: unsupported pixel format")
+        image = self.root.get_image(0, 0, width, height, X.ZPixmap, 0xFFFFFFFF)
+        if len(image.data) != width * height * 4:
+            raise RuntimeError("capture: unexpected image size")
+        return image.data, width * 4
+
+    # The whole root as BGRX rows at device resolution, written in place into `path` (a tmpfs file
+    # desktopd reads); reusing the file keeps its pages, so the write is one copy.
+    def cmd_capture(self, a):
+        g = self.root.get_geometry()
+        t = mono()
+        pixels, stride = self.grab(g.width, g.height)
+        view = memoryview(pixels).cast("B")
+        fd = os.open(a["path"], os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            if os.fstat(fd).st_size != len(view):
+                os.ftruncate(fd, len(view))
+            done = 0
+            while done < len(view):
+                done += os.pwrite(fd, view[done:], done)
+        finally:
+            os.close(fd)
+        return {"width": g.width, "height": g.height, "stride": stride, "mono": t}
 
 
 def main():
-    dmg = Damage()
-    listener = Listener(dmg)
+    screen = Screen()
+    listener = Listener(screen)
     listener.start()
     listener.ready.wait(5)
     if listener.error:
         sys.exit(1)
-    cmds = Commands(dmg)
+    cmds = Commands(screen)
     emit({"ev": "ready", "mono": mono()})
     for line in sys.stdin:
         line = line.strip()

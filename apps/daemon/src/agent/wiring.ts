@@ -84,7 +84,7 @@ export function createAgent(d: AgentWiringDeps) {
     settings = new SettingsStore(d.home),
     catalog = new CatalogStore(d.home);
   const transcripts = new TranscriptStore(d.home),
-    png = new FramePng(d.frames),
+    png = new FramePng(d.frames, d.gateway),
     outputs = new OutputStore(d.home),
     transfers = d.transfers ?? new Transfers();
   const clients = new Map<string, DesktopdTools>();
