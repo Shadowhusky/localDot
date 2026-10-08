@@ -234,3 +234,85 @@ describe("Sheet", () => {
     expect(closedCount()).toBe("Closed 1");
   });
 });
+
+function Counter() {
+  const [count, setCount] = useState(0);
+  return (
+    <button type="button" onClick={() => setCount((value) => value + 1)}>
+      Count {count}
+    </button>
+  );
+}
+
+function Pages() {
+  const [page, setPage] = useState<"main" | "keys">("main");
+  return (
+    <Sheet
+      open
+      onClose={() => {}}
+      title={page === "keys" ? "Keys" : "Models and settings"}
+      page={page}
+      back={page === "keys" ? { label: "Settings", onBack: () => setPage("main") } : undefined}
+    >
+      {page === "keys" ? (
+        <label>
+          Key name
+          <input />
+        </label>
+      ) : (
+        <>
+          <Counter />
+          <button type="button" onClick={() => setPage("keys")}>
+            Keys
+          </button>
+        </>
+      )}
+    </Sheet>
+  );
+}
+
+function pages() {
+  return [...document.querySelectorAll<HTMLElement>(".ui-sheet-page")].map((page) => ({
+    page: page.dataset.page,
+    leaving: page.hasAttribute("data-leaving"),
+    inert: page.hasAttribute("inert"),
+    direction: page.dataset.direction,
+  }));
+}
+
+describe("Sheet pages", () => {
+  it("slides a nested page over the first, which keeps its state until it has gone", () => {
+    render(<Pages />);
+    fireEvent.click(screen.getByRole("button", { name: "Count 0" }));
+    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+    expect(screen.getByRole("dialog", { name: "Keys" })).toBeTruthy();
+    expect(pages()).toEqual([
+      { page: "main", leaving: true, inert: true, direction: "forward" },
+      { page: "keys", leaving: false, inert: false, direction: "forward" },
+    ]);
+    expect(document.querySelector("[data-page=main]")?.textContent).toContain("Count 1");
+    expect(document.activeElement).toBe(screen.getByLabelText("Key name"));
+    wait(400);
+    expect(pages()).toEqual([{ page: "keys", leaving: false, inert: false, direction: "forward" }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(screen.getByRole("dialog", { name: "Models and settings" })).toBeTruthy();
+    expect(pages()).toEqual([
+      { page: "keys", leaving: true, inert: true, direction: "back" },
+      { page: "main", leaving: false, inert: false, direction: "back" },
+    ]);
+  });
+
+  it("goes there and back before the first slide ends without doubling a page", () => {
+    const errors = vi.spyOn(console, "error").mockImplementation(() => {});
+    render(<Pages />);
+    fireEvent.click(screen.getByRole("button", { name: "Keys" }));
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    expect(pages()).toEqual([
+      { page: "keys", leaving: true, inert: true, direction: "back" },
+      { page: "main", leaving: false, inert: false, direction: "back" },
+    ]);
+    expect(errors).not.toHaveBeenCalled();
+    errors.mockRestore();
+  });
+});

@@ -6,10 +6,13 @@ import { ICONS, type IconName } from "./icons.ts";
 
 afterEach(cleanup);
 
-// The set the UI plan names (§4.2), so later screens can count on each one.
+// The set the UI plan names (§4.2), so later screens can count on each one, plus what a kit
+// primitive needs.
 const PLANNED: IconName[] = [
   "check",
   "x",
+  // Not in the plan's list: the Back of a sheet's nested page (T08).
+  "chevron-left",
   "chevron-right",
   "chevron-down",
   "chevron-up",

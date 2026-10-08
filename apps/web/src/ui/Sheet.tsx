@@ -19,6 +19,26 @@ import { attachSheetDrag } from "./sheet-drag.ts";
 
 // Longer than the slowest exit (--dur-sheet), so the sheet is gone from view before it unmounts.
 const EXIT = 320;
+// A page that slides away stays on the page this long.
+const PAGE_EXIT = 320;
+const CURRENT_BODY = ".ui-sheet-page:not([data-leaving]) > .ui-sheet-body";
+
+// A phone keeps its keyboard down until a field is chosen.
+function fieldFor(element: HTMLElement): HTMLElement | undefined {
+  return matches("(pointer: coarse)") ? undefined : firstField(element);
+}
+
+function pageOf(sheet: HTMLElement | null, key: string): HTMLElement | null {
+  return (
+    sheet?.querySelector<HTMLElement>(`.ui-sheet-page[data-page="${CSS.escape(key)}"]`) ?? null
+  );
+}
+
+export interface SheetBack {
+  // Names the page it goes back to.
+  label: string;
+  onBack(): void;
+}
 
 export interface SheetProps {
   open: boolean;
@@ -36,8 +56,22 @@ export interface SheetProps {
   // Where focus goes back to when the sheet closes; by default what had it before opening.
   returnFocus?: RefObject<HTMLElement | null>;
   closeLabel?: string;
+  // Names the page on show. Changing it slides the new page over the old one: in from the right when
+  // it has a Back, back from the left when it is the one the Back led to.
+  page?: string;
+  back?: SheetBack;
   footer?: ReactNode;
   children: ReactNode;
+}
+
+interface PageView {
+  key: string;
+  title: ReactNode;
+  description?: ReactNode;
+  back?: SheetBack;
+  footer?: ReactNode;
+  children: ReactNode;
+  direction?: "forward" | "back";
 }
 
 export function Sheet(props: SheetProps) {
@@ -54,13 +88,14 @@ function SheetLayer({
   modal = true,
   returnFocus,
   closeLabel = "Close",
+  page = "main",
+  back,
   footer,
   children,
   closing,
 }: SheetProps & { closing: boolean }) {
   const root = useRef<HTMLDivElement>(null);
   const panel = useRef<HTMLElement>(null);
-  const body = useRef<HTMLDivElement>(null);
   const scrimRef = useRef<HTMLDivElement>(null);
   const keep = useRef<HTMLButtonElement>(null);
   const resume = useRef<Element | null>(null);
@@ -72,6 +107,32 @@ function SheetLayer({
   const [asking, setAsking] = useState(false);
   const latest = useRef({ dirty, asking, onClose, closing });
   latest.current = { dirty, asking, onClose, closing };
+
+  const current: PageView = { key: page, title, description, back, footer, children };
+  const shownRef = useRef(current);
+  const [shown, setShown] = useState<{ key: string; direction?: PageView["direction"] }>({
+    key: page,
+  });
+  const [leaving, setLeaving] = useState<PageView[]>([]);
+  if (shown.key !== page) {
+    const before = shownRef.current;
+    const direction = !back && before.back ? "back" : "forward";
+    setShown({ key: page, direction });
+    setLeaving((pages) => [
+      ...pages.filter((view) => view.key !== page && view.key !== before.key),
+      { ...before, direction },
+    ]);
+  }
+  current.direction = shown.key === page ? shown.direction : undefined;
+  useLayoutEffect(() => {
+    shownRef.current = current;
+  });
+
+  useEffect(() => {
+    if (leaving.length === 0) return;
+    const done = window.setTimeout(() => setLeaving([]), PAGE_EXIT);
+    return () => window.clearTimeout(done);
+  }, [leaving]);
 
   const requestClose = useCallback(() => {
     const now = latest.current;
@@ -97,8 +158,7 @@ function SheetLayer({
     trap: modal,
     modal,
     onEscape: () => (latest.current.asking ? keepEditing() : requestClose()),
-    // A phone keeps its keyboard down until a field is chosen.
-    initialFocus: (element) => (matches("(pointer: coarse)") ? undefined : firstField(element)),
+    initialFocus: fieldFor,
     returnFocus,
   });
   const behind = useBehind(entry);
@@ -114,10 +174,54 @@ function SheetLayer({
     if (asking) keep.current?.focus();
   }, [asking]);
 
+  // A new page takes focus from the one that slid away: its first field, else its Back.
+  const firstPage = useRef(true);
+  useLayoutEffect(() => {
+    if (firstPage.current) {
+      firstPage.current = false;
+      return;
+    }
+    const view = pageOf(panel.current, shown.key);
+    if (!view) return;
+    const target = fieldFor(view) ?? view.querySelector<HTMLElement>(".ui-sheet-back");
+    focusWithoutScroll(target ?? (panel.current as HTMLElement));
+  }, [shown.key]);
+
+  // A bottom sheet eases between the heights of the pages it moves between.
+  const sized = useRef({ key: page, height: 0 });
+  useLayoutEffect(() => {
+    const sheet = panel.current;
+    if (!sheet) return;
+    const before = sized.current;
+    const after = sheet.offsetHeight;
+    sized.current = { key: shown.key, height: after };
+    if (before.key === shown.key || placement !== "bottom" || !before.height) return;
+    if (before.height === after || matches(REDUCED_MOTION)) return;
+    sheet.style.height = `${before.height}px`;
+    void sheet.offsetHeight;
+    sheet.dataset.resizing = "";
+    sheet.style.height = `${after}px`;
+    const done = window.setTimeout(() => {
+      sheet.style.removeProperty("height");
+      delete sheet.dataset.resizing;
+    }, PAGE_EXIT);
+    return () => window.clearTimeout(done);
+  }, [shown.key, placement]);
+
+  useEffect(() => {
+    const sheet = panel.current;
+    if (!sheet || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (sheet.dataset.resizing === undefined) sized.current.height = sheet.offsetHeight;
+    });
+    observer.observe(sheet);
+    return () => observer.disconnect();
+  }, []);
+
   // The edges show a hairline only while content runs under them.
   useEffect(() => {
-    const scroller = body.current;
     const sheet = panel.current;
+    const scroller = pageOf(sheet, shown.key)?.querySelector<HTMLElement>(".ui-sheet-body");
     if (!scroller || !sheet) return;
     const mark = () => {
       const { scrollTop, scrollHeight, clientHeight } = scroller;
@@ -133,7 +237,7 @@ function SheetLayer({
       observer?.disconnect();
       scroller.removeEventListener("scroll", mark);
     };
-  }, []);
+  }, [shown.key]);
 
   useEffect(() => {
     const sheet = panel.current;
@@ -141,7 +245,7 @@ function SheetLayer({
     return attachSheetDrag({
       panel: sheet,
       scrim: scrimRef.current,
-      body: body.current,
+      body: () => sheet.querySelector<HTMLElement>(CURRENT_BODY),
       allowDismiss: () => {
         if (!latest.current.dirty) return true;
         requestClose();
@@ -152,6 +256,7 @@ function SheetLayer({
     });
   }, [placement, closing, requestClose]);
 
+  const pageProps = { closeLabel, onClose: requestClose, asking };
   return (
     <LayerPortal kind="sheet" closing={closing} rootRef={root} className="ui-sheet-layer">
       {modal && <div ref={scrimRef} className="ui-scrim" aria-hidden="true" {...scrim} />}
@@ -168,30 +273,24 @@ function SheetLayer({
         data-modal={modal ? "" : undefined}
         data-behind={behind ? "" : undefined}
       >
-        <div className="ui-sheet-handle">
-          {placement === "bottom" && <div className="ui-sheet-grabber" aria-hidden="true" />}
-          <header className="ui-sheet-header">
-            <div className="ui-sheet-heading">
-              <h2 id={titleId} className="ui-sheet-title">
-                {title}
-              </h2>
-              {description && (
-                <p id={descriptionId} className="ui-sheet-description">
-                  {description}
-                </p>
-              )}
-            </div>
-            <IconButton label={closeLabel} icon="x" onClick={requestClose} />
-          </header>
-        </div>
-        <div ref={body} className="ui-sheet-body">
-          {children}
-        </div>
-        {footer && (
-          <footer className="ui-sheet-footer" inert={asking}>
-            {footer}
-          </footer>
+        {placement === "bottom" && (
+          <div className="ui-sheet-handle">
+            <div className="ui-sheet-grabber" aria-hidden="true" />
+          </div>
         )}
+        <div className="ui-sheet-pages">
+          {/* One keyed list, so a page that starts leaving keeps its instance and state. */}
+          {[...leaving, current].map((view) => (
+            <SheetPage
+              key={view.key}
+              view={view}
+              leaving={view !== current}
+              titleId={view === current ? titleId : undefined}
+              descriptionId={view === current ? descriptionId : undefined}
+              {...pageProps}
+            />
+          ))}
+        </div>
         <fieldset
           aria-labelledby={promptId}
           className="ui-sheet-prompt"
@@ -210,5 +309,67 @@ function SheetLayer({
         </fieldset>
       </section>
     </LayerPortal>
+  );
+}
+
+interface SheetPageProps {
+  view: PageView;
+  leaving?: boolean;
+  titleId?: string;
+  descriptionId?: string;
+  closeLabel: string;
+  onClose(): void;
+  asking: boolean;
+}
+
+// A page keeps its key as it slides away, so what it holds keeps its state until it is gone.
+function SheetPage({
+  view,
+  leaving = false,
+  titleId,
+  descriptionId,
+  closeLabel,
+  onClose,
+  asking,
+}: SheetPageProps) {
+  return (
+    <div
+      className="ui-sheet-page"
+      data-page={view.key}
+      data-leaving={leaving ? "" : undefined}
+      data-direction={view.direction}
+      inert={leaving}
+    >
+      <header className="ui-sheet-header ui-sheet-handle">
+        <div className="ui-sheet-heading">
+          {view.back && (
+            <Button
+              variant="quiet"
+              size="sm"
+              icon="chevron-left"
+              className="ui-sheet-back"
+              onClick={view.back.onBack}
+            >
+              {view.back.label}
+            </Button>
+          )}
+          <h2 id={titleId} className="ui-sheet-title">
+            {view.title}
+          </h2>
+          {view.description && (
+            <p id={descriptionId} className="ui-sheet-description">
+              {view.description}
+            </p>
+          )}
+        </div>
+        <IconButton label={closeLabel} icon="x" onClick={onClose} />
+      </header>
+      <div className="ui-sheet-body">{view.children}</div>
+      {view.footer && (
+        <footer className="ui-sheet-footer" inert={asking}>
+          {view.footer}
+        </footer>
+      )}
+    </div>
   );
 }

@@ -40,8 +40,8 @@ export function velocityOf(samples: readonly Sample[]): number {
 export interface SheetDragHost {
   panel: HTMLElement;
   scrim: HTMLElement | null;
-  // The one scroller inside: a drag starts there only from its top, moving down.
-  body: HTMLElement | null;
+  // The one scroller of the page on show: a drag starts there only from its top, moving down.
+  body(): HTMLElement | null;
   // Says whether the sheet may close. A sheet with unsaved changes asks first and stays.
   allowDismiss(): boolean;
   close(): void;
@@ -65,7 +65,7 @@ interface Press {
 // velocity to a spring: back to rest, or off the bottom edge. A sheet still moving can be grabbed
 // again, from wherever it is on screen.
 export function attachSheetDrag(host: SheetDragHost): () => void {
-  const { panel, scrim, body } = host;
+  const { panel, scrim } = host;
   let press: Press | undefined;
   let offset = 0;
   let frame = 0;
@@ -146,6 +146,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   const onPointerDown = (event: PointerEvent) => {
     if (press || (event.pointerType === "mouse" && event.button !== 0)) return;
     const target = event.target instanceof Element ? event.target : null;
+    const body = host.body();
     const inHandle = Boolean(target?.closest(".ui-sheet-handle"));
     const fromBody = Boolean(body && target && body.contains(target));
     if (!inHandle && !fromBody) return;
@@ -196,7 +197,7 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
 
   // A drag that starts in the scroller would otherwise also pull at the page.
   const onTouchMove = (event: TouchEvent) => {
-    if (press?.dragging || (press?.fromBody && (body?.scrollTop ?? 0) <= 0)) {
+    if (press?.dragging || (press?.fromBody && (host.body()?.scrollTop ?? 0) <= 0)) {
       const touch = event.touches[0];
       if (press.dragging || (touch && touch.clientY > press.y)) event.preventDefault();
     }
@@ -208,13 +209,13 @@ export function attachSheetDrag(host: SheetDragHost): () => void {
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerEnd);
   window.addEventListener("pointercancel", onPointerEnd);
-  body?.addEventListener("touchmove", onTouchMove, { passive: false });
+  panel.addEventListener("touchmove", onTouchMove, { passive: false });
   return () => {
     cancelAnimationFrame(frame);
     panel.removeEventListener("pointerdown", onPointerDown);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerEnd);
     window.removeEventListener("pointercancel", onPointerEnd);
-    body?.removeEventListener("touchmove", onTouchMove);
+    panel.removeEventListener("touchmove", onTouchMove);
   };
 }

@@ -312,6 +312,59 @@
     isolation: isolate;
   }
 
+  /* Pages slide over each other: the one leaving lies on top of the new one while it goes. */
+  .ui-sheet-pages {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .ui-sheet-page {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    background-color: var(--color-raised);
+    transition:
+      opacity var(--dur-fade) var(--ease-enter),
+      translate var(--dur-sheet) var(--ease-spring);
+  }
+
+  @starting-style {
+    .ui-sheet-page[data-direction="forward"] {
+      opacity: 0;
+      translate: calc(var(--_nudge) * 6) 0;
+    }
+
+    .ui-sheet-page[data-direction="back"] {
+      opacity: 0;
+      translate: calc(var(--_nudge) * -6) 0;
+    }
+  }
+
+  .ui-sheet-page[data-leaving] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    translate: calc(var(--_nudge) * -6) 0;
+    pointer-events: none;
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      translate var(--dur-sheet) var(--ease-spring);
+  }
+
+  .ui-sheet-page[data-leaving][data-direction="back"] {
+    translate: calc(var(--_nudge) * 6) 0;
+  }
+
+  .ui-sheet[data-side="bottom"][data-resizing] {
+    transition:
+      height var(--dur-sheet) var(--ease-spring),
+      translate var(--dur-spring) var(--ease-spring);
+  }
+
   .ui-sheet-handle {
     flex-shrink: 0;
   }
@@ -348,6 +401,23 @@
     border-bottom-color: var(--color-hairline);
   }
 
+  /* Back sits above the title, its chevron on the content's edge, level with the close button. */
+  .ui-sheet-heading:has(> .ui-sheet-back) {
+    padding-top: 0;
+  }
+
+  .ui-sheet-back {
+    justify-self: start;
+    margin: 0 0 var(--spacing) calc(var(--spacing) * -3);
+  }
+
+  /* On a coarse pointer Back grows to 44 px; the close button stays centred on its row. */
+  @media (--coarse) {
+    .ui-sheet-header:has(.ui-sheet-back) > .ui-icon-button {
+      margin-top: calc(var(--spacing) * 2);
+    }
+  }
+
   /* The title's line sits centred on the 28 px close button beside it. */
   .ui-sheet-heading {
     display: grid;
@@ -378,8 +448,7 @@
     scrollbar-color: var(--color-control-pressed) transparent;
   }
 
-  .ui-sheet[data-side="bottom"] .ui-sheet-body:last-child,
-  .ui-sheet[data-side="bottom"] .ui-sheet-body:has(+ .ui-sheet-prompt) {
+  .ui-sheet[data-side="bottom"] .ui-sheet-body:last-child {
     padding-bottom: calc(var(--spacing) * 5 + env(safe-area-inset-bottom));
   }
 
