@@ -1,5 +1,5 @@
 import { type SpringParams, springValue } from "@localdot/stage";
-import { springVelocity } from "./spring.ts";
+import { settleMs, springVelocity } from "./spring.ts";
 
 // One animated value: a spring toward `to` that keeps its current value and velocity when it is
 // retargeted. Times are in milliseconds.
@@ -9,6 +9,7 @@ export class Channel {
   private v0 = 0;
   private t0 = 0;
   private p: SpringParams;
+  private settled = Number.NEGATIVE_INFINITY;
 
   constructor(value: number, p: SpringParams) {
     this.to = value;
@@ -21,6 +22,7 @@ export class Channel {
   }
 
   speed(t: number): number {
+    if (t >= this.settled) return 0;
     return Math.abs(springVelocity(this.from, this.to, this.v0, this.elapsed(t), this.p));
   }
 
@@ -52,5 +54,6 @@ export class Channel {
     this.v0 = v0;
     this.t0 = t;
     if (p) this.p = p;
+    this.settled = t + settleMs(this.p);
   }
 }

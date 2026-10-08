@@ -31,3 +31,10 @@ export function springVelocity(
   const a = (velocity - r2 * x0) / (r1 - r2);
   return a * r1 * Math.exp(r1 * t) + (x0 - a) * r2 * Math.exp(r2 * t);
 }
+
+// How long a spring keeps moving measurably, in ms: until its envelope has decayed by e^-20.
+export function settleMs(p: SpringParams): number {
+  const omega = (2 * Math.PI) / p.response;
+  const zeta = p.dampingRatio;
+  return 20_000 / omega / (zeta < 1 ? zeta : zeta - Math.sqrt(zeta * zeta - 1));
+}

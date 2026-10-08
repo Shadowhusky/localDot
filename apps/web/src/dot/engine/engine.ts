@@ -42,6 +42,48 @@ const BIAS: Point = { x: 0.25 * GAZE_MAX.x, y: 0.12 * GAZE_MAX.y };
 const COMPOSER: Point = { x: -3.5, y: 4.5 };
 const CARD: Point = { x: 4.5, y: 3.5 };
 const ANNOYED_WINDOW_MS = 60_000;
+// How far one unit of each channel moves something on screen, in frame units, so activity() can
+// compare them: lids and eye shapes by the eye's height, a body scale by its height, tilt and roll
+// by how far a degree swings a lid corner or an eye, and a full fade counts as a 20-unit move.
+const EYE_H = 10;
+const FADE = 20;
+const SPEED_UNITS: Record<keyof Pose | Motion, number> = {
+  gx: 1,
+  gy: 1,
+  mx: 1,
+  my: 1,
+  bodyX: 1,
+  bodyY: 1,
+  lift: 1,
+  shake: 1,
+  breath: 1,
+  squash: 2 * R,
+  size: 2 * R,
+  upL: EYE_H,
+  upR: EYE_H,
+  lo: EYE_H,
+  loArch: EYE_H,
+  eyeSY: EYE_H,
+  eyeScale: EYE_H,
+  happy: EYE_H,
+  closed: EYE_H,
+  tiltL: 0.15,
+  tiltR: 0.15,
+  roll: 0.12,
+  eyeOpacity: FADE,
+  dim: FADE,
+  rim: FADE,
+};
+const SPEED_KEYS = Object.keys(SPEED_UNITS) as (keyof Pose | Motion)[];
+// Channels that show only where the body animates.
+const RICH_ONLY: ReadonlySet<keyof Pose | Motion> = new Set([
+  "mx",
+  "my",
+  "lift",
+  "shake",
+  "squash",
+  "breath",
+]);
 
 export interface EyePose {
   frame: EyeFrame;
@@ -229,23 +271,14 @@ export class DotEngine {
     };
   }
 
-  // An upper bound on how fast anything visible is moving; a renderer slows down while it is calm.
+  // An upper bound on how fast anything visible is moving, in frame units per second; a renderer
+  // slows down while it is calm.
   activity(t: number): number {
     this.advance(t);
+    const rich = this.rich && !this.reduced;
     let m = 0;
-    for (const k of [
-      "gx",
-      "gy",
-      "lift",
-      "squash",
-      "happy",
-      "closed",
-      "eyeSY",
-      "shake",
-      "upL",
-      "upR",
-    ] as const) {
-      m = Math.max(m, this.ch[k].speed(t));
+    for (const k of SPEED_KEYS) {
+      if (rich || !RICH_ONLY.has(k)) m = Math.max(m, this.ch[k].speed(t) * SPEED_UNITS[k]);
     }
     return m + this.blinkAmount(t) * 50 + this.talk(t) * 50;
   }

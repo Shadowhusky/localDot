@@ -1,9 +1,10 @@
 import { mulberry32, springValue } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { LOD_DETAIL } from "../render/lod.ts";
+import { Channel } from "./channel.ts";
 import { DotEngine, type DotEngineOptions, type DotPose } from "./engine.ts";
-import { springVelocity } from "./spring.ts";
-import { STATE_HOLD_MS, STATE_NAMES, spring } from "./states.ts";
+import { settleMs, springVelocity } from "./spring.ts";
+import { SPRINGS, STATE_HOLD_MS, STATE_NAMES, spring } from "./states.ts";
 
 type Input = [t: number, kind: "state" | "react" | "pointer", arg: unknown];
 
@@ -223,6 +224,21 @@ describe("springVelocity", () => {
         const slope = (springValue(2, 0, 5, t + h, p) - springValue(2, 0, 5, t - h, p)) / (2 * h);
         expect(springVelocity(2, 0, 5, t, p)).toBeCloseTo(slope, 3);
       }
+    }
+  });
+});
+
+describe("Channel", () => {
+  it("reads as still once its spring has settled beyond any visible motion", () => {
+    for (const p of [SPRINGS.pose, SPRINGS.drift, SPRINGS.hop, SPRINGS.shake]) {
+      const c = new Channel(0, p);
+      expect(c.speed(0)).toBe(0);
+      c.set(30, 0);
+      expect(c.speed(20)).toBeGreaterThan(1);
+      expect(c.speed(settleMs(p) - 1)).toBeLessThan(1e-3);
+      expect(c.speed(settleMs(p))).toBe(0);
+      c.kick(5, 5000, p);
+      expect(c.speed(5010)).toBeGreaterThan(1);
     }
   });
 });
