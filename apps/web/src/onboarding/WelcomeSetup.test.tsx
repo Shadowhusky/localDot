@@ -59,6 +59,19 @@ it("turns the computer on whenever it can start, with or without a model", () =>
   fireEvent.click(turnOn);
   expect(p.onStart).toHaveBeenCalledOnce();
 });
+it("keeps the first-task hint neutral while saved settings load", () => {
+  const p = props();
+  const view = render(<WelcomeSetup {...p} loading />);
+  const hint = () =>
+    screen.getByRole("heading", { name: "Ready for your first task?" }).nextSibling;
+  expect(hint()?.textContent).toBe("Turn on your computer to get started.");
+  view.rerender(<WelcomeSetup {...p} />);
+  expect(hint()?.textContent).toBe("Turn on your computer while you choose a model.");
+  view.rerender(<WelcomeSetup {...p} modelReady />);
+  expect(hint()?.textContent).toBe(
+    "Turn on your computer, then describe what you want in the conversation.",
+  );
+});
 it("uses saved policy values without changing policy or storing keys", () => {
   const p = props();
   p.autonomy = { ...DEFAULT_AUTONOMY, reading: "ask", browsing: "ask" };

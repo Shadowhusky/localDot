@@ -82,9 +82,11 @@ export function WelcomeSetup(props: WelcomeSetupProps) {
         <div>
           <h2>Ready for your first task?</h2>
           <p>
-            {props.modelReady
-              ? "Turn on your computer, then describe what you want in the conversation."
-              : "Turn on your computer while you choose a model."}
+            {props.loading
+              ? "Turn on your computer to get started."
+              : props.modelReady
+                ? "Turn on your computer, then describe what you want in the conversation."
+                : "Turn on your computer while you choose a model."}
           </p>
         </div>
         <button
