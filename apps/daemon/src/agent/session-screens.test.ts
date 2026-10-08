@@ -920,6 +920,18 @@ describe("session-owned screen authority", () => {
     expect(h.actions.at(-1)?.ctx.source).toBe("agent");
   });
 
+  it("refuses to hold keys on the browser screen before asking for or starting any input", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    const held = await h.call({ action: "hold_key", keys: ["shift"], ms: 1000 });
+    expect(held.result).toEqual({
+      ok: false,
+      content: [{ type: "text", text: "Holding keys is not available on the browser screen." }],
+    });
+    expect(h.actions).toEqual([]);
+  });
+
   it("fails closed when a screen-enabled session has no gateway binding", async () => {
     const f = fixture();
     await f.browser();

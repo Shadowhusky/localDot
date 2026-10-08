@@ -175,6 +175,9 @@ export async function computerTool(
   }
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
+  // The browser screen presses one key at a time and cannot hold one: refused before approval.
+  if (a.action === "hold_key" && ctx.screen?.selection.screen === "browser")
+    return { ok: false, content: [text("Holding keys is not available on the browser screen.")] };
   const hold =
     action.verb === "key" && action.holdMs ? untilPaused(session, ctx.signal) : undefined;
   const nativeContext: ActionContext = {
