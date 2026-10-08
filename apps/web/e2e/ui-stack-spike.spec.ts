@@ -368,11 +368,15 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const note = sheet.getByRole("textbox", { name: "Task note" });
       await note.fill("Check the totals");
       const ask = sheet.getByRole("combobox", { name: "When to ask" });
+      await ask.tap();
+      await listbox(page).getByRole("option", { name: "Never ask" }).tap();
+      await expect(listbox(page)).toBeHidden();
+      await expect(ask).toHaveText("Never ask");
       const stillOpen = async () => {
         await expect(listbox(page)).toBeHidden();
         await expect(sheet).toBeVisible();
         await expect(note).toHaveValue("Check the totals");
-        await expect(ask).toHaveText("Ask before risky actions");
+        await expect(ask).toHaveText("Never ask");
       };
 
       await ask.tap();
