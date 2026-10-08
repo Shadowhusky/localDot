@@ -99,6 +99,36 @@ describe("provider/model/role presentation", () => {
       screen.getByRole("option", { name: "GLM Coding Plan — not available here" }),
     ).toHaveProperty("disabled", true);
   });
+  it("says Claude plans can't be used here, under Anthropic, on a search and in Subscription", () => {
+    const SENTENCE =
+      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    const PLAN = "Claude Pro or Max — not available here";
+    const view = render(<ProviderPicker modelRole="main" value="" onChange={vi.fn()} />);
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    const plan = screen.getByRole("option", { name: PLAN }) as HTMLOptionElement;
+    expect(plan.disabled).toBe(true);
+    expect(plan.closest("optgroup")?.label).toBe("Subscription");
+    view.rerender(<ProviderPicker modelRole="main" value="anthropic" onChange={vi.fn()} />);
+    const select = screen.getByRole("combobox", { name: "main provider" });
+    expect(screen.getByText(SENTENCE).id).toBe(select.getAttribute("aria-describedby"));
+    view.rerender(<ProviderPicker modelRole="main" value="openai" onChange={vi.fn()} />);
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    const search = screen.getByLabelText("Search main providers");
+    for (const text of ["claude", "Claude Code", "pro", "MAX", "subscription"]) {
+      fireEvent.change(search, { target: { value: text } });
+      expect(screen.getAllByText(SENTENCE), text).toHaveLength(1);
+      expect(screen.getByRole("option", { name: PLAN })).toBeTruthy();
+    }
+    fireEvent.change(search, { target: { value: "minimax" } });
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    expect(screen.queryByRole("option", { name: PLAN })).toBeNull();
+    fireEvent.change(search, { target: { value: "claude" } });
+    view.rerender(<ProviderPicker modelRole="main" value="anthropic" onChange={vi.fn()} />);
+    expect(screen.getAllByText(SENTENCE)).toHaveLength(1);
+    cleanup();
+    render(<ProviderPicker modelRole="fast" value="anthropic" onChange={vi.fn()} />);
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+  });
   it("retains the canonical selected provider through filtered searches", () => {
     const change = vi.fn();
     render(<ProviderPicker modelRole="main" value="google" onChange={change} />);

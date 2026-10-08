@@ -1,5 +1,6 @@
 import { providerById } from "@localdot/providers";
 import { useId, useState } from "react";
+import { CLAUDE_PLAN_REFUSAL } from "../keys/binding.ts";
 import {
   groupOf,
   type ModelRole,
@@ -7,6 +8,8 @@ import {
   PROVIDER_GROUPS,
   providerPickable,
 } from "./choices.ts";
+
+const CLAUDE_PLAN_SEARCH = /\b(?:claude|pro|max|subscription)\b/i;
 
 export function ProviderPicker({
   modelRole: role,
@@ -25,15 +28,20 @@ export function ProviderPicker({
   const shown = [...matchingProviders(search)];
   const selected = providerById(value);
   if (selected && !shown.some((provider) => provider.id === selected.id)) shown.unshift(selected);
-  const note = selected?.notOffered ?? selected?.rule;
+  const note =
+    selected?.notOffered ??
+    selected?.rule ??
+    (selected?.id === "anthropic" ? CLAUDE_PLAN_REFUSAL : undefined);
   const searchedReasons = search.trim()
     ? shown.filter((provider) => provider.notOffered && provider !== selected)
     : [];
+  const claudePlanSearched = role !== "local" && CLAUDE_PLAN_SEARCH.test(search);
   const chatgptShown =
     role === "main" &&
     (!search.trim() ||
       "chatgpt plan subscription".includes(search.trim().toLowerCase()) ||
       value === "chatgpt");
+  const claudePlanShown = role === "main" && (!search.trim() || claudePlanSearched);
   return (
     <div className="provider-picker">
       <label>
@@ -78,11 +86,18 @@ export function ProviderPicker({
                 ))}
             </optgroup>
           ))}
-          {(chatgptShown || value === "chatgpt") && (
+          {(chatgptShown || value === "chatgpt" || claudePlanShown) && (
             <optgroup label="Subscription">
-              <option value="chatgpt" disabled={role !== "main"}>
-                ChatGPT plan
-              </option>
+              {(chatgptShown || value === "chatgpt") && (
+                <option value="chatgpt" disabled={role !== "main"}>
+                  ChatGPT plan
+                </option>
+              )}
+              {claudePlanShown && (
+                <option value="claude-plan" disabled>
+                  Claude Pro or Max — not available here
+                </option>
+              )}
             </optgroup>
           )}
         </select>
@@ -91,6 +106,9 @@ export function ProviderPicker({
         <p id={noteId} className="provider-note">
           {note}
         </p>
+      )}
+      {claudePlanSearched && note !== CLAUDE_PLAN_REFUSAL && (
+        <p className="provider-note">{CLAUDE_PLAN_REFUSAL}</p>
       )}
       {searchedReasons.map((provider) => (
         <p key={provider.id} className="provider-note">
