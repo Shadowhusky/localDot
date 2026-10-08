@@ -29,6 +29,16 @@ const MODES = [
   { value: "handoff", label: "I'll do it" },
 ] as const;
 
+const lower = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
+
+const NOTES = [
+  ...AUTONOMY_PRESETS.map((preset) => ({
+    name: preset.name,
+    text: preset.recommended ? `Recommended: ${lower(preset.summary)}` : preset.summary,
+  })),
+  { name: "", text: `Custom: ${lower(CUSTOM_SUMMARY)}` },
+];
+
 const locked = (policy: AutonomyPolicy): readonly [ActionClass, string][] => [
   ["upload", policy.send === "handoff" ? "I'll do it, like sending" : "Ask me"],
   ["credentials", "I'll do it"],
@@ -57,11 +67,20 @@ export function AutonomyMatrix({ value, saved, onChange, rules }: AutonomyMatrix
     <div className="settings-autonomy">
       <Field
         label="Start from"
-        description={active ? active.summary : `Custom: ${CUSTOM_SUMMARY.toLowerCase()}`}
+        description={
+          // Every note shares one cell, so switching between them never moves the rows below.
+          <span className="settings-preset-notes">
+            {NOTES.map((note) => (
+              <span key={note.name} data-shown={note.name === (active?.name ?? "") || undefined}>
+                {note.text}
+              </span>
+            ))}
+          </span>
+        }
       >
         <SegmentedControl
           value={active?.name ?? ""}
-          items={AUTONOMY_PRESETS.map((preset) => ({ value: preset.name, label: preset.name }))}
+          items={AUTONOMY_PRESETS.map((preset) => ({ value: preset.name, label: preset.label }))}
           onValueChange={(name) => {
             const preset = AUTONOMY_PRESETS.find((each) => each.name === name);
             if (preset) onChange(AutonomyPolicy.parse({ ...preset.policy }));

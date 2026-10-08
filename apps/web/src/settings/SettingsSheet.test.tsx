@@ -57,9 +57,7 @@ describe("settings inspector", () => {
     const later = render(<SettingsSheet {...p} focusSection="autonomy" loading />);
     later.rerender(<SettingsSheet {...p} focusSection="autonomy" />);
     const preset = screen.getByRole("radiogroup", { name: "Start from" });
-    expect(document.activeElement).toBe(
-      within(preset).getByRole("radio", { name: "Balanced (recommended)" }),
-    );
+    expect(document.activeElement).toBe(within(preset).getByRole("radio", { name: "Balanced" }));
     const browsing = within(screen.getByRole("radiogroup", { name: "Browse websites" })).getByRole(
       "radio",
       { name: "Just do it" },

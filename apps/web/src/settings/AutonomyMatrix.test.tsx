@@ -22,20 +22,25 @@ it("gives every class it can change exactly one row", () => {
   expect(new Set(rows).size).toBe(rows.length);
 });
 
-it("shows which preset the choices match, or Custom", () => {
+it("shows which preset the choices match, or Custom, in one note that keeps its room", () => {
   const view = render(<AutonomyMatrix value={BALANCED_AUTONOMY} onChange={vi.fn()} />);
-  expect(preset("Balanced (recommended)").getAttribute("aria-checked")).toBe("true");
+  const note = () => document.querySelector(".settings-preset-notes > [data-shown]")?.textContent;
+  expect(preset("Balanced").getAttribute("aria-checked")).toBe("true");
   expect(preset("Careful").getAttribute("aria-checked")).toBe("false");
-  expect(screen.queryByText(/^Custom/)).toBeNull();
+  expect(note()).toBe(
+    "Recommended: works on its own in its computer and asks before acting as you.",
+  );
   view.rerender(<AutonomyMatrix value={CAREFUL_AUTONOMY} onChange={vi.fn()} />);
-  expect(preset("Balanced (recommended)").getAttribute("aria-checked")).toBe("false");
+  expect(preset("Balanced").getAttribute("aria-checked")).toBe("false");
   expect(preset("Careful").getAttribute("aria-checked")).toBe("true");
+  expect(note()).toBe("Asks before every step except reading and browsing.");
   view.rerender(
     <AutonomyMatrix value={{ ...BALANCED_AUTONOMY, purchase: "handoff" }} onChange={vi.fn()} />,
   );
-  expect(preset("Balanced (recommended)").getAttribute("aria-checked")).toBe("false");
+  expect(preset("Balanced").getAttribute("aria-checked")).toBe("false");
   expect(preset("Careful").getAttribute("aria-checked")).toBe("false");
-  expect(screen.getByText(/^Custom/)).toBeTruthy();
+  expect(note()).toBe("Custom: your own mix of choices.");
+  expect(document.querySelectorAll(".settings-preset-notes > span")).toHaveLength(3);
 });
 
 it("applies a preset to every class at once", () => {
@@ -46,7 +51,7 @@ it("applies a preset to every class at once", () => {
   view.rerender(
     <AutonomyMatrix value={{ ...CAREFUL_AUTONOMY, reading: "ask" }} onChange={onChange} />,
   );
-  fireEvent.click(preset("Balanced (recommended)"));
+  fireEvent.click(preset("Balanced"));
   expect(onChange).toHaveBeenLastCalledWith(BALANCED_AUTONOMY);
 });
 

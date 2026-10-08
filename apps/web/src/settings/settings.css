@@ -202,6 +202,18 @@
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
 }
 
+.settings-preset-notes {
+  display: grid;
+}
+
+.settings-preset-notes > span {
+  grid-area: 1 / 1;
+}
+
+.settings-preset-notes > span:not([data-shown]) {
+  visibility: hidden;
+}
+
 .settings-autonomy-hint {
   padding-top: calc(var(--spacing) * 2);
 }

@@ -310,6 +310,16 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await expectAutonomyRow(sheet, false);
       await page.setViewportSize({ width: 360, height: 780 });
       await expectAutonomyRow(sheet, false);
+      // A row changed under the presets turns them to Custom without moving anything.
+      await sheet.locator("#settings-autonomy").evaluate((section) => {
+        const body = section.closest(".ui-sheet-body") as HTMLElement;
+        body.scrollTop += section.getBoundingClientRect().top - body.getBoundingClientRect().top;
+      });
+      const browse = sheet.getByRole("radiogroup", { name: "Browse websites" });
+      const before = (await browse.boundingBox())?.y;
+      await browse.getByRole("radio", { name: "Ask me" }).tap();
+      await expect(sheet.getByText("Custom: your own mix of choices.")).toBeVisible();
+      expect((await browse.boundingBox())?.y).toBe(before);
       await context.close();
     });
   });

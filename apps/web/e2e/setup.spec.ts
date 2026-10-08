@@ -52,7 +52,7 @@ test("installer progress hands off once to first-run setup and settings", async 
     await expect(
       settings
         .getByRole("radiogroup", { name: "Start from" })
-        .getByRole("radio", { name: "Balanced (recommended)" }),
+        .getByRole("radio", { name: "Balanced" }),
     ).toBeFocused();
     expect(await settings.evaluate((sheet) => sheet.scrollTop), "the header stays in place").toBe(
       0,

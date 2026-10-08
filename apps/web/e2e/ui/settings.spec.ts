@@ -38,7 +38,7 @@ test("settings, autonomy", async ({ page, ui }) => {
 test("settings, unsaved changes", async ({ page, ui }) => {
   const sheet = await settings(page, ui);
   await sheet
-    .getByRole("radiogroup", { name: "Send messages" })
+    .getByRole("radiogroup", { name: "Send as you" })
     .getByRole("radio", { name: "Just do it" })
     .click();
   await expect(sheet.getByText("Unsaved changes", { exact: true })).toBeVisible();

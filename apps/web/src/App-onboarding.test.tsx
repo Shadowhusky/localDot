@@ -47,7 +47,7 @@ it("guides an empty authenticated workspace without starting tasks or saving pol
   await waitFor(() =>
     expect(document.activeElement).toBe(
       within(within(dialog).getByRole("radiogroup", { name: "Start from" })).getByRole("radio", {
-        name: "Balanced (recommended)",
+        name: "Balanced",
       }),
     ),
   );

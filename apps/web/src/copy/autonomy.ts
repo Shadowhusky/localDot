@@ -46,6 +46,9 @@ export function undoAllowedLabel(actionClass: ActionClass, option: AlwaysOption)
 
 export interface AutonomyPreset {
   readonly name: string;
+  // The name where room is short, such as a segment.
+  readonly label: string;
+  readonly recommended?: boolean;
   readonly summary: string;
   readonly policy: Readonly<AutonomyPolicy>;
 }
@@ -53,11 +56,14 @@ export interface AutonomyPreset {
 export const AUTONOMY_PRESETS: readonly AutonomyPreset[] = [
   {
     name: "Balanced (recommended)",
+    label: "Balanced",
+    recommended: true,
     summary: "Works on its own in its computer and asks before acting as you.",
     policy: BALANCED_AUTONOMY,
   },
   {
     name: "Careful",
+    label: "Careful",
     summary: "Asks before every step except reading and browsing.",
     policy: CAREFUL_AUTONOMY,
   },
