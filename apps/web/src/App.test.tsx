@@ -261,7 +261,7 @@ describe("App Replay mode", () => {
     expect(window.location.search).toBe("");
     expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
     expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getAllByRole("button", { name: "Turn on" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
   });
   it("keeps Watch working when no session exists", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
@@ -408,7 +408,7 @@ describe("App token states", () => {
     expect(screen.getByRole("alert").textContent).toContain("No access token");
 
     window.location.hash = `#token=${TOKEN}`;
-    expect(await screen.findAllByRole("button", { name: "Turn on" })).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2));
     expect(window.location.hash).toBe("");
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
   });
@@ -563,7 +563,7 @@ describe("App token states", () => {
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("removed")) }),
     );
     expect(screen.getByTestId("hud-status").textContent).toBe("No computer");
-    expect(screen.getAllByRole("button", { name: "Turn on" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1);
     expect(FakeWebSocket.instances[0]?.closed).toBe(true);
   });
 });
@@ -878,7 +878,7 @@ describe("App token hardening", () => {
       expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
       expect(screen.queryByText("No access token")).toBeNull();
       expect(screen.queryByText(/rejected the stored token/)).toBeNull();
-      expect(screen.getAllByRole("button", { name: "Turn on" })).toBeTruthy();
+      expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
     },
   );
 
