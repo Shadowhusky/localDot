@@ -470,7 +470,7 @@ describe("inject", () => {
       expect(progress).toEqual([{ presses: 1, pressMono: res.pressMono }]);
     });
 
-    it("lets go where it started when it is stopped part-way", async () => {
+    it("cancels where it is when it is stopped part-way, never moving back to the start", async () => {
       const s = desktop();
       const ac = new AbortController();
       const helper: XHelper = {
@@ -483,10 +483,29 @@ describe("inject", () => {
       };
       await expect(inject(helper, dragging(), undefined, ac.signal)).rejects.toThrow();
       expect(moves(s)).toHaveLength(3);
-      expect(s.calls.at(-1)).toEqual({ cmd: "up", args: { ...from, button: 1 } });
+      expect(s.calls.at(-1)).toEqual({ cmd: "cancel", args: {} });
+      expect(s.calls.filter((c) => c.cmd === "up")).toEqual([]);
     });
 
-    it("lets go where it started when another window now covers the drop point", async () => {
+    it("stops a glide that fell behind its schedule at its next motion", async () => {
+      const s = desktop();
+      const ac = new AbortController();
+      const helper: XHelper = {
+        ...s.helper,
+        call: async (cmd, args, timeout) => {
+          // Each motion takes longer than the gap to the next sample: no wait is left to stop in.
+          if (cmd === "move") await new Promise((r) => setTimeout(r, 40));
+          const reply = await s.helper.call(cmd, args, timeout);
+          if (cmd === "move" && moves(s).length === 2) ac.abort();
+          return reply as never;
+        },
+      };
+      await expect(inject(helper, dragging(), undefined, ac.signal)).rejects.toThrow();
+      expect(moves(s)).toHaveLength(2);
+      expect(s.calls.at(-1)?.cmd).toBe("cancel");
+    });
+
+    it("cancels before its drop when another window now covers the drop point", async () => {
       const s = desktop([
         xwin(21, { frame: [350, 50, 200, 200] }),
         xwin(11, { frame: [0, 0, 800, 600] }),
@@ -494,8 +513,16 @@ describe("inject", () => {
       await expect(inject(s.helper, dragging({ dropWindow: 11 }))).rejects.toThrow(
         DropChangedError,
       );
-      expect(s.calls.at(-1)).toEqual({ cmd: "up", args: { ...from, button: 1 } });
-      expect(s.calls.filter((c) => c.cmd === "up")).toHaveLength(1);
+      expect(s.calls.at(-1)).toEqual({ cmd: "cancel", args: {} });
+      expect(s.calls.filter((c) => c.cmd === "up")).toEqual([]);
+    });
+
+    it("cancels before its drop when the approved window is no longer at the drop point", async () => {
+      const s = desktop([xwin(11, { frame: [0, 0, 50, 50] })]);
+      await expect(inject(s.helper, dragging({ dropWindow: 11 }))).rejects.toThrow(
+        DropChangedError,
+      );
+      expect(s.calls.at(-1)?.cmd).toBe("cancel");
     });
 
     it("drops over the approved window even under its own drag icon", async () => {
@@ -520,8 +547,7 @@ describe("inject", () => {
     it("lets go when its press is never seen", async () => {
       const s = desktop([], { silent: true });
       await expect(inject(s.helper, dragging())).rejects.toThrow(NoPressError);
-      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "down", "up"]);
-      expect(s.calls.at(-1)?.args).toEqual({ ...from, button: 1 });
+      expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "down", "cancel"]);
     });
   });
 
@@ -561,6 +587,35 @@ describe("inject", () => {
       const res = await inject(up(false).helper, req);
       expect(res.releaseMono).toBeUndefined();
       expect(res.presses).toEqual([]);
+    });
+
+    it("lets go only over the window approved for the drop, and cancels anywhere else", async () => {
+      const desk = (windows: HelperWindow[]) =>
+        scripted((cmd, _args, emit) => {
+          if (cmd === "windows") return { windows, generation: 1 };
+          if (cmd === "up") emit({ ev: "release", kind: "button", detail: 1, mono: 66 });
+          return { button: 1, released: true };
+        });
+      const req = (dropWindow: number) => ({
+        ...click,
+        input: { kind: "up" as const, button: "left" as const, at: { x: 30, y: 30 } },
+        dropWindow,
+      });
+      const over = desk([
+        xwin(90, { overrideRedirect: true, frame: [20, 20, 32, 32] }),
+        xwin(11, { frame: [0, 0, 100, 100] }),
+      ]);
+      expect(await inject(over.helper, req(11))).toMatchObject({ releaseMono: 66 });
+      expect(over.calls.map((c) => c.cmd)).toEqual(["arm", "windows", "up"]);
+      for (const [windows, expected] of [
+        [[xwin(21, { frame: [0, 0, 100, 100] }), xwin(11, { frame: [0, 0, 100, 100] })], 11],
+        [[], 11],
+        [[xwin(11, { frame: [0, 0, 100, 100] })], 0],
+      ] as const) {
+        const changed = desk([...windows]);
+        await expect(inject(changed.helper, req(expected))).rejects.toThrow(DropChangedError);
+        expect(changed.calls.map((c) => c.cmd)).toEqual(["arm", "windows", "cancel"]);
+      }
     });
   });
 

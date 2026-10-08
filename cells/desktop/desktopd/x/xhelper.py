@@ -32,6 +32,8 @@ HOLD_SLACK_MS = 1000
 # A button `down` pressed is released this long after the last pointer command, if nobody asks:
 # the daemon lets go after 60 s without a mouse action.
 BUTTON_HOLD_MS = 90_000
+# After the Escape that cancels a drag, before its button comes up: the drag's owner ungrabs first.
+CANCEL_MS = 100
 MAX_KEYSYM = 0x1FFFFFFF
 # Damage inside a rect that was already changing this long before arm() (a spinner, a clock) is
 # ambient. Settle's quiet window is 250 ms, so the previous action's own changes have stopped
@@ -530,11 +532,13 @@ class Commands:
         self.held = []
         self.held_taps = []
         self.hold_until = None
-        # Buttons a `down` pressed, the modifier keycodes held with them, and when they are let go
-        # of at the latest.
+        # Buttons a `down` pressed, the modifier keycodes held with them, when they are let go of
+        # at the latest, where they went down and whether the pointer moved since.
         self.buttons = []
         self.button_mods = []
         self.buttons_until = None
+        self.button_at = None
+        self.button_moved = False
         self.d.sync()
 
     # Events queued on the command connection: MappingNotify after our own keymap changes.
@@ -674,9 +678,17 @@ class Commands:
     def cmd_move(self, a):
         self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
         self.d.sync()
-        if self.buttons:
-            self.buttons_until = mono() + BUTTON_HOLD_MS
+        self.held_pointer(a)
         return {"mono": mono()}
+
+    # A pointer command while a button is down: it stays down as long again, and a move away from
+    # where it went down makes it a drag.
+    def held_pointer(self, a):
+        if not self.buttons:
+            return
+        self.buttons_until = mono() + BUTTON_HOLD_MS
+        if (int(a["x"]), int(a["y"])) != self.button_at:
+            self.button_moved = True
 
     # Presses a button (and modifiers) at a point and keeps it down until `up`, release_all, or
     # BUTTON_HOLD_MS without a pointer command.
@@ -694,6 +706,7 @@ class Commands:
                 self.button_mods.append(kc)
             self.d.xtest_fake_input(X.ButtonPress, button)
             self.buttons.append(button)
+            self.button_at = (int(a["x"]), int(a["y"]))
             self.d.sync()
         except Exception:
             self.release_buttons()
@@ -715,6 +728,7 @@ class Commands:
             if button in self.buttons:
                 self.buttons.remove(button)
             if not self.buttons:
+                self.button_at, self.button_moved = None, False
                 self.release_buttons()
         return {"button": button, "released": down}
 
@@ -764,6 +778,7 @@ class Commands:
                     notches += 1
         finally:
             self.release_keys(down)
+        self.held_pointer(a)
         return {"notches": notches}
 
     def keysym_for_name(self, name):
@@ -922,30 +937,63 @@ class Commands:
     def cmd_release(self, a):
         return {"keycodes": self.release_held()}
 
+    # Lets go of the buttons a `down` pressed, where the pointer is. A button the pointer moved with
+    # may be dragging something (a file, a window, a toolkit or XDND drag): its modifiers come up,
+    # then Escape cancels the drag while the button is still down, so letting go drops nothing.
+    # The pointer is never taken back with the button down: a paint tool would draw the way back.
     def release_buttons(self):
         buttons, self.buttons, self.buttons_until = self.buttons, [], None
         mods, self.button_mods = self.button_mods, []
+        at, moved = self.button_at, self.button_moved
+        self.button_at, self.button_moved = None, False
         try:
-            for b in reversed(buttons):
-                self.d.xtest_fake_input(X.ButtonRelease, b)
-            if buttons:
-                self.d.sync()
+            if buttons and (moved or self.pointer_at() != at):
+                moved = True
+                try:
+                    if mods:
+                        self.release_keys(mods)
+                        mods = []
+                finally:
+                    self.escape()
         finally:
-            if mods:
-                self.release_keys(mods)
-        return buttons
+            try:
+                for b in reversed(buttons):
+                    self.d.xtest_fake_input(X.ButtonRelease, b)
+                if buttons:
+                    self.d.sync()
+            finally:
+                if mods:
+                    self.release_keys(mods)
+        return buttons, bool(buttons) and moved
+
+    def pointer_at(self):
+        p = self.root.query_pointer()
+        return (p.root_x, p.root_y)
+
+    def escape(self):
+        self.tap([self.keycode_for_name("Escape")[0]])
+        self.pause(CANCEL_MS / 1000)
+
+    # Lets go of the buttons a `down` pressed without dropping anything: a stopped drag.
+    def cmd_cancel(self, a):
+        buttons, escaped = self.release_buttons()
+        return {"buttons": len(buttons), "escaped": bool(escaped)}
 
     # Every key and button the server has down, whoever pressed them: a helper that died while
     # holding keys leaves them down for the next one to release.
     def cmd_release_all(self, a):
         held = self.release_held()
-        pressed = self.release_buttons()
+        pressed, _ = self.release_buttons()
         keymap = self.d.query_keymap()
         keys = [i * 8 + bit for i, byte in enumerate(keymap) for bit in range(8) if byte >> bit & 1]
-        mask = self.root.query_pointer().mask
-        buttons = [b for b in range(1, 6) if mask & (1 << (7 + b))]
         for kc in keys:
             self.d.xtest_fake_input(X.KeyRelease, kc)
+        self.d.sync()
+        # Whoever pressed these, nobody knows where they went down: each may be dragging.
+        mask = self.root.query_pointer().mask
+        buttons = [b for b in range(1, 6) if mask & (1 << (7 + b))]
+        if buttons:
+            self.escape()
         for b in buttons:
             self.d.xtest_fake_input(X.ButtonRelease, b)
         self.d.sync()

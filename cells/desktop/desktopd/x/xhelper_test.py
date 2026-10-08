@@ -529,7 +529,7 @@ US_KEYS = {
     0xffe3: [(37, 0)], 0xffe1: [(50, 0)], 0xffe9: [(64, 0)], 0xfe03: [(92, 0)],
     0x2f: [(61, 0)], 0x3f: [(61, 1)], 0x3d: [(21, 0)], 0x2b: [(21, 1)], 0x61: [(38, 0)],
     0x5d: [(35, 0)], 0x7e: [(49, 1)], 0xff0d: [(36, 0)], 0x40: [(11, 2)], 0xff7f: [(77, 0)],
-    0xff9c: [(87, 0)], 0xffb1: [(87, 1)], 0xffab: [(86, 0)],
+    0xff9c: [(87, 0)], 0xffb1: [(87, 1)], 0xffab: [(86, 0)], 0xff1b: [(9, 0)],
 }
 # Both levels of the keypad keys (KP_End/KP_1, KP_Add/KP_Add).
 KEYPAD_LEVELS = {(87, 0): 0xff9c, (87, 1): 0xffb1, (86, 0): 0xffab, (86, 1): 0xffab}
@@ -545,6 +545,7 @@ class Keyboard:
         self.fail_on = fail_on
         self.fail_button = fail_button
         self.numlock = numlock
+        self.pointer = (0, 0)
 
     def xtest_fake_input(self, kind, detail=0, x=0, y=0):
         if self.fail_on is not None and kind == X.KeyPress and detail == self.fail_on:
@@ -552,7 +553,9 @@ class Keyboard:
         if kind == X.ButtonPress and detail == self.fail_button:
             raise RuntimeError("BadValue")
         self.events.append((kind, (x, y) if kind == X.MotionNotify else detail))
-        if kind == X.KeyPress:
+        if kind == X.MotionNotify:
+            self.pointer = (x, y)
+        elif kind == X.KeyPress:
             self.down.add(detail)
             if detail == 77:
                 self.numlock = not self.numlock
@@ -592,11 +595,14 @@ def keyboard(fail_on=None, numlock=False, fail_button=None):
     cmds.buttons = []
     cmds.button_mods = []
     cmds.buttons_until = None
+    cmds.button_at = None
+    cmds.button_moved = False
     cmds.remapped = {}
+    cmds.pause = lambda s: None
     cmds.root = types.SimpleNamespace(
         query_pointer=lambda: types.SimpleNamespace(
             mask=sum(1 << (7 + b) for b in kb.buttons) | (1 << 4 if kb.numlock else 0),
-            root_x=0, root_y=0))
+            root_x=kb.pointer[0], root_y=kb.pointer[1]))
     return cmds, kb
 
 
@@ -731,6 +737,68 @@ class Buttons(unittest.TestCase):
                                      (X.ButtonPress, 5), (X.ButtonRelease, 5), (X.KeyRelease, 37)])
 
 
+class Cancel(unittest.TestCase):
+    def test_letting_go_after_a_move_cancels_the_drag_with_escape_where_the_pointer_is(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1, "mods": [0xffe3]})
+        cmds.cmd_move({"x": 300, "y": 400})
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 1, "escaped": True})
+        self.assertEqual(kb.events, [(X.KeyRelease, 37), (X.KeyPress, 9), (X.KeyRelease, 9),
+                                     (X.ButtonRelease, 1)])
+        self.assertEqual((kb.buttons, kb.down, kb.pointer), (set(), set(), (300, 400)))
+        self.assertEqual((cmds.buttons, cmds.button_at, cmds.button_moved), ([], None, False))
+
+    def test_a_button_that_never_moved_comes_up_where_it_went_down_without_escape(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1, "mods": [0xffe3]})
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 1, "escaped": False})
+        self.assertEqual(kb.events, [(X.ButtonRelease, 1), (X.KeyRelease, 37)])
+
+    def test_a_move_back_to_the_press_point_still_counts_as_a_drag(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        cmds.cmd_move({"x": 300, "y": 400})
+        cmds.cmd_move({"x": 10, "y": 20})
+        cmds.release_buttons()
+        self.assertIn((X.KeyPress, 9), kb.events)
+
+    def test_release_all_cancels_a_held_drag_and_one_pressed_by_someone_else(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        cmds.cmd_scroll({"x": 50, "y": 60, "dy": 1})
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_release_all({}), {"keys": 0, "buttons": 1})
+        self.assertEqual(kb.events[:3], [(X.KeyPress, 9), (X.KeyRelease, 9), (X.ButtonRelease, 1)])
+        self.assertNotIn(X.MotionNotify, [k for k, _ in kb.events])
+        cmds, kb = keyboard()
+        kb.buttons.add(1)
+        cmds.cmd_release_all({})
+        self.assertEqual(kb.events[:3], [(X.KeyPress, 9), (X.KeyRelease, 9), (X.ButtonRelease, 1)])
+
+    def test_nothing_down_sends_no_escape(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 0, "escaped": False})
+        cmds.cmd_release_all({})
+        self.assertEqual(kb.events, [])
+
+    def test_the_explicit_release_is_no_cancel(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        cmds.cmd_move({"x": 300, "y": 400})
+        cmds.cmd_up({"x": 300, "y": 400, "button": 1})
+        self.assertNotIn((X.KeyPress, 9), kb.events)
+
+    def test_a_scroll_while_held_keeps_the_button_down_as_long_as_a_move(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        before = cmds.buttons_until
+        time.sleep(0.01)
+        cmds.cmd_scroll({"x": 10, "y": 20, "dy": 1})
+        self.assertGreater(cmds.buttons_until, before)
+
+
 class Holds(unittest.TestCase):
     def test_holds_keys_down_until_released(self):
         cmds, kb = keyboard()
@@ -836,9 +904,12 @@ class Serve(unittest.TestCase):
         with patch.object(xhelper, "BUTTON_HOLD_MS", 50), \
                 patch.object(xhelper.Commands, "release_buttons", tracked):
             cmds, kb, _, _, took = self.serve(
-                [{"id": 1, "cmd": "down", "x": 1, "y": 2, "button": 1, "mods": [0xffe1]}],
+                [{"id": 1, "cmd": "down", "x": 1, "y": 2, "button": 1, "mods": [0xffe1]},
+                 {"id": 2, "cmd": "move", "x": 40, "y": 50}],
                 close_after=0.4)
         self.assertEqual((kb.buttons, kb.down, cmds.buttons), (set(), set(), []))
+        self.assertEqual(kb.events[-4:], [(X.KeyRelease, 50), (X.KeyPress, 9), (X.KeyRelease, 9),
+                                          (X.ButtonRelease, 1)])
         self.assertEqual(len(let_go), 1)
         self.assertLess(let_go[0] - start, 300)
         self.assertGreater(took, 350)

@@ -48,7 +48,7 @@ export class ActivationError extends Error {
 
 export class DropChangedError extends Error {
   constructor() {
-    super("another window is at the drop point now; the drag let go where it started");
+    super("another window is at the drop point now; the drag was cancelled before its drop");
     this.name = "DropChangedError";
   }
 }
@@ -209,8 +209,17 @@ async function checkDrop(x: XHelper, to: Point, expected: number): Promise<void>
   if ((top?.id ?? 0) !== expected) throw new DropChangedError();
 }
 
+// Lets go of a held button without dropping: Escape cancels the drag first, and the button comes up
+// where the pointer is (xhelper's `cancel`). Taking it back to the start would draw the way back.
+async function cancel(x: XHelper): Promise<void> {
+  await x
+    .call("cancel")
+    .catch(() => x.call("release_all"))
+    .catch(() => undefined);
+}
+
 // Press at the start, follow the path, let go at the end. A drag that is stopped or whose drop
-// point changed lets go where it started, which drops nothing anywhere else.
+// point changed is cancelled where it is.
 async function drag(
   x: XHelper,
   req: InputRequest,
@@ -253,11 +262,7 @@ async function drag(
       armedMono,
     };
   } finally {
-    if (held)
-      await x
-        .call("up", { ...input.from, button })
-        .catch(() => x.call("release_all"))
-        .catch(() => undefined);
+    if (held) await cancel(x);
   }
 }
 
@@ -300,6 +305,11 @@ export async function inject(
   }
   if (input.kind === "up") {
     const button = BUTTONS[input.button];
+    if (req.dropWindow !== undefined)
+      await checkDrop(x, input.at, req.dropWindow).catch(async (error) => {
+        await cancel(x);
+        throw error;
+      });
     const [release] = await withRelease(
       x,
       buttonEvent(button),
