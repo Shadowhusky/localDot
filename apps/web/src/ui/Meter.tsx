@@ -1,28 +1,52 @@
 import { clsx } from "clsx";
+import { type CSSProperties, useId } from "react";
 
-const HIGH = 0.9;
+// From this share of the limit the fill brightens and says so in words, never by colour alone.
+export const NEAR_LIMIT = 0.9;
+const NEAR_LIMIT_WORDS = "Almost at limit";
 
 export interface MeterProps {
+  label: string;
   value: number;
   max?: number;
-  label: string;
+  // What the value means, shown at the right: "62% used". A percentage when left out.
+  valueText?: string;
   className?: string;
 }
 
-export function Meter({ value, max = 100, label, className }: MeterProps) {
-  const ratio = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
+// How much of a limit is used: a name and an amount over a 4 px bar.
+export function Meter({ label, value, max = 100, valueText, className }: MeterProps) {
+  const id = useId();
+  const used = max > 0 ? Math.min(1, Math.max(0, value / max)) : 0;
+  const near = used >= NEAR_LIMIT;
+  const amount = valueText ?? `${Math.round(used * 100)}%`;
+  const shown = near ? `${NEAR_LIMIT_WORDS} · ${amount}` : amount;
   return (
-    // biome-ignore lint/a11y/useSemanticElements: A native meter draws differently in each engine and can't take the kit's track.
     <div
-      role="meter"
-      aria-label={label}
-      aria-valuemin={0}
-      aria-valuemax={max}
-      aria-valuenow={value}
       className={clsx("ui-meter", className)}
-      data-high={ratio >= HIGH || undefined}
+      data-near={near ? "" : undefined}
+      style={{ "--_value": used } as CSSProperties}
     >
-      <span className="ui-meter-fill" style={{ scale: `${ratio} 1` }} />
+      <div className="ui-meter-head">
+        <span id={`${id}-label`} className="ui-meter-label">
+          {label}
+        </span>
+        <span className="ui-meter-value" aria-hidden="true">
+          {shown}
+        </span>
+      </div>
+      {/* biome-ignore lint/a11y/useSemanticElements: a native meter draws differently in each engine and cannot take the kit's bar. */}
+      <div
+        role="meter"
+        aria-labelledby={`${id}-label`}
+        aria-valuemin={0}
+        aria-valuemax={max}
+        aria-valuenow={Math.min(max, Math.max(0, value))}
+        aria-valuetext={near ? `${amount}, ${NEAR_LIMIT_WORDS.toLowerCase()}` : amount}
+        className="ui-meter-track"
+      >
+        <span className="ui-meter-fill" />
+      </div>
     </div>
   );
 }

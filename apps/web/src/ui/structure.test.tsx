@@ -88,8 +88,8 @@ describe("Meter", () => {
     );
     const [low, high] = screen.getAllByRole("meter");
     expect(low?.getAttribute("aria-valuenow")).toBe("40");
-    expect(low?.hasAttribute("data-high")).toBe(false);
-    expect(high?.hasAttribute("data-high")).toBe(true);
+    expect(low?.closest(".ui-meter")?.hasAttribute("data-near")).toBe(false);
+    expect(high?.closest(".ui-meter")?.hasAttribute("data-near")).toBe(true);
   });
 });
 

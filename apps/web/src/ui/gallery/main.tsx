@@ -6,6 +6,7 @@ import "./shell.css";
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { AtomsPage } from "./AtomsPage.tsx";
+import { FeedbackPage } from "./FeedbackPage.tsx";
 import { FieldsPage } from "./FieldsPage.tsx";
 import { OverlaysPage } from "./OverlaysPage.tsx";
 
@@ -28,6 +29,12 @@ const PAGES = {
     note: "Sheets, menus, popovers and dialogs, and how each one opens, closes and keeps your work.",
     Page: OverlaysPage,
   },
+  feedback: {
+    name: "Feedback",
+    title: "Feedback",
+    note: "Toasts, banners, progress, meters, skeletons and empty states, and how each arrives and leaves.",
+    Page: FeedbackPage,
+  },
 };
 
 // A stand-in for the T01 gallery until it lands here, loading the same legacy styles it does.
@@ -35,7 +42,9 @@ const query = new URLSearchParams(location.search);
 const midnight = query.get("appearance") === "midnight";
 const requested = query.get("page");
 const pageName: keyof typeof PAGES =
-  requested === "fields" || requested === "overlays" ? requested : "atoms";
+  requested === "fields" || requested === "overlays" || requested === "feedback"
+    ? requested
+    : "atoms";
 const { title, note, Page } = PAGES[pageName];
 if (midnight) document.documentElement.dataset.appearance = "midnight";
 

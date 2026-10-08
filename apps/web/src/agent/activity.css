@@ -756,8 +756,7 @@ button.activity-usage-trigger:active {
   border-top: 1px solid var(--color-hairline);
 }
 
-.usage-plan h4,
-.usage-window-name {
+.usage-plan h4 {
   font:
     var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
     var(--font-ui);
