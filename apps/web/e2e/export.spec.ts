@@ -125,7 +125,7 @@ test("export sheet floats, fits a short viewport, and cancels without a partial 
   });
   await openForExport(page, uiSession.seed.sessionId);
   await page.evaluate(() => window.__localdot?.replay?.seek(1000, "exact"));
-  const before = await page.getByRole("main", { name: "Session replay" }).boundingBox();
+  const before = await page.getByRole("main", { name: "Replay" }).boundingBox();
   await page.getByRole("button", { name: "Export MP4", exact: true }).click();
   const sheet = page.getByRole("dialog", { name: "Export MP4" });
   await expect(sheet).toBeVisible();
@@ -133,7 +133,7 @@ test("export sheet floats, fits a short viewport, and cancels without a partial 
   await sheet.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
-  const after = await page.getByRole("main", { name: "Session replay" }).boundingBox();
+  const after = await page.getByRole("main", { name: "Replay" }).boundingBox();
   expect(after?.y).toBe(before?.y);
   expect(after?.height).toBe(before?.height);
   await page.screenshot({ path: "e2e/out/export-sheet.png" });

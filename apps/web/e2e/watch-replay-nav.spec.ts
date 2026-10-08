@@ -15,6 +15,14 @@ async function phonePage(browser: Browser, width: number) {
 
 const modes = (page: Page) => page.getByRole("navigation", { name: "Mode" });
 
+async function pickTask(page: Page, title: string) {
+  await page.getByRole("button", { name: /^All tasks/ }).click();
+  await page
+    .getByRole("dialog", { name: "Tasks" })
+    .getByRole("link", { name: new RegExp(`^${title}`) })
+    .click();
+}
+
 // The 44 px touch target may extend past the visible segment, so probe the hit area itself.
 async function hitHeight(page: Page, name: string) {
   return modes(page)
@@ -78,12 +86,12 @@ test("browser Back from Replay returns to Watch", async ({ page }) => {
   await modes(page).getByRole("button", { name: "Replay", exact: true }).click();
   await expect(page).toHaveURL(/[?&]replay=/);
   const older = fixture.seeded[1] as string;
-  await page.locator(".replay-session-open", { hasText: "Earlier sample task 1" }).click();
+  await pickTask(page, "Earlier sample task 1");
   await expect(page).toHaveURL(new RegExp(`replay=${older}`));
   await page.goBack();
   await expect(page).toHaveURL(`${fixture.origin}/`);
   await expect(watch).toHaveAttribute("aria-current", "page");
-  await expect(page.getByRole("main", { name: "Session replay" })).toHaveCount(0);
+  await expect(page.getByRole("main", { name: "Replay" })).toHaveCount(0);
   await page.goForward();
   await expect(page).toHaveURL(new RegExp(`replay=${older}`));
 });
@@ -95,7 +103,7 @@ test("Replay hides the live task's Pause and Stop shortcut", async ({ page }) =>
   await expect(pause).toBeVisible();
   await expect(hint).toBeVisible();
   await modes(page).getByRole("button", { name: "Replay", exact: true }).click();
-  await expect(page.getByRole("main", { name: "Session replay" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Replay" })).toBeVisible();
   await expect(pause).toHaveCount(0);
   await expect(hint).toHaveCount(0);
 });
@@ -117,7 +125,7 @@ for (const engine of ["chrome", "webkit"] as const satisfies Engine[])
 test("Replay keeps the late-heartbeat warning and points to Watch", async ({ page }) => {
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
   await modes(page).getByRole("button", { name: "Replay", exact: true }).click();
-  await expect(page.getByRole("main", { name: "Session replay" })).toBeVisible();
+  await expect(page.getByRole("main", { name: "Replay" })).toBeVisible();
   await page.request.post(`${fixture.origin}/__qa/heartbeat`);
   await expect(
     page.getByText("The live task's heartbeat is late. Switch to Watch if you want to stop it."),
@@ -137,18 +145,22 @@ test("browser Back never reopens a deleted recording", async ({ page }) => {
   const entries = await page.evaluate(() => history.length);
   const older = fixture.seeded[1] as string;
   await replay.click();
-  await page.locator(".replay-session-open", { hasText: "Earlier sample task 1" }).click();
+  await pickTask(page, "Earlier sample task 1");
   await expect(page).toHaveURL(new RegExp(`replay=${older}`));
   await watch.click();
   await expect(page).toHaveURL(`${fixture.origin}/`);
   await replay.click();
   await expect(page).toHaveURL(/[?&]replay=/);
   expect(await page.evaluate(() => history.length)).toBe(entries + 1);
-  await page.getByRole("button", { name: "Delete Earlier sample task 1" }).click();
-  await page.getByRole("button", { name: "Delete session" }).click();
-  await expect(
-    page.locator(".replay-session-open", { hasText: "Earlier sample task 1" }),
-  ).toHaveCount(0);
+  await page.getByRole("button", { name: /^All tasks/ }).click();
+  const tasks = page.getByRole("dialog", { name: "Tasks" });
+  await tasks.getByRole("button", { name: "More for Earlier sample task 1" }).click();
+  await page.getByRole("menuitem", { name: /^Delete recording/ }).click();
+  await page
+    .getByRole("alertdialog", { name: "Delete this task's recording?" })
+    .getByRole("button", { name: "Delete", exact: true })
+    .click();
+  await expect(tasks.getByRole("link", { name: /^Earlier sample task 1/ })).toHaveCount(0);
   await page.goBack();
   await expect(page).toHaveURL(`${fixture.origin}/`);
   await expect(watch).toHaveAttribute("aria-current", "page");
