@@ -106,6 +106,29 @@ describe("owned explicit ChatGPT setup", () => {
     expect(f.state.calls.every((call) => call.method === "GET")).toBe(true);
     expect(v.current().canStart).toBe(false);
   });
+  it("shows the plain reason the plan is off instead of a generic line", async () => {
+    const f = fixture({
+      available: false,
+      codexVersion: "0.154.0",
+      state: "unavailable",
+      install: { state: "not_installed" },
+      reason: "ChatGPT plan support isn't switched on in this version yet.",
+    });
+    await opened(f);
+    expect(
+      screen.getByText("ChatGPT plan support isn't switched on in this version yet."),
+    ).toBeTruthy();
+    expect(screen.queryByText("ChatGPT support is unavailable on this computer.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Install ChatGPT support" })).toBeNull();
+  });
+  it("asks for device code sign-in in ChatGPT before offering a code", async () => {
+    await opened(fixture());
+    const hint = screen.getByText(
+      "Turn on device code sign-in in ChatGPT under Settings → Security first.",
+    );
+    const button = screen.getByRole("button", { name: "Sign in with code" });
+    expect(hint.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
   it("shares one explicit installation and explicit cancellation across duplicate clicks", async () => {
     const f = fixture({
       available: true,

@@ -28,7 +28,9 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
       {!status && (
         <p>{account.checking ? "Checking ChatGPT support…" : "Account status is unknown."}</p>
       )}
-      {status?.available === false && <p>ChatGPT support is unavailable on this computer.</p>}
+      {status?.available === false && (
+        <p>{status.reason ?? "ChatGPT support is unavailable on this computer."}</p>
+      )}
       {status?.available && install?.state === "not_installed" && !account.installWatching && (
         <>
           <p>Install ChatGPT support to sign in with your account.</p>
@@ -75,6 +77,9 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
               ? "Your account sign-in expired. Sign in again, then explicitly resume the paused task."
               : "Sign in with your ChatGPT account using a device code."}
           </p>
+          {status.state === "signed_out" && (
+            <p>Turn on device code sign-in in ChatGPT under Settings → Security first.</p>
+          )}
           <button type="button" disabled={disabled} onClick={() => void account.login()}>
             {status.state === "expired" ? "Sign in again" : "Sign in with code"}
           </button>

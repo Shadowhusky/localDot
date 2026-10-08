@@ -64,7 +64,7 @@ const status = z
   });
 export type ChatgptResponse = z.infer<typeof status>;
 export type ChatgptLoginMaterial = z.infer<typeof login>;
-export type ChatgptSummary = Omit<ChatgptResponse, "reason" | "lastError" | "login"> & {
+export type ChatgptSummary = Omit<ChatgptResponse, "lastError" | "login"> & {
   login?: Pick<ChatgptLoginMaterial, "loginId" | "startedAt">;
 };
 // Copy public fields explicitly. Device codes and URLs never enter React state, logs or storage.
@@ -74,6 +74,7 @@ export function chatgptSummary(value: ChatgptResponse): ChatgptSummary {
     codexVersion: value.codexVersion,
     state: value.state,
     install: value.install,
+    ...(value.reason ? { reason: value.reason } : {}),
     ...(value.account ? { account: value.account } : {}),
     ...(value.usage ? { usage: value.usage } : {}),
     ...(value.models ? { models: value.models } : {}),

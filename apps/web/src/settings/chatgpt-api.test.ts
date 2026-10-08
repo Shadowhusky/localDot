@@ -124,7 +124,7 @@ describe("bounded ChatGPT account transport", () => {
       expect(f.calls).toHaveLength(1);
     }
   });
-  it("copies only public metadata into a summary and keeps missing usage unknown", async () => {
+  it("copies only public metadata and the plain reason into a summary and keeps missing usage unknown", async () => {
     const f = fixture(() =>
       Response.json({
         ...installed(),
@@ -136,7 +136,8 @@ describe("bounded ChatGPT account transport", () => {
     );
     const summary = chatgptSummary(await readChatgpt(f.api, signal()));
     const text = JSON.stringify(summary);
-    expect(text).not.toMatch(/TEST-DEVICE-CODE|auth.openai.com|TEST-DIAGNOSTIC|TEST-ERROR/);
+    expect(text).not.toMatch(/TEST-DEVICE-CODE|auth.openai.com|TEST-ERROR/);
+    expect(summary.reason).toBe("TEST-DIAGNOSTIC");
     expect(summary.login).toEqual({ loginId: "test-attempt", startedAt: expect.any(Number) });
     expect(summary.usage).toBeUndefined();
   });

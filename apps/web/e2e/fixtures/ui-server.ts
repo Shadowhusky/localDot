@@ -9,7 +9,11 @@ import { fileURLToPath } from "node:url";
 import { type KeydRecord, toBase64url, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
-import type { CodexInstaller, InstalledCodex } from "../../../../harness/codex/src/index.ts";
+import {
+  CHATGPT_SWITCHED_OFF,
+  type CodexInstaller,
+  type InstalledCodex,
+} from "../../../../harness/codex/src/index.ts";
 import type { ChatgptStatus, CodexAccount } from "../../../daemon/src/agent/codex/account.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
@@ -554,12 +558,24 @@ const installed: InstalledCodex = {
   codexBin: join(HOME, "inert/codex"),
   codeModeHostBin: join(HOME, "inert/code-mode-host"),
 } as InstalledCodex;
+let installing: Promise<InstalledCodex> | undefined;
 const installer = {
   status: () =>
     chatgptState === "signed_in" || chatgptState === "signed_out"
       ? { state: "ready", version: "0.154.0" }
-      : { state: "not_installed" },
-  ensureInstalled: async () => installed,
+      : installing
+        ? { state: "downloading", receivedBytes: 48 * 1024 * 1024, totalBytes: 116_501_639 }
+        : { state: "not_installed" },
+  ensureInstalled: () => {
+    installing ??= new Promise((resolve) =>
+      setTimeout(() => {
+        chatgptState = "signed_out";
+        installing = undefined;
+        resolve(installed);
+      }, 1500),
+    );
+    return installing;
+  },
   verifiedInstallation: async () =>
     chatgptState === "signed_in" || chatgptState === "signed_out" ? installed : undefined,
   cancel: () => {},
@@ -610,7 +626,7 @@ const account = {
 const harness = () =>
   chatgptState && chatgptState !== "unavailable"
     ? { available: true as const }
-    : { available: false as const, reason: "Sample fixture has no ChatGPT harness" };
+    : { available: false as const, reason: CHATGPT_SWITCHED_OFF };
 const agent: AgentRoutesDeps = {
   home: HOME,
   settings: settingsStore,
@@ -897,6 +913,14 @@ app.post("/__qa/finish", (c) => {
 app.post("/__qa/cell/:kind", (c) => {
   const next = cellFor(c.req.param("kind") as CellKind, cellId);
   if (next) cells.emit(next);
+  return c.json({ ok: true });
+});
+app.post("/__qa/chatgpt/:state", (c) => {
+  const state = c.req.param("state");
+  if (!chatgptState) return c.text("start the fixture with QA_CHATGPT", 409);
+  if (!["signed_in", "signed_out", "not_installed", "unavailable"].includes(state))
+    return c.text("unknown ChatGPT state", 400);
+  chatgptState = state as NonNullable<typeof chatgptState>;
   return c.json({ ok: true });
 });
 app.post("/__qa/keyd/:mode", (c) => {

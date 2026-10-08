@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import type { CodexInstallState } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
-import { expect, type Page, test } from "@playwright/test";
+import { type Browser, expect, type Locator, type Page, test } from "@playwright/test";
 import type { CodexInstaller, InstalledCodex } from "../../../harness/codex/src/index.ts";
 import {
   AccountError,
@@ -20,6 +20,7 @@ import { type AgentRoutesDeps, agentRoutes } from "../../daemon/src/agent/routes
 import { SettingsStore } from "../../daemon/src/agent/settings.ts";
 import { KeydUnavailableError } from "../../daemon/src/keyd/client.ts";
 import { serveUi } from "../../daemon/src/static-ui.ts";
+import { ENGINES, TOKEN as FIXTURE_TOKEN, startUiFixture, type UiFixture } from "./ui-fixture.ts";
 
 // Real production bundle/CSP and accepted authenticated routes/private settings store. The
 // installer/account are owned inert stand-ins; no binary, actual account or model is contacted.
@@ -391,7 +392,7 @@ test("unsupported capability and an uncertain account retirement keep admission 
   try {
     const audit = await load(page, unsupported);
     await expect(
-      audit.sheet.getByText("ChatGPT support is unavailable on this computer."),
+      audit.sheet.getByText("ChatGPT support is unavailable in this owned fixture."),
     ).toBeVisible();
     expect(await audit.sheet.getByRole("button", { name: "Install ChatGPT support" }).count()).toBe(
       0,
@@ -421,4 +422,91 @@ test("unsupported capability and an uncertain account retirement keep admission 
     await page.close();
     await f.close();
   }
+});
+
+// The same states on the fixture daemon, which serves the built UI through the real agent routes.
+const VIEWS = [
+  { name: "c14", engine: "chrome", viewport: { width: 1440, height: 900 } },
+  { name: "w14", engine: "webkit", viewport: { width: 1440, height: 900 } },
+  { name: "w39", engine: "webkit", viewport: { width: 390, height: 844 }, phone: true },
+] as const;
+const DEVICE_HINT = "Turn on device code sign-in in ChatGPT under Settings → Security first.";
+test.describe("ChatGPT plan states on the fixture daemon", () => {
+  let daemon: UiFixture;
+  test.beforeAll(async () => {
+    test.setTimeout(120_000);
+    daemon = await startUiFixture("localdot-chatgpt-states", {
+      QA_CHATGPT: "unavailable",
+      QA_SETTINGS: "chatgpt",
+    });
+  });
+  test.afterAll(async () => {
+    await daemon?.stop();
+  });
+  async function each(
+    state: "unavailable" | "not_installed" | "signed_in",
+    check: (panel: Locator, page: Page, view: (typeof VIEWS)[number]) => Promise<void>,
+  ) {
+    for (const view of VIEWS) {
+      const reset = await fetch(`${daemon.origin}/__qa/chatgpt/${state}`, { method: "POST" });
+      expect(reset.status).toBe(200);
+      const browser: Browser = await ENGINES[view.engine]();
+      try {
+        const page = await browser.newPage({
+          viewport: view.viewport,
+          deviceScaleFactor: 2,
+          ...("phone" in view ? { isMobile: true, hasTouch: true } : {}),
+        });
+        await page.goto(`${daemon.origin}/#token=${FIXTURE_TOKEN}`);
+        const settings = page.getByRole("button", { name: "Settings", exact: true });
+        if ("phone" in view) await settings.tap();
+        else await settings.click();
+        const sheet = page.getByRole("dialog", { name: "Models and settings" });
+        const panel = sheet.locator(".chatgpt-panel");
+        await expect(panel.getByRole("heading", { name: "ChatGPT plan" })).toBeVisible();
+        await check(panel, page, view);
+        await panel.scrollIntoViewIfNeeded();
+        await page.screenshot({
+          path: test.info().outputPath(`chatgpt-${state}-${view.name}.png`),
+        });
+      } finally {
+        await browser.close();
+      }
+    }
+  }
+  test("an unavailable plan says why and offers no install", async () => {
+    await each("unavailable", async (panel) => {
+      await expect(
+        panel.getByText("ChatGPT plan support isn't switched on in this version yet."),
+      ).toBeVisible();
+      await expect(panel.getByRole("button", { name: "Install ChatGPT support" })).toHaveCount(0);
+      await expect(panel.getByText(/daemon|harness/i)).toHaveCount(0);
+    });
+  });
+  test("installing ChatGPT support leads to sign-in with a code and the device code hint", async () => {
+    await each("not_installed", async (panel, page, view) => {
+      const install = panel.getByRole("button", { name: "Install ChatGPT support", exact: true });
+      await expect(install).toBeEnabled();
+      if ("phone" in view) await install.tap();
+      else await install.click();
+      await expect(
+        panel.getByRole("progressbar", { name: "ChatGPT download progress" }),
+      ).toBeVisible();
+      const signIn = panel.getByRole("button", { name: "Sign in with code", exact: true });
+      await expect(signIn).toBeEnabled({ timeout: 15_000 });
+      const hint = panel.getByText(DEVICE_HINT);
+      await expect(hint).toBeVisible();
+      const [above, button] = await Promise.all([hint.boundingBox(), signIn.boundingBox()]);
+      expect(above && button && above.y + above.height <= button.y).toBe(true);
+      if ("phone" in view) expect(button?.height).toBeGreaterThanOrEqual(44);
+      await expect(page.getByText(/daemon|harness/i)).toHaveCount(0);
+    });
+  });
+  test("a signed-in plan shows the account and its usage", async () => {
+    await each("signed_in", async (panel) => {
+      await expect(panel.getByText("Signed in as preview@example.test")).toBeVisible();
+      await expect(panel.getByText(/Primary window: 23% used/)).toBeVisible();
+      await expect(panel.getByText(DEVICE_HINT)).toHaveCount(0);
+    });
+  });
 });
