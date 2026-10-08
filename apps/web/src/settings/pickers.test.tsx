@@ -304,6 +304,78 @@ describe("provider/model/role presentation", () => {
     fireEvent.click(button);
     expect(onKeys).toHaveBeenCalledWith("main", "azure", button);
   });
+  it("lets a custom endpoint say whether its model sees images, its context and a flat-rate plan", () => {
+    const anc: KeyRecord = {
+      ...stored,
+      id: "anc",
+      provider: "anthropic-compatible",
+      baseURL: "https://api.z.ai/api/anthropic/v1",
+    };
+    function Form({ provider }: { provider: string }) {
+      const [value, set] = useState<RoleChoice | undefined>({
+        provider,
+        model: "glm-5.3-flash",
+        key: provider === "anthropic" ? stored.id : "anc",
+      });
+      return (
+        <>
+          <RoleEditor
+            modelRole="main"
+            value={value}
+            providers={[]}
+            keys={[anc, { ...stored, provider: "anthropic" }]}
+            keyLayer="online"
+            onChange={set}
+            onKeys={vi.fn()}
+          />
+          <output>{JSON.stringify(value)}</output>
+        </>
+      );
+    }
+    const state = () => JSON.parse(screen.getByRole("status").textContent ?? "") as RoleChoice;
+    const view = render(<Form provider="anthropic-compatible" />);
+    expect(screen.getByText("Configure the endpoint under Keys.")).toBeTruthy();
+    const vision = screen.getByRole("checkbox", {
+      name: "Can see images (needed to use the screen)",
+    }) as HTMLInputElement;
+    expect(vision.checked).toBe(true);
+    fireEvent.click(vision);
+    expect(state().vision).toBe(false);
+    fireEvent.click(vision);
+    expect(state()).not.toHaveProperty("vision");
+
+    const context = screen.getByRole("textbox", {
+      name: "main context window — tokens",
+    }) as HTMLInputElement;
+    expect(context.placeholder).toBe("32768");
+    expect(context.getAttribute("inputmode")).toBe("numeric");
+    const help = screen.getByText("Optional. Leave empty for 32,768.");
+    expect(context.getAttribute("aria-describedby")).toBe(help.id);
+    fireEvent.change(context, { target: { value: "128,000" } });
+    expect(state().contextTokens).toBe(128_000);
+    expect(context.value).toBe("128000");
+    fireEvent.change(context, { target: { value: "" } });
+    expect(state()).not.toHaveProperty("contextTokens");
+
+    const plan = screen.getByRole("checkbox", {
+      name: "Flat-rate plan (no per-token price)",
+    }) as HTMLInputElement;
+    expect(plan.checked).toBe(false);
+    expect(screen.queryByText(/no spending ceiling/)).toBeNull();
+    fireEvent.click(plan);
+    expect(state().plan).toBe(true);
+    expect(
+      screen.getByText("Uses your plan's limits, with no spending ceiling here."),
+    ).toBeTruthy();
+    fireEvent.click(plan);
+    expect(state()).not.toHaveProperty("plan");
+
+    view.unmount();
+    render(<Form provider="anthropic" />);
+    expect(screen.queryByRole("checkbox", { name: /Can see images/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Flat-rate plan/ })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: /context window/ })).toBeNull();
+  });
   it("shows only the reason for a plan that is not offered, and a plan's key and rule otherwise", () => {
     const onKeys = vi.fn();
     const props = {

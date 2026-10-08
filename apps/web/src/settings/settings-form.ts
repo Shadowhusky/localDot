@@ -10,6 +10,7 @@ import {
   matchingKeys,
   modelAllowed,
   modelIdProblem,
+  onPlan,
   type PickerKey,
   planOnly,
   providerAllowed,
@@ -57,9 +58,9 @@ export function pickerKeys(index: ProviderIndex): PickerKey[] {
 export function needsPrice(choice: RoleChoice | undefined, index: ProviderIndex | null): boolean {
   if (!choice) return false;
   const provider = providerById(choice.provider);
-  if (!provider || provider.local || provider.plan || provider.availableIn || !choice.model)
+  if (!provider || provider.local || onPlan(choice) || provider.availableIn || !choice.model)
     return false;
-  if (provider.id === "openai-compatible") return true;
+  if (provider.custom) return true;
   const model = index?.providers
     .find((p) => p.id === provider.id)
     ?.models.find((m) => m.id === choice.model);
@@ -173,11 +174,23 @@ function checkRole(
   const model = index.providers
     .find((p) => p.id === provider.id)
     ?.models.find((m) => m.id === value.model);
-  if (provider.id !== "openai-compatible" && !provider.local && !model)
+  if (!provider.custom && !provider.local && !model)
     return "this model is unavailable. Refresh the catalog or choose another model.";
-  if (provider.id !== "openai-compatible" && model && !modelAllowed(role, model))
+  if (!provider.custom && model && !modelAllowed(role, model))
     return "this model cannot call the required tools.";
   const next: RoleChoice = { provider: value.provider, model: value.model };
+  const flat = onPlan(value);
+  if (provider.custom) {
+    const context = value.contextTokens;
+    if (
+      context !== undefined &&
+      !(Number.isInteger(context) && context >= 4_096 && context <= 2_000_000)
+    )
+      return "enter a context window from 4,096 to 2,000,000 tokens, or leave it empty.";
+    if (value.vision === false) next.vision = false;
+    if (context !== undefined) next.contextTokens = context;
+    if (flat) next.plan = true;
+  }
   if (provider.local) {
     if (value.key !== undefined || value.price !== undefined)
       return "local servers use no stored key or manual price.";
@@ -192,21 +205,21 @@ function checkRole(
     if (!price)
       return "enter both input and output prices, from 0 to 10000 USD per million tokens, with at least one positive.";
     next.price = price;
-  } else if (!provider.plan) {
+  } else if (!flat) {
     if (value.price !== undefined)
       return "the catalog already prices this model. Remove its manual price by choosing the model again.";
     if (model && (model.inputUSDPerMTok > 10_000 || model.outputUSDPerMTok > 10_000))
       return "this catalog price is unsupported.";
   }
   const route = routeFor(provider, next.key) ?? "";
-  const kind = provider.plan ? "plan" : "paid";
+  const kind = flat ? "plan" : "paid";
   const [billing, owner] = accounting.get(route)?.split("\0") ?? [];
   if (billing && billing !== kind)
-    return provider.plan
+    return flat
       ? `this key is pay as you go for ${owner}. Use a key from this plan here.`
       : `this key is a plan for ${owner}. Use a pay-as-you-go key here.`;
   if (!billing) accounting.set(route, `${kind}\0${role}`);
-  const rate = provider.plan ? { inputUSDPerMTok: 0, outputUSDPerMTok: 0 } : (next.price ?? model);
+  const rate = flat ? { inputUSDPerMTok: 0, outputUSDPerMTok: 0 } : (next.price ?? model);
   if (rate) {
     const id = `${route}\0${next.model}`;
     const pair = JSON.stringify([rate.inputUSDPerMTok, rate.outputUSDPerMTok]);

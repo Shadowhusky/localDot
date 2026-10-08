@@ -110,6 +110,63 @@ describe("configuration validation before explicit save", () => {
       expect(validateForm(d, {}, index)).toMatchObject({ ok: false });
     }
   });
+  it("saves what a custom endpoint's model can do, and no price when it is on a flat-rate plan", () => {
+    const index = providerFixture();
+    index.keys.push({
+      id: "anc",
+      provider: "anthropic-compatible",
+      baseURL: "https://api.z.ai/api/anthropic/v1",
+    });
+    const choice = { provider: "anthropic-compatible", model: "glm-5.3-flash", key: "anc" };
+    const d = formOf({ main: { ...choice, vision: false, contextTokens: 128_000 } });
+    expect(needsPrice(d.choices.main, index)).toBe(true);
+    d.prices.main = { input: "0.6", output: "2.2" };
+    expect(validateForm(d, {}, index)).toEqual({
+      ok: true,
+      document: {
+        main: {
+          ...choice,
+          vision: false,
+          contextTokens: 128_000,
+          price: { inputUSDPerMTok: 0.6, outputUSDPerMTok: 2.2 },
+        },
+      },
+    });
+    // On a plan, the price typed before is kept in the form but never saved.
+    d.choices.main = { ...choice, plan: true };
+    expect(needsPrice(d.choices.main, index)).toBe(false);
+    expect(validateForm(d, {}, index)).toEqual({
+      ok: true,
+      document: { main: { ...choice, plan: true } },
+    });
+    for (const contextTokens of [1, 4_095, 2_000_001])
+      expect(
+        validateForm(
+          { ...d, choices: { main: { ...choice, plan: true, contextTokens } } },
+          {},
+          index,
+        ),
+      ).toEqual({
+        ok: false,
+        problems: [
+          "Main: enter a context window from 4,096 to 2,000,000 tokens, or leave it empty.",
+        ],
+      });
+  });
+
+  it("states abilities only for custom endpoints", () => {
+    const claude = { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" };
+    const d = formOf({ main: claude });
+    d.choices.main = { ...claude, vision: false, contextTokens: 9_000, plan: true };
+    // Only a custom endpoint's plan makes an unpriced model need no price.
+    const free = { provider: "openrouter", model: "meta-llama/llama-4-maverick:free", key: "k" };
+    expect(needsPrice({ ...free, plan: true }, providerFixture())).toBe(true);
+    expect(validateForm(d, {}, providerFixture())).toEqual({
+      ok: true,
+      document: { main: claude },
+    });
+  });
+
   it("saves a plan with a key bound to its address and refuses a plan that is not offered", () => {
     const index = providerFixture();
     index.keys.push({
