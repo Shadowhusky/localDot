@@ -1,7 +1,13 @@
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Input, Point } from "@localdot/protocol";
+import {
+  type ApprovalCard,
+  type AutonomyPolicy,
+  CAREFUL_AUTONOMY,
+  type Input,
+  type Point,
+} from "@localdot/protocol";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -24,6 +30,7 @@ import {
 } from "../agent/evals/policy.ts";
 import { runAgent } from "../agent/evals/stack.ts";
 import { ORACLE_BINDING } from "../agent/evals/suite.ts";
+import { SettingsStore } from "../agent/settings.ts";
 import { DesktopdClient } from "../desktopd/client.ts";
 import { DOCKER_TESTS } from "./testing/docker-cli.ts";
 
@@ -95,14 +102,40 @@ const oracle = (policy: Policy) => (facts: Parameters<typeof oracleModel>[1]) =>
   model: oracleModel(policy, facts).model,
 });
 
-const agent = (task: string, policy: Policy, timeoutMs = 180_000) =>
+// A home whose autonomy is the given policy, or the default (Balanced).
+function homeWith(autonomy?: AutonomyPolicy): string {
+  const home = mkdtempSync(join(tmpdir(), "localdot-mouse-"));
+  if (autonomy) {
+    const settings = new SettingsStore(home);
+    settings.put({ ...settings.get(), autonomy });
+  }
+  return home;
+}
+
+const agent = (
+  task: string,
+  policy: Policy,
+  timeoutMs = 180_000,
+  o: {
+    autonomy?: AutonomyPolicy;
+    answer?: (card: ApprovalCard) => "approve" | "deny";
+    approvalDelayMs?: number;
+  } = {},
+) =>
   runAgent({
     cell,
-    home: mkdtempSync(join(tmpdir(), "localdot-mouse-")),
+    home: homeWith(o.autonomy),
     task,
     model: oracle(policy),
     timeoutMs,
+    ...(o.answer ? { answer: o.answer } : {}),
+    ...(o.approvalDelayMs ? { approvalDelayMs: o.approvalDelayMs } : {}),
   });
+const field = (card: ApprovalCard, key: string) => card.fields.find(([k]) => k === key)?.[1];
+const cards = (run: Awaited<ReturnType<typeof agent>>) =>
+  run.events
+    .filter((e) => e.type === "approval.request")
+    .map((e) => e.data as { title: string; preview?: { fields?: [string, string][] } });
 
 // Thunar's detailed list: rows 28 px apart under the column header, names in the first column
 // (model pixels, as in the desktop eval).
@@ -421,10 +454,6 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
         return next ? [next(rows as Rows)] : [["done", { summary: "Done." }]];
       };
     };
-    const cards = (run: Awaited<ReturnType<typeof agent>>) =>
-      run.events
-        .filter((e) => e.type === "approval.request")
-        .map((e) => e.data as { title: string; preview?: { fields?: [string, string][] } });
     const autoRelease = (run: Awaited<ReturnType<typeof agent>>) =>
       run.events.filter(
         (e) =>
@@ -432,11 +461,25 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
           (e.data as { label: string }).label === "Release the left button, cancelling the drag",
       );
 
-    it("asks for the release as a drag from the file to the folder under the drag, and drops it there", async () => {
+    it("drops a file into a folder with a held button and shows no card under Balanced", async () => {
       await desk();
       const run = await agent(
         "Move report.txt into archive.",
         turns([(r) => press(r.report), (r) => hover(r.archive), () => release()]),
+      );
+      expect(run.error).toBeUndefined();
+      expect(cards(run)).toEqual([]);
+      expect(where()).toEqual({ desk: ["archive", "share"], archive: "report.txt", share: "" });
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+
+    it("asks under Careful for the release as a drag from the file to the folder under the drag, and drops it there", async () => {
+      await desk();
+      const run = await agent(
+        "Move report.txt into archive.",
+        turns([(r) => press(r.report), (r) => hover(r.archive), () => release()]),
+        180_000,
+        { autonomy: CAREFUL_AUTONOMY },
       );
       expect(run.error).toBeUndefined();
       const fields = cards(run).at(-1)?.preview?.fields ?? [];
@@ -449,15 +492,24 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
       expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
     });
 
-    it("asks for a held move over a folder it may not drop on, and drops nothing there", async () => {
+    // Under Careful, the user turns down any drop on share.
+    const notShare = (card: ApprovalCard) =>
+      field(card, "Drop target") === "share" ? "deny" : "approve";
+
+    it("asks under Careful for a held move over a folder, and drops nothing there when denied", async () => {
       await desk();
       const run = await agent(
         "Put report.txt in share.",
         turns([(r) => press(r.report), (r) => hover(r.share), () => release()]),
+        180_000,
+        { autonomy: CAREFUL_AUTONOMY, answer: notShare },
       );
-      expect(run.assisted.denied).toContain("post");
-      expect(cards(run).find((c) => c.title === "Publish content")?.preview?.fields).toContainEqual(
-        ["Drop target", "share"],
+      expect(run.assisted.denied).toContain("computer");
+      expect(cards(run).map((c) => c.preview?.fields ?? [])).toContainEqual(
+        expect.arrayContaining([
+          ["Drop target", "share"],
+          ["Action", "move the pointer"],
+        ]),
       );
       expect(where()).toEqual(untouched);
       expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
@@ -481,8 +533,10 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
       const run = await agent(
         "Put report.txt in share.",
         turns([(r) => press(r.report), (r) => hover(r.archive), (r) => release(r.share)]),
+        180_000,
+        { autonomy: CAREFUL_AUTONOMY, answer: notShare },
       );
-      expect(run.assisted.denied).toContain("post");
+      expect(run.assisted.denied).toContain("computer");
       await sleep(1000);
       expect(where()).toEqual(untouched);
       expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
@@ -533,7 +587,7 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
       // Over the list's empty space, below the rows: a folder would spring open under a long hover.
       const slow = await runAgent({
         cell,
-        home: mkdtempSync(join(tmpdir(), "localdot-mouse-")),
+        home: homeWith(CAREFUL_AUTONOMY),
         task: "Drag report.txt below the list and let go.",
         model: oracle(
           turns([
@@ -573,6 +627,158 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
       expect(idle.error).toBeUndefined();
       expect(autoRelease(idle)).toHaveLength(1);
       expect(where()).toEqual(untouched);
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+    it("keeps the button down through a card that waits longer than desktopd's own backstop", async () => {
+      await desk();
+      let held = -1;
+      const run = await agent(
+        "Move report.txt into archive.",
+        turns([(r) => press(r.report), (r) => release(r.archive)]),
+        420_000,
+        {
+          autonomy: CAREFUL_AUTONOMY,
+          approvalDelayMs: 100_000,
+          answer: (card) => {
+            if (field(card, "Action") === "release a mouse button") held = down().buttons;
+            return "approve";
+          },
+        },
+      );
+      expect(run.error).toBeUndefined();
+      expect(held & LEFT_BUTTON).toBe(LEFT_BUTTON);
+      expect(autoRelease(run)).toEqual([]);
+      expect(where()).toEqual({ desk: ["archive", "share"], archive: "report.txt", share: "" });
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    }, 480_000);
+  });
+
+  describe("drawing by hand in GIMP", () => {
+    const canvasTitle = /^\[sketch\].*GIMP$/;
+    // A fresh white canvas in GIMP with the paintbrush, its window in model pixels.
+    async function sketch(): Promise<Rect> {
+      shell("pkill -f [g]imp; sleep 1; true");
+      shell(
+        `mkdir -p ${HOME}/eval && convert -size 640x400 xc:white -strip -define png:color-type=2 ${HOME}/eval/sketch.png`,
+      );
+      cell.launch(["gimp", `${HOME}/eval/sketch.png`]);
+      const gimp = await waitFor("GIMP", titled(canvasTitle), 180_000);
+      await sleep(3000);
+      const welcome = await titled(/^Welcome to GIMP/)();
+      if (welcome)
+        await desktop.input({
+          input: {
+            kind: "click",
+            button: "left",
+            count: 1,
+            at: {
+              x: welcome.rect.x + welcome.rect.w - 112,
+              y: welcome.rect.y + welcome.rect.h - 54,
+            },
+          },
+          injector: "xtest",
+          holdMs: 0,
+        });
+      await waitFor(
+        "the welcome dialog closed",
+        async () => ((await titled(/^Welcome/)()) ? undefined : true),
+        10_000,
+      );
+      await desktop.input({
+        input: { kind: "key", combo: ["p"] },
+        injector: "xtest",
+        holdMs: 0,
+        window: gimp.id,
+      });
+      await sleep(500);
+      const r = gimp.rect;
+      return { x: r.x / 2, y: r.y / 2, w: r.w / 2, h: r.h / 2 };
+    }
+    const dark = async (points: Point[]) => {
+      const now = await luma((await desktop.observe()).image);
+      return points.filter((p) => now.at(p) < 100).length;
+    };
+    const calls = (run: Awaited<ReturnType<typeof agent>>, kind: string) =>
+      run.events.filter(
+        (e) => e.type === "action.dispatch" && (e.data as { input: Input }).input.kind === kind,
+      ).length;
+
+    it("draws a closed shape with a held button and 40 moves under Balanced, with no card", async () => {
+      const w = await sketch();
+      const c = { x: w.x + w.w / 2, y: w.y + w.h / 2 };
+      const loop = Array.from({ length: 40 }, (_, i) => ({
+        x: Math.round(c.x + 110 * Math.cos((2 * Math.PI * (i + 1)) / 40)),
+        y: Math.round(c.y + 70 * Math.sin((2 * Math.PI * (i + 1)) / 40)),
+      }));
+      const first = loop.at(-1) as Point;
+      const plan: OracleCall[][] = [
+        [["computer", { action: "left_mouse_down", coordinate: [first.x, first.y] }]],
+        ...Array.from({ length: 4 }, (_, k) =>
+          loop
+            .slice(k * 10, k * 10 + 10)
+            .map((p): OracleCall => ["computer", { action: "mouse_move", coordinate: [p.x, p.y] }]),
+        ),
+        [["computer", { action: "left_mouse_up" }]],
+      ];
+      let turn = 0;
+      const run = await agent(
+        "Draw a closed loop on the canvas by hand.",
+        () => plan[turn++] ?? [["done", { summary: "Drew a loop." }]],
+      );
+      await sleep(800);
+      await keep("gimp-loop.png");
+      expect(run.error).toBeUndefined();
+      expect(run.events.filter((e) => e.type === "approval.request")).toEqual([]);
+      expect([calls(run, "down"), calls(run, "move"), calls(run, "up")]).toEqual([1, 40, 1]);
+      const painted = await dark(loop);
+      console.log(`painted ${painted} of ${loop.length} points of the loop`);
+      expect(painted).toBeGreaterThanOrEqual(36);
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    }, 300_000);
+
+    it("asks under Careful for a scroll while the button is down as a drag, and paints nothing when denied", async () => {
+      const w = await sketch();
+      const from = { x: Math.round(w.x + w.w / 2 - 150), y: Math.round(w.y + w.h / 2) };
+      const to = { x: from.x + 300, y: from.y };
+      const plan: OracleCall[] = [
+        ["computer", { action: "left_mouse_down", coordinate: [from.x, from.y] }],
+        [
+          "computer",
+          {
+            action: "scroll",
+            coordinate: [to.x, to.y],
+            scroll_direction: "right",
+            scroll_amount: 1,
+          },
+        ],
+      ];
+      let turn = 0;
+      const run = await agent(
+        "Hold the button on the canvas, then scroll further along.",
+        () => {
+          const next = plan[turn++];
+          return next ? [next] : [["done", { summary: "Done." }]];
+        },
+        180_000,
+        {
+          autonomy: CAREFUL_AUTONOMY,
+          answer: (card) => (field(card, "Drag") ? "deny" : "approve"),
+        },
+      );
+      await sleep(800);
+      await keep("gimp-held-scroll.png");
+      expect(run.error).toBeUndefined();
+      const scroll = cards(run).find((card) =>
+        (card.preview?.fields ?? []).some(([k]) => k === "Drag"),
+      );
+      expect(scroll?.preview?.fields).toContainEqual([
+        "Drag",
+        `(${from.x}, ${from.y}) to (${to.x}, ${to.y})`,
+      ]);
+      expect(run.assisted.denied).toEqual(["computer"]);
+      expect(calls(run, "scroll")).toBe(0);
+      const along = Array.from({ length: 5 }, (_, i) => ({ x: from.x + 50 + i * 50, y: from.y }));
+      expect(await dark(along)).toBe(0);
       expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
     });
   });
