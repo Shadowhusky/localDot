@@ -235,6 +235,55 @@
     opacity: var(--opacity-disabled);
   }
 
+  /* A filled icon button is round. Primary is the one action a surface leads with, such as Send;
+     unavailable, its disc dims and its glyph keeps full strength, so it still reads as itself. */
+  .ui-icon-button:is([data-variant="primary"], [data-variant="secondary"]) {
+    border-radius: var(--radius-full);
+    color: var(--color-fg-1);
+  }
+
+  .ui-icon-button[data-variant="primary"] {
+    --_face: var(--color-fg-1);
+    color: var(--color-void);
+  }
+
+  .ui-icon-button[data-variant="secondary"] {
+    --_face: var(--color-control);
+  }
+
+  @media (hover: hover) {
+    .ui-icon-button[data-variant="primary"]:not([aria-disabled="true"], [data-pressed]):hover {
+      --_face: color-mix(in oklab, var(--color-fg-1) 92%, var(--color-void));
+      color: var(--color-void);
+    }
+
+    .ui-icon-button[data-variant="secondary"]:not([aria-disabled="true"], [data-pressed]):hover {
+      --_face: var(--color-control-hover);
+    }
+  }
+
+  .ui-icon-button[data-variant="primary"][data-pressed] {
+    --_face: color-mix(in oklab, var(--color-fg-1) 84%, var(--color-void));
+    color: var(--color-void);
+  }
+
+  .ui-icon-button[data-variant="secondary"][data-pressed] {
+    --_face: var(--color-control-pressed);
+  }
+
+  .ui-icon-button[data-variant="primary"][aria-disabled="true"] {
+    --_face: color-mix(in oklab, var(--color-fg-1) 28%, transparent);
+    color: var(--color-raised);
+  }
+
+  .ui-icon-button[data-variant="secondary"][aria-disabled="true"] {
+    color: var(--color-fg-3);
+  }
+
+  .ui-icon-button[data-variant][aria-disabled="true"] > .ui-icon {
+    opacity: 1;
+  }
+
   @media (--coarse) {
     .ui-button {
       min-width: calc(var(--spacing) * 11);

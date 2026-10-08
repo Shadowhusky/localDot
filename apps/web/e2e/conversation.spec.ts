@@ -176,6 +176,9 @@ for (const [engine, size, options] of MATRIX) {
     const work = page.locator(".thread-live .thread-work");
     await expect(work).toContainText("Select the Net total cell");
     await expect(work.getByRole("button", { name: /^Working · 6 steps/ })).toBeVisible();
+    // Long enough to scroll, the thread is still the only thing in the column that does.
+    await qa("say?n=12&text=Checking that each month adds up");
+    await expect(thread.locator(".thread-row")).toHaveCount(14);
     expect(await scrollers(page)).toEqual(["ui-scroll-area thread-scroll"]);
     // The thread keeps saying what dot does as it moves on.
     await qa("steps?n=1&item=calc");
@@ -229,8 +232,8 @@ for (const [engine, size, options] of MATRIX) {
 
   test(`a reader who scrolled back stays put while dot talks on (${engine} ${size})`, async () => {
     const { browser, page, thread } = await open(engine, options, { QA_ACTIVITY: "long" });
-    await qa("say?n=8&text=Colouring the next patch of fur");
-    await expect(thread.locator(".thread-row")).toHaveCount(10);
+    await qa("say?n=24&text=Colouring the next patch of fur");
+    await expect(thread.locator(".thread-row")).toHaveCount(26);
     await expect
       .poll(() => scroller(page).evaluate((el) => el.scrollHeight - el.clientHeight - el.scrollTop))
       .toBeLessThan(2);

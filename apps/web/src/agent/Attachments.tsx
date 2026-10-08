@@ -1,69 +1,83 @@
-import { FILE_LIMITS } from "./file-transfer.ts";
-import type { useUploads } from "./useUploads.ts";
-import "./files.css";
-export function Attachments({
-  uploads,
-  disabled,
+import { bytes } from "../copy/format.ts";
+import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
+import { Spinner } from "../ui/Spinner.tsx";
+import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
+import { FileName } from "./ResultFiles.tsx";
+import type { UploadRow } from "./useUploads.ts";
+
+const STATUS: Record<UploadRow["phase"], string> = {
+  pending: "Waiting",
+  uploading: "Uploading…",
+  complete: "Uploaded to Downloads",
+  uncertain: "Unconfirmed",
+  refused: "Not uploaded",
+};
+
+// The files added to a draft, over its field. Each chip says where its upload stands.
+export function AttachmentChips({
+  rows,
+  onRemove,
 }: {
-  uploads: ReturnType<typeof useUploads>;
-  disabled: boolean;
+  rows: readonly UploadRow[];
+  onRemove(id: number): void;
 }) {
+  // Each reason once: the chips already say which files it applies to.
+  const reasons = [...new Set(rows.flatMap((row) => (row.explanation ? [row.explanation] : [])))];
   return (
-    <section className="attachments" aria-label="Task attachments">
-      <label className="file-picker">
-        <span>Add files</span>
-        <input
-          type="file"
-          multiple
-          disabled={disabled}
-          onChange={(event) => {
-            const input = event.currentTarget;
-            if (input.files) uploads.select(input.files);
-            input.value = "";
-          }}
-        />
-      </label>
-      <p className="history-note">
-        Up to {FILE_LIMITS.count} files, 100 MiB total. Only confirmed uploads are included when you
-        send.
-      </p>
-      {!!uploads.rows.length && (
-        <ul>
-          {uploads.rows.map((row) => (
-            <li key={row.id}>
-              <span>
-                {row.name} · {row.bytes.toLocaleString()} bytes
-              </span>
-              <span role="status">
-                {row.phase === "complete"
-                  ? "Uploaded to Downloads"
-                  : row.phase === "uploading"
-                    ? "Uploading…"
-                    : row.phase === "pending"
-                      ? "Waiting"
-                      : row.phase === "uncertain"
-                        ? "Upload unconfirmed"
-                        : "Upload refused"}
-              </span>
-              {row.explanation && <p>{row.explanation}</p>}
-              <button
-                type="button"
-                onClick={() => uploads.remove(row.id)}
-                aria-label={`Remove ${row.name} from draft`}
-              >
-                Remove
-              </button>
-            </li>
-          ))}
-        </ul>
-      )}
-      {uploads.notice && <p role="status">{uploads.notice}</p>}
-      {uploads.problem && <p role="alert">{uploads.problem}</p>}
-      {uploads.rows.some((row) => row.phase === "uploading" || row.phase === "pending") && (
-        <button type="button" onClick={uploads.cancel}>
-          Cancel uploads
-        </button>
-      )}
-    </section>
+    <div className="file-chips-block">
+      <ul className="file-chips" aria-label="Attached files">
+        {rows.map((row) => (
+          <li key={row.id} className="file-chip" data-phase={row.phase}>
+            {row.phase === "uploading" || row.phase === "pending" ? (
+              <Spinner size={12} className="file-chip-icon" />
+            ) : (
+              <Icon
+                name={row.phase === "complete" ? "file" : "circle-alert"}
+                size={12}
+                className="file-chip-icon"
+              />
+            )}
+            <FileName name={row.name} />
+            {row.phase === "complete" ? (
+              <>
+                <span className="file-chip-meta num" aria-hidden="true">
+                  {bytes(row.bytes)}
+                </span>
+                <VisuallyHidden>{STATUS.complete}</VisuallyHidden>
+              </>
+            ) : (
+              <span className="file-chip-meta">{STATUS[row.phase]}</span>
+            )}
+            <IconButton
+              className="file-chip-remove"
+              icon="x"
+              size={24}
+              label={`Remove ${row.name}`}
+              onClick={() => onRemove(row.id)}
+            />
+          </li>
+        ))}
+      </ul>
+      {reasons.map((reason) => (
+        <p key={reason} className="file-chips-note">
+          {reason}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+// The files a sent message carried, under its bubble.
+export function SentFiles({ names }: { names: readonly string[] }) {
+  return (
+    <ul className="file-chips" data-sent="" aria-label="Attached files">
+      {names.map((name) => (
+        <li key={name} className="file-chip">
+          <Icon name="file" size={12} className="file-chip-icon" />
+          <FileName name={name} />
+        </li>
+      ))}
+    </ul>
   );
 }

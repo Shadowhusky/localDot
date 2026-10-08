@@ -140,7 +140,7 @@ it("guards question and hand-back notes before a recognized key can enter a requ
     }) as HTMLButtonElement;
     expect(send.disabled || send.getAttribute("aria-disabled") === "true").toBe(true);
     const notice =
-      "1 recognised key was removed from your message. Discard it or move it to Keys before sending.";
+      "A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.";
     const described = () =>
       (send.getAttribute("aria-describedby") ?? "")
         .split(" ")

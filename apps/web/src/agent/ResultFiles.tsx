@@ -207,12 +207,12 @@ export function useResultDownloads(
 export type ResultDownloads = ReturnType<typeof useResultDownloads>;
 
 // Keeps the end of a long name (its extension) in view; the middle gives way.
-function MiddleName({ name }: { name: string }) {
+export function FileName({ name }: { name: string }) {
   const tail = Math.min(8, Math.max(0, name.length - 4));
   return (
-    <span className="result-file-name" title={name}>
-      <span className="result-file-head">{name.slice(0, name.length - tail)}</span>
-      <span className="result-file-tail">{name.slice(name.length - tail)}</span>
+    <span className="file-name" title={name}>
+      <span className="file-name-head">{name.slice(0, name.length - tail)}</span>
+      <span className="file-name-tail">{name.slice(name.length - tail)}</span>
     </span>
   );
 }
@@ -251,7 +251,7 @@ export function ResultCard({
                   {type || <Icon name="file" size={16} />}
                 </span>
                 <span className="result-file-text">
-                  {ok ? <MiddleName name={file.name} /> : <span>Unavailable file name</span>}
+                  {ok ? <FileName name={file.name} /> : <span>Unavailable file name</span>}
                   <span className="result-file-meta num">
                     {!ok
                       ? "Can't be downloaded"

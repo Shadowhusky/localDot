@@ -29,6 +29,19 @@ describe("IconButton", () => {
     expect(icon?.getAttribute("width")).toBe("16");
   });
 
+  it("is quiet unless asked to be filled", () => {
+    render(
+      <>
+        <IconButton label="Copy" icon="copy" />
+        <IconButton label="Send" icon="arrow-up" variant="primary" />
+        <IconButton label="Stop task" icon="square" variant="secondary" />
+      </>,
+    );
+    expect(screen.getByRole("button", { name: "Copy" }).hasAttribute("data-variant")).toBe(false);
+    expect(screen.getByRole("button", { name: "Send" }).dataset.variant).toBe("primary");
+    expect(screen.getByRole("button", { name: "Stop task" }).dataset.variant).toBe("secondary");
+  });
+
   it("shows its label and shortcut on hover without describing itself twice", () => {
     vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
     render(<IconButton label="Stop" icon="square" kbd={["Mod", "Shift", "."]} />);

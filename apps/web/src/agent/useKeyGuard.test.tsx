@@ -2,7 +2,7 @@
 /// <reference types="node" />
 import { webcrypto } from "node:crypto";
 import { toBase64url } from "@localdot/protocol";
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { createRef, useRef } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { KeyForm, type KeyIntake } from "../keys/KeyForm.tsx";
@@ -30,6 +30,16 @@ afterEach(() => {
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
+const keyChoice = () => screen.getByRole("combobox", { name: "Key to move" });
+// Opens the key list, moves down to row `index` and chooses it, from the keyboard.
+function chooseKey(index: number) {
+  const trigger = keyChoice();
+  trigger.focus();
+  fireEvent.keyDown(trigger, { key: "Home" });
+  fireEvent.keyDown(trigger, { key: "Home" });
+  for (let step = 0; step < index; step++) fireEvent.keyDown(trigger, { key: "ArrowDown" });
+  fireEvent.keyDown(trigger, { key: "Enter" });
+}
 
 function fixture(
   options: { active?: boolean; keyActive?: boolean; disabled?: boolean; seal?: Seal } = {},
@@ -133,12 +143,12 @@ describe("key guard at the composer and sealed form boundary", () => {
       f.submit();
       expect(f.calls).toEqual([]);
       expect(f.task.value).not.toContain(key);
-      expect(screen.getByRole("alert").textContent).toContain("removed");
+      expect(screen.getByRole("alert").textContent).toContain("taken out");
       absent(f);
       f.submit();
       expect(f.calls).toEqual([]);
       expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
+      fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
       expect(document.activeElement).toBe(f.task);
       f.submit();
       await act(async () => {});
@@ -171,8 +181,8 @@ describe("key guard at the composer and sealed form boundary", () => {
       toBase64url(new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey))),
     );
     fireEvent.input(f.task, { target: { value: `before ${keys[0]} then ${keys[7]} after` } });
-    expect(screen.getByRole("button", { name: "Discard keys and edit" })).toBeTruthy();
-    fireEvent.change(screen.getByLabelText("Key to move"), { target: { value: "1" } });
+    expect(screen.getByRole("button", { name: "Discard keys" })).toBeTruthy();
+    chooseKey(1);
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(f.task.value).toBe("before  then  after");
     expect(f.keyField.value).toBe(keys[7]);
@@ -263,21 +273,22 @@ describe("key guard at the composer and sealed form boundary", () => {
     const f = fixture();
     fireEvent.input(f.task, { target: { value: `use ${token} for this` } });
     expect(f.task.value).toBe("use  for this");
-    expect(screen.getByRole("alert").textContent).toBe(
-      "A Claude plan token was removed from your message.",
-    );
-    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    const safeguard = screen.getByRole("region", { name: "Key safeguard" });
+    expect(safeguard.textContent).toContain("Claude plan token removed");
+    expect(screen.getByRole("alert").textContent).toBe(SENTENCE);
     expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard key" }));
     fireEvent.input(f.task, { target: { value: `${token} ${keys[0]}` } });
-    const choice = screen.getByLabelText("Key to move") as HTMLSelectElement;
-    expect([...choice.options].map((o) => o.textContent)).toEqual([
+    fireEvent.keyDown(keyChoice(), { key: "ArrowDown" });
+    const list = within(screen.getByRole("listbox", { name: "Key to move" }));
+    expect(list.getAllByRole("option").map((o) => o.textContent)).toEqual([
       "Claude plan token · character 1",
       "Anthropic · character 110",
     ]);
+    fireEvent.keyDown(keyChoice(), { key: "Escape" });
     expect(screen.getByText(SENTENCE)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
-    fireEvent.change(choice, { target: { value: "1" } });
+    chooseKey(1);
     expect(screen.queryByText(SENTENCE)).toBeNull();
     expect(screen.getByRole("button", { name: "Move to Keys" })).toBeTruthy();
     expect(f.calls).toEqual([]);
@@ -291,24 +302,26 @@ describe("key guard at the composer and sealed form boundary", () => {
     fireEvent.input(f.task, {
       target: { value: `sk-ant-oat01-${"m".repeat(95)} sk-ant-ort01-${"n".repeat(95)}` },
     });
-    expect(screen.getByRole("alert").textContent).toBe(
-      "2 Claude plan tokens were removed from your message.",
+    expect(screen.getByRole("region", { name: "Key safeguard" }).textContent).toContain(
+      "Claude plan tokens removed",
     );
-    expect(screen.getByText(SENTENCE)).toBeTruthy();
-    expect(screen.queryByLabelText("Key to move")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe(SENTENCE);
+    expect(screen.queryByRole("combobox", { name: "Key to move" })).toBeNull();
     expect(screen.queryByText(/Moving one key/)).toBeNull();
     expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard keys" }));
     expect(f.task.value).toBe(" ");
     expect(f.calls).toEqual([]);
   });
   it("starts each new notice on its first key, not the one chosen in an earlier notice", () => {
     const f = fixture();
     fireEvent.input(f.task, { target: { value: `${keys[0]} ${keys[2]}` } });
-    fireEvent.change(screen.getByLabelText("Key to move"), { target: { value: "1" } });
-    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+    chooseKey(1);
+    expect(keyChoice().textContent).toContain("character 110");
+    fireEvent.click(screen.getByRole("button", { name: "Discard keys" }));
     fireEvent.input(f.task, { target: { value: `${keys[2]} sk-ant-oat01-${"m".repeat(95)}` } });
-    expect((screen.getByLabelText("Key to move") as HTMLSelectElement).value).toBe("0");
+    expect(keyChoice().textContent).toContain("character 1");
+    expect(keyChoice().textContent).not.toContain("Claude plan token");
     expect(screen.getByRole("button", { name: "Move to Keys" })).toBeTruthy();
     expect(screen.queryByText(/Claude Pro and Max plans/)).toBeNull();
     absent(f);

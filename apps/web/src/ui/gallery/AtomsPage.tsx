@@ -123,7 +123,7 @@ export function AtomsPage() {
 
       <Section
         title="Icon button"
-        note="A 16 px glyph on a 24, 28 or 32 px button with a 44 px target. Its label shows as a tooltip, with the shortcut when there is one."
+        note="A 16 px glyph on a 24, 28 or 32 px button with a 44 px target. Its label shows as a tooltip, with the shortcut when there is one. Filled ones are round; primary leads a surface, as Send does."
       >
         <div className="atoms-panel">
           <div className="atoms-row">
@@ -148,6 +148,23 @@ export function AtomsPage() {
                 <IconButton label="Keys, one needs attention" icon="key-round" />
                 <Badge kind="dot" tone="attention" label="Needs attention" />
               </span>
+            </Specimen>
+          </div>
+          <div className="atoms-row">
+            <span className="atoms-label">Filled</span>
+            <Specimen caption="Primary">
+              <IconButton label="Send" icon="arrow-up" variant="primary" />
+            </Specimen>
+            <Specimen caption="Primary, unavailable">
+              <IconButton
+                label="Send"
+                icon="arrow-up"
+                variant="primary"
+                disabledReason="Write a message first."
+              />
+            </Specimen>
+            <Specimen caption="Secondary">
+              <IconButton label="Stop task" icon="square" variant="secondary" />
             </Specimen>
           </div>
           <div className="atoms-row">

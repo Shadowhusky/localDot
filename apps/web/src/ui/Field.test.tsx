@@ -151,5 +151,11 @@ describe("TextArea", () => {
     const area = screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
     expect(area.rows).toBe(1);
     expect(area.style.getPropertyValue("--_rows")).toBe("6");
+    expect(area.hasAttribute("data-bare")).toBe(false);
+  });
+
+  it("can leave its box to the card it sits in", () => {
+    render(<TextArea aria-label="Message" bare />);
+    expect(screen.getByRole("textbox", { name: "Message" }).hasAttribute("data-bare")).toBe(true);
   });
 });

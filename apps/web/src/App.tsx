@@ -469,6 +469,8 @@ function Theatre({ api }: { api: ApiClient }) {
       !agent.model.pendingTakeover &&
       !agent.snapshot?.pendingTakeover,
   });
+  // The composer offers the task's Stop exactly when the HUD does.
+  const taskStopAction = appStatus.actions.find((action) => action.kind === "stop-task");
   const sheetStop = appStatus.actions.find(
     (action) => action.kind === "stop-task" || action.kind === "stop",
   );
@@ -612,10 +614,16 @@ function Theatre({ api }: { api: ApiClient }) {
                     configured={mainReady}
                     onSettings={showSettings}
                     onTaskStarted={session.check}
-                    modelSummary={
-                      settings.saved?.main
-                        ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`
-                        : "Choose a main model in Settings before starting a task."
+                    model={
+                      mainChoice &&
+                      (modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model)
+                    }
+                    stop={
+                      taskStopAction && {
+                        run: taskStop,
+                        busy: !!taskStopAction.busy,
+                        enabled: taskStopAction.enabled,
+                      }
                     }
                   />
                 }

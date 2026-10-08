@@ -179,6 +179,23 @@
     scrollbar-color: var(--color-scrollbar) transparent;
   }
 
+  /* A bare text area draws no box: the card it sits in is its box and shows its focus. It reads at
+     the reading size. */
+  .ui-text-area[data-bare] {
+    --_lh: var(--text-reading--line-height);
+    min-height: calc(var(--_lh) + var(--_pad) * 2);
+    padding-inline: var(--spacing);
+    border-color: transparent;
+    background-color: transparent;
+    font-size: var(--text-reading);
+    letter-spacing: var(--text-reading--letter-spacing);
+  }
+
+  .ui-text-area[data-bare]:is(:hover, :focus, [data-invalid], [data-unavailable]) {
+    border-color: transparent;
+    box-shadow: none;
+  }
+
   /* A row with a checkbox or switch and its label; the whole row is the target. */
   .ui-choice {
     display: flex;
@@ -541,6 +558,13 @@
 
     .ui-text-area {
       --_pad: calc(var(--spacing) * 2.5);
+    }
+
+    .ui-text-area[data-bare] {
+      --_lh: var(--text-title-2--line-height);
+      --_pad: calc(var(--spacing) * 1.5);
+      font-size: var(--text-title-2);
+      letter-spacing: normal;
     }
 
     .ui-choice {

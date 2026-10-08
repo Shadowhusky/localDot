@@ -168,43 +168,40 @@ for (const run of runs) {
       await box.fill(`use ${PLAN_TOKEN} please`);
       await expect(box).toHaveValue("use  please");
       const notice = page.getByRole("region", { name: "Key safeguard" });
-      await expect(notice.getByRole("alert")).toHaveText(
-        "A Claude plan token was removed from your message.",
-      );
-      await expect(notice.getByText(SENTENCE, { exact: true })).toBeVisible();
+      await expect(notice).toContainText("Claude plan token removed");
+      await expect(notice.getByRole("alert")).toHaveText(SENTENCE);
       await expect(notice.getByRole("button", { name: "Move to Keys" })).toHaveCount(0);
       await expect(page.getByRole("button", { name: "Send now" })).toBeDisabled();
-      await press(notice.getByRole("button", { name: "Discard key and edit" }));
+      await press(notice.getByRole("button", { name: "Discard key" }));
       await expect(notice).toHaveCount(0);
 
       // With an API key beside it, only the API key can move to Keys.
       await box.fill(`${PLAN_TOKEN} and ${API_KEY}`);
-      const choice = notice.getByLabel("Key to move");
-      await expect(choice).toHaveValue("0");
-      expect((await choice.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      const choice = notice.getByRole("combobox", { name: "Key to move" });
+      await expect(choice).toContainText("Claude plan token · character 1");
+      expect((await choice.boundingBox())?.height).toBeGreaterThanOrEqual(run.phone ? 44 : 32);
       await expect(notice.getByText(SENTENCE, { exact: true })).toBeVisible();
       await expect(notice.getByRole("button", { name: "Move to Keys" })).toHaveCount(0);
-      await choice.selectOption("1");
+      await press(choice);
+      await press(page.getByRole("option", { name: /^Anthropic · character/ }));
       await expect(notice.getByText(SENTENCE, { exact: true })).toHaveCount(0);
       await expect(notice.getByRole("button", { name: "Move to Keys" })).toBeVisible();
-      await press(notice.getByRole("button", { name: "Discard keys and edit" }));
+      await press(notice.getByRole("button", { name: "Discard keys" }));
       await expect(notice).toHaveCount(0);
 
       await box.fill(`${API_KEY} and ${PLAN_TOKEN}`);
-      await expect(choice).toHaveValue("0");
+      await expect(choice).toContainText("Anthropic · character 1");
       await expect(notice.getByRole("button", { name: "Move to Keys" })).toBeVisible();
-      await press(notice.getByRole("button", { name: "Discard keys and edit" }));
+      await press(notice.getByRole("button", { name: "Discard keys" }));
       await expect(notice).toHaveCount(0);
 
       await box.fill(`${PLAN_TOKEN} and ${REFRESH_TOKEN}`);
-      await expect(notice.getByRole("alert")).toHaveText(
-        "2 Claude plan tokens were removed from your message.",
-      );
-      await expect(notice.getByText(SENTENCE, { exact: true })).toBeVisible();
-      await expect(notice.getByLabel("Key to move")).toHaveCount(0);
+      await expect(notice).toContainText("Claude plan tokens removed");
+      await expect(notice.getByRole("alert")).toHaveText(SENTENCE);
+      await expect(notice.getByRole("combobox", { name: "Key to move" })).toHaveCount(0);
       await expect(notice.getByText(/Moving one key/)).toHaveCount(0);
       await expect(notice.getByRole("button", { name: "Move to Keys" })).toHaveCount(0);
-      await press(notice.getByRole("button", { name: "Discard keys and edit" }));
+      await press(notice.getByRole("button", { name: "Discard keys" }));
       await expect(notice).toHaveCount(0);
       expect(carried).toEqual([]);
     });

@@ -210,6 +210,7 @@ export function useUploads(props: Owner) {
     remove,
     cancel: interrupted,
     forMessage: () => {
+      if (!list.current.length) return [];
       if (
         list.current.some((row) => row.phase !== "complete" || !row.path) ||
         !current.current.ready

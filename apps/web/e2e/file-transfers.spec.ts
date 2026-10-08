@@ -280,10 +280,10 @@ async function load(page: Page) {
   return { errors, external, downloads };
 }
 async function chooser(page: Page, name: string, buffer: Buffer) {
-  const input = page.getByLabel("Add files");
-  await input.focus();
+  const attach = page.getByRole("button", { name: "Attach files" });
+  await attach.focus();
   const opening = page.waitForEvent("filechooser");
-  await input.press("Enter");
+  await attach.press("Enter");
   await (await opening).setFiles({ name, mimeType: "text/plain", buffer });
 }
 for (const width of [1280, 390])
@@ -316,14 +316,18 @@ for (const width of [1280, 390])
     if (width >= 1180)
       await page.screenshot({ path: info.outputPath(`files-${width}-sample.png`) });
     await page.getByRole("button", { name: "Send follow-up", exact: true }).click();
-    await expect(page.getByText("Sent to dot.", { exact: true })).toBeVisible();
+    const history = page.getByRole("region", { name: "Conversation history" });
+    await expect(history.getByText("Read the two sample files", { exact: true })).toBeVisible();
+    await expect(history.getByRole("list", { name: "Attached files" })).toHaveText(
+      "one.txttwo.txt",
+    );
     expect(messages).toEqual([
       "Read the two sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
     ]);
     await expect(page.getByLabel("Message", { exact: true })).toHaveValue("");
     await expect(page.getByText("Uploaded to Downloads", { exact: true })).toHaveCount(0);
     await chooser(page, "one.txt", Buffer.from("must not replace"));
-    await expect(page.getByText("Upload refused", { exact: true })).toBeVisible();
+    await expect(page.getByText("Not uploaded", { exact: true })).toBeVisible();
     expect(messages).toHaveLength(1);
     expect(readFileSync(join(desktopHome, "Downloads", "one.txt"))).toEqual(ONE);
     const files = page
