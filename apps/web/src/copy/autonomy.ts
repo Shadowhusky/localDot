@@ -94,7 +94,8 @@ export function checksSummary(policy: AutonomyPolicy): string {
       ? `Asks before every step in its computer, and before ${listed}.`
       : "Asks before every step in its computer.";
   }
-  return listed
-    ? `Asks before ${listed}.`
-    : "Works without asking, even when buying, sending, posting or deleting.";
+  if (listed) return `Asks before ${listed}.`;
+  return EDITABLE_ACTION_CLASSES.every((key) => policy[key] === "act")
+    ? "Works without asking, even when buying, sending, posting or deleting."
+    : "Asks before some steps.";
 }

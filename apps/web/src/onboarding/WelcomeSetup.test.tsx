@@ -44,15 +44,14 @@ const step = (title: string) => {
 it("guides model and autonomy setup through the existing settings controls", () => {
   const p = props();
   render(<WelcomeSetup {...p} />);
-  const model = within(step("Model").row).getByRole("button", { name: "Choose" });
+  const model = within(step("Model").row).getByRole("button", { name: "Choose model" });
   fireEvent.click(model);
   expect(p.onSettings).toHaveBeenCalledWith(model);
   const checks = within(step("When dot checks with you").row).getByRole("button", {
-    name: "Review",
+    name: "Review when dot checks with you",
   });
-  expect(checks.getAttribute("aria-describedby")).toContain(
-    screen.getByRole("heading", { name: "When dot checks with you" }).id,
-  );
+  expect(model.textContent).toBe("Choose");
+  expect(checks.textContent).toBe("Review");
   fireEvent.click(checks);
   expect(p.onSettings).toHaveBeenCalledWith(checks, "autonomy");
   expect(p.onStart).not.toHaveBeenCalled();
@@ -68,7 +67,9 @@ it("shows the model as the one step left, and turns it done once a model is save
   view.rerender(<WelcomeSetup {...p} modelReady modelLabel="Saved provider · saved model" />);
   expect(states()).toEqual(["done", "done", "done"]);
   expect(step("Model").detail()).toBe("Saved provider · saved model");
-  expect(within(step("Model").row).getByRole("button").textContent).toBe("Change");
+  expect(within(step("Model").row).getByRole("button", { name: "Change model" }).textContent).toBe(
+    "Change",
+  );
   view.rerender(
     <WelcomeSetup
       {...p}

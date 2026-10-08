@@ -340,7 +340,7 @@ describe("App token states", () => {
     const keys = screen.getByRole("dialog", { name: "Keys" });
     const value = within(keys).getByRole("textbox", { name: "Key" }) as HTMLInputElement;
     fireEvent.change(value, { target: { value: "sk-typed-but-not-saved" } });
-    const review = screen.getByRole("button", { name: "Review" });
+    const review = screen.getByRole("button", { name: "Review when dot checks with you" });
     fireEvent.click(review);
     const prompt = within(keys).getByRole("group", { name: "Discard unsaved changes?" });
     expect(prompt.hasAttribute("data-shown")).toBe(true);

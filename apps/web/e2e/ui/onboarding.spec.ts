@@ -44,10 +44,12 @@ test("first run shows Turn on without scrolling and keeps the stage where the co
         all.filter((element) => /auto|scroll/.test(getComputedStyle(element).overflowY)).length,
     );
   expect(scrollers).toBe(1);
-  if (viewport.width < 760) return;
   const before = await box(page, ".stage");
-  expect(await box(page, ".welcome-setup")).toEqual(before);
   expect((before?.width ?? 0) / (before?.height ?? 1)).toBeCloseTo(1.6, 2);
+  const setup = await box(page, ".welcome-setup");
+  // Inside the stage on a wide screen; over the whole computer pane, and so the stage, on a phone.
+  if (viewport.width >= 760) expect(setup).toEqual(before);
+  else expect(setup).toEqual(await box(page, ".stage-col"));
   await turnOn.click();
   await expect(page.locator(".welcome-setup")).toHaveCount(0);
   expect(await box(page, ".stage")).toEqual(before);
@@ -146,4 +148,67 @@ test("installer failed", async ({ page }) => {
   } finally {
     await f.close();
   }
+});
+
+// The widest the fill is drawn, as a share of the bar, over the next two seconds of frames while
+// the bar shows a share rather than its sweep.
+function widestFill(page: Page) {
+  return page.evaluate(
+    () =>
+      new Promise<number>((resolve) => {
+        const bar = document.querySelector("#bar") as HTMLElement;
+        const fill = document.querySelector("#fill") as HTMLElement;
+        const end = performance.now() + 2000;
+        let widest = 0;
+        const frame = () => {
+          if (!bar.hasAttribute("data-indeterminate"))
+            widest = Math.max(
+              widest,
+              fill.getBoundingClientRect().width / bar.getBoundingClientRect().width,
+            );
+          if (performance.now() < end) requestAnimationFrame(frame);
+          else resolve(widest);
+        };
+        requestAnimationFrame(frame);
+      }),
+  );
+}
+
+test.describe("installer bar in motion", () => {
+  test.use({ reducedMotion: "no-preference" });
+
+  test("goes from the sweep straight to its share", async ({ page }) => {
+    const f = await installer(page);
+    try {
+      await expect(page.locator("#bar")).toHaveAttribute("data-indeterminate", "");
+      const widest = widestFill(page);
+      f.channel.report({ role: "desktop", phase: "ready" });
+      f.channel.report({
+        role: "gate",
+        phase: "downloading",
+        layer: "a",
+        currentBytes: 48,
+        totalBytes: 100,
+      });
+      expect(await widest).toBeLessThanOrEqual(0.375);
+      await expect(page.getByRole("progressbar")).toHaveAttribute("aria-valuenow", "37");
+      expect(f.problems).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
+
+  test("stops from the sweep without filling the bar", async ({ page }) => {
+    const f = await installer(page);
+    try {
+      await expect(page.locator("#bar")).toHaveAttribute("data-indeterminate", "");
+      const widest = widestFill(page);
+      f.channel.finish("failed");
+      expect(await widest).toBeLessThanOrEqual(0.005);
+      await expect(page.getByRole("heading", { name: "Setup stopped" })).toBeVisible();
+      expect(f.problems).toEqual([]);
+    } finally {
+      await f.close();
+    }
+  });
 });

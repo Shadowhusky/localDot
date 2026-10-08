@@ -12,13 +12,15 @@ it("says in words what dot stops to ask about", () => {
   expect(
     checksSummary({ ...BALANCED_AUTONOMY, purchase: "handoff", post: "act", delete: "act" }),
   ).toBe("Asks before buying or sending.");
+  const consequential = { purchase: "act", send: "act", post: "act", delete: "act" } as const;
+  expect(checksSummary({ ...BALANCED_AUTONOMY, ...consequential })).toBe("Asks before some steps.");
   expect(
     checksSummary({
       ...BALANCED_AUTONOMY,
-      purchase: "act",
-      send: "act",
-      post: "act",
-      delete: "act",
+      ...consequential,
+      download_execute: "act",
+      system_settings: "act",
+      memory: "act",
     }),
   ).toBe("Works without asking, even when buying, sending, posting or deleting.");
 });

@@ -55,6 +55,8 @@ import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { Announcer } from "./ui/Announcer.tsx";
+import { PHONE, useMediaQuery } from "./ui/media.ts";
+import { Presence } from "./ui/Presence.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -373,6 +375,7 @@ function Theatre({ api }: { api: ApiClient }) {
     media.addEventListener("change", changed);
     return () => media.removeEventListener("change", changed);
   }, []);
+  const phone = useMediaQuery(PHONE);
   const controls = useTaskControls({
     api,
     cell,
@@ -545,6 +548,26 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => {
     document.title = appStatus.title;
   }, [appStatus.title]);
+  // On a phone it covers the computer pane, over a stage that stays where the computer appears.
+  const welcome = (
+    <Presence show={!replayId && status === "known" && !cell && listed.length === 0}>
+      <WelcomeSetup
+        modelReady={mainReady}
+        loading={settings.phase === "loading" || !settings.saved}
+        modelLabel={
+          mainChoice
+            ? `${mainProvider?.name ?? mainChoice.provider} · ${mainChoice.model}`
+            : undefined
+        }
+        autonomy={settings.saved?.autonomy}
+        appearance={appearance}
+        starting={pending !== null}
+        canStart={appStatus.actions.some((action) => action.kind === "start" && action.enabled)}
+        onSettings={showSettings}
+        onStart={guardStart}
+      />
+    </Presence>
+  );
   return (
     <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
       <div className="theatre-content">
@@ -724,26 +747,9 @@ function Theatre({ api }: { api: ApiClient }) {
                 frozen={!!stageHud.paused}
                 control={appStatus.control}
                 caption={appStatus.caption.text}
+                cover={phone ? welcome : undefined}
               >
-                {!replayId && status === "known" && !cell && listed.length === 0 && (
-                  <WelcomeSetup
-                    modelReady={mainReady}
-                    loading={settings.phase === "loading" || !settings.saved}
-                    modelLabel={
-                      mainChoice
-                        ? `${mainProvider?.name ?? mainChoice.provider} · ${mainChoice.model}`
-                        : undefined
-                    }
-                    autonomy={settings.saved?.autonomy}
-                    appearance={appearance}
-                    starting={pending !== null}
-                    canStart={appStatus.actions.some(
-                      (action) => action.kind === "start" && action.enabled,
-                    )}
-                    onSettings={showSettings}
-                    onStart={guardStart}
-                  />
-                )}
+                {!phone && welcome}
                 {!replayId && selectedScreen && (
                   <div className="screen-label" role="status">
                     {selectedScreen.screen === "browser" ? "Signed-in browser" : "Desktop"}

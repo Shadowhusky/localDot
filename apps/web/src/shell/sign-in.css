@@ -1,4 +1,5 @@
-/* The page before the app: dot and one way forward, high on the void where the stage will be. */
+/* The page before the app: dot and one way forward, high on the void where the stage will be. It
+   shares its column, type and copy chip with the installer's page (apps/cli browser-page.ts). */
 .sign-in {
   display: grid;
   justify-items: center;
@@ -7,13 +8,13 @@
   padding: 20vh calc(var(--spacing) * 4) calc(var(--spacing) * 8);
   background: var(--color-void);
   color: var(--color-fg-1);
-  text-align: center;
 }
 
 .sign-in-body {
   display: grid;
-  justify-items: center;
-  max-width: calc(var(--spacing) * 90);
+  justify-items: start;
+  width: 100%;
+  max-width: calc(var(--spacing) * 110);
   transition:
     opacity var(--dur-fade) var(--ease-enter),
     translate var(--dur-spring) var(--ease-spring);
@@ -32,16 +33,16 @@
 
 .sign-in-title {
   font:
-    var(--text-title-2--font-weight) var(--text-title-2) / var(--text-title-2--line-height)
+    var(--text-display--font-weight) var(--text-display) / var(--text-display--line-height)
     var(--font-ui);
-  letter-spacing: var(--text-title-2--letter-spacing);
+  letter-spacing: var(--text-display--letter-spacing);
 }
 
 .sign-in-message {
   margin-top: calc(var(--spacing) * 2);
   color: var(--color-fg-2);
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
-  text-wrap: balance;
+  text-wrap: pretty;
 }
 
 .sign-in-command {

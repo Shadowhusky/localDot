@@ -412,6 +412,21 @@
     margin-top: 14px;
     font-size: 14px;
   }
+  /* The stage keeps the middle of its pane whatever the caption under it says, so a caption that
+     wraps onto another line never moves it. */
+  .pane > .stage-col:not(.manual-column) {
+    display: grid;
+    grid-template-rows: 1fr auto 1fr;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+  }
+  .pane > .stage-col:not(.manual-column) > .stage {
+    grid-row: 2;
+  }
+  .pane > .stage-col:not(.manual-column) > .caption {
+    grid-row: 3;
+    align-self: start;
+  }
 }
 
 .stage > .rim {

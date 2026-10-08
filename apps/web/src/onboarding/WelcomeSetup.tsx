@@ -1,5 +1,5 @@
 import { AutonomyPolicy, DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { type ReactNode, useId } from "react";
+import type { ReactNode } from "react";
 import { checksSummary } from "../copy/autonomy.ts";
 import { Dot } from "../dot/Dot.tsx";
 import { Button } from "../ui/Button.tsx";
@@ -68,15 +68,15 @@ export function WelcomeSetup(props: WelcomeSetupProps) {
                     ? (props.modelLabel ?? "Your saved model")
                     : "Choose the model dot thinks with."
               }
-              action={(described) => (
+              action={
                 <Button
                   size="sm"
-                  aria-describedby={described}
+                  aria-label={props.modelReady ? "Change model" : "Choose model"}
                   onClick={(event) => props.onSettings(event.currentTarget)}
                 >
                   {props.modelReady ? "Change" : "Choose"}
                 </Button>
-              )}
+              }
             />
             <Step
               title="Appearance"
@@ -99,15 +99,15 @@ export function WelcomeSetup(props: WelcomeSetupProps) {
                     ? checksSummary(policy.data)
                     : "Your choices couldn't be read. Review them in Settings."
               }
-              action={(described) => (
+              action={
                 <Button
                   size="sm"
-                  aria-describedby={described}
+                  aria-label="Review when dot checks with you"
                   onClick={(event) => props.onSettings(event.currentTarget, "autonomy")}
                 >
                   Review
                 </Button>
-              )}
+              }
             />
           </ol>
         </ScrollArea>
@@ -126,18 +126,14 @@ function Step({
   title: string;
   state: GlyphState;
   detail?: string;
-  // Gets the id of the step's title, so a short label still says what it changes.
-  action?(described: string): ReactNode;
+  action?: ReactNode;
   children?: ReactNode;
 }) {
-  const id = useId();
   return (
     <li className="welcome-step" data-state={state}>
       <StatusGlyph state={state} className="welcome-step-glyph" />
-      <h2 id={id} className="welcome-step-title">
-        {title}
-      </h2>
-      {action && <div className="welcome-step-action">{action(id)}</div>}
+      <h2 className="welcome-step-title">{title}</h2>
+      {action && <div className="welcome-step-action">{action}</div>}
       {detail && <p className="welcome-step-detail">{detail}</p>}
       {children && <div className="welcome-step-extra">{children}</div>}
     </li>

@@ -38,7 +38,9 @@ test("installer progress hands off once to first-run setup and settings", async 
     await expect(page.getByRole("heading", { name: "Set up localDot" })).toBeVisible();
     await expect(page).toHaveURL(`${f.origin}/`);
     const setupBounds = await page.locator(".welcome-setup").boundingBox();
-    expect(setupBounds).toEqual(await page.locator(".stage").boundingBox());
+    // Inside the stage on a wide screen; over the whole computer pane on a phone.
+    const host = (page.viewportSize()?.width ?? 0) < 760 ? ".stage-col" : ".stage";
+    expect(setupBounds).toEqual(await page.locator(host).first().boundingBox());
     await page.screenshot({ path: info.outputPath("first-run-setup.png") });
     expect(f.requests.filter((r) => r.path === "/auth/exchange-code")).toHaveLength(1);
     expect(f.requests.filter((r) => r.method !== "GET").map((r) => r.path)).toEqual([

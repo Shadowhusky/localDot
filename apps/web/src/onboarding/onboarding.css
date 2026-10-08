@@ -1,13 +1,26 @@
-/* First run sits inside the 16:10 stage, so turning the computer on never moves the stage. dot and
-   the one action stay put on the left; the steps scroll on their own on the right. */
+/* First run lies over the 16:10 stage, so turning the computer on never moves the stage: inside it
+   on a wide screen, over the whole computer pane on a phone. dot and the one action stay put on the
+   left; the steps scroll on their own on the right. */
 .welcome-setup {
   position: absolute;
   inset: 0;
   z-index: 5;
+  overflow: hidden;
+  border-radius: var(--radius-stage);
   background: var(--color-raised);
+  box-shadow: var(--shadow-stage);
   color: var(--color-fg-1);
   container-type: size;
   transition: opacity var(--dur-sheet) var(--ease-enter);
+}
+
+.ui-presence[data-leaving] > .welcome-setup {
+  opacity: 0;
+  transition: opacity var(--dur-exit) var(--ease-exit);
+}
+
+.stage-col:has(> .ui-presence > .welcome-setup) {
+  position: relative;
 }
 
 .welcome-layout {
@@ -184,24 +197,5 @@
   .welcome-steps {
     align-content: start;
     padding: calc(var(--spacing) * 1) calc(var(--spacing) * 5) calc(var(--spacing) * 4);
-  }
-}
-
-/* A phone's computer pane has nothing else in it while there is no computer, so setup takes the
-   pane rather than a 16:10 strip of it. */
-@media (width < 760px) {
-  .stage:has(> .welcome-setup) {
-    flex: 1;
-    width: 100%;
-    min-height: 0;
-    aspect-ratio: auto;
-  }
-
-  .stage-col:has(.welcome-setup) {
-    justify-content: stretch;
-  }
-
-  .stage-col:has(.welcome-setup) > .caption {
-    display: none;
   }
 }
