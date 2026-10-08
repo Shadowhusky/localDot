@@ -220,6 +220,20 @@ describe("App Replay mode", () => {
       true,
     );
   });
+  it("adds a history entry for Replay so browser Back returns to Watch", async () => {
+    const fixture = historyDaemon();
+    render(<App fetchImpl={fixture.fetchImpl} />);
+    const replayButton = screen.getByRole("button", { name: "Replay" });
+    await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
+    const entries = window.history.length;
+    fireEvent.click(replayButton);
+    expect(window.history.length).toBe(entries + 1);
+    await screen.findByRole("main", { name: "Session replay" });
+    window.history.back();
+    await waitFor(() => expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull());
+    expect(window.location.search).toBe("");
+    expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
+  });
   it("Space toggles play and Escape goes back to Watch", async () => {
     const fixture = historyDaemon();
     window.history.replaceState(null, "", `/?replay=${fixture.sessionId}&t=12000`);

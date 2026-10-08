@@ -182,12 +182,15 @@ function Theatre({ api }: { api: ApiClient }) {
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
   replayIdRef.current = replayId;
-  const selectReplay = (id: string | null) => {
+  // Moving between Watch and Replay adds a history entry, so browser Back stays in the app.
+  const selectReplay = (id: string | null, entry: "push" | "replace" = "push") => {
     const address = new URL(window.location.href);
     if (id) address.searchParams.set("replay", id);
     else address.searchParams.delete("replay");
     if (id !== replayIdRef.current) address.searchParams.delete("t");
-    window.history.replaceState(null, "", address);
+    if (entry === "push" && (id === null) !== (replayIdRef.current === null))
+      window.history.pushState(null, "", address);
+    else window.history.replaceState(null, "", address);
     setReplayId(id);
   };
   useEffect(() => {
@@ -725,7 +728,7 @@ function Theatre({ api }: { api: ApiClient }) {
               if (id === newestReplayId) setNewestReplayId(null);
               historyOwner.current++;
               setHistoryRevision(historyOwner.current);
-              if (id === replayId) selectReplay(null);
+              if (id === replayId) selectReplay(null, "replace");
             }}
             visible={!keysOpen && !settings.open && !safety.approval}
           />

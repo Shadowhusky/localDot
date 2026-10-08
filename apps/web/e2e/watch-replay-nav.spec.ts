@@ -121,3 +121,20 @@ for (const engine of ["chrome", "webkit"] as const satisfies Engine[])
         await owned?.close();
       }
     });
+
+test("browser Back from Replay returns to Watch", async ({ page }) => {
+  await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+  const watch = modes(page).getByRole("button", { name: "Watch", exact: true });
+  await expect(watch).toHaveAttribute("aria-current", "page");
+  await modes(page).getByRole("button", { name: "Replay", exact: true }).click();
+  await expect(page).toHaveURL(/[?&]replay=/);
+  const older = fixture.seeded[1] as string;
+  await page.locator(".replay-session-open", { hasText: "Earlier sample task 1" }).click();
+  await expect(page).toHaveURL(new RegExp(`replay=${older}`));
+  await page.goBack();
+  await expect(page).toHaveURL(`${fixture.origin}/`);
+  await expect(watch).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("main", { name: "Session replay" })).toHaveCount(0);
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`replay=${older}`));
+});
