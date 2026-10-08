@@ -1,6 +1,12 @@
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { startXHelper, type XEvent, type XHelper, XHelperError } from "./helper.ts";
+import {
+  startXHelper,
+  type XEvent,
+  type XHelper,
+  XHelperError,
+  XHelperTimeoutError,
+} from "./helper.ts";
 
 const FAKE = fileURLToPath(new URL("./testing/fake-xhelper.mjs", import.meta.url));
 const helpers: XHelper[] = [];
@@ -43,7 +49,8 @@ describe("startXHelper", () => {
 
   it("times out a command that never answers", async () => {
     const h = await fake();
-    await expect(h.call("hang", {}, 50)).rejects.toThrow(/timed out/);
+    await expect(h.call("hang", {}, 50)).rejects.toThrow(XHelperTimeoutError);
+    await expect(h.call("boom")).rejects.not.toThrow(XHelperTimeoutError);
   });
 
   it("fails every pending call and reports not alive when the process exits", async () => {

@@ -1,38 +1,195 @@
-import { execFile } from "node:child_process";
-import type { Rect } from "@localdot/protocol";
+import type { Point, Rect } from "@localdot/protocol";
+import {
+  startXHelper,
+  type XHelper,
+  type XHelperOptions,
+  XHelperTimeoutError,
+} from "../x/helper.ts";
 import type { HelperWindow } from "./hit-test.ts";
+import type { AppToolkit } from "./mapping.ts";
 
+// Frames are in the toolkit's units: GTK frame units, or device / c for Chromium's own UI.
 export interface NativeElement {
   role: string;
   name: string;
   frame: Rect;
-  ancestorRoles: string[];
-  depth: number;
+  space: "gtk" | "chrome";
+  secret: boolean;
+  editable: boolean;
+}
+
+// `unknown`: the lookup did not finish within its budget, so nothing is known below the window.
+export type NativeAnswer = { element: NativeElement | null } | { unknown: true };
+export type NativeTree = { elements: NativeElement[] } | { unknown: true };
+
+export interface NativeQuery {
+  kit: AppToolkit;
+  g: number;
+  c: number;
+  // An override-redirect menu has no accessible of its own: its items hang off its parent's.
+  parent?: HelperWindow;
 }
 
 export interface NativeAccessibility {
-  query(win: HelperWindow, mode: "focused" | "content" | "namebox"): Promise<NativeElement | null>;
+  at(win: HelperWindow, point: Point, q: NativeQuery, budgetMs: number): Promise<NativeAnswer>;
+  focused(win: HelperWindow, q: NativeQuery, budgetMs: number): Promise<NativeAnswer>;
+  // Kept per window while the screen's change generation stays the same.
+  tree(
+    win: HelperWindow,
+    q: NativeQuery,
+    budgetMs: number,
+    generation: number,
+  ): Promise<NativeTree>;
+  content(win: HelperWindow, budgetMs: number): Promise<Rect | null>;
 }
 
-// Separate from XTest's helper: a hung application must not block input or its raw timestamps.
-export class AtspiAccessibility implements NativeAccessibility {
-  constructor(private readonly script = "/opt/localdot/native.py") {}
+// Past its own deadline the helper is inside one application call at most; this long is allowed
+// for that before the helper counts as stuck.
+const GRACE_MS = 200;
+const TREE_CACHE_LIMIT = 32;
 
-  query(win: HelperWindow, mode: "focused" | "content" | "namebox"): Promise<NativeElement | null> {
-    return new Promise((resolve, reject) => {
-      execFile(
-        "/usr/bin/python3",
-        [this.script, JSON.stringify({ pid: win.pid, title: win.title, mode })],
-        { timeout: 1500, maxBuffer: 64 * 1024, env: process.env },
-        (error, stdout) => {
-          if (error) return reject(error);
-          try {
-            resolve(JSON.parse(stdout) as NativeElement | null);
-          } catch (err) {
-            reject(err);
-          }
-        },
-      );
+// `work`'s answer if it comes within `ms`, else undefined; `work` itself runs on.
+export function within<T>(work: Promise<T>, ms: number): Promise<T | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(resolve, Math.max(0, ms), undefined);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
+const wire = (w: HelperWindow) => ({
+  pid: w.pid,
+  title: w.title,
+  rect: [w.x, w.y, w.w, w.h],
+  frame: w.frame,
+  overrideRedirect: w.overrideRedirect,
+});
+
+const query = (q: NativeQuery) => ({
+  kit: q.kit,
+  g: q.g,
+  c: q.c,
+  ...(q.parent ? { parent: wire(q.parent) } : {}),
+});
+
+// One persistent AT-SPI helper, apart from XTest's: a hung application must not block input or its
+// raw timestamps. A helper that misses its own deadline is replaced at once. It answers one query
+// at a time, so each query's budget runs from the call: one whose turn, or a helper still starting,
+// does not come within it answers unknown without being sent.
+export class AtspiAccessibility implements NativeAccessibility {
+  #helper: Promise<XHelper> | undefined;
+  #idle: Promise<true> = Promise.resolve(true);
+  readonly #trees = new Map<number, { key: string; elements: NativeElement[] }>();
+
+  constructor(
+    private readonly start: () => Promise<XHelper>,
+    private readonly mono: () => number,
+  ) {}
+
+  static launch(env: NodeJS.ProcessEnv, mono: () => number): AtspiAccessibility {
+    const options: XHelperOptions = {
+      name: "native",
+      // /usr/bin/python3: the base image's PATH starts with a venv (/lsiopy) without PyGObject.
+      command: "/usr/bin/python3",
+      args: ["-u", env.LOCALDOT_NATIVE_HELPER ?? "/opt/localdot/native.py"],
+      env,
+    };
+    return new AtspiAccessibility(() => startXHelper(options), mono);
+  }
+
+  // Started with desktopd, so the helper has seen every focus change before the first query.
+  warm(): void {
+    void this.#ensure().catch(() => {});
+  }
+
+  async #ensure(): Promise<XHelper> {
+    const current = this.#helper;
+    if (current) {
+      const helper = await current.catch(() => undefined);
+      if (helper?.alive) return helper;
+      if (this.#helper === current) this.#helper = undefined;
+      return this.#ensure();
+    }
+    const next = this.start();
+    this.#helper = next;
+    return next;
+  }
+
+  async #call<T extends object>(
+    cmd: string,
+    args: Record<string, unknown>,
+    budgetMs: number,
+  ): Promise<T | { unknown: true }> {
+    const deadline = this.mono() + budgetMs;
+    const left = () => deadline - this.mono();
+    const previous = this.#idle;
+    let finished!: (value: true) => void;
+    const mine = new Promise<true>((resolve) => {
+      finished = resolve;
     });
+    this.#idle = previous.then(() => mine);
+    try {
+      const turn = await within(previous, left());
+      const starting = turn && this.#ensure().catch(() => undefined);
+      const helper = starting && (await within(starting, left()));
+      if (!helper) return { unknown: true };
+      try {
+        return await helper.call<T>(cmd, { ...args, deadline }, Math.max(0, left()) + GRACE_MS);
+      } catch (err) {
+        if (err instanceof XHelperTimeoutError) {
+          this.#helper = undefined;
+          void helper.close();
+          this.warm();
+        }
+        return { unknown: true };
+      }
+    } finally {
+      finished(true);
+    }
+  }
+
+  at(win: HelperWindow, point: Point, q: NativeQuery, budgetMs: number): Promise<NativeAnswer> {
+    return this.#call<NativeAnswer>("at", { window: wire(win), point, ...query(q) }, budgetMs);
+  }
+
+  focused(win: HelperWindow, q: NativeQuery, budgetMs: number): Promise<NativeAnswer> {
+    return this.#call<NativeAnswer>("focused", { window: wire(win), ...query(q) }, budgetMs);
+  }
+
+  async tree(
+    win: HelperWindow,
+    q: NativeQuery,
+    budgetMs: number,
+    generation: number,
+  ): Promise<NativeTree> {
+    const key = JSON.stringify([generation, wire(win), query(q)]);
+    const kept = this.#trees.get(win.id);
+    if (kept?.key === key) return { elements: kept.elements };
+    const answer = await this.#call<{ elements: NativeElement[]; truncated: boolean }>(
+      "tree",
+      { window: wire(win), ...query(q) },
+      budgetMs,
+    );
+    if ("unknown" in answer) return answer;
+    if (!answer.truncated) {
+      if (this.#trees.size >= TREE_CACHE_LIMIT) this.#trees.clear();
+      this.#trees.set(win.id, { key, elements: answer.elements });
+    }
+    return { elements: answer.elements };
+  }
+
+  async content(win: HelperWindow, budgetMs: number): Promise<Rect | null> {
+    const answer = await this.#call<{ frame: Rect | null }>(
+      "content",
+      { window: wire(win), kit: "chromium" },
+      budgetMs,
+    );
+    return "unknown" in answer ? null : answer.frame;
+  }
+
+  async close(): Promise<void> {
+    const helper = await this.#helper?.catch(() => undefined);
+    this.#helper = undefined;
+    await helper?.close();
   }
 }

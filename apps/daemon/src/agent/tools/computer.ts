@@ -1,7 +1,7 @@
-import type { ComputerAction, ToolResult } from "@localdot/protocol";
+import type { ComputerAction, Target, ToolResult } from "@localdot/protocol";
 import type { ActionContext, GuiAction } from "../../gateway/gateway.ts";
 import { authorizePrepared } from "../safety/authorize.ts";
-import type { RiskFacts } from "../safety/risk.ts";
+import { classify, type RiskFacts } from "../safety/risk.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
@@ -11,6 +11,26 @@ async function screenshot(deps: ToolDeps, ctx: ToolCallContext): Promise<ToolRes
   const o = await deps.gateway.observe(screenContext(ctx));
   ctx.check();
   return { ok: true, content: [await frame(deps, ctx, o.frameId)] };
+}
+
+// DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
+function nativeFacts(action: GuiAction, target: Target | null): RiskFacts {
+  if (action.verb === "wait" || action.verb === "scroll") return { operation: action.verb };
+  return {
+    operation: action.verb,
+    ...(target
+      ? {
+          target: {
+            source: target.source,
+            fresh: true,
+            role: target.role,
+            name: target.name,
+            url: target.url,
+            secret: target.secret === true,
+          },
+        }
+      : {}),
+  };
 }
 
 function gui(a: ComputerAction): GuiAction | string {
@@ -90,26 +110,8 @@ export async function computerTool(
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();
-      const target = request.identity.target;
-      // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-      const facts: RiskFacts =
-        request.action.verb === "wait" || request.action.verb === "scroll"
-          ? { operation: request.action.verb }
-          : {
-              operation: request.action.verb,
-              ...(target
-                ? {
-                    target: {
-                      source: target.source,
-                      fresh: true,
-                      role: target.role,
-                      name: target.name,
-                      url: target.url,
-                      secret: target.secret === true,
-                    },
-                  }
-                : {}),
-            };
+      const facts = nativeFacts(request.action, request.identity.target);
+      const approved = classify(facts, ctx.session.autonomy).actionClass;
       const boundInput = { toolInput: a, action: request.action };
       const permit = await authorizePrepared(ctx, {
         tool: "computer",
@@ -121,7 +123,14 @@ export async function computerTool(
       ctx.check();
       if (!permit) return undefined;
       return {
-        consume: (current, identity) => permit.consume({ toolInput: a, action: current }, identity),
+        // An approval made without an element binds only its window, so the read at dispatch may
+        // name one: it must fall in the approved class, or in one the policy runs without asking.
+        consume: (current, identity, fresh) => {
+          const found = classify(nativeFacts(current, fresh.target), ctx.session.autonomy);
+          if (found.mode !== "act" && found.actionClass !== approved) return false;
+          if (ctx.redact(JSON.stringify(fresh)) !== JSON.stringify(fresh)) return false;
+          return permit.consume({ toolInput: a, action: current }, identity);
+        },
       };
     },
   };

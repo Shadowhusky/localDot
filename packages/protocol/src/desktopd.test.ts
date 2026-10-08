@@ -5,6 +5,7 @@ import {
   LaunchRequest,
   SettleRequest,
   TypeRequest,
+  WindowInfo,
   ZoomRequest,
 } from "./desktopd.ts";
 
@@ -57,5 +58,36 @@ describe("desktopd wire schemas", () => {
       window: "w".repeat(400),
     };
     expect(HitTestResult.parse({ target: long, window: 7, ms: 3 }).target?.name).toHaveLength(300);
+  });
+
+  it("keeps a window's frame and an unfinished lookup apart from no element", () => {
+    const frame = { x: 0, y: 54, w: 1604, h: 1258 };
+    const timedOut = HitTestResult.parse({
+      target: null,
+      window: 7,
+      windowFrame: frame,
+      unknown: true,
+      ms: 300,
+    });
+    expect(timedOut).toMatchObject({ windowFrame: frame, unknown: true });
+    expect(HitTestResult.parse({ target: null, window: null, ms: 1 }).unknown).toBeUndefined();
+    expect(() => HitTestResult.parse({ target: null, window: 7, unknown: false, ms: 1 })).toThrow();
+  });
+
+  it("describes popups and transient windows, and still reads a window list without them", () => {
+    const base = {
+      id: 9,
+      pid: 2,
+      cls: "Gimp",
+      title: "",
+      rect: { x: 0, y: 0, w: 10, h: 10 },
+      frame: { x: 0, y: 0, w: 10, h: 10 },
+      active: false,
+    };
+    expect(WindowInfo.parse({ ...base, overrideRedirect: true, transientFor: 7 })).toMatchObject({
+      overrideRedirect: true,
+      transientFor: 7,
+    });
+    expect(WindowInfo.parse(base).overrideRedirect).toBeUndefined();
   });
 });
