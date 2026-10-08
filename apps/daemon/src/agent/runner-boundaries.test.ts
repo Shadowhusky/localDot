@@ -1,5 +1,11 @@
 import { mkdtempSync, rmSync } from "node:fs";
-import { type BootConfig, type KeydRecord, type TaskPricing, ulid } from "@localdot/protocol";
+import {
+  type BootConfig,
+  type KeydRecord,
+  RESUME_WAIT_REASON,
+  type TaskPricing,
+  ulid,
+} from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -667,6 +673,30 @@ it.each(["the Pause itself", "a repeated action", "an approval", "a question"] a
     expect(session.safetyPause?.phase).toBe("paused");
   },
 );
+
+it("the brain's wait for Resume keeps a budget pause, and Resume waits until the budget is raised", async () => {
+  const h = setup();
+  const session = await h.runner.start(h.cellId, "Budget, Pause, then the brain waits");
+  await h.ready();
+  session.append("budget.exceeded", {
+    scope: "task",
+    taskId: session.id,
+    limitUSD: 5,
+    spentUSD: 5,
+    needUSD: 1,
+  });
+  const pause = h.runner.pauseTask(session.id, ulid());
+  await until(() => session.safetyPause?.phase === "paused");
+  // The brain publishes its own paused state while it waits for Resume.
+  session.append("agent.state", { state: "paused", reason: RESUME_WAIT_REASON });
+  await expect(
+    h.runner.resumeSafety(session.id, pause.requestId, pause.revision),
+  ).rejects.toMatchObject({ status: 409 });
+  expect(session.safetyPause?.phase).toBe("paused");
+  await h.runner.raiseBudget(session.id, 8);
+  await h.runner.resumeSafety(session.id, pause.requestId, pause.revision);
+  expect(session.safetyPause).toBeUndefined();
+});
 
 it.each(["pausing", "uncertain"] as const)(
   "Stop after a %s Pause leaves no intent that fences the computer at the next start",

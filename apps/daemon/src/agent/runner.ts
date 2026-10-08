@@ -482,6 +482,8 @@ export class AgentRunner {
       // An in-flight raise can finish after Stop/recovery; it must never resume obsolete work.
       if (!session.isCurrent(generation) || session.controlHeld || session.pendingAsk || !ready())
         throw new AgentError(409, "the task changed while updating its budget");
+      // The raised limit settles the budget pause; a held Pause still waits for its own Resume.
+      if (rt.pause === "budget") rt.pause = undefined;
       if (!session.controlHeld) session.post("resume", "");
     });
   }

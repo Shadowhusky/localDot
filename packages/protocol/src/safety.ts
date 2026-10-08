@@ -236,12 +236,16 @@ export const ApprovalCard = ApprovalCardDraft.extend({
 });
 export type ApprovalCard = z.infer<typeof ApprovalCard>;
 export const PauseReason = z.enum(["user", "repeated_action"]);
-// Reasons on the paused states a session publishes for its own Pause, approval or question. None is
-// a recovery pause such as the spending limit, so none may stand in for one.
+// The brain's own paused state while it waits for Resume of the session's Pause.
+export const RESUME_WAIT_REASON = "Waiting for explicit Resume";
+// Reasons on the paused states a session or its brain publishes for the session's own Pause,
+// approval or question. None is a recovery pause such as the spending limit, so none may stand in
+// for one.
 export const SESSION_PAUSE_REASONS: readonly string[] = [
   ...PauseReason.options,
   "approval",
   "question",
+  RESUME_WAIT_REASON,
 ];
 export const PauseSnapshot = z
   .strictObject({

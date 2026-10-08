@@ -7,7 +7,7 @@ import type {
   TranscriptMessage,
   UpdatePlanInput,
 } from "@localdot/protocol";
-import { isToolName } from "@localdot/protocol";
+import { isToolName, RESUME_WAIT_REASON } from "@localdot/protocol";
 import { toModelSpace } from "@localdot/providers";
 import { APICallError, generateText, type LanguageModel, type ModelMessage, streamText } from "ai";
 import { toComputerAction } from "./computer.ts";
@@ -181,7 +181,7 @@ export class Agent {
     signal.throwIfAborted();
     while (state.pause) {
       this.#o.sink.busy(false);
-      this.#o.sink.state("paused", "Waiting for explicit Resume");
+      this.#o.sink.state("paused", RESUME_WAIT_REASON);
       state = await this.#o.api.control(state.revision, 25000, signal);
       signal.throwIfAborted();
     }
