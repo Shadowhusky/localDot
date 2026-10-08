@@ -162,6 +162,9 @@ describe("settings inspector", () => {
         .map((row) => row.textContent),
     ).toEqual(["Local: choose a valid model ID.", "Enter a limit per task in US dollars."]);
     expect(save().getAttribute("aria-disabled")).toBe("true");
+    view.rerender(<SettingsSheet {...p} dirty />);
+    fireEvent.click(save());
+    expect(p.save?.run).toHaveBeenCalledOnce();
     view.rerender(<SettingsSheet {...p} dirty busy />);
     expect(status()?.textContent).toBe("Saving…");
     expect(save().getAttribute("aria-busy")).toBe("true");
@@ -289,5 +292,13 @@ describe("settings inspector", () => {
     } finally {
       vi.unstubAllGlobals();
     }
+  });
+  it("says Saved only after a save, not after an account step that was busy", () => {
+    const p = props();
+    const view = render(<SettingsSheet {...p} />);
+    view.rerender(<SettingsSheet {...p} busy />);
+    expect(status()?.textContent).toBe("All changes saved");
+    view.rerender(<SettingsSheet {...p} />);
+    expect(status()?.textContent).toBe("All changes saved");
   });
 });

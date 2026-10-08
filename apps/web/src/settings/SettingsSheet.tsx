@@ -121,18 +121,29 @@ export function SettingsSheet(props: SettingsSheetProps) {
   const active = props.open && !props.suspended;
   const phone = useMediaQuery(PHONE);
   const [saved, setSaved] = useState(false);
-  const wasBusy = useRef(false);
+  // Set from a press of Save until that save is done; the account's own steps are busy too.
+  const [saving, setSaving] = useState(false);
+  const sawBusy = useRef(false);
   // The role whose Add key opened Keys gets focus back when Settings returns.
   const keysFrom = useRef<ModelRole | null>(null);
 
   useEffect(() => {
-    const was = wasBusy.current;
-    wasBusy.current = !!props.busy;
-    if (!was || props.busy || props.dirty || props.error) return;
-    setSaved(true);
+    if (!saving) return;
+    if (props.busy) {
+      sawBusy.current = true;
+      return;
+    }
+    if (!sawBusy.current) return;
+    sawBusy.current = false;
+    setSaving(false);
+    if (!props.dirty && !props.error) setSaved(true);
+  }, [saving, props.busy, props.dirty, props.error]);
+
+  useEffect(() => {
+    if (!saved) return;
     const timer = window.setTimeout(() => setSaved(false), SAVED_MS);
     return () => window.clearTimeout(timer);
-  }, [props.busy, props.dirty, props.error]);
+  }, [saved]);
 
   useEffect(() => {
     if (props.dirty) setSaved(false);
@@ -197,7 +208,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
 
   const status = props.loading ? (
     "Loading saved settings…"
-  ) : props.busy ? (
+  ) : saving ? (
     "Saving…"
   ) : problems ? (
     <>
@@ -224,7 +235,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
 
   const footer = (
     <div className="settings-footer">
-      {props.error && !props.loading && !props.busy ? (
+      {props.error && !props.loading && !saving ? (
         <p id={statusId} key="error" className="settings-footer-status" role="alert" data-error="">
           <Icon name="circle-alert" size={12} />
           {props.error}
@@ -242,10 +253,15 @@ export function SettingsSheet(props: SettingsSheetProps) {
       {props.save && (
         <Button
           variant="primary"
-          busy={props.busy}
-          disabledReason={props.busy ? undefined : saveReason}
+          busy={saving}
+          disabledReason={
+            saving ? undefined : (saveReason ?? (props.busy ? "Wait a moment" : undefined))
+          }
           aria-describedby={statusId}
-          onClick={() => props.save?.run()}
+          onClick={() => {
+            setSaving(true);
+            props.save?.run();
+          }}
         >
           Save
         </Button>
