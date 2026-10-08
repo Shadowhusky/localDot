@@ -211,6 +211,10 @@ describe("toComputerActions", () => {
     expect(
       toComputerActions({ action: "left_click_drag", path: points(64) }, "pixels", F),
     ).toHaveLength(1);
+    for (const n of [1, 65])
+      expect(toComputerActions({ action: "left_click_drag", path: points(n) }, "pixels", F)).toBe(
+        "left_click_drag: a path has 2 to 64 points",
+      );
     for (const input of [
       { action: "left_click_drag", path: points(65) },
       { action: "left_click_drag", path: points(1) },

@@ -36,6 +36,13 @@ describe("repetition of pointer actions", () => {
         { verb: "drag", path, mods: ["shift"] },
       ]),
     ).toBe(4);
+    expect(
+      admitted([
+        { verb: "drag", path },
+        { verb: "drag", path, mods: ["shift"] },
+        { verb: "drag", path, mods: ["ctrl"] },
+      ]),
+    ).toBe(3);
     const stroke = (y: number): GuiAction => ({ verb: "drag", path: [...path, { x: 30, y }] });
     expect(admitted([stroke(1), stroke(2), stroke(3)])).toBe(3);
   });

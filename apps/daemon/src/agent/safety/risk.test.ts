@@ -30,6 +30,11 @@ describe("pointer verbs map onto the existing classes", () => {
     expect(
       classify({ operation: "click", target: item("report.txt"), drop: null }, policy),
     ).toMatchObject({ actionClass: "unknown", mode: "ask" });
+    // A drop where no element is known never takes the start's class, even one that runs.
+    expect(classify({ operation: "click", target: item("Share"), drop: null }, act)).toMatchObject({
+      actionClass: "unknown",
+      mode: "ask",
+    });
     const handoff = { ...DEFAULT_AUTONOMY, delete: "handoff" } as const;
     expect(
       classify({ operation: "click", target: item("report.txt"), drop: item("Trash") }, handoff)
