@@ -3,7 +3,8 @@
   "compilerOptions": {
     "lib": ["es2024", "dom", "dom.iterable"],
     "types": ["vite/client"],
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["src"]
 }

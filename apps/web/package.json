@@ -13,23 +13,28 @@
     "calibrate": "tsx e2e/calibrate.ts"
   },
   "dependencies": {
+    "@base-ui/react": "1.8.0",
     "@localdot/protocol": "workspace:*",
     "@localdot/providers": "workspace:*",
     "@localdot/stage": "workspace:*",
+    "clsx": "2.1.1",
+    "mediabunny": "1.61.0",
     "pixi.js": "8.21.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "zod": "4.6.5",
-    "mediabunny": "1.61.0"
+    "tailwind-merge": "3.7.0",
+    "zod": "4.6.5"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
+    "@tailwindcss/vite": "4.3.3",
     "@testing-library/dom": "10.4.2",
     "@testing-library/react": "16.3.3",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",
     "sharp": "0.35.5",
+    "tailwindcss": "4.3.3",
     "tsx": "4.23.15",
     "vite": "8.3.1"
   }
