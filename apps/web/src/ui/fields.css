@@ -598,9 +598,19 @@
       background-color: Canvas;
     }
 
-    .ui-checkbox:has(> :checked),
+    .ui-checkbox:has(> :is(:checked, [data-indeterminate])),
     .ui-switch:has(> :checked) {
       background-color: Highlight;
+    }
+
+    .ui-radio-card-check {
+      forced-color-adjust: none;
+      color: Highlight;
+    }
+
+    :is(.ui-choice, .ui-radio-card)[data-unavailable] :is(.ui-choice-label, .ui-choice-note),
+    .ui-segment[aria-disabled="true"] {
+      color: GrayText;
     }
 
     .ui-checkbox {
