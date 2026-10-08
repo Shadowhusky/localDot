@@ -67,6 +67,66 @@ const reach = (control: Locator) =>
     return bottom - top + 1;
   });
 
+const transportControls = (page: Page) =>
+  page
+    .getByRole("group", { name: "Playback controls" })
+    .locator("button, [role=combobox], [role=switch], .ui-badge, output");
+
+// The bar, the picture and the transport stay inside the width, with no two controls on top of each
+// other, once a task with no video shows its chip.
+async function fitsTheWidth(page: Page, size: Size) {
+  await expect(
+    page.getByRole("group", { name: "Playback controls" }).getByText("No video"),
+  ).toBeVisible({
+    timeout: 5000,
+  });
+  const width = size.viewport.width;
+  for (const control of [
+    page.getByRole("button", { name: /^(Back to Watch|Jump to live)$/ }),
+    page.getByRole("button", { name: "Play replay" }),
+    page.getByRole("combobox", { name: "Playback speed" }),
+    page.getByRole("button", { name: "Export MP4" }),
+  ]) {
+    await expect(control).toBeVisible();
+    const box = await control.boundingBox();
+    expect(box?.x).toBeGreaterThanOrEqual(0);
+    expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
+    if (size.hasTouch) expect(await reach(control)).toBeGreaterThanOrEqual(44);
+  }
+  const overlaps = await transportControls(page).evaluateAll((controls) => {
+    const boxes = controls
+      .filter((control) => !controls.some((other) => other !== control && other.contains(control)))
+      .map((control) => ({
+        name: control.getAttribute("aria-label") ?? control.textContent?.trim(),
+        box: control.getBoundingClientRect(),
+      }))
+      .filter(({ box }) => box.width > 0);
+    return boxes.flatMap(({ name, box }, at) =>
+      boxes
+        .slice(at + 1)
+        .filter(
+          (other) =>
+            box.left < other.box.right - 0.5 &&
+            other.box.left < box.right - 0.5 &&
+            box.top < other.box.bottom - 0.5 &&
+            other.box.top < box.bottom - 0.5,
+        )
+        .map((other) => `${name} covers ${other.name}`),
+    );
+  });
+  expect(overlaps).toEqual([]);
+  const outside = await page.evaluate(() => {
+    const main = document.querySelector(".replay-main") as HTMLElement;
+    const room = main.getBoundingClientRect();
+    const spill = [...main.querySelectorAll("*")].filter((element) => {
+      const box = element.getBoundingClientRect();
+      return box.width > 0 && (box.right > room.right + 0.5 || box.bottom > room.bottom + 0.5);
+    });
+    return [document.documentElement.scrollWidth - innerWidth, spill.length];
+  });
+  expect(outside).toEqual([0, 0]);
+}
+
 for (const [label, engine, size] of [
   ["chrome at 1728", "chrome", WIDE],
   ["chrome at 1440", "chrome", DESKTOP],
@@ -116,31 +176,8 @@ for (const [label, engine, size] of [
     });
 
     test("the bar, the picture and the transport fit the width without a scroll", async () => {
-      const { context, page, press } = await open(browser, size, `/?replay=${earlier}`);
-      await expect(replayTime(page)).toHaveText("0:00 / 1:00");
-      const width = size.viewport.width;
-      for (const control of [
-        page.getByRole("button", { name: "Back to Watch" }),
-        page.getByRole("button", { name: "Play replay" }),
-        page.getByRole("combobox", { name: "Playback speed" }),
-        page.getByRole("button", { name: "Export MP4" }),
-      ]) {
-        await expect(control).toBeVisible();
-        const box = await control.boundingBox();
-        expect(box?.x).toBeGreaterThanOrEqual(0);
-        expect((box?.x ?? 0) + (box?.width ?? 0)).toBeLessThanOrEqual(width);
-        if (size.hasTouch) expect(await reach(control)).toBeGreaterThanOrEqual(44);
-      }
-      const outside = await page.evaluate(() => {
-        const main = document.querySelector(".replay-main") as HTMLElement;
-        const room = main.getBoundingClientRect();
-        const spill = [...main.querySelectorAll("*")].filter((element) => {
-          const box = element.getBoundingClientRect();
-          return box.width > 0 && (box.right > room.right + 0.5 || box.bottom > room.bottom + 0.5);
-        });
-        return [document.documentElement.scrollWidth - innerWidth, spill.length];
-      });
-      expect(outside).toEqual([0, 0]);
+      const { context, page, press } = await open(browser, size, `/?replay=${fixture.sessionId}`);
+      await fitsTheWidth(page, size);
       const screen = page.locator(".replay");
       expect(await screen.locator("select, input[type=radio], input[type=file]").count()).toBe(0);
       if (size.hasTouch) {
@@ -189,12 +226,17 @@ for (const [label, engine, size] of [
       });
       expect(look.background).toBeGreaterThanOrEqual(0.9);
       expect(look).toMatchObject({ lower: true, inside: true, title: "rgb(238, 239, 241)" });
-      const play = page.getByRole("button", { name: "Play replay" });
-      const before = await play.boundingBox();
+      const boxes = () =>
+        transportControls(page).evaluateAll((controls) =>
+          controls
+            .filter((control) => !control.matches(".ui-badge"))
+            .map((control) => control.getBoundingClientRect().toJSON()),
+        );
+      const before = await boxes();
       const controls = page.getByRole("group", { name: "Playback controls" });
       await expect(controls.getByText("No video", { exact: true })).toBeVisible({ timeout: 5000 });
       await expect(card).toBeHidden();
-      expect(await play.boundingBox()).toEqual(before);
+      expect(await boxes()).toEqual(before);
       await context.close();
     });
 
@@ -237,6 +279,17 @@ for (const [label, engine, size] of [
       await context.close();
     });
   });
+
+// An iPad held upright: the transport is too narrow for one row, so how it plays takes a second.
+for (const engine of ["chrome", "webkit"] as const)
+  for (const width of [768, 820])
+    test(`the transport fits a ${engine} tablet held upright at ${width}`, async () => {
+      const browser = await ENGINES[engine]();
+      const size: Size = { viewport: { width, height: 1024 }, hasTouch: true };
+      const { page } = await open(browser, size, `/?replay=${fixture.sessionId}`);
+      await fitsTheWidth(page, size);
+      await browser.close();
+    });
 
 test("a deep link opens Replay at its time", async () => {
   const browser = await ENGINES.chrome();

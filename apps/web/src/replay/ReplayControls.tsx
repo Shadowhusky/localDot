@@ -63,9 +63,9 @@ export function ReplayControls({
           <span className="replay-now-label">{label}</span>
           {replay.idleNow && <span className="replay-now-idle">Idle skipped</span>}
         </span>
+        {noVideo && <Badge className="replay-no-video">No video</Badge>}
       </div>
       <div className="replay-transport-side">
-        {noVideo && <Badge className="replay-no-video">No video</Badge>}
         <span className="replay-speed">
           <Select
             aria-label="Playback speed"

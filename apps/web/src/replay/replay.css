@@ -203,7 +203,7 @@
 .replay-main {
   --_chrome: calc(var(--spacing) * 46);
   --_w: min(100cqw, (100cqh - var(--_chrome)) * 1.6);
-  container-type: size;
+  container: replay-main / size;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -216,6 +216,14 @@
 .replay-main > * {
   width: var(--_w);
   flex: none;
+}
+
+/* Too short for a 640 px picture, the transport takes two rows, so the picture leaves room for the
+   second: 584 = 640 / 1.6 + the 184 px of chrome. */
+@container replay-main (height < 584px) {
+  .replay-main > * {
+    width: min(100cqw, (100cqh - var(--_chrome) - var(--spacing) * 6) * 1.6);
+  }
 }
 
 .replay-bar {
@@ -539,11 +547,14 @@
   white-space: nowrap;
 }
 
-/* The transport: one 48 px row, playback on the left, how it plays on the right. */
+/* The transport: one 48 px row, playback on the left, how it plays on the right. Where the row is
+   too narrow for both, how it plays takes a second row. */
 .replay-transport {
+  container: replay-transport / inline-size;
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: calc(var(--spacing) * 4);
+  gap: var(--spacing) calc(var(--spacing) * 4);
   min-height: calc(var(--spacing) * 12);
 }
 
@@ -561,6 +572,17 @@
 
 .replay-transport-side {
   flex: none;
+}
+
+.replay-no-video {
+  flex: none;
+}
+
+@container replay-transport (width < 640px) {
+  .replay-transport-side {
+    flex: 1 1 100%;
+    justify-content: space-between;
+  }
 }
 
 /* While an export runs with its popover put away, its ring stands where the icon was. */
@@ -780,16 +802,6 @@
     container-type: normal;
     gap: calc(var(--spacing) * 2);
     padding-top: 0;
-  }
-
-  .replay-transport {
-    flex-wrap: wrap;
-    row-gap: var(--spacing);
-  }
-
-  .replay-transport-side {
-    flex: 1 1 100%;
-    justify-content: space-between;
   }
 
   .replay-export-text,
