@@ -8,7 +8,7 @@ import { Collapse } from "../ui/Disclosure.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { MoneyField } from "../ui/MoneyField.tsx";
-import { matches } from "../ui/media.ts";
+import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
@@ -72,6 +72,9 @@ export interface SettingsSheetProps {
     change(value: string, useDefault: boolean): void;
   };
   knowledge?: Knowledge;
+  // A phone's sheet covers the page and its Stop, so it carries one, with what Stop reports.
+  stop?: { label: string; enabled: boolean; run(): void };
+  taskControls?: ReactNode;
 }
 
 function ago(at: string | undefined, now: number): string | null {
@@ -116,6 +119,7 @@ function Section({ id, title, children }: { id: string; title: string; children:
 export function SettingsSheet(props: SettingsSheetProps) {
   const statusId = useId();
   const active = props.open && !props.suspended;
+  const phone = useMediaQuery(PHONE);
   const [saved, setSaved] = useState(false);
   const wasBusy = useRef(false);
   // The role whose Add key opened Keys gets focus back when Settings returns.
@@ -260,6 +264,21 @@ export function SettingsSheet(props: SettingsSheetProps) {
       footer={footer}
     >
       <div id="settings-sheet-body" className="settings-body">
+        {phone && props.stop && (
+          <div className="settings-stop">
+            <div className="settings-inline">
+              <p className="settings-note">Your computer</p>
+              <Button
+                icon="square"
+                disabledReason={props.stop.enabled ? undefined : "Not available right now"}
+                onClick={() => props.stop?.run()}
+              >
+                {props.stop.label}
+              </Button>
+            </div>
+            {props.taskControls}
+          </div>
+        )}
         {props.loading ? (
           <Skeleton loading shape="block" height="320px" className="settings-loading" />
         ) : (

@@ -785,6 +785,8 @@ function Theatre({ api }: { api: ApiClient }) {
       <SettingsSheet
         focusSection={settingsSection}
         appearance={appearance}
+        taskControls={<StopControl controls={controls} />}
+        stop={sheetStopControl}
         open={settings.open}
         suspended={keysOpen}
         choices={settings.draft?.choices ?? {}}
