@@ -610,8 +610,17 @@
     }
 
     :is(.ui-choice, .ui-radio-card)[data-unavailable] :is(.ui-choice-label, .ui-choice-note),
-    .ui-segment[aria-disabled="true"] {
+    .ui-segment[aria-disabled="true"],
+    .ui-field-box[data-unavailable],
+    .ui-field-box[data-unavailable] :is(.ui-input, .ui-select-value) {
       color: GrayText;
+    }
+
+    .ui-text-field:focus-within,
+    .ui-text-area:focus,
+    .ui-select-trigger:is(:focus-visible, [data-open]) {
+      outline: var(--focus-width) solid Highlight;
+      outline-offset: 1px;
     }
 
     .ui-checkbox {

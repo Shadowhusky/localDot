@@ -371,5 +371,14 @@
       outline: 2px solid Highlight;
       outline-offset: -2px;
     }
+
+    .ui-option-check {
+      forced-color-adjust: none;
+      color: Highlight;
+    }
+
+    .ui-option[aria-disabled="true"] :is(.ui-option-label, .ui-option-note) {
+      color: GrayText;
+    }
   }
 }
