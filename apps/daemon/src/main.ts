@@ -46,7 +46,7 @@ import { KeydClient, keydSocketPath } from "./keyd/client.ts";
 import { KeydEventRouter } from "./keyd/event-router.ts";
 import { cameUp, KeydMonitor } from "./keyd/monitor.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
-import { localdotHome } from "./paths.ts";
+import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
@@ -64,6 +64,7 @@ const port = portFromEnv();
 publicOriginFromEnv();
 const keydPorts = keydPortsFromEnv();
 const home = localdotHome();
+secureHomeOrFail(home);
 const serviceIdentity = managedServiceFromEnv(process.env);
 if (serviceIdentity) retainManagedDaemonLease(process.env, serviceIdentity);
 let serviceReadiness: ManagedServiceReadiness | undefined;
@@ -416,6 +417,15 @@ function portFromEnv(): number {
     return parsePort(process.env.LOCALDOT_PORT);
   } catch (err) {
     return fail(`LOCALDOT_PORT: ${(err as Error).message}`);
+  }
+}
+
+function secureHomeOrFail(dir: string): void {
+  try {
+    if (secureHome(dir).tightened)
+      console.error(`made ${dir} private (removed group and other access)`);
+  } catch (err) {
+    fail((err as Error).message);
   }
 }
 
