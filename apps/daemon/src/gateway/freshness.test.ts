@@ -316,6 +316,19 @@ describe("gateway freshness", () => {
     expect(out.ok).toBe(true);
     expect(s.clicks()).toHaveLength(1);
   });
+  it("checks a button press at a point against the screenshot, but not one where the cursor is", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 620, y: 380, w: 40, h: 40 })));
+    expect(
+      await s.gateway.run(s.ctx, { verb: "down", point, basedOn: s.basis.frameId }),
+    ).toMatchObject({ ok: false, cancelled: "stale" });
+    await s.gateway.run(s.ctx, { verb: "move", point });
+    expect((await s.gateway.run(s.ctx, { verb: "down", basedOn: s.basis.frameId })).ok).toBe(true);
+    expect(s.clicks().map((c) => (c.body as { input: { kind: string } }).input.kind)).toEqual([
+      "move",
+      "down",
+    ]);
+  });
   it("checks a drag's start against the screenshot, not the canvas it is about to change", async () => {
     const s = await setup();
     s.setFrames(await png(paint(base(), { x: 80, y: 80, w: 40, h: 40 })));

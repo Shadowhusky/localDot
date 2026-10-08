@@ -476,8 +476,12 @@ export class ActionGateway {
     const glideMs = Math.max(1, Math.round(durationMs));
     const glide = held && (action.verb === "move" || action.verb === "up") && durationMs > 0;
     // A release or a hover keeps no basis: the press it ends was checked, and the screen under a
-    // drag changes as it goes.
-    const fresh = action.verb === "click" || action.verb === "scroll" || action.verb === "down";
+    // drag changes as it goes. Nor does a press where the cursor already is: the move that put it
+    // there may have drawn a tool's own outline around it (a paintbrush's footprint).
+    const fresh =
+      action.verb === "click" ||
+      action.verb === "scroll" ||
+      (action.verb === "down" && action.point !== undefined);
     let result: { frameId: string; changed: boolean };
     let notDown = false;
     try {
