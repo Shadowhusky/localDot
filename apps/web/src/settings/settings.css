@@ -172,7 +172,8 @@
   gap: 8px;
   margin-left: auto;
 }
-.settings-sheet .model-capability {
+.settings-sheet .model-capability,
+.settings-sheet .provider-note {
   color: var(--color-text);
 }
 @media (width < 600px) {

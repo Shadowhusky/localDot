@@ -23,21 +23,33 @@ export interface ProviderModels {
 export type ProviderGroup =
   | "API providers"
   | "Compatible providers"
+  | "Plans"
   | "Local servers"
+  | "Not available here"
   | "Later releases";
 export function groupOf(provider: ProviderSpec): ProviderGroup {
   if (provider.availableIn) return "Later releases";
+  if (provider.notOffered) return "Not available here";
   if (provider.local) return "Local servers";
+  if (provider.plan) return "Plans";
   return provider.client === "openai-compatible" ? "Compatible providers" : "API providers";
 }
 export const PROVIDER_GROUPS: readonly ProviderGroup[] = [
   "API providers",
   "Compatible providers",
+  "Plans",
   "Local servers",
+  "Not available here",
   "Later releases",
 ];
 export function providerAllowed(role: ModelRole, provider: ProviderSpec): boolean {
-  return !provider.availableIn && (role !== "local" || provider.local === true);
+  return (
+    !provider.availableIn && !provider.notOffered && (role !== "local" || provider.local === true)
+  );
+}
+// A plan that is not offered can still be picked, only to read why; it never saves.
+export function providerPickable(role: ModelRole, provider: ProviderSpec): boolean {
+  return providerAllowed(role, provider) || (!!provider.notOffered && role !== "local");
 }
 export function matchingProviders(search: string): readonly ProviderSpec[] {
   const query = search.trim().toLowerCase();
@@ -67,7 +79,7 @@ export function matchingKeys(
   provider: ProviderSpec,
   keys: readonly PickerKey[],
 ): readonly PickerKey[] {
-  if (provider.local || provider.availableIn) return [];
+  if (provider.local || provider.availableIn || provider.notOffered) return [];
   const bound = endpoint(provider.baseURL);
   return keys.filter(
     (key) =>

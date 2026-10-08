@@ -110,6 +110,37 @@ describe("configuration validation before explicit save", () => {
       expect(validateForm(d, {}, index)).toMatchObject({ ok: false });
     }
   });
+  it("saves a plan with a key bound to its address and refuses a plan that is not offered", () => {
+    const index = providerFixture();
+    index.keys.push({
+      id: "token-plan",
+      provider: "openai-compatible",
+      baseURL: "https://api.minimax.io/v1",
+    });
+    const plan = formOf({
+      main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+    });
+    // models.dev prices plan models at $0, so they still take a manual rate for now.
+    expect(needsPrice(plan.choices.main, index)).toBe(true);
+    expect(validateForm(plan, {}, index)).toMatchObject({ ok: false });
+    plan.prices.main = { input: "0.3", output: "1.2" };
+    expect(validateForm(plan, {}, index)).toMatchObject({
+      ok: true,
+      document: { main: { provider: "minimax-coding-plan", key: "token-plan" } },
+    });
+    // Even an index that listed models for it, with any compatible key, cannot save the row.
+    index.providers
+      .find((p) => p.id === "zai-coding-plan")
+      ?.models.push(...(index.providers.find((p) => p.id === "zai")?.models ?? []));
+    const refused = formOf({
+      main: { provider: "zai-coding-plan", model: "glm-5v-turbo", key: "gateway" },
+    });
+    refused.prices.main = { input: "1", output: "1" };
+    expect(validateForm(refused, {}, index)).toEqual({
+      ok: false,
+      problems: ["Main: choose a supported provider for this role."],
+    });
+  });
   it("does not override catalog prices and keeps local routes keyless and free", () => {
     const index = providerFixture();
     expect(

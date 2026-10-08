@@ -52,6 +52,53 @@ describe("provider/model/role presentation", () => {
     fireEvent.change(screen.getByLabelText("Search main providers"), { target: { value: "chat" } });
     expect(screen.getByRole("option", { name: "ChatGPT plan" })).toBeTruthy();
   });
+  it("groups plans and the plans not offered, and says why when one is chosen or searched", () => {
+    const change = vi.fn();
+    const view = render(<ProviderPicker modelRole="main" value="" onChange={change} />);
+    const plans = screen.getByRole("group", { name: "Plans" });
+    expect([...plans.querySelectorAll("option")].map((o) => [o.textContent, o.disabled])).toEqual([
+      ["MiniMax Token Plan", false],
+      ["Alibaba Token Plan", false],
+      ["Alibaba Coding Plan", false],
+    ]);
+    const refused = screen.getByRole("group", { name: "Not available here" });
+    expect([...refused.querySelectorAll("option")].map((o) => [o.textContent, o.disabled])).toEqual(
+      [
+        ["GLM Coding Plan — not available here", false],
+        ["Kimi For Coding — not available here", false],
+        ["Ark Coding Plan — not available here", false],
+      ],
+    );
+    const GLM =
+      "Z.ai lets this plan run only in the coding tools it lists. Use a Z.ai API key here instead.";
+    expect(screen.queryByText(GLM)).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "main provider" }), {
+      target: { value: "zai-coding-plan" },
+    });
+    expect(change).toHaveBeenCalledWith("zai-coding-plan");
+    view.rerender(<ProviderPicker modelRole="main" value="zai-coding-plan" onChange={change} />);
+    const select = screen.getByRole("combobox", { name: "main provider" });
+    expect(screen.getByText(GLM).id).toBe(select.getAttribute("aria-describedby"));
+    view.rerender(
+      <ProviderPicker modelRole="main" value="alibaba-coding-plan" onChange={change} />,
+    );
+    expect(screen.queryByText(GLM)).toBeNull();
+    expect(
+      screen.getByText("Alibaba allows this plan only for tasks you start and watch."),
+    ).toBeTruthy();
+    view.rerender(<ProviderPicker modelRole="main" value="" onChange={change} />);
+    fireEvent.change(screen.getByLabelText("Search main providers"), { target: { value: "kimi" } });
+    expect(
+      screen.getByText(
+        "Kimi For Coding: Kimi lets this plan run only in coding tools it recognises. Use a Moonshot API key here instead.",
+      ),
+    ).toBeTruthy();
+    cleanup();
+    render(<ProviderPicker modelRole="local" value="" onChange={vi.fn()} />);
+    expect(
+      screen.getByRole("option", { name: "GLM Coding Plan — not available here" }),
+    ).toHaveProperty("disabled", true);
+  });
   it("retains the canonical selected provider through filtered searches", () => {
     const change = vi.fn();
     render(<ProviderPicker modelRole="main" value="google" onChange={change} />);
@@ -193,6 +240,37 @@ describe("provider/model/role presentation", () => {
     const button = screen.getByRole("button", { name: "Add key for main" });
     fireEvent.click(button);
     expect(onKeys).toHaveBeenCalledWith("main", "azure", button);
+  });
+  it("shows only the reason for a plan that is not offered, and a plan's key and rule otherwise", () => {
+    const onKeys = vi.fn();
+    const props = {
+      modelRole: "main" as const,
+      value: { provider: "zai-coding-plan", model: "" },
+      providers: [],
+      keys: [{ ...stored, provider: "openai-compatible", baseURL: "https://api.minimax.io/v1" }],
+      keyLayer: "online" as const,
+      onChange: vi.fn(),
+      onKeys,
+    };
+    const view = render(<RoleEditor {...props} />);
+    expect(screen.getByText(/^Z\.ai lets this plan run only/)).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "main model" })).toBeNull();
+    expect(screen.queryByRole("combobox", { name: "main key" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Add key for main" })).toBeNull();
+    view.rerender(
+      <RoleEditor
+        {...props}
+        value={{ provider: "minimax-coding-plan", model: "MiniMax-M3", key: stored.id }}
+        providers={[{ id: "minimax-coding-plan", models }]}
+      />,
+    );
+    expect((screen.getByRole("combobox", { name: "main key" }) as HTMLSelectElement).value).toBe(
+      stored.id,
+    );
+    expect(screen.getByRole("combobox", { name: "main model" })).toBeTruthy();
+    const button = screen.getByRole("button", { name: "Add key for main" });
+    fireEvent.click(button);
+    expect(onKeys).toHaveBeenCalledWith("main", "minimax-coding-plan", button);
   });
   it("turns optional roles off explicitly, clears old provider-bound selection on a provider change and refuses local remote rows", () => {
     function Form() {

@@ -11,6 +11,7 @@ import {
   modelAllowed,
   modelIdProblem,
   type PickerKey,
+  providerAllowed,
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
@@ -160,7 +161,7 @@ function checkRole(
     return { provider: value.provider, model: value.model };
   }
   const provider = providerById(value.provider);
-  if (!provider || provider.availableIn || (role === "local" && !provider.local))
+  if (!provider || !providerAllowed(role, provider))
     return "choose a supported provider for this role.";
   if (isOpenRouterRouterId(provider.id, value.model))
     return "choose a specific model rather than a router ID.";
