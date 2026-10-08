@@ -56,6 +56,7 @@ export function useSettings(
     phase,
     revision: 0,
     generation: 0,
+    session: 0,
   });
   const reading = useRef<AbortController | null>(null);
   const mutating = useRef<AbortController | null>(null);
@@ -137,6 +138,7 @@ export function useSettings(
     mounted.current = true;
     current.current.api = api;
     current.current.generation++;
+    current.current.session++;
     if (loadedFor.current !== api) {
       unresolved.current = false;
       setUncertain(false);
@@ -145,6 +147,7 @@ export function useSettings(
     return () => {
       mounted.current = false;
       current.current.generation++;
+      current.current.session++;
       reading.current?.abort();
       mutating.current?.abort();
     };
@@ -185,6 +188,7 @@ export function useSettings(
     if (owner.open) return;
     owner.open = true;
     owner.generation++;
+    owner.session++;
     owner.revision++;
     setOpen(true);
     void read(true);
@@ -193,6 +197,7 @@ export function useSettings(
     const owner = current.current;
     owner.open = false;
     owner.generation++;
+    owner.session++;
     owner.revision++;
     reading.current?.abort();
     if (writing.current) {
@@ -368,60 +373,49 @@ export function useSettings(
       void read(true, true);
     }
   };
+  // Switching apps to copy a key bumps generation but not session, so the key still binds.
   const captureKey = (role: ModelRole, provider: string) => ({
     api,
-    generation: current.current.generation,
+    session: current.current.session,
     revision: current.current.revision,
     role,
     provider,
   });
   const keySaved = async (capture: ReturnType<typeof captureKey>, key: KeyRecord) => {
-    const owner = current.current;
-    if (
-      capture.api !== api ||
-      owner.api !== api ||
-      !owner.open ||
-      capture.generation !== owner.generation ||
-      capture.revision !== owner.revision ||
-      document.hidden ||
-      blocked.current ||
-      loadedFor.current !== api
-    )
-      return;
+    const owner = current.current,
+      session = owner.session;
+    const usable = () =>
+      mounted.current &&
+      owner.api === api &&
+      owner.open &&
+      owner.session === session &&
+      !document.hidden &&
+      !blocked.current &&
+      loadedFor.current === api;
+    if (capture.api !== api || !usable()) return;
     const before = owner.index?.keys ?? [];
     try {
       const next = await loadProviderIndex(api);
-      if (
-        !mounted.current ||
-        owner.api !== api ||
-        !owner.open ||
-        capture.generation !== owner.generation ||
-        capture.revision !== owner.revision ||
-        document.hidden ||
-        blocked.current ||
-        loadedFor.current !== api
-      )
-        return;
+      if (!usable()) return;
       owner.index = next;
       setIndex(next);
       const provider = providerById(capture.provider),
         d = owner.draft;
-      if (!provider || !d || d.choices[capture.role]?.provider !== capture.provider) return;
+      if (
+        capture.session !== session ||
+        capture.revision !== owner.revision ||
+        !provider ||
+        !d ||
+        d.choices[capture.role]?.provider !== capture.provider
+      )
+        return;
       const newlyBound = matchingKeys(provider, pickerKeys(next)).filter(
         (row) => !before.some((old) => old.id === row.id),
       );
       if (newlyBound.length !== 1 || newlyBound[0]?.id !== key.id) return;
       change(capture.role, { ...(d.choices[capture.role] as RoleChoice), key: key.id });
     } catch {
-      if (
-        mounted.current &&
-        owner.api === api &&
-        owner.open &&
-        capture.generation === owner.generation &&
-        capture.revision === owner.revision &&
-        !blocked.current &&
-        !document.hidden
-      )
+      if (usable())
         setError(
           "The key was saved, but current model key metadata could not be loaded. Choose its binding after reconnecting.",
         );

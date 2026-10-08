@@ -336,4 +336,38 @@ describe("explicit configuration save ownership", () => {
     });
     expect(result.current.draft?.choices.main?.key).toBeUndefined();
   });
+  it("binds a key saved after switching apps to copy it", async () => {
+    const f = server({ main: { provider: "anthropic", model: "claude-sonnet-5-5" } }),
+      { result } = await opened(f);
+    const context = result.current.captureKey("main", "anthropic");
+    act(() => setHidden(true));
+    act(() => setHidden(false));
+    await waitFor(() => expect(result.current.phase).toBe("ready"));
+    f.state.index.keys.push({ id: "copied", provider: "anthropic" });
+    await act(async () => {
+      await result.current.keySaved(context, { ...storedKey, id: "copied" });
+    });
+    expect(result.current.index?.keys.map((key) => key.id)).toContain("copied");
+    expect(result.current.draft?.choices.main?.key).toBe("copied");
+    expect(result.current.saveEnabled).toBe(true);
+  });
+  it("lists a key saved after other edits without binding it", async () => {
+    const f = server({ main: { provider: "anthropic", model: "claude-sonnet-5-5" } }),
+      { result } = await opened(f);
+    const context = result.current.captureKey("main", "anthropic");
+    act(() => result.current.budget("3", false));
+    f.state.index.keys.push({ id: "later", provider: "anthropic" });
+    await act(async () => {
+      await result.current.keySaved(context, { ...storedKey, id: "later" });
+    });
+    expect(result.current.index?.keys.map((key) => key.id)).toContain("later");
+    expect(result.current.draft?.choices.main?.key).toBeUndefined();
+  });
 });
+const storedKey = {
+  id: "",
+  kind: "llm" as const,
+  provider: "anthropic",
+  createdAt: "t",
+  updatedAt: "t",
+};
