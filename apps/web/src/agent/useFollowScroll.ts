@@ -26,12 +26,27 @@ export const reducedMotion = () =>
 const scrollToEnd = (element: HTMLElement) =>
   element.scrollTo?.({ top: element.scrollHeight, behavior: reducedMotion() ? "auto" : "smooth" });
 
-const topOf = (element: HTMLElement, scroller: HTMLElement) =>
-  element.getBoundingClientRect().top - scroller.getBoundingClientRect().top;
+// Where a row sits in the view, by layout: a row still easing in (a transform) has not moved.
+function topOf(element: HTMLElement, scroller: HTMLElement): number {
+  let top = 0;
+  for (let node: HTMLElement | null = element; node; ) {
+    top += node.offsetTop;
+    const parent: Element | null = node.offsetParent;
+    node =
+      parent instanceof HTMLElement && parent !== scroller && scroller.contains(parent)
+        ? parent
+        : null;
+  }
+  return top - scroller.scrollTop;
+}
 
 // Following the end, the end stays in view; scrolled back, the first [data-anchor] row in view stays
 // put. The browser's own scroll anchoring is off (WebKit has none), so both engines behave alike.
-export function useFollowScroll(owner: string, follow: boolean) {
+// Without glide the end is held at once, in the same frame as the growth, so nothing at the end
+// moves.
+export function useFollowScroll(owner: string, follow: boolean, { glide = true } = {}) {
+  const glides = useRef(glide);
+  glides.current = glide;
   const [pinned, setPinned] = useState(follow);
   const tracking = useRef<Tracking>({
     element: null,
@@ -61,7 +76,7 @@ export function useFollowScroll(owner: string, follow: boolean) {
       }
       // A whole screen or more (a first load, a page) is taken at once; one or two rows glide, from
       // wherever a glide in flight has got to, toward the end as it is when each frame is drawn.
-      if (lift >= element.clientHeight || reducedMotion()) {
+      if (lift >= element.clientHeight || reducedMotion() || !glides.current) {
         if (t.glide) cancelAnimationFrame(t.glide.frame);
         t.glide = null;
         element.scrollTop = end;
@@ -101,7 +116,7 @@ export function useFollowScroll(owner: string, follow: boolean) {
     for (const row of element.querySelectorAll<HTMLElement>("[data-anchor]")) {
       if (row.getBoundingClientRect().bottom > top) {
         t.anchor = row;
-        t.anchorTop = row.getBoundingClientRect().top - top;
+        t.anchorTop = topOf(row, element);
         break;
       }
     }
@@ -180,5 +195,16 @@ export function useFollowScroll(owner: string, follow: boolean) {
       if (t.glide) cancelAnimationFrame(t.glide.frame);
       t.glide = null;
     },
+    // Stops following the end before the reader is moved elsewhere on purpose, such as a page.
+    release() {
+      const t = tracking.current;
+      t.jumping = false;
+      if (t.glide) cancelAnimationFrame(t.glide.frame);
+      t.glide = null;
+      t.anchor = null;
+      setPin(false);
+    },
+    // Read now, not as of the last render.
+    following: () => tracking.current.pinned,
   };
 }
