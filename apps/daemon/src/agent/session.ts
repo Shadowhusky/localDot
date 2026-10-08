@@ -304,9 +304,9 @@ export class AgentSession {
     if (this.#repeatPauseHandler) throw new Error("task safety controller already installed");
     this.#repeatPauseHandler = handler;
   }
-  admitNativeEffect(action: GuiAction, identity: NativeActionIdentity): boolean {
+  admitNativeEffect(action: GuiAction, identity: NativeActionIdentity, call: string): boolean {
     if (this.stopped || this.controlHeld || this.safetyPause) return false;
-    if (this.#repeatGuard.admit(action, identity)) return true;
+    if (this.#repeatGuard.admit(action, identity, call)) return true;
     const requestId = ulid();
     let pause: PauseSnapshot;
     if (this.#repeatPauseHandler) pause = this.#repeatPauseHandler(requestId);

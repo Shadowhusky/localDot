@@ -658,10 +658,20 @@ async function approvedClick(f: ReturnType<typeof setup>, label: string) {
   return pending;
 }
 describe("repeat safety at actual native dispatch", () => {
-  it("third identical key inside one tool batch pauses after exactly two physical effects", async () => {
+  it("one key call with repeat 5 presses five times without pausing", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    repeatController(f);
+    const out = await f.call("computer", { action: "key", keys: ["bracketright"], repeat: 5 });
+    expect(out.body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(5);
+    expect(f.session.safetyPause).toBeUndefined();
+  });
+  it("a third identical call pauses after exactly two physical effects, whatever call id the model sends", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
-    const out = await f.call("computer", { ...repeatedKey, repeat: 3 });
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    expect((await f.call("computer", repeatedKey)).body.ok).toBe(true);
+    const out = await f.call("computer", repeatedKey);
     expect(f.effects()).toHaveLength(2);
     expect(out.body).toMatchObject({ ok: false, pause: true });
     await controller.settled();
@@ -709,7 +719,7 @@ describe("repeat safety at actual native dispatch", () => {
   it("answering the daemon repeat question cannot Resume and explicit Resume resets the streak", async () => {
     const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
-    await f.call("computer", { ...repeatedKey, repeat: 3 });
+    for (let i = 0; i < 3; i++) await f.call("computer", repeatedKey);
     await controller.settled();
     const pause = f.session.safetyPause,
       ask = f.session.pendingAsk;

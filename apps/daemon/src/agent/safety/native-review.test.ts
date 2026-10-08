@@ -288,7 +288,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const pause = f.session.safetyPause;
     const ask = f.session.pendingAsk;
@@ -341,7 +341,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const pause = f.session.safetyPause,
       ask = f.session.pendingAsk;
@@ -375,7 +375,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const ask = f.session.pendingAsk;
     assert.ok(ask);
@@ -393,7 +393,7 @@ describe("review native repeat answer ownership", () => {
     const f = fixture();
     f.run();
     const first = await f.active();
-    await first.c.call({ action: "key", keys: ["ARROWDOWN"], repeat: 3 });
+    for (let i = 0; i < 3; i++) await first.c.call({ action: "key", keys: ["ARROWDOWN"] });
     await f.control.settled();
     const pause = f.session.safetyPause,
       ask = f.session.pendingAsk;

@@ -93,7 +93,7 @@ export async function computerTool(
   const nativeContext: ActionContext = {
     ...selected,
     source: "agent",
-    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
+    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity, ctx.step),
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();
