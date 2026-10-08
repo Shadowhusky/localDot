@@ -284,6 +284,35 @@ describe("key guard at the composer and sealed form boundary", () => {
     expect(document.body.innerHTML + f.metadata.join("")).not.toContain(token);
     absent(f);
   });
+  it("offers no key to move when every key found is a Claude plan token", () => {
+    const SENTENCE =
+      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    const f = fixture();
+    fireEvent.input(f.task, {
+      target: { value: `sk-ant-oat01-${"m".repeat(95)} sk-ant-ort01-${"n".repeat(95)}` },
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "2 Claude plan tokens were removed from your message.",
+    );
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    expect(screen.queryByLabelText("Key to move")).toBeNull();
+    expect(screen.queryByText(/Moving one key/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+    expect(f.task.value).toBe(" ");
+    expect(f.calls).toEqual([]);
+  });
+  it("starts each new notice on its first key, not the one chosen in an earlier notice", () => {
+    const f = fixture();
+    fireEvent.input(f.task, { target: { value: `${keys[0]} ${keys[2]}` } });
+    fireEvent.change(screen.getByLabelText("Key to move"), { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Discard keys and edit" }));
+    fireEvent.input(f.task, { target: { value: `${keys[2]} sk-ant-oat01-${"m".repeat(95)}` } });
+    expect((screen.getByLabelText("Key to move") as HTMLSelectElement).value).toBe("0");
+    expect(screen.getByRole("button", { name: "Move to Keys" })).toBeTruthy();
+    expect(screen.queryByText(/Claude Pro and Max plans/)).toBeNull();
+    absent(f);
+  });
   it("fails closed at finite character and candidate limits, and Remove does not restore overflow text", () => {
     const f = fixture();
     for (const text of ["x".repeat(8001), Array(17).fill(keys[5]).join(" ")]) {

@@ -11,6 +11,8 @@ import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts"
 const SENTENCE =
   "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
 const PLAN_TOKEN = `sk-ant-oat01-${"Qz7_".repeat(24)}`;
+const REFRESH_TOKEN = `sk-ant-ort01-${"Pv5_".repeat(24)}`;
+const API_KEY = `sk-ant-api03-${"Rw8-".repeat(24)}`;
 
 const runs = [
   { name: "Chrome at desktop width", engine: "chrome", phone: false },
@@ -58,8 +60,7 @@ for (const run of runs) {
       const carried: string[] = [];
       page.on("request", (r) => {
         const sent = `${r.url()} ${r.postData() ?? ""}`;
-        if (sent.includes(PLAN_TOKEN) || sent.includes("sk-ant-oat"))
-          carried.push(`${r.method()} ${new URL(r.url()).pathname}`);
+        if (/sk-ant-o[ar]t/.test(sent)) carried.push(`${r.method()} ${new URL(r.url()).pathname}`);
       });
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
@@ -176,7 +177,7 @@ for (const run of runs) {
       await expect(notice).toHaveCount(0);
 
       // With an API key beside it, only the API key can move to Keys.
-      await box.fill(`${PLAN_TOKEN} and sk-ant-api03-${"Rw8-".repeat(24)}`);
+      await box.fill(`${PLAN_TOKEN} and ${API_KEY}`);
       const choice = notice.getByLabel("Key to move");
       await expect(choice).toHaveValue("0");
       expect((await choice.boundingBox())?.height).toBeGreaterThanOrEqual(44);
@@ -185,6 +186,23 @@ for (const run of runs) {
       await choice.selectOption("1");
       await expect(notice.getByText(SENTENCE, { exact: true })).toHaveCount(0);
       await expect(notice.getByRole("button", { name: "Move to Keys" })).toBeVisible();
+      await press(notice.getByRole("button", { name: "Discard keys and edit" }));
+      await expect(notice).toHaveCount(0);
+
+      await box.fill(`${API_KEY} and ${PLAN_TOKEN}`);
+      await expect(choice).toHaveValue("0");
+      await expect(notice.getByRole("button", { name: "Move to Keys" })).toBeVisible();
+      await press(notice.getByRole("button", { name: "Discard keys and edit" }));
+      await expect(notice).toHaveCount(0);
+
+      await box.fill(`${PLAN_TOKEN} and ${REFRESH_TOKEN}`);
+      await expect(notice.getByRole("alert")).toHaveText(
+        "2 Claude plan tokens were removed from your message.",
+      );
+      await expect(notice.getByText(SENTENCE, { exact: true })).toBeVisible();
+      await expect(notice.getByLabel("Key to move")).toHaveCount(0);
+      await expect(notice.getByText(/Moving one key/)).toHaveCount(0);
+      await expect(notice.getByRole("button", { name: "Move to Keys" })).toHaveCount(0);
       await press(notice.getByRole("button", { name: "Discard keys and edit" }));
       await expect(notice).toHaveCount(0);
       expect(carried).toEqual([]);

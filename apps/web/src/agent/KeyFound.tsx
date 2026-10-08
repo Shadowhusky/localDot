@@ -1,7 +1,7 @@
 import { CLAUDE_PLAN_REFUSAL } from "@localdot/protocol";
 import { useState } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
-import type { KeyGuard } from "./useKeyGuard.ts";
+import type { KeyGuard, KeyNotice } from "./useKeyGuard.ts";
 import "./key-guard.css";
 
 export function KeyFound({
@@ -13,11 +13,18 @@ export function KeyFound({
   receive?: KeyIntake["receive"];
   noticeId?: string;
 }) {
-  const [selected, setSelected] = useState(0);
+  const [choice, setChoice] = useState<{ notice: KeyNotice | null; index: number }>({
+    notice: null,
+    index: 0,
+  });
   const notice = guard.notice;
   if (!notice) return null;
-  const index = Math.min(selected, Math.max(0, notice.candidates.length - 1));
+  const count = notice.candidates.length;
+  const index = choice.notice === notice ? Math.min(choice.index, Math.max(0, count - 1)) : 0;
   const planToken = notice.candidates[index]?.hint === "Claude plan token";
+  const onlyPlanTokens =
+    count > 0 && notice.candidates.every((candidate) => candidate.hint === "Claude plan token");
+  const choosing = count > 1 && !onlyPlanTokens;
   return (
     <section className="key-found" aria-label="Key safeguard">
       <p role="alert" id={noticeId}>
@@ -25,16 +32,21 @@ export function KeyFound({
           ? "This text exceeded the key safeguard's limit and was cleared. Paste keys directly into Keys."
           : notice.kind === "transfer_failed"
             ? "Could not move the key. Open Keys and paste it again."
-            : notice.candidates.length === 1
-              ? planToken
+            : onlyPlanTokens
+              ? count === 1
                 ? "A Claude plan token was removed from your message."
-                : "1 recognised key was removed from your message. Discard it or move it to Keys before sending."
-              : `${notice.candidates.length} recognised keys were removed from your message. Discard them or move one to Keys before sending.`}
+                : `${count} Claude plan tokens were removed from your message.`
+              : count === 1
+                ? "1 recognised key was removed from your message. Discard it or move it to Keys before sending."
+                : `${count} recognised keys were removed from your message. Discard them or move one to Keys before sending.`}
       </p>
-      {notice.candidates.length > 1 && (
+      {choosing && (
         <label>
           <span>Key to move</span>
-          <select value={index} onChange={(event) => setSelected(Number(event.target.value))}>
+          <select
+            value={index}
+            onChange={(event) => setChoice({ notice, index: Number(event.target.value) })}
+          >
             {notice.candidates.map((candidate, i) => (
               <option key={`${candidate.start}-${candidate.end}`} value={i}>
                 {candidate.hint} · character {candidate.start + 1}
@@ -44,7 +56,7 @@ export function KeyFound({
         </label>
       )}
       {planToken && <p>{CLAUDE_PLAN_REFUSAL}</p>}
-      {notice.candidates.length > 1 && <p>Moving one key discards the other detected keys.</p>}
+      {choosing && <p>Moving one key discards the other detected keys.</p>}
       <div className="key-found-actions">
         <button type="button" onClick={guard.remove}>
           {notice.kind !== "found"
