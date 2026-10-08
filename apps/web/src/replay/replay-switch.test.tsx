@@ -167,3 +167,28 @@ it("names the recorded task in the top bar and puts nothing over the top of its 
   expect(within(stage).queryByText("Replay")).toBeNull();
   expect(within(stage).queryByText(/\d:\d\d \/ \d:\d\d/)).toBeNull();
 });
+
+it("names the picked task in the top bar at once, never the one it switched from", async () => {
+  const newest = recorded("Newest notes", 120_000);
+  const older = recorded("Older notes", 60_000);
+  const f = fixture([newest, older]);
+  let release = () => {};
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (new URL(String(input)).pathname === `/api/sessions/${older.card.id}/card`) await held;
+    return f.fetchImpl(input, init);
+  }) as typeof fetch;
+  window.history.replaceState(null, "", `/?replay=${newest.card.id}`);
+  const { container } = render(<App fetchImpl={fetchImpl} />);
+  const bar = container.querySelector("header.bar") as HTMLElement;
+  await waitFor(() => expect(within(bar).getByText("Newest notes")).toBeTruthy());
+  fireEvent.click(await sessionCard("Older notes"));
+  await waitFor(() => expect(query("replay")).toBe(older.card.id));
+  expect(within(bar).queryByText("Newest notes")).toBeNull();
+  expect(within(bar).getByText("Older notes")).toBeTruthy();
+  release();
+  await screen.findByRole("heading", { name: "Older notes" });
+  expect(within(bar).getByText("Older notes")).toBeTruthy();
+});

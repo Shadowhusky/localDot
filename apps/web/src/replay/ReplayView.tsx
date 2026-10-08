@@ -40,7 +40,10 @@ const SCREENS = [
 ] as const;
 const NO_VIDEO = new Set(["none", "failed", "expired"]);
 
+export const RECORDED_TASK = "Recorded task";
+
 export interface RecordedTitle {
+  sessionId: string;
   title: string;
   note: string;
 }
@@ -122,9 +125,16 @@ export function ReplayView({
   }, [replay.tMs, replay.playing, replay.map, sessionId]);
 
   const card = replay.card;
+  // A task picked from the library is named from its row until its own card loads.
+  const named = card ?? tasks.cards.find((entry) => entry.id === sessionId) ?? null;
   useEffect(() => {
-    if (card) titled.current?.({ title: taskTitle(card), note: recordedLabel(card, new Date()) });
-  }, [card]);
+    if (named)
+      titled.current?.({
+        sessionId,
+        title: taskTitle(named),
+        note: recordedLabel(named, new Date()),
+      });
+  }, [named, sessionId]);
   useEffect(() => () => titled.current?.(null), []);
 
   const recording = replay.info?.manifest.state;
@@ -161,7 +171,7 @@ export function ReplayView({
   );
   const gapKind = gap?.reason ?? (noticeOver ? undefined : whole);
   const activeStep = stepAt(replay.model, replay.tMs);
-  const title = card ? taskTitle(card) : "Recorded task";
+  const title = named ? taskTitle(named) : RECORDED_TASK;
   const browser = card?.recordings?.browser;
   const twoScreens =
     replay.screen === "browser" || (!!browser && browser.bytes > 0 && !NO_VIDEO.has(browser.state));

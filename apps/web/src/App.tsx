@@ -26,7 +26,7 @@ import { exchangeInstallCode, type InstallLink, takeInstallLink } from "./lib/in
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
-import { type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
+import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
 import { statusFor, taskFacts, taskHud } from "./session/status.ts";
@@ -183,6 +183,7 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
+  const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
   // An export keeps going when Replay closes or moves to another task.
   const [exportJob] = useState(createExportJob);
   useEffect(() => () => exportJob.dispose(), [exportJob]);
@@ -492,8 +493,12 @@ function Theatre({ api }: { api: ApiClient }) {
     <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
       <div className="theatre-content" inert={keysOpen || settings.open}>
         <TopBar
-          title={(replayId && recorded?.title) || (session.model.title ?? "Your computer")}
-          note={replayId ? recorded?.note : undefined}
+          title={
+            replayId
+              ? (shownRecording?.title ?? RECORDED_TASK)
+              : (session.model.title ?? "Your computer")
+          }
+          note={shownRecording?.note}
           live={stageHud.live}
           mode={replayId ? "replay" : "watch"}
           replayEnabled={!!(replayId || newestReplayId)}
