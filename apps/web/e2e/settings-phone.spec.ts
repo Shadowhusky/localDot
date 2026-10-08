@@ -330,5 +330,12 @@ test("chrome at 1440: theme tiles, autonomy rows and pointer-sized pickers", asy
     expect(height, name).toBeGreaterThanOrEqual(32);
     expect(height, name).toBeLessThan(44);
   }
+  await sheet.getByRole("button", { name: "Show memory" }).click();
+  const wells = sheet.locator(".settings-well");
+  await expect(wells).toHaveCount(2);
+  // Memory scrolls with the sheet's body, never in a box of its own.
+  expect(await wells.evaluateAll((all) => all.map((el) => getComputedStyle(el).overflowY))).toEqual(
+    ["visible", "visible"],
+  );
   await browser.close();
 });

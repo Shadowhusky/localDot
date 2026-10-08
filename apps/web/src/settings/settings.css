@@ -287,8 +287,6 @@
 }
 
 .settings-well {
-  max-height: calc(var(--spacing) * 40);
-  overflow: auto;
   padding: calc(var(--spacing) * 3);
   border-radius: var(--radius-md);
   background-color: var(--color-well);
@@ -297,8 +295,6 @@
   font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-scrollbar) transparent;
 }
 
 .settings-swatch {
