@@ -1,5 +1,8 @@
+// Chromium transfers a stream of frames to the render worker. iOS Safari can transfer neither a
+// stream nor a track that yields frames there, so its frames are posted to the worker one by one.
 export interface FrameSource {
-  readable: ReadableStream<VideoFrame>;
+  readable?: ReadableStream<VideoFrame>;
+  frames?: (deliver: (frame: VideoFrame) => void) => void;
   trackId: string;
   first?: VideoFrame;
   // Ends the tap and releases a seed frame that was never handed on.
@@ -53,7 +56,9 @@ export function tapVideoTrack(video: VideoLike): FrameSource | undefined {
   if (!track) return undefined;
   if (typeof MediaStreamTrackProcessor === "undefined") return tapPresentedFrames(video, track.id);
   const clone = track.clone();
-  const processor = new MediaStreamTrackProcessor({ track: clone as MediaStreamTrack & MediaStreamVideoTrack });
+  const processor = new MediaStreamTrackProcessor({
+    track: clone as MediaStreamTrack & MediaStreamVideoTrack,
+  });
   const first = currentFrame(video);
   return {
     readable: processor.readable,
@@ -67,50 +72,31 @@ export function tapVideoTrack(video: VideoLike): FrameSource | undefined {
 }
 
 // Safari decodes into the client's <video> but has no MediaStreamTrackProcessor on the page, so
-// each frame the video presents is copied. A one-frame queue keeps the stage current: a frame
-// that would wait behind the worker is never made, so no GPU memory piles up.
+// each frame the video presents is copied as it is shown.
 function tapPresentedFrames(video: VideoLike, trackId: string): FrameSource | undefined {
   const request = video.requestVideoFrameCallback?.bind(video);
   if (!request) return undefined;
   let handle: number | undefined;
   let ended = false;
-  let controller!: ReadableStreamDefaultController<VideoFrame>;
-  const present = () => {
-    handle = undefined;
-    if (ended) return;
-    if ((controller.desiredSize ?? 0) > 0) {
-      try {
-        controller.enqueue(new VideoFrame(video as unknown as HTMLVideoElement));
-      } catch {}
-    }
-    handle = request(present);
-  };
-  const end = () => {
-    if (ended) return;
-    ended = true;
-    if (handle !== undefined) video.cancelVideoFrameCallback?.(handle);
-    try {
-      controller.close();
-    } catch {}
-  };
-  const readable = new ReadableStream<VideoFrame>(
-    {
-      start(c) {
-        controller = c;
-        handle = request(present);
-      },
-      cancel: end,
-    },
-    new CountQueuingStrategy({ highWaterMark: 1 }),
-  );
   const first = currentFrame(video);
   return {
-    readable,
     trackId,
     first,
+    frames: (deliver) => {
+      const present = () => {
+        handle = undefined;
+        if (ended) return;
+        try {
+          deliver(new VideoFrame(video as unknown as HTMLVideoElement));
+        } catch {}
+        handle = request(present);
+      };
+      if (!ended) handle = request(present);
+    },
     stop: () => {
       first?.close();
-      end();
+      ended = true;
+      if (handle !== undefined) video.cancelVideoFrameCallback?.(handle);
     },
   };
 }

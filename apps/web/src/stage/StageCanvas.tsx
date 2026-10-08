@@ -254,25 +254,48 @@ export const StageCanvas = forwardRef<StageCanvasHandle, StageCanvasProps>(funct
         return;
       }
       // S8's seed frame travels with the readable; both are transferred.
-      const transfer: Transferable[] = source.first
-        ? [source.readable, source.first]
-        : [source.readable];
-      try {
-        worker.postMessage(
-          {
-            type: "frames",
-            sourceId: id,
-            readable: source.readable,
-            first: source.first,
-          } satisfies WorkerIn,
-          transfer,
-        );
-      } catch (err) {
+      if (source.readable) {
+        const transfer: Transferable[] = source.first
+          ? [source.readable, source.first]
+          : [source.readable];
+        try {
+          worker.postMessage(
+            {
+              type: "frames",
+              sourceId: id,
+              readable: source.readable,
+              first: source.first,
+            } satisfies WorkerIn,
+            transfer,
+          );
+        } catch (err) {
+          source.stop();
+          sourceRef.current = null;
+          void source.readable.cancel().catch(() => {});
+          console.warn("could not attach desktop frames", err);
+        }
+        return;
+      }
+      if (!source.frames) {
         source.stop();
         sourceRef.current = null;
-        void source.readable.cancel().catch(() => {});
-        console.warn("could not attach desktop frames", err);
+        return;
       }
+      worker.postMessage(
+        { type: "frames", sourceId: id, pushed: true, first: source.first } satisfies WorkerIn,
+        source.first ? [source.first] : [],
+      );
+      source.frames((frame) => {
+        if (sourceId.current !== id) {
+          frame.close();
+          return;
+        }
+        try {
+          worker.postMessage({ type: "frame", sourceId: id, frame } satisfies WorkerIn, [frame]);
+        } catch {
+          frame.close();
+        }
+      });
     },
     detach() {
       sourceId.current += 1;

@@ -1,6 +1,8 @@
 import type { Camera, Scene } from "@localdot/stage";
 // This polyfill avoids generated functions, keeping the stage compatible with our strict CSP.
 import "pixi.js/unsafe-eval";
+// Loaded here, not by init(): iOS Safari otherwise registers its extensions twice and init fails.
+import "pixi.js/webworker";
 import {
   Application,
   Container,
@@ -59,6 +61,7 @@ export class PixiPresenter implements Presenter {
       backgroundAlpha: 1,
       autoStart: false,
       sharedTicker: false,
+      manageImports: false,
     });
     return new PixiPresenter(app, opts);
   }

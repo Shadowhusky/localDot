@@ -26,6 +26,9 @@ let presenter: PixiPresenter | undefined;
 let replay: WorkerReplay | undefined;
 let pump: { stop(): Promise<void> } | undefined;
 let sourceGeneration = 0;
+let pushed:
+  | { sourceId?: number; controller: ReadableStreamDefaultController<VideoFrame> }
+  | undefined;
 let pendingStats: { generation: number; sourceId?: number; stats: PumpStats } | undefined;
 let probe: { rect: ProbeRect; threshold: number; last: boolean | null } | null = null;
 let model: SessionModel = emptyModel();
@@ -253,26 +256,41 @@ async function handle(m: WorkerIn): Promise<void> {
         scope.postMessage({ type: "oracle-reply", id: m.command.id, reply });
         return;
       }
+      case "frame": {
+        const target = pushed;
+        if (
+          !target ||
+          target.sourceId !== m.sourceId ||
+          (target.controller.desiredSize ?? 0) <= 0
+        ) {
+          m.frame.close();
+          return;
+        }
+        target.controller.enqueue(m.frame);
+        return;
+      }
       case "stop":
       case "frames": {
+        endPushed();
         const generation = ++sourceGeneration;
         pendingStats = undefined;
         await pump?.stop();
         pump = undefined;
         oracle.dispose();
         if (m.type === "frames") {
-          if (replay) {
+          const readable = m.readable ?? (m.pushed ? pushedFrames(m.sourceId) : undefined);
+          if (replay || !readable) {
             m.first?.close();
-            void m.readable.cancel().catch(() => {});
+            void readable?.cancel().catch(() => {});
             return;
           }
           if (!presenter) {
             m.first?.close();
-            await m.readable.cancel();
+            await readable.cancel();
             throw new Error("frames before init");
           }
           pump = pumpFrames(
-            m.readable,
+            readable,
             probing(presenter),
             (stats) => {
               if (generation !== sourceGeneration) return;
@@ -294,6 +312,29 @@ async function handle(m: WorkerIn): Promise<void> {
     report(err);
   }
 }
+// A one-frame queue for frames the page posts one by one: one that would wait is dropped.
+function pushedFrames(sourceId: number | undefined): ReadableStream<VideoFrame> {
+  return new ReadableStream<VideoFrame>(
+    {
+      start(controller) {
+        pushed = { sourceId, controller };
+      },
+      cancel() {
+        if (pushed?.sourceId === sourceId) pushed = undefined;
+      },
+    },
+    new CountQueuingStrategy({ highWaterMark: 1 }),
+  );
+}
+
+function endPushed(): void {
+  const ending = pushed;
+  pushed = undefined;
+  try {
+    ending?.controller.close();
+  } catch {}
+}
+
 function report(err: unknown): void {
   scope.postMessage({ type: "error", message: err instanceof Error ? err.message : String(err) });
 }

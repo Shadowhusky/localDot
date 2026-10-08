@@ -141,44 +141,28 @@ describe("frame source without MediaStreamTrackProcessor", () => {
     if (!support.ok) expect(support.reason).toMatch(/Safari|Chrome/);
   });
 
-  it("copies each presented frame into the stream", async () => {
+  it("delivers each frame the video presents, one by one", () => {
     const { video, made, fire } = stubCallbackVideo();
     const source = tapVideoTrack(video);
-    if (!source) throw new Error("no source");
-    const reader = source.readable.getReader();
+    if (!source?.frames) throw new Error("no frames");
+    expect(source.readable).toBeUndefined();
+    const got: unknown[] = [];
+    source.frames((frame) => got.push(frame));
     fire();
-    const first = await reader.read();
-    expect(first.value).toBe(made[0]);
     fire();
-    expect((await reader.read()).value).toBe(made[1]);
+    expect(got).toEqual([made[0], made[1]]);
     source.stop();
   });
 
-  it("drops frames instead of queueing them while the worker is behind", async () => {
-    const { video, made, fire } = stubCallbackVideo();
+  it("stops asking for frames on stop", () => {
+    const { video, made, fire, cancelled, armed } = stubCallbackVideo();
     const source = tapVideoTrack(video);
-    if (!source) throw new Error("no source");
-    fire();
-    fire();
-    fire();
-    // Only the first frame fits the queue; the others are never made, so nothing leaks.
-    expect(made).toHaveLength(1);
-    const reader = source.readable.getReader();
-    expect((await reader.read()).value).toBe(made[0]);
-    fire();
-    expect(made).toHaveLength(2);
-    source.stop();
-  });
-
-  it("stops asking for frames and ends the stream on stop", async () => {
-    const { video, fire, cancelled, armed } = stubCallbackVideo();
-    const source = tapVideoTrack(video);
-    if (!source) throw new Error("no source");
-    const reader = source.readable.getReader();
+    if (!source?.frames) throw new Error("no frames");
+    source.frames(() => {});
     expect(armed()).toBe(true);
     source.stop();
     expect(cancelled).toHaveLength(1);
     fire();
-    expect((await reader.read()).done).toBe(true);
+    expect(made).toHaveLength(0);
   });
 });
