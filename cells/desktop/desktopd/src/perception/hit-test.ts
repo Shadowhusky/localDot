@@ -7,6 +7,7 @@ import {
   type Target,
 } from "@localdot/protocol";
 import type { XHelper } from "../x/helper.ts";
+import type { Screenshots } from "./capture.ts";
 import type { ChromiumPerception } from "./cdp.ts";
 import type { CuaDriver, DriverElement } from "./driver.ts";
 import { appToolkit, elementToolkit, frameToDevice, menuBarHeight } from "./mapping.ts";
@@ -28,6 +29,7 @@ export interface HelperWindow {
 export interface PerceptionDeps {
   x: XHelper;
   driver: CuaDriver;
+  screenshots?: Screenshots;
   cdp?: ChromiumPerception;
   native?: NativeAccessibility;
   scale: 1 | 2;

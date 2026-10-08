@@ -1,15 +1,18 @@
-"""localDot desktopd X helper: XTest injection, window activation, XI2 raw-press stamps and settle
-(DAMAGE, window changes, app pings).
+"""localDot desktopd X helper: XTest injection, window activation, XI2 raw-press stamps, settle
+(DAMAGE, window changes, app pings) and root capture.
 
 Runs as the desktop user with DISPLAY set. JSON lines over stdio:
   request  {"id": 1, "cmd": "click", ...} -> {"id": 1, "ok": true, ...} | {"id": 1, "ok": false, "error": "..."}
   event    {"ev": "press"|"release", "kind": "button"|"key", "detail": 1, "mono": 12345.678}
 Times are CLOCK_MONOTONIC milliseconds (time.monotonic_ns() / 1e6), the clock desktopd's Node
 process reads through process.hrtime, so nothing inside the cell needs a clock mapping.
-Two X connections: `cmd` serves requests on the main thread, `evt` feeds the listener thread.
+X connections: `cmd` serves requests on the main thread, `evt` feeds the listener thread, and
+`capture` opens an Xlib one for MIT-SHM on first use.
 """
 import collections
+import ctypes
 import json
+import os
 import select
 import sys
 import threading
@@ -351,6 +354,137 @@ class Listener(threading.Thread):
             self.geometry.pop(wid, None)
 
 
+class RootShm:
+    """The root window through MIT-SHM: the server copies its pixels into a shared segment."""
+
+    class Segment(ctypes.Structure):
+        _fields_ = [("shmseg", ctypes.c_ulong), ("shmid", ctypes.c_int),
+                    ("shmaddr", ctypes.c_void_p), ("readOnly", ctypes.c_int)]
+
+    class Image(ctypes.Structure):
+        _fields_ = [("width", ctypes.c_int), ("height", ctypes.c_int), ("xoffset", ctypes.c_int),
+                    ("format", ctypes.c_int), ("data", ctypes.c_void_p), ("byte_order", ctypes.c_int),
+                    ("bitmap_unit", ctypes.c_int), ("bitmap_bit_order", ctypes.c_int),
+                    ("bitmap_pad", ctypes.c_int), ("depth", ctypes.c_int),
+                    ("bytes_per_line", ctypes.c_int), ("bits_per_pixel", ctypes.c_int),
+                    ("red_mask", ctypes.c_ulong), ("green_mask", ctypes.c_ulong),
+                    ("blue_mask", ctypes.c_ulong)]
+
+    class Error(ctypes.Structure):
+        _fields_ = [("type", ctypes.c_int), ("display", ctypes.c_void_p),
+                    ("resourceid", ctypes.c_ulong), ("serial", ctypes.c_ulong),
+                    ("error_code", ctypes.c_ubyte), ("request_code", ctypes.c_ubyte),
+                    ("minor_code", ctypes.c_ubyte)]
+
+    def __init__(self):
+        x11 = ctypes.CDLL("libX11.so.6")
+        xext = ctypes.CDLL("libXext.so.6")
+        libc = ctypes.CDLL(None, use_errno=True)
+        x11.XOpenDisplay.restype = ctypes.c_void_p
+        x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XDefaultScreen.argtypes = [ctypes.c_void_p]
+        x11.XDefaultVisual.restype = ctypes.c_void_p
+        x11.XDefaultVisual.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong
+        x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x11.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+        x11.XFree.argtypes = [ctypes.c_void_p]
+        xext.XShmQueryExtension.argtypes = [ctypes.c_void_p]
+        xext.XShmCreateImage.restype = ctypes.POINTER(RootShm.Image)
+        xext.XShmCreateImage.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint, ctypes.c_int,
+                                         ctypes.c_char_p, ctypes.POINTER(RootShm.Segment),
+                                         ctypes.c_uint, ctypes.c_uint]
+        xext.XShmAttach.argtypes = [ctypes.c_void_p, ctypes.POINTER(RootShm.Segment)]
+        xext.XShmDetach.argtypes = [ctypes.c_void_p, ctypes.POINTER(RootShm.Segment)]
+        xext.XShmGetImage.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.POINTER(RootShm.Image),
+                                      ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+        libc.shmget.argtypes = [ctypes.c_int, ctypes.c_size_t, ctypes.c_int]
+        libc.shmat.restype = ctypes.c_void_p
+        libc.shmat.argtypes = [ctypes.c_int, ctypes.c_void_p, ctypes.c_int]
+        libc.shmdt.argtypes = [ctypes.c_void_p]
+        libc.shmctl.argtypes = [ctypes.c_int, ctypes.c_int, ctypes.c_void_p]
+        self.x11, self.xext, self.libc = x11, xext, libc
+        self.errors = []
+
+        # Xlib's default error handler ends the process; record the error and fail the capture.
+        def on_error(_dpy, err):
+            self.errors.append(err.contents.error_code)
+            return 0
+        self.on_error = ctypes.CFUNCTYPE(ctypes.c_int, ctypes.c_void_p, ctypes.POINTER(RootShm.Error))(on_error)
+        x11.XSetErrorHandler(self.on_error)
+        self.dpy = x11.XOpenDisplay(None)
+        if not self.dpy:
+            raise RuntimeError("capture: cannot open the display")
+        if not xext.XShmQueryExtension(self.dpy):
+            raise RuntimeError("capture: the server has no MIT-SHM")
+        self.root = x11.XDefaultRootWindow(self.dpy)
+        self.visual = x11.XDefaultVisual(self.dpy, x11.XDefaultScreen(self.dpy))
+        self.segment = RootShm.Segment()
+        self.image = None
+        self.size = None
+
+    def _free(self, image):
+        image.contents.data = None
+        self.x11.XFree(image)
+
+    def _release(self):
+        if self.image is None:
+            return
+        self.xext.XShmDetach(self.dpy, ctypes.byref(self.segment))
+        self.x11.XSync(self.dpy, 0)
+        self.libc.shmdt(self.segment.shmaddr)
+        self._free(self.image)
+        self.image = None
+        self.size = None
+
+    def _create(self, width, height):
+        self._release()
+        image = self.xext.XShmCreateImage(self.dpy, self.visual, 24, X.ZPixmap, None,
+                                          ctypes.byref(self.segment), width, height)
+        if not image:
+            raise RuntimeError("capture: XShmCreateImage failed")
+        im = image.contents
+        if (im.bits_per_pixel != 32 or im.byte_order != X.LSBFirst
+                or (im.red_mask, im.green_mask, im.blue_mask) != (0xFF0000, 0xFF00, 0xFF)):
+            self._free(image)
+            raise RuntimeError("capture: unsupported pixel format")
+        shmid = self.libc.shmget(0, im.bytes_per_line * height, 0o1600)
+        if shmid < 0:
+            self._free(image)
+            raise RuntimeError("capture: shmget failed (errno %d)" % ctypes.get_errno())
+        addr = self.libc.shmat(shmid, None, 0)
+        if addr in (None, ctypes.c_void_p(-1).value):
+            self.libc.shmctl(shmid, 0, None)
+            self._free(image)
+            raise RuntimeError("capture: shmat failed (errno %d)" % ctypes.get_errno())
+        self.segment.shmid = shmid
+        self.segment.shmaddr = addr
+        self.segment.readOnly = 0
+        im.data = addr
+        self.errors.clear()
+        attached = self.xext.XShmAttach(self.dpy, ctypes.byref(self.segment))
+        self.x11.XSync(self.dpy, 0)
+        # IPC_RMID at once: the segment goes when both the server and this process detach.
+        self.libc.shmctl(shmid, 0, None)
+        if not attached or self.errors:
+            self.libc.shmdt(addr)
+            self._free(image)
+            raise RuntimeError("capture: XShmAttach failed")
+        self.image = image
+        self.size = (width, height)
+
+    def grab(self, width, height):
+        """The root's BGRX pixels in the shared segment (valid until the next grab) and their stride."""
+        if self.size != (width, height):
+            self._create(width, height)
+        self.errors.clear()
+        ok = self.xext.XShmGetImage(self.dpy, self.root, self.image, 0, 0, ctypes.c_ulong(-1).value)
+        if not ok or self.errors:
+            raise RuntimeError("capture: XShmGetImage failed")
+        stride = self.image.contents.bytes_per_line
+        return (ctypes.c_char * (stride * height)).from_address(self.segment.shmaddr), stride
+
+
 class Commands:
     pause = staticmethod(time.sleep)
 
@@ -358,6 +492,7 @@ class Commands:
         self.d = display.Display()
         self.root = self.d.screen().root
         self.screen = screen
+        self.shm = None
         self.pings = 0
         self.WM_PROTOCOLS = self.d.intern_atom("WM_PROTOCOLS")
         self.NET_WM_PING = self.d.intern_atom("_NET_WM_PING")
@@ -600,6 +735,45 @@ class Commands:
                 return {"changed": [], "lastChange": None, "quiet": True, "noVisibleChange": True}
             self.pause(0.01)
 
+    def grab(self, width, height):
+        if self.shm is None:
+            try:
+                self.shm = RootShm()
+            except Exception as err:  # noqa: BLE001 - the protocol path below still works
+                sys.stderr.write("capture: MIT-SHM unavailable, using GetImage (%s)\n" % err)
+                self.shm = False
+        if self.shm:
+            return self.shm.grab(width, height)
+        info = self.d.display.info
+        visual = self.d.screen().root_visual
+        formats = [f for f in info.pixmap_formats if f.depth == 24]
+        masks = [(v.red_mask, v.green_mask, v.blue_mask) for depth in self.d.screen().allowed_depths
+                 for v in depth.visuals if v.visual_id == visual]
+        if (len(formats) != 1 or formats[0].bits_per_pixel != 32 or info.image_byte_order != X.LSBFirst
+                or masks != [(0xFF0000, 0xFF00, 0xFF)]):
+            raise RuntimeError("capture: unsupported pixel format")
+        image = self.root.get_image(0, 0, width, height, X.ZPixmap, 0xFFFFFFFF)
+        if len(image.data) != width * height * 4:
+            raise RuntimeError("capture: unexpected image size")
+        return image.data, width * 4
+
+    # The whole root as BGRX rows at device resolution, written in place into `path` (a tmpfs file
+    # desktopd reads); reusing the file keeps its pages, so the write is one copy.
+    def cmd_capture(self, a):
+        g = self.root.get_geometry()
+        t = mono()
+        pixels, stride = self.grab(g.width, g.height)
+        view = memoryview(pixels).cast("B")
+        fd = os.open(a["path"], os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            if os.fstat(fd).st_size != len(view):
+                os.ftruncate(fd, len(view))
+            done = 0
+            while done < len(view):
+                done += os.pwrite(fd, view[done:], done)
+        finally:
+            os.close(fd)
+        return {"width": g.width, "height": g.height, "stride": stride, "mono": t}
 
 
 def main():

@@ -252,7 +252,9 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     }
   };
   app.post("/observe", (c) =>
-    withPerception(async (p) => c.json(await observe({ driver: p.driver, x: p.x })))(),
+    withPerception(async (p) =>
+      c.json(await observe({ driver: p.driver, x: p.x, screenshots: p.screenshots })),
+    )(),
   );
   app.post("/focused", (c) => withPerception(async (p) => c.json(await focusedTarget(p)))());
   app.post("/hitTest", (c) =>

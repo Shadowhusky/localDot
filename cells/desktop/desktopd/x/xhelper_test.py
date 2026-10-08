@@ -1,6 +1,8 @@
 import importlib.util
+import os
 from pathlib import Path
 import sys
+import tempfile
 import types
 import unittest
 from unittest.mock import patch
@@ -362,6 +364,36 @@ class ListenerWindowEvents(unittest.TestCase):
         lst.window_event(pong(4), 12)
         lst.window_event(pong(4), 50)
         self.assertEqual(screen.snapshot(4).pong, 12)
+
+
+class Capture(unittest.TestCase):
+    def test_writes_the_root_in_place_and_reports_its_layout(self):
+        cmds = xhelper.Commands.__new__(xhelper.Commands)
+        frames = [bytes([1, 2, 3, 0]) * 8, bytes([9, 8, 7, 0]) * 8]
+        cmds.root = types.SimpleNamespace(get_geometry=lambda: types.SimpleNamespace(width=4, height=2))
+        cmds.grab = lambda w, h: (frames.pop(0), w * 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "frame.raw")
+            first = cmds.cmd_capture({"path": path})
+            inode = os.stat(path).st_ino
+            self.assertEqual((first["width"], first["height"], first["stride"]), (4, 2, 16))
+            self.assertEqual(Path(path).read_bytes(), bytes([1, 2, 3, 0]) * 8)
+            cmds.cmd_capture({"path": path})
+            self.assertEqual(Path(path).read_bytes(), bytes([9, 8, 7, 0]) * 8)
+            self.assertEqual(os.stat(path).st_ino, inode)
+            self.assertEqual(oct(os.stat(path).st_mode & 0o777), "0o600")
+
+    def test_refuses_to_follow_a_symlink(self):
+        cmds = xhelper.Commands.__new__(xhelper.Commands)
+        cmds.root = types.SimpleNamespace(get_geometry=lambda: types.SimpleNamespace(width=1, height=1))
+        cmds.grab = lambda w, h: (bytes(4), 4)
+        with tempfile.TemporaryDirectory() as tmp:
+            target = os.path.join(tmp, "elsewhere")
+            Path(target).write_bytes(b"keep")
+            os.symlink(target, os.path.join(tmp, "frame.raw"))
+            with self.assertRaises(OSError):
+                cmds.cmd_capture({"path": os.path.join(tmp, "frame.raw")})
+            self.assertEqual(Path(target).read_bytes(), b"keep")
 
 
 if __name__ == "__main__":

@@ -4,6 +4,7 @@ import { createDesktopdApp, monoNow } from "./app.ts";
 import { MIN_TOKEN_LENGTH } from "./auth.ts";
 import { prepareDesktopBrowser } from "./browser-profile.ts";
 import { launchApp } from "./launch.ts";
+import { captureFile, Screenshots } from "./perception/capture.ts";
 import { ChromiumPerception } from "./perception/cdp.ts";
 import { CuaDriver } from "./perception/driver.ts";
 import { driverInjector } from "./perception/find.ts";
@@ -62,6 +63,7 @@ await ensureHelper();
 setInterval(() => void ensureHelper(), 2000).unref();
 
 const driver = new CuaDriver(CuaDriver.defaultOptions());
+const screenshots = new Screenshots(captureFile(uid));
 const native = new AtspiAccessibility();
 const cdp = new ChromiumPerception({
   originProvider: async (win) => {
@@ -92,7 +94,7 @@ const app = createDesktopdApp({
   launch: (req) => launchApp(req, process.env),
   clockMono: monoNow,
   get perception(): PerceptionDeps | undefined {
-    return x ? { x, driver, native, cdp, scale, readScaling: scaling } : undefined;
+    return x ? { x, driver, screenshots, native, cdp, scale, readScaling: scaling } : undefined;
   },
   get injectors() {
     return x
