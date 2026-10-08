@@ -472,7 +472,6 @@ test.describe("ChatGPT plan states on the fixture daemon", () => {
         const settings = page.getByRole("button", { name: "Settings", exact: true });
         if ("phone" in view) await settings.tap();
         else await settings.click();
-        // The panel by its own name, the same before and after Settings moved onto the kit.
         const panel = page.getByRole("region", { name: "ChatGPT plan", exact: true });
         await expect(panel.getByRole("heading", { name: "ChatGPT plan" })).toBeVisible();
         await check(panel, page, view);

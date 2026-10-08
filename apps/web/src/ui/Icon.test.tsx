@@ -36,7 +36,6 @@ const PLANNED: IconName[] = [
   "key-round",
   "sliders-horizontal",
   "copy",
-  // Not in the plan's list: the Paste beside the Keys sheet's key field (T20).
   "clipboard-paste",
   "download",
   "undo-2",
