@@ -2,13 +2,16 @@ import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promi
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
 import { imageRef, ReleaseManifest } from "../../../../packages/protocol/src/release.ts";
+import { DEFAULT_AUTONOMY } from "../../../../packages/protocol/src/safety.ts";
 import { sampleManifest } from "../../../../packages/protocol/src/testing/sample-release.ts";
 import { ComputerFences } from "../../../daemon/src/agent/safety/fences.ts";
+import { SafetyIntentStore } from "../../../daemon/src/agent/safety/store.ts";
 import { DockerError, type DockerRequest } from "../../../daemon/src/cells/docker.ts";
 import type { runtimeCandidateSpec } from "../../../daemon/src/cells/runtime-update-candidate.ts";
 import { RuntimeUpdateStore } from "../../../daemon/src/cells/runtime-update-store.ts";
 import { cellNames } from "../../../daemon/src/cells/spec.ts";
 import type { CellRecord } from "../../../daemon/src/cells/types.ts";
+import { EventLog } from "../../../daemon/src/event-log.ts";
 import { prepareInstalledRuntimes } from "./prepare-runtimes.ts";
 import { serviceConfigurationId } from "./service-definition.ts";
 
@@ -317,6 +320,32 @@ it("keeps a durable native-fenced identity untouched while updating another comp
   new ComputerFences(f.home).capture(retired.id, "01JXYZ00000000000000000009", "native");
   await f.run();
   expect(await f.saved(retired.id)).toEqual(retired);
+  expect(f.mutations).toHaveLength(4);
+});
+it("updates a computer whose finished task left a Pause intent, but not one that crashed mid-Pause", async () => {
+  const f = await fixture(2),
+    stale = required(f.sources[0]),
+    crashed = required(f.sources[1]);
+  const log = new EventLog(f.home),
+    intents = new SafetyIntentStore(f.home),
+    pause = {
+      requestId: "01JXYZ0000000000000000000A",
+      revision: 1,
+      reason: "user" as const,
+      phase: "pausing" as const,
+      atStepBoundary: false,
+      resumeAvailable: false,
+    };
+  const finished = log.createSession("paused, then stopped by an older build"),
+    running = log.createSession("crashed mid-pause");
+  intents.write(finished, stale.id, DEFAULT_AUTONOMY, pause, "native");
+  intents.write(running, crashed.id, DEFAULT_AUTONOMY, pause, "native");
+  log.append(finished, { type: "session.end", agent: "main", data: { reason: "stopped" } });
+  log.close();
+  await f.run();
+  expect(new ComputerFences(f.home).records().map((r) => r.cellId)).toEqual([crashed.id]);
+  expect(await f.saved(crashed.id)).toEqual(crashed);
+  expect((await f.saved(stale.id)).ownership?.desktop).not.toBe(stale.ownership?.desktop);
   expect(f.mutations).toHaveLength(4);
 });
 it("rolls back a batch containing both completed and interrupted computer migrations", async () => {

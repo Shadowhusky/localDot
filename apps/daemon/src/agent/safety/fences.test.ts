@@ -25,12 +25,11 @@ function open(dir: string): EventLog {
 // Startup order in main.ts: the event log recovers first, then the fences read their records.
 function restart(dir: string): ComputerFences {
   for (const log of logs.splice(0)) log.close();
-  const log = open(dir);
-  return new ComputerFences(
-    dir,
-    () => false,
-    (sessionId) => log.ended(sessionId),
-  );
+  open(dir);
+  return new ComputerFences(dir);
+}
+function stopService(): void {
+  for (const log of logs.splice(0)) log.close();
 }
 function pause(phase: PauseSnapshot["phase"]): PauseSnapshot {
   return {
@@ -117,4 +116,33 @@ it("an unsettled intent fences after a crash but not once its task recorded its 
   const fences = restart(dir);
   expect(fences.isFenced(crashedCell)).toBe(true);
   expect(fences.isFenced(endedCell)).toBe(false);
+});
+
+it("reading the fences while the service is stopped leaves a finished task's intent unfenced", () => {
+  const dir = home(),
+    log = open(dir),
+    cellId = ulid(),
+    session = log.createSession("paused, then stopped by an older build");
+  new SafetyIntentStore(dir).write(session, cellId, DEFAULT_AUTONOMY, pause("resuming"), "native");
+  log.append(session, { type: "session.end", agent: "main", data: { reason: "stopped" } });
+  stopService();
+  expect(new ComputerFences(dir).records()).toEqual([]);
+  expect(readdirSync(join(dir, "safety", "fences"))).toEqual([]);
+  expect(restart(dir).isFenced(cellId)).toBe(false);
+});
+
+it("an unsettled intent still fences when its task log cannot be read", () => {
+  const dir = home(),
+    log = open(dir),
+    cellId = ulid(),
+    session = log.createSession("crashed mid-pause");
+  new SafetyIntentStore(dir).write(session, cellId, DEFAULT_AUTONOMY, pause("pausing"), "api");
+  stopService();
+  const events = join(dir, "sessions", session, "events.jsonl");
+  rmSync(events, { force: true });
+  mkdirSync(events);
+  const fences = new ComputerFences(dir);
+  expect(fences.isFenced(cellId)).toBe(true);
+  expect(fences.isFenced(ulid())).toBe(false);
+  expect(fences.record(cellId)).toMatchObject({ cellId, sessionId: session, executor: "api" });
 });

@@ -27,6 +27,7 @@ import {
   ulidTime,
 } from "@localdot/protocol";
 import { type Clock, monotonicClock } from "./clock.ts";
+import { parseLine, readValid } from "./event-file.ts";
 import { DatabaseSync, type StatementSync } from "./sqlite.ts";
 
 const BUSY_TIMEOUT_MS = 2000;
@@ -142,13 +143,6 @@ export class EventLog {
       ULID_PATTERN.test(sessionId) &&
       !this.hasPendingDeletion(sessionId) &&
       existsSync(join(this.#root, sessionId))
-    );
-  }
-
-  ended(sessionId: string): boolean {
-    return (
-      this.hasSession(sessionId) &&
-      this.read(sessionId).some((event) => event.type === "session.end")
     );
   }
 
@@ -364,27 +358,6 @@ function syncDirectory(directory: string): void {
 
 function sizeOf(file: string): number {
   return statSync(file, { throwIfNoEntry: false })?.size ?? 0;
-}
-
-// Only the unterminated tail can be a torn write; a complete line that fails to parse is skipped.
-function readValid(file: string): { events: LocalDotEvent[]; validBytes: number } {
-  if (!existsSync(file)) return { events: [], validBytes: 0 };
-  const bytes = readFileSync(file);
-  const validBytes = bytes.lastIndexOf(0x0a) + 1;
-  const events = bytes
-    .subarray(0, validBytes)
-    .toString("utf8")
-    .split("\n")
-    .flatMap((line) => parseLine(line) ?? []);
-  return { events, validBytes };
-}
-
-function parseLine(line: string): LocalDotEvent | undefined {
-  try {
-    return parseEvent(JSON.parse(line));
-  } catch {
-    return undefined;
-  }
 }
 
 function writeMeta(dir: string, meta: SessionMeta): void {
