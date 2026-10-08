@@ -25,6 +25,7 @@ import {
   bindingOf,
   CHATGPT,
   checkChatgptChoice,
+  planOnly,
   pricingOf,
   type ResolvedRole,
   type Role,
@@ -411,6 +412,7 @@ export class AgentRunner {
             provider: role.providerId,
             model: role.model.id,
           })),
+          ...(planOnly(selection.roles) ? { plan: true as const } : {}),
         };
   }
   activeChatgptTasks(): number {
@@ -456,6 +458,8 @@ export class AgentRunner {
     if (!rt) throw new AgentError(404, "no such live task");
     if (rt.selection.kind === "chatgpt")
       throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
+    if (planOnly(rt.selection.roles))
+      throw new AgentError(409, "This task uses your plan's limits.");
     await this.#exclusive(rt, async () => {
       const { session, brain } = rt;
       const generation = session.generation;

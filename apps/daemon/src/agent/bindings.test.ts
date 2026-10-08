@@ -2,7 +2,7 @@ import type { KeydRecord } from "@localdot/protocol";
 import { keydRouteModel, normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { describe, expect, it } from "vitest";
-import { BindingError, bindingOf, resolveRole } from "./bindings.ts";
+import { BindingError, bindingOf, planOnly, pricingOf, resolveRole } from "./bindings.ts";
 
 const catalog = normalizeCatalog(MODELS_DEV_FIXTURE, "2026-10-02T00:00:00.000Z");
 const at = "2026-10-02T00:00:00Z";
@@ -277,27 +277,111 @@ describe("vendor presets and plans", () => {
     ).toThrow(/Use a Moonshot API key here instead\.$/);
   });
 
-  it("still asks for a manual price on a $0 plan model until plan routes are flat-rate", () => {
+  it("prices a plan at zero on a flat route, with no manual price", () => {
     const choice = { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "minimax" };
-    expect(() => resolveRole("main", choice, catalog, vendorKeys)).toThrow(
-      /MiniMax-M3 has no price in the catalog/,
-    );
-    const priced = resolveRole(
-      "main",
-      { ...choice, price: { inputUSDPerMTok: 0.3, outputUSDPerMTok: 1.2 } },
-      catalog,
-      vendorKeys,
-    );
-    expect(keydRouteModel(priced.model)).toEqual({
+    const plan = resolveRole("main", choice, catalog, vendorKeys);
+    expect(plan.flat).toBe(true);
+    expect(keydRouteModel(plan.model)).toEqual({
       id: "MiniMax-M3",
-      inputUSDPerMTok: 0.3,
-      outputUSDPerMTok: 1.2,
+      inputUSDPerMTok: 0,
+      outputUSDPerMTok: 0,
       maxOutputTokens: 512_000,
     });
-    expect(bindingOf(priced, { minimax: SURROGATE })).toMatchObject({
+    expect(bindingOf(plan, { minimax: SURROGATE })).toMatchObject({
       route: "minimax",
       client: "openai-compatible",
       vision: true,
     });
+    expect(pricingOf([plan])).toEqual({
+      v: 1,
+      routes: [
+        {
+          route: "minimax",
+          flat: true,
+          models: [
+            { id: "MiniMax-M3", inputUSDPerMTok: 0, outputUSDPerMTok: 0, maxOutputTokens: 16_000 },
+          ],
+        },
+      ],
+    });
+    expect(planOnly([plan])).toBe(true);
+    expect(() =>
+      resolveRole(
+        "main",
+        { ...choice, price: { inputUSDPerMTok: 0.3, outputUSDPerMTok: 1.2 } },
+        catalog,
+        vendorKeys,
+      ),
+    ).toThrow(
+      new BindingError(
+        "main",
+        "MiniMax Token Plan takes no manual price; choose its model again in Settings",
+      ),
+    );
+  });
+
+  it("keeps a plan flat even if the catalog starts to price its models", () => {
+    const priced = structuredClone(catalog);
+    const model = priced.providers["minimax-coding-plan"]?.models["MiniMax-M3"];
+    if (!model) throw new Error("fixture plan model missing");
+    Object.assign(model, { inputUSDPerMTok: 2, outputUSDPerMTok: 8, cacheReadUSDPerMTok: 1 });
+    const plan = resolveRole(
+      "main",
+      { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "minimax" },
+      priced,
+      vendorKeys,
+    );
+    expect(pricingOf([plan]).routes[0]?.models[0]).toEqual({
+      id: "MiniMax-M3",
+      inputUSDPerMTok: 0,
+      outputUSDPerMTok: 0,
+      maxOutputTokens: 16_000,
+    });
+  });
+
+  it("keeps the dollar budget for a paid fast role beside a plan main", () => {
+    const main = resolveRole(
+      "main",
+      { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "minimax" },
+      catalog,
+      vendorKeys,
+    );
+    const fast = resolveRole(
+      "fast",
+      { provider: "zai", model: "glm-5v-turbo", key: "zai" },
+      catalog,
+      vendorKeys,
+    );
+    expect(fast.flat).toBeUndefined();
+    expect(pricingOf([main, fast]).routes).toEqual([
+      expect.objectContaining({ route: "minimax", flat: true }),
+      {
+        route: "zai",
+        models: [expect.objectContaining({ inputUSDPerMTok: 1.2, outputUSDPerMTok: 4 })],
+      },
+    ]);
+    expect(planOnly([main, fast])).toBe(false);
+    expect(planOnly([fast])).toBe(false);
+    const local = resolveRole("local", { provider: "ollama", model: "qwen3.8:27b" }, catalog, []);
+    expect(planOnly([main, local])).toBe(true);
+    expect(planOnly([local])).toBe(false);
+  });
+
+  it("refuses one key used both as a plan and as a paid key in one task", () => {
+    const plan = resolveRole(
+      "main",
+      { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "minimax" },
+      catalog,
+      vendorKeys,
+    );
+    const paid = resolveRole(
+      "fast",
+      { provider: "minimax", model: "MiniMax-M3", key: "minimax" },
+      catalog,
+      vendorKeys,
+    );
+    expect(() => pricingOf([plan, paid])).toThrow(
+      new BindingError("fast", "key minimax is a plan for one model and pay as you go for another"),
+    );
   });
 });

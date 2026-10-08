@@ -50,6 +50,8 @@ export interface ResolvedRole {
   model: CatalogModel;
   capability: Capability;
   keyId?: string;
+  // A plan the provider bills at a flat rate: priced at zero, on a route keyd marks flat.
+  flat?: true;
 }
 function endpoint(raw: string): string {
   const url = new URL(raw);
@@ -111,7 +113,12 @@ export function resolveRole(
       `${choice.model} is not in the ${provider.name} catalog; refresh the catalog`,
     );
   model = { ...model };
-  if (provider.local) {
+  if (provider.plan && choice.price)
+    throw new BindingError(
+      role,
+      `${provider.name} takes no manual price; choose its model again in Settings`,
+    );
+  if (provider.local || provider.plan) {
     model.inputUSDPerMTok = 0;
     model.outputUSDPerMTok = 0;
     delete model.cacheReadUSDPerMTok;
@@ -155,7 +162,14 @@ export function resolveRole(
     model,
     capability,
     ...(keyId ? { keyId } : {}),
+    ...(provider.plan ? { flat: true as const } : {}),
   });
+}
+// No role is billed per token and at least one runs on a plan: no dollar budget applies.
+export function planOnly(roles: readonly ResolvedRole[]): boolean {
+  return (
+    roles.some((r) => r.flat) && roles.every((r) => r.flat || providerById(r.providerId)?.local)
+  );
 }
 export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): ModelBinding {
   const surrogate = r.keyId && Object.hasOwn(surrogates, r.keyId) ? surrogates[r.keyId] : undefined;
@@ -178,7 +192,14 @@ export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): 
 // are real secret-backed/local routes; this never mutates shared route model tables or aliases.
 export function pricingOf(roles: readonly ResolvedRole[]): TaskPricing {
   const routes = new Map<string, Map<string, ReturnType<typeof keydRouteModel>>>();
+  const flat = new Map<string, boolean>();
   for (const r of roles) {
+    if ((flat.get(r.route) ?? !!r.flat) !== !!r.flat)
+      throw new BindingError(
+        r.role,
+        `key ${r.route} is a plan for one model and pay as you go for another`,
+      );
+    flat.set(r.route, !!r.flat);
     const model = keydRouteModel({
       ...r.model,
       maxOutputTokens: Math.min(r.model.maxOutputTokens, OUTPUT_CAP_TOKENS),
@@ -200,6 +221,7 @@ export function pricingOf(roles: readonly ResolvedRole[]): TaskPricing {
         .sort(([a], [b]) => a.localeCompare(b))
         .map(([route, models]) => ({
           route,
+          ...(flat.get(route) ? { flat: true } : {}),
           models: [...models.values()].sort((a, b) => a.id.localeCompare(b.id)),
         })),
     }),
