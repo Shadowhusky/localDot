@@ -577,6 +577,23 @@ for (const [engine, launch] of Object.entries(ENGINES))
           await context.close();
         });
 
+      if (!touch)
+        test("a banner's close button lines up with the buttons beside it", async () => {
+          const { context, page, seen } = await open(browser, device);
+          await page.getByTestId("below-banner").scrollIntoViewIfNeeded();
+          await press(page.getByRole("button", { name: "Show a message" }));
+          const banner = page.locator(".feedback-flow .ui-banner");
+          await settled(page.locator(".feedback-flow > .ui-banner-reveal"));
+          const middle = (rect: { y: number; height: number }) => rect.y + rect.height / 2;
+          const [close, retry] = await Promise.all([
+            box(banner.getByRole("button", { name: "Dismiss" })),
+            box(banner.getByRole("button", { name: "Try again" })),
+          ]);
+          expect(Math.abs(middle(close) - middle(retry))).toBeLessThanOrEqual(1);
+          expect(await seen()).toEqual({ violations: [], styles: 0 });
+          await context.close();
+        });
+
       test("a download ring fills, then closes with a check", async () => {
         const { context, page, seen } = await open(browser, device);
         const live = page.locator(".feedback-download");

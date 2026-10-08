@@ -258,6 +258,14 @@
     margin: calc(var(--spacing) * -0.75) calc(var(--spacing) * -1) 0 calc(var(--spacing) * 2);
   }
 
+  /* Beside buttons, the close button lines up with them. */
+  @container (width >= 480px) {
+    .ui-banner-actions + .ui-banner-close {
+      align-self: center;
+      margin-top: 0;
+    }
+  }
+
   /* Narrow, the buttons go under the text they act on. */
   @container (width < 480px) {
     .ui-banner-actions {

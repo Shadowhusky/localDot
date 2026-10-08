@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 type Kit = typeof import("./Banner.tsx") & typeof import("./Announcer.tsx");
@@ -29,6 +30,29 @@ function Panel({ open, announce = false }: { open: boolean; announce?: boolean }
       >
         Your changes are kept.
       </kit.Banner>
+    </>
+  );
+}
+
+function Closing() {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <button type="button">Elsewhere</button>
+      <button type="button" onClick={() => setOpen(true)}>
+        Show a message
+      </button>
+      <kit.Banner
+        open={open}
+        title="Couldn't save your settings"
+        onDismiss={() => setOpen(false)}
+        actions={
+          <button type="button" onClick={() => setOpen(false)}>
+            Try again
+          </button>
+        }
+      />
+      <button type="button">After</button>
     </>
   );
 }
@@ -66,6 +90,25 @@ describe("Banner", () => {
   it("stays quiet when it is part of the page from the start", () => {
     render(<Panel open />);
     expect(screen.getByRole("status").textContent).toBe("");
+  });
+
+  it("gives focus back to where it came from when it closes while holding it", () => {
+    render(<Closing />);
+    const elsewhere = screen.getByRole("button", { name: "Elsewhere" });
+    const retry = screen.getByRole("button", { name: "Try again" });
+    act(() => elsewhere.focus());
+    act(() => retry.focus());
+    fireEvent.click(retry);
+    expect(document.querySelector(".ui-banner-reveal")?.hasAttribute("inert")).toBe(true);
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it("gives focus to the control before it when focus did not come from anywhere", () => {
+    render(<Closing />);
+    const close = screen.getByRole("button", { name: "Dismiss" });
+    act(() => close.focus());
+    fireEvent.click(close);
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "Show a message" }));
   });
 
   it("offers a dismiss button only when it can be dismissed", () => {

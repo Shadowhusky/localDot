@@ -1,6 +1,7 @@
 import { clsx } from "clsx";
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useLayoutEffect, useRef } from "react";
 import { announce as speak } from "./Announcer.tsx";
+import { canFocus, focusWithoutScroll, tabbableBefore } from "./focus.ts";
 import { Icon } from "./Icon.tsx";
 import { IconButton } from "./IconButton.tsx";
 import type { IconName } from "./icons.ts";
@@ -44,7 +45,34 @@ export function Banner({
   className,
 }: BannerProps) {
   const id = useId();
+  const reveal = useRef<HTMLDivElement>(null);
   const box = useRef<HTMLDivElement>(null);
+  const cameFrom = useRef<Element | null>(null);
+
+  useEffect(() => {
+    const element = reveal.current;
+    if (!element) return;
+    const onFocusIn = (event: FocusEvent) => {
+      const from = event.relatedTarget;
+      if (!(from instanceof Node) || !element.contains(from))
+        cameFrom.current = from instanceof Element ? from : null;
+    };
+    element.addEventListener("focusin", onFocusIn);
+    return () => element.removeEventListener("focusin", onFocusIn);
+  }, []);
+
+  // Closing while it holds focus, it gives focus back to where it came from, or to the control
+  // before it, and only then is made inert, so focus never falls to the page.
+  useLayoutEffect(() => {
+    const element = reveal.current;
+    if (!element) return;
+    if (!open && element.contains(document.activeElement)) {
+      const origin = element.contains(cameFrom.current) ? null : cameFrom.current;
+      const target = canFocus(origin) ? origin : tabbableBefore(element);
+      if (target) focusWithoutScroll(target);
+    }
+    element.toggleAttribute("inert", !open);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !announce) return;
@@ -55,9 +83,9 @@ export function Banner({
 
   return (
     <div
+      ref={reveal}
       className={clsx("ui-banner-reveal", className)}
       data-open={open ? "" : undefined}
-      inert={!open}
     >
       <div className="ui-banner-clip">
         <div ref={box} className="ui-banner" data-tone={tone}>

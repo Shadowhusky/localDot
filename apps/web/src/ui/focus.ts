@@ -39,6 +39,17 @@ export function firstField(container: HTMLElement): HTMLElement | undefined {
   return tabbables(container).find((element) => element.matches(FIELDS));
 }
 
+// The last control Tab reaches before an element, outside it.
+export function tabbableBefore(element: HTMLElement): HTMLElement | undefined {
+  return tabbables(element.ownerDocument.body)
+    .filter(
+      (other) =>
+        element.compareDocumentPosition(other) & Node.DOCUMENT_POSITION_PRECEDING &&
+        !other.contains(element),
+    )
+    .at(-1);
+}
+
 // Focus may go back only to an element that is still on the page and can take it.
 export function canFocus(element: Element | null | undefined): element is HTMLElement {
   return element instanceof HTMLElement && element.isConnected && shown(element);
