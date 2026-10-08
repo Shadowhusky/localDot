@@ -158,9 +158,34 @@ function headingTop(page: Page): Promise<number> {
   return page.locator("h1").evaluate((h) => h.getBoundingClientRect().top);
 }
 
+// Everything inside a layer's blocks, braces matched; empty when the layer is only declared.
+function layerRules(css: string, name: string): string {
+  const head = `@layer ${name}{`;
+  let rules = "";
+  for (let start = css.indexOf(head); start >= 0; start = css.indexOf(head, start + 1)) {
+    let depth = 0;
+    let at = start + head.length - 1;
+    do {
+      if (css[at] === "{") depth++;
+      else if (css[at] === "}") depth--;
+      at++;
+    } while (depth > 0 && at < css.length);
+    if (depth > 0) throw new Error(`unclosed @layer ${name}`);
+    rules += css.slice(start + head.length, at - 1);
+  }
+  return rules;
+}
+
+function classNames(css: string): Set<string> {
+  return new Set(
+    [...css.matchAll(/\.(-?[A-Za-z_](?:\\.|[\w-])*)/g)].map((match) => match[1] as string),
+  );
+}
+
 test("the production build orders the layers with the legacy styles in components", async () => {
   const out = join(scratch, "dist");
   await build({
+    root: WEB,
     configFile: join(WEB, "vite.config.ts"),
     logLevel: "warn",
     build: { outDir: out, emptyOutDir: true, sourcemap: false },
@@ -169,18 +194,21 @@ test("the production build orders the layers with the legacy styles in component
   const sheets = readdirSync(assets).filter((name) => name.endsWith(".css"));
   expect(sheets).toHaveLength(1);
   const css = readFileSync(join(assets, sheets[0] as string), "utf8");
-  const order = [...css.matchAll(/@layer ([a-z]+)[;{]/g)].map((match) => match[1]);
+  const order = [...css.matchAll(/@layer ([a-z, ]+?) ?[;{]/g)].flatMap((match) =>
+    (match[1] as string).split(/, ?/),
+  );
   expect([...new Set(order)].filter((name) => name !== "properties")).toEqual([
     "theme",
     "base",
     "components",
     "utilities",
   ]);
-  const components = css.indexOf("@layer components{");
-  const utilities = css.indexOf("@layer utilities{");
-  expect(css.indexOf(".app{")).toBeGreaterThan(components);
-  expect(css.indexOf(".app{")).toBeLessThan(utilities);
+  expect(layerRules(css, "components")).toContain(".app{");
   expect(css).not.toContain("--rails-collapse");
+  const legacy = classNames(layerRules(css, "components"));
+  expect([...classNames(layerRules(css, "utilities"))].filter((name) => legacy.has(name))).toEqual(
+    [],
+  );
   for (const name of readdirSync(assets)) {
     const text = readFileSync(join(assets, name), "latin1");
     expect(text, name).not.toContain("Kit spike");
