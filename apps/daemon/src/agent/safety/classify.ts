@@ -60,6 +60,8 @@ const PATTERNS = {
     /^(?:[^@\s/]+@)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:\/\S*)?$/i,
   remotePath: /^(?:[^@\s/:]+@)?(\[[0-9a-f:]+\]|[^\s/:]+):/i,
   assignment: /^\w+=/,
+  // A parameter expansion, which may be empty: `$x git push` and `g${x}it push` run git push.
+  expansion: /\$(?:[A-Za-z_]\w*|[@*#?$!\d-]|\{[^}]*\})/g,
   // Reserved words that open or continue a compound command: the command follows them.
   keywords: /^(?:if|then|elif|else|do|while|until|!|\{)$/,
   // These name a word before what they run (`for x do …`, `function f { …`); `for x in a b` only
@@ -115,7 +117,10 @@ const PATTERNS = {
   ] as readonly (readonly [RegExp, Options])[],
   stdinPath: /^(?:-|\/dev\/stdin|\/dev\/fd\/0|\/proc\/self\/fd\/0)$/,
   ansiEscape:
-    /^\\(?:x([\da-fA-F]{1,2})|([0-7]{1,3})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|c([\s\S])|([\s\S]))?/,
+    /^\\(?:x([\da-fA-F]{1,2})|([0-7]{1,3})|u([\da-fA-F]{1,4})|U([\da-fA-F]{1,8})|c(\\\\|[\s\S])|([\s\S]))?/,
+  // ${ followed by these is a command substitution run in the shell itself.
+  funsub: /^\$\{[ \t\n|]/,
+  pattern: /[?*+@!]/,
   installer:
     /^(?:(?:ba|z|da|k|fi)?sh|python[\d.]*|node|perl|ruby|php|chmod|dpkg|apt|apt-get|rpm|pip[\d.]*)$/,
   mail: /^(?:mail|mailx|sendmail|mutt|msmtp|ssmtp)$/,
@@ -300,11 +305,19 @@ interface Token {
 
 interface Lexed {
   readonly tokens: readonly Token[];
-  // A quote, substitution or here-doc is still open at the end of the input, or a backtick is
-  // nested inside another.
+  // A quote, substitution or here-doc is still open at the end of the input, or a construct the
+  // shell may read either way is used.
   readonly open: boolean;
   readonly bodies: readonly string[];
+  // The commands of backquoted substitutions, which the shell runs as command strings.
+  readonly codes: readonly string[];
 }
+
+// What the lexer is inside. `quote` is "…", `body` a here-doc's text and `parameter` a ${…}. A
+// `group` is a subshell's (…) and a `substitution` a $(…), <(…) or >(…), whose text continues the
+// word around it, as a `brace`'s ${ …; } does. The shell reads a `literal` group to its matching
+// paren with # as text: arithmetic ((…)) and $((…)), and extended glob patterns such as @(…).
+type Mode = "quote" | "body" | "parameter" | "group" | "substitution" | "brace" | "literal";
 
 interface Heredoc {
   readonly redirect: number;
@@ -331,25 +344,30 @@ const ANSI_C: Readonly<Record<string, string>> = {
 
 // The words and operators of a command line as the shell reads them: quotes and backslashes join a
 // word, and only unquoted characters are operators. A substitution, even inside double quotes, opens
-// a group of its own. A redirection is a `redirect` token before its target, which for a descriptor
-// copy (2>&1) is the descriptor. A # at the start of a word comments out the rest of the line, and
-// a here-doc's body is its redirect's text rather than commands; an unquoted body's substitutions
-// still run, so their tokens follow the stream's as lines of their own.
-function lex(source: string, from = 0, to = source.length, inBody = false): Lexed {
+// a group of its own, and a backquoted one is a command string of its own. A redirection is a
+// `redirect` token before its target, which for a descriptor copy (2>&1) is the descriptor. A # that
+// starts a word in code comments out the rest of the line, and a here-doc's body is its redirect's
+// text rather than commands; an unquoted body's substitutions still run, so their tokens follow the
+// stream's as lines of their own.
+function lex(source: string, from = 0, to = source.length, inBody = false, comments = true): Lexed {
   const tokens: Token[] = [];
   const expansions: Token[] = [];
-  const modes: ("quote" | "group" | "tick" | "body")[] = inBody ? ["body"] : [];
+  const modes: Mode[] = inBody ? ["body"] : [];
   const heredocs: Heredoc[] = [];
   const bodies: string[] = [];
+  const codes: string[] = [];
   let redirect: { readonly redirect: number; readonly strip: boolean } | undefined;
   let open = false;
   let word = "";
   let started = -1;
+  // A substitution or a quote just closed and the word goes on, so a # here is text.
+  let glued = false;
   const char = (at: number) => (at < to ? (source[at] ?? "") : "");
   const begin = (at: number) => {
     if (started < 0) started = at;
   };
   const flush = (at: number) => {
+    glued = false;
     if (started < 0) return;
     tokens.push({ kind: "word", text: word, start: started, end: at });
     if (redirect)
@@ -379,28 +397,74 @@ function lex(source: string, from = 0, to = source.length, inBody = false): Lexe
       if (!doc.literal) {
         const inner = lex(source, at, end, true);
         expansions.push({ kind: "operator", text: ";", start: at, end: at }, ...inner.tokens);
+        codes.push(...inner.codes);
         open ||= inner.open;
       }
       at = next ?? to;
     }
     return at;
   };
+  // Inside double quotes, unless a substitution comes between.
+  const quoted = () => modes.findLast((mode) => mode !== "parameter") === "quote";
+  // What every mode reads alike: $$, a backquoted command, $(…), $((…)) and ${…}. Returns where
+  // reading goes on, or undefined when none of them starts here.
+  const piece = (at: number, rest: string, code: boolean): number | undefined => {
+    if (rest.startsWith("$$")) {
+      begin(at);
+      word += "$$";
+      return at + 2;
+    }
+    if (rest.startsWith("`")) {
+      const { command, end } = backquoted(source, at + 1, to, quoted());
+      codes.push(command);
+      emit("operator", "(", at, 1);
+      if (end === undefined) {
+        open = true;
+        return to;
+      }
+      emit("operator", ")", end - 1, 1);
+      glued = true;
+      return end;
+    }
+    if (rest.startsWith("$(")) {
+      emit("operator", "(", at, 2);
+      modes.push(rest[2] === "(" ? "literal" : "substitution");
+      return at + 2;
+    }
+    // ${ cmd; } runs its commands in the shell itself; inside quotes or a here-doc it is unclear.
+    if (PATTERNS.funsub.test(rest)) {
+      if (code) {
+        emit("operator", "(", at, 2);
+        modes.push("brace");
+      } else {
+        open = true;
+        begin(at);
+        word += "${";
+      }
+      return at + 2;
+    }
+    if (rest.startsWith("${") && modes.at(-1) !== "body") {
+      begin(at);
+      word += "${";
+      modes.push("parameter");
+      return at + 2;
+    }
+    return undefined;
+  };
   for (let i = from; i < to; ) {
     const c = source[i] ?? "";
     const rest = source.slice(i, to);
     const mode = modes.at(-1);
-    if (c === "\\" && char(i + 1) === "`" && modes.includes("tick")) open = true;
+    const next = piece(i, rest, mode !== "quote" && mode !== "body" && mode !== "parameter");
+    if (next !== undefined) {
+      i = next;
+      continue;
+    }
     if (mode === "quote" || mode === "body") {
       const escapes = mode === "quote" ? /^[$`"\\]$/ : /^[$`\\]$/;
-      if (c === '"' && mode === "quote") modes.pop();
-      else if (rest.startsWith("$(")) {
-        emit("operator", "(", i, 2);
-        modes.push("group");
-        i += 2;
-        continue;
-      } else if (c === "`") {
-        emit("operator", "(", i, 1);
-        modes.push("tick");
+      if (c === '"' && mode === "quote") {
+        modes.pop();
+        glued = true;
       } else if (c === "\\" && char(i + 1) === "\n") {
         i += 2;
         continue;
@@ -424,55 +488,65 @@ function lex(source: string, from = 0, to = source.length, inBody = false): Lexe
       i += 2;
       continue;
     }
-    if (c === "#" && started < 0) {
+    if (c === "'" || rest.startsWith("$'")) {
+      begin(i);
+      // In a double-quoted ${…}, the shell's mode and the operator decide whether a single quote
+      // quotes. Its text is read either way, and it is unclear when the two readings could end
+      // the ${…} or the quotes in different places.
+      if (quoted()) {
+        const close = closing(source, i + 1, to, "'", false);
+        const plain = close !== undefined && !/[}"$`\\]/.test(source.slice(i + 1, close));
+        if (!plain) open = true;
+        word += plain ? source.slice(i, close + 1) : c;
+        i = plain ? close + 1 : i + 1;
+        continue;
+      }
+      const quote = c === "'" ? single(source, i + 1, to) : ansiC(source, i + 2, to);
+      if (quote.end === undefined) open = true;
+      word += quote.text;
+      i = quote.end ?? to;
+      continue;
+    }
+    if (c === '"' || rest.startsWith('$"')) {
+      begin(i);
+      modes.push("quote");
+      i += c === '"' ? 1 : 2;
+      continue;
+    }
+    const process = /^[<>]\(/.test(rest);
+    if (mode === "parameter") {
+      if (process) {
+        emit("operator", "(", i, 2);
+        modes.push(rest[2] === "(" ? "literal" : "substitution");
+        i += 2;
+        continue;
+      }
+      if (c === "}") modes.pop();
+      begin(i);
+      word += c;
+      i++;
+      continue;
+    }
+    if (c === "#" && comments && started < 0 && !glued && mode !== "literal") {
       while (i < to && !endsLine(source[i] ?? "")) i++;
       continue;
     }
-    if (c === "'") {
-      begin(i);
-      const close = source.indexOf("'", i + 1);
-      const end = close < 0 || close >= to ? to : close;
-      if (end === to) open = true;
-      word += source.slice(i + 1, end);
-      i = end + 1;
+    if (process || c === "(") {
+      const length = process ? 2 : 1;
+      const literal =
+        mode === "literal" ||
+        rest[length] === "(" ||
+        (!process && started >= 0 && PATTERNS.pattern.test(source[i - 1] ?? ""));
+      emit("operator", "(", i, length);
+      modes.push(literal ? "literal" : process ? "substitution" : "group");
+      i += length;
       continue;
     }
-    if (rest.startsWith("$'")) {
-      begin(i);
-      const quoted = ansiC(source, i + 2, to);
-      if (quoted.end === undefined) open = true;
-      word += quoted.text;
-      i = quoted.end ?? to;
-      continue;
-    }
-    if (rest.startsWith('$"')) {
-      begin(i);
-      i++;
-      continue;
-    }
-    if (c === '"') {
-      begin(i);
-      modes.push("quote");
-      i++;
-      continue;
-    }
-    if (c === "`") {
-      if (mode === "tick") modes.pop();
-      else modes.push("tick");
-      emit("operator", mode === "tick" ? ")" : "(", i, 1);
-      i++;
-      continue;
-    }
-    const opening = /^(?:\$\(|[<>]\(|\()/.exec(rest)?.[0];
-    if (opening) {
-      emit("operator", "(", i, opening.length);
-      modes.push("group");
-      i += opening.length;
-      continue;
-    }
-    if (c === ")") {
-      if (mode === "group") modes.pop();
+    if (c === ")" || (c === "}" && mode === "brace" && started < 0)) {
+      const closed =
+        mode === undefined || (mode === "brace" && c === ")") ? undefined : modes.pop();
       emit("operator", ")", i, 1);
+      glued = closed !== undefined && closed !== "group";
       i++;
       continue;
     }
@@ -497,7 +571,7 @@ function lex(source: string, from = 0, to = source.length, inBody = false): Lexe
         started = -1;
       }
       emit("redirect", operator, i, operator.length);
-      if (operator.startsWith("<<") && operator !== "<<<")
+      if (operator.startsWith("<<") && operator !== "<<<" && mode !== "literal")
         redirect = { redirect: tokens.length - 1, strip: operator === "<<-" };
       i += operator.length;
       continue;
@@ -514,7 +588,7 @@ function lex(source: string, from = 0, to = source.length, inBody = false): Lexe
   }
   flush(to);
   if (modes.length > (inBody ? 1 : 0) || heredocs.length || redirect) open = true;
-  return { tokens: [...tokens, ...expansions], open, bodies };
+  return { tokens: [...tokens, ...expansions], open, bodies, codes };
 }
 
 // Where a here-doc's body ends: at the line that is its delimiter (after leading tabs for <<-), or
@@ -536,21 +610,51 @@ function delimited(
   return { end: to };
 }
 
-// A $'…' word's text from just after its opening quote, with its backslash escapes decoded, and
-// where it ends. The shell cuts the word at a NUL.
+// Where a quoted piece ends: at the first `close` that no backslash escapes, when backslashes escape.
+function closing(source: string, from: number, to: number, close: string, escapes: boolean) {
+  let at = from;
+  while (at < to && source[at] !== close) at += escapes && source[at] === "\\" ? 2 : 1;
+  return at < to ? at : undefined;
+}
+
+// A '…' word's text from just after its opening quote, and where it ends.
+function single(source: string, from: number, to: number): { text: string; end?: number } {
+  const close = closing(source, from, to, "'", false);
+  return close === undefined
+    ? { text: source.slice(from, to) }
+    : { text: source.slice(from, close), end: close + 1 };
+}
+
+// A $'…' word's text from just after its opening quote, and where it ends. As the shell does, the
+// end is found first, with a backslash taking the next character with it, and the escapes decoded
+// after. The shell cuts the word at a NUL.
 function ansiC(source: string, from: number, to: number): { text: string; end?: number } {
+  const close = closing(source, from, to, "'", true);
+  const inner = source.slice(from, close ?? to);
   let text = "";
-  let cut = false;
-  for (let i = from; i < to; ) {
-    const c = source[i] ?? "";
-    if (c === "'") return { text, end: i + 1 };
-    const sequence = c === "\\" ? PATTERNS.ansiEscape.exec(source.slice(i, to)) : null;
-    const decoded = sequence ? decodeEscape(sequence) : c;
+  for (let i = 0; i < inner.length; ) {
+    const sequence = inner[i] === "\\" ? PATTERNS.ansiEscape.exec(inner.slice(i)) : null;
+    const decoded = sequence ? decodeEscape(sequence) : (inner[i] ?? "");
+    if (decoded === "\0") break;
+    text += decoded;
     i += sequence?.[0].length ?? 1;
-    if (decoded === "\0") cut = true;
-    if (!cut) text += decoded;
   }
-  return { text };
+  return close === undefined ? { text } : { text, end: close + 1 };
+}
+
+// A backquoted command from just after its opening backquote, and where it ends. The command loses
+// the backslashes before $, ` and \, and inside double quotes before ", as the shell's does.
+function backquoted(
+  source: string,
+  from: number,
+  to: number,
+  quoted: boolean,
+): { command: string; end?: number } {
+  const close = closing(source, from, to, "`", true);
+  const command = source
+    .slice(from, close ?? to)
+    .replace(quoted ? /\\([$`\\"])/g : /\\([$`\\])/g, "$1");
+  return close === undefined ? { command } : { command, end: close + 1 };
 }
 
 function decodeEscape(sequence: RegExpExecArray): string {
@@ -578,8 +682,11 @@ interface Line {
 
 // The commands of a command line, each a list of the stages its pipes, groups and substitutions
 // separate, with redirections taken out.
-function parse(source: string): { lines: Line[]; open: boolean; bodies: readonly string[] } {
-  const lexed = lex(source);
+function parse(
+  source: string,
+  comments = true,
+): { lines: Line[]; open: boolean; bodies: readonly string[]; codes: readonly string[] } {
+  const lexed = lex(source, 0, source.length, false, comments);
   const lines: Line[] = [];
   let tokens: Token[] = [];
   const close = () => {
@@ -612,7 +719,7 @@ function parse(source: string): { lines: Line[]; open: boolean; bodies: readonly
     else tokens.push(token);
   }
   close();
-  return { lines, open: lexed.open, bodies: lexed.bodies };
+  return { lines, open: lexed.open, bodies: lexed.bodies, codes: lexed.codes };
 }
 
 // The physical lines of a command, split where the lexer ends a line.
@@ -674,7 +781,10 @@ function program(stage: Stage): Run {
   const nested: string[] = [];
   for (;;) {
     const first = tokens[0] ?? "";
-    if (PATTERNS.assignment.test(first) || PATTERNS.keywords.test(first)) tokens = tokens.slice(1);
+    const bare = first.replace(PATTERNS.expansion, "");
+    if (bare !== first) tokens = bare ? [bare, ...tokens.slice(1)] : tokens.slice(1);
+    else if (PATTERNS.assignment.test(first) || PATTERNS.keywords.test(first))
+      tokens = tokens.slice(1);
     // `coproc NAME { …; }` names the coprocess; otherwise coproc runs a plain command.
     else if (first === "coproc") tokens = tokens.slice(tokens[2] === "{" ? 2 : 1);
     else if (PATTERNS.headers.test(first)) tokens = tokens.slice(2);
@@ -754,12 +864,13 @@ function execs(args: readonly string[]): string[] {
 }
 
 // Whether an interpreter takes its program from stdin: no option names the code and no script
-// operand is given, other than stdin itself.
+// operand is given, other than stdin itself. A word of only expansions may be empty, so no operand.
 function readsProgram(tokens: readonly string[]): boolean {
   const options = interpreter(base(tokens[0]));
   if (!options) return false;
   for (let i = 1; i < tokens.length; i++) {
     const arg = tokens[i] ?? "";
+    if (!arg.replace(PATTERNS.expansion, "")) continue;
     if (PATTERNS.stdinPath.test(arg)) return true;
     if (arg === "--")
       return i + 1 === tokens.length || PATTERNS.stdinPath.test(tokens[i + 1] ?? "");
@@ -898,14 +1009,13 @@ function shell(command: string, signedIn: boolean): ActionClass[] {
 
 // Fails closed: a command the lexer cannot read to its end is unclear, and every here-doc body and
 // physical line is also read as commands on its own, so a quote or here-doc misread on one line
-// cannot hide the next. Those extra reads see fragments, so they are not held to reading to the end.
+// cannot hide the next. A line is read with # as text, so a # misread as a comment cannot hide the
+// rest of its line. Those extra reads see fragments, so they are not held to reading to the end.
 function effects(command: string, depth: number, whole = true): ActionClass[] {
   if (depth > MAX_NESTING) return ["unknown"];
   const { found, open } = stream(command, depth, whole);
   if (open && whole) found.push("unknown");
-  const physical = physicalLines(command);
-  if (physical.length > 1)
-    for (const line of physical) found.push(...commands(parse(line).lines, depth, false));
+  for (const line of physicalLines(command)) found.push(...stream(line, depth, false, false).found);
   return found;
 }
 
@@ -913,9 +1023,11 @@ function stream(
   command: string,
   depth: number,
   whole: boolean,
+  comments = true,
 ): { found: ActionClass[]; open: boolean } {
-  const { lines, open, bodies } = parse(command);
+  const { lines, open, bodies, codes } = parse(command, comments);
   const found = commands(lines, depth, whole);
+  for (const code of codes) found.push(...effects(code, depth + 1, whole));
   for (const body of bodies) found.push(...stream(body, depth, false).found);
   return { found, open };
 }

@@ -81,6 +81,9 @@ export function spendingText(data: {
     ? why
     : `${why} Raise the limit to continue; what was spent stays counted.`;
 }
+// The daily limit belongs to the key layer and is shared by every task, so no raise here moves it.
+const DAY_LIMIT =
+  "All tasks share one daily spending limit, and today's is used up. It resets at midnight; resume the task after that. Raising this task's limit does not change it.";
 const CUSTOM = "other";
 const MAX_LIMIT = 10_000;
 
@@ -134,6 +137,7 @@ export function TaskRecovery({
     agent.snapshot.models.roles.some(
       (role) => role.role === "main" && ["ollama", "lmstudio"].includes(role.provider),
     );
+  // A held Pause stands in for the paused state the spending limit published.
   const reason = hold ? "budget" : state.reason;
   const known = knownReason(reason, local);
   const taskBudget =
@@ -171,13 +175,13 @@ export function TaskRecovery({
           (hold || state.state === "paused" ? "Task paused" : "The task needs attention")}
       </h3>
       <p className="thread-recovery-text">
-        {reason === "budget" && budget && !subscription
-          ? spendingText(budget.data)
-          : (known?.text ?? UNEXPLAINED)}
+        {dayLimit
+          ? DAY_LIMIT
+          : reason === "budget" && budget && !subscription
+            ? spendingText(budget.data)
+            : (known?.text ?? UNEXPLAINED)}
       </p>
-      {state.reason && !known && (
-        <p className="thread-recovery-reason">Reported reason: {state.reason}</p>
-      )}
+      {reason && !known && <p className="thread-recovery-reason">Reported reason: {reason}</p>}
       {resets && (
         <p className="thread-recovery-reason">
           {resets.replace(/^Resets/, "Your plan's limit resets")}.
@@ -197,12 +201,6 @@ export function TaskRecovery({
             }
           />
         </div>
-      )}
-      {dayLimit && (
-        <p className="thread-recovery-reason">
-          This is the daily limit for all tasks. It resets at midnight; continue after that. Raising
-          this task's limit doesn't change it.
-        </p>
       )}
       {raising ? (
         <form

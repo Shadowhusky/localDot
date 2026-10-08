@@ -154,15 +154,20 @@ const resume = () => screen.getByRole("button", { name: "Resume task" }) as HTML
 it("a Pause held at the task's spending limit offers the budget form, then Resume once it is raised", async () => {
   const fake = open("task");
   const recovery = await screen.findByRole("region", { name: "Task recovery" });
-  const raise = screen.getByRole("button", { name: "Raise to $7" });
-  await waitFor(() => expect(raise.getAttribute("aria-disabled")).toBeNull());
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Raise to $7" }).getAttribute("aria-disabled")).toBe(
+      null,
+    ),
+  );
   expect(recovery.textContent).toContain("dot has spent all of this task's limit");
-  expect(recovery.textContent).toContain("The task stays paused until you press Resume task.");
-  expect(screen.queryByRole("button", { name: /^Continue/ })).toBeNull();
+  expect(recovery.textContent).toContain("stays paused until you press Resume task");
+  expect(screen.queryByRole("button", { name: /^Continue/ }), "only the Pause resumes").toBeNull();
   expect(document.body.textContent).toContain("set a new task budget in Conversation, then resume");
   expect(resume().disabled, "Resume waits for the budget").toBe(true);
-  fireEvent.click(raise);
-  await waitFor(() => expect(fake.state.raises).toEqual([7]));
+  fireEvent.click(screen.getByRole("radio", { name: "Other" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "New limit" }), { target: { value: "8" } });
+  fireEvent.click(screen.getByRole("button", { name: "Raise to $8" }));
+  await waitFor(() => expect(fake.state.raises).toEqual([8]));
   await waitFor(() => expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull());
   await waitFor(() => expect(resume().disabled).toBe(false));
   expect(fake.state.resumes, "no Resume was sent before the raise").toEqual([]);
@@ -177,8 +182,9 @@ it("a Pause held at the task's spending limit offers the budget form, then Resum
 it("a Pause held at the shared daily limit explains it and keeps Resume available", async () => {
   const fake = open("day");
   const recovery = await screen.findByRole("region", { name: "Task recovery" });
-  expect(recovery.textContent).toContain("It resets at midnight");
+  expect(recovery.textContent).toContain("today's is used up. It resets at midnight");
   expect(screen.queryByRole("form", { name: "Raise the spending limit" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Continue/ }), "only the Pause resumes").toBeNull();
   await waitFor(() => expect(resume().disabled).toBe(false));
   await act(async () => {
     fireEvent.click(resume());
