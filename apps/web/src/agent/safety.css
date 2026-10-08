@@ -302,10 +302,9 @@
   max-width: calc(100% - 2 * var(--spacing-edge));
   padding: 6px 6px 6px 16px;
   border-radius: var(--radius-stage);
-  background: var(--color-hud-solid);
+  /* Opaque: WebKit shows the page's text through a translucent line, even under a blur. */
+  background: var(--color-surface);
   box-shadow: var(--shadow-hud);
-  -webkit-backdrop-filter: blur(var(--blur-hud));
-  backdrop-filter: blur(var(--blur-hud));
   color: var(--color-text);
   transform: translateX(-50%);
   animation: always-notice-in var(--duration-veil) var(--ease-veil);
@@ -394,12 +393,5 @@
   }
   .approval-card .always-allow-toggle::after {
     transition: none;
-  }
-}
-@media (prefers-reduced-transparency: reduce) {
-  .always-notice {
-    background: var(--color-surface);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
   }
 }
