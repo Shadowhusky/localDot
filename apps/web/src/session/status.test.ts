@@ -631,6 +631,10 @@ const at = (events: LocalDotEvent[], nowMs = 9500, computer: HudState = live) =>
   view(events, nowMs, computer).status;
 const alone = (computer: HudState) => statusFor({ computer, task: null });
 const typing = () => view(start(), 2000).task;
+// dot mid-action on a computer in the given state.
+const underTask = (computer: HudState) => at(start(), 2000, computer);
+const FAILED = { state: "failed", error: "not ready after 120 s" } as const;
+const FENCED = { fenced: { revision: 1 } } as const;
 
 // One fixture per state the status model knows.
 const STATES: Record<string, Status> = {
@@ -645,8 +649,16 @@ const STATES: Record<string, Status> = {
   "shutting down": alone(computerIn({ state: "stopping" })),
   off: alone(computerIn({ state: "stopped" })),
   "off after a task": at(ended("done"), 9500, computerIn({ state: "stopped", ...stream("none") })),
-  "failed to start": alone(computerIn({ state: "failed", error: "not ready after 120 s" })),
-  fenced: alone(computerIn({ fenced: { revision: 1 } })),
+  "failed to start": alone(computerIn(FAILED)),
+  fenced: alone(computerIn(FENCED)),
+  "no computer, task open": underTask(noCell("known")),
+  "list failed, task open": underTask(noCell("unknown")),
+  "starting, task open": underTask(computerIn({ state: "starting" })),
+  "restarting, task open": underTask(computerIn({ state: "starting", error: RESTART_NOTE })),
+  "shutting down, task open": underTask(computerIn({ state: "stopping" })),
+  "off, task open": underTask(computerIn({ state: "stopped" })),
+  "failed, task open": underTask(computerIn(FAILED)),
+  "fenced, task open": underTask(computerIn(FENCED)),
   "task stopping": statusFor({ computer: live, task: typing(), stop: "stopping" }),
   "stop unconfirmed": statusFor({ computer: live, task: typing(), stop: "unconfirmed" }),
   approval: at([...start(), approvalRequest(1500)]),
@@ -681,10 +693,14 @@ const STATES: Record<string, Status> = {
   ready: alone(live),
 };
 
-// The audit's status table, first match wins from the top: the HUD label, dot's pose, the
-// attention and who speaks the caption for every state.
+// The audit's status table, first match wins from the top, behind a task Stop in flight: the HUD
+// label, dot's pose, the attention and who speaks the caption for every state.
 const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "system"][] = [
-  // 1. The computer is not live, or nothing runs on it.
+  // A task Stop outranks every row.
+  ["task stopping", "stopping", "Stopping…", "resting", "working", "dot"],
+  ["stop unconfirmed", "stopping", "Stop unconfirmed", "error", "blocked", "dot"],
+  // 1. The computer is not live, or nothing runs on it. A computer that is off, failing or not
+  // up yet holds the row over an open task; a late picture or a list check does not.
   ["checking", "computer", "Checking…", "idle", null, "system"],
   ["no computer", "computer", "No computer", "sleeping", null, "system"],
   ["list failed", "computer", "Unavailable", "error", "blocked", "system"],
@@ -698,9 +714,14 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["off after a task", "computer", "Stopped", "sleeping", null, "system"],
   ["failed to start", "computer", "Failed", "error", "blocked", "system"],
   ["fenced", "computer", "Unavailable", "error", "blocked", "system"],
-  // A task Stop outranks every row below it.
-  ["task stopping", "stopping", "Stopping…", "resting", "working", "dot"],
-  ["stop unconfirmed", "stopping", "Stop unconfirmed", "error", "blocked", "dot"],
+  ["no computer, task open", "computer", "No computer", "sleeping", null, "system"],
+  ["list failed, task open", "computer", "Unavailable", "error", "blocked", "system"],
+  ["starting, task open", "computer", "Starting…", "waking", null, "system"],
+  ["restarting, task open", "computer", "Reconnecting…", "waking", null, "system"],
+  ["shutting down, task open", "computer", "Stopping…", "sleeping", null, "system"],
+  ["off, task open", "computer", "Stopped", "sleeping", null, "system"],
+  ["failed, task open", "computer", "Failed", "error", "blocked", "system"],
+  ["fenced, task open", "computer", "Unavailable", "error", "blocked", "system"],
   // 2–4. Approval, question, takeover.
   ["approval", "approval", "Needs your OK", "waiting", "needs_you", "system"],
   ["question", "question", "Has a question", "waiting", "needs_you", "dot"],
@@ -756,7 +777,7 @@ describe("one status model for every surface (T10)", () => {
         expect(status.label, name).not.toMatch(/^(Clicking|Typing|Pressing|Scrolling|Opening)\b/);
   });
 
-  it("ranks the rows: Stop, a frozen computer, the verdict, then what waits for the user", () => {
+  it("ranks the rows: Stop, a computer that can't carry the task, the verdict, then what waits for the user", () => {
     const frozen = computerIn({ paused: true });
     const pairs: [string, Status, StatusRow][] = [
       [
@@ -765,8 +786,23 @@ describe("one status model for every surface (T10)", () => {
         "stopping",
       ],
       [
+        "Stop over a failed computer",
+        statusFor({ computer: computerIn(FAILED), task: typing(), stop: "stopping" }),
+        "stopping",
+      ],
+      [
         "a frozen computer over an approval",
         at([...start(), approvalRequest(1500)], 9500, frozen),
+        "computer",
+      ],
+      [
+        "an unavailable computer over an approval",
+        at([...start(), approvalRequest(1500)], 9500, computerIn(FENCED)),
+        "computer",
+      ],
+      [
+        "a computer that is off over a running task",
+        underTask(computerIn({ state: "stopped" })),
         "computer",
       ],
       [
@@ -800,9 +836,30 @@ describe("one status model for every surface (T10)", () => {
         at([...start(), ev("agent.state", 100, { state: "thinking" })], 500),
         "acting",
       ],
+      // The computer is up and dot works on it, whatever the picture does.
       ["the task over a stalled picture", at(start(), 500, stream("stalled")), "acting"],
+      [
+        "the task over a picture still connecting",
+        at(start(), 500, stream("connecting")),
+        "acting",
+      ],
+      [
+        "the task over a list check",
+        at(start(), 500, hudFor({ cell, status: "known", pending: "list" })),
+        "acting",
+      ],
     ];
     for (const [name, status, row] of pairs) expect(status.row, name).toBe(row);
+  });
+
+  it("lets a computer that can't carry the task speak for it, with no clock and no control", () => {
+    const fenced = computerIn(FENCED);
+    expect(at(start(), 7200, fenced)).toMatchObject({
+      caption: { speaker: "system", text: fenced.caption },
+      elapsedS: null,
+      control: false,
+    });
+    expect(at(start(), 7200, stream("stalled"))).toMatchObject({ elapsedS: 7, control: true });
   });
 
   it("gives dot control only while it works and the app allows it", () => {
@@ -830,6 +887,10 @@ describe("one status model for every surface (T10)", () => {
       { kind: "stop", enabled: false },
     ]);
     expect(STATES.off?.actions).toEqual([{ kind: "start", enabled: true }]);
+    // The task keeps its Stop on a computer that can't carry it. With no computer, that Stop is
+    // the only control, so Welcome's Turn on waits until the task ends.
+    for (const [name, status] of Object.entries(STATES))
+      if (name.endsWith(", task open")) expect(status.actions, name).toEqual(stopsTask);
     expect(STATES.done?.actions).toEqual([{ kind: "stop", enabled: true }]);
   });
 });

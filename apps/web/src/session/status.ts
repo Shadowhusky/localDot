@@ -249,7 +249,8 @@ export interface Status {
   // dot has control: the xenon rim.
   readonly control: boolean;
   readonly dotPose: DotState;
-  // How urgently this asks for the user, on the scale every surface shares.
+  // How urgently this asks for the user, on the scale every surface shares. "done" marks any
+  // finished task; the surface that shows it drops it once the user has seen it.
   readonly attention: Attention | null;
   readonly title: string;
 }
@@ -326,9 +327,22 @@ const DOT_SPEAKS = new Set<TaskRow>([
   "observing",
 ]);
 
+// Computers that can't carry a task: off, failing or not up yet. A late picture (connecting,
+// reconnecting) or a list check leaves the task in charge, since dot works on the computer itself.
+const DOWN = new Set<ComputerPhase>([
+  "none",
+  "starting",
+  "restarting",
+  "stopping",
+  "stopped",
+  "failed",
+  "unavailable",
+]);
+
 // The one place status is decided: the HUD, the caption, dot's pose and the tab title all read it.
-// A task Stop outranks everything; a frozen computer outranks any task; a finished task keeps its
-// verdict only while the computer is live.
+// A task Stop outranks everything. A frozen computer outranks any task, its Stop included; a
+// computer that is down outranks it too but leaves its Stop. A finished task keeps its verdict
+// only while the computer is live.
 export function statusFor({
   computer,
   task,
@@ -336,7 +350,8 @@ export function statusFor({
   canStop = true,
   mayControl = true,
 }: StatusInput): Status {
-  const own = computer.paused ? null : task;
+  const held = computer.paused ? null : task;
+  const own = DOWN.has(computer.phase) ? null : held;
   const running = own && own.phase !== "finished" ? own : null;
   const shown = running ?? (own && computer.live ? own : null);
   const row: StatusRow = stop
@@ -349,7 +364,7 @@ export function statusFor({
         ? "Stop unconfirmed"
         : (shown ?? computer).label;
   const actions: HudAction[] =
-    stop || running
+    stop || (held && held.phase !== "finished")
       ? [
           stop === "stopping"
             ? { kind: "stop-task", enabled: false, busy: true }
