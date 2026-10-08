@@ -568,6 +568,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 agent={agent}
                 api={api}
                 rows={rows}
+                computerReady={cell?.state === "ready" && !cell.paused}
                 live={task && !session.ended ? { ...task, nowMs: now } : null}
                 onReplay={
                   agent.sessionId && (agent.model.ended || task?.phase === "finished")

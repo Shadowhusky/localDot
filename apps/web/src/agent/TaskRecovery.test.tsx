@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
-import { raiseChoice, TaskRecovery } from "./TaskRecovery.tsx";
+import { raiseChoice, raiseSteps, TaskRecovery } from "./TaskRecovery.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 
@@ -84,9 +84,9 @@ it("raises the limit by a chosen step and continues, and checks an amount of you
   // The smallest step that covers what the next request needs is chosen first.
   fireEvent.click(screen.getByRole("button", { name: "Raise to $7 and continue" }));
   expect(raiseBudget).toHaveBeenLastCalledWith(7);
-  fireEvent.click(screen.getByRole("radio", { name: "+$10" }));
-  fireEvent.click(screen.getByRole("button", { name: "Raise to $15 and continue" }));
-  expect(raiseBudget).toHaveBeenLastCalledWith(15);
+  fireEvent.click(screen.getByRole("radio", { name: "+$5" }));
+  fireEvent.click(screen.getByRole("button", { name: "Raise to $10 and continue" }));
+  expect(raiseBudget).toHaveBeenLastCalledWith(10);
   fireEvent.click(screen.getByRole("radio", { name: "Other" }));
   fireEvent.change(screen.getByRole("textbox", { name: "New limit" }), { target: { value: "4" } });
   fireEvent.click(screen.getByRole("button", { name: "Raise and continue" }));
@@ -99,9 +99,28 @@ it("raises the limit by a chosen step and continues, and checks an amount of you
   expect(raiseBudget).toHaveBeenLastCalledWith(8.5);
 });
 
+it("offers the smallest step that covers the next request, and the one after", () => {
+  expect(raiseSteps(2)).toEqual([2, 5]);
+  expect(raiseSteps(3)).toEqual([5, 10]);
+  expect(raiseSteps(undefined)).toEqual([5, 10]);
+  expect(raiseSteps(400)).toEqual([25, 50]);
+});
+
 it("works out the new limit from a step or an amount", () => {
   expect(raiseChoice("2", "", 5)).toBe(7);
   expect(raiseChoice("other", "12.25", 5)).toBe(12.25);
   for (const custom of ["", "5", "0", "10001", "abc"])
     expect(typeof raiseChoice("other", custom, 5)).toBe("string");
+});
+
+it("starts from the first step that covers a refusal that arrives after the card", () => {
+  const agent = budgetAgent();
+  const later = { ...agent, model: { ...agent.model, budget: null } };
+  const props = {
+    controls: { ...controls, canRaiseBudget: true, canResumeTask: true },
+    onSettings: vi.fn(),
+  };
+  const view = render(<TaskRecovery agent={later} {...props} />);
+  view.rerender(<TaskRecovery agent={agent} {...props} />);
+  expect(screen.getByRole("button", { name: "Raise to $7 and continue" })).toBeTruthy();
 });

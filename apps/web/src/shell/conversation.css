@@ -2,7 +2,9 @@
    its foot. Messages, questions, results and the work line are rows of one card map. */
 
 .thread-body {
-  --thread-dock-shown: 0px;
+  --thread-foot-shown: 0px;
+  /* The scroller's bar keeps a gutter; the foot keeps the same, so their right edges line up. */
+  --thread-gutter: 0px;
   position: relative;
   flex: 1;
   min-height: 0;
@@ -12,7 +14,6 @@
 
 .thread-scroll {
   flex: 1;
-  scroll-padding-bottom: var(--thread-dock-shown);
 }
 
 .thread-content {
@@ -26,7 +27,7 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding-block: var(--spacing) calc(var(--spacing) * 5);
+  padding-block: var(--spacing) calc(var(--spacing) * 3);
   border-radius: var(--radius-md);
 }
 
@@ -45,6 +46,11 @@
 
 .thread-row[data-group-start] {
   margin-top: calc(var(--spacing) * 5);
+}
+
+/* A card under dot's words keeps a little more air than a line of text. */
+.thread-row:is([data-kind="result"], [data-kind="question"]):not([data-group-start]) {
+  margin-top: calc(var(--spacing) * 3);
 }
 
 .thread-row:first-child,
@@ -666,40 +672,40 @@
   padding-block: var(--spacing) calc(var(--spacing) * 2);
 }
 
-/* The foot of the thread: the composer or the answer panel, over a fade where the thread runs on
-   beneath it. */
+/* Under the thread: the live work line and the composer (or the answer panel). */
+.thread-foot {
+  flex: none;
+  min-width: 0;
+  padding-right: var(--thread-gutter);
+}
+
 .thread-dock {
-  position: relative;
-  z-index: 2;
-  padding-bottom: var(--spacing);
-  background-color: var(--color-void);
+  padding-top: calc(var(--spacing) * 2);
 }
 
-.thread-dock[data-docked] {
-  position: sticky;
-  bottom: 0;
+/* The thread is the column's scroller, so the composer never scrolls on its own. */
+.thread-composer > .composer {
+  max-height: none;
+  overflow: visible;
 }
 
-.thread-dock::before {
-  content: "";
-  position: absolute;
-  inset: auto 0 100%;
-  height: calc(var(--spacing) * 4);
-  background: linear-gradient(to top, var(--color-void), transparent);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-fade) var(--ease-standard);
+.thread-live .thread-work {
+  padding-bottom: calc(var(--spacing) * 2);
 }
 
-.thread-scroll[data-edge-bottom] .thread-dock[data-docked]::before {
-  opacity: 1;
+/* Under the thread the work line keeps one line each, so its changing words never move the
+   composer; the whole text is in the HUD and in Activity. */
+.thread-live :is(.thread-work-text, .ui-disclosure-summary) {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .thread-jump {
   position: absolute;
   z-index: 3;
   left: 50%;
-  bottom: calc(var(--thread-dock-shown) + var(--spacing) * 3);
+  bottom: calc(var(--thread-foot-shown) + var(--spacing) * 3);
   border-radius: var(--radius-md);
   background-color: var(--color-raised-2);
   box-shadow: var(--shadow-overlay);

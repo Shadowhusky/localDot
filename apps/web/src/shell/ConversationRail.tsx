@@ -21,6 +21,7 @@ export function ConversationRail({
   live = null,
   api = null,
   onReplay,
+  computerReady = false,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -32,6 +33,7 @@ export function ConversationRail({
   live?: LiveWork | null;
   api?: ApiClient | null;
   onReplay?: () => void;
+  computerReady?: boolean;
 }) {
   const model = agent?.model;
   const ended = model?.ended?.reason;
@@ -69,6 +71,7 @@ export function ConversationRail({
         recovery={recovery}
         error={agent?.error}
         onReplay={onReplay}
+        computerReady={computerReady}
         dock={
           <>
             {answer}

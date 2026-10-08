@@ -55,8 +55,14 @@ export const dollars = (value: number) =>
     minimumFractionDigits: Number.isInteger(value) ? 0 : 2,
     maximumFractionDigits: 2,
   })}`;
-// What a chip adds to the limit.
-const RAISES = [2, 5, 10] as const;
+// What a step adds to the limit. Two are offered: the smallest that covers what the next request
+// needs, and the one after it.
+const RAISES = [2, 5, 10, 25, 50] as const;
+export function raiseSteps(need: number | undefined): number[] {
+  const first = RAISES.findIndex((raise) => raise >= (need ?? 5));
+  const at = first < 0 ? RAISES.length - 2 : Math.min(first, RAISES.length - 2);
+  return RAISES.slice(at, at + 2);
+}
 const CUSTOM = "other";
 const MAX_LIMIT = 10_000;
 
@@ -84,9 +90,10 @@ export function TaskRecovery({
 }) {
   const budget = agent.model.budget;
   const need = budget?.data.needUSD;
-  const [choice, setChoice] = useState<string>(() =>
-    String(RAISES.find((raise) => need === undefined || raise >= need) ?? RAISES.at(-1)),
-  );
+  const steps = raiseSteps(need);
+  // A choice belongs to the refusal it was made for; a new one starts from its own first step.
+  const [chosen, setChosen] = useState<{ budget: string | undefined; value: string } | null>(null);
+  const choice = chosen && chosen.budget === budget?.id ? chosen.value : String(steps[0]);
   const [custom, setCustom] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const state = agent.model.state;
@@ -182,12 +189,12 @@ export function TaskRecovery({
           <SegmentedControl
             aria-label="Raise the limit by"
             items={[
-              ...RAISES.map((raise) => ({ value: String(raise), label: `+$${raise}` })),
+              ...steps.map((raise) => ({ value: String(raise), label: `+$${raise}` })),
               { value: CUSTOM, label: "Other" },
             ]}
             value={choice}
             onValueChange={(value) => {
-              setChoice(value);
+              setChosen({ budget: budget.id, value });
               setProblem(null);
             }}
           />

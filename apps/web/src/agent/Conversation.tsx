@@ -9,9 +9,12 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
+import { count } from "../copy/format.ts";
 import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
+import { Collapse } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { CopyButton } from "./CopyButton.tsx";
@@ -27,20 +30,22 @@ import { usePagedRows } from "./usePagedRows.ts";
 
 // The thread mounts at most this many items; scrolling to either end moves it by half.
 const WINDOW = 200;
-// The dock stays in view while the thread scrolls under it, unless it would take more than this
-// share of the view; then it scrolls away with the thread, so history is never read through a slot.
-const DOCK_SHARE = 0.45;
+// The foot (the live work line and the composer) sits under the thread and stays put while it
+// scrolls, as long as the thread keeps this much room above it. A taller foot joins the end of the
+// thread instead, so the column keeps one scroller; it comes back under with a little to spare.
+const THREAD_ROOM = 200;
+const ROOM_BACK = 224;
 const itemKey = (item: ThreadItem) => item.key;
 
 interface ThreadContext {
   announce(text: string): void;
   downloads: ResultDownloads;
-  live: LiveWork | null;
   ended?: "done" | "stopped" | "error";
   pendingAsk: string | null;
   latestWork: string | undefined;
   onReplay?: () => void;
 }
+type WorkItem = Extract<ThreadItem, { kind: "work" }>;
 type CardOf<K extends ThreadKind> = (props: {
   item: Extract<ThreadItem, { kind: K }>;
   thread: ThreadContext;
@@ -99,7 +104,7 @@ const CARDS: { [K in ThreadKind]: CardOf<K> } = {
     <LiveWorkLine
       steps={item.steps}
       startMs={item.startMs}
-      live={item.key === thread.latestWork ? thread.live : null}
+      live={null}
       ended={item.key === thread.latestWork ? thread.ended : undefined}
     />
   ),
@@ -150,9 +155,10 @@ export interface ConversationProps {
   sessionId?: string | null;
   recovery?: ReactNode;
   error?: string | null;
-  // The composer, or the answer panel while dot waits for one. It stays at the foot of the thread.
+  // The composer, or the answer panel while dot waits for one, under the thread.
   dock?: ReactNode;
   onReplay?: () => void;
+  computerReady?: boolean;
 }
 
 export function Conversation({
@@ -169,9 +175,23 @@ export function Conversation({
   error,
   dock,
   onReplay,
+  computerReady = false,
 }: ConversationProps) {
-  const page = usePagedRows(items, itemKey, ownerKey, { size: WINDOW, step: WINDOW / 2 });
-  const follow = useFollowScroll(ownerKey, true);
+  // While its task is live, the latest turn's work line sits in the foot, always in view; once the
+  // turn is over it joins the thread as that turn's last row.
+  const latestWork = items.findLast((item) => item.kind === "work") as WorkItem | undefined;
+  const liveWork = live ? latestWork : undefined;
+  const shown = useMemo(
+    () => (liveWork ? items.filter((item) => item !== liveWork) : items),
+    [items, liveWork],
+  );
+  const lastLive = useRef<WorkItem | undefined>(undefined);
+  if (liveWork) lastLive.current = liveWork;
+  const footWork = liveWork ?? lastLive.current;
+  const page = usePagedRows(shown, itemKey, ownerKey, { size: WINDOW, step: WINDOW / 2 });
+  // Following the end, the end is held in the same frame as anything arrives, so nothing at the
+  // end moves; a new row eases in where it lands instead.
+  const follow = useFollowScroll(ownerKey, true, { glide: false });
   const [announcement, setAnnouncement] = useState({ owner: ownerKey, text: "" });
   const announce = useCallback(
     (text: string) =>
@@ -188,7 +208,6 @@ export function Conversation({
   );
   const downloads = useResultDownloads(api, sessionId, results, announce);
   const rows = useMemo(() => threadRows(page.rows), [page.rows]);
-  const latestWork = items.findLast((item) => item.kind === "work")?.key;
 
   const announced = useRef({ owner: ownerKey, id: "" });
   const completed = items.findLast(
@@ -225,11 +244,20 @@ export function Conversation({
     ? items.filter((item) => item.kind !== "work" && !left.keys.has(item.key)).length
     : 0;
 
-  const paging = useRef({ page, pinned: follow.pinned });
-  paging.current = { page, pinned: follow.pinned };
+  const paging = useRef({ page, following: follow.following });
+  paging.current = { page, following: follow.following };
   const observer = useRef<IntersectionObserver | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
   // Reaching either end of the mounted window moves it; the rows in view stay mounted and in place.
+  // A page moved by its buttons waits for the reader's own scrolling before the edges move it again.
+  const held = useRef(false);
+  const reached = useRef({ older: false, newer: false });
+  const moveAt = useCallback((edge: "older" | "newer") => {
+    const { page: now, following } = paging.current;
+    if (held.current) return;
+    if (edge === "older" && !following() && now.hasOlder) now.older();
+    else if (edge === "newer" && now.hasNewer) now.newer();
+  }, []);
   const edges = useMemo(() => {
     const watch = (edge: "older" | "newer") => (element: HTMLElement | null) => {
       if (!element) return;
@@ -237,21 +265,29 @@ export function Conversation({
         observer.current = new IntersectionObserver(
           (entries) => {
             for (const entry of entries) {
-              if (!entry.isIntersecting) continue;
-              const { page: now, pinned } = paging.current;
-              const end = (entry.target as HTMLElement).dataset.edge;
-              if (end === "older" && !pinned && now.hasOlder) now.older();
-              else if (end === "newer" && now.hasNewer) now.newer();
+              const end = (entry.target as HTMLElement).dataset.edge as "older" | "newer";
+              reached.current[end] = entry.isIntersecting;
+              if (entry.isIntersecting) moveAt(end);
             }
           },
           { root: scroller.current, rootMargin: "240px 0px" },
         );
       element.dataset.edge = edge;
       observer.current?.observe(element);
-      return () => observer.current?.unobserve(element);
+      return () => {
+        reached.current[edge] = false;
+        observer.current?.unobserve(element);
+      };
     };
     return { older: watch("older"), newer: watch("newer") };
-  }, []);
+  }, [moveAt]);
+  const reading = () => {
+    follow.interrupt();
+    if (!held.current) return;
+    held.current = false;
+    if (reached.current.older) moveAt("older");
+    else if (reached.current.newer) moveAt("newer");
+  };
   useEffect(() => () => observer.current?.disconnect(), []);
   const attach = useCallback(
     (element: HTMLDivElement | null) => {
@@ -261,37 +297,53 @@ export function Conversation({
     [follow.ref],
   );
 
-  // Written straight onto the elements, so scrolling never re-renders the thread. The jump button
-  // and scrolled-to rows keep clear of the part of the dock in view.
+  // The foot's content is rendered once into its own element, which moves between the column and
+  // the end of the thread without remounting, so a draft in the composer is never lost. Where it
+  // is, and how much of it is in view, is written straight onto the elements, so scrolling never
+  // re-renders the thread; the jump button keeps clear of it.
   const body = useRef<HTMLDivElement>(null);
-  const footer = useRef<HTMLDivElement>(null);
+  const foot = useRef<HTMLDivElement>(null);
+  const end = useRef<HTMLDivElement>(null);
+  const [dockHost] = useState(() => {
+    const host = document.createElement("div");
+    host.className = "thread-dock";
+    return host;
+  });
   const placeDock = useCallback(() => {
+    const column = body.current;
     const view = scroller.current?.getBoundingClientRect();
-    const foot = footer.current;
-    if (!view || !foot || !body.current) return;
-    foot.toggleAttribute("data-docked", foot.offsetHeight <= view.height * DOCK_SHARE);
-    const top = foot.getBoundingClientRect().top;
-    const shown = Math.max(0, Math.min(foot.offsetHeight, view.bottom - top));
-    body.current.style.setProperty("--thread-dock-shown", `${Math.round(shown)}px`);
-  }, []);
-  useEffect(() => {
+    if (!column || !view || !foot.current || !end.current) return;
+    const inThread = dockHost.parentElement === end.current;
+    const room = column.clientHeight - dockHost.offsetHeight;
+    const target = room < (inThread ? ROOM_BACK : THREAD_ROOM) ? end.current : foot.current;
+    if (dockHost.parentElement !== target) target.append(dockHost);
+    const top = dockHost.getBoundingClientRect().top;
+    const bottom = column.getBoundingClientRect().bottom;
+    const inView = Math.max(0, Math.min(dockHost.offsetHeight, bottom - top));
+    column.style.setProperty("--thread-foot-shown", `${Math.round(inView)}px`);
+    const gutter = scroller.current
+      ? scroller.current.offsetWidth - scroller.current.clientWidth
+      : 0;
+    column.style.setProperty("--thread-gutter", `${gutter}px`);
+  }, [dockHost]);
+  useLayoutEffect(() => {
+    placeDock();
     if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(placeDock);
-    if (scroller.current) observer.observe(scroller.current);
-    if (footer.current) observer.observe(footer.current);
+    if (body.current) observer.observe(body.current);
+    observer.observe(dockHost);
     return () => observer.disconnect();
-  }, [placeDock]);
+  }, [placeDock, dockHost]);
 
   const thread: ThreadContext = {
     announce,
     downloads,
-    live,
     ended,
     pendingAsk,
-    latestWork,
+    latestWork: latestWork?.key,
     onReplay,
   };
-  const empty = !items.length;
+  const empty = !shown.length && !liveWork;
   return (
     <div className="thread-body" ref={body}>
       <VisuallyHidden role="status" aria-live="polite" aria-atomic="true">
@@ -300,17 +352,17 @@ export function Conversation({
       <ScrollArea
         ref={attach}
         className="thread-scroll"
-        fade="top"
+        fade="both"
         onScroll={() => {
           placeDock();
           if (!visible) return;
           if (!follow.onScroll()) page.freeze();
           else if (!page.following && !page.hasNewer) page.latest();
         }}
-        onWheel={follow.interrupt}
-        onTouchStart={follow.interrupt}
-        onPointerDown={follow.interrupt}
-        onKeyDown={follow.interrupt}
+        onWheel={reading}
+        onTouchStart={reading}
+        onPointerDown={reading}
+        onKeyDown={reading}
       >
         <div className="thread-content">
           <section
@@ -331,18 +383,26 @@ export function Conversation({
               older={page.hasOlder}
               newer={page.hasNewer}
               onOlder={() => {
+                held.current = true;
+                follow.release();
                 page.older();
                 if (scroller.current) scroller.current.scrollTop = 0;
               }}
               onNewer={() => {
+                held.current = true;
+                follow.release();
                 page.newer();
                 if (scroller.current) scroller.current.scrollTop = 0;
               }}
             />
-            {empty && !live ? (
+            {empty ? (
               <div className="thread-empty">
                 <h3>What would you like done?</h3>
-                <p>Turn on your computer, then write a task below.</p>
+                <p>
+                  {computerReady
+                    ? "Write a task below and dot does it on your computer."
+                    : "Turn on your computer, then write a task below."}
+                </p>
               </div>
             ) : (
               rows.map((row, index) => (
@@ -366,16 +426,14 @@ export function Conversation({
               </p>
             )}
           </section>
-          <div className="thread-dock" ref={footer}>
-            {dock}
-          </div>
+          <div className="thread-end" ref={end} />
         </div>
       </ScrollArea>
       <span className="thread-jump" data-shown={!follow.pinned || undefined} inert={follow.pinned}>
         <Button
           size="sm"
           icon="arrow-down"
-          aria-label={unread ? `${unread} new messages` : "Jump to latest"}
+          aria-label={unread ? count(unread, "new message", "new messages") : "Jump to latest"}
           onClick={() => {
             page.latest();
             follow.jump();
@@ -384,6 +442,23 @@ export function Conversation({
           {unread ? `${unread} new` : "Latest"}
         </Button>
       </span>
+      <div className="thread-foot" ref={foot} />
+      {createPortal(
+        <>
+          <Collapse open={!!liveWork} className="thread-live">
+            {footWork && (
+              <LiveWorkLine
+                steps={footWork.steps}
+                startMs={footWork.startMs}
+                live={liveWork ? live : null}
+                ended={ended}
+              />
+            )}
+          </Collapse>
+          {dock}
+        </>,
+        dockHost,
+      )}
     </div>
   );
 }

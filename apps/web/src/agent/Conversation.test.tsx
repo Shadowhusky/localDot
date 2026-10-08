@@ -141,9 +141,7 @@ describe("the conversation thread", () => {
         truncated={false}
       />,
     );
-    expect(within(jump()).getByRole("button", { name: "1 new messages" }).textContent).toBe(
-      "1 new",
-    );
+    expect(within(jump()).getByRole("button", { name: "1 new message" }).textContent).toBe("1 new");
     scrolled(800);
     expect(jump().hasAttribute("data-shown")).toBe(false);
   });
