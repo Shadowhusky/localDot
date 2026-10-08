@@ -784,6 +784,7 @@ app.get("/api/keyd", (c) =>
             : { state: "active", source: "router", addresses: 1 },
       }),
 );
+app.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
 app.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
