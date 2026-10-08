@@ -2,21 +2,28 @@ import { useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { replayOrigin } from "./useReplay.ts";
 
-// Recently shown pictures stay as blobs, so a scrubber moving back over them paints at once.
-const KEPT = 64;
-const kept = new WeakMap<ApiClient, Map<string, Blob>>();
+// Recently shown pictures stay as blobs, so a scrubber moving back over them paints at once. A full
+// frame weighs as much as dozens of thumbnails, so only a few of those stay.
+const KEPT = { thumbs: 64, frames: 8 } as const;
+type Kind = keyof typeof KEPT;
+const kept = new WeakMap<ApiClient, Record<Kind, Map<string, Blob>>>();
 
-function keptBy(api: ApiClient): Map<string, Blob> {
+function keptBy(api: ApiClient, kind: Kind): Map<string, Blob> {
   let blobs = kept.get(api);
   if (!blobs) {
-    blobs = new Map();
+    blobs = { thumbs: new Map(), frames: new Map() };
     kept.set(api, blobs);
   }
-  return blobs;
+  return blobs[kind];
 }
 
-async function load(api: ApiClient, key: string, signal: AbortSignal): Promise<Blob | null> {
-  const blobs = keptBy(api);
+async function load(
+  api: ApiClient,
+  kind: Kind,
+  key: string,
+  signal: AbortSignal,
+): Promise<Blob | null> {
+  const blobs = keptBy(api, kind);
   const held = blobs.get(key);
   if (!held) {
     const response = await api.fetch(`${replayOrigin(api)}/api/sessions/${key}`, {
@@ -30,7 +37,7 @@ async function load(api: ApiClient, key: string, signal: AbortSignal): Promise<B
     const blob = await response.blob();
     blobs.set(key, blob);
     for (const old of blobs.keys()) {
-      if (blobs.size <= KEPT) break;
+      if (blobs.size <= KEPT[kind]) break;
       blobs.delete(old);
     }
     return blob;
@@ -56,11 +63,12 @@ export function ReplayImage({
 }) {
   const [image, setImage] = useState<{ sessionId: string; url: string } | null>(null);
   const shown = useRef<string | null>(null);
-  const key = `${sessionId}/${full ? "frames" : "thumbs"}/${frameId}`;
+  const kind = full ? "frames" : "thumbs";
+  const key = `${sessionId}/${kind}/${frameId}`;
   useEffect(() => {
     if (!frameId) return;
     const controller = new AbortController();
-    void load(api, key, controller.signal)
+    void load(api, kind, key, controller.signal)
       .then((blob) => {
         if (controller.signal.aborted) return;
         const url = blob && URL.createObjectURL(blob);
@@ -70,7 +78,7 @@ export function ReplayImage({
       })
       .catch(() => {});
     return () => controller.abort();
-  }, [api, key, sessionId, frameId]);
+  }, [api, kind, key, sessionId, frameId]);
   useEffect(
     () => () => {
       if (shown.current) URL.revokeObjectURL(shown.current);
