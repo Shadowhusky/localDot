@@ -1,8 +1,15 @@
-import { randomBytes } from "node:crypto";
+import { createECDH, createPrivateKey, type KeyObject, randomBytes, sign } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
-import type { HairpinGuard, KeydEvent, KeydOpened, KeydRecord } from "@localdot/protocol";
+import {
+  type HairpinGuard,
+  type KeydEvent,
+  type KeydOpened,
+  KeydPushRequest,
+  type KeydRecord,
+  pushServiceOf,
+} from "@localdot/protocol";
 
 // A stand-in for keyd's admin API on a temporary Unix socket, for unit tests: it keeps secrets'
 // records (never values: a sealed body is only recorded), cells and an event stream, and can be
@@ -47,6 +54,11 @@ export class FakeKeyd {
   hairpin: HairpinGuard = { state: "active", source: "nat-pmp", addresses: 1 };
   // Answers the next request whose "METHOD /path" starts with the key with this error.
   readonly failures = new Map<string, { status: number; code: string }>();
+  // Web Push: the fake's own VAPID key, and where a send goes. Without a target a send is only
+  // recorded and answered 201; with one, the fake POSTs to it the way keyd does.
+  readonly pushPublicKey: string;
+  pushTarget: ((endpoint: URL) => string) | undefined;
+  readonly #pushKey: KeyObject;
   readonly #streams = new Set<ServerResponse>();
   readonly #dir: string;
   readonly socketPath: string;
@@ -55,6 +67,20 @@ export class FakeKeyd {
   constructor() {
     this.#dir = mkdtempSync("/tmp/ld-fake-keyd-");
     this.socketPath = join(this.#dir, "admin.sock");
+    const ecdh = createECDH("prime256v1");
+    ecdh.generateKeys();
+    const point = ecdh.getPublicKey();
+    this.pushPublicKey = point.toString("base64url");
+    this.#pushKey = createPrivateKey({
+      format: "jwk",
+      key: {
+        kty: "EC",
+        crv: "P-256",
+        x: point.subarray(1, 33).toString("base64url"),
+        y: point.subarray(33).toString("base64url"),
+        d: ecdh.getPrivateKey().toString("base64url"),
+      },
+    });
   }
 
   async start(): Promise<this> {
@@ -112,7 +138,64 @@ export class FakeKeyd {
         return;
       }
     }
+    if (method === "POST" && path === "/v1/push/send") {
+      await this.#pushSend(body, res);
+      return;
+    }
     this.#route(method, path, body, res);
+  }
+
+  async #pushSend(body: unknown, res: ServerResponse): Promise<void> {
+    const parsed = KeydPushRequest.safeParse(body);
+    if (!parsed.success) {
+      reply(res, 400, { error: { code: "bad-request", message: "fake keyd: bad push request" } });
+      return;
+    }
+    const request = parsed.data;
+    if (!pushServiceOf(request.endpoint)) {
+      reply(res, 400, { error: { code: "not-push-service", message: "not a push service" } });
+      return;
+    }
+    const endpoint = new URL(request.endpoint);
+    if (!this.pushTarget) {
+      reply(res, 200, { status: 201, gone: false });
+      return;
+    }
+    const header = Buffer.from('{"typ":"JWT","alg":"ES256"}').toString("base64url");
+    const claims = Buffer.from(
+      JSON.stringify({
+        aud: endpoint.origin,
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        sub: "https://github.com/shadowhusky/localdot",
+      }),
+    ).toString("base64url");
+    const input = `${header}.${claims}`;
+    const signature = sign("sha256", Buffer.from(input), {
+      key: this.#pushKey,
+      dsaEncoding: "ieee-p1363",
+    }).toString("base64url");
+    try {
+      const answer = await fetch(this.pushTarget(endpoint), {
+        method: "POST",
+        headers: {
+          authorization: `vapid t=${input}.${signature}, k=${this.pushPublicKey}`,
+          "content-encoding": "aes128gcm",
+          "content-type": "application/octet-stream",
+          ttl: String(request.ttl),
+          urgency: request.urgency,
+          ...(request.topic ? { topic: request.topic } : {}),
+        },
+        body: Buffer.from(request.body, "base64url"),
+        redirect: "manual",
+      });
+      await answer.arrayBuffer();
+      reply(res, 200, {
+        status: answer.status,
+        gone: answer.status === 404 || answer.status === 410,
+      });
+    } catch {
+      reply(res, 502, { error: { code: "unreachable", message: "fake push service unreachable" } });
+    }
   }
 
   #route(method: string, path: string, body: unknown, res: ServerResponse): boolean {
@@ -129,6 +212,8 @@ export class FakeKeyd {
         hairpin: this.hairpin,
       });
     }
+    if (method === "GET" && path === "/v1/push/key")
+      return reply(res, 200, { publicKey: this.pushPublicKey });
     if (method === "GET" && path === "/v1/secrets")
       return reply(res, 200, { secrets: [...this.records.values()] });
     if (method === "GET" && path === "/v1/events") {
