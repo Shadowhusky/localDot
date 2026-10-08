@@ -208,7 +208,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
   });
   session.append("message.user", { messageId: ulid(), text: o.task, kind: "task" });
   const desktop = new DesktopdTools({ baseUrl: o.cell.baseUrl, token: o.cell.token });
-  const png = new FramePng(frames);
+  const png = new FramePng(frames, gateway);
   const outputs = new OutputStore(o.home);
   const tools: ToolDeps = {
     gateway,

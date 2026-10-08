@@ -9,6 +9,7 @@ import {
   SettleRequest,
   TypeRequest,
   type TypeResult,
+  ZoomRequest,
 } from "@localdot/protocol";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
@@ -255,6 +256,15 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     withPerception(async (p) =>
       c.json(await observe({ driver: p.driver, x: p.x, screenshots: p.screenshots })),
     )(),
+  );
+  app.post("/zoom", (c) =>
+    withPerception(async (p) => {
+      const parsed = ZoomRequest.safeParse(await c.req.json().catch(() => ({})));
+      if (!parsed.success) return c.text(parsed.error.message, 400);
+      const png = p.screenshots?.zoom(parsed.data.frameId, parsed.data.region);
+      if (!png) return c.text("that frame is no longer kept", 404);
+      return c.body(new Uint8Array(png), 200, { "content-type": "image/png" });
+    })(),
   );
   app.post("/focused", (c) => withPerception(async (p) => c.json(await focusedTarget(p)))());
   app.post("/hitTest", (c) =>

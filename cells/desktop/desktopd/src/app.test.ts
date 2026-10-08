@@ -359,3 +359,58 @@ describe("desktopd input routes", () => {
     expect((await a.request("/settle", { method: "POST", headers: bearer })).status).toBe(503);
   });
 });
+
+describe("desktopd zoom", () => {
+  const frameId = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
+  function zoomApp(zoom: (id: string, region: unknown) => Buffer | undefined) {
+    return createDesktopdApp({
+      token: TOKEN,
+      scale: 2,
+      display: ":1",
+      readXsettings: async () => ({ windowScalingFactor: 2, xftDpi: 96 }),
+      readScreen: async () => ({ w: 2560, h: 1600 }),
+      perception: {
+        x: fakeX(),
+        driver: {} as never,
+        screenshots: { zoom } as never,
+        scale: 2,
+        readScaling: async () => 2,
+      },
+    });
+  }
+  const post = (a: ReturnType<typeof zoomApp>, body: unknown) =>
+    a.request("/zoom", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+  it("returns the kept frame's region as PNG and 404 once the frame is gone", async () => {
+    const asked: unknown[] = [];
+    const a = zoomApp((id, region) => {
+      asked.push([id, region]);
+      return id === frameId ? Buffer.from("png") : undefined;
+    });
+    const region = { x: 10, y: 20, w: 30, h: 40 };
+    const res = await post(a, { frameId, region });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(Buffer.from(await res.arrayBuffer()).toString()).toBe("png");
+    expect((await post(a, { frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0P", region })).status).toBe(404);
+    expect(asked).toEqual([
+      [frameId, region],
+      ["01J9ZQ3V8Y7X6W5T4S3R2Q1P0P", region],
+    ]);
+  });
+
+  it("refuses a malformed request before reading any frame", async () => {
+    const a = zoomApp(() => {
+      throw new Error("must not be asked");
+    });
+    expect((await post(a, { frameId: "../x", region: { x: 0, y: 0, w: 8, h: 8 } })).status).toBe(
+      400,
+    );
+    expect((await post(a, { frameId })).status).toBe(400);
+    expect((await a.request("/zoom", { method: "POST", body: "{}" })).status).toBe(401);
+  });
+});

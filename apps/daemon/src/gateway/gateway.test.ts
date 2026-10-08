@@ -774,4 +774,39 @@ describe("ActionGateway settle and zoom", () => {
     for (const [i, path] of paths.entries())
       if (path === "/settle") expect(paths[i + 1]).toBe("/observe");
   });
+
+  it("zooms the session's newest frame through its desktop, and nothing else", async () => {
+    let next = 0;
+    const ids = ["01J9ZQ3V8Y7X6W5T4S3R2Q1P0A", "01J9ZQ3V8Y7X6W5T4S3R2Q1P0B"];
+    const s = setup({
+      observe: () => ({
+        frameId: ids[next++] as string,
+        width: 1280,
+        height: 800,
+        image: Buffer.from("RIFF....WEBP").toString("base64"),
+        pointer: { x: 0, y: 0 },
+        windows: [],
+      }),
+      zoom: (body) => Buffer.from(`png of ${(body as { frameId: string }).frameId}`),
+    });
+    const ctx = { sessionId: s.sessionId, cellId: s.cellId };
+    const region = { x: 100, y: 50, w: 40, h: 20 };
+    const { frameId } = await s.gateway.observe(ctx);
+    expect((await s.gateway.zoom(s.sessionId, frameId, region))?.toString()).toBe(
+      `png of ${frameId}`,
+    );
+    expect(s.fake.calls.at(-1)).toEqual({ path: "/zoom", body: { frameId, region } });
+    expect(
+      await s.gateway.zoom(s.eventLog.createSession("other"), frameId, region),
+    ).toBeUndefined();
+    expect(await s.gateway.zoom(s.sessionId, "01J9ZQ3V8Y7X6W5T4S3R2Q1P0Z", region)).toBeUndefined();
+    const cell = s.cells.get(s.cellId);
+    if (!cell) throw new Error("no cell");
+    s.cells.emit({ ...cell, paused: true });
+    expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
+    s.cells.emit(cell);
+    await s.gateway.observe(ctx);
+    expect(await s.gateway.zoom(s.sessionId, frameId, region)).toBeUndefined();
+    expect(s.fake.calls.filter((c) => c.path === "/zoom")).toHaveLength(1);
+  });
 });

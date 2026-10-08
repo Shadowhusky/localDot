@@ -75,7 +75,7 @@ describe("observe", () => {
 describe("observe from the root capture", () => {
   const shots = () => new Screenshots(join(mkdtempSync(join(tmpdir(), "localdot-obs-")), "r.raw"));
 
-  it("encodes the helper's capture at model size, not the driver's screenshot", async () => {
+  it("encodes the helper's capture at model size, not the driver's screenshot, and keeps it", async () => {
     const { x } = rootHelper(77);
     const screenshots = shots();
     const inputs: Buffer[] = [];
@@ -97,13 +97,14 @@ describe("observe from the root capture", () => {
     expect(inputs[0]?.length).toBe(header.length + 1280 * 800 * 3);
     expect(inputs[0]?.[header.length + 1000]).toBe(77);
     expect(result).toMatchObject({ width: 1280, height: 800, pointer: { x: 10, y: 20 } });
+    expect(screenshots.zoom(result.frameId, { x: 0, y: 0, w: 8, h: 8 })).toBeInstanceOf(Buffer);
   });
 
   it("falls back to the driver's screenshot when the capture fails", async () => {
     const { x } = rootHelper(0, true);
     const screenshots = shots();
     const inputs: string[] = [];
-    await observe({
+    const result = await observe({
       driver: { desktopShot: async () => Buffer.from("png-bytes") },
       x,
       screenshots,
@@ -113,5 +114,6 @@ describe("observe from the root capture", () => {
       },
     });
     expect(inputs).toEqual(["png-bytes"]);
+    expect(screenshots.zoom(result.frameId, { x: 0, y: 0, w: 8, h: 8 })).toBeUndefined();
   });
 });

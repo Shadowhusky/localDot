@@ -141,6 +141,11 @@ const holding = (s: StreamState) =>
 export class ActionGateway {
   readonly #cursor = new Map<string, Point>();
   readonly #queues = new Map<string, Promise<unknown>>();
+  // Each screen's newest frame: its desktopd keeps that frame's device-resolution pixels.
+  readonly #lastFrame = new Map<
+    string,
+    { frameId: string; sessionId: string; device: NativeDevice }
+  >();
 
   constructor(private readonly deps: GatewayDeps) {}
 
@@ -157,7 +162,31 @@ export class ActionGateway {
     this.deps.frames.save(ctx.sessionId, o.frameId, Buffer.from(o.image, "base64"));
     this.#append(ctx, "observe", { frameId: o.frameId, width: o.width, height: o.height });
     this.#cursor.set(ctx.cellId, o.pointer);
+    this.#lastFrame.set(ctx.cellId, { frameId: o.frameId, sessionId: ctx.sessionId, device: d });
     return { frameId: o.frameId, pointer: o.pointer };
+  }
+
+  // A model-pixel region of the session's frame at the screen's device resolution (PNG), while
+  // that frame is still its screen's newest; undefined otherwise or on a screen without one.
+  async zoom(
+    sessionId: string,
+    frameId: string,
+    region: Rect,
+    signal?: AbortSignal,
+  ): Promise<Buffer | undefined> {
+    for (const [cellId, last] of this.#lastFrame) {
+      if (last.frameId !== frameId) continue;
+      const cell = this.deps.cells.get(cellId);
+      if (!cell) {
+        this.#lastFrame.delete(cellId);
+        return undefined;
+      }
+      if (last.sessionId !== sessionId || !last.device.client.zoom) return undefined;
+      if (cell.state !== "ready" || cell.paused || cell.fenced || cell.replacementPending)
+        return undefined;
+      return await last.device.client.zoom({ frameId, region }, signal);
+    }
+    return undefined;
   }
 
   async run(ctx: ActionContext, action: GuiAction): Promise<ActionOutcome> {

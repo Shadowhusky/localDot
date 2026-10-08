@@ -13,6 +13,7 @@ import {
   TypeProgress,
   type TypeRequest,
   TypeResult,
+  type ZoomRequest,
 } from "@localdot/protocol";
 import type { DesktopdEndpoint } from "../cells/types.ts";
 
@@ -34,6 +35,7 @@ const TIMEOUT_MS = {
   launch: 5000,
   observe: 10_000,
   hitTest: 5000,
+  zoom: 5000,
 } as const;
 
 export class DesktopdClient {
@@ -64,6 +66,16 @@ export class DesktopdClient {
 
   observe(signal?: AbortSignal): Promise<ObserveResult> {
     return this.#json("POST", "/observe", {}, TIMEOUT_MS.observe, ObserveResult.parse, signal);
+  }
+
+  // A region of the frame desktopd observed last, as PNG at the screen's device resolution;
+  // undefined once a newer observe replaced that frame.
+  async zoom(req: ZoomRequest, signal?: AbortSignal): Promise<Buffer | undefined> {
+    signal?.throwIfAborted();
+    const res = await this.#send("POST", "/zoom", req, TIMEOUT_MS.zoom, signal);
+    if (res.status === 404) return undefined;
+    if (!res.ok) throw new DesktopdError(res.status, (await res.text()) || res.statusText, "/zoom");
+    return Buffer.from(await res.arrayBuffer());
   }
 
   focused(): Promise<HitTestResult> {

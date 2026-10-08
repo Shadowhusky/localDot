@@ -118,6 +118,10 @@ export const ObserveResult = z.object({
 });
 export type ObserveResult = z.infer<typeof ObserveResult>;
 
+// A region of an observed frame in model pixels, read back at the screen's device resolution.
+export const ZoomRequest = z.object({ frameId: z.string().regex(ULID_PATTERN), region: Rect });
+export type ZoomRequest = z.infer<typeof ZoomRequest>;
+
 export const HitTestRequest = z.object({ point: Point });
 export type HitTestRequest = z.infer<typeof HitTestRequest>;
 // desktopd clips names at the source and the gateway's clipTarget cuts to the event limits before

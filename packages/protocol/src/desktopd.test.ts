@@ -5,6 +5,7 @@ import {
   LaunchRequest,
   SettleRequest,
   TypeRequest,
+  ZoomRequest,
 } from "./desktopd.ts";
 
 describe("desktopd wire schemas", () => {
@@ -38,6 +39,14 @@ describe("desktopd wire schemas", () => {
       firstMs: 400,
     });
     expect(() => SettleRequest.parse({ verb: "drag" })).toThrow();
+  });
+
+  it("zooms a frame by its id and a region", () => {
+    const region = { x: 10, y: 20, w: 100, h: 50 };
+    expect(ZoomRequest.parse({ frameId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", region }).region).toEqual(
+      region,
+    );
+    expect(() => ZoomRequest.parse({ frameId: "../frame", region })).toThrow();
   });
 
   it("carries a target name of any length for the gateway to cut", () => {

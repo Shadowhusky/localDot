@@ -2,7 +2,9 @@ import { existsSync, lstatSync, mkdirSync, mkdtempSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { Rect } from "@localdot/protocol";
 import type { XHelper } from "../x/helper.ts";
+import { encodePng } from "./png.ts";
 
 export const MODEL_SCREEN = { width: 1280, height: 800 } as const;
 
@@ -53,6 +55,29 @@ export function modelPixels(c: RootCapture): Buffer {
   return out;
 }
 
+// A model-pixel region, clamped to the screen the way the daemon clamps a zoom, in device pixels.
+export function deviceRegion(c: RootCapture, region: Rect): Rect {
+  const f = factorOf(c);
+  const x = Math.max(0, Math.min(MODEL_SCREEN.width - 8, Math.round(region.x)));
+  const y = Math.max(0, Math.min(MODEL_SCREEN.height - 8, Math.round(region.y)));
+  const w = Math.max(8, Math.min(MODEL_SCREEN.width - x, Math.round(region.w)));
+  const h = Math.max(8, Math.min(MODEL_SCREEN.height - y, Math.round(region.h)));
+  return { x: x * f, y: y * f, w: w * f, h: h * f };
+}
+
+export function cropPng(c: RootCapture, r: Rect): Buffer {
+  const rgb = Buffer.allocUnsafe(r.w * r.h * 3);
+  let o = 0;
+  for (let y = r.y; y < r.y + r.h; y++) {
+    for (let i = y * c.stride + r.x * 4, end = i + r.w * 4; i < end; i += 4) {
+      rgb[o++] = c.pixels[i + 2] as number;
+      rgb[o++] = c.pixels[i + 1] as number;
+      rgb[o++] = c.pixels[i] as number;
+    }
+  }
+  return encodePng(rgb, r.w, r.h);
+}
+
 // The tmpfs file the helper rewrites with each capture (16 MB at 2×). One fixed path per user, so
 // a restarted desktopd reuses it instead of leaving another behind.
 export function captureFile(
@@ -66,9 +91,11 @@ export function captureFile(
   return join(ours ? dir : mkdtempSync(join(base, "localdot-desktopd-")), "root.raw");
 }
 
-// Root captures through the X helper.
+// Root captures through the X helper. The last observed one stays in memory, so a zoom on that
+// frame reads the same moment at full device resolution.
 export class Screenshots {
   #turn: Promise<unknown> = Promise.resolve();
+  #kept: { frameId: string; capture: RootCapture } | undefined;
 
   // `file` is a tmpfs path only this desktopd uses; the helper rewrites it in place.
   constructor(private readonly file: string) {}
@@ -88,5 +115,17 @@ export class Screenshots {
     });
     this.#turn = run.catch(() => {});
     return run;
+  }
+
+  keep(frameId: string, capture: RootCapture): void {
+    this.#kept = { frameId, capture };
+  }
+
+  // The region of a kept frame as PNG at device resolution; undefined once a newer frame
+  // replaced it.
+  zoom(frameId: string, region: Rect): Buffer | undefined {
+    const kept = this.#kept;
+    if (kept?.frameId !== frameId) return undefined;
+    return cropPng(kept.capture, deviceRegion(kept.capture, region));
   }
 }

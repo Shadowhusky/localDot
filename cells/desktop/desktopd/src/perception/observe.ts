@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { clipText, type ObserveResult, ulid, type WindowInfo } from "@localdot/protocol";
 import type { XHelper } from "../x/helper.ts";
-import { MODEL_SCREEN, modelPixels, type Screenshots } from "./capture.ts";
+import { MODEL_SCREEN, modelPixels, type RootCapture, type Screenshots } from "./capture.ts";
 import type { CuaDriver } from "./driver.ts";
 import { type HelperWindow, listWindows } from "./hit-test.ts";
 
@@ -57,33 +57,35 @@ export function windowInfo(w: HelperWindow): WindowInfo {
 }
 
 // The X helper's capture of the root; the driver's screenshot only when that fails.
-async function screenImage(deps: ObserveDeps): Promise<Buffer> {
+async function screenImage(deps: ObserveDeps): Promise<{ image: Buffer; capture?: RootCapture }> {
   const encode = deps.encode ?? encodeWebp;
   if (deps.screenshots) {
     try {
       const capture = await deps.screenshots.capture(deps.x);
       const rgb = modelPixels(capture);
-      return await encode(ppm(rgb, MODEL_SCREEN.width, MODEL_SCREEN.height));
+      return { image: await encode(ppm(rgb, MODEL_SCREEN.width, MODEL_SCREEN.height)), capture };
     } catch (err) {
       console.error(
         `desktopd: root capture failed, using the driver: ${err instanceof Error ? err.message : String(err)}`,
       );
     }
   }
-  return encode(await deps.driver.desktopShot(MODEL_SCREEN.width));
+  return { image: await encode(await deps.driver.desktopShot(MODEL_SCREEN.width)) };
 }
 
 export async function observe(deps: ObserveDeps): Promise<ObserveResult> {
-  const [image, pointer, windows] = await Promise.all([
+  const [shot, pointer, windows] = await Promise.all([
     screenImage(deps),
     deps.x.call<{ x: number; y: number }>("pointer"),
     listWindows(deps.x),
   ]);
+  const frameId = ulid();
+  if (shot.capture) deps.screenshots?.keep(frameId, shot.capture);
   return {
-    frameId: ulid(),
+    frameId,
     width: MODEL_SCREEN.width,
     height: MODEL_SCREEN.height,
-    image: image.toString("base64"),
+    image: shot.image.toString("base64"),
     pointer: { x: pointer.x, y: pointer.y },
     windows: windows.map(windowInfo),
   };
