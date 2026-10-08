@@ -498,8 +498,10 @@
     line-height: var(--text-footnote--line-height);
   }
 
+  /* The chosen label brightens as the thumb arrives under it, not before. */
   .ui-segment:is([aria-checked="true"], [aria-selected="true"]) {
     color: var(--color-fg-1);
+    transition-duration: var(--dur-spring), var(--dur-press);
   }
 
   @media (hover: hover) {
