@@ -1,5 +1,4 @@
 import type { AskUserInput, RequestTakeoverInput, ToolResult } from "@localdot/protocol";
-import { screenOf } from "../safety/autonomy.ts";
 import { frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 export async function askUserTool(
   deps: ToolDeps,
@@ -50,7 +49,8 @@ export async function requestTakeoverTool(
   input: RequestTakeoverInput,
 ): Promise<ToolResult> {
   ctx.check();
-  if (input.reason !== "other") ctx.session.taskAutonomy.signIn(screenOf(ctx));
+  // The user gets every screen during a takeover, so a sign-in may land on the desktop.
+  if (input.reason !== "other") ctx.session.taskAutonomy.signIn("desktop");
   const outcome = await ctx.session.takeover(
     input.reason,
     ctx.redact(input.note),

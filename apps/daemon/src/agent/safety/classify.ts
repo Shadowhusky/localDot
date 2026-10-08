@@ -128,13 +128,13 @@ export function classify(facts: RiskFacts): readonly ActionClass[] {
       return ["browsing"];
     case "files_write":
     case "files_delete":
-      return ["computer"];
+      return facts.signedIn ? ["computer", "unknown"] : ["computer"];
     case "memory_write":
       return ["memory"];
     case "files_upload":
       return ["upload"];
     case "shell":
-      return shell(facts.command ?? "");
+      return shell(facts.command ?? "", facts.signedIn === true);
     case "navigate":
       return navigation(facts);
     default:
@@ -428,8 +428,9 @@ function stageClass(tokens: readonly string[]): ActionClass | undefined {
   return undefined;
 }
 
-function shell(command: string): ActionClass[] {
-  const classes = new Set<ActionClass>(["computer"]);
+// On a signed-in desktop any command can drive the signed-in browser (xdotool, XTest, DevTools).
+function shell(command: string, signedIn: boolean): ActionClass[] {
+  const classes = new Set<ActionClass>(signedIn ? ["computer", "unknown"] : ["computer"]);
   const commands = command
     .replace(/\|&/g, "|")
     .replace(/\d*>&\d*|&>/g, " ")

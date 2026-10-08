@@ -143,6 +143,21 @@ describe("shell commands inside the computer", () => {
     expect(classify(shell(command))).toContain(actionClass);
   });
 
+  it("a signed-in desktop makes every command unclear, and a signed-out one does not", () => {
+    const command = "xdotool key Return";
+    expect(classify(shell(command))).toEqual(["computer"]);
+    const facts = { ...shell(command), signedIn: true };
+    expect(classify(facts)).toEqual(["computer", "unknown"]);
+    expect(decide(facts, BALANCED_AUTONOMY)).toEqual({
+      actionClass: "unknown",
+      mode: "ask",
+      risk: "medium",
+    });
+    expect(decide({ ...shell("git push"), signedIn: true }, BALANCED_AUTONOMY)).toMatchObject({
+      actionClass: "post",
+    });
+  });
+
   it("never treats shell text as a protected field or a click name", () => {
     expect(classify(shell("grep -ri password ~/notes; echo 'sign in'"))).toEqual(["computer"]);
   });
@@ -314,17 +329,17 @@ describe("navigation", () => {
 
 describe("tool effects", () => {
   it.each([
-    ["observe", "reading"],
-    ["files_read", "reading"],
-    ["wait", "browsing"],
-    ["scroll", "browsing"],
-    ["files_write", "computer"],
-    ["files_delete", "computer"],
-    ["memory_write", "memory"],
-    ["files_upload", "upload"],
-  ] as const)("%s is %s", (operation, actionClass) => {
-    expect(classify({ ...desktop, operation })).toEqual([actionClass]);
-    expect(classify({ ...signedIn, operation })).toEqual([actionClass]);
+    ["observe", ["reading"], ["reading"]],
+    ["files_read", ["reading"], ["reading"]],
+    ["wait", ["browsing"], ["browsing"]],
+    ["scroll", ["browsing"], ["browsing"]],
+    ["files_write", ["computer"], ["computer", "unknown"]],
+    ["files_delete", ["computer"], ["computer", "unknown"]],
+    ["memory_write", ["memory"], ["memory"]],
+    ["files_upload", ["upload"], ["upload"]],
+  ] as const)("%s is %j, and %j once signed in", (operation, out, signedInOut) => {
+    expect(classify({ ...desktop, operation })).toEqual(out);
+    expect(classify({ ...signedIn, operation })).toEqual(signedInOut);
   });
 });
 

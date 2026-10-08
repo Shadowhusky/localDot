@@ -9,6 +9,7 @@ import { classify } from "./classify.ts";
 import type { RiskDecision, RiskFacts } from "./risk.ts";
 
 const MODE_RANK = { act: 0, ask: 1, handoff: 2 } as const;
+const DESKTOP_ONLY = new Set<RiskFacts["operation"]>(["shell", "files_write", "files_delete"]);
 const RISK_RANK = { none: 0, medium: 1, high: 2 } as const;
 
 function mode(actionClass: ActionClass, policy: AutonomyPolicy): AutonomyMode {
@@ -43,8 +44,9 @@ export function screenOf(ctx: ToolCallContext): ScreenName {
   return ctx.screen?.selection.screen ?? ctx.session.screens?.selection.screen ?? "desktop";
 }
 
+// Commands and file changes run on the desktop whichever screen is selected.
 export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDecision {
-  const screen = screenOf(ctx);
+  const screen = DESKTOP_ONLY.has(facts.operation) ? "desktop" : screenOf(ctx);
   return decide(
     { ...facts, screen, signedIn: ctx.session.taskAutonomy.signedIn(screen) },
     ctx.session.autonomy,
