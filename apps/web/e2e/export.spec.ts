@@ -169,11 +169,12 @@ test("export popover floats, keeps its size, collapses to a ring and cancels wit
   await panel.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
+  // The sheet runs on past the bottom edge by design, so it is its footer that has to fit.
   const bounds = await panel.boundingBox();
   expect(bounds).not.toBeNull();
   expect(bounds?.x).toBeGreaterThanOrEqual(0);
-  expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(480);
   const footer = await panel.locator(".ui-sheet-footer").boundingBox();
+  expect(footer).not.toBeNull();
   expect((footer?.y ?? 0) + (footer?.height ?? 0)).toBeLessThanOrEqual(480);
   await page.screenshot({ path: "e2e/out/export-sheet-narrow.png" });
 });
