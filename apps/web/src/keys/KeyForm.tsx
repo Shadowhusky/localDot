@@ -151,15 +151,16 @@ export function KeyForm({
     setSaved(null);
     setTried(false);
   }, [preset]);
+  // A key typed stays through another key's change, read-only meanwhile; closing or an outage clears it.
   // biome-ignore lint/correctness/useExhaustiveDependencies: report reads refs only
   useLayoutEffect(() => {
-    if ((!active || locked) && valueRef.current?.value) {
+    if ((!active || unavailable) && valueRef.current?.value) {
       valueRef.current.value = "";
       report();
     }
     intakeAllowed.current = active && !locked;
     intakeBlocked.current = !active || document.hidden;
-  }, [active, locked]);
+  }, [active, unavailable, locked]);
   useImperativeHandle(
     intakeRef,
     () => ({

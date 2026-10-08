@@ -383,6 +383,24 @@ describe("KeysSheet", () => {
     expect(unavailable(saveButton())).toBe(false);
   });
 
+  it("keeps a typed key while another key is removed, read-only until the removal settles", async () => {
+    const deleting = Promise.withResolvers<void>();
+    vi.spyOn(keysApi, "deleteKey").mockReturnValue(deleting.promise);
+    render(<Live open onClose={() => {}} />);
+    await screen.findByText("weather");
+    type(LABEL, "books");
+    type("Key", "fake-private-value");
+    fireEvent.click(screen.getByRole("button", { name: "Remove weather" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm remove weather" }));
+    expect(field("Key").value).toBe("fake-private-value");
+    expect(field("Key").readOnly).toBe(true);
+    await act(async () => {
+      deleting.resolve();
+    });
+    expect(field("Key").value).toBe("fake-private-value");
+    expect(field("Key").readOnly).toBe(false);
+  });
+
   it("expires deletion confirmation and clears it on close or offline transition", () => {
     vi.useFakeTimers();
     const remove = vi.fn(async () => {});
