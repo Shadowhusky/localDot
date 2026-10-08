@@ -8,6 +8,9 @@ import { providerFixture } from "./testing.ts";
 import { useSettings } from "./useSettings.ts";
 
 afterEach(cleanup);
+afterEach(() => {
+  Reflect.deleteProperty(document, "hidden");
+});
 const initial = (): AgentSettingsDocument => ({
   main: { provider: "ollama", model: "local" },
   codexDenyRead: ["/private/fixture"],
@@ -42,6 +45,10 @@ function server(settings = initial()) {
     },
   });
   return { ...f, api, state: f };
+}
+function setHidden(hidden: boolean) {
+  Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
+  document.dispatchEvent(new Event("visibilitychange"));
 }
 async function opened(f: ReturnType<typeof server>) {
   const view = renderHook(() => useSettings(f.api));
@@ -225,6 +232,51 @@ describe("explicit configuration save ownership", () => {
     });
     await waitFor(() => expect(result.current.phase).toBe("ready"));
     expect(result.current.uncertain).toBe(false);
+  });
+  it("keeps edits saveable after the page is hidden and shown again, then saves once", async () => {
+    const f = server(),
+      { result } = await opened(f);
+    act(() => result.current.change("main", { provider: "ollama", model: "edited" }));
+    act(() => setHidden(true));
+    expect(result.current.saveEnabled).toBe(false);
+    act(() => setHidden(false));
+    await waitFor(() => expect(result.current.saveEnabled).toBe(true));
+    expect(result.current.draft?.choices.main?.model).toBe("edited");
+    expect(result.current.dirty).toBe(true);
+    expect(result.current.error).toBeNull();
+    await act(async () => {
+      await result.current.save();
+    });
+    expect(f.state.puts).toEqual([{ ...initial(), main: { provider: "ollama", model: "edited" } }]);
+  });
+  it("restores readiness after a background while Settings is closed", async () => {
+    const f = server(),
+      view = renderHook(() => useSettings(f.api));
+    await waitFor(() => expect(view.result.current.mainReady).toBe(true));
+    act(() => setHidden(true));
+    expect(view.result.current.mainReady).toBe(false);
+    act(() => setHidden(false));
+    await waitFor(() => expect(view.result.current.mainReady).toBe(true));
+  });
+  it("keeps edits when the return read fails and lets Try again recover them", async () => {
+    const f = server(),
+      { result } = await opened(f);
+    act(() => result.current.change("main", { provider: "ollama", model: "edited" }));
+    f.state.readIndex = async () => {
+      throw new Error("private-offline");
+    };
+    act(() => setHidden(true));
+    act(() => setHidden(false));
+    await waitFor(() => expect(result.current.phase).toBe("error"));
+    expect(result.current.error).toContain("Your edits are kept");
+    expect(result.current.draft?.choices.main?.model).toBe("edited");
+    f.state.readIndex = undefined;
+    await act(async () => {
+      await result.current.refresh();
+    });
+    await waitFor(() => expect(result.current.saveEnabled).toBe(true));
+    expect(result.current.draft?.choices.main?.model).toBe("edited");
+    expect(f.state.calls).not.toContain("POST /api/agent/catalog/refresh");
   });
   it("ignores an old account's save and metadata responses after API replacement", async () => {
     const first = server(),

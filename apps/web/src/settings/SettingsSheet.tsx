@@ -56,7 +56,7 @@ const CATALOG_MESSAGE: Record<SettingsSheetProps["catalog"], string> = {
   empty: "The model catalog is empty.",
   stale: "The saved catalog is older. Your selections are retained while you refresh.",
   refreshing: "Refreshing the model catalog…",
-  offline: "Catalog connection unavailable. Your selections are retained.",
+  offline: "The model catalog is unavailable right now. Your choices are kept.",
 };
 export function SettingsSheet(props: SettingsSheetProps) {
   const panel = useRef<HTMLElement>(null);
@@ -163,7 +163,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
                 disabled={props.busy || props.catalog === "refreshing"}
                 onClick={props.onRefresh}
               >
-                Refresh catalog
+                {props.catalog === "offline" ? "Try again" : "Refresh catalog"}
               </button>
             )}
           </div>

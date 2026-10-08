@@ -47,7 +47,16 @@ export function useSettings(
   const [error, setError] = useState<string | null>(null);
   const [uncertain, setUncertain] = useState(false);
   const [busy, setBusy] = useState(false);
-  const current = useRef({ api, open: false, saved, index, draft, revision: 0, generation: 0 });
+  const current = useRef({
+    api,
+    open: false,
+    saved,
+    index,
+    draft,
+    phase,
+    revision: 0,
+    generation: 0,
+  });
   const reading = useRef<AbortController | null>(null);
   const mutating = useRef<AbortController | null>(null);
   const mounted = useRef(false);
@@ -56,8 +65,8 @@ export function useSettings(
   const blocked = useRef(false);
   const loadedFor = useRef<ApiClient | null>(null);
   useLayoutEffect(() => {
-    Object.assign(current.current, { api, saved, index, draft });
-  }, [api, saved, index, draft]);
+    Object.assign(current.current, { api, saved, index, draft, phase });
+  }, [api, saved, index, draft, phase]);
   const read = useCallback(
     async (reset: boolean, reconcile = false) => {
       const owner = current.current;
@@ -114,7 +123,9 @@ export function useSettings(
           return;
         setPhase("error");
         setError(
-          "Settings are unavailable or do not match this version. Reconnect and reload saved settings.",
+          owner.draft
+            ? "Settings could not be loaded. Your edits are kept. Choose Try again."
+            : "Settings could not be loaded. Check that localDot is running, then choose Try again.",
         );
       } finally {
         if (reading.current === abort) reading.current = null;
@@ -151,9 +162,13 @@ export function useSettings(
       setPhase("error");
       setError("The view was interrupted. Reload saved settings before continuing.");
     };
+    // Coming back re-reads what the interruption discarded but keeps the draft, so switching apps
+    // to copy a key never costs the user their choices.
     const visible = () => {
-      if (document.hidden) suspend();
-      else blocked.current = false;
+      if (document.hidden) return suspend();
+      if (!blocked.current) return;
+      blocked.current = false;
+      if (mounted.current) void read(current.current.open && !current.current.draft);
     };
     window.addEventListener("pagehide", suspend);
     window.addEventListener("pageshow", visible);
@@ -163,7 +178,7 @@ export function useSettings(
       window.removeEventListener("pageshow", visible);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, []);
+  }, [read]);
   const show = useCallback(() => {
     const owner = current.current;
     if (document.hidden || blocked.current) return;
@@ -291,7 +306,7 @@ export function useSettings(
         setError(
           unknown
             ? new SettingsFailure(true).message
-            : "The daemon refused the settings or key metadata is unavailable. Your edits are retained; check the choices before retrying.",
+            : "These settings could not be saved. Your edits are kept; check the choices and try again.",
         );
     } finally {
       if (mutating.current === abort) {
@@ -304,8 +319,9 @@ export function useSettings(
   };
   const refresh = async () => {
     const owner = current.current;
-    if (!owner.open || mutating.current || unresolved.current || document.hidden || blocked.current)
-      return;
+    if (!owner.open || mutating.current || document.hidden || blocked.current) return;
+    if (owner.phase === "error") return read(!owner.draft);
+    if (unresolved.current) return;
     const generation = owner.generation,
       revision = owner.revision;
     const abort = new AbortController();
