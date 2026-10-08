@@ -10,7 +10,9 @@ export interface IconButtonProps
   extends Omit<ComponentProps<"button">, "disabled" | "children" | "aria-label"> {
   label: string;
   icon: IconName;
-  size?: 24 | 28 | 32;
+  size?: 24 | 28 | 32 | 36;
+  // A primary icon button is the one main action of its group, such as Play: round and filled.
+  variant?: "quiet" | "primary";
   kbd?: readonly string[];
   // Unavailable while set. The button keeps focus and gives this as its description and tooltip.
   disabledReason?: string;
@@ -20,6 +22,7 @@ export function IconButton({
   label,
   icon,
   size = 28,
+  variant = "quiet",
   kbd,
   disabledReason,
   type = "button",
@@ -47,6 +50,7 @@ export function IconButton({
         type={type}
         className={clsx("ui-icon-button", className)}
         data-size={size}
+        data-variant={variant === "primary" ? variant : undefined}
         aria-label={label}
         aria-disabled={disabledReason ? true : undefined}
         aria-describedby={joinIds(props["aria-describedby"], triggerProps["aria-describedby"])}

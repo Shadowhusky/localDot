@@ -35,6 +35,17 @@ describe("formatKeys", () => {
       aria: "Escape",
     });
   });
+
+  it("draws arrow keys as arrows and names Space, on every platform", () => {
+    for (const mac of [true, false]) {
+      expect(formatKeys(["ArrowLeft"], mac)).toEqual({
+        label: "←",
+        spoken: "Left arrow",
+        aria: "ArrowLeft",
+      });
+      expect(formatKeys([" "], mac)).toEqual({ label: "Space", spoken: "Space", aria: "Space" });
+    }
+  });
 });
 
 describe("Kbd", () => {

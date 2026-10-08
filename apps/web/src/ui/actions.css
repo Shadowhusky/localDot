@@ -219,6 +219,16 @@
     --_size: calc(var(--spacing) * 8);
   }
 
+  .ui-icon-button[data-size="36"] {
+    --_size: calc(var(--spacing) * 9);
+  }
+
+  .ui-icon-button[data-variant="primary"] {
+    --_face: var(--color-fg-1);
+    border-radius: var(--radius-full);
+    color: var(--color-void);
+  }
+
   @media (hover: hover) {
     .ui-icon-button:not([aria-disabled="true"], [data-pressed]):hover {
       --_face: var(--color-state-hover);
@@ -229,6 +239,26 @@
   .ui-icon-button[data-pressed] {
     --_face: var(--color-state-pressed);
     color: var(--color-fg-1);
+  }
+
+  @media (hover: hover) {
+    .ui-icon-button[data-variant="primary"]:not([aria-disabled="true"], [data-pressed]):hover {
+      --_face: color-mix(in oklab, var(--color-fg-1) 92%, var(--color-void));
+      color: var(--color-void);
+    }
+  }
+
+  .ui-icon-button[data-variant="primary"][data-pressed] {
+    --_face: color-mix(in oklab, var(--color-fg-1) 84%, var(--color-void));
+    color: var(--color-void);
+  }
+
+  .ui-icon-button[data-variant="primary"][aria-disabled="true"] {
+    --_face: color-mix(
+      in oklab,
+      var(--color-fg-1) calc(var(--opacity-disabled) * 100%),
+      transparent
+    );
   }
 
   .ui-icon-button[aria-disabled="true"] > .ui-icon {

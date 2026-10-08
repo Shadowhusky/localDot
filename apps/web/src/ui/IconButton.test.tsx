@@ -29,6 +29,15 @@ describe("IconButton", () => {
     expect(icon?.getAttribute("width")).toBe("16");
   });
 
+  it("draws the primary action round and filled, at 36 px when asked", () => {
+    render(<IconButton label="Play" icon="play" variant="primary" size={36} />);
+    const button = screen.getByRole("button", { name: "Play" });
+    expect(button.dataset.variant).toBe("primary");
+    expect(button.dataset.size).toBe("36");
+    render(<IconButton label="Next" icon="skip-forward" />);
+    expect(screen.getByRole("button", { name: "Next" }).hasAttribute("data-variant")).toBe(false);
+  });
+
   it("shows its label and shortcut on hover without describing itself twice", () => {
     vi.spyOn(navigator, "platform", "get").mockReturnValue("MacIntel");
     render(<IconButton label="Stop" icon="square" kbd={["Mod", "Shift", "."]} />);
