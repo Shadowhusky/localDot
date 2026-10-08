@@ -1,14 +1,21 @@
+import type { SessionCard } from "@localdot/protocol";
 import { buildPlaybackMap, emptyModel, type Tick } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import {
+  byDay,
   compareFrames,
+  dayLabel,
   followRule,
   gapCard,
+  matchesSearch,
+  recordedLabel,
   replayKey,
   scrubberModel,
   speedLabel,
   suggestedExportName,
+  taskMeta,
   timeLabel,
+  verdictGlyph,
 } from "./replay-view.ts";
 
 const chapters = [
@@ -99,13 +106,13 @@ describe("replay controls and timeline presentation", () => {
     [
       "disk-full",
       "Recording stopped: the disk was full",
-      "Steps are shown from screenshots. Free some space and new sessions record again.",
+      "Steps are shown from screenshots. Free some space and new tasks record again.",
     ],
     ["size-cap", "Recording stopped at the size limit", "Steps are shown from screenshots."],
     ["recorder-error", "Recording stopped", "Steps are shown from screenshots."],
     ["expired", "The video was removed to save space", "Steps are shown from screenshots."],
-    ["none", "No video for this session", "Steps are shown from screenshots."],
-    ["failed", "No video for this session", "Steps are shown from screenshots."],
+    ["none", "No video for this task", "Steps are shown from screenshots."],
+    ["failed", "No video for this task", "Steps are shown from screenshots."],
   ] as const)("names the %s gap card", (kind, title, body) => {
     expect(gapCard(kind)).toEqual({ title, body });
   });
@@ -115,7 +122,7 @@ describe("replay controls and timeline presentation", () => {
     for (const modifier of ["metaKey", "ctrlKey", "altKey", "targetIsField"])
       expect(replayKey({ ...input, [modifier]: true })).toBeNull();
     expect(
-      ["K", "ArrowLeft", "ArrowRight", "J", "L", "[", "]", "B", "Escape"].map((key) =>
+      ["K", "ArrowLeft", "ArrowRight", "J", "L", "[", "]", "B", "I", "o", "Escape"].map((key) =>
         replayKey({ ...input, key }),
       ),
     ).toEqual([
@@ -127,6 +134,8 @@ describe("replay controls and timeline presentation", () => {
       { kind: "speed", dir: -1 },
       { kind: "speed", dir: 1 },
       { kind: "compare" },
+      { kind: "mark", edge: "in" },
+      { kind: "mark", edge: "out" },
       { kind: "exit" },
     ]);
   });
@@ -157,5 +166,69 @@ describe("replay controls and timeline presentation", () => {
   });
   it("suggests an export name with the date, never the title", () => {
     expect(suggestedExportName(new Date(2026, 9, 2, 10, 12))).toBe("localdot-2026-10-02-1012.mp4");
+  });
+});
+
+describe("the task library's words", () => {
+  const now = new Date(2026, 9, 8, 19, 30);
+  const at = (day: number, hour: number, minute: number) =>
+    new Date(2026, 9, day, hour, minute).toISOString();
+  const card = (patch: Partial<SessionCard>): SessionCard => ({
+    id: "01M4D263DDHCRM52FMG340DDF3",
+    title: "Monthly report",
+    startedAt: at(8, 9, 53),
+    durationMs: 33_000,
+    verdict: "done",
+    steps: 3,
+    failedSteps: 0,
+    coverFrameId: null,
+    screen: null,
+    recording: { state: "complete", bytes: 10 },
+    ...patch,
+  });
+  it("names days the way people say them", () => {
+    expect(dayLabel(at(8, 0, 1), now)).toBe("Today");
+    expect(dayLabel(at(7, 23, 59), now)).toBe("Yesterday");
+    expect(dayLabel(at(6, 12, 0), now)).toMatch(/6/);
+    expect(dayLabel(new Date(2025, 9, 6).toISOString(), now)).toMatch(/2025/);
+  });
+  it("gives each row its start and length, and a running task no length", () => {
+    expect(taskMeta(card({}))).toBe("09:53 · 0:33");
+    expect(taskMeta(card({ verdict: "live", durationMs: null }))).toBe("09:53 · Running");
+    expect(recordedLabel(card({}), now)).toBe("Recorded · Today 09:53");
+    expect(recordedLabel(card({ verdict: "live", durationMs: null }), now)).toBe(
+      "Running · Today 09:53",
+    );
+  });
+  it("draws every verdict as a glyph with words", () => {
+    expect(
+      (["done", "live", "stopped", "error", "interrupted"] as const).map(verdictGlyph),
+    ).toEqual([
+      { state: "done", label: "Done" },
+      { state: "doing", label: "Running" },
+      { state: "skipped", label: "Stopped" },
+      { state: "failed", label: "Failed" },
+      { state: "failed", label: "Interrupted" },
+    ]);
+  });
+  it("matches every searched word in any order and case, and an empty search matches all", () => {
+    expect(matchesSearch({ title: "Email the monthly totals" }, " TOTALS email ")).toBe(true);
+    expect(matchesSearch({ title: "Email the monthly totals" }, "weekly totals")).toBe(false);
+    expect(matchesSearch({ title: null }, "untitled")).toBe(true);
+    expect(matchesSearch({ title: "Anything" }, "")).toBe(true);
+  });
+  it("groups newest-first tasks into runs of one day", () => {
+    const days = byDay(
+      [
+        card({ id: "01M4D263DDHCRM52FMG340DDF1", startedAt: at(8, 10, 0) }),
+        card({ id: "01M4D263DDHCRM52FMG340DDF2", startedAt: at(8, 9, 0) }),
+        card({ id: "01M4D263DDHCRM52FMG340DDF4", startedAt: at(7, 9, 0) }),
+      ],
+      now,
+    );
+    expect(days.map(({ day, cards }) => [day, cards.length])).toEqual([
+      ["Today", 2],
+      ["Yesterday", 1],
+    ]);
   });
 });

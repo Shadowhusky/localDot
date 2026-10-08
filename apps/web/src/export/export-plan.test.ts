@@ -1,7 +1,16 @@
 import { ulid } from "@localdot/protocol";
 import { emptyModel } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
-import { EXPORT_FPS, type ExportRequest, PRIVACY_NOTE, planExport } from "./export-plan.ts";
+import {
+  EXPORT_FPS,
+  EXPORT_SIZES,
+  type ExportRequest,
+  estimateBytes,
+  fileSize,
+  PRIVACY_NOTE,
+  planExport,
+  videoLength,
+} from "./export-plan.ts";
 
 function fixture(endMs = 60_000) {
   const model = emptyModel();
@@ -85,6 +94,27 @@ describe("deterministic MP4 export plan", () => {
     expect(plan.gapAt(119)).toBe("user-control");
     expect(plan.gapAt(120)).toBeNull();
     expect(planExport({ ...request, captions: false }, model, [], gaps).captionAt(30)).toBeNull();
+  });
+
+  it("burns in no speed note when captions are off", () => {
+    const { model, request } = fixture();
+    const plan = planExport({ ...request, speed: 4, captions: false }, model, [], []);
+    expect(plan.labelAt(0)).toBeNull();
+    expect(planExport({ ...request, speed: 4 }, model, [], []).labelAt(0)).toBe("Playing at 4×");
+  });
+
+  it("offers 720p and 1080p and estimates their files from the encoder's rate", () => {
+    expect(EXPORT_SIZES.map((size) => size.label)).toEqual(["720p", "1080p"]);
+    const [small, large] = EXPORT_SIZES;
+    const minute = estimateBytes(small, 60);
+    expect(minute / (1024 * 1024)).toBeGreaterThan(20);
+    expect(minute / (1024 * 1024)).toBeLessThan(25);
+    expect(estimateBytes(large, 60)).toBeGreaterThan(2 * minute);
+    expect(fileSize(2048)).toBe("2 KB");
+    expect(fileSize(3.25 * 1024 * 1024)).toBe("3.3 MB");
+    expect(fileSize(78.4 * 1024 * 1024)).toBe("78 MB");
+    expect(videoLength(0.6)).toBe("0:01");
+    expect(videoLength(97.2)).toBe("1:38");
   });
 
   it("prioritizes takeover over other overlapping gaps and handles open-ended gaps", () => {

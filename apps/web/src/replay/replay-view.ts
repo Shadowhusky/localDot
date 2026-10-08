@@ -3,6 +3,7 @@ import {
   type RecordingGap,
   type RecordingGapReason,
   type ScreenName,
+  type SessionCard,
 } from "@localdot/protocol";
 import {
   type Chapter,
@@ -147,7 +148,7 @@ export function gapCard(kind: RecordingGapReason | "none" | "expired" | "failed"
     case "disk-full":
       return {
         title: "Recording stopped: the disk was full",
-        body: `${screenshotBody} Free some space and new sessions record again.`,
+        body: `${screenshotBody} Free some space and new tasks record again.`,
       };
     case "size-cap":
       return { title: "Recording stopped at the size limit", body: screenshotBody };
@@ -157,7 +158,7 @@ export function gapCard(kind: RecordingGapReason | "none" | "expired" | "failed"
       return { title: "The video was removed to save space", body: screenshotBody };
     case "none":
     case "failed":
-      return { title: "No video for this session", body: screenshotBody };
+      return { title: "No video for this task", body: screenshotBody };
   }
 }
 export type ReplayCommand =
@@ -167,6 +168,7 @@ export type ReplayCommand =
   | { kind: "jump"; ms: number }
   | { kind: "speed"; dir: -1 | 1 }
   | { kind: "compare" }
+  | { kind: "mark"; edge: "in" | "out" }
   | { kind: "exit" };
 export function replayKey(event: {
   key: string;
@@ -195,6 +197,10 @@ export function replayKey(event: {
       return { kind: "speed", dir: 1 };
     case "b":
       return { kind: "compare" };
+    case "i":
+      return { kind: "mark", edge: "in" };
+    case "o":
+      return { kind: "mark", edge: "out" };
     case "escape":
       return { kind: "exit" };
     default:
@@ -251,4 +257,75 @@ export function followRule(options: {
 export function suggestedExportName(now: Date): string {
   const pad = (value: number) => String(value).padStart(2, "0");
   return `localdot-${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}.mp4`;
+}
+
+function startOfDay(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+export function clockLabel(value: string): string {
+  return new Date(value).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+export function dayLabel(value: string, now: Date): string {
+  const started = new Date(value);
+  const days = Math.round((startOfDay(now) - startOfDay(started)) / 86_400_000);
+  if (days === 0) return "Today";
+  if (days === 1) return "Yesterday";
+  return started.toLocaleDateString([], {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    ...(started.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
+  });
+}
+export function recordedLabel(card: SessionCard, now: Date): string {
+  const when = `${dayLabel(card.startedAt, now)} ${clockLabel(card.startedAt)}`;
+  return `${card.verdict === "live" ? "Running" : "Recorded"} · ${when}`;
+}
+export function taskMeta(card: SessionCard): string {
+  const length = card.durationMs === null ? "Running" : timeLabel(card.durationMs);
+  return `${clockLabel(card.startedAt)} · ${length}`;
+}
+export type VerdictGlyph = { state: "doing" | "done" | "failed" | "skipped"; label: string };
+export function verdictGlyph(verdict: SessionCard["verdict"]): VerdictGlyph {
+  switch (verdict) {
+    case "done":
+      return { state: "done", label: "Done" };
+    case "live":
+      return { state: "doing", label: "Running" };
+    case "stopped":
+      return { state: "skipped", label: "Stopped" };
+    case "interrupted":
+      return { state: "failed", label: "Interrupted" };
+    case "error":
+      return { state: "failed", label: "Failed" };
+  }
+}
+export function taskTitle(card: Pick<SessionCard, "title">): string {
+  return card.title?.trim() || "Untitled task";
+}
+// Every word of the search appears somewhere in the title, in any order and case.
+export function matchesSearch(card: Pick<SessionCard, "title">, search: string): boolean {
+  const title = taskTitle(card).toLocaleLowerCase();
+  return search
+    .trim()
+    .toLocaleLowerCase()
+    .split(/\s+/)
+    .every((word) => title.includes(word));
+}
+export function byDay(
+  cards: readonly SessionCard[],
+  now: Date,
+): { day: string; cards: SessionCard[] }[] {
+  const days: { day: string; cards: SessionCard[] }[] = [];
+  for (const card of cards) {
+    const day = dayLabel(card.startedAt, now);
+    const last = days.at(-1);
+    if (last?.day === day) last.cards.push(card);
+    else days.push({ day, cards: [card] });
+  }
+  return days;
 }

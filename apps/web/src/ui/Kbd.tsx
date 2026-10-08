@@ -37,7 +37,16 @@ const NAMED: Record<string, { mac: Spelling; other: Spelling }> = {
     mac: { label: "⌫", spoken: "Delete", aria: "Backspace" },
     other: { label: "Backspace", spoken: "Backspace", aria: "Backspace" },
   },
+  " ": same({ label: "Space", spoken: "Space", aria: "Space" }),
+  ArrowLeft: same({ label: "←", spoken: "Left arrow", aria: "ArrowLeft" }),
+  ArrowRight: same({ label: "→", spoken: "Right arrow", aria: "ArrowRight" }),
+  ArrowUp: same({ label: "↑", spoken: "Up arrow", aria: "ArrowUp" }),
+  ArrowDown: same({ label: "↓", spoken: "Down arrow", aria: "ArrowDown" }),
 };
+
+function same(spelling: Spelling) {
+  return { mac: spelling, other: spelling };
+}
 
 function spell(key: string, mac: boolean): Spelling {
   const named = NAMED[key];

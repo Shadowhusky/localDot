@@ -283,20 +283,20 @@ for (const [engine, launch] of Object.entries(ENGINES))
     });
 
     test("replay speed and export choices are tap-sized", async () => {
-      // WebKit has no save picker, so Export stays off there; lend it one to reach the sheet.
-      const { context, page } = await phone(browser, `/?replay=${replayId}`, () =>
-        Object.assign(window, { showSaveFilePicker: () => Promise.reject(new Error("unused")) }),
-      );
+      const { context, page } = await phone(browser, `/?replay=${replayId}`);
       const speed = page.getByRole("combobox", { name: "Playback speed" });
       await speed.scrollIntoViewIfNeeded();
       expect((await speed.boundingBox())?.height).toBeGreaterThanOrEqual(44);
       await page.getByRole("button", { name: "Export MP4" }).tap();
       const exporter = page.getByRole("dialog", { name: "Export MP4" });
-      for (const name of ["Export range", "Export speed", "Export size"]) {
-        const control = exporter.getByRole("combobox", { name });
+      for (const name of ["Range", "Speed", "Size"]) {
+        const control = exporter.getByRole("radiogroup", { name });
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
-        expect(await control.evaluate((el) => getComputedStyle(el).fontSize), name).toBe("16px");
+      }
+      for (const name of ["Skip idle", "Captions"]) {
+        const row = exporter.locator(".ui-choice").filter({ hasText: name });
+        expect((await row.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
       }
       await context.close();
     });

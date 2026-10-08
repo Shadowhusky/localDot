@@ -219,6 +219,10 @@
     --_size: calc(var(--spacing) * 8);
   }
 
+  .ui-icon-button[data-size="36"] {
+    --_size: calc(var(--spacing) * 9);
+  }
+
   @media (hover: hover) {
     .ui-icon-button:not([aria-disabled="true"], [data-pressed]):hover {
       --_face: var(--color-state-hover);

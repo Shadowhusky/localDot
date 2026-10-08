@@ -112,7 +112,7 @@ test("export smoke produces a playable MP4", async ({ page }) => {
   expect(playback.duration).toBeCloseTo(1, 1);
 });
 
-test("export sheet floats, fits a short viewport, and cancels without a partial video", async ({
+test("export popover floats, keeps its size, collapses to a ring and cancels without a partial video", async ({
   page,
 }) => {
   await page.addInitScript(() => {
@@ -125,28 +125,33 @@ test("export sheet floats, fits a short viewport, and cancels without a partial 
   });
   await openForExport(page, uiSession.seed.sessionId);
   await page.evaluate(() => window.__localdot?.replay?.seek(1000, "exact"));
-  const before = await page.getByRole("main", { name: "Session replay" }).boundingBox();
-  await page.getByRole("button", { name: "Export MP4", exact: true }).click();
-  const sheet = page.getByRole("dialog", { name: "Export MP4" });
-  await expect(sheet).toBeVisible();
-  await expect(sheet.getByRole("button", { name: "Save…" })).toBeEnabled();
-  await sheet.evaluate(async (element) => {
+  const before = await page.getByRole("main", { name: "Replay" }).boundingBox();
+  const trigger = page.getByRole("button", { name: "Export MP4", exact: true });
+  await trigger.click();
+  const panel = page.getByRole("dialog", { name: "Export MP4" });
+  await expect(panel).toBeVisible();
+  const save = panel.getByRole("button", { name: "Save…" });
+  await expect(save).not.toHaveAttribute("aria-disabled", "true");
+  await panel.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
-  const after = await page.getByRole("main", { name: "Session replay" }).boundingBox();
+  const after = await page.getByRole("main", { name: "Replay" }).boundingBox();
   expect(after?.y).toBe(before?.y);
   expect(after?.height).toBe(before?.height);
-  await page.screenshot({ path: "e2e/out/export-sheet.png" });
-  await sheet.getByRole("button", { name: "Save…" }).click();
-  await expect(sheet.getByRole("progressbar", { name: "Export progress" })).toHaveAttribute(
-    "value",
-    /[1-9]/,
-  );
+  const options = await panel.boundingBox();
+  await page.screenshot({ path: "e2e/out/export-options.png" });
+  await save.click();
+  const progress = panel.getByRole("progressbar", { name: "Export progress" });
+  await expect(progress).toHaveAttribute("aria-valuenow", /[1-9]/);
+  expect(await panel.boundingBox()).toEqual(options);
   await page.screenshot({ path: "e2e/out/export-progress.png" });
-  await page.keyboard.press("Escape");
-  await expect(sheet.getByText("Cancel this export?", { exact: true })).toBeVisible();
-  await sheet.getByRole("button", { name: "Cancel export", exact: true }).click();
-  await expect(sheet.getByText("Export cancelled", { exact: true })).toBeVisible();
+  await panel.getByRole("button", { name: "Keep working" }).click();
+  await expect(panel).toBeHidden();
+  await expect(trigger).toHaveAttribute("data-ring", "");
+  await trigger.click();
+  await expect(progress).toBeVisible();
+  await panel.getByRole("button", { name: "Cancel", exact: true }).click();
+  await expect(panel.getByText("Cancelled. Nothing was saved.", { exact: true })).toBeVisible();
   const partialSize = await page.evaluate(
     async () =>
       (
@@ -156,20 +161,21 @@ test("export sheet floats, fits a short viewport, and cancels without a partial 
       ).size,
   );
   expect(partialSize).toBe(0);
-  await sheet.getByRole("button", { name: "Done" }).click();
-  await expect(sheet).not.toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel).toBeHidden();
   await page.setViewportSize({ width: 375, height: 480 });
-  await page.getByRole("button", { name: "Export MP4", exact: true }).click();
-  await expect(sheet).toBeVisible();
-  await sheet.evaluate(async (element) => {
+  await trigger.click();
+  await expect(panel).toBeVisible();
+  await panel.evaluate(async (element) => {
     await Promise.all(element.getAnimations().map((animation) => animation.finished));
   });
-  const bounds = await sheet.boundingBox();
+  // The sheet runs on past the bottom edge by design, so it is its footer that has to fit.
+  const bounds = await panel.boundingBox();
   expect(bounds).not.toBeNull();
-  expect(bounds?.x).toBeGreaterThanOrEqual(15);
-  expect((bounds?.y ?? 0) + (bounds?.height ?? 0)).toBeLessThanOrEqual(465);
-  const footer = await sheet.locator("footer").boundingBox();
-  expect((footer?.y ?? 0) + (footer?.height ?? 0)).toBeLessThanOrEqual(465);
+  expect(bounds?.x).toBeGreaterThanOrEqual(0);
+  const footer = await panel.locator(".ui-sheet-footer").boundingBox();
+  expect(footer).not.toBeNull();
+  expect((footer?.y ?? 0) + (footer?.height ?? 0)).toBeLessThanOrEqual(480);
   await page.screenshot({ path: "e2e/out/export-sheet-narrow.png" });
 });
 

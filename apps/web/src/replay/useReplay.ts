@@ -43,6 +43,8 @@ export interface ReplayState {
   idleNow: boolean;
   map: PlaybackMap | null;
   compare: { before: string | null; after: string | null } | null;
+  // The stretch marked with I and O, for an export.
+  selection: { fromMs: number; toMs: number } | null;
   run(command: ReplayCommand): void;
   seek(tMs: number, mode: "exact" | "preview"): void;
   setSpeed(speed: ReplaySpeed): void;
@@ -70,6 +72,7 @@ function initialState(sessionId: string | null): ReplayValues {
     idleNow: false,
     map: null,
     compare: null,
+    selection: null,
   };
 }
 export function replayOrigin(api: ApiClient): string {
@@ -284,8 +287,22 @@ export function useReplay(
         sendTransport();
         break;
       }
+      case "mark": {
+        if (!state.map) return;
+        const at = Math.max(state.map.startMs, Math.min(state.map.endMs, state.tMs));
+        const from = state.selection?.fromMs ?? state.map.startMs;
+        const to = state.selection?.toMs ?? state.map.endMs;
+        // A mark past the other end starts the selection over from the recording's edge.
+        const selection =
+          command.edge === "in"
+            ? { fromMs: at, toMs: to > at ? to : state.map.endMs }
+            : { fromMs: from < at ? from : state.map.startMs, toMs: at };
+        update({ selection: selection.toMs > selection.fromMs ? selection : null });
+        break;
+      }
       case "exit":
         if (state.compare) update({ compare: null });
+        else if (state.selection) update({ selection: null });
         else options.current.onGoLive();
         break;
     }

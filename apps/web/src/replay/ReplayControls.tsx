@@ -1,100 +1,104 @@
 import { REPLAY_SPEEDS } from "@localdot/stage";
-import { useId } from "react";
-import { exportSupport } from "../export/sink.ts";
+import type { ReactNode } from "react";
+import { Badge } from "../ui/Badge.tsx";
+import { Button } from "../ui/Button.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
+import { Select } from "../ui/Select.tsx";
+import { Switch } from "../ui/Switch.tsx";
+import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { speedLabel, timeLabel } from "./replay-view.ts";
 import type { ReplayState } from "./useReplay.ts";
 
+const SPEEDS = REPLAY_SPEEDS.map((speed) => ({
+  value: String(speed),
+  label: `${speed === 0.5 ? "½" : speed}×`,
+}));
+export const LOADING = "The recording is still loading";
+
 export function ReplayControls({
   replay,
-  onExport,
+  label,
+  noVideo = false,
+  exportControl,
 }: {
   replay: ReplayState;
-  onExport?: (anchor: HTMLButtonElement) => void;
+  // What is happening at the playhead.
+  label: string;
+  // The recording has no video; the card that said so has gone.
+  noVideo?: boolean;
+  exportControl?: ReactNode;
 }) {
-  const label = speedLabel(replay.speed, replay.idleNow);
-  const support = exportSupport();
-  const exportNote = useId();
+  const loading = replay.map ? undefined : LOADING;
   return (
-    <fieldset className="replay-controls" aria-label="Playback controls">
-      <button
-        type="button"
-        aria-label="Previous step"
-        disabled={!replay.map}
-        onClick={() => replay.run({ kind: "step", dir: -1 })}
-      >
-        Previous
-      </button>
-      <button
-        type="button"
-        disabled={!replay.map}
-        aria-label={replay.playing ? "Pause replay" : "Play replay"}
-        onClick={() => replay.run({ kind: "toggle-play" })}
-      >
-        {replay.playing ? "Pause" : "Play"}
-      </button>
-      <button
-        type="button"
-        aria-label="Next step"
-        disabled={!replay.map}
-        onClick={() => replay.run({ kind: "step", dir: 1 })}
-      >
-        Next
-      </button>
-      <output className="replay-time" aria-label="Replay time">
-        {timeLabel(replay.tMs)} / {timeLabel(replay.map?.endMs ?? 0)}
-      </output>
-      <label>
-        Speed{" "}
-        <select
-          aria-label="Playback speed"
-          value={replay.speed}
-          onChange={(event) => {
-            const speed = REPLAY_SPEEDS.find((value) => value === Number(event.target.value));
-            if (speed !== undefined) replay.setSpeed(speed);
-          }}
-        >
-          {REPLAY_SPEEDS.map((speed) => (
-            <option key={speed} value={speed}>
-              {speed === 0.5 ? "½" : speed}×
-            </option>
-          ))}
-        </select>
-      </label>
-      <label>
-        <input
-          type="checkbox"
-          checked={replay.skipIdle}
-          onChange={(event) => replay.setSkipIdle(event.target.checked)}
-        />{" "}
-        Skip idle
-      </label>
-      <button
-        type="button"
-        disabled={!replay.model.steps.length}
-        aria-pressed={replay.compare !== null}
-        onClick={() => replay.run({ kind: "compare" })}
-      >
-        Before / after
-      </button>
-      {onExport && (
-        <span className="replay-export">
-          <button
-            type="button"
-            disabled={!replay.map || !replay.info}
-            aria-disabled={!support.ok || undefined}
-            aria-describedby={support.ok ? undefined : exportNote}
-            onClick={(event) => {
-              if (support.ok) onExport(event.currentTarget);
-            }}
-          >
-            Export MP4
-          </button>
-          {!support.ok && <span id={exportNote}>{support.reason}</span>}
+    // biome-ignore lint/a11y/useSemanticElements: a fieldset would draw a frame and claim min-content width.
+    <div className="replay-transport" role="group" aria-label="Playback controls">
+      <div className="replay-transport-main">
+        <IconButton
+          label="Previous step"
+          icon="skip-back"
+          kbd={["ArrowLeft"]}
+          disabledReason={loading}
+          onClick={() => replay.run({ kind: "step", dir: -1 })}
+        />
+        <IconButton
+          variant="primary"
+          size={36}
+          label={replay.playing ? "Pause replay" : "Play replay"}
+          icon={replay.playing ? "pause" : "play"}
+          kbd={[" "]}
+          disabledReason={loading}
+          onClick={() => replay.run({ kind: "toggle-play" })}
+        />
+        <IconButton
+          label="Next step"
+          icon="skip-forward"
+          kbd={["ArrowRight"]}
+          disabledReason={loading}
+          onClick={() => replay.run({ kind: "step", dir: 1 })}
+        />
+        <output className="replay-time num" aria-label="Replay time">
+          {timeLabel(replay.tMs)} / {timeLabel(replay.map?.endMs ?? 0)}
+        </output>
+        <span className="replay-now">
+          <span className="replay-now-label">{label}</span>
+          {replay.idleNow && <span className="replay-now-idle">Idle skipped</span>}
         </span>
-      )}
-      <span className="replay-speed-label" role="status">
-        {label}
-      </span>
-    </fieldset>
+        {noVideo && <Badge className="replay-no-video">No video</Badge>}
+      </div>
+      <div className="replay-transport-side">
+        <span className="replay-speed">
+          <Select
+            aria-label="Playback speed"
+            value={String(replay.speed)}
+            items={SPEEDS}
+            onValueChange={(value) => {
+              const speed = REPLAY_SPEEDS.find((speed) => String(speed) === value);
+              if (speed !== undefined) replay.setSpeed(speed);
+            }}
+          />
+        </span>
+        <span className="replay-skip">
+          <Switch
+            label="Skip idle"
+            checked={replay.skipIdle}
+            onCheckedChange={(checked) => replay.setSkipIdle(checked)}
+          />
+        </span>
+        <span className="replay-toggle" data-on={replay.compare ? "" : undefined}>
+          <Button
+            variant="quiet"
+            aria-pressed={replay.compare !== null}
+            disabledReason={replay.model.steps.length ? undefined : "No steps to compare yet"}
+            onClick={() => replay.run({ kind: "compare" })}
+          >
+            Compare
+          </Button>
+        </span>
+        {exportControl}
+      </div>
+      <VisuallyHidden className="replay-speed-label" role="status">
+        {speedLabel(replay.speed, replay.idleNow)}
+      </VisuallyHidden>
+    </div>
   );
 }

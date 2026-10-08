@@ -9,7 +9,7 @@ import {
   type ExportOut,
   type ExportSourceSample,
 } from "./export-protocol.ts";
-import type { ExportSink } from "./sink.ts";
+import { type ExportSink, ExportTooLongError, LONG_EXPORT } from "./sink.ts";
 
 type ExportResult = Extract<ExportOut, { type: "done" | "cancelled" | "error" }>;
 type ExportProgress = Extract<ExportOut, { type: "progress" }>;
@@ -62,8 +62,14 @@ export function startExport(options: {
     state = "finished";
     resolveDone(result);
   };
-  const fail = () =>
-    finish({ type: "error", message: "The export could not finish. Please try again." });
+  const fail = (error?: unknown) =>
+    finish({
+      type: "error",
+      message:
+        error instanceof ExportTooLongError
+          ? LONG_EXPORT
+          : "The export could not finish. Please try again.",
+    });
   const post = (message: ExportIn) => worker?.postMessage(message);
   const writeChunk = (message: Extract<ExportOut, { type: "chunk" }>) => {
     if (
@@ -86,7 +92,7 @@ export function startExport(options: {
       pendingChunks.delete(message.chunk);
       if (state === "running") post({ type: "ack", chunk: message.chunk });
     });
-    void pendingWrites.catch(fail);
+    void pendingWrites.catch((error: unknown) => fail(error));
   };
   try {
     const theme = readTheme(getComputedStyle(document.documentElement));

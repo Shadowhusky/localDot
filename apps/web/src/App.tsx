@@ -21,6 +21,7 @@ import { useTaskControls } from "./agent/useTaskControls.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { createExportJob } from "./export/job.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
@@ -35,7 +36,7 @@ import {
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
-import { ReplayView } from "./replay/ReplayView.tsx";
+import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
 import { statusFor, taskFacts, taskHud } from "./session/status.ts";
@@ -200,6 +201,11 @@ function Theatre({ api }: { api: ApiClient }) {
     return selected && ULID_PATTERN.test(selected) ? selected : null;
   });
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
+  const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
+  const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
+  // An export keeps going when Replay closes or moves to another task.
+  const [exportJob] = useState(createExportJob);
+  useEffect(() => () => exportJob.dispose(), [exportJob]);
   const [historyRevision, setHistoryRevision] = useState(0);
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
@@ -574,7 +580,12 @@ function Theatre({ api }: { api: ApiClient }) {
     <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
       <div className="theatre-content">
         <TopBar
-          title={session.model.title ?? "Your computer"}
+          title={
+            replayId
+              ? (shownRecording?.title ?? RECORDED_TASK)
+              : (session.model.title ?? "Your computer")
+          }
+          note={shownRecording?.note}
           live={stageHud.live}
           mode={replayId ? "replay" : "watch"}
           replayEnabled={!!(replayId || newestReplayId)}
@@ -861,6 +872,8 @@ function Theatre({ api }: { api: ApiClient }) {
               setHistoryRevision(historyOwner.current);
               if (id === replayId) selectReplay(null, "replace");
             }}
+            onTitle={setRecorded}
+            exportJob={exportJob}
             visible={!keysOpen && !settings.open && !safety.approval}
           />
         )}
