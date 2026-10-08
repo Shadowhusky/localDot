@@ -463,14 +463,14 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await speed.scrollIntoViewIfNeeded();
       const recording = page.evaluate(
         () =>
-          new Promise<number[]>((resolve) => {
+          new Promise<[number, number][]>((resolve) => {
             const thumb = document.querySelector(".ui-segmented-thumb") as HTMLElement;
-            const xs: number[] = [];
+            const samples: [number, number][] = [];
             const start = performance.now();
-            const tick = () => {
-              xs.push(thumb.getBoundingClientRect().x);
-              if (performance.now() - start < 900) requestAnimationFrame(tick);
-              else resolve(xs);
+            const tick = (now: number) => {
+              samples.push([now, thumb.getBoundingClientRect().x]);
+              if (now - start < 900) requestAnimationFrame(tick);
+              else resolve(samples);
             };
             requestAnimationFrame(tick);
           }),
@@ -478,12 +478,18 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await speed.getByRole("radio", { name: "2×" }).click();
       await page.waitForTimeout(80);
       await speed.getByRole("radio", { name: "4×" }).click();
-      const xs = await recording;
+      const samples = await recording;
       const width = (await speed.getByRole("radio", { name: "1×" }).boundingBox())?.width ?? 0;
-      const steps = xs.slice(1).map((x, at) => x - (xs[at] as number));
-      // Only ever forward, and no frame covers more than half a segment.
-      expect(Math.min(...steps)).toBeGreaterThanOrEqual(-0.5);
-      expect(Math.max(...steps)).toBeLessThan(width / 2);
+      const xs = samples.map(([, x]) => x);
+      const steps = samples.slice(1).map(([t, x], at) => {
+        const [t0, x0] = samples[at] as [number, number];
+        return { dx: x - x0, dt: t - t0 };
+      });
+      const frame = steps.map(({ dt }) => dt).sort((a, b) => a - b)[steps.length >> 1] ?? 16.7;
+      // Only ever forward, and never more than half a segment a frame. A frame the browser drops
+      // doubles a step without making it a jump, so a step is weighed by the frames it spans.
+      expect(Math.min(...steps.map(({ dx }) => dx))).toBeGreaterThanOrEqual(-0.5);
+      expect(steps.filter(({ dx, dt }) => dx >= (width / 2) * Math.max(1, dt / frame))).toEqual([]);
       expect((xs.at(-1) ?? 0) - (xs[0] ?? 0)).toBeGreaterThan(width * 1.9);
       await expect(speed.getByRole("radio", { name: "4×" })).toHaveAttribute(
         "aria-checked",
