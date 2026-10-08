@@ -1,5 +1,5 @@
-import { ComputerAction, type CoordSpaceName } from "@localdot/protocol";
-import { checkCombo } from "@localdot/protocol/keys";
+import { ComputerAction, type CoordSpaceName, MAX_DRAG_MS, type Point } from "@localdot/protocol";
+import { checkCombo, checkModifiers } from "@localdot/protocol/keys";
 import { modelPoint } from "@localdot/providers";
 
 // What Anthropic's computer tools and localDot's generic tool send: the same Anthropic-style shape.
@@ -15,6 +15,8 @@ export interface ProviderComputerInput {
   repeat?: number;
   clear?: boolean;
   submit?: boolean;
+  path?: number[][];
+  button?: "left" | "right" | "middle";
 }
 
 const CLICKS: Record<string, { button: "left" | "right" | "middle"; count: 1 | 2 | 3 }> = {
@@ -25,8 +27,8 @@ const CLICKS: Record<string, { button: "left" | "right" | "middle"; count: 1 | 2
   triple_click: { button: "left", count: 3 },
 };
 
-const NOT_YET = new Set(["mouse_move", "left_click_drag", "left_mouse_down", "left_mouse_up"]);
 const MAX_HOLD_S = 30;
+const BUTTONS = new Set(["left", "right", "middle"]);
 
 // xdotool-style combos ("ctrl+shift+t", "Return"): the gateway's key names (protocol keys.ts maps
 // them onto X keysyms). A trailing "+" is the plus key: "ctrl++", or "+" alone.
@@ -47,6 +49,61 @@ function comboOf(action: string, text: string | undefined): string[] | string {
   return checkCombo(keys) ?? keys;
 }
 
+// The modifier keys `text` holds down through a pointer action (the native tools' convention),
+// none without text, or the message for the model.
+function modsOf(action: string, text: string | undefined): { mods?: string[] } | string {
+  if (!text) return {};
+  const keys = keyCombo(text);
+  if (!keys) return `${action}: text names the keys to hold down, such as "shift" or "ctrl+shift"`;
+  const refused = checkModifiers(keys);
+  return refused ? `${action}: ${refused}` : { mods: keys };
+}
+
+// A pointer action's optional coordinate: none acts where the cursor is.
+function pointOf(
+  action: string,
+  input: ProviderComputerInput,
+  coords: CoordSpaceName,
+): { point?: Point } | string {
+  if (input.coordinate === undefined) return {};
+  const p = modelPoint(input.coordinate, coords);
+  return p.ok ? { point: p.point } : `${action}: ${p.error}`;
+}
+
+function dragOf(
+  input: ProviderComputerInput,
+  coords: CoordSpaceName,
+  frame: { basedOn?: string },
+): ComputerAction | string {
+  const mods = modsOf("left_click_drag", input.text);
+  if (typeof mods === "string") return mods;
+  const way =
+    input.path ??
+    (input.start_coordinate && input.coordinate
+      ? [input.start_coordinate, input.coordinate]
+      : undefined);
+  if (!way)
+    return "left_click_drag needs start_coordinate and coordinate, or a path of [x, y] points";
+  if (way.length < 2 || way.length > 64) return "left_click_drag: a path has 2 to 64 points";
+  const path: Point[] = [];
+  for (const [i, c] of way.entries()) {
+    const p = modelPoint(c, coords);
+    if (!p.ok) return `left_click_drag: point ${i + 1}: ${p.error}`;
+    path.push(p.point);
+  }
+  const ms = input.duration === undefined ? undefined : Math.round(input.duration * 1000);
+  if (ms !== undefined && (ms <= 0 || ms > MAX_DRAG_MS))
+    return `left_click_drag: a duration is more than 0 and at most ${MAX_DRAG_MS / 1000} seconds`;
+  return {
+    action: "drag",
+    path,
+    button: input.button ?? "left",
+    ...mods,
+    ...(ms === undefined ? {} : { ms }),
+    ...frame,
+  };
+}
+
 // A provider's computer action as the daemon's ComputerAction, in model pixels; a string is the
 // error the model gets back instead. basedOn is the screenshot the model was looking at.
 function normalizeComputerAction(
@@ -59,15 +116,16 @@ function normalizeComputerAction(
   const frame = basedOn ? { basedOn } : {};
   const click = Object.hasOwn(CLICKS, action) ? CLICKS[action] : undefined;
   if (click) {
-    if (input.text)
-      return "Clicks with held keys are not supported yet; press the keys with the key action instead.";
-    const p = at();
-    if (!p.ok) return `${action}: ${p.error}`;
+    const mods = modsOf(action, input.text);
+    if (typeof mods === "string") return mods;
+    const point = pointOf(action, input, coords);
+    if (typeof point === "string") return point;
     return {
       action: "click",
-      point: p.point,
+      ...point,
       button: click.button,
       count: click.count,
+      ...mods,
       ...frame,
     };
   }
@@ -95,15 +153,42 @@ function normalizeComputerAction(
       return { action: "hold_key", keys, ms: Math.round(seconds * 1000) };
     }
     case "scroll": {
-      const p = at();
-      if (!p.ok) return `scroll: ${p.error}`;
+      const mods = modsOf(action, input.text);
+      if (typeof mods === "string") return mods;
+      const point = pointOf(action, input, coords);
+      if (typeof point === "string") return point;
       const n = Math.max(1, Math.min(30, Math.round(input.scroll_amount ?? 3)));
       const d = input.scroll_direction ?? "down";
       return {
         action: "scroll",
-        point: p.point,
+        ...point,
         dx: d === "left" ? -n : d === "right" ? n : 0,
         dy: d === "up" ? -n : d === "down" ? n : 0,
+        ...mods,
+        ...frame,
+      };
+    }
+    case "left_click_drag":
+      return dragOf(input, coords, frame);
+    case "mouse_move": {
+      const p = at();
+      if (!p.ok) return `mouse_move: ${p.error}`;
+      return { action: "move", point: p.point, ...frame };
+    }
+    case "left_mouse_down":
+    case "left_mouse_up": {
+      const down = action === "left_mouse_down";
+      if (!down && input.text)
+        return "left_mouse_up takes no keys: the keys held with left_mouse_down come up with it";
+      const mods = modsOf(action, input.text);
+      if (typeof mods === "string") return mods;
+      const point = pointOf(action, input, coords);
+      if (typeof point === "string") return point;
+      return {
+        action: down ? "mouse_down" : "mouse_up",
+        ...point,
+        button: input.button ?? "left",
+        ...mods,
         ...frame,
       };
     }
@@ -132,8 +217,6 @@ function normalizeComputerAction(
       };
     }
   }
-  if (NOT_YET.has(action))
-    return `${action} is not supported yet (drags arrive later); use clicks, keys and scrolling.`;
   return `Unknown computer action ${JSON.stringify(action).slice(0, 40)}.`;
 }
 
@@ -188,9 +271,14 @@ export function toComputerActions(
     !["up", "down", "left", "right"].includes(input.scroll_direction)
   )
     return "Invalid scroll direction";
-  if (input.coordinate !== undefined && !Array.isArray(input.coordinate))
-    return "Invalid coordinate";
-  if (input.region !== undefined && !Array.isArray(input.region)) return "Invalid region";
+  for (const field of ["coordinate", "start_coordinate", "region"] as const)
+    if (input[field] !== undefined && !Array.isArray(input[field])) return `Invalid ${field}`;
+  if (
+    input.path !== undefined &&
+    (!Array.isArray(input.path) || !input.path.every((point) => Array.isArray(point)))
+  )
+    return "Invalid path";
+  if (input.button !== undefined && !BUTTONS.has(input.button)) return "Invalid button";
   const result =
     input.action === "type"
       ? typeSteps(input, coords, basedOn)

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keyName, keysymOf, repeatsWhileHeld } from "./keys.ts";
+import { checkModifiers, keyName, keysymOf, repeatsWhileHeld } from "./keys.ts";
 
 describe("keyName", () => {
   it("maps the common aliases onto X keysym names", () => {
@@ -138,5 +138,17 @@ describe("repeatsWhileHeld", () => {
     expect(repeatsWhileHeld(["b"])).toBe(true);
     expect(repeatsWhileHeld(["Delete"])).toBe(true);
     expect(repeatsWhileHeld(["ctrl", "z"])).toBe(true);
+  });
+});
+
+describe("checkModifiers", () => {
+  it("accepts the keys a pointer action holds down and names any other", () => {
+    expect(checkModifiers(["shift"])).toBeUndefined();
+    expect(checkModifiers(["ctrl", "Shift_L", "alt", "cmd", "AltGr"])).toBeUndefined();
+    expect(checkModifiers(["ctrl", "a"])).toBe(
+      '"a" is not a modifier key; hold shift, ctrl, alt or super',
+    );
+    expect(checkModifiers(["Caps_Lock"])).toMatch(/not a modifier/);
+    expect(checkModifiers(["shfit"])).toMatch(/^unknown key "shfit"; did you mean/);
   });
 });

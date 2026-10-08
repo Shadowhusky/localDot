@@ -69,11 +69,19 @@ export const GenericComputerInput = z.object({
   // type only: click `coordinate` first, select all and delete before typing, press Return after.
   clear: z.boolean().optional(),
   submit: z.boolean().optional(),
+  // left_click_drag: the whole way, start first (instead of start_coordinate and coordinate).
+  path: z.array(z.array(z.number()).length(2)).min(2).max(64).optional(),
+  // left_click_drag, left_mouse_down and left_mouse_up: another button than the left one.
+  button: z.enum(["left", "right", "middle"]).optional(),
 });
 export type GenericComputerInput = z.infer<typeof GenericComputerInput>;
 
+const ModelPoint = z.object({ x: z.number().int(), y: z.number().int() });
+export const MAX_DRAG_MS = 10_000;
+
 // What the brain sends the daemon for one computer action, whatever the provider said: points in
-// model pixels (MODEL_SCREEN), keys as X-style names.
+// model pixels (MODEL_SCREEN), keys as X-style names. A click, scroll or button press without a
+// point acts where the cursor is.
 export const ComputerAction = z.object({
   action: z.enum([
     "screenshot",
@@ -82,19 +90,28 @@ export const ComputerAction = z.object({
     "key",
     "hold_key",
     "scroll",
+    "move",
+    "drag",
+    "mouse_down",
+    "mouse_up",
     "wait",
     "zoom",
     "cursor_position",
   ]),
-  point: z.object({ x: z.number().int(), y: z.number().int() }).optional(),
+  point: ModelPoint.optional(),
+  // drag: the whole way, start first.
+  path: z.array(ModelPoint).min(2).max(64).optional(),
   button: z.enum(["left", "right", "middle"]).optional(),
-  count: z.union([z.literal(1), z.literal(2), z.literal(3)]).optional(),
+  count: z.literal([1, 2, 3]).optional(),
+  // Modifier keys held down through a click, scroll or drag, or a button press until its release.
+  mods: z.array(z.string().min(1).max(32)).min(1).max(4).optional(),
   text: z.string().min(1).max(4000).optional(),
   keys: z.array(z.string().min(1).max(32)).min(1).max(8).optional(),
   // key: presses of the combo, as one input. hold_key: `ms` is how long the keys stay down.
   repeat: z.number().int().min(1).max(100).optional(),
   dx: z.number().int().min(-30).max(30).optional(),
   dy: z.number().int().min(-30).max(30).optional(),
+  // wait and hold_key: how long. drag: how long the motion takes, up to MAX_DRAG_MS.
   ms: z.number().int().min(0).max(30_000).optional(),
   region: z
     .object({ x: z.number().int(), y: z.number().int(), w: z.number().int(), h: z.number().int() })

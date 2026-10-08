@@ -123,8 +123,8 @@ export function keysymOf(name: string): number {
   return sym;
 }
 
-// Modifiers and locks: X does not repeat them while they are held down.
-const UNREPEATED = new Set([
+// Keys a click, scroll or drag can hold down.
+const MODIFIERS = new Set([
   "Shift_L",
   "Shift_R",
   "Control_L",
@@ -138,6 +138,10 @@ const UNREPEATED = new Set([
   "Hyper_L",
   "Hyper_R",
   "ISO_Level3_Shift",
+]);
+// Modifiers and locks: X does not repeat them while they are held down.
+const UNREPEATED = new Set([
+  ...MODIFIERS,
   "ISO_Level5_Shift",
   "Mode_switch",
   "Caps_Lock",
@@ -167,6 +171,16 @@ export function checkCombo(combo: readonly string[]): string | undefined {
     }
   }
   return undefined;
+}
+
+// Every name is a modifier held through a pointer action, or the message for the first that is not.
+export function checkModifiers(keys: readonly string[]): string | undefined {
+  const unknown = checkCombo(keys);
+  if (unknown) return unknown;
+  const other = keys.find((key) => !MODIFIERS.has(keyName(key)));
+  return other === undefined
+    ? undefined
+    : `${JSON.stringify(other.slice(0, 40))} is not a modifier key; hold shift, ctrl, alt or super`;
 }
 
 const squash = (name: string) => name.toLowerCase().replace(/[\s_-]+/g, "");
