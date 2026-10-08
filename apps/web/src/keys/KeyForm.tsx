@@ -185,7 +185,14 @@ export function KeyForm({ active, disabled, save, intakeRef, fieldRef, preset }:
   };
   const errorFor = (field: DraftField) =>
     shown?.field === field ? (
-      <p className="field-error" id={`key-${field}-error`}>
+      // A plan refusal wipes the field as it appears, so it is announced. A fresh node per
+      // message is read even when it replaces another error.
+      <p
+        key={shown.message}
+        className="field-error"
+        id={`key-${field}-error`}
+        role={shown.message === CLAUDE_PLAN_REFUSAL ? "alert" : undefined}
+      >
         {shown.message}
       </p>
     ) : null;

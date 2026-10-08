@@ -124,6 +124,7 @@ for (const run of runs) {
       await expect(field).toHaveValue("");
       const error = keys.getByText(SENTENCE, { exact: true });
       await expect(error).toBeVisible();
+      await expect(keys.getByRole("alert")).toHaveText(SENTENCE);
       await expect(field).toHaveAttribute("aria-invalid", "true");
       await expect(field).toHaveAttribute("aria-describedby", "key-value-error key-value-hint");
 

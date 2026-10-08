@@ -391,6 +391,7 @@ describe("KeysSheet", () => {
     const error = screen.getByText(SENTENCE);
     expect(field("Key").getAttribute("aria-invalid")).toBe("true");
     expect(field("Key").getAttribute("aria-describedby")?.split(" ")).toContain(error.id);
+    expect(screen.getByRole("alert")).toBe(error);
     // A value set without an input event, before a name is given, is refused for itself first.
     type("Name", "x");
     type("Name", "");
@@ -423,9 +424,15 @@ describe("KeysSheet", () => {
     const save = vi.fn(async () => ({ restart: false }));
     render(<KeysSheet open keys={controller({ save })} onClose={() => {}} />);
     type("Name", "claudewrapped");
+    type("Key", "short");
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    const tooShort = screen.getByText(/8 to 8,192 characters/);
+    expect(screen.queryByRole("alert")).toBeNull();
     type("Key", value);
     expect(field("Key").value).toBe("");
-    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    const refusal = screen.getByRole("alert");
+    expect(refusal.textContent).toBe(SENTENCE);
+    expect(refusal).not.toBe(tooShort);
     type("Name", "claudewrapped2");
     expect(screen.queryByText(SENTENCE)).toBeNull();
     field("Key").value = value;
