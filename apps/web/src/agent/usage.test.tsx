@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { LocalDotEvent } from "@localdot/protocol";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
@@ -164,4 +164,28 @@ it("names the model as the catalog does, and keeps the id for a model it does no
   render(<UsageFooter model={model} modelName={named} />);
   fireEvent.click(screen.getByRole("button", { name: /^Usage:/ }));
   expect(screen.getByRole("dialog", { name: "Usage" }).textContent).toContain("Sample Large 2");
+});
+it("keeps the usage details open while a phone's toolbar hides", () => {
+  const model = projectAgentEvent(
+    emptyAgentModel(),
+    event(0, "model.usage", {
+      role: "main",
+      route: "openai",
+      model: "fixture",
+      inputTokens: 10,
+      outputTokens: 2,
+    }),
+  );
+  render(<UsageFooter model={model} />);
+  fireEvent.click(screen.getByRole("button", { name: /^Usage:/ }));
+  const height = window.innerHeight;
+  act(() => {
+    window.innerHeight = height - 60;
+    window.dispatchEvent(new Event("resize"));
+  });
+  window.innerHeight = height;
+  expect(screen.getByRole("dialog", { name: "Usage" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: /^Usage:/ }).getAttribute("aria-expanded")).toBe(
+    "true",
+  );
 });
