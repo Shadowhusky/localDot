@@ -44,6 +44,8 @@ export interface EvalReport {
   model?: string;
   generatedAt: string;
   image: string;
+  // The tag moves on every rebuild; the id tells two runs' images apart.
+  imageId: string;
   ok: boolean;
   problems: string[];
   tasks: TaskReport[];
@@ -116,7 +118,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 // required), and every checker rejected the no-op run.
 export function suiteReport(
   tasks: TaskReport[],
-  meta: Pick<EvalReport, "mode" | "model" | "generatedAt" | "image">,
+  meta: Pick<EvalReport, "mode" | "model" | "generatedAt" | "image" | "imageId">,
 ): EvalReport {
   const problems = tasks.flatMap((t) => [
     ...(t.harnessError ? [`${t.id}: the harness failed: ${t.harnessError}`] : []),
@@ -182,7 +184,7 @@ export function markdownReport(report: EvalReport): string {
   return [
     `# Desktop eval (${report.mode}${report.model ? `, ${report.model}` : ""})`,
     "",
-    `${report.generatedAt} · image ${report.image} · ${report.ok ? "suite holds" : "suite fails"}`,
+    `${report.generatedAt} · image ${report.image} (${report.imageId.replace(/^sha256:/, "").slice(0, 12)}) · ${report.ok ? "suite holds" : "suite fails"}`,
     "",
     "Phase columns are medians in seconds per GUI action; Model is the median model call.",
     "Hand-offs are inputs the simulated user did for the agent; pass-assisted means it needed some.",

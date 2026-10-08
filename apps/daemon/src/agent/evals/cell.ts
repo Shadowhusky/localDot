@@ -99,6 +99,12 @@ export function scopeFilters(o: EvalScope, name?: string): string[] {
   ];
 }
 
+export function imageId(image: string): string {
+  const r = docker(["image", "inspect", "--format", "{{.Id}}", image]);
+  if (r.status !== 0) throw new Error(`the desktop image ${image} is missing: ${detail(r)}`);
+  return r.out.trim();
+}
+
 // -v removes the anonymous /config volume with its container.
 export function removeEvalContainers(o: EvalScope, name?: string): void {
   const ids = execFileSync("docker", ["ps", "-aq", ...scopeFilters(o, name)], {

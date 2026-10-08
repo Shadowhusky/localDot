@@ -94,7 +94,12 @@ describe("taskReport", () => {
 });
 
 describe("suiteReport", () => {
-  const meta = { mode: "oracle" as const, generatedAt: "2026-10-08T00:00:00.000Z", image: "img" };
+  const meta = {
+    mode: "oracle" as const,
+    generatedAt: "2026-10-08T00:00:00.000Z",
+    image: "img",
+    imageId: `sha256:${"0".repeat(64)}`,
+  };
 
   it("holds with passes and expected failures only", () => {
     const r = suiteReport(
@@ -159,8 +164,10 @@ describe("markdownReport", () => {
         mode: "oracle",
         generatedAt: "2026-10-08T00:00:00.000Z",
         image: "localdot/desktop:dev",
+        imageId: `sha256:0123456789ab${"c".repeat(52)}`,
       }),
     );
+    expect(md).toContain("image localdot/desktop:dev (0123456789ab)");
     expect(md).toContain("| Task | Result | Turns | Calls (failed/skipped) | Wall s | Pre-auth |");
     expect(md).toContain("| calc-fill | pass-assisted | 4 | 4 (1/1) | 12.5 | – |");
     expect(md).toContain("| 3 | 1/2 | 0 |");

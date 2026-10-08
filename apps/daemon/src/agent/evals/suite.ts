@@ -6,6 +6,7 @@ import { analyseEvents } from "./analyse.ts";
 import {
   type EvalCell,
   type EvalCellOptions,
+  imageId,
   removeEvalContainers,
   startEvalCell,
 } from "./cell.ts";
@@ -151,6 +152,7 @@ async function runTask(task: EvalTask, o: SuiteOptions): Promise<TaskReport> {
 
 export async function runSuite(o: SuiteOptions): Promise<EvalReport> {
   mkdirSync(o.outDir, { recursive: true });
+  const image = imageId(o.cell.image);
   const tasks = TASKS.filter((t) => !o.only?.length || o.only.includes(t.id));
   const reports: TaskReport[] = [];
   for (const task of tasks) reports.push(await runTask(task, o));
@@ -159,6 +161,7 @@ export async function runSuite(o: SuiteOptions): Promise<EvalReport> {
     ...(o.model ? { model: o.model.label } : {}),
     generatedAt: new Date().toISOString(),
     image: o.cell.image,
+    imageId: image,
   });
   writeFileSync(join(o.outDir, "report.json"), `${JSON.stringify(report, null, 2)}\n`);
   writeFileSync(join(o.outDir, "report.md"), markdownReport(report));
