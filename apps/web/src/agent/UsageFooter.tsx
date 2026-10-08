@@ -111,6 +111,9 @@ export function UsageDetails({
       {!model.usage.length && !waiting.length && selection?.kind !== "chatgpt" && (
         <p className="usage-note">No model calls reported yet.</p>
       )}
+      {selection?.kind === "api" && selection.plan && (
+        <p className="usage-note">Uses your plan's limits.</p>
+      )}
       {(selection?.kind === "chatgpt" || subscription) && (
         <div className="usage-plan">
           <h4>ChatGPT plan{subscription?.data.plan ? ` · ${subscription.data.plan}` : ""}</h4>

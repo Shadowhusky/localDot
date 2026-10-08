@@ -1,4 +1,6 @@
 import {
+  CLAUDE_PLAN_REFUSAL,
+  claudePlanToken,
   type HTTP_FORMATS,
   type LLM_PROVIDERS,
   PRINTABLE_ASCII,
@@ -41,6 +43,7 @@ export const PROVIDER_NAMES: Record<Provider, string> = {
   openrouter: "OpenRouter",
   "openai-compatible": "OpenAI-compatible",
   azure: "Azure OpenAI",
+  "anthropic-compatible": "Anthropic-compatible",
 };
 
 export const FORMAT_NAMES: Record<HttpFormat, string> = {
@@ -50,8 +53,17 @@ export const FORMAT_NAMES: Record<HttpFormat, string> = {
   "basic-password": "Basic auth, key as password",
 };
 
-// The two providers with no fixed address: the key goes to the base URL the user names.
-export const needsBaseURL = (p: Provider) => p === "openai-compatible" || p === "azure";
+// The providers with no fixed address: the key goes to the base URL the user names.
+export const needsBaseURL = (p: Provider) =>
+  p === "openai-compatible" || p === "azure" || p === "anthropic-compatible";
+
+// keyd refuses private hosts and ports, so a server on this Mac is reached through its own route.
+export function baseURLHint(p: Provider): string | undefined {
+  const local = "Local servers go through LM Studio or Ollama.";
+  if (p === "openai-compatible") return `Use https. ${local}`;
+  if (p === "anthropic-compatible") return `Use https, ending in /v1 (added if missing). ${local}`;
+  return undefined;
+}
 
 export type DraftField = "id" | "baseURL" | "hosts" | "header" | "value";
 export type DraftCheck =
@@ -79,12 +91,20 @@ export function bindingOf(d: KeyDraft): DraftCheck {
   if (d.kind === "llm") {
     if (!needsBaseURL(d.provider))
       return { ok: true, binding: { id, kind: "llm", provider: d.provider } };
-    const baseURL = httpsBase(d.baseURL);
+    let baseURL = httpsBase(d.baseURL);
     if (!baseURL)
       return fail(
         "baseURL",
-        "Enter the https:// address the API lives at, with no port, user, query or #.",
+        "Enter the API's https:// address by host name, with no port, user, query or #.",
       );
+    if (d.provider === "anthropic-compatible") {
+      if (/(^|\.)anthropic\.com$/.test(new URL(baseURL).hostname))
+        return fail("baseURL", "For Anthropic's own API, choose Anthropic as the provider.");
+      // Vendors give the address Anthropic's SDKs add /v1/messages to; the route keyd holds ends
+      // in the version, as Anthropic's own does.
+      baseURL = baseURL.replace(/\/+$/, "");
+      if (!baseURL.endsWith("/v1")) baseURL += "/v1";
+    }
     return { ok: true, binding: { id, kind: "llm", provider: d.provider, baseURL } };
   }
   const hosts = [
@@ -112,9 +132,13 @@ export function bindingOf(d: KeyDraft): DraftCheck {
   return { ok: true, binding: { id, kind: "http", hosts, header, format: d.format } };
 }
 
+export const valueHint = (d: KeyDraft) =>
+  d.kind === "llm" && d.provider === "anthropic" ? "sk-ant-api" : undefined;
+
 // keyd stores 8 to 8,192 printable ASCII characters with no space at either end; a paste's stray
 // spaces are trimmed first.
 export function valueProblem(value: string): string | undefined {
+  if (claudePlanToken(value)) return CLAUDE_PLAN_REFUSAL;
   if (value.length < 8 || value.length > 8192 || !PRINTABLE_ASCII.test(value)) {
     return "A key is 8 to 8,192 characters of printable ASCII.";
   }
@@ -131,7 +155,15 @@ function httpsBase(text: string): string | undefined {
   } catch {
     return undefined;
   }
-  if (u.protocol !== "https:" || u.username || u.password || u.port || u.search || u.hash) {
+  if (
+    u.protocol !== "https:" ||
+    u.username ||
+    u.password ||
+    u.port ||
+    u.search ||
+    u.hash ||
+    !HOST.test(u.hostname)
+  ) {
     return undefined;
   }
   const href = u.href;

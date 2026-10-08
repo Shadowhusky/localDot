@@ -16,6 +16,9 @@ import { TranscriptStore } from "./transcript.ts";
 const shapes = [
   `sk-ant-api03-${"a".repeat(95)}`,
   `sk-ant-admin01-${"b".repeat(95)}`,
+  `sk-ant-oat01-${"l".repeat(95)}`,
+  `sk-ant-ort01-${"m".repeat(95)}`,
+  `sk-ant-sid01-${"n".repeat(95)}`,
   `sk-proj-${"c".repeat(156)}`,
   `sk-svcacct-${"d".repeat(156)}`,
   `sk-admin-${"e".repeat(156)}`,
@@ -120,7 +123,11 @@ describe("independent key safeguard at all four daemon text ingresses", () => {
         const response = await f.send(path, body);
         expect(response.status).toBe(400);
         const refusal = await response.text();
-        expect(refusal).toContain("Recognised API keys belong in Keys");
+        expect(refusal).toContain(
+          /^sk-ant-(?:oat|ort|sid)/.test(key)
+            ? "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead."
+            : "Recognised API keys belong in Keys",
+        );
         expect(refusal).not.toContain(key);
         expect(f.files()).toBe(before);
         expect(f.redact).toHaveBeenCalledTimes(calls);

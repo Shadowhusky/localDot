@@ -152,6 +152,40 @@ describe("the first-class providers", () => {
   });
 });
 
+describe("custom endpoints", () => {
+  it("are the two Other rows, one for each API they can speak, with no address of their own", () => {
+    expect(PROVIDERS.filter((p) => p.custom)).toEqual([
+      {
+        id: "openai-compatible",
+        name: "Other (OpenAI-compatible)",
+        client: "openai-compatible",
+        keyd: "openai-compatible",
+        custom: true,
+      },
+      {
+        id: "anthropic-compatible",
+        name: "Other (Anthropic-compatible)",
+        client: "anthropic-compatible",
+        keyd: "anthropic-compatible",
+        custom: true,
+      },
+    ]);
+  });
+
+  it("get localDot's computer tool, never Anthropic's own, which needs Anthropic's API", () => {
+    const other = providerById("anthropic-compatible");
+    if (!other) throw new Error("missing");
+    expect(capabilityOf(other, localModel("claude-sonnet-5-5"))).toMatchObject({
+      tier: "vision-tools",
+      computer: "generic",
+    });
+    expect(capabilityOf(other, localModel("glm-5.3-flash", { vision: false }))).toMatchObject({
+      tier: "text-only",
+      computer: "none",
+    });
+  });
+});
+
 describe("the registry against the catalog", () => {
   const listed: Record<string, { api?: string; models: object }> = MODELS_DEV_FIXTURE;
   const trimmed = (url: string) => url.replace(/\/+$/, "");

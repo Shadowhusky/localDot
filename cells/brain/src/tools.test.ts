@@ -65,5 +65,6 @@ describe("the model's advertised tools and instructions", () => {
     );
     expect(imagesInToolResults(binding())).toBe(true);
     expect(imagesInToolResults(binding({ client: "google" }))).toBe(false);
+    expect(imagesInToolResults(binding({ client: "anthropic-compatible" }))).toBe(false);
   });
 });
