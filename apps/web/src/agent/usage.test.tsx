@@ -200,3 +200,24 @@ it("says a task that runs on a plan uses the plan's limits", () => {
   view.rerender(<UsageDetails model={emptyAgentModel()} selection={{ kind: "api", roles }} />);
   expect(screen.queryByText("Uses your plan's limits.")).toBeNull();
 });
+it("names each provider as the registry does", () => {
+  const model = projectAgentEvent(
+    emptyAgentModel(),
+    event(0, "model.usage", {
+      role: "main",
+      route: "minimax-coding-plan",
+      model: "MiniMax-M3",
+      inputTokens: 10,
+      outputTokens: 2,
+    }),
+  );
+  const roles = [
+    { role: "main" as const, provider: "minimax-coding-plan", model: "MiniMax-M3" },
+    { role: "fast" as const, provider: "moonshotai", model: "kimi-fixture" },
+  ];
+  render(<UsageDetails model={model} selection={{ kind: "api", roles, plan: true }} />);
+  const text = screen.getByRole("region", { name: "Task usage" }).textContent;
+  expect(text).toContain("MiniMax Token Plan · 1 call");
+  expect(text).toContain("Moonshot (Kimi) · No calls yet");
+  expect(text).not.toContain("Minimax-coding-plan");
+});

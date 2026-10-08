@@ -1,4 +1,5 @@
 import type { TaskModelSelection } from "@localdot/protocol";
+import { providerById } from "@localdot/providers";
 import { useRef, useState } from "react";
 import { count } from "../copy/format.ts";
 import { Icon } from "../ui/Icon.tsx";
@@ -10,10 +11,9 @@ import type { AgentModel } from "./model.ts";
 const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
 const whole = (value: number) => value.toLocaleString();
 const ROLES: Record<string, string> = { main: "Main", fast: "Fast", vision: "Vision" };
-const PROVIDERS: Record<string, string> = { openai: "OpenAI", chatgpt: "ChatGPT", xai: "xAI" };
 const roleName = (role: string) => ROLES[role] ?? role;
 const providerName = (id: string) =>
-  PROVIDERS[id] ?? `${id.slice(0, 1).toUpperCase()}${id.slice(1)}`;
+  id === "chatgpt" ? "ChatGPT plan" : (providerById(id)?.name ?? id);
 
 export type ModelName = (provider: string, model: string) => string | undefined;
 
