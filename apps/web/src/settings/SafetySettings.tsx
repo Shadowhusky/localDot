@@ -47,8 +47,8 @@ export function SafetySettings({
         </label>
       ))}
       <p>
-        Passwords, codes and card details are always handed to you. Uploads and unclear steps on
-        signed-in sites always ask.
+        Passwords, codes and card details are always handed to you. Uploads always need you. Unclear
+        steps on signed-in sites always ask, and so do commands once you sign in on its computer.
       </p>
     </fieldset>
   );
