@@ -5,7 +5,7 @@ import { expect, type Harness, keepBaselinesAt, test } from "./harness.ts";
 // Export from Replay: the popover's choices, a video being made, a saved file and a browser that
 // cannot make video. Chrome saves through its save picker (lent here, so nothing reaches the disk);
 // WebKit has none and saves through a download.
-keepBaselinesAt("c14", "w39");
+keepBaselinesAt("c14", "w14", "w39");
 
 // Holds the export worker at 12 of 40 frames, or with `done` writes 2.4 MB and finishes, so the
 // pictures do not depend on how fast a machine encodes.
