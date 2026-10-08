@@ -38,6 +38,13 @@ export const InputResult = z.object({
   armedMono: z.number(),
 });
 export type InputResult = z.infer<typeof InputResult>;
+// /input answers a repeated or held key as NDJSON: a line per press of a repeat, or one once a
+// hold's keys are down; then the InputResult with `done: true`, or an {error, status} line.
+export const KeyProgress = z.object({
+  presses: z.number().int().positive(),
+  pressMono: z.number(),
+});
+export type KeyProgress = z.infer<typeof KeyProgress>;
 
 export const ReleaseResult = z.object({
   keys: z.number().int().nonnegative(),

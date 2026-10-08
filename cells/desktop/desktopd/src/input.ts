@@ -3,6 +3,7 @@ import type {
   Injector,
   InputRequest,
   InputResult,
+  KeyProgress,
   TypeProgress,
   TypeRequest,
   TypeResult,
@@ -14,9 +15,8 @@ import type { XEvent, XHelper } from "./x/helper.ts";
 export const PRESS_TIMEOUT_MS = 150;
 const PROGRESS_EVERY = 8;
 const BUTTONS = { left: 1, middle: 2, right: 3 } as const;
-// xhelper waits this long between the presses of a repeated combo.
+// The gap between the presses of a repeated combo.
 const REPEAT_GAP_MS = 20;
-const HELPER_CALL_MS = 5000;
 
 export class NoPressError extends Error {
   constructor(what: string) {
@@ -137,17 +137,19 @@ function driverFor(injectors: Injectors, what: string): DriverInjector {
 // A combo's keys as the keysyms xhelper presses; an unknown name fails before anything is armed.
 const keysyms = (names: readonly string[]) => names.map((name) => keysymOf(keyName(name)));
 
-// Presses of a combo's last key, one per repeat: a shifted symbol's level modifier, which the
-// helper adds, is not one of them.
+// The press of a combo's last key: a shifted symbol's level modifier, which the helper adds, is
+// not it.
 const lastKey = (e: XEvent, reply: { keycodes: number[] }) =>
   e.kind === "key" && e.detail === reply.keycodes.at(-1);
 
-// `signal` is the request's: a Stop closes it, and held keys are released at once.
+// `signal` is the request's: a Stop closes it, held keys are released at once, and a repeat ends
+// after the press in progress. `onPress` hears each press of a repeat, and a hold once it is down.
 export async function inject(
   x: XHelper,
   req: InputRequest,
   injectors: Injectors = { xtest: true },
   signal?: AbortSignal,
+  onPress?: (p: KeyProgress) => void | Promise<void>,
 ): Promise<InputResult> {
   signal?.throwIfAborted();
   const { input } = req;
@@ -229,39 +231,30 @@ export async function inject(
   }
   if (input.holdMs) {
     try {
-      const presses = await withPress(x, lastKey, 1, () =>
+      const [press] = await withPress(x, lastKey, 1, () =>
         x.call<{ keycodes: number[] }>("hold", { combo, ms: input.holdMs }),
       );
+      const pressMono = (press as XEvent).mono;
+      await onPress?.({ presses: 1, pressMono });
       await sleep(input.holdMs, undefined, { signal });
-      return {
-        pressMono: (presses[0] as XEvent).mono,
-        presses: presses.map((p) => p.mono),
-        injector,
-        armedMono,
-      };
+      return { pressMono, presses: [pressMono], injector, armedMono };
     } finally {
       await x.call("release");
     }
   }
-  const repeat = input.repeat ?? 1;
-  const presses = await withPress(
-    x,
-    lastKey,
-    repeat,
-    () =>
-      x.call<{ keycodes: number[] }>(
-        "keys",
-        { combo, ...(repeat > 1 ? { repeat } : {}) },
-        HELPER_CALL_MS + repeat * REPEAT_GAP_MS,
-      ),
-    PRESS_TIMEOUT_MS + repeat * 5,
-  );
-  return {
-    pressMono: (presses[0] as XEvent).mono,
-    presses: presses.map((p) => p.mono),
-    injector,
-    armedMono,
-  };
+  // One helper call per press: a Stop reaches the helper between presses, and a release the
+  // daemon sends waits behind one press at most.
+  const presses: number[] = [];
+  for (let i = 0; i < (input.repeat ?? 1); i++) {
+    if (i > 0) await sleep(REPEAT_GAP_MS, undefined, { signal });
+    signal?.throwIfAborted();
+    const [press] = await withPress(x, lastKey, 1, () =>
+      x.call<{ keycodes: number[] }>("keys", { combo }),
+    );
+    presses.push((press as XEvent).mono);
+    await onPress?.({ presses: presses.length, pressMono: (press as XEvent).mono });
+  }
+  return { pressMono: presses[0] as number, presses, injector, armedMono };
 }
 
 // `signal` is the request's: a Stop closes the daemon's request, and typing ends at the next key.

@@ -1,4 +1,4 @@
-import type { InputRequest, TypeProgress, TypeRequest } from "@localdot/protocol";
+import type { InputRequest, KeyProgress, TypeProgress, TypeRequest } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import {
   ActivationError,
@@ -279,19 +279,45 @@ describe("inject", () => {
     expect(res.presses).toEqual([12]);
   });
 
-  it("presses a repeated combo in one helper call and returns one press per repeat", async () => {
-    const s = scripted((_cmd, args, emit) => {
-      for (let i = 0; i < Number(args.repeat); i++) emit(press("key", 35, 20 + i));
-      return { keycodes: [35] };
-    });
-    const res = await inject(s.helper, {
+  describe("repeated keys", () => {
+    const repeating = () => {
+      let mono = 20;
+      return scripted((cmd, _args, emit) => {
+        if (cmd === "keys") emit(press("key", 35, mono++));
+        return { keycodes: [35] };
+      });
+    };
+    const repeat = (n: number): InputRequest => ({
       ...click,
-      input: { kind: "key", combo: ["bracketright"], repeat: 5 },
+      input: { kind: "key", combo: ["bracketright"], repeat: n },
     });
-    expect(s.calls.filter((c) => c.cmd === "keys").map((c) => c.args)).toEqual([
-      { combo: [0x5d], repeat: 5 },
-    ]);
-    expect(res).toMatchObject({ pressMono: 20, presses: [20, 21, 22, 23, 24] });
+
+    it("presses once per helper call and reports each press as it lands", async () => {
+      const s = repeating();
+      const heard: KeyProgress[] = [];
+      const res = await inject(s.helper, repeat(5), { xtest: true }, undefined, (p) => {
+        heard.push(p);
+      });
+      expect(s.calls.filter((c) => c.cmd === "keys").map((c) => c.args)).toEqual(
+        Array(5).fill({ combo: [0x5d] }),
+      );
+      expect(res).toMatchObject({ pressMono: 20, presses: [20, 21, 22, 23, 24] });
+      expect(heard).toEqual([20, 21, 22, 23, 24].map((m, i) => ({ presses: i + 1, pressMono: m })));
+    });
+
+    it("stops pressing once the request is stopped", async () => {
+      const s = repeating();
+      const stop = new AbortController();
+      const heard: number[] = [];
+      await expect(
+        inject(s.helper, repeat(100), { xtest: true }, stop.signal, (p) => {
+          heard.push(p.presses);
+          if (p.presses === 3) stop.abort();
+        }),
+      ).rejects.toThrow(/abort/);
+      expect(s.calls.filter((c) => c.cmd === "keys")).toHaveLength(3);
+      expect(heard).toEqual([1, 2, 3]);
+    });
   });
 
   it("refuses an unknown key before arming, naming the close ones", async () => {
@@ -330,11 +356,15 @@ describe("inject", () => {
 
     it("keeps the keys down for their time, then releases them", async () => {
       const { s, at, req } = held(60);
-      const res = await inject(s.helper, req);
+      const heard: KeyProgress[] = [];
+      const res = await inject(s.helper, req, { xtest: true }, undefined, (p) => {
+        heard.push(p);
+      });
       expect(s.calls.map((c) => c.cmd)).toEqual(["arm", "hold", "release"]);
       expect(s.calls[1]?.args).toEqual({ combo: [0xffe1], ms: 60 });
       expect((at.release as number) - (at.hold as number)).toBeGreaterThanOrEqual(55);
       expect(res.presses).toEqual([30]);
+      expect(heard).toEqual([{ presses: 1, pressMono: 30 }]);
     });
 
     it("releases them at once when the request is stopped", async () => {

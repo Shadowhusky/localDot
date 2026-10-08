@@ -585,8 +585,6 @@ def keyboard(fail_on=None, numlock=False):
     cmds.held_taps = []
     cmds.hold_until = None
     cmds.remapped = {}
-    cmds.paused = []
-    cmds.pause = cmds.paused.append
     cmds.root = types.SimpleNamespace(
         query_pointer=lambda: types.SimpleNamespace(
             mask=sum(1 << (7 + b) for b in kb.buttons) | (1 << 4 if kb.numlock else 0),
@@ -622,15 +620,6 @@ class Keys(unittest.TestCase):
     def test_names_still_work_for_the_browser_helper(self):
         cmds, kb = keyboard()
         self.assertEqual(cmds.cmd_keys({"combo": ["Control_L", "a"]}), {"keycodes": [37, 38]})
-
-    def test_repeats_the_combo_with_a_gap_between_presses(self):
-        cmds, kb = keyboard()
-        cmds.cmd_keys({"combo": [0x5d], "repeat": 3})
-        self.assertEqual(presses(kb), [("down", 35), ("up", 35)] * 3)
-        self.assertEqual(len(cmds.paused), 2)
-        for bad in (0, 101, 2.5, True):
-            with self.assertRaises(ValueError):
-                cmds.cmd_keys({"combo": [0x5d], "repeat": bad})
 
     def test_a_failure_mid_combo_releases_what_went_down(self):
         cmds, kb = keyboard(fail_on=61)

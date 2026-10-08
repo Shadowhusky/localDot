@@ -26,8 +26,6 @@ from Xlib.protocol import rq
 
 ACTIVATE_TIMEOUT_MS = 300
 DOUBLE_CLICK_GAP_MS = 90
-REPEAT_GAP_MS = 20
-MAX_REPEAT = 100
 MAX_HOLD_MS = 30_000
 # Held keys are released this long after their hold should have ended, if desktopd never asks.
 HOLD_SLACK_MS = 1000
@@ -828,14 +826,8 @@ class Commands:
         self.d.sync()
 
     def cmd_keys(self, a):
-        repeat = a.get("repeat", 1)
-        if type(repeat) is not int or not 1 <= repeat <= MAX_REPEAT:
-            raise ValueError("repeat must be 1 to %d" % MAX_REPEAT)
         own, codes, taps = self.combo_plan(a["combo"])
-        for i in range(repeat):
-            if i:
-                self.pause(REPEAT_GAP_MS / 1000)
-            self.press_combo(codes, taps)
+        self.press_combo(codes, taps)
         return {"keycodes": own}
 
     # Presses the combo and keeps it down: desktopd sends `release` when the hold is over, and

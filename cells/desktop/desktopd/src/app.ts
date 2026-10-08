@@ -11,7 +11,7 @@ import {
   type TypeResult,
   ZoomRequest,
 } from "@localdot/protocol";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { stream } from "hono/streaming";
 import {
@@ -181,12 +181,46 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     }
   };
 
+  // NDJSON lines from `run`, then an {error, status} line if it fails. Hono's response cancellation
+  // is separate from the incoming request's signal in Node: either one stops `run`.
+  const ndjson = (
+    c: Context,
+    run: (write: (line: object) => Promise<void>, signal: AbortSignal) => Promise<void>,
+  ) => {
+    c.header("content-type", "application/x-ndjson");
+    return stream(c, async (out) => {
+      const stopped = new AbortController();
+      out.onAbort(() => stopped.abort());
+      if (out.aborted) stopped.abort();
+      const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
+      try {
+        await run(async (line) => {
+          signal.throwIfAborted();
+          await out.write(`${JSON.stringify(line)}\n`);
+        }, signal);
+      } catch (err) {
+        if (signal.aborted) return;
+        await out.write(
+          `${JSON.stringify({ error: err instanceof Error ? err.message : String(err), status: statusOf(err) })}\n`,
+        );
+      }
+    });
+  };
+
   app.post("/input", async (c) =>
     withX(async (x) => {
       const parsed = InputRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      const result: InputResult = await inject(x, parsed.data, deps.injectors, c.req.raw.signal);
-      return c.json(result);
+      const { input } = parsed.data;
+      if (input.kind !== "key" || !(input.repeat || input.holdMs)) {
+        const result: InputResult = await inject(x, parsed.data, deps.injectors, c.req.raw.signal);
+        return c.json(result);
+      }
+      // Each press is reported as it lands, so a request stopped part-way knows what was pressed.
+      return ndjson(c, async (write, signal) => {
+        const result = await inject(x, parsed.data, deps.injectors, signal, write);
+        await write({ ...result, done: true });
+      });
     })(),
   );
 
@@ -199,26 +233,9 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     withX(async (x) => {
       const parsed = TypeRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      c.header("content-type", "application/x-ndjson");
-      return stream(c, async (out) => {
-        // Hono's response cancellation is separate from the incoming request's signal in Node.
-        const stopped = new AbortController();
-        out.onAbort(() => stopped.abort());
-        if (out.aborted) stopped.abort();
-        const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
-        try {
-          const write = async (line: unknown) => {
-            signal.throwIfAborted();
-            await out.write(`${JSON.stringify(line)}\n`);
-          };
-          const result: TypeResult = await typeText(x, parsed.data, write, deps.injectors, signal);
-          await write(result);
-        } catch (err) {
-          if (signal.aborted) return;
-          await out.write(
-            `${JSON.stringify({ error: err instanceof Error ? err.message : String(err), status: statusOf(err) })}\n`,
-          );
-        }
+      return ndjson(c, async (write, signal) => {
+        const result: TypeResult = await typeText(x, parsed.data, write, deps.injectors, signal);
+        await write(result);
       });
     })(),
   );

@@ -178,6 +178,10 @@ function fakeX(): XHelper & {
         for (const l of listeners) l({ ev: "press", kind: "key", detail: 50, mono });
         return { keycodes: [50] } as never;
       }
+      if (cmd === "keys") {
+        for (const l of listeners) l({ ev: "press", kind: "key", detail: 35, mono });
+        return { keycodes: [35] } as never;
+      }
       if (cmd === "release") return { keycodes: [50] } as never;
       if (cmd === "release_all") return { keys: 2, buttons: 1 } as never;
       if (cmd === "settle")
@@ -349,6 +353,53 @@ describe("desktopd input routes", () => {
         })
       ).status,
     ).toBe(400);
+  });
+
+  it("streams each press of a repeated key, then the result", async () => {
+    const res = await fullApp(fakeX()).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["bracketright"], repeat: 3 } }),
+    });
+    expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+    const lines = (await res.text())
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines.map((l) => l.presses)).toEqual([1, 2, 3, [102, 103, 104]]);
+    expect(lines[3]).toMatchObject({ done: true, pressMono: 102, injector: "xtest" });
+  });
+
+  it("stops pressing a repeated key when its response stream is cancelled", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["bracketright"], repeat: 100 } }),
+    });
+    const reader = res.body?.getReader();
+    await reader?.read();
+    await reader?.cancel();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(x.calls.filter((cmd) => cmd === "keys").length).toBeLessThanOrEqual(2);
+  });
+
+  it("tells a held key's caller once the keys are down", async () => {
+    const stop = new AbortController();
+    const res = await fullApp(fakeX()).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ input: { kind: "key", combo: ["shift"], holdMs: 10_000 } }),
+      signal: stop.signal,
+    });
+    const reader = res.body?.getReader();
+    const first = await reader?.read();
+    expect(JSON.parse(new TextDecoder().decode(first?.value))).toEqual({
+      presses: 1,
+      pressMono: 102,
+    });
+    stop.abort();
+    await reader?.cancel().catch(() => undefined);
   });
 
   it("releases held keys when the request that holds them is stopped", async () => {

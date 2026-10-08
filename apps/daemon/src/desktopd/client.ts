@@ -4,6 +4,7 @@ import {
   HitTestResult,
   type InputRequest,
   InputResult,
+  KeyProgress,
   type LaunchRequest,
   LaunchResult,
   ObserveResult,
@@ -38,6 +39,9 @@ const TIMEOUT_MS = {
   hitTest: 5000,
   zoom: 5000,
 } as const;
+// A press of a repeated key takes about 25 ms on an idle desktop; this leaves room under load.
+const REPEAT_PRESS_MS = 50;
+const LINE_MAX = 64 * 1024;
 
 export class DesktopdClient {
   constructor(
@@ -49,9 +53,28 @@ export class DesktopdClient {
     return this.#json("GET", "/clock", undefined, TIMEOUT_MS.clock, ClockResult.parse);
   }
 
-  input(req: InputRequest, signal?: AbortSignal): Promise<InputResult> {
-    const held = req.input.kind === "key" ? (req.input.holdMs ?? 0) : 0;
-    return this.#json("POST", "/input", req, TIMEOUT_MS.input + held, InputResult.parse, signal);
+  // A repeated or held key answers as NDJSON: `onPress` hears each press of a repeat, and a hold
+  // once its keys are down. Aborting `signal` (a Stop) ends a repeat after the press in progress.
+  async input(
+    req: InputRequest,
+    signal?: AbortSignal,
+    onPress?: (p: KeyProgress) => void | Promise<void>,
+  ): Promise<InputResult> {
+    const key = req.input.kind === "key" ? req.input : undefined;
+    const timeoutMs = TIMEOUT_MS.input + (key?.holdMs ?? 0) + (key?.repeat ?? 0) * REPEAT_PRESS_MS;
+    signal?.throwIfAborted();
+    const res = await this.#send("POST", "/input", req, timeoutMs, signal);
+    const streamed = res.headers.get("content-type")?.includes("application/x-ndjson");
+    if (!res.ok || !res.body || !streamed) {
+      const text = await res.text();
+      if (!res.ok) throw new DesktopdError(res.status, text || res.statusText, "/input");
+      return InputResult.parse(JSON.parse(text));
+    }
+    return InputResult.parse(
+      await this.#lines(res.body, "/input", signal, async (line) => {
+        await onPress?.(KeyProgress.parse(line));
+      }),
+    );
   }
 
   // Releases every key and button that is down on the desktop.
@@ -106,7 +129,21 @@ export class DesktopdClient {
   ): Promise<TypeResult> {
     const res = await this.#send("POST", "/type", req, 60_000 + req.text.length * 50, signal);
     if (!res.ok || !res.body) throw new DesktopdError(res.status, await res.text(), "/type");
-    const reader = res.body.getReader();
+    return TypeResult.parse(
+      await this.#lines(res.body, "/type", signal, async (line) => {
+        await onProgress(TypeProgress.parse(line));
+      }),
+    );
+  }
+
+  // Progress lines until the one with `done: true`, which it returns.
+  async #lines(
+    body: ReadableStream<Uint8Array>,
+    path: string,
+    signal: AbortSignal | undefined,
+    onLine: (line: Record<string, unknown>) => Promise<void>,
+  ): Promise<Record<string, unknown>> {
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffered = "";
     const abort = () => {
@@ -124,19 +161,19 @@ export class DesktopdClient {
           buffered = buffered.slice(nl + 1);
           nl = buffered.indexOf("\n");
           if (!line) continue;
-          if (line.length > 64 * 1024)
-            throw new DesktopdError(502, "typing line exceeds its limit", "/type");
+          if (line.length > LINE_MAX)
+            throw new DesktopdError(502, "a progress line exceeds its limit", path);
           const msg = JSON.parse(line) as Record<string, unknown>;
           if ("error" in msg)
-            throw new DesktopdError(Number(msg.status) || 500, String(msg.error), "/type");
-          if (msg.done === true) return TypeResult.parse(msg);
-          else await onProgress(TypeProgress.parse(msg));
+            throw new DesktopdError(Number(msg.status) || 500, String(msg.error), path);
+          if (msg.done === true) return msg;
+          await onLine(msg);
         }
-        if (buffered.length > 64 * 1024)
-          throw new DesktopdError(502, "typing line exceeds its limit", "/type");
+        if (buffered.length > LINE_MAX)
+          throw new DesktopdError(502, "a progress line exceeds its limit", path);
         if (done) break;
       }
-      throw new DesktopdError(502, "typing ended without a result line", "/type");
+      throw new DesktopdError(502, "the reply ended without a result line", path);
     } finally {
       signal?.removeEventListener("abort", abort);
       await reader.cancel().catch(() => {});
