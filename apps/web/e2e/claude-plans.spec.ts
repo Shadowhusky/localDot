@@ -86,6 +86,10 @@ for (const run of runs) {
       await sheet.getByLabel("Search main providers").fill("claude code");
       await expect(sheet.getByText(SENTENCE, { exact: true })).toBeVisible();
       await expect(plan).toBeAttached();
+      await expect(provider.locator('option[value="anthropic"]')).toHaveJSProperty(
+        "disabled",
+        false,
+      );
       await sheet.getByLabel("Search main providers").fill("");
       await expect(sheet.getByText(SENTENCE)).toHaveCount(0);
 

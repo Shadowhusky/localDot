@@ -129,6 +129,26 @@ describe("provider/model/role presentation", () => {
     render(<ProviderPicker modelRole="fast" value="anthropic" onChange={vi.fn()} />);
     expect(screen.getByText(SENTENCE)).toBeTruthy();
   });
+  it("offers Anthropic on a Claude plan search, so the sentence's next step is one pick away", () => {
+    for (const role of ["main", "fast"] as const) {
+      const change = vi.fn();
+      render(<ProviderPicker modelRole={role} value="" onChange={change} />);
+      const search = screen.getByLabelText(`Search ${role} providers`);
+      for (const text of ["claude", "claude code token", "pro", "gemini pro", "subscription"]) {
+        fireEvent.change(search, { target: { value: text } });
+        const anthropic = screen.getByRole("option", { name: "Anthropic" }) as HTMLOptionElement;
+        expect(anthropic.disabled, `${role} ${text}`).toBe(false);
+        expect(anthropic.closest("optgroup")?.label).toBe("API providers");
+      }
+      fireEvent.change(screen.getByRole("combobox", { name: `${role} provider` }), {
+        target: { value: "anthropic" },
+      });
+      expect(change).toHaveBeenCalledWith("anthropic");
+      fireEvent.change(search, { target: { value: "groq" } });
+      expect(screen.queryByRole("option", { name: "Anthropic" })).toBeNull();
+      cleanup();
+    }
+  });
   it("retains the canonical selected provider through filtered searches", () => {
     const change = vi.fn();
     render(<ProviderPicker modelRole="main" value="google" onChange={change} />);

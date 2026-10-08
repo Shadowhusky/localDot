@@ -25,9 +25,11 @@ export function ProviderPicker({
   const providerLabel = useId();
   const noteId = useId();
   const [search, setSearch] = useState("");
+  const claudePlanSearched = role !== "local" && CLAUDE_PLAN_SEARCH.test(search);
   const shown = [...matchingProviders(search)];
   const selected = providerById(value);
-  if (selected && !shown.some((provider) => provider.id === selected.id)) shown.unshift(selected);
+  for (const extra of [selected, claudePlanSearched ? providerById("anthropic") : undefined])
+    if (extra && !shown.some((provider) => provider.id === extra.id)) shown.unshift(extra);
   const note =
     selected?.notOffered ??
     selected?.rule ??
@@ -35,7 +37,6 @@ export function ProviderPicker({
   const searchedReasons = search.trim()
     ? shown.filter((provider) => provider.notOffered && provider !== selected)
     : [];
-  const claudePlanSearched = role !== "local" && CLAUDE_PLAN_SEARCH.test(search);
   const chatgptShown =
     role === "main" &&
     (!search.trim() ||
