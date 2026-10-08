@@ -120,22 +120,24 @@ export function useFollowScroll(owner: string, follow: boolean) {
     if (t.element) t.element.scrollTop = follow ? t.element.scrollHeight : 0;
   }, [owner, follow, setPin]);
 
-  const onScroll = useCallback(() => {
+  // Says whether the reader still follows the live end after this scroll.
+  const onScroll = useCallback((): boolean => {
     const t = tracking.current,
       element = t.element;
-    if (!element) return;
+    if (!element) return t.pinned;
     const below = element.scrollHeight - element.clientHeight - element.scrollTop;
     // A scroll the glide did not make (the reader's, or the page's) ends the glide.
     if (t.glide && t.glide.at >= 0 && Math.abs(element.scrollTop - t.glide.at) > 1) {
       cancelAnimationFrame(t.glide.frame);
       t.glide = null;
     }
-    if ((t.jumping || t.glide) && below >= PIN_SLACK) return;
+    if ((t.jumping || t.glide) && below >= PIN_SLACK) return t.pinned;
     t.jumping = false;
     const next = follow && below < PIN_SLACK;
     if (next !== t.pinned) setPin(next);
     cancelAnimationFrame(t.frame);
     t.frame = requestAnimationFrame(pickAnchor);
+    return next;
   }, [follow, pickAnchor, setPin]);
 
   return {

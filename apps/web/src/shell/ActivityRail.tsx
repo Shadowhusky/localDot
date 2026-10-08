@@ -248,9 +248,13 @@ export function ActivityRail({
             className="activity-scroll"
             fade={plan.length ? "bottom" : "both"}
             onScroll={(event) => {
-              follow.onScroll();
+              // Only the reader leaving the live end holds the page; the rail's own glides do not.
               const pane = event.currentTarget;
-              if (pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32) page.freeze();
+              if (
+                !follow.onScroll() &&
+                pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32
+              )
+                page.freeze();
             }}
             onWheel={follow.interrupt}
             onTouchStart={follow.interrupt}
