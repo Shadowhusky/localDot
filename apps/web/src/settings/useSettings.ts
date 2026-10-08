@@ -251,7 +251,7 @@ export function useSettings(
       return;
     const initial = validateForm(captured, previous, owner.index, subscriptionModels);
     if (!initial.ok) {
-      setError(initial.message);
+      setError(initial.problems.join(" "));
       return;
     }
     const revision = owner.revision,
@@ -277,7 +277,7 @@ export function useSettings(
       setIndex(fresh);
       const checked = validateForm(captured, previous, fresh, subscriptionModels);
       if (!checked.ok) {
-        setError(checked.message);
+        setError(checked.problems.join(" "));
         return;
       }
       sent = true;
@@ -457,7 +457,7 @@ export function useSettings(
     captureKey,
     keySaved,
     dirty: !!draft && !!saved && !sameDraft(draft, formOf(saved)),
-    validation: validation && !validation.ok ? validation.message : null,
+    validation: validation && !validation.ok ? validation.problems : null,
     saveEnabled:
       validation?.ok === true &&
       !busy &&

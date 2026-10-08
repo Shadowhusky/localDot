@@ -75,7 +75,8 @@
 }
 .settings-sheet input:disabled,
 .settings-sheet select:disabled,
-.settings-sheet button:disabled {
+.settings-sheet button:disabled,
+.settings-sheet button[aria-disabled="true"] {
   opacity: 0.6;
 }
 .role-editor {
@@ -99,6 +100,27 @@
 }
 .settings-sheet .role-enabled input {
   min-width: 24px;
+}
+.settings-problems ul {
+  margin: 0 0 8px;
+  padding-left: 18px;
+  color: var(--color-text);
+}
+.settings-problems li + li {
+  margin-top: 4px;
+}
+.settings-commit {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 16px;
+}
+.settings-sheet .settings-save {
+  background: var(--color-text);
+  border-color: var(--color-text);
+  color: var(--color-void);
+  font-weight: 600;
 }
 .settings-sheet .model-capability {
   color: var(--color-text);

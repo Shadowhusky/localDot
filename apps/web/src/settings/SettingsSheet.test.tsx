@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SettingsSheet, type SettingsSheetProps } from "./SettingsSheet.tsx";
@@ -96,9 +96,9 @@ describe("settings sheet presentation ownership", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
     expect(run).toHaveBeenCalledOnce();
-    expect((screen.getByRole("button", { name: "Saving…" }) as HTMLButtonElement).disabled).toBe(
-      true,
-    );
+    const saving = screen.getByRole("button", { name: "Saving…" });
+    expect(saving.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(saving);
     expect(save).not.toHaveBeenCalled();
     view.rerender(<SettingsSheet {...p} stop={{ label: "Stop", enabled: false, run }} />);
     fireEvent.click(screen.getByRole("button", { name: "Stop" }));
@@ -129,5 +129,45 @@ describe("settings sheet presentation ownership", () => {
     expect(screen.queryByLabelText(/USD|fast provider|fast model/)).toBeNull();
     expect(screen.queryByRole("group", { name: "Task spending ceiling" })).toBeNull();
     expect(screen.queryByText(/million tokens/)).toBeNull();
+  });
+  it("lists every problem and ties Save's reason to it", () => {
+    const p = props();
+    const view = render(
+      <SettingsSheet
+        {...p}
+        dirty
+        validation={["Local: choose a valid model ID.", "Enter an explicit task ceiling in USD."]}
+        save={{ enabled: false, run: vi.fn() }}
+      />,
+    );
+    const save = screen.getByRole("button", { name: "Save settings" });
+    expect(save.getAttribute("aria-disabled")).toBe("true");
+    const reason = document.getElementById(save.getAttribute("aria-describedby") ?? "");
+    expect(
+      within(reason as HTMLElement)
+        .getAllByRole("listitem")
+        .map((li) => li.textContent),
+    ).toEqual(["Local: choose a valid model ID.", "Enter an explicit task ceiling in USD."]);
+    view.rerender(
+      <SettingsSheet
+        {...p}
+        dirty
+        catalog="offline"
+        error="Settings could not be loaded. Your edits are kept. Choose Try again."
+        onRefresh={vi.fn()}
+        save={{ enabled: false, run: vi.fn() }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: "Save settings" }).getAttribute("aria-describedby"),
+    ).toContain("settings-error");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+    view.rerender(<SettingsSheet {...p} save={{ enabled: false, run: vi.fn() }} />);
+    expect(
+      document.getElementById(
+        screen.getByRole("button", { name: "Save settings" }).getAttribute("aria-describedby") ??
+          "",
+      )?.textContent,
+    ).toBe("Saved choices");
   });
 });

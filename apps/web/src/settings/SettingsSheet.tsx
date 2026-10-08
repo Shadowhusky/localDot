@@ -47,7 +47,7 @@ export interface SettingsSheetProps {
     change(value: string, useDefault: boolean): void;
   };
   onReload?(): void;
-  validation?: string | null;
+  validation?: readonly string[] | null;
   loading?: boolean;
 }
 const CATALOG_MESSAGE: Record<SettingsSheetProps["catalog"], string> = {
@@ -109,6 +109,18 @@ export function SettingsSheet(props: SettingsSheetProps) {
     section.querySelector<HTMLSelectElement>("select")?.focus();
     focusedSection.current = true;
   }, [active, props.open, props.loading, props.focusSection]);
+  const saveBlocked = !props.save?.enabled || props.busy;
+  const problems = props.validation?.length ? props.validation : null;
+  const saveReason =
+    [
+      problems && "settings-problems",
+      props.error && "settings-error",
+      props.loading && "settings-loading",
+      (props.catalog === "refreshing" || props.catalog === "offline") && "settings-catalog-state",
+    ]
+      .filter(Boolean)
+      .join(" ") ||
+    (!props.dirty && "settings-state");
   return (
     <>
       <div
@@ -153,10 +165,18 @@ export function SettingsSheet(props: SettingsSheetProps) {
         <div className="settings-body">
           {props.appearance && <AppearancePicker appearance={props.appearance} />}
           <p>Saved settings apply to future tasks. The current task keeps its models.</p>
-          <p role="status">{props.dirty ? "Unsaved choices" : "Saved choices"}</p>
-          {props.loading && <p role="status">Loading saved settings…</p>}
+          <p id="settings-state" role="status">
+            {props.dirty ? "Unsaved choices" : "Saved choices"}
+          </p>
+          {props.loading && (
+            <p id="settings-loading" role="status">
+              Loading saved settings…
+            </p>
+          )}
           <div className="settings-catalog">
-            <p role="status">{CATALOG_MESSAGE[props.catalog]}</p>
+            <p id="settings-catalog-state" role="status">
+              {CATALOG_MESSAGE[props.catalog]}
+            </p>
             {props.onRefresh && (
               <button
                 type="button"
@@ -235,22 +255,41 @@ export function SettingsSheet(props: SettingsSheetProps) {
               )}
             </fieldset>
           )}
-          {props.validation && <p role="status">{props.validation}</p>}
-          {props.error && <p role="alert">{props.error}</p>}
-          {props.onReload && (
-            <button type="button" disabled={props.busy} onClick={props.onReload}>
-              Reload saved settings
-            </button>
+          {problems && (
+            <div id="settings-problems" className="settings-problems" role="status">
+              <p>Before you can save:</p>
+              <ul>
+                {problems.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+            </div>
           )}
-          {props.save && (
-            <button
-              type="button"
-              disabled={!props.save.enabled || props.busy}
-              onClick={props.save.run}
-            >
-              {props.busy ? "Saving…" : "Save settings"}
-            </button>
+          {props.error && (
+            <p id="settings-error" role="alert">
+              {props.error}
+            </p>
           )}
+          <div className="settings-commit">
+            {props.onReload && (
+              <button type="button" disabled={props.busy} onClick={props.onReload}>
+                Reload saved settings
+              </button>
+            )}
+            {props.save && (
+              <button
+                type="button"
+                className="settings-save"
+                aria-disabled={saveBlocked || undefined}
+                aria-describedby={(saveBlocked && !props.busy && saveReason) || undefined}
+                onClick={() => {
+                  if (!saveBlocked) props.save?.run();
+                }}
+              >
+                {props.busy ? "Saving…" : "Save settings"}
+              </button>
+            )}
+          </div>
         </div>
       </section>
     </>
