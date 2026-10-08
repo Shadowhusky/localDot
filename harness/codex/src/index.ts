@@ -1,11 +1,5 @@
 export { CodexInstallFailure, CodexInstallState } from "@localdot/protocol";
-export {
-  CHATGPT_SWITCHED_OFF,
-  CODEX_MANIFEST_SHA256,
-  canonical,
-  canonicalDigest,
-  codexAccepted,
-} from "./acceptance.ts";
+export { CHATGPT_SWITCHED_OFF, CODEX_MANIFEST_SHA256, codexAccepted } from "./acceptance.ts";
 export {
   type ApprovalBrainGeneration,
   type ApprovalContext,
