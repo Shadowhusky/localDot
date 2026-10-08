@@ -227,6 +227,7 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
           (e.data.pause as { phase?: string }).phase === "resuming",
       ),
     ).toBe(true);
+    // One card per identical key call. The third is approved, then stops before its dispatch.
     for (let n = 0; n < 3; n++) await approveCurrent(page, f);
     await expect
       .poll(async () => (await f.state(owner))[0]?.pause?.reason, { timeout: 30000 })
@@ -235,7 +236,7 @@ test("bound approvals, private handoff, atomic Pause, queued changes and repeate
       .poll(async () => (await f.state(owner))[0]?.pause?.phase, { timeout: 30000 })
       .toBe("paused");
     const repeated = (await f.state(owner))[0];
-    expect(repeated?.provider).toHaveLength(9);
+    expect(repeated?.provider).toHaveLength(11);
     const nativeKeys = repeated?.events.filter(
       (e) =>
         e.type === "action.dispatch" &&
