@@ -6,6 +6,7 @@ import { requestTakeoverTool } from "../tools/ask.ts";
 import type { ToolCallContext, ToolDeps } from "../tools/deps.ts";
 import { authorizePrepared, toolRisk } from "./authorize.ts";
 import { decideAutonomy } from "./autonomy.ts";
+import { PausedStepError } from "./step-barrier.ts";
 import { TaskAutonomy } from "./task-autonomy.ts";
 
 function context(
@@ -105,6 +106,28 @@ describe("signed-in screens of one task", () => {
     expect(takeover).toHaveBeenCalledOnce();
     expect(session.taskAutonomy.signedIn("desktop")).toBe(true);
     expect(decideAutonomy(ctx, { operation: "click" }).mode).toBe("ask");
+  });
+
+  it("a held Pause refuses a password hand-off or a login takeover before signing anything in", async () => {
+    const { ctx, session, takeover } = context();
+    session.requestSafetyPause(ulid());
+    await expect(
+      authorizePrepared(ctx, {
+        tool: "computer",
+        input: { action: "type" },
+        target: null,
+        facts: {
+          operation: "type",
+          target: { source: "dom", fresh: true, role: "textbox", name: "Password", secret: true },
+        },
+        revalidate: async () => true,
+      }),
+    ).rejects.toBeInstanceOf(PausedStepError);
+    await expect(
+      requestTakeoverTool({} as ToolDeps, ctx, { reason: "login", note: "Over to you." }),
+    ).rejects.toBeInstanceOf(PausedStepError);
+    expect(takeover).not.toHaveBeenCalled();
+    expect(session.taskAutonomy.signedIn("desktop")).toBe(false);
   });
 
   it("a hand-off the user chose, or one for a private key, leaves the desktop signed out", async () => {

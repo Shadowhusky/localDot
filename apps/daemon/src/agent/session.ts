@@ -868,6 +868,8 @@ export class AgentSession {
     const generation = lease?.generation ?? this.generation;
     if (!generation) throw new SessionStoppedError();
     this.check(generation, lease?.signal);
+    // A held Pause refuses a hand-off like any step; the model can ask again after Resume.
+    if (this.#steps.pause) throw new PausedStepError();
     let resolve!: (outcome: TakeoverOutcome) => void;
     const released = new Promise<TakeoverOutcome>((r) => {
       resolve = r;

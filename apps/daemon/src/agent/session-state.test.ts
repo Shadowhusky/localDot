@@ -97,37 +97,33 @@ it("still pauses when the paused state cannot be journaled", () => {
   expect(session.status).toBe("paused");
 });
 
-it("publishes a Pause once per pause, even across a takeover", async () => {
-  const { session, states } = setup();
+it("publishes a Pause once per pause, and nothing for a takeover the Pause refuses", async () => {
+  const { session, events, states } = setup();
   session.setStatus("running");
   const requestId = ulid();
   session.requestSafetyPause(requestId);
-  void session.takeover("login", "Sign in").catch(() => {});
-  await Promise.resolve();
-  await Promise.resolve();
-  expect(session.endTakeover(session.pendingTakeover ?? "", undefined)).toBe(true);
+  await expect(session.takeover("login", "Sign in")).rejects.toThrow("task execution paused");
+  expect(session.controlHeld).toBe(false);
   session.requestSafetyPause(requestId);
-  expect(states()).toEqual([
-    { state: "paused", reason: "user" },
-    { state: "waiting_user", reason: "takeover" },
-  ]);
+  expect(states()).toEqual([{ state: "paused", reason: "user" }]);
+  expect(events.some((e) => e.type === "takeover.request")).toBe(false);
 });
 
-it("reports a held Pause as paused once control is handed back, and a plain hand-back as running", async () => {
+it("reports a plain hand-back as running, and keeps a held Pause paused with no hand-off", async () => {
   const { session } = setup();
   session.setStatus("running");
-  const handBack = async () => {
-    void session.takeover("other", "Finish this step").catch(() => {});
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(session.status).toBe("waiting_user");
-    expect(session.endTakeover(session.pendingTakeover ?? "", undefined)).toBe(true);
-  };
-  await handBack();
+  void session.takeover("other", "Finish this step").catch(() => {});
+  await Promise.resolve();
+  await Promise.resolve();
+  expect(session.status).toBe("waiting_user");
+  expect(session.endTakeover(session.pendingTakeover ?? "", undefined)).toBe(true);
   expect(session.status).toBe("running");
   const requestId = ulid();
   session.confirmSafetyPause(requestId, session.requestSafetyPause(requestId).revision);
-  await handBack();
+  await expect(session.takeover("other", "Finish this step")).rejects.toThrow(
+    "task execution paused",
+  );
+  expect(session.pendingTakeover).toBeUndefined();
   expect(session.safetyPause?.phase).toBe("paused");
   expect(session.status).toBe("paused");
 });

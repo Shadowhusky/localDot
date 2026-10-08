@@ -4,6 +4,7 @@ import { CountedPermit } from "./approvals.ts";
 import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
 import { handoffFor } from "./handoff.ts";
 import { actionDigest, buildApprovalCard, type RiskDecision, type RiskFacts } from "./risk.ts";
+import { PausedStepError } from "./step-barrier.ts";
 
 export interface EffectPermit {
   // The user approved a card for this exact effect, rather than the policy letting it act.
@@ -100,6 +101,8 @@ export async function authorizePrepared(
     // before takeover drains all screens; the old lease can never authorize a replay.
     ctx.screen?.finish();
     const { reason, note } = handoffFor(decision, prepared.facts);
+    // A held Pause refuses the hand-off before anything counts as signed in.
+    if (ctx.session.safetyPause) throw new PausedStepError();
     if (reason !== "other") ctx.session.taskAutonomy.signIn(screenOf(ctx));
     await ctx.session.takeover(reason, note, ctx.step, ctx.lease);
     ctx.check();

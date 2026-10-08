@@ -98,7 +98,8 @@ export async function dispatchTool(
     : requestSignal;
   try {
     // Takeover is a control interrupt. It must be able to cancel an approval or
-    // policy wait and drain it through the existing ToolLease owner.
+    // policy wait and drain it through the existing ToolLease owner, so it skips the
+    // step queue; the session still refuses it while a Pause is held.
     const invoke = () =>
       dispatchAdmitted(deps, session, name, callId, queuedInput, redact, generation, signal);
     const outcome =
@@ -324,6 +325,8 @@ async function dispatchAdmitted(
       },
     };
   } catch (error) {
+    // A Pause refused this call before its step began, so there is nothing to record.
+    if (error instanceof PausedStepError && !session.stopped) throw error;
     const message = redact(error instanceof Error ? error.message : String(error));
     // Cancellation must not emit late success, status changes, or screenshots.
     if (ctx && session.isCurrent(ctx.generation) && !ctx.signal.aborted && !session.controlHeld) {
