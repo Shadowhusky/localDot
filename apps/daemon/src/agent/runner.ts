@@ -830,8 +830,8 @@ export class AgentRunner {
         session.stop();
         await session.screensSettled().catch(() => {});
       }
-      // Its tools have settled and any cleanup uncertainty has already fenced the computer, so a
-      // Pause that Stop left unsettled must not fence it at the next start.
+      // Its tools have settled, so a Pause that Stop left unsettled must not fence the computer at
+      // the next start. Named cleanup uncertainty fenced it above; an unconfirmed Stop never fences.
       try {
         new SafetyIntentStore(this.deps.home).remove(session.id, session.cellId);
       } catch {
