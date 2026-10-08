@@ -610,3 +610,22 @@ it("a keyd boot change cannot reopen a saved user Pause or claim an old model ow
   ).rejects.toMatchObject({ status: 503 });
   expect(writes.mock.calls.filter(([, input]) => input.state === "open")).toHaveLength(before);
 });
+
+it("a user Pause's published state leaves a budget pause holding Resume", async () => {
+  const h = setup();
+  const session = await h.runner.start(h.cellId, "Budget, then Pause");
+  await h.ready();
+  session.append("budget.exceeded", {
+    scope: "task",
+    taskId: session.id,
+    limitUSD: 5,
+    spentUSD: 5,
+    needUSD: 1,
+  });
+  const pause = h.runner.pauseTask(session.id, ulid());
+  await until(() => session.safetyPause?.phase === "paused");
+  await expect(
+    h.runner.resumeSafety(session.id, pause.requestId, pause.revision),
+  ).rejects.toMatchObject({ status: 409 });
+  expect(session.safetyPause?.phase).toBe("paused");
+});

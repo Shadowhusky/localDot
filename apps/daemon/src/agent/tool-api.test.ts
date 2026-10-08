@@ -287,6 +287,7 @@ describe("the tools", () => {
     expect(r.body.content[0]?.text).toMatch(/^Exit code 2\./);
     expect(h.events().map((e) => e.type)).toEqual([
       "approval.request",
+      "agent.state",
       "approval.resolve",
       "step.start",
       "tool.start",
