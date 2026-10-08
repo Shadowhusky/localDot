@@ -74,6 +74,7 @@ export function resolveRole(
       role,
       `${provider.name} arrives in ${provider.availableIn.toUpperCase()}`,
     );
+  if (provider.notOffered) throw new BindingError(role, provider.notOffered);
   let keyId: string | undefined;
   if (!provider.local) {
     const key = keys.find((k) => k.id === choice.key);
