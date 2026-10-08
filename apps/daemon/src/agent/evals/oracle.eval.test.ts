@@ -2,20 +2,20 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { evalCellOptions, removeLabelled } from "./cell.ts";
+import { evalCellOptions, removeEvalContainers } from "./cell.ts";
 import { runSuite } from "./suite.ts";
 
-// Needs Docker and the desktop image. Every container is created for this run, carries the eval
-// label, and is removed by that label alone: LOCALDOT_DOCKER_TESTS=1 pnpm test:eval.
+// Needs Docker and the desktop image. Every container is created for this run, and cleanup removes
+// only containers with the eval label and name prefix: LOCALDOT_DOCKER_TESTS=1 pnpm test:eval.
 const enabled = process.env.LOCALDOT_DOCKER_TESTS === "1" && !process.env.LOCALDOT_EVAL_MODEL;
 
 describe.skipIf(!enabled)("desktop tasks through the whole agent stack (oracle mode)", () => {
   const cell = enabled ? evalCellOptions() : undefined;
   beforeAll(() => {
-    if (cell) removeLabelled(cell.label);
+    if (cell) removeEvalContainers(cell);
   });
   afterAll(() => {
-    if (cell) removeLabelled(cell.label);
+    if (cell) removeEvalContainers(cell);
   });
 
   it("passes every task whose capabilities have landed and writes the report", async () => {

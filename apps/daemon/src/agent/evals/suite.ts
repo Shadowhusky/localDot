@@ -3,7 +3,12 @@ import { join } from "node:path";
 import { type AgentLimits, ModelBinding } from "@localdot/protocol";
 import sharp from "sharp";
 import { analyseEvents } from "./analyse.ts";
-import { type EvalCell, type EvalCellOptions, removeLabelled, startEvalCell } from "./cell.ts";
+import {
+  type EvalCell,
+  type EvalCellOptions,
+  removeEvalContainers,
+  startEvalCell,
+} from "./cell.ts";
 import type { Verdict } from "./checks.ts";
 import { type DesktopFacts, oracleModel } from "./oracle.ts";
 import {
@@ -127,7 +132,7 @@ async function runTask(task: EvalTask, o: SuiteOptions, spentUSD: number): Promi
     log(`${task.id}: ${error}`);
   } finally {
     await session?.end().catch(() => log(`${task.id}: the model session did not close cleanly`));
-    if (cell) removeLabelled(o.cell.label, cell.id);
+    if (cell) removeEvalContainers(o.cell, cell.name);
   }
   const events = run?.events ?? [];
   return taskReport({

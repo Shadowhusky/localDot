@@ -97,7 +97,7 @@ async function startGimp(cell: EvalCell): Promise<void> {
     "png:color-type=2",
     `${HOME}/eval/canvas.png`,
   ]);
-  if (made.status !== 0) throw new Error(`could not make the canvas: ${made.out}`);
+  if (made.status !== 0) throw new Error(`could not make the canvas: ${made.err}`);
   cell.launch(["gimp", `${HOME}/eval/canvas.png`]);
   await waitForWindow(cell, (w) => /^\[canvas\].*GIMP$/.test(w.title), 180_000);
 }

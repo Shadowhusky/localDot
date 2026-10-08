@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { KeydClient } from "../../keyd/client.ts";
 import { startKeyd, TEST_KEYD_PORTS } from "../../keyd/testing/keyd-process.ts";
-import { evalCellOptions, removeLabelled } from "./cell.ts";
+import { evalCellOptions, removeEvalContainers } from "./cell.ts";
 import { keydModelMode, modelModeConfig } from "./model-mode.ts";
 import { runSuite } from "./suite.ts";
 
@@ -37,7 +37,7 @@ describe.skipIf(!selected)("desktop tasks with a real model (spend-capped)", () 
         config.capUSD,
       );
     } finally {
-      removeLabelled(cell.label);
+      removeEvalContainers(cell);
       await keyd.stop();
     }
   });
