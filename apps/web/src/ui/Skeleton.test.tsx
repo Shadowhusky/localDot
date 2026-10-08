@@ -41,6 +41,20 @@ describe("Skeleton", () => {
     expect(document.querySelector(".ui-skeleton-bones")).toBeNull();
   });
 
+  it("keeps showing the content it had while it loads again, marked busy, until new content comes", () => {
+    const { container, rerender } = render(<Row name="summary.txt" />);
+    const skeleton = container.querySelector(".ui-skeleton");
+    // Loading again, the caller has nothing to show yet: the last content stays.
+    rerender(<Row />);
+    expect(skeleton?.getAttribute("aria-busy")).toBe("true");
+    expect(screen.getByText("summary.txt").closest("[data-stale]")).not.toBeNull();
+    expect(skeleton?.querySelectorAll(".ui-skeleton-bone")).toHaveLength(1);
+    rerender(<Row name="monthly-report.ods" />);
+    expect(screen.queryByText("summary.txt")).toBeNull();
+    expect(screen.getByText("monthly-report.ods").closest("[data-stale]")).toBeNull();
+    expect(skeleton?.hasAttribute("aria-busy")).toBe(false);
+  });
+
   it("sizes itself from its props", () => {
     const { container } = render(<Skeleton loading shape="block" width="32px" height="32px" />);
     const skeleton = container.querySelector(".ui-skeleton") as HTMLElement;

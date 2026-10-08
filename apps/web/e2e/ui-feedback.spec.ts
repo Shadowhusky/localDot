@@ -547,6 +547,58 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await context.close();
       });
 
+      test("a reload keeps the rows on screen, and shows bones only if it lasts", async () => {
+        const { context, page, seen } = await open(browser, device);
+        const panel = page.getByRole("figure").filter({ hasText: "Loaded" });
+        await panel.scrollIntoViewIfNeeded();
+        // The first row's name, sampled every frame for 700 ms from the press on Reload.
+        const sampling = panel.evaluate(
+          (figure) =>
+            new Promise<{ t: number; content: number; bones: number }[]>((resolve) => {
+              const name = figure.querySelectorAll(".ui-skeleton")[1];
+              const reload = [...figure.querySelectorAll("button")].find(
+                (button) => button.textContent?.trim() === "Reload",
+              );
+              const seenAt = (element: Element | null | undefined) => {
+                if (!element) return 0;
+                const style = getComputedStyle(element);
+                return style.visibility === "visible" ? Number(style.opacity) : 0;
+              };
+              reload?.addEventListener(
+                "click",
+                () => {
+                  const start = performance.now();
+                  const frames: { t: number; content: number; bones: number }[] = [];
+                  const step = (now: number) => {
+                    frames.push({
+                      t: now - start,
+                      content: seenAt(name?.querySelector(".ui-skeleton-content")),
+                      bones: seenAt(name?.querySelector(".ui-skeleton-bones")),
+                    });
+                    if (now - start < 700) requestAnimationFrame(step);
+                    else resolve(frames);
+                  };
+                  requestAnimationFrame(step);
+                },
+                { once: true },
+              );
+            }),
+        );
+        await press(panel.getByRole("button", { name: "Reload" }));
+        const frames = await sampling;
+        expect(frames.filter((frame) => Math.max(frame.content, frame.bones) < 0.45)).toEqual([]);
+        const early = frames.filter((frame) => frame.t < 150);
+        expect(early.length).toBeGreaterThan(2);
+        expect(early.every((frame) => frame.content === 1 && frame.bones === 0)).toBe(true);
+        const late = frames.filter((frame) => frame.t > 450);
+        expect(late.length).toBeGreaterThan(2);
+        expect(late.every((frame) => frame.bones === 1 && frame.content === 0)).toBe(true);
+        await expect(panel.locator(".ui-skeleton-bones")).toHaveCount(0, { timeout: 5000 });
+        await expect(panel.getByText("monthly-report.ods")).toBeVisible();
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      });
+
       if (touch)
         test("a toast's close button takes its whole 44 px reach on touch", async () => {
           const { context, page, seen } = await open(browser, device);

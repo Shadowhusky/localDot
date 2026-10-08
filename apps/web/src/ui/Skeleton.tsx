@@ -17,7 +17,8 @@ export interface SkeletonProps {
 }
 
 // Holds the exact room its content will take, so nothing moves when the content arrives. The bones
-// show only if loading lasts, then the content fades in over them as they fade out.
+// show only if loading lasts, then the content fades in over them as they fade out. Loading again,
+// the content last shown stays until the bones would show, and then gives way to them.
 export function Skeleton({
   loading,
   shape = "text",
@@ -28,10 +29,15 @@ export function Skeleton({
   children,
 }: SkeletonProps) {
   const bones = useRef<HTMLSpanElement>(null);
+  const last = useRef(children);
   const [boned, setBoned] = useState(loading);
   const [arrived, setArrived] = useState(false);
+  const [had, setHad] = useState(!loading);
   if (loading && !boned) setBoned(true);
   if (!loading && boned && !arrived) setArrived(true);
+  if (!loading && !had) setHad(true);
+  if (!loading) last.current = children;
+  const stale = loading && had;
 
   useEffect(() => {
     if (loading || !boned) return;
@@ -59,9 +65,13 @@ export function Skeleton({
           ))}
         </span>
       )}
-      {!loading && (
-        <span className="ui-skeleton-content" data-arrived={arrived ? "" : undefined}>
-          {children}
+      {(!loading || stale) && (
+        <span
+          className="ui-skeleton-content"
+          data-arrived={arrived ? "" : undefined}
+          data-stale={stale ? "" : undefined}
+        >
+          {stale ? last.current : children}
         </span>
       )}
     </span>
