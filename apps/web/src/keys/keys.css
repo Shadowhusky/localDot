@@ -239,14 +239,14 @@
 }
 
 .field-hint {
-  margin-top: -4px;
-  font-size: 12px;
+  margin-top: calc(var(--spacing) * -1);
+  font-size: var(--text-footnote);
   color: var(--color-text-3);
 }
 
 .field-hint code {
   font-family: var(--font-mono);
-  font-size: 11.5px;
+  font-size: var(--text-micro);
   color: var(--color-text-2);
 }
 
