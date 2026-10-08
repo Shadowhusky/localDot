@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CLAUDE_PLAN_REFUSAL } from "../keys/binding.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { KeyGuard } from "./useKeyGuard.ts";
 import "./key-guard.css";
@@ -16,6 +17,7 @@ export function KeyFound({
   const notice = guard.notice;
   if (!notice) return null;
   const index = Math.min(selected, Math.max(0, notice.candidates.length - 1));
+  const planToken = notice.candidates[index]?.hint === "Claude plan token";
   return (
     <section className="key-found" aria-label="Key safeguard">
       <p role="alert" id={noticeId}>
@@ -24,7 +26,9 @@ export function KeyFound({
           : notice.kind === "transfer_failed"
             ? "Could not move the key. Open Keys and paste it again."
             : notice.candidates.length === 1
-              ? "1 recognised key was removed from your message. Discard it or move it to Keys before sending."
+              ? planToken
+                ? "A Claude plan token was removed from your message."
+                : "1 recognised key was removed from your message. Discard it or move it to Keys before sending."
               : `${notice.candidates.length} recognised keys were removed from your message. Discard them or move one to Keys before sending.`}
       </p>
       {notice.candidates.length > 1 && (
@@ -39,6 +43,7 @@ export function KeyFound({
           </select>
         </label>
       )}
+      {planToken && <p>{CLAUDE_PLAN_REFUSAL}</p>}
       {notice.candidates.length > 1 && <p>Moving one key discards the other detected keys.</p>}
       <div className="key-found-actions">
         <button type="button" onClick={guard.remove}>
@@ -48,7 +53,7 @@ export function KeyFound({
               ? "Discard key and edit"
               : "Discard keys and edit"}
         </button>
-        {notice.kind === "found" && (
+        {notice.kind === "found" && !planToken && (
           <button
             type="button"
             disabled={!receive}
@@ -60,7 +65,9 @@ export function KeyFound({
           </button>
         )}
       </div>
-      {!receive && notice.kind === "found" && <p>Open Keys to store a key securely.</p>}
+      {!receive && notice.kind === "found" && !planToken && (
+        <p>Open Keys to store a key securely.</p>
+      )}
     </section>
   );
 }

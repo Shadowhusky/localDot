@@ -256,6 +256,34 @@ describe("key guard at the composer and sealed form boundary", () => {
       absent(f);
     },
   );
+  it("says a Claude plan token can't be used here and never offers to move it to Keys", () => {
+    const SENTENCE =
+      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    const token = `sk-ant-oat01-${"m".repeat(95)}`;
+    const f = fixture();
+    fireEvent.input(f.task, { target: { value: `use ${token} for this` } });
+    expect(f.task.value).toBe("use  for this");
+    expect(screen.getByRole("alert").textContent).toBe(
+      "A Claude plan token was removed from your message.",
+    );
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
+    fireEvent.input(f.task, { target: { value: `${token} ${keys[0]}` } });
+    const choice = screen.getByLabelText("Key to move") as HTMLSelectElement;
+    expect([...choice.options].map((o) => o.textContent)).toEqual([
+      "Claude plan token · character 1",
+      "Anthropic · character 110",
+    ]);
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
+    fireEvent.change(choice, { target: { value: "1" } });
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    expect(screen.getByRole("button", { name: "Move to Keys" })).toBeTruthy();
+    expect(f.calls).toEqual([]);
+    expect(document.body.innerHTML + f.metadata.join("")).not.toContain(token);
+    absent(f);
+  });
   it("fails closed at finite character and candidate limits, and Remove does not restore overflow text", () => {
     const f = fixture();
     for (const text of ["x".repeat(8001), Array(17).fill(keys[5]).join(" ")]) {
