@@ -38,7 +38,6 @@ export function TopBar({
         <span className="title">{title}</span>
       </div>
       <nav className="modes" aria-label="Mode">
-        <span aria-disabled="true">Glance</span>
         <button
           type="button"
           className={mode === "watch" ? "on" : undefined}

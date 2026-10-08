@@ -355,7 +355,7 @@ describe("App token states", () => {
     const start = hudButton();
     expect(start.textContent).toBe("Turn on");
     expect(start.getAttribute("aria-disabled")).toBeNull();
-    expect(screen.getByRole("navigation", { name: "Mode" }).textContent).toContain("Watch");
+    expect(screen.getByRole("navigation", { name: "Mode" }).textContent).toBe("WatchReplay");
     start.click();
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Starting…"));
     expect(calls).toEqual(["GET /api/cells", "POST /api/cells"]);

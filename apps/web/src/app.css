@@ -93,7 +93,6 @@
   color: var(--color-text-3);
 }
 
-.modes span,
 .modes button {
   position: relative;
 }
@@ -110,12 +109,10 @@
   cursor: default;
 }
 
-.modes span.on,
 .modes button.on {
   color: var(--color-text);
 }
 
-.modes span.on::after,
 .modes button.on::after {
   content: "";
   position: absolute;
