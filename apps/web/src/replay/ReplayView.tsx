@@ -123,11 +123,11 @@ export function ReplayView({
               </button>
             ))}
           </fieldset>
-          {(replay.info?.live || replay.card?.verdict === "live") && (
-            <button type="button" onClick={onGoLive}>
-              Jump to live
-            </button>
-          )}
+          <button type="button" onClick={onGoLive}>
+            {replay.info?.live || replay.card?.verdict === "live"
+              ? "Jump to live"
+              : "Back to Watch"}
+          </button>
         </header>
         <div className={`stage lit replay-stage${hud.control ? " control" : ""}`}>
           <Stage

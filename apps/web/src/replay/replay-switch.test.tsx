@@ -125,3 +125,22 @@ it("never asks for the previous session's screenshots under the picked session",
   );
   expect(f.requests).not.toContain(`/api/sessions/${older.card.id}/thumbs/${newest.frameId}`);
 });
+
+it("leads back to Watch from a finished session and offers Jump to live for a live one", async () => {
+  const finished = recorded("Finished notes", 60_000);
+  const live = recorded("Live notes", 60_000, "live");
+  const f = fixture([live, finished]);
+  window.history.replaceState(null, "", `/?replay=${finished.card.id}`);
+  render(<App fetchImpl={f.fetchImpl} />);
+  const back = await screen.findByRole("button", { name: "Back to Watch" });
+  expect(screen.queryByRole("button", { name: "Jump to live" })).toBeNull();
+  fireEvent.click(back);
+  await waitFor(() => expect(query("replay")).toBeNull());
+  expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+
+  cleanup();
+  window.history.replaceState(null, "", `/?replay=${live.card.id}`);
+  render(<App fetchImpl={f.fetchImpl} />);
+  await screen.findByRole("button", { name: "Jump to live" });
+  expect(screen.queryByRole("button", { name: "Back to Watch" })).toBeNull();
+});
