@@ -658,11 +658,30 @@ async function approvedClick(f: ReturnType<typeof setup>, label: string) {
   return pending;
 }
 describe("repeat safety at actual native dispatch", () => {
-  it("one key call with repeat 5 presses five times without pausing", async () => {
-    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+  it("one key call with repeat 5 in a native app asks once and presses five times without pausing", async () => {
+    const f = setup(CAREFUL_AUTONOMY);
     repeatController(f);
-    const out = await f.call("computer", { action: "key", keys: ["bracketright"], repeat: 5 });
-    expect(out.body.ok).toBe(true);
+    f.target.value = {
+      target: {
+        point: { x: 300, y: 200 },
+        bbox: { x: 0, y: 40, w: 800, h: 560 },
+        source: "ax",
+        role: "AXGroup",
+        name: "Canvas",
+        app: "Paint",
+        window: "Untitled",
+        mark: 1,
+        secret: false,
+      },
+      window: 77,
+      ms: 1,
+    };
+    const out = f.call("computer", { action: "key", keys: ["bracketright"], repeat: 5 });
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval).toMatchObject({ actionClass: "computer" });
+    expect(f.session.pendingApproval?.fields).toContainEqual(["Repeat", "× 5"]);
+    expect((await f.post(f.answer())).status).toBe(204);
+    expect((await out).body.ok).toBe(true);
     expect(f.effects()).toHaveLength(5);
     expect(f.session.safetyPause).toBeUndefined();
   });

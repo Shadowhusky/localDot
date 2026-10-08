@@ -120,6 +120,13 @@ describe("private actual native action repetition", () => {
     expect(guard.admit(key, identity, next())).toBe(true);
     expect(guard.admit(key, identity, next())).toBe(false);
   });
+  it("counts a second identical call's repeat once too", () => {
+    const guard = new RepeatGuard();
+    expect(guard.admit(key, identity, next())).toBe(true);
+    const second = next();
+    for (let i = 0; i < 5; i++) expect(guard.admit(key, identity, second)).toBe(true);
+    expect(guard.admit(key, identity, next())).toBe(false);
+  });
   it("stops a repeat at its first press after two identical calls", () => {
     const guard = new RepeatGuard();
     expect(guard.admit(key, identity, next())).toBe(true);
