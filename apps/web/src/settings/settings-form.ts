@@ -145,6 +145,7 @@ function checkRole(
   subscriptionModels: readonly SubscriptionModel[],
   accounting: Map<string, string>,
 ): RoleChoice | string {
+  if (providerById(value.provider)?.notOffered) return "choose a provider that is available here.";
   if (modelIdProblem(value.model)) return "choose a valid model ID.";
   if (value.provider === "chatgpt") {
     if (

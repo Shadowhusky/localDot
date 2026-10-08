@@ -138,7 +138,13 @@ describe("configuration validation before explicit save", () => {
     refused.prices.main = { input: "1", output: "1" };
     expect(validateForm(refused, {}, index)).toEqual({
       ok: false,
-      problems: ["Main: choose a supported provider for this role."],
+      problems: ["Main: choose a provider that is available here."],
+    });
+    // As the picker leaves it: the row chosen, with no model.
+    refused.choices.main = { provider: "zai-coding-plan", model: "" };
+    expect(validateForm(refused, {}, index)).toEqual({
+      ok: false,
+      problems: ["Main: choose a provider that is available here."],
     });
   });
   it("does not override catalog prices and keeps local routes keyless and free", () => {
