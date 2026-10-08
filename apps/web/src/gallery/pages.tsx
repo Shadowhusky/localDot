@@ -51,11 +51,10 @@ function DotPage() {
   );
 }
 
-const noop = () => {};
 const STAGES = [
   { label: "dot has control", caption: "Select the Net total cell", control: true },
   { label: "Waiting for you", caption: "Waiting for your OK." },
-  { label: "Paused", caption: "Paused.", paused: true as const },
+  { label: "Paused", caption: "Paused.", paused: true },
 ];
 
 // The real StageColumn around a still frame. The frame stands in for Stage, so the rim Stage draws
@@ -63,18 +62,9 @@ const STAGES = [
 function StagePage() {
   return (
     <div className="gallery-stages">
-      {STAGES.map(({ label, caption, control = false, paused }) => (
+      {STAGES.map(({ label, caption, control = false, paused = false }) => (
         <figure key={label}>
-          <StageColumn
-            hud={{ label, caption, action: { kind: "stop", enabled: true }, live: true, paused }}
-            control={control}
-            showHud={false}
-            onStart={noop}
-            onStop={noop}
-            onStopSession={noop}
-            onResume={noop}
-            onRetry={noop}
-          >
+          <StageColumn live frozen={paused} control={control} caption={caption}>
             <StillFrame />
             {control && <div className="rim" aria-hidden="true" />}
           </StageColumn>
