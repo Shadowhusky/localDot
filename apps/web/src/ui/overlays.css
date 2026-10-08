@@ -132,6 +132,11 @@
     padding: calc(var(--spacing) * 4);
   }
 
+  .ui-popover[data-size="lg"] {
+    width: calc(var(--spacing) * 90);
+    max-width: calc(100vw - var(--spacing) * 4);
+  }
+
   .ui-popover-title {
     font:
       var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)

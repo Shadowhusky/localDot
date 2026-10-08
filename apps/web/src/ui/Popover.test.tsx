@@ -54,6 +54,19 @@ describe("Popover", () => {
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Copy link" }));
   });
 
+  it("takes the wider size when asked, for a panel with a picture in it", () => {
+    render(<Harness />);
+    expect(open().getAttribute("data-size")).toBe("md");
+    cleanup();
+    const trigger = { current: null };
+    render(
+      <Popover open onClose={() => {}} anchor={trigger} title="Export MP4" size="lg">
+        <button type="button">Save</button>
+      </Popover>,
+    );
+    expect(screen.getByRole("dialog", { name: "Export MP4" }).getAttribute("data-size")).toBe("lg");
+  });
+
   it("says it is modal, since it keeps Tab inside and an outside press only closes it", () => {
     render(<Harness />);
     expect(open().getAttribute("aria-modal")).toBe("true");
