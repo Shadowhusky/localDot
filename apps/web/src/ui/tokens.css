@@ -1,5 +1,7 @@
 /* One ramp per appearance, from the same OKLCH lightness steps: Graphite near-neutral, Midnight at
-   hue 255 and chroma about .02. Roles below point into the ramp of the active appearance. */
+   hue 255. Midnight's void and well hold chroma about .02 and its raised steps about .038, the least
+   that keeps the two appearances (and their picker tiles) visibly apart. Roles below point into the
+   ramp of the active appearance. */
 @layer theme {
   :root {
     --graphite-void: #0a0b0d;
@@ -13,9 +15,9 @@
     --graphite-stage-dim: rgba(10, 11, 13, 0.45);
 
     --midnight-void: #050b14;
-    --midnight-raised: #151c26;
-    --midnight-raised-2: #1f2731;
-    --midnight-overlay: #272f39;
+    --midnight-raised: #0f1c2d;
+    --midnight-raised-2: #192739;
+    --midnight-overlay: #212f41;
     --midnight-well: #030811;
     --midnight-fg-1: #edeff2;
     --midnight-hud: rgba(9, 16, 24, 0.8);

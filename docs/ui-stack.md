@@ -195,9 +195,12 @@ T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests
   `tablet:`, `laptop:` and `wide:` variants.
 - **Appearances.** Two ramps of the same OKLCH lightness steps, `--graphite-*` and `--midnight-*`. The
   roles point into Graphite on `:root` and into Midnight under `:root[data-appearance="midnight"]`.
-  Midnight sits at hue 255 and chroma about .02, and fg-2 and fg-3 are shared, so fg-2 against fg-3 is
-  1.59:1 in both (it was 1.24:1 in the old Midnight). The theme picker's preview tiles read the ramps
-  directly.
+  Midnight sits at hue 255. Its void and well keep chroma about .02; its raised, raised-2 and overlay
+  steps carry about .038, because at .02 they sat .015 from Graphite in OKLab (below a just-noticeable
+  difference), so the picker tiles looked the same and choosing Midnight barely changed the page. The
+  unit test holds those steps, and the tiles' top band, at least .03 apart. xenon (chroma .12, hue 225)
+  still reads as the accent on them. fg-2 and fg-3 are shared, so fg-2 against fg-3 is 1.59:1 in both
+  (it was 1.24:1 in the old Midnight). The theme picker's preview tiles read the ramps directly.
 - **Modes.** `prefers-contrast: more` brightens fg-2 and fg-3, turns hairlines into field lines, makes
   the HUD solid and widens the focus ring to 3 px. `prefers-reduced-transparency` makes the HUD solid.
   `motion.css` maps every duration into 120–150 ms under reduced motion.

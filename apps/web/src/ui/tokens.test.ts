@@ -8,6 +8,7 @@ const tokensCss = await readSource(new URL("./tokens.css", import.meta.url));
 const motionCss = await readSource(new URL("./motion.css", import.meta.url));
 const baseCss = await readSource(new URL("./base.css", import.meta.url));
 const legacyCss = await readSource(new URL("../theme.css", import.meta.url));
+const onboardingCss = await readSource(new URL("../onboarding/onboarding.css", import.meta.url));
 const page = await readSource(new URL("../../index.html", import.meta.url));
 const stylesheets = (await readdir(SRC, { recursive: true }))
   .filter((path) => path.endsWith(".css") && !path.includes("_spike"))
@@ -43,17 +44,31 @@ function contrast(a: Rgba, b: Rgba): number {
   return (hi + 0.05) / (lo + 0.05);
 }
 
-// OKLCH lightness, chroma and hue, with Björn Ottosson's OKLab matrices.
-function oklch([r, g, b]: Rgba): [number, number, number] {
+// Björn Ottosson's OKLab matrices.
+function oklab([r, g, b]: Rgba): [number, number, number] {
   const [lr, lg, lb] = [r, g, b].map(linear) as [number, number, number];
   const l = Math.cbrt(0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb);
   const m = Math.cbrt(0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb);
   const s = Math.cbrt(0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb);
-  const L = 0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s;
-  const A = 1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s;
-  const B = 0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s;
+  return [
+    0.2104542553 * l + 0.793617785 * m - 0.0040720468 * s,
+    1.9779984951 * l - 2.428592205 * m + 0.4505937099 * s,
+    0.0259040371 * l + 0.7827717662 * m - 0.808675766 * s,
+  ];
+}
+
+function oklch(color: Rgba): [number, number, number] {
+  const [L, A, B] = oklab(color);
   return [L, Math.hypot(A, B), ((Math.atan2(B, A) * 180) / Math.PI + 360) % 360];
 }
+
+function deltaE(a: Rgba, b: Rgba): number {
+  const [p, q] = [oklab(a), oklab(b)];
+  return Math.hypot(p[0] - q[0], p[1] - q[1], p[2] - q[2]);
+}
+
+// About one and a half just-noticeable differences in OKLab.
+const VISIBLY_APART = 0.03;
 
 function palette(context: TokenContext) {
   const tokens = readTokens([tokensCss], context);
@@ -117,9 +132,34 @@ describe("colour tokens", () => {
       const [l, c, h] = oklch(midnight(step));
       expect(Math.abs(l - lightness), `${step} lightness`).toBeLessThan(0.005);
       expect(c, `${step} chroma`).toBeGreaterThan(0.015);
-      expect(c, `${step} chroma`).toBeLessThan(0.03);
+      expect(c, `${step} chroma`).toBeLessThan(0.045);
       expect(Math.abs(h - 255), `${step} hue`).toBeLessThan(3);
     }
+  });
+
+  it("keeps Midnight's raised surfaces visibly apart from Graphite's", () => {
+    const graphite = palette({ appearance: "graphite" });
+    const midnight = palette({ appearance: "midnight" });
+    for (const step of ["raised", "raised-2", "overlay"]) {
+      const distance = deltaE(graphite(step), midnight(step));
+      expect(distance, step).toBeGreaterThanOrEqual(VISIBLY_APART);
+    }
+  });
+
+  it("draws the two theme tiles visibly apart", () => {
+    const tokens = readTokens([tokensCss]);
+    const bands = (appearance: string) => {
+      const tile = cssBlocks(onboardingCss).find(
+        (block) => block.selector === `.appearance-tile.${appearance}`,
+      );
+      const names = [...(tile?.body ?? "").matchAll(/var\((--[\w-]+)\)/g)].map((m) => m[1]);
+      return names.map((name) => rgba(tokens.get(name as string) ?? `no ${name}`));
+    };
+    const [graphite, midnight] = [bands("graphite"), bands("midnight")];
+    expect(graphite).toHaveLength(2);
+    expect(midnight).toHaveLength(2);
+    const widest = Math.max(...graphite.map((band, i) => deltaE(band, midnight[i] as Rgba)));
+    expect(widest).toBeGreaterThanOrEqual(VISIBLY_APART);
   });
 
   it("makes the HUD solid for more contrast or less transparency", () => {
