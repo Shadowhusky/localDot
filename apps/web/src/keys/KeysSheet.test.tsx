@@ -377,6 +377,72 @@ describe("KeysSheet", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it("refuses a Claude plan token on paste and on save, clears it and saves nothing", () => {
+    const SENTENCE =
+      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    const token = `sk-ant-oat01-${"a".repeat(95)}`;
+    const save = vi.fn(async () => ({ restart: false }));
+    render(<KeysSheet open keys={controller({ save })} onClose={() => {}} />);
+    const hint = screen.getByText("sk-ant-api").closest("p");
+    expect(hint?.textContent).toBe("Starts with sk-ant-api");
+    expect(field("Key").getAttribute("aria-describedby")).toBe(hint?.id);
+    type("Key", token);
+    expect(field("Key").value).toBe("");
+    const error = screen.getByText(SENTENCE);
+    expect(field("Key").getAttribute("aria-invalid")).toBe("true");
+    expect(field("Key").getAttribute("aria-describedby")?.split(" ")).toContain(error.id);
+    expect(screen.getByRole("alert")).toBe(error);
+    // A value set without an input event, before a name is given, is refused for itself first.
+    type("Name", "x");
+    type("Name", "");
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    field("Key").value = token;
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(field("Key").value).toBe("");
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Web API" }));
+    expect(screen.queryByText("sk-ant-api")).toBeNull();
+    type("Name", "claude");
+    type("Hosts", "api.anthropic.com");
+    field("Key").value = token;
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    expect(save).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [
+      "the setup-token export line",
+      `export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-${"a".repeat(95)}`,
+    ],
+    ["a quoted token", `"sk-ant-oat01-${"a".repeat(95)}"`],
+    ["a Bearer token", `Bearer sk-ant-oat01-${"a".repeat(95)}`],
+    ["a refresh token", `sk-ant-ort01-${"a".repeat(95)}`],
+  ])("refuses %s on paste and on save, and saves nothing", (_, value) => {
+    const SENTENCE =
+      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    const save = vi.fn(async () => ({ restart: false }));
+    render(<KeysSheet open keys={controller({ save })} onClose={() => {}} />);
+    type("Name", "claudewrapped");
+    type("Key", "short");
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    const tooShort = screen.getByText(/8 to 8,192 characters/);
+    expect(screen.queryByRole("alert")).toBeNull();
+    type("Key", value);
+    expect(field("Key").value).toBe("");
+    const refusal = screen.getByRole("alert");
+    expect(refusal.textContent).toBe(SENTENCE);
+    expect(refusal).not.toBe(tooShort);
+    type("Name", "claudewrapped2");
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    field("Key").value = value;
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(field("Key").value).toBe("");
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    expect(screen.queryByText(/^Saved/)).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("says when saving failed and asks for the key again", async () => {
     const save = vi.fn(async () => {
       throw new Error("boom");
@@ -397,6 +463,27 @@ describe("KeysSheet", () => {
       target: { value: "openai-compatible" },
     });
     expect(screen.getByLabelText("Base URL")).toBeTruthy();
+  });
+
+  it("says a custom endpoint's address must be https, and where local servers go", () => {
+    render(<KeysSheet open keys={controller()} onClose={() => {}} />);
+    const provider = screen.getByLabelText("Provider") as HTMLSelectElement;
+    expect([...provider.options].find((o) => o.value === "anthropic-compatible")?.textContent).toBe(
+      "Anthropic-compatible",
+    );
+    const hint = (text: string) => {
+      const node = screen.getByText(text);
+      expect(field("Base URL").getAttribute("aria-describedby")).toContain(node.id);
+    };
+    fireEvent.change(provider, { target: { value: "openai-compatible" } });
+    hint("Use https. Local servers go through LM Studio or Ollama.");
+    fireEvent.change(provider, { target: { value: "anthropic-compatible" } });
+    expect(field("Base URL").placeholder).toBe("https://api.example.com/anthropic");
+    hint(
+      "Use https, ending in /v1 (added if missing). Local servers go through LM Studio or Ollama.",
+    );
+    fireEvent.change(provider, { target: { value: "azure" } });
+    expect(screen.queryByText(/Local servers go through/)).toBeNull();
   });
 
   it("says the key layer is offline and will not save", () => {

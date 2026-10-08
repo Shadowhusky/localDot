@@ -8,12 +8,13 @@ import {
 import {
   ApprovalAnswer,
   BudgetRaiseRequest,
+  CLAUDE_PLAN_REFUSAL,
   HandbackRequest,
   type KeydRecord,
-  keyLikePresent,
   PauseRequest,
   QuestionAnswerRequest,
   ResumeSafetyRequest,
+  scanKeyLike,
   TakeoverInputRequest,
   ULID_PATTERN,
 } from "@localdot/protocol";
@@ -311,8 +312,14 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   };
   const redact = (value: string, sessionId?: string, cellId?: string, max = 8000) => {
     // Refuse before redaction, allocation, event/inbox dispatch or model-bound persistence.
-    if (keyLikePresent(value))
-      throw new RouteError(400, "Recognised API keys belong in Keys, not task text.");
+    const scan = scanKeyLike(value);
+    if (scan.overflow || scan.matches.length > 0)
+      throw new RouteError(
+        400,
+        scan.matches.some((match) => match.hint === "Claude plan token")
+          ? CLAUDE_PLAN_REFUSAL
+          : "Recognised API keys belong in Keys, not task text.",
+      );
     const clean = deps.redactUserText(value, sessionId, cellId);
     if (!text(max).safeParse(clean).success) throw new RouteError(400, "invalid user text");
     return clean;

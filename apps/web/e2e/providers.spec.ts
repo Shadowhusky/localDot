@@ -111,9 +111,18 @@ for (const run of runs) {
       await press(keys.getByRole("button", { name: "Close keys" }));
       await expect(sheet.getByRole("combobox", { name: "main key" })).toHaveValue("token-plan");
 
-      // Plan models are priced at $0 in the catalog, so they still take a manual rate for now.
-      await sheet.getByLabel("main Input — USD per million tokens").fill("0.3");
-      await sheet.getByLabel("main Output — USD per million tokens").fill("1.2");
+      // A plan uses its own limits: no per-token price, and no dollar ceiling.
+      await expect(
+        sheet
+          .getByRole("group", { name: "Main" })
+          .getByText("Uses your plan's limits. Use a key from this plan, not a pay-as-you-go key."),
+      ).toBeVisible();
+      await expect(
+        sheet
+          .getByRole("group", { name: "Task spending ceiling" })
+          .getByText("Uses your plan's limits.", { exact: true }),
+      ).toBeAttached();
+      await expect(sheet.getByText(/USD per million tokens/)).toHaveCount(0);
       const save = sheet.getByRole("button", { name: "Save settings" });
       await expect(save).toBeEnabled();
       await press(save);
@@ -122,7 +131,6 @@ for (const run of runs) {
         provider: "minimax-coding-plan",
         model: "MiniMax-M3",
         key: "token-plan",
-        price: { inputUSDPerMTok: 0.3, outputUSDPerMTok: 1.2 },
       });
     });
 

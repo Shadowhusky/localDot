@@ -218,10 +218,10 @@
   },
   "src/settings/ProviderPicker.tsx": {
     "native-control": 2,
-    "native-disabled": 5
+    "native-disabled": 6
   },
   "src/settings/RoleEditor.tsx": {
-    "native-control": 5,
+    "native-control": 8,
     "native-disabled": 5
   },
   "src/settings/SafetySettings.tsx": {

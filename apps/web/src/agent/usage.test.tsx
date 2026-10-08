@@ -191,3 +191,12 @@ it("keeps the usage details open while a phone's toolbar hides", () => {
     "true",
   );
 });
+it("says a task that runs on a plan uses the plan's limits", () => {
+  const roles = [{ role: "main" as const, provider: "minimax-coding-plan", model: "MiniMax-M3" }];
+  const view = render(
+    <UsageDetails model={emptyAgentModel()} selection={{ kind: "api", roles, plan: true }} />,
+  );
+  expect(screen.getByText("Uses your plan's limits.")).toBeTruthy();
+  view.rerender(<UsageDetails model={emptyAgentModel()} selection={{ kind: "api", roles }} />);
+  expect(screen.queryByText("Uses your plan's limits.")).toBeNull();
+});

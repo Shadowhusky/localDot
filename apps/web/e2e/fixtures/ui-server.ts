@@ -11,17 +11,19 @@ import { parseArgs } from "node:util";
 import {
   CHATGPT_DEVICE_CODE_OFF,
   type KeydRecord,
+  type TaskModelSelection,
   type ToolName,
   toBase64url,
   ulid,
 } from "@localdot/protocol";
-import { normalizeCatalog } from "@localdot/providers";
+import { normalizeCatalog, providerById } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import {
   CHATGPT_SWITCHED_OFF,
   type CodexInstaller,
   type InstalledCodex,
 } from "../../../../harness/codex/src/index.ts";
+import { resolveRole, taskSelection } from "../../../daemon/src/agent/bindings.ts";
 import {
   AccountError,
   type ChatgptLogin,
@@ -164,6 +166,18 @@ let SAMPLE_KEYS: KeydRecord[] = [
   },
 ] as KeydRecord[];
 if (env.QA_KEYS === "0") SAMPLE_KEYS = [];
+if (settingsMode === "plan")
+  SAMPLE_KEYS = [
+    ...SAMPLE_KEYS,
+    {
+      id: "token-plan",
+      kind: "llm",
+      provider: "openai-compatible",
+      baseURL: "https://api.minimax.io/v1",
+      createdAt: "2026-10-04T09:00:00Z",
+      updatedAt: "2026-10-04T09:00:00Z",
+    } as KeydRecord,
+  ];
 const SETTINGS: Record<string, AgentSettings> = {
   configured: {
     main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic-main" },
@@ -172,6 +186,9 @@ const SETTINGS: Record<string, AgentSettings> = {
   } as AgentSettings,
   empty: {},
   chatgpt: { main: { provider: "chatgpt", model: "sample-plan-model" } } as AgentSettings,
+  plan: {
+    main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+  } as AgentSettings,
 };
 
 // The desktop repaints one still frame, so the picture is steady while the stream stays live.
@@ -275,6 +292,18 @@ const ledger = { limit: 5, spent: 4 };
 let session: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
 let liveStep: string | undefined;
+// A plan task resolves through the daemon's own bindings, frozen at start as the runner does.
+let selection: TaskModelSelection | undefined;
+function planSelection(): TaskModelSelection | undefined {
+  const stored = settingsStore.get();
+  if (!stored.main || !providerById(stored.main.provider)?.plan) return undefined;
+  return taskSelection(
+    (["main", "fast", "local"] as const).flatMap((role) => {
+      const choice = stored[role];
+      return choice ? [resolveRole(role, choice, catalog, keys)] : [];
+    }),
+  );
+}
 let teardown = false;
 
 function attachLive(owned: AgentSession) {
@@ -789,6 +818,7 @@ const killSwitch = new KillSwitch({
 const catalog = env.QA_CATALOG
   ? normalizeCatalog(JSON.parse(readFileSync(env.QA_CATALOG, "utf8")), new Date().toISOString())
   : normalizeCatalog(MODELS_DEV_FIXTURE, new Date().toISOString());
+if (session) selection = planSelection();
 const installed: InstalledCodex = {
   version: "0.154.0",
   platform: "darwin-arm64",
@@ -913,6 +943,7 @@ const agent: AgentRoutesDeps = {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       session = newSession(task.slice(0, 60), task);
+      selection = planSelection();
       attachLive(session);
       session.append("message.user", { messageId: ulid(), kind: "task", text: task });
       session.setStatus("running");
@@ -933,13 +964,13 @@ const agent: AgentRoutesDeps = {
     selectionOf: () =>
       chatgptState === "signed_in" && settingsMode === "chatgpt"
         ? { kind: "chatgpt", model: "sample-plan-model" }
-        : {
+        : (selection ?? {
             kind: "api",
             roles: [
               { role: "main", provider: "anthropic", model: "claude-sonnet-5-5" },
               { role: "fast", provider: "openai", model: "gpt-6-luna" },
             ],
-          },
+          }),
     pauseTask: (taskId, requestId) => {
       if (!session || taskId !== session.id) throw new Error("no session");
       const pause = session.requestSafetyPause(requestId);

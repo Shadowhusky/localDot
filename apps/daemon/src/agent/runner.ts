@@ -25,10 +25,12 @@ import {
   bindingOf,
   CHATGPT,
   checkChatgptChoice,
+  planOnly,
   pricingOf,
   type ResolvedRole,
   type Role,
   resolveRole,
+  taskSelection,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
 import type { CodexAccount } from "./codex/account.ts";
@@ -404,14 +406,7 @@ export class AgentRunner {
     if (!selection) return undefined;
     return selection.kind === "chatgpt"
       ? { kind: "chatgpt" as const, model: selection.model }
-      : {
-          kind: "api" as const,
-          roles: selection.roles.map((role) => ({
-            role: role.role,
-            provider: role.providerId,
-            model: role.model.id,
-          })),
-        };
+      : taskSelection(selection.roles);
   }
   activeChatgptTasks(): number {
     return [...this.#runtime.values()].filter(
@@ -456,6 +451,8 @@ export class AgentRunner {
     if (!rt) throw new AgentError(404, "no such live task");
     if (rt.selection.kind === "chatgpt")
       throw new AgentError(409, "A ChatGPT plan task has no budget in localDot.");
+    if (planOnly(rt.selection.roles))
+      throw new AgentError(409, "This task uses your plan's limits.");
     await this.#exclusive(rt, async () => {
       const { session, brain } = rt;
       const generation = session.generation;

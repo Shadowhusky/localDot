@@ -28,6 +28,9 @@ export interface ProviderSpec {
   rule?: string;
   // A plan whose vendor keeps it to the tools it lists: shown with this reason, never bound.
   notOffered?: string;
+  // The user's own endpoint: its key names the address, and the user types the model's ID and
+  // says what it can do and how it is billed.
+  custom?: true;
 }
 
 const compatible = (id: string, name: string, baseURL: string): ProviderSpec => ({
@@ -48,7 +51,8 @@ const notOffered = (id: string, name: string, reason: string): ProviderSpec => (
 // Every API-key provider the spec names, the plans their vendors let an agent use, and the local
 // servers; each id is models.dev's provider id. The first-class providers use their official AI
 // SDK packages and their own keyd kinds; the rest speak OpenAI's chat completions at base URLs
-// pinned here, never taken from the catalog (P5a-R4).
+// pinned here, never taken from the catalog (P5a-R4), except the custom endpoints, whose keys
+// name their own.
 export const PROVIDERS: readonly ProviderSpec[] = [
   { id: "anthropic", name: "Anthropic", client: "anthropic", keyd: "anthropic" },
   { id: "openai", name: "OpenAI", client: "openai", keyd: "openai" },
@@ -84,6 +88,14 @@ export const PROVIDERS: readonly ProviderSpec[] = [
     name: "Other (OpenAI-compatible)",
     client: "openai-compatible",
     keyd: "openai-compatible",
+    custom: true,
+  },
+  {
+    id: "anthropic-compatible",
+    name: "Other (Anthropic-compatible)",
+    client: "anthropic-compatible",
+    keyd: "anthropic-compatible",
+    custom: true,
   },
   {
     ...compatible("minimax-coding-plan", "MiniMax Token Plan", "https://api.minimax.io/v1"),

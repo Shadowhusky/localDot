@@ -36,6 +36,23 @@ export function ModelPicker({
   if (selected && !shown.some((model) => model.id === value)) shown.unshift(selected);
   const blocked = (model: PickerModel) =>
     !modelAllowed(role, model) || isOpenRouterRouterId(providerId, model.id);
+  const idField = custom && (
+    <label>
+      <span>{role} custom model ID</span>
+      <input
+        value={value}
+        maxLength={128}
+        autoComplete="off"
+        spellCheck={false}
+        disabled={disabled}
+        onChange={(event) => onChange(event.target.value)}
+        aria-invalid={!!value && !!modelIdProblem(value)}
+      />
+      {value && modelIdProblem(value) && <span role="alert">{modelIdProblem(value)}</span>}
+    </label>
+  );
+  // A custom endpoint or local server with nothing in the catalog is only ever a typed ID.
+  if (custom && !models.length) return <div className="model-picker">{idField}</div>;
   return (
     <div className="model-picker">
       <label>
@@ -85,24 +102,10 @@ export function ModelPicker({
             : "No models are available in the current catalog."}
         </p>
       )}
-      {custom ? (
-        <label>
-          <span>{role} custom model ID</span>
-          <input
-            value={value}
-            maxLength={128}
-            autoComplete="off"
-            spellCheck={false}
-            disabled={disabled}
-            onChange={(event) => onChange(event.target.value)}
-            aria-invalid={!!value && !!modelIdProblem(value)}
-          />
-          {value && modelIdProblem(value) && <span role="alert">{modelIdProblem(value)}</span>}
-        </label>
-      ) : (
-        !models.length &&
-        providerId !== "chatgpt" && <p>Refresh the catalog before choosing a model.</p>
-      )}
+      {idField ||
+        (!models.length && providerId !== "chatgpt" && (
+          <p>Refresh the catalog before choosing a model.</p>
+        ))}
     </div>
   );
 }
