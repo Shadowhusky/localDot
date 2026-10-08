@@ -17,6 +17,8 @@ const shapes = [
   `sk-ant-api03-${"a".repeat(95)}`,
   `sk-ant-admin01-${"b".repeat(95)}`,
   `sk-ant-oat01-${"l".repeat(95)}`,
+  `sk-ant-ort01-${"m".repeat(95)}`,
+  `sk-ant-sid01-${"n".repeat(95)}`,
   `sk-proj-${"c".repeat(156)}`,
   `sk-svcacct-${"d".repeat(156)}`,
   `sk-admin-${"e".repeat(156)}`,

@@ -8,8 +8,6 @@ import {
 } from "@playwright/test";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
-// Claude plans in Settings, Keys and the composer, in Chrome at desktop width and in WebKit on a
-// phone, against the fixture daemon. A pasted plan token is refused in the page and sent nowhere.
 const SENTENCE =
   "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
 const PLAN_TOKEN = `sk-ant-oat01-${"Qz7_".repeat(24)}`;
@@ -124,13 +122,22 @@ for (const run of runs) {
       await expect(field).toHaveAttribute("aria-invalid", "true");
       await expect(field).toHaveAttribute("aria-describedby", "key-value-error key-value-hint");
 
-      // A value that arrives without an input event is refused on save.
-      await field.evaluate((input: HTMLInputElement, token) => {
-        input.value = token;
-      }, PLAN_TOKEN);
-      await press(keys.getByRole("button", { name: "Save key" }));
+      await keys.getByLabel("Name", { exact: true }).fill("claudewrapped");
+      await expect(error).toHaveCount(0);
+      await field.focus();
+      await page.keyboard.insertText(`export CLAUDE_CODE_OAUTH_TOKEN=${PLAN_TOKEN}`);
       await expect(field).toHaveValue("");
       await expect(error).toBeVisible();
+
+      // A value that arrives without an input event is refused on save.
+      for (const value of [PLAN_TOKEN, `Bearer ${PLAN_TOKEN}`]) {
+        await field.evaluate((input: HTMLInputElement, token) => {
+          input.value = token;
+        }, value);
+        await press(keys.getByRole("button", { name: "Save key" }));
+        await expect(field).toHaveValue("");
+        await expect(error).toBeVisible();
+      }
       await expect(keys.getByText("No keys yet.")).toBeVisible();
       expect(posts).toEqual([]);
       expect(carried).toEqual([]);

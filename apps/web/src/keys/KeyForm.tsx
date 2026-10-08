@@ -1,4 +1,4 @@
-import type { SecretBinding } from "@localdot/protocol";
+import { claudePlanToken, type SecretBinding } from "@localdot/protocol";
 import {
   type FormEvent,
   type Ref,
@@ -12,7 +12,6 @@ import {
 import {
   bindingOf,
   CLAUDE_PLAN_REFUSAL,
-  claudePlanToken,
   type DraftField,
   EMPTY_DRAFT,
   FORMAT_NAMES,

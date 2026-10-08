@@ -409,6 +409,33 @@ describe("KeysSheet", () => {
     expect(save).not.toHaveBeenCalled();
   });
 
+  it.each([
+    [
+      "the setup-token export line",
+      `export CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-${"a".repeat(95)}`,
+    ],
+    ["a quoted token", `"sk-ant-oat01-${"a".repeat(95)}"`],
+    ["a Bearer token", `Bearer sk-ant-oat01-${"a".repeat(95)}`],
+    ["a refresh token", `sk-ant-ort01-${"a".repeat(95)}`],
+  ])("refuses %s on paste and on save, and saves nothing", (_, value) => {
+    const SENTENCE =
+      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+    const save = vi.fn(async () => ({ restart: false }));
+    render(<KeysSheet open keys={controller({ save })} onClose={() => {}} />);
+    type("Name", "claudewrapped");
+    type("Key", value);
+    expect(field("Key").value).toBe("");
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    type("Name", "claudewrapped2");
+    expect(screen.queryByText(SENTENCE)).toBeNull();
+    field("Key").value = value;
+    fireEvent.click(screen.getByRole("button", { name: "Save key" }));
+    expect(field("Key").value).toBe("");
+    expect(screen.getByText(SENTENCE)).toBeTruthy();
+    expect(screen.queryByText(/^Saved/)).toBeNull();
+    expect(save).not.toHaveBeenCalled();
+  });
+
   it("says when saving failed and asks for the key again", async () => {
     const save = vi.fn(async () => {
       throw new Error("boom");

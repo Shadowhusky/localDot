@@ -169,6 +169,18 @@ describe("Claude plan tokens", () => {
     expect(valueProblem(`sk-ant-api03-${"a".repeat(95)}`)).toBeUndefined();
     expect(valueProblem(`sk-ant-admin01-${"a".repeat(95)}`)).toBeUndefined();
   });
+  it("refuses a plan token with anything around it, and Claude's refresh and session tokens", () => {
+    const token = `sk-ant-oat01-${"a".repeat(95)}`;
+    for (const value of [
+      `export CLAUDE_CODE_OAUTH_TOKEN=${token}`,
+      `"${token}"`,
+      `Bearer ${token}`,
+      `abc${token}`,
+      `sk-ant-ort01-${"b".repeat(95)}`,
+      `sk-ant-sid01-${"c".repeat(95)}`,
+    ])
+      expect(valueProblem(value), value).toBe(SENTENCE);
+  });
   it("says what an Anthropic key starts with, and nothing for other keys", () => {
     expect(valueHint(draft({ provider: "anthropic" }))).toBe("sk-ant-api");
     expect(valueHint(draft({ provider: "openai" }))).toBeUndefined();

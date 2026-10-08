@@ -1,4 +1,5 @@
 import {
+  claudePlanToken,
   type HTTP_FORMATS,
   type LLM_PROVIDERS,
   PRINTABLE_ASCII,
@@ -115,10 +116,6 @@ export function bindingOf(d: KeyDraft): DraftCheck {
 export const CLAUDE_PLAN_REFUSAL =
   "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
 
-// A Claude plan's sign-in token. Anthropic lets no other app store or send one, for any provider.
-export const claudePlanToken = (value: string) => value.trimStart().startsWith("sk-ant-oat");
-
-// What the key field's value starts with, where one provider's keys all share a prefix.
 export const valueHint = (d: KeyDraft) =>
   d.kind === "llm" && d.provider === "anthropic" ? "sk-ant-api" : undefined;
 
