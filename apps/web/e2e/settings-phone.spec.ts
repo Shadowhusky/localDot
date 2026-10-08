@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,19 +10,33 @@ import {
   type BrowserContext,
   chromium,
   expect,
+  type Locator,
   type Page,
   test,
   webkit,
 } from "@playwright/test";
 
-// Settings and Keys on a phone, in Chrome and in WebKit (Safari and Chrome on iOS), against the
-// fixture daemon serving the built UI: run `pnpm --filter @localdot/web build` first.
+// Settings and Keys on a phone, in Chrome and in WebKit (Safari and Chrome on iOS), and in Chrome
+// at desktop width, against the fixture daemon serving the built UI.
 const TOKEN = "a".repeat(43);
 const ENGINES = {
   chrome: () => chromium.launch({ channel: "chrome" }),
+  // The config's channel "chrome" reaches every launch, and WebKit refuses any channel.
   webkit: () => webkit.launch({ channel: undefined }),
 };
-let fixture: ChildProcess, origin: string, scratch: string;
+const WEB = fileURLToPath(new URL("..", import.meta.url));
+let fixture: ChildProcess, origin: string, scratch: string, replayId: string;
+
+function newest(dir: string): number {
+  return Math.max(
+    0,
+    ...readdirSync(dir, { withFileTypes: true }).map((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return newest(path);
+      return /\.test\.tsx?$/.test(entry.name) ? 0 : statSync(path).mtimeMs;
+    }),
+  );
+}
 
 function freePort(): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -39,20 +53,24 @@ function freePort(): Promise<number> {
 
 test.beforeAll(async () => {
   test.setTimeout(120_000);
-  const port = Number(process.env.QA_PORT) || (await freePort());
+  if (newest(join(WEB, "src")) > statSync(join(WEB, "dist/index.html")).mtimeMs)
+    throw new Error("The built UI is older than src: run pnpm --filter @localdot/web build.");
+  const port = await freePort();
   scratch = mkdtempSync(join(tmpdir(), "localdot-settings-phone-"));
   fixture = spawn(process.execPath, ["--import", "tsx", "e2e/fixtures/ui-server.ts"], {
-    cwd: fileURLToPath(new URL("..", import.meta.url)),
+    cwd: WEB,
     env: { ...process.env, QA_PORT: String(port), QA_HOME: join(scratch, "home") },
     stdio: ["ignore", "pipe", "inherit"],
   });
   const lines = createInterface({ input: fixture.stdout as NonNullable<typeof fixture.stdout> });
-  origin = await new Promise<string>((resolve, reject) => {
+  const ready = await new Promise<{ origin: string; seeded: string[] }>((resolve, reject) => {
     fixture.once("exit", (code) => reject(new Error(`fixture exited with ${code}`)));
     lines.on("line", (line) => {
-      if (line.includes('"ready":true')) resolve((JSON.parse(line) as { origin: string }).origin);
+      if (line.includes('"ready":true')) resolve(JSON.parse(line));
     });
   });
+  origin = ready.origin;
+  replayId = ready.seeded[0] as string;
 });
 
 test.afterAll(async () => {
@@ -64,7 +82,10 @@ test.afterAll(async () => {
   if (scratch) rmSync(scratch, { recursive: true, force: true });
 });
 
-async function phone(browser: Browser): Promise<{ context: BrowserContext; page: Page }> {
+async function phone(
+  browser: Browser,
+  path = "/",
+): Promise<{ context: BrowserContext; page: Page }> {
   const context = await browser.newContext({
     viewport: { width: 390, height: 844 },
     deviceScaleFactor: 2,
@@ -72,7 +93,7 @@ async function phone(browser: Browser): Promise<{ context: BrowserContext; page:
     hasTouch: true,
   });
   const page = await context.newPage();
-  await page.goto(`${origin}/#token=${TOKEN}`);
+  await page.goto(`${origin}${path}#token=${TOKEN}`);
   return { context, page };
 }
 
@@ -84,7 +105,7 @@ async function openSettings(page: Page) {
 }
 
 // Playwright cannot switch apps, so hide and show the page the way the browser reports it.
-async function background(page: Page) {
+async function background(page: Page, whileHidden?: () => Promise<void>) {
   const flip = (hidden: boolean) =>
     page.evaluate((hidden) => {
       Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
@@ -95,8 +116,28 @@ async function background(page: Page) {
       document.dispatchEvent(new Event("visibilitychange"));
     }, hidden);
   await flip(true);
-  await expect(page.getByRole("button", { name: "Save settings" })).toBeDisabled();
+  await whileHidden?.();
   await flip(false);
+}
+
+async function expectAutonomyRow(sheet: Locator) {
+  const row = sheet.locator(".safety-settings label").first();
+  await row.scrollIntoViewIfNeeded();
+  const [text, select] = await Promise.all([
+    row.locator("span").boundingBox(),
+    row.locator("select").boundingBox(),
+  ]);
+  if (!text || !select) throw new Error("autonomy row missing");
+  expect(Math.abs(text.y + text.height / 2 - (select.y + select.height / 2))).toBeLessThan(2);
+  expect(select.x).toBeGreaterThan(text.x + text.width);
+}
+
+async function expectThemeTiles(sheet: Locator) {
+  await expect(sheet.getByText("Change it in Settings")).toHaveCount(0);
+  const graphite = sheet.getByRole("radio", { name: "Graphite" });
+  expect(await graphite.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
+  const tile = sheet.locator(".appearance-tile.graphite");
+  expect(await tile.boundingBox()).toMatchObject({ width: 20, height: 14 });
 }
 
 async function savedModel(): Promise<string | undefined> {
@@ -129,8 +170,8 @@ for (const [engine, launch] of Object.entries(ENGINES))
       const target = before === "claude-opus-5-5" ? "claude-sonnet-5-5" : "claude-opus-5-5";
       await model.selectOption(target);
       await expect(sheet.getByText("Unsaved choices", { exact: true })).toBeVisible();
-      await background(page);
       const save = sheet.getByRole("button", { name: "Save settings" });
+      await background(page, () => expect(save).toBeDisabled());
       await expect(save).toBeEnabled();
       await expect(model).toHaveValue(target);
       await expect(sheet.getByText("Unsaved choices", { exact: true })).toBeVisible();
@@ -142,6 +183,31 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await expect(sheet).toBeHidden();
       await openSettings(page);
       await expect(model).toHaveValue(target);
+      await context.close();
+    });
+
+    test("a key saved after switching apps to copy it is listed and chosen", async () => {
+      const { context, page } = await phone(browser);
+      const sheet = await openSettings(page);
+      await sheet.getByRole("combobox", { name: "main provider" }).selectOption("google");
+      const model = sheet.getByRole("combobox", { name: "main model" });
+      const first = model.locator("option:not([disabled]):not([value=''])").first();
+      await model.selectOption((await first.getAttribute("value")) as string);
+      await sheet.getByRole("button", { name: "Add key for main" }).tap();
+      const keys = page.getByRole("dialog", { name: "Keys" });
+      await expect(keys.getByRole("combobox", { name: "Provider" })).toHaveValue("google");
+      const reread = page.waitForResponse((r) => r.url().endsWith("/api/agent/providers"));
+      await background(page);
+      await reread;
+      const name = `copied-${engine}`;
+      await keys.getByLabel("Name", { exact: true }).fill(name);
+      await keys.getByLabel("Key", { exact: true }).fill(`AIza${"k".repeat(35)}`);
+      await keys.getByRole("button", { name: "Save key" }).tap();
+      await expect(keys.getByText(`Saved ${name}.`)).toBeVisible();
+      await keys.getByRole("button", { name: "Close keys" }).tap();
+      await expect(sheet.getByRole("combobox", { name: "main key" })).toHaveValue(name);
+      await expect(sheet.locator("#settings-problems")).toHaveCount(0);
+      await expect(sheet.getByRole("button", { name: "Save settings" })).toBeEnabled();
       await context.close();
     });
 
@@ -207,25 +273,46 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await context.close();
     });
 
+    test("replay speed and export choices are tap-sized", async () => {
+      const { context, page } = await phone(browser, `/?replay=${replayId}`);
+      const speed = page.getByRole("combobox", { name: "Playback speed" });
+      await speed.scrollIntoViewIfNeeded();
+      expect((await speed.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await page.getByRole("button", { name: "Export MP4" }).tap();
+      const exporter = page.getByRole("dialog", { name: "Export MP4" });
+      for (const name of ["Export range", "Export speed", "Export size"]) {
+        const control = exporter.getByRole("combobox", { name });
+        await control.scrollIntoViewIfNeeded();
+        expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
+        expect(await control.evaluate((el) => getComputedStyle(el).fontSize), name).toBe("16px");
+      }
+      await context.close();
+    });
+
     test("theme choices are preview tiles and autonomy rows sit on one line", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      await expect(sheet.getByText("Change it in Settings")).toHaveCount(0);
-      const graphite = sheet.getByRole("radio", { name: "Graphite" });
-      expect(await graphite.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
-      const tile = sheet.locator(".appearance-tile.graphite");
-      expect(await tile.boundingBox()).toMatchObject({ width: 20, height: 14 });
+      await expectThemeTiles(sheet);
       const option = sheet.locator(".appearance-option").filter({ hasText: "Graphite" });
       expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
-      const row = sheet.locator(".safety-settings label").first();
-      await row.scrollIntoViewIfNeeded();
-      const [text, select] = await Promise.all([
-        row.locator("span").boundingBox(),
-        row.locator("select").boundingBox(),
-      ]);
-      if (!text || !select) throw new Error("autonomy row missing");
-      expect(Math.abs(text.y + text.height / 2 - (select.y + select.height / 2))).toBeLessThan(2);
-      expect(select.x).toBeGreaterThan(text.x + text.width);
+      await expectAutonomyRow(sheet);
       await context.close();
     });
   });
+
+test("chrome at 1440: theme tiles, autonomy rows and pointer-sized selects", async () => {
+  const browser = await ENGINES.chrome();
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  await page.goto(`${origin}/#token=${TOKEN}`);
+  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  const sheet = page.getByRole("dialog", { name: "Models and settings" });
+  await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
+  await expectThemeTiles(sheet);
+  await expectAutonomyRow(sheet);
+  for (const name of ["main provider", "main model", "main key", "Send messages"]) {
+    const height = (await sheet.getByRole("combobox", { name }).boundingBox())?.height ?? 0;
+    expect(height, name).toBeGreaterThanOrEqual(32);
+    expect(height, name).toBeLessThan(44);
+  }
+  await browser.close();
+});
