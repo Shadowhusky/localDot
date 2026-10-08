@@ -74,7 +74,7 @@ it("keeps the first-task hint neutral while saved settings load", () => {
 });
 it("uses saved policy values without changing policy or storing keys", () => {
   const p = props();
-  p.autonomy = { ...DEFAULT_AUTONOMY, reading: "ask", browsing: "ask" };
+  p.autonomy = { ...DEFAULT_AUTONOMY, reading: "ask", browsing: "ask", computer: "ask" };
   render(<WelcomeSetup {...p} />);
   expect(screen.getByText(/0 action types can act/)).toBeTruthy();
   fireEvent.click(screen.getByRole("radio", { name: "Midnight" }));

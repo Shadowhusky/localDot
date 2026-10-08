@@ -1,6 +1,6 @@
 import {
   type AutonomyPolicy,
-  DEFAULT_AUTONOMY,
+  CAREFUL_AUTONOMY,
   type HitTestResult,
   msToMicros,
   ulid,
@@ -207,7 +207,7 @@ describe("mandatory user approval at the real action boundary", () => {
     expect(f.effects()).toHaveLength(1);
   });
   it("the frozen Act class is a positive control while unowned native callers fail closed", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     expect((await f.call("computer", click)).body.ok).toBe(true);
     expect(f.session.pendingApproval).toBeUndefined();
     expect(f.effects()).toHaveLength(1);
@@ -424,13 +424,13 @@ describe("full native identity is revalidated", () => {
     expect((await pending).body.ok).toBe(false);
     expect(f.effects()).toHaveLength(0);
   });
-  it("unknown coordinate and vision targets keep Ask under otherwise permissive policy", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+  it("coordinate and vision targets ask under Careful even when sending acts", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     if (!f.target.value.target) throw new Error("missing native target");
     f.target.value.target.source = "vision";
     const pending = f.call("computer", click);
     await until(() => !!f.session.pendingApproval);
-    expect(f.session.pendingApproval?.actionClass).toBe("unknown");
+    expect(f.session.pendingApproval?.actionClass).toBe("computer");
     expect(f.effects()).toHaveLength(0);
     await f.post(f.answer("deny"));
     await pending;
@@ -445,17 +445,20 @@ describe("full native identity is revalidated", () => {
     expect(f.effects()).toHaveLength(1);
     expect(f.fake.calls.filter((c) => c.path === "/focused").length).toBeGreaterThanOrEqual(3);
   });
-  it("ordinary typing always hands off before text or native intent is published", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+  it("ordinary typing asks under Careful before text or native intent is published", async () => {
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
+    if (!f.target.value.target) throw new Error("missing native target");
+    f.target.value.target.role = "textbox";
+    f.target.value.target.name = "Message";
     const literal = "private bilingual text 中文 English";
     const pending = f.call("computer", { action: "type", text: literal });
-    await until(() => f.events().some((e) => e.type === "takeover.request"));
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval?.actionClass).toBe("computer");
+    expect(f.events().some((e) => e.type === "takeover.request")).toBe(false);
     expect(f.effects()).toHaveLength(0);
     expect(JSON.stringify(f.events())).not.toContain(literal);
     expect(f.events().filter((e) => e.type === "action.intent")).toHaveLength(0);
-    const id = f.session.pendingTakeover;
-    if (!id) throw new Error("missing takeover");
-    f.session.endTakeover(id, "Ready");
+    await f.post(f.answer("deny"));
     expect((await pending).body.ok).toBe(false);
     expect(f.effects()).toHaveLength(0);
   });
@@ -656,7 +659,7 @@ async function approvedClick(f: ReturnType<typeof setup>, label: string) {
 }
 describe("repeat safety at actual native dispatch", () => {
   it("third identical key inside one tool batch pauses after exactly two physical effects", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     const out = await f.call("computer", { ...repeatedKey, repeat: 3 });
     expect(f.effects()).toHaveLength(2);
@@ -680,7 +683,7 @@ describe("repeat safety at actual native dispatch", () => {
     expect(f.session.safetyPause?.reason).toBe("repeated_action");
   });
   it("a different actual native window resets the consecutive input identity", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     repeatController(f);
     expect((await f.call("computer", { ...repeatedKey, repeat: 2 })).body.ok).toBe(true);
     f.target.value = { ...f.target.value, window: 78 };
@@ -689,7 +692,7 @@ describe("repeat safety at actual native dispatch", () => {
     expect(f.session.safetyPause).toBeUndefined();
   });
   it("screenshot observations cannot conceal the third identical input", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     await f.call("computer", repeatedKey);
     await f.call("computer", { action: "screenshot" });
@@ -704,7 +707,7 @@ describe("repeat safety at actual native dispatch", () => {
     await controller.settled();
   });
   it("answering the daemon repeat question cannot Resume and explicit Resume resets the streak", async () => {
-    const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
+    const f = setup({ ...CAREFUL_AUTONOMY, send: "act" });
     const controller = repeatController(f);
     await f.call("computer", { ...repeatedKey, repeat: 3 });
     await controller.settled();

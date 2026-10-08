@@ -1,4 +1,5 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { DEFAULT_AUTONOMY, ulid } from "@localdot/protocol";
 import { afterEach, expect, it, vi } from "vitest";
 import { AgentSession } from "../session.ts";
@@ -46,4 +47,26 @@ it("invalid or inherited settings cannot overwrite the protected saved file", ()
     "invalid agent settings",
   );
   expect(store.get().autonomy).toEqual(DEFAULT_AUTONOMY);
+});
+it("a saved eight-class agent.json keeps loading, upgrades and saves the full policy", () => {
+  const home = mkdtempSync("/private/tmp/localdot-test-m5-settings-");
+  homes.push(home);
+  const legacy = {
+    reading: "act",
+    browsing: "act",
+    purchase: "ask",
+    send: "act",
+    post: "ask",
+    delete: "ask",
+    download_execute: "ask",
+    system_settings: "ask",
+  };
+  writeFileSync(join(home, "agent.json"), `${JSON.stringify({ autonomy: legacy }, null, 2)}\n`, {
+    mode: 0o600,
+  });
+  const store = new SettingsStore(home);
+  const upgraded = { ...legacy, computer: "act", memory: "ask" };
+  expect(store.get().autonomy).toEqual(upgraded);
+  store.put(store.get());
+  expect(JSON.parse(readFileSync(join(home, "agent.json"), "utf8")).autonomy).toEqual(upgraded);
 });

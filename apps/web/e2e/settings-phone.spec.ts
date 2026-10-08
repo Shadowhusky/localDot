@@ -157,7 +157,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
     test("Escape after a select change keeps the sheet and the choice", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      const send = sheet.getByRole("combobox", { name: "Send messages" });
+      const send = sheet.getByRole("combobox", { name: "Send as you" });
       const saved = await send.inputValue();
       const choice = saved === "handoff" ? "act" : "handoff";
       await send.focus();
@@ -191,7 +191,7 @@ for (const [engine, launch] of Object.entries(ENGINES))
     test("selects and fields are tap-sized and never zoom the page", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
-      for (const name of ["main provider", "main model", "main key", "Send messages"]) {
+      for (const name of ["main provider", "main model", "main key", "Send as you"]) {
         const control = sheet.getByRole("combobox", { name });
         await control.scrollIntoViewIfNeeded();
         expect((await control.boundingBox())?.height, name).toBeGreaterThanOrEqual(44);
@@ -255,7 +255,7 @@ test("chrome at 1440: theme tiles, autonomy rows and pointer-sized selects", asy
   await expect(sheet.getByText("Saved choices", { exact: true })).toBeVisible();
   await expectThemeTiles(sheet);
   await expectAutonomyRow(sheet);
-  for (const name of ["main provider", "main model", "main key", "Send messages"]) {
+  for (const name of ["main provider", "main model", "main key", "Send as you"]) {
     const height = (await sheet.getByRole("combobox", { name }).boundingBox())?.height ?? 0;
     expect(height, name).toBeGreaterThanOrEqual(32);
     expect(height, name).toBeLessThan(44);

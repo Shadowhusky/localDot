@@ -1,4 +1,5 @@
 import type { AskUserInput, RequestTakeoverInput, ToolResult } from "@localdot/protocol";
+import { screenOf } from "../safety/autonomy.ts";
 import { frame, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 export async function askUserTool(
   deps: ToolDeps,
@@ -49,6 +50,7 @@ export async function requestTakeoverTool(
   input: RequestTakeoverInput,
 ): Promise<ToolResult> {
   ctx.check();
+  if (input.reason !== "other") ctx.session.taskAutonomy.signIn(screenOf(ctx));
   const outcome = await ctx.session.takeover(
     input.reason,
     ctx.redact(input.note),

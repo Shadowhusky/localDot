@@ -1,7 +1,7 @@
 import type { ComputerAction, ToolResult } from "@localdot/protocol";
 import type { ActionContext, GuiAction } from "../../gateway/gateway.ts";
 import { authorizePrepared } from "../safety/authorize.ts";
-import type { RiskFacts } from "../safety/risk.ts";
+import { nativeActionFacts } from "../safety/classify.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
@@ -90,26 +90,8 @@ export async function computerTool(
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();
-      const target = request.identity.target;
       // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-      const facts: RiskFacts =
-        request.action.verb === "wait" || request.action.verb === "scroll"
-          ? { operation: request.action.verb }
-          : {
-              operation: request.action.verb,
-              ...(target
-                ? {
-                    target: {
-                      source: target.source,
-                      fresh: true,
-                      role: target.role,
-                      name: target.name,
-                      url: target.url,
-                      secret: target.secret === true,
-                    },
-                  }
-                : {}),
-            };
+      const facts = nativeActionFacts(request.action, request.identity.target);
       const boundInput = { toolInput: a, action: request.action };
       const permit = await authorizePrepared(ctx, {
         tool: "computer",

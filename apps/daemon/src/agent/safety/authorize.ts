@@ -1,7 +1,8 @@
 import { ApprovalCardDraft, type ToolName, UploadApproval } from "@localdot/protocol";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { OncePermit } from "./approvals.ts";
-import { actionDigest, buildApprovalCard, classify, type RiskFacts } from "./risk.ts";
+import { decideAutonomy, screenOf } from "./autonomy.ts";
+import { actionDigest, buildApprovalCard, type RiskFacts } from "./risk.ts";
 
 export interface EffectPermit {
   consume(input: unknown, target: unknown): boolean;
@@ -44,7 +45,7 @@ export async function authorizePrepared(
   const inputDigest = actionDigest(input),
     targetDigest = actionDigest(target);
   const digest = actionDigest({ tool: prepared.tool, input, target });
-  const decision = classify(prepared.facts, ctx.session.autonomy);
+  const decision = decideAutonomy(ctx, prepared.facts);
   const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
   if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
     throw new Error("Upload approval does not match this action.");
@@ -58,6 +59,7 @@ export async function authorizePrepared(
     // No native effect has begun. Release this initiating tool's physical screen lease
     // before takeover drains all screens; the old lease can never authorize a replay.
     ctx.screen?.finish();
+    ctx.session.taskAutonomy.signIn(screenOf(ctx));
     await ctx.session.takeover(
       "other",
       "This action needs your control. Complete it on the computer, then hand control back.",
@@ -175,7 +177,7 @@ export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
     case "browser_navigate":
       return { operation: "navigate", destination: String(input.url) };
     case "remember":
-      return { operation: "files_write" };
+      return { operation: "memory_write" };
     case "done":
       return {
         operation:

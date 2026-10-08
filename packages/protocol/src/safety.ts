@@ -8,12 +8,15 @@ export type AutonomyMode = z.infer<typeof AutonomyMode>;
 export const ActionClass = z.enum([
   "reading",
   "browsing",
+  "computer",
   "purchase",
   "send",
   "post",
   "delete",
   "download_execute",
   "system_settings",
+  "memory",
+  "upload",
   "credentials",
   "unknown",
 ]);
@@ -21,23 +24,41 @@ export type ActionClass = z.infer<typeof ActionClass>;
 export const EDITABLE_ACTION_CLASSES = [
   "reading",
   "browsing",
+  "computer",
   "purchase",
   "send",
   "post",
   "delete",
   "download_execute",
   "system_settings",
+  "memory",
 ] as const;
+const LEGACY_ACTION_CLASSES = EDITABLE_ACTION_CLASSES.filter(
+  (key) => key !== "computer" && key !== "memory",
+);
 const policyObject = z.strictObject({
   reading: AutonomyMode,
   browsing: AutonomyMode,
+  computer: AutonomyMode,
   purchase: AutonomyMode,
   send: AutonomyMode,
   post: AutonomyMode,
   delete: AutonomyMode,
   download_execute: AutonomyMode,
   system_settings: AutonomyMode,
+  memory: AutonomyMode,
 });
+// Policies saved before `computer` and `memory` existed must keep parsing, or one old safety.json
+// fences every computer. They take `computer` from the saved browsing choice.
+const legacyPolicyObject = policyObject
+  .omit({ computer: true, memory: true })
+  .transform(({ reading, browsing, ...rest }) => ({
+    reading,
+    browsing,
+    computer: browsing,
+    ...rest,
+    memory: "ask" as const,
+  }));
 // HTTP JSON and daemon-produced dictionaries have own data properties only. Refuse
 // inherited values/accessors before Zod can read them as authority.
 const ownPolicy = z.custom<Record<string, unknown>>((value) => {
@@ -46,26 +67,37 @@ const ownPolicy = z.custom<Record<string, unknown>>((value) => {
   if (prototype !== Object.prototype && prototype !== null) return false;
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const keys = Reflect.ownKeys(descriptors);
+  const shape =
+    keys.length === LEGACY_ACTION_CLASSES.length ? LEGACY_ACTION_CLASSES : EDITABLE_ACTION_CLASSES;
   return (
-    keys.length === EDITABLE_ACTION_CLASSES.length &&
-    EDITABLE_ACTION_CLASSES.every((key) => {
+    keys.length === shape.length &&
+    shape.every((key) => {
       const descriptor = descriptors[key];
       return descriptor !== undefined && Object.hasOwn(descriptor, "value");
     })
   );
 }, "autonomy must contain exactly the editable action classes as own data properties");
-export const AutonomyPolicy = ownPolicy.pipe(policyObject).readonly();
+export const AutonomyPolicy = ownPolicy
+  .pipe(z.union([policyObject, legacyPolicyObject]))
+  .readonly();
 export type AutonomyPolicy = z.infer<typeof AutonomyPolicy>;
-export const DEFAULT_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
+export const BALANCED_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
   reading: "act",
   browsing: "act",
+  computer: "act",
   purchase: "ask",
   send: "ask",
   post: "ask",
   delete: "ask",
   download_execute: "ask",
   system_settings: "ask",
+  memory: "ask",
 });
+export const CAREFUL_AUTONOMY: Readonly<AutonomyPolicy> = Object.freeze({
+  ...BALANCED_AUTONOMY,
+  computer: "ask",
+});
+export const DEFAULT_AUTONOMY = BALANCED_AUTONOMY;
 export function freezeAutonomy(value: unknown = DEFAULT_AUTONOMY): Readonly<AutonomyPolicy> {
   return AutonomyPolicy.parse(value);
 }

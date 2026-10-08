@@ -154,3 +154,59 @@ it.each(["symlink", "oversize", "public", "wrong-owner"])(
     expect(new ComputerFences(f.home).isFenced(ulid())).toBe(true);
   },
 );
+
+const LEGACY_POLICY = {
+  reading: "act",
+  browsing: "act",
+  purchase: "ask",
+  send: "ask",
+  post: "ask",
+  delete: "ask",
+  download_execute: "ask",
+  system_settings: "ask",
+};
+function writeIntent(home: string, record: { sessionId: string } & Record<string, unknown>) {
+  const dir = join(home, "sessions", record.sessionId);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  writeFileSync(join(dir, "safety.json"), `${JSON.stringify({ version: 1, ...record })}\n`, {
+    mode: 0o600,
+  });
+}
+function mixedIntents(f: ReturnType<typeof fixture>) {
+  const legacy = { sessionId: ulid(), cellId: ulid() };
+  const current = { sessionId: ulid(), cellId: ulid() };
+  const crashed = { sessionId: ulid(), cellId: ulid() };
+  writeIntent(f.home, { ...legacy, policy: LEGACY_POLICY, pause: f.pause });
+  writeIntent(f.home, {
+    ...current,
+    policy: { ...LEGACY_POLICY, computer: "ask", memory: "ask" },
+    executor: "api",
+  });
+  writeIntent(f.home, {
+    ...crashed,
+    policy: LEGACY_POLICY,
+    pause: { ...f.pause, phase: "uncertain", resumeAvailable: false },
+  });
+  return { legacy, current, crashed };
+}
+it("reads legacy eight-class intents as upgraded policies beside new ones", () => {
+  const f = fixture();
+  const { legacy, current } = mixedIntents(f);
+  expect(f.store.read(legacy.sessionId)?.policy).toEqual({
+    ...LEGACY_POLICY,
+    computer: "act",
+    memory: "ask",
+  });
+  expect(f.store.read(current.sessionId)?.policy.computer).toBe("ask");
+  expect(f.store.list()).toHaveLength(3);
+});
+it("old and new intents together never fence every computer at startup", () => {
+  const f = fixture();
+  const { legacy, current, crashed } = mixedIntents(f);
+  const fences = new ComputerFences(f.home);
+  expect(() => fences.records()).not.toThrow();
+  expect(fences.isFenced(legacy.cellId)).toBe(false);
+  expect(fences.isFenced(current.cellId)).toBe(false);
+  expect(fences.isFenced(ulid())).toBe(false);
+  expect(fences.isFenced(crashed.cellId)).toBe(true);
+});

@@ -22,6 +22,7 @@ import {
 } from "./safety/approvals.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
+import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const AGENT = "main";
@@ -98,6 +99,7 @@ export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> 
 // caller of a takeover but cannot hand the computer back on the user's behalf.
 export class AgentSession {
   readonly #autonomy: Readonly<AutonomyPolicy>;
+  readonly taskAutonomy = new TaskAutonomy();
   readonly #approvals: ApprovalBroker;
   readonly #steps = new StepBarrier(() => {
     if (this.stopped) throw new SessionStoppedError();

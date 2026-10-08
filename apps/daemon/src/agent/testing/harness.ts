@@ -8,7 +8,7 @@ import type {
   ShellChunk,
   ShellDone,
 } from "@localdot/protocol";
-import { ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, ulid } from "@localdot/protocol";
 import { EventLog } from "../../event-log.ts";
 import type { ActionContext, ActionOutcome, GuiAction } from "../../gateway/gateway.ts";
 import { MemoryStore } from "../memory.ts";
@@ -45,7 +45,14 @@ export function toolHarness(
   const home = mkdtempSync(join(tmpdir(), "local dot's tool api-"));
   const eventLog = new EventLog(home);
   const sessionId = eventLog.createSession("task");
-  const session = new AgentSession(sessionId, ulid(), "Find the weather", eventLog, opts.autonomy);
+  // Suites here exercise the approval machinery, so they run under the preset that asks for it.
+  const session = new AgentSession(
+    sessionId,
+    ulid(),
+    "Find the weather",
+    eventLog,
+    opts.autonomy ?? CAREFUL_AUTONOMY,
+  );
   session.beginBrain();
   session.toolToken = TOOL_TOKEN;
   session.status = "running";

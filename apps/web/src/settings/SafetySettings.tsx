@@ -1,14 +1,16 @@
 import { AutonomyMode, AutonomyPolicy, EDITABLE_ACTION_CLASSES } from "@localdot/protocol";
 
-const labels = {
-  reading: "Read information",
+const labels: Record<(typeof EDITABLE_ACTION_CLASSES)[number], string> = {
+  reading: "Read and look",
   browsing: "Browse websites",
-  purchase: "Make purchases",
-  send: "Send messages",
-  post: "Publish posts",
-  delete: "Delete files or data",
-  download_execute: "Download and run files",
-  system_settings: "Change system settings",
+  computer: "Work in its computer",
+  purchase: "Buy or pay",
+  send: "Send as you",
+  post: "Post or publish as you",
+  delete: "Delete your online data",
+  download_execute: "Run downloaded programs",
+  system_settings: "Change account settings",
+  memory: "Save to its memory",
 };
 export function SafetySettings({
   value,
@@ -45,7 +47,8 @@ export function SafetySettings({
         </label>
       ))}
       <p>
-        Credentials always require safe handoff. Unrecognized actions always require a decision.
+        Passwords, codes and card details are always handed to you. Uploads and unclear steps on
+        signed-in sites always ask.
       </p>
     </fieldset>
   );

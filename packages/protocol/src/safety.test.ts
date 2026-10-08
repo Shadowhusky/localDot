@@ -5,6 +5,8 @@ import {
   ApprovalAnswer,
   ApprovalCard,
   AutonomyPolicy,
+  BALANCED_AUTONOMY,
+  CAREFUL_AUTONOMY,
   DEFAULT_AUTONOMY,
   freezeAutonomy,
   ModelAdmissionWrite,
@@ -14,24 +16,71 @@ import {
 } from "./safety.ts";
 
 describe("safety protocol authority boundaries", () => {
-  it("defaults act only on reading/browsing and ask on the six editable consequential classes", () => {
-    expect(DEFAULT_AUTONOMY).toEqual({
+  it("Balanced is the default: it acts inside the computer and asks for everything that leaves it", () => {
+    expect(DEFAULT_AUTONOMY).toBe(BALANCED_AUTONOMY);
+    expect(BALANCED_AUTONOMY).toEqual({
       reading: "act",
       browsing: "act",
+      computer: "act",
       purchase: "ask",
       send: "ask",
       post: "ask",
       delete: "ask",
       download_execute: "ask",
       system_settings: "ask",
+      memory: "ask",
     });
-    expect(AutonomyPolicy.parse(DEFAULT_AUTONOMY)).toEqual(DEFAULT_AUTONOMY);
-    expect(Object.isFrozen(DEFAULT_AUTONOMY)).toBe(true);
+    expect(CAREFUL_AUTONOMY).toEqual({ ...BALANCED_AUTONOMY, computer: "ask" });
+    for (const preset of [BALANCED_AUTONOMY, CAREFUL_AUTONOMY]) {
+      expect(AutonomyPolicy.parse(preset)).toEqual(preset);
+      expect(Object.isFrozen(preset)).toBe(true);
+    }
+  });
+  it("a saved eight-class policy keeps parsing and gains computer at its browsing mode", () => {
+    const legacy = {
+      reading: "act",
+      browsing: "act",
+      purchase: "ask",
+      send: "act",
+      post: "ask",
+      delete: "handoff",
+      download_execute: "ask",
+      system_settings: "ask",
+    } as const;
+    expect(AutonomyPolicy.parse(legacy)).toEqual({ ...legacy, computer: "act", memory: "ask" });
+    expect(AutonomyPolicy.parse({ ...legacy, browsing: "ask" })).toMatchObject({
+      computer: "ask",
+      memory: "ask",
+    });
+    expect(Object.isFrozen(freezeAutonomy(legacy))).toBe(true);
+    expect(AgentSettingsDocument.parse({ autonomy: legacy }).autonomy).toMatchObject({
+      send: "act",
+      computer: "act",
+    });
+    for (const value of [
+      { ...legacy, computer: "act" },
+      { ...legacy, memory: "ask" },
+      { ...legacy, credentials: "act" },
+      Object.create(legacy),
+    ])
+      expect(AutonomyPolicy.safeParse(value).success).toBe(false);
+    let getterCalls = 0;
+    const accessor = { ...legacy };
+    Object.defineProperty(accessor, "browsing", {
+      get() {
+        getterCalls++;
+        return "act";
+      },
+      enumerable: true,
+    });
+    expect(AutonomyPolicy.safeParse(accessor).success).toBe(false);
+    expect(getterCalls).toBe(0);
   });
   it("unknown, inherited, accessor and credential-floor keys cannot become a policy", () => {
     for (const value of [
       { ...DEFAULT_AUTONOMY, credentials: "act" },
       { ...DEFAULT_AUTONOMY, unknown: "act" },
+      { ...DEFAULT_AUTONOMY, upload: "act" },
       JSON.parse('{"__proto__":{"send":"act"}}'),
       Object.create(DEFAULT_AUTONOMY),
       { ...DEFAULT_AUTONOMY, send: "always" },
@@ -79,10 +128,12 @@ describe("safety protocol authority boundaries", () => {
       expiresAt: 1000,
       actionClass: "send",
       risk: "high",
-      title: "Send message",
+      title: "Send as you",
       fields: [["Recipient", "Synthetic recipient"]],
     };
     expect(ApprovalCard.safeParse(card).success).toBe(true);
+    for (const actionClass of ["computer", "memory", "upload"])
+      expect(ApprovalCard.safeParse({ ...card, actionClass }).success).toBe(true);
     for (const changed of [
       { ...card, html: "<script>approve()</script>" },
       { ...card, image: "https://evil.test/" },
