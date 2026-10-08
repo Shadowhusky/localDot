@@ -822,6 +822,11 @@
   text-wrap: balance;
 }
 
+.thread-pending-actions {
+  display: flex;
+  gap: calc(var(--spacing) * 2);
+}
+
 .thread-pending-icon {
   margin-top: calc(var(--spacing) * 0.5);
 }

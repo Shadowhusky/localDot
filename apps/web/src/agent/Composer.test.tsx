@@ -808,6 +808,8 @@ describe("a message on its way", () => {
     const waiting = await screen.findByRole("region", { name: "Message delivery" });
     await waitFor(() => expect(waiting.textContent).toContain("Not sent"));
     expect(waiting.textContent).toContain("monthly-figures.csv");
+    // A refused message was never sent while dot worked, so it says no such thing.
+    expect(waiting.querySelector(".thread-tag")).toBeNull();
     expect(waiting.querySelector(".thread-bubble")?.textContent).toBe("Use this");
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     expect(screen.queryByRole("region", { name: "Message delivery" })).toBeNull();

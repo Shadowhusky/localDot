@@ -41,7 +41,9 @@ export function PendingMessage({
           <p className="thread-bubble">{delivery.draftText}</p>
         </div>
         {delivery.files.length > 0 && <SentFiles names={delivery.files} />}
-        {delivery.tag && <p className="thread-tag">{delivery.tag}</p>}
+        {delivery.tag && (phase === "sending" || phase === "accepted") && (
+          <p className="thread-tag">{delivery.tag}</p>
+        )}
         {phase === "refused" ? (
           <div className="thread-pending-status" role="status">
             <p>
@@ -62,12 +64,14 @@ export function PendingMessage({
                 Sending again could repeat it.
               </span>
             </p>
-            <Button size="sm" disabledReason={retryReason} onClick={onRetry}>
-              Send again
-            </Button>
-            <Button size="sm" variant="quiet" onClick={onDismiss}>
-              Keep as draft
-            </Button>
+            <div className="thread-pending-actions">
+              <Button size="sm" disabledReason={retryReason} onClick={onRetry}>
+                Send again
+              </Button>
+              <Button size="sm" variant="quiet" onClick={onDismiss}>
+                Keep as draft
+              </Button>
+            </div>
           </div>
         ) : (
           <VisuallyHidden role="status">

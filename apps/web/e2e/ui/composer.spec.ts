@@ -102,7 +102,7 @@ test("a sent message holds its place as its own row takes over", async ({ page, 
           bottom: box.bottom,
           pending: !!last.closest(".thread-pending"),
         });
-      if (frames.length < 240) requestAnimationFrame(tick);
+      if (frames.length < 1500) requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   });
