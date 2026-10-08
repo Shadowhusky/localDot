@@ -817,3 +817,51 @@ it("keeps the choice when the reply is lost, since the task's record confirms it
   expect(fetchImpl).toHaveBeenCalledOnce();
   expect(f.result.current.allowed?.option.scope).toBe("task");
 });
+const confirm = (f: ReturnType<typeof fixture>, outcome: Record<string, unknown>) =>
+  f.update({
+    agent: {
+      ...f.props.agent,
+      model: {
+        ...f.props.agent.model,
+        approval: null,
+        approvalOutcome: { approvalId: ID, decision: "approve", actionClass: "send", ...outcome },
+      },
+    },
+  });
+const site = {
+  scope: "site" as const,
+  label: "On mail.example.test",
+  site: "https://mail.example.test",
+  actionClass: "send" as const,
+};
+it.each([
+  ["the task saved a different choice", "task", { rule: { ...site, id: RULE } }],
+  ["it was removed elsewhere", "site", { rule: { ...site, id: RULE }, ruleRemoved: true }],
+  ["the saved choice has no id", "site", { rule: site }],
+] as const)("Undo sends nothing when %s", async (_name, scope, outcome) => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+    f = fixture(fetchImpl, offered);
+  await act(async () => {
+    await f.result.current.answerApproval({ ...approve, always: scope });
+  });
+  confirm(f, outcome);
+  await act(async () => {
+    expect(await f.result.current.undoAllowed()).toBe(false);
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(f.result.current.allowed?.undo).toBe("idle");
+});
+it("an Undo still held from before a task switch sends nothing", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+    f = fixture(fetchImpl, offered);
+  await act(async () => {
+    await f.result.current.answerApproval({ ...approve, always: "task" });
+  });
+  confirm(f, { rule: { scope: "task", label: "For this task", actionClass: "send" } });
+  const undo = f.result.current.undoAllowed;
+  f.update({ agent: { ...f.props.agent, sessionId: OTHER } });
+  await act(async () => {
+    expect(await undo()).toBe(false);
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+});

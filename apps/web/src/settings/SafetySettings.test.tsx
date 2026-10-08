@@ -155,8 +155,8 @@ it("says when nothing is allowed yet, and when a removal is under way or failed"
 it("keeps Remove usable while the rest of Settings is busy", () => {
   const view = rules({ rules: [rule("01J00000000000000000000010")] });
   render(<SafetySettings value={DEFAULT_AUTONOMY} disabled onChange={vi.fn()} rules={view} />);
-  const remove = screen.getByRole("button", { name: /^Remove/ }) as HTMLButtonElement;
-  expect(remove.disabled).toBe(false);
+  const remove = screen.getByRole("button", { name: /^Remove/ });
+  expect(remove.matches(":disabled")).toBe(false);
   fireEvent.click(remove);
   expect(view.remove).toHaveBeenCalledOnce();
 });

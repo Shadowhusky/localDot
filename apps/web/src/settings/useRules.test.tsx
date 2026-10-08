@@ -111,3 +111,43 @@ it("says when Start over failed, and forgets it once it works", async () => {
   await waitFor(() => expect(hook.result.current.unreadable).toBeNull());
   expect(hook.result.current.resetFailed).toBe(false);
 });
+
+it("runs one change at a time", async () => {
+  let finish = () => {};
+  const { fetchImpl, hook } = setup([{ status: 200, body: { rules: [ONE, TWO] } }]);
+  await waitFor(() => expect(hook.result.current.rules).toHaveLength(2));
+  fetchImpl.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = () => resolve(new Response(null, { status: 204 }));
+      }),
+  );
+  await act(async () => hook.result.current.remove(ONE.id));
+  expect(hook.result.current.removing).toBe(ONE.id);
+  await act(async () => {
+    hook.result.current.remove(TWO.id);
+    hook.result.current.reset();
+  });
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+  expect(hook.result.current.resetting).toBe(false);
+  await act(async () => finish());
+  await waitFor(() => expect(hook.result.current.rules).toEqual([TWO]));
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+});
+
+it("ignores a read that lands after Settings closes", async () => {
+  let land = () => {};
+  const fetchImpl = vi.fn<typeof fetch>(
+    () =>
+      new Promise((resolve) => {
+        land = () => resolve(new Response(JSON.stringify({ rules: [ONE] }), { status: 200 }));
+      }),
+  );
+  const api = createApi("fixture", { origin: ORIGIN, fetchImpl });
+  const hook = renderHook((visible: boolean) => useRules(api, visible), { initialProps: true });
+  await waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+  hook.rerender(false);
+  await act(async () => land());
+  expect(hook.result.current.rules).toEqual([]);
+  expect(hook.result.current.phase).toBe("loading");
+});

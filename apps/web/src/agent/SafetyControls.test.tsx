@@ -151,11 +151,14 @@ it("keeps the status line's time running while Settings is open", () => {
     };
     const view = render(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
     expect(line()).toBe("Allowed for this task: sending messages.");
-    act(() => vi.advanceTimersByTime(3_000));
+    act(() => vi.advanceTimersByTime(5_000));
     view.rerender(
       <SafetyControls safety={allowed} agent={confirmed} cell={null} visible={false} />,
     );
-    act(() => vi.advanceTimersByTime(10_000));
+    act(() => vi.advanceTimersByTime(2_000));
+    view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
+    expect(line()).toBe("Allowed for this task: sending messages.");
+    act(() => vi.advanceTimersByTime(1_500));
     expect(dismissAllowed).toHaveBeenCalledOnce();
   } finally {
     vi.useRealTimers();

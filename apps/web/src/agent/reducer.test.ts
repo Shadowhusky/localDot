@@ -205,10 +205,11 @@ describe("bounded agent projection", () => {
       ruleRemoved: true,
     });
     const note = "Approved once. Your Always allow choice was not saved. Try again later.";
+    const task = { scope: "task", label: "For this task", actionClass: "send" };
     const unsaved = reduce([
       request,
       ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user", note }),
-      ev(2, "rule.created", { scope: "task", label: "For this task", actionClass: "post" }),
+      ev(2, "rule.created", task),
     ]);
     expect(unsaved.approvalOutcome).toEqual({
       approvalId: approval,
@@ -216,7 +217,18 @@ describe("bounded agent projection", () => {
       actionClass: "send",
       note,
     });
-    const task = { scope: "task", label: "For this task", actionClass: "send" };
+    const otherClass = reduce([
+      request,
+      ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user" }),
+      ev(2, "rule.created", { ...task, actionClass: "post" }),
+    ]);
+    expect(otherClass.approvalOutcome).toEqual({
+      approvalId: approval,
+      decision: "approve",
+      actionClass: "send",
+    });
+    const second = projectAgentEvent(saved, ev(3, "rule.created", task));
+    expect(second.approvalOutcome?.rule).toEqual(site);
     const allowed = reduce([
       request,
       ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user" }),
@@ -224,6 +236,18 @@ describe("bounded agent projection", () => {
       ev(3, "rule.removed", task),
     ]);
     expect(allowed.approvalOutcome?.ruleRemoved).toBe(true);
+    const kept = reduce([
+      request,
+      ev(1, "approval.resolve", { approvalId: approval, decision: "approve", by: "user" }),
+      ev(2, "rule.created", task),
+    ]);
+    for (const removed of [
+      { ...task, actionClass: "post" },
+      { scope: "always", label: "Always", actionClass: "send" },
+    ])
+      expect(
+        projectAgentEvent(kept, ev(3, "rule.removed", removed)).approvalOutcome?.ruleRemoved,
+      ).toBeUndefined();
   });
 });
 describe("single event feed boundary", () => {
