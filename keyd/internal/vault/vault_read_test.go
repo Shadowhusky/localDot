@@ -65,6 +65,11 @@ func (s *heldStore) Put(id string, value []byte, binding string) error {
 	return s.Store.Put(id, value, binding)
 }
 
+func (s *heldStore) Delete(id string) error {
+	s.wait("delete")
+	return s.Store.Delete(id)
+}
+
 func (s *heldStore) count() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -104,20 +109,25 @@ func within(t *testing.T, what string, f func()) {
 // A Keychain read can run to the helper's deadline. Every request looks up records, so a read
 // must hold up only the callers that need its value.
 func TestAStalledStoreCallHoldsUpOnlyItsOwnSecret(t *testing.T) {
-	for _, op := range []string{"get", "put"} {
-		t.Run(op, func(t *testing.T) {
+	read := func(v *Vault) error { _, err := v.Value("weather"); return err }
+	put := func(v *Vault) error { return v.Put(httpRecord("weather"), []byte("rotated-fake-value-for-test")) }
+	del := func(v *Vault) error { return v.Delete("weather") }
+	calls := map[string]struct {
+		op   string
+		call func(*Vault) error
+	}{
+		"get":                     {"get", read},
+		"put":                     {"put", put},
+		"put's read of the value": {"get", put},
+		"delete":                  {"delete", del},
+	}
+	for name, c := range calls {
+		t.Run(name, func(t *testing.T) {
 			store := newHeldStore(t)
 			v := coldVault(t, store)
-			store.arm(op)
+			store.arm(c.op)
 			stalled := make(chan error, 1)
-			go func() {
-				if op == "get" {
-					_, err := v.Value("weather")
-					stalled <- err
-				} else {
-					stalled <- v.Put(httpRecord("weather"), []byte("rotated-fake-value-for-test"))
-				}
-			}()
+			go func() { stalled <- c.call(v) }()
 			<-store.entered
 			within(t, "Records", func() { v.Records() })
 			within(t, "Record", func() { v.Record("maps") })
@@ -129,6 +139,52 @@ func TestAStalledStoreCallHoldsUpOnlyItsOwnSecret(t *testing.T) {
 			store.free()
 			if err := <-stalled; err != nil {
 				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Put and Delete of one secret take turns, so each finds the store and the index as the other left
+// them: the index never names a value the store no longer holds, nor the store keep a deleted one.
+func TestPutAndDeleteOfASecretTakeTurns(t *testing.T) {
+	rotated := []byte("rotated-fake-value-for-test")
+	put := func(v *Vault) error { return v.Put(httpRecord("weather"), rotated) }
+	del := func(v *Vault) error { return v.Delete("weather") }
+	orders := map[string]struct {
+		held          string
+		first, second func(*Vault) error
+		kept          bool
+	}{
+		"put then delete": {"put", put, del, false},
+		"delete then put": {"delete", del, put, true},
+	}
+	for name, c := range orders {
+		t.Run(name, func(t *testing.T) {
+			store := newHeldStore(t)
+			v := coldVault(t, store)
+			store.arm(c.held)
+			first, second := make(chan error, 1), make(chan error, 1)
+			go func() { first <- c.first(v) }()
+			<-store.entered
+			go func() { second <- c.second(v) }()
+			select {
+			case err := <-second:
+				t.Fatalf("the second change ended (%v) while the first was still in the store", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			store.free()
+			if err := <-first; err != nil {
+				t.Fatal(err)
+			}
+			if err := <-second; err != nil {
+				t.Fatal(err)
+			}
+			_, indexed := v.Record("weather")
+			got, err := v.Value("weather")
+			stored, serr := store.Store.Get("weather", testBinding)
+			if c.kept && (!indexed || err != nil || !bytes.Equal(got, rotated) || serr != nil || !bytes.Equal(stored, rotated)) ||
+				!c.kept && (indexed || !errors.Is(err, ErrNotFound) || !errors.Is(serr, ErrNotFound)) {
+				t.Fatalf("indexed %v, Value %q (%v), the store %q (%v)", indexed, got, err, stored, serr)
 			}
 		})
 	}
