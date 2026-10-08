@@ -4,6 +4,7 @@ package privatestream
 
 import (
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"syscall"
@@ -117,5 +118,40 @@ func TestRejectsNonPrivateStreams(t *testing.T) {
 	info, _ := file.Stat()
 	if info.Size() != 0 {
 		t.Fatal("file data was written")
+	}
+}
+
+// A connection to a socket bound in the filesystem is reachable by name, so either end of it is
+// refused even though it is a connected Unix stream.
+func TestRejectsBothEndsOfANamedSocket(t *testing.T) {
+	dir, err := os.MkdirTemp("/tmp", "privatestream-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: filepath.Join(dir, "s"), Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	client, err := net.DialUnix("unix", nil, listener.Addr().(*net.UnixAddr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	server, err := listener.AcceptUnix()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer server.Close()
+	for name, conn := range map[string]*net.UnixConn{"dialing end": client, "accepted end": server} {
+		file, err := conn.File()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if stream, err := Duplicate(file); err == nil || stream != nil {
+			t.Errorf("the %s of a named socket was accepted", name)
+		}
+		file.Close()
 	}
 }

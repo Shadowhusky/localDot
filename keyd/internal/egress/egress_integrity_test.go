@@ -539,7 +539,7 @@ func TestAnEchoBecomesTheCellsOwnSurrogate(t *testing.T) {
 
 type failingGets struct{ vault.Store }
 
-func (failingGets) Get(string) ([]byte, error) { return nil, errors.New("store unavailable") }
+func (failingGets) Get(string, string) ([]byte, error) { return nil, errors.New("store unavailable") }
 
 // A secret bound to the host that keyd cannot read means it cannot scrub: the request fails closed.
 func TestAnUnreadableBoundSecretFailsClosed(t *testing.T) {

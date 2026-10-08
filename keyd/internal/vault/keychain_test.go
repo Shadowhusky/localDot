@@ -81,17 +81,17 @@ func carries(text string, value []byte) bool {
 
 func TestKeychainRoundTripThroughTheItemHelper(t *testing.T) {
 	k, dir := fakeKeychain(t)
-	if err := k.Put("weather", fakeValue); err != nil {
+	if err := k.Put("weather", fakeValue, testBinding); err != nil {
 		t.Fatal(err)
 	}
-	got, err := k.Get("weather")
+	got, err := k.Get("weather", testBinding)
 	if err != nil || !bytes.Equal(got, fakeValue) {
 		t.Fatalf("Get = %q, %v", got, err)
 	}
 	if err := k.Delete("weather"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.Get("weather"); !errors.Is(err, ErrNotFound) {
+	if _, err := k.Get("weather", testBinding); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get after delete: %v", err)
 	}
 	if err := k.Delete("weather"); !errors.Is(err, ErrNotFound) {
@@ -110,14 +110,14 @@ func TestKeychainKeepsLongValuesWhole(t *testing.T) {
 	k, dir := fakeKeychain(t)
 	for _, n := range []int{3000, maxValueLen} {
 		value := longValue(n)
-		if err := k.Put("weather", value); err != nil {
+		if err := k.Put("weather", value, testBinding); err != nil {
 			t.Fatalf("Put of %d bytes: %v", n, err)
 		}
-		if got, err := k.Get("weather"); err != nil || !bytes.Equal(got, value) {
+		if got, err := k.Get("weather", testBinding); err != nil || !bytes.Equal(got, value) {
 			t.Fatalf("Get after %d bytes: %d bytes back, %v", n, len(got), err)
 		}
 	}
-	if err := k.Put("weather", fakeValue); err != nil {
+	if err := k.Put("weather", fakeValue, testBinding); err != nil {
 		t.Fatal(err)
 	}
 	items, _ := os.ReadDir(filepath.Join(dir, "store"))
@@ -134,11 +134,11 @@ func TestKeychainErrorsNeverCarryTheValue(t *testing.T) {
 	k, dir := fakeKeychain(t)
 	value := longValue(maxValueLen)
 	t.Setenv("FAKE_FAIL", "add")
-	if err := k.Put("weather", value); err == nil || carries(err.Error(), value) {
+	if err := k.Put("weather", value, testBinding); err == nil || carries(err.Error(), value) {
 		t.Fatalf("Put through a failing tool: %v", err)
 	}
 	t.Setenv("FAKE_FAIL", "")
-	if err := k.Put("weather", value); err != nil {
+	if err := k.Put("weather", value, testBinding); err != nil {
 		t.Fatal(err)
 	}
 	// A chunk from another write: what a crash between two chunk writes leaves.
@@ -150,17 +150,17 @@ func TestKeychainErrorsNeverCarryTheValue(t *testing.T) {
 	if err := os.WriteFile(chunk, append([]byte(strings.Repeat("0", 16)), data[16:]...), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.Get("weather"); err == nil || carries(err.Error(), value) {
+	if _, err := k.Get("weather", testBinding); err == nil || carries(err.Error(), value) {
 		t.Fatalf("Get of a torn value: %v", err)
 	}
 }
 
 func TestKeychainReportsToolFailures(t *testing.T) {
 	k := &Keychain{Service: "localdot-keyd-test", Path: filepath.Join(t.TempDir(), "missing")}
-	if err := k.Put("weather", fakeValue); err == nil {
+	if err := k.Put("weather", fakeValue, testBinding); err == nil {
 		t.Fatal("Put through a missing tool succeeded")
 	}
-	if _, err := k.Get("weather"); err == nil || errors.Is(err, ErrNotFound) {
+	if _, err := k.Get("weather", testBinding); err == nil || errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get through a missing tool: %v", err)
 	}
 }
@@ -177,17 +177,17 @@ func TestKeychainAgainstTheLoginKeychain(t *testing.T) {
 	t.Logf("synthetic Keychain account: %s (service localdot-keyd-test)", id)
 	t.Cleanup(func() { _ = k.Delete(id) })
 	for _, value := range [][]byte{fakeValue, longValue(maxValueLen), []byte("second-fake-value-for-test")} {
-		if err := k.Put(id, value); err != nil {
+		if err := k.Put(id, value, testBinding); err != nil {
 			t.Fatalf("Put of %d bytes: %v", len(value), err)
 		}
-		if got, err := k.Get(id); err != nil || !bytes.Equal(got, value) {
+		if got, err := k.Get(id, testBinding); err != nil || !bytes.Equal(got, value) {
 			t.Fatalf("Get after %d bytes: %d bytes back, %v", len(value), len(got), err)
 		}
 	}
 	if err := k.Delete(id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.Get(id); !errors.Is(err, ErrNotFound) {
+	if _, err := k.Get(id, testBinding); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get after delete: %v", err)
 	}
 	for i := range maxChunks {
@@ -223,23 +223,23 @@ func TestKeychainSurvivesSignedExecutableUpdate(t *testing.T) {
 	id := fmt.Sprintf("probe-%d", time.Now().UnixNano())
 	t.Logf("synthetic update account: %s (service localdot-keyd-test)", id)
 	t.Cleanup(func() { _ = before.Delete(id); _ = after.Delete(id) })
-	if err := before.Put(id, fakeValue); err != nil {
+	if err := before.Put(id, fakeValue, testBinding); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := after.Get(id); err != nil || !bytes.Equal(got, fakeValue) {
+	if got, err := after.Get(id, testBinding); err != nil || !bytes.Equal(got, fakeValue) {
 		t.Fatalf("updated binary could not read existing fake value: %v", err)
 	}
 	updated := []byte("updated-fake-value-for-signed-release")
-	if err := after.Put(id, updated); err != nil {
+	if err := after.Put(id, updated, testBinding); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := before.Get(id); err != nil || !bytes.Equal(got, updated) {
+	if got, err := before.Get(id, testBinding); err != nil || !bytes.Equal(got, updated) {
 		t.Fatalf("rollback binary could not read updated fake value: %v", err)
 	}
 	if err := before.Delete(id); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := after.Get(id); !errors.Is(err, ErrNotFound) {
+	if _, err := after.Get(id, testBinding); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("updated binary did not observe deletion: %v", err)
 	}
 	for i := range maxChunks {

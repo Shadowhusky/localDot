@@ -224,3 +224,30 @@ func TestIDIsStableAndHidesTheToken(t *testing.T) {
 		t.Fatal("two tokens share an ID")
 	}
 }
+
+// Taking random bytes mod 62 without rejection makes the first eight characters a quarter more
+// likely than the rest. Over 440,000 characters the two groups' means lie within a few percent of
+// each other when the alphabet is uniform, and a quarter apart when it is not.
+func TestMintedCharactersAreUniform(t *testing.T) {
+	counts := map[byte]int{}
+	for range 20000 {
+		token, err := Mint("key")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range []byte(token[len("ld_key_") : len("ld_key_")+randomLen]) {
+			counts[c]++
+		}
+	}
+	var low, rest float64
+	for i := range len(alphabet) {
+		if i < 8 {
+			low += float64(counts[alphabet[i]]) / 8
+		} else {
+			rest += float64(counts[alphabet[i]]) / float64(len(alphabet)-8)
+		}
+	}
+	if ratio := low / rest; ratio > 1.1 || ratio < 0.9 {
+		t.Fatalf("the first eight characters appear %.3f times as often as the rest", ratio)
+	}
+}

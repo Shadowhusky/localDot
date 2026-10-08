@@ -135,7 +135,7 @@ func TestFailedFirstWriteDoesNotClaimUnchanged(t *testing.T) {
 func TestInvalidReadAndDeleteDoNotRunHelper(t *testing.T) {
 	k := NewKeychain("localdot-keyd")
 	k.configureCommand = func(*exec.Cmd) { t.Fatal("invalid ID reached helper") }
-	if _, err := k.Get("weather.0"); err == nil {
+	if _, err := k.Get("weather.0", testBinding); err == nil {
 		t.Fatal("chunk access exposed")
 	}
 	if err := k.Delete("weather.0"); err == nil {
