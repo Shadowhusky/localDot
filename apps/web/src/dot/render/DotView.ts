@@ -79,6 +79,7 @@ export class DotView implements Frameable {
   private readonly svgXenon: SVGCircleElement;
   private readonly svgDim: SVGCircleElement;
   private readonly eyes: [Eye, Eye];
+  private readonly listeners = new AbortController();
 
   constructor(root: HTMLElement, o: DotViewOptions) {
     this.root = root;
@@ -107,14 +108,23 @@ export class DotView implements Frameable {
       xenon: this.image("dot-plate dot-plate-xenon", this.body),
       dim: this.image("dot-plate dot-plate-dim", this.body),
     };
+    const { signal } = this.listeners;
     for (const img of Object.values(this.plates)) {
-      img.addEventListener("error", () => {
-        root.dataset.skin = "svg";
-      });
+      img.addEventListener(
+        "error",
+        () => {
+          root.dataset.skin = "svg";
+        },
+        { signal },
+      );
     }
-    this.plates.neutral.addEventListener("load", () => {
-      if (root.dataset.skin === "loading") root.dataset.skin = "plate";
-    });
+    this.plates.neutral.addEventListener(
+      "load",
+      () => {
+        if (root.dataset.skin === "loading") root.dataset.skin = "plate";
+      },
+      { signal },
+    );
 
     const face = svg(
       "svg",
@@ -226,6 +236,7 @@ export class DotView implements Frameable {
 
   destroy(): void {
     removeView(this);
+    this.listeners.abort();
     this.root.replaceChildren();
     delete this.root.dataset.lod;
     delete this.root.dataset.skin;

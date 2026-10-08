@@ -16,8 +16,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function mount(o: Partial<DotViewOptions> = {}) {
-  const root = document.createElement("span");
+function mount(o: Partial<DotViewOptions> = {}, root = document.createElement("span")) {
   document.body.appendChild(root);
   const view = new DotView(root, {
     size: 24,
@@ -91,6 +90,19 @@ describe("DotView", () => {
     expect(failed.root.dataset.skin).toBe("svg");
     failed.plate("neutral").dispatchEvent(new Event("load"));
     expect(failed.root.dataset.skin).toBe("svg");
+  });
+
+  it("ignores late image events from a view destroyed on the same host", () => {
+    const first = mount({ control: true });
+    drive(first.view, T0, T0 + 50);
+    const [oldNeutral, oldXenon] = [first.plate("neutral"), first.plate("xenon")];
+    first.view.destroy();
+    views.splice(views.indexOf(first.view), 1);
+    const second = mount({}, first.root);
+    oldNeutral.dispatchEvent(new Event("load"));
+    expect(second.root.dataset.skin).toBe("loading");
+    oldXenon.dispatchEvent(new Event("error"));
+    expect(second.root.dataset.skin).toBe("loading");
   });
 
   it("draws the face with the badge rules and moves to richer detail as it grows", () => {
