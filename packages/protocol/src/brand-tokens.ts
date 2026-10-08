@@ -9,8 +9,8 @@ export const BRAND_TOKENS = {
   "color-fg-3": "#83868b",
   "color-hairline": "rgba(255, 255, 255, 0.07)",
   "color-control": "rgba(255, 255, 255, 0.08)",
-  "color-control-hover": "rgba(255, 255, 255, 0.12)",
-  "color-control-pressed": "rgba(255, 255, 255, 0.16)",
+  "color-state-hover": "rgba(255, 255, 255, 0.06)",
+  "color-state-pressed": "rgba(255, 255, 255, 0.1)",
   "color-danger-fg": "#f08f8f",
   "shadow-raised":
     "inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.6), 0 6px 16px rgba(0, 0, 0, 0.35)",
@@ -21,6 +21,8 @@ export const BRAND_TOKENS = {
   "text-display": "22px",
   "text-display--line-height": "28px",
   "text-display--letter-spacing": "-0.02em",
+  "text-reading": "14px",
+  "text-reading--line-height": "22px",
   "text-body": "13px",
   "text-body--line-height": "18px",
   "text-footnote": "12px",
@@ -34,6 +36,8 @@ export const BRAND_TOKENS = {
   "dur-hover": "120ms",
   "dur-fade": "150ms",
   "dur-spring": "360ms",
+  "loop-sweep": "1400ms",
+  "loop-turn": "1200ms",
 } as const;
 
 export type BrandToken = keyof typeof BRAND_TOKENS;

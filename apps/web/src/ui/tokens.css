@@ -183,6 +183,9 @@
   --dur-exit: 180ms;
   --dur-sheet: 280ms;
   --dur-spring: 360ms;
+  /* Loops, which reduced motion stops rather than shortens. */
+  --loop-sweep: 1400ms;
+  --loop-turn: 1200ms;
   --default-transition-duration: var(--dur-fade);
   --default-transition-timing-function: var(--ease-standard);
 

@@ -110,6 +110,22 @@ it("does not poll when a page is reopened without its capability", async () => {
   expect(p.node("#title").textContent).toBe("Return to your terminal");
   expect(p.node("#resume").hidden).toBe(false);
 });
+it("marks no step as stopped when a reload or a missed reply loses touch with setup", async () => {
+  const reloaded = page([{}], "");
+  await vi.advanceTimersByTimeAsync(0);
+  expect(reloaded.node("#release").dataset.state).toBe("todo");
+  expect(reloaded.node("#bar").dataset.stopped).toBe("");
+  const dropped = page([
+    { phase: "images", role: "desktop", imagePhase: "downloading", progress: 0.4 },
+  ]);
+  await vi.advanceTimersByTimeAsync(0);
+  dropped.fetch.mockRejectedValue(new Error("offline"));
+  await vi.advanceTimersByTimeAsync(750);
+  expect(dropped.node("#title").textContent).toBe("Return to your terminal");
+  expect(dropped.node("#release").dataset.state).toBe("done");
+  expect(dropped.node("#images").dataset.state).toBe("todo");
+  expect(dropped.node("#fill").style.transform).toBe("scaleX(0.4)");
+});
 it("navigates using only the successful local one-use URL", async () => {
   const url = `http://127.0.0.1:4750/#code=${"b".repeat(43)}`;
   const p = page([{ phase: "ready", url }]);
