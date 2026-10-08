@@ -7,7 +7,7 @@ import {
   KeysPanel,
   type KeysPanelProps,
 } from "../keys/KeysSheet.tsx";
-import type { AppearanceControl } from "../onboarding/AppearancePicker.tsx";
+import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
@@ -15,7 +15,6 @@ import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { MoneyField } from "../ui/MoneyField.tsx";
 import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
-import { RadioCards } from "../ui/RadioCards.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
@@ -481,16 +480,7 @@ function Appearance({ appearance }: { appearance: AppearanceControl }) {
           : "Applied for this visit. This browser couldn't save it."
       }
     >
-      <RadioCards
-        layout="tiles"
-        value={appearance.value}
-        onValueChange={(value) => appearance.change(value === "midnight" ? "midnight" : "graphite")}
-        options={(["graphite", "midnight"] as const).map((value) => ({
-          value,
-          label: value === "graphite" ? "Graphite" : "Midnight",
-          preview: <span className="settings-swatch" data-appearance={value} />,
-        }))}
-      />
+      <AppearancePicker appearance={appearance} />
     </Field>
   );
 }

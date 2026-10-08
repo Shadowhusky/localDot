@@ -309,30 +309,6 @@
   overflow-wrap: anywhere;
 }
 
-.settings-swatch {
-  display: block;
-  width: calc(var(--spacing) * 10);
-  height: calc(var(--spacing) * 7);
-  border-radius: var(--radius-xs);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
-}
-
-.settings-swatch[data-appearance="graphite"] {
-  background: linear-gradient(
-    to bottom,
-    var(--graphite-raised-2) 0 40%,
-    var(--graphite-void) 40% 100%
-  );
-}
-
-.settings-swatch[data-appearance="midnight"] {
-  background: linear-gradient(
-    to bottom,
-    var(--midnight-raised-2) 0 40%,
-    var(--midnight-void) 40% 100%
-  );
-}
-
 .settings-hint {
   display: flex;
   gap: calc(var(--spacing) * 1.5);

@@ -76,3 +76,25 @@ export function presetOf(policy: AutonomyPolicy): AutonomyPreset | undefined {
     EDITABLE_ACTION_CLASSES.every((key) => preset.policy[key] === policy[key]),
   );
 }
+
+const CHECKED_FIRST = [
+  ["purchase", "buying"],
+  ["send", "sending"],
+  ["post", "posting"],
+  ["delete", "deleting"],
+] as const;
+
+// What dot stops to ask about, in one line for someone who has not opened Settings yet.
+export function checksSummary(policy: AutonomyPolicy): string {
+  const asks = CHECKED_FIRST.filter(([key]) => policy[key] !== "act").map(([, verb]) => verb);
+  const listed =
+    asks.length > 1 ? `${asks.slice(0, -1).join(", ")} or ${asks.at(-1)}` : (asks[0] ?? "");
+  if (policy.computer !== "act") {
+    return listed
+      ? `Asks before every step in its computer, and before ${listed}.`
+      : "Asks before every step in its computer.";
+  }
+  return listed
+    ? `Asks before ${listed}.`
+    : "Works without asking, even when buying, sending, posting or deleting.";
+}

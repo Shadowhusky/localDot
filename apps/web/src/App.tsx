@@ -26,7 +26,12 @@ import { KeysSheet } from "./keys/KeysSheet.tsx";
 import type { KeyRecord } from "./keys/keys-api.ts";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
 import { type ApiClient, ApiError, createApi } from "./lib/api.ts";
-import { exchangeInstallCode, type InstallLink, takeInstallLink } from "./lib/install-link.ts";
+import {
+  exchangeInstallCode,
+  type InstallLink,
+  linkArrived,
+  takeInstallLink,
+} from "./lib/install-link.ts";
 import { forgetToken, keepToken, storedToken } from "./lib/token.ts";
 import { useAppearance } from "./onboarding/appearance.ts";
 import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
@@ -45,6 +50,7 @@ import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ConversationRail } from "./shell/ConversationRail.tsx";
 import { Hud } from "./shell/Hud.tsx";
 import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
+import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
@@ -64,6 +70,9 @@ export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
   const [candidate, setCandidate] = useState<InstallLink | null>(null);
   const [rejected, setRejected] = useState<Rejected>(null);
+  // A link in the address is read in an effect, after the first paint; until then that paint is the
+  // check it will start, not a sign-in prompt.
+  const [arriving, setArriving] = useState(linkArrived);
   const tokenOwner = useRef(token);
   const linkOwner = useRef<InstallLink | null>(null);
   const exchange = useRef<{ code: string; promise: Promise<string> } | null>(null);
@@ -81,6 +90,7 @@ export function App({ fetchImpl }: AppProps) {
     };
     window.addEventListener("hashchange", onHashChange);
     onHashChange();
+    setArriving(false);
     return () => window.removeEventListener("hashchange", onHashChange);
   }, []);
 
@@ -170,15 +180,16 @@ export function App({ fetchImpl }: AppProps) {
   );
 
   if (api) return <Theatre key={token} api={api} />;
-  if (candidate) {
-    return (
-      <p className="notice" role="status">
-        Checking the link…
-      </p>
-    );
-  }
-  return <NoToken rejected={rejected} />;
+  if (candidate || arriving) return <SignIn state="checking" />;
+  return <SignIn state={SIGN_IN[rejected ?? "none"]} />;
 }
+
+const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
+  none: "first",
+  stored: "signed-out",
+  link: "expired",
+  code: "expired",
+};
 
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
@@ -936,24 +947,5 @@ function Theatre({ api }: { api: ApiClient }) {
       />
       <Announcer />
     </div>
-  );
-}
-
-const REJECTED: Record<Exclude<Rejected, null>, string> = {
-  stored: "Your saved sign-in no longer works.",
-  link: "This sign-in link was not accepted.",
-  code: "This sign-in link could not be used.",
-};
-
-function NoToken({ rejected }: { rejected: Rejected }) {
-  return (
-    <section className="notice" role="alert">
-      <h1>Sign in to localDot</h1>
-      <p>
-        {rejected ? `${REJECTED[rejected]} ` : ""}Run <code>localdot open</code> where localDot is
-        installed, then open its sign-in link here as <code>{window.location.origin}/#code=…</code>{" "}
-        within one minute. Each link works once.
-      </p>
-    </section>
   );
 }

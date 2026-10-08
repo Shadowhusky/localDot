@@ -133,20 +133,6 @@
     "half-pixel": 1,
     "type-literal": 2
   },
-  "src/onboarding/AppearancePicker.tsx": {
-    "native-control": 1
-  },
-  "src/onboarding/WelcomeSetup.tsx": {
-    "native-control": 3
-  },
-  "src/onboarding/onboarding.css": {
-    "control-selector": 6,
-    "half-pixel": 1,
-    "radius-literal": 3,
-    "spacing-literal": 15,
-    "stray-stylesheet": 1,
-    "type-literal": 10
-  },
   "src/replay/CompareView.tsx": {
     "native-control": 1
   },
@@ -205,10 +191,10 @@
   },
   "src/theme.css": {
     "control-selector": 2,
-    "half-pixel": 3,
+    "half-pixel": 2,
     "motion-literal": 7,
     "raw-colour": 15,
     "stray-stylesheet": 1,
-    "type-literal": 4
+    "type-literal": 2
   }
 }

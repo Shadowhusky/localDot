@@ -100,7 +100,7 @@ describe("App one-use sign-in", () => {
         <App fetchImpl={request} />
       </StrictMode>,
     );
-    await screen.findByText(/could not be used/);
+    await screen.findByText(/That link has expired or was already used/);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(30_000);
     });
@@ -130,7 +130,7 @@ describe("App one-use sign-in", () => {
     await waitFor(() => expect(exchanges(request)).toHaveLength(1));
     await act(async () => {});
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
-    expect(screen.queryByRole("heading", { name: "Sign in to localDot" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Open localDot from Terminal" })).toBeNull();
   });
   it("never lets an older exchange overwrite a newer successful link", async () => {
     const older = deferred<Response>();
@@ -158,12 +158,12 @@ describe("App one-use sign-in", () => {
     await screen.findAllByRole("button", { name: "Turn on" });
     await act(async () => oldCheck.resolve(json({}, 401)));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-    expect(screen.queryByRole("heading", { name: "Sign in to localDot" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Open localDot from Terminal" })).toBeNull();
   });
   it("refuses malformed success authority and ambiguous fragments without storing them", async () => {
     const request = daemon(() => json({ token: "bad" }));
     render(<App fetchImpl={request} />);
-    await screen.findByText(/could not be used/);
+    await screen.findByText(/That link has expired or was already used/);
     navigate(`${OTHER_CODE}&token=${TOKEN}`);
     await act(async () => {});
     expect(window.location.hash).toBe("");

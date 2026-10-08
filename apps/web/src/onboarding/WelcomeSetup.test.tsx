@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
-import { CAREFUL_AUTONOMY, DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { act, cleanup, fireEvent, render, renderHook, screen } from "@testing-library/react";
+import { CAREFUL_AUTONOMY } from "@localdot/protocol";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  renderHook,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { StageCanvas } from "../stage/StageCanvas.tsx";
 import { FakeWorker, fakeChromium } from "../testing/fake-chromium.ts";
@@ -17,7 +25,6 @@ function props(): WelcomeSetupProps {
   return {
     modelReady: false,
     loading: false,
-    autonomy: DEFAULT_AUTONOMY,
     appearance: { value: "graphite", saved: true, change: vi.fn() },
     starting: false,
     canStart: true,
@@ -25,73 +32,104 @@ function props(): WelcomeSetupProps {
     onStart: vi.fn(),
   };
 }
+const step = (title: string) => {
+  const row = screen.getByRole("heading", { name: title }).closest("li");
+  if (!row) throw new Error(`no step ${title}`);
+  return {
+    row,
+    state: () => within(row).getByRole("img").getAttribute("data-state"),
+    detail: () => row.querySelector(".welcome-step-detail")?.textContent,
+  };
+};
 it("guides model and autonomy setup through the existing settings controls", () => {
   const p = props();
   render(<WelcomeSetup {...p} />);
-  const model = screen.getByRole("button", { name: "Choose model" });
+  const model = within(step("Model").row).getByRole("button", { name: "Choose" });
   fireEvent.click(model);
   expect(p.onSettings).toHaveBeenCalledWith(model);
-  const autonomy = screen.getByRole("button", { name: "Review autonomy" });
-  fireEvent.click(autonomy);
-  expect(p.onSettings).toHaveBeenCalledWith(autonomy, "autonomy");
+  const checks = within(step("When dot checks with you").row).getByRole("button", {
+    name: "Review",
+  });
+  expect(checks.getAttribute("aria-describedby")).toContain(
+    screen.getByRole("heading", { name: "When dot checks with you" }).id,
+  );
+  fireEvent.click(checks);
+  expect(p.onSettings).toHaveBeenCalledWith(checks, "autonomy");
   expect(p.onStart).not.toHaveBeenCalled();
 });
-it("turns the computer on whenever it can start, with or without a model", () => {
+it("shows the model as the one step left, and turns it done once a model is saved", () => {
+  const p = props();
+  const view = render(<WelcomeSetup {...p} loading />);
+  const states = () =>
+    ["Model", "Appearance", "When dot checks with you"].map((t) => step(t).state());
+  expect(states()).toEqual(["todo", "done", "todo"]);
+  view.rerender(<WelcomeSetup {...p} />);
+  expect(states()).toEqual(["todo", "done", "done"]);
+  view.rerender(<WelcomeSetup {...p} modelReady modelLabel="Saved provider · saved model" />);
+  expect(states()).toEqual(["done", "done", "done"]);
+  expect(step("Model").detail()).toBe("Saved provider · saved model");
+  expect(within(step("Model").row).getByRole("button").textContent).toBe("Change");
+  view.rerender(
+    <WelcomeSetup
+      {...p}
+      autonomy={{ reading: "act" } as unknown as WelcomeSetupProps["autonomy"]}
+    />,
+  );
+  expect(step("When dot checks with you").state()).toBe("failed");
+});
+it("offers one primary action, Turn on, whenever the computer can start", () => {
   const p = props();
   const view = render(<WelcomeSetup {...p} />);
   const turnOn = screen.getByRole("button", { name: "Turn on" });
-  expect(screen.getByText("Turn on your computer while you choose a model.")).toBeTruthy();
+  expect(turnOn.dataset.variant).toBe("primary");
+  expect(document.querySelectorAll('[data-variant="primary"]')).toHaveLength(1);
+  expect(screen.getByText("You can turn it on while you choose a model.")).toBeTruthy();
   expect(turnOn.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(turnOn);
   expect(p.onStart).toHaveBeenCalledOnce();
-  view.rerender(
-    <WelcomeSetup {...p} modelReady modelLabel="Saved provider · saved model" loading />,
-  );
-  expect(screen.getByRole("status").textContent).toContain("Checking saved settings…");
+  view.rerender(<WelcomeSetup {...p} modelReady loading />);
+  expect(step("Model").detail()).toBe("Checking your saved model…");
   expect(turnOn.getAttribute("aria-disabled")).toBeNull();
-  view.rerender(<WelcomeSetup {...p} modelReady modelLabel="Saved provider · saved model" />);
-  expect(screen.getByRole("status").textContent).toContain("Saved provider · saved model");
   turnOn.focus();
   view.rerender(<WelcomeSetup {...p} canStart={false} starting />);
-  expect(turnOn.textContent).toBe("Starting…");
+  expect(turnOn.textContent).toBe("Turn on");
+  expect(turnOn.getAttribute("aria-busy")).toBe("true");
   expect(turnOn.getAttribute("aria-disabled")).toBe("true");
   expect(document.activeElement).toBe(turnOn);
   fireEvent.click(turnOn);
   expect(p.onStart).toHaveBeenCalledOnce();
+  view.rerender(<WelcomeSetup {...p} canStart={false} />);
+  expect(turnOn.getAttribute("aria-disabled")).toBe("true");
+  expect(turnOn.getAttribute("aria-describedby")).toBeTruthy();
 });
-it("keeps the first-task hint neutral while saved settings load", () => {
+it("keeps the hint under Turn on in its place while saved settings load", () => {
   const p = props();
   const view = render(<WelcomeSetup {...p} loading />);
-  const hint = () =>
-    screen.getByRole("heading", { name: "Ready for your first task?" }).nextSibling;
-  expect(hint()?.textContent).toBe("Turn on your computer to get started.");
+  const note = () => document.querySelector(".welcome-note");
+  expect(note()?.textContent).toBe("");
   view.rerender(<WelcomeSetup {...p} />);
-  expect(hint()?.textContent).toBe("Turn on your computer while you choose a model.");
+  expect(note()?.textContent).toBe("You can turn it on while you choose a model.");
   view.rerender(<WelcomeSetup {...p} modelReady />);
-  expect(hint()?.textContent).toBe(
-    "Turn on your computer, then describe what you want in the conversation.",
-  );
+  expect(note()?.textContent).toBe("Then tell dot what to do in the conversation.");
 });
-it("uses saved policy values without changing policy or storing keys", () => {
+it("says in words when dot checks with you, and changes nothing itself", () => {
   const p = props();
-  p.autonomy = { ...DEFAULT_AUTONOMY, reading: "ask", browsing: "ask", computer: "ask" };
-  render(<WelcomeSetup {...p} />);
-  expect(screen.getByText(/^Custom/)).toBeTruthy();
+  const view = render(<WelcomeSetup {...p} />);
+  expect(step("When dot checks with you").detail()).toBe(
+    "Asks before buying, sending, posting or deleting.",
+  );
+  view.rerender(<WelcomeSetup {...p} autonomy={CAREFUL_AUTONOMY} />);
+  expect(step("When dot checks with you").detail()).toMatch(/^Asks before every step/);
   fireEvent.click(screen.getByRole("radio", { name: "Midnight" }));
   expect(p.appearance.change).toHaveBeenCalledWith("midnight");
   expect(localStorage.length).toBe(0);
   expect(p.onStart).not.toHaveBeenCalled();
 });
-it("names the autonomy preset in one line instead of counting classes", () => {
-  const p = props();
-  const view = render(<WelcomeSetup {...p} />);
-  const line = () => screen.getByRole("heading", { name: "Your autonomy defaults" }).nextSibling;
-  expect(line()?.textContent).toMatch(/^Balanced \(recommended\) · /);
-  view.rerender(<WelcomeSetup {...p} autonomy={CAREFUL_AUTONOMY} />);
-  expect(line()?.textContent).toMatch(/^Careful · /);
-  view.rerender(<WelcomeSetup {...p} autonomy={{ ...DEFAULT_AUTONOMY, purchase: "handoff" }} />);
-  expect(line()?.textContent).toMatch(/^Custom · /);
-  expect(screen.queryByText(/action types/)).toBeNull();
+it("draws the theme choices with the kit and no native radio on screen", () => {
+  render(<WelcomeSetup {...props()} />);
+  const group = screen.getByRole("radiogroup", { name: "Theme" });
+  expect(group.classList.contains("ui-radio-cards")).toBe(true);
+  expect(within(group).getAllByRole("radio")).toHaveLength(2);
 });
 it("persists only a bounded theme name and reacts to another tab's preference", () => {
   const hook = renderHook(() => useAppearance());

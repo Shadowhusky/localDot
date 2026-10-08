@@ -2,6 +2,12 @@ import { TOKEN_PATTERN, type TokenHost } from "./token.ts";
 
 export type InstallLink = { kind: "code" | "token"; value: string } | { kind: "invalid" };
 
+// Whether the address carries a sign-in link, without taking it: safe to call during render.
+export function linkArrived(host: Pick<TokenHost, "location"> = window): boolean {
+  const params = new URLSearchParams(host.location.hash.replace(/^#/, ""));
+  return params.has("code") || params.has("token");
+}
+
 /** Read in an effect/event, never during render. Remove even invalid credential fragments. */
 export function takeInstallLink(host: TokenHost = window): InstallLink | null {
   const params = new URLSearchParams(host.location.hash.replace(/^#/, ""));

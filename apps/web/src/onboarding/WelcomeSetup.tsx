@@ -1,5 +1,11 @@
 import { AutonomyPolicy, DEFAULT_AUTONOMY } from "@localdot/protocol";
-import { CUSTOM_SUMMARY, presetOf } from "../copy/autonomy.ts";
+import { type ReactNode, useId } from "react";
+import { checksSummary } from "../copy/autonomy.ts";
+import { Dot } from "../dot/Dot.tsx";
+import { Button } from "../ui/Button.tsx";
+import { PHONE, useMediaQuery } from "../ui/media.ts";
+import { ScrollArea } from "../ui/ScrollArea.tsx";
+import { type GlyphState, StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { type AppearanceControl, AppearancePicker } from "./AppearancePicker.tsx";
 import "./onboarding.css";
 
@@ -19,87 +25,121 @@ export interface WelcomeSetupProps {
  * choices, starts a task or grants permissions. Those actions remain in their existing controls.
  */
 export function WelcomeSetup(props: WelcomeSetupProps) {
+  const phone = useMediaQuery(PHONE);
   const policy = AutonomyPolicy.safeParse(props.autonomy ?? DEFAULT_AUTONOMY);
-  const preset = policy.success ? presetOf(policy.data) : undefined;
   return (
     <section className="welcome-setup" aria-labelledby="welcome-title">
-      <header>
-        <p className="welcome-eyebrow">YOUR WORKSPACE</p>
-        <h1 id="welcome-title">Set up localDot</h1>
-        <p>Choose a model, make it yours, then start your first task.</p>
-      </header>
-      <ol className="welcome-steps">
-        <li>
-          <span className="welcome-number" aria-hidden="true">
-            1
-          </span>
-          <div>
-            <h2>Model and keys</h2>
-            <p role="status">
-              {props.loading
-                ? "Checking saved settings…"
-                : props.modelReady
-                  ? `Ready · ${props.modelLabel ?? "Your saved model"}`
-                  : "Choose a main model and connect its provider in Settings."}
-            </p>
-            <button type="button" onClick={(event) => props.onSettings(event.currentTarget)}>
-              {props.modelReady ? "Change model" : "Choose model"}
-            </button>
-          </div>
-        </li>
-        <li>
-          <span className="welcome-number" aria-hidden="true">
-            2
-          </span>
-          <div>
-            <h2>Make it yours</h2>
-            <AppearancePicker appearance={props.appearance} />
-          </div>
-        </li>
-        <li>
-          <span className="welcome-number" aria-hidden="true">
-            3
-          </span>
-          <div>
-            <h2>Your autonomy defaults</h2>
-            <p>
-              {props.loading
-                ? "Loading your defaults…"
-                : policy.success
-                  ? `${preset?.name ?? "Custom"} · ${preset?.summary ?? CUSTOM_SUMMARY}`
-                  : "Defaults are unavailable. Reload Settings before continuing."}
-            </p>
-            <button
-              type="button"
-              onClick={(event) => props.onSettings(event.currentTarget, "autonomy")}
-            >
-              Review autonomy
-            </button>
-          </div>
-        </li>
-      </ol>
-      <footer>
-        <div>
-          <h2>Ready for your first task?</h2>
-          <p>
+      <div className="welcome-layout">
+        <div className="welcome-hero">
+          <Dot size={phone ? 64 : 96} state={props.starting ? "waking" : "idle"} />
+          <h1 id="welcome-title" className="welcome-title">
+            Set up localDot
+          </h1>
+          <p className="welcome-lede">Three quick choices, then turn on your computer.</p>
+          <Button
+            variant="primary"
+            size="lg"
+            className="welcome-start"
+            busy={props.starting}
+            disabledReason={
+              props.canStart || props.starting ? undefined : "Looking for your computer…"
+            }
+            onClick={props.onStart}
+          >
+            Turn on
+          </Button>
+          <p className="welcome-note">
             {props.loading
-              ? "Turn on your computer to get started."
+              ? ""
               : props.modelReady
-                ? "Turn on your computer, then describe what you want in the conversation."
-                : "Turn on your computer while you choose a model."}
+                ? "Then tell dot what to do in the conversation."
+                : "You can turn it on while you choose a model."}
           </p>
         </div>
-        <button
-          className="welcome-primary"
-          type="button"
-          aria-disabled={props.canStart ? undefined : true}
-          onClick={() => {
-            if (props.canStart) props.onStart();
-          }}
-        >
-          {props.starting ? "Starting…" : "Turn on"}
-        </button>
-      </footer>
+        <ScrollArea className="welcome-scroll">
+          <ol className="welcome-steps">
+            <Step
+              title="Model"
+              state={props.modelReady ? "done" : "todo"}
+              detail={
+                props.loading
+                  ? "Checking your saved model…"
+                  : props.modelReady
+                    ? (props.modelLabel ?? "Your saved model")
+                    : "Choose the model dot thinks with."
+              }
+              action={(described) => (
+                <Button
+                  size="sm"
+                  aria-describedby={described}
+                  onClick={(event) => props.onSettings(event.currentTarget)}
+                >
+                  {props.modelReady ? "Change" : "Choose"}
+                </Button>
+              )}
+            />
+            <Step
+              title="Appearance"
+              state="done"
+              detail={
+                props.appearance.saved
+                  ? undefined
+                  : "Applied for this visit. This browser couldn't save it."
+              }
+            >
+              <AppearancePicker appearance={props.appearance} aria-label="Theme" />
+            </Step>
+            <Step
+              title="When dot checks with you"
+              state={props.loading ? "todo" : policy.success ? "done" : "failed"}
+              detail={
+                props.loading
+                  ? "Checking your saved choices…"
+                  : policy.success
+                    ? checksSummary(policy.data)
+                    : "Your choices couldn't be read. Review them in Settings."
+              }
+              action={(described) => (
+                <Button
+                  size="sm"
+                  aria-describedby={described}
+                  onClick={(event) => props.onSettings(event.currentTarget, "autonomy")}
+                >
+                  Review
+                </Button>
+              )}
+            />
+          </ol>
+        </ScrollArea>
+      </div>
     </section>
+  );
+}
+
+function Step({
+  title,
+  state,
+  detail,
+  action,
+  children,
+}: {
+  title: string;
+  state: GlyphState;
+  detail?: string;
+  // Gets the id of the step's title, so a short label still says what it changes.
+  action?(described: string): ReactNode;
+  children?: ReactNode;
+}) {
+  const id = useId();
+  return (
+    <li className="welcome-step" data-state={state}>
+      <StatusGlyph state={state} className="welcome-step-glyph" />
+      <h2 id={id} className="welcome-step-title">
+        {title}
+      </h2>
+      {action && <div className="welcome-step-action">{action(id)}</div>}
+      {detail && <p className="welcome-step-detail">{detail}</p>}
+      {children && <div className="welcome-step-extra">{children}</div>}
+    </li>
   );
 }

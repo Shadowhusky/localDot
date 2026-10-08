@@ -1,176 +1,207 @@
-/* Setup is a form, so use the workspace height instead of the computer's video aspect ratio. */
-.stage-col:has(.welcome-setup) {
-  justify-content: stretch;
-}
-.stage:has(> .welcome-setup) {
-  width: 100%;
-  aspect-ratio: auto;
-  flex: 1;
-  min-height: 0;
-}
-.stage-col:has(.welcome-setup) > .caption {
-  display: none;
-}
+/* First run sits inside the 16:10 stage, so turning the computer on never moves the stage. dot and
+   the one action stay put on the left; the steps scroll on their own on the right. */
 .welcome-setup {
   position: absolute;
   inset: 0;
   z-index: 5;
-  padding: clamp(1.25rem, 3vw, 2.5rem);
-  overflow: auto;
-  overscroll-behavior: contain;
-  background: var(--color-surface);
-  color: var(--color-text);
-  font: 0.875rem / 1.5 var(--font-ui);
-  scrollbar-gutter: stable;
+  background: var(--color-raised);
+  color: var(--color-fg-1);
+  container-type: size;
+  transition: opacity var(--dur-sheet) var(--ease-enter);
 }
-.welcome-setup header,
-.welcome-steps,
-.welcome-setup footer {
-  max-width: 44rem;
-  margin-inline: auto;
-}
-.welcome-setup .welcome-eyebrow {
-  font-size: 0.65rem;
-  letter-spacing: 0.12em;
-  font-weight: 650;
-  color: var(--color-text-2);
-}
-.welcome-setup h1 {
-  font-size: clamp(1.5rem, 3vw, 2rem);
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.15;
-  margin: 0.4rem 0 0.65rem;
-}
-.welcome-setup h2 {
-  font-size: 0.95rem;
-  font-weight: 600;
-  line-height: 1.35;
-}
-.welcome-setup p {
-  color: var(--color-text-2);
-  margin: 0.35rem 0 0.7rem;
-}
-.welcome-steps {
-  list-style: none;
-  padding: 0;
-  margin-block: 1.5rem;
-}
-.welcome-steps li {
+
+.welcome-layout {
   display: grid;
-  grid-template-columns: 1.7rem minmax(0, 1fr);
-  gap: 0.9rem;
-  border-top: 1px solid var(--color-line);
-  padding: 1.1rem 0;
-}
-.welcome-number {
-  display: grid;
-  place-items: center;
-  width: 1.6rem;
-  height: 1.6rem;
-  border: 1px solid var(--color-line);
-  border-radius: 50%;
-  color: var(--color-text-2);
-  font-size: 0.75rem;
-}
-.welcome-setup button {
-  min-height: 2.75rem;
-  padding: 0.55rem 0.85rem;
-  border: 1px solid var(--color-line);
-  border-radius: 0.55rem;
-  background: var(--color-surface-2);
-  color: var(--color-text);
-  font: inherit;
-  cursor: pointer;
-}
-.welcome-setup button:is(:disabled, [aria-disabled="true"]) {
-  opacity: 0.5;
-  cursor: default;
-}
-.welcome-setup button:active:not(:disabled, [aria-disabled="true"]) {
-  opacity: 0.8;
-}
-.welcome-setup footer {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.75rem;
-  border-top: 1px solid var(--color-line);
-  padding-top: 1.15rem;
-}
-.welcome-setup footer > div {
-  flex: 1 1 14rem;
-}
-.welcome-setup .welcome-primary {
-  background: var(--color-text);
-  color: var(--color-void);
-  font-weight: 600;
-}
-.appearance-picker {
-  border: 0;
-  padding: 0;
-  margin: 0.65rem 0 0;
-  min-width: 0;
-}
-.appearance-picker legend {
-  font-size: 0.8rem;
-  color: var(--color-text-2);
-}
-.appearance-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.65rem;
-  margin-top: 0.4rem;
-}
-.appearance-picker .appearance-option {
-  position: relative;
-  display: flex;
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
-  min-height: 44px;
-  margin: 0;
-  padding: 0 16px 0 12px;
-  border-radius: 8px;
-  background: var(--color-surface-2);
-  box-shadow: inset 0 0 0 1px var(--color-line);
-  color: var(--color-text-2);
-  cursor: pointer;
-}
-.appearance-option:has(input:checked) {
-  box-shadow: inset 0 0 0 1.5px var(--color-text-2);
-  color: var(--color-text);
-}
-.appearance-option:has(input:focus-visible) {
-  outline: var(--focus-width) solid var(--color-text);
-  outline-offset: 2px;
-}
-.appearance-picker .appearance-option input {
-  position: absolute;
-  inset: 0;
-  width: 100%;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
   height: 100%;
-  min-width: 0;
+}
+
+@starting-style {
+  .welcome-setup {
+    opacity: 0;
+  }
+}
+
+.stage-col:has(.welcome-setup) > .caption {
+  visibility: hidden;
+}
+
+.welcome-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   min-height: 0;
+  padding: calc(var(--spacing) * 8) calc(var(--spacing) * 6);
+  border-right: 1px solid var(--color-hairline);
+  text-align: center;
+}
+
+.welcome-hero > .dot {
+  margin-bottom: calc(var(--spacing) * 5);
+}
+
+.welcome-title {
+  font:
+    var(--text-display--font-weight) var(--text-display) / var(--text-display--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-display--letter-spacing);
+}
+
+.welcome-lede {
+  max-width: 28ch;
+  margin-top: calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-wrap: balance;
+}
+
+.welcome-start {
+  margin-top: calc(var(--spacing) * 6);
+}
+
+/* Holds its line while empty, so the hint arriving moves nothing. */
+.welcome-note {
+  min-height: var(--text-footnote--line-height);
+  margin-top: calc(var(--spacing) * 3);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-wrap: balance;
+}
+
+.welcome-scroll {
+  height: 100%;
+}
+
+.welcome-steps {
+  display: grid;
+  align-content: center;
+  min-height: 100%;
   margin: 0;
-  opacity: 0;
-  cursor: pointer;
+  padding: calc(var(--spacing) * 6) calc(var(--spacing) * 8);
+  list-style: none;
 }
-.appearance-picker p {
-  font-size: 0.75rem;
-  color: var(--color-text-2);
-  margin-top: 0.55rem;
+
+/* The glyph sits on the title's line, the detail under the title, and the control centred beside
+   the two; any choices take the full width beneath. */
+.welcome-step {
+  display: grid;
+  grid-template-columns: calc(var(--spacing) * 4) minmax(0, 1fr) auto;
+  grid-template-areas:
+    "glyph title action"
+    ". detail action"
+    ". extra extra";
+  align-items: center;
+  column-gap: calc(var(--spacing) * 3);
+  padding-block: calc(var(--spacing) * 4);
+  border-top: 1px solid var(--color-hairline);
 }
-.appearance-tile {
-  flex: none;
-  width: 20px;
-  height: 14px;
-  border-radius: 4px;
+
+.welcome-step:first-child {
+  border-top: 0;
 }
-.appearance-tile.graphite {
-  background: linear-gradient(var(--graphite-overlay) 0 5px, var(--graphite-void) 5px);
+
+.welcome-step-glyph {
+  grid-area: glyph;
 }
-.appearance-tile.midnight {
-  background: linear-gradient(var(--midnight-overlay) 0 5px, var(--midnight-void) 5px);
+
+.welcome-step-title {
+  grid-area: title;
+  font:
+    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+}
+
+.welcome-step-action {
+  grid-area: action;
+}
+
+.welcome-step-detail {
+  grid-area: detail;
+  margin-top: 2px;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.welcome-step-extra {
+  grid-area: extra;
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.appearance-swatch {
+  display: block;
+  width: calc(var(--spacing) * 10);
+  height: calc(var(--spacing) * 7);
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.appearance-swatch[data-appearance="graphite"] {
+  background: linear-gradient(
+    to bottom,
+    var(--graphite-raised-2) 0 40%,
+    var(--graphite-void) 40% 100%
+  );
+}
+
+.appearance-swatch[data-appearance="midnight"] {
+  background: linear-gradient(
+    to bottom,
+    var(--midnight-raised-2) 0 40%,
+    var(--midnight-void) 40% 100%
+  );
+}
+
+/* A short stage keeps the steps and the action, and lets dot go. */
+@container (height < 400px) {
+  .welcome-hero > .dot {
+    display: none;
+  }
+}
+
+/* A narrow stage stacks the action above the steps; only the steps scroll. */
+@container (width < 600px) {
+  .welcome-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .welcome-hero {
+    padding: calc(var(--spacing) * 6) calc(var(--spacing) * 5) calc(var(--spacing) * 4);
+    border-right: 0;
+    border-bottom: 1px solid var(--color-hairline);
+  }
+
+  .welcome-hero > .dot {
+    margin-bottom: calc(var(--spacing) * 3);
+  }
+
+  .welcome-start {
+    margin-top: calc(var(--spacing) * 4);
+  }
+
+  .welcome-steps {
+    align-content: start;
+    padding: calc(var(--spacing) * 1) calc(var(--spacing) * 5) calc(var(--spacing) * 4);
+  }
+}
+
+/* A phone's computer pane has nothing else in it while there is no computer, so setup takes the
+   pane rather than a 16:10 strip of it. */
+@media (width < 760px) {
+  .stage:has(> .welcome-setup) {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    aspect-ratio: auto;
+  }
+
+  .stage-col:has(.welcome-setup) {
+    justify-content: stretch;
+  }
+
+  .stage-col:has(.welcome-setup) > .caption {
+    display: none;
+  }
 }

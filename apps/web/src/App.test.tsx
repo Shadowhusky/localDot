@@ -2,6 +2,7 @@
 
 import { emptyManifest, type LocalDotEvent, type SessionCard, ulid } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
@@ -288,10 +289,13 @@ describe("App token states", () => {
 
   it("asks for the token when none is stored", () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    const notice = screen.getByRole("alert").textContent;
-    expect(notice).toContain("Sign in to localDot");
-    expect(notice).toContain("Run localdot open");
-    expect(notice).not.toMatch(/daemon|token/i);
+    expect(screen.getByRole("heading", { name: "Open localDot from Terminal" })).toBeTruthy();
+    expect(screen.getByRole("status").textContent).toBe(
+      "This page needs a sign-in link. Run this to get one:",
+    );
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(document.body.textContent).toContain("localdot open");
+    expect(document.body.textContent).not.toMatch(/daemon|token|#code/i);
   });
 
   it("opens Keys beside the live page and gives focus back to the trigger after closing", async () => {
@@ -336,7 +340,7 @@ describe("App token states", () => {
     const keys = screen.getByRole("dialog", { name: "Keys" });
     const value = within(keys).getByRole("textbox", { name: "Key" }) as HTMLInputElement;
     fireEvent.change(value, { target: { value: "sk-typed-but-not-saved" } });
-    const review = screen.getByRole("button", { name: "Review autonomy" });
+    const review = screen.getByRole("button", { name: "Review" });
     fireEvent.click(review);
     const prompt = within(keys).getByRole("group", { name: "Discard unsaved changes?" });
     expect(prompt.hasAttribute("data-shown")).toBe(true);
@@ -474,7 +478,7 @@ describe("App token states", () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const fetchImpl = vi.fn(unauthorized);
     render(<App fetchImpl={fetchImpl} />);
-    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
+    expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fetchImpl).toHaveBeenCalledTimes(5);
@@ -482,12 +486,14 @@ describe("App token states", () => {
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
+    expect(screen.getByRole("heading", { name: "Open localDot from Terminal" })).toBeTruthy();
 
     window.location.hash = "#token=abc";
     await waitFor(() => expect(window.location.hash).toBe(""));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "That link has expired or was already used.",
+    );
 
     window.location.hash = `#token=${TOKEN}`;
     await waitFor(() => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2));
@@ -827,7 +833,7 @@ describe("App on a refused status socket", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     revoked = true;
     act(() => FakeWebSocket.instances[0]?.onclose?.());
-    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
+    expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami"]);
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     // The unmount's or cell change's effect cleanup closes the socket; let React run it first.
@@ -917,7 +923,7 @@ describe("App token hardening", () => {
     await screen.findAllByRole("button", { name: "Turn on" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
-    expect(screen.queryByText("Sign in to localDot")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Open localDot from Terminal" })).toBeNull();
     expect(d.calls.filter((c) => c.path === "/api/cells").every((c) => c.token === TOKEN)).toBe(
       true,
     );
@@ -927,7 +933,7 @@ describe("App token hardening", () => {
     const d = daemon(() => new Response("unauthorized", { status: 401 }));
     window.location.hash = `#token=${NEWER}`;
     render(<App fetchImpl={d.fetchImpl} />);
-    expect(await screen.findByText(/This sign-in link was not accepted/)).toBeTruthy();
+    expect(await screen.findByText(/That link has expired or was already used/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(d.seen()).toEqual(["GET /api/whoami"]);
   });
@@ -958,8 +964,8 @@ describe("App token hardening", () => {
       oldList.resolve(new Response("unauthorized", { status: 401 }));
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-      expect(screen.queryByText("Sign in to localDot")).toBeNull();
-      expect(screen.queryByText(/Your saved sign-in no longer works/)).toBeNull();
+      expect(screen.queryByRole("heading", { name: "Open localDot from Terminal" })).toBeNull();
+      expect(screen.queryByText(/This browser was signed out/)).toBeNull();
       expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
     },
   );
@@ -976,7 +982,7 @@ describe("App token hardening", () => {
     try {
       window.location.hash = `#token=${TOKEN}`;
       render(<App fetchImpl={d.fetchImpl} />);
-      expect(await screen.findByText("Checking the link…")).toBeTruthy();
+      expect(await screen.findByText("Signing you in…")).toBeTruthy();
       await waitFor(() => expect(answers).toBe(1));
       expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
       act(() => vi.advanceTimersByTime(2000));
@@ -987,9 +993,34 @@ describe("App token hardening", () => {
     }
   });
 
-  it("points at the link on the origin the page was opened from", () => {
-    render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain(`${window.location.origin}/#code=…`);
-    expect(window.location.origin).not.toBe("http://127.0.0.1:4750");
+  it("paints a link's sign-in check first, never the sign-in prompt it would replace", () => {
+    window.location.hash = `#code=${TOKEN}`;
+    const html = renderToString(<App fetchImpl={noCells as typeof fetch} />);
+    expect(html).not.toContain("Open localDot from Terminal");
+    expect(html).not.toContain('role="alert"');
+    expect(html).toContain('data-state="checking"');
+    expect(window.location.hash).toBe(`#code=${TOKEN}`);
+  });
+
+  it("shows nothing while a quick sign-in checks, then says it is signing in", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    const whoami = deferred<Response>();
+    window.location.hash = `#token=${TOKEN}`;
+    render(
+      <App
+        fetchImpl={
+          ((input: RequestInfo | URL) =>
+            new URL(String(input)).pathname === "/api/whoami"
+              ? whoami.promise
+              : noCells(input)) as typeof fetch
+        }
+      />,
+    );
+    expect(document.querySelector('.sign-in[data-state="checking"]')?.textContent).toBe("");
+    act(() => vi.advanceTimersByTime(599));
+    expect(screen.queryByText("Signing you in…")).toBeNull();
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByRole("status").textContent).toBe("Signing you in…");
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 });

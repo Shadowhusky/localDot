@@ -102,7 +102,7 @@ async function expectThemeTiles(sheet: Locator) {
   await expect(sheet.getByText("Change it in Settings")).toHaveCount(0);
   const graphite = sheet.getByRole("radio", { name: "Graphite" });
   expect(await graphite.evaluate((el) => getComputedStyle(el).opacity)).toBe("0");
-  const tile = sheet.locator('.settings-swatch[data-appearance="graphite"]');
+  const tile = sheet.locator('.appearance-swatch[data-appearance="graphite"]');
   expect(await tile.boundingBox()).toMatchObject({ width: 40, height: 28 });
 }
 
