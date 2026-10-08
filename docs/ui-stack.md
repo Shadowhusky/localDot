@@ -162,7 +162,7 @@ move onto Base UI behind the same `Tooltip`/`useTooltip` API. See "Kit atoms" be
 | Combobox | pass | Base UI |
 | Popover | pass | Base UI |
 | Menu | pass | Base UI |
-| Tooltip | pass | own since T06 (zero-dependency, first paint); Base UI remains possible behind the same API |
+| Tooltip | pass | own for now (T06, zero-dependency, first paint), pending gate 4; Base UI remains possible behind the same API |
 | Dialog / Sheet | pass | Base UI Dialog |
 | Drawer (bottom sheet) | pass | own drag over Dialog, so the budget can hold |
 | Toast | pass | own, so the budget can hold |
@@ -242,8 +242,8 @@ under the production CSP.
   element selectors (`.composer button`, `.settings-sheet button`, …) say, and a caller can still place it
   with a utility. Legacy properties the kit does not set still reach it; the screen tasks remove those
   selectors as they move a screen onto the kit (T04 guard rule 5). The legacy global
-  `button:active{transform:scale(.97)}` is overridden because the kit owns `transform`, but under reduced
-  motion its `opacity: .6` still dims a kit button while pressed until T29 deletes it.
+  `button:active` rules (`scale(.97)`, and `opacity: .6` under reduced motion) do not reach a kit control:
+  the kit holds its `transform` and `opacity`, because either would sink its face (see Targets).
 - **Gallery.** The atoms are one gallery page, `AtomsPage` in `src/ui/gallery/`, which brings its own
   styles (`atoms.css`, classes `atoms-*`). Until T01's gallery reaches this branch,
   `vite.kit-gallery.config.ts` builds the page alone (output `e2e/out/kit-gallery`) inside a stand-in
@@ -254,23 +254,36 @@ under the production CSP.
   screenshot spec drives them for each shot.
 - **Press.** `press.ts` writes `data-pressed` onto the element on pointer-down (and Space), so feedback is
   in the frame the pointer lands, without a render. It lets go when the pointer slides off and returns
-  if it comes back. A control up to 120×44 px squeezes (`scale(.97)`); a wider one only darkens. The
-  plan says 40 px tall; 44 keeps the squeeze on coarse pointers, where buttons grow to 44.
+  if it comes back. A control up to 120×44 px squeezes (`scale: .97` on its face and content, never on
+  the button itself); a wider one only darkens. The plan says 40 px tall; 44 keeps the squeeze on coarse
+  pointers, where buttons grow to 44.
 - **Unavailable.** `disabledReason` makes a control `aria-disabled` (never native `disabled`), keeps it
   focusable, suppresses its click (and form submission), describes it through a hidden node, and shows
   the reason as a tooltip on hover, keyboard focus, a mouse press or a tap.
-- **Tooltip.** Own, about 250 lines: 500 ms delay, then instant for 300 ms after one closes; closes on
-  leave, blur, a press elsewhere, scroll, resize and Escape (Escape on a focused trigger is consumed so a
-  parent layer stays open). The popup is `aria-hidden`: the trigger's name or `aria-describedby` already
-  carries the text. Positioned with inline styles set through the CSSOM, so the CSP holds. Grows from the
-  trigger on `--ease-spring`; opacity only under reduced motion.
+- **Tooltip.** Own, about 260 lines: 500 ms delay, then instant for 300 ms after one closes; closes on
+  leave, blur, a press elsewhere, resize, Escape (Escape on a focused trigger is consumed so a parent
+  layer stays open) and a scroll that can move its trigger: the page's or a scroller's around it, not a
+  rail streaming beside it. The popup is `aria-hidden`: the trigger's name or `aria-describedby` already
+  carries the text. Positioned with inline styles set through the CSSOM, so the CSP holds, and measured
+  again after every render while open, so it stays centred when a label changes under the pointer.
+  Grows from the trigger on `--ease-spring`; opacity only under reduced motion. Escape while a hovered
+  tooltip is open and focus is elsewhere also reaches the page; T08's `LayerStack` makes the tooltip the
+  topmost layer so one Escape closes only it.
 - **Targets.** Buttons reach 6 px past their edge on fine pointers and grow to 44 px on coarse ones;
-  icon buttons keep their visual size and reach to 44 px through `::after` at every size.
+  icon buttons keep their visual size and reach to 44 px through `::after` at every size. Controls can
+  sit closer than their reach, so the fill is drawn on a `::before` face that, with the control's
+  content, sits at `z-index: 1`, above every reach at `auto`: a press just inside an edge lands on that
+  control, and only the gap is shared. The button itself must never form a stacking context. Anything
+  drawn over a control, such as a badge, needs `z-index: 2` (and `pointer-events: none` so taps reach the
+  control); a sticky bar or panel that can cover kit controls in the same stacking context needs
+  `z-index: 2` or its own stacking context. Today that is the Keys sheet's sticky `.keys-discard` bar,
+  for T20.
 - **Icons.** 35 Lucide 1.31.0 outlines (the plan's list), drawn at 16 px with a 1.5 px stroke at any
   size. The licence is in `vendor/lucide/LICENSE`.
 - **Utilities minted by accident.** Words in kit sources mint `.grid`, `.hidden` and `.resize` into the
   app's utilities. No legacy class uses those names (the build test checks), so they are inert.
-- **Cost.** App CSS grows 63.1 → 71.8 kB (13.1 → 14.7 kB gz); app JS is unchanged.
+- **Cost.** App CSS grows 63.1 → 72.4 kB (13.1 → 14.9 kB gzip, as Vite reports it); app JS is
+  unchanged.
 
 ## Notes for the tasks that build on this
 
