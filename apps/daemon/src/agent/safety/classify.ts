@@ -2,6 +2,20 @@ import type { ActionClass, Target } from "@localdot/protocol";
 import type { GuiAction } from "../../gateway/gateway.ts";
 import type { NativeTargetFacts, RiskFacts } from "./risk.ts";
 
+// The options of a wrapper or interpreter: short (`value`) and long (`long`) ones whose value may be
+// the next word, operands before the program, and options that carry the program itself (`code`,
+// `codeLong`) or read it from stdin.
+interface Options {
+  readonly value?: string;
+  readonly long?: RegExp;
+  readonly operands?: number;
+  readonly code?: string;
+  readonly codeLong?: RegExp;
+  readonly stdin?: string;
+}
+
+const SHELL: Options = { code: "c", value: "oO", stdin: "s", long: /^--(?:rcfile|init-file)$/ };
+
 // Inside the computer the agent acts. Only a positive match here (a consequential name on a page, a
 // command that reaches past the computer, a secret field) or an unidentified target on a signed-in
 // screen lifts an action out of `computer`.
@@ -25,6 +39,7 @@ const PATTERNS = {
   actionable: /button|link|menu ?item|submit/i,
   field:
     /^(?:ax)?(?:text|text ?box|text ?field|text ?area|search ?box|search ?field|combo ?box|entry|editable text|input|spin ?button|password text|secure ?text ?field)$/i,
+  searchRole: /search|combo/i,
   secretRole: /AXSecureTextField|password|secure/i,
   secretName:
     /密碼|密码|验证码|驗證碼|支付|付款|信用卡|登入|登录|登錄|password|passcode|passphrase|one[ -]?time|verification[ -]?code|2fa|captcha|credit[ -]?card|card[ -]?number|security[ -]?code|cvv|cvc|expiry|expiration|billing|payment|sign[ -]?in|log[ -]?in/i,
@@ -34,9 +49,53 @@ const PATTERNS = {
   bareLoopback:
     /^(?:[^@\s/]+@)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:\/\S*)?$/i,
   remotePath: /^(?:[^@\s/:]+@)?(\[[0-9a-f:]+\]|[^\s/:]+):/i,
+  assignment: /^\w+=/,
   substitution:
     /(?:\b(?:ba|z|da|k)?sh|\beval|\bsource|(?:^|\s)\.)\s[^|;]*(?:<\(|\$\(|`)\s*(?:curl|wget)\b/,
-  interpreter: /^(?:(?:ba|z|da|k|fi)?sh|python[\d.]*|node|perl|ruby|php)$/,
+  wrappers: new Map<string, Options>([
+    [
+      "sudo",
+      {
+        value: "ugpCDrtTUR",
+        long: /^--(?:user|group|host|prompt|close-from|chdir|role|type|command-timeout|other-user)$/,
+      },
+    ],
+    ["doas", { value: "uaC" }],
+    ["env", { value: "uCP", long: /^--(?:unset|chdir)$/ }],
+    ["timeout", { value: "sk", long: /^--(?:signal|kill-after)$/, operands: 1 }],
+    ["nice", { value: "n", long: /^--adjustment$/ }],
+    ["ionice", { value: "cnpPu", long: /^--(?:class|classdata|pid|pgid|uid)$/ }],
+    ["stdbuf", { value: "ioe", long: /^--(?:input|output|error)$/ }],
+    ["nohup", {}],
+    ["setsid", {}],
+    ["time", { value: "fo", long: /^--(?:format|output)$/ }],
+    ["command", {}],
+    ["exec", { value: "a" }],
+    [
+      "xargs",
+      {
+        value: "aIdELnPs",
+        long: /^--(?:arg-file|delimiter|max-args|max-procs|max-chars|process-slot-var)$/,
+      },
+    ],
+  ]),
+  interpreters: [
+    [/^(?:ba|z|da|k|fi)?sh$/, SHELL],
+    [/^python[\d.]*$/, { code: "cm", value: "WX" }],
+    [
+      /^node$/,
+      {
+        code: "cep",
+        codeLong: /^--(?:eval|print|check)$/,
+        value: "rC",
+        long: /^--(?:require|import|loader|experimental-loader|conditions|title|env-file)$/,
+      },
+    ],
+    [/^perl$/, { code: "eE", value: "IMm" }],
+    [/^ruby$/, { code: "e", value: "rICEF" }],
+    [/^php$/, { code: "rfRF", value: "cdzBE" }],
+  ] as readonly (readonly [RegExp, Options])[],
+  stdinPath: /^(?:-|\/dev\/stdin|\/dev\/fd\/0|\/proc\/self\/fd\/0)$/,
   installer:
     /^(?:(?:ba|z|da|k|fi)?sh|python[\d.]*|node|perl|ruby|php|chmod|dpkg|apt|apt-get|rpm|pip[\d.]*)$/,
   mail: /^(?:mail|mailx|sendmail|mutt|msmtp|ssmtp)$/,
@@ -51,6 +110,12 @@ const PATTERNS = {
     ["podman", "push"],
   ]),
   ghPost: /^(?:create|comment|merge|edit|review|close|reopen)$/,
+  // curl's short options that take a value, which may be attached (-XPUT) or the next word.
+  curlValue: new Set("AbcCdDeEFHKmoPQrTtuUwxXyYz"),
+  curlSend: /^(?:data|json$)/,
+  curlUpload: /^(?:form|upload-file$)/,
+  wgetDelete: /--method[\s=]DELETE\b/i,
+  wgetSend: /--post-(?:data|file)|--body-(?:data|file)|--method[\s=](?:POST|PUT|PATCH)\b/i,
 } as const;
 
 export function classify(facts: RiskFacts): readonly ActionClass[] {
@@ -124,7 +189,7 @@ function input(facts: RiskFacts): ActionClass[] {
     (facts.operation === "type" && facts.newline === true);
   const compose =
     PATTERNS.field.test(identified.role ?? "") &&
-    !/search|combo/i.test(identified.role ?? "") &&
+    !PATTERNS.searchRole.test(identified.role ?? "") &&
     !PATTERNS.search.test(name);
   return submits && compose ? ["send"] : ["computer"];
 }
@@ -178,19 +243,83 @@ function words(text: string): string[] {
     .filter(Boolean);
 }
 
-// Drops wrappers that run the next word as the program.
-function program(stage: string): string[] {
-  const tokens = words(stage);
-  while (
-    tokens.length &&
-    (/^(?:sudo|env|nohup|time|exec)$/.test(tokens[0] ?? "") || /^\w+=/.test(tokens[0] ?? ""))
-  )
-    tokens.shift();
-  return tokens;
-}
-
 function base(token: string | undefined): string {
   return (token ?? "").split("/").pop() ?? "";
+}
+
+function interpreter(name: string): Options | undefined {
+  return PATTERNS.interpreters.find(([pattern]) => pattern.test(name))?.[1];
+}
+
+// The words after a wrapper's options. A shell wraps only with -c (otherwise it runs a script or
+// stdin); the words of its command string follow, since the stage was split into plain words.
+function unwrap(args: readonly string[], options: Options): string[] | undefined {
+  let operands = options.operands ?? 0;
+  let code = false;
+  let i = 0;
+  for (; i < args.length; i++) {
+    const arg = args[i] ?? "";
+    if (arg === "--") {
+      i++;
+      break;
+    }
+    if (arg.startsWith("--")) {
+      if (!arg.includes("=") && options.long?.test(arg)) i++;
+    } else if (/^[-+]/.test(arg)) {
+      for (let j = 1; j < arg.length; j++) {
+        const flag = arg[j] ?? "";
+        if (options.code?.includes(flag)) code = true;
+        if (options.value?.includes(flag)) {
+          if (j === arg.length - 1) i++;
+          break;
+        }
+      }
+    } else if (operands-- <= 0) break;
+  }
+  return options.code && !code ? undefined : args.slice(i);
+}
+
+function program(stage: string): string[] {
+  let tokens = words(stage);
+  for (;;) {
+    while (PATTERNS.assignment.test(tokens[0] ?? "")) tokens.shift();
+    const name = base(tokens[0]);
+    const options =
+      PATTERNS.wrappers.get(name) ?? (interpreter(name) === SHELL ? SHELL : undefined);
+    const rest = options && unwrap(tokens.slice(1), options);
+    if (!rest) return tokens;
+    tokens = rest;
+  }
+}
+
+// Whether an interpreter takes its program from stdin: no option names the code and no script
+// operand is given, other than stdin itself.
+function readsProgram(tokens: readonly string[]): boolean {
+  const options = interpreter(base(tokens[0]));
+  if (!options) return false;
+  for (let i = 1; i < tokens.length; i++) {
+    const arg = tokens[i] ?? "";
+    if (PATTERNS.stdinPath.test(arg)) return true;
+    if (arg === "--")
+      return i + 1 === tokens.length || PATTERNS.stdinPath.test(tokens[i + 1] ?? "");
+    if (arg.startsWith("--")) {
+      const [option = ""] = arg.split("=", 1);
+      if (options.codeLong?.test(option)) return false;
+      if (!arg.includes("=") && options.long?.test(arg)) i++;
+      continue;
+    }
+    if (!/^[-+]./.test(arg)) return false;
+    for (let j = 1; j < arg.length; j++) {
+      const flag = arg[j] ?? "";
+      if (options.code?.includes(flag)) return false;
+      if (options.stdin?.includes(flag)) return true;
+      if (options.value?.includes(flag)) {
+        if (j === arg.length - 1) i++;
+        break;
+      }
+    }
+  }
+  return true;
 }
 
 function hosts(tokens: readonly string[]): string[] {
@@ -230,9 +359,6 @@ function subcommand(tokens: readonly string[]): string | undefined {
   return undefined;
 }
 
-// curl's short options that take a value, which may be attached (-XPUT) or the next word.
-const CURL_VALUE_FLAGS = new Set("AbcCdDeEFHKmoPQrTtuUwxXyYz");
-
 function curl(args: readonly string[]): ActionClass | undefined {
   const used = new Set<string>();
   let method = "";
@@ -241,15 +367,16 @@ function curl(args: readonly string[]): ActionClass | undefined {
     if (arg.startsWith("--")) {
       const [name = "", inline] = arg.slice(2).split("=", 2);
       if (name === "request") method = (inline ?? args[++i] ?? "").toUpperCase();
-      else if (/^(?:data|json$)/.test(name)) used.add("d");
-      else if (/^(?:form|upload-file$)/.test(name)) used.add("F");
+      else if (name === "get") used.add("G");
+      else if (PATTERNS.curlSend.test(name)) used.add("d");
+      else if (PATTERNS.curlUpload.test(name)) used.add("F");
       continue;
     }
     if (!arg.startsWith("-")) continue;
     for (let j = 1; j < arg.length; j++) {
       const flag = arg[j] ?? "";
       used.add(flag);
-      if (!CURL_VALUE_FLAGS.has(flag)) continue;
+      if (!PATTERNS.curlValue.has(flag)) continue;
       const value = arg.slice(j + 1) || args[++i] || "";
       if (flag === "X") method = value.toUpperCase();
       break;
@@ -257,15 +384,15 @@ function curl(args: readonly string[]): ActionClass | undefined {
   }
   if (used.has("F") || used.has("T")) return "upload";
   if (method === "DELETE") return "delete";
-  if (used.has("d") || ["POST", "PUT", "PATCH"].includes(method)) return "send";
+  // -G sends the data as a query string on a GET.
+  if ((used.has("d") && !used.has("G")) || ["POST", "PUT", "PATCH"].includes(method)) return "send";
   return undefined;
 }
 
 function wget(tokens: readonly string[]): ActionClass | undefined {
   const flags = tokens.join(" ");
-  if (/--method[\s=]DELETE\b/i.test(flags)) return "delete";
-  if (/--post-(?:data|file)|--body-(?:data|file)|--method[\s=](?:POST|PUT|PATCH)\b/i.test(flags))
-    return "send";
+  if (PATTERNS.wgetDelete.test(flags)) return "delete";
+  if (PATTERNS.wgetSend.test(flags)) return "send";
   return undefined;
 }
 
@@ -303,7 +430,10 @@ function stageClass(tokens: readonly string[]): ActionClass | undefined {
 
 function shell(command: string): ActionClass[] {
   const classes = new Set<ActionClass>(["computer"]);
-  const commands = command.replace(/\d*>&\d*|&>/g, " ").split(/&&|\|\||[;\n]|&(?!&)/);
+  const commands = command
+    .replace(/\|&/g, "|")
+    .replace(/\d*>&\d*|&>/g, " ")
+    .split(/&&|\|\||[;\n]|&(?!&)/);
   for (const text of commands) {
     if (PATTERNS.substitution.test(text) && remote(words(text))) classes.add("download_execute");
     const stages = text
@@ -317,7 +447,7 @@ function shell(command: string): ActionClass[] {
       if (
         ["curl", "wget"].includes(base(stage[0])) &&
         next &&
-        PATTERNS.interpreter.test(base(next[0])) &&
+        readsProgram(next) &&
         remote(stage.slice(1))
       )
         classes.add("download_execute");
