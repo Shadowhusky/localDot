@@ -451,6 +451,43 @@ describe("private browser perception projection", () => {
     ]);
   });
 
+  it("names the page on every target without its user info, query or fragment", () => {
+    const source = metadata();
+    const strings = source.snapshot.strings;
+    strings.push(`https://me:pw@mail.example.test/compose?draft=${privateCanary}#${privateCanary}`);
+    Object.assign(required(source.snapshot.documents[0]), { documentURL: strings.length - 1 });
+    const result = projectBrowser(source.snapshot, source.accessibility, "root", geometry(), 2);
+    expect(result.targets.map((target) => target.url)).toEqual(
+      result.targets.map(() => "https://mail.example.test/compose"),
+    );
+    expect(result.targetForNode(13)?.url).toBe("https://mail.example.test/compose");
+    expect(JSON.stringify(result)).not.toMatch(/private-field|me:pw/);
+  });
+
+  it.each([
+    "about:blank",
+    "chrome-error://chromewebdata/",
+    "file:///private.txt",
+    "not a page address",
+  ])("names no page for %s", (address) => {
+    const source = metadata();
+    const strings = source.snapshot.strings;
+    strings.push(address);
+    Object.assign(required(source.snapshot.documents[0]), { documentURL: strings.length - 1 });
+    const result = projectBrowser(source.snapshot, source.accessibility, "root", geometry(), 2);
+    expect(result.targets.length).toBeGreaterThan(0);
+    expect(result.targets.some((target) => "url" in target)).toBe(false);
+  });
+
+  it("names only the site of a page whose address is too long to carry", () => {
+    const source = metadata();
+    const strings = source.snapshot.strings;
+    strings.push(`https://mail.example.test/${"a".repeat(2100)}`);
+    Object.assign(required(source.snapshot.documents[0]), { documentURL: strings.length - 1 });
+    const result = projectBrowser(source.snapshot, source.accessibility, "root", geometry(), 2);
+    expect(result.targets[0]?.url).toBe("https://mail.example.test");
+  });
+
   it("unions multiple layout boxes for one node and masks every fragment", () => {
     const source = metadata();
     const root = required(source.snapshot.documents[0]);
@@ -495,6 +532,19 @@ describe("leased browser observation", () => {
       expect(JSON.stringify(result)).not.toMatch(/backend|private-field|foreign frame|image/);
     },
   );
+  it("names the page of a target it looks up", async () => {
+    const f = await setup();
+    readingPage(f);
+    const result = await f.observation.lookup(
+      permit,
+      "tab",
+      { kind: "hitTest", point: { x: 95, y: 143.75 } },
+      f.abort.signal,
+    );
+    expect(result.target).toMatchObject({ name: "Continue", url: "https://example.test/article" });
+    expect(JSON.stringify(result)).not.toContain(privateCanary);
+    await f.observation.close();
+  });
   it("finds unique public names and returns no ambiguous or foreign target", async () => {
     const f = await setup();
     expect(

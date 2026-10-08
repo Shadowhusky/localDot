@@ -4,16 +4,15 @@ import {
   type ActionClass,
   type ApprovalRequestDraft,
   type AutonomyMode,
-  type AutonomyPolicy,
   ApprovalRequestDraft as DraftSchema,
-  AutonomyPolicy as PolicySchema,
-  Target,
+  type ScreenName,
 } from "@localdot/protocol";
 export interface NativeTargetFacts {
   source: "ax" | "dom" | "coords" | "som" | "ocr" | "vision";
   fresh: boolean;
   role?: string;
   name?: string;
+  app?: string;
   url?: string;
   secret?: boolean;
 }
@@ -22,6 +21,7 @@ export type RiskFacts = {
     | "observe"
     | "navigate"
     | "click"
+    | "pointer"
     | "type"
     | "key"
     | "scroll"
@@ -30,8 +30,16 @@ export type RiskFacts = {
     | "files_read"
     | "files_write"
     | "files_upload"
-    | "files_delete";
+    | "files_delete"
+    | "memory_write";
+  // Filled from the daemon's own session state when the action is decided.
+  screen?: ScreenName;
+  signedIn?: boolean;
   target?: NativeTargetFacts;
+  keys?: readonly string[];
+  newline?: boolean;
+  // Typed text goes on past a Tab, which moves focus to the next control.
+  tabbed?: boolean;
   command?: string;
   destination?: string;
 };
@@ -40,95 +48,6 @@ export type RiskDecision = {
   mode: AutonomyMode;
   risk: "none" | "medium" | "high";
 };
-const protectedField =
-  /密碼|密码|验证码|驗證碼|支付|付款|信用卡|登入|登录|登錄|AXSecureTextField|password|passcode|one[ -]?time|verification[ -]?code|2fa|captcha|credit[ -]?card|card[ -]?number|security[ -]?code|cvv|expiry|billing|payment|sign[ -]?in|log[ -]?in/i;
-const high: readonly [ActionClass, RegExp][] = [
-  ["purchase", /\b(buy|pay|purchase|place\s+order|checkout)\b/i],
-  ["send", /\b(send|submit\s+message|mail|email)\b/i],
-  ["post", /\b(post|publish|share)\b/i],
-  ["delete", /\b(delete|remove|trash|erase|discard)\b/i],
-  ["download_execute", /\b(install|execute|run\s+download|open\s+download)\b/i],
-  ["system_settings", /\b(permission|settings|preferences|allow\s+access)\b/i],
-];
-function risk(c: ActionClass, policy: AutonomyPolicy): RiskDecision {
-  return {
-    actionClass: c,
-    mode: c === "credentials" ? "handoff" : c === "unknown" ? "ask" : policy[c],
-    risk: c === "reading" || c === "browsing" ? "none" : c === "unknown" ? "medium" : "high",
-  };
-}
-function strongest(classes: ActionClass[], policy: AutonomyPolicy): RiskDecision {
-  if (classes.length === 0) return risk("unknown", policy);
-  const rank = { act: 0, ask: 1, handoff: 2 };
-  return classes
-    .map((c) => risk(c, policy))
-    .reduce((best, next) => (rank[next.mode] > rank[best.mode] ? next : best));
-}
-function matching(description: string): ActionClass[] {
-  return high.filter(([, pattern]) => pattern.test(description)).map(([c]) => c);
-}
-export function classify(facts: RiskFacts, rawPolicy: AutonomyPolicy): RiskDecision {
-  const policy = PolicySchema.parse(rawPolicy);
-  if (facts.operation === "observe" || facts.operation === "files_read")
-    return risk("reading", policy);
-  if (facts.operation === "wait" || facts.operation === "scroll") return risk("browsing", policy);
-  if (facts.operation === "files_delete") return risk("delete", policy);
-  if (facts.operation === "files_write") return risk("unknown", policy);
-  if (facts.operation === "files_upload") {
-    const decision = risk("send", policy);
-    return { ...decision, mode: decision.mode === "handoff" ? "handoff" : "ask", risk: "high" };
-  }
-  if (facts.operation === "shell") {
-    const command = facts.command ?? "";
-    if (protectedField.test(command)) return risk("credentials", policy);
-    const classes = matching(command);
-    if (/(^|[;&|\s])(?:rm|rmdir|unlink|shred)(?:\s|$)/i.test(command)) classes.push("delete");
-    if (/(^|[;&|\s])(?:sudo|systemctl|launchctl|defaults)(?:\s|$)/i.test(command))
-      classes.push("system_settings");
-    if (/(^|[;&|\s])(?:bash|sh|zsh|python\d*|node|npm|pnpm|pip\d*|chmod)(?:\s|$)/i.test(command))
-      classes.push("download_execute");
-    const decision = strongest(classes, policy);
-    // Regex cannot establish the complete effects of scripts, substitutions or aliases.
-    return decision.mode === "act" ? { ...decision, mode: "ask" } : decision;
-  }
-  if (facts.operation === "navigate") {
-    let url: URL;
-    try {
-      url = new URL(facts.destination ?? "");
-    } catch {
-      return risk("unknown", policy);
-    }
-    if (!["http:", "https:"].includes(url.protocol) || url.username || url.password)
-      return risk("unknown", policy);
-    const classes = matching(decodePath(url.pathname));
-    if (url.search) classes.push("unknown");
-    return strongest(classes.length ? classes : ["browsing"], policy);
-  }
-  const target = facts.target;
-  if (!target?.fresh || !["ax", "dom"].includes(target.source))
-    return risk(facts.operation === "type" ? "credentials" : "unknown", policy);
-  const description = `${target.role ?? ""}\n${target.name ?? ""}\n${decodePath(safeTargetURL(target.url))}`;
-  if (facts.operation === "type" || target.secret || protectedField.test(description))
-    return risk("credentials", policy);
-  const classes = matching(description);
-  if (target.url) {
-    try {
-      const url = new URL(target.url);
-      if (!["http:", "https:"].includes(url.protocol) || url.username || url.password || url.search)
-        classes.push("unknown");
-    } catch {
-      classes.push("unknown");
-    }
-  }
-  return strongest(classes, policy);
-}
-function decodePath(value: string): string {
-  try {
-    return decodeURIComponent(value);
-  } catch {
-    return value;
-  }
-}
 export function safeTargetURL(value: string | undefined): string {
   if (!value) return "";
   try {
@@ -198,41 +117,20 @@ export function actionDigest(value: unknown): string {
   return createHash("sha256").update(canonical(value)).digest("hex");
 }
 
-export function nativeRiskFacts(
-  operation: "click" | "key" | "type",
-  value: Target | undefined,
-  fresh: boolean,
-): RiskFacts {
-  const target = value === undefined ? undefined : Target.parse(value);
-  return {
-    operation,
-    ...(target
-      ? {
-          target: {
-            source: target.source,
-            fresh,
-            role: target.role,
-            name: target.name,
-            url: target.url,
-            secret:
-              target.secret === true ||
-              protectedField.test(`${target.role ?? ""} ${target.name ?? ""}`),
-          },
-        }
-      : {}),
-  };
-}
 const titles: Record<ActionClass, string> = {
   reading: "Read information",
-  browsing: "Browse information",
-  purchase: "Make purchase",
-  send: "Send message",
-  post: "Publish content",
-  delete: "Delete item",
-  download_execute: "Run downloaded program",
-  system_settings: "Change system settings",
-  credentials: "Take control for protected input",
-  unknown: "Review action",
+  browsing: "Browse websites",
+  computer: "Work in its computer",
+  purchase: "Buy or pay",
+  send: "Send as you",
+  post: "Post as you",
+  delete: "Delete your online data",
+  download_execute: "Run a downloaded program",
+  system_settings: "Change account settings",
+  memory: "Save to its memory",
+  upload: "Upload your files",
+  credentials: "Enter a password or code yourself",
+  unknown: "Unclear step",
 };
 export function buildApprovalCard(
   facts: RiskFacts,

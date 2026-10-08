@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { APPROVAL_TIMEOUT_MS } from "@localdot/protocol";
 import { Agent, fetch as undiciFetch } from "undici";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { bootConfig, PROXY_TOKEN } from "./testing/scripted.ts";
@@ -58,11 +59,11 @@ describe("tool deadlines own the whole response lifetime", () => {
     await call.settled;
     expect(call.state.value).toEqual(RESULT);
   });
-  it("expires an unanswered shell at its validated timeout plus ten seconds", async () => {
+  it("expires an unanswered shell after the approval wait plus its timeout and ten seconds", async () => {
     vi.useFakeTimers();
-    const c = client(delayed(900_000));
+    const c = client(delayed(APPROVAL_TIMEOUT_MS + 900_000));
     const call = observe(c.tool("shell", "c", { command: "fixture", timeout_sec: 600 }));
-    await vi.advanceTimersByTimeAsync(609_999);
+    await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS + 609_999);
     expect(call.state.done).toBe(false);
     await vi.advanceTimersByTimeAsync(1);
     expect(call.state.done).toBe(true);
@@ -70,6 +71,52 @@ describe("tool deadlines own the whole response lifetime", () => {
     expect(call.state.error).toBeInstanceOf(ToolApiError);
     expect(String(call.state.error)).toContain("cancelled");
   });
+  // Evidence: unanswered cards were cancelled at about 117 s, and a hand-off held inside a
+  // computer call died with its request. The daemon bounds the work; the brain only waits.
+  it.each([
+    "computer",
+    "shell",
+    "files",
+    "browser_read",
+    "browser_navigate",
+    "browser_upload",
+    "remember",
+    "done",
+  ])("keeps %s pending while the user decides for fifteen minutes", async (name) => {
+    vi.useFakeTimers();
+    const c = client(delayed(16 * 60_000));
+    const call = observe(
+      c.tool(name, "c", name === "shell" ? { command: "fixture", timeout_sec: 30 } : {}),
+    );
+    await vi.advanceTimersByTimeAsync(120_001);
+    expect(call.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(13 * 60_000);
+    expect(call.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(60_000);
+    await call.settled;
+    expect(call.state.value).toEqual(RESULT);
+  });
+  it("expires a computer call at the approval wait plus two minutes of work", async () => {
+    vi.useFakeTimers();
+    const call = observe(client(delayed(APPROVAL_TIMEOUT_MS * 2)).tool("computer", "c", {}));
+    await vi.advanceTimersByTimeAsync(APPROVAL_TIMEOUT_MS + 119_999);
+    expect(call.state.done).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    await call.settled;
+    expect(String(call.state.error)).toContain("cancelled");
+  });
+  it.each(["update_plan", "switch_screen"])(
+    "keeps the base two-minute deadline for %s, which never waits on the user",
+    async (name) => {
+      vi.useFakeTimers();
+      const call = observe(client(delayed(900_000)).tool(name, "c", {}));
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(call.state.done).toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      await call.settled;
+      expect(String(call.state.error)).toContain("cancelled");
+    },
+  );
   it("keeps ask_user pending for six minutes but expires at thirty minutes plus ten seconds", async () => {
     vi.useFakeTimers();
     const call = observe(client(delayed(2_000_000)).tool("ask_user", "c", {}));
@@ -92,9 +139,13 @@ describe("tool deadlines own the whole response lifetime", () => {
     await call.settled;
     expect(String(call.state.error)).toContain("cancelled");
   });
-  it.each(["shell", "files"])(
+  it.each([
+    ["shell", APPROVAL_TIMEOUT_MS + 610_000],
+    ["files", APPROVAL_TIMEOUT_MS + 120_000],
+    ["update_plan", 120_000],
+  ] as const)(
     "keeps the deadline through a silent %s response body and cancels the reader",
-    async (name) => {
+    async (name, deadline) => {
       vi.useFakeTimers();
       let cancelled = false;
       const stream = new ReadableStream({
@@ -109,9 +160,9 @@ describe("tool deadlines own the whole response lifetime", () => {
       const call = observe(
         c.tool(name, "c", name === "shell" ? { command: "fixture", timeout_sec: 600 } : {}),
       );
-      await vi.advanceTimersByTimeAsync(name === "shell" ? 300_001 : 119_999);
+      await vi.advanceTimersByTimeAsync(deadline - 1);
       expect(call.state.done).toBe(false);
-      await vi.advanceTimersByTimeAsync(name === "shell" ? 309_999 : 1);
+      await vi.advanceTimersByTimeAsync(1);
       expect(call.state.done).toBe(true);
       await call.settled;
       expect(String(call.state.error)).toContain("cancelled");

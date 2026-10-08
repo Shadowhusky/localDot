@@ -1,7 +1,12 @@
-import type { ComputerAction, Target, ToolResult } from "@localdot/protocol";
-import type { ActionContext, GuiAction } from "../../gateway/gateway.ts";
-import { authorizePrepared } from "../safety/authorize.ts";
-import { classify, type RiskFacts } from "../safety/risk.ts";
+import type { ComputerAction, ToolResult } from "@localdot/protocol";
+import {
+  type ActionContext,
+  CHANGED_WHILE_DECIDING,
+  type GuiAction,
+} from "../../gateway/gateway.ts";
+import { authorizePrepared, type EffectPermit } from "../safety/authorize.ts";
+import { decideAutonomy } from "../safety/autonomy.ts";
+import { nativeActionFacts } from "../safety/classify.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
@@ -11,26 +16,6 @@ async function screenshot(deps: ToolDeps, ctx: ToolCallContext): Promise<ToolRes
   const o = await deps.gateway.observe(screenContext(ctx));
   ctx.check();
   return { ok: true, content: [await frame(deps, ctx, o.frameId)] };
-}
-
-// DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-function nativeFacts(action: GuiAction, target: Target | null): RiskFacts {
-  if (action.verb === "wait" || action.verb === "scroll") return { operation: action.verb };
-  return {
-    operation: action.verb,
-    ...(target
-      ? {
-          target: {
-            source: target.source,
-            fresh: true,
-            role: target.role,
-            name: target.name,
-            url: target.url,
-            secret: target.secret === true,
-          },
-        }
-      : {}),
-  };
 }
 
 function gui(a: ComputerAction): GuiAction | string {
@@ -103,30 +88,38 @@ export async function computerTool(
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
   const repeat = a.action === "key" ? (a.repeat ?? 1) : 1;
+  let runs = 0;
+  // One card covers the whole repeat, for the exact input and target it showed and nothing else.
+  let approval: EffectPermit | undefined;
   const nativeContext: ActionContext = {
     ...selected,
     source: "agent",
-    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
+    beforeEffect: (action, identity) => session.admitNativeEffect(action, identity, ctx.step),
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();
-      const facts = nativeFacts(request.action, request.identity.target);
-      const approved = classify(facts, ctx.session.autonomy).actionClass;
-      const boundInput = { toolInput: a, action: request.action };
-      const permit = await authorizePrepared(ctx, {
-        tool: "computer",
-        input: boundInput,
-        target: request.identity,
-        facts,
-        revalidate: request.revalidate,
-      });
+      const left = repeat - runs++;
+      // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
+      const facts = nativeActionFacts(request.action, request.identity.target);
+      const approved = decideAutonomy(ctx, facts).actionClass;
+      const permit =
+        approval ??
+        (await authorizePrepared(ctx, {
+          tool: "computer",
+          input: { toolInput: a, action: request.action },
+          target: request.identity,
+          facts,
+          revalidate: request.revalidate,
+          count: left,
+        }));
       ctx.check();
       if (!permit) return undefined;
+      if (permit.approved) approval = permit;
       return {
         // An approval made without an element binds only its window, so the read at dispatch may
         // name one: it must fall in the approved class, or in one the policy runs without asking.
         consume: (current, identity, fresh) => {
-          const found = classify(nativeFacts(current, fresh.target), ctx.session.autonomy);
+          const found = decideAutonomy(ctx, nativeActionFacts(current, fresh.target));
           if (found.mode !== "act" && found.actionClass !== approved) return false;
           if (ctx.redact(JSON.stringify(fresh)) !== JSON.stringify(fresh)) return false;
           return permit.consume({ toolInput: a, action: current }, identity);
@@ -145,7 +138,9 @@ export async function computerTool(
   if (outcome.cancelled === "stale") {
     content.push(
       text(
-        "Not clicked: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.",
+        outcome.error === CHANGED_WHILE_DECIDING
+          ? CHANGED_WHILE_DECIDING
+          : "Not clicked: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.",
       ),
     );
   } else if (!outcome.ok) {

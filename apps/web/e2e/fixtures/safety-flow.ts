@@ -38,6 +38,7 @@ export async function startSafetyTask(page: Page, f: Assembly) {
     .getByRole("checkbox", { name: "Use the configured default", exact: true })
     .uncheck();
   await settings.getByLabel("Task ceiling — USD", { exact: true }).fill("0.05");
+  await settings.getByLabel("Work in its computer", { exact: true }).selectOption("ask");
   await settings.getByRole("button", { name: "Save settings", exact: true }).click();
   await expect(settings).toContainText("Saved choices");
   await settings.getByRole("button", { name: "Close settings", exact: true }).click();

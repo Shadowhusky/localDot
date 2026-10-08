@@ -7,6 +7,7 @@ import {
 } from "../../desktopd/tools-client.ts";
 import { actPolicy } from "../policy.ts";
 import { redactor } from "../redact.ts";
+import { PausedStepError } from "../safety/step-barrier.ts";
 import { PROXY_TOKEN, SURROGATE, toolHarness } from "../testing/harness.ts";
 import type { ToolDeps } from "./deps.ts";
 import { type DispatchDeps, dispatchTool } from "./index.ts";
@@ -184,6 +185,62 @@ describe("handler generation and control fences", () => {
     expect((await call).result.ok).toBe(false);
     expect(launcher).not.toHaveBeenCalled();
     expect(observe).not.toHaveBeenCalled();
+  });
+});
+
+describe("a held Pause and hand-offs", () => {
+  const handedOff = (h: ReturnType<typeof setup>) => ({
+    control: h.session.controlHeld,
+    signedIn: h.session.taskAutonomy.signedIn("desktop"),
+    recorded: h
+      .events()
+      .filter(
+        (e) =>
+          ["takeover.request", "tool.end", "step.end"].includes(e.type) ||
+          (e.type === "agent.state" && e.data.state === "waiting_user"),
+      ).length,
+  });
+  const nothing = { control: false, signedIn: false, recorded: 0 };
+
+  it("refuses a takeover request: nothing is handed over, signed in or recorded", async () => {
+    const h = setup();
+    h.session.requestSafetyPause(ulid());
+    const { result } = await h.call("request_takeover", { reason: "login", note: "Sign in" });
+    expect(result).toMatchObject({ ok: false, pause: true });
+    expect(handedOff(h)).toEqual(nothing);
+  });
+  it("refuses a takeover request when the Pause lands while its policy is deciding", async () => {
+    const h = setup();
+    const gate = deferred<{ kind: "act" }>();
+    h.deps.policy = { decide: () => gate.promise };
+    const pending = h.call("request_takeover", { reason: "login", note: "Sign in" });
+    await turns();
+    h.session.requestSafetyPause(ulid());
+    gate.resolve({ kind: "act" });
+    expect((await pending).result).toMatchObject({ ok: false, pause: true });
+    expect(handedOff(h)).toEqual(nothing);
+  });
+  it("refuses a step's own hand-off while the Pause waits for that step to finish", async () => {
+    const h = setup();
+    const gate = deferred<{ kind: "act" }>();
+    h.deps.policy = { decide: () => gate.promise };
+    // A known credential in a command is the user's to type, so the step hands off.
+    const pending = h.call("shell", { command: `printf %s ${PROXY_TOKEN}` });
+    await turns();
+    const pause = h.session.requestSafetyPause(ulid());
+    expect(pause.phase).toBe("pausing");
+    gate.resolve({ kind: "act" });
+    expect((await pending).result).toMatchObject({ ok: false, pause: true });
+    expect(handedOff(h)).toEqual(nothing);
+    await h.session.safetyBoundary();
+    h.session.confirmSafetyPause(pause.requestId, pause.revision);
+    expect(h.session.safetyPause?.resumeAvailable).toBe(true);
+  });
+  it("the session itself refuses a hand-off while a Pause is held", async () => {
+    const h = setup();
+    h.session.requestSafetyPause(ulid());
+    await expect(h.session.takeover("login", "Sign in")).rejects.toBeInstanceOf(PausedStepError);
+    expect(handedOff(h)).toEqual(nothing);
   });
 });
 

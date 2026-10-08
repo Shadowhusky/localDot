@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, type KeydRecord, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import { afterEach, expect, it, vi } from "vitest";
@@ -177,7 +177,7 @@ it("reviewer: pending task keeps its policy while an idle prior task drains", as
   const f = setup();
   f.setSettings({
     main: { provider: "chatgpt", model: "gpt-6-astra" },
-    autonomy: DEFAULT_AUTONOMY,
+    autonomy: CAREFUL_AUTONOMY,
   });
   const old = await f.runner.start(f.cellId, "prior task");
   await until(() => old.status === "idle");
@@ -196,7 +196,7 @@ it("reviewer: pending task keeps its policy while an idle prior task drains", as
     await entered.promise;
     f.setSettings({
       main: { provider: "chatgpt", model: "gpt-6-astra" },
-      autonomy: { ...DEFAULT_AUTONOMY, send: "act" },
+      autonomy: { ...CAREFUL_AUTONOMY, send: "act" },
     });
     gate.resolve();
     const session = await pending;
@@ -211,13 +211,13 @@ it("reviewer: a later explicit task request receives the newly saved policy", as
   const f = setup();
   f.setSettings({
     main: { provider: "chatgpt", model: "gpt-6-astra" },
-    autonomy: DEFAULT_AUTONOMY,
+    autonomy: CAREFUL_AUTONOMY,
   });
   const old = await f.runner.start(f.cellId, "prior task");
   await until(() => old.status === "idle");
   f.setSettings({
     main: { provider: "chatgpt", model: "gpt-6-astra" },
-    autonomy: { ...DEFAULT_AUTONOMY, send: "act" },
+    autonomy: { ...CAREFUL_AUTONOMY, send: "act" },
   });
   const next = await f.runner.start(f.cellId, "explicit later task");
   expect(old.autonomy.send).toBe("ask");

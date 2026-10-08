@@ -24,7 +24,7 @@ describe("settings sheet presentation ownership", () => {
     const view = render(<SettingsSheet {...p} focusSection="autonomy" loading />);
     expect(document.activeElement).toBe(screen.getByRole("button", { name: "Close settings" }));
     view.rerender(<SettingsSheet {...p} focusSection="autonomy" />);
-    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: "Read information" }));
+    expect(document.activeElement).toBe(screen.getByRole("combobox", { name: "Read and look" }));
     const browsing = screen.getByRole("combobox", { name: "Browse websites" });
     browsing.focus();
     view.rerender(<SettingsSheet {...p} focusSection="autonomy" dirty />);
@@ -166,7 +166,7 @@ describe("settings sheet presentation ownership", () => {
   it("keeps the sheet and the choice when Escape comes from a select", () => {
     const p = { ...props(), dirty: true, autonomy: DEFAULT_AUTONOMY, onAutonomy: vi.fn() };
     render(<SettingsSheet {...p} />);
-    const select = screen.getByRole("combobox", { name: "Send messages" });
+    const select = screen.getByRole("combobox", { name: "Send as you" });
     select.focus();
     fireEvent.change(select, { target: { value: "handoff" } });
     fireEvent.keyDown(select, { key: "Escape" });

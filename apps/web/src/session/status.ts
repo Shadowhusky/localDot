@@ -94,7 +94,7 @@ export const past = (label: string) => tense(label, PAST);
 
 // Reasons the daemon and brain give a paused state that the Pause, question or approval owns,
 // rather than a recovery such as the spending limit. Once that control is settled, so is the pause.
-const OWNED_REASONS = new Set([...SESSION_PAUSE_REASONS, "Waiting for explicit Resume"]);
+const OWNED_REASONS = new Set(SESSION_PAUSE_REASONS);
 export const ownedPause = (reason: string | null | undefined) =>
   reason != null && OWNED_REASONS.has(reason);
 

@@ -1,15 +1,14 @@
 import { ApprovalRequestDraft, type ToolName, UploadApproval } from "@localdot/protocol";
 import type { ToolCallContext } from "../tools/deps.ts";
-import { OncePermit } from "./approvals.ts";
-import {
-  actionDigest,
-  buildApprovalCard,
-  classify,
-  type RiskDecision,
-  type RiskFacts,
-} from "./risk.ts";
+import { CountedPermit } from "./approvals.ts";
+import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
+import { handoffFor } from "./handoff.ts";
+import { actionDigest, buildApprovalCard, type RiskDecision, type RiskFacts } from "./risk.ts";
+import { PausedStepError } from "./step-barrier.ts";
 
 export interface EffectPermit {
+  // The user approved a card for this exact effect, rather than the policy letting it act.
+  readonly approved: boolean;
   consume(input: unknown, target: unknown): boolean;
 }
 export interface PreparedEffect {
@@ -18,6 +17,8 @@ export interface PreparedEffect {
   readonly target: unknown;
   readonly facts: RiskFacts;
   readonly upload?: UploadApproval;
+  // Identical dispatches one decision covers, such as a key's repeat.
+  readonly count?: number;
   revalidate(): Promise<boolean>;
 }
 export function freezeExecutionInput<T>(input: T): T {
@@ -83,7 +84,9 @@ export async function authorizePrepared(
   const inputDigest = actionDigest(input),
     targetDigest = actionDigest(target);
   const digest = actionDigest({ tool: prepared.tool, input, target });
-  const decision = classify(prepared.facts, ctx.session.autonomy);
+  const uses = prepared.count ?? 1;
+  const permit = new CountedPermit(digest, uses);
+  const decision = decideAutonomy(ctx, prepared.facts);
   const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
   if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
     throw new Error("Upload approval does not match this action.");
@@ -97,17 +100,17 @@ export async function authorizePrepared(
     // No native effect has begun. Release this initiating tool's physical screen lease
     // before takeover drains all screens; the old lease can never authorize a replay.
     ctx.screen?.finish();
-    await ctx.session.takeover(
-      "other",
-      "This action needs your control. Complete it on the computer, then hand control back.",
-      ctx.step,
-      ctx.lease,
-    );
+    const { reason, note } = handoffFor(decision, prepared.facts);
+    // A held Pause refuses the hand-off before anything counts as signed in.
+    if (ctx.session.safetyPause) throw new PausedStepError();
+    if (reason !== "other") ctx.session.taskAutonomy.signIn(screenOf(ctx));
+    await ctx.session.takeover(reason, note, ctx.step, ctx.lease);
     ctx.check();
     // Hand-back never authorizes automatic replay of the action that caused takeover.
     return undefined;
   }
   if (decision.mode === "ask") {
+    const draft = approvalDraft(prepared.tool, input, prepared.facts, decision, ctx.redact, upload);
     const outcome = await ctx.session.requestApproval(
       {
         sessionId: ctx.session.id,
@@ -117,7 +120,11 @@ export async function authorizePrepared(
         digest,
         targetDigest,
       },
-      approvalDraft(prepared.tool, input, prepared.facts, decision, ctx.redact, upload),
+      ApprovalRequestDraft.parse({
+        ...draft,
+        fields: uses > 1 ? [...draft.fields, ["Repeat", `× ${uses}`]] : draft.fields,
+        always: alwaysOptions(decision.actionClass, actingFacts(ctx, prepared.facts), ctx.redact),
+      }),
       {
         signal: ctx.signal,
         check: () => ctx.check(),
@@ -144,8 +151,8 @@ export async function authorizePrepared(
     if (outcome !== "approve") return undefined;
   }
   ctx.check();
-  const permit = new OncePermit(digest);
   return Object.freeze({
+    approved: decision.mode === "ask",
     consume(nextInput: unknown, nextTarget: unknown): boolean {
       ctx.check();
       if (actionDigest(nextInput) !== inputDigest || actionDigest(nextTarget) !== targetDigest)
@@ -172,7 +179,7 @@ export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
     case "browser_navigate":
       return { operation: "navigate", destination: String(input.url) };
     case "remember":
-      return { operation: "files_write" };
+      return { operation: "memory_write" };
     case "done":
       return {
         operation:

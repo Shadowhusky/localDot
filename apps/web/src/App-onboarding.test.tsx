@@ -46,7 +46,7 @@ it("guides an empty authenticated workspace without starting tasks or saving pol
   const dialog = await screen.findByRole("dialog", { name: "Models and settings" });
   await waitFor(() =>
     expect(document.activeElement).toBe(
-      within(dialog).getByRole("combobox", { name: "Read information" }),
+      within(dialog).getByRole("combobox", { name: "Read and look" }),
     ),
   );
   expect(

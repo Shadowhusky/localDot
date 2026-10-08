@@ -1,6 +1,7 @@
 import { writeFileSync } from "node:fs";
 import { expect, test } from "@playwright/test";
 import { assembledProcess } from "./fixtures/assembled-process.ts";
+import { approveCurrent } from "./fixtures/safety-flow.ts";
 
 // Real daemon routes, keyd, Docker desktop/brain and browser UI; only the model script is synthetic.
 test("approval card, atomic Pause, matching Resume and in-dialog Stop remain honest", async ({
@@ -72,7 +73,8 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
       .getByRole("checkbox", { name: "Use the configured default", exact: true })
       .uncheck();
     await settings.getByLabel("Task ceiling — USD", { exact: true }).fill("0.05");
-    await expect(settings.getByLabel("Send messages", { exact: true })).toHaveValue("ask");
+    await expect(settings.getByLabel("Send as you", { exact: true })).toHaveValue("ask");
+    await settings.getByLabel("Work in its computer", { exact: true }).selectOption("ask");
     await settings.getByRole("button", { name: "Save settings", exact: true }).click();
     await expect(settings).toContainText("Saved choices");
     await page.screenshot({ path: info.outputPath("safety-settings.png"), fullPage: true });
@@ -103,16 +105,10 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
       content.scrollTop = 0;
     });
     await approvalLayout();
-    await card.getByRole("button", { name: "Approve once", exact: true }).click();
+    await approveCurrent(page, f); // synthetic HTML write
     await expect.poll(() => answers.length).toBe(1);
-    // The following shell names a sign-in page: the frozen credential rule requires handoff.
-    await showPane("Computer");
-    const protectedHandoff = page.getByRole("region", { name: "Manual control", exact: true });
-    await expect(protectedHandoff).toBeVisible({ timeout: 30000 });
-    await protectedHandoff
-      .getByRole("button", { name: "Return control to dot", exact: true })
-      .click();
-    await showPane("Conversation");
+    await approveCurrent(page, f); // local browser launch
+    await expect.poll(() => answers.length).toBe(2);
     await expect(
       page.getByText("Which synthetic table should I export?", { exact: true }).first(),
     ).toBeVisible({ timeout: 30000 });
@@ -192,7 +188,7 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
     expect(outcome.paused || (outcome.closed && outcome.stopped)).toBe(true);
     await expect(settings).toContainText("paused");
     expect(errors).toEqual([]);
-    expect(answers).toHaveLength(2);
+    expect(answers).toHaveLength(3);
     writeFileSync(
       info.outputPath("safety-ui-proof.json"),
       JSON.stringify(

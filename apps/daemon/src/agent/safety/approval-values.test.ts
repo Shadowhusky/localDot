@@ -1,4 +1,10 @@
-import { APPROVAL_FIELD_CHARS, APPROVAL_VALUE_CHARS, ulid } from "@localdot/protocol";
+import {
+  APPROVAL_FIELD_CHARS,
+  APPROVAL_VALUE_CHARS,
+  type AutonomyPolicy,
+  CAREFUL_AUTONOMY,
+  ulid,
+} from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../../app.ts";
 import { CatalogStore } from "../catalog-store.ts";
@@ -29,8 +35,8 @@ async function until(predicate: () => boolean) {
   }
   throw new Error("fixture did not reach its boundary");
 }
-function setup() {
-  const h = toolHarness({ autoApprove: false });
+function setup(autonomy?: AutonomyPolicy) {
+  const h = toolHarness({ autoApprove: false, ...(autonomy ? { autonomy } : {}) });
   const ui = createApp({
     token: UI_TOKEN,
     port: 4750,
@@ -127,7 +133,8 @@ describe("the approval card carries the complete value being approved", () => {
       ["browser_navigate", { url: "https://bank.test/transfer?to=attacker&amount=900#confirm" }],
     ];
     for (const [tool, input] of inputs) {
-      const f = setup();
+      // Careful lets browsing act; asking for it shows the navigation's card.
+      const f = setup({ ...CAREFUL_AUTONOMY, browsing: "ask" });
       f.call(tool, input);
       await until(() => !!f.h.session.pendingApproval);
       const shown = f.card().fields.map(([, text]) => text);

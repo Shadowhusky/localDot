@@ -1,6 +1,6 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import {
-  DEFAULT_AUTONOMY,
+  CAREFUL_AUTONOMY,
   ReplacementRecord,
   type SecretBinding,
   sealSecret,
@@ -50,7 +50,7 @@ describe.skipIf(!enabled)("actual fenced replacement", () => {
       brainImage = process.env.LOCALDOT_SAFETY_BRAIN_IMAGE;
     if (!desktopImage || !gateImage || !brainImage || !process.env.LOCALDOT_KEYD_BIN)
       throw new Error("owned cached images and keyd fixture required");
-    const h = toolHarness({ autoApprove: false, autonomy: DEFAULT_AUTONOMY }),
+    const h = toolHarness({ autoApprove: false, autonomy: CAREFUL_AUTONOMY }),
       keydHome = mkdtempSync("/tmp/ld-safety5-keyd-"),
       docker = new DockerClient(),
       store = new CellStore(h.home, PORTS),

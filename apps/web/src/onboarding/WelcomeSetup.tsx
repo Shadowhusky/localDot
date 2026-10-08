@@ -1,4 +1,5 @@
-import { AutonomyPolicy, DEFAULT_AUTONOMY, EDITABLE_ACTION_CLASSES } from "@localdot/protocol";
+import { AutonomyPolicy, DEFAULT_AUTONOMY } from "@localdot/protocol";
+import { CUSTOM_SUMMARY, presetOf } from "../copy/autonomy.ts";
 import { type AppearanceControl, AppearancePicker } from "./AppearancePicker.tsx";
 import "./onboarding.css";
 
@@ -19,8 +20,7 @@ export interface WelcomeSetupProps {
  */
 export function WelcomeSetup(props: WelcomeSetupProps) {
   const policy = AutonomyPolicy.safeParse(props.autonomy ?? DEFAULT_AUTONOMY);
-  const counts = { act: 0, ask: 0, handoff: 0 };
-  if (policy.success) for (const action of EDITABLE_ACTION_CLASSES) counts[policy.data[action]]++;
+  const preset = policy.success ? presetOf(policy.data) : undefined;
   return (
     <section className="welcome-setup" aria-labelledby="welcome-title">
       <header>
@@ -66,7 +66,7 @@ export function WelcomeSetup(props: WelcomeSetupProps) {
               {props.loading
                 ? "Loading your defaults…"
                 : policy.success
-                  ? `${counts.act} action types can act · ${counts.ask} ask first · ${counts.handoff} hand off to you`
+                  ? `${preset?.name ?? "Custom"} · ${preset?.summary ?? CUSTOM_SUMMARY}`
                   : "Defaults are unavailable. Reload Settings before continuing."}
             </p>
             <button
