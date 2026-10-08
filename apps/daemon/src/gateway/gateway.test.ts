@@ -745,3 +745,33 @@ describe("ActionGateway type and key", () => {
     expect(s.fake.calls).toEqual([]);
   });
 });
+
+describe("ActionGateway settle and zoom", () => {
+  it("settles each input with its verb and that verb's wait for a first change", async () => {
+    const s = setup(
+      {
+        hitTest: () => ({ target: null, window: null, ms: 2 }),
+        type: () => ({
+          progress: [{ count: 1, chunk: "h", pressMono: 60_000 }],
+          result: { done: true, count: 1, firstPressMono: 60_000, injector: "xtest", armedMono: 1 },
+        }),
+      },
+      { viewers: 0 },
+    );
+    const ctx = { source: "manual" as const, sessionId: s.sessionId, cellId: s.cellId };
+    await s.gateway.run(ctx, { verb: "click", point: { x: 10, y: 10 } });
+    await s.gateway.run(ctx, { verb: "scroll", point: { x: 10, y: 10 }, dx: 0, dy: 2 });
+    await s.gateway.run(ctx, { verb: "key", combo: ["Escape"] });
+    await s.gateway.run(ctx, { verb: "type", text: "h" });
+    expect(s.fake.calls.filter((c) => c.path === "/settle").map((c) => c.body)).toEqual([
+      { verb: "click", quietMs: 250, firstMs: 800, timeoutMs: 3000 },
+      { verb: "scroll", quietMs: 250, firstMs: 800, timeoutMs: 3000 },
+      { verb: "key", quietMs: 250, firstMs: 400, timeoutMs: 3000 },
+      { verb: "type", quietMs: 250, firstMs: 400, timeoutMs: 3000 },
+    ]);
+    // The result frame is observed right after the settle, with nothing in between.
+    const paths = s.fake.calls.map((c) => c.path);
+    for (const [i, path] of paths.entries())
+      if (path === "/settle") expect(paths[i + 1]).toBe("/observe");
+  });
+});

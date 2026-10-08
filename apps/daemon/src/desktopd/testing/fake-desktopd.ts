@@ -91,8 +91,8 @@ export class FakeDesktopd {
       });
       return new Response(held, { headers });
     });
-    this.app.post("/settle", (c) => {
-      this.calls.push({ path: "/settle", body: null });
+    this.app.post("/settle", async (c) => {
+      this.calls.push({ path: "/settle", body: await c.req.json().catch(() => null) });
       return c.json(
         this.script.settle?.() ?? {
           changed: [],

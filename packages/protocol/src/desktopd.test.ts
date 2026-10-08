@@ -32,6 +32,14 @@ describe("desktopd wire schemas", () => {
     expect(SettleRequest.parse({})).toEqual({ quietMs: 250, firstMs: 1500, timeoutMs: 3000 });
   });
 
+  it("names the input a settle follows from a fixed set", () => {
+    expect(SettleRequest.parse({ verb: "key", firstMs: 400 })).toMatchObject({
+      verb: "key",
+      firstMs: 400,
+    });
+    expect(() => SettleRequest.parse({ verb: "drag" })).toThrow();
+  });
+
   it("carries a target name of any length for the gateway to cut", () => {
     const long = {
       point: { x: 1, y: 2 },

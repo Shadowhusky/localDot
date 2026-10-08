@@ -144,24 +144,31 @@ describe("desktopd health", () => {
   });
 });
 
-function fakeX(): XHelper & { emit(e: XEvent): void; calls: string[] } {
+function fakeX(): XHelper & {
+  emit(e: XEvent): void;
+  calls: string[];
+  args: Record<string, unknown>[];
+} {
   const listeners = new Set<(e: XEvent) => void>();
   const calls: string[] = [];
+  const args: Record<string, unknown>[] = [];
   let mono = 100;
   return {
     alive: true,
     calls,
+    args,
     emit: (e) => {
       for (const l of listeners) l(e);
     },
-    async call(cmd, args = {}) {
+    async call(cmd, sent = {}) {
       calls.push(cmd);
+      args.push(sent);
       mono += 1;
       if (cmd === "ping" || cmd === "arm" || cmd === "move") return { mono } as never;
       if (cmd === "click") {
         for (const l of listeners)
-          l({ ev: "press", kind: "button", detail: Number(args.button), mono });
-        return { button: args.button, presses: 1 } as never;
+          l({ ev: "press", kind: "button", detail: Number(sent.button), mono });
+        return { button: sent.button, presses: 1 } as never;
       }
       if (cmd === "char") {
         for (const l of listeners) l({ ev: "press", kind: "key", detail: 30, mono });
@@ -300,6 +307,26 @@ describe("desktopd input routes", () => {
       quiet: true,
       noVisibleChange: false,
     });
+    await a.request("/settle", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({ verb: "key", firstMs: 400, quietMs: 250, timeoutMs: 3000 }),
+    });
+    expect(x.args[x.calls.lastIndexOf("settle")]).toEqual({
+      verb: "key",
+      firstMs: 400,
+      quietMs: 250,
+      timeoutMs: 3000,
+    });
+    expect(
+      (
+        await a.request("/settle", {
+          method: "POST",
+          headers: { ...bearer, "content-type": "application/json" },
+          body: JSON.stringify({ verb: "drag" }),
+        })
+      ).status,
+    ).toBe(400);
     expect((await a.request("/arm", { method: "POST", headers: bearer })).status).toBe(200);
     const launched = await a.request("/launch", {
       method: "POST",
