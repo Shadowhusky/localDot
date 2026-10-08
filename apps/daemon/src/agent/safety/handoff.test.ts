@@ -84,6 +84,8 @@ describe("why a step is handed to the user", () => {
       PASSWORD,
     ],
     ["a sign-in password", field("Sign-in password"), "login", PASSWORD],
+    ["a password confirmation", field("Password verification"), "login", PASSWORD],
+    ["a billing password", field("Billing account password"), "login", PASSWORD],
     ["a sign-in email", field("Sign in email"), "login", SIGN_IN],
     ["a 登录 field", field("登录账号"), "login", SIGN_IN],
     ["a one-time code", field("One-time code"), "2fa", CODE],
@@ -134,7 +136,7 @@ describe("why a step is handed to the user", () => {
   it("a private localDot key in the input is never typed by the agent", async () => {
     expect(await handOff(field("Notes"), `token ${SECRET}`)).toEqual({
       reason: "other",
-      note: "This step contains a private localDot key, so it won't run on its own. Do it on the computer if you need to, then hand control back.",
+      note: "This step included one of localDot's private keys, so it didn't run. Hand control back to continue.",
     });
   });
 

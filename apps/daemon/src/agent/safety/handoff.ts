@@ -12,18 +12,19 @@ const PASSWORD: Handoff = {
   note: `This field takes a password. Type it ${BACK}`,
 };
 
-// First match wins: a "one-time passcode" is a code and a "sign-in password" a password.
+// First match wins: a "one-time passcode" is a code, and a "sign-in password" or a "billing
+// password" a password.
 const FIELDS: readonly (readonly [RegExp, Handoff])[] = [
   [
-    /one[ -]?time|verification|2fa|two[ -]?(?:factor|step)|authenticat(?:ion|or) code|\botp\b|验证码|驗證碼/i,
+    /one[ -]?time|verification[ -]?code|2fa|two[ -]?(?:factor|step)|authenticat(?:ion|or) code|\botp\b|验证码|驗證碼/i,
     { reason: "2fa", note: `This field takes a one-time code. Type it ${BACK}` },
   ],
   [/captcha/i, { reason: "captcha", note: `This is a CAPTCHA. Solve it ${BACK}` }],
+  [/password|passphrase|passcode|密碼|密码/i, PASSWORD],
   [
     /credit[ -]?card|card[ -]?number|security[ -]?code|cvv|cvc|expiry|expiration|billing|payment|支付|付款|信用卡/i,
     { reason: "payment", note: `This field takes card or payment details. Type them ${BACK}` },
   ],
-  [/password|passphrase|passcode|密碼|密码/i, PASSWORD],
   [
     /sign[ -]?in|log[ -]?in|登入|登录|登錄/i,
     { reason: "login", note: `This is a sign-in field. Fill it in ${BACK}` },
@@ -43,6 +44,6 @@ export function handoffFor(decision: RiskDecision, facts: RiskFacts): Handoff {
     };
   return {
     reason: "other",
-    note: "This step contains a private localDot key, so it won't run on its own. Do it on the computer if you need to, then hand control back.",
+    note: "This step included one of localDot's private keys, so it didn't run. Hand control back to continue.",
   };
 }
