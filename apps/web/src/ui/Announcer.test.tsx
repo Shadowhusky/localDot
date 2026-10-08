@@ -49,6 +49,18 @@ describe("announcer", () => {
     expect(heard).toEqual(["Working", "Saved to Downloads", "Key moved to Keys"]);
   });
 
+  it("drops a message still waiting once its channel is withdrawn", () => {
+    const queue = createAnnouncer();
+    const heard: string[] = [];
+    queue.subscribe(() => heard.push(queue.spoken().polite));
+    queue.announce("toast a", "Saved to Downloads");
+    queue.announce("toast b", "Key moved to Keys");
+    queue.announce("toast c", "Stopped");
+    queue.withdraw("toast b");
+    vi.advanceTimersByTime(ANNOUNCE_GAP * 3);
+    expect(heard).toEqual(["Saved to Downloads", "Stopped"]);
+  });
+
   it("never holds back an error that stops work", () => {
     const queue = createAnnouncer();
     queue.announce("status", "Working");

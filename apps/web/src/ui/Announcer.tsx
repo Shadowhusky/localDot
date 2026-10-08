@@ -16,6 +16,8 @@ export interface Spoken {
 export interface AnnouncerQueue {
   // A newer message on the same channel replaces one still waiting there; channels take turns.
   announce(channel: string, text: string, urgency?: Urgency): void;
+  // Drops what is still waiting on a channel, once it no longer holds.
+  withdraw(channel: string): void;
   spoken(): Spoken;
   subscribe(listener: () => void): () => void;
 }
@@ -52,6 +54,10 @@ export function createAnnouncer(): AnnouncerQueue {
       if (wait <= 0) next();
       else timer = setTimeout(next, wait);
     },
+    withdraw(channel) {
+      const at = waiting.findIndex((message) => message.channel === channel);
+      if (at >= 0) waiting.splice(at, 1);
+    },
     spoken: () => spoken,
     subscribe(listener) {
       listeners.add(listener);
@@ -65,6 +71,10 @@ const shared = createAnnouncer();
 // Assertive is for errors that stop work; everything else waits its turn politely.
 export function announce(channel: string, text: string, urgency?: Urgency): void {
   shared.announce(channel, text, urgency);
+}
+
+export function withdraw(channel: string): void {
+  shared.withdraw(channel);
 }
 
 // The page's only live regions. Mount once, near the root, before anything announces.

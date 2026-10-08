@@ -84,6 +84,22 @@ describe("toast queue", () => {
     expect(shown(queue)).toEqual(["Saved to Downloads"]);
   });
 
+  it("keeps a toast's key when it is shown again in place, and gives it a new one after a swipe", () => {
+    const queue = createToasts();
+    queue.show({ id: "stop", title: "Couldn't confirm the stop", tone: "danger" });
+    const first = queue.list()[0]?.key;
+    queue.show({ id: "stop", title: "Still checking", tone: "danger" });
+    queue.dismiss("stop");
+    queue.show({ id: "stop", title: "Stopped", tone: "success" });
+    expect(queue.list().map((toast) => toast.key)).toEqual([first]);
+    // Its element is still flying off with the swipe, so the toast comes back as a new one.
+    queue.dismiss("stop", "swipe");
+    queue.show({ id: "stop", title: "Couldn't confirm the stop", tone: "danger" });
+    expect(queue.list()).toHaveLength(1);
+    expect(shown(queue)).toEqual(["Couldn't confirm the stop"]);
+    expect(queue.list()[0]?.key).not.toBe(first);
+  });
+
   it("keeps a dismissed toast listed as leaving until it is forgotten", () => {
     const queue = createToasts();
     const id = queue.show({ title: "Saved to Downloads" });

@@ -2,7 +2,8 @@
    and empty states. A toast comes out of its anchor and goes back into it, or leaves the way it was
    swiped; a banner opens by sliding what follows down. Under reduced motion they only fade. */
 @layer kit {
-  /* The toaster sits in its anchor's positioned box, out of the flow, so it never moves anything. */
+  /* The toaster sits in its anchor's positioned box, out of the flow, so it never moves anything. Its
+     own layer keeps it over the page's controls where it hangs past the stage. */
   .ui-toaster {
     --_width: min(calc(var(--spacing) * 90), 100% - var(--spacing) * 8);
     position: absolute;
@@ -12,7 +13,7 @@
       var(--_x, 50%),
       calc(100% - var(--_width) / 2 - var(--spacing) * 2)
     );
-    z-index: 1;
+    z-index: var(--layer-toast);
     width: var(--_width);
     height: var(--_extent, 0px);
     translate: -50% 0;
@@ -101,6 +102,7 @@
       scale var(--dur-exit) var(--ease-exit);
   }
 
+  /* Words coming out from behind start at once and slow down; covered, they go quickly. */
   .ui-toast-body {
     display: flex;
     align-items: center;
@@ -108,13 +110,12 @@
     min-height: calc(var(--spacing) * 11);
     padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 2)
       calc(var(--spacing) * 4);
-    opacity: var(--_content, 1);
-    transition: opacity var(--dur-press) var(--ease-exit);
+    transition: opacity var(--dur-fade) var(--ease-enter);
   }
 
-  /* Laid out, a toast's words come in once the cards have mostly parted, never over one another. */
-  .ui-toaster[data-expanded] .ui-toast-body {
-    transition: opacity var(--dur-fade) var(--ease-enter) var(--dur-hover);
+  .ui-toast[data-covered] > .ui-toast-body {
+    opacity: 0;
+    transition: opacity var(--dur-press) var(--ease-exit);
   }
 
   /* A leading glyph carries its own side bearing, so the padding before it is optically smaller. */
@@ -140,10 +141,11 @@
     text-wrap: pretty;
   }
 
+  /* Beside an action it often takes two short lines, best kept even. */
   .ui-toast-description {
     color: var(--color-fg-2);
     font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
-    text-wrap: pretty;
+    text-wrap: balance;
   }
 
   /* On touch the toast's buttons keep their size and reach 44 px past it, so the toast stays 44 tall. */
@@ -154,6 +156,11 @@
 
     .ui-toast .ui-button::after {
       inset: calc((var(--spacing) * 7 - var(--spacing) * 11) / 2) calc(var(--spacing) * -1.5);
+    }
+
+    /* Room for the close button's whole reach, which the toast's rounded clip would cut. */
+    .ui-toast-body {
+      padding-inline-end: calc(var(--spacing) * 2.5);
     }
   }
 

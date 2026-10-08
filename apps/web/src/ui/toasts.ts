@@ -1,4 +1,4 @@
-import { announce } from "./Announcer.tsx";
+import { announce, type Urgency, withdraw } from "./Announcer.tsx";
 
 // How long a toast that does not persist stays in front once it gets there.
 export const SHOWN_FOR = 4000;
@@ -19,10 +19,15 @@ export interface ToastOptions {
   action?: ToastAction;
   // Stays until dismissed. A failure stays unless told otherwise.
   persist?: boolean;
+  // "assertive" only for an error that stops work.
+  urgency?: Urgency;
 }
 
 export interface Toast {
   id: string;
+  // Names its element. It stays the same when the toast is shown again in place, and changes when
+  // the toast comes back while its old element is still being swiped off.
+  key: string;
   title: string;
   description?: string;
   tone: ToastTone;
@@ -79,8 +84,10 @@ export function createToasts(): ToastQueue {
       made += 1;
       const id = options.id ?? `toast-${made}`;
       const tone = options.tone ?? "neutral";
+      const before = list.find((toast) => toast.id === id);
       const toast: Toast = {
         id,
+        key: before && before.leaving !== "swipe" ? before.key : `${id}:${made}`,
         title: options.title,
         description: options.description,
         tone,
@@ -91,13 +98,15 @@ export function createToasts(): ToastQueue {
       remaining.delete(id);
       run();
       emit();
-      announce(`toast ${id}`, [toast.title, toast.description].filter(Boolean).join(". "));
+      const words = [toast.title, toast.description].filter(Boolean).join(". ");
+      announce(`toast ${id}`, words, options.urgency);
       return id;
     },
     dismiss(id, how = "fade") {
       if (!list.some((toast) => toast.id === id && !toast.leaving)) return;
       list = list.map((toast) => (toast.id === id ? { ...toast, leaving: how } : toast));
       remaining.delete(id);
+      withdraw(`toast ${id}`);
       run();
       emit();
     },
