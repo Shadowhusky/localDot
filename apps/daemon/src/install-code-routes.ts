@@ -1,4 +1,5 @@
 import type { Hono } from "hono";
+import { isPublicOrigin } from "./guard.ts";
 import { InstallCodeCapacityError, type InstallCodes } from "./install-codes.ts";
 
 const MAX_BODY_BYTES = 128;
@@ -23,7 +24,10 @@ export function installCodeRoutes(app: Hono, codes: InstallCodes): void {
 
   app.post("/auth/exchange-code", async (c) => {
     const url = new URL(c.req.url);
-    if (c.req.header("origin") !== url.origin) return c.text("forbidden origin", 403);
+    // The page must be this origin. Behind an HTTPS front the page is the configured public
+    // origin while the daemon itself sees plain http, so that one name also matches.
+    const origin = c.req.header("origin");
+    if (origin !== url.origin && !isPublicOrigin(origin)) return c.text("forbidden origin", 403);
     if (url.search) return c.text("invalid request", 400);
     if (!/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(c.req.header("content-type") ?? "")) {
       return c.text("JSON required", 415);

@@ -1,6 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "./app.ts";
 import type { EventLog } from "./event-log.ts";
+import { setPublicOrigin } from "./guard.ts";
 import { InstallCodes } from "./install-codes.ts";
 
 const TOKEN = "t".repeat(43),
@@ -247,5 +248,44 @@ describe("install code HTTP boundary without a listener", () => {
     expect(result.headers.get("retry-after")).toBe("60");
     expect(result.headers.get("cache-control")).toBe("no-store");
     expect((await f.exchange(first.code)).status).toBe(200);
+  });
+});
+
+describe("install code exchange behind an HTTPS front", () => {
+  const PUBLIC = "https://mac.tailnet.ts.net:4750";
+  afterEach(() => setPublicOrigin(undefined));
+
+  function exchangeVia(f: ReturnType<typeof fixture>, code: string, origin: string | undefined) {
+    return f.app.request("http://mac.tailnet.ts.net:4750/auth/exchange-code", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(origin === undefined ? {} : { origin }),
+      },
+      body: JSON.stringify({ code }),
+    });
+  }
+
+  it("exchanges a code from exactly the configured public origin", async () => {
+    setPublicOrigin(PUBLIC);
+    const f = fixture();
+    const reply = await exchangeVia(f, f.codes.issue().code, PUBLIC);
+    expect(reply.status).toBe(200);
+    expect(await reply.json()).toEqual({ token: TOKEN });
+  });
+
+  it("refuses that origin when no public origin is configured", async () => {
+    const f = fixture();
+    expect((await exchangeVia(f, f.codes.issue().code, PUBLIC)).status).toBe(403);
+  });
+
+  it("refuses a foreign or missing origin even with a public origin configured", async () => {
+    setPublicOrigin(PUBLIC);
+    const f = fixture();
+    const issued = f.codes.issue();
+    expect((await exchangeVia(f, issued.code, "https://evil.ts.net:4750")).status).toBe(403);
+    expect((await exchangeVia(f, issued.code, `http://mac.tailnet.ts.net:4750`)).status).toBe(403);
+    expect((await exchangeVia(f, issued.code, undefined)).status).toBe(403);
+    expect((await exchangeVia(f, issued.code, PUBLIC)).status).toBe(200);
   });
 });

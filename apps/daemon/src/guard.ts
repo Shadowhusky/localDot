@@ -25,6 +25,10 @@ export function setPublicOrigin(value: string | undefined): void {
   publicOrigin = url;
 }
 
+export function isPublicOrigin(origin: string | undefined): boolean {
+  return publicOrigin !== undefined && origin === publicOrigin.origin;
+}
+
 export function isAllowedHost(host: string | undefined, port: number): boolean {
   return (
     host === `127.0.0.1:${port}` ||
@@ -38,7 +42,7 @@ export function isAllowedOrigin(origin: string | undefined, port: number): boole
     origin === undefined ||
     origin === `http://127.0.0.1:${port}` ||
     origin === `http://localhost:${port}` ||
-    (publicOrigin !== undefined && origin === publicOrigin.origin)
+    isPublicOrigin(origin)
   );
 }
 
