@@ -387,7 +387,9 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
   and draw with these class names rather than a second `.ui-popover` or `.ui-sheet`. A popup outside the
   stack loses focus to a trapping sheet beneath it, because the stack pulls focus that leaves the topmost
   trapping layer back in; then Enter lands on the sheet's close button. Once a listbox sits in a layer of
-  its own, `lib/dismiss.ts` must stop treating it as a native picker that keeps Escape.
+  its own, `lib/dismiss.ts` must stop treating it as a native picker that keeps Escape. Until then
+  the pickers draw `.ui-picker-popover` and `.ui-picker-sheet`, so neither set of rules reaches the
+  other's surfaces.
 - **One stack.** Every open overlay, and a tooltip while shown, registers with the stack. One document
   `keydown` listener sends Escape to the topmost layer only. It leaves alone an Escape that something
   already handled, or that a native `select` or a listbox owns (`lib/dismiss.ts`). Escape in a menu
