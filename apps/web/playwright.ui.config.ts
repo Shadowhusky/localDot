@@ -1,6 +1,7 @@
 import { defineConfig } from "@playwright/test";
 
-const chrome = { browserName: "chromium" as const, channel: "chrome" };
+// Playwright's own Chromium, not the installed Chrome, which updates itself under the baselines.
+const chromium = { browserName: "chromium" as const };
 const webkit = { browserName: "webkit" as const };
 const desktop = (width: number, height: number) => ({
   viewport: { width, height },
@@ -19,7 +20,7 @@ export default defineConfig({
   testDir: "e2e/ui",
   testMatch: "*.spec.ts",
   globalSetup: "./e2e/ui/fresh-build.ts",
-  snapshotPathTemplate: "{testDir}/../__screenshots__/{projectName}/{arg}{ext}",
+  snapshotPathTemplate: "{testDir}/../__screenshots__/{platform}/{projectName}/{arg}{ext}",
   outputDir: "e2e/out/ui",
   fullyParallel: true,
   workers: 4,
@@ -38,9 +39,9 @@ export default defineConfig({
     serviceWorkers: "block",
   },
   projects: [
-    { name: "c14", use: { ...chrome, ...desktop(1440, 900) } },
-    { name: "c12", use: { ...chrome, ...desktop(1280, 800) } },
-    { name: "c39", use: { ...chrome, ...phone } },
+    { name: "c14", use: { ...chromium, ...desktop(1440, 900) } },
+    { name: "c12", use: { ...chromium, ...desktop(1280, 800) } },
+    { name: "c39", use: { ...chromium, ...phone } },
     { name: "w14", use: { ...webkit, ...desktop(1440, 900) } },
     { name: "w39", use: { ...webkit, ...phone } },
   ],

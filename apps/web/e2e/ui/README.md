@@ -11,10 +11,13 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --pr
 pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --update-snapshots=all
 ```
 
-- **Matrix:** `c14` `c12` `c39` (Chrome at 1440×900, 1280×800, 390×844 touch) and `w14` `w39`
-  (WebKit at 1440×900, 390×844 touch), all with reduced motion.
-- **Baselines** live in `e2e/__screenshots__/<project>/`, kept at `c14` and `w39` for now
-  (`keepBaselinesAt`). Updating one is a deliberate act: look at the new image before committing it.
+- **Matrix:** `c14` `c12` `c39` (Chromium at 1440×900, 1280×800, 390×844 touch) and `w14` `w39`
+  (WebKit at 1440×900, 390×844 touch), all with reduced motion. Both are Playwright's own builds
+  (`pnpm --filter @localdot/web exec playwright install chromium webkit`), never the installed
+  Chrome, so a browser update cannot move the baselines.
+- **Baselines** live in `e2e/__screenshots__/<platform>/<project>/`, kept at `c14` and `w39` for
+  now (`keepBaselinesAt`). Only macOS (`darwin`) baselines are committed: fonts render differently
+  elsewhere. Updating one is a deliberate act: look at the new image before committing it.
 - **Determinism:** the fixture's wall clock starts at `FIXTURE_START` (`QA_NOW`), seeded tasks take
   the same session time on every run, the fake desktop shows one still frame, and the page's
   `Date` stands still. The live dot badge blinks, so app screenshots hide it (`ui.still()`);
