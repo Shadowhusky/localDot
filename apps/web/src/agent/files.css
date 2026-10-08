@@ -56,7 +56,7 @@
 .attachments button:focus-visible,
 .result-files button:focus-visible,
 .file-picker input:focus-visible {
-  outline: 2px solid var(--color-text-2);
+  outline: var(--focus-width) solid var(--color-text-2);
   outline-offset: 2px;
 }
 .attachments [role="status"] {

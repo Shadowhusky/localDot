@@ -226,19 +226,36 @@ describe("token layer", () => {
 });
 
 describe("focus", () => {
-  it("draws the ring in fg-1 and never in xenon", async () => {
+  // The approval card's ring predates the token layer; it goes when that card moves onto the kit.
+  const RAW_RING_ALLOWED = ["agent/safety.css"];
+  const RAW_COLOUR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|color)\(|xenon/i;
+
+  async function focusRules() {
+    const rules: { path: string; selector: string; body: string }[] = [];
+    for (const path of stylesheets) {
+      for (const { selector, body } of cssBlocks(await readSource(new URL(path, SRC)))) {
+        if (/:focus/.test(selector))
+          rules.push({ path, selector: selector.replace(/\s+/g, " "), body });
+      }
+    }
+    expect(rules.map((rule) => rule.path)).toContain("onboarding/onboarding.css");
+    return rules;
+  }
+
+  it("draws the ring in a text role, never in xenon or a raw colour", async () => {
     expect(baseCss).toMatch(
       /:focus-visible \{\s*outline: var\(--focus-width\) solid var\(--color-fg-1\);/,
     );
-    const xenon: string[] = [];
-    for (const path of stylesheets) {
-      for (const block of cssBlocks(await readSource(new URL(path, SRC)))) {
-        if (/:focus/.test(block.selector) && /xenon/.test(block.body)) {
-          xenon.push(`${path} ${block.selector}`);
-        }
-      }
-    }
-    expect(stylesheets).toContain("onboarding/onboarding.css");
-    expect(xenon).toEqual([]);
+    const raw = (await focusRules())
+      .filter(({ path, body }) => RAW_COLOUR.test(body) && !RAW_RING_ALLOWED.includes(path))
+      .map(({ path, selector }) => `${path} ${selector}`);
+    expect(raw).toEqual([]);
+  });
+
+  it("draws every ring at the focus width, so more contrast widens it", async () => {
+    const fixed = (await focusRules())
+      .filter(({ body }) => /outline(?:-width)?\s*:[^;]*\b\d+px/.test(body))
+      .map(({ path, selector }) => `${path} ${selector}`);
+    expect(fixed).toEqual([]);
   });
 });

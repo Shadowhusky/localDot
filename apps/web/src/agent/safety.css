@@ -196,7 +196,7 @@
 .safety-controls button:focus-visible,
 .approval-card button:focus-visible,
 .approval-card h2:focus-visible {
-  outline: 2px solid #afdfff;
+  outline: var(--focus-width) solid #afdfff;
   outline-offset: 4px;
 }
 .stop-hint {
