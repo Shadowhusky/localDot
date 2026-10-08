@@ -175,6 +175,124 @@
 .settings-sheet .model-capability {
   color: var(--color-text);
 }
+.safety-presets {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 8px;
+  margin: 12px 0 0;
+}
+.settings-sheet .safety-presets button {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--color-text-2);
+  text-align: left;
+  transition:
+    background var(--duration-press) var(--ease-press),
+    border-color var(--duration-press) var(--ease-press),
+    color var(--duration-press) var(--ease-press);
+}
+.settings-sheet .safety-presets button::after {
+  content: "";
+  flex: none;
+  width: 5px;
+  height: 10px;
+  margin: -3px 2px 0 0;
+  border: solid currentColor;
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+  visibility: hidden;
+}
+.settings-sheet .safety-presets button[aria-pressed="true"] {
+  border-color: var(--color-text-2);
+  background: var(--color-surface-2);
+  color: var(--color-text);
+  font-weight: 600;
+}
+.settings-sheet .safety-presets button[aria-pressed="true"]::after {
+  visibility: visible;
+}
+@media (hover: hover) {
+  .settings-sheet .safety-presets button:hover:not(:disabled, [aria-pressed="true"]) {
+    color: var(--color-text);
+    border-color: var(--color-text-3);
+  }
+}
+.settings-sheet .safety-preset-note {
+  margin: 8px 0 12px;
+}
+.safety-locked {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding: 12px 0 0;
+  list-style: none;
+  border-top: 1px solid var(--color-line);
+}
+.settings-sheet .safety-locked li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 36px;
+}
+.settings-sheet .safety-locked li span:last-child {
+  flex: none;
+  color: var(--color-text-2);
+  text-align: right;
+}
+.settings-sheet .safety-hint {
+  margin: 8px 0 0;
+  color: var(--color-text-3);
+  font-size: 12.5px;
+}
+.safety-rules ul {
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.settings-sheet .safety-rules li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 0;
+}
+.settings-sheet .safety-rules li + li {
+  border-top: 1px solid var(--color-line);
+}
+.safety-rule-text {
+  display: grid;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.safety-rule-where {
+  color: var(--color-text-2);
+  font-size: 12.5px;
+}
+.settings-sheet .safety-rules li p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-text);
+  font-size: 12.5px;
+}
+.safety-rules-problem {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 8px 0;
+}
+.settings-sheet .safety-rules-message {
+  flex: 1 1 240px;
+  margin: 0;
+  color: var(--color-text);
+}
 @media (width < 600px) {
   .settings-sheet {
     inset: 0;
@@ -191,6 +309,10 @@
   }
   .settings-discard button {
     flex: 1;
+  }
+  /* Two lines either way, so switching presets never moves the rows below. */
+  .settings-sheet .safety-preset-note {
+    min-height: 3.1em;
   }
 }
 

@@ -1,7 +1,6 @@
 import { type ActionClass, AutonomyMode, AutonomyPolicy } from "@localdot/protocol";
 import { AUTONOMY_PRESETS, CLASS_LABELS, CUSTOM_SUMMARY, presetOf } from "../copy/autonomy.ts";
 import type { RulesView } from "./useRules.ts";
-import "../agent/safety.css";
 
 const ROWS = [
   "reading",
