@@ -97,7 +97,7 @@ export function RoleEditor({
               disabled={disabled}
               onChange={(model) => onChange({ provider: "chatgpt", model })}
             />
-          ) : value?.provider ? (
+          ) : value?.provider && !provider?.notOffered ? (
             <ModelPicker
               key={value.provider}
               modelRole={role}
@@ -108,7 +108,7 @@ export function RoleEditor({
               onChange={(model) => onChange({ ...value, model, price: undefined })}
             />
           ) : null}
-          {provider && !provider.local && !provider.availableIn && (
+          {provider && !provider.local && !provider.availableIn && !provider.notOffered && (
             <div className="role-key">
               <label>
                 <span id={keyLabel}>{role} key</span>

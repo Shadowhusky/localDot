@@ -47,14 +47,17 @@ function freePort(): Promise<number> {
 }
 
 // The fixture daemon serves the built UI (dist) with a fake computer and two recorded sessions.
-export async function startUiFixture(name: string): Promise<UiFixture> {
+export async function startUiFixture(
+  name: string,
+  env: Record<string, string> = {},
+): Promise<UiFixture> {
   if (newest(join(WEB, "src")) > statSync(join(WEB, "dist/index.html")).mtimeMs)
     throw new Error("The built UI is older than src: run pnpm --filter @localdot/web build.");
   const port = await freePort();
   const scratch = mkdtempSync(join(tmpdir(), `${name}-`));
   const fixture = spawn(process.execPath, ["--import", "tsx", "e2e/fixtures/ui-server.ts"], {
     cwd: WEB,
-    env: { ...process.env, QA_PORT: String(port), QA_HOME: join(scratch, "home") },
+    env: { ...process.env, ...env, QA_PORT: String(port), QA_HOME: join(scratch, "home") },
     stdio: ["ignore", "pipe", "inherit"],
   });
   const lines = createInterface({ input: fixture.stdout as NonNullable<typeof fixture.stdout> });

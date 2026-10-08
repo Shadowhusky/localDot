@@ -57,7 +57,7 @@ describe("capabilityOf", () => {
     });
   });
 
-  it("gives Gemini and Qwen the generic tool on the 0–1000 grid, others screenshot pixels", () => {
+  it("gives Gemini, Qwen and GLM the generic tool on the 0–1000 grid, others screenshot pixels", () => {
     expect(cap("google", "gemini-3.1-flash-lite")).toMatchObject({
       tier: "vision-tools",
       computer: "generic",
@@ -68,6 +68,9 @@ describe("capabilityOf", () => {
       coords: "per1000",
     });
     expect(cap("openai", "gpt-6.1-sol")).toMatchObject({ computer: "generic", coords: "pixels" });
+    expect(cap("zai", "glm-5v-turbo")).toMatchObject({ computer: "generic", coords: "per1000" });
+    expect(cap("zhipuai", "glm-5v-turbo")).toMatchObject({ coords: "per1000" });
+    expect(cap("volcengine", "doubao-seed-2-0-pro-260215")).toMatchObject({ coords: "pixels" });
     expect(cap("mistral", "mistral-medium-3")).toMatchObject({
       computer: "generic",
       coords: "pixels",
@@ -93,7 +96,9 @@ describe("the first-class providers", () => {
       // keyd fixes their base URLs (P5a-R31): the registry names none for the key to match.
       expect(providerById(id)).toEqual({ id, name: expect.any(String), client: id, keyd: id });
     }
-    const compatible = PROVIDERS.filter((p) => p.client === "openai-compatible" && !p.availableIn);
+    const compatible = PROVIDERS.filter(
+      (p) => p.client === "openai-compatible" && !p.availableIn && !p.plan && !p.notOffered,
+    );
     expect(compatible.map((p) => p.id)).toEqual([
       "togetherai",
       "fireworks-ai",
@@ -102,10 +107,18 @@ describe("the first-class providers", () => {
       "cohere",
       "deepinfra",
       "moonshotai",
+      "moonshotai-cn",
       "alibaba",
+      "alibaba-cn",
+      "zai",
+      "zhipuai",
+      "minimax",
+      "volcengine",
+      "siliconflow",
+      "siliconflow-cn",
       "openai-compatible",
     ]);
-    for (const p of compatible.slice(0, 8)) {
+    for (const p of compatible.slice(0, -1)) {
       expect(p.keyd).toBe("openai-compatible");
       expect(p.baseURL).toMatch(/^https:\/\/[a-z0-9.-]+(\/|$)/);
     }
@@ -136,6 +149,80 @@ describe("the first-class providers", () => {
     const m = findModel(catalog, "openrouter", "google/gemini-3.6-flash");
     if (!m) throw new Error("missing");
     expect(keydRouteModel(m).id).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$/);
+  });
+});
+
+describe("the registry against the catalog", () => {
+  const listed: Record<string, { api?: string; models: object }> = MODELS_DEV_FIXTURE;
+  const trimmed = (url: string) => url.replace(/\/+$/, "");
+  // models.dev lists MiniMax by its Anthropic route; localDot pins the OpenAI one.
+  const CATALOG_ROUTE: Record<string, string> = {
+    minimax: "https://api.minimax.io/anthropic/v1",
+    "minimax-coding-plan": "https://api.minimax.io/anthropic/v1",
+  };
+
+  it("finds every pinned preset in the catalog at the address the catalog lists", () => {
+    const pinned = PROVIDERS.filter((p) => p.baseURL);
+    expect(pinned.length).toBeGreaterThan(0);
+    for (const p of pinned) {
+      const entry = listed[p.id];
+      expect(entry, p.id).toBeDefined();
+      if (entry?.api) expect(trimmed(entry.api), p.id).toBe(CATALOG_ROUTE[p.id] ?? p.baseURL);
+    }
+    for (const id of ["zai", "minimax-coding-plan", "alibaba-token-plan", "alibaba-coding-plan"])
+      expect(Object.keys(catalog.providers[id]?.models ?? {}).length, id).toBeGreaterThan(0);
+  });
+
+  it("offers the plans whose vendors let an agent use them, over the OpenAI-compatible kind", () => {
+    const plans = PROVIDERS.filter((p) => p.plan);
+    expect(plans.map((p) => [p.id, p.name])).toEqual([
+      ["minimax-coding-plan", "MiniMax Token Plan"],
+      ["alibaba-token-plan", "Alibaba Token Plan"],
+      ["alibaba-coding-plan", "Alibaba Coding Plan"],
+    ]);
+    for (const p of plans) {
+      expect(p).toMatchObject({ client: "openai-compatible", keyd: "openai-compatible" });
+      expect(p.baseURL).toMatch(/^https:\/\//);
+      expect(p.notOffered).toBeUndefined();
+    }
+    expect(providerById("alibaba-coding-plan")?.rule).toBe(
+      "Alibaba allows this plan only for tasks you start and watch.",
+    );
+    // models.dev prices plan models at $0.
+    expect(findModel(catalog, "minimax-coding-plan", "MiniMax-M3")).toMatchObject({
+      inputUSDPerMTok: 0,
+      outputUSDPerMTok: 0,
+    });
+  });
+
+  it("lists the plans it cannot offer with one sentence that points to the vendor's API key", () => {
+    const rows = PROVIDERS.filter((p) => p.notOffered);
+    expect(rows.map((p) => [p.id, p.name, p.notOffered])).toEqual([
+      [
+        "zai-coding-plan",
+        "GLM Coding Plan",
+        "Z.ai lets this plan run only in the coding tools it lists. Use a Z.ai API key here instead.",
+      ],
+      [
+        "kimi-code-plan-global",
+        "Kimi For Coding",
+        "Kimi lets this plan run only in coding tools it recognises. Use a Moonshot API key here instead.",
+      ],
+      [
+        "volcengine-coding-plan",
+        "Ark Coding Plan",
+        "Volcengine lets this plan run only in the coding tools it lists. Use an Ark API key here instead.",
+      ],
+    ]);
+    for (const p of rows) {
+      expect(listed[p.id], p.id).toBeDefined();
+      // Nothing a key could be bound to, and no plan or rule to offer.
+      expect(p.baseURL).toBeUndefined();
+      expect(p.plan).toBeUndefined();
+      expect(p.rule).toBeUndefined();
+      expect(p.local).toBeUndefined();
+      expect(p.availableIn).toBeUndefined();
+    }
   });
 });
 

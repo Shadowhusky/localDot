@@ -318,6 +318,43 @@ describe("agent user routes", () => {
     expect(offline.keys).toEqual([]);
     expect(offline.providers).toEqual(body.providers);
   });
+  it("marks plans, their rule and the plans not offered, which list no models", async () => {
+    const f = await setup();
+    const body = (await (await f.send("GET", "/api/agent/providers")).json()) as {
+      providers: {
+        id: string;
+        baseURL?: string;
+        plan?: true;
+        rule?: string;
+        notOffered?: string;
+        models: { id: string }[];
+      }[];
+    };
+    const row = (id: string) => body.providers.find((p) => p.id === id);
+    expect(row("minimax-coding-plan")).toMatchObject({
+      plan: true,
+      baseURL: "https://api.minimax.io/v1",
+      models: [{ id: "MiniMax-M3" }],
+    });
+    expect(row("minimax-coding-plan")).not.toHaveProperty("rule");
+    expect(row("alibaba-coding-plan")).toMatchObject({
+      plan: true,
+      rule: "Alibaba allows this plan only for tasks you start and watch.",
+    });
+    expect(row("zai")).not.toHaveProperty("plan");
+    expect(row("zai")?.models.map((m) => m.id)).toEqual(["glm-5v-turbo", "glm-4.6v"]);
+    const refused = body.providers.filter((p) => p.notOffered);
+    expect(refused.map((p) => p.id)).toEqual([
+      "zai-coding-plan",
+      "kimi-code-plan-global",
+      "volcengine-coding-plan",
+    ]);
+    for (const p of refused) {
+      expect(p.notOffered).toMatch(/ API key here instead\.$/);
+      expect(p.models).toEqual([]);
+      expect(p).not.toHaveProperty("baseURL");
+    }
+  });
   it("validates all settings roles and refuses writes after cancellation during key lookup", async () => {
     const f = await setup();
     const choice = {
@@ -677,6 +714,28 @@ describe("ChatGPT settings and installation integration", () => {
     });
     expect(f.account.status).not.toHaveBeenCalled();
     expect(f.installer.ensureInstalled).not.toHaveBeenCalled();
+  });
+  it("explains the plan in plain words without internal names", async () => {
+    const off = await setup();
+    const reply = (await (await off.send("GET", "/api/agent/providers")).json()) as {
+      subscriptions: { reason?: string }[];
+    };
+    expect(reply.subscriptions[0]?.reason).toBe(
+      "ChatGPT plan support isn't switched on in this version yet.",
+    );
+    const f = await installedFixture();
+    expect(await (await f.send("GET", "/api/agent/chatgpt")).json()).toMatchObject({
+      available: true,
+      state: "unavailable",
+      reason: "Install ChatGPT support first.",
+    });
+    const login = await f.send("POST", "/api/agent/chatgpt/login", {});
+    expect(login.status).toBe(409);
+    expect(await login.text()).toBe("Install ChatGPT support first.");
+    f.setAvailable(false);
+    const install = await f.send("POST", "/api/agent/chatgpt/install");
+    expect(install.status).toBe(503);
+    expect(await install.text()).toBe("ChatGPT support can't be installed on this computer.");
   });
   it.each(["/install", "/install/cancel"])("requires the install token for %s", async (path) => {
     const f = await installedFixture(),

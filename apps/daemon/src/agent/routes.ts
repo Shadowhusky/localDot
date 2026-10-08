@@ -1,4 +1,6 @@
 import {
+  CHATGPT_INSTALL_FIRST,
+  CHATGPT_SWITCHED_OFF,
   CODEX_VERSION,
   type CodexInstaller,
   type HarnessAvailability,
@@ -218,13 +220,12 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
   const harness = () =>
     deps.harness?.() ?? {
       available: false,
-      reason: "The ChatGPT plan is not set up in this daemon.",
+      reason: CHATGPT_SWITCHED_OFF,
     };
   if (deps.chatgpt) {
     const { account, installer } = deps.chatgpt;
     const installed = () => {
-      if (installer.status().state !== "ready")
-        throw new AccountError(409, "Install the ChatGPT harness before signing in.");
+      if (installer.status().state !== "ready") throw new AccountError(409, CHATGPT_INSTALL_FIRST);
       const availability = harness();
       if (!availability.available)
         throw new AccountError(503, availability.reason ?? "The ChatGPT plan is unavailable.");
@@ -244,7 +245,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           if (install.state !== "ready")
             return {
               available: true,
-              reason: "Install the ChatGPT harness before signing in.",
+              reason: CHATGPT_INSTALL_FIRST,
               codexVersion: CODEX_VERSION,
               state: "unavailable" as const,
               install,
@@ -273,7 +274,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         await empty(c.req.raw);
         check(c.req.raw.signal);
         if (!deps.chatgpt?.availability().available)
-          throw new RouteError(503, "The ChatGPT harness cannot be installed on this computer.");
+          throw new RouteError(503, "ChatGPT support can't be installed on this computer.");
         // Installation is explicitly requested and daemon-owned; a disconnected HTTP caller
         // does not cancel the shared flight. Its separate cancel action remains available.
         if (!flight) {
@@ -359,8 +360,11 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
           local: provider.local === true,
           ...(provider.baseURL ? { baseURL: provider.baseURL } : {}),
           ...(provider.availableIn ? { availableIn: provider.availableIn } : {}),
+          ...(provider.plan ? { plan: true } : {}),
+          ...(provider.rule ? { rule: provider.rule } : {}),
+          ...(provider.notOffered ? { notOffered: provider.notOffered } : {}),
           models: Object.values(
-            catalog && Object.hasOwn(catalog.providers, provider.id)
+            catalog && !provider.notOffered && Object.hasOwn(catalog.providers, provider.id)
               ? (catalog.providers[provider.id]?.models ?? {})
               : {},
           ).map((model) => ({

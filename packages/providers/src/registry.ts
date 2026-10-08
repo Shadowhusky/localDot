@@ -22,11 +22,33 @@ export interface ProviderSpec {
   local?: boolean;
   // Spec "Providers and sign-in": Bedrock and Vertex need keyd's signing, which is M8's.
   availableIn?: "m8";
+  // A flat-rate plan whose vendor lets a general agent use it; models.dev prices its models at $0.
+  plan?: true;
+  // The vendor's condition on the plan, shown when it is chosen.
+  rule?: string;
+  // A plan whose vendor keeps it to the tools it lists: shown with this reason, never bound.
+  notOffered?: string;
 }
 
-// Every API-key provider the spec names, and the local servers; each id is models.dev's provider
-// id. The first-class providers use their official AI SDK packages and their own keyd kinds; the
-// other eight speak OpenAI's chat completions at their documented base URLs (P5a-R4).
+const compatible = (id: string, name: string, baseURL: string): ProviderSpec => ({
+  id,
+  name,
+  client: "openai-compatible",
+  keyd: "openai-compatible",
+  baseURL,
+});
+const notOffered = (id: string, name: string, reason: string): ProviderSpec => ({
+  id,
+  name,
+  client: "openai-compatible",
+  keyd: "openai-compatible",
+  notOffered: reason,
+});
+
+// Every API-key provider the spec names, the plans their vendors let an agent use, and the local
+// servers; each id is models.dev's provider id. The first-class providers use their official AI
+// SDK packages and their own keyd kinds; the rest speak OpenAI's chat completions at base URLs
+// pinned here, never taken from the catalog (P5a-R4).
 export const PROVIDERS: readonly ProviderSpec[] = [
   { id: "anthropic", name: "Anthropic", client: "anthropic", keyd: "anthropic" },
   { id: "openai", name: "OpenAI", client: "openai", keyd: "openai" },
@@ -37,70 +59,70 @@ export const PROVIDERS: readonly ProviderSpec[] = [
   { id: "deepseek", name: "DeepSeek", client: "deepseek", keyd: "deepseek" },
   { id: "groq", name: "Groq", client: "groq", keyd: "groq" },
   { id: "openrouter", name: "OpenRouter", client: "openrouter", keyd: "openrouter" },
-  {
-    id: "togetherai",
-    name: "Together",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.together.xyz/v1",
-  },
-  {
-    id: "fireworks-ai",
-    name: "Fireworks",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.fireworks.ai/inference/v1",
-  },
-  {
-    id: "cerebras",
-    name: "Cerebras",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.cerebras.ai/v1",
-  },
-  {
-    id: "perplexity",
-    name: "Perplexity",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.perplexity.ai",
-  },
-  {
-    id: "cohere",
-    name: "Cohere",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.cohere.ai/compatibility/v1",
-  },
-  {
-    id: "deepinfra",
-    name: "DeepInfra",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.deepinfra.com/v1/openai",
-  },
-  {
-    id: "moonshotai",
-    name: "Moonshot (Kimi)",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://api.moonshot.ai/v1",
-  },
-  {
-    id: "alibaba",
-    name: "Alibaba (Qwen)",
-    client: "openai-compatible",
-    keyd: "openai-compatible",
-    baseURL: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-  },
+  compatible("togetherai", "Together", "https://api.together.xyz/v1"),
+  compatible("fireworks-ai", "Fireworks", "https://api.fireworks.ai/inference/v1"),
+  compatible("cerebras", "Cerebras", "https://api.cerebras.ai/v1"),
+  compatible("perplexity", "Perplexity", "https://api.perplexity.ai"),
+  compatible("cohere", "Cohere", "https://api.cohere.ai/compatibility/v1"),
+  compatible("deepinfra", "DeepInfra", "https://api.deepinfra.com/v1/openai"),
+  compatible("moonshotai", "Moonshot (Kimi)", "https://api.moonshot.ai/v1"),
+  compatible("moonshotai-cn", "Moonshot (China)", "https://api.moonshot.cn/v1"),
+  compatible("alibaba", "Alibaba (Qwen)", "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"),
+  compatible(
+    "alibaba-cn",
+    "Alibaba (Qwen, China)",
+    "https://dashscope.aliyuncs.com/compatible-mode/v1",
+  ),
+  compatible("zai", "Z.ai", "https://api.z.ai/api/paas/v4"),
+  compatible("zhipuai", "Zhipu AI (China)", "https://open.bigmodel.cn/api/paas/v4"),
+  compatible("minimax", "MiniMax", "https://api.minimax.io/v1"),
+  compatible("volcengine", "Volcengine Ark", "https://ark.cn-beijing.volces.com/api/v3"),
+  compatible("siliconflow", "SiliconFlow", "https://api.siliconflow.com/v1"),
+  compatible("siliconflow-cn", "SiliconFlow (China)", "https://api.siliconflow.cn/v1"),
   {
     id: "openai-compatible",
     name: "Other (OpenAI-compatible)",
     client: "openai-compatible",
     keyd: "openai-compatible",
   },
+  {
+    ...compatible("minimax-coding-plan", "MiniMax Token Plan", "https://api.minimax.io/v1"),
+    plan: true,
+  },
+  {
+    ...compatible(
+      "alibaba-token-plan",
+      "Alibaba Token Plan",
+      "https://token-plan.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1",
+    ),
+    plan: true,
+  },
+  {
+    ...compatible(
+      "alibaba-coding-plan",
+      "Alibaba Coding Plan",
+      "https://coding-intl.dashscope.aliyuncs.com/v1",
+    ),
+    plan: true,
+    rule: "Alibaba allows this plan only for tasks you start and watch.",
+  },
   { id: "lmstudio", name: "LM Studio", client: "lmstudio", keyd: "lmstudio", local: true },
   { id: "ollama", name: "Ollama", client: "ollama", keyd: "ollama", local: true },
+  notOffered(
+    "zai-coding-plan",
+    "GLM Coding Plan",
+    "Z.ai lets this plan run only in the coding tools it lists. Use a Z.ai API key here instead.",
+  ),
+  notOffered(
+    "kimi-code-plan-global",
+    "Kimi For Coding",
+    "Kimi lets this plan run only in coding tools it recognises. Use a Moonshot API key here instead.",
+  ),
+  notOffered(
+    "volcengine-coding-plan",
+    "Ark Coding Plan",
+    "Volcengine lets this plan run only in the coding tools it lists. Use an Ark API key here instead.",
+  ),
   {
     id: "amazon-bedrock",
     name: "Amazon Bedrock",

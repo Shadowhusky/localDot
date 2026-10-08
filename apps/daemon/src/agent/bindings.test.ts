@@ -209,3 +209,95 @@ describe("resolveRole", () => {
     ).toBe(0);
   });
 });
+
+describe("vendor presets and plans", () => {
+  const bound = (id: string, baseURL: string): KeydRecord => ({
+    id,
+    kind: "llm",
+    provider: "openai-compatible",
+    baseURL,
+    createdAt: at,
+    updatedAt: at,
+  });
+  const vendorKeys = [
+    bound("zai", "https://api.z.ai/api/paas/v4/"),
+    bound("zai-plan", "https://api.z.ai/api/coding/paas/v4"),
+    bound("minimax", "https://api.minimax.io/v1"),
+  ];
+  const GLM_PLAN =
+    "Z.ai lets this plan run only in the coding tools it lists. Use a Z.ai API key here instead.";
+
+  it("binds a Z.ai key to the pinned address, with GLM vision on the 0–1000 grid", () => {
+    const r = resolveRole(
+      "main",
+      { provider: "zai", model: "glm-5v-turbo", key: "zai" },
+      catalog,
+      vendorKeys,
+    );
+    expect(bindingOf(r, { zai: SURROGATE })).toMatchObject({
+      route: "zai",
+      client: "openai-compatible",
+      model: "glm-5v-turbo",
+      computer: "generic",
+      coords: "per1000",
+      vision: true,
+    });
+    expect(r.model).toMatchObject({ inputUSDPerMTok: 1.2, outputUSDPerMTok: 4 });
+  });
+
+  it("refuses a key bound to another address, even the same vendor's plan endpoint", () => {
+    expect(() =>
+      resolveRole(
+        "main",
+        { provider: "zai", model: "glm-5v-turbo", key: "zai-plan" },
+        catalog,
+        vendorKeys,
+      ),
+    ).toThrow(/zai-plan is bound to https:\/\/api\.z\.ai\/api\/coding\/paas\/v4, not/);
+  });
+
+  it("refuses a plan the vendor keeps to its listed tools, with its one-sentence reason", () => {
+    const price = { inputUSDPerMTok: 1, outputUSDPerMTok: 1 };
+    for (const key of ["zai-plan", "zai", undefined])
+      expect(() =>
+        resolveRole(
+          "main",
+          { provider: "zai-coding-plan", model: "glm-5.3-flash", price, ...(key ? { key } : {}) },
+          catalog,
+          vendorKeys,
+        ),
+      ).toThrow(new BindingError("main", GLM_PLAN));
+    expect(() =>
+      resolveRole(
+        "fast",
+        { provider: "kimi-code-plan-global", model: "kimi-for-coding" },
+        catalog,
+        vendorKeys,
+      ),
+    ).toThrow(/Use a Moonshot API key here instead\.$/);
+  });
+
+  it("still asks for a manual price on a $0 plan model until plan routes are flat-rate", () => {
+    const choice = { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "minimax" };
+    expect(() => resolveRole("main", choice, catalog, vendorKeys)).toThrow(
+      /MiniMax-M3 has no price in the catalog/,
+    );
+    const priced = resolveRole(
+      "main",
+      { ...choice, price: { inputUSDPerMTok: 0.3, outputUSDPerMTok: 1.2 } },
+      catalog,
+      vendorKeys,
+    );
+    expect(keydRouteModel(priced.model)).toEqual({
+      id: "MiniMax-M3",
+      inputUSDPerMTok: 0.3,
+      outputUSDPerMTok: 1.2,
+      maxOutputTokens: 512_000,
+    });
+    expect(bindingOf(priced, { minimax: SURROGATE })).toMatchObject({
+      route: "minimax",
+      client: "openai-compatible",
+      vision: true,
+    });
+  });
+});

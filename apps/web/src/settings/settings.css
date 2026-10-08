@@ -172,7 +172,8 @@
   gap: 8px;
   margin-left: auto;
 }
-.settings-sheet .model-capability {
+.settings-sheet .model-capability,
+.settings-sheet .provider-note {
   color: var(--color-text);
 }
 @media (width < 600px) {
@@ -203,10 +204,23 @@
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  margin: 8px 0;
+}
+.chatgpt-panel > button {
+  margin: 4px 8px 4px 0;
+}
+.chatgpt-usage {
+  margin: 12px 0 0;
+  padding: 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 6px;
+  min-width: 0;
 }
 
 .chatgpt-panel progress {
-  max-width: 100%;
+  display: block;
+  width: 100%;
+  margin: 8px 0 16px;
 }
 .chatgpt-confirm {
   padding: 12px;

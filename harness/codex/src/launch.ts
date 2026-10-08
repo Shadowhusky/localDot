@@ -45,12 +45,14 @@ export type CodexLaunchFailure =
   | "transport_failed"
   | "process_exited"
   | "shutdown_failed";
+export const CHATGPT_NEEDS_APPLE_SILICON = "ChatGPT plan needs a Mac with Apple silicon.";
+export const CHATGPT_INSTALL_FIRST = "Install ChatGPT support first.";
 const MESSAGES: Record<CodexLaunchFailure, string> = {
   cancelled: "The Codex launch was cancelled.",
-  unsupported_platform: "The ChatGPT harness is unavailable on this computer.",
+  unsupported_platform: "ChatGPT support is unavailable on this computer.",
   browser_unavailable:
     "Browser sign-in cannot safely restrict its callback to loopback. Use device-code sign-in.",
-  install_required: "Install the ChatGPT harness before signing in.",
+  install_required: CHATGPT_INSTALL_FIRST,
   integrity_failed: "The pinned Codex executable could not be verified.",
   invalid_request: "The Codex launch request is invalid.",
   endpoint_unavailable: "The localDot Codex tool bridge is unavailable.",
@@ -76,7 +78,7 @@ export function harnessAvailability(
   caBundle = CA_BUNDLE,
 ): HarnessAvailability {
   if (platform !== "darwin" || arch !== "arm64" || !codexBuild(platform, arch))
-    return { available: false, reason: "The ChatGPT plan needs macOS on Apple silicon for now." };
+    return { available: false, reason: CHATGPT_NEEDS_APPLE_SILICON };
   try {
     const file = lstatSync(caBundle);
     if (

@@ -3,6 +3,7 @@ import { z } from "zod";
 import measured from "../releases/0.154.0.json" with { type: "json" };
 
 export const CODEX_VERSION = "0.154.0";
+export const CODEX_RELEASE_BUNDLE: unknown = measured;
 export const MAX_COMPRESSED_BYTES = 256 * 1024 * 1024;
 export const MAX_EXPANDED_BYTES = 512 * 1024 * 1024;
 export const MAX_ARCHIVE_ENTRIES = 4096;

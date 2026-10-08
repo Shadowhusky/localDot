@@ -798,6 +798,7 @@ function Theatre({ api }: { api: ApiClient }) {
             !provider ||
             provider.local ||
             provider.availableIn ||
+            provider.notOffered ||
             !settings.open ||
             settings.busy ||
             !LLM_PROVIDERS.some((kind) => kind === provider.keyd)
