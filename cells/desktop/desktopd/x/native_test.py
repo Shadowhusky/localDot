@@ -133,6 +133,14 @@ class PointQuery(unittest.TestCase):
         self.assertEqual(found["space"], "gtk")
         self.assertEqual((found["editable"], found["secret"]), (True, False))
 
+    def test_marks_a_password_field_secret_under_the_point_and_as_focus(self):
+        helper, _, entry = gimp()
+        entry.role = "password text"
+        found = at(helper, DIALOG, (896, 736))["element"]
+        self.assertEqual((found["role"], found["secret"]), ("password text", True))
+        entry.states.add("focused")
+        self.assertEqual(focused(helper)["secret"], True)
+
     def test_finds_the_window_by_title_and_never_a_hidden_element(self):
         helper, dialog, _ = gimp()
         dialog.children[0].answers = lambda x, y: dialog.children[0].children[2]
@@ -328,6 +336,37 @@ class Focus(unittest.TestCase):
         entry.states.add("focused")
         self.assertEqual(focused(helper)["role"], "text")
 
+    def test_rechecks_an_announced_element_that_lost_focus_without_an_event(self):
+        helper, dialog, entry = gimp()
+        spin = Node("spin button", "", (457, 183, 126, 28), dialog.children[0],
+                    states=("showing", "editable"))
+        entry.states.add("focused")
+        helper.on_event(event("object:state-changed:focused", entry))
+        self.assertEqual(focused(helper)["role"], "text")
+        # The unfocus event never came: the entry's own state says it is no longer focused.
+        entry.states.discard("focused")
+        spin.states.add("focused")
+        self.assertEqual(focused(helper)["role"], "spin button")
+
+    def test_never_reports_an_announced_element_that_is_no_longer_showing(self):
+        helper, _, entry = gimp()
+        entry.states.add("focused")
+        helper.on_event(event("object:state-changed:focused", entry))
+        entry.states.discard("showing")
+        self.assertIsNone(focused(helper))
+
+    def test_ignores_focus_announced_by_another_app_in_an_untitled_window(self):
+        # An untitled top-level passes as this window's popup list; only the process id tells.
+        helper, _, _ = gimp()
+        _, other = app(999, "other")
+        helper.desktop.children.append(other)
+        other.parent = helper.desktop
+        popup = Node("window", "", (380, 355, 161, 28), other)
+        field = Node("password text", "", (380, 355, 161, 28), popup,
+                     states=("showing", "focused", "editable"))
+        helper.on_event(event("object:state-changed:focused", field))
+        self.assertIsNone(focused(helper))
+
     def test_walks_the_window_when_no_event_has_been_seen(self):
         helper, _, entry = gimp()
         entry.states.add("focused")
@@ -404,6 +443,31 @@ class Menus(unittest.TestCase):
         helper.on_event(event("object:state-changed:selected", file_menu))
         found = at(helper, win, (115, 296))["element"]
         self.assertEqual((found["role"], found["name"]), ("menu item", "Open..."))
+
+    def test_never_names_a_hidden_item_of_an_open_menu(self):
+        helper, file_menu, win, _ = gimp_menu()
+        Node("menu item", "Quit", (7, 136, 296, 25), file_menu, states=())
+        file_menu.children.insert(0, file_menu.children.pop())
+        file_menu.states.add("selected")
+        helper.on_event(event("object:state-changed:selected", file_menu))
+        self.assertEqual(at(helper, win, (115, 296))["element"]["name"], "Open...")
+
+    def test_never_names_an_item_of_another_apps_menu(self):
+        helper, _, win, _ = gimp_menu()
+        _, other = app(999, "other")
+        other.parent = helper.desktop
+        menu = Node("menu", "Account", (1, 55, 38, 25), Node("menu bar", "", (1, 55, 800, 25), other),
+                    states=("showing", "selected"))
+        Node("menu item", "Delete account", (7, 136, 296, 25), menu)
+        helper.on_event(event("object:state-changed:selected", menu))
+        self.assertEqual(at(helper, win, (115, 296)), {"element": None})
+
+    def test_never_names_an_item_of_an_announced_menu_that_closed(self):
+        helper, file_menu, win, _ = gimp_menu()
+        file_menu.states.add("selected")
+        helper.on_event(event("object:state-changed:selected", file_menu))
+        file_menu.states.discard("showing")
+        self.assertEqual(at(helper, win, (115, 296)), {"element": None})
 
     def test_finds_an_item_of_an_open_submenu(self):
         helper, file_menu, win, _ = gimp_menu()
