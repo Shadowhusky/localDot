@@ -461,7 +461,18 @@
     gap: calc(var(--spacing) * 2);
     padding: calc(var(--spacing) * 3) calc(var(--spacing) * 5);
     border-top: 1px solid transparent;
-    transition: border-color var(--dur-hover) var(--ease-standard);
+    transition:
+      border-color var(--dur-hover) var(--ease-standard),
+      opacity var(--dur-fade) var(--ease-enter) var(--dur-press);
+  }
+
+  /* The footer and the discard prompt over it hand over in turn: each fades out before the other
+     fades in, so the two rows of buttons never show through each other. */
+  .ui-sheet-footer[inert] {
+    opacity: 0;
+    transition:
+      border-color var(--dur-hover) var(--ease-standard),
+      opacity var(--dur-press) var(--ease-standard);
   }
 
   .ui-sheet[data-under-bottom] .ui-sheet-footer {
@@ -489,7 +500,7 @@
     translate: 0 calc(var(--_nudge) * 3);
     pointer-events: none;
     transition:
-      opacity var(--dur-exit) var(--ease-exit),
+      opacity var(--dur-press) var(--ease-standard),
       translate var(--dur-exit) var(--ease-exit);
   }
 
@@ -498,7 +509,7 @@
     translate: 0 0;
     pointer-events: auto;
     transition:
-      opacity var(--dur-fade) var(--ease-enter),
+      opacity var(--dur-fade) var(--ease-enter) calc(var(--dur-press) / 2),
       translate var(--dur-spring) var(--ease-spring);
   }
 

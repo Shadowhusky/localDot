@@ -168,8 +168,12 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await page.keyboard.press("Escape");
         await expect(promptOf(page)).toBeVisible();
         await expect(keep).toBeFocused();
+        // The footer under the prompt fades out, so the two rows of buttons never show at once.
+        const footer = sheet.locator(".ui-sheet-footer");
+        await expect(footer).toHaveCSS("opacity", "0");
         await press(keep);
         await expect(promptOf(page)).toHaveCount(0);
+        await expect(footer).toHaveCSS("opacity", "1");
 
         await press(sheet.getByRole("button", { name: "Close settings" }));
         await expect(promptOf(page)).toBeVisible();
