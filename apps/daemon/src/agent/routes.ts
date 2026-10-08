@@ -489,6 +489,19 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return s.answerApproval(parsed) ? c.body(null, 204) : c.text("approval is not waiting", 409);
     }),
   );
+  app.get(
+    "/api/agent/sessions/:id/approvals/:approvalId/fields/:field",
+    route((c) => {
+      const s = session(c.req.param("id") ?? "");
+      const field = c.req.param("field") ?? "";
+      const text = /^(?:\d|1[0-5])$/.test(field)
+        ? s.approvalField(c.req.param("approvalId") ?? "", Number(field))
+        : undefined;
+      if (text === undefined) throw new RouteError(404, "that approval text is not waiting");
+      c.header("cache-control", "no-store");
+      return c.json({ text });
+    }),
+  );
   app.post(
     "/api/agent/sessions/:id/answer",
     route(async (c) => {

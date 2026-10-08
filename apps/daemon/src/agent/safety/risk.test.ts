@@ -157,7 +157,7 @@ describe("native and execution risk facts", () => {
     cyclic.self = cyclic;
     expect(() => actionDigest(cyclic)).toThrow();
   });
-  it("approval previews redact whole input before clipping and exclude URL credentials/query/fragment", () => {
+  it("approval previews redact the whole input and exclude page URL credentials/query/fragment", () => {
     const redact = vi.fn((text: string) => text.replaceAll("synthetic-private", "[redacted]"));
     const card = buildApprovalCard(
       {
@@ -177,8 +177,7 @@ describe("native and execution risk facts", () => {
     expect(JSON.stringify(card)).not.toContain("synthetic-private");
     expect(JSON.stringify(card)).not.toContain("u:p");
     expect(JSON.stringify(card)).not.toContain("?token");
-    expect(card.fields.every(([key, value]) => key.length <= 80 && value.length <= 512)).toBe(true);
-    expect(redact.mock.calls.some(([text]) => text.length > 512)).toBe(true);
+    expect(card.fields).toContainEqual(["Command", `echo [redacted] ${"x".repeat(1000)}`]);
     expect(safeTargetURL("https://u:p@example.test/path?secret=x#otp")).toBe(
       "https://example.test/path",
     );

@@ -1,4 +1,4 @@
-import type { ApprovalCardDraft, PauseSnapshot } from "@localdot/protocol";
+import type { ApprovalRequestDraft, PauseSnapshot } from "@localdot/protocol";
 import {
   type ApprovalCard,
   type AutonomyPolicy,
@@ -179,9 +179,12 @@ export class AgentSession {
   get pendingApproval(): ApprovalCard | undefined {
     return this.#approvals.pending(this.id);
   }
+  approvalField(approvalId: string, field: number): string | undefined {
+    return this.#approvals.field(this.id, approvalId, field);
+  }
   requestApproval(
     binding: ActionBinding,
-    draft: ApprovalCardDraft,
+    draft: ApprovalRequestDraft,
     checks: ApprovalChecks,
   ): Promise<ApprovalOutcome> {
     const generation = this.generation;
