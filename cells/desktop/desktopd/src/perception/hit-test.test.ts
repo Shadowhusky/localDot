@@ -20,8 +20,10 @@ const win = (
   y,
   w,
   h,
-  frame: [x - 1, y - 24, w + 2, h + 25],
+  frame: [x - 1, y - 24, w + 2, h + 25] as [number, number, number, number],
   active: id === 1,
+  overrideRedirect: false,
+  transientFor: null as number | null,
 });
 
 function deps(
@@ -31,7 +33,7 @@ function deps(
 ): PerceptionDeps & { driverCalls: number[] } {
   const driverCalls: number[] = [];
   const x = {
-    call: async (cmd: string) => (cmd === "windows" ? { windows } : {}),
+    call: async (cmd: string) => (cmd === "windows" ? { windows, generation: 1 } : {}),
   } as unknown as XHelper;
   const driver = {
     windowState: async (_pid: number, id: number) => {
@@ -92,6 +94,19 @@ describe("hitTest", () => {
     const inTerminal = await hitTest(d, { x: 600, y: 400 });
     expect(inTerminal.window).toBe(1);
     expect(inTerminal.target?.app).toBe("Xfce4-terminal");
+  });
+
+  it("names an open menu over its parent window as the window under the point", async () => {
+    const menu = {
+      ...win(30, "Gimp", -10, 150, 640, 1108),
+      frame: [-10, 150, 640, 1108] as [number, number, number, number],
+      overrideRedirect: true,
+      transientFor: 2,
+    };
+    const d = deps([menu, win(2, "Gimp", 2, 110, 1600, 1200)], { 30: [], 2: [] });
+    const hit = await hitTest(d, { x: 115, y: 296 });
+    expect(hit.window).toBe(30);
+    expect(d.driverCalls).toEqual([30]);
   });
 
   it("returns a coordinates-only target on a window's decoration and nothing on empty desktop", async () => {

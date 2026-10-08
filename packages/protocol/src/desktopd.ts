@@ -16,6 +16,9 @@ export const WindowInfo = z.object({
   rect: Rect,
   frame: Rect,
   active: z.boolean(),
+  // Menus, popups and tooltips: never managed, never active, stacked above their parent.
+  overrideRedirect: z.boolean().optional(),
+  transientFor: z.number().int().nonnegative().nullable().optional(),
 });
 export type WindowInfo = z.infer<typeof WindowInfo>;
 

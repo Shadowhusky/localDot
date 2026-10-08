@@ -24,6 +24,8 @@ export interface HelperWindow {
   h: number;
   frame: [number, number, number, number];
   active: boolean;
+  overrideRedirect: boolean;
+  transientFor: number | null;
 }
 
 export interface PerceptionDeps {
@@ -44,9 +46,14 @@ const contains = (r: Rect, p: Point) =>
   p.x >= r.x && p.y >= r.y && p.x < r.x + r.w && p.y < r.y + r.h;
 const area = (r: Rect) => r.w * r.h;
 
+// Every window top first, open menus and popups included, and the screen's change generation,
+// which moves with every damage, map, unmap and move.
+export function windowStack(x: XHelper): Promise<{ windows: HelperWindow[]; generation: number }> {
+  return x.call<{ windows: HelperWindow[]; generation: number }>("windows", { stack: true });
+}
+
 export async function listWindows(x: XHelper): Promise<HelperWindow[]> {
-  const { windows } = await x.call<{ windows: HelperWindow[] }>("windows");
-  return windows;
+  return (await windowStack(x)).windows;
 }
 
 // The panel, the dock and the desktop window (the classes the Task 3 windows test filters) are
@@ -54,6 +61,7 @@ export async function listWindows(x: XHelper): Promise<HelperWindow[]> {
 // a null target and the gateway keeps the crosshair; find never searches them either.
 export const DECOR_CLASSES = new Set(["Xfce4-panel", "Plank", "Xfdesktop"]);
 
+// The top-most window at the point, open menus and popups included: input goes to it.
 export function windowUnder(windows: HelperWindow[], point: Point): HelperWindow | undefined {
   return windows.find(
     (w) =>
