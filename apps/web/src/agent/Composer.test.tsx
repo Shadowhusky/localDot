@@ -409,6 +409,27 @@ describe("composer delivery ownership and draft handling", () => {
       body: { kind: "followup", text: "idle follow-up" },
     });
   });
+  it("opens model settings before any computer exists and keeps the draft", () => {
+    const onSettings = vi.fn();
+    const f = setup(undefined, {
+      cell: null,
+      known: false,
+      agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
+      configured: false,
+      onSettings,
+    });
+    expect(f.field.disabled).toBe(false);
+    f.input("Draft the monthly summary");
+    const connect = screen.getByRole("button", { name: "Connect a model" }) as HTMLButtonElement;
+    expect(connect.disabled).toBe(false);
+    fireEvent.click(connect);
+    expect(onSettings).toHaveBeenCalledExactlyOnceWith(f.field);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(onSettings).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(f.field.value).toBe("Draft the monthly summary");
+    expect(f.requests).toEqual([]);
+  });
 });
 
 describe("explicit composer attachments", () => {

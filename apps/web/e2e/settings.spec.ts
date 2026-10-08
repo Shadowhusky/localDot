@@ -235,7 +235,7 @@ async function load(page: Page) {
   await page.goto(origin);
   const conversation = page.getByRole("tab", { name: "Conversation" });
   if (await conversation.isVisible()) await conversation.click();
-  await expect(page.getByRole("button", { name: "Set up models" })).toBeEnabled();
+  await expect(page.getByRole("button", { name: "Connect a model" })).toBeEnabled();
   return { errors, external };
 }
 for (const width of [1280, 390])
@@ -245,7 +245,7 @@ for (const width of [1280, 390])
     if (width < 1180) await page.getByRole("tab", { name: "Conversation" }).click();
     const draft = page.getByLabel("New task");
     await draft.fill("Prepare a sample report later.");
-    await page.getByRole("button", { name: "Set up models" }).click();
+    await page.getByRole("button", { name: "Connect a model" }).click();
     const sheet = page.getByRole("dialog", { name: "Models and settings" });
     await expect(sheet).toBeVisible();
     await expect(page.locator(".theatre-content")).toHaveAttribute("inert", "");

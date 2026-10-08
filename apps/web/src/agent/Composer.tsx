@@ -209,6 +209,10 @@ export function Composer(props: ComposerProps) {
     }
     const now = current.current;
     const chosen = modeFor(now, selectedNow.current);
+    if (chosen === "new" && now.configured === false) {
+      now.onSettings?.(input);
+      return;
+    }
     if (
       !readyCell(now) ||
       !navigator.onLine ||
@@ -221,10 +225,6 @@ export function Composer(props: ComposerProps) {
     const text = input.value;
     if (!text.trim() || text.length > 8000 || !text.isWellFormed() || text.includes("\0")) {
       setProblem("Write a message of 1–8000 characters.");
-      return;
-    }
-    if (chosen === "new" && now.configured === false) {
-      now.onSettings?.(input);
       return;
     }
     const attached = uploads.forMessage();
@@ -378,20 +378,29 @@ export function Composer(props: ComposerProps) {
         />
         <div className="composer-actions">
           <span>{length}/8000</span>
-          <button
-            type="submit"
-            disabled={!permitted || sending || uncertain || !!guard.notice || uploads.blocked}
-          >
-            {sending
-              ? "Sending…"
-              : mode === "new"
-                ? props.configured === false
-                  ? "Set up models"
-                  : "Start task"
-                : mode === "followup"
-                  ? "Send follow-up"
-                  : "Send now"}
-          </button>
+          {mode === "new" && props.configured === false ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (field.current) props.onSettings?.(field.current);
+              }}
+            >
+              Connect a model
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!permitted || sending || uncertain || !!guard.notice || uploads.blocked}
+            >
+              {sending
+                ? "Sending…"
+                : mode === "new"
+                  ? "Start task"
+                  : mode === "followup"
+                    ? "Send follow-up"
+                    : "Send now"}
+            </button>
+          )}
         </div>
       </form>
       <KeyFound guard={guard} receive={props.receiveKey} />
