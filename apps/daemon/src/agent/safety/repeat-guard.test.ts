@@ -36,6 +36,8 @@ describe("repetition of pointer actions", () => {
         { verb: "drag", path, mods: ["shift"] },
       ]),
     ).toBe(4);
+    const stroke = (y: number): GuiAction => ({ verb: "drag", path: [...path, { x: 30, y }] });
+    expect(admitted([stroke(1), stroke(2), stroke(3)])).toBe(3);
   });
   it("tells moves, presses, releases and modifier clicks apart", () => {
     const at = (x: number): NativeActionIdentity => ({ ...identity, point: { x, y: 0 } });

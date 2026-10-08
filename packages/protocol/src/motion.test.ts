@@ -25,8 +25,8 @@ describe("motionSamples", () => {
     expect(samples.at(-1)?.t).toBeCloseTo(400, 0);
     const steps = samples.slice(0, corner + 1).map((s, i, all) => s.at.x - (all[i - 1]?.at.x ?? 0));
     const middle = steps[Math.floor(steps.length / 2)] as number;
-    expect(steps[0]).toBeLessThan(middle);
-    expect(steps.at(-1)).toBeLessThan(middle);
+    expect(steps[0]).toBeLessThan(middle / 2);
+    expect(steps.at(-1)).toBeLessThan(middle / 2);
   });
 
   it("moves at 60 to 120 motions a second, slowing a dense path down rather than going faster", () => {

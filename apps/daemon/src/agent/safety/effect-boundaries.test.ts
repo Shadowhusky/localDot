@@ -733,6 +733,14 @@ describe("immediate effect ownership", () => {
   });
   it("a drag card names both ends, the path, the button and the keys held", async () => {
     const f = setup();
+    const item = (name: string, x: number): HitTestResult => ({
+      target: { point: { x, y: 40 }, source: "ax", role: "list item", name, app: "Thunar" },
+      window: 77,
+      ms: 1,
+    });
+    // The drag starts on a file (device x 20) and drops on Trash (device x 100).
+    f.fake.script.hitTest = (point) =>
+      point.x > 60 ? item("Trash", point.x) : item("report.txt", point.x);
     const pending = f.call("computer", {
       action: "drag",
       path: [
@@ -744,6 +752,9 @@ describe("immediate effect ownership", () => {
     });
     await until(() => !!f.session.pendingApproval);
     const fields = f.session.pendingApproval?.fields;
+    expect(f.session.pendingApproval?.title).toBe("Delete item");
+    expect(fields).toContainEqual(["Target", "report.txt"]);
+    expect(fields).toContainEqual(["Drop target", "Trash"]);
     expect(fields).toContainEqual(["Action", "drag"]);
     expect(fields).toContainEqual(["Drag", "(10, 20) to (50, 60)"]);
     expect(fields).toContainEqual(["Path", "3 points"]);
