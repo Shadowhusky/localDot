@@ -223,6 +223,43 @@ describe("the tools", () => {
     expect(h.actions).toHaveLength(1);
   });
 
+  it("tells the model where typing and keys went, and when nothing changed", async () => {
+    const h = toolHarness();
+    const field = {
+      point: { x: 10, y: 10 },
+      source: "ax" as const,
+      role: "text",
+      name: "HTML notation",
+      window: "Change Foreground Color",
+    };
+    const note = async (input: unknown, focus: unknown, changed: boolean) => {
+      h.setOutcome(() => ({ ok: true, frameId: ulid(), changed, focus }) as never);
+      const r = await h.call("computer", input);
+      expect(r.body.content.at(-1)?.type).toBe("image");
+      return r.body.content[0]?.text;
+    };
+    const typing = { action: "type", text: "A9743E" };
+    expect(await note(typing, { target: field }, true)).toBe(
+      'Typed 6 characters into "HTML notation" (text) in "Change Foreground Color".',
+    );
+    expect(await note(typing, { target: null }, false)).toBe(
+      "Typed 6 characters, but no element had keyboard focus. No visible change.",
+    );
+    const selectAll = { action: "key", keys: ["ctrl", "a"] };
+    expect(await note(selectAll, { target: field }, false)).toBe(
+      'Pressed ctrl+a. No visible change: keyboard focus is on "HTML notation" (text) in "Change Foreground Color".',
+    );
+    expect(await note(selectAll, { target: null, unknown: true }, false)).toBe(
+      "Pressed ctrl+a. No visible change: keyboard focus is unknown.",
+    );
+    expect(await note({ action: "key", keys: ["]"], repeat: 5 }, { target: field }, true)).toBe(
+      'Pressed ] 5 times. Keyboard focus is on "HTML notation" (text) in "Change Foreground Color".',
+    );
+    expect(
+      await note({ action: "hold_key", keys: ["shift"], ms: 2000 }, { target: null }, true),
+    ).toBe("Held shift for 2 s. No element has keyboard focus.");
+  });
+
   it("ends a hold when the task is paused", async () => {
     const h = toolHarness();
     let signal: AbortSignal | undefined;

@@ -125,6 +125,8 @@ export interface ActionOutcome {
   cancelled?: "preflight" | "user" | "timeout" | "stale";
   // Settle saw a change and the result frame differs from the frame before the input.
   changed?: boolean;
+  // Typing and keys: the element that had keyboard focus just before the input.
+  focus?: { target: Target | null; unknown?: true };
 }
 
 export interface GatewayDeps {
@@ -444,7 +446,7 @@ export class ActionGateway {
       injector: "xtest" as const,
       ...(identity.window ? { window: identity.window } : {}),
     };
-    await this.#consume(ctx, action, identity, permit, readIdentity);
+    const fresh = await this.#consume(ctx, action, identity, permit, readIdentity);
     this.#check(ctx);
     const result = await d.client.type(
       typing,
@@ -476,7 +478,12 @@ export class ActionGateway {
     );
     if (result.count === 0) throw new Cancelled("timeout", "nothing was typed");
     const settled = await this.#finish(ctx, d, "type");
-    return { ok: true, ...settled, ...(identity.target ? { target: identity.target } : {}) };
+    return {
+      ok: true,
+      ...settled,
+      ...(identity.target ? { target: identity.target } : {}),
+      ...(fresh ? { focus: focusOf(fresh) } : {}),
+    };
   }
 
   async #keyAction(
@@ -508,7 +515,9 @@ export class ActionGateway {
       ...(action.repeat && action.repeat > 1 ? { repeat: action.repeat } : {}),
       ...(action.holdMs ? { holdMs: action.holdMs } : {}),
     };
-    if (identity) await this.#consume(ctx, action, identity, permit, readIdentity);
+    const fresh = identity
+      ? await this.#consume(ctx, action, identity, permit, readIdentity)
+      : undefined;
     this.#check(ctx);
     let res: InputResult;
     try {
@@ -539,7 +548,7 @@ export class ActionGateway {
     });
     this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
     const settled = await this.#finish(ctx, d, "key");
-    return { ok: true, ...settled };
+    return { ok: true, ...settled, ...(fresh ? { focus: focusOf(fresh) } : {}) };
   }
 
   // The element under a point, or keyboard focus without one. A lookup that failed or ran out of
@@ -588,15 +597,16 @@ export class ActionGateway {
     return permit;
   }
 
+  // The read just before input, once it confirmed the approved identity; none for manual input.
   async #consume(
     ctx: ActionContext,
     action: GuiAction,
     identity: NativeActionIdentity,
     permit: NativeActionPermit | undefined,
     read: () => Promise<NativeActionIdentity>,
-  ): Promise<void> {
+  ): Promise<NativeActionIdentity | undefined> {
     this.#check(ctx);
-    if (ctx.source === "manual") return;
+    if (ctx.source === "manual") return undefined;
     const fresh = await read();
     this.#check(ctx);
     // The permit and the repeat guard bind the approved identity; the fresh read only confirms it.
@@ -610,6 +620,7 @@ export class ActionGateway {
         "user",
         "this input was paused before dispatch; wait for explicit Resume",
       );
+    return fresh;
   }
 
   // settle → observe → result; returns this action's own frame, never a concurrent action's, and
@@ -876,6 +887,10 @@ export class ActionGateway {
       data: clean(data),
     } as never);
   }
+}
+
+function focusOf(read: NativeActionIdentity): NonNullable<ActionOutcome["focus"]> {
+  return { target: read.target, ...(read.unknown ? { unknown: true as const } : {}) };
 }
 
 function roundRect(r: Rect): Rect {

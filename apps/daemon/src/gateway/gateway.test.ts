@@ -836,6 +836,21 @@ describe("ActionGateway keyboard", () => {
     expect(s.fake.calls.map((c) => c.path).slice(-2)).toEqual(["/input", "/release"]);
   });
 
+  it("reports where keyboard focus was, and whether the screen changed after the keys", async () => {
+    const s = setup({ focused: () => search(), observe: () => frame() });
+    const ctx = agentCtx(s);
+    s.fake.script.settle = () => settled(true);
+    const still = await s.gateway.run(ctx, { verb: "key", combo: ["ctrl", "a"] });
+    expect(still).toMatchObject({ ok: true, changed: false, focus: { target: search().target } });
+    s.fake.script.settle = () => settled(false);
+    const moved = await s.gateway.run(ctx, { verb: "key", combo: ["Tab"] });
+    expect(moved).toMatchObject({ ok: true, changed: true });
+    expect(ctx.afterEffect.mock.calls).toEqual([[false], [true]]);
+    s.fake.script.focused = () => ({ target: null, window: 77, unknown: true, ms: 300 });
+    const unknown = await s.gateway.run(ctx, { verb: "key", combo: ["Tab"] });
+    expect(unknown).toMatchObject({ ok: true, focus: { target: null, unknown: true } });
+  });
+
   it("counts a frame identical to the one before the input as no change", async () => {
     const s = setup({ focused: () => search(), observe: () => frame("the same pixels") });
     const ctx = agentCtx(s);
@@ -844,6 +859,31 @@ describe("ActionGateway keyboard", () => {
     const outcome = await s.gateway.run(ctx, { verb: "key", combo: ["ctrl", "a"] });
     expect(outcome).toMatchObject({ ok: true, changed: false });
     expect(ctx.afterEffect.mock.calls).toEqual([[false]]);
+  });
+
+  it("reports the field that typing went into", async () => {
+    const field = {
+      target: {
+        point: { x: 300, y: 400 },
+        source: "ax" as const,
+        role: "text",
+        name: "HTML notation",
+        window: "Change Foreground Color",
+      },
+      window: 21,
+      ms: 4,
+    };
+    const s = setup({
+      focused: () => field,
+      settle: () => settled(false),
+      observe: () => frame(),
+      type: () => ({
+        progress: [{ count: 6, chunk: "A9743E", pressMono: 60_000 }],
+        result: { done: true, count: 6, firstPressMono: 60_000, injector: "xtest", armedMono: 1 },
+      }),
+    });
+    const outcome = await s.gateway.run(agentCtx(s), { verb: "type", text: "A9743E" });
+    expect(outcome).toMatchObject({ ok: true, changed: true, focus: { target: field.target } });
   });
 });
 

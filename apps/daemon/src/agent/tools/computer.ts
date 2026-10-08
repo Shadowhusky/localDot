@@ -1,4 +1,4 @@
-import type { ComputerAction, Target, ToolResult } from "@localdot/protocol";
+import { type ComputerAction, clipText, type Target, type ToolResult } from "@localdot/protocol";
 import { checkCombo } from "@localdot/protocol/keys";
 import type { ActionContext, ActionOutcome, GuiAction } from "../../gateway/gateway.ts";
 import { authorizePrepared } from "../safety/authorize.ts";
@@ -79,6 +79,46 @@ function gui(a: ComputerAction): GuiAction | string {
     default:
       return `${a.action} is not an input`;
   }
+}
+
+function element(t: Target): string {
+  return [
+    t.name ? JSON.stringify(clipText(t.name, 60)) : "an unnamed element",
+    ...(t.role ? [`(${clipText(t.role, 40)})`] : []),
+    ...(t.window ? [`in ${JSON.stringify(clipText(t.window, 80))}`] : []),
+  ].join(" ");
+}
+
+// Where typing and keys went, and whether the screen changed: a screenshot shows neither keyboard
+// focus nor a key that reached nothing.
+function keyboardNote(a: ComputerAction, outcome: ActionOutcome): string | undefined {
+  if (!outcome.ok) return undefined;
+  const focus = outcome.focus;
+  const target = focus && !focus.unknown ? focus.target : undefined;
+  const still = outcome.changed === false ? " No visible change." : "";
+  if (a.action === "type" && a.text) {
+    const n = [...a.text].length;
+    const typed = `Typed ${n} character${n === 1 ? "" : "s"}`;
+    if (target) return `${typed} into ${element(target)}.${still}`;
+    if (target === null) return `${typed}, but no element had keyboard focus.${still}`;
+    return `${typed}; where keyboard focus was is unknown.${still}`;
+  }
+  if ((a.action !== "key" && a.action !== "hold_key") || !a.keys) return undefined;
+  const keys = a.keys.join("+");
+  const did =
+    a.action === "hold_key"
+      ? `Held ${keys} for ${Number(((a.ms ?? 0) / 1000).toFixed(1))} s.`
+      : a.repeat && a.repeat > 1
+        ? `Pressed ${keys} ${a.repeat} times.`
+        : `Pressed ${keys}.`;
+  const where = target
+    ? `keyboard focus is on ${element(target)}`
+    : target === null
+      ? "no element has keyboard focus"
+      : "keyboard focus is unknown";
+  return outcome.changed === false
+    ? `${did} No visible change: ${where}.`
+    : `${did} ${where[0]?.toUpperCase()}${where.slice(1)}.`;
 }
 
 // A hold ends when the task is paused: nobody is left to let go of the keys.
@@ -173,6 +213,8 @@ export async function computerTool(
   ctx.check();
   if (action.verb === "wait" && outcome.ok) return screenshot(deps, ctx);
   const content: ToolResult["content"] = [];
+  const note = keyboardNote(a, outcome);
+  if (note) content.push(text(ctx.redact(note)));
   if (outcome.cancelled === "stale") {
     content.push(
       text(
