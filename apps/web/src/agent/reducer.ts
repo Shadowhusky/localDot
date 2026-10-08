@@ -10,6 +10,8 @@ import {
 } from "./model.ts";
 import { appendTerminal, emptyTerminal, finishTerminal } from "./terminal-text.ts";
 
+// While dot is in one of these, a follow-up waits for the task to finish.
+const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
 const STREAM_ERROR = "Activity could not be verified. Reconnect to load it again.";
 const GAP_ERROR = "Some activity is missing. Reconnect to load it again.";
 const RELEVANT = new Set<LocalDotEvent["type"]>([
@@ -160,7 +162,10 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     case "budget.exceeded":
       next = { ...next, budget: { id: e.id, at: e.t, data: { ...e.data } } };
       break;
-    case "message.user":
+    case "message.user": {
+      const seen = model.messages.get(e.data.messageId);
+      const queued =
+        seen?.queued ?? (e.data.kind === "followup" && WORKING.has(model.state?.state ?? "idle"));
       next = {
         ...next,
         messages: put(
@@ -168,11 +173,12 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           e.data.messageId,
           {
             id: e.data.messageId,
-            ...firstSeen(model.messages.get(e.data.messageId), e),
+            ...firstSeen(seen, e),
             role: "user",
             text: e.data.text,
             final: true,
             kind: e.data.kind,
+            ...(queued ? { queued } : {}),
             ...(e.data.files ? { files: [...e.data.files] } : {}),
           },
           L.messages,
@@ -182,6 +188,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           (!model.messages.has(e.data.messageId) && model.messages.size >= L.messages),
       };
       break;
+    }
     case "message.delta": {
       const old = model.messages.get(e.data.messageId);
       if (old?.final || old?.role === "user") break;

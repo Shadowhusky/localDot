@@ -100,6 +100,25 @@ describe("bounded agent projection", () => {
     const ended = projectAgentEvent(model, ev(4, "session.end", { reason: "stopped" }));
     expect(projectAgentEvent(ended, ev(5, "agent.state", { state: "acting" }))).toBe(ended);
   });
+  it("marks a follow-up sent while dot works as waiting for the task, and keeps that on replay", () => {
+    const queued = id(10002);
+    const events = [
+      ev(0, "agent.state", { state: "acting" }),
+      ev(1, "message.user", { messageId: message, text: "Also email it", kind: "steer" }),
+      ev(2, "message.user", { messageId: queued, text: "Then tidy up", kind: "followup" }),
+      ev(3, "agent.state", { state: "idle" }),
+      ev(4, "message.user", { messageId: other, text: "One more", kind: "followup" }),
+    ];
+    const model = reduce(events);
+    expect([...model.messages.values()].map((m) => [m.kind, m.queued])).toEqual([
+      ["steer", undefined],
+      ["followup", true],
+      ["followup", undefined],
+    ]);
+    expect(projectAgentEvent(model, events[2] as LocalDotEvent).messages.get(queued)?.queued).toBe(
+      true,
+    );
+  });
   it("projects plans, memory changes and file patches without mutating older snapshots", () => {
     const original = reduce([
       ev(0, "plan.set", { items: [{ id: "p", text: "Review", status: "todo" }] }),
