@@ -457,6 +457,14 @@
   color: var(--color-text);
 }
 
+/* Wide, the inspector covers the bar's right end but for its top inset, where a pressed button
+   would show through. */
+@media (width >= 760px) {
+  .keys-btn[aria-expanded="true"] {
+    background: none;
+  }
+}
+
 .keys-btn .dot {
   width: 6px;
   height: 6px;

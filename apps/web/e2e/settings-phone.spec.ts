@@ -323,6 +323,13 @@ test("chrome at 1440: theme tiles, autonomy rows and pointer-sized pickers", asy
   await expect(sheet.getByText("All changes saved", { exact: true })).toBeVisible();
   await expectThemeTiles(sheet);
   await expectAutonomyRow(sheet, true);
+  // The inspector covers the bar's right end but for its top inset: nothing pressed shows there.
+  const pressed = page.locator("header.bar").getByRole("button", { name: "Settings", exact: true });
+  await expect(pressed).toHaveAttribute("aria-expanded", "true");
+  await page.mouse.move(0, 450);
+  expect(await pressed.evaluate((el) => getComputedStyle(el).backgroundColor)).toBe(
+    "rgba(0, 0, 0, 0)",
+  );
   const main = roleCard(sheet, "main");
   for (const name of ["Provider", "Model", "Key"]) {
     const height =
