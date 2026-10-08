@@ -434,8 +434,8 @@ describe("App token states", () => {
     const retrying = render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     act(() => FakeWebSocket.instances[1]?.onclose?.());
-    // Cell retry, live-session retry, and the mounted download-list poll.
-    expect(vi.getTimerCount()).toBe(3);
+    // Cell retry and live-session retry; a starting computer's downloads are not polled.
+    expect(vi.getTimerCount()).toBe(2);
     retrying.unmount();
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(60_000);

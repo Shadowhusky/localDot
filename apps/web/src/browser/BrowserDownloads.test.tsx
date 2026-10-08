@@ -183,3 +183,59 @@ describe("browser download review controls", () => {
     ).rejects.toThrow();
   });
 });
+describe("download list refresh", () => {
+  const FAILED = "Downloads could not be refreshed. Check the computer and try again.";
+  const lists = (fetchImpl: ReturnType<typeof vi.fn<typeof fetch>>) =>
+    fetchImpl.mock.calls.filter(([, init]) => init?.method !== "POST").length;
+  const wait = (ms: number) =>
+    act(async () => {
+      await vi.advanceTimersByTimeAsync(ms);
+    });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+  it("polls only while a file can be released or is waiting for review", async () => {
+    vi.useFakeTimers();
+    let items: QuarantineItem[] = [];
+    const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ items }));
+    const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
+    const view = render(<BrowserDownloads api={api} cellId={parent} releaseReady={false} />);
+    await wait(10_000);
+    expect(lists(fetchImpl)).toBe(1);
+    view.rerender(<BrowserDownloads api={api} cellId={parent} releaseReady />);
+    await wait(4_100);
+    expect(lists(fetchImpl)).toBeGreaterThanOrEqual(3);
+    items = [held];
+    await wait(2_100);
+    view.rerender(<BrowserDownloads api={api} cellId={parent} releaseReady={false} />);
+    const counted = lists(fetchImpl);
+    await wait(4_100);
+    expect(lists(fetchImpl)).toBeGreaterThan(counted);
+    items = [];
+    await wait(2_100);
+    const settled = lists(fetchImpl);
+    await wait(10_000);
+    expect(lists(fetchImpl)).toBe(settled);
+  });
+  it("shows no refresh error before the first list and clears it after the next success", async () => {
+    vi.useFakeTimers();
+    let ok = false;
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      ok ? Response.json({ items: [held] }) : new Response("starting", { status: 503 }),
+    );
+    const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
+    render(<BrowserDownloads api={api} cellId={parent} releaseReady />);
+    await wait(6_100);
+    expect(lists(fetchImpl)).toBeGreaterThanOrEqual(3);
+    expect(screen.queryByText(FAILED)).toBeNull();
+    ok = true;
+    await wait(2_100);
+    expect(screen.getByText("report.pdf")).toBeTruthy();
+    ok = false;
+    await wait(2_100);
+    expect(screen.getByText(FAILED)).toBeTruthy();
+    ok = true;
+    await wait(2_100);
+    expect(screen.queryByText(FAILED)).toBeNull();
+  });
+});
