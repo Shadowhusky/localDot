@@ -231,10 +231,10 @@ describe("settings inspector", () => {
     const spending = screen.getByRole("region", { name: "Spending" });
     expect(within(spending).getByText(/Your plan's own limits apply/)).toBeTruthy();
     expect(within(spending).queryByRole("textbox")).toBeNull();
+    const main = screen.getByRole("region", { name: "Main model" });
+    expect(within(main).getByText("Uses your plan's limits.")).toBeTruthy();
     expect(
-      within(screen.getByRole("region", { name: "Main model" })).getByText(
-        "Use a key from this plan, not a pay-as-you-go key.",
-      ),
+      within(main).getByText("Use a key from this plan, not a pay-as-you-go key."),
     ).toBeTruthy();
     view.rerender(
       <SettingsSheet
@@ -268,5 +268,26 @@ describe("settings inspector", () => {
     );
     expect(screen.getAllByRole("img", { name: "Changed" })).toHaveLength(1);
     expect(screen.getByText("Passwords, codes and card details")).toBeTruthy();
+  });
+  it("carries Stop on a phone, where the sheet covers the page, and leaves it to the page elsewhere", () => {
+    const run = vi.fn();
+    const stop = { label: "Stop", enabled: true, run };
+    const view = render(<SettingsSheet {...props()} stop={stop} />);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    view.unmount();
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: query === "(width < 760px)",
+      media: query,
+      addEventListener: () => {},
+      removeEventListener: () => {},
+    }));
+    try {
+      render(<SettingsSheet {...props()} stop={stop} taskControls={<p>Stopping…</p>} />);
+      fireEvent.click(within(sheet()).getByRole("button", { name: "Stop" }));
+      expect(run).toHaveBeenCalledOnce();
+      expect(within(sheet()).getByText("Stopping…")).toBeTruthy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 });

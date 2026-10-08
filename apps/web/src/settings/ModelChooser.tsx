@@ -26,7 +26,7 @@ function providerNote(id: string): string | undefined {
   const provider = providerById(id);
   if (!provider) return id ? "This provider is no longer offered. Choose another." : undefined;
   if (provider.notOffered) return provider.notOffered;
-  if (provider.rule) return provider.rule;
+  if (provider.plan) return ["Uses your plan's limits.", provider.rule].filter(Boolean).join(" ");
   if (provider.id === "anthropic") return CLAUDE_PLAN_REFUSAL;
   return undefined;
 }
