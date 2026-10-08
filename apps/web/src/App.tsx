@@ -50,6 +50,7 @@ export interface AppProps {
 type Rejected = "stored" | "link" | "code" | null;
 
 const RETRY_CHECK_MS = 2000;
+const FROM_WATCH = { fromWatch: true };
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -182,15 +183,19 @@ function Theatre({ api }: { api: ApiClient }) {
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
   replayIdRef.current = replayId;
-  // Moving between Watch and Replay adds a history entry, so browser Back stays in the app.
-  const selectReplay = (id: string | null, entry: "push" | "replace" = "push") => {
+  // Entering Replay from Watch adds one marked entry and leaving steps back over it, so browser
+  // Back returns to Watch without stacking entries. A deletion only replaces the current entry.
+  const selectReplay = (id: string | null, entry: "navigate" | "replace" = "navigate") => {
     const address = new URL(window.location.href);
     if (id) address.searchParams.set("replay", id);
     else address.searchParams.delete("replay");
     if (id !== replayIdRef.current) address.searchParams.delete("t");
-    if (entry === "push" && (id === null) !== (replayIdRef.current === null))
-      window.history.pushState(null, "", address);
-    else window.history.replaceState(null, "", address);
+    const leaving = id === null && replayIdRef.current !== null;
+    if (entry === "navigate" && id !== null && replayIdRef.current === null)
+      window.history.pushState(FROM_WATCH, "", address);
+    else if (entry === "navigate" && leaving && window.history.state?.fromWatch)
+      window.history.back();
+    else window.history.replaceState(leaving ? null : window.history.state, "", address);
     setReplayId(id);
   };
   useEffect(() => {

@@ -164,3 +164,31 @@ for (const engine of ["chrome", "webkit"] as const satisfies Engine[])
       await owned?.close();
     }
   });
+
+// Runs last: it deletes a seeded recording the earlier tests open.
+test("browser Back never reopens a deleted recording", async ({ page }) => {
+  await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+  const watch = modes(page).getByRole("button", { name: "Watch", exact: true });
+  const replay = modes(page).getByRole("button", { name: "Replay", exact: true });
+  await expect(replay).toBeEnabled();
+  const entries = await page.evaluate(() => history.length);
+  const older = fixture.seeded[1] as string;
+  await replay.click();
+  await page.locator(".replay-session-open", { hasText: "Earlier sample task 1" }).click();
+  await expect(page).toHaveURL(new RegExp(`replay=${older}`));
+  await watch.click();
+  await expect(page).toHaveURL(`${fixture.origin}/`);
+  await replay.click();
+  await expect(page).toHaveURL(/[?&]replay=/);
+  expect(await page.evaluate(() => history.length)).toBe(entries + 1);
+  await page.getByRole("button", { name: "Delete Earlier sample task 1" }).click();
+  await page.getByRole("button", { name: "Delete session" }).click();
+  await expect(
+    page.locator(".replay-session-open", { hasText: "Earlier sample task 1" }),
+  ).toHaveCount(0);
+  await page.goBack();
+  await expect(page).toHaveURL(`${fixture.origin}/`);
+  await expect(watch).toHaveAttribute("aria-current", "page");
+  await page.goBack();
+  expect(page.url()).not.toContain(older);
+});

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { emptyManifest, type SessionCard, ulid } from "@localdot/protocol";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { App } from "../App.tsx";
 import { TOKEN_KEY } from "../lib/token.ts";
@@ -110,6 +110,66 @@ async function remove(title: string) {
     fireEvent.click(screen.getByRole("button", { name: "Delete session" }));
   });
 }
+const replayParam = () => new URLSearchParams(window.location.search).get("replay");
+// Resolves after the traversal, or after a short wait when there is no entry to move to.
+async function travel(delta: number) {
+  await act(async () => {
+    const moved = new Promise<void>((resolve) => {
+      const settle = () => {
+        window.removeEventListener("popstate", settle);
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(settle, 300);
+      window.addEventListener("popstate", settle);
+    });
+    window.history.go(delta);
+    await moved;
+  });
+  return replayParam();
+}
+async function watch() {
+  fireEvent.click(screen.getByRole("button", { name: "Watch" }));
+  await waitFor(() => expect(window.location.search).toBe(""));
+}
+function enterApp() {
+  window.history.replaceState(null, "", "/before");
+  window.history.pushState(null, "", "/");
+}
+it("browser Back never reopens a recording deleted after a Watch round-trip", async () => {
+  const f = fixture();
+  enterApp();
+  const button = await open(f);
+  const rail = screen.getByRole("complementary", { name: "Recorded sessions" });
+  fireEvent.click(within(rail).getByText("Older notes").closest("button") as HTMLButtonElement);
+  await waitFor(() => expect(replayParam()).toBe(f.cards[1]?.id));
+  await watch();
+  fireEvent.click(button);
+  await screen.findByRole("button", { name: "Delete Older notes" });
+  await remove("Older notes");
+  expect(f.deleted).toEqual([f.cards[1]?.id]);
+  expect(await travel(-1)).toBeNull();
+  expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+  expect(await travel(-1)).toBeNull();
+  expect(window.location.pathname).toBe("/before");
+});
+it("deleting the open recording replaces its entry so Back and Forward never reopen it", async () => {
+  const f = fixture();
+  enterApp();
+  const button = await open(f);
+  await watch();
+  fireEvent.click(button);
+  await screen.findByRole("button", { name: "Delete Newest notes" });
+  const entries = window.history.length;
+  await remove("Newest notes");
+  expect(window.history.length).toBe(entries);
+  expect(window.location.search).toBe("");
+  const visited = [];
+  for (const delta of [-1, -1, 1, 1, 1]) visited.push(await travel(delta));
+  expect(visited).not.toContain(f.cards[0]?.id);
+  expect(window.location.pathname).toBe("/");
+  expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+});
 it("keeps remaining history reachable after deleting the selected newest session", async () => {
   const f = fixture();
   const button = await open(f);

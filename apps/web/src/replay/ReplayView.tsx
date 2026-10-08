@@ -71,7 +71,7 @@ export function ReplayView({
     const address = new URL(window.location.href);
     if (address.searchParams.get("replay") !== sessionId) return;
     address.searchParams.set("t", String(Math.round(replay.tMs)));
-    window.history.replaceState(null, "", address);
+    window.history.replaceState(window.history.state, "", address);
   }, [replay.tMs, replay.playing, replay.map, sessionId]);
   const hud = sessionHud(replay.model, replay.tMs);
   const endedAt = replay.map?.endMs ?? 0;

@@ -220,12 +220,25 @@ describe("App Replay mode", () => {
       true,
     );
   });
-  it("adds a history entry for Replay so browser Back returns to Watch", async () => {
+  it("adds one history entry for Replay so browser Back returns to Watch", async () => {
     const fixture = historyDaemon();
     render(<App fetchImpl={fixture.fetchImpl} />);
     const replayButton = screen.getByRole("button", { name: "Replay" });
+    const watchButton = screen.getByRole("button", { name: "Watch" });
     await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
     const entries = window.history.length;
+    for (const leave of [
+      () => fireEvent.click(watchButton),
+      () => fireEvent.keyDown(window, { key: "Escape" }),
+    ]) {
+      fireEvent.click(replayButton);
+      expect(window.history.length).toBe(entries + 1);
+      await waitFor(() => expect(new URLSearchParams(window.location.search).has("t")).toBe(true));
+      leave();
+      await waitFor(() => expect(window.location.search).toBe(""));
+      expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+      expect(window.history.length).toBe(entries + 1);
+    }
     fireEvent.click(replayButton);
     expect(window.history.length).toBe(entries + 1);
     await screen.findByRole("main", { name: "Session replay" });
