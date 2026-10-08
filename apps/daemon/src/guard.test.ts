@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   isAllowedHost,
   isAllowedOrigin,
+  isPublicOrigin,
   setPublicOrigin,
   tokenFromHeaders,
   WS_TOKEN_PREFIX,
@@ -78,5 +79,27 @@ describe("the public origin", () => {
     ]) {
       expect(() => setPublicOrigin(bad), bad).toThrow(/LOCALDOT_PUBLIC_ORIGIN/);
     }
+  });
+});
+
+describe("several public origins", () => {
+  afterEach(() => setPublicOrigin(undefined));
+
+  it("accepts each origin of a comma-separated list, and nothing else", () => {
+    setPublicOrigin("https://mac.tailnet.ts.net:4750, https://100.91.187.75:4744");
+    expect(isAllowedHost("mac.tailnet.ts.net:4750", 4750)).toBe(true);
+    expect(isAllowedHost("100.91.187.75:4744", 4750)).toBe(true);
+    expect(isAllowedOrigin("https://100.91.187.75:4744", 4750)).toBe(true);
+    expect(isPublicOrigin("https://100.91.187.75:4744")).toBe(true);
+    expect(isPublicOrigin("https://mac.tailnet.ts.net:4750")).toBe(true);
+    expect(isAllowedHost("100.91.187.75:4750", 4750)).toBe(false);
+    expect(isAllowedOrigin("https://100.91.187.76:4744", 4750)).toBe(false);
+  });
+
+  it("refuses the whole list if any entry is not a bare https origin", () => {
+    expect(() =>
+      setPublicOrigin("https://mac.tailnet.ts.net:4750,http://100.91.187.75:4744"),
+    ).toThrow(/LOCALDOT_PUBLIC_ORIGIN/);
+    expect(isAllowedHost("mac.tailnet.ts.net:4750", 4750)).toBe(false);
   });
 });
