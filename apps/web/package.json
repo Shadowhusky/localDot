@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "build": "vite build && node scripts/notices.mjs",
+    "build:gallery": "vite build --config vite.gallery.config.ts",
     "dev": "vite build --watch",
     "typecheck": "tsc --noEmit -p . && tsc --noEmit -p e2e",
     "shot": "tsx e2e/shot.ts",
