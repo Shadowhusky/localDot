@@ -115,15 +115,19 @@ function settledSince(model: SessionModel, at: AgentStateAt, nowMs: number): boo
 }
 // A Pause publishes its paused state as soon as it is asked for, and the step in flight runs on.
 // Live shows pausing until the Pause next changes. Replay has no phase, so it shows pausing while
-// the step the Pause was asked in is still open and the Pause has not changed since.
+// the step the Pause was asked in is still open and that request is the Pause's only change since
+// the step began. A held Pause republishes its paused state, so that state's time cannot tell.
 function pausing(model: SessionModel, step: StepState, at: AgentStateAt, nowMs: number): boolean {
   if ((step.endT ?? Number.POSITIVE_INFINITY) <= nowMs) return false;
+  let requestT: number | undefined;
   for (let i = model.marks.length - 1; i >= 0; i--) {
     const mark = model.marks[i];
-    if (!mark || mark.t < step.startT) return false;
-    if (mark.type === "safety.pause" && mark.t <= nowMs) return mark.t <= at.t;
+    if (!mark || mark.t < step.startT) break;
+    if (mark.t > nowMs || mark.type !== "safety.pause") continue;
+    if (requestT !== undefined) return false;
+    requestT = mark.t;
   }
-  return false;
+  return requestT !== undefined && requestT <= at.t;
 }
 function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): string {
   if (at.state !== "waiting_user" && at.state !== "paused") return at.state;

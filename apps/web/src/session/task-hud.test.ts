@@ -263,6 +263,43 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     ];
     expect(replay(cut, 5005).label).toBe("Pausing after this step");
     expect(replay(cut, 6000)).toMatchObject({ label: "Paused", phase: "waiting" });
+    // A held Pause's paused state is published again, so a later one cannot reopen the pausing.
+    const republished = [
+      ...cut,
+      ev("agent.state", 5100, { state: "paused", reason: "Waiting for explicit Resume" }),
+    ];
+    for (const at of [6000, 60_000])
+      expect(replay(republished, at)).toMatchObject({
+        label: "Paused",
+        phase: "waiting",
+        control: false,
+      });
+    const retired = [
+      ...start(),
+      ev("agent.state", 3000, { state: "thinking" }),
+      ev("safety.pause", 5000, pause("pausing")),
+      ev("agent.state", 5000, { state: "paused", reason: "user" }),
+      ev("safety.pause", 5010, pause("paused")),
+      ev("agent.state", 5100, { state: "paused", reason: "Waiting for explicit Resume" }),
+    ];
+    expect(replay(retired, 5005)).toMatchObject({
+      label: "Pausing after this step",
+      control: true,
+    });
+    expect(replay(retired, 6000)).toMatchObject({ label: "Paused", control: false });
+    const unconfirmed = [
+      ...start(),
+      ev("safety.pause", 300, pause("pausing")),
+      ev("agent.state", 300, { state: "paused", reason: "user" }),
+      ev("safety.pause", 1000, pause("uncertain")),
+      ev("agent.state", 1001, { state: "paused", reason: "keyd unavailable" }),
+    ];
+    expect(replay(unconfirmed, 500).label).toBe("Pausing after this step");
+    // Replay has no Pause phase, so an unconfirmed Pause reads as Paused; it waits all the same.
+    for (const at of [2000, 60_000]) {
+      const { phase, control } = liveAt(unconfirmed, at);
+      expect(replay(unconfirmed, at)).toMatchObject({ label: "Paused", phase, control });
+    }
     // A recovery pause is no Pause request, even over a cut step or after an earlier Pause.
     const recovery = [
       ...cut.slice(0, 8),
@@ -279,6 +316,28 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ev("agent.state", 5000, { state: "paused", reason: "keyd unavailable" }),
     ];
     expect(replay(afterPause, 6000).label).toBe("Paused");
+    const secondPause = [
+      ...afterPause.slice(0, -1),
+      ev(
+        "action.intent",
+        2200,
+        { verb: "click", label: "Click Save", point: { x: 1, y: 1 }, risk: "none" },
+        "s2",
+      ),
+      ev("safety.pause", 3000, pause("pausing")),
+      ev("agent.state", 3000, { state: "paused", reason: "user" }),
+    ];
+    expect(replay(secondPause, 4000)).toMatchObject({
+      label: "Pausing after this step",
+      control: true,
+    });
+    // A Pause asked for while a recovery holds the task publishes no state, and no step runs on.
+    const heldThenPaused = [
+      ...recovery,
+      ev("safety.pause", 7000, pause("pausing")),
+      ev("safety.pause", 7010, pause("paused")),
+    ];
+    expect(replay(heldThenPaused, 7005)).toMatchObject({ label: "Paused", phase: "waiting" });
     for (const [events, at] of [
       [typing, 2000],
       [typing, 4000],
@@ -286,8 +345,16 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       [shell, 95_000],
       [cut, 5005],
       [cut, 6000],
+      [republished, 6000],
+      [republished, 60_000],
+      [retired, 5005],
+      [retired, 6000],
+      [retired, 60_000],
+      [unconfirmed, 500],
       [recovery, 6000],
       [afterPause, 6000],
+      [secondPause, 4000],
+      [heldThenPaused, 8000],
     ] as const) {
       const { label, phase, control } = liveAt(events, at);
       expect(replay(events, at)).toMatchObject({ label, phase, control });
