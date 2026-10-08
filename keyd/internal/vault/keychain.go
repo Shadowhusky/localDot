@@ -11,6 +11,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -26,9 +27,10 @@ const (
 // Keychain stores generic passwords through a bounded child of the same signed keyd executable.
 // Security.framework gives keyd the explicit trusted-app ACL. Values travel on stdin, never argv.
 // A value is split into
-// chunk items <id>.0, <id>.1, …; the item <id> names their count and the write that made them, so
-// a read never mixes two writes. The tool's output never leaves keyd: it can echo a value, so an
-// error names only the operation, the item and the exit status.
+// chunk items <id>.0, <id>.1, …; the item <id> names their count, the write that made them and the
+// binding the value was stored for, so a read never mixes two writes or serves another binding.
+// The tool's output never leaves keyd: it can echo a value, so an error names only the operation,
+// the item and the exit status.
 type Keychain struct {
 	Service string
 	Path    string
@@ -55,12 +57,15 @@ func (k *Keychain) Check() error {
 // Put writes the chunks, then the item that names them, then reads the value back: a write the
 // helper cut short or refused is an error, never a stored fragment. Only validated item IDs
 // and values Delete can remove whole are accepted.
-func (k *Keychain) Put(id string, value []byte) error {
+func (k *Keychain) Put(id string, value []byte, binding string) error {
 	if !idPattern.MatchString(id) {
 		return fmt.Errorf("keychain: %q is not a secret id", id)
 	}
 	if len(value) == 0 || len(value) > maxValueLen {
 		return fmt.Errorf("keychain: store %s: want 1-%d bytes", id, maxValueLen)
+	}
+	if !bindingPattern.MatchString(binding) {
+		return fmt.Errorf("keychain: store %s: invalid binding (%w)", id, errUnchanged)
 	}
 	gen, err := newWriteID()
 	if err != nil {
@@ -75,10 +80,10 @@ func (k *Keychain) Put(id string, value []byte) error {
 			return k.abandon(ctx, id, i > 0, err)
 		}
 	}
-	if err := k.add(ctx, id, fmt.Sprintf("keyd:%s:%d", gen, n)); err != nil {
+	if err := k.add(ctx, id, itemHead(gen, n, binding)); err != nil {
 		return k.abandon(ctx, id, true, err)
 	}
-	if got, err := k.get(ctx, id); err != nil || !bytes.Equal(got, value) {
+	if got, err := k.get(ctx, id, binding); err != nil || !bytes.Equal(got, value) {
 		return k.abandon(ctx, id, true, fmt.Errorf("keychain: store %s: the value did not read back intact", id))
 	}
 	// The value read back whole, and Get never reads past the count the item names, so an old chunk
@@ -104,23 +109,29 @@ func (k *Keychain) abandon(ctx context.Context, id string, wrote bool, err error
 	return fmt.Errorf("keychain: store %s: write did not complete", id)
 }
 
-func (k *Keychain) Get(id string) ([]byte, error) {
-	if !idPattern.MatchString(id) {
-		return nil, errors.New("keychain: invalid secret id")
+func (k *Keychain) Get(id, binding string) ([]byte, error) {
+	if !idPattern.MatchString(id) || !bindingPattern.MatchString(binding) {
+		return nil, errors.New("keychain: invalid secret id or binding")
 	}
 	ctx, cancel := k.deadline()
 	defer cancel()
-	return k.get(ctx, id)
+	return k.get(ctx, id, binding)
 }
 
-func (k *Keychain) get(ctx context.Context, id string) ([]byte, error) {
+// get refuses a value stored for another binding before reading any of it. An item written before
+// keyd stored bindings takes the binding of its first read, as its ACL does on first access; from
+// then on a keyd build that predates bindings cannot parse it.
+func (k *Keychain) get(ctx context.Context, id, binding string) ([]byte, error) {
 	head, err := k.find(ctx, id)
 	if err != nil {
 		return nil, err
 	}
-	gen, count, ok := parseHead(head)
+	gen, count, bound, ok := parseHead(head)
 	if !ok {
 		return nil, fmt.Errorf("keychain: item %s is not keyd's", id)
+	}
+	if bound != "" && bound != binding {
+		return nil, fmt.Errorf("keychain: item %s: %w", id, errRebound)
 	}
 	value := make([]byte, 0, count*chunkBytes)
 	for i := range count {
@@ -134,6 +145,11 @@ func (k *Keychain) get(ctx context.Context, id string) ([]byte, error) {
 			return nil, fmt.Errorf("keychain: item %s was torn by an interrupted write; store it again", id)
 		}
 		value = append(value, part...)
+	}
+	if bound == "" {
+		if err := k.add(ctx, id, itemHead(gen, count, binding)); err != nil {
+			log.Printf("keyd: secret %s is still stored without its binding: %v", id, err)
+		}
 	}
 	return value, nil
 }
@@ -238,16 +254,29 @@ func chunkAccount(id string, i int) string {
 	return id + "." + strconv.Itoa(i)
 }
 
-func parseHead(head string) (gen string, count int, ok bool) {
+var bindingPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
+func itemHead(gen string, count int, binding string) string {
+	return fmt.Sprintf("keyd:%s:%d:%s", gen, count, binding)
+}
+
+// parseHead reads an item head; binding is empty for a head written before bindings were stored.
+func parseHead(head string) (gen string, count int, binding string, ok bool) {
 	parts := strings.Split(head, ":")
-	if len(parts) != 3 || parts[0] != "keyd" {
-		return "", 0, false
+	if (len(parts) != 3 && len(parts) != 4) || parts[0] != "keyd" {
+		return "", 0, "", false
 	}
 	count, err := strconv.Atoi(parts[2])
 	if err != nil || count < 1 || count > maxChunks {
-		return "", 0, false
+		return "", 0, "", false
 	}
-	return parts[1], count, true
+	if len(parts) == 4 {
+		if !bindingPattern.MatchString(parts[3]) {
+			return "", 0, "", false
+		}
+		binding = parts[3]
+	}
+	return parts[1], count, binding, true
 }
 
 func newWriteID() (string, error) {

@@ -23,9 +23,9 @@ func TestKeychainStalledCommandsHaveAnOperationDeadline(t *testing.T) {
 			var err error
 			switch operation {
 			case "put":
-				err = k.Put("weather", fakeValue)
+				err = k.Put("weather", fakeValue, testBinding)
 			case "get":
-				_, err = k.Get("weather")
+				_, err = k.Get("weather", testBinding)
 			case "delete":
 				err = k.Delete("weather")
 			}
@@ -43,7 +43,7 @@ func TestKeychainSharesItsDeadlineAcrossCommands(t *testing.T) {
 	for _, operation := range []string{"put", "get", "delete"} {
 		t.Run(operation, func(t *testing.T) {
 			k, _ := fakeKeychain(t)
-			if err := k.Put("weather", longValue(maxValueLen)); err != nil {
+			if err := k.Put("weather", longValue(maxValueLen), testBinding); err != nil {
 				t.Fatal(err)
 			}
 			// Every individual command finishes well inside the deadline. A
@@ -57,9 +57,9 @@ func TestKeychainSharesItsDeadlineAcrossCommands(t *testing.T) {
 			var err error
 			switch operation {
 			case "put":
-				err = k.Put("weather", longValue(maxValueLen))
+				err = k.Put("weather", longValue(maxValueLen), testBinding)
 			case "get":
-				_, err = k.Get("weather")
+				_, err = k.Get("weather", testBinding)
 			case "delete":
 				err = k.Delete("weather")
 			}
@@ -119,7 +119,7 @@ func TestKeychainOutputIsBoundedEvenThroughCopy(t *testing.T) {
 	if err := os.WriteFile(k.Path, []byte(script), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := k.Get("weather"); err == nil || strings.Contains(err.Error(), "sensitive") {
+	if _, err := k.Get("weather", testBinding); err == nil || strings.Contains(err.Error(), "sensitive") {
 		t.Fatalf("oversized output was exposed or accepted: %v", err)
 	}
 }
@@ -140,7 +140,7 @@ func TestKeychainDoesNotWaitForAnInheritedPipe(t *testing.T) {
 		}
 	})
 	started := time.Now()
-	if _, err := k.Get("weather"); err == nil || time.Since(started) > 500*time.Millisecond {
+	if _, err := k.Get("weather", testBinding); err == nil || time.Since(started) > 500*time.Millisecond {
 		t.Fatalf("security's inherited pipe kept the read alive: %v", err)
 	}
 }

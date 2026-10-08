@@ -168,10 +168,10 @@ type stalledReadStore struct {
 	entered, release chan struct{}
 }
 
-func (s *stalledReadStore) Get(id string) ([]byte, error) {
+func (s *stalledReadStore) Get(id, binding string) ([]byte, error) {
 	close(s.entered)
 	<-s.release
-	return s.Memory.Get(id)
+	return s.Memory.Get(id, binding)
 }
 
 func TestCredentialLookupDoesNotHoldTheStopLock(t *testing.T) {

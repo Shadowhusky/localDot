@@ -1,5 +1,6 @@
 // Package vault keeps keyd's secrets: values in a Store, metadata in an index file that never
-// holds a value.
+// holds a value. The Store keeps each value with a digest of its binding, so an index rewritten
+// outside keyd cannot send a stored value anywhere else.
 package vault
 
 import (
@@ -160,9 +161,9 @@ func (v *Vault) Put(rec Record, value []byte) error {
 		rec.CreatedAt = old.CreatedAt
 		prev, _ = v.valueLocked(rec.ID)
 	}
-	if err := v.store.Put(rec.ID, value); err != nil {
+	if err := v.store.Put(rec.ID, value, bindingOf(rec)); err != nil {
 		if !errors.Is(err, errUnchanged) {
-			v.restoreValueLocked(rec.ID, prev)
+			v.restoreValueLocked(rec.ID, old, prev)
 		}
 		return err
 	}
@@ -178,7 +179,7 @@ func (v *Vault) Put(rec Record, value []byte) error {
 		if errors.Is(err, errNotSynced) && v.saveLocked() != nil {
 			prev = nil
 		}
-		v.restoreValueLocked(rec.ID, prev)
+		v.restoreValueLocked(rec.ID, old, prev)
 		return err
 	}
 	v.cache[rec.ID] = slices.Clone(value)
@@ -188,10 +189,10 @@ func (v *Vault) Put(rec Record, value []byte) error {
 // restoreValueLocked undoes a store write that Put cannot keep. Without an old value to put back,
 // it deletes the item, so a restored record never meets the new value; and if the item cannot be
 // deleted, the record leaves memory, so this process fails closed.
-func (v *Vault) restoreValueLocked(id string, prev []byte) {
+func (v *Vault) restoreValueLocked(id string, old Record, prev []byte) {
 	if prev != nil {
 		v.cache[id] = prev
-		if v.store.Put(id, prev) == nil {
+		if v.store.Put(id, prev, bindingOf(old)) == nil {
 			return
 		}
 	} else {
@@ -252,7 +253,7 @@ func (v *Vault) valueLocked(id string) ([]byte, error) {
 	if cached, ok := v.cache[id]; ok {
 		return cached, nil
 	}
-	value, err := v.store.Get(id)
+	value, err := v.store.Get(id, bindingOf(v.records[id]))
 	if err != nil {
 		return nil, err
 	}

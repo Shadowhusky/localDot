@@ -3,6 +3,7 @@ package vault
 import (
 	"bytes"
 	"errors"
+	"log"
 	"os"
 	"path/filepath"
 	"slices"
@@ -45,14 +46,14 @@ func storeItems(dir string) []string {
 func TestKeychainRefusesAWriteThatDoesNotReadBack(t *testing.T) {
 	k, _ := fakeKeychain(t)
 	old, value := longValue(3000), longValue(maxValueLen)
-	if err := k.Put("weather", old); err != nil {
+	if err := k.Put("weather", old, testBinding); err != nil {
 		t.Fatal(err)
 	}
 	stale := strings.Replace(fakeSecurity, `printf '%s' "$pw" > "$item"`, `[ -f "$item" ] || printf '%s' "$pw" > "$item"`, 1)
 	if err := os.WriteFile(k.Path, []byte(stale), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	err := k.Put("weather", value)
+	err := k.Put("weather", value, testBinding)
 	if err == nil || carries(err.Error(), value) || carries(err.Error(), old) {
 		t.Fatalf("Put through a tool that kept the old items: %v", err)
 	}
@@ -65,17 +66,17 @@ func TestKeychainKeepsEveryPrintableCharacter(t *testing.T) {
 	for c := byte(' '); c <= '~'; c++ {
 		value = append(value, c)
 	}
-	if err := k.Put("weather", value); err != nil {
+	if err := k.Put("weather", value, testBinding); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := k.Get("weather"); err != nil || !bytes.Equal(got, value) {
+	if got, err := k.Get("weather", testBinding); err != nil || !bytes.Equal(got, value) {
 		t.Fatalf("Get = %q, %v", got, err)
 	}
 }
 
 func TestKeychainDeleteLeavesNoChunk(t *testing.T) {
 	k, dir := fakeKeychain(t)
-	if err := k.Put("weather", longValue(maxValueLen)); err != nil {
+	if err := k.Put("weather", longValue(maxValueLen), testBinding); err != nil {
 		t.Fatal(err)
 	}
 	if err := k.Delete("weather"); err != nil {
@@ -90,12 +91,12 @@ func TestKeychainAFailedPutLeavesNoFragment(t *testing.T) {
 	for _, account := range []string{"weather.3", "weather"} {
 		k, dir := failingFake(t)
 		t.Setenv("FAKE_FAIL", "")
-		if err := k.Put("weather", longValue(3000)); err != nil {
+		if err := k.Put("weather", longValue(3000), testBinding); err != nil {
 			t.Fatal(err)
 		}
 		value := longValue(maxValueLen)
 		t.Setenv("FAKE_FAIL", "add:"+account)
-		if err := k.Put("weather", value); err == nil {
+		if err := k.Put("weather", value, testBinding); err == nil {
 			t.Fatalf("Put succeeded with the write of %s failing", account)
 		}
 		for _, name := range storeItems(dir) {
@@ -111,14 +112,14 @@ func TestKeychainAFailedPutLeavesNoFragment(t *testing.T) {
 // chunk the tool cannot remove is logged and the Put stands; the other old chunks still go.
 func TestKeychainPutStandsOverAnOldChunkItCannotRemove(t *testing.T) {
 	k, dir := failingFake(t)
-	if err := k.Put("weather", longValue(maxValueLen)); err != nil {
+	if err := k.Put("weather", longValue(maxValueLen), testBinding); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("FAKE_FAIL", "del:weather.2")
-	if err := k.Put("weather", fakeValue); err != nil {
+	if err := k.Put("weather", fakeValue, testBinding); err != nil {
 		t.Fatalf("Put over an old chunk it cannot remove: %v", err)
 	}
-	if got, err := k.Get("weather"); err != nil || !bytes.Equal(got, fakeValue) {
+	if got, err := k.Get("weather", testBinding); err != nil || !bytes.Equal(got, fakeValue) {
 		t.Fatalf("Get = %q, %v", got, err)
 	}
 	want := []string{"localdot-keyd-test.weather", "localdot-keyd-test.weather.0", "localdot-keyd-test.weather.2"}
@@ -152,23 +153,127 @@ func TestKeychainDeleteReportsAChunkItCannotRemove(t *testing.T) {
 // Only valid IDs and values that Delete can remove whole may reach the item helper.
 func TestKeychainPutRefusesWhatItCannotStoreSafely(t *testing.T) {
 	k, dir := fakeKeychain(t)
-	if err := k.Put("victim", fakeValue); err != nil {
+	if err := k.Put("victim", fakeValue, testBinding); err != nil {
 		t.Fatal(err)
 	}
 	for _, id := range []string{"x\ndelete-generic-password -s localdot-keyd-test -a victim", "a b", "Weather", "weather.0", ""} {
-		if err := k.Put(id, fakeValue); err == nil {
+		if err := k.Put(id, fakeValue, testBinding); err == nil {
 			t.Errorf("Put of id %q succeeded", id)
 		}
 	}
 	for _, value := range [][]byte{nil, longValue(maxValueLen + 1)} {
-		if err := k.Put("weather", value); err == nil {
+		if err := k.Put("weather", value, testBinding); err == nil {
 			t.Errorf("Put of %d bytes succeeded", len(value))
 		}
 	}
-	if got, err := k.Get("victim"); err != nil || !bytes.Equal(got, fakeValue) {
+	if got, err := k.Get("victim", testBinding); err != nil || !bytes.Equal(got, fakeValue) {
 		t.Fatalf("the victim after the refused writes: %q, %v", got, err)
 	}
 	if items := storeItems(dir); len(items) != 2 {
 		t.Fatalf("items %v, want only the victim's two", items)
+	}
+}
+
+func headOf(t *testing.T, dir, id string) string {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(dir, "store", "localdot-keyd-test."+id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(data)
+}
+
+// The item names the binding its value was stored for, and a read for any other binding is refused
+// before a chunk is read.
+func TestKeychainRefusesAValueStoredForAnotherBinding(t *testing.T) {
+	k, dir := fakeKeychain(t)
+	value := longValue(3000)
+	if err := k.Put("weather", value, testBinding); err != nil {
+		t.Fatal(err)
+	}
+	if head := headOf(t, dir, "weather"); !strings.HasSuffix(head, ":2:"+testBinding) || strings.Count(head, ":") != 3 {
+		t.Fatalf("the item holds %q", head)
+	}
+	if err := os.Remove(filepath.Join(dir, "argv.log")); err != nil {
+		t.Fatal(err)
+	}
+	other := bindingOf(Record{ID: "weather", Kind: KindHTTP, Hosts: []string{"attacker.example.test"}, Header: "X-Api-Key", Format: "raw"})
+	got, err := k.Get("weather", other)
+	if !errors.Is(err, errRebound) || got != nil || carries(err.Error(), value) {
+		t.Fatalf("Get for another binding = %q, %v", got, err)
+	}
+	argv, _ := os.ReadFile(filepath.Join(dir, "argv.log"))
+	if string(argv) != "keychain-item read localdot-keyd-test weather\n" {
+		t.Fatalf("the refused read ran %q", argv)
+	}
+	for _, binding := range []string{"", "weather", strings.ToUpper(testBinding), testBinding + "0", testBinding[1:] + ":"} {
+		if err := k.Put("weather", fakeValue, binding); !errors.Is(err, errUnchanged) {
+			t.Errorf("Put with the binding %q: %v", binding, err)
+		}
+		if _, err := k.Get("weather", binding); err == nil {
+			t.Errorf("Get with the binding %q succeeded", binding)
+		}
+	}
+	if got, err := k.Get("weather", testBinding); err != nil || !bytes.Equal(got, value) {
+		t.Fatalf("Get after the refused writes: %d bytes, %v", len(got), err)
+	}
+}
+
+// An item written before keyd stored bindings takes the binding of its first read. Its head then
+// has a fourth field, which a keyd build that predates bindings refuses to parse.
+func TestKeychainBindsAnItemFromBeforeBindingsOnItsFirstRead(t *testing.T) {
+	k, dir := fakeKeychain(t)
+	if err := k.Put("weather", fakeValue, testBinding); err != nil {
+		t.Fatal(err)
+	}
+	head := filepath.Join(dir, "store", "localdot-keyd-test.weather")
+	legacy := strings.TrimSuffix(headOf(t, dir, "weather"), ":"+testBinding)
+	other := bindingOf(Record{ID: "weather", Kind: KindLLM, Provider: "anthropic"})
+	for name, binding := range map[string]string{"empty": "", "not hex": strings.Repeat("z", 64)} {
+		if err := os.WriteFile(head, []byte(legacy+":"+binding), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := k.Get("weather", other); err == nil || errors.Is(err, errRebound) {
+			t.Errorf("%s fourth field: Get = %v", name, err)
+		}
+	}
+	if err := os.WriteFile(head, []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := k.Get("weather", other); err != nil || !bytes.Equal(got, fakeValue) {
+		t.Fatalf("first read of an unbound item = %q, %v", got, err)
+	}
+	if got := headOf(t, dir, "weather"); got != legacy+":"+other {
+		t.Fatalf("after its first read the item holds %q", got)
+	}
+	if _, err := k.Get("weather", testBinding); !errors.Is(err, errRebound) {
+		t.Fatalf("a read for the binding it was first read for did not stick: %v", err)
+	}
+}
+
+// A first read whose binding cannot be written still serves the value it read, as keyd did before
+// it stored bindings, and the next read tries again.
+func TestKeychainServesAnUnboundItemWhoseBindingCannotBeWritten(t *testing.T) {
+	k, dir := failingFake(t)
+	if err := k.Put("weather", fakeValue, testBinding); err != nil {
+		t.Fatal(err)
+	}
+	legacy := strings.TrimSuffix(headOf(t, dir, "weather"), ":"+testBinding)
+	if err := os.WriteFile(filepath.Join(dir, "store", "localdot-keyd-test.weather"), []byte(legacy), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var logged bytes.Buffer
+	log.SetOutput(&logged)
+	defer log.SetOutput(os.Stderr)
+	t.Setenv("FAKE_FAIL", "add:weather")
+	if got, err := k.Get("weather", testBinding); err != nil || !bytes.Equal(got, fakeValue) {
+		t.Fatalf("Get = %q, %v", got, err)
+	}
+	if headOf(t, dir, "weather") != legacy || !strings.Contains(logged.String(), "weather") || carries(logged.String(), fakeValue) {
+		t.Fatalf("the item holds %q, the log %q", headOf(t, dir, "weather"), logged.String())
+	}
+	t.Setenv("FAKE_FAIL", "")
+	if _, err := k.Get("weather", testBinding); err != nil || headOf(t, dir, "weather") != legacy+":"+testBinding {
+		t.Fatalf("the second read left %q (%v)", headOf(t, dir, "weather"), err)
 	}
 }
