@@ -371,3 +371,110 @@ func TestTaskPricingPinsAttachmentBeforeReadingBody(t *testing.T) {
 		t.Fatalf("replacement positive control: status=%d hits=%d", response.Code, hits.Load())
 	}
 }
+
+func flatPrices(route string) llm.TaskPricingRoute {
+	return llm.TaskPricingRoute{Route: route, Flat: true, Models: []llm.Price{{Model: "claude-sonnet-5-5", MaxOutput: 100}}}
+}
+
+// A flat route is a plan the provider bills outside localDot: its $0 models run and charge nothing.
+func TestFlatRouteServesAZeroPricedModelAndChargesNothing(t *testing.T) {
+	m, w := newManager(t)
+	var hits atomic.Int32
+	w.tlsUpstream("api.anthropic.com", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		rw.Header().Set("Content-Type", "application/json")
+		io.WriteString(rw, `{"usage":{"input_tokens":100000,"output_tokens":50}}`)
+	}))
+	o, err := m.Open(OpenRequest{CellID: "a", Role: "brain", Secrets: []string{"anthropic"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginPricedTask("a", "session", 5, llm.TaskPricing{V: 1, Routes: []llm.TaskPricingRoute{flatPrices("anthropic")}}); err != nil {
+		t.Fatal(err)
+	}
+	openFixtureAdmission(t, m, "a")
+	req, _ := http.NewRequest("POST", "http://llm.ldot/anthropic/messages", strings.NewReader(sonnet))
+	req.Header.Set("X-Api-Key", o.Surrogates["anthropic"])
+	resp, err := cellClient(w, o).Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	io.Copy(io.Discard, resp.Body)
+	resp.Body.Close()
+	info, _ := m.d.Budget.Task("a")
+	if resp.StatusCode != 200 || hits.Load() != 1 || info.SpentUSD != 0 {
+		t.Fatalf("flat route: status=%d hits=%d account=%+v", resp.StatusCode, hits.Load(), info)
+	}
+	priced := flatPrices("anthropic")
+	priced.Models[0].Output = 1
+	if err := m.BeginPricedTask("a", "other", 5, llm.TaskPricing{V: 1, Routes: []llm.TaskPricingRoute{priced}}); err == nil {
+		t.Fatal("a flat route with a price was accepted")
+	}
+}
+
+// Only the route the task marked flat runs at $0: not another route of the same task, and never
+// the shared tables a legacy task reads.
+func TestZeroPriceRunsOnlyOnTheRouteMarkedFlat(t *testing.T) {
+	m, w := newManager(t)
+	w.secret(vault.Record{ID: "second", Kind: vault.KindLLM, Provider: "anthropic"}, realValue)
+	var hits atomic.Int32
+	w.tlsUpstream("api.anthropic.com", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) {
+		hits.Add(1)
+		rw.Header().Set("Content-Type", "application/json")
+		io.WriteString(rw, `{"usage":{"input_tokens":1,"output_tokens":1}}`)
+	}))
+	o, err := m.Open(OpenRequest{CellID: "a", Role: "brain", Secrets: []string{"anthropic", "second"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	unflat := flatPrices("second")
+	unflat.Flat = false
+	pricing := llm.TaskPricing{V: 1, Routes: []llm.TaskPricingRoute{flatPrices("anthropic"), unflat}}
+	if err := m.BeginPricedTask("a", "session", 5, pricing); err == nil {
+		t.Fatal("an unpriced route that is not flat was accepted")
+	}
+	// Past the manager's own check, the gateway still refuses the $0 route that is not flat.
+	identities := map[string]string{}
+	for _, route := range []string{"anthropic", "second"} {
+		b, _ := m.cells["a"].cell.gatewayRoute(route)
+		identities[route] = keys.BindingIdentity(b)
+	}
+	snapshot, err := llm.NewTaskSnapshot(pricing, identities)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.d.Budget.BeginPriced("a", "session", 5, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	openFixtureAdmission(t, m, "a")
+	send := func(route string) *http.Response {
+		req, _ := http.NewRequest("POST", "http://llm.ldot/"+route+"/messages", strings.NewReader(sonnet))
+		req.Header.Set("X-Api-Key", o.Surrogates[route])
+		resp, err := cellClient(w, o).Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		io.Copy(io.Discard, resp.Body)
+		resp.Body.Close()
+		return resp
+	}
+	if resp := send("second"); resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != ReasonModelUnpriced || hits.Load() != 0 {
+		t.Fatalf("unflat $0 route: %d %q hits=%d", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"), hits.Load())
+	}
+	if resp := send("anthropic"); resp.StatusCode != 200 || hits.Load() != 1 {
+		t.Fatalf("flat route: %d hits=%d", resp.StatusCode, hits.Load())
+	}
+	if err := m.EndTask("a"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetModels("anthropic", []llm.Price{{Model: "claude-sonnet-5-5", MaxOutput: 100}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.BeginTask("a", "legacy", 5); err != nil {
+		t.Fatal(err)
+	}
+	openFixtureAdmission(t, m, "a")
+	if resp := send("anthropic"); resp.StatusCode != 403 || resp.Header.Get("X-Keyd-Reason") != ReasonModelUnpriced || hits.Load() != 1 {
+		t.Fatalf("legacy $0 table: %d %q hits=%d", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"), hits.Load())
+	}
+}

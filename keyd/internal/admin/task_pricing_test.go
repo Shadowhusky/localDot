@@ -52,3 +52,31 @@ func TestTaskPricingAdminWireAndImmutableRetry(t *testing.T) {
 		t.Fatal("omitted pricing downgraded existing snapshot")
 	}
 }
+
+func TestTaskPricingAdminFlatRoute(t *testing.T) {
+	f := newFixture(t)
+	if err := f.s.Vault.Put(vault.Record{ID: "provider", Kind: vault.KindLLM, Provider: "openai"}, []byte(fakeKey)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.s.Manager.Open(egress.OpenRequest{CellID: "brain", Role: "brain", Secrets: []string{"provider"}}); err != nil {
+		t.Fatal(err)
+	}
+	pricing := func(flat any, output float64) map[string]any {
+		route := map[string]any{"route": "provider", "models": []any{map[string]any{"id": "m", "inputUSDPerMTok": 0, "outputUSDPerMTok": output, "maxOutputTokens": 10}}}
+		if flat != nil {
+			route["flat"] = flat
+		}
+		return map[string]any{"v": 1, "routes": []any{route}}
+	}
+	for _, bad := range []map[string]any{pricing(nil, 0), pricing(false, 0), pricing(true, 1)} {
+		if code, _ := f.call(t, "PUT", "/v1/cells/brain/task", map[string]any{"taskId": "session", "budgetUSD": 5, "pricing": bad}); code != 400 {
+			t.Fatalf("pricing %v: status %d", bad, code)
+		}
+	}
+	if code, _ := f.call(t, "PUT", "/v1/cells/brain/task", map[string]any{"taskId": "session", "budgetUSD": 5, "pricing": pricing(true, 0)}); code != 204 {
+		t.Fatalf("flat route: %d", code)
+	}
+	if code, body := f.call(t, "PUT", "/v1/cells/brain/task", map[string]any{"taskId": "session", "budgetUSD": 5, "pricing": pricing(nil, 1)}); code != 409 || body["error"].(map[string]any)["code"] != "task-pricing-conflict" {
+		t.Fatalf("flat mark changed on retry: %d %v", code, body)
+	}
+}
