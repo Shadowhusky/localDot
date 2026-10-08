@@ -6,13 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { type KeydRecord, toBase64url, ulid } from "@localdot/protocol";
+import { CAREFUL_AUTONOMY, type KeydRecord, toBase64url, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import type { CodexInstaller, InstalledCodex } from "../../../../harness/codex/src/index.ts";
 import type { ChatgptStatus, CodexAccount } from "../../../daemon/src/agent/codex/account.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
+import { authorizePrepared } from "../../../daemon/src/agent/safety/authorize.ts";
+import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
 import { AgentSession } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
@@ -69,6 +71,7 @@ let chatgptState = (env.QA_CHATGPT || undefined) as
   | undefined;
 let keydMode = (env.QA_KEYD ?? "online") as "online" | "offline" | "audit" | "guard";
 const replays = Number(env.QA_REPLAYS ?? 2);
+const autonomy = env.QA_AUTONOMY === "careful" ? CAREFUL_AUTONOMY : undefined;
 
 rmSync(HOME, { recursive: true, force: true });
 mkdirSync(HOME, { recursive: true, mode: 0o700 });
@@ -250,7 +253,7 @@ function attachLive(owned: AgentSession) {
   );
 }
 function newSession(title: string, task: string): AgentSession {
-  const s = new AgentSession(log.createSession(title), cellId, task, log);
+  const s = new AgentSession(log.createSession(title), cellId, task, log, autonomy);
   s.beginBrain();
   log.append(s.id, {
     agent: "main",
@@ -815,6 +818,34 @@ app.post("/__qa/approval", (c) => {
   const risk = (c.req.query("risk") ?? "high") as "medium" | "high";
   const controller = new AbortController();
   pendingApprovals.push(controller);
+  const repeat = Number(c.req.query("repeat") ?? 1);
+  if (repeat > 1) {
+    // The card a repeated key press gets under QA_AUTONOMY=careful, from the real authorization.
+    const keys = ["bracketright"];
+    const action = { verb: "key" as const, combo: keys, speed: "auto" as const };
+    void authorizePrepared(
+      {
+        session,
+        generation: session.generation,
+        check() {},
+        callId: ulid(),
+        step: ulid(),
+        redact: (value: string) => value,
+        signal: controller.signal,
+      } as never,
+      {
+        tool: "computer",
+        input: { toolInput: { action: "key", keys, repeat }, action },
+        target: { target: null, window: 9, point: null },
+        facts: nativeActionFacts(action, null),
+        revalidate: async () => true,
+        count: repeat,
+      },
+    )
+      .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
+      .catch((e) => effects.push(`approval-error:${String(e)}`));
+    return c.json({ ok: true });
+  }
   void session
     .requestApproval(
       {
