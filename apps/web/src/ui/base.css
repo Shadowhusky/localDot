@@ -26,7 +26,7 @@
   }
 
   ::selection {
-    background: rgba(238, 239, 241, 0.22);
+    background: var(--color-selection);
   }
 
   h1,
@@ -66,7 +66,7 @@
     display: inline-block;
     width: 12px;
     height: 12px;
-    margin-inline-end: 6px;
+    margin-inline-end: calc(var(--spacing) * 1.5);
     vertical-align: -1px;
     background: currentColor;
     mask:
