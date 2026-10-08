@@ -247,6 +247,21 @@ describe("provider/model/role presentation", () => {
       target: { value: "custom-next" },
     });
     expect(change).toHaveBeenCalledWith("custom-next");
+    // Nothing in the catalog to search or pick: only the typed ID.
+    expect(screen.queryByRole("combobox", { name: "main model" })).toBeNull();
+    expect(screen.queryByLabelText("Search main models")).toBeNull();
+    expect(screen.queryByText(/No models are available/)).toBeNull();
+    view.rerender(
+      <ModelPicker
+        modelRole="main"
+        providerId="anthropic-compatible"
+        models={models}
+        value="text-a"
+        onChange={change}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "main model" })).toBeTruthy();
+    expect(screen.getByLabelText("main custom model ID")).toBeTruthy();
     view.rerender(
       <ModelPicker
         modelRole="main"
@@ -361,12 +376,10 @@ describe("provider/model/role presentation", () => {
       name: "Flat-rate plan (no per-token price)",
     }) as HTMLInputElement;
     expect(plan.checked).toBe(false);
-    expect(screen.queryByText(/no spending ceiling/)).toBeNull();
+    expect(screen.queryByText(/not a spending ceiling/)).toBeNull();
     fireEvent.click(plan);
     expect(state().plan).toBe(true);
-    expect(
-      screen.getByText("Uses your plan's limits, with no spending ceiling here."),
-    ).toBeTruthy();
+    expect(screen.getByText("Uses your plan's limits, not a spending ceiling.")).toBeTruthy();
     fireEvent.click(plan);
     expect(state()).not.toHaveProperty("plan");
 

@@ -479,7 +479,9 @@ describe("KeysSheet", () => {
     hint("Use https. Local servers go through LM Studio or Ollama.");
     fireEvent.change(provider, { target: { value: "anthropic-compatible" } });
     expect(field("Base URL").placeholder).toBe("https://api.example.com/anthropic");
-    hint("Use https. Local servers go through LM Studio or Ollama. /v1 is added if it is missing.");
+    hint(
+      "Use https, ending in /v1 (added if missing). Local servers go through LM Studio or Ollama.",
+    );
     fireEvent.change(provider, { target: { value: "azure" } });
     expect(screen.queryByText(/Local servers go through/)).toBeNull();
   });

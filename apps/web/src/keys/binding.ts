@@ -59,9 +59,9 @@ export const needsBaseURL = (p: Provider) =>
 
 // keyd refuses private hosts and ports, so a server on this Mac is reached through its own route.
 export function baseURLHint(p: Provider): string | undefined {
-  const local = "Use https. Local servers go through LM Studio or Ollama.";
-  if (p === "openai-compatible") return local;
-  if (p === "anthropic-compatible") return `${local} /v1 is added if it is missing.`;
+  const local = "Local servers go through LM Studio or Ollama.";
+  if (p === "openai-compatible") return `Use https. ${local}`;
+  if (p === "anthropic-compatible") return `Use https, ending in /v1 (added if missing). ${local}`;
   return undefined;
 }
 
@@ -95,7 +95,7 @@ export function bindingOf(d: KeyDraft): DraftCheck {
     if (!baseURL)
       return fail(
         "baseURL",
-        "Enter the https:// address the API lives at, by host name, with no port, user, query or #.",
+        "Enter the API's https:// address by host name, with no port, user, query or #.",
       );
     if (d.provider === "anthropic-compatible") {
       if (/(^|\.)anthropic\.com$/.test(new URL(baseURL).hostname))

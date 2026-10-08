@@ -202,7 +202,7 @@ export function RoleEditor({
                 />
                 Flat-rate plan (no per-token price)
               </label>
-              {value.plan && <p>Uses your plan's limits, with no spending ceiling here.</p>}
+              {value.plan && <p>Uses your plan's limits, not a spending ceiling.</p>}
             </>
           )}
           {value?.provider === "chatgpt" && (
