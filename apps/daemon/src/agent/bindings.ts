@@ -78,6 +78,15 @@ export function resolveRole(
       `${provider.name} arrives in ${provider.availableIn.toUpperCase()}`,
     );
   if (provider.notOffered) throw new BindingError(role, provider.notOffered);
+  if (
+    !provider.custom &&
+    (choice.vision !== undefined || choice.contextTokens !== undefined || choice.plan)
+  )
+    throw new BindingError(
+      role,
+      "only a custom endpoint states what its model can do or a flat-rate plan",
+    );
+  const flat = provider.plan || (provider.custom && choice.plan);
   let keyId: string | undefined;
   if (!provider.local) {
     const key = keys.find((k) => k.id === choice.key);
@@ -103,11 +112,10 @@ export function resolveRole(
     throw new BindingError(role, "local routes use no stored key or manual price");
   const route = routeFor(provider, keyId);
   if (!route) throw new BindingError(role, "no route");
-  let model =
-    provider.id === "openai-compatible"
-      ? localModel(choice.model)
-      : ((catalog && findModel(catalog, provider.id, choice.model)) ??
-        (provider.local ? localModel(choice.model) : undefined));
+  let model = provider.custom
+    ? localModel(choice.model, { vision: choice.vision, contextTokens: choice.contextTokens })
+    : ((catalog && findModel(catalog, provider.id, choice.model)) ??
+      (provider.local ? localModel(choice.model) : undefined));
   if (!model)
     throw new BindingError(
       role,
@@ -119,7 +127,8 @@ export function resolveRole(
       role,
       `${provider.name} takes no manual price; choose its model again in Settings`,
     );
-  if (provider.local || provider.plan) {
+  if (flat && choice.price) throw new BindingError(role, "a flat-rate plan takes no manual price");
+  if (provider.local || flat) {
     model.inputUSDPerMTok = 0;
     model.outputUSDPerMTok = 0;
     delete model.cacheReadUSDPerMTok;
@@ -163,7 +172,7 @@ export function resolveRole(
     model,
     capability,
     ...(keyId ? { keyId } : {}),
-    ...(provider.plan ? { flat: true as const } : {}),
+    ...(flat ? { flat: true as const } : {}),
   });
 }
 // No role is billed per token and at least one runs on a plan: no dollar budget applies.

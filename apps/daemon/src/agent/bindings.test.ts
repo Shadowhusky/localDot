@@ -367,7 +367,7 @@ describe("vendor presets and plans", () => {
     expect(planOnly([local])).toBe(false);
   });
 
-  it("marks only a registry plan flat, never a paid provider or a forged choice", () => {
+  it("never marks a paid provider flat, and refuses a forged flat field", () => {
     expect(() =>
       resolveRole(
         "main",
@@ -407,5 +407,152 @@ describe("vendor presets and plans", () => {
     expect(() => pricingOf([plan, paid])).toThrow(
       new BindingError("fast", "key minimax is a plan for one model and pay as you go for another"),
     );
+  });
+});
+
+describe("custom endpoints state what their model can do", () => {
+  const custom: KeydRecord[] = [
+    {
+      id: "anc",
+      kind: "llm",
+      provider: "anthropic-compatible",
+      baseURL: "https://api.z.ai/api/anthropic/v1",
+      createdAt: at,
+      updatedAt: at,
+    },
+    {
+      id: "gateway",
+      kind: "llm",
+      provider: "openai-compatible",
+      baseURL: "https://llm.example.test/v1",
+      createdAt: at,
+      updatedAt: at,
+    },
+    ...keys,
+  ];
+  const price = { inputUSDPerMTok: 0.6, outputUSDPerMTok: 2.2 };
+  const anc = { provider: "anthropic-compatible", model: "glm-5.3-flash", key: "anc", price };
+
+  it("reaches an Anthropic-compatible endpoint with localDot's computer tool by default", () => {
+    const r = resolveRole("main", anc, catalog, custom);
+    expect(bindingOf(r, { anc: SURROGATE })).toEqual({
+      route: "anc",
+      client: "anthropic-compatible",
+      model: "glm-5.3-flash",
+      surrogate: SURROGATE,
+      computer: "generic",
+      coords: "per1000",
+      vision: true,
+      reasoning: false,
+      contextTokens: 32_768,
+      maxOutputTokens: 4_096,
+    });
+    expect(() => resolveRole("main", { ...anc, key: "gateway" }, catalog, custom)).toThrow(
+      new BindingError("main", "key gateway is not a Other (Anthropic-compatible) key"),
+    );
+    expect(() => resolveRole("main", { ...anc, price: undefined }, catalog, custom)).toThrow(
+      /no price in the catalog/,
+    );
+  });
+
+  it("gives a model that cannot see images the text-only capability", () => {
+    for (const choice of [
+      { ...anc, vision: false },
+      {
+        provider: "openai-compatible",
+        model: "kimi-k2.7-code",
+        key: "gateway",
+        price,
+        vision: false,
+      },
+    ]) {
+      const r = resolveRole("main", choice, catalog, custom);
+      expect(r.capability.tier).toBe("text-only");
+      expect(bindingOf(r, { anc: SURROGATE, gateway: SURROGATE })).toMatchObject({
+        computer: "none",
+        vision: false,
+      });
+    }
+  });
+
+  it("honours the context window the user states", () => {
+    const r = resolveRole("main", { ...anc, contextTokens: 200_000 }, catalog, custom);
+    expect(bindingOf(r, { anc: SURROGATE }).contextTokens).toBe(200_000);
+    const o = resolveRole(
+      "fast",
+      { provider: "openai-compatible", model: "m", key: "gateway", price, contextTokens: 4_096 },
+      catalog,
+      custom,
+    );
+    expect(bindingOf(o, { gateway: SURROGATE }).contextTokens).toBe(4_096);
+  });
+
+  it("runs a custom endpoint on a flat-rate plan at zero, on a flat route, with no price", () => {
+    const { price: _, ...unpriced } = anc;
+    const plan = resolveRole("main", { ...unpriced, plan: true }, catalog, custom);
+    expect(plan.flat).toBe(true);
+    expect(pricingOf([plan])).toEqual({
+      v: 1,
+      routes: [
+        {
+          route: "anc",
+          flat: true,
+          models: [
+            {
+              id: "glm-5.3-flash",
+              inputUSDPerMTok: 0,
+              outputUSDPerMTok: 0,
+              maxOutputTokens: 4_096,
+            },
+          ],
+        },
+      ],
+    });
+    expect(planOnly([plan])).toBe(true);
+    expect(() => resolveRole("main", { ...anc, plan: true }, catalog, custom)).toThrow(
+      new BindingError("main", "a flat-rate plan takes no manual price"),
+    );
+    const paid = resolveRole("fast", anc, catalog, custom);
+    expect(paid.flat).toBeUndefined();
+    expect(() => pricingOf([plan, paid])).toThrow(/key anc is a plan for one model/);
+  });
+
+  it("refuses stated abilities and plans for every provider whose models come from elsewhere", () => {
+    const zai: KeydRecord = {
+      id: "zai",
+      kind: "llm",
+      provider: "openai-compatible",
+      baseURL: "https://api.z.ai/api/paas/v4",
+      createdAt: at,
+      updatedAt: at,
+    };
+    const minimax: KeydRecord = { ...zai, id: "minimax", baseURL: "https://api.minimax.io/v1" };
+    for (const choice of [
+      { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+      { provider: "zai", model: "glm-5v-turbo", key: "zai" },
+      { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "minimax" },
+      { provider: "ollama", model: "qwen3.8:27b" },
+    ])
+      for (const stated of [
+        { vision: false },
+        { vision: true },
+        { contextTokens: 100_000 },
+        { plan: true },
+      ])
+        expect(
+          () =>
+            resolveRole(
+              choice.provider === "ollama" ? "local" : "main",
+              { ...choice, ...stated } as never,
+              catalog,
+              [...custom, zai, minimax],
+            ),
+          `${choice.provider} ${JSON.stringify(stated)}`,
+        ).toThrow(
+          new BindingError(
+            choice.provider === "ollama" ? "local" : "main",
+            "only a custom endpoint states what its model can do or a flat-rate plan",
+          ),
+        );
   });
 });
