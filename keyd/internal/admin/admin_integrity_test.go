@@ -48,11 +48,11 @@ type errorStore struct {
 	failPut, failDelete bool
 }
 
-func (s *errorStore) Put(id string, value []byte) error {
+func (s *errorStore) Put(id string, value []byte, binding string) error {
 	if s.failPut {
 		return errors.New("backend reported " + fakeKey)
 	}
-	return s.Memory.Put(id, value)
+	return s.Memory.Put(id, value, binding)
 }
 func (s *errorStore) Delete(id string) error {
 	if s.failDelete {

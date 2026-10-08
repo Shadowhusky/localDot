@@ -10,7 +10,10 @@ import (
 	"time"
 )
 
-var fakeValue = []byte("real-secret-value-for-test")
+var (
+	fakeValue   = []byte("real-secret-value-for-test")
+	testBinding = bindingOf(httpRecord("weather"))
+)
 
 func openTemp(t *testing.T, store Store) (*Vault, string) {
 	t.Helper()
@@ -36,7 +39,7 @@ func TestPutStoresValueAndIndexWithoutTheValue(t *testing.T) {
 	if err != nil || !bytes.Equal(got, fakeValue) {
 		t.Fatalf("Value = %q, %v", got, err)
 	}
-	stored, _ := store.Get("weather")
+	stored, _ := store.Get("weather", testBinding)
 	if !bytes.Equal(stored, fakeValue) {
 		t.Fatalf("store holds %q", stored)
 	}
@@ -114,7 +117,7 @@ func TestDeleteRemovesValueAndRecord(t *testing.T) {
 	if _, err := v.Value("weather"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Value after delete: %v", err)
 	}
-	if _, err := store.Get("weather"); !errors.Is(err, ErrNotFound) {
+	if _, err := store.Get("weather", testBinding); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("store after delete: %v", err)
 	}
 	if err := v.Delete("weather"); !errors.Is(err, ErrNotFound) {
@@ -180,7 +183,7 @@ type countingStore struct {
 	gets int
 }
 
-func (c *countingStore) Get(id string) ([]byte, error) {
+func (c *countingStore) Get(id, binding string) ([]byte, error) {
 	c.gets++
-	return c.Store.Get(id)
+	return c.Store.Get(id, binding)
 }

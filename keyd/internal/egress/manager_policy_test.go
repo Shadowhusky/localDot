@@ -131,7 +131,7 @@ func TestModelChangesCancelRequestsWaitingForBudget(t *testing.T) {
 	}
 }
 
-func (s *blockedStore) Put(id string, value []byte) error {
+func (s *blockedStore) Put(id string, value []byte, binding string) error {
 	s.mu.Lock()
 	entered, release := s.entered, s.release
 	s.mu.Unlock()
@@ -139,7 +139,7 @@ func (s *blockedStore) Put(id string, value []byte) error {
 		close(entered)
 		<-release
 	}
-	return s.Memory.Put(id, value)
+	return s.Memory.Put(id, value, binding)
 }
 
 func TestSecretReplacementRevokesBeforeStorageAndSerializesMint(t *testing.T) {
