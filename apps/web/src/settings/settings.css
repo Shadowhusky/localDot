@@ -116,6 +116,19 @@
   font-family: monospace;
   letter-spacing: 0.08em;
 }
+.settings-sheet .safety-settings label {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 8px 0;
+}
+.settings-sheet .safety-settings select {
+  flex: none;
+  width: 128px;
+  min-height: 36px;
+}
 .settings-problems ul {
   margin: 0 0 8px;
   padding-left: 18px;
@@ -215,8 +228,10 @@
   .settings-sheet input:not([type="checkbox"], [type="radio"]) {
     font-size: 16px;
   }
-  .settings-sheet select {
+  .settings-sheet select,
+  .settings-sheet .safety-settings select {
     height: 44px;
+    min-height: 44px;
   }
   .settings-sheet .role-enabled {
     min-height: 44px;
