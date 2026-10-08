@@ -43,6 +43,10 @@ function put<T>(
   }
   return next;
 }
+// A message keeps its place in the conversation as later deltas and its final text arrive.
+function firstSeen(old: { seq?: number; at?: number } | undefined, e: LocalDotEvent) {
+  return { seq: old?.seq ?? e.seq, at: old?.at ?? e.t };
+}
 function step(model: AgentModel, id: string): AgentStep {
   return model.steps.get(id) ?? { id, output: [], outputTruncated: false };
 }
@@ -164,6 +168,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           e.data.messageId,
           {
             id: e.data.messageId,
+            ...firstSeen(model.messages.get(e.data.messageId), e),
             role: "user",
             text: e.data.text,
             final: true,
@@ -188,6 +193,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
           e.data.messageId,
           {
             id: e.data.messageId,
+            ...firstSeen(old, e),
             role: "assistant",
             text: text.slice(0, L.messageText),
             final: false,
@@ -207,7 +213,13 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         messages: put(
           model.messages,
           e.data.messageId,
-          { id: e.data.messageId, role: "assistant", text: e.data.text, final: true },
+          {
+            id: e.data.messageId,
+            ...firstSeen(old, e),
+            role: "assistant",
+            text: e.data.text,
+            final: true,
+          },
           L.messages,
         ),
         historyTruncated: next.historyTruncated || (!old && model.messages.size >= L.messages),
@@ -269,7 +281,11 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         questions: put(
           model.questions,
           e.data.askId,
-          { ...e.data, options: e.data.options.map((option) => ({ ...option })) },
+          {
+            ...e.data,
+            ...firstSeen(model.questions.get(e.data.askId), e),
+            options: e.data.options.map((option) => ({ ...option })),
+          },
           L.questions,
         ),
         historyTruncated: next.historyTruncated || model.questions.size >= L.questions,
@@ -341,7 +357,13 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         ...next,
         results: [
           ...model.results,
-          { id: e.id, summary: e.data.summary, files: e.data.files.map((file) => ({ ...file })) },
+          {
+            id: e.id,
+            seq: e.seq,
+            at: e.t,
+            summary: e.data.summary,
+            files: e.data.files.map((file) => ({ ...file })),
+          },
         ].slice(-L.results),
         historyTruncated: next.historyTruncated || model.results.length >= L.results,
       };

@@ -16,13 +16,11 @@ import {
   groupMeta,
   hasDetails,
   matchesFilter,
-  questionView,
   runsOnView,
 } from "../agent/activity.ts";
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
 import { PlanView } from "../agent/PlanView.tsx";
-import { ResultFiles } from "../agent/ResultFiles.tsx";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
 import { usePagedRows } from "../agent/usePagedRows.ts";
@@ -275,7 +273,6 @@ export function ActivityRail({
       !change.step ||
       !entries.some((entry) => entry.row.kind === "step" && entry.row.id === change.step),
   );
-  const questions = [...model.questions.values()];
 
   return (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
@@ -350,18 +347,6 @@ export function ActivityRail({
                 ))}
               </section>
             )}
-            {questions.length > 0 && (
-              <section className="activity-section" aria-label="Question history">
-                <h3 className="activity-section-title">Questions</h3>
-                {questions.map((question) => (
-                  <ActivityRow
-                    key={question.askId}
-                    id={`${domId}-ask-${question.askId}`}
-                    view={questionView(question, model.pendingAsk === question.askId && !ended)}
-                  />
-                ))}
-              </section>
-            )}
             {started && (
               <section className="activity-steps" aria-labelledby={`${domId}-steps`}>
                 <div className="activity-steps-head">
@@ -403,15 +388,6 @@ export function ActivityRail({
                   </p>
                 )}
               </section>
-            )}
-            {agent && started && (
-              <ResultFiles
-                api={api}
-                sessionId={sessionId}
-                results={model.results}
-                ended={ended}
-                idle={model.state?.state === "idle"}
-              />
             )}
             {model.historyTruncated && (
               <p className="activity-note">Older activity is kept in the task log.</p>

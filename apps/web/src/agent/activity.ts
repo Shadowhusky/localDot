@@ -4,7 +4,7 @@ import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/k
 import type { StepRowView } from "../session/session-view.ts";
 import type { IconName } from "../ui/icons.ts";
 import type { GlyphState } from "../ui/StatusGlyph.tsx";
-import type { AgentChange, AgentModel, AgentQuestion, AgentStep } from "./model.ts";
+import type { AgentChange, AgentModel, AgentStep } from "./model.ts";
 
 export type ActivityFilter = "all" | "screen" | "tools";
 export interface ActivityStep {
@@ -207,7 +207,7 @@ const VERB_ICONS: Record<string, IconName> = {
 };
 
 export interface EntryView {
-  testId: "step-row" | "tool-row" | "key-use" | "change-row" | "question-row";
+  testId: "step-row" | "tool-row" | "key-use" | "change-row";
   icon: IconName;
   title: string;
   metric: string;
@@ -333,37 +333,6 @@ export function groupMeta(views: readonly EntryView[]): GroupMeta {
     steps: steps.length,
     failed: steps.filter((view) => view.state === "failed").length,
     durationMs: starts.length ? Math.max(...ends) - Math.min(...starts) : 0,
-  };
-}
-
-export function questionView(question: AgentQuestion, waiting: boolean): EntryView {
-  const answer = question.answer;
-  const option = question.options.find((item) => item.key === answer?.option);
-  const [state, stateLabel]: [GlyphState, string] = !answer
-    ? waiting
-      ? ["doing", "Waiting for you"]
-      : ["skipped", "No longer waiting"]
-    : answer.by === "stop"
-      ? ["skipped", "Stopped"]
-      : answer.by === "timeout"
-        ? ["skipped", "Timed out"]
-        : ["done", "Answered"];
-  const reason = [
-    option ? `Answer: ${option.text}` : answer?.option ? `Answer: ${answer.option}` : "",
-    answer?.text ?? "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  return {
-    testId: "question-row",
-    icon: "circle-alert",
-    title: question.question,
-    metric: "",
-    state,
-    stateLabel,
-    ...(reason ? { reason } : {}),
-    startT: Number.NaN,
-    endT: null,
   };
 }
 

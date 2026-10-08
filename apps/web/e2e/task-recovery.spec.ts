@@ -30,22 +30,20 @@ for (const width of [1280, 390])
       );
       if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
       const recovery = page.getByRole("region", { name: "Task recovery" });
-      await expect(recovery).toContainText("ceiling $5, spent $4");
-      const ceiling = page.getByLabel("New task ceiling (USD)");
-      await expect(ceiling).toBeEnabled();
+      await expect(recovery).toContainText("$4 of $5 spent");
       await page.screenshot({
         path: info.outputPath(`before-recovery-${width}.png`),
         fullPage: true,
       });
-      await ceiling.fill("0");
-      await page.getByRole("button", { name: "Set task budget and resume" }).click();
+      await recovery.getByRole("radio", { name: "Other" }).click();
+      const limit = recovery.getByRole("textbox", { name: "New limit" });
+      await limit.fill("0");
+      await recovery.getByRole("button", { name: "Raise and continue" }).click();
+      await expect(recovery).toContainText("Enter a limit above $5");
       expect(f.raises).toEqual([]);
-      await ceiling.fill("8");
-      await recovery.evaluate((element) => {
-        element.scrollTop = 0;
-      });
+      await limit.fill("8");
       await page.screenshot({ path: info.outputPath(`recovery-${width}.png`), fullPage: true });
-      await page.getByRole("button", { name: "Set task budget and resume" }).click();
+      await recovery.getByRole("button", { name: "Raise to $8 and continue" }).click();
       await expect.poll(() => f.raises).toEqual([{ id: f.id, ceiling: 8 }]);
       expect(f.ledger).toEqual({ taskId: f.id, limit: 8, spent: 4 });
       await expect(recovery).toHaveCount(0);
@@ -95,18 +93,17 @@ test("plan windows remain unknown when absent and explicit Resume never raises U
     await expect(usage).toContainText("Almost at limit · 98% used");
     await expect(usage.getByRole("meter")).toHaveCount(1);
     await page.keyboard.press("Escape");
-    await expect(page.getByLabel("New task ceiling (USD)")).toHaveCount(0);
     await page.getByRole("tab", { name: "Conversation", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Resume task" })).toBeEnabled();
-    await expect(page.getByRole("region", { name: "Task recovery" })).not.toContainText(
-      "ceiling $5",
-    );
+    const recovery = page.getByRole("region", { name: "Task recovery" });
+    await expect(recovery.getByRole("radio", { name: "Other" })).toHaveCount(0);
+    await expect(recovery.getByRole("button", { name: "Continue", exact: true })).toBeEnabled();
+    await expect(recovery).not.toContainText("$5");
     const before = f.session.inboxSequence;
     await page.screenshot({
       path: info.outputPath("subscription-recovery-390.png"),
       fullPage: true,
     });
-    await page.getByRole("button", { name: "Resume task" }).click();
+    await recovery.getByRole("button", { name: "Continue", exact: true }).click();
     await expect.poll(() => f.session.inboxSequence).toBe(before + 1);
     expect(f.raises).toEqual([]);
     expect(f.ledger.spent).toBe(4);
@@ -173,7 +170,7 @@ for (const width of [1280, 390])
       expect(f.realRunner?.get(f.id)).toBeUndefined();
       if (width === 390) await page.getByRole("tab", { name: "Conversation", exact: true }).click();
       await expect(page.getByRole("textbox", { name: "New task", exact: true })).toHaveCount(1);
-      await expect(page.getByRole("button", { name: "Resume task", exact: true })).toHaveCount(0);
+      await expect(page.getByRole("region", { name: "Task recovery" })).toHaveCount(0);
       await proof(page, p.errors, p.external);
     } finally {
       await context.close();
