@@ -1,0 +1,177 @@
+import { type BrowserContextOptions, expect, type Page, test } from "@playwright/test";
+import { startUiFixture, TOKEN, type UiFixture } from "./fixtures/start-ui-fixture.ts";
+import { ENGINES } from "./ui-fixture.ts";
+
+// The Activity rail against the fixture daemon's long hand-drawing task: one scroller, the live
+// step in view, older runs folded, rows that unfold in place, and new steps that never move what
+// the reader is looking at.
+test.describe.configure({ timeout: 120_000 });
+
+const DESKTOP: BrowserContextOptions = { viewport: { width: 1440, height: 900 } };
+const PHONE: BrowserContextOptions = {
+  viewport: { width: 390, height: 844 },
+  isMobile: true,
+  hasTouch: true,
+};
+const MATRIX = [
+  ["chrome", "desktop", DESKTOP],
+  ["webkit", "desktop", DESKTOP],
+  ["chrome", "phone", PHONE],
+  ["webkit", "phone", PHONE],
+] as const;
+
+let fixture: UiFixture | undefined;
+test.afterEach(async () => {
+  await fixture?.close();
+  fixture = undefined;
+});
+
+async function open(engine: keyof typeof ENGINES, options: BrowserContextOptions) {
+  fixture = await startUiFixture({ QA_ACTIVITY: "long" });
+  const browser = await ENGINES[engine]();
+  const context = await browser.newContext(options);
+  const page = await context.newPage();
+  await page.goto(`${fixture.origin}/#token=${TOKEN}`);
+  if ((options.viewport?.width ?? 0) < 1180)
+    await page.getByRole("tab", { name: "Activity", exact: true }).click();
+  const rail = page.getByRole("complementary", { name: "Plan and steps" });
+  await expect(rail.locator("[data-current]")).toHaveCount(1);
+  return { browser, page, rail };
+}
+
+const qa = (path: string) => fetch(`${fixture?.origin}/__qa/${path}`, { method: "POST" });
+
+function scrollers(page: Page) {
+  return page.evaluate(() =>
+    [...document.querySelectorAll(".pane-activity *")]
+      .filter((element) => {
+        const { overflowY } = getComputedStyle(element);
+        return /auto|scroll/.test(overflowY) && element.scrollHeight > element.clientHeight + 1;
+      })
+      .map((element) => element.className),
+  );
+}
+
+function inView(page: Page, selector: string) {
+  return page.evaluate((query) => {
+    const row = document.querySelector(query)?.getBoundingClientRect();
+    const pane = document.querySelector(".activity-scroll")?.getBoundingClientRect();
+    return !!row && !!pane && row.top >= pane.top - 1 && row.bottom <= pane.bottom + 1;
+  }, selector);
+}
+
+for (const [engine, size, options] of MATRIX) {
+  test(`a long task opens on its live step, in one scroller, with older runs folded (${engine} ${size})`, async () => {
+    const { browser, page, rail } = await open(engine, options);
+    expect(await inView(page, ".activity-row[data-current]")).toBe(true);
+    await expect(rail.locator("[data-current]")).toContainText("Fill the tail with brown");
+    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+    await expect(rail.getByRole("button", { name: /^Open the paint app/ })).toHaveAttribute(
+      "aria-expanded",
+      "false",
+    );
+    await expect(rail.getByRole("button", { name: /^Colour the dog in/ })).toHaveAttribute(
+      "aria-expanded",
+      "true",
+    );
+    // The plan header stays in view, naming the item in progress once the plan scrolls away.
+    await expect(rail.locator(".plan-head")).toHaveAttribute("data-stuck");
+    await expect(rail.locator(".plan-title-current")).toHaveText("Colour the dog in");
+    // Every model call uses a key; those fold into their step. Only the blocked use is a row.
+    await rail.getByRole("button", { name: /^Sketch the dog's outline/ }).click();
+    await expect(rail.getByTestId("key-use")).toHaveCount(1);
+    await expect(rail.getByTestId("key-use")).toContainText("Blocked stock-images key");
+    if (size === "phone")
+      for (const target of await rail
+        .locator(".activity-row-head, .ui-disclosure-trigger, .ui-segmented-item")
+        .all()) {
+        const box = await target.boundingBox();
+        if (box) expect(box.height).toBeGreaterThanOrEqual(43.5);
+      }
+    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+    await browser.close();
+  });
+}
+
+for (const engine of ["chrome", "webkit"] as const) {
+  test(`new steps never move the row being read, and Jump to latest follows again (${engine})`, async () => {
+    const { browser, page, rail } = await open(engine, DESKTOP);
+    const scroller = page.locator(".activity-scroll");
+    const jump = rail.getByRole("button", { name: "Jump to latest" });
+    await expect(jump).not.toHaveAttribute("data-shown");
+    await scroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight / 2 - element.clientHeight / 2;
+    });
+    const reading = rail.getByRole("button", { name: /Check the canvas size/ });
+    await reading.scrollIntoViewIfNeeded();
+    await scroller.evaluate((element) => element.scrollBy(0, -40));
+    await expect(jump).toHaveAttribute("data-shown");
+    const before = await reading.boundingBox();
+    await qa("steps?n=3");
+    await expect(rail.locator("[data-current]")).toContainText("Fill area 3 with brown");
+    await page.waitForTimeout(400);
+    expect((await reading.boundingBox())?.y).toBeCloseTo(before?.y ?? Number.NaN, 0);
+    await jump.click();
+    await expect(jump).not.toHaveAttribute("data-shown");
+    await expect.poll(() => inView(page, ".activity-row[data-current]")).toBe(true);
+    await qa("steps?n=2");
+    await expect(rail.locator("[data-current]")).toContainText("Fill area 5 with brown");
+    await expect.poll(() => inView(page, ".activity-row[data-current]")).toBe(true);
+    await browser.close();
+  });
+
+  test(`a step unfolds in place, Escape folds it, and usage opens over the rail (${engine})`, async () => {
+    const { browser, page, rail } = await open(engine, DESKTOP);
+    const row = rail.getByRole("button", { name: /Export a preview/ });
+    await row.scrollIntoViewIfNeeded();
+    const top = (await row.boundingBox())?.y;
+    await row.focus();
+    await page.keyboard.press("Enter");
+    await expect(row).toHaveAttribute("aria-expanded", "true");
+    await expect(rail.getByRole("region", { name: "Standard error text" })).toHaveText(
+      "convert: no images defined `preview.png'\n",
+    );
+    expect((await row.boundingBox())?.y).toBeCloseTo(top ?? Number.NaN, 0);
+    await page.keyboard.press("Escape");
+    await expect(row).toHaveAttribute("aria-expanded", "false");
+    await expect(row).toBeFocused();
+    expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
+
+    const scroller = await page.locator(".activity-scroll").boundingBox();
+    const usage = rail.getByRole("button", { name: /^Usage:/ });
+    await usage.click();
+    const details = page.getByRole("dialog", { name: "Usage" });
+    await expect(details).toContainText("186,420 in · 9,210 out");
+    expect(await page.locator(".activity-scroll").boundingBox()).toEqual(scroller);
+    await page.keyboard.press("Escape");
+    await expect(details).toHaveCount(0);
+    await expect(usage).toBeFocused();
+    await browser.close();
+  });
+}
+
+test("steps arriving while the reader follows shift nothing in the rail (chrome)", async () => {
+  const { browser, page } = await open("chrome", DESKTOP);
+  await page.evaluate(() => {
+    const shifts: number[] = [];
+    (window as unknown as { railShifts: number[] }).railShifts = shifts;
+    new PerformanceObserver((list) => {
+      for (const entry of list.getEntries() as (PerformanceEntry & {
+        value: number;
+        sources: { node?: Node }[];
+      })[])
+        if (entry.sources.some((source) => source.node?.parentElement?.closest(".pane-activity")))
+          shifts.push(entry.value);
+    }).observe({ type: "layout-shift" });
+  });
+  for (let n = 0; n < 4; n++) {
+    await qa("steps?n=1");
+    await page.waitForTimeout(250);
+  }
+  await page.waitForTimeout(400);
+  const shifts = await page.evaluate(
+    () => (window as unknown as { railShifts: number[] }).railShifts,
+  );
+  expect(shifts.reduce((sum, value) => sum + value, 0)).toBeLessThan(0.001);
+  await browser.close();
+});
