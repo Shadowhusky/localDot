@@ -470,6 +470,84 @@ page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 a
   `<html>` scroll lock against rubber-banding, the fixed bottom sheet with the keyboard up and the 48 px
   bleed have been seen only in Chrome's touch emulation.
 
+## Feedback
+
+T09 (UI plan §4.2), the feedback half: toasts, banners, progress, meters, skeletons, empty states and
+the page's one announcer. Files in `src/ui/`: `Announcer.tsx`, `Toast.tsx` with `toasts.ts` (the
+queue) and `toast-swipe.ts`, `Banner.tsx`, `Progress.tsx`, `Meter.tsx`, `Skeleton.tsx`,
+`EmptyState.tsx`, and `feedback.css` in the kit layer. Unit tests sit beside them;
+`e2e/ui-feedback.spec.ts` drives the gallery's Feedback page (`?page=feedback`) in Chrome and WebKit,
+on a desktop and on a touch phone, under the production CSP, and `e2e/ui/feedback.spec.ts` keeps the
+`ui-toast`, `ui-toast-expanded` and `ui-feedback` baselines at c14 and w39. Zero-dependency, like the
+rest of the kit. No screen uses them yet. `feedback.css` adds 1.9 kB gz to the app's CSS.
+
+- **Announcer.** `announce(channel, text, urgency?)` and `<Announcer />`, mounted once near the root:
+  the page's only polite region and its only alert region. One polite announcement at most every
+  1.5 s; a newer message on a channel replaces one still waiting there (the HUD's status on one
+  channel never queues stale states), and channels take turns. `assertive` is for errors that stop
+  work and is never held back. Text repeated on purpose gets a trailing no-break space, so it is
+  heard again.
+- **Toasts.** `showToast({ id?, title, description?, tone?, action?, persist? })` and
+  `dismissToast(id)`; `<Toaster anchor={hudRef} />` renders them. The Toaster is absolutely
+  positioned in its anchor's positioned box (the stage frame), 8 px under the anchor and centred on
+  it, 360 px wide or the box less 16 px a side, so a toast never moves anything. Mount one Toaster.
+  - Newest in front; the front one and the edges of two behind it show, each step back 5% narrower
+    and a little lighter, the rest wait. Only the front toast's time runs (4 s), so each is read in
+    turn; a `danger` toast persists unless told otherwise. Time stands still while the stack is
+    hovered, holds focus, is opened by a tap, is being swiped, or the page is hidden.
+  - Hover or focus lays the stack out into a column (8 px apart); on touch a tap does, and a press
+    elsewhere closes it. Behind toasts are inert until then. The words of a card that comes out from
+    behind fade in once the cards have parted.
+  - Showing again under an `id` replaces that toast where it is and brings it to the front: an action
+    such as "Check again" can turn "Couldn't confirm the stop" into "Stopped" in place.
+  - A toast is read out through the Announcer when shown; the stack itself is a labelled region, not
+    a live one. Escape on a focused toast dismisses it (focus moves to the next toast) and goes no
+    further. The close button is always there; buttons keep a 28 px face and reach 44 px on touch, so
+    a toast stays 44 px tall.
+  - Motion: it grows down out of the anchor (8 px, scale .96, blur 4 px to sharp) on the spring and
+    leaves back into it on `--ease-exit`, sinking under the cards that slide up. Swipe: sideways or up,
+    10 px of slop, then 1:1 from the grab point (down gives by a rubber band); a release projected
+    (d = .998) past 40% of the width or half the height carries on out at the release speed on
+    `springValue` from `@localdot/stage`, otherwise it springs home and can be caught on the way.
+    Under reduced motion it only fades.
+  - The surface is the HUD material at its solid strength (`--color-hud-solid`, blur 20 px), since a
+    toast hangs over the picture. Playwright's WebKit draws no `backdrop-filter`, so its screenshots
+    show the picture faintly through; Safari blurs it.
+- **Banner.** `tone: neutral | attention | danger`, `title`, detail as children, small-button
+  `actions` (beside the text from 480 px wide, under it below that), `onDismiss`, `open` and
+  `announce`. It stays mounted: closing folds it to nothing (`grid-template-rows` 1fr → 0fr) and
+  makes it inert, opening unfolds it and slides what follows down, so keep it mounted and toggle
+  `open` rather than rendering it conditionally. Spacing around it belongs inside the part that folds
+  (a margin on `.ui-banner`), or a gap stays behind when it is closed. Attention is a 1 px rim, danger
+  a tinted fill with an alert glyph, never colour alone. `announce` reads it out each time it opens.
+- **Progress.** `label`, `value`, `max`, `valueText`, `variant: bar | ring`, ring `size: 16 | 20 | 24`.
+  The bar is 4 px, its fill sliding along the track; without a value a 30% stretch sweeps along a
+  2 px line in the same 4 px, so a bar that learns its length moves nothing. The ring's arc draws from
+  twelve o'clock; complete, it brightens and draws a check (the download button's ring → check →
+  toast). Reduced motion: the sweep and the turning ring breathe instead.
+- **Meter.** `label`, `value`, `max` (100), `valueText`: the label and the amount over a 4 px bar. From
+  90% the fill turns fg-1 and the amount reads "Almost at limit · …", in words and in the meter's
+  value text. `role="meter"` on a drawn bar, since a native `meter` draws differently in each engine.
+- **Skeleton.** `loading`, `shape: text | block | circle`, `width`, `height`, `lines`, children. A text
+  line is one line of the surrounding type tall (`1lh`) with a bar about cap height, so it takes the
+  content's own type and the room is the same before and after; blocks take `width` and `height`.
+  The bones appear only if loading lasts 200 ms, one sweep of light crosses every bone on the page
+  together, and when the content arrives it fades in over the fading bones in the same grid cell.
+  Mark the region `aria-busy` while it loads.
+- **EmptyState.** `title`, detail, `icon`, `actions`, `layout: center | start`: centred in the room a
+  list would fill, or a quiet line in fg-3 where the list starts ("What would you like done?"). Show it
+  once loaded and empty; while loading, a Skeleton.
+- **Not here.** StatusGlyph, Disclosure and ScrollArea are L9's. The status lamp is not in §4.2; the
+  `Badge` dot covers a lamp, and T12 removes the top bar's Live / Not live lamp. `Presence`, `useFlip`
+  and `useSpringValue` were not needed: entrances use `data-entering` or `@starting-style`, the stack
+  is laid out with CSS variables, and the swipe uses `springValue` directly.
+- **Wiring (T12 and on).** Mount `<Announcer />` once at the root and move the HUD's, the
+  conversation's and the caption's live regions onto `announce`. Mount `<Toaster anchor={hud} />`
+  inside the stage frame, with the HUD above it, so a toast swiped up goes back under the HUD. The
+  decision card (T18) hangs from the same place; show one or the other. Replace `<meter>` in
+  `agent/UsageView.tsx` and `<progress>` in `export/ExportSheet.tsx` and
+  `settings/ChatgptPanel.tsx` with `Meter` and `Progress`.
+
 ## Notes for the tasks that build on this
 
 - **Generator:** shadcn 4.21.0 writes `import { cn } from "cn"` and installs the unrelated npm package
