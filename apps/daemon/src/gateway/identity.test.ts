@@ -95,6 +95,18 @@ describe("sameNativeIdentity", () => {
     expect(sameNativeIdentity(nowhere, read())).toBe(false);
   });
 
+  it("refuses a secret field found after a window-level approval", () => {
+    const password = read({
+      target: { ...cancel, role: "password text", name: "", secret: true, editable: true },
+    });
+    expect(sameNativeIdentity(late(), password)).toBe(false);
+    expect(sameNativeIdentity(read({ target: null, point: null }), password)).toBe(false);
+    // Only the secret flag decides here; other elements are re-classified by the caller.
+    const plain = read({ target: { ...cancel, role: "text", name: "", editable: true } });
+    expect(sameNativeIdentity(late(), plain)).toBe(true);
+    expect(sameNativeIdentity(read({ target: null, point: null }), plain)).toBe(true);
+  });
+
   it("binds no window when the approved lookup never answered, and refuses one that appears", () => {
     const silent = late({ target: null, window: null, windowFrame: undefined });
     expect(sameNativeIdentity(silent, silent)).toBe(true);

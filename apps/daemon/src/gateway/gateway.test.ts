@@ -847,6 +847,7 @@ describe("ActionGateway native identity", () => {
     let n = 0;
     s.fake.script.hitTest = (point) => (reads[Math.min(n++, reads.length - 1)] ?? broken)(point);
     const consumed: NativeActionIdentity[] = [];
+    const found: NativeActionIdentity[] = [];
     const admitted: NativeActionIdentity[] = [];
     const revalidated: boolean[] = [];
     const ctx: ActionContext = {
@@ -856,8 +857,9 @@ describe("ActionGateway native identity", () => {
       authorizeAgent: async (request) => {
         if (revalidate) revalidated.push(await request.revalidate());
         return {
-          consume: (_action, identity) => {
+          consume: (_action, identity, fresh) => {
             consumed.push(identity);
+            found.push(fresh);
             return true;
           },
         };
@@ -868,7 +870,7 @@ describe("ActionGateway native identity", () => {
       },
     };
     const inputs = () => s.fake.calls.filter((c) => c.path === "/input");
-    return { s, ctx, consumed, admitted, revalidated, inputs };
+    return { s, ctx, consumed, found, admitted, revalidated, inputs };
   }
 
   it("acts on a window-level approval when the next read finds an element in that window", async () => {
@@ -880,6 +882,41 @@ describe("ActionGateway native identity", () => {
     // The permit and the repeat guard see what was approved, not the later read.
     expect(a.consumed).toEqual([expect.objectContaining({ unknown: true, window: 77 })]);
     expect(a.admitted).toEqual(a.consumed);
+    // The permit also gets the later read, to classify the element it found.
+    expect(a.found).toEqual([
+      expect.objectContaining({ target: expect.objectContaining({ name: "Search" }) }),
+    ]);
+  });
+
+  it("refuses a window-level approval once that window has moved", async () => {
+    const moved = (point: Point) => ({
+      ...timedOut(point),
+      windowFrame: { ...frame, x: frame.x + 40 },
+    });
+    const a = agent([timedOut, moved]);
+    expect(await a.s.gateway.run(a.ctx, click)).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.inputs()).toHaveLength(0);
+    const resized = agent([
+      timedOut,
+      (point) => ({ ...moved(point), windowFrame: { ...frame, h: 900 } }),
+    ]);
+    expect((await resized.s.gateway.run(resized.ctx, click)).ok).toBe(false);
+    expect(resized.inputs()).toHaveLength(0);
+  });
+
+  it("refuses a secret field that a window-level approval finds at dispatch", async () => {
+    const password = (point: Point): HitTestResult => {
+      const hit = search(point);
+      return {
+        ...hit,
+        target: { ...hit.target, role: "password text", secret: true },
+        windowFrame: frame,
+      };
+    };
+    const a = agent([timedOut, password]);
+    expect(await a.s.gateway.run(a.ctx, click)).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(a.found).toHaveLength(0);
+    expect(a.inputs()).toHaveLength(0);
   });
 
   it("refuses an approved element that a later read can no longer confirm", async () => {

@@ -71,7 +71,8 @@ type Lookup = Omit<NativeActionIdentity, "point">;
 const UNKNOWN: Lookup = { target: null, window: null, unknown: true };
 
 export interface NativeActionPermit {
-  consume(action: GuiAction, identity: NativeActionIdentity): boolean;
+  // `fresh` is the read just before input: it may name an element the approved read did not.
+  consume(action: GuiAction, approved: NativeActionIdentity, fresh: NativeActionIdentity): boolean;
 }
 export interface NativeActionRequest {
   readonly action: GuiAction;
@@ -566,7 +567,7 @@ export class ActionGateway {
     const fresh = await read();
     this.#check(ctx);
     // The permit and the repeat guard bind the approved identity; the fresh read only confirms it.
-    if (!sameNativeIdentity(identity, fresh) || !permit?.consume(action, identity))
+    if (!sameNativeIdentity(identity, fresh) || !permit?.consume(action, identity, fresh))
       throw new Cancelled(
         "stale",
         "the approved action or target changed; look again before acting",
