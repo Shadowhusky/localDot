@@ -92,15 +92,30 @@ describe("hudFor", () => {
     });
   });
 
-  it("shows a failure in plain words and offers Start, or Stop again when the stop failed", () => {
+  it("shows a failure in plain words and offers Turn on, or Stop again when the stop failed", () => {
     const failed = hudFor(known(cell("failed", "none", `not ready after 120 s: ${DOCKER_DOWN}`)));
     expect(failed).toMatchObject({ label: "Failed", action: { kind: "start", enabled: true } });
-    expect(failed.caption).toBe("Your computer didn't finish starting. Start it again.");
+    expect(failed.caption).toBe("Your computer didn't finish starting. Turn it on again.");
     const stopFailed = hudFor(known(cell("failed", "none", `stop failed: ${DOCKER_DOWN}`)));
     expect(stopFailed).toMatchObject({ label: "Failed", action: { kind: "stop", enabled: true } });
     expect(stopFailed.caption).toBe(
       "Your computer didn't stop: Docker isn't answering. Check that Docker Desktop is running, then stop it again.",
     );
+  });
+
+  it("asks to turn the computer on again, naming the Turn on control", () => {
+    for (const error of [
+      DOCKER_DOWN,
+      `not ready after 120 s: ${DOCKER_DOWN}`,
+      "desktop container exited with 1; stop and start the computer",
+      "desktop container exited with 137; gave up after 5 restarts",
+      "background check stopped (EACCES)",
+    ]) {
+      const failed = hudFor(known(cell("failed", "none", error)));
+      expect(failed.action, error).toEqual({ kind: "start", enabled: true });
+      expect(failed.caption, error).toMatch(/turn it on again|turn on your computer again/i);
+      expect(failed.caption, error).not.toMatch(/\bstart\b/i);
+    }
   });
 
   it("keeps Docker's and the daemon's own wording out of every caption", () => {
