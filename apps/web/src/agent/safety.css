@@ -96,9 +96,59 @@
   color: #b7c8d8;
 }
 .approval-card dd {
+  min-width: 0;
   margin: 0;
+}
+.approval-value {
+  max-height: min(16.5em, 36vh);
+  margin: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  font: 13px / 1.5 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  unicode-bidi: isolate;
+}
+.approval-value[tabindex] {
+  padding: 6px 10px;
+  border: 1px solid #344654;
+  border-radius: 10px;
+  background: rgb(0 0 0 / 18%);
+}
+.approval-value:focus-visible {
+  outline: 2px solid #afdfff;
+  outline-offset: 2px;
+}
+.approval-blank {
+  color: #6f8597;
+}
+.approval-mark {
+  display: inline-block;
+  margin: 0 2px;
+  padding: 0 5px;
+  border-radius: 5px;
+  background: #2c3d4c;
+  color: #d4e2ee;
+  font-size: 11.5px;
+  line-height: 1.5;
+  unicode-bidi: isolate;
+}
+.approval-hidden {
+  background: #4a3a17;
+  color: #ffd27a;
+}
+.approval-value-facts,
+.approval-value-warning {
+  margin: 4px 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: #b7c8d8;
+}
+.approval-value-warning {
+  color: #ffd27a;
+}
+.approval-card .approval-show-all {
+  margin-top: 8px;
 }
 .safety-task-controls,
 .notification-control {
