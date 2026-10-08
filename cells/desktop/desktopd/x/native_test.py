@@ -269,6 +269,22 @@ class Trees(unittest.TestCase):
         self.assertEqual([e["name"] for e in tree["elements"]], ["OK"])
         self.assertEqual(asked, [(["showing"], native.TREE_LIMIT)])
 
+    def test_a_walk_cut_short_answers_what_it_found_marked_truncated(self):
+        helper = calc(25)
+        req = {"window": CALC, "kit": "libreoffice", "g": 2, "c": 2, "deadline": native.mono() + 5000}
+        checks = [0]
+        full = len(helper.cmd_tree(req)["elements"])
+
+        def expiring(q):
+            checks[0] += 1
+            if checks[0] > 12:
+                raise native.Expired()
+        with patch.object(native.Query, "check", expiring):
+            tree = helper.cmd_tree(req)
+        self.assertTrue(tree["truncated"])
+        self.assertIn("Bold", [e["name"] for e in tree["elements"]])
+        self.assertLess(len(tree["elements"]), full)
+
     def test_walks_libreoffice_and_toolkits_without_the_query(self):
         helper = calc(0)
         root = helper.desktop.children[0].children[0]

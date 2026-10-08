@@ -7,8 +7,8 @@ JSON lines over stdio, like xhelper:
   request  {"id": 1, "cmd": "at", "deadline": 12345.6, ...} -> {"id": 1, "ok": true, ...}
   event    {"ev": "ready", "mono": 12345.678}
 `deadline` is CLOCK_MONOTONIC milliseconds, the clock desktopd reads. A query that reaches it
-answers {"unknown": true}, never a partial result. Only roles, names, states and extents are read,
-never a control's text or value.
+answers {"unknown": true}, never a partial result; only a tree comes back cut short, marked
+truncated. Only roles, names, states and extents are read, never a control's text or value.
 
 Coordinates: desktopd sends device pixels and the window's client origin. GTK reports frame units,
 device = origin + (frame - floor(origin / g)) * g; Chromium's own UI reports device / c. LibreOffice
@@ -531,12 +531,22 @@ class Helper:
             return None
 
     def cmd_tree(self, req):
+        """A window's named elements. A walk its deadline cuts short still answers what it found,
+        marked truncated (never cached): find can match the parts it reached first, and the
+        element it names is looked up again before any input."""
         q = Query(req)
         app = self.app(q.pid, q)
         root = self.root(app, q, q.title, q.frame) if app is not None else None
         if root is None:
             return {"elements": [], "truncated": False}
         elements = []
+        try:
+            return {"elements": elements, "truncated": self.named(root, q, elements)}
+        except Expired:
+            return {"elements": elements, "truncated": True}
+
+    def named(self, root, q, elements):
+        """Appends the window's named elements; True if some were left out."""
         matches = self.showing_in(root, q)
         if matches is not None:
             for node in matches:
@@ -551,7 +561,7 @@ class Helper:
                         elements.append(el)
                 except Exception:  # noqa: BLE001
                     continue
-            return {"elements": elements, "truncated": len(matches) >= TREE_LIMIT}
+            return len(matches) >= TREE_LIMIT
         stack = [(root, [])]
         visited = 0
         while stack and visited < TREE_LIMIT:
@@ -578,7 +588,7 @@ class Helper:
                 raise
             except Exception:  # noqa: BLE001
                 continue
-        return {"elements": elements, "truncated": bool(stack)}
+        return bool(stack)
 
     # Chromium's web content area, which its accessible reports in device pixels (CDP's origin).
     def cmd_content(self, req):
