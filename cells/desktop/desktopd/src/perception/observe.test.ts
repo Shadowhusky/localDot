@@ -47,6 +47,22 @@ describe("observe", () => {
                     h: 50,
                     frame: [0, 54, 102, 75],
                     active: true,
+                    overrideRedirect: false,
+                    transientFor: null,
+                  },
+                  {
+                    id: 6,
+                    pid: 50,
+                    cls: "Thunar",
+                    title: "",
+                    x: 20,
+                    y: 100,
+                    w: 60,
+                    h: 80,
+                    frame: [20, 100, 60, 80],
+                    active: false,
+                    overrideRedirect: true,
+                    transientFor: 5,
                   },
                 ],
               },
@@ -67,7 +83,10 @@ describe("observe", () => {
       rect: { x: 1, y: 78, w: 100, h: 50 },
       frame: { x: 0, y: 54, w: 102, h: 75 },
       active: true,
+      overrideRedirect: false,
+      transientFor: null,
     });
+    expect(result.windows[1]).toMatchObject({ id: 6, overrideRedirect: true, transientFor: 5 });
     expect(result.frameId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
   });
 });

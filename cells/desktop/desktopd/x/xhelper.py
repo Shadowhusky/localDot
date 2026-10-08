@@ -169,6 +169,9 @@ class Screen:
         self.count = 0
         self.unpainted = {}
         self.pongs = {}
+        # Counts every damage and window change, ambient or not: a cache keyed by it is valid only
+        # while nothing on the screen has changed.
+        self.generation = 0
 
     def _change(self, rect, t):
         if rect is not None:
@@ -180,6 +183,7 @@ class Screen:
 
     def add(self, rect, t):
         with self.lock:
+            self.generation += 1
             self.recent.append((t, rect))
             if len(self.recent) > HISTORY_LIMIT:
                 self.recent = [(at, r) for at, r in self.recent if at >= t - PERIODIC_MS]
@@ -193,16 +197,19 @@ class Screen:
 
     def mapped(self, wid, rect, t):
         with self.lock:
+            self.generation += 1
             self._change(rect, t)
             self.unpainted[wid] = (rect, t)
 
     def unmapped(self, wid, rect, t):
         with self.lock:
+            self.generation += 1
             self._change(rect, t)
             self.unpainted.pop(wid, None)
 
     def moved(self, rect, t):
         with self.lock:
+            self.generation += 1
             self._change(rect, t)
 
     def expect(self, token):
@@ -501,6 +508,7 @@ class Commands:
         self.NET_PID = self.d.intern_atom("_NET_WM_PID")
         self.NET_NAME = self.d.intern_atom("_NET_WM_NAME")
         self.NET_EXTENTS = self.d.intern_atom("_NET_FRAME_EXTENTS")
+        self.TRANSIENT_FOR = self.d.intern_atom("WM_TRANSIENT_FOR")
         self.root.change_attributes(event_mask=X.PropertyChangeMask)
         info = self.d.display.info
         self.min_kc, self.max_kc = info.min_keycode, info.max_keycode
@@ -532,36 +540,91 @@ class Commands:
         p = self.root.query_pointer()
         return {"x": p.root_x, "y": p.root_y}
 
+    def root_child(self, wid):
+        """The root's child that holds a client window: its window manager frame, or itself."""
+        w = self.window(wid)
+        for _ in range(8):
+            parent = w.query_tree().parent
+            if parent is None or parent.id in (0, self.root.id):
+                return w.id
+            w = parent
+        return w.id
+
+    def describe(self, wid, active, popup=False, stack=False):
+        w = self.window(wid)
+        g = w.get_geometry()
+        t = self.root.translate_coords(w, 0, 0)
+        ext = None if popup else self.prop(w, self.NET_EXTENTS)
+        left, right, top, bottom = (int(v) for v in ext[:4]) if ext is not None and len(ext) >= 4 else (0, 0, 0, 0)
+        pid = self.prop(w, self.NET_PID)
+        cls = w.get_wm_class()
+        name = self.prop(w, self.NET_NAME)
+        if isinstance(name, (bytes, bytearray)):
+            title = name.decode("utf-8", "replace")
+        else:
+            title = name if isinstance(name, str) else (w.get_wm_name() or "")
+        info = {
+            "id": int(wid),
+            "pid": int(pid[0]) if pid is not None and len(pid) else 0,
+            "cls": cls[1] if cls else "",
+            "title": title,
+            "x": t.x, "y": t.y, "w": g.width, "h": g.height,
+            "frame": [t.x - left, t.y - top, g.width + left + right, g.height + top + bottom],
+            "active": int(wid) == active,
+        }
+        if stack:
+            parent = self.prop(w, self.TRANSIENT_FOR)
+            info["overrideRedirect"] = popup
+            info["transientFor"] = int(parent[0]) if parent is not None and len(parent) and int(parent[0]) else None
+        return info
+
+    # Managed windows, top first. With `stack`, the mapped override-redirect windows (menus,
+    # popups, tooltips) join them in their stacking place, every window names its transient
+    # parent, and the reply carries the screen's change generation.
     def cmd_windows(self, a):
-        ids = self.prop(self.root, self.NET_STACK)
+        ids = [int(wid) for wid in (self.prop(self.root, self.NET_STACK) or [])]
         active = self.active_window()
+        if not a.get("stack"):
+            entries = [(0, i, wid, False) for i, wid in enumerate(ids)]
+        else:
+            children = self.root.query_tree().children
+            place = {w.id: i for i, w in enumerate(children)}
+            managed = set(ids)
+            entries = []
+            for i, wid in enumerate(ids):
+                try:
+                    entries.append((place.get(self.root_child(wid), -1), i, wid, False))
+                except Exception:  # noqa: BLE001 - a window that vanished mid-walk
+                    continue
+            for w in children:
+                if w.id in managed:
+                    continue
+                try:
+                    attrs = w.get_attributes()
+                except Exception:  # noqa: BLE001
+                    continue
+                if attrs.override_redirect and attrs.map_state == X.IsViewable and attrs.win_class != X.InputOnly:
+                    entries.append((place[w.id], 0, w.id, True))
         out = []
-        for wid in reversed(list(ids or [])):  # EWMH lists bottom to top
+        for _, _, wid, popup in sorted(entries, reverse=True):
             try:
-                w = self.window(wid)
-                g = w.get_geometry()
-                t = self.root.translate_coords(w, 0, 0)
-                ext = self.prop(w, self.NET_EXTENTS)
-                left, right, top, bottom = (int(v) for v in ext[:4]) if ext is not None and len(ext) >= 4 else (0, 0, 0, 0)
-                pid = self.prop(w, self.NET_PID)
-                cls = w.get_wm_class()
-                name = self.prop(w, self.NET_NAME)
-                if isinstance(name, (bytes, bytearray)):
-                    title = name.decode("utf-8", "replace")
-                else:
-                    title = name if isinstance(name, str) else (w.get_wm_name() or "")
-                out.append({
-                    "id": int(wid),
-                    "pid": int(pid[0]) if pid is not None and len(pid) else 0,
-                    "cls": cls[1] if cls else "",
-                    "title": title,
-                    "x": t.x, "y": t.y, "w": g.width, "h": g.height,
-                    "frame": [t.x - left, t.y - top, g.width + left + right, g.height + top + bottom],
-                    "active": int(wid) == active,
-                })
+                info = self.describe(wid, active, popup, bool(a.get("stack")))
             except Exception:  # noqa: BLE001 - a window that vanished mid-walk
                 continue
-        return {"windows": out}
+            if popup:
+                rect = clip(info["frame"], self.screen.size)
+                if rect is None:
+                    continue
+                if not info["pid"] and info["transientFor"]:
+                    try:
+                        parent = self.prop(self.window(info["transientFor"]), self.NET_PID)
+                        info["pid"] = int(parent[0]) if parent is not None and len(parent) else 0
+                    except Exception:  # noqa: BLE001
+                        pass
+            out.append(info)
+        if not a.get("stack"):
+            return {"windows": out}
+        return {"windows": out, "generation": self.screen.generation}
 
     def cmd_activate(self, a):
         wid = int(a["window"])

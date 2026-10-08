@@ -54,6 +54,8 @@ describe("user-activated inert result downloads", () => {
       <ResultFiles
         api={apiFor(fetchImpl)}
         sessionId={SESSION}
+        ended={false}
+        idle={false}
         results={[
           {
             id: "many-result-files",
@@ -74,7 +76,9 @@ describe("user-activated inert result downloads", () => {
   it("uses only authenticated session/name, never the model path, and releases its inert object URL", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => response()),
       api = apiFor(fetchImpl);
-    const view = render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
+    const view = render(
+      <ResultFiles api={api} sessionId={SESSION} results={results} ended={false} idle={false} />,
+    );
     expect(fetchImpl).not.toHaveBeenCalled();
     expect(created).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
@@ -92,14 +96,18 @@ describe("user-activated inert result downloads", () => {
     const late = Promise.withResolvers<Response>(),
       fetchImpl = vi.fn<typeof fetch>(async () => late.promise),
       api = apiFor(fetchImpl);
-    const view = render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
+    const view = render(
+      <ResultFiles api={api} sessionId={SESSION} results={results} ended={false} idle={false} />,
+    );
     act(() => {
       const button = screen.getByRole("button", { name: "Download report.html" });
       button.click();
       button.click();
     });
     expect(fetchImpl).toHaveBeenCalledOnce();
-    view.rerender(<ResultFiles api={api} sessionId={OTHER} results={results} />);
+    view.rerender(
+      <ResultFiles api={api} sessionId={OTHER} results={results} ended={false} idle={false} />,
+    );
     await act(async () => late.resolve(response()));
     expect(created).not.toHaveBeenCalled();
     expect(clicked).not.toHaveBeenCalled();
@@ -125,7 +133,9 @@ describe("user-activated inert result downloads", () => {
           },
         }),
     );
-    render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
+    render(
+      <ResultFiles api={api} sessionId={SESSION} results={results} ended={false} idle={false} />,
+    );
     fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
     await act(async () => Promise.resolve());
     fireEvent.click(screen.getByRole("button", { name: "Cancel download" }));

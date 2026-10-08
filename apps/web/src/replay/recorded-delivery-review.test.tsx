@@ -7,7 +7,7 @@ import { activityRows } from "../agent/activity.ts";
 import { createApi } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import { stepRows } from "../session/session-view.ts";
-import { PlanRail } from "../shell/PlanRail.tsx";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
 
 const event = (seq: number, type: string, data: unknown, step: string) =>
   LocalDotEvent.parse({
@@ -60,22 +60,17 @@ describe("recorded GUI delivery survives the actual row/render chain", () => {
         computer: { delivery: delivered ? "delivered" : "proposed" },
       });
       render(
-        <PlanRail
+        <ActivityRail
           rows={rows}
           sessionId="00000000000000000000000000"
           scale={2}
           api={createApi("fixture", { origin: "http://inert.invalid" })}
-          title="Recorded activity"
           asOfMs={10}
         />,
       );
       const row = within(screen.getByTestId("step-row"));
-      expect(
-        row.getByText(delivered ? "Input delivered" : "Input not delivered", { exact: true }),
-      ).toBeTruthy();
-      expect(
-        row.queryByText(delivered ? "Input not delivered" : "Input delivered", { exact: true }),
-      ).toBeNull();
+      // Only input that never reached the computer is called out; delivered input says nothing.
+      expect(row.queryAllByText("Not sent", { exact: true })).toHaveLength(delivered ? 0 : 1);
       expect(
         row.getByText(delivered ? 'Clicked "Name Box"' : 'Click "Name Box"', { exact: true }),
       ).toBeTruthy();

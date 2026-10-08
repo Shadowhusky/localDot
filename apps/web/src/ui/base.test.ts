@@ -20,7 +20,7 @@ describe("base layer", () => {
           unweighted.push(`${path} ${selector.replace(/\s+/g, " ")}`);
       }
     }
-    expect(stylesheets).toContain("agent/usage.css");
+    expect(stylesheets).toContain("agent/recovery.css");
     expect(unweighted).toEqual([]);
   });
 

@@ -45,6 +45,7 @@ export function RoleEditor({
   inactive?: boolean;
 }) {
   const keyLabel = useId();
+  const contextHelp = useId();
   if (inactive)
     return (
       <fieldset className="role-editor" disabled>
@@ -108,6 +109,36 @@ export function RoleEditor({
               onChange={(model) => onChange({ ...value, model, price: undefined })}
             />
           ) : null}
+          {provider?.custom && value && (
+            <>
+              <label className="role-switch">
+                <input
+                  type="checkbox"
+                  checked={value.vision !== false}
+                  onChange={(event) =>
+                    onChange({ ...value, vision: event.target.checked ? undefined : false })
+                  }
+                />
+                Can see images (needed to use the screen)
+              </label>
+              <label>
+                <span>{role} context window — tokens</span>
+                <input
+                  inputMode="numeric"
+                  maxLength={9}
+                  placeholder="32768"
+                  autoComplete="off"
+                  value={value.contextTokens ?? ""}
+                  aria-describedby={contextHelp}
+                  onChange={(event) => {
+                    const digits = event.target.value.replace(/\D/g, "");
+                    onChange({ ...value, contextTokens: digits ? Number(digits) : undefined });
+                  }}
+                />
+              </label>
+              <p id={contextHelp}>Optional. Leave empty for 32,768.</p>
+            </>
+          )}
           {provider && !provider.local && !provider.availableIn && !provider.notOffered && (
             <div className="role-key">
               <label>
@@ -140,7 +171,7 @@ export function RoleEditor({
               {keyLayer === "online" && !availableKeys.length && (
                 <p>Add a key bound to {provider.name}.</p>
               )}
-              {provider.client === "azure" || provider.id === "openai-compatible" ? (
+              {provider.client === "azure" || provider.custom ? (
                 <p>Configure the endpoint under Keys.</p>
               ) : null}
               <button
@@ -151,6 +182,28 @@ export function RoleEditor({
                 Add key for {role}
               </button>
             </div>
+          )}
+          {provider?.plan && (
+            <p>Uses your plan's limits. Use a key from this plan, not a pay-as-you-go key.</p>
+          )}
+          {provider?.custom && value && (
+            <>
+              <label className="role-switch">
+                <input
+                  type="checkbox"
+                  checked={value.plan === true}
+                  onChange={(event) =>
+                    onChange({
+                      ...value,
+                      plan: event.target.checked ? true : undefined,
+                      price: undefined,
+                    })
+                  }
+                />
+                Flat-rate plan (no per-token price)
+              </label>
+              {value.plan && <p>Uses your plan's limits, not a spending ceiling.</p>}
+            </>
           )}
           {value?.provider === "chatgpt" && (
             <p>The ChatGPT plan uses account sign-in and requires no API key or per-token price.</p>

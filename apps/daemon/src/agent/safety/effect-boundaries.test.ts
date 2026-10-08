@@ -385,11 +385,12 @@ describe("full native identity is revalidated", () => {
     const value = structuredClone(f.target.value);
     if (!value.target) throw new Error("missing native target");
     switch (field) {
+      // Past the two pixels a toolkit's own rounding moves an element between reads.
       case "point":
-        value.target.point.x++;
+        value.target.point.x += 3;
         break;
       case "bbox":
-        value.target.bbox = { x: 11, y: 20, w: 40, h: 40 };
+        value.target.bbox = { x: 13, y: 20, w: 40, h: 40 };
         break;
       case "source":
         value.target.source = "dom";
@@ -423,6 +424,22 @@ describe("full native identity is revalidated", () => {
     f.stage.hold.resolve(undefined);
     expect((await pending).body.ok).toBe(false);
     expect(f.effects()).toHaveLength(0);
+  });
+  it("a pixel of layout jitter after approval still dispatches the approved press", async () => {
+    const f = setup();
+    f.stage.hold = deferred();
+    const pending = f.call("computer", click);
+    await until(() => !!f.session.pendingApproval);
+    await f.post(f.answer());
+    await until(() => f.stage.entered);
+    const value = structuredClone(f.target.value);
+    if (!value.target?.bbox) throw new Error("missing native target");
+    value.target.point.x += 1;
+    value.target.bbox = { ...value.target.bbox, x: value.target.bbox.x + 1 };
+    f.target.value = value;
+    f.stage.hold.resolve(undefined);
+    expect((await pending).body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(1);
   });
   it("unknown coordinate and vision targets keep Ask under otherwise permissive policy", async () => {
     const f = setup({ ...DEFAULT_AUTONOMY, send: "act" });
@@ -485,6 +502,110 @@ describe("full native identity is revalidated", () => {
     expect(f.events().find((e) => e.type === "action.target")?.data.target.url).toBe(
       "https://example.test/message",
     );
+  });
+});
+
+describe("a window-level approval re-checks the element found at dispatch", () => {
+  const FRAME = { x: 0, y: 54, w: 1000, h: 800 };
+  const late: HitTestResult = {
+    target: { point: { x: 20, y: 40 }, source: "coords", app: "Chromium", window: "Draft" },
+    window: 77,
+    windowFrame: FRAME,
+    unknown: true,
+    ms: 300,
+  };
+  const noFocus: HitTestResult = { target: null, window: 77, windowFrame: FRAME, ms: 1 };
+  const element = (role: string, name: string, secret = false): HitTestResult => ({
+    target: {
+      point: { x: 20, y: 40 },
+      bbox: { x: 10, y: 20, w: 40, h: 40 },
+      source: "ax",
+      role,
+      name,
+      app: "Chromium",
+      window: "Draft",
+      ...(secret ? { secret: true, editable: true } : {}),
+    },
+    window: 77,
+    windowFrame: FRAME,
+    ms: 1,
+  });
+  async function approveThenFind(
+    input: unknown,
+    before: HitTestResult,
+    after: HitTestResult,
+    autonomy?: AutonomyPolicy,
+  ) {
+    const f = setup(autonomy);
+    f.stage.hold = deferred();
+    f.target.value = before;
+    const pending = f.call("computer", input);
+    await until(() => !!f.session.pendingApproval);
+    expect(f.session.pendingApproval).toMatchObject({ actionClass: "unknown", risk: "medium" });
+    await f.post(f.answer());
+    await until(() => f.stage.entered);
+    f.target.value = after;
+    f.stage.hold.resolve(undefined);
+    return { f, result: await pending };
+  }
+  const paste = { action: "key", keys: ["ctrl", "v"] };
+
+  it.each([
+    ["no focused element", noFocus],
+    ["a timed-out read", late],
+  ])("keys approved on %s are refused when focus lands on a password field", async (_, before) => {
+    const { f, result } = await approveThenFind(paste, before, element("password text", "", true));
+    expect(result.body).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("keys approved on a timed-out read are refused on a field named as a login", async () => {
+    const { f, result } = await approveThenFind(paste, late, element("text", "Password"));
+    expect(result.body.ok).toBe(false);
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("keys approved on a timed-out read are refused on an element carrying a known credential", async () => {
+    const { f, result } = await approveThenFind(
+      paste,
+      late,
+      element("push button", `Search ${PROXY_TOKEN}`),
+    );
+    expect(result.body.ok).toBe(false);
+    expect(f.effects()).toHaveLength(0);
+    expect(JSON.stringify(f.events())).not.toContain(PROXY_TOKEN);
+  });
+  it("a click approved on a timed-out read is refused on a password field", async () => {
+    const { f, result } = await approveThenFind(click, late, element("password text", "", true));
+    expect(result.body.ok).toBe(false);
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("a click approved on a timed-out read is refused when the read at dispatch finds Delete", async () => {
+    const { f, result } = await approveThenFind(
+      click,
+      late,
+      element("push button", "Delete"),
+      DEFAULT_AUTONOMY,
+    );
+    expect(result.body).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("an element whose own class would act under the policy is still pressed", async () => {
+    const { f, result } = await approveThenFind(click, late, element("push button", "Delete"), {
+      ...DEFAULT_AUTONOMY,
+      delete: "act",
+    });
+    expect(result.body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(1);
+  });
+  it.each([
+    ["a timed-out read", late],
+    ["no focused element", noFocus],
+  ])("an approval on %s still acts on a plain element found later", async (_, before) => {
+    const { f, result } = await approveThenFind(paste, before, element("push button", "Search"));
+    expect(result.body.ok).toBe(true);
+    expect(f.effects()).toHaveLength(1);
+    const clicked = await approveThenFind(click, late, element("push button", "Search"));
+    expect(clicked.result.body.ok).toBe(true);
+    expect(clicked.f.effects()).toHaveLength(1);
   });
 });
 

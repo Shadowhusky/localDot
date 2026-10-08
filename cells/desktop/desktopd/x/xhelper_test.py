@@ -366,6 +366,131 @@ class ListenerWindowEvents(unittest.TestCase):
         self.assertEqual(screen.snapshot(4).pong, 12)
 
 
+class XWin:
+    """A window on a fake X server: its parent, geometry relative to it, attributes and properties."""
+
+    def __init__(self, wid, parent, rect, props=None, cls=None, override=False, viewable=True,
+                 input_only=False):
+        self.id = wid
+        self.parent = parent
+        self.rect = rect
+        self.props = props or {}
+        self.cls = cls
+        self.override = override
+        self.viewable = viewable
+        self.input_only = input_only
+        self.children = []
+        if parent is not None:
+            parent.children.append(self)
+
+    def query_tree(self):
+        return types.SimpleNamespace(parent=self.parent, children=list(self.children))
+
+    def get_attributes(self):
+        return types.SimpleNamespace(override_redirect=self.override,
+                                     win_class=X.InputOnly if self.input_only else 1,
+                                     map_state=X.IsViewable if self.viewable else X.IsUnmapped)
+
+    def get_geometry(self):
+        x, y, w, h = self.rect
+        return types.SimpleNamespace(x=x, y=y, width=w, height=h, border_width=0)
+
+    def get_wm_class(self):
+        return self.cls
+
+    def get_wm_name(self):
+        return ""
+
+    def origin(self):
+        x, y = self.rect[0], self.rect[1]
+        p = self.parent
+        while p is not None and p.parent is not None:
+            x, y = x + p.rect[0], y + p.rect[1]
+            p = p.parent
+        return x, y
+
+
+def desktop():
+    """GIMP's image window and its colour dialog under xfwm4 frames, an open menu above both,
+    a closed menu, an input-only window and the window manager's off-screen helper."""
+    root = XWin(1, None, [0, 0, 2560, 1600])
+    main_frame = XWin(10, root, [0, 54, 1604, 1258])
+    main = XWin(11, main_frame, [2, 56, 1600, 1200], {3: [2193], 4: "GNU Image Manipulation Program",
+                                                      5: [2, 2, 56, 2]}, ("gimp", "Gimp"))
+    dialog_frame = XWin(20, root, [0, 166, 1192, 792])
+    dialog = XWin(21, dialog_frame, [2, 56, 1188, 734], {3: [2193], 4: "Change Foreground Color",
+                                                         5: [2, 2, 56, 2], 7: [11]},
+                  ("gimp", "Gimp"))
+    XWin(30, root, [-10, 150, 640, 1108], {7: [11]}, ("gimp", "Gimp"), override=True)
+    XWin(31, root, [0, 0, 400, 400], {}, ("gimp", "Gimp"), override=True, viewable=False)
+    XWin(32, root, [0, 0, 2560, 1600], {}, None, override=True, input_only=True)
+    XWin(33, root, [-1000, -1000, 10, 10], {3: [1785]}, ("xfwm4", "Xfwm4"), override=True)
+    by_id = {}
+
+    def index(w):
+        by_id[w.id] = w
+        for c in w.children:
+            index(c)
+    index(root)
+    cmds = xhelper.Commands.__new__(xhelper.Commands)
+    cmds.screen = xhelper.Screen()
+    cmds.root = root
+    root.props = {1: [11, 21], 2: [21]}
+    root.translate_coords = lambda w, x, y: types.SimpleNamespace(x=w.origin()[0] + x, y=w.origin()[1] + y)
+    cmds.NET_STACK, cmds.NET_ACTIVE, cmds.NET_PID, cmds.NET_NAME, cmds.NET_EXTENTS = 1, 2, 3, 4, 5
+    cmds.TRANSIENT_FOR = 7
+    cmds.window = lambda wid: by_id[int(wid)]
+    cmds.prop = lambda win, atom: win.props.get(atom)
+    return cmds, main, dialog
+
+
+class Windows(unittest.TestCase):
+    def test_the_plain_list_keeps_its_shape(self):
+        cmds, _, _ = desktop()
+        windows = cmds.cmd_windows({})["windows"]
+        self.assertEqual([w["id"] for w in windows], [21, 11])
+        self.assertEqual(set(windows[0]), {"id", "pid", "cls", "title", "x", "y", "w", "h", "frame", "active"})
+        self.assertEqual(windows[0]["frame"], [0, 166, 1192, 792])
+        self.assertTrue(windows[0]["active"])
+        self.assertNotIn("generation", cmds.cmd_windows({}))
+
+    def test_the_stack_puts_an_open_menu_on_top_with_its_parent_and_type(self):
+        cmds, _, _ = desktop()
+        reply = cmds.cmd_windows({"stack": True})
+        windows = reply["windows"]
+        self.assertEqual([w["id"] for w in windows], [30, 21, 11])
+        menu, dialog, main = windows
+        self.assertEqual((menu["overrideRedirect"], menu["transientFor"]), (True, 11))
+        self.assertEqual((menu["frame"], menu["active"]), ([-10, 150, 640, 1108], False))
+        # The menu has no _NET_WM_PID of its own: it takes its parent's.
+        self.assertEqual(menu["pid"], 2193)
+        self.assertEqual((dialog["overrideRedirect"], dialog["transientFor"]), (False, 11))
+        self.assertEqual((main["overrideRedirect"], main["transientFor"]), (False, None))
+        self.assertEqual(reply["generation"], 0)
+
+    def test_the_stack_follows_the_frames_stacking_order(self):
+        cmds, main, _ = desktop()
+        root = cmds.root
+        frame = main.parent
+        root.children.remove(frame)
+        root.children.insert(1, frame)
+        self.assertEqual([w["id"] for w in cmds.cmd_windows({"stack": True})["windows"]], [30, 11, 21])
+
+
+class Generation(unittest.TestCase):
+    def test_counts_every_change_ambient_or_not(self):
+        time, screen, _ = helper()
+        screen.add(CARET, time.t - 100)
+        screen.arm()
+        before = screen.generation
+        screen.add(CARET, time.t)
+        self.assertEqual(screen.snapshot().count, 0)
+        screen.mapped(5, DIALOG, time.t)
+        screen.moved(DIALOG, time.t)
+        screen.unmapped(5, DIALOG, time.t)
+        self.assertEqual(screen.generation, before + 4)
+
+
 class Capture(unittest.TestCase):
     def test_writes_the_root_in_place_and_reports_its_layout(self):
         cmds = xhelper.Commands.__new__(xhelper.Commands)

@@ -1,10 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { KEY_SCAN_CHARS, KEY_SCAN_MATCHES, keyLikePresent, scanKeyLike } from "./key-like.ts";
+import {
+  claudePlanToken,
+  KEY_SCAN_CHARS,
+  KEY_SCAN_MATCHES,
+  keyLikePresent,
+  scanKeyLike,
+} from "./key-like.ts";
 
 // Synthetic shapes only; no existing environment, credential file or account is read.
 const shapes = [
   [`sk-ant-api03-${"a".repeat(95)}`, "Anthropic"],
   [`sk-ant-admin01-${"b".repeat(95)}`, "Anthropic"],
+  [`sk-ant-oat01-${"l".repeat(95)}`, "Claude plan token"],
+  [`sk-ant-ort01-${"m".repeat(95)}`, "Claude plan token"],
+  [`sk-ant-sid01-${"n".repeat(95)}`, "Claude plan token"],
   [`sk-proj-${"c".repeat(156)}`, "OpenAI"],
   [`sk-svcacct-${"d".repeat(156)}`, "OpenAI"],
   [`sk-admin-${"e".repeat(156)}`, "OpenAI"],
@@ -47,6 +56,42 @@ describe("bounded key-shaped text recognition", () => {
     expect(scan.matches.at(-1)?.provider).toBeUndefined();
     for (const [index, match] of scan.matches.entries())
       expect(text.slice(match.start, match.end)).toBe(shapes[index]?.[0]);
+  });
+  it("names a Claude plan token with no provider to store it under, and keeps API keys Anthropic's", () => {
+    const [plan, api, admin] = [
+      `sk-ant-oat01-${"a".repeat(95)}`,
+      `sk-ant-api03-${"a".repeat(95)}`,
+      `sk-ant-admin01-${"a".repeat(95)}`,
+    ].map((key) => scanKeyLike(key).matches);
+    expect(plan).toEqual([{ start: 0, end: 108, hint: "Claude plan token" }]);
+    expect(api).toEqual([{ start: 0, end: 108, hint: "Anthropic", provider: "anthropic" }]);
+    expect(admin).toEqual([{ start: 0, end: 110, hint: "Anthropic", provider: "anthropic" }]);
+    expect(keyLikePresent(`claude setup-token gave me sk-ant-oat01-${"Z9_-".repeat(20)}`)).toBe(
+      true,
+    );
+    expect(keyLikePresent(["sk", "ant", "oat01", "short"].join("-"))).toBe(false);
+  });
+  it("finds a Claude plan, refresh or session token wherever it sits", () => {
+    const token = `sk-ant-oat01-${"a".repeat(95)}`;
+    for (const value of [
+      token,
+      `export CLAUDE_CODE_OAUTH_TOKEN=${token}`,
+      `"${token}"`,
+      `Bearer ${token}`,
+      `abc${token}`,
+      `sk-ant-ort01-${"b".repeat(95)}`,
+      `sk-ant-sid01-${"c".repeat(95)}`,
+    ]) {
+      expect(claudePlanToken(value), value).toBe(true);
+      expect(scanKeyLike(value).matches.map((m) => m.hint)).toEqual(["Claude plan token"]);
+    }
+    for (const value of [
+      `sk-ant-api03-${"a".repeat(95)}`,
+      `sk-ant-admin01-${"a".repeat(95)}`,
+      "sk-ant-oat",
+      "",
+    ])
+      expect(claudePlanToken(value), value).toBe(false);
   });
   it("permits ordinary identifiers, hashes, UUIDs, short examples and near-prefix strings", () => {
     for (const text of [

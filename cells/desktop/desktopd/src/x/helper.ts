@@ -20,6 +20,8 @@ export interface XHelper {
 }
 
 export interface XHelperOptions {
+  // Names the helper in its log lines and errors.
+  name?: string;
   command: string;
   args: string[];
   env?: NodeJS.ProcessEnv;
@@ -33,6 +35,13 @@ export class XHelperError extends Error {
   }
 }
 
+export class XHelperTimeoutError extends XHelperError {
+  constructor(message: string) {
+    super(message);
+    this.name = "XHelperTimeoutError";
+  }
+}
+
 interface Pending {
   cmd: string;
   resolve(value: object): void;
@@ -43,6 +52,7 @@ interface Pending {
 const DEFAULT_CALL_TIMEOUT_MS = 5000;
 
 export function startXHelper(opts: XHelperOptions): Promise<XHelper> {
+  const name = opts.name ?? "xhelper";
   const child: ChildProcess = spawn(opts.command, opts.args, {
     env: opts.env ?? process.env,
     stdio: ["pipe", "pipe", "pipe"],
@@ -62,18 +72,18 @@ export function startXHelper(opts: XHelperOptions): Promise<XHelper> {
   const failAll = (why: string) => {
     for (const [id, p] of pending) {
       clearTimeout(p.timer);
-      p.reject(new XHelperError(`xhelper ${p.cmd}: ${why}`));
+      p.reject(new XHelperError(`${name} ${p.cmd}: ${why}`));
       pending.delete(id);
     }
   };
 
-  child.stderr?.on("data", (d: Buffer) => console.error(`xhelper: ${String(d).trimEnd()}`));
+  child.stderr?.on("data", (d: Buffer) => console.error(`${name}: ${String(d).trimEnd()}`));
   createInterface({ input: child.stdout as NodeJS.ReadableStream }).on("line", (line) => {
     let msg: Record<string, unknown>;
     try {
       msg = JSON.parse(line) as Record<string, unknown>;
     } catch {
-      console.error(`xhelper: unreadable line ${line}`);
+      console.error(`${name}: unreadable line ${line}`);
       return;
     }
     if (typeof msg.ev === "string") {
@@ -93,17 +103,17 @@ export function startXHelper(opts: XHelperOptions): Promise<XHelper> {
     pending.delete(Number(msg.id));
     clearTimeout(p.timer);
     if (msg.ok) p.resolve(msg);
-    else p.reject(new XHelperError(`xhelper ${p.cmd}: ${String(msg.error)}`));
+    else p.reject(new XHelperError(`${name} ${p.cmd}: ${String(msg.error)}`));
   });
   child.on("exit", (code, signal) => {
     alive = false;
     const why = `exited with ${code ?? signal}`;
-    readyReject?.(new XHelperError(`xhelper ${why} before ready`));
+    readyReject?.(new XHelperError(`${name} ${why} before ready`));
     failAll(why);
   });
   child.on("error", (err) => {
     alive = false;
-    readyReject?.(new XHelperError(`xhelper failed to start: ${err.message}`));
+    readyReject?.(new XHelperError(`${name} failed to start: ${err.message}`));
     failAll(err.message);
   });
 
@@ -116,12 +126,12 @@ export function startXHelper(opts: XHelperOptions): Promise<XHelper> {
       args: Record<string, unknown> = {},
       timeoutMs = DEFAULT_CALL_TIMEOUT_MS,
     ): Promise<T> {
-      if (!alive) return Promise.reject(new XHelperError(`xhelper ${cmd}: helper is not running`));
+      if (!alive) return Promise.reject(new XHelperError(`${name} ${cmd}: helper is not running`));
       const id = ++seq;
       return new Promise<T>((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
-          reject(new XHelperError(`xhelper ${cmd}: timed out after ${timeoutMs} ms`));
+          reject(new XHelperTimeoutError(`${name} ${cmd}: timed out after ${timeoutMs} ms`));
         }, timeoutMs);
         pending.set(id, { cmd, resolve: resolve as (v: object) => void, reject, timer });
         child.stdin?.write(`${JSON.stringify({ ...args, id, cmd })}\n`);
@@ -145,7 +155,7 @@ export function startXHelper(opts: XHelperOptions): Promise<XHelper> {
     setTimeout(
       () =>
         reject(
-          new XHelperError(`xhelper did not say ready within ${opts.readyTimeoutMs ?? 5000} ms`),
+          new XHelperError(`${name} did not say ready within ${opts.readyTimeoutMs ?? 5000} ms`),
         ),
       opts.readyTimeoutMs ?? 5000,
     ).unref(),

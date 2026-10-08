@@ -82,3 +82,27 @@ describe("task pricing wire", () => {
     ).toBe(false);
   });
 });
+describe("flat task routes", () => {
+  const free = { id: "plan-model", inputUSDPerMTok: 0, outputUSDPerMTok: 0, maxOutputTokens: 100 };
+  const route = (flat: unknown, models: object[]) => ({
+    v: 1,
+    routes: [{ route: "plan", ...(flat === undefined ? {} : { flat }), models }],
+  });
+  it("marks a plan route flat with its models at zero", () => {
+    expect(TaskPricing.parse(route(true, [free])).routes[0]?.flat).toBe(true);
+    expect(TaskPricing.parse(route(undefined, [free])).routes[0]).not.toHaveProperty("flat");
+  });
+  it("refuses a flat route that states any price, and any mark but true", () => {
+    for (const change of [
+      { inputUSDPerMTok: 1 },
+      { outputUSDPerMTok: 0.5 },
+      { cacheReadUSDPerMTok: 0 },
+      { cacheWriteUSDPerMTok: 1 },
+    ])
+      expect(
+        TaskPricing.safeParse(route(true, [free, { ...free, id: "b", ...change }])).success,
+      ).toBe(false);
+    for (const flat of [false, null, 1, "true"])
+      expect(TaskPricing.safeParse(route(flat, [free])).success).toBe(false);
+  });
+});

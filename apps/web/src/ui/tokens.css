@@ -83,6 +83,7 @@
   --color-state-hover: rgba(255, 255, 255, 0.06);
   --color-state-pressed: rgba(255, 255, 255, 0.1);
   --color-state-selected: rgba(255, 255, 255, 0.12);
+  --color-selection: rgba(238, 239, 241, 0.22);
   --opacity-disabled: 0.45;
 
   /* Filled controls (secondary buttons, chips): rest, hover and pressed. */

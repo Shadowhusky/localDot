@@ -1,10 +1,16 @@
-import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
+import { Button } from "../ui/Button.tsx";
 import { downloadResult, FILE_LIMITS, safeTransferName } from "./file-transfer.ts";
 import type { AgentResult } from "./model.ts";
-import "./files.css";
 
 type FileRow = AgentResult["files"][number];
+const bytes = (value: number) =>
+  value < 1024
+    ? `${value.toLocaleString()} bytes`
+    : value < 1024 * 1024
+      ? `${(value / 1024).toFixed(1)} KB`
+      : `${(value / (1024 * 1024)).toFixed(1)} MB`;
 interface Selection {
   resultId: string;
   file: FileRow;
@@ -28,12 +34,14 @@ export function ResultFiles({
   api,
   sessionId,
   results,
-  renderResult,
+  ended,
+  idle,
 }: {
   api: ApiClient;
   sessionId: string | null;
   results: readonly AgentResult[];
-  renderResult?: (result: AgentResult, files: ReactNode) => ReactNode;
+  ended: boolean;
+  idle: boolean;
 }) {
   const [pending, setPending] = useState(false),
     [message, setMessage] = useState<string | null>(null);
@@ -155,62 +163,84 @@ export function ResultFiles({
       }
     }
   };
-  if (!results.length || (!renderResult && !results.some((result) => result.files.length)))
-    return null;
+  if (!results.length) return null;
+  const latest = results.at(-1);
   return (
-    <section className="result-files" aria-label="Result files">
-      <h3>{renderResult ? "Results" : "Result files"}</h3>
-      <p className="history-note">
-        Download files to inspect them. Files are not opened automatically.
-      </p>
-      {results.map((result) => {
-        const files = (
-          <ul key={result.id} aria-label={`Files in result ${result.id}`}>
-            {result.files.map((file) => {
-              const valid =
-                safeTransferName(file.name) &&
-                Number.isSafeInteger(file.bytes) &&
-                file.bytes >= 0 &&
-                file.bytes <= FILE_LIMITS.bytes;
-              return (
-                <li key={file.name}>
-                  <span>{valid ? file.name : "Unavailable file name"}</span>
-                  <span>
-                    {valid
-                      ? `${file.bytes.toLocaleString()} bytes`
-                      : "This file cannot be downloaded."}
-                  </span>
-                  <button
-                    type="button"
-                    disabled={!valid || !sessionId || pending}
-                    onClick={() => void request(result.id, file)}
-                    aria-label={valid ? `Download ${file.name}` : "Unavailable file"}
-                  >
-                    Download
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        );
-        return (
-          <div key={result.id}>
-            {renderResult ? renderResult(result, result.files.length ? files : null) : files}
+    <section className="activity-results" aria-label="Result files">
+      {results.map((result) => (
+        <section key={result.id} className="activity-result" aria-label="Task result">
+          <div className="activity-section-head">
+            <h3 className="activity-section-title">Result</h3>
+            {result !== latest ? (
+              <span className="activity-section-meta">Earlier</span>
+            ) : ended ? (
+              <span className="activity-section-meta">Task ended</span>
+            ) : idle ? (
+              <span className="activity-section-meta">Ready for a follow-up</span>
+            ) : null}
           </div>
-        );
-      })}
-      {pending && (
-        <button
-          type="button"
-          onClick={() => {
-            retire();
-            setMessage("Download cancelled.");
-          }}
-        >
-          Cancel download
-        </button>
+          <p className="result-summary">{result.summary}</p>
+          {result.files.length > 0 && (
+            <ul className="activity-files" aria-label={`Files in result ${result.id}`}>
+              {result.files.map((file) => {
+                const valid =
+                  safeTransferName(file.name) &&
+                  Number.isSafeInteger(file.bytes) &&
+                  file.bytes >= 0 &&
+                  file.bytes <= FILE_LIMITS.bytes;
+                return (
+                  <li key={file.name} className="activity-file">
+                    <span className="activity-file-name">
+                      {valid ? file.name : "Unavailable file name"}
+                    </span>
+                    <span className="activity-file-size num">
+                      {valid ? bytes(file.bytes) : "Can't be downloaded"}
+                    </span>
+                    <Button
+                      size="sm"
+                      aria-label={valid ? `Download ${file.name}` : "Unavailable file"}
+                      disabledReason={
+                        !valid
+                          ? "This file can't be downloaded."
+                          : !sessionId
+                            ? "This task is no longer available."
+                            : pending
+                              ? "Another download is still running."
+                              : undefined
+                      }
+                      onClick={() => void request(result.id, file)}
+                    >
+                      Download
+                    </Button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </section>
+      ))}
+      {results.some((result) => result.files.length) && (
+        <p className="activity-note">
+          Files download to this device. They never open on their own.
+        </p>
       )}
-      {message && <p role="status">{message}</p>}
+      {(pending || message) && (
+        <div className="activity-files-status">
+          {pending && (
+            <Button
+              variant="quiet"
+              size="sm"
+              onClick={() => {
+                retire();
+                setMessage("Download cancelled.");
+              }}
+            >
+              Cancel download
+            </Button>
+          )}
+          <p role="status">{message}</p>
+        </div>
+      )}
     </section>
   );
 }

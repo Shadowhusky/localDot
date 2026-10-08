@@ -55,6 +55,8 @@ export const TaskModelSelection = z.discriminatedUnion("kind", [
           roles.some((role) => role.role === "main") &&
           new Set(roles.map((role) => role.role)).size === roles.length,
       ),
+    // No role is billed per token and at least one runs on a flat-rate plan: no dollar budget applies.
+    plan: z.literal(true).optional(),
   }),
 ]);
 export type TaskModelSelection = z.infer<typeof TaskModelSelection>;

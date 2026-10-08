@@ -264,6 +264,41 @@ describe("agent user routes", () => {
     expect(f.settings.get()).toEqual(before);
     expect(f.start).not.toHaveBeenCalled();
   });
+  it("saves what a custom endpoint's model can do, and refuses it for a catalog model", async () => {
+    const f = await setup();
+    (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValue([
+      { id: "anthropic", kind: "llm", provider: "anthropic", createdAt: at, updatedAt: at },
+      {
+        id: "anc",
+        kind: "llm",
+        provider: "anthropic-compatible",
+        baseURL: "https://api.z.ai/api/anthropic/v1",
+        createdAt: at,
+        updatedAt: at,
+      },
+    ]);
+    const stated = {
+      main: {
+        provider: "anthropic-compatible",
+        model: "glm-5.3-flash",
+        key: "anc",
+        vision: false,
+        contextTokens: 128_000,
+        plan: true,
+      },
+    };
+    expect((await f.send("PUT", "/api/agent/settings", stated)).status).toBe(200);
+    expect(f.settings.get()).toEqual(stated);
+    for (const extra of [{ vision: false }, { contextTokens: 128_000 }, { plan: true }])
+      expect(
+        (
+          await f.send("PUT", "/api/agent/settings", {
+            main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic", ...extra },
+          })
+        ).status,
+      ).toBe(400);
+    expect(f.settings.get()).toEqual(stated);
+  });
   it("refuses conflicting rates for the same active route/model before persisting settings", async () => {
     const f = await setup();
     (f.deps.keyd.secrets as ReturnType<typeof vi.fn>).mockResolvedValue([

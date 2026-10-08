@@ -107,7 +107,8 @@
   padding: 0 6px;
   font-weight: 600;
 }
-.settings-sheet .role-enabled {
+.settings-sheet .role-enabled,
+.settings-sheet .role-switch {
   flex-direction: row;
   align-items: center;
   gap: 10px;
@@ -249,7 +250,8 @@
     height: 44px;
     min-height: 44px;
   }
-  .settings-sheet .role-enabled {
+  .settings-sheet .role-enabled,
+  .settings-sheet .role-switch {
     min-height: 44px;
   }
 }

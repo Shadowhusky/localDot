@@ -1025,6 +1025,9 @@
                 },
                 "secret": {
                   "type": "boolean"
+                },
+                "editable": {
+                  "type": "boolean"
                 }
               },
               "required": [
@@ -2393,6 +2396,9 @@
                   "maximum": 9007199254740991
                 },
                 "secret": {
+                  "type": "boolean"
+                },
+                "editable": {
                   "type": "boolean"
                 }
               },

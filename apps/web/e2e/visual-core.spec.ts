@@ -95,9 +95,13 @@ test("the puppet runs a multi-app sequence live in the Theatre with the overlays
   expect(events.filter((e) => e.type === "action.cancel")).toEqual([]);
   await expect(page.getByTestId("hud-status")).toHaveText("Done", { timeout: 15_000 });
   await expect(page.locator(".stage.control")).toHaveCount(0);
-  const rows = page.getByTestId("step-row");
+  const rail = page.getByRole("complementary", { name: "Plan and steps" });
+  const folded = rail.locator('.activity-group > .ui-disclosure-trigger[aria-expanded="false"]');
+  while ((await folded.count()) > 0) await folded.first().click();
+  const rows = rail.getByTestId("step-row");
   await expect(rows).toHaveCount(SCRIPT.steps.length);
-  await expect(rows.first().locator("img")).toHaveAttribute("src", /^blob:/);
+  await rows.first().locator(".activity-row-head").click();
+  await expect(rows.first().locator(".activity-frame img")).toHaveAttribute("src", /^blob:/);
   await page.screenshot({ path: "e2e/out/13-done.png" });
 
   const order = [

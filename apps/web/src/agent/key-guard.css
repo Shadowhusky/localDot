@@ -12,14 +12,20 @@
   display: grid;
   gap: 6px;
 }
+/* WebKit ignores the height of a native menulist, so the select draws its own box and chevron. */
 .key-found select {
+  appearance: none;
   max-width: 100%;
   min-height: 44px;
+  padding: 0 calc(var(--spacing) * 8) 0 calc(var(--spacing) * 2.5);
   border: 1px solid var(--color-line);
   border-radius: 8px;
-  background: var(--color-surface-2);
+  background:
+    var(--icon-chevron-down) no-repeat right 10px center / 12px 12px,
+    var(--color-surface-2);
   color: var(--color-text);
   font: inherit;
+  text-overflow: ellipsis;
 }
 .key-found-actions {
   display: flex;

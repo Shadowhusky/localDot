@@ -15,5 +15,6 @@ export const Target = z.object({
   url: boundedText(2048).optional(),
   mark: z.number().int().nonnegative().optional(),
   secret: z.boolean().optional(),
+  editable: z.boolean().optional(),
 });
 export type Target = z.infer<typeof Target>;

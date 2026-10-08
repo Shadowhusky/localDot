@@ -3,7 +3,7 @@ import { useRef, useState } from "react";
 import { ownedPause } from "../session/status.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
-import "./usage.css";
+import "./recovery.css";
 
 const UNEXPLAINED =
   "The task could not continue. Check the reported reason and repair its provider or model before deciding whether to resume.";

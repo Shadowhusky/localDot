@@ -11,17 +11,19 @@ import { parseArgs } from "node:util";
 import {
   CHATGPT_DEVICE_CODE_OFF,
   type KeydRecord,
+  type TaskModelSelection,
   type ToolName,
   toBase64url,
   ulid,
 } from "@localdot/protocol";
-import { normalizeCatalog } from "@localdot/providers";
+import { normalizeCatalog, providerById } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import {
   CHATGPT_SWITCHED_OFF,
   type CodexInstaller,
   type InstalledCodex,
 } from "../../../../harness/codex/src/index.ts";
+import { resolveRole, taskSelection } from "../../../daemon/src/agent/bindings.ts";
 import {
   AccountError,
   type ChatgptLogin,
@@ -164,6 +166,18 @@ let SAMPLE_KEYS: KeydRecord[] = [
   },
 ] as KeydRecord[];
 if (env.QA_KEYS === "0") SAMPLE_KEYS = [];
+if (settingsMode === "plan")
+  SAMPLE_KEYS = [
+    ...SAMPLE_KEYS,
+    {
+      id: "token-plan",
+      kind: "llm",
+      provider: "openai-compatible",
+      baseURL: "https://api.minimax.io/v1",
+      createdAt: "2026-10-04T09:00:00Z",
+      updatedAt: "2026-10-04T09:00:00Z",
+    } as KeydRecord,
+  ];
 const SETTINGS: Record<string, AgentSettings> = {
   configured: {
     main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic-main" },
@@ -172,6 +186,9 @@ const SETTINGS: Record<string, AgentSettings> = {
   } as AgentSettings,
   empty: {},
   chatgpt: { main: { provider: "chatgpt", model: "sample-plan-model" } } as AgentSettings,
+  plan: {
+    main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
+  } as AgentSettings,
 };
 
 // The desktop repaints one still frame, so the picture is steady while the stream stays live.
@@ -275,6 +292,18 @@ const ledger = { limit: 5, spent: 4 };
 let session: AgentSession | undefined;
 // The seeded running task's open step, which /__qa/step-end finishes.
 let liveStep: string | undefined;
+// A plan task resolves through the daemon's own bindings, frozen at start as the runner does.
+let selection: TaskModelSelection | undefined;
+function planSelection(): TaskModelSelection | undefined {
+  const stored = settingsStore.get();
+  if (!stored.main || !providerById(stored.main.provider)?.plan) return undefined;
+  return taskSelection(
+    (["main", "fast", "local"] as const).flatMap((role) => {
+      const choice = stored[role];
+      return choice ? [resolveRole(role, choice, catalog, keys)] : [];
+    }),
+  );
+}
 let teardown = false;
 
 function attachLive(owned: AgentSession) {
@@ -511,11 +540,194 @@ function seedTask(s: AgentSession, finished: boolean) {
   }
 }
 
+// QA_ACTIVITY=long: a long hand-drawing task, so the Activity rail is checked with many steps,
+// several plan items, failures, folded key uses and a blocked one. /__qa/steps adds more live.
+let fill = 0;
+function seedLongTask(s: AgentSession) {
+  const a = (type: string, data: Record<string, unknown>, step?: string) => {
+    skew += type === "step.end" ? 900_000 : 240_000;
+    s.append(type, data, step);
+  };
+  let frameNo = 0;
+  const modelCall = () =>
+    a("key.use", {
+      secretId: "anthropic-main",
+      host: "api.anthropic.com",
+      method: "POST",
+      path: "/v1/messages",
+      decision: "allow",
+    });
+  const gui = (
+    planItem: string,
+    verb: string,
+    label: string,
+    outcome: "ok" | "failed" | "stale" = "ok",
+    note?: string,
+  ) => {
+    const step = ulid();
+    const point = { x: 600 + ((frameNo * 173) % 1400), y: 400 + ((frameNo * 97) % 800) };
+    a("step.start", { kind: "gui", planItem }, step);
+    a("action.intent", { verb, label, risk: "none", point }, step);
+    if (outcome === "stale") {
+      a("action.cancel", { reason: "stale" }, step);
+      a("step.end", { status: "cancelled", note: "The target changed before input." }, step);
+    } else {
+      a(
+        "action.dispatch",
+        {
+          input:
+            verb === "type"
+              ? { kind: "type", chars: 6, masked: false }
+              : { kind: "click", button: "left", count: 1, at: point },
+          pressT: 2_000_000,
+          ringAt: 2_010_000,
+          injector: "xtest",
+        },
+        step,
+      );
+      a("action.result", { ok: outcome === "ok" }, step);
+      const file = join(ASSETS, `frame-${(frameNo++ % 4) + 1}.webp`);
+      if (existsSync(file)) {
+        const frameId = ulid();
+        frames.save(s.id, frameId, readFileSync(file));
+        a("observe", { frameId, width: 2560, height: 1600 }, step);
+      }
+      a("step.end", { status: outcome, ...(note ? { note } : {}) }, step);
+    }
+    modelCall();
+  };
+  const shell = (planItem: string, title: string, stdout: string, exitCode = 0) => {
+    const step = ulid();
+    a("step.start", { kind: "shell", planItem }, step);
+    a("tool.start", { tool: "shell", title }, step);
+    a("tool.output", { stream: exitCode ? "stderr" : "stdout", chunk: stdout }, step);
+    a("tool.end", { ok: exitCode === 0, exitCode }, step);
+    a(
+      "step.end",
+      exitCode
+        ? { status: "failed", note: `The command returned exit code ${exitCode}.` }
+        : { status: "ok" },
+      step,
+    );
+    modelCall();
+  };
+  a("message.user", {
+    messageId: ulid(),
+    kind: "task",
+    text: "Draw a dog by hand in the paint app, then save it as dog.png in Pictures.",
+  });
+  a("agent.state", { state: "thinking" });
+  a("thought.delta", {
+    text: "The paint app is installed. I'll sketch with the brush, then colour.",
+  });
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "I'll open the paint app, sketch the dog with the brush, colour it in, then save it.",
+  });
+  a("plan.set", {
+    items: [
+      { id: "open", text: "Open the paint app", status: "done" },
+      { id: "canvas", text: "Make a 1200 × 900 canvas", status: "done" },
+      { id: "sketch", text: "Sketch the dog's outline", status: "done" },
+      { id: "colour", text: "Colour the dog in", status: "doing" },
+      { id: "save", text: "Save it as dog.png in Pictures", status: "todo" },
+      { id: "share", text: "Share it with the family album", status: "skipped" },
+    ],
+  });
+  modelCall();
+  shell("open", "Find an installed paint app", "/usr/bin/gimp\n/usr/bin/mypaint\n");
+  gui("open", "click", "Opened the Applications menu");
+  gui("open", "click", "Opened GIMP");
+  gui("open", "wait", "Waited for GIMP to open");
+  gui("canvas", "click", "Opened File ▸ New");
+  gui("canvas", "type", "Typed 1200 in Width");
+  gui("canvas", "type", "Typed 900 in Height");
+  gui("canvas", "click", "Clicked OK");
+  gui("sketch", "key", "Pressed P for the paintbrush");
+  for (const part of ["head", "left ear", "right ear", "body", "front legs", "back legs", "tail"])
+    gui("sketch", "drag", `Drew the ${part}`);
+  gui("sketch", "click", "Click Undo", "stale");
+  gui("sketch", "scroll", "Zoomed in on the face");
+  for (const part of ["eyes", "nose", "mouth"]) gui("sketch", "drag", `Drew the ${part}`);
+  a("key.use", {
+    secretId: "stock-images",
+    host: "api.images.example",
+    method: "GET",
+    path: "/v2/search?q=dog+outline",
+    decision: "deny",
+  });
+  const notes = ulid();
+  a("step.start", { kind: "file", planItem: "sketch" }, notes);
+  a(
+    "file.change",
+    {
+      path: "Pictures/dog-steps.md",
+      op: "create",
+      patch:
+        "@@ -0,0 +1,4 @@\n+# Dog sketch\n+\n+- Outline: head, ears, body, legs, tail\n+- Face: eyes, nose, mouth",
+    },
+    notes,
+  );
+  a("step.end", { status: "ok" }, notes);
+  modelCall();
+  gui("colour", "click", "Opened the colour picker");
+  gui(
+    "colour",
+    "type",
+    "Type 8B5A2B in the hex field",
+    "failed",
+    "The colour dialog didn't take the typed value.",
+  );
+  gui("colour", "click", "Picked brown from the palette");
+  shell(
+    "colour",
+    "Check the canvas size",
+    "dog.xcf: 1200x900, 3 layers\nBackground: white\nOutline: 1 path\n",
+  );
+  shell("colour", "Export a preview", "convert: no images defined `preview.png'\n", 1);
+  gui("colour", "click", "Filled the body with brown");
+  gui("colour", "click", "Filled the ears with dark brown");
+  const remembered = memory.apply(s.id, "MEMORY.md", "append", "Likes hand-drawn sketches.");
+  a("memory.change", {
+    file: remembered.file,
+    patch: remembered.patch,
+    changeId: remembered.changeId,
+  });
+  a("model.usage", {
+    role: "main",
+    route: "anthropic",
+    model: "claude-sonnet-5-5",
+    inputTokens: 186_420,
+    outputTokens: 9_210,
+    reasoningTokens: 3_640,
+  });
+  a("model.usage", {
+    role: "fast",
+    route: "openai",
+    model: "gpt-6-luna",
+    inputTokens: 41_100,
+    outputTokens: 1_380,
+  });
+  s.setStatus("running");
+  a("agent.state", { state: "acting" });
+  liveStep = ulid();
+  a("step.start", { kind: "gui", planItem: "colour" }, liveStep);
+  a(
+    "action.intent",
+    { verb: "click", label: "Fill the tail with brown", risk: "none", point: { x: 1700, y: 900 } },
+    liveStep,
+  );
+}
+
 if (withSession && initial) {
   heldAt = base.nowMicros();
-  session = newSession("Sample · monthly report", "Sample task");
+  session = newSession(
+    env.QA_ACTIVITY === "long" ? "Sample · dog drawing" : "Sample · monthly report",
+    "Sample task",
+  );
   attachLive(session);
-  seedTask(session, phase === "finished");
+  if (env.QA_ACTIVITY === "long") seedLongTask(session);
+  else seedTask(session, phase === "finished");
   skew -= base.nowMicros() - heldAt;
   heldAt = undefined;
 }
@@ -606,6 +818,7 @@ const killSwitch = new KillSwitch({
 const catalog = env.QA_CATALOG
   ? normalizeCatalog(JSON.parse(readFileSync(env.QA_CATALOG, "utf8")), new Date().toISOString())
   : normalizeCatalog(MODELS_DEV_FIXTURE, new Date().toISOString());
+if (session) selection = planSelection();
 const installed: InstalledCodex = {
   version: "0.154.0",
   platform: "darwin-arm64",
@@ -730,6 +943,7 @@ const agent: AgentRoutesDeps = {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       session = newSession(task.slice(0, 60), task);
+      selection = planSelection();
       attachLive(session);
       session.append("message.user", { messageId: ulid(), kind: "task", text: task });
       session.setStatus("running");
@@ -750,13 +964,13 @@ const agent: AgentRoutesDeps = {
     selectionOf: () =>
       chatgptState === "signed_in" && settingsMode === "chatgpt"
         ? { kind: "chatgpt", model: "sample-plan-model" }
-        : {
+        : (selection ?? {
             kind: "api",
             roles: [
               { role: "main", provider: "anthropic", model: "claude-sonnet-5-5" },
               { role: "fast", provider: "openai", model: "gpt-6-luna" },
             ],
-          },
+          }),
     pauseTask: (taskId, requestId) => {
       if (!session || taskId !== session.id) throw new Error("no session");
       const pause = session.requestSafetyPause(requestId);
@@ -1028,6 +1242,42 @@ routes.post("/__qa/step-end", (c) => {
   endLiveStep();
   const pause = session.safetyPause;
   if (pause?.phase === "pausing") session.confirmSafetyPause(pause.requestId, pause.revision);
+  return c.json({ ok: true });
+});
+// Finishes the open step and starts n more, each after a model call, as a live task does.
+routes.post("/__qa/steps", (c) => {
+  if (!session) return c.text("no session", 409);
+  const owned = session;
+  for (let n = Number(c.req.query("n") ?? 1); n > 0; n--) {
+    if (liveStep) {
+      owned.append("action.result", { ok: true }, liveStep);
+      owned.append("step.end", { status: "ok" }, liveStep);
+    }
+    owned.append("key.use", {
+      secretId: "anthropic-main",
+      host: "api.anthropic.com",
+      method: "POST",
+      path: "/v1/messages",
+      decision: "allow",
+    });
+    liveStep = ulid();
+    fill++;
+    owned.append(
+      "step.start",
+      { kind: "gui", planItem: c.req.query("item") ?? "colour" },
+      liveStep,
+    );
+    owned.append(
+      "action.intent",
+      {
+        verb: "click",
+        label: `Fill area ${fill} with brown`,
+        risk: "none",
+        point: { x: 1200, y: 700 },
+      },
+      liveStep,
+    );
+  }
   return c.json({ ok: true });
 });
 routes.post("/__qa/heartbeat", (c) => {

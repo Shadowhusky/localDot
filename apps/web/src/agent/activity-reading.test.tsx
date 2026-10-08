@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
-import { PlanRail } from "../shell/PlanRail.tsx";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
 
 const api = createApi("inert-reading", {
   origin: "https://owned.invalid",
@@ -12,7 +12,7 @@ const api = createApi("inert-reading", {
   },
 });
 const rail = (count: number) => (
-  <PlanRail
+  <ActivityRail
     rows={timelineRows(
       Array.from({ length: count }, (_, n) => ({
         id: `reading-${n}`,
@@ -26,7 +26,6 @@ const rail = (count: number) => (
     sessionId="reading-owner"
     scale={1}
     api={api}
-    title={null}
   />
 );
 afterEach(() => {

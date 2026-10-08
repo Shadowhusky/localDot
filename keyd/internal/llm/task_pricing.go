@@ -27,6 +27,7 @@ type TaskPricing struct {
 }
 type TaskPricingRoute struct {
 	Route  string  `json:"route"`
+	Flat   bool    `json:"flat,omitempty"`
 	Models []Price `json:"models"`
 }
 
@@ -41,6 +42,7 @@ func (p *TaskPricing) UnmarshalJSON(raw []byte) error {
 	// A missing input/output price must not silently become an explicit free side.
 	var wire struct {
 		Routes []struct {
+			Flat   json.RawMessage              `json:"flat"`
 			Models []map[string]json.RawMessage `json:"models"`
 		} `json:"routes"`
 	}
@@ -48,6 +50,10 @@ func (p *TaskPricing) UnmarshalJSON(raw []byte) error {
 		return err
 	}
 	for _, r := range wire.Routes {
+		// One encoding per policy: a route is marked flat only by true.
+		if r.Flat != nil && !bytes.Equal(bytes.TrimSpace(r.Flat), []byte("true")) {
+			return errors.New("llm: invalid snapshot flat mark")
+		}
 		for _, m := range r.Models {
 			for _, k := range []string{"cacheReadUSDPerMTok", "cacheWriteUSDPerMTok"} {
 				if v, ok := m[k]; ok && bytes.Equal(bytes.TrimSpace(v), []byte("null")) {
@@ -82,6 +88,12 @@ func CanonicalTaskPricing(p TaskPricing) (TaskPricing, error) {
 		if err := ValidateModels(r.Models); err != nil {
 			return TaskPricing{}, err
 		}
+		// A flat route is a plan billed outside localDot: every price it states is zero.
+		if r.Flat && slices.ContainsFunc(r.Models, func(m Price) bool {
+			return m.Input != 0 || m.Output != 0 || m.CacheRead != 0 || m.CacheWrite != 0
+		}) {
+			return TaskPricing{}, errors.New("llm: a flat route prices every model at zero")
+		}
 		total += len(r.Models)
 		if total > 64 {
 			return TaskPricing{}, errors.New("llm: at most 64 snapshot models")
@@ -107,7 +119,7 @@ func CanonicalTaskPricing(p TaskPricing) (TaskPricing, error) {
 			}
 		}
 		slices.SortFunc(models, func(a, b Price) int { return bytes.Compare([]byte(a.Model), []byte(b.Model)) })
-		out.Routes[i] = TaskPricingRoute{Route: r.Route, Models: models}
+		out.Routes[i] = TaskPricingRoute{Route: r.Route, Flat: r.Flat, Models: models}
 	}
 	slices.SortFunc(out.Routes, func(a, b TaskPricingRoute) int { return bytes.Compare([]byte(a.Route), []byte(b.Route)) })
 	for i := 1; i < len(out.Routes); i++ {
@@ -165,6 +177,17 @@ type TaskLease struct {
 func (l *TaskLease) Snapshot() bool { return l != nil && l.t.pricing != nil }
 func (l *TaskLease) AllowsRoute(route, identity string) bool {
 	return l != nil && (l.t.pricing == nil || l.t.pricing.Bindings[route] == identity)
+}
+func (l *TaskLease) Flat(route string) bool {
+	if l == nil || l.t.pricing == nil {
+		return false
+	}
+	for _, r := range l.t.pricing.Pricing.Routes {
+		if r.Route == route {
+			return r.Flat
+		}
+	}
+	return false
 }
 func (l *TaskLease) Price(route, model string) (Price, bool) {
 	if l == nil || l.t.pricing == nil {

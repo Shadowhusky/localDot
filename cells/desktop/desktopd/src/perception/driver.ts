@@ -11,25 +11,6 @@ export interface DriverWindow {
   z_index: number;
 }
 
-export interface DriverElement {
-  element_index: number;
-  element_token?: string;
-  role: string;
-  label?: string;
-  value?: string;
-  frame?: { x: number; y: number; w: number; h: number };
-  parent_index?: number;
-  depth: number;
-  actions?: string[];
-  in_web_content?: boolean;
-}
-
-export interface DriverWindowState {
-  elements: DriverElement[];
-  truncated?: boolean;
-  truncation_reason?: string;
-}
-
 export interface DriverOptions {
   command: string;
   args: string[];
@@ -126,15 +107,6 @@ export class CuaDriver {
   async listWindows(): Promise<DriverWindow[]> {
     const { structured } = await this.call<{ windows: DriverWindow[] }>("list_windows", {});
     return structured?.windows ?? [];
-  }
-
-  async windowState(pid: number, windowId: number, timeoutMs = 2500): Promise<DriverWindowState> {
-    const { structured } = await this.call<DriverWindowState>(
-      "get_window_state",
-      { pid, window_id: windowId, timeout_ms: timeoutMs, include_screenshot: false },
-      timeoutMs,
-    );
-    return structured ?? { elements: [] };
   }
 
   // The driver's PNG of the X root, downscaled to the model's 1280 px width at 2×.

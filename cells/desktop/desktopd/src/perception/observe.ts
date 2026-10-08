@@ -53,6 +53,8 @@ export function windowInfo(w: HelperWindow): WindowInfo {
     rect: { x: w.x, y: w.y, w: w.w, h: w.h },
     frame: { x: w.frame[0], y: w.frame[1], w: w.frame[2], h: w.frame[3] },
     active: w.active,
+    overrideRedirect: w.overrideRedirect,
+    transientFor: w.transientFor,
   };
 }
 
