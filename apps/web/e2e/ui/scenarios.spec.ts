@@ -7,42 +7,48 @@ import { expect, test } from "./harness.ts";
 // The harness checks itself across the whole matrix: every scenario, sheet and gallery page renders
 // what it names, with no page error, CSP violation or outside request (the `ui` fixture fails the
 // test on any of those).
-const status = (page: Page) => page.getByTestId("hud-status");
-const LANDMARKS: Record<UiScenarioName, (page: Page) => Locator> = {
-  "first-run": (page) => page.getByRole("heading", { name: "Set up localDot" }),
-  "model-ready": (page) => status(page).getByText("No computer"),
-  starting: (page) => status(page).getByText("Starting…"),
-  ready: (page) => status(page).getByText("Live"),
-  running: (page) => status(page).getByText("Select the Net total cell"),
-  approval: (page) => page.getByRole("dialog", { name: /^Send the monthly report/ }),
-  ask: (page) => status(page).getByText("Has a question"),
-  takeover: (page) => status(page).getByText("Your turn"),
-  budget: (page) => status(page).getByText("Paused · Limit reached"),
-  done: (page) => status(page).getByText("Done"),
-  reconnecting: (page) => page.locator(".stage-veil.on"),
-  paused: (page) => status(page).getByText("Paused"),
-  failed: (page) => status(page).getByText("Failed"),
-  fenced: (page) => page.getByText("This computer is unavailable"),
-  off: (page) => status(page).getByText("Stopped"),
+const hud = (label: string) => (page: Page) =>
+  expect(page.getByTestId("hud-status")).toHaveText(label);
+const shows = (find: (page: Page) => Locator) => (page: Page) => expect(find(page)).toBeVisible();
+const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
+  "first-run": shows((page) => page.getByRole("heading", { name: "Set up localDot" })),
+  "model-ready": hud("No computer"),
+  starting: hud("Starting…"),
+  ready: hud("Live"),
+  running: hud("Select the Net total cell"),
+  approval: shows((page) => page.getByRole("dialog", { name: /^Send the monthly report/ })),
+  ask: hud("Has a question"),
+  takeover: hud("Your turn"),
+  budget: hud("Paused · Limit reached"),
+  done: hud("Done"),
+  reconnecting: shows((page) => page.locator(".stage-veil.on")),
+  paused: hud("Paused"),
+  failed: hud("Failed"),
+  fenced: shows((page) =>
+    page
+      .getByRole("region", { name: "Computer recovery" })
+      .getByRole("heading", { name: "This computer is unavailable", exact: true }),
+  ),
+  off: hud("Stopped"),
 };
 
 for (const scenario of Object.keys(UI_SCENARIOS) as UiScenarioName[])
   test(`scenario ${scenario}`, async ({ page, ui }) => {
     await ui.open(scenario);
-    await expect(LANDMARKS[scenario](page)).toBeVisible();
+    await LANDMARKS[scenario](page);
     await ui.settle();
   });
 
 test("a running fixture steps between scenarios", async ({ page, ui }) => {
   await ui.open("running");
-  await expect(LANDMARKS.running(page)).toBeVisible();
+  await LANDMARKS.running(page);
   await ui.step("paused");
-  await expect(LANDMARKS.paused(page)).toBeVisible();
+  await LANDMARKS.paused(page);
   // "ready" brings the computer back live, so the task carries on.
   await ui.step("ready");
-  await expect(LANDMARKS.running(page)).toBeVisible();
+  await LANDMARKS.running(page);
   await ui.step("done");
-  await expect(LANDMARKS.done(page)).toBeVisible();
+  await LANDMARKS.done(page);
 });
 
 test("Settings and Keys open", async ({ page, ui }) => {
