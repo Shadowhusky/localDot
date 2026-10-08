@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 import { desktopContainer, docker, type RunningDaemon, startDaemon } from "./daemon.ts";
 
 test.skip(process.env.LOCALDOT_MEASURE !== "1", "opt in to the stream measurements");
-const fullcolor = process.env.LOCALDOT_STREAM_FULLCOLOR !== "0";
+const fullcolor = process.env.LOCALDOT_STREAM_FULLCOLOR === "1";
 let daemon: RunningDaemon;
 test.beforeAll(async () => {
   daemon = await startDaemon({ LOCALDOT_STREAM_FULLCOLOR: fullcolor ? "1" : "0" });

@@ -143,7 +143,7 @@ const orchestrator = new CellOrchestrator({
   keyd: keydWiring,
   store,
   images: imagesFromEnv(),
-  streamFullcolor: process.env.LOCALDOT_STREAM_FULLCOLOR !== "0",
+  streamFullcolor: process.env.LOCALDOT_STREAM_FULLCOLOR === "1",
   probeDesktopd,
   probeStream,
 });

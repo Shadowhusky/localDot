@@ -220,7 +220,7 @@ export class CellOrchestrator {
     this.#docker = deps.docker;
     this.#store = deps.store;
     this.#images = deps.images;
-    this.#streamFullcolor = deps.streamFullcolor ?? true;
+    this.#streamFullcolor = deps.streamFullcolor ?? false;
     this.#probeDesktopd = deps.probeDesktopd;
     this.#probeStream = deps.probeStream;
     this.#externalKeydPorts = deps.externalKeydPorts;

@@ -59,7 +59,8 @@ subprotocols `localdot.v1, localdot.token.<token>`.
   `LOCALDOT_DOCKER_TESTS=1 pnpm --filter @localdot/web e2e` checks the live desktop in installed
   Google Chrome, including Stop/Start, Stop/Resume, key management and daemon restart recovery.
 - `LOCALDOT_MEASURE=1 pnpm --filter @localdot/web e2e --grep measure` records frame rate and CPU.
-  Repeat with `LOCALDOT_STREAM_FULLCOLOR=0` to measure 4:2:0 instead of the default 4:4:4.
+  The stream defaults to 4:2:0 H.264, which every browser decodes; iPhones and iPads cannot decode
+  4:4:4. `LOCALDOT_STREAM_FULLCOLOR=1` streams 4:4:4 for sharper coloured text in desktop Chrome.
   Both modes keep the stream setting locked in the client. Results and screenshots are in
   `apps/web/e2e/out/`.
 - Processes that need to stop the daemon should run `node --import tsx src/main.ts` from
