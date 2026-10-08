@@ -379,7 +379,7 @@ for (const width of [1280, 390])
         .takeover("login", "Sign in on the sample computer, then return control.")
         .catch(() => ({ by: "stop" as const }));
       await expect.poll(() => f.session.manualControl).toBe("ready");
-      if (width < 1180) await page.getByRole("tab", { name: "Computer", exact: true }).click();
+      if (width < 1180) await page.getByRole("tab", { name: /^Computer/ }).click();
       await expect(page.getByRole("button", { name: "Type text", exact: true })).toBeEnabled();
       await page.reload(); // The held takeover is restored from the daemon, never released by reload.
       await expect(page.getByRole("region", { name: "Manual control" })).toBeVisible();
