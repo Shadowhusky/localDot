@@ -44,7 +44,12 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-function state(patch: { tMs: number; playing: boolean; speed?: ReplaySpeed }): ReplayState {
+function state(patch: {
+  tMs: number;
+  playing: boolean;
+  speed?: ReplaySpeed;
+  selection?: ReplayState["selection"];
+}): ReplayState {
   return {
     sessionId: "01M4D263DDHCRM52FMG340DDF3",
     screen: "desktop",
@@ -58,6 +63,7 @@ function state(patch: { tMs: number; playing: boolean; speed?: ReplaySpeed }): R
     idleNow: false,
     map,
     compare: null,
+    selection: null,
     setScreen: vi.fn(),
     run: vi.fn(),
     seek: vi.fn(),
@@ -100,6 +106,19 @@ it("moves with a doubled speed at once, without waiting for the next report", ()
   rerender(<Scrubber api={api} sessionId="s" replay={{ ...replay, speed: 2 }} />);
   frame(1500);
   expect(head()).toBe("translateX(310px)");
+});
+
+it("brackets the stretch marked with I and O, and says so", () => {
+  const replay = state({ tMs: 0, playing: false, selection: { fromMs: 15_000, toMs: 45_000 } });
+  const { rerender } = render(<Scrubber api={api} sessionId="s" replay={replay} />);
+  const band = screen.getByTestId("replay-selection");
+  expect(band.style.left).toBe("25%");
+  expect(band.style.width).toBe("50%");
+  const slider = screen.getByRole("slider", { name: "Replay timeline" });
+  expect(slider.getAttribute("aria-description")).toBe("Marked 0:15 to 0:45");
+  rerender(<Scrubber api={api} sessionId="s" replay={{ ...replay, selection: null }} />);
+  expect(screen.queryByTestId("replay-selection")).toBeNull();
+  expect(slider.hasAttribute("aria-description")).toBe(false);
 });
 
 it("tracks a drag one to one and keeps playing after it if it was playing", () => {

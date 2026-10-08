@@ -122,7 +122,7 @@ describe("replay controls and timeline presentation", () => {
     for (const modifier of ["metaKey", "ctrlKey", "altKey", "targetIsField"])
       expect(replayKey({ ...input, [modifier]: true })).toBeNull();
     expect(
-      ["K", "ArrowLeft", "ArrowRight", "J", "L", "[", "]", "B", "Escape"].map((key) =>
+      ["K", "ArrowLeft", "ArrowRight", "J", "L", "[", "]", "B", "I", "o", "Escape"].map((key) =>
         replayKey({ ...input, key }),
       ),
     ).toEqual([
@@ -134,6 +134,8 @@ describe("replay controls and timeline presentation", () => {
       { kind: "speed", dir: -1 },
       { kind: "speed", dir: 1 },
       { kind: "compare" },
+      { kind: "mark", edge: "in" },
+      { kind: "mark", edge: "out" },
       { kind: "exit" },
     ]);
   });

@@ -1,8 +1,11 @@
 import { microsToMs } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
 import { useEffect, useRef, useState } from "react";
-import { ExportSheet } from "../export/ExportSheet.tsx";
+import { ExportButton } from "../export/ExportButton.tsx";
+import { ExportPopover } from "../export/ExportPopover.tsx";
 import { type ExportContext, exportContext } from "../export/export-context.ts";
+import type { ExportJob } from "../export/job.ts";
+import { exportSupport } from "../export/sink.ts";
 import { useExportProbe } from "../export/useExportProbe.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
@@ -19,7 +22,7 @@ import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
 import { CompareView } from "./CompareView.tsx";
 import { GapCard, type GapKind } from "./GapCard.tsx";
-import { ReplayControls } from "./ReplayControls.tsx";
+import { LOADING, ReplayControls } from "./ReplayControls.tsx";
 import { recordedLabel, replayKey, taskTitle } from "./replay-view.ts";
 import { Scrubber } from "./Scrubber.tsx";
 import { TaskList, TasksSearch, useTaskIndex } from "./TasksLibrary.tsx";
@@ -49,6 +52,7 @@ export function ReplayView({
   onGoLive,
   onDeleted,
   onTitle,
+  exportJob: job,
   visible = true,
 }: {
   api: ApiClient;
@@ -58,6 +62,7 @@ export function ReplayView({
   onDeleted(id: string): void;
   // What the top bar names while this recording plays; null once Replay closes.
   onTitle?(title: RecordedTitle | null): void;
+  exportJob: ExportJob;
   visible?: boolean;
 }) {
   const stage = useRef<StageHandle>(null);
@@ -67,10 +72,15 @@ export function ReplayView({
   const railed = useMediaQuery(LIBRARY_RAIL);
   const [library, setLibrary] = useState(false);
   const libraryTrigger = useRef<HTMLButtonElement>(null);
+  const exportTrigger = useRef<HTMLButtonElement>(null);
+  // The popover is keyed by each opening, so its choices start fresh, and it stays mounted while it
+  // closes.
   const [exporting, setExporting] = useState<{
     context: ExportContext;
-    anchor: HTMLButtonElement;
+    open: boolean;
+    key: number;
   } | null>(null);
+  const exportOpen = exporting?.open ?? false;
   const [notice, setNotice] = useState({ key: "", over: false });
   useExportProbe(api, sessionId, replay);
   const commands = useRef(replay.run);
@@ -79,7 +89,7 @@ export function ReplayView({
   titled.current = onTitle;
 
   useEffect(() => {
-    if (!visible || exporting !== null) return;
+    if (!visible || exportOpen) return;
     const key = (event: KeyboardEvent) => {
       if (event.defaultPrevented) return;
       const target = event.target;
@@ -101,7 +111,7 @@ export function ReplayView({
     };
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
-  }, [visible, exporting]);
+  }, [visible, exportOpen]);
 
   useEffect(() => {
     if (replay.playing || !replay.map) return;
@@ -128,6 +138,7 @@ export function ReplayView({
   }, [whole, noticeKey]);
 
   const hud = taskHud(replay.model, replay.tMs);
+  const support = exportSupport();
   const endedAt = replay.map?.endMs ?? 0;
   const baseRows = stepRows(replay.model);
   const chapterRows: StepRowView[] = chapters(replay.model, endedAt).map((chapter) => {
@@ -262,10 +273,21 @@ export function ReplayView({
           replay={replay}
           label={hud.label}
           noVideo={!!whole && noticeOver}
-          onExport={(anchor) => {
-            replay.run({ kind: "pause" });
-            setExporting({ context: exportContext(api, sessionId, replay), anchor });
-          }}
+          exportControl={
+            <ExportButton
+              ref={exportTrigger}
+              job={job}
+              open={exportOpen}
+              disabledReason={
+                support.ok ? (replay.info && replay.map ? undefined : LOADING) : support.reason
+              }
+              onOpen={() => {
+                replay.run({ kind: "pause" });
+                const context = job.snapshot().context ?? exportContext(api, sessionId, replay);
+                setExporting((was) => ({ context, open: true, key: (was?.key ?? 0) + 1 }));
+              }}
+            />
+          }
         />
       </main>
       <ActivityRail
@@ -292,10 +314,17 @@ export function ReplayView({
         </Sheet>
       )}
       {exporting && (
-        <ExportSheet
+        <ExportPopover
+          key={exporting.key}
+          api={api}
+          job={job}
           context={exporting.context}
-          anchor={exporting.anchor}
-          onClose={() => setExporting(null)}
+          open={exporting.open}
+          anchor={exportTrigger}
+          onClose={() => {
+            job.dismiss();
+            setExporting((was) => was && { ...was, open: false });
+          }}
         />
       )}
     </div>

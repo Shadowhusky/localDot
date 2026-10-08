@@ -179,6 +179,11 @@ export function Scrubber({
         aria-valuemax={map?.endMs ?? 0}
         aria-valuenow={Math.round(replay.tMs)}
         aria-valuetext={`${timeLabel(replay.tMs)} of ${timeLabel(map?.endMs ?? 0)}, ${labelAt(replay.tMs)}`}
+        aria-description={
+          replay.selection
+            ? `Marked ${timeLabel(replay.selection.fromMs)} to ${timeLabel(replay.selection.toMs)}`
+            : undefined
+        }
         aria-disabled={!map}
         className="replay-scrub"
         data-dragging={dragging ? "" : undefined}
@@ -228,6 +233,14 @@ export function Scrubber({
           );
         }}
       >
+        {replay.selection && (
+          <span
+            className="replay-selection"
+            data-testid="replay-selection"
+            style={span(fraction(replay.selection.fromMs), fraction(replay.selection.toMs))}
+            aria-hidden="true"
+          />
+        )}
         <div className="replay-track">
           <span ref={played} className="replay-played" />
           {view?.idle.map((band) => (

@@ -139,20 +139,6 @@
   "src/dot/render/DotView.ts": {
     "raw-colour": 13
   },
-  "src/export/ExportSheet.tsx": {
-    "banned-copy": 1,
-    "native-control": 13,
-    "native-disabled": 5
-  },
-  "src/export/export.css": {
-    "control-selector": 10,
-    "motion-literal": 2,
-    "radius-literal": 3,
-    "raw-colour": 2,
-    "spacing-literal": 14,
-    "stray-stylesheet": 1,
-    "type-literal": 11
-  },
   "src/gallery/gallery.css": {
     "half-pixel": 1,
     "type-literal": 2

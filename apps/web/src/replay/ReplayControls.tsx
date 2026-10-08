@@ -1,5 +1,5 @@
 import { REPLAY_SPEEDS } from "@localdot/stage";
-import { exportSupport } from "../export/sink.ts";
+import type { ReactNode } from "react";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
@@ -13,22 +13,21 @@ const SPEEDS = REPLAY_SPEEDS.map((speed) => ({
   value: String(speed),
   label: `${speed === 0.5 ? "½" : speed}×`,
 }));
-const LOADING = "The recording is still loading";
+export const LOADING = "The recording is still loading";
 
 export function ReplayControls({
   replay,
   label,
   noVideo = false,
-  onExport,
+  exportControl,
 }: {
   replay: ReplayState;
   // What is happening at the playhead.
   label: string;
   // The recording has no video; the card that said so has gone.
   noVideo?: boolean;
-  onExport?: (anchor: HTMLButtonElement) => void;
+  exportControl?: ReactNode;
 }) {
-  const support = exportSupport();
   const loading = replay.map ? undefined : LOADING;
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would draw a frame and claim min-content width.
@@ -95,16 +94,7 @@ export function ReplayControls({
             Compare
           </Button>
         </span>
-        {onExport && (
-          <Button
-            icon="download"
-            aria-label="Export MP4"
-            disabledReason={support.ok ? (replay.info ? loading : LOADING) : support.reason}
-            onClick={(event) => onExport(event.currentTarget)}
-          >
-            <span className="replay-export-text">Export</span>
-          </Button>
-        )}
+        {exportControl}
       </div>
       <VisuallyHidden className="replay-speed-label" role="status">
         {speedLabel(replay.speed, replay.idleNow)}

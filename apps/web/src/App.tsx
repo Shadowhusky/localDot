@@ -17,6 +17,7 @@ import { useTaskControls } from "./agent/useTaskControls.ts";
 import { hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
+import { createExportJob } from "./export/job.ts";
 import type { KeyFormPreset, KeyIntake } from "./keys/KeyForm.tsx";
 import { KeysSheet } from "./keys/KeysSheet.tsx";
 import { keyStatus, useKeys } from "./keys/useKeys.ts";
@@ -181,6 +182,9 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
+  // An export keeps going when Replay closes or moves to another task.
+  const [exportJob] = useState(createExportJob);
+  useEffect(() => () => exportJob.dispose(), [exportJob]);
   const [historyRevision, setHistoryRevision] = useState(0);
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
@@ -775,6 +779,7 @@ function Theatre({ api }: { api: ApiClient }) {
               if (id === replayId) selectReplay(null, "replace");
             }}
             onTitle={setRecorded}
+            exportJob={exportJob}
             visible={!keysOpen && !settings.open && !safety.approval}
           />
         )}

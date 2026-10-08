@@ -365,6 +365,17 @@
   outline-offset: var(--focus-offset);
 }
 
+/* The stretch marked with I and O: a band behind the track, bracketed at both ends. */
+.replay-selection {
+  position: absolute;
+  top: calc(50% - var(--spacing) * 2);
+  height: calc(var(--spacing) * 4);
+  border-inline: 2px solid var(--color-fg-2);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-state-selected);
+  pointer-events: none;
+}
+
 .replay-track {
   position: absolute;
   top: 50%;
@@ -550,6 +561,33 @@
 
 .replay-transport-side {
   flex: none;
+}
+
+/* While an export runs with its popover put away, its ring stands where the icon was. */
+.replay-export .ui-button-content {
+  position: relative;
+}
+
+.replay-export .ui-icon,
+.replay-export-ring {
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.replay-export-ring {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  display: flex;
+  opacity: 0;
+  translate: 0 -50%;
+}
+
+.replay-export[data-ring] .ui-icon {
+  opacity: 0;
+}
+
+.replay-export[data-ring] .replay-export-ring {
+  opacity: 1;
 }
 
 .replay-time {

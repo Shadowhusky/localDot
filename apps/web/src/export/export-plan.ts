@@ -16,13 +16,12 @@ import {
   type Span,
   sessionAt,
 } from "@localdot/stage";
-import { speedLabel } from "../replay/replay-view.ts";
+import { speedLabel, timeLabel } from "../replay/replay-view.ts";
 
 export const EXPORT_FPS = 30;
 export const EXPORT_SIZES = [
-  { w: 1280, h: 800 },
-  { w: 1920, h: 1200 },
-  { w: 2560, h: 1600 },
+  { w: 1280, h: 800, label: "720p" },
+  { w: 1920, h: 1200, label: "1080p" },
 ] as const;
 export type ExportSpeed = 1 | 2 | 4 | 8;
 export interface ExportRequest {
@@ -44,6 +43,25 @@ export interface ExportPlan {
 }
 export const PRIVACY_NOTE =
   "This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.";
+
+// The encoder's rate for its high quality level (mediabunny's QUALITY_HIGH for H.264), so the size
+// shown before an export is close to the file it writes.
+export function estimateBytes(size: { w: number; h: number }, durationS: number): number {
+  const bitrate =
+    3_000_000 * ((size.w * size.h) / (1920 * 1080)) ** 0.95 * 0.3 * Math.exp(2.5538 * 0.75);
+  return (bitrate / 8) * durationS;
+}
+
+export function fileSize(bytes: number): string {
+  const megabytes = bytes / (1024 * 1024);
+  if (megabytes < 1) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+  return `${megabytes < 10 ? megabytes.toFixed(1) : Math.round(megabytes)} MB`;
+}
+
+// A video's length, rounded up so a short one never reads as 0:00.
+export function videoLength(seconds: number): string {
+  return timeLabel(Math.ceil(seconds) * 1000);
+}
 
 function knownEnd(model: SessionModel, activity: ActivitySpan[]): number {
   if (model.ended) return model.ended.t;
@@ -144,7 +162,7 @@ export function planExport(
     sessionMsAt,
     labelAt(frame) {
       const time = sessionMsAt(frame);
-      return speedLabel(speed, idleAt(map, time));
+      return captions ? speedLabel(speed, idleAt(map, time)) : null;
     },
     captionAt(frame) {
       const time = sessionMsAt(frame);

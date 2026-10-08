@@ -1,196 +1,217 @@
-.export-sheet {
-  position: fixed;
-  inset: auto;
-  margin: 0;
-  width: min(440px, calc(100vw - 32px));
-  max-height: calc(100dvh - 32px);
-  padding: 0;
-  box-sizing: border-box;
-  overflow: hidden;
-  border: 1px solid var(--color-hud-line);
-  border-radius: 18px;
-  color: var(--color-text);
-  background: var(--color-hud-solid);
-  box-shadow: 0 24px 80px #0009;
-  animation: export-enter 150ms ease-out both;
-}
-.export-sheet[open] {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-}
-.export-sheet::backdrop {
-  background: #0005;
-}
-.export-sheet.closing {
-  animation: export-exit 150ms ease-in both;
-}
-.export-sheet header,
-.export-sheet footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 20px 24px;
-}
-.export-sheet header {
-  border-bottom: 1px solid var(--color-hud-line);
-}
-.export-sheet h2,
-.export-sheet h3 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 550;
-}
-.export-eyebrow {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 11px;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: var(--color-text-2);
-}
-.export-sheet button,
-.export-sheet select {
-  border: 1px solid var(--color-hud-line);
-  border-radius: 9px;
-  padding: 9px 12px;
-  background: var(--color-void);
-  color: var(--color-text);
-  font: inherit;
-}
-/* WebKit ignores min-height on a native menulist, so the select draws its own box and chevron. */
-.export-sheet select {
-  appearance: none;
-  height: 36px;
-  padding: 0 32px 0 12px;
-  background:
-    var(--icon-chevron-down) no-repeat right 10px center / 12px 12px,
-    var(--color-void);
-  text-overflow: ellipsis;
-}
-@media (pointer: coarse) {
-  .export-sheet select {
-    height: 44px;
-    font-size: 16px;
-  }
-}
-.export-sheet button {
-  cursor: pointer;
-}
-.export-sheet button:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.export-sheet button:focus-visible,
-.export-sheet select:focus-visible,
-.export-sheet input:focus-visible {
-  outline: var(--focus-width) solid var(--color-text);
-  outline-offset: 3px;
-}
-.export-sheet header button {
-  border: 0;
-  background: transparent;
-  font-size: 22px;
-}
+/* Export: a popover above Export in Replay's transport, a bottom sheet on a phone. The choices and
+   the progress share one cell, so the panel keeps its size from the first choice to the saved file. */
 .export-body {
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding: 20px 24px;
-}
-.export-body > label,
-.export-option-row label {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-bottom: 18px;
-  font-size: 13px;
-}
-.export-option-row {
   display: grid;
-  grid-template-columns: 88px minmax(0, 1fr);
-  gap: 16px;
-}
-.export-option-row select {
+  gap: calc(var(--spacing) * 3);
   min-width: 0;
-  width: 100%;
 }
-.export-body .export-check {
-  flex-direction: row;
-  align-items: center;
-  gap: 10px;
+
+.export-preview {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
-.export-check input {
-  accent-color: var(--color-text);
-  width: 16px;
-  height: 16px;
-}
-.export-estimate {
-  font-size: 13px;
-  font-variant-numeric: tabular-nums;
-}
-.export-privacy {
-  font-size: 12px;
-  line-height: 1.6;
-  color: var(--color-text-2);
-  margin-bottom: 0;
-}
-.export-sheet footer {
-  border-top: 1px solid var(--color-hud-line);
-}
-.export-sheet .export-save {
-  margin-left: auto;
-  background: var(--color-text);
-  color: var(--color-void);
-}
-.export-progress {
-  padding: 8px 0 16px;
-  font-variant-numeric: tabular-nums;
-}
-.export-progress progress {
+
+.export-preview > :is(img, .replay-image-empty) {
   display: block;
   width: 100%;
-  margin: 24px 0 12px;
-  accent-color: var(--color-text);
-  height: 8px;
+  height: 100%;
+  object-fit: cover;
 }
-.export-progress p,
-.export-progress span,
-.export-result p {
-  font-size: 13px;
-  line-height: 1.6;
-  color: var(--color-text-2);
+
+/* Where the burned-in caption sits in the video, on the same material. */
+.export-preview-caption {
+  position: absolute;
+  bottom: calc(var(--spacing) * 2);
+  left: 50%;
+  max-width: calc(100% - var(--spacing) * 6);
+  overflow: hidden;
+  padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 2);
+  border-radius: var(--radius-sm);
+  background-color: color-mix(in oklab, var(--color-hud-solid) 92%, transparent);
+  color: var(--color-fg-1);
+  font:
+    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+  letter-spacing: var(--text-micro--letter-spacing);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0;
+  translate: -50% 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
 }
-.export-cancel-confirm {
-  padding: 14px;
-  border: 1px solid var(--color-hud-line);
-  border-radius: 10px;
+
+.export-preview-caption[data-shown] {
+  opacity: 1;
 }
-.export-cancel-confirm p {
-  margin-top: 0;
+
+.export-range {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
 }
-.export-cancel-confirm button + button {
-  margin-left: 8px;
+
+/* The chosen range, bracketed on the whole recording the way the scrubber marks a selection. */
+.export-range-track {
+  position: relative;
+  height: calc(var(--spacing) * 3);
 }
-@keyframes export-enter {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+
+.export-range-track::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  inset-inline: 0;
+  height: var(--spacing);
+  border-radius: var(--radius-full);
+  background-color: var(--color-control);
+  translate: 0 -50%;
 }
-@keyframes export-exit {
-  to {
-    opacity: 0;
-    transform: translateY(8px);
-  }
+
+.export-range-chosen {
+  position: absolute;
+  inset-block: 0;
+  left: calc(var(--_from) * 100%);
+  right: calc((1 - var(--_to)) * 100%);
+  min-width: calc(var(--spacing) * 2);
+  border-inline: 2px solid var(--color-fg-2);
+  border-radius: var(--radius-xs);
+  background-color: var(--color-state-selected);
+  transition:
+    left var(--dur-spring) var(--ease-spring),
+    right var(--dur-spring) var(--ease-spring);
 }
+
+.export-range-label,
+.export-progress-line,
+.export-details-text,
+.export-file-meta,
+.export-privacy,
+.export-summary {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.export-views {
+  display: grid;
+}
+
+.export-options,
+.export-status {
+  grid-area: 1 / 1;
+  min-width: 0;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    visibility var(--dur-exit);
+}
+
+.export-options[data-shown],
+.export-status[data-shown] {
+  opacity: 1;
+  visibility: visible;
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    visibility 0s;
+}
+
+.export-options {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.export-row {
+  grid-template-columns: calc(var(--spacing) * 14) minmax(0, 1fr);
+  align-items: center;
+  column-gap: calc(var(--spacing) * 3);
+}
+
+.export-row .ui-segmented {
+  width: 100%;
+}
+
+.export-switches {
+  display: grid;
+}
+
+.export-privacy {
+  padding-top: var(--spacing);
+}
+
+.export-status {
+  display: grid;
+  align-content: center;
+}
+
+.export-progress,
+.export-result {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+}
+
+.export-status-title {
+  color: var(--color-fg-1);
+  font:
+    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+}
+
+.export-result {
+  justify-items: center;
+  gap: var(--spacing);
+  text-align: center;
+}
+
+.export-result-mark {
+  display: grid;
+  place-items: center;
+  width: calc(var(--spacing) * 8);
+  height: calc(var(--spacing) * 8);
+  margin-bottom: var(--spacing);
+  border-radius: var(--radius-full);
+  background-color: var(--color-control);
+  color: var(--color-fg-1);
+}
+
+.export-file {
+  max-width: 100%;
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.export-footer {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.export-popover .export-footer {
+  padding-top: calc(var(--spacing) * 3);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.ui-sheet-footer > .export-footer {
+  flex: 1;
+}
+
+.export-summary {
+  flex: 1;
+  min-width: 0;
+}
+
+.export-actions {
+  display: flex;
+  flex: none;
+  gap: calc(var(--spacing) * 2);
+  margin-left: auto;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .export-sheet,
-  .export-sheet.closing {
-    animation: none;
+  .export-range-chosen {
+    transition: none;
   }
 }

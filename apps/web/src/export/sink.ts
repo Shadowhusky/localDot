@@ -51,17 +51,32 @@ function fileSink(stream: FileSystemWritableFileStream): ExportSink {
   };
 }
 
-export function exportSupport(): { ok: true } | { ok: false; reason: string } {
-  if (
-    typeof picker() !== "function" ||
-    typeof VideoEncoder === "undefined" ||
-    typeof OffscreenCanvas === "undefined"
-  )
-    return { ok: false, reason: "Export needs Chrome or Edge for now" };
-  return { ok: true };
+export const NO_ENCODER = "Export needs Chrome, Edge or Safari 17 or later";
+export const LONG_EXPORT = "Long exports need Chrome or Edge";
+// Without a save picker the video is held in memory until it is downloaded, so it has a ceiling.
+export const DOWNLOAD_LIMIT = 256 * 1024 * 1024;
+const BLOCK = 4 * 1024 * 1024;
+
+export type ExportSupport =
+  | { ok: true; save: "picker" | "download" }
+  | { ok: false; reason: string };
+
+export class ExportTooLongError extends RangeError {
+  override name = "ExportTooLongError";
+  constructor() {
+    super(LONG_EXPORT);
+  }
 }
 
-export async function pickFileSink(suggestedName: string): Promise<ExportSink | null> {
+export function exportSupport(): ExportSupport {
+  if (typeof VideoEncoder === "undefined" || typeof OffscreenCanvas === "undefined")
+    return { ok: false, reason: NO_ENCODER };
+  return { ok: true, save: typeof picker() === "function" ? "picker" : "download" };
+}
+
+export async function pickFileSink(
+  suggestedName: string,
+): Promise<(ExportSink & { name: string }) | null> {
   const save = picker();
   if (!save) throw new Error("Saving an export is not supported in this browser.");
   try {
@@ -69,11 +84,78 @@ export async function pickFileSink(suggestedName: string): Promise<ExportSink | 
       suggestedName,
       types: [{ description: "MP4 video", accept: { "video/mp4": [".mp4"] } }],
     });
-    return fileSink(await handle.createWritable());
+    return { ...fileSink(await handle.createWritable()), name: handle.name || suggestedName };
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return null;
     throw error;
   }
+}
+
+export interface MemorySink extends ExportSink {
+  // The finished file, once closed. The bytes are handed to the Blob and released.
+  blob(): Blob;
+}
+
+// Holds the file in fixed blocks, so a write back into its start (the MP4 header) costs no copy.
+export function memorySink(limit = DOWNLOAD_LIMIT): MemorySink {
+  let blocks: Uint8Array<ArrayBuffer>[] = [];
+  let size = 0;
+  let state: "open" | "closed" | "aborted" = "open";
+  const cancelled = () => new DOMException("Export cancelled.", "AbortError");
+  return {
+    async write(position, data) {
+      if (state !== "open") throw cancelled();
+      if (!Number.isSafeInteger(position) || position < 0)
+        throw new RangeError("Invalid export file position.");
+      const end = position + data.byteLength;
+      if (end > limit) throw new ExportTooLongError();
+      for (let offset = 0; offset < data.byteLength; ) {
+        const at = position + offset;
+        const index = Math.floor(at / BLOCK);
+        const start = at - index * BLOCK;
+        const count = Math.min(BLOCK - start, data.byteLength - offset);
+        const block = blocks[index] ?? new Uint8Array(BLOCK);
+        blocks[index] = block;
+        block.set(data.subarray(offset, offset + count), start);
+        offset += count;
+      }
+      size = Math.max(size, end);
+    },
+    async close() {
+      if (state === "aborted") throw cancelled();
+      state = "closed";
+    },
+    async abort() {
+      state = "aborted";
+      blocks = [];
+    },
+    blob() {
+      if (state !== "closed") throw new Error("The export has not finished.");
+      const parts: Uint8Array<ArrayBuffer>[] = [];
+      for (let index = 0; index * BLOCK < size; index++)
+        parts.push(
+          (blocks[index] ?? new Uint8Array(BLOCK)).subarray(
+            0,
+            Math.min(BLOCK, size - index * BLOCK),
+          ),
+        );
+      blocks = [];
+      return new Blob(parts, { type: "video/mp4" });
+    },
+  };
+}
+
+export function downloadFile(blob: Blob, name: string): void {
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = name;
+  link.rel = "noopener";
+  document.body.append(link);
+  link.click();
+  link.remove();
+  // A browser that asks first (Safari on a phone) reads the file only after the answer.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000);
 }
 
 export async function opfsSink(name: string): Promise<ExportSink> {

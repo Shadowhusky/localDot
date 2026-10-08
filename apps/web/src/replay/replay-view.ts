@@ -168,6 +168,7 @@ export type ReplayCommand =
   | { kind: "jump"; ms: number }
   | { kind: "speed"; dir: -1 | 1 }
   | { kind: "compare" }
+  | { kind: "mark"; edge: "in" | "out" }
   | { kind: "exit" };
 export function replayKey(event: {
   key: string;
@@ -196,6 +197,10 @@ export function replayKey(event: {
       return { kind: "speed", dir: 1 };
     case "b":
       return { kind: "compare" };
+    case "i":
+      return { kind: "mark", edge: "in" };
+    case "o":
+      return { kind: "mark", edge: "out" };
     case "escape":
       return { kind: "exit" };
     default:
