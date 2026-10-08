@@ -30,6 +30,7 @@ import {
   type ResolvedRole,
   type Role,
   resolveRole,
+  taskSelection,
 } from "./bindings.ts";
 import { type BrainCell, type BrainCells, BrainCleanupError } from "./brain-cell.ts";
 import type { CodexAccount } from "./codex/account.ts";
@@ -405,15 +406,7 @@ export class AgentRunner {
     if (!selection) return undefined;
     return selection.kind === "chatgpt"
       ? { kind: "chatgpt" as const, model: selection.model }
-      : {
-          kind: "api" as const,
-          roles: selection.roles.map((role) => ({
-            role: role.role,
-            provider: role.providerId,
-            model: role.model.id,
-          })),
-          ...(planOnly(selection.roles) ? { plan: true as const } : {}),
-        };
+      : taskSelection(selection.roles);
   }
   activeChatgptTasks(): number {
     return [...this.#runtime.values()].filter(

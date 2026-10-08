@@ -3,6 +3,7 @@ import {
   type KeydRecord,
   type ModelBinding,
   SURROGATE_PATTERN,
+  type TaskModelSelection,
   TaskPricing,
 } from "@localdot/protocol";
 import {
@@ -170,6 +171,13 @@ export function planOnly(roles: readonly ResolvedRole[]): boolean {
   return (
     roles.some((r) => r.flat) && roles.every((r) => r.flat || providerById(r.providerId)?.local)
   );
+}
+export function taskSelection(roles: readonly ResolvedRole[]): TaskModelSelection {
+  return {
+    kind: "api",
+    roles: roles.map((r) => ({ role: r.role, provider: r.providerId, model: r.model.id })),
+    ...(planOnly(roles) ? { plan: true as const } : {}),
+  };
 }
 export function bindingOf(r: ResolvedRole, surrogates: Record<string, string>): ModelBinding {
   const surrogate = r.keyId && Object.hasOwn(surrogates, r.keyId) ? surrogates[r.keyId] : undefined;
