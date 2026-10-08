@@ -39,6 +39,7 @@ import { KillSwitch } from "./gateway/kill-switch.ts";
 import { LiveSessions } from "./gateway/live.ts";
 import { loadOnsetTable } from "./gateway/onset-table.ts";
 import { policyFromEnv } from "./gateway/ring-onset.ts";
+import { setPublicOrigin } from "./guard.ts";
 import { InstallCodes } from "./install-codes.ts";
 import { CellKeydWiring, refreshRunningCells } from "./keyd/cell-wiring.ts";
 import { KeydClient, keydSocketPath } from "./keyd/client.ts";
@@ -60,6 +61,7 @@ import { loadOrCreateToken } from "./token.ts";
 import { attachUpgradeRouter } from "./upgrade-router.ts";
 
 const port = portFromEnv();
+publicOriginFromEnv();
 const keydPorts = keydPortsFromEnv();
 const home = localdotHome();
 const serviceIdentity = managedServiceFromEnv(process.env);
@@ -414,6 +416,14 @@ function portFromEnv(): number {
     return parsePort(process.env.LOCALDOT_PORT);
   } catch (err) {
     return fail(`LOCALDOT_PORT: ${(err as Error).message}`);
+  }
+}
+
+function publicOriginFromEnv(): void {
+  try {
+    setPublicOrigin(process.env.LOCALDOT_PUBLIC_ORIGIN || undefined);
+  } catch (err) {
+    fail((err as Error).message);
   }
 }
 
