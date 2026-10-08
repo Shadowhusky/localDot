@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AlwaysOption, ulid } from "@localdot/protocol";
+import { type AlwaysOption, type AutonomyRule, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { MAX_RULES, RuleError, RulesStore } from "./rules.ts";
 
@@ -26,6 +26,10 @@ const MAIL = "https://mail.example.test";
 const onMail: AlwaysOption = { scope: "site", label: "On mail.example.test", site: MAIL };
 const inNotes: AlwaysOption = { scope: "app", label: "In Notes", app: "Notes" };
 const always: AlwaysOption = { scope: "always", label: "Always" };
+function saved(rule: AutonomyRule | undefined): AutonomyRule {
+  if (!rule) throw new Error("expected a new rule");
+  return rule;
+}
 
 describe("saved Always allow rules", () => {
   it("saves a rule in a private rules.json and reads it back", () => {
@@ -87,16 +91,16 @@ describe("saved Always allow rules", () => {
     expect(store.list()).toEqual({ rules: [] });
   });
 
-  it("keeps one rule per class and place", () => {
+  it("keeps one rule per class and place and adds nothing for a repeat", () => {
     const store = new RulesStore(home());
     const first = store.add("send", onMail, ulid());
-    expect(store.add("send", onMail, ulid())).toEqual(first);
-    expect(store.list().rules).toHaveLength(1);
+    expect(store.add("send", onMail, ulid())).toBeUndefined();
+    expect(store.list().rules).toEqual([first]);
   });
 
   it("stops matching a removed rule at once", () => {
     const store = new RulesStore(home());
-    const rule = store.add("send", onMail, ulid());
+    const rule = saved(store.add("send", onMail, ulid()));
     expect(store.remove(rule.id)).toEqual(rule);
     expect(store.matches("send", { site: MAIL })).toBe(false);
     expect(store.remove(rule.id)).toBeUndefined();

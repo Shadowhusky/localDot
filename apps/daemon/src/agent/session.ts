@@ -1,4 +1,4 @@
-import type { ApprovalCardDraft, PauseSnapshot } from "@localdot/protocol";
+import type { ApprovalCardDraft, PauseSnapshot, RuleChange } from "@localdot/protocol";
 import {
   type ApprovalCard,
   type AutonomyPolicy,
@@ -21,7 +21,7 @@ import {
   type ApprovalOutcome,
 } from "./safety/approvals.ts";
 import { RepeatGuard } from "./safety/repeat-guard.ts";
-import type { RulesStore } from "./safety/rules.ts";
+import { RuleError, type RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
 import type { TranscriptStore } from "./transcript.ts";
@@ -176,10 +176,16 @@ export class AgentSession {
       ({ always, ...resolution }) => {
         if (this.status === "waiting_user" && !this.stopped && !this.controlHeld)
           this.setStatus("running");
-        this.append("approval.resolve", { ...resolution });
-        const change =
-          always &&
-          this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+        let change: RuleChange | undefined;
+        let note = resolution.note;
+        try {
+          change =
+            always &&
+            this.taskAutonomy.grant(always.actionClass, always.option, resolution.approvalId);
+        } catch (error) {
+          note = `Approved once. Your Always allow choice was not saved. ${error instanceof RuleError ? error.message : "Try again later."}`;
+        }
+        this.append("approval.resolve", { ...resolution, ...(note ? { note } : {}) });
         if (change) this.append("rule.created", change);
       },
     );

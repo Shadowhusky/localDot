@@ -28,6 +28,7 @@ export class TaskAutonomy {
   ): RuleChange | undefined {
     if (!ALWAYS_SCOPES[actionClass].includes(option.scope)) return undefined;
     if (option.scope === "task") {
+      if (this.#allowed.has(actionClass)) return undefined;
       const change = { scope: option.scope, actionClass, label: option.label };
       this.#allowed.set(actionClass, change);
       return change;

@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AlwaysOption, DEFAULT_AUTONOMY, ulid } from "@localdot/protocol";
+import { type AlwaysOption, type AutonomyRule, DEFAULT_AUTONOMY, ulid } from "@localdot/protocol";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
@@ -15,6 +15,10 @@ import type { ToolCallContext } from "./tools/deps.ts";
 const MAIL = "https://mail.example.test";
 const onMail: AlwaysOption = { scope: "site", label: "On mail.example.test", site: MAIL };
 const TOKEN = "r".repeat(43);
+function saved(rule: AutonomyRule | undefined): AutonomyRule {
+  if (!rule) throw new Error("expected a new rule");
+  return rule;
+}
 const owned: { home: string; session: AgentSession }[] = [];
 afterEach(() => {
   for (const item of owned.splice(0)) {
@@ -73,7 +77,7 @@ function setup() {
 describe("Always allow routes", () => {
   it("lists saved rules and removes one, which tightens the next decision", async () => {
     const f = setup();
-    const rule = f.rules.add("send", onMail, ulid());
+    const rule = saved(f.rules.add("send", onMail, ulid()));
     expect(f.sendDecision()).toBe("act");
     const listed = await f.send("GET", "/api/agent/rules");
     expect(listed.status).toBe(200);
@@ -186,7 +190,7 @@ describe("Always allow routes", () => {
 
   it("sits behind the install token and the Origin check", async () => {
     const f = setup();
-    const rule = f.rules.add("send", onMail, ulid());
+    const rule = saved(f.rules.add("send", onMail, ulid()));
     f.session.taskAutonomy.grant("send", { scope: "task", label: "For this task" }, ulid());
     const log = new EventLog(f.home);
     const app = createApp({ token: TOKEN, port: 4783, eventLog: log, agent: f.deps });

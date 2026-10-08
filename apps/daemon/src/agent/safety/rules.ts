@@ -95,7 +95,12 @@ export class RulesStore {
           (rule.scope === "app" && rule.app === place.app)),
     );
   }
-  add(actionClass: ActionClass, option: AlwaysOption, createdFrom: string): AutonomyRule {
+  // Returns the new rule, or nothing when the same rule is already saved.
+  add(
+    actionClass: ActionClass,
+    option: AlwaysOption,
+    createdFrom: string,
+  ): AutonomyRule | undefined {
     const rules = this.#current();
     const same = rules.find(
       (rule) =>
@@ -104,7 +109,7 @@ export class RulesStore {
         rule.site === option.site &&
         rule.app === option.app,
     );
-    if (same) return same;
+    if (same) return undefined;
     if (rules.length >= MAX_RULES)
       throw new RuleError(409, `You can keep up to ${MAX_RULES} Always allow choices.`);
     const rule = Rule.parse({

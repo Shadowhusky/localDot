@@ -21,7 +21,7 @@ import { authorizePrepared } from "./authorize.ts";
 import { alwaysOptions, decide, placeOf } from "./autonomy.ts";
 import { nativeActionFacts } from "./classify.ts";
 import type { RiskFacts } from "./risk.ts";
-import { RulesStore } from "./rules.ts";
+import { MAX_RULES, RulesStore } from "./rules.ts";
 import { TaskAutonomy } from "./task-autonomy.ts";
 
 const SECRET = "synthetic-known-secret-0123";
@@ -426,6 +426,7 @@ describe("Always allow precedence", () => {
     new RulesStore(dir).remove(change.id);
     expect(next()).toBe("ask");
     task.grant("send", TASK, ulid());
+    expect(task.grant("send", TASK, ulid())).toBeUndefined();
     expect(next()).toBe("act");
     expect(task.revoke("send")).toEqual({
       scope: "task",
@@ -762,6 +763,50 @@ describe("Always allow on this site, end to end", () => {
     expect((await t.card()).always).toEqual([TASK, ALWAYS]);
     expect(await t.answer("deny")).toBe(true);
     expect(await pending).toBeUndefined();
+  });
+
+  it("logs a rule once when the same rule was saved while the card waited", async () => {
+    const dir = home();
+    const t = task(dir);
+    const pending = t.send(`${MAIL}/compose`);
+    await t.card();
+    new RulesStore(dir).add("send", site(MAIL), ulid());
+    expect(await t.answer("approve", "site")).toBe(true);
+    expect((await pending)?.approved).toBe(true);
+    expect(t.events.filter((event) => event.type === "rule.created")).toEqual([]);
+    expect(new RulesStore(dir).list().rules).toHaveLength(1);
+  });
+
+  it.each<[string, (dir: string) => void, RegExp]>([
+    [
+      "an unreadable rules.json",
+      (dir) => writeFileSync(join(dir, "rules.json"), "{", { mode: 0o600 }),
+      /could not be read/,
+    ],
+    [
+      "a full rules.json",
+      (dir) => {
+        const rules = new RulesStore(dir);
+        for (let n = 0; n < MAX_RULES; n++)
+          rules.add("post", site(`https://${n}.example.test`), ulid());
+      },
+      /up to 200/,
+    ],
+  ])("approves once and says so when %s cannot take the choice", async (_, spoil, reason) => {
+    const dir = home();
+    const t = task(dir);
+    const pending = t.send(`${MAIL}/compose`);
+    await t.card();
+    spoil(dir);
+    expect(await t.answer("approve", "site")).toBe(true);
+    expect((await pending)?.approved).toBe(true);
+    const resolved = t.events.find((event) => event.type === "approval.resolve");
+    expect(resolved?.data).toMatchObject({ decision: "approve", by: "user" });
+    expect(String(resolved?.data.note)).toMatch(
+      /^Approved once\. Your Always allow choice was not saved\. /,
+    );
+    expect(String(resolved?.data.note)).toMatch(reason);
+    expect(t.events.some((event) => event.type === "rule.created")).toBe(false);
   });
 
   it("still hands off a known secret on an allowed site", async () => {
