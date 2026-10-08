@@ -1,5 +1,6 @@
 import { BudgetRaiseRequest } from "@localdot/protocol";
 import { useRef, useState } from "react";
+import { ownedPause } from "../session/task-hud.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { TaskControls } from "./useTaskControls.ts";
 import "./usage.css";
@@ -39,7 +40,8 @@ export function TaskRecovery({
     !agent.sessionId ||
     agent.model.ended ||
     !state ||
-    !["paused", "error"].includes(state.state)
+    !["paused", "error"].includes(state.state) ||
+    (state.state === "paused" && ownedPause(state.reason))
   )
     return null;
   const subscription = agent.snapshot?.models?.kind === "chatgpt" || !!agent.model.subscription;

@@ -27,7 +27,8 @@ import { useAppearance } from "./onboarding/appearance.ts";
 import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
 import { ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
-import { mergeHud, sessionHud, stepRows } from "./session/session-view.ts";
+import { stepRows } from "./session/session-view.ts";
+import { mergeHud, taskFacts, taskHud } from "./session/task-hud.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
@@ -407,11 +408,16 @@ function Theatre({ api }: { api: ApiClient }) {
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? hudFor({ cell: stageCell, status, pending })
       : hud;
-  const now = useNowMs(session.model, session.version);
-  const sHud = session.sessionId ? sessionHud(session.model, now) : null;
+  const facts = taskFacts(agent.model);
+  const now = useNowMs(
+    session.model,
+    session.version,
+    (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
+  );
+  const task = session.sessionId ? taskHud(session.model, now, facts) : null;
   const sessionMerged = mergeHud(
     error ? { ...containedHud, caption: error } : containedHud,
-    controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped" ? null : sHud,
+    controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped" ? null : task,
   );
   const merged = {
     ...sessionMerged,
@@ -479,7 +485,7 @@ function Theatre({ api }: { api: ApiClient }) {
               stopEnabled={controls.canStop}
               onRetry={retry}
             />
-            {session.sessionId && (
+            {task && !session.ended && (
               <span className="task-connection">
                 {agent.error
                   ? "Activity unavailable"
@@ -487,11 +493,11 @@ function Theatre({ api }: { api: ApiClient }) {
                     ? "Connection lost"
                     : agent.connection === "connecting"
                       ? "Connecting…"
-                      : agent.snapshot?.status === "idle"
+                      : task.phase === "finished"
                         ? "Ready for follow-up"
-                        : agent.model.pendingTakeover
+                        : task.row === "takeover"
                           ? "Your turn"
-                          : agent.model.pendingAsk
+                          : task.phase === "waiting"
                             ? "Waiting for you"
                             : "Task activity"}
               </span>

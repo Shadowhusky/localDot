@@ -1,8 +1,7 @@
 import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
 import { emptyModel, foldEvents } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
-import { hudFor } from "../cells/hud-state.ts";
-import { mergeHud, sessionHud, stepRows } from "./session-view.ts";
+import { stepRows } from "./session-view.ts";
 
 let seq = 0;
 const ev = (
@@ -67,54 +66,7 @@ const log = [
     "s2",
   ),
 ];
-const cell = {
-  id: "01JXYZ0000000000000000ABCD",
-  state: "ready" as const,
-  scale: 2 as const,
-  createdAt: "",
-  stream: { connection: "live" as const, viewers: 1, lastUpstreamAt: null },
-};
-
-describe("sessionHud", () => {
-  it("keeps paused controls and caption even if session end is delayed or an old verdict remains", () => {
-    const frozen = hudFor({ cell: { ...cell, paused: true }, status: "known", pending: null });
-    const working = sessionHud(foldEvents(emptyModel(), log), 1200);
-    for (const state of ["working", "idle", "done", "stopped", "error"] as const) {
-      const merged = mergeHud(frozen, { ...working, state });
-      expect(merged).toMatchObject({
-        label: "Paused",
-        caption: frozen.caption,
-        control: false,
-        live: false,
-        action: { kind: "resume" },
-      });
-      expect(merged.stop).toBeUndefined();
-    }
-    expect(
-      mergeHud(
-        { ...frozen, caption: "The key layer is offline." },
-        { ...working, state: "stopped" },
-      ).caption,
-    ).toBe("The key layer is offline.");
-  });
-
-  it("keeps pause authoritative while relisting after a lost Resume response and during gate recovery", () => {
-    const working = sessionHud(foldEvents(emptyModel(), log), 1200);
-    const paused = { ...cell, paused: true as const };
-    for (const view of [
-      { cell: paused, status: "known" as const, pending: "list" as const },
-      { cell: { ...paused, state: "starting" as const }, status: "known" as const, pending: null },
-    ]) {
-      const hud = hudFor(view);
-      expect(hud.paused).toBe(true);
-      const merged = mergeHud(hud, working);
-      expect(merged).toMatchObject({ label: "Paused", control: false, live: false });
-      expect(merged.stop).toBeUndefined();
-      expect(merged.caption).toBe(hud.caption);
-    }
-    expect(hudFor({ cell: paused, status: "known", pending: "list" }).action.enabled).toBe(false);
-  });
-
+describe("stepRows", () => {
   it("keeps a step's earliest action time for interleaved key uses", () => {
     const model = foldEvents(emptyModel(), [
       ...log,
@@ -124,55 +76,6 @@ describe("sessionHud", () => {
       { id: "s1", startT: 20 },
       { id: "s2", startT: 1110 },
     ]);
-  });
-
-  it("labels the current action in the present progressive with the elapsed time after 5 s", () => {
-    const m = foldEvents(emptyModel(), log);
-    expect(sessionHud(m, 1200)).toMatchObject({
-      label: 'Typing "B2"',
-      control: true,
-      state: "working",
-      elapsedS: null,
-    });
-    expect(sessionHud(m, 7200)).toMatchObject({ elapsedS: 7 });
-    expect(
-      sessionHud(
-        foldEvents(emptyModel(), [...log, ev("session.end", 2000, { reason: "done" })]),
-        2500,
-      ),
-    ).toMatchObject({ label: "Done", control: false, state: "done" });
-  });
-
-  it("merges into the cell HUD: the session owns the label and the Stop while live", () => {
-    const merged = mergeHud(
-      hudFor({ cell, status: "known", pending: null }),
-      sessionHud(foldEvents(emptyModel(), log), 1200),
-    );
-    expect(merged).toMatchObject({
-      label: 'Typing "B2"',
-      action: { kind: "stop", enabled: true },
-      stop: true,
-      control: true,
-      live: true,
-    });
-    expect(mergeHud(hudFor({ cell, status: "known", pending: null }), null)).toMatchObject({
-      label: "Live",
-      action: { kind: "stop", enabled: true },
-      control: false,
-    });
-    // A finished session keeps its verdict on the HUD while the computer is live, and gives the
-    // computer's own Stop back.
-    const done = sessionHud(
-      foldEvents(emptyModel(), [...log, ev("session.end", 2000, { reason: "done" })]),
-      2500,
-    );
-    expect(mergeHud(hudFor({ cell, status: "known", pending: null }), done)).toMatchObject({
-      label: "Done",
-      caption: "Done.",
-      action: { kind: "stop", enabled: true },
-      control: false,
-    });
-    expect(mergeHud(hudFor({ cell, status: "known", pending: null }), done).stop).toBeUndefined();
   });
 
   it("lists steps with their thumbnail and target", () => {
