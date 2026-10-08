@@ -1,0 +1,691 @@
+/* Overlays enter along the path they leave by: popups grow out of their anchor, the side sheet slides
+   in from the right, the bottom sheet rises from the bottom edge. Under reduced motion they only
+   fade. */
+@layer kit {
+  /* Every movement below is scaled by --_motion, which reduced motion sets to 0. */
+  .ui-layer {
+    --_motion: 1;
+    --_nudge: calc(var(--spacing) * var(--_motion));
+    --_shrink: calc(1 - 0.03 * var(--_motion));
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    pointer-events: none;
+  }
+
+  .ui-layer > * {
+    pointer-events: auto;
+  }
+
+  /* A trigger stays lit while the menu or popover it opened is showing. */
+  .ui-button[aria-expanded="true"] {
+    --_face: var(--_bg-pressed);
+    color: var(--_fg-hover);
+  }
+
+  .ui-icon-button[aria-expanded="true"] {
+    --_face: var(--color-state-pressed);
+    color: var(--color-fg-1);
+  }
+
+  .ui-scrim,
+  .ui-catcher {
+    position: absolute;
+    inset: 0;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .ui-scrim {
+    background-color: var(--color-scrim);
+    transition: opacity var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-layer[data-closing] > .ui-scrim {
+    opacity: 0;
+    transition-duration: var(--dur-exit);
+  }
+
+  @starting-style {
+    .ui-scrim {
+      opacity: 0;
+    }
+  }
+
+  :is(.ui-popup, .ui-sheet, .ui-dialog):focus-visible {
+    outline: none;
+  }
+
+  /* Popover and menu. */
+  .ui-popup {
+    position: fixed;
+    top: 0;
+    left: 0;
+    display: flex;
+    flex-direction: column;
+    max-width: calc(100vw - var(--spacing) * 4);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: var(--radius-lg);
+    background-color: var(--color-overlay);
+    box-shadow: var(--shadow-overlay);
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-control-pressed) transparent;
+    transition:
+      opacity var(--dur-hover) var(--ease-enter),
+      scale var(--dur-sheet) var(--ease-spring),
+      translate var(--dur-sheet) var(--ease-spring);
+  }
+
+  .ui-layer[data-closing] > .ui-popup {
+    opacity: 0;
+    scale: var(--_shrink);
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      scale var(--dur-exit) var(--ease-exit),
+      translate var(--dur-exit) var(--ease-exit);
+  }
+
+  /* It starts a little toward its anchor and settles away from it. */
+  .ui-layer[data-closing] > .ui-popup {
+    translate: 0 calc(var(--_nudge) * -1);
+  }
+
+  .ui-layer[data-closing] > .ui-popup[data-side="top"] {
+    translate: 0 var(--_nudge);
+  }
+
+  .ui-layer[data-closing] > .ui-popup[data-side="left"] {
+    translate: var(--_nudge) 0;
+  }
+
+  .ui-layer[data-closing] > .ui-popup[data-side="right"] {
+    translate: calc(var(--_nudge) * -1) 0;
+  }
+
+  /* Inserted holding this state with no transition, then placed and let go (see Popover.tsx). */
+  .ui-popup[data-placing] {
+    opacity: 0;
+    scale: var(--_shrink);
+    translate: 0 calc(var(--_nudge) * -1);
+    transition: none;
+  }
+
+  .ui-popup[data-placing][data-side="top"] {
+    translate: 0 var(--_nudge);
+  }
+
+  .ui-popup[data-placing][data-side="left"] {
+    translate: var(--_nudge) 0;
+  }
+
+  .ui-popup[data-placing][data-side="right"] {
+    translate: calc(var(--_nudge) * -1) 0;
+  }
+
+  .ui-popover {
+    gap: calc(var(--spacing) * 3);
+    width: max-content;
+    max-width: min(calc(var(--spacing) * 80), calc(100vw - var(--spacing) * 4));
+    padding: calc(var(--spacing) * 4);
+  }
+
+  .ui-popover-title {
+    font:
+      var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+      var(--font-ui);
+  }
+
+  .ui-menu {
+    min-width: calc(var(--spacing) * 50);
+    max-width: min(calc(var(--spacing) * 80), calc(100vw - var(--spacing) * 4));
+    padding: var(--spacing);
+  }
+
+  .ui-menu-item {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+    width: 100%;
+    min-height: calc(var(--spacing) * 8);
+    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2);
+    border: 0;
+    border-radius: var(--radius-md);
+    background-color: transparent;
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    text-align: start;
+    cursor: default;
+    user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    outline: none;
+    opacity: 1;
+    transform: none;
+    transition: background-color var(--dur-hover) var(--ease-standard);
+  }
+
+  .ui-menu-item:focus {
+    background-color: var(--color-control-hover);
+  }
+
+  .ui-menu-item[aria-disabled="true"]:focus {
+    background-color: var(--color-state-hover);
+  }
+
+  .ui-menu-item[data-pressed] {
+    background-color: var(--color-control-pressed);
+    transition-duration: var(--dur-press);
+  }
+
+  .ui-menu-icon {
+    color: var(--color-fg-2);
+  }
+
+  /* An item without an icon keeps its label in line with those of the items that have one. */
+  .ui-menu:has(.ui-menu-icon) .ui-menu-item:not(:has(> .ui-menu-icon)) {
+    padding-inline-start: calc(var(--spacing) * 8);
+  }
+
+  .ui-menu-text {
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+    min-width: 0;
+  }
+
+  .ui-menu-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ui-menu-item[aria-disabled="true"] :is(.ui-menu-label, .ui-menu-icon, .ui-menu-kbd) {
+    opacity: var(--opacity-disabled);
+  }
+
+  /* fg-3 is too faint on the overlay surface, so secondary text there is fg-2. */
+  .ui-menu-reason {
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .ui-menu-kbd {
+    margin-inline-start: auto;
+    padding-inline-start: calc(var(--spacing) * 4);
+    color: var(--color-fg-2);
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+  }
+
+  /* A touch screen has no keyboard to press, as with Kbd. */
+  @media (hover: none) and (pointer: coarse) {
+    .ui-menu-kbd {
+      display: none;
+    }
+  }
+
+  .ui-menu-separator {
+    flex-shrink: 0;
+    height: 1px;
+    border: 0;
+    margin: var(--spacing) calc(var(--spacing) * -1);
+    background-color: var(--color-hairline);
+  }
+
+  .ui-menu-group-label {
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2) var(--spacing);
+    color: var(--color-fg-2);
+    font:
+      var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
+    letter-spacing: var(--text-micro--letter-spacing);
+  }
+
+  /* Sheet. */
+  .ui-sheet {
+    position: absolute;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-overlay);
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    transition:
+      opacity var(--dur-fade) var(--ease-enter),
+      translate var(--dur-spring) var(--ease-spring),
+      scale var(--dur-spring) var(--ease-spring);
+  }
+
+  .ui-sheet[data-side="inspector"] {
+    top: calc(var(--spacing) * 2);
+    right: calc(var(--spacing) * 2);
+    bottom: calc(var(--spacing) * 2);
+    width: clamp(calc(var(--spacing) * 110), 36vw, calc(var(--spacing) * 140));
+    max-width: calc(100vw - var(--spacing) * 4);
+    border-radius: var(--radius-xl);
+  }
+
+  /* The surface runs on below the screen's edge, so a spring that overshoots never shows a gap. */
+  .ui-sheet[data-side="bottom"] {
+    --_bleed: calc(var(--spacing) * 12);
+    right: 0;
+    bottom: calc(var(--_bleed) * -1);
+    left: 0;
+    width: min(100%, calc(var(--spacing) * 160));
+    max-height: calc(100dvh - var(--spacing) * 10 - env(safe-area-inset-top) + var(--_bleed));
+    margin-inline: auto;
+    padding-bottom: var(--_bleed);
+    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
+  }
+
+  .ui-sheet[data-behind] {
+    scale: var(--_shrink);
+  }
+
+  @starting-style {
+    .ui-sheet[data-side="inspector"] {
+      opacity: 0;
+      translate: calc(var(--_nudge) * 6) 0;
+    }
+
+    .ui-sheet[data-side="bottom"] {
+      translate: 0 calc(100% * var(--_motion));
+    }
+  }
+
+  .ui-layer[data-closing] > .ui-sheet[data-side="inspector"] {
+    opacity: 0;
+    translate: calc(var(--_nudge) * 6) 0;
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      translate var(--dur-exit) var(--ease-exit);
+  }
+
+  .ui-layer[data-closing] > .ui-sheet[data-side="bottom"] {
+    translate: 0 calc(100% * var(--_motion));
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      translate var(--dur-sheet) var(--ease-exit);
+  }
+
+  /* Kit controls raise their faces (z-index 1) over their neighbours' reach, so each region keeps
+     them in its own stacking context: then the discard prompt can cover the footer. */
+  :is(.ui-sheet-handle, .ui-sheet-body, .ui-sheet-footer, .ui-sheet-prompt, .ui-dialog) {
+    isolation: isolate;
+  }
+
+  /* Pages slide over each other. */
+  .ui-sheet-pages {
+    position: relative;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .ui-sheet-page {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+    background-color: var(--color-raised);
+    transition:
+      opacity var(--dur-fade) var(--ease-enter),
+      translate var(--dur-sheet) var(--ease-spring);
+  }
+
+  @starting-style {
+    .ui-sheet-page[data-direction="forward"] {
+      opacity: 0;
+      translate: calc(var(--_nudge) * 6) 0;
+    }
+
+    .ui-sheet-page[data-direction="back"] {
+      opacity: 0;
+      translate: calc(var(--_nudge) * -6) 0;
+    }
+  }
+
+  /* A page under a nested one stays where it slid to, faded out, until Back brings it back. */
+  .ui-sheet-page:is([data-held], [data-leaving]) {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    translate: calc(var(--_nudge) * -6) 0;
+    pointer-events: none;
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      translate var(--dur-sheet) var(--ease-spring);
+  }
+
+  .ui-sheet-page[data-leaving][data-direction="back"] {
+    translate: calc(var(--_nudge) * 6) 0;
+  }
+
+  /* Once it has slid away, a held page is hidden outright, so assistive tech and find in page skip
+     it; it keeps its layout, so its scroll position survives. Back shows it again at once. */
+  .ui-sheet-page[data-held] {
+    visibility: hidden;
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      translate var(--dur-sheet) var(--ease-spring),
+      visibility 0s linear var(--dur-sheet);
+  }
+
+  .ui-sheet[data-side="bottom"][data-resizing] {
+    transition:
+      height var(--dur-sheet) var(--ease-spring),
+      translate var(--dur-spring) var(--ease-spring);
+  }
+
+  .ui-sheet-handle {
+    flex-shrink: 0;
+  }
+
+  .ui-sheet[data-side="bottom"] .ui-sheet-handle {
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  .ui-sheet-grabber {
+    width: calc(var(--spacing) * 9);
+    height: calc(var(--spacing) * 1.25);
+    margin: calc(var(--spacing) * 1.5) auto 0;
+    border-radius: var(--radius-full);
+    background-color: var(--color-fg-4);
+  }
+
+  .ui-sheet-header {
+    display: flex;
+    align-items: flex-start;
+    gap: calc(var(--spacing) * 3);
+    padding: calc(var(--spacing) * 4) calc(var(--spacing) * 3) calc(var(--spacing) * 3)
+      calc(var(--spacing) * 5);
+    border-bottom: 1px solid transparent;
+    transition: border-color var(--dur-hover) var(--ease-standard);
+  }
+
+  .ui-sheet[data-side="bottom"] .ui-sheet-header {
+    padding-top: calc(var(--spacing) * 2);
+  }
+
+  .ui-sheet[data-under-top] .ui-sheet-header {
+    border-bottom-color: var(--color-hairline);
+  }
+
+  /* Back sits above the title, its chevron on the content's edge, level with the close button. */
+  .ui-sheet-heading:has(> .ui-sheet-back) {
+    padding-top: 0;
+  }
+
+  .ui-sheet-back {
+    justify-self: start;
+    margin: 0 0 var(--spacing) calc(var(--spacing) * -3);
+  }
+
+  /* On a coarse pointer Back grows to 44 px; the close button stays centred on its row. */
+  @media (--coarse) {
+    .ui-sheet-header:has(.ui-sheet-back) > .ui-icon-button {
+      margin-top: calc(var(--spacing) * 2);
+    }
+  }
+
+  /* The title's line sits centred on the 28 px close button beside it. */
+  .ui-sheet-heading {
+    display: grid;
+    flex: 1;
+    gap: calc(var(--spacing) * 0.5);
+    min-width: 0;
+    padding-top: var(--spacing);
+  }
+
+  .ui-sheet-title {
+    font:
+      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+    letter-spacing: var(--text-title--letter-spacing);
+  }
+
+  .ui-sheet-description {
+    color: var(--color-fg-2);
+    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  }
+
+  .ui-sheet-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--spacing) calc(var(--spacing) * 5) calc(var(--spacing) * 5);
+    /* The gutter is kept whether or not the content overflows, so nothing shifts when it starts to,
+       and comes out of the padding beside it (Sheet.tsx measures it), so the content ends where the
+       header's and footer's do. */
+    padding-inline-end: max(0px, calc(var(--spacing) * 5 - var(--_gutter, 0px)));
+    scrollbar-gutter: stable;
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-control-pressed) transparent;
+  }
+
+  .ui-sheet[data-side="bottom"] .ui-sheet-body:last-child {
+    padding-bottom: calc(var(--spacing) * 5 + env(safe-area-inset-bottom));
+  }
+
+  .ui-sheet-footer {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    justify-content: flex-end;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 5);
+    border-top: 1px solid transparent;
+    transition:
+      border-color var(--dur-hover) var(--ease-standard),
+      opacity var(--dur-fade) var(--ease-enter) var(--dur-press);
+  }
+
+  /* The footer and the discard prompt over it hand over in turn: each fades out before the other
+     fades in, so the two rows of buttons never show through each other. */
+  .ui-sheet-footer[inert] {
+    opacity: 0;
+    transition:
+      border-color var(--dur-hover) var(--ease-standard),
+      opacity var(--dur-press) var(--ease-standard);
+  }
+
+  .ui-sheet[data-under-bottom] .ui-sheet-footer {
+    border-top-color: var(--color-hairline);
+  }
+
+  .ui-sheet[data-side="bottom"] .ui-sheet-footer {
+    padding-bottom: calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+  }
+
+  /* Asking before discarding covers the footer in place, so nothing above it moves. */
+  .ui-sheet-prompt {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(var(--spacing) * 3);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 5);
+    background-color: var(--color-raised-2);
+    box-shadow: inset 0 1px 0 var(--color-hairline);
+    opacity: 0;
+    translate: 0 calc(var(--_nudge) * 3);
+    pointer-events: none;
+    transition:
+      opacity var(--dur-press) var(--ease-standard),
+      translate var(--dur-exit) var(--ease-exit);
+  }
+
+  .ui-sheet-prompt[data-shown] {
+    opacity: 1;
+    translate: 0 0;
+    pointer-events: auto;
+    transition:
+      opacity var(--dur-fade) var(--ease-enter) calc(var(--dur-press) / 2),
+      translate var(--dur-spring) var(--ease-spring);
+  }
+
+  .ui-sheet[data-side="bottom"] .ui-sheet-prompt {
+    bottom: var(--_bleed);
+    padding-bottom: calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+  }
+
+  .ui-sheet-prompt-text {
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  .ui-sheet-prompt-actions {
+    display: flex;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  @media (--phone) {
+    .ui-sheet-prompt {
+      flex-direction: column;
+      align-items: stretch;
+      gap: calc(var(--spacing) * 2);
+    }
+
+    .ui-sheet-prompt-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+  }
+
+  /* Dialog. */
+  .ui-layer[data-kind="dialog"] {
+    display: grid;
+    place-items: center;
+    padding: calc(var(--spacing) * 4);
+  }
+
+  .ui-dialog {
+    position: relative;
+    display: grid;
+    gap: calc(var(--spacing) * 2);
+    width: min(100%, calc(var(--spacing) * 90));
+    padding: calc(var(--spacing) * 5);
+    border-radius: var(--radius-xl);
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-overlay);
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    transition:
+      opacity var(--dur-hover) var(--ease-enter),
+      scale var(--dur-sheet) var(--ease-spring),
+      translate var(--dur-sheet) var(--ease-spring);
+  }
+
+  .ui-dialog[data-anchored] {
+    position: fixed;
+    top: 0;
+    left: 0;
+  }
+
+  .ui-dialog[data-behind] {
+    scale: var(--_shrink);
+  }
+
+  .ui-dialog[data-placing] {
+    opacity: 0;
+    scale: var(--_shrink);
+    transition: none;
+  }
+
+  .ui-dialog[data-placing][data-anchored] {
+    translate: 0 calc(var(--_nudge) * -1);
+  }
+
+  .ui-dialog[data-placing][data-anchored][data-side="top"] {
+    translate: 0 var(--_nudge);
+  }
+
+  .ui-layer[data-closing] > .ui-dialog {
+    opacity: 0;
+    scale: var(--_shrink);
+    transition:
+      opacity var(--dur-exit) var(--ease-exit),
+      scale var(--dur-exit) var(--ease-exit),
+      translate var(--dur-exit) var(--ease-exit);
+  }
+
+  .ui-layer[data-closing] > .ui-dialog[data-anchored] {
+    translate: 0 calc(var(--_nudge) * -1);
+  }
+
+  .ui-layer[data-closing] > .ui-dialog[data-anchored][data-side="top"] {
+    translate: 0 var(--_nudge);
+  }
+
+  .ui-dialog-title {
+    font:
+      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
+    letter-spacing: var(--text-title--letter-spacing);
+  }
+
+  .ui-dialog-description {
+    color: var(--color-fg-2);
+  }
+
+  .ui-dialog-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: calc(var(--spacing) * 2);
+    margin-top: calc(var(--spacing) * 3);
+  }
+
+  @media (--phone) {
+    .ui-dialog-actions > * {
+      flex: 1;
+    }
+  }
+
+  @media (--coarse) {
+    .ui-menu-item {
+      min-height: calc(var(--spacing) * 11);
+    }
+  }
+
+  /* Only opacity changes: the sheet a drag lets go of returns at once and fades if it closes. */
+  @media (prefers-reduced-motion: reduce) {
+    .ui-layer {
+      --_motion: 0;
+    }
+
+    .ui-layer :is(.ui-popup, .ui-sheet, .ui-dialog, .ui-sheet-prompt),
+    .ui-layer[data-closing] > :is(.ui-popup, .ui-sheet, .ui-dialog),
+    .ui-layer[data-closing] > :is(.ui-popup, .ui-sheet, .ui-dialog)[data-side] {
+      transition-property: opacity;
+    }
+
+    @starting-style {
+      .ui-sheet[data-side="bottom"] {
+        opacity: 0;
+      }
+    }
+
+    .ui-layer[data-closing] > .ui-sheet[data-side="bottom"] {
+      opacity: 0;
+    }
+  }
+
+  @media (forced-colors: active) {
+    :is(.ui-popup, .ui-sheet, .ui-dialog) {
+      border: 1px solid CanvasText;
+    }
+
+    .ui-menu-item:focus {
+      forced-color-adjust: none;
+      background-color: Highlight;
+      color: HighlightText;
+    }
+  }
+}

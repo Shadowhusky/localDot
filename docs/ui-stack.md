@@ -167,11 +167,11 @@ no screen uses the kit yet, and the build test's "no kit libraries" check still 
 | --- | --- | --- |
 | Select | pass | own (T07, zero-dependency) until the controller rules; Base UI as a lazy chunk behind the same props is the alternative |
 | Combobox | pass | own (T07, zero-dependency) until the controller rules; Base UI as a lazy chunk behind the same props is the alternative |
-| Popover | pass | Base UI |
-| Menu | pass | Base UI |
+| Popover | pass | own (T08, zero-dependency) until the controller rules; Base UI as a lazy chunk behind the same API is the alternative |
+| Menu | pass | own (T08, zero-dependency) until the controller rules; Base UI as a lazy chunk behind the same API is the alternative |
 | Tooltip | pass | own (T06, zero-dependency, first paint) until the controller rules; Base UI behind the same API is the alternative |
-| Dialog / Sheet | pass | Base UI Dialog |
-| Drawer (bottom sheet) | pass | own drag over Dialog, so the budget can hold |
+| Dialog / Sheet | pass | own (T08, zero-dependency) until the controller rules; Base UI Dialog as a lazy chunk behind the same API is the alternative |
+| Drawer (bottom sheet) | pass | own drag, part of the kit's `Sheet` (T08) |
 | Toast | pass | own, so the budget can hold |
 | ScrollArea | not in the spike | Base UI (needs `KitProvider`); T09 adds it to the CSP check |
 | Checkbox, Switch, RadioGroup, Tabs | not in the spike | own (T07): native inputs and buttons carry the semantics, so Base UI would add first-paint JS for no accessibility gain |
@@ -273,9 +273,8 @@ under the production CSP.
   rail streaming beside it. The popup is `aria-hidden`: the trigger's name or `aria-describedby` already
   carries the text. Positioned with inline styles set through the CSSOM, so the CSP holds, and measured
   again after every render while open, so it stays centred when a label changes under the pointer.
-  Grows from the trigger on `--ease-spring`; opacity only under reduced motion. Escape while a hovered
-  tooltip is open and focus is elsewhere also reaches the page; T08's `LayerStack` makes the tooltip the
-  topmost layer so one Escape closes only it.
+  Grows from the trigger on `--ease-spring`; opacity only under reduced motion. While shown it is the
+  topmost layer of T08's stack (see Overlays), so one Escape closes only the tooltip, wherever focus is.
 - **Targets.** Buttons reach 6 px past their edge on fine pointers and grow to 44 px on coarse ones;
   icon buttons keep their visual size and reach to 44 px through `::after` at every size. Controls can
   sit closer than their reach, so the fill is drawn on a `::before` face that, with the control's
@@ -285,8 +284,9 @@ under the production CSP.
   control); a sticky bar or panel that can cover kit controls in the same stacking context needs
   `z-index: 2` or its own stacking context. Today that is the Keys sheet's sticky `.keys-discard` bar,
   for T20.
-- **Icons.** 36 Lucide 1.31.0 outlines (the plan's list, and `search` for T07's Combobox), drawn at
-  16 px with a 1.5 px stroke at any size. The licence is in `vendor/lucide/LICENSE`.
+- **Icons.** 37 Lucide 1.31.0 outlines (the plan's list, `search` for T07's Combobox and
+  `chevron-left` for a sheet's Back), drawn at 16 px with a 1.5 px stroke at any size. The licence is
+  in `vendor/lucide/LICENSE`.
 - **Utilities minted by accident.** Words in kit sources mint `.grid`, `.hidden` and `.resize` into the
   app's utilities. No legacy class uses those names (the build test checks), so they are inert.
 - **Cost.** App CSS grows 63.1 → 72.4 kB (13.1 → 14.9 kB gzip, as Vite reports it); app JS is
@@ -346,7 +346,7 @@ desktop and on a touch phone, under the production CSP. No screen uses them yet;
 - **Legacy press rule.** `theme.css` scales any pressed `<button>` to .97. The picker trigger and the
   segments hold `transform: none`: in WebKit the rule shrank the trigger just as the list measured it
   to open, and the popover came out 3 % narrower than its trigger.
-- **Gallery.** The stand-in gallery has a page switch (Atoms, Fields); `parts.tsx` holds the shared
+- **Gallery.** The stand-in gallery has a page switch (Atoms, Fields, Overlays); `parts.tsx` holds the shared
   section and specimen frames. The Fields page has a stand-in settings panel that closes on Escape or a
   click on its dimmed backdrop, to show the list keeping both from it, and RadioCards stands in for the
   theme picker. The page shows live specimens only; still hover, pressed and focus-visible specimens,
@@ -354,13 +354,119 @@ desktop and on a touch phone, under the production CSP. No screen uses them yet;
 - **Forced colours.** Field edges, checks, switches, chosen cards and segments, the focused field or
   trigger (a Highlight outline, since the ring is a shadow the mode drops), the chosen row's check
   (Highlight) and unavailable rows and fields (GrayText) all keep their state.
-- **Utilities minted by accident.** Kit sources now also mint `.fixed`, `.block` and `.transition`. No
-  legacy class or markup uses those names, so they stay inert.
+- **Utilities minted by accident.** Kit sources now also mint `.block` (`.fixed` and `.transition` are
+  kept out by `stack.css`, see "Overlays"). No legacy class or markup uses that name, so it stays inert.
 - **Cost.** App CSS grows 74.2 → 93.3 kB (15.4 → 18.1 kB gzip, as Vite reports it); app JS is
   unchanged, since no screen imports the kit yet. The review fixes (the held message line and the
   forced-colour states) add 0.4 kB (94.5 → 94.9 kB, 18.4 kB gzip, on top of the approval-card work
   merged since). `stack.css` loads `fields.css` and `pickers.css` on first paint for now; when the first
   screen adopts the pickers, `pickers.css` moves into their code-split chunk, per the gate 4 decision.
+
+## Overlays
+
+T08 (UI plan §4.2). Files in `src/ui/`: `LayerStack.tsx` (the stack, `useLayer`, `useExit`,
+`LayerPortal`), `Sheet.tsx` with `sheet-drag.ts`, `Dialog.tsx`, `Popover.tsx` (also `Anchored`, the base
+of every anchored popup, and `triggerProps`), `Menu.tsx`, `focus.ts`, `scroll-lock.ts`, `position.ts`,
+`scrim.ts`, `media.ts`, `finished.ts` and `overlays.css`. Unit tests sit beside them; `e2e/ui-overlays.spec.ts` drives the gallery's Overlays
+page (`?page=overlays`) under the production CSP in Chrome and WebKit, at 1440 and at 390 with touch.
+
+- **Own, zero-dependency, until the controller rules.** Gate 4 was settled before this work began (110 kB
+  gz for the kit, overlays and pickers code-split; see "Gate 4"), but the overlays were written on the
+  premise that it was still open, so they ship no Base UI code. They need an explicit ruling: stay own, or
+  move Dialog, Popover and Menu onto Base UI behind the same API as a lazy chunk, keeping the own
+  bottom-sheet drag. For own: one stack already routes Escape, focus and stacking across the kit's
+  Tooltip, the discard prompt, nested pages and menus inside sheets, which Base UI's dismissal would have
+  to be bridged to; and Sheet, Dialog, Popover and Menu add 7.3 kB gz to the app (minified, over the
+  atoms, with `@localdot/stage` and zod already loaded), against 20–51 kB gz for each Base UI part. For
+  Base UI: it carries the accessibility risk D2 gives it, and §4.2 asks every primitive to wrap it. The
+  unit and e2e specs drive the overlays through roles, keys, taps and the gallery, so they carry over to
+  a port.
+- **Pickers open through this stack.** Select and Combobox must register with it (`useLayer`, so a
+  search field inside a trapping sheet counts as inside the topmost layer), use `Anchored` for the desktop
+  popup and `Sheet` (or `attachSheetDrag` with the shared scrim and `lockScroll`) for the phone sheet,
+  and draw with these class names rather than a second `.ui-popover` or `.ui-sheet`. A popup outside the
+  stack loses focus to a trapping sheet beneath it, because the stack pulls focus that leaves the topmost
+  trapping layer back in; then Enter lands on the sheet's close button. Once a listbox sits in a layer of
+  its own, `lib/dismiss.ts` must stop treating it as a native picker that keeps Escape.
+- **One stack.** Every open overlay, and a tooltip while shown, registers with the stack. One document
+  `keydown` listener sends Escape to the topmost layer only. It leaves alone an Escape that something
+  already handled, or that a native `select` or a listbox owns (`lib/dismiss.ts`). Escape in a menu
+  inside a sheet closes the menu; Escape over a tooltip closes the tooltip. A sheet beside the page hears
+  Escape only from inside it (or with nothing focused), so the page's composer and fields keep theirs.
+- **Focus.** A modal sheet, a dialog and a popover keep Tab inside: they wrap at the ends and pull back
+  focus that escapes (Safari tabs past the last field into the page). A menu closes on Tab. Opening
+  focuses the sheet's first field (on fine pointers only, so a phone keeps its keyboard down), the
+  dialog's first and safe choice, the popover's first control, or the menu's first item when it was
+  opened from the keyboard (otherwise the menu itself, until an arrow key or the pointer). Closing puts
+  focus back on the opener, `returnFocus` or the anchor, unless the user moved it elsewhere. The opener
+  is taken once, on opening: a sheet that changes kind while open (widened from bottom sheet to
+  inspector) registers again, by when focus is already inside it. That return
+  runs in a passive effect: React restores focus to the element that had it when a commit began, which
+  undoes a focus change made in a layout effect's cleanup.
+- **Dismissal never loses edits.** With `dirty`, Escape, the close button, the dim area and a swipe show
+  "Discard unsaved changes? · Keep editing · Discard" in a bar that covers the footer, so nothing moves;
+  Escape again keeps editing. The footer and the bar hand over in turn (each fades out before the other
+  fades in), so the two rows of buttons never show through each other. The dim area closes a sheet or dialog only on a click that both starts and
+  ends on it. A mouse press there keeps focus inside; a touch's pointerdown is never cancelled, because
+  WebKit then drops the tap's click.
+- **Outside presses.** Popovers and menus lie on a transparent catcher, so a press outside only closes
+  them and never reaches the control beneath, and a tap's late click has nowhere to land. Items commit on
+  click. A closing layer stays mounted until its exit transitions have finished (`finished.ts` reads
+  them, ignoring endless ones such as a spinner, and stops waiting after 1 s), so no JS copy of a duration
+  token can cut an exit short; then it stays while a press is still down (at most 1 s more).
+- **Modal or beside.** A modal sheet dims the page, traps focus and locks scroll; one beside the page
+  does none of these. By default an inspector sits beside the page, so the HUD's Stop and incoming
+  approvals stay in reach while Settings is open (§4.2), and a bottom sheet, which covers a phone, is
+  modal; `modal` overrides either. A sheet beside the page has no dim area to dismiss it by.
+- **Triggers.** `triggerProps("menu" | "dialog", open)` gives the control that opens a menu or popover
+  its `aria-haspopup` and `aria-expanded`; the latter also keeps it lit while open. The control still
+  passes its ref as `anchor`. A popover holds Tab, so it is `aria-modal`.
+- **Scroll lock.** Inline styles through the CSSOM on `<html>` (`overflow: hidden`, `data-scroll-locked`)
+  and body padding for a classic scrollbar, reference-counted. No `<style>` element.
+- **Stacking.** Each layer is a fixed `.ui-layer` (z-index 50, like the tooltip) in its own portal in
+  `body`, so later layers paint above earlier ones. Kit controls raise their faces to z-index 1, so each
+  sheet region is its own stacking context (`isolation: isolate`) and the prompt can cover the footer.
+  A modal opened over another pushes the lower one back (scale .97).
+- **Motion.** Popovers and menus grow from their anchor (`transform-origin`), starting 4 px toward it.
+  They are inserted holding that start state with no transition (`data-placing`), placed, then let go:
+  `@starting-style` would fix the start at the first style flush, before the flip to the other side is
+  known. The side sheet slides 24 px and fades in on `--ease-spring`; the bottom sheet rises from 100%
+  on `--ease-spring` and leaves on `--ease-exit`. Exits retrace the entrance. Every movement is scaled
+  by `--_motion` on `.ui-layer`, which reduced motion sets to 0, leaving opacity alone.
+- **Bottom sheet drag.** From the grabber and header with any pointer, or from the content by touch when
+  it is scrolled to the top and the finger moves down. Past 10 px of slop it follows the finger 1:1 from
+  where it was grabbed; pulled up past rest it stretches by a rubber band that never exceeds the 48 px of
+  surface below the screen's edge. A release is projected with deceleration .998: past 30% of the height
+  it closes, otherwise it springs back, with the release velocity handed to a closed-form spring from
+  `@localdot/stage` (ζ 1, or ζ .8 after a flick). A sheet still moving can be grabbed again from where
+  it is. With unsaved changes it springs back and asks. Moves are followed on the window, since the first
+  ones can leave the sheet before the drag takes the pointer.
+- **Nested pages.** `page` names the page on show and `back` gives it a Back above its title. A new
+  page slides 24 px in from the right over the old one, which slides 24 px left and fades; Back runs the
+  same path the other way. The pages a nested page was opened from stay mounted under it, faded out and
+  inert, in the order they were first shown (a DOM move would drop scroll and focus), so Back finds each
+  as it was: its state, its scroll position, and focus on the row that led on. A new page takes focus
+  (its first field, else Back). A page is "back" when it is one of those held, so any depth unwinds one
+  page at a time. A bottom sheet eases between the pages' heights. Escape and the close button still
+  dismiss the whole sheet.
+- **Phones.** `side="auto"` is a bottom sheet under 760 px. Menu rows grow to 44 px on coarse pointers
+  and hide their shortcuts on touch screens. A menu item without an icon keeps its label in line with
+  the items that have one. The sheet body keeps a stable scrollbar gutter, so its content does not shift
+  when it first overflows under a classic scrollbar.
+- **Cost.** App CSS 73.5 → 85.1 kB (15.1 → 16.5 kB gzip); app JS is unchanged, because no screen uses
+  the overlays yet. `stack.css` keeps `container`, `fixed`, `visible`, `inline` and `transition` (words
+  in the kit's prose) from minting utilities.
+- **Gallery.** The stand-in gallery switches pages with `?page=overlays` and loads `@localdot/protocol/csp`
+  first, as the app does: the sheet's spring comes from `@localdot/stage`, which brings zod, whose
+  `Function` probe the CSP otherwise reports.
+- **Visual baselines.** `e2e/ui/overlays.spec.ts` runs on T01's harness over the Overlays page of its
+  gallery (`/gallery/#overlays`) and keeps `ui-sheet-inspector` (c14), `ui-sheet-bottom` (w39) and
+  `ui-dialog-destructive` (both).
+- **Not yet.** Select and Combobox on this stack (see "Pickers open through this stack"), with T08's
+  Playwright scenarios (a), (b) and (f) and the `ui-select-*` and `ui-combobox-search` baselines.
+  G3a on iOS Safari: Playwright's WebKit sends no touch moves, so a content drag from the top, the
+  `<html>` scroll lock against rubber-banding, the fixed bottom sheet with the keyboard up and the 48 px
+  bleed have been seen only in Chrome's touch emulation.
 
 ## Notes for the tasks that build on this
 
