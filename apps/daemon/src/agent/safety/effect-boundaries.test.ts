@@ -724,6 +724,10 @@ describe("immediate effect ownership", () => {
       "Hold",
       "1.5 s",
     ]);
+    expect(await cardFor({ action: "hold_key", keys: ["Delete"], ms: 3000 })).toContainEqual([
+      "Hold",
+      "3 s (repeats while held)",
+    ]);
     expect(f.effects()).toHaveLength(0);
   });
   it("calling an effect handler directly without a consumed dispatcher permit executes nothing", async () => {

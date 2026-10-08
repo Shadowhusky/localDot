@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { keyName, keysymOf } from "./keys.ts";
+import { keyName, keysymOf, repeatsWhileHeld } from "./keys.ts";
 
 describe("keyName", () => {
   it("maps the common aliases onto X keysym names", () => {
@@ -128,5 +128,15 @@ describe("keysymOf", () => {
     expect(keysymOf("é")).toBe(0xe9);
     expect(keysymOf("€")).toBe(0x10020ac);
     expect(keysymOf("\n")).toBe(0xff0d);
+  });
+});
+
+describe("repeatsWhileHeld", () => {
+  it("is false for modifiers and locks alone, true once any other key is held", () => {
+    expect(repeatsWhileHeld(["shift"])).toBe(false);
+    expect(repeatsWhileHeld(["ctrl", "alt", "Super_R", "AltGr", "Caps_Lock"])).toBe(false);
+    expect(repeatsWhileHeld(["b"])).toBe(true);
+    expect(repeatsWhileHeld(["Delete"])).toBe(true);
+    expect(repeatsWhileHeld(["ctrl", "z"])).toBe(true);
   });
 });

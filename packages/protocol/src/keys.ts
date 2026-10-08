@@ -123,6 +123,39 @@ export function keysymOf(name: string): number {
   return sym;
 }
 
+// Modifiers and locks: X does not repeat them while they are held down.
+const UNREPEATED = new Set([
+  "Shift_L",
+  "Shift_R",
+  "Control_L",
+  "Control_R",
+  "Alt_L",
+  "Alt_R",
+  "Meta_L",
+  "Meta_R",
+  "Super_L",
+  "Super_R",
+  "Hyper_L",
+  "Hyper_R",
+  "ISO_Level3_Shift",
+  "ISO_Level5_Shift",
+  "Mode_switch",
+  "Caps_Lock",
+  "Shift_Lock",
+  "Num_Lock",
+]);
+
+// Whether holding the combo down types it again and again: any key but a modifier repeats.
+export function repeatsWhileHeld(combo: readonly string[]): boolean {
+  return combo.some((key) => {
+    try {
+      return !UNREPEATED.has(keyName(key));
+    } catch {
+      return true;
+    }
+  });
+}
+
 // Every name of a combo resolves, or the first that does not names its close matches.
 export function checkCombo(combo: readonly string[]): string | undefined {
   for (const key of combo) {

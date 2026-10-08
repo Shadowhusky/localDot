@@ -811,7 +811,8 @@ app.get("/owned-preview.js", (c) => c.body(DESKTOP_JS, 200, { "content-type": "t
 
 // QA control plane (no auth; loopback only, scratch fixture).
 const pendingApprovals: AbortController[] = [];
-// A keyboard approval as the daemon builds it: a repeated key (?kind=repeat) or a hold (?kind=hold).
+// A keyboard approval as the daemon builds it: a repeated key (?kind=repeat), a held modifier
+// (?kind=hold) or a held key that repeats (?kind=hold-repeat).
 const KEY_CARDS: Record<string, [string, string][]> = {
   repeat: [
     ["Tool", "computer"],
@@ -824,6 +825,12 @@ const KEY_CARDS: Record<string, [string, string][]> = {
     ["Action", "key"],
     ["Keys", "shift"],
     ["Hold", "1.5 s"],
+  ],
+  "hold-repeat": [
+    ["Tool", "computer"],
+    ["Action", "key"],
+    ["Keys", "Delete"],
+    ["Hold", "3 s (repeats while held)"],
   ],
 };
 app.post("/__qa/approval", (c) => {

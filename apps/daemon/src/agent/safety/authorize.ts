@@ -1,4 +1,5 @@
 import { ApprovalCardDraft, type ToolName, UploadApproval } from "@localdot/protocol";
+import { repeatsWhileHeld } from "@localdot/protocol/keys";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { OncePermit } from "./approvals.ts";
 import { actionDigest, buildApprovalCard, classify, type RiskFacts } from "./risk.ts";
@@ -80,8 +81,11 @@ export async function authorizePrepared(
         fields.push(["Keys", boundedPreview(action.combo.join(" + "), ctx)]);
       if (typeof action.repeat === "number")
         fields.push(["Repeat", boundedPreview(`${action.repeat} times`, ctx)]);
-      if (typeof action.holdMs === "number")
-        fields.push(["Hold", boundedPreview(`${action.holdMs / 1000} s`, ctx)]);
+      if (typeof action.holdMs === "number") {
+        const repeats = Array.isArray(action.combo) && repeatsWhileHeld(action.combo.map(String));
+        const held = `${action.holdMs / 1000} s${repeats ? " (repeats while held)" : ""}`;
+        fields.push(["Hold", boundedPreview(held, ctx)]);
+      }
       if (action.point && typeof action.point === "object")
         fields.push(["Pointer", boundedPreview(JSON.stringify(action.point), ctx)]);
       if (action.verb === "click")
