@@ -220,6 +220,8 @@ describe("the tools", () => {
     expect(refused.body).toMatchObject({ ok: false });
     expect(refused.body.content[0]?.text).toMatch(/unknown key "Retrun"; did you mean Return/);
     expect((await h.call("computer", { action: "hold_key", keys: ["shift"] })).body.ok).toBe(false);
+    const held = await h.call("computer", { action: "hold_key", keys: ["shfit"], ms: 1000 });
+    expect(held.body.content[0]?.text).toMatch(/unknown key "shfit"; did you mean shift/);
     expect(h.actions).toHaveLength(1);
   });
 

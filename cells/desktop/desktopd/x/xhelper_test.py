@@ -654,6 +654,16 @@ class Keys(unittest.TestCase):
                 cmds.cmd_keys({"combo": [bad]})
 
 
+class Clicks(unittest.TestCase):
+    def test_a_click_stopped_while_its_button_is_down_still_releases_it_and_its_modifiers(self):
+        cmds, kb = keyboard()
+        with patch.object(xhelper.time, "sleep", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            cmds.cmd_click({"x": 1, "y": 2, "button": 1, "holdMs": 50, "mods": ["Shift_L"]})
+        self.assertEqual(kb.events[-4:], [(X.KeyPress, 50), (X.ButtonPress, 1),
+                                          (X.ButtonRelease, 1), (X.KeyRelease, 50)])
+
+
 class Holds(unittest.TestCase):
     def test_holds_keys_down_until_released(self):
         cmds, kb = keyboard()

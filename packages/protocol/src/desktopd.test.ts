@@ -18,6 +18,22 @@ describe("desktopd wire schemas", () => {
     expect(req.holdMs).toBe(0);
   });
 
+  it("bounds a key's repeat to 2-100 presses and its hold to 30 s", () => {
+    const key = (more: object) =>
+      InputRequest.safeParse({ input: { kind: "key", combo: ["a"], ...more } }).success;
+    expect([key({ repeat: 2 }), key({ repeat: 100 }), key({ holdMs: 30_000 })]).toEqual([
+      true,
+      true,
+      true,
+    ]);
+    expect([key({ repeat: 1 }), key({ repeat: 101 }), key({ repeat: 2.5 })]).toEqual([
+      false,
+      false,
+      false,
+    ]);
+    expect([key({ holdMs: 0 }), key({ holdMs: 30_001 })]).toEqual([false, false]);
+  });
+
   it("caps typed text and rejects an unknown app", () => {
     expect(() =>
       TypeRequest.parse({

@@ -70,6 +70,9 @@ describe("the v1 tool table", () => {
     expect(
       TOOL_INPUTS.computer.safeParse({ action: "click", point: { x: 1.5, y: 2 } }).success,
     ).toBe(false);
+    const keys = (repeat: number) =>
+      TOOL_INPUTS.computer.safeParse({ action: "key", keys: ["Delete"], repeat }).success;
+    expect([keys(1), keys(100), keys(101), keys(0)]).toEqual([true, true, false, false]);
     expect(
       TOOL_INPUTS.ask_user.safeParse({
         question: "Which?",
