@@ -360,6 +360,9 @@
     height: 44px;
     min-height: 44px;
   }
+  .settings-sheet .safety-settings select {
+    width: auto;
+  }
   .settings-sheet .role-enabled {
     min-height: 44px;
   }

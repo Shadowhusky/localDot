@@ -246,12 +246,14 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await context.close();
     });
 
-    test("theme choices are preview tiles and autonomy rows sit on one line", async () => {
+    test("theme choices are preview tiles and autonomy rows sit on one line down to 360", async () => {
       const { context, page } = await phone(browser);
       const sheet = await openSettings(page);
       await expectThemeTiles(sheet);
       const option = sheet.locator(".appearance-option").filter({ hasText: "Graphite" });
       expect((await option.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+      await expectAutonomyRow(sheet);
+      await page.setViewportSize({ width: 360, height: 780 });
       await expectAutonomyRow(sheet);
       await context.close();
     });
