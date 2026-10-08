@@ -47,7 +47,8 @@
   letter-spacing: 0.08em;
   color: var(--color-text-2);
 }
-.replay-house button,
+/* The Activity rail beside the replay draws its own rows. */
+.replay-house button:not(.activity-rail *),
 .replay-house select,
 .replay-delete-dialog button {
   border: 1px solid var(--color-line);
@@ -78,8 +79,8 @@
     font-size: 16px;
   }
 }
-.replay-house button:disabled,
-.replay-house button[aria-disabled="true"],
+.replay-house button:disabled:not(.activity-rail *),
+.replay-house button[aria-disabled="true"]:not(.activity-rail *),
 .replay-delete-dialog button:disabled {
   opacity: 0.5;
   cursor: default;

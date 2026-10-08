@@ -1,10 +1,5 @@
 @custom-media --coarse (pointer: coarse);
 
-/* The rail does not scroll; its one ScrollArea does, between the label and the usage line. */
-.rail.r.activity-rail {
-  overflow: hidden;
-}
-
 .activity-body {
   position: relative;
   flex: 1;
@@ -13,12 +8,13 @@
   flex-direction: column;
 }
 
-/* The scroller reaches 8 px past the rail on each side, so row highlights have room to breathe
-   while their text stays on the rail's edge. On the right, the scrollbar's gutter is that room. */
+/* The rail itself never scrolls: its one ScrollArea does, between the label and the usage line. The
+   scroller reaches 8 px past the rail on each side, so row highlights have room to breathe while
+   their text stays on the rail's edges. */
 .activity-scroll {
   flex: 1;
   margin-inline: calc(var(--spacing) * -2);
-  padding-inline: calc(var(--spacing) * 2) 0;
+  padding-inline: calc(var(--spacing) * 2);
 }
 
 .activity-content {
@@ -27,12 +23,16 @@
   padding-bottom: calc(var(--spacing) * 4);
 }
 
+.activity-content > :first-child {
+  margin-top: 0;
+}
+
 .plan-head {
   position: sticky;
   top: 0;
   z-index: 2;
-  margin-inline-start: calc(var(--spacing) * -2);
-  padding-inline-start: calc(var(--spacing) * 2);
+  margin-inline: calc(var(--spacing) * -2);
+  padding-inline: calc(var(--spacing) * 2);
   display: flex;
   align-items: center;
   gap: calc(var(--spacing) * 3);
@@ -183,12 +183,12 @@
 /* The header's highlight takes the same bleed as a row's; what it opens stays on the text edge. */
 .activity-disclosure,
 .activity-group {
-  margin-inline-start: calc(var(--spacing) * -2);
+  margin-inline: calc(var(--spacing) * -2);
 }
 
 .activity-disclosure > .ui-collapse,
 .activity-group > .ui-collapse {
-  margin-inline-start: calc(var(--spacing) * 2);
+  margin-inline: calc(var(--spacing) * 2);
 }
 
 /* A run's name over its count, the same in every run, so the headers keep one rhythm. */
@@ -249,7 +249,7 @@
 }
 
 .activity-row {
-  margin-inline-start: calc(var(--spacing) * -2);
+  margin-inline: calc(var(--spacing) * -2);
   border-radius: var(--radius-md);
   transition:
     opacity var(--dur-fade) var(--ease-enter),

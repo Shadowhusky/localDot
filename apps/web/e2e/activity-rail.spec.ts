@@ -85,6 +85,24 @@ for (const [engine, size, options] of MATRIX) {
     await rail.getByRole("button", { name: /^Sketch the dog's outline/ }).click();
     await expect(rail.getByTestId("key-use")).toHaveCount(1);
     await expect(rail.getByTestId("key-use")).toContainText("Blocked stock-images key");
+    // No text in the rail reaches past its edges, whatever the scrollbar takes.
+    expect(
+      await rail.evaluate((element) => {
+        const { left, right } = element.getBoundingClientRect();
+        const scroller = element.querySelector(".activity-scroll") as HTMLElement;
+        const walker = document.createTreeWalker(scroller, NodeFilter.SHOW_TEXT);
+        const outside: string[] = [];
+        const range = document.createRange();
+        for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+          if (!node.textContent?.trim()) continue;
+          range.selectNodeContents(node);
+          const box = range.getBoundingClientRect();
+          if (box.width && (box.left < left - 0.5 || box.right > right + 0.5))
+            outside.push(node.textContent);
+        }
+        return outside;
+      }),
+    ).toEqual([]);
     if (size === "phone")
       for (const target of await rail
         .locator(".activity-row-head, .ui-disclosure-trigger, .ui-segmented-item")
@@ -177,5 +195,21 @@ test("steps arriving while the reader follows shift nothing in the rail (chrome)
     () => (window as unknown as { railShifts: number[] }).railShifts,
   );
   expect(shifts.reduce((sum, value) => sum + value, 0)).toBeLessThan(0.001);
+  await browser.close();
+});
+
+test("a replay's steps are plain rows, not boxed buttons (chrome)", async () => {
+  fixture = await startUiFixture({ QA_ACTIVITY: "long" });
+  const browser = await ENGINES.chrome();
+  const page = await (await browser.newContext(DESKTOP)).newPage();
+  await page.goto(`${fixture.origin}/?replay=${fixture.seeded[0]}#token=${TOKEN}`);
+  const head = page.locator(".replay-house .activity-row-head").first();
+  await expect(head).toBeVisible();
+  expect(
+    await head.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return [style.borderTopWidth, style.backgroundColor];
+    }),
+  ).toEqual(["0px", "rgba(0, 0, 0, 0)"]);
   await browser.close();
 });

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
 import { createApi } from "../lib/api.ts";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { BrowserDownloads } from "./BrowserDownloads.tsx";
 import { changeDownload, listDownloads, releaseRequest } from "./download-api.ts";
 
@@ -246,4 +247,12 @@ describe("download list refresh", () => {
     await wait(2_100);
     expect(screen.queryByText(FAILED)).toBeNull();
   });
+});
+it("shows a held download in Activity before any task has started", async () => {
+  const f = fixture();
+  render(<ActivityRail rows={[]} sessionId={null} cellId={parent} scale={1} api={f.api} />);
+  expect(screen.getByText("Plan and steps appear here once dot starts.")).toBeTruthy();
+  const downloads = await screen.findByRole("region", { name: "Browser downloads" });
+  expect(within(downloads).getByText("report.pdf")).toBeTruthy();
+  expect(within(downloads).getByText("1 waiting")).toBeTruthy();
 });

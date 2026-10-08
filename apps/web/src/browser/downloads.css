@@ -9,6 +9,11 @@
   margin-top: var(--spacing);
 }
 
+/* A quiet button that starts the line sits on the text edge, not on its padding. */
+.download-actions > .ui-button[data-variant="quiet"]:first-child {
+  margin-left: calc(var(--spacing) * -2.5);
+}
+
 .download-decision-actions {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }

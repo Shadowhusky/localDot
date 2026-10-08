@@ -235,7 +235,12 @@ export function ActivityRail({
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
       {!started ? (
-        <p className="activity-empty">Plan and steps appear here once dot starts.</p>
+        <>
+          <p className="activity-empty">Plan and steps appear here once dot starts.</p>
+          {cellId && !replay && (
+            <BrowserDownloads key={cellId} api={api} cellId={cellId} releaseReady={releaseReady} />
+          )}
+        </>
       ) : (
         <div className="activity-body">
           <ScrollArea
