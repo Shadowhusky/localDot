@@ -165,10 +165,12 @@ describe("browser download review controls", () => {
     const f = fixture();
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady={false} />);
     const button = await screen.findByRole("button", { name: "Review & release" });
-    expect((button as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Discard" }) as HTMLButtonElement).disabled).toBe(
-      false,
-    );
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(button);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Discard" }).getAttribute("aria-disabled"),
+    ).toBeNull();
   });
   it("rejects a forged ownership reply before displaying or trusting it", async () => {
     const f = fixture({ ...held, parentCellId: other });
@@ -186,7 +188,7 @@ describe("browser download review controls", () => {
 it("counts one kept download as one file", async () => {
   const f = fixture(released);
   render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
-  await screen.findByText("Saved to ~/Downloads/report.pdf");
+  await screen.findByText(/Saved to ~\/Downloads\/report\.pdf/);
   expect(screen.getByText("1 file")).toBeTruthy();
 });
 describe("download list refresh", () => {

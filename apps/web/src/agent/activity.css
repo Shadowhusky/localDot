@@ -1,6 +1,823 @@
-.plan-view {
+@custom-media --coarse (pointer: coarse);
+
+/* The rail does not scroll; its one ScrollArea does, between the label and the usage line. */
+.rail.r.activity-rail {
+  overflow: hidden;
+}
+
+.activity-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* The scroller reaches 8 px past the rail on each side, so row highlights have room to breathe
+   while their text stays on the rail's edge. */
+.activity-scroll {
+  flex: 1;
+  margin-inline: calc(var(--spacing) * -2);
+  padding-inline: calc(var(--spacing) * 2);
+}
+
+.activity-content {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: calc(var(--spacing) * 4);
+}
+
+.plan-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 8);
+  background-color: var(--color-void);
+}
+
+/* Where the steps slide under the stuck header, a short fade instead of a hard edge. */
+.plan-head::after {
+  content: "";
+  position: absolute;
+  inset: 100% 0 auto;
+  height: calc(var(--spacing) * 3);
+  background: linear-gradient(var(--color-void), transparent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.plan-head[data-stuck]::after {
+  opacity: 1;
+}
+
+.plan-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+}
+
+.plan-title > span {
+  grid-area: 1 / 1;
+  min-width: 0;
+  transition:
+    opacity var(--dur-fade) var(--ease-standard),
+    translate var(--dur-spring) var(--ease-spring);
+}
+
+.plan-title-current {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  font-weight: var(--font-weight-medium);
+  opacity: 0;
+  translate: 0 4px;
+}
+
+.plan-title-current > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-head[data-stuck] .plan-title-name {
+  opacity: 0;
+  translate: 0 -4px;
+}
+
+.plan-head[data-stuck] .plan-title-current {
+  opacity: 1;
+  translate: 0 0;
+}
+
+.plan-count {
+  flex-shrink: 0;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.plan-roll {
+  display: inline-flex;
+  overflow: hidden;
+  vertical-align: bottom;
+}
+
+.plan-roll > span {
+  transition:
+    translate var(--dur-spring) var(--ease-spring),
+    opacity var(--dur-fade) var(--ease-enter);
+}
+
+@starting-style {
+  .plan-roll > span {
+    translate: 0 70%;
+    opacity: 0;
+  }
+}
+
+.plan-list {
+  list-style: none;
+  display: grid;
+  margin: var(--spacing) 0 0;
+  padding: 0;
+}
+
+.plan-item {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr);
+  column-gap: calc(var(--spacing) * 2);
+  align-items: start;
+  padding: 5px 0;
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  transition: color var(--dur-fade) var(--ease-standard);
+}
+
+.plan-item > .ui-status-glyph {
+  margin-top: 1px;
+}
+
+.plan-item[data-state="doing"] {
+  color: var(--color-fg-1);
+  font-weight: var(--font-weight-medium);
+}
+
+.plan-text {
+  overflow-wrap: anywhere;
+}
+
+.plan-item[data-state="skipped"] .plan-text {
+  color: var(--color-fg-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--color-fg-4);
+}
+
+.plan-sentinel {
+  display: block;
+  height: 0;
+}
+
+.activity-extras {
+  display: grid;
+  margin-top: calc(var(--spacing) * 3);
+}
+
+.activity-disclosure > .ui-disclosure-trigger,
+.activity-group > .ui-disclosure-trigger {
+  width: calc(100% + var(--spacing) * 4);
+  margin-inline: calc(var(--spacing) * -2);
+}
+
+/* The chevron fills the same 16 px column as a row's icon, so every label starts on one line. */
+.activity-disclosure .ui-disclosure-chevron,
+.activity-group .ui-disclosure-chevron {
+  margin-inline: 2px;
+}
+
+.activity-notes {
+  padding: var(--spacing) 0 calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.activity-steps {
+  margin-top: calc(var(--spacing) * 6);
+}
+
+.activity-steps-head,
+.activity-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 8);
+  margin-bottom: var(--spacing);
+}
+
+.activity-steps-head h3,
+.activity-section-title {
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+}
+
+.activity-timeline {
+  display: flex;
+  flex-direction: column;
+}
+
+.activity-group + .activity-group {
+  margin-top: var(--spacing);
+}
+
+.activity-group-rows {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: var(--spacing);
+}
+
+.activity-row {
+  margin-inline: calc(var(--spacing) * -2);
+  border-radius: var(--radius-md);
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    translate var(--dur-spring) var(--ease-spring);
+}
+
+/* A row that arrives eases up into place; nothing around it moves. */
+@starting-style {
+  .activity-row {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+
+.activity-row-head {
+  display: grid;
+  /* The metric column keeps its width before a step has a duration, so the title never rewraps. */
+  grid-template-columns: 16px minmax(0, 1fr) minmax(calc(var(--spacing) * 9), auto) 16px;
+  column-gap: calc(var(--spacing) * 2);
+  align-items: center;
+  width: 100%;
+  min-height: calc(var(--spacing) * 9);
+  padding: 9px calc(var(--spacing) * 2);
+  border: 0;
+  border-radius: inherit;
+  background-color: transparent;
+  color: var(--color-fg-1);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  text-align: start;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transform: none;
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+
+button.activity-row-head:active {
+  transform: none;
+}
+
+@media (hover: hover) {
+  button.activity-row-head:not([data-pressed]):hover {
+    background-color: var(--color-state-hover);
+  }
+}
+
+button.activity-row-head[data-pressed] {
+  background-color: var(--color-state-pressed);
+  transition-duration: var(--dur-press);
+}
+
+.activity-row-head:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.activity-row-icon {
+  color: var(--color-fg-3);
+}
+
+/* The glyph keeps its column whether or not the row has a metric. */
+.activity-row-head > .ui-status-glyph {
+  grid-column: 4;
+}
+
+.activity-row-title {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.activity-row[data-open] .activity-row-title {
+  display: block;
+}
+
+.activity-row-metric {
+  justify-self: end;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  white-space: nowrap;
+}
+
+.activity-row[data-current] > .activity-row-head {
+  background-color: var(--color-state-hover);
+}
+
+.activity-row[data-future] {
+  opacity: var(--opacity-disabled);
+}
+
+.activity-row[data-danger] :is(.activity-row-icon, .activity-row-title) {
+  color: var(--color-danger-fg);
+}
+
+.activity-row-reason {
+  margin-top: -6px;
+  padding: 0 calc(var(--spacing) * 2) 9px calc(var(--spacing) * 8);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+/* The chip runs inline, so the reason flows on beside it rather than dropping under it. */
+.activity-row-reason > .ui-badge {
+  margin-right: calc(var(--spacing) * 2);
+  vertical-align: 1px;
+}
+
+.activity-row[data-danger] .activity-row-reason {
+  font-family: var(--font-mono);
+}
+
+.activity-detail {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+  padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 8);
+}
+
+.activity-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.activity-detail-note {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.activity-frame {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.activity-frame > img {
+  position: absolute;
+  max-width: none;
+  height: auto;
+}
+
+.activity-frame > img:not(.activity-frame-crop) {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.activity-frame-target {
+  position: absolute;
+  border-radius: var(--radius-xs);
+  box-shadow:
+    0 0 0 1.5px var(--color-fg-1),
+    0 0 0 3px var(--color-scrim);
+}
+
+.app.control .activity-row[data-current] .activity-frame-target {
+  box-shadow:
+    0 0 0 1.5px var(--color-xenon),
+    0 0 0 3px var(--color-scrim);
+}
+
+.activity-keys {
+  list-style: none;
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  margin: 0;
+  padding: 0;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.activity-keys li {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  column-gap: calc(var(--spacing) * 2);
+  align-items: center;
+}
+
+.activity-keys .ui-icon {
+  color: var(--color-fg-3);
+}
+
+.activity-keys-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.activity-keys-request {
+  grid-column: 2 / -1;
+  min-width: 0;
+  color: var(--color-fg-3);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+}
+
+.activity-page {
+  align-self: flex-start;
+  margin-block: var(--spacing);
+}
+
+.activity-empty {
+  padding: calc(var(--spacing) * 2) 0;
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.rail.r.activity-rail > .activity-empty {
+  padding-top: 0;
+}
+
+.activity-note {
+  margin-top: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.activity-section,
+.activity-results {
+  display: flex;
+  flex-direction: column;
+  margin-top: calc(var(--spacing) * 6);
+}
+
+.activity-section-title + .activity-row {
+  margin-top: var(--spacing);
+}
+
+.activity-section-meta {
+  flex-shrink: 0;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.activity-result + .activity-result {
+  margin-top: calc(var(--spacing) * 4);
+}
+
+.result-summary {
+  color: var(--color-fg-1);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.activity-files {
+  list-style: none;
+  display: grid;
+  margin: calc(var(--spacing) * 3) 0 0;
+  padding: 0;
+}
+
+.activity-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  column-gap: calc(var(--spacing) * 3);
+  align-items: center;
+  min-height: calc(var(--spacing) * 10);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.activity-file:last-child {
+  border-bottom: 1px solid var(--color-hairline);
+}
+
+.activity-file-name {
+  min-width: 0;
+  color: var(--color-fg-1);
+  overflow-wrap: anywhere;
+}
+
+.activity-file-size {
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+.activity-files-status {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  margin-top: calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+}
+
+/* Over the list, so it never takes a line from it. It rises in when the reader leaves the end. */
+.activity-jump {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: calc(var(--spacing) * 3);
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  height: calc(var(--spacing) * 8);
+  padding: 0 calc(var(--spacing) * 3) 0 calc(var(--spacing) * 2.5);
+  border: 0;
+  border-radius: var(--radius-full);
+  background-color: var(--color-raised-2);
+  box-shadow: var(--shadow-raised);
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  white-space: nowrap;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  translate: -50% 8px;
+  scale: 0.97;
+  pointer-events: none;
+  transform: none;
+  transition:
+    opacity var(--dur-exit) var(--ease-exit),
+    translate var(--dur-exit) var(--ease-exit),
+    scale var(--dur-exit) var(--ease-exit),
+    background-color var(--dur-hover) var(--ease-standard);
+}
+
+.activity-jump[data-shown] {
+  opacity: 1;
+  translate: -50% 0;
+  scale: 1;
+  pointer-events: auto;
+  transition:
+    opacity var(--dur-fade) var(--ease-enter),
+    translate var(--dur-spring) var(--ease-spring),
+    scale var(--dur-spring) var(--ease-spring),
+    background-color var(--dur-hover) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .activity-jump:not([data-pressed]):hover {
+    background-color: var(--color-overlay);
+  }
+}
+
+.activity-jump[data-pressed] {
+  scale: 0.97;
+  background-color: var(--color-overlay);
+  transition-duration: var(--dur-press);
+}
+
+.activity-jump:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: var(--focus-offset);
+}
+
+.activity-usage {
+  flex-shrink: 0;
+  margin-top: calc(var(--spacing) * 2);
+  padding-top: var(--spacing);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.activity-usage-trigger {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  width: calc(100% + var(--spacing) * 4);
+  min-height: calc(var(--spacing) * 8);
+  margin-inline: calc(var(--spacing) * -2);
+  padding: 0 calc(var(--spacing) * 2);
+  border: 0;
+  border-radius: var(--radius-md);
+  background-color: transparent;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-align: start;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transform: none;
+  transition:
+    background-color var(--dur-hover) var(--ease-standard),
+    color var(--dur-hover) var(--ease-standard);
+}
+
+button.activity-usage-trigger:active {
+  transform: none;
+}
+
+@media (hover: hover) {
+  .activity-usage-trigger:not([data-pressed]):hover {
+    background-color: var(--color-state-hover);
+    color: var(--color-fg-1);
+  }
+}
+
+.activity-usage-trigger[data-pressed],
+.activity-usage-trigger[aria-expanded="true"] {
+  background-color: var(--color-state-pressed);
+  color: var(--color-fg-1);
+}
+
+.activity-usage-trigger:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.activity-usage-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.activity-usage-chevron {
+  color: var(--color-fg-3);
+  transition: rotate var(--dur-spring) var(--ease-spring);
+}
+
+.activity-usage-trigger[aria-expanded="true"] .activity-usage-chevron {
+  rotate: 180deg;
+}
+
+.usage-details {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+}
+
+.usage-title {
+  font:
+    var(--font-weight-semibold) var(--text-headline) / var(--text-headline--line-height)
+    var(--font-ui);
+}
+
+.usage-roles {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  margin: 0;
+}
+
+.usage-role {
+  display: grid;
+  grid-template-columns: calc(var(--spacing) * 12) minmax(0, 1fr);
+  column-gap: calc(var(--spacing) * 3);
+}
+
+.usage-role dt {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-body--line-height) var(--font-ui);
+}
+
+.usage-role dd {
+  display: grid;
+  gap: 2px;
+  margin: 0;
   min-width: 0;
 }
+
+.usage-model {
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.usage-line,
+.usage-note {
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.usage-plan {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  padding-top: calc(var(--spacing) * 3);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.usage-plan h4,
+.usage-window-name {
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.usage-window {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+}
+
+.knowledge-view {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  padding: var(--spacing) 0 calc(var(--spacing) * 3) calc(var(--spacing) * 6);
+}
+
+.knowledge-head {
+  margin-top: var(--spacing);
+  color: var(--color-fg-1);
+  font:
+    var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+}
+
+.skills-list {
+  list-style: none;
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  margin: 0;
+  padding: 0;
+}
+
+.skills-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: calc(var(--spacing) * 2);
+  row-gap: 2px;
+  align-items: center;
+}
+
+.skills-name {
+  min-width: 0;
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.skills-description {
+  grid-column: 1 / -1;
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.knowledge-file {
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-mono);
+}
+
+.knowledge-text {
+  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / 19px var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (--coarse) {
+  .activity-row-head {
+    min-height: calc(var(--spacing) * 11);
+    padding-block: 13px;
+  }
+
+  .activity-row-reason {
+    margin-top: -10px;
+    padding-bottom: 13px;
+  }
+
+  .activity-jump,
+  .activity-usage-trigger {
+    min-height: calc(var(--spacing) * 11);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .activity-row,
+  .plan-title > span,
+  .plan-roll > span {
+    translate: none;
+  }
+
+  .activity-jump,
+  .activity-jump[data-shown] {
+    translate: -50% 0;
+    scale: none;
+  }
+
+  .activity-usage-chevron {
+    transition: none;
+  }
+}
+
+/* Shared by the conversation's question form, its history pages and screen-reader text. */
 .activity-heading {
   display: flex;
   align-items: baseline;
@@ -8,80 +825,29 @@
   flex-wrap: wrap;
   gap: 4px 12px;
 }
+
 .activity-heading h3 {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
 }
+
 .activity-heading > span {
   color: var(--color-text-2);
   font-size: 11px;
 }
-.activity-filters {
-  border: 0;
-  margin: 0;
-  min-width: 0;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding: 8px 0 14px;
-}
-.activity-filters button[aria-pressed="true"] {
-  border-color: var(--color-text-2);
-  background: var(--color-surface);
-}
-.tool-row,
-.memory-card,
-.question-card,
-.skills-view {
+
+.question-card {
   border: 1px solid var(--color-line);
   border-radius: 8px;
   padding: 12px;
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.tool-row p,
-.memory-card p,
+
 .question-card p {
   margin: 8px 0;
   white-space: pre-wrap;
-}
-.tool-title {
-  font-weight: 500;
-}
-.step-reason,
-.tool-outcome,
-.input-delivery {
-  color: var(--color-text-2);
-  font-size: 12px;
-  overflow-wrap: anywhere;
-}
-.activity-changes,
-.question-history {
-  display: grid;
-  gap: 12px;
-  margin-top: 18px;
-}
-.result-summary {
-  white-space: pre-wrap;
-}
-.result-preview {
-  white-space: normal;
-}
-.skills-view h3 {
-  font-size: 15px;
-  font-weight: 600;
-}
-.skills-view ul {
-  list-style: none;
-  padding: 0;
-}
-.skills-view li {
-  margin-top: 12px;
-  overflow-wrap: anywhere;
-}
-.activity-details button {
-  margin-right: 6px;
 }
 
 .history-pages {
@@ -90,6 +856,7 @@
   gap: 8px;
   margin-block: 12px;
 }
+
 .history-pages button {
   min-height: 44px;
   padding: 8px 12px;
@@ -99,6 +866,7 @@
   color: inherit;
   font: inherit;
 }
+
 .history-pages button:disabled {
   opacity: 0.45;
 }

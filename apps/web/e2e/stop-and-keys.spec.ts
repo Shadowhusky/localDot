@@ -69,10 +69,16 @@ test("a key's use shows in the steps; Stop freezes the computer and Resume thaws
     body: JSON.stringify(script),
   });
   expect(started.status).toBe(202);
-  await expect(page.getByTestId("key-use").first()).toContainText(
-    "Used echo key → postman-echo.com",
-    { timeout: 90_000 },
-  );
+  // An allowed use folds into the step it came with; unfolding the step lists it.
+  const rail = page.getByRole("complementary", { name: "Plan and steps" });
+  await expect(async () => {
+    const head = rail.getByTestId("step-row").last().getByRole("button");
+    if ((await head.getAttribute("aria-expanded")) === "false") await head.click();
+    await expect(rail.getByRole("list", { name: "Keys used" })).toContainText(
+      "Used echo key → postman-echo.com",
+      { timeout: 2000 },
+    );
+  }).toPass({ timeout: 90_000 });
   await page.screenshot({ path: "e2e/out/key-use.png" });
 
   // Stop: the session ends, keyd drops the computer's keys, and the computer freezes.

@@ -361,21 +361,6 @@
   font-size: 11px;
   color: var(--color-text-2);
 }
-.replay-house .step[data-future] {
-  opacity: 0.42;
-}
-.replay-house .step-cap button {
-  border: 0;
-  padding: 0;
-  background: none;
-  text-align: left;
-}
-.replay-thumb img {
-  position: static;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
 .replay-compare {
   position: absolute;
   z-index: 3;

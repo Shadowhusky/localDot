@@ -2,11 +2,11 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { PlanRail } from "../shell/PlanRail.tsx";
-import { MemoryCard } from "./MemoryCard.tsx";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
+import { ChangeRow } from "./ChangeRow.tsx";
 import { type AgentChange, type AgentStep, emptyAgentModel } from "./model.ts";
 import { QuestionCard } from "./QuestionCard.tsx";
-import { ResultCard } from "./ResultCard.tsx";
+import { ResultFiles } from "./ResultFiles.tsx";
 import { SkillsView } from "./SkillsView.tsx";
 import { appendTerminal, emptyTerminal } from "./terminal-text.ts";
 
@@ -30,34 +30,34 @@ const step: AgentStep = {
   terminal: appendTerminal(emptyTerminal(), "stderr", "Useful failure output"),
 };
 
-describe("activity cards and inspection", () => {
-  it("keeps failed command output inspectable after a crash and filters without losing selected history", () => {
+describe("activity rows and inspection", () => {
+  it("keeps failed command output inspectable after a crash and filters without losing it", () => {
     const model = {
       ...emptyAgentModel(),
       steps: new Map([[step.id, step]]),
       ended: { reason: "error" as const },
     };
     const view = render(
-      <PlanRail api={api} sessionId="one" scale={1} title={null} rows={[]} agent={model} />,
+      <ActivityRail api={api} sessionId="one" scale={1} rows={[]} agent={model} />,
     );
-    expect(screen.getByText("Completion not confirmed")).toBeTruthy();
-    expect(screen.getByText("Tool failed. Exit code 7.")).toBeTruthy();
-    expect(screen.queryByLabelText("Standard error text")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Inspect Check report" }));
+    const row = screen.getByTestId("tool-row");
+    expect(row.textContent).toContain("The task ended before this step finished.");
+    expect(within(row).getByRole("img", { name: "Not confirmed" })).toBeTruthy();
+    const head = screen.getByRole("button", { name: /Check report/ });
+    fireEvent.click(head);
     expect(screen.getByLabelText("Standard error text").textContent).toBe("Useful failure output");
-    const filter = within(screen.getByRole("group", { name: "Activity filter" }));
-    fireEvent.click(filter.getByRole("button", { name: /^Computer$/ }));
+    const filter = within(screen.getByRole("radiogroup", { name: "Activity filter" }));
+    fireEvent.click(filter.getByRole("radio", { name: "Screen" }));
     expect(screen.queryByTestId("tool-row")).toBeNull();
-    expect(screen.getByLabelText("Standard error text")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Close output" }));
-    fireEvent.click(filter.getByRole("button", { name: /^All$/ }));
-    expect(screen.getByTestId("tool-row")).toBeTruthy();
-    view.rerender(
-      <PlanRail api={api} sessionId="two" scale={1} title={null} rows={[]} agent={model} />,
+    fireEvent.click(filter.getByRole("radio", { name: "All" }));
+    expect(screen.getByLabelText("Standard error text").textContent).toBe("Useful failure output");
+    view.rerender(<ActivityRail api={api} sessionId="two" scale={1} rows={[]} agent={model} />);
+    expect(screen.getByRole("button", { name: /Check report/ }).getAttribute("aria-expanded")).toBe(
+      "false",
     );
-    expect(screen.queryByRole("region", { name: "Selected output" })).toBeNull();
   });
-  it("renders plan states and relevant file diffs once without treating tool success as step completion", () => {
+
+  it("shows plan states and a step's file diff once, and never treats tool success as step completion", () => {
     const change = {
       ...source,
       type: "file" as const,
@@ -77,91 +77,93 @@ describe("activity cards and inspection", () => {
       ]),
       changes: [change],
     };
-    render(<PlanRail api={api} sessionId="one" scale={1} title={null} rows={[]} agent={model} />);
-    expect(screen.getByText("1 of 4 completed")).toBeTruthy();
-    expect(screen.getByText("Step completion not confirmed")).toBeTruthy();
-    const diff = screen.getAllByRole("button", { name: "Inspect create: report.txt" });
-    expect(diff).toHaveLength(1);
-    const trigger = diff[0];
-    if (!trigger) throw new Error("Missing relevant diff control");
-    fireEvent.click(trigger);
+    render(<ActivityRail api={api} sessionId="one" scale={1} rows={[]} agent={model} />);
+    expect(document.querySelector(".plan-count")?.textContent).toBe("1 of 4 done");
+    expect(
+      within(screen.getByRole("list", { name: "Task plan" }))
+        .getAllByRole("img")
+        .map((glyph) => glyph.getAttribute("aria-label")),
+    ).toEqual(["Next", "In progress", "Done", "Skipped"]);
+    const row = screen.getByTestId("tool-row");
+    expect(within(row).getByRole("img", { name: "Running" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Changes" })).toBeNull();
+    fireEvent.click(within(row).getByRole("button"));
+    expect(screen.getAllByLabelText("Unified text diff")).toHaveLength(1);
     expect(screen.getByLabelText("Unified text diff").textContent).toBe("+sample");
   });
-  it("names only the selected durable memory ID, suppresses already undone changes, and offers reread on conflict", () => {
+
+  it("names only the selected durable memory ID, suppresses already undone changes, and offers a reread on conflict", () => {
     const undo = vi.fn(),
       reread = vi.fn(),
-      inspect = vi.fn();
-    const view = render(
-      <MemoryCard change={source} changes={[source]} onInspect={inspect} onUndo={undo} />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Undo this change" }));
-    expect(undo).toHaveBeenCalledExactlyOnceWith(source.changeId);
-    view.rerender(
-      <MemoryCard
+      toggle = vi.fn();
+    const row = (props: Partial<Parameters<typeof ChangeRow>[0]>) => (
+      <ChangeRow
+        id="memory"
         change={source}
         changes={[source]}
-        onInspect={inspect}
+        open
+        onToggle={toggle}
         onUndo={undo}
-        onReread={reread}
-        status="conflict"
-      />,
+        {...props}
+      />
     );
+    const view = render(row({}));
+    fireEvent.click(screen.getByRole("button", { name: "Undo this change" }));
+    expect(undo).toHaveBeenCalledExactlyOnceWith(source.changeId);
+    view.rerender(row({ onReread: reread, status: "conflict" }));
     expect(
-      (screen.getByRole("button", { name: "Undo this change" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
-    fireEvent.click(screen.getByRole("button", { name: "Reread memory" }));
+      screen.getByRole("button", { name: "Undo this change" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Undo this change" }));
+    fireEvent.click(screen.getByRole("button", { name: "Read memory again" }));
     expect(reread).toHaveBeenCalledOnce();
     view.rerender(
-      <MemoryCard
-        change={source}
-        changes={[
+      row({
+        changes: [
           source,
           { ...source, id: "undo", changeId: "different", undoes: source.changeId },
-        ]}
-        onInspect={inspect}
-        onUndo={undo}
-      />,
+        ],
+      }),
     );
     expect(screen.queryByRole("button", { name: "Undo this change" })).toBeNull();
     expect(screen.getByText("This change has already been undone.")).toBeTruthy();
-    view.rerender(
-      <MemoryCard
-        change={{ ...source, changeId: undefined }}
-        changes={[]}
-        onInspect={inspect}
-        onUndo={undo}
-      />,
-    );
+    view.rerender(row({ change: { ...source, changeId: undefined }, changes: [] }));
     expect(screen.queryByRole("button", { name: "Undo this change" })).toBeNull();
     expect(undo).toHaveBeenCalledTimes(1);
   });
-  it("preserves multiline plain result text with zero or multiple files and separates result receipt from task ending", () => {
+
+  it("keeps multiline result text plain and says where the task stands", () => {
     const result = { id: "r", summary: "First line\n<script>plain text</script>\n中文", files: [] };
-    const view = render(<ResultCard result={result} latest ended={false} idle={false} />);
+    const view = render(
+      <ResultFiles api={api} sessionId="one" results={[result]} ended={false} idle={false} />,
+    );
     expect(view.container.querySelector(".result-summary")?.textContent).toBe(result.summary);
     expect(view.container.querySelector("script")).toBeNull();
-    expect(screen.getByText("No files attached to this result.")).toBeTruthy();
-    expect(screen.getByText("Result received. The task may continue.")).toBeTruthy();
+    expect(screen.queryByRole("list")).toBeNull();
     view.rerender(
-      <ResultCard
-        result={{
-          ...result,
-          files: [
-            { name: "a", path: "ignored", bytes: 1 },
-            { name: "b", path: "ignored", bytes: 2 },
-          ],
-        }}
-        latest
+      <ResultFiles
+        api={api}
+        sessionId="one"
+        results={[
+          {
+            ...result,
+            files: [
+              { name: "a", path: "ignored", bytes: 1 },
+              { name: "b", path: "ignored", bytes: 2 },
+            ],
+          },
+        ]}
         ended={false}
         idle
       />,
     );
-    expect(screen.getByText("2 files attached.")).toBeTruthy();
-    expect(screen.getByText("Ready for a follow-up in Conversation.")).toBeTruthy();
-    view.rerender(<ResultCard result={result} latest ended idle={false} />);
-    expect(screen.getByText("This task has ended. Its history remains available.")).toBeTruthy();
+    expect(screen.getAllByRole("listitem")).toHaveLength(2);
+    expect(screen.getByText("Ready for a follow-up")).toBeTruthy();
+    view.rerender(<ResultFiles api={api} sessionId="one" results={[result]} ended idle={false} />);
+    expect(screen.getByText("Task ended")).toBeTruthy();
   });
-  it("keeps questions and skills as plain history without submitting answers or exposing unsupported editors", () => {
+
+  it("keeps questions and skills as plain history without submitting answers or exposing editors", () => {
     const question = {
       askId: "ask",
       question: "Use <b>plain</b>?",
@@ -172,12 +174,13 @@ describe("activity cards and inspection", () => {
     const { container } = render(
       <>
         <QuestionCard question={question} pending={false} />
-        <SkillsView skills={[{ name: "Report", description: "<img src=x>", source: "built-in" }]} />
+        <SkillsView skills={[{ name: "Report", description: "<img src=x>", source: "user" }]} />
       </>,
     );
     expect(screen.getByText("Answered")).toBeTruthy();
     expect(screen.getByText("Answer: Yes")).toBeTruthy();
     expect(container.querySelectorAll("form,input,textarea,button,img,b")).toHaveLength(0);
-    expect(screen.getByText("Skills are read-only here.")).toBeTruthy();
+    expect(screen.getByText("<img src=x>")).toBeTruthy();
+    expect(screen.getByText("Yours")).toBeTruthy();
   });
 });

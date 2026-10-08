@@ -1,11 +1,11 @@
 // @vitest-environment jsdom
 import { LocalDotEvent } from "@localdot/protocol";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
 import { recoveryMessage } from "./TaskRecovery.tsx";
-import { resetTime, UsageView } from "./UsageView.tsx";
+import { resetTime, UsageDetails, UsageFooter, usageSummary } from "./UsageFooter.tsx";
 
 const id = (n: number) => String(n).padStart(26, "0");
 const event = (seq: number, type: string, data: unknown) =>
@@ -62,21 +62,19 @@ it("keeps role/route/model totals with deduped replay and retains unknown reason
     ["main", 310, 48, 6, 2],
     ["fast", 5, 2, undefined, 1],
   ]);
-  render(
-    <UsageView
-      model={model}
-      selection={{ kind: "api", roles: [{ role: "main", provider: "openai", model: "fixture" }] }}
-    />,
-  );
+  const selection = {
+    kind: "api" as const,
+    roles: [{ role: "main" as const, provider: "openai", model: "fixture" }],
+  };
+  expect(usageSummary(model, selection)).toBe("fixture · 365 tokens");
+  render(<UsageFooter model={model} selection={selection} />);
+  fireEvent.click(screen.getByRole("button", { name: "Usage: fixture · 365 tokens" }));
   const usage = screen.getByRole("region", { name: "Task usage" }).textContent;
-  expect(usage).toContain("310 input · 48 output tokens");
-  expect(usage).toContain(
-    "6 reported reasoning tokens · some calls did not report reasoning · 2 reported calls",
-  );
-  expect(usage).toContain("5 input · 2 output tokens");
-  expect(usage).toContain("1 reported call");
-  expect(usage).not.toContain("1 reported calls");
-  expect(screen.getByText("Token counts do not establish an invoice cost.")).toBeTruthy();
+  expect(usage).toContain("310 in · 48 out · 6 reasoning (some calls didn't say)");
+  expect(usage).toContain("2 calls");
+  expect(usage).toContain("5 in · 2 out");
+  expect(usage).toContain("1 call");
+  expect(usage).not.toContain("1 calls");
   expect(document.body.textContent).not.toContain("$");
 });
 it("bounds distinct model rows and records saturation as partial, without negative or wrapped totals", () => {
@@ -115,13 +113,16 @@ it("shows reported plan usage with missing windows/reset time unknown and no USD
       limitReached: true,
     }),
   );
-  render(<UsageView model={model} selection={{ kind: "chatgpt", model: "fixture" }} />);
-  expect(screen.getByRole("meter", { name: "primary plan usage" })).toHaveProperty("value", 99);
-  expect(screen.queryByRole("meter", { name: "secondary plan usage" })).toBeNull();
-  expect(document.body.textContent).toContain("Usage unavailable · Reset time unavailable");
+  render(<UsageDetails model={model} selection={{ kind: "chatgpt", model: "fixture" }} />);
+  expect(
+    screen.getByRole("meter", { name: "Plan window used" }).getAttribute("aria-valuenow"),
+  ).toBe("99");
+  expect(screen.getAllByRole("meter")).toHaveLength(1);
+  expect(document.body.textContent).toContain("99% used · Almost at limit");
+  expect(document.body.textContent).toContain("The plan limit is reached.");
   expect(document.body.textContent).not.toContain("0% used");
   expect(document.body.textContent).not.toContain("$");
-  expect(resetTime(Number.MAX_SAFE_INTEGER)).toBe("Reset time unavailable");
+  expect(resetTime(Number.MAX_SAFE_INTEGER)).toBeNull();
   expect(resetTime(1_800_000_000)).toContain("2027");
 });
 it("keeps retry events informational and identifies accepted repairs without deriving entitlement from a catalog", () => {
@@ -135,10 +136,11 @@ it("keeps retry events informational and identifies accepted repairs without der
       fallback: "fixture-local",
     }),
   );
-  render(<UsageView model={model} />);
+  render(<UsageDetails model={model} />);
   expect(document.querySelector("img")).toBeNull();
-  expect(document.body.textContent).toContain("Provider refused <img src=x>");
-  expect(document.body.textContent).toContain("browser does not retry model calls");
+  expect(document.body.textContent).toContain(
+    "Main model retried (try 2) after 4.0 s: Provider refused <img src=x> Switched to fixture-local.",
+  );
   expect(recoveryMessage("model unavailable", true)).toContain("local model");
   expect(recoveryMessage("keyd unavailable", false)).toContain("key layer is offline");
   expect(recoveryMessage("chatgpt sign-in expired", false)).toContain("explicitly resume");

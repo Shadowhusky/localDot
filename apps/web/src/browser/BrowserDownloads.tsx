@@ -3,6 +3,9 @@ import { createPortal } from "react-dom";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
 import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
+import { Button } from "../ui/Button.tsx";
+import { Icon } from "../ui/Icon.tsx";
+import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { changeDownload, listDownloads } from "./download-api.ts";
 import "../agent/safety.css";
 import "./downloads.css";
@@ -13,8 +16,8 @@ const size = (bytes: number) =>
   bytes < 1024
     ? `${bytes} bytes`
     : bytes < 1048576
-      ? `${(bytes / 1024).toFixed(1)} KiB`
-      : `${(bytes / 1048576).toFixed(1)} MiB`;
+      ? `${(bytes / 1024).toFixed(1)} KB`
+      : `${(bytes / 1048576).toFixed(1)} MB`;
 const stateLabel = (item: QuarantineItem) =>
   item.state === "held"
     ? "Waiting for your review"
@@ -168,71 +171,89 @@ export function BrowserDownloads({
     trigger.current = element;
     setDecision({ item: structuredClone(item), action });
   };
+  if (!visible.length && !message && !decision) return null;
   return (
-    <section className="browser-downloads" aria-label="Browser downloads">
-      <details open={waiting > 0}>
-        <summary>
-          Browser downloads{" "}
-          <span>
-            {waiting
-              ? `${waiting} waiting`
-              : visible.length
-                ? count(visible.length, "file", "files")
+    <section className="activity-section browser-downloads" aria-label="Browser downloads">
+      <div className="activity-section-head">
+        <h3 className="activity-section-title">Downloads</h3>
+        <span className="activity-section-meta">
+          {waiting ? `${waiting} waiting` : count(visible.length, "file", "files")}
+        </span>
+      </div>
+      {visible.slice(0, limit).map((item) => (
+        <div
+          key={item.id}
+          className="activity-row download-row"
+          data-state={item.state}
+          data-testid="download-row"
+        >
+          <div className="activity-row-head">
+            <Icon name="download" className="activity-row-icon" />
+            <span className="activity-row-title">{item.name}</span>
+            <span className="activity-row-metric num">{size(item.bytes)}</span>
+            <StatusGlyph
+              state={
+                item.state === "released" ? "done" : item.state === "failed" ? "failed" : "todo"
+              }
+              label={stateLabel(item)}
+            />
+          </div>
+          <div className="download-detail">
+            <p className="activity-detail-note">
+              {stateLabel(item)} · {item.source}
+              {item.state === "held" && item.recovery
+                ? " · The earlier transfer didn't save this file, so it needs a new review."
                 : ""}
-          </span>
-        </summary>
-        <p className="download-intro">
-          Review downloaded files before saving them to this computer.
-        </p>
-        {!visible.length && <p>No browser downloads yet.</p>}
-        <ul>
-          {visible.slice(0, limit).map((item) => (
-            <li key={item.id}>
-              <strong>{item.name}</strong>
-              <span className="download-meta">
-                {size(item.bytes)} · {item.source} · {item.kind}
-              </span>
-              <span className={`download-state download-${item.state}`}>{stateLabel(item)}</span>
-              {item.state === "held" && item.recovery && (
-                <span className="download-meta">
-                  The earlier transfer did not save this file. A new review is required.
-                </span>
-              )}
-              <div className="download-actions">
+            </p>
+            {(item.state === "held" || item.state === "releasing" || item.state === "failed") && (
+              <div className="activity-detail-actions">
                 {(item.state === "held" || item.state === "releasing") && (
-                  <button
-                    type="button"
-                    disabled={!releaseReady || pending}
+                  <Button
+                    size="sm"
+                    disabledReason={
+                      !releaseReady
+                        ? "Turn the computer back on to release a file."
+                        : pending
+                          ? "Another download is being checked."
+                          : undefined
+                    }
                     onClick={(event) => choose(item, "release", event.currentTarget)}
                   >
                     {item.state === "releasing" ? "Check delivery" : "Review & release"}
-                  </button>
+                  </Button>
                 )}
                 {(item.state === "held" || item.state === "failed") && (
-                  <button
-                    type="button"
-                    disabled={pending}
+                  <Button
+                    size="sm"
+                    variant="quiet"
+                    disabledReason={pending ? "Another download is being checked." : undefined}
                     onClick={(event) => choose(item, "discard", event.currentTarget)}
                   >
                     Discard
-                  </button>
+                  </Button>
                 )}
               </div>
-            </li>
-          ))}
-        </ul>
+            )}
+          </div>
+        </div>
+      ))}
+      <div className="activity-detail-actions download-actions">
         {visible.length > limit && (
-          <button type="button" onClick={() => setLimit((count) => count + 12)}>
+          <Button variant="quiet" size="sm" onClick={() => setLimit((shown) => shown + 12)}>
             Show more downloads
-          </button>
+          </Button>
         )}
-        {!releaseReady && waiting > 0 && <p>Resume the computer to release a file.</p>}
-        <button type="button" disabled={pending} onClick={() => void refresh.current()}>
+        <Button
+          variant="quiet"
+          size="sm"
+          disabledReason={pending ? "Another download is being checked." : undefined}
+          onClick={() => void refresh.current()}
+        >
           Refresh downloads
-        </button>
-      </details>
+        </Button>
+      </div>
       {message && (
-        <p role="status" className="download-message">
+        <p role="status" className="activity-detail-note download-message">
           {message}
         </p>
       )}

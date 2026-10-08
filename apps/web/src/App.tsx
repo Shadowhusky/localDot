@@ -35,10 +35,10 @@ import { matchingKeys } from "./settings/choices.ts";
 import { SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useSettings } from "./settings/useSettings.ts";
+import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ConversationRail } from "./shell/ConversationRail.tsx";
 import { Hud } from "./shell/Hud.tsx";
 import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
-import { PlanRail } from "./shell/PlanRail.tsx";
 import { StageColumn } from "./shell/StageColumn.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
@@ -698,7 +698,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 if (!narrow) setPane("activity");
               }}
             >
-              <PlanRail
+              <ActivityRail
                 cellId={cell?.id}
                 releaseReady={
                   cell?.state === "ready" &&
@@ -739,7 +739,6 @@ function Theatre({ api }: { api: ApiClient }) {
                 sessionId={session.sessionId}
                 scale={cell?.scale ?? 2}
                 api={api}
-                title={session.model.title}
               />
             </div>
           </div>

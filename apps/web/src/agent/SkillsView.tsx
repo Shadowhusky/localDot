@@ -1,26 +1,23 @@
+import { Badge } from "../ui/Badge.tsx";
+
 export interface SkillSummary {
   readonly name: string;
   readonly description: string;
   readonly source: string;
 }
+
+// Read-only: what dot can draw on. Descriptions are plain text, never markup.
 export function SkillsView({ skills }: { skills: readonly SkillSummary[] }) {
+  if (!skills.length) return <p className="activity-detail-note">No skills yet.</p>;
   return (
-    <section className="skills-view" aria-label="Available skills">
-      <h3>Skills</h3>
-      {!skills.length ? (
-        <p>No skills are listed.</p>
-      ) : (
-        <ul>
-          {skills.map((skill) => (
-            <li key={`${skill.source}:${skill.name}`}>
-              <strong>{skill.name}</strong>
-              <p>{skill.description}</p>
-              <span>{skill.source}</span>
-            </li>
-          ))}
-        </ul>
-      )}
-      <p className="history-note">Skills are read-only here.</p>
-    </section>
+    <ul className="skills-list" aria-label="Available skills">
+      {skills.map((skill) => (
+        <li key={`${skill.source}:${skill.name}`} className="skills-item">
+          <span className="skills-name">{skill.name}</span>
+          <Badge>{skill.source === "user" ? "Yours" : "Built in"}</Badge>
+          <span className="skills-description">{skill.description}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

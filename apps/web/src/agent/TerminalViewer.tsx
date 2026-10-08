@@ -1,9 +1,19 @@
 // biome-ignore-all lint/a11y/noNoninteractiveTabindex: Named scroll regions require keyboard focus so long output can be scrolled.
 import { useMemo } from "react";
+import { Badge } from "../ui/Badge.tsx";
 import type { AgentStep } from "./model.ts";
 import { OutputCopy } from "./OutputCopy.tsx";
 import { emptyTerminal, terminalDisplayed } from "./terminal-text.ts";
 import "./output.css";
+
+const STREAMS = {
+  stdout: { name: "Output", region: "Standard output text", copy: "Copy output" },
+  stderr: { name: "Errors", region: "Standard error text", copy: "Copy errors" },
+} as const;
+// A command that succeeded still writes warnings and notes to its error stream.
+const NOTES = { ...STREAMS.stderr, name: "Messages", copy: "Copy messages" };
+
+// Read-only: what the step printed, in a well. Error lines carry a rule, not only a colour.
 export function TerminalViewer({ step }: { step: AgentStep }) {
   const display = useMemo(() => {
     const terminal = step.terminal ?? emptyTerminal();
@@ -14,42 +24,44 @@ export function TerminalViewer({ step }: { step: AgentStep }) {
     };
   }, [step.terminal]);
   const shortened = display.stdout.truncated || display.stderr.truncated || step.outputTruncated;
+  const exit = step.tool?.exitCode;
+  const notes = [
+    shortened && "Shortened to the kept text.",
+    display.terminal.controlsRemoved && "Terminal control codes removed.",
+    display.terminal.nonprintable && "Binary output left out.",
+  ].filter(Boolean);
+  const streams = (["stdout", "stderr"] as const).filter((stream) => display[stream].text);
+  const failed = step.tool?.ok === false || (exit !== undefined && exit !== 0);
+  const named = (stream: "stdout" | "stderr") =>
+    stream === "stderr" && !failed ? NOTES : STREAMS[stream];
   return (
     <section className="terminal-viewer" aria-label="Command output">
-      <h3>{step.tool?.title ?? "Command output"}</h3>
-      <p className="history-note">Output from this step. This viewer does not accept commands.</p>
-      {step.tool?.exitCode !== undefined && <p>Exit code: {step.tool.exitCode}</p>}
-      {shortened && (
-        <p className="history-note">Output preview shortened. Showing retained text.</p>
-      )}
-      {display.terminal.controlsRemoved && (
-        <p className="history-note">Terminal control sequences removed.</p>
-      )}
-      {display.terminal.nonprintable && (
-        <p className="history-note">Binary or nonprintable output omitted.</p>
-      )}
-      {(["stdout", "stderr"] as const).map((stream) => (
-        <section
-          key={stream}
-          aria-label={stream === "stdout" ? "Standard output" : "Standard error"}
-        >
-          <h4>{stream === "stdout" ? "Standard output" : "Standard error"}</h4>
-          {display[stream].text ? (
-            <>
-              <section
-                className="terminal-text"
-                tabIndex={0}
-                aria-label={stream === "stdout" ? "Standard output text" : "Standard error text"}
-              >
-                <pre>{display[stream].text}</pre>
-              </section>
-              <OutputCopy text={display[stream].text} label={`Copy ${stream}`} />
-            </>
-          ) : (
-            <p className="history-note">No text output.</p>
-          )}
-        </section>
-      ))}
+      <div className="terminal-well">
+        {streams.map((stream) => (
+          <section
+            key={stream}
+            className="terminal-stream"
+            data-stream={stream}
+            data-failed={failed || undefined}
+            aria-label={named(stream).name}
+          >
+            <h4 className="terminal-stream-name">{named(stream).name}</h4>
+            <section className="terminal-text" tabIndex={0} aria-label={named(stream).region}>
+              <pre>{display[stream].text}</pre>
+            </section>
+          </section>
+        ))}
+        {!streams.length && <p className="terminal-empty">No output.</p>}
+      </div>
+      <div className="terminal-foot">
+        {exit !== undefined && (
+          <Badge tone={exit === 0 ? "neutral" : "danger"}>{`Exit ${exit}`}</Badge>
+        )}
+        {notes.length > 0 && <span className="terminal-notes">{notes.join(" ")}</span>}
+        {streams.map((stream) => (
+          <OutputCopy key={stream} text={display[stream].text} label={named(stream).copy} />
+        ))}
+      </div>
     </section>
   );
 }

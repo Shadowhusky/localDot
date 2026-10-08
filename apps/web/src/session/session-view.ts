@@ -5,6 +5,7 @@ import { past, progressive } from "./task-hud.ts";
 export interface StepRowView {
   id: string;
   label: string;
+  verb?: string;
   startT: number;
   status: "doing" | "ok" | "failed" | "cancelled";
   frameId?: string;
@@ -32,6 +33,7 @@ export function stepRows(model: SessionModel): StepRowView[] {
     rows.set(id, {
       id,
       startT: rows.get(id)?.startT ?? a.intentT,
+      verb: a.verb,
       label:
         done === undefined
           ? progressive(a.label)

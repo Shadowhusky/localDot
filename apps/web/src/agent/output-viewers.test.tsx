@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ActivityDetails } from "./ActivityDetails.tsx";
-import { DIFF_LIMITS, DiffViewer, diffPreview } from "./DiffViewer.tsx";
+import { createApi } from "../lib/api.ts";
+import { ActivityRail } from "../shell/ActivityRail.tsx";
+import { frameCrop } from "./ActivityDetails.tsx";
+import { DIFF_LIMITS, DiffViewer, diffPreview, numberLines } from "./DiffViewer.tsx";
 import { type AgentChange, type AgentStep, emptyAgentModel } from "./model.ts";
 import { TerminalViewer } from "./TerminalViewer.tsx";
 import { appendTerminal, emptyTerminal } from "./terminal-text.ts";
@@ -37,11 +39,11 @@ describe("non-executing output inspection", () => {
     const { container } = render(<TerminalViewer step={step()} />);
     expect(write).not.toHaveBeenCalled();
     expect(
-      within(screen.getByRole("region", { name: "Standard output" })).getByText("beforeafter"),
+      within(screen.getByRole("region", { name: "Output" })).getByText("beforeafter"),
     ).toBeTruthy();
     expect(screen.getByText("failure 中")).toBeTruthy();
     expect(container.querySelectorAll("a,iframe,input,textarea")).toHaveLength(0);
-    fireEvent.click(screen.getByRole("button", { name: "Copy stdout" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy output" }));
     await waitFor(() => expect(write).toHaveBeenCalledWith("beforeafter"));
     expect(write.mock.calls[0]?.[0]).not.toContain("hidden");
     expect(write.mock.calls[0]?.[0]).not.toContain("\x1b");
@@ -61,7 +63,7 @@ describe("non-executing output inspection", () => {
     expect(screen.getByLabelText("Unified text diff").textContent).toBe(patch);
     expect(container.querySelectorAll("img,svg,script")).toHaveLength(0);
     expect(container.querySelector(".diff-hunk")).toBeTruthy();
-    expect(screen.getByText("Modified file")).toBeTruthy();
+    expect(screen.getByText("Changed")).toBeTruthy();
   });
   it("bounds a huge single line and a huge number of diff rows, and makes controls visible instead of copying escapes", () => {
     expect(diffPreview("x".repeat(100_000)).text).toHaveLength(DIFF_LIMITS.chars);
@@ -70,24 +72,57 @@ describe("non-executing output inspection", () => {
     expect(preview.text).not.toContain("\x1b");
     expect(preview.text).toContain("␛");
   });
-  it("opens lazy detail for the selected source ID, restores its trigger and retires it on another session", () => {
+  it("numbers lines from the hunk headers without putting numbers into the diff text", () => {
+    const patch = "@@ -4,3 +4,3 @@\n Month,Net\n-Dec,12000\n+Dec,12311\n Total,12480";
+    expect(numberLines(patch.split("\n"))).toEqual([
+      { kind: "hunk" },
+      { kind: "line", line: 4 },
+      { kind: "remove", line: 5 },
+      { kind: "add", line: 5 },
+      { kind: "line", line: 6 },
+    ]);
+    render(<DiffViewer change={change(patch)} />);
+    const text = screen.getByLabelText("Unified text diff");
+    expect(text.textContent).toBe(patch);
+    expect(
+      [...text.querySelectorAll("[data-line]")].map((row) => row.getAttribute("data-line")),
+    ).toEqual(["4", "5", "5", "6"]);
+  });
+  it("crops a step's frame around its target and keeps the whole frame without one", () => {
+    expect(frameCrop(undefined, 2)).toEqual({
+      image: { width: "100%", left: "0%", top: "0%" },
+      target: null,
+    });
+    const crop = frameCrop({ x: 1200, y: 800, w: 80, h: 40 }, 2);
+    expect(crop.image.width).toBe("400.000%");
+    // A 40 × 20 target sits in the middle of a 320 × 200 window, the narrowest one shown.
+    expect(crop.target).toEqual({
+      left: "43.750%",
+      top: "45.000%",
+      width: "12.500%",
+      height: "10.000%",
+    });
+  });
+  it("keeps the model's notes folded until asked, and shows them as plain text", () => {
     const model = {
       ...emptyAgentModel(),
       steps: new Map([["step", step()]]),
-      changes: [change("+text")],
-      activity: "Actual display event",
+      activity: "<b>Notes</b>",
     };
-    const view = render(<ActivityDetails model={model} sessionId="one" />);
-    const summary = screen.getByText("Model activity").closest("details");
-    expect(summary?.hasAttribute("open")).toBe(false);
-    expect(screen.queryByLabelText("Standard output text")).toBeNull();
-    const trigger = screen.getByRole("button", { name: "Inspect Run report" });
-    fireEvent.click(trigger);
-    expect(screen.getByLabelText("Standard output text").textContent).toBe("beforeafter");
-    fireEvent.click(screen.getByRole("button", { name: "Close output" }));
-    expect(document.activeElement).toBe(trigger);
-    fireEvent.click(trigger);
-    view.rerender(<ActivityDetails model={model} sessionId="two" />);
-    expect(screen.queryByRole("region", { name: "Selected output" })).toBeNull();
+    render(
+      <ActivityRail
+        rows={[]}
+        sessionId="one"
+        scale={1}
+        api={createApi("notes", { origin: "http://localhost" })}
+        agent={model}
+      />,
+    );
+    const notes = screen.getByRole("button", { name: "Thinking notes" });
+    expect(notes.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("<b>Notes</b>")).toBeNull();
+    fireEvent.click(notes);
+    expect(screen.getByText("<b>Notes</b>")).toBeTruthy();
+    expect(document.querySelector(".activity-notes b")).toBeNull();
   });
 });
