@@ -1,34 +1,79 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 
 export const TOKEN = "a".repeat(43);
 const WEB = fileURLToPath(new URL("../..", import.meta.url));
 
-function newest(dir: string): number {
-  return Math.max(
-    0,
-    ...readdirSync(dir, { withFileTypes: true }).map((entry) => {
-      const path = join(dir, entry.name);
-      if (entry.isDirectory()) return newest(path);
-      return /\.test\.tsx?$/.test(entry.name) ? 0 : statSync(path).mtimeMs;
-    }),
-  );
+const SHARED = [
+  "src",
+  "vite.config.ts",
+  "../../packages/protocol/src",
+  "../../packages/providers/src",
+  "../../packages/stage/src",
+];
+// What each build is made from, relative to apps/web. The app never imports the gallery, so the
+// gallery's own sources leave the app's build current.
+const BUILDS = {
+  app: {
+    built: "dist/index.html",
+    script: "build",
+    inputs: [...SHARED, "index.html"],
+    skip: ["src/gallery"],
+  },
+  gallery: {
+    built: "dist-gallery/gallery.html",
+    script: "build:gallery",
+    inputs: [...SHARED, "gallery.html", "vite.gallery.config.ts", "e2e/fixtures/ui-assets"],
+    skip: [],
+  },
+};
+export type Build = keyof typeof BUILDS;
+
+interface Newest {
+  path: string;
+  mtimeMs: number;
 }
 
-// Fails when `built` (relative to apps/web) is missing or older than any source file, naming the
-// script that rebuilds it.
-export function assertFreshBuild(built: string, script: string) {
-  const file = join(WEB, built);
-  if (!existsSync(file) || newest(join(WEB, "src")) > statSync(file).mtimeMs)
-    throw new Error(`${built} is older than src: run pnpm --filter @localdot/web ${script}.`);
+function newest(path: string, skip: Set<string>): Newest | undefined {
+  if (skip.has(path) || !existsSync(path)) return undefined;
+  const stat = statSync(path);
+  if (!stat.isDirectory())
+    return /\.test\.tsx?$/.test(path) ? undefined : { path, mtimeMs: stat.mtimeMs };
+  let found: Newest | undefined;
+  for (const entry of readdirSync(path)) {
+    const candidate = newest(join(path, entry), skip);
+    if (candidate && (!found || candidate.mtimeMs > found.mtimeMs)) found = candidate;
+  }
+  return found;
+}
+
+// Why `build` is out of date under `web` (apps/web), naming the script that rebuilds it.
+export function staleBuild(build: Build, web = WEB): string | undefined {
+  const { built, script, inputs, skip } = BUILDS[build];
+  const rebuild = `run pnpm --filter @localdot/web ${script}`;
+  const file = join(web, built);
+  if (!existsSync(file)) return `${built} is missing: ${rebuild}.`;
+  const skipped = new Set(skip.map((path) => join(web, path)));
+  const builtAt = statSync(file).mtimeMs;
+  for (const input of inputs) {
+    const changed = newest(join(web, input), skipped);
+    if (changed && changed.mtimeMs > builtAt)
+      return `${built} is older than ${relative(web, changed.path)}: ${rebuild}.`;
+  }
+}
+
+export function assertFreshBuild(build: Build) {
+  const problem = staleBuild(build);
+  if (problem) throw new Error(problem);
 }
 
 export interface UiFixture {
   origin: string;
+  home: string;
   sessionId?: string;
   seeded: string[];
   close(): Promise<void>;
@@ -56,9 +101,12 @@ export async function startUiFixture(
       stdio: ["ignore", "pipe", "pipe"],
     },
   );
+  // The fixture's errors are held for the failure message until it is up, then passed through.
   let errors = "";
+  let up = false;
   child.stderr?.on("data", (chunk: Buffer) => {
-    errors = (errors + chunk.toString()).slice(-4000);
+    if (up) process.stderr.write(chunk);
+    else errors = (errors + chunk.toString()).slice(-4000);
   });
   const close = async () => {
     if (child.exitCode === null && child.signalCode === null) {
@@ -69,14 +117,16 @@ export async function startUiFixture(
     rmSync(home, { recursive: true, force: true });
   };
   try {
-    const ready = await new Promise<Omit<UiFixture, "close">>((resolve, reject) => {
+    const ready = await new Promise<Omit<UiFixture, "home" | "close">>((resolve, reject) => {
       child.once("exit", (code) => reject(new Error(`Fixture exited with ${code}\n${errors}`)));
       const lines = createInterface({ input: child.stdout as NonNullable<typeof child.stdout> });
       lines.on("line", (line) => {
         if (line.includes('"ready":true')) resolve(JSON.parse(line));
       });
     });
-    return { ...ready, close };
+    up = true;
+    if (errors) process.stderr.write(errors);
+    return { ...ready, home, close };
   } catch (error) {
     await close();
     throw error;

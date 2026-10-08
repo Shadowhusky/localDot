@@ -21,8 +21,11 @@ export interface UiScenario {
   about: string;
   // QA_* settings the fixture boots with; an explicit QA_* variable still wins.
   boot?: Record<string, string>;
-  // What `POST /__qa/scenario/<name>` does on a running fixture, and what a boot runs once ready.
+  // What `POST /__qa/scenario/<name>` does on a running fixture.
   step?: ScenarioStep;
+  // A fixture booted into the scenario also takes `step` once it is up, for a state its boot
+  // settings cannot set.
+  stepAtBoot?: true;
 }
 
 const FRESH = { QA_CELL: "none", QA_SESSION: "0", QA_REPLAYS: "0" };
@@ -40,10 +43,14 @@ export const UI_SCENARIOS = {
   },
   ready: { about: "The computer is on with no task", boot: { QA_SESSION: "0" }, step: "cell/live" },
   running: { about: "dot is working on the sample task" },
-  approval: { about: "dot waits for a decision before sending", step: "approval" },
-  ask: { about: "dot asks a question", step: "ask" },
-  takeover: { about: "dot hands control over for a sign-in", step: "takeover" },
-  budget: { about: "The task stopped at its spending limit", step: "budget" },
+  approval: {
+    about: "dot waits for a decision before sending",
+    step: "approval",
+    stepAtBoot: true,
+  },
+  ask: { about: "dot asks a question", step: "ask", stepAtBoot: true },
+  takeover: { about: "dot hands control over for a sign-in", step: "takeover", stepAtBoot: true },
+  budget: { about: "The task stopped at its spending limit", step: "budget", stepAtBoot: true },
   done: {
     about: "The task finished with two files",
     boot: { QA_PHASE: "finished" },
@@ -83,4 +90,9 @@ export function uiScenario(name: string): UiScenario {
   if (!scenario)
     throw new Error(`Unknown scenario ${name}: ${Object.keys(UI_SCENARIOS).join(", ")}`);
   return scenario;
+}
+
+// The step a fixture booted into `scenario` takes once it is up.
+export function bootStep(scenario: UiScenario | undefined): ScenarioStep | undefined {
+  return scenario?.stepAtBoot ? scenario.step : undefined;
 }

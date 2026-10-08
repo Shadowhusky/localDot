@@ -41,6 +41,7 @@ import { readStatic } from "../../../daemon/src/static-files.ts";
 import { UI_CSP } from "../../../daemon/src/static-ui.ts";
 import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
 import {
+  bootStep,
   type CellKind,
   type ScenarioStep,
   UI_SCENARIOS,
@@ -81,6 +82,9 @@ const TOKEN = "a".repeat(43);
 // 0 lets the system pick a free port; the ready line names the one it chose.
 const REQUESTED_PORT = Number(args.port ?? env.QA_PORT ?? 4786);
 const HOME = env.QA_HOME ?? join(tmpdir(), `localdot-ui-fixture-${process.pid}`);
+// A home the fixture named itself, or one a launcher made for it, goes when the fixture stops: the
+// launcher may die before it can remove it.
+const ownsHome = !env.QA_HOME || !!env.QA_PARENT_PID;
 const ASSETS = fileURLToPath(new URL("./ui-assets", import.meta.url));
 const GALLERY = fileURLToPath(new URL("../../dist-gallery", import.meta.url));
 if (env.QA_NOW) startWallClockAt(Date.parse(env.QA_NOW));
@@ -1019,8 +1023,9 @@ routes.get("/gallery/*", (c) => {
   });
 });
 
-if (scenario?.step && !scenario.boot) {
-  const problem = STEPS[scenario.step]();
+const atBoot = bootStep(scenario);
+if (atBoot) {
+  const problem = STEPS[atBoot]();
   if (problem) throw new Error(`${scenarioName}: ${problem}`);
 }
 app = routes;
@@ -1050,8 +1055,12 @@ const shutdown = async () => {
   } catch {}
   for (const peer of upgraded) peer.destroy();
   server.closeAllConnections();
-  server.close(() => process.exit(0));
-  setTimeout(() => process.exit(0), 2000).unref();
+  const exit = () => {
+    if (ownsHome) rmSync(HOME, { recursive: true, force: true });
+    process.exit(0);
+  };
+  server.close(exit);
+  setTimeout(exit, 2000).unref();
 };
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);

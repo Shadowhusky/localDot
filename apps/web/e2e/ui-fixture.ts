@@ -17,7 +17,7 @@ export interface UiFixture {
 
 // The fixture daemon serves the built UI (dist) with a fake computer and two recorded sessions.
 export async function startUiFixture(name: string): Promise<UiFixture> {
-  assertFreshBuild("dist/index.html", "build");
+  assertFreshBuild("app");
   const fixture = await start({}, name);
   return {
     origin: fixture.origin,
