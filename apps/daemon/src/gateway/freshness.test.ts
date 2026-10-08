@@ -285,6 +285,48 @@ describe("gateway freshness", () => {
     expect(s.sleeps).not.toContain(100);
     expect(s.clicks()).toHaveLength(1);
   });
+  it("cancels a drag whose start changed since the model's screenshot, before any press", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 620, y: 380, w: 40, h: 40 })));
+    const out = await s.gateway.run(s.ctx, {
+      verb: "drag",
+      path: [point, { x: 100, y: 100 }],
+      basedOn: s.basis.frameId,
+    });
+    expect(out).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(s.clicks()).toHaveLength(0);
+  });
+  it("lets an agent's drag start beside a spinner once its element read stays the same", async () => {
+    const s = await setup();
+    s.fake.script.hitTest = (p) => ({
+      target: { point: p, name: "Canvas", role: "drawing area", source: "ax" },
+      window: 42,
+      ms: 1,
+    });
+    s.setFrames(await png(paint(base(), spinner)), await png(base()));
+    const out = await s.gateway.run(
+      {
+        ...s.ctx,
+        source: "agent",
+        authorizeAgent: async () => ({ consume: () => true }),
+        beforeEffect: () => true,
+      },
+      { verb: "drag", path: [point, { x: 100, y: 100 }], basedOn: s.basis.frameId },
+    );
+    expect(out.ok).toBe(true);
+    expect(s.clicks()).toHaveLength(1);
+  });
+  it("checks a drag's start against the screenshot, not the canvas it is about to change", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 80, y: 80, w: 40, h: 40 })));
+    const out = await s.gateway.run(s.ctx, {
+      verb: "drag",
+      path: [point, { x: 100, y: 100 }],
+      basedOn: s.basis.frameId,
+    });
+    expect(out.ok).toBe(true);
+    expect(s.clicks()).toHaveLength(1);
+  });
   it("preserves optional unknown-basis behavior and avoids checks without a basis", async () => {
     const s = await setup();
     for (const basedOn of [undefined, ulid()])

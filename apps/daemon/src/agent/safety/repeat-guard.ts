@@ -20,11 +20,35 @@ function effect(action: GuiAction, identity: NativeActionIdentity): unknown {
         point: identity.point,
         button: action.button ?? "left",
         count: action.count ?? 1,
+        mods: action.mods ?? [],
       };
     case "type":
       return { verb: action.verb, text: action.text, masked: action.masked === true };
     case "scroll":
-      return { verb: action.verb, point: identity.point, dx: action.dx, dy: action.dy };
+      return {
+        verb: action.verb,
+        point: identity.point,
+        dx: action.dx,
+        dy: action.dy,
+        mods: action.mods ?? [],
+      };
+    case "drag":
+      return {
+        verb: action.verb,
+        path: action.path,
+        button: action.button ?? "left",
+        mods: action.mods ?? [],
+      };
+    case "move":
+      return { verb: action.verb, point: identity.point };
+    case "down":
+    case "up":
+      return {
+        verb: action.verb,
+        point: identity.point,
+        button: action.button ?? "left",
+        mods: action.mods ?? [],
+      };
     case "wait":
       return undefined;
   }

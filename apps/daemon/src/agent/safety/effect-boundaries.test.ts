@@ -28,6 +28,7 @@ import { filesTool } from "../tools/files.ts";
 import { dispatchTool } from "../tools/index.ts";
 import { rememberTool } from "../tools/remember.ts";
 import { shellTool } from "../tools/shell.ts";
+import { authorizePrepared } from "./authorize.ts";
 import { SafetyController } from "./controller.ts";
 
 const UI_TOKEN = "i".repeat(43);
@@ -729,6 +730,64 @@ describe("immediate effect ownership", () => {
       "3 s (repeats while held)",
     ]);
     expect(f.effects()).toHaveLength(0);
+  });
+  it("a drag card names both ends, the path, the button and the keys held", async () => {
+    const f = setup();
+    const pending = f.call("computer", {
+      action: "drag",
+      path: [
+        { x: 10, y: 20 },
+        { x: 30, y: 40 },
+        { x: 50, y: 60 },
+      ],
+      mods: ["shift"],
+    });
+    await until(() => !!f.session.pendingApproval);
+    const fields = f.session.pendingApproval?.fields;
+    expect(fields).toContainEqual(["Action", "drag"]);
+    expect(fields).toContainEqual(["Drag", "(10, 20) to (50, 60), through 1 more point"]);
+    expect(fields).toContainEqual(["Button", "left"]);
+    expect(fields).toContainEqual(["Keys held", "shift"]);
+    await f.post(f.answer("deny"));
+    await pending;
+    expect(f.effects()).toHaveLength(0);
+  });
+  it("a drag's approval binds every point of its path", async () => {
+    const f = setup();
+    const generation = f.session.generation;
+    if (!generation) throw new Error("missing generation");
+    const lease = f.session.admit(generation);
+    const ctx: ToolCallContext = {
+      session: f.session,
+      generation,
+      lease,
+      check: () => lease.check(),
+      callId: "drag",
+      step: ulid(),
+      redact: redactor([PROXY_TOKEN, TOOL_TOKEN]),
+      signal: lease.signal,
+    };
+    const ends = [
+      { x: 10, y: 20 },
+      { x: 50, y: 60 },
+    ];
+    const toolInput = { action: "drag", path: [...ends] };
+    const approved = { verb: "drag", path: [ends[0], { x: 30, y: 40 }, ends[1]] };
+    const swerved = { verb: "drag", path: [ends[0], { x: 30, y: 400 }, ends[1]] };
+    const target = { target: null, window: 7, point: { x: 20, y: 40 } };
+    const authorizing = authorizePrepared(ctx, {
+      tool: "computer",
+      input: { toolInput, action: approved },
+      target,
+      facts: { operation: "click", drop: null },
+      revalidate: async () => true,
+    });
+    await until(() => !!f.session.pendingApproval);
+    await f.post(f.answer());
+    const permit = await authorizing;
+    expect(permit?.consume({ toolInput, action: swerved }, target)).toBe(false);
+    expect(permit?.consume({ toolInput, action: approved }, target)).toBe(true);
+    lease.finish();
   });
   it("calling an effect handler directly without a consumed dispatcher permit executes nothing", async () => {
     const f = setup();

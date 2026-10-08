@@ -76,9 +76,26 @@ export async function authorizePrepared(
     fields.push(["Tool", prepared.tool]);
     if (prepared.tool === "computer" && object?.action && typeof object.action === "object") {
       const action = object.action as Record<string, unknown>;
-      fields.push(["Action", boundedPreview(String(action.verb), ctx)]);
+      const verb = String(action.verb);
+      fields.push(["Action", boundedPreview(VERBS[verb] ?? verb, ctx)]);
       if (Array.isArray(action.combo))
         fields.push(["Keys", boundedPreview(action.combo.join(" + "), ctx)]);
+      if (Array.isArray(action.mods))
+        fields.push(["Keys held", boundedPreview(action.mods.join(" + "), ctx)]);
+      if (Array.isArray(action.path) && action.path.length >= 2) {
+        const at = (p: unknown) => {
+          const { x, y } = p as { x: unknown; y: unknown };
+          return `(${String(x)}, ${String(y)})`;
+        };
+        const more = action.path.length - 2;
+        const via = more ? `, through ${more} more point${more === 1 ? "" : "s"}` : "";
+        fields.push([
+          "Drag",
+          boundedPreview(`${at(action.path[0])} to ${at(action.path.at(-1))}${via}`, ctx),
+        ]);
+      }
+      if (["drag", "down", "up"].includes(verb))
+        fields.push(["Button", boundedPreview(String(action.button ?? "left"), ctx)]);
       if (typeof action.repeat === "number")
         fields.push(["Repeat", boundedPreview(`${action.repeat} times`, ctx)]);
       if (typeof action.holdMs === "number") {
@@ -165,6 +182,12 @@ export async function authorizePrepared(
     },
   });
 }
+// The card's words for gateway verbs that are not plain English on their own.
+const VERBS: Record<string, string> = {
+  down: "hold down a mouse button",
+  up: "release a mouse button",
+  move: "move the pointer",
+};
 export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
   const input = raw as Record<string, unknown>;
   switch (tool) {

@@ -32,6 +32,11 @@ export type RiskFacts = {
     | "files_upload"
     | "files_delete";
   target?: NativeTargetFacts;
+  // A drag's drop point: its element, or null when none is known there. The stronger decision of
+  // the two ends wins.
+  drop?: NativeTargetFacts | null;
+  // Modifier keys held down through a click, scroll or drag: shown, they do not change the class.
+  mods?: string[];
   command?: string;
   destination?: string;
 };
@@ -57,18 +62,30 @@ function risk(c: ActionClass, policy: AutonomyPolicy): RiskDecision {
     risk: c === "reading" || c === "browsing" ? "none" : c === "unknown" ? "medium" : "high",
   };
 }
+const RANK = { act: 0, ask: 1, handoff: 2 };
+const LEVEL = { none: 0, medium: 1, high: 2 };
 function strongest(classes: ActionClass[], policy: AutonomyPolicy): RiskDecision {
   if (classes.length === 0) return risk("unknown", policy);
-  const rank = { act: 0, ask: 1, handoff: 2 };
   return classes
     .map((c) => risk(c, policy))
-    .reduce((best, next) => (rank[next.mode] > rank[best.mode] ? next : best));
+    .reduce((best, next) => (RANK[next.mode] > RANK[best.mode] ? next : best));
 }
 function matching(description: string): ActionClass[] {
   return high.filter(([, pattern]) => pattern.test(description)).map(([c]) => c);
 }
 export function classify(facts: RiskFacts, rawPolicy: AutonomyPolicy): RiskDecision {
   const policy = PolicySchema.parse(rawPolicy);
+  if (facts.drop !== undefined) {
+    const { drop, target: _start, ...rest } = facts;
+    const [start, end] = [facts.target, drop ?? undefined].map((target) =>
+      classify({ ...rest, ...(target ? { target } : {}) }, policy),
+    ) as [RiskDecision, RiskDecision];
+    // Between ends that ask alike, the riskier class names the card: a drop on Trash is a delete.
+    return RANK[end.mode] > RANK[start.mode] ||
+      (end.mode === start.mode && LEVEL[end.risk] > LEVEL[start.risk])
+      ? end
+      : start;
+  }
   if (facts.operation === "observe" || facts.operation === "files_read")
     return risk("reading", policy);
   if (facts.operation === "wait" || facts.operation === "scroll") return risk("browsing", policy);
@@ -252,6 +269,7 @@ export function buildApprovalCard(
     }
   };
   add("Target", facts.target?.name);
+  add("Drop target", facts.drop?.name);
   add("App location", safeTargetURL(facts.target?.url ?? facts.destination));
   add("Command", facts.command);
   return CardSchema.parse({

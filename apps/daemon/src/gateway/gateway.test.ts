@@ -24,6 +24,7 @@ import {
   type ActionContext,
   ActionGateway,
   type NativeActionIdentity,
+  type NativeActionRequest,
   type NativeScreenBinding,
 } from "./gateway.ts";
 import { DEFAULT_ONSET_TABLE } from "./onset-table.ts";
@@ -39,7 +40,10 @@ function fakeClock(start = 10_000_000): Clock & { advance(us: number): void } {
   };
 }
 
-function setup(script: FakeScript = {}, opts: { viewers?: number; scale?: 1 | 2 } = {}) {
+function setup(
+  script: FakeScript = {},
+  opts: { viewers?: number; scale?: 1 | 2; heldButtonMs?: number } = {},
+) {
   const home = mkdtempSync(join(tmpdir(), "local dot's gateway-"));
   const clock = fakeClock();
   const eventLog = new EventLog(home, clock);
@@ -80,6 +84,7 @@ function setup(script: FakeScript = {}, opts: { viewers?: number; scale?: 1 | 2 
       await new Promise((r) => setImmediate(r));
     },
     hitTestTimeoutMs: 2500,
+    ...(opts.heldButtonMs ? { heldButtonMs: opts.heldButtonMs } : {}),
   });
   const sessionId = eventLog.createSession("test");
   const events = () => eventLog.read(sessionId);
@@ -1154,5 +1159,230 @@ describe("ActionGateway native identity", () => {
     const silent = agent([broken, broken]);
     expect((await silent.s.gateway.run(silent.ctx, click)).ok).toBe(true);
     expect(silent.consumed[0]).toMatchObject({ target: null, window: null, unknown: true });
+  });
+});
+
+describe("ActionGateway drags, moves and held buttons", () => {
+  function agentCtx(s: ReturnType<typeof setup>, signal?: AbortSignal) {
+    const released: string[] = [];
+    let release: (() => Promise<void>) | undefined;
+    const forget = vi.fn();
+    const ctx = {
+      source: "agent" as const,
+      sessionId: s.sessionId,
+      cellId: s.cellId,
+      ...(signal ? { signal } : {}),
+      authorizeAgent: vi.fn(async (_request: NativeActionRequest) => ({ consume: () => true })),
+      beforeEffect: vi.fn(() => true),
+      afterEffect: vi.fn(),
+      holdInput: vi.fn((r: () => Promise<void>) => {
+        release = r;
+        return forget;
+      }),
+    };
+    return { ctx, released, forget, release: () => release?.() };
+  }
+  const inputs = (s: ReturnType<typeof setup>) =>
+    s.fake.calls
+      .filter((c) => c.path === "/input")
+      .map((c) => c.body as { input: { kind: string }; window?: number; dropWindow?: number });
+  const at = (x: number, y: number, name?: string, window = 77): HitTestResult => ({
+    target: name ? { point: { x, y }, source: "ax", role: "list item", name } : null,
+    window,
+    ms: 3,
+  });
+  const desk = (point: Point) =>
+    point.x > 1000 ? at(point.x, point.y, "Trash", 88) : at(point.x, point.y, "report.txt");
+
+  it("drags along the whole path under one approval that names both ends", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx } = agentCtx(s);
+    const path = [
+      { x: 100, y: 200 },
+      { x: 300, y: 250 },
+      { x: 600, y: 300 },
+    ];
+    const outcome = await s.gateway.run(ctx, {
+      verb: "drag",
+      path,
+      button: "left",
+      mods: ["shift"],
+    });
+    expect(outcome.ok).toBe(true);
+    expect(ctx.authorizeAgent).toHaveBeenCalledOnce();
+    const request = ctx.authorizeAgent.mock.calls[0]?.[0];
+    expect(request?.action).toMatchObject({ verb: "drag", path });
+    expect(request?.identity).toMatchObject({
+      target: { name: "report.txt" },
+      point: { x: 200, y: 400 },
+      drop: { target: { name: "Trash" }, window: 88, point: { x: 1200, y: 600 } },
+    });
+    const [sent] = inputs(s);
+    expect(sent).toMatchObject({
+      input: {
+        kind: "drag",
+        from: { x: 200, y: 400 },
+        to: { x: 1200, y: 600 },
+        path: [{ x: 600, y: 500 }],
+        button: "left",
+        mods: ["shift"],
+        durationMs: expect.any(Number),
+      },
+      window: 77,
+      dropWindow: 88,
+    });
+    expect(s.ofType("action.intent")[0]?.data).toMatchObject({
+      verb: "drag",
+      label: 'Drag "report.txt" to "Trash"',
+      point: { x: 200, y: 400 },
+    });
+    expect(s.ofType("action.dispatch")).toHaveLength(1);
+    expect(s.gateway.cursorOf(s.cellId)).toEqual({ x: 1200, y: 600 });
+  });
+
+  it("cancels a drag whose drop point changed after approval, before any press", async () => {
+    let trash = "Trash";
+    const s = setup({ hitTest: (p) => (p.x > 1000 ? at(p.x, p.y, trash, 88) : desk(p)) });
+    const { ctx } = agentCtx(s);
+    ctx.authorizeAgent.mockImplementation(async () => {
+      trash = "Shred";
+      return { consume: () => true };
+    });
+    const outcome = await s.gateway.run(ctx, {
+      verb: "drag",
+      path: [
+        { x: 100, y: 200 },
+        { x: 600, y: 300 },
+      ],
+    });
+    expect(outcome).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(inputs(s)).toEqual([]);
+  });
+
+  it("lets go of the button when stopped mid-drag, before the action returns", async () => {
+    const s = setup({ hitTest: desk, inputHolds: 1, releaseMs: 20 });
+    const stop = new AbortController();
+    const { ctx } = agentCtx(s, stop.signal);
+    const running = s.gateway.run(ctx, {
+      verb: "drag",
+      path: [
+        { x: 100, y: 200 },
+        { x: 600, y: 300 },
+      ],
+    });
+    await vi.waitFor(() => expect(s.ofType("action.dispatch")).toHaveLength(1));
+    stop.abort();
+    expect(await running).toMatchObject({ ok: false, cancelled: "user" });
+    expect(s.fake.calls.at(-1)?.path).toBe("/release");
+    expect(s.ofType("action.result")[0]?.data.ok).toBe(false);
+  });
+
+  it("refuses a drag or a press while a button is down", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx } = agentCtx(s);
+    expect((await s.gateway.run(ctx, { verb: "down", point: { x: 10, y: 10 } })).ok).toBe(true);
+    for (const action of [
+      {
+        verb: "drag" as const,
+        path: [
+          { x: 1, y: 1 },
+          { x: 9, y: 9 },
+        ],
+      },
+      { verb: "down" as const, point: { x: 10, y: 10 } },
+      { verb: "click" as const, point: { x: 10, y: 10 } },
+    ])
+      expect(await s.gateway.run(ctx, action)).toMatchObject({
+        ok: false,
+        cancelled: "preflight",
+        error: "the left button is still down; let go of it with left_mouse_up first",
+      });
+    expect(inputs(s).map((i) => i.input.kind)).toEqual(["down"]);
+  });
+
+  it("keeps a pressed button down between actions, glides while it is down, and lets go on up", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx, forget } = agentCtx(s);
+    await s.gateway.run(ctx, { verb: "move", point: { x: 50, y: 60 } });
+    await s.gateway.run(ctx, { verb: "down", mods: ["ctrl"] });
+    expect(ctx.holdInput).toHaveBeenCalledOnce();
+    await s.gateway.run(ctx, { verb: "move", point: { x: 200, y: 160 } });
+    const up = await s.gateway.run(ctx, { verb: "up" });
+    expect(up).toMatchObject({ ok: true });
+    expect(up.notDown).toBeUndefined();
+    expect(inputs(s).map((i) => i.input)).toEqual([
+      { kind: "move", to: { x: 100, y: 120 } },
+      { kind: "down", button: "left", at: { x: 100, y: 120 }, mods: ["ctrl"] },
+      { kind: "move", to: { x: 400, y: 320 }, durationMs: expect.any(Number) },
+      { kind: "up", button: "left", at: { x: 400, y: 320 } },
+    ]);
+    expect(forget).toHaveBeenCalledOnce();
+    expect(s.ofType("action.intent").map((e) => e.data.label)).toEqual([
+      'Move to "report.txt"',
+      'Hold down the left button on "report.txt"',
+      'Move to "report.txt"',
+      'Release the left button on "report.txt"',
+    ]);
+  });
+
+  it("glides to a release point while the button is down, then lets go there", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx } = agentCtx(s);
+    await s.gateway.run(ctx, { verb: "down", point: { x: 10, y: 10 } });
+    await s.gateway.run(ctx, { verb: "up", point: { x: 300, y: 300 } });
+    expect(inputs(s).map((i) => i.input.kind)).toEqual(["down", "move", "up"]);
+    expect(inputs(s)[1]?.input).toMatchObject({
+      to: { x: 600, y: 600 },
+      durationMs: expect.any(Number),
+    });
+  });
+
+  it("says when a released button was not down", async () => {
+    const s = setup({
+      hitTest: desk,
+      input: () => ({ pressMono: 50_001, presses: [], injector: "xtest", armedMono: 50_000 }),
+    });
+    const { ctx } = agentCtx(s);
+    expect(await s.gateway.run(ctx, { verb: "up" })).toMatchObject({ ok: true, notDown: true });
+  });
+
+  it("lets go of a held button for its owner, and after its time without another pointer action", async () => {
+    const s = setup({ hitTest: desk, releaseMs: 5 }, { heldButtonMs: 60 });
+    const a = agentCtx(s);
+    await s.gateway.run(a.ctx, { verb: "down", point: { x: 10, y: 10 } });
+    await a.release();
+    expect(s.fake.calls.filter((c) => c.path === "/release")).toHaveLength(1);
+    expect(a.forget).toHaveBeenCalledOnce();
+    await a.release();
+    expect(s.fake.calls.filter((c) => c.path === "/release")).toHaveLength(1);
+
+    await s.gateway.run(a.ctx, { verb: "down", point: { x: 10, y: 10 } });
+    await new Promise((r) => setTimeout(r, 40));
+    await s.gateway.run(a.ctx, { verb: "move", point: { x: 20, y: 20 } });
+    await new Promise((r) => setTimeout(r, 40));
+    expect(s.fake.calls.filter((c) => c.path === "/release")).toHaveLength(1);
+    await vi.waitFor(() =>
+      expect(s.fake.calls.filter((c) => c.path === "/release")).toHaveLength(2),
+    );
+    expect((await s.gateway.run(a.ctx, { verb: "click", point: { x: 5, y: 5 } })).ok).toBe(true);
+  });
+
+  it("lets go when a press fails", async () => {
+    const s = setup({ hitTest: desk, input: () => ({ status: 504, body: "no raw press" }) });
+    const { ctx } = agentCtx(s);
+    expect((await s.gateway.run(ctx, { verb: "down" })).ok).toBe(false);
+    expect(s.fake.calls.at(-1)?.path).toBe("/release");
+    expect(ctx.holdInput).not.toHaveBeenCalled();
+  });
+
+  it("moves the cursor without a glide when no button is down, and checks no basis for it", async () => {
+    const s = setup({ hitTest: desk });
+    const { ctx } = agentCtx(s);
+    const outcome = await s.gateway.run(ctx, { verb: "move", point: { x: 40, y: 30 } });
+    expect(outcome.ok).toBe(true);
+    expect(inputs(s)).toEqual([
+      expect.objectContaining({ input: { kind: "move", to: { x: 80, y: 60 } } }),
+    ]);
+    expect(s.fake.calls.filter((c) => c.path === "/observe")).toHaveLength(1);
   });
 });

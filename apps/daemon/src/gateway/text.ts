@@ -25,6 +25,33 @@ export function keyLabel(
   return clipText(`Press ${keys}${times}`, LABEL_MAX);
 }
 
+const at = (target: Target | null | undefined, point: Point) =>
+  target?.name ? `"${target.name}"` : `(${point.x}, ${point.y})`;
+
+export function dragLabel(
+  from: { target: Target | null | undefined; point: Point },
+  to: { target: Target | null | undefined; point: Point },
+): string {
+  return clipText(`Drag ${at(from.target, from.point)} to ${at(to.target, to.point)}`, LABEL_MAX);
+}
+
+export function moveLabel(target: Target | null | undefined, point: Point): string {
+  return clipText(`Move to ${at(target, point)}`, LABEL_MAX);
+}
+
+export function buttonLabel(
+  verb: "down" | "up",
+  button: "left" | "right" | "middle",
+  target: Target | null | undefined,
+  point: Point,
+): string {
+  const where = target?.name ? ` on "${target.name}"` : ` at (${point.x}, ${point.y})`;
+  return clipText(
+    `${verb === "down" ? "Hold down" : "Release"} the ${button} button${where}`,
+    LABEL_MAX,
+  );
+}
+
 export function scrollLabel(dx: number, dy: number): string {
   const parts = [];
   if (dy) parts.push(`${dy > 0 ? "down" : "up"} ${Math.abs(dy)}`);

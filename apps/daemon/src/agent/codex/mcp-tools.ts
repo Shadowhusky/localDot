@@ -1,5 +1,6 @@
 import {
   ComputerAction,
+  MAX_DRAG_MS,
   MODEL_SCREEN,
   TOOL_INPUTS,
   TOOL_NAMES,
@@ -19,10 +20,15 @@ const H = MODEL_SCREEN.height;
 export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   computer:
     `Use the virtual computer's screen, a ${W}x${H} Linux desktop. action: screenshot (returns the screen), ` +
-    `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}; button left/right/middle; count 1-3), ` +
-    "type (text), key (keys: X key names such as Return, Page_Up or plus, several for a combo like ctrl+l; " +
-    "repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them down), scroll (point, dx and dy in " +
-    "steps of -30..30), wait (ms), zoom (region {x, y, w, h}, returns that part enlarged), cursor_position. " +
+    `click (point {x, y} in screen pixels, 0 <= x < ${W}, 0 <= y < ${H}, or where the cursor is without one; ` +
+    'button left/right/middle; count 1-3; mods: modifier keys held during the click, such as ["shift"] or ' +
+    '["ctrl"]), drag (path: 2 to 64 points {x, y} to follow, start first, such as a stroke when drawing; ' +
+    `button; mods; ms up to ${MAX_DRAG_MS} for the motion), move (point: hovers, or drags while a button is ` +
+    "down), mouse_down (point optional, button, mods: the button stays down until mouse_up, at most 60 s), " +
+    "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
+    "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
+    "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
+    "(region {x, y, w, h}, returns that part enlarged), cursor_position. " +
     "Each action can return a new screenshot. Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.",
   shell:
     "Run one bash command in the virtual computer's terminal, as its user, in their home. Returns the " +

@@ -66,12 +66,15 @@ export class FakeDesktopd {
       const at = body.input?.kind === "move" ? body.input.to : body.input?.at;
       if (at) this.pointer = { x: at.x, y: at.y };
       const armedMono = this.mono();
-      const long = body.input?.kind === "key" && (body.input.repeat || body.input.holdMs);
-      const count = long ? (body.input?.holdMs ? 1 : (body.input?.repeat ?? 1)) : 1;
+      if (body.input?.kind === "drag" && body.input.to) this.pointer = { ...body.input.to };
+      const drag = body.input?.kind === "drag";
+      const long = drag || (body.input?.kind === "key" && (body.input.repeat || body.input.holdMs));
+      const count = long && !drag ? (body.input?.holdMs ? 1 : (body.input?.repeat ?? 1)) : 1;
       const presses = Array.from({ length: count }, () => this.mono());
       const out = this.script.input?.(body) ?? {
         pressMono: presses[0] as number,
         presses,
+        ...(body.input?.kind === "up" ? { releaseMono: presses[0] as number } : {}),
         injector: "xtest",
         armedMono,
       };

@@ -53,15 +53,19 @@ export class DesktopdClient {
     return this.#json("GET", "/clock", undefined, TIMEOUT_MS.clock, ClockResult.parse);
   }
 
-  // A repeated or held key answers as NDJSON: `onPress` hears each press of a repeat, and a hold
-  // once its keys are down. Aborting `signal` (a Stop) ends a repeat after the press in progress.
+  // A repeated or held key, or a drag, answers as NDJSON: `onPress` hears each press of a repeat,
+  // and a hold or a drag once its keys or button are down. Aborting `signal` (a Stop) ends a repeat
+  // after the press in progress, and a drag where it is (it lets go where it started).
   async input(
     req: InputRequest,
     signal?: AbortSignal,
     onPress?: (p: KeyProgress) => void | Promise<void>,
   ): Promise<InputResult> {
-    const key = req.input.kind === "key" ? req.input : undefined;
-    const timeoutMs = TIMEOUT_MS.input + (key?.holdMs ?? 0) + (key?.repeat ?? 0) * REPEAT_PRESS_MS;
+    const { input } = req;
+    const key = input.kind === "key" ? input : undefined;
+    const motionMs = input.kind === "drag" || input.kind === "move" ? (input.durationMs ?? 0) : 0;
+    const timeoutMs =
+      TIMEOUT_MS.input + (key?.holdMs ?? 0) + (key?.repeat ?? 0) * REPEAT_PRESS_MS + motionMs;
     signal?.throwIfAborted();
     const res = await this.#send("POST", "/input", req, timeoutMs, signal);
     const streamed = res.headers.get("content-type")?.includes("application/x-ndjson");

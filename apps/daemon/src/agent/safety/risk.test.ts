@@ -17,6 +17,53 @@ const act = {
   download_execute: "act",
   system_settings: "act",
 } as const;
+describe("pointer verbs map onto the existing classes", () => {
+  const item = (name: string) => ({ source: "ax" as const, fresh: true, role: "list item", name });
+  it("classifies a drag by the stronger of its two ends: a drop on Trash is a delete", () => {
+    const policy = { ...DEFAULT_AUTONOMY, delete: "ask" } as const;
+    expect(
+      classify({ operation: "click", target: item("report.txt"), drop: item("Trash") }, policy),
+    ).toEqual({ actionClass: "delete", mode: "ask", risk: "high" });
+    expect(
+      classify({ operation: "click", target: item("Trash"), drop: item("report.txt") }, policy),
+    ).toMatchObject({ actionClass: "delete" });
+    expect(
+      classify({ operation: "click", target: item("report.txt"), drop: null }, policy),
+    ).toMatchObject({ actionClass: "unknown", mode: "ask" });
+    const handoff = { ...DEFAULT_AUTONOMY, delete: "handoff" } as const;
+    expect(
+      classify({ operation: "click", target: item("report.txt"), drop: item("Trash") }, handoff)
+        .mode,
+    ).toBe("handoff");
+    expect(
+      classify(
+        { operation: "click", target: item("a"), drop: { ...item("Password"), secret: true } },
+        act,
+      ).actionClass,
+    ).toBe("credentials");
+  });
+  it("names both ends and the held keys on the card", () => {
+    const facts = {
+      operation: "click" as const,
+      target: item("report.txt"),
+      drop: item("Trash"),
+      mods: ["shift"],
+    };
+    const card = buildApprovalCard(facts, classify(facts, DEFAULT_AUTONOMY), (t) => t);
+    expect(card.title).toBe("Delete item");
+    expect(card.fields).toEqual([
+      ["Target", "report.txt"],
+      ["Drop target", "Trash"],
+    ]);
+  });
+  it("lets held modifier keys show without changing a click's class", () => {
+    const plain = classify({ operation: "click", target: item("Buy") }, DEFAULT_AUTONOMY);
+    expect(
+      classify({ operation: "click", target: item("Buy"), mods: ["ctrl"] }, DEFAULT_AUTONOMY),
+    ).toEqual(plain);
+  });
+});
+
 describe("native and execution risk facts", () => {
   it("file disclosure always needs approval, while an explicit handoff policy remains stricter", () => {
     for (const send of ["act", "ask", "handoff"] as const)

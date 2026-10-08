@@ -1,8 +1,20 @@
-import { type ComputerAction, clipText, type Target, type ToolResult } from "@localdot/protocol";
-import { checkCombo } from "@localdot/protocol/keys";
-import type { ActionContext, ActionOutcome, GuiAction } from "../../gateway/gateway.ts";
+import {
+  type ComputerAction,
+  clipText,
+  MAX_DRAG_MS,
+  type Target,
+  type ToolResult,
+} from "@localdot/protocol";
+import { checkCombo, checkModifiers } from "@localdot/protocol/keys";
+import {
+  type ActionContext,
+  type ActionOutcome,
+  type GuiAction,
+  HELD_BUTTON_MS,
+  type NativeActionIdentity,
+} from "../../gateway/gateway.ts";
 import { authorizePrepared } from "../safety/authorize.ts";
-import { classify, type RiskFacts } from "../safety/risk.ts";
+import { classify, type NativeTargetFacts, type RiskFacts } from "../safety/risk.ts";
 import type { AgentSession } from "../session.ts";
 import { frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
@@ -15,39 +27,81 @@ async function screenshot(deps: ToolDeps, ctx: ToolCallContext): Promise<ToolRes
   return { ok: true, content: [await frame(deps, ctx, o.frameId)] };
 }
 
+const targetFacts = (target: Target): NativeTargetFacts => ({
+  source: target.source,
+  fresh: true,
+  role: target.role,
+  name: target.name,
+  url: target.url,
+  secret: target.secret === true,
+});
+
 // DesktopdClient already parsed WireTarget. Classify full native strings before public clipping.
-function nativeFacts(action: GuiAction, target: Target | null): RiskFacts {
-  if (action.verb === "wait" || action.verb === "scroll") return { operation: action.verb };
+// A hover browses like a scroll; a drag, a press or a release acts like a click where it lands,
+// and a drag is as strong as the stronger of its two ends.
+function nativeFacts(action: GuiAction, identity: NativeActionIdentity): RiskFacts {
+  const mods = "mods" in action && action.mods?.length ? { mods: action.mods } : {};
+  if (action.verb === "wait") return { operation: "wait" };
+  if (action.verb === "scroll") return { operation: "scroll", ...mods };
+  if (action.verb === "move") return { operation: "scroll" };
+  const { target } = identity;
   return {
-    operation: action.verb,
-    ...(target
-      ? {
-          target: {
-            source: target.source,
-            fresh: true,
-            role: target.role,
-            name: target.name,
-            url: target.url,
-            secret: target.secret === true,
-          },
-        }
+    operation: action.verb === "type" || action.verb === "key" ? action.verb : "click",
+    ...(target ? { target: targetFacts(target) } : {}),
+    ...(action.verb === "drag"
+      ? { drop: identity.drop?.target ? targetFacts(identity.drop.target) : null }
       : {}),
+    ...mods,
   };
 }
 
+const modsOf = (a: ComputerAction): { mods?: string[] } | string =>
+  a.mods ? (checkModifiers(a.mods) ?? { mods: a.mods }) : {};
+
 function gui(a: ComputerAction): GuiAction | string {
   const basedOn = a.basedOn ? { basedOn: a.basedOn } : {};
+  const point = a.point ? { point: a.point } : {};
+  const mods = modsOf(a);
+  if (typeof mods === "string") return mods;
   switch (a.action) {
     case "click":
-      if (!a.point) return "click needs a coordinate";
       return {
         verb: "click",
-        point: a.point,
+        ...point,
         button: a.button ?? "left",
         count: a.count ?? 1,
+        ...mods,
         speed: "auto",
         ...basedOn,
       };
+    case "drag":
+      if (!a.path) return "drag needs a path";
+      if (a.ms !== undefined && (a.ms <= 0 || a.ms > MAX_DRAG_MS))
+        return `a drag lasts more than 0 and at most ${MAX_DRAG_MS} ms`;
+      return {
+        verb: "drag",
+        path: a.path,
+        button: a.button ?? "left",
+        ...mods,
+        ...(a.ms ? { durationMs: a.ms } : {}),
+        speed: "auto",
+        ...basedOn,
+      };
+    case "move":
+      if (!a.point) return "move needs a point";
+      return { verb: "move", point: a.point, speed: "auto" };
+    case "mouse_down":
+      return {
+        verb: "down",
+        ...point,
+        button: a.button ?? "left",
+        ...mods,
+        speed: "auto",
+        ...basedOn,
+      };
+    case "mouse_up":
+      if (a.mods) return "mouse_up takes no keys: the keys held with mouse_down come up with it";
+      return { verb: "up", ...point, button: a.button ?? "left", speed: "auto" };
     case "type":
       if (!a.text) return "type needs text";
       return { verb: "type", text: a.text, speed: "auto" };
@@ -65,12 +119,12 @@ function gui(a: ComputerAction): GuiAction | string {
       if (!a.keys || !a.ms) return "hold_key needs keys and how long to hold them (ms)";
       return checkCombo(a.keys) ?? { verb: "key", combo: a.keys, holdMs: a.ms, speed: "auto" };
     case "scroll":
-      if (!a.point) return "scroll needs a coordinate";
       return {
         verb: "scroll",
-        point: a.point,
+        ...point,
         dx: a.dx ?? 0,
         dy: a.dy ?? 0,
+        ...mods,
         speed: "auto",
         ...basedOn,
       };
@@ -127,6 +181,26 @@ function keyboardNote(a: ComputerAction, outcome: ActionOutcome): string | undef
     : `${did} ${where[0]?.toUpperCase()}${where.slice(1)}.`;
 }
 
+const BUTTON_HELD_S = HELD_BUTTON_MS / 1000;
+const STALE: Partial<Record<ComputerAction["action"], string>> = {
+  click: "Not clicked",
+  scroll: "Not scrolled",
+  drag: "Not dragged",
+  mouse_down: "Not pressed",
+};
+
+// What a pointer action did that its screenshot cannot show: a button left down, one that was not
+// down, or a drag that stopped before its drop.
+function pointerNote(a: ComputerAction, outcome: ActionOutcome): string | undefined {
+  const button = a.button ?? "left";
+  if (a.action === "mouse_down" && outcome.ok)
+    return `The ${button} button is down. It stays down until mouse up, or ${BUTTON_HELD_S} s without another mouse action.`;
+  if (a.action === "mouse_up" && outcome.notDown) return `The ${button} button was not down.`;
+  if (a.action === "drag" && !outcome.ok && !outcome.cancelled)
+    return "The drag stopped before its drop and let go where it started.";
+  return undefined;
+}
+
 // A hold ends when the task is paused: nobody is left to let go of the keys.
 function untilPaused(session: AgentSession, signal: AbortSignal) {
   const paused = new AbortController();
@@ -175,11 +249,26 @@ export async function computerTool(
   }
   const action = gui(a);
   if (typeof action === "string") return { ok: false, content: [text(action)] };
-  // The browser screen presses one key at a time and cannot hold one: refused before approval.
-  if (a.action === "hold_key" && ctx.screen?.selection.screen === "browser")
-    return { ok: false, content: [text("Holding keys is not available on the browser screen.")] };
+  // The browser screen presses one key at a time and keeps no button down between actions:
+  // refused before approval.
+  if (ctx.screen?.selection.screen === "browser") {
+    if (a.action === "hold_key")
+      return { ok: false, content: [text("Holding keys is not available on the browser screen.")] };
+    if (a.action === "mouse_down" || a.action === "mouse_up")
+      return {
+        ok: false,
+        content: [
+          text(
+            "Holding a mouse button between actions is not available on the browser screen; drag with left_click_drag instead.",
+          ),
+        ],
+      };
+  }
+  // A hold or a drag ends when the task is paused: nobody is left to let go.
   const hold =
-    action.verb === "key" && action.holdMs ? untilPaused(session, ctx.signal) : undefined;
+    (action.verb === "key" && action.holdMs) || action.verb === "drag"
+      ? untilPaused(session, ctx.signal)
+      : undefined;
   const nativeContext: ActionContext = {
     ...selected,
     ...(hold ? { signal: hold.signal } : {}),
@@ -187,10 +276,11 @@ export async function computerTool(
     beforeEffect: (action, identity) => session.admitNativeEffect(action, identity),
     afterEffect: (action, identity, changed) =>
       session.settleNativeEffect(action, identity, changed),
+    holdInput: (release) => session.holdInput(release),
     redact: ctx.redact,
     authorizeAgent: async (request) => {
       ctx.check();
-      const facts = nativeFacts(request.action, request.identity.target);
+      const facts = nativeFacts(request.action, request.identity);
       const approved = classify(facts, ctx.session.autonomy).actionClass;
       const boundInput = { toolInput: a, action: request.action };
       const permit = await authorizePrepared(ctx, {
@@ -206,7 +296,7 @@ export async function computerTool(
         // An approval made without an element binds only its window, so the read at dispatch may
         // name one: it must fall in the approved class, or in one the policy runs without asking.
         consume: (current, identity, fresh) => {
-          const found = classify(nativeFacts(current, fresh.target), ctx.session.autonomy);
+          const found = classify(nativeFacts(current, fresh), ctx.session.autonomy);
           if (found.mode !== "act" && found.actionClass !== approved) return false;
           if (ctx.redact(JSON.stringify(fresh)) !== JSON.stringify(fresh)) return false;
           return permit.consume({ toolInput: a, action: current }, identity);
@@ -223,12 +313,12 @@ export async function computerTool(
   ctx.check();
   if (action.verb === "wait" && outcome.ok) return screenshot(deps, ctx);
   const content: ToolResult["content"] = [];
-  const note = keyboardNote(a, outcome);
+  const note = keyboardNote(a, outcome) ?? pointerNote(a, outcome);
   if (note) content.push(text(ctx.redact(note)));
   if (outcome.cancelled === "stale") {
     content.push(
       text(
-        "Not clicked: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.",
+        `${STALE[a.action] ?? "Not done"}: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.`,
       ),
     );
   } else if (!outcome.ok && !outcome.partial) {

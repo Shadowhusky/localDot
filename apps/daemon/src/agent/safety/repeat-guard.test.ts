@@ -16,6 +16,45 @@ const target = {
 };
 const identity: NativeActionIdentity = { window: 77, point: { x: 20, y: 40 }, target };
 const key: GuiAction = { verb: "key", combo: ["Ctrl", "c"] };
+describe("repetition of pointer actions", () => {
+  const admitted = (actions: GuiAction[], at = identity) => {
+    const guard = new RepeatGuard();
+    return actions.filter((action) => guard.admit(action, at)).length;
+  };
+  const path = [
+    { x: 1, y: 1 },
+    { x: 9, y: 9 },
+  ];
+  it("pauses the third identical drag that changed nothing, but not a stroke that moves on", () => {
+    const drag: GuiAction = { verb: "drag", path, label: "a", speed: "fast" };
+    expect(admitted([drag, { ...drag, label: "b" }, { ...drag, basedOn: "frame" }])).toBe(2);
+    expect(
+      admitted([
+        drag,
+        { verb: "drag", path: [...path, { x: 20, y: 20 }] },
+        { verb: "drag", path, button: "right" },
+        { verb: "drag", path, mods: ["shift"] },
+      ]),
+    ).toBe(4);
+  });
+  it("tells moves, presses, releases and modifier clicks apart", () => {
+    const at = (x: number): NativeActionIdentity => ({ ...identity, point: { x, y: 0 } });
+    const guard = new RepeatGuard();
+    const moves = [1, 2, 3, 4].map((x) => guard.admit({ verb: "move", point: { x, y: 0 } }, at(x)));
+    expect(moves).toEqual([true, true, true, true]);
+    expect(
+      admitted([
+        { verb: "click" },
+        { verb: "click", mods: ["ctrl"] },
+        { verb: "down" },
+        { verb: "up" },
+        { verb: "click", mods: ["shift"] },
+      ]),
+    ).toBe(5);
+    expect(admitted([{ verb: "down" }, { verb: "down" }, { verb: "down" }])).toBe(2);
+  });
+});
+
 describe("private actual native action repetition", () => {
   it("refuses the third identical key before its effect", () => {
     const guard = new RepeatGuard();
