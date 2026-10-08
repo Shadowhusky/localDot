@@ -66,8 +66,8 @@ export async function authorizePrepared(
     // No native effect has begun. Release this initiating tool's physical screen lease
     // before takeover drains all screens; the old lease can never authorize a replay.
     ctx.screen?.finish();
-    ctx.session.taskAutonomy.signIn(screenOf(ctx));
     const { reason, note } = handoffFor(decision, prepared.facts);
+    if (reason !== "other") ctx.session.taskAutonomy.signIn(screenOf(ctx));
     await ctx.session.takeover(reason, note, ctx.step, ctx.lease);
     ctx.check();
     // Hand-back never authorizes automatic replay of the action that caused takeover.

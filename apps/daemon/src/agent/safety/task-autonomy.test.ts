@@ -1,4 +1,4 @@
-import { DEFAULT_AUTONOMY, type ScreenName, ulid } from "@localdot/protocol";
+import { type AutonomyPolicy, DEFAULT_AUTONOMY, type ScreenName, ulid } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
@@ -8,8 +8,12 @@ import { authorizePrepared, toolRisk } from "./authorize.ts";
 import { decideAutonomy } from "./autonomy.ts";
 import { TaskAutonomy } from "./task-autonomy.ts";
 
-function context(screen?: ScreenName, selected?: ScreenName) {
-  const session = new AgentSession(ulid(), ulid(), "task", { append: vi.fn() }, DEFAULT_AUTONOMY);
+function context(
+  screen?: ScreenName,
+  selected?: ScreenName,
+  policy: AutonomyPolicy = DEFAULT_AUTONOMY,
+) {
+  const session = new AgentSession(ulid(), ulid(), "task", { append: vi.fn() }, policy);
   if (selected)
     vi.spyOn(session, "screens", "get").mockReturnValue({
       selection: { screen: selected },
@@ -101,6 +105,29 @@ describe("signed-in screens of one task", () => {
     expect(takeover).toHaveBeenCalledOnce();
     expect(session.taskAutonomy.signedIn("desktop")).toBe(true);
     expect(decideAutonomy(ctx, { operation: "click" }).mode).toBe("ask");
+  });
+
+  it("a hand-off the user chose, or one for a private key, leaves the desktop signed out", async () => {
+    const SECRET = "synthetic-known-secret-0123";
+    const typeNotes = (ctx: ToolCallContext, text: string) =>
+      authorizePrepared(ctx, {
+        tool: "computer",
+        input: { action: "type", text },
+        target: null,
+        facts: {
+          operation: "type",
+          target: { source: "ax", fresh: true, role: "AXTextArea", name: "Notes", app: "Editor" },
+        },
+        revalidate: async () => true,
+      });
+    const chosen = context(undefined, undefined, { ...DEFAULT_AUTONOMY, computer: "handoff" });
+    await typeNotes(chosen.ctx, "draft");
+    const keyed = context();
+    await typeNotes({ ...keyed.ctx, redact: redactor([SECRET]) }, `token ${SECRET}`);
+    for (const { takeover, session } of [chosen, keyed]) {
+      expect(takeover.mock.calls[0]?.[0]).toBe("other");
+      expect(session.taskAutonomy.signedIn("desktop")).toBe(false);
+    }
   });
 
   it.each([
