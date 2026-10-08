@@ -24,8 +24,11 @@ export interface FakeScript {
   clockDelayMs?: number;
   // A long string still typing: /type sends its progress lines, then nothing until the request ends.
   typeHolds?: boolean;
-  // Held keys: /input answers a key hold only once the request ends, as a Stop ends it.
-  inputHolds?: boolean;
+  // A held or repeated key still pressing: /input sends this many presses' lines, then nothing
+  // until the request ends, as a Stop ends it.
+  inputHolds?: number;
+  // How long /release takes before it answers (and is recorded).
+  releaseMs?: number;
 }
 
 export class FakeDesktopd {
@@ -55,28 +58,40 @@ export class FakeDesktopd {
           kind?: string;
           at?: { x: number; y: number };
           to?: { x: number; y: number };
+          repeat?: number;
           holdMs?: number;
         };
       };
       this.calls.push({ path: "/input", body });
-      if (this.script.inputHolds && body.input?.holdMs) {
-        const signal = c.req.raw.signal;
-        await new Promise<void>((resolve) =>
-          signal.aborted ? resolve() : signal.addEventListener("abort", () => resolve()),
-        );
-        return c.text("stopped", 499 as never);
-      }
       const at = body.input?.kind === "move" ? body.input.to : body.input?.at;
       if (at) this.pointer = { x: at.x, y: at.y };
       const armedMono = this.mono();
-      const pressMono = this.mono();
+      const long = body.input?.kind === "key" && (body.input.repeat || body.input.holdMs);
+      const count = long ? (body.input?.holdMs ? 1 : (body.input?.repeat ?? 1)) : 1;
+      const presses = Array.from({ length: count }, () => this.mono());
       const out = this.script.input?.(body) ?? {
-        pressMono,
-        presses: [pressMono],
+        pressMono: presses[0] as number,
+        presses,
         injector: "xtest",
         armedMono,
       };
-      return "status" in out ? c.text(out.body, out.status as 500) : c.json(out);
+      if ("status" in out) return c.text(out.body, out.status as 500);
+      if (!long) return c.json(out);
+      const lines = out.presses.map((pressMono, i) => ({ presses: i + 1, pressMono }));
+      const ndjson = (ls: unknown[]) => ls.map((l) => `${JSON.stringify(l)}\n`).join("");
+      const headers = { "content-type": "application/x-ndjson" };
+      const holds = this.script.inputHolds;
+      if (holds === undefined)
+        return new Response(ndjson([...lines, { ...out, done: true }]), { headers });
+      const signal = c.req.raw.signal;
+      const sent = new TextEncoder().encode(ndjson(lines.slice(0, holds)));
+      const held = new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(sent);
+          signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+        },
+      });
+      return new Response(held, { headers });
     });
     this.app.post("/type", async (c) => {
       const body = await c.req.json();
@@ -119,7 +134,8 @@ export class FakeDesktopd {
       );
     });
     this.app.post("/arm", (c) => c.json({ mono: this.mono() }));
-    this.app.post("/release", (c) => {
+    this.app.post("/release", async (c) => {
+      if (this.script.releaseMs) await new Promise((r) => setTimeout(r, this.script.releaseMs));
       this.calls.push({ path: "/release", body: null });
       return c.json({ keys: 0, buttons: 0 });
     });

@@ -93,7 +93,7 @@ export function browserGatewayDevice(options: {
       const owner = scope();
       return hit(client.lookup(permit, tabId, { kind: "find", ...request }, owner), owner);
     },
-    input: async (request, signal) => {
+    input: async (request, signal, onPress) => {
       const owner = scope(signal);
       if (request.window !== undefined) throw new BrowserClientError("request");
       const input = request.input;
@@ -110,8 +110,10 @@ export function browserGatewayDevice(options: {
       const once = mapped.kind === "key" ? { kind: "key" as const, combo: mapped.combo } : mapped;
       const results: InputResult[] = [];
       for (let i = 0; i < times; i++) {
-        results.push(await client.input(permit, tabId, { ...request, input: once }, owner));
+        const result = await client.input(permit, tabId, { ...request, input: once }, owner);
+        results.push(result);
         owner.check();
+        if (times > 1) await onPress?.({ presses: i + 1, pressMono: result.pressMono });
       }
       const [first] = results as [InputResult, ...InputResult[]];
       return { ...first, presses: results.flatMap((r) => r.presses) };

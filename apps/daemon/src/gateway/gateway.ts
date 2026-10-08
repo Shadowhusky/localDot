@@ -127,6 +127,9 @@ export interface ActionOutcome {
   changed?: boolean;
   // Typing and keys: the element that had keyboard focus just before the input.
   focus?: { target: Target | null; unknown?: true };
+  // A repeat or a hold that stopped after its first press: the presses made, or how long the
+  // keys were down.
+  partial?: { presses: number; heldMs?: number };
 }
 
 export interface GatewayDeps {
@@ -519,6 +522,20 @@ export class ActionGateway {
       ? await this.#consume(ctx, action, identity, permit, readIdentity)
       : undefined;
     this.#check(ctx);
+    // The input is dispatched once its first press is down: a repeat or a hold that stops later
+    // still pressed keys. `downAt` is when a hold's keys went down, in daemon time.
+    let dispatched = false;
+    let presses = 0;
+    let downAt = 0;
+    const dispatch = async (pressMono: number, injector: InputResult["injector"]) => {
+      if (dispatched) return;
+      dispatched = true;
+      downAt = this.deps.now();
+      mark(true);
+      const pressT = this.#pressT(ctx, d, pressMono);
+      const ringAt = await this.deps.ringOnset.onset({ pressT, injector, kind: "key", scale });
+      this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector });
+    };
     let res: InputResult;
     try {
       res = await d.client.input(
@@ -531,22 +548,34 @@ export class ActionGateway {
             : {}),
         },
         ctx.signal,
+        async (p) => {
+          presses = p.presses;
+          await dispatch(p.pressMono, "xtest");
+        },
       );
     } catch (error) {
       // A hold that was stopped, or keys that failed partway, may still be down. desktopd and its
       // helper release them too; this waits for it before Stop or a takeover goes on.
       await d.client.release?.().catch(() => undefined);
-      throw error;
+      if (!dispatched) throw error;
+      const heldMs = action.holdMs
+        ? Math.min(action.holdMs, Math.round((this.deps.now() - downAt) / 1000))
+        : undefined;
+      const cause = ctx.signal?.aborted ? ctx.signal.reason : error;
+      const raw = cause instanceof Error ? cause.message : "stopped";
+      const why = ctx.redact ? ctx.redact(raw) : raw;
+      const done =
+        heldMs === undefined
+          ? `${presses} of ${action.repeat ?? 1} presses`
+          : `holding for ${seconds(heldMs)} s of ${seconds(action.holdMs ?? 0)} s`;
+      return {
+        ...this.#fail(ctx, new Error(`Stopped after ${done}: ${why}`), true),
+        error: why,
+        partial: { presses, ...(heldMs === undefined ? {} : { heldMs }) },
+        ...(fresh ? { focus: focusOf(fresh) } : {}),
+      };
     }
-    mark(true);
-    const pressT = this.#pressT(ctx, d, res.pressMono);
-    const ringAt = await this.deps.ringOnset.onset({
-      pressT,
-      injector: res.injector,
-      kind: "key",
-      scale,
-    });
-    this.#append(ctx, "action.dispatch", { input, pressT, ringAt, injector: res.injector });
+    await dispatch(res.pressMono, res.injector);
     const settled = await this.#finish(ctx, d, "key");
     return { ok: true, ...settled, ...(fresh ? { focus: focusOf(fresh) } : {}) };
   }
@@ -888,6 +917,8 @@ export class ActionGateway {
     } as never);
   }
 }
+
+const seconds = (ms: number) => Number((ms / 1000).toFixed(1));
 
 function focusOf(read: NativeActionIdentity): NonNullable<ActionOutcome["focus"]> {
   return { target: read.target, ...(read.unknown ? { unknown: true as const } : {}) };

@@ -131,19 +131,38 @@ describe("leased browser gateway device", () => {
   it("presses a repeated key once per repeat and refuses to hold keys", async () => {
     const f = fixture();
     const key = { kind: "key" as const, combo: ["Down"] };
-    const result = await f.device.client.input({
-      input: { ...key, repeat: 3 },
-      injector: "xtest",
-      holdMs: 0,
-    });
+    const heard: number[] = [];
+    const result = await f.device.client.input(
+      { input: { ...key, repeat: 3 }, injector: "xtest", holdMs: 0 },
+      undefined,
+      (p) => {
+        heard.push(p.presses);
+      },
+    );
     expect(f.client.input.mock.calls.map((c) => (c as unknown[])[2])).toEqual(
       Array(3).fill({ input: key, injector: "xtest", holdMs: 0 }),
     );
     expect(result).toMatchObject({ pressMono: 51, presses: [51, 51, 51] });
+    expect(heard).toEqual([1, 2, 3]);
     await expect(
       f.device.client.input({ input: { ...key, holdMs: 500 }, injector: "xtest", holdMs: 0 }),
     ).rejects.toThrow(/hold/i);
     expect(f.client.input).toHaveBeenCalledTimes(3);
+  });
+  it("stops a repeated key once its screen lease ends between presses", async () => {
+    const f = fixture();
+    let presses = 0;
+    f.onReply(() => {
+      if (++presses === 2) f.lease.finish();
+    });
+    await expect(
+      f.device.client.input({
+        input: { kind: "key", combo: ["Delete"], repeat: 50 },
+        injector: "xtest",
+        holdMs: 0,
+      }),
+    ).rejects.toThrow("expired screen");
+    expect(f.client.input).toHaveBeenCalledTimes(2);
   });
   it("refuses a finished screen lease before and after asynchronous service replies", async () => {
     const f = fixture();

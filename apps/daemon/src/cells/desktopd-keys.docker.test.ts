@@ -200,6 +200,53 @@ describe.skipIf(!DOCKER_TESTS)("keyboard input on a real 2× desktop", () => {
     expect(down().keys).toEqual([]);
   });
 
+  it("stops pressing a repeated key soon after the request is stopped", async () => {
+    cell.write(`${HOME}/eval/stop.txt`, "");
+    cell.launch(["mousepad", `${HOME}/eval/stop.txt`]);
+    const editor = await waitFor("Mousepad", titled(/stop\.txt - Mousepad$/), 60_000);
+    await sleep(1500);
+    const stop = new AbortController();
+    let heard = 0;
+    const repeating = desktop
+      .input(
+        {
+          input: { kind: "key", combo: ["a"], repeat: 100 },
+          injector: "xtest",
+          holdMs: 0,
+          window: editor.id,
+        },
+        stop.signal,
+        (p) => {
+          heard = p.presses;
+        },
+      )
+      .catch((e: unknown) => e);
+    await sleep(300);
+    stop.abort();
+    expect(await repeating).toBeInstanceOf(Error);
+    const releasing = performance.now();
+    await desktop.release();
+    const releaseMs = performance.now() - releasing;
+    await sleep(300);
+    await press(["ctrl", "s"], { window: editor.id });
+    let typed = "";
+    for (let t = 0; t < 10; t++) {
+      await sleep(300);
+      typed = cell.read(`${HOME}/eval/stop.txt`)?.toString("utf8") ?? "";
+      if (typed.length > 0) break;
+    }
+    console.log(
+      `stopped after ${heard} reported presses, ${typed.length} typed, release ${releaseMs.toFixed(0)} ms`,
+    );
+    expect(heard).toBeGreaterThan(0);
+    expect(typed).toMatch(/^a+$/);
+    expect(typed.length).toBeLessThanOrEqual(heard + 2);
+    expect(typed.length).toBeLessThan(40);
+    expect(releaseMs).toBeLessThan(500);
+    expect(down()).toEqual({ keys: [], buttons: 0 });
+    cell.exec(["pkill", "mousepad"]);
+  });
+
   it("releases the keys a helper held when it died", async () => {
     const holding = desktop
       .input({
@@ -293,5 +340,8 @@ describe.skipIf(!DOCKER_TESTS)("keyboard input on a real 2× desktop", () => {
     const run = await running;
     expect(run.outcome).toBe("timeout");
     expect(down()).toEqual({ keys: [], buttons: 0 });
+    // Shift was down for seconds: the step is delivered, not cancelled before input.
+    expect(run.events.filter((e) => e.type === "action.dispatch")).toHaveLength(1);
+    expect(run.events.filter((e) => e.type === "action.cancel")).toEqual([]);
   });
 });

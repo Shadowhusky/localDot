@@ -89,10 +89,13 @@ function element(t: Target): string {
   ].join(" ");
 }
 
+const seconds = (ms: number | undefined) => Number(((ms ?? 0) / 1000).toFixed(1));
+
 // Where typing and keys went, and whether the screen changed: a screenshot shows neither keyboard
-// focus nor a key that reached nothing.
+// focus nor a key that reached nothing. A repeat or hold that stopped part-way says how far it got.
 function keyboardNote(a: ComputerAction, outcome: ActionOutcome): string | undefined {
-  if (!outcome.ok) return undefined;
+  const partial = outcome.partial;
+  if (!outcome.ok && !partial) return undefined;
   const focus = outcome.focus;
   const target = focus && !focus.unknown ? focus.target : undefined;
   const still = outcome.changed === false ? " No visible change." : "";
@@ -101,13 +104,16 @@ function keyboardNote(a: ComputerAction, outcome: ActionOutcome): string | undef
     const typed = `Typed ${n} character${n === 1 ? "" : "s"}`;
     if (target) return `${typed} into ${element(target)}.${still}`;
     if (target === null) return `${typed}, but no element had keyboard focus.${still}`;
-    return `${typed}; where keyboard focus was is unknown.${still}`;
+    return `${typed}; keyboard focus is unknown.${still}`;
   }
   if ((a.action !== "key" && a.action !== "hold_key") || !a.keys) return undefined;
   const keys = a.keys.join("+");
-  const did =
-    a.action === "hold_key"
-      ? `Held ${keys} for ${Number(((a.ms ?? 0) / 1000).toFixed(1))} s.`
+  const did = partial
+    ? a.action === "hold_key"
+      ? `Held ${keys} for ${seconds(partial.heldMs)} s of ${seconds(a.ms)} s, then stopped: ${outcome.error ?? "stopped"}.`
+      : `Pressed ${keys} ${partial.presses} of ${a.repeat ?? 1} times, then stopped: ${outcome.error ?? "stopped"}.`
+    : a.action === "hold_key"
+      ? `Held ${keys} for ${seconds(a.ms)} s.`
       : a.repeat && a.repeat > 1
         ? `Pressed ${keys} ${a.repeat} times.`
         : `Pressed ${keys}.`;
@@ -221,7 +227,7 @@ export async function computerTool(
         "Not clicked: the screen changed around that point since your screenshot. Here is the screen now; look again before acting.",
       ),
     );
-  } else if (!outcome.ok) {
+  } else if (!outcome.ok && !outcome.partial) {
     content.push(
       text(ctx.redact(`Failed: ${outcome.error ?? outcome.cancelled ?? "unknown error"}`)),
     );

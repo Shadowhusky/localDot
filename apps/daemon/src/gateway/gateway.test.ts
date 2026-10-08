@@ -812,17 +812,71 @@ describe("ActionGateway keyboard", () => {
     expect(paths).not.toContain("/release");
   });
 
-  it("releases every key and button when a hold is stopped", async () => {
-    const s = setup({ focused: () => search(), inputHolds: true });
+  it("delivers a hold that is stopped, says how long the keys were down, and releases them first", async () => {
+    const s = setup({ focused: () => search(), inputHolds: 1, releaseMs: 20 });
     const stop = new AbortController();
     const running = s.gateway.run(agentCtx(s, stop.signal), {
       verb: "key",
       combo: ["shift"],
-      holdMs: 20_000,
+      holdMs: 10_000,
+    });
+    await vi.waitFor(() => expect(s.ofType("action.dispatch")).toHaveLength(1));
+    s.clock.advance(msToMicros(3100));
+    stop.abort(new Error("the task was paused"));
+    expect(await running).toEqual({
+      ok: false,
+      cancelled: "user",
+      error: "the task was paused",
+      partial: { presses: 1, heldMs: 3100 },
+      focus: { target: search().target },
+    });
+    expect(s.fake.calls.at(-1)?.path).toBe("/release");
+    expect(s.events().map((e) => e.type)).toEqual([
+      "action.intent",
+      "action.dispatch",
+      "action.result",
+    ]);
+    expect(s.ofType("action.dispatch")[0]?.data.input).toEqual({
+      kind: "key",
+      combo: ["shift"],
+      holdMs: 10_000,
+    });
+    expect(s.ofType("action.result")[0]?.data).toEqual({
+      ok: false,
+      error: "Stopped after holding for 3.1 s of 10 s: the task was paused",
+    });
+  });
+
+  it("delivers a repeat that is stopped, with the presses it made", async () => {
+    const s = setup({ focused: () => search(), inputHolds: 37 });
+    const stop = new AbortController();
+    const running = s.gateway.run(agentCtx(s, stop.signal), {
+      verb: "key",
+      combo: ["Delete"],
+      repeat: 100,
+    });
+    await vi.waitFor(() => expect(s.ofType("action.dispatch")).toHaveLength(1));
+    stop.abort();
+    expect(await running).toMatchObject({ ok: false, cancelled: "user", partial: { presses: 37 } });
+    expect(s.ofType("action.result")[0]?.data.error).toMatch(/^Stopped after 37 of 100 presses/);
+    expect(s.ofType("action.cancel")).toEqual([]);
+  });
+
+  it("does not deliver a hold stopped before its keys went down", async () => {
+    const s = setup({ focused: () => search(), inputHolds: 0 });
+    const stop = new AbortController();
+    const running = s.gateway.run(agentCtx(s, stop.signal), {
+      verb: "key",
+      combo: ["shift"],
+      holdMs: 10_000,
     });
     await vi.waitFor(() => expect(inputs(s)).toHaveLength(1));
     stop.abort();
-    expect(await running).toMatchObject({ ok: false, cancelled: "user" });
+    const outcome = await running;
+    expect(outcome).toMatchObject({ ok: false, cancelled: "user" });
+    expect(outcome.partial).toBeUndefined();
+    expect(s.ofType("action.dispatch")).toEqual([]);
+    expect(s.ofType("action.cancel")[0]?.data.reason).toBe("user");
     expect(s.fake.calls.at(-1)?.path).toBe("/release");
   });
 

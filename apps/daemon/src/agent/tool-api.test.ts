@@ -258,6 +258,42 @@ describe("the tools", () => {
     expect(
       await note({ action: "hold_key", keys: ["shift"], ms: 2000 }, { target: null }, true),
     ).toBe("Held shift for 2 s. No element has keyboard focus.");
+    expect(await note(typing, { target: null, unknown: true }, true)).toBe(
+      "Typed 6 characters; keyboard focus is unknown.",
+    );
+    expect(await note(selectAll, { target: { ...field, name: PROXY_TOKEN } }, true)).toBe(
+      'Pressed ctrl+a. Keyboard focus is on "[redacted]" (text) in "Change Foreground Color".',
+    );
+  });
+
+  it("tells the model how far a repeat or a hold got before it stopped", async () => {
+    const h = toolHarness();
+    const stopped = async (input: unknown, partial: unknown) => {
+      h.setOutcome(
+        () =>
+          ({
+            ok: false,
+            cancelled: "user",
+            error: "the task was paused",
+            partial,
+            focus: { target: null },
+          }) as never,
+      );
+      return (await h.call("computer", input)).body.content.map((c) => c.text);
+    };
+    expect(
+      await stopped(
+        { action: "hold_key", keys: ["shift"], ms: 10_000 },
+        { presses: 1, heldMs: 3100 },
+      ),
+    ).toEqual([
+      "Held shift for 3.1 s of 10 s, then stopped: the task was paused. No element has keyboard focus.",
+    ]);
+    expect(
+      await stopped({ action: "key", keys: ["Delete"], repeat: 100 }, { presses: 37 }),
+    ).toEqual([
+      "Pressed Delete 37 of 100 times, then stopped: the task was paused. No element has keyboard focus.",
+    ]);
   });
 
   it("ends a hold when the task is paused", async () => {
