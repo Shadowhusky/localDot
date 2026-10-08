@@ -104,14 +104,16 @@ it("reads typed bounded private intent but never restores a permit or live gener
     executor: "api",
     pause: f.pause,
   });
-  expect(f.store.list()).toHaveLength(1);
+  expect(f.store.scan().intents).toHaveLength(1);
   expect(new ComputerFences(f.home).isFenced(f.cellId)).toBe(false);
   writeFileSync(
     f.path,
     JSON.stringify({ ...JSON.parse(readFileSync(f.path, "utf8")), permit: "injected" }) + "\n",
   );
   expect(() => f.store.read(f.sessionId)).toThrow();
-  expect(new ComputerFences(f.home).isFenced(ulid())).toBe(true);
+  const fences = new ComputerFences(f.home);
+  expect(fences.isFenced(f.cellId)).toBe(true);
+  expect(fences.isFenced(ulid())).toBe(false);
 });
 it("a crashed uncertain API pause becomes a permanent deny before startup effects", () => {
   const f = fixture();
@@ -151,6 +153,9 @@ it.each(["symlink", "oversize", "public", "wrong-owner"])(
     const before = lstatSync(f.path);
     expect(() => f.store.read(f.sessionId)).toThrow();
     expect(lstatSync(f.path).ino).toBe(before.ino);
-    expect(new ComputerFences(f.home).isFenced(ulid())).toBe(true);
+    const fences = new ComputerFences(f.home);
+    expect(fences.isFenced(f.cellId)).toBe(true);
+    // Only an intent that names no computer still closes every computer's admission.
+    expect(fences.isFenced(ulid())).toBe(kind === "symlink" || kind === "oversize");
   },
 );

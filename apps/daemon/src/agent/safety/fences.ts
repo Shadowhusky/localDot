@@ -35,9 +35,14 @@ export class ComputerFences {
         this.#durable.add(record.cellId);
       }
       // A crashed unsettled Pause is deny-only recovery. No recorded snapshot can mint a Resume permit.
-      for (const intent of new SafetyIntentStore(home).list())
+      const { intents, refused } = new SafetyIntentStore(home).scan();
+      for (const intent of intents)
         if (intent.pause && intent.pause.phase !== "paused")
           this.capture(intent.cellId, intent.sessionId, intent.executor ?? "native");
+      for (const intent of refused) {
+        if (!intent.cellId) throw new Error("unattributable safety intent");
+        this.capture(intent.cellId, intent.sessionId, "native");
+      }
     } catch {
       this.#unavailable = true;
     }

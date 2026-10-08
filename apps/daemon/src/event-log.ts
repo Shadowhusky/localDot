@@ -11,6 +11,7 @@ import {
   readFileSync,
   readSync,
   renameSync,
+  rmdirSync,
   rmSync,
   statSync,
   truncateSync,
@@ -168,6 +169,7 @@ export class EventLog {
       syncDirectory(this.#root);
     }
     this.#finishDeletion(sessionId);
+    this.#dropStaging();
   }
 
   #finishDeletion(sessionId: string): void {
@@ -189,6 +191,15 @@ export class EventLog {
     const staging = join(this.#root, ".deleting");
     rmSync(join(staging, sessionId), { recursive: true, force: true });
     syncDirectory(staging);
+  }
+
+  #dropStaging(): void {
+    try {
+      rmdirSync(join(this.#root, ".deleting"));
+      syncDirectory(this.#root);
+    } catch {
+      /* Absent, or another deletion is still pending. */
+    }
   }
 
   originOf(sessionId: string): number {
@@ -241,6 +252,7 @@ export class EventLog {
           console.warn("A pending session deletion will be retried.");
         }
       }
+      this.#dropStaging();
     }
     for (const entry of readdirSync(this.#root, { withFileTypes: true })) {
       if (!entry.isDirectory() || !ULID_PATTERN.test(entry.name)) continue;
