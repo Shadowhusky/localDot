@@ -1,14 +1,6 @@
-import { msToSeconds, type Rect } from "@localdot/protocol";
-import { type ActionState, type SessionModel, sceneAt } from "@localdot/stage";
-import type { HudState } from "../cells/hud-state.ts";
-
-export interface SessionHud {
-  label: string;
-  caption: string;
-  elapsedS: number | null;
-  control: boolean;
-  state: "working" | "idle" | "done" | "stopped" | "error";
-}
+import type { Rect } from "@localdot/protocol";
+import type { ActionState, SessionModel } from "@localdot/stage";
+import { past, progressive } from "./task-hud.ts";
 
 export interface StepRowView {
   id: string;
@@ -20,76 +12,6 @@ export interface StepRowView {
   durationMs: number | null;
   delivery?: "proposed" | "delivered";
   reason?: string;
-}
-
-const PROGRESSIVE: [RegExp, string][] = [
-  [/^Click\b/, "Clicking"],
-  [/^Type\b/, "Typing"],
-  [/^Press\b/, "Pressing"],
-  [/^Scroll\b/, "Scrolling"],
-  [/^Open\b/, "Opening"],
-  [/^Wait\b/, "Waiting"],
-];
-const PAST: [RegExp, string][] = [
-  [/^Click\b/, "Clicked"],
-  [/^Type\b/, "Typed"],
-  [/^Press\b/, "Pressed"],
-  [/^Scroll\b/, "Scrolled"],
-  [/^Open\b/, "Opened"],
-  [/^Wait\b/, "Waited"],
-];
-const tense = (label: string, table: [RegExp, string][]) =>
-  table.reduce((l, [re, to]) => l.replace(re, to), label);
-
-export function sessionHud(model: SessionModel, nowMs: number): SessionHud {
-  const scene = sceneAt(model, nowMs, { reducedMotion: true });
-  const elapsedS =
-    scene.hud.elapsedMs >= 5000 ? Math.floor(msToSeconds(scene.hud.elapsedMs)) : null;
-  if (scene.hud.state === "done")
-    return { label: "Done", caption: "Done.", elapsedS, control: false, state: "done" };
-  if (scene.hud.state === "stopped")
-    return { label: "Stopped", caption: "Stopped.", elapsedS, control: false, state: "stopped" };
-  if (scene.hud.state === "error")
-    return {
-      label: "Failed",
-      caption: scene.hud.label || "The step failed.",
-      elapsedS,
-      control: false,
-      state: "error",
-    };
-  const label = scene.hud.label ? tense(scene.hud.label, PROGRESSIVE) : "Working";
-  return {
-    label,
-    caption: scene.hud.label || "Starting…",
-    elapsedS,
-    control: scene.control,
-    state: scene.hud.state === "working" ? "working" : "idle",
-  };
-}
-
-export function mergeHud(
-  hud: HudState,
-  session: SessionHud | null,
-): HudState & { control: boolean; elapsedS?: number | null; stop?: boolean } {
-  // Pause is authoritative even when the session-end event arrives after cell status.
-  if (!session || hud.paused) return { ...hud, control: false };
-  if (session.state === "done" || session.state === "stopped" || session.state === "error") {
-    // A finished session keeps its verdict while the computer is live; the computer's controls return.
-    return {
-      ...hud,
-      ...(hud.live ? { label: session.label } : {}),
-      caption: session.caption,
-      control: false,
-    };
-  }
-  return {
-    ...hud,
-    label: session.label,
-    caption: session.caption,
-    control: session.control,
-    elapsedS: session.elapsedS,
-    stop: true,
-  };
 }
 
 export function stepRows(model: SessionModel): StepRowView[] {
@@ -112,9 +34,9 @@ export function stepRows(model: SessionModel): StepRowView[] {
       startT: rows.get(id)?.startT ?? a.intentT,
       label:
         done === undefined
-          ? tense(a.label, PROGRESSIVE)
+          ? progressive(a.label)
           : a.dispatch || (a.verb === "wait" && a.resultT !== undefined && a.ok && !a.cancel)
-            ? tense(a.label, PAST)
+            ? past(a.label)
             : a.label,
       status,
       ...(a.target?.bbox ? { target: a.target.bbox } : {}),

@@ -77,7 +77,7 @@ test("approval card, atomic Pause, matching Resume and in-dialog Stop remain hon
     await expect(settings).toContainText("Saved choices");
     await page.screenshot({ path: info.outputPath("safety-settings.png"), fullPage: true });
     await settings.getByRole("button", { name: "Close settings", exact: true }).click();
-    await page.getByRole("button", { name: "Start computer", exact: true }).click();
+    await page.getByRole("button", { name: "Turn on", exact: true }).first().click();
     await showPane("Conversation");
     const task = page.getByRole("textbox", { name: "New task", exact: true });
     await expect(task).toBeEnabled({ timeout: 120000 });

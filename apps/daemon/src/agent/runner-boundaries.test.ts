@@ -610,3 +610,47 @@ it("a keyd boot change cannot reopen a saved user Pause or claim an old model ow
   ).rejects.toMatchObject({ status: 503 });
   expect(writes.mock.calls.filter(([, input]) => input.state === "open")).toHaveLength(before);
 });
+
+it.each(["the Pause itself", "an approval", "a question"] as const)(
+  "a budget pause still holds Resume after a user Pause publishes a paused state for %s",
+  async (wait) => {
+    const h = setup();
+    const session = await h.runner.start(h.cellId, "Budget, then Pause");
+    await h.ready();
+    session.append("budget.exceeded", {
+      scope: "task",
+      taskId: session.id,
+      limitUSD: 5,
+      spentUSD: 5,
+      needUSD: 1,
+    });
+    const pause = h.runner.pauseTask(session.id, ulid());
+    await until(() => session.safetyPause?.phase === "paused");
+    const generation = required(session.generation);
+    if (wait === "an approval") {
+      void session
+        .requestApproval(
+          {
+            sessionId: session.id,
+            cellId: session.cellId,
+            generation: generation.id,
+            callId: ulid(),
+            digest: "d".repeat(64),
+            targetDigest: "t".repeat(64),
+          } as never,
+          { actionClass: "send", risk: "high", title: "Send the report", fields: [] },
+          { signal: new AbortController().signal, check: () => {}, revalidate: async () => true },
+        )
+        .catch(() => {});
+      expect(session.pendingApproval).toBeDefined();
+    }
+    if (wait === "a question") {
+      void session.ask("Which file?", [], true, 0, undefined, generation).catch(() => {});
+      expect(session.pendingAsk).toBeDefined();
+    }
+    await expect(
+      h.runner.resumeSafety(session.id, pause.requestId, pause.revision),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(session.safetyPause?.phase).toBe("paused");
+  },
+);

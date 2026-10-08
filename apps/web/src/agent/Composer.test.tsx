@@ -7,6 +7,18 @@ import { Composer, type ComposerProps } from "./Composer.tsx";
 import { emptyAgentModel } from "./model.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 
+// Lets one test pass a key-shaped name through the upload's own guards to reach Send's check.
+const transfer = vi.hoisted(() => ({ trustNames: false }));
+vi.mock("./file-transfer.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./file-transfer.ts")>();
+  return {
+    ...actual,
+    safeTransferName: (name: string) => transfer.trustNames || actual.safeTransferName(name),
+    uploadFile: async (...args: Parameters<typeof actual.uploadFile>) =>
+      transfer.trustNames ? `~/Downloads/${args[2].name}` : actual.uploadFile(...args),
+  };
+});
+
 const cellId = "01JXYZ0000000000000000CE11";
 const sessionId = "01JXYZ0000000000000000SESS";
 const otherSession = "01JXYZ00000000000000000002";
@@ -31,6 +43,7 @@ const agent: AgentSessionView = {
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  transfer.trustNames = false;
 });
 function setup(
   response: () => Response | Promise<Response> = () => new Response(null, { status: 202 }),
@@ -121,7 +134,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.field.value).toBe("请继续 monthly report");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(f.field.value).toBe("");
-    expect(screen.getByText("Accepted by the daemon.")).toBeTruthy();
+    expect(screen.getByText("Sent to dot.")).toBeTruthy();
   });
   it("preserves a newer draft even when its text equals the accepted message", async () => {
     const pending = Promise.withResolvers<Response>();
@@ -149,7 +162,7 @@ describe("composer delivery ownership and draft handling", () => {
     f.input("new session draft");
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
     expect(f.field.value).toBe("new session draft");
-    expect(screen.queryByText("Accepted by the daemon.")).toBeNull();
+    expect(screen.queryByText("Sent to dot.")).toBeNull();
     f.submit();
     expect(f.requests.at(-1)?.path).toContain(otherSession);
   });
@@ -170,7 +183,7 @@ describe("composer delivery ownership and draft handling", () => {
     expect(agent.reconcile).toHaveBeenCalled();
     expect(f.requests).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
-    await screen.findByText("Accepted by the daemon.");
+    await screen.findByText("Sent to dot.");
     expect(f.requests).toHaveLength(2);
     expect(f.requests[1]?.body).toEqual({ kind: "steer", text: "captured ordinary message" });
     expect(f.field.value).toBe("new unsent draft");
@@ -212,7 +225,7 @@ describe("composer delivery ownership and draft handling", () => {
     });
     expect(f.requests).toHaveLength(2);
     await act(async () => pending.resolve(new Response(null, { status: 202 })));
-    expect(screen.getByText("Accepted by the daemon.")).toBeTruthy();
+    expect(screen.getByText("Sent to dot.")).toBeTruthy();
   });
   it("checks the current field before retrying a captured ordinary request", async () => {
     const f = setup(() => {
@@ -239,9 +252,9 @@ describe("composer delivery ownership and draft handling", () => {
     });
     f.input("explicit new task after Stop");
     f.submit();
-    await screen.findByText(/The daemon refused this message/);
+    await screen.findByText(/This message was not accepted/);
     f.update({ agent: { ...agent, sessionId: null, snapshot: null, fresh: false } });
-    expect(screen.getByText(/The daemon refused this message/)).toBeTruthy();
+    expect(screen.getByText(/This message was not accepted/)).toBeTruthy();
     expect(f.field.value).toBe("explicit new task after Stop");
     expect(f.requests).toHaveLength(1);
     f.update({
@@ -251,7 +264,7 @@ describe("composer delivery ownership and draft handling", () => {
         snapshot: { ...snapshot, sessionId: otherSession },
       },
     });
-    expect(screen.queryByText(/The daemon refused this message/)).toBeNull();
+    expect(screen.queryByText(/This message was not accepted/)).toBeNull();
     expect(f.requests).toHaveLength(1);
   });
   it("retains the start gate when live polling adopts its session before the confirmed reply", async () => {
@@ -266,7 +279,22 @@ describe("composer delivery ownership and draft handling", () => {
     expect(f.requests).toHaveLength(1);
     await act(async () => pending.resolve(Response.json({ sessionId }, { status: 202 })));
     expect(f.field.value).toBe("");
-    expect(screen.getByText("Accepted by the daemon.")).toBeTruthy();
+    expect(screen.getByText("Task started.")).toBeTruthy();
+  });
+  it("asks for the new task's session as soon as the start is accepted", async () => {
+    const onTaskStarted = vi.fn();
+    const f = setup(() => Response.json({ sessionId }, { status: 202 }), {
+      agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
+      onTaskStarted,
+    });
+    f.input("new task");
+    await act(async () => f.submit());
+    await waitFor(() => expect(onTaskStarted).toHaveBeenCalledOnce());
+    f.update({ agent });
+    f.input("steer the running task");
+    await act(async () => f.submit());
+    await waitFor(() => expect(f.requests).toHaveLength(2));
+    expect(onTaskStarted).toHaveBeenCalledOnce();
   });
   it("does not acknowledge or clear a start reply for an unrelated adopted session", async () => {
     const pending = Promise.withResolvers<Response>();
@@ -284,7 +312,7 @@ describe("composer delivery ownership and draft handling", () => {
     });
     await act(async () => pending.resolve(Response.json({ sessionId }, { status: 202 })));
     expect(f.field.value).toBe("new task awaiting reply");
-    expect(screen.queryByText("Accepted by the daemon.")).toBeNull();
+    expect(screen.queryByText("Task started.")).toBeNull();
     expect(screen.getByText(/task changed while sending/)).toBeTruthy();
   });
   it("keeps a lost start reply uncertain after adoption and permits explicit dismissal without resending", async () => {
@@ -358,12 +386,41 @@ describe("composer delivery ownership and draft handling", () => {
     f.submit();
     expect(f.requests).toEqual([]);
     expect(document.body.innerHTML).not.toContain(key);
-    fireEvent.click(screen.getByRole("button", { name: "Discard detected keys" }));
+    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
     f.field.value = key;
     f.submit();
     expect(f.field.value).toBe("");
     expect(f.requests).toEqual([]);
     expect(screen.queryByLabelText("Message delivery")).toBeNull();
+  });
+  it("lets a draft with a detected key reach Send only by discarding the key", async () => {
+    const f = setup();
+    const key = `sk-ant-api03-${"x".repeat(40)}`;
+    f.input(`token ${key} please`);
+    const send = screen.getByRole("button", { name: "Send now" }) as HTMLButtonElement;
+    expect(send.disabled).toBe(true);
+    const reason = document.getElementById(send.getAttribute("aria-describedby") ?? "");
+    expect(reason?.textContent).toContain("1 recognised key was removed from your message");
+    expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+    f.input(`${f.field.value} continue`);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    f.submit();
+    expect(f.requests).toEqual([]);
+    expect(send.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
+    expect(screen.queryByRole("region", { name: "Key safeguard" })).toBeNull();
+    expect(document.activeElement).toBe(f.field);
+    expect(send.disabled).toBe(false);
+    expect(send.hasAttribute("aria-describedby")).toBe(false);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    await act(async () => {});
+    expect(f.requests).toEqual([
+      {
+        path: `/api/agent/sessions/${sessionId}/messages`,
+        body: { kind: "steer", text: "token  please continue" },
+      },
+    ]);
+    expect(JSON.stringify(f.requests)).not.toContain("sk-ant-api03");
   });
   it("rejects empty and oversized drafts, with an exact 8000-character positive", async () => {
     const f = setup();
@@ -372,7 +429,7 @@ describe("composer delivery ownership and draft handling", () => {
       f.submit();
     }
     expect(f.requests).toEqual([]);
-    fireEvent.click(screen.getByRole("button", { name: "Review message" }));
+    fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     f.input("x".repeat(8000));
     f.submit();
     expect(f.requests).toHaveLength(1);
@@ -409,6 +466,27 @@ describe("composer delivery ownership and draft handling", () => {
       body: { kind: "followup", text: "idle follow-up" },
     });
   });
+  it("opens model settings before any computer exists and keeps the draft", () => {
+    const onSettings = vi.fn();
+    const f = setup(undefined, {
+      cell: null,
+      known: false,
+      agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
+      configured: false,
+      onSettings,
+    });
+    expect(f.field.disabled).toBe(false);
+    f.input("Draft the monthly summary");
+    const connect = screen.getByRole("button", { name: "Connect a model" }) as HTMLButtonElement;
+    expect(connect.disabled).toBe(false);
+    fireEvent.click(connect);
+    expect(onSettings).toHaveBeenCalledExactlyOnceWith(f.field);
+    fireEvent.keyDown(f.field, { key: "Enter" });
+    expect(onSettings).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(f.field.value).toBe("Draft the monthly summary");
+    expect(f.requests).toEqual([]);
+  });
 });
 
 describe("explicit composer attachments", () => {
@@ -443,7 +521,7 @@ describe("explicit composer attachments", () => {
     await waitFor(() => expect(screen.getAllByText("Uploaded to Downloads")).toHaveLength(2));
     expect(calls.map((c) => c.body)).toEqual([one, two]);
     fireEvent.click(screen.getByRole("button", { name: "Send now" }));
-    await screen.findByText("Accepted by the daemon.");
+    await screen.findByText("Sent to dot.");
     expect(JSON.parse(String(calls[2]?.body))).toEqual({
       kind: "steer",
       text: "Read both sample files\n\nAttached files on this computer:\n- ~/Downloads/one.txt\n- ~/Downloads/two.txt",
@@ -472,6 +550,24 @@ describe("explicit composer attachments", () => {
     expect(screen.queryByLabelText("Message delivery")).toBeNull();
     expect(screen.getByText(/Finish or remove unconfirmed uploads/)).toBeTruthy();
   });
+  it("refuses to cite a confirmed attachment whose name looks like a key", async () => {
+    transfer.trustNames = true;
+    const key = `sk-ant-api03-${"x".repeat(40)}`;
+    const f = setup();
+    f.input("Read the file");
+    fireEvent.change(screen.getByLabelText("Add files"), {
+      target: { files: [new File(["x"], `${key}.txt`)] },
+    });
+    await screen.findByText("Uploaded to Downloads");
+    f.submit();
+    await act(async () => {});
+    expect(f.requests).toEqual([]);
+    expect(f.field.value).toBe("Read the file");
+    expect(screen.queryByLabelText("Message delivery")).toBeNull();
+    expect(screen.getByRole("alert").textContent).toBe(
+      "Shorten the message or attachment names before sending.",
+    );
+  });
   it("retains the original confirmed attachment references for an explicit uncertain-message retry", async () => {
     const delivered: string[] = [];
     const api = createApi("fixture", {
@@ -496,7 +592,7 @@ describe("explicit composer attachments", () => {
     f.submit();
     expect(delivered).toHaveLength(1);
     fireEvent.click(screen.getByRole("button", { name: "Resend once, risking a duplicate" }));
-    await screen.findByText("Accepted by the daemon.");
+    await screen.findByText("Sent to dot.");
     expect(delivered).toHaveLength(2);
     expect(delivered[1]).toBe(delivered[0]);
     expect(JSON.parse(delivered[0] as string).text).toContain("~/Downloads/one.txt");

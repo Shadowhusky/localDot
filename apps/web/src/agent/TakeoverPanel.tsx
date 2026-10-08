@@ -1,5 +1,5 @@
 import { HandbackRequest, ManualInput } from "@localdot/protocol";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import type { AgentTakeover } from "./model.ts";
@@ -33,6 +33,7 @@ export function TakeoverPanel({
   const [problem, setProblem] = useState<string | null>(null);
   const guard = useKeyGuard(visible),
     guardOwner = useRef(guard);
+  const keyNotice = useId();
   const current = useRef({ takeover, controls, visible });
   const clear = () => {
     if (text.current) text.current.value = "";
@@ -107,7 +108,7 @@ export function TakeoverPanel({
       <h3>Your turn · {takeover.reason === "2fa" ? "verification" : takeover.reason}</h3>
       <p>{takeover.note}</p>
       <p className="history-note">
-        Click the computer below. Text is sent to the computer and cleared after sending.
+        Click or tap the computer to use it. Text is sent to the computer and cleared after sending.
       </p>
       <fieldset disabled={!visible || !controls.canInput} className="pointer-modes">
         <legend>Pointer</legend>
@@ -251,10 +252,11 @@ export function TakeoverPanel({
           }}
         />
       </label>
-      <KeyFound guard={guard} receive={receiveKey} />
+      <KeyFound guard={guard} receive={receiveKey} noticeId={keyNotice} />
       <button
         type="button"
         disabled={!visible || !controls.canHandback || !!guard.notice}
+        aria-describedby={guard.notice ? keyNotice : undefined}
         onClick={handback}
       >
         Return control to dot

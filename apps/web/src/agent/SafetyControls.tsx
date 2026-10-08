@@ -11,11 +11,13 @@ export function SafetyControls({
   agent,
   cell,
   visible = true,
+  replaying = false,
 }: {
   safety: SafetyView;
   agent: AgentSessionView;
   cell: CellSummary | null;
   visible?: boolean;
+  replaying?: boolean;
 }) {
   const seen = useRef(new Set<string>());
   const [notificationError, setNotificationError] = useState<string | null>(null);
@@ -63,6 +65,8 @@ export function SafetyControls({
     }
   };
   const pause = safety.pause;
+  const status = agent.snapshot?.status;
+  const taskOpen = !replaying && !!agent.sessionId && status !== "ended" && status !== "idle";
   return (
     <div className="safety-controls">
       {safety.approval && (
@@ -86,7 +90,7 @@ export function SafetyControls({
           </div>
         </ApprovalCard>
       )}
-      {!!agent.sessionId && agent.snapshot?.status !== "ended" && (
+      {taskOpen && (
         <div className="safety-task-controls">
           {pause ? (
             <>
@@ -120,7 +124,11 @@ export function SafetyControls({
         </div>
       )}
       {taskStalled(agent, now) && (
-        <p role="status">The task heartbeat is late. You can use Stop if you want to contain it.</p>
+        <p role="status">
+          {replaying
+            ? "The live task's heartbeat is late. Switch to Watch if you want to stop it."
+            : "The task heartbeat is late. You can use Stop if you want to contain it."}
+        </p>
       )}
       {cell?.fenced && (
         <section className="fenced-recovery" aria-label="Computer recovery">

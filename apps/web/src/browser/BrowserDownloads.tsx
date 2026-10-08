@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { QuarantineItem } from "../../../../packages/protocol/src/quarantine.ts";
+import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { changeDownload, listDownloads } from "./download-api.ts";
 import "../agent/safety.css";
 import "./downloads.css";
 
 type Decision = { item: QuarantineItem; action: "release" | "discard" };
+const REFRESH_FAILED = "Downloads could not be refreshed. Check the computer and try again.";
 const size = (bytes: number) =>
   bytes < 1024
     ? `${bytes} bytes`
@@ -40,48 +42,73 @@ export function BrowserDownloads({
   const [limit, setLimit] = useState(12);
   const owner = useRef(0);
   const refresh = useRef<() => Promise<void>>(async () => {});
+  const poll = useRef<() => Promise<void>>(async () => {});
   const operation = useRef<AbortController | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
   const trigger = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
     const epoch = ++owner.current;
     const abort = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
     let loading: Promise<void> | undefined;
+    // A computer that is still starting refuses the list, so a background failure counts only
+    // after a list has loaded once; a refresh the user asked for always reports.
+    let loaded = false;
+    let asked = false;
     setItems([]);
     setDecision(null);
     setPending(false);
     setMessage(null);
     setLimit(12);
-    const load = () => {
+    const load = (explicit = false) => {
+      asked ||= explicit;
       if (loading) return loading;
       loading = (async () => {
         try {
           const next = await listDownloads(api, cellId, abort.signal);
-          if (epoch === owner.current && !abort.signal.aborted) setItems(next);
+          if (epoch === owner.current && !abort.signal.aborted) {
+            loaded = true;
+            setItems(next);
+            setMessage((shown) => (shown === REFRESH_FAILED ? null : shown));
+          }
         } catch {
-          if (epoch === owner.current && !abort.signal.aborted)
-            setMessage("Downloads could not be refreshed. Check the computer and try again.");
+          if (epoch === owner.current && !abort.signal.aborted && (loaded || asked))
+            setMessage(REFRESH_FAILED);
         } finally {
           loading = undefined;
+          asked = false;
         }
       })();
       return loading;
     };
-    refresh.current = load;
-    const poll = async () => {
-      await load();
-      if (!abort.signal.aborted) timer = setTimeout(() => void poll(), 2000);
-    };
-    void poll();
+    refresh.current = () => load(true);
+    poll.current = () => load();
+    void load();
     return () => {
       owner.current++;
-      clearTimeout(timer);
       abort.abort();
       operation.current?.abort();
       operation.current = null;
     };
   }, [api, cellId]);
+  const visible = items.filter((item) => item.state !== "discarded");
+  const waiting = visible.filter(
+    (item) => item.state === "held" || item.state === "releasing",
+  ).length;
+  const polling = releaseReady || waiting > 0;
+  useEffect(() => {
+    if (!polling) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      await poll.current();
+      if (!stopped) timer = setTimeout(() => void tick(), 2000);
+    };
+    timer = setTimeout(() => void tick(), 2000);
+    return () => {
+      stopped = true;
+      clearTimeout(timer);
+    };
+  }, [polling]);
   useEffect(() => {
     if (!decision) return;
     heading.current?.focus({ preventScroll: true });
@@ -137,10 +164,6 @@ export function BrowserDownloads({
       }
     }
   };
-  const visible = items.filter((item) => item.state !== "discarded");
-  const waiting = visible.filter(
-    (item) => item.state === "held" || item.state === "releasing",
-  ).length;
   const choose = (item: QuarantineItem, action: Decision["action"], element: HTMLButtonElement) => {
     trigger.current = element;
     setDecision({ item: structuredClone(item), action });
@@ -151,7 +174,11 @@ export function BrowserDownloads({
         <summary>
           Browser downloads{" "}
           <span>
-            {waiting ? `${waiting} waiting` : visible.length ? `${visible.length} files` : ""}
+            {waiting
+              ? `${waiting} waiting`
+              : visible.length
+                ? count(visible.length, "file", "files")
+                : ""}
           </span>
         </summary>
         <p className="download-intro">

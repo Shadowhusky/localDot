@@ -164,6 +164,7 @@ export class AgentSession {
                 : "other";
         const { fields, ...data } = card;
         this.append("approval.request", { ...data, kind, preview: { fields } });
+        this.#publishState(this.safetyPause ? "paused" : "waiting_user", "approval");
       },
       (resolution) => {
         if (this.status === "waiting_user" && !this.stopped && !this.controlHeld)
@@ -268,11 +269,16 @@ export class AgentSession {
     if (this.stopped) throw new SessionStoppedError();
     if (this.controlHeld) throw new ControlHeldError();
     const prior = this.#steps.pause;
+    const pausedBefore = this.status === "paused";
     this.#steps.requestPause(requestId, reason);
     this.#approvals.cancel(this.id);
     this.#ask?.finish({ by: "pause" });
     this.setStatus("paused");
-    if (!prior) this.#safetyChanged();
+    if (!prior) {
+      this.#safetyChanged();
+      // A task already paused for a recovery keeps that reason as its published state.
+      if (!pausedBefore) this.#publishState("paused", reason);
+    }
     const pause = this.safetyPause;
     if (!pause) throw new PausedStepError();
     return pause;
@@ -382,6 +388,14 @@ export class AgentSession {
       });
     } catch {
       /* The private revision and wakeup have already committed. */
+    }
+  }
+  // Viewers read the task's state from the journal; a failed append cannot undo the transition.
+  #publishState(state: "paused" | "waiting_user", reason: string): void {
+    try {
+      this.append("agent.state", { state, reason });
+    } catch {
+      /* The private state has already changed. */
     }
   }
   get pendingAsk(): string | undefined {

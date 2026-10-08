@@ -124,7 +124,7 @@ export function Conversation({
         ) : (
           <div className="conversation-empty">
             <h3>What would you like done?</h3>
-            <p>Start your computer, then write a task below.</p>
+            <p>Turn on your computer, then write a task below.</p>
           </div>
         )}
         <HistoryPages

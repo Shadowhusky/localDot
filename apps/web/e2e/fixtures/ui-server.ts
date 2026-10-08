@@ -784,6 +784,7 @@ app.get("/api/keyd", (c) =>
             : { state: "active", source: "router", addresses: 1 },
       }),
 );
+app.get("/api/cells/:id/quarantine", (c) => c.json({ items: [] }));
 app.get("/api/keys", (c) =>
   keydMode === "offline" ? c.text("owned key layer offline", 503) : c.json({ keys }),
 );
@@ -872,6 +873,17 @@ app.post("/__qa/budget", (c) => {
   });
   session.setStatus("paused");
   session.append("agent.state", { state: "paused", reason: "budget" });
+  return c.json({ ok: true });
+});
+app.post("/__qa/pause-uncertain", (c) => {
+  const pause = session?.safetyPause;
+  if (!session || !pause) return c.text("no pause", 409);
+  session.uncertainSafetyPause(pause.requestId, pause.revision);
+  return c.json({ ok: true });
+});
+app.post("/__qa/heartbeat", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
 app.post("/__qa/finish", (c) => {

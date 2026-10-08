@@ -33,12 +33,11 @@ export function TopBar({
       <div className="bar-l">
         <span className="brand">
           <Mascot />
-          localDot
+          <span className="brand-name">localDot</span>
         </span>
         <span className="title">{title}</span>
       </div>
       <nav className="modes" aria-label="Mode">
-        <span aria-disabled="true">Glance</span>
         <button
           type="button"
           className={mode === "watch" ? "on" : undefined}

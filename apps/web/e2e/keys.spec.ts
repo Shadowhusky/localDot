@@ -64,7 +64,7 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   await expect(sheet).toBeVisible();
   await expect(sheet.getByText("No keys yet.")).toBeVisible();
   // The underlying computer cannot receive focus or input while keys are open.
-  const start = page.getByRole("button", { name: "Start computer", includeHidden: true });
+  const start = page.getByRole("button", { name: "Turn on", includeHidden: true }).first();
   await start.evaluate((button: HTMLButtonElement) => button.focus());
   await expect(start).not.toBeFocused();
 

@@ -220,6 +220,33 @@ describe("App Replay mode", () => {
       true,
     );
   });
+  it("adds one history entry for Replay so browser Back returns to Watch", async () => {
+    const fixture = historyDaemon();
+    render(<App fetchImpl={fixture.fetchImpl} />);
+    const replayButton = screen.getByRole("button", { name: "Replay" });
+    const watchButton = screen.getByRole("button", { name: "Watch" });
+    await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
+    const entries = window.history.length;
+    for (const leave of [
+      () => fireEvent.click(watchButton),
+      () => fireEvent.keyDown(window, { key: "Escape" }),
+    ]) {
+      fireEvent.click(replayButton);
+      expect(window.history.length).toBe(entries + 1);
+      await waitFor(() => expect(new URLSearchParams(window.location.search).has("t")).toBe(true));
+      leave();
+      await waitFor(() => expect(window.location.search).toBe(""));
+      expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
+      expect(window.history.length).toBe(entries + 1);
+    }
+    fireEvent.click(replayButton);
+    expect(window.history.length).toBe(entries + 1);
+    await screen.findByRole("main", { name: "Session replay" });
+    window.history.back();
+    await waitFor(() => expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull());
+    expect(window.location.search).toBe("");
+    expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
+  });
   it("Space toggles play and Escape goes back to Watch", async () => {
     const fixture = historyDaemon();
     window.history.replaceState(null, "", `/?replay=${fixture.sessionId}&t=12000`);
@@ -234,11 +261,11 @@ describe("App Replay mode", () => {
     expect(window.location.search).toBe("");
     expect(screen.queryByRole("main", { name: "Session replay" })).toBeNull();
     expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
   });
   it("keeps Watch working when no session exists", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     const replayButton = screen.getByRole("button", { name: "Replay" });
     expect(replayButton.hasAttribute("disabled")).toBe(true);
     expect(replayButton.title).toBe("No sessions yet");
@@ -261,13 +288,16 @@ describe("App token states", () => {
 
   it("asks for the token when none is stored", () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain("No access token");
+    const notice = screen.getByRole("alert").textContent;
+    expect(notice).toContain("Sign in to localDot");
+    expect(notice).toContain("Run localdot open");
+    expect(notice).not.toMatch(/daemon|token/i);
   });
 
   it("makes the Theatre inert while keys are open and restores the trigger after closing", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     render(<App fetchImpl={noCells as typeof fetch} />);
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     const trigger = screen.getByTestId("keys-button");
     fireEvent.click(trigger);
     expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(true);
@@ -325,7 +355,7 @@ describe("App token states", () => {
     expect(field.value).toBe("before  after");
   });
 
-  it("shows the Theatre with a Start computer control when the daemon has no cell", async () => {
+  it("shows the Theatre with a Turn on control when the daemon has no cell", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -353,9 +383,10 @@ describe("App token states", () => {
     expect(hudButton().getAttribute("aria-disabled")).toBe("true");
     hudButton().click();
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("No computer"));
-    const start = screen.getByRole("button", { name: "Start computer" });
+    const start = hudButton();
+    expect(start.textContent).toBe("Turn on");
     expect(start.getAttribute("aria-disabled")).toBeNull();
-    expect(screen.getByRole("navigation", { name: "Mode" }).textContent).toContain("Watch");
+    expect(screen.getByRole("navigation", { name: "Mode" }).textContent).toBe("WatchReplay");
     start.click();
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Starting…"));
     expect(calls).toEqual(["GET /api/cells", "POST /api/cells"]);
@@ -365,7 +396,7 @@ describe("App token states", () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const fetchImpl = vi.fn(unauthorized);
     render(<App fetchImpl={fetchImpl} />);
-    expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
+    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(fetchImpl).toHaveBeenCalledTimes(5);
@@ -373,15 +404,15 @@ describe("App token states", () => {
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
-    expect(screen.getByRole("alert").textContent).toContain("No access token");
+    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
 
     window.location.hash = "#token=abc";
     await waitFor(() => expect(window.location.hash).toBe(""));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
-    expect(screen.getByRole("alert").textContent).toContain("No access token");
+    expect(screen.getByRole("alert").textContent).toContain("Sign in to localDot");
 
     window.location.hash = `#token=${TOKEN}`;
-    expect(await screen.findByRole("button", { name: "Start computer" })).toBeTruthy();
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2));
     expect(window.location.hash).toBe("");
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
   });
@@ -407,8 +438,8 @@ describe("App token states", () => {
     const retrying = render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     act(() => FakeWebSocket.instances[1]?.onclose?.());
-    // Cell retry, live-session retry, and the mounted download-list poll.
-    expect(vi.getTimerCount()).toBe(3);
+    // Cell retry and live-session retry; a starting computer's downloads are not polled.
+    expect(vi.getTimerCount()).toBe(2);
     retrying.unmount();
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(60_000);
@@ -435,7 +466,8 @@ describe("App token states", () => {
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("stopped")) }),
     );
     await waitFor(() => expect(hudButton().getAttribute("aria-disabled")).toBeNull());
-    screen.getByRole("button", { name: "Start computer" }).click();
+    expect(hudButton().textContent).toBe("Turn on");
+    hudButton().click();
     expect(await screen.findByText(DOCKER_DOWN_CAPTION)).toBeTruthy();
     expect(document.body.textContent).not.toContain("ENOENT");
     expect(calls.filter((call) => !call.endsWith("/live"))).toEqual([
@@ -535,7 +567,7 @@ describe("App token states", () => {
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("removed")) }),
     );
     expect(screen.getByTestId("hud-status").textContent).toBe("No computer");
-    expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1);
     expect(FakeWebSocket.instances[0]?.closed).toBe(true);
   });
 });
@@ -717,7 +749,7 @@ describe("App on a refused status socket", () => {
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
     revoked = true;
     act(() => FakeWebSocket.instances[0]?.onclose?.());
-    expect(await screen.findByText(/rejected the stored token/)).toBeTruthy();
+    expect(await screen.findByText(/Your saved sign-in no longer works/)).toBeTruthy();
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/whoami"]);
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     // The unmount's or cell change's effect cleanup closes the socket; let React run it first.
@@ -789,7 +821,7 @@ describe("App token hardening", () => {
     await waitFor(() => expect(d.seen()).toEqual(["GET /api/whoami"]));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     whoami.resolve(json({ ok: true }));
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
     expect(d.calls.every((c) => c.token === TOKEN)).toBe(true);
   });
@@ -804,10 +836,10 @@ describe("App token hardening", () => {
     await waitFor(() =>
       expect(d.calls).toContainEqual({ method: "GET", path: "/api/whoami", token: NEWER }),
     );
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
-    expect(screen.queryByText("No access token")).toBeNull();
+    expect(screen.queryByText("Sign in to localDot")).toBeNull();
     expect(d.calls.filter((c) => c.path === "/api/cells").every((c) => c.token === TOKEN)).toBe(
       true,
     );
@@ -817,7 +849,7 @@ describe("App token hardening", () => {
     const d = daemon(() => new Response("unauthorized", { status: 401 }));
     window.location.hash = `#token=${NEWER}`;
     render(<App fetchImpl={d.fetchImpl} />);
-    expect(await screen.findByText(/rejected the token in the link/)).toBeTruthy();
+    expect(await screen.findByText(/This sign-in link was not accepted/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     expect(d.seen()).toEqual(["GET /api/whoami"]);
   });
@@ -844,13 +876,13 @@ describe("App token hardening", () => {
       );
       window.location.hash = `#token=${NEWER}`;
       await waitFor(() => expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER));
-      await screen.findByRole("button", { name: "Start computer" });
+      await screen.findAllByRole("button", { name: "Turn on" });
       oldList.resolve(new Response("unauthorized", { status: 401 }));
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-      expect(screen.queryByText("No access token")).toBeNull();
-      expect(screen.queryByText(/rejected the stored token/)).toBeNull();
-      expect(screen.getByRole("button", { name: "Start computer" })).toBeTruthy();
+      expect(screen.queryByText("Sign in to localDot")).toBeNull();
+      expect(screen.queryByText(/Your saved sign-in no longer works/)).toBeNull();
+      expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
     },
   );
 
@@ -870,7 +902,7 @@ describe("App token hardening", () => {
       await waitFor(() => expect(answers).toBe(1));
       expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
       act(() => vi.advanceTimersByTime(2000));
-      await screen.findByRole("button", { name: "Start computer" });
+      await screen.findAllByRole("button", { name: "Turn on" });
       expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
     } finally {
       vi.useRealTimers();

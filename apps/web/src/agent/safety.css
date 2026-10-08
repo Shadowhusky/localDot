@@ -201,6 +201,11 @@
   color: #b7c8d8;
   font-size: 12px;
 }
+@media (hover: none) and (pointer: coarse) {
+  .stop-hint {
+    display: none;
+  }
+}
 .safety-settings select {
   min-height: 44px;
   max-width: 100%;

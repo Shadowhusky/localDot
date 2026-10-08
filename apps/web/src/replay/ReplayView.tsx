@@ -6,7 +6,8 @@ import { type ExportContext, exportContext } from "../export/export-context.ts";
 import { useExportProbe } from "../export/useExportProbe.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
-import { type StepRowView, sessionHud, stepRows } from "../session/session-view.ts";
+import { type StepRowView, stepRows } from "../session/session-view.ts";
+import { taskHud } from "../session/task-hud.ts";
 import { PlanRail } from "../shell/PlanRail.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
 import { CompareView } from "./CompareView.tsx";
@@ -71,9 +72,9 @@ export function ReplayView({
     const address = new URL(window.location.href);
     if (address.searchParams.get("replay") !== sessionId) return;
     address.searchParams.set("t", String(Math.round(replay.tMs)));
-    window.history.replaceState(null, "", address);
+    window.history.replaceState(window.history.state, "", address);
   }, [replay.tMs, replay.playing, replay.map, sessionId]);
-  const hud = sessionHud(replay.model, replay.tMs);
+  const hud = taskHud(replay.model, replay.tMs);
   const endedAt = replay.map?.endMs ?? 0;
   const baseRows = stepRows(replay.model);
   const chapterRows: StepRowView[] = chapters(replay.model, endedAt).map((chapter) => {

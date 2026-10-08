@@ -81,18 +81,23 @@ export function WelcomeSetup(props: WelcomeSetupProps) {
       <footer>
         <div>
           <h2>Ready for your first task?</h2>
-          <p>Start the computer, then describe what you want in the conversation.</p>
+          <p>
+            {props.loading
+              ? "Turn on your computer to get started."
+              : props.modelReady
+                ? "Turn on your computer, then describe what you want in the conversation."
+                : "Turn on your computer while you choose a model."}
+          </p>
         </div>
         <button
           className="welcome-primary"
           type="button"
-          disabled={!props.canStart || !props.modelReady || props.loading || props.starting}
+          aria-disabled={props.canStart ? undefined : true}
           onClick={() => {
-            if (props.canStart && props.modelReady && !props.loading && !props.starting)
-              props.onStart();
+            if (props.canStart) props.onStart();
           }}
         >
-          {props.starting ? "Starting computer…" : "Start your computer"}
+          {props.starting ? "Starting…" : "Turn on"}
         </button>
       </footer>
     </section>

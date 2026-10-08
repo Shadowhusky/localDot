@@ -138,7 +138,7 @@ export function gatewayRoutes(app: Hono, cells: CellApi, deps: GatewayRoutesDeps
     const id = c.req.param("id") ?? "";
     if (!ULID_PATTERN.test(id)) return c.text("invalid cell id", 400);
     const sessionId = deps.live?.get(id);
-    return sessionId ? c.json({ sessionId }) : c.text("no live session", 404);
+    return sessionId ? c.json({ sessionId }) : c.body(null, 204);
   });
 
   app.post("/api/sessions/:id/stop", async (c) => {

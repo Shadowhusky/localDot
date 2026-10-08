@@ -27,7 +27,8 @@ import { useAppearance } from "./onboarding/appearance.ts";
 import { WelcomeSetup } from "./onboarding/WelcomeSetup.tsx";
 import { ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
-import { mergeHud, sessionHud, stepRows } from "./session/session-view.ts";
+import { stepRows } from "./session/session-view.ts";
+import { mergeHud, taskFacts, taskHud } from "./session/task-hud.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
@@ -50,6 +51,7 @@ export interface AppProps {
 type Rejected = "stored" | "link" | "code" | null;
 
 const RETRY_CHECK_MS = 2000;
+const FROM_WATCH = { fromWatch: true };
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -182,12 +184,19 @@ function Theatre({ api }: { api: ApiClient }) {
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
   replayIdRef.current = replayId;
-  const selectReplay = (id: string | null) => {
+  // Entering Replay from Watch adds one marked entry and leaving steps back over it, so browser
+  // Back returns to Watch without stacking entries. A deletion only replaces the current entry.
+  const selectReplay = (id: string | null, entry: "navigate" | "replace" = "navigate") => {
     const address = new URL(window.location.href);
     if (id) address.searchParams.set("replay", id);
     else address.searchParams.delete("replay");
     if (id !== replayIdRef.current) address.searchParams.delete("t");
-    window.history.replaceState(null, "", address);
+    const leaving = id === null && replayIdRef.current !== null;
+    if (entry === "navigate" && id !== null && replayIdRef.current === null)
+      window.history.pushState(FROM_WATCH, "", address);
+    else if (entry === "navigate" && leaving && window.history.state?.fromWatch)
+      window.history.back();
+    else window.history.replaceState(leaving ? null : window.history.state, "", address);
     setReplayId(id);
   };
   useEffect(() => {
@@ -359,6 +368,13 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const takeoverShown = useRef<string | null>(null);
+  useEffect(() => {
+    const requestId = takeover?.requestId;
+    if (!requestId || requestId === takeoverShown.current) return;
+    takeoverShown.current = requestId;
+    if (narrow) setPane("computer");
+  }, [takeover?.requestId, narrow]);
   const guardStart = () => {
     if (
       !controls.stopping &&
@@ -399,11 +415,16 @@ function Theatre({ api }: { api: ApiClient }) {
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? hudFor({ cell: stageCell, status, pending })
       : hud;
-  const now = useNowMs(session.model, session.version);
-  const sHud = session.sessionId ? sessionHud(session.model, now) : null;
+  const facts = taskFacts(agent.model);
+  const now = useNowMs(
+    session.model,
+    session.version,
+    (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
+  );
+  const task = session.sessionId ? taskHud(session.model, now, facts) : null;
   const sessionMerged = mergeHud(
     error ? { ...containedHud, caption: error } : containedHud,
-    controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped" ? null : sHud,
+    controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped" ? null : task,
   );
   const merged = {
     ...sessionMerged,
@@ -471,7 +492,7 @@ function Theatre({ api }: { api: ApiClient }) {
               stopEnabled={controls.canStop}
               onRetry={retry}
             />
-            {session.sessionId && (
+            {task && !session.ended && (
               <span className="task-connection">
                 {agent.error
                   ? "Activity unavailable"
@@ -479,11 +500,11 @@ function Theatre({ api }: { api: ApiClient }) {
                     ? "Connection lost"
                     : agent.connection === "connecting"
                       ? "Connecting…"
-                      : agent.snapshot?.status === "idle"
+                      : task.phase === "finished"
                         ? "Ready for follow-up"
-                        : agent.model.pendingTakeover
+                        : task.row === "takeover"
                           ? "Your turn"
-                          : agent.model.pendingAsk
+                          : task.phase === "waiting"
                             ? "Waiting for you"
                             : "Task activity"}
               </span>
@@ -495,13 +516,20 @@ function Theatre({ api }: { api: ApiClient }) {
             agent={agent}
             cell={cell}
             visible={!keysOpen && !settings.open}
+            replaying={!!replayId}
           />
         </div>
         <div className="watch-content" hidden={!!replayId} inert={!!replayId}>
           <PaneTabs
             selected={pane}
             onSelect={setPane}
-            waiting={Boolean(agent.model.pendingAsk || agent.model.pendingTakeover)}
+            attention={
+              agent.model.pendingTakeover
+                ? "computer"
+                : agent.model.pendingAsk
+                  ? "conversation"
+                  : undefined
+            }
           />
           <div className="house">
             <div
@@ -549,6 +577,7 @@ function Theatre({ api }: { api: ApiClient }) {
                       receiveKey={receiveKey}
                       configured={mainReady}
                       onSettings={showSettings}
+                      onTaskStarted={session.check}
                       modelSummary={
                         settings.saved?.main
                           ? `Saved main: ${providerById(settings.saved.main.provider)?.name ?? settings.saved.main.provider} · ${settings.saved.main.model}`
@@ -575,7 +604,7 @@ function Theatre({ api }: { api: ApiClient }) {
               }}
             >
               <StageColumn
-                before={
+                after={
                   takeover && !agent.model.ended ? (
                     <TakeoverPanel
                       key={takeover.requestId}
@@ -725,7 +754,7 @@ function Theatre({ api }: { api: ApiClient }) {
               if (id === newestReplayId) setNewestReplayId(null);
               historyOwner.current++;
               setHistoryRevision(historyOwner.current);
-              if (id === replayId) selectReplay(null);
+              if (id === replayId) selectReplay(null, "replace");
             }}
             visible={!keysOpen && !settings.open && !safety.approval}
           />
@@ -849,18 +878,19 @@ function Theatre({ api }: { api: ApiClient }) {
 }
 
 const REJECTED: Record<Exclude<Rejected, null>, string> = {
-  stored: "The daemon rejected the stored token.",
-  link: "The daemon rejected the token in the link.",
-  code: "This sign-in link could not be used. Open a fresh link and try again.",
+  stored: "Your saved sign-in no longer works.",
+  link: "This sign-in link was not accepted.",
+  code: "This sign-in link could not be used.",
 };
 
 function NoToken({ rejected }: { rejected: Rejected }) {
   return (
     <section className="notice" role="alert">
-      <h1>No access token</h1>
+      <h1>Sign in to localDot</h1>
       <p>
-        {rejected ? REJECTED[rejected] : "Open a sign-in link from your local daemon."} The link
-        works once and expires after one minute: <code>{window.location.origin}/#code=…</code>
+        {rejected ? `${REJECTED[rejected]} ` : ""}Run <code>localdot open</code> where localDot is
+        installed, then open its sign-in link here as <code>{window.location.origin}/#code=…</code>{" "}
+        within one minute. Each link works once.
       </p>
     </section>
   );

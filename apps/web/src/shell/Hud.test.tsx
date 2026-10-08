@@ -40,6 +40,6 @@ describe("paused HUD", () => {
     fireEvent.click(stop);
     expect(onResume).toHaveBeenCalledOnce();
     expect(onStop).toHaveBeenCalledOnce();
-    expect(screen.queryByRole("button", { name: "Start computer" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
   });
 });

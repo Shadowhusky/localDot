@@ -12,8 +12,6 @@
   margin: 8px var(--spacing-gutter);
   flex: 0 1 auto;
   min-height: 100px;
-  max-height: 55%;
-  overflow-y: auto;
 }
 .usage-view h3,
 .task-recovery h3,

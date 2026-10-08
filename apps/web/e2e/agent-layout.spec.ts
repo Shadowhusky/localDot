@@ -350,7 +350,7 @@ test("composer submits once and moves a recognised key without a task request", 
   expect(bodies).toEqual([JSON.stringify({ kind: "followup", text: "请继续 the sample report" })]);
   accepted.resolve();
   await expect(draft).toHaveValue("");
-  await expect(page.getByText("Accepted by the daemon.")).toBeVisible();
+  await expect(page.getByText("Sent to dot.")).toBeVisible();
   const key = `sk-proj-${"a".repeat(156)}`;
   await draft.fill(`before ${key} after`);
   await expect(draft).toHaveValue("before  after");

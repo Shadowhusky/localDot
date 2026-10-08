@@ -50,7 +50,7 @@ test("live 2x desktop survives Stop/Start and a daemon restart", async ({ page }
   const created = page.waitForResponse(
     (res) => res.request().method() === "POST" && new URL(res.url()).pathname === "/api/cells",
   );
-  await page.getByRole("button", { name: "Start computer" }).click();
+  await page.getByRole("button", { name: "Turn on" }).first().click();
   const cellId = ((await (await created).json()) as { id: string }).id;
   await expectFrames(page);
   await page.screenshot({ path: "e2e/out/02-theatre-live.png" });
@@ -64,7 +64,7 @@ test("live 2x desktop survives Stop/Start and a daemon restart", async ({ page }
 
   await page.getByRole("button", { name: "Stop computer" }).click();
   await expect(page.getByTestId("hud-status")).toHaveText("Stopped", { timeout: 60_000 });
-  await page.getByRole("button", { name: "Start computer" }).click();
+  await page.getByRole("button", { name: "Turn on" }).first().click();
   await expectFrames(page);
   const previousTicket = await page.locator("iframe.desktop-frame").getAttribute("src");
   await daemon.restart();

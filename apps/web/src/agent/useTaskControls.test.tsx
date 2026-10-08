@@ -401,6 +401,34 @@ it.each(["paused", "stopped"])(
   },
 );
 
+it("reports the computer off once it stops after a paused Stop", async () => {
+  const f = fixture(
+    async () =>
+      Response.json(
+        {
+          revoked: true,
+          paused: true,
+          stopped: false,
+          closed: false,
+          errors: ["keyd: could not confirm completion"],
+        },
+        { status: 202 },
+      ),
+    true,
+  );
+  await act(async () => {
+    await f.result.current.stop();
+  });
+  f.update({ cell: { ...ready, paused: true } });
+  expect(f.result.current.stopStatus.phase).toBe("paused");
+  f.update({ cell: { ...ready, state: "stopped" } });
+  await waitFor(() => expect(f.result.current.stopStatus.phase).toBe("stopped"));
+  expect(f.result.current.stopStatus.errors).toEqual(["keyd: could not confirm completion"]);
+  expect(f.result.current.fenced).toBe(true);
+  f.update({ cell: { ...ready } });
+  await waitFor(() => expect(f.result.current.stopStatus.phase).toBe("idle"));
+});
+
 function pauseFixture(f: ReturnType<typeof fixture>, subscription = false) {
   const model = {
     ...f.props.agent.model,

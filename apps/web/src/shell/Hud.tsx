@@ -60,7 +60,7 @@ export function Hud({
             ? "Stopping…"
             : "Stop"
           : hud.action.kind === "start"
-            ? "Start computer"
+            ? "Turn on"
             : hud.action.kind === "stop"
               ? "Stop computer"
               : hud.action.kind === "resume"

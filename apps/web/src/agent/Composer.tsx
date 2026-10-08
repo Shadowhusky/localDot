@@ -1,5 +1,5 @@
 import { keyLikePresent, ULID_PATTERN } from "@localdot/protocol";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import type { ApiClient } from "../lib/api.ts";
@@ -24,6 +24,7 @@ export interface ComposerProps {
   configured?: boolean;
   modelSummary?: string;
   onSettings?(trigger: HTMLTextAreaElement): void;
+  onTaskStarted?(): void;
 }
 export interface Delivery {
   readonly id: number;
@@ -57,6 +58,7 @@ export function Composer(props: ComposerProps) {
   const current = useRef(props);
   const guard = useKeyGuard(true);
   const guardOwner = useRef<KeyGuard>(guard);
+  const keyNotice = useId();
   const revision = useRef(0);
   const nextId = useRef(0);
   const pending = useRef<Delivery | null>(null);
@@ -170,6 +172,7 @@ export function Composer(props: ComposerProps) {
         return;
       }
       setDelivery({ ...record, phase: "accepted" });
+      if (request.mode === "new") current.current.onTaskStarted?.();
       uploads.acknowledge(record.attachmentIDs);
       if (
         revision.current === capturedRevision &&
@@ -209,6 +212,10 @@ export function Composer(props: ComposerProps) {
     }
     const now = current.current;
     const chosen = modeFor(now, selectedNow.current);
+    if (chosen === "new" && now.configured === false) {
+      now.onSettings?.(input);
+      return;
+    }
     if (
       !readyCell(now) ||
       !navigator.onLine ||
@@ -221,10 +228,6 @@ export function Composer(props: ComposerProps) {
     const text = input.value;
     if (!text.trim() || text.length > 8000 || !text.isWellFormed() || text.includes("\0")) {
       setProblem("Write a message of 1–8000 characters.");
-      return;
-    }
-    if (chosen === "new" && now.configured === false) {
-      now.onSettings?.(input);
       return;
     }
     const attached = uploads.forMessage();
@@ -378,23 +381,33 @@ export function Composer(props: ComposerProps) {
         />
         <div className="composer-actions">
           <span>{length}/8000</span>
-          <button
-            type="submit"
-            disabled={!permitted || sending || uncertain || !!guard.notice || uploads.blocked}
-          >
-            {sending
-              ? "Sending…"
-              : mode === "new"
-                ? props.configured === false
-                  ? "Set up models"
-                  : "Start task"
-                : mode === "followup"
-                  ? "Send follow-up"
-                  : "Send now"}
-          </button>
+          {mode === "new" && props.configured === false ? (
+            <button
+              type="button"
+              onClick={() => {
+                if (field.current) props.onSettings?.(field.current);
+              }}
+            >
+              Connect a model
+            </button>
+          ) : (
+            <button
+              type="submit"
+              disabled={!permitted || sending || uncertain || !!guard.notice || uploads.blocked}
+              aria-describedby={guard.notice ? keyNotice : undefined}
+            >
+              {sending
+                ? "Sending…"
+                : mode === "new"
+                  ? "Start task"
+                  : mode === "followup"
+                    ? "Send follow-up"
+                    : "Send now"}
+            </button>
+          )}
         </div>
       </form>
-      <KeyFound guard={guard} receive={props.receiveKey} />
+      <KeyFound guard={guard} receive={props.receiveKey} noticeId={keyNotice} />
       {problem && <p role="alert">{problem}</p>}
       {(props.agent.snapshot?.status === "paused" || props.agent.model.pendingTakeover) && (
         <p className="composer-note">A message does not resume the task or hand back control.</p>

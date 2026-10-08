@@ -205,8 +205,11 @@ export function useTaskControls(props: Props) {
       }
     }
     if (stopStatus.phase === "paused" || stopStatus.phase === "stopped") {
-      if (props.cell?.paused || props.cell?.state === "stopped") containedCell.current = true;
-      else if (
+      if (props.cell?.paused || props.cell?.state === "stopped") {
+        containedCell.current = true;
+        if (stopStatus.phase === "paused" && props.cell.state === "stopped")
+          setStopStatus((status) => ({ ...status, phase: "stopped" }));
+      } else if (
         containedCell.current &&
         props.cell?.state === "ready" &&
         props.cellPending === null

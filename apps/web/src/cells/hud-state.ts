@@ -58,7 +58,7 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
   if (!cell) {
     // The create's answer brings the cell id that Stop needs.
     if (pending === "create") return hud("Starting…", STARTING, "stop", false);
-    return hud("No computer", "Start your computer to see it here.", "start");
+    return hud("No computer", "Turn on your computer to see it here.", "start");
   }
   if (cell.fenced)
     return hud(
@@ -140,20 +140,20 @@ function describeCellError(error: string | undefined): string {
       : "Your computer didn't stop. Stop it again.";
   }
   if (/; gave up after \d+ restarts$/.test(error)) {
-    return "Your computer kept stopping unexpectedly. Start it again when you're ready.";
+    return "Your computer kept stopping unexpectedly. Turn it on again when you're ready.";
   }
   if (error.startsWith("not ready after ")) {
-    return "Your computer didn't finish starting. Start it again.";
+    return "Your computer didn't finish starting. Turn it on again.";
   }
   if (error.endsWith("removed outside localDot")) {
     return "Your computer's containers were removed outside localDot.";
   }
-  if (DOCKER_ERROR.test(error)) return `${DOCKER_DOWN}, then start your computer again.`;
+  if (DOCKER_ERROR.test(error)) return `${DOCKER_DOWN}, then turn on your computer again.`;
   if (/container exited with \d+/.test(error)) {
-    return "Your computer stopped unexpectedly. Start it again.";
+    return "Your computer stopped unexpectedly. Turn it on again.";
   }
   if (error.startsWith("background check stopped")) {
-    return "localDot lost track of your computer. Start it again.";
+    return "localDot lost track of your computer. Turn it on again.";
   }
   return "Your computer could not start.";
 }

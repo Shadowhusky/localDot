@@ -1,5 +1,5 @@
 import { QuestionAnswerRequest } from "@localdot/protocol";
-import { useLayoutEffect, useRef, useState } from "react";
+import { useId, useLayoutEffect, useRef, useState } from "react";
 import type { KeyIntake } from "../keys/KeyForm.tsx";
 import { KeyFound } from "./KeyFound.tsx";
 import type { AgentQuestion } from "./model.ts";
@@ -25,6 +25,7 @@ export function AskForm({
   const current = useRef({ controls, visible, question, option });
   const guard = useKeyGuard(visible && !question.answer),
     guardOwner = useRef(guard);
+  const keyNotice = useId();
   useLayoutEffect(() => {
     current.current = { controls, visible, question, option };
     guardOwner.current = guard;
@@ -122,11 +123,15 @@ export function AskForm({
             />
           </label>
         )}
-        <button type="submit" disabled={!visible || !controls.canAnswer || !!guard.notice}>
+        <button
+          type="submit"
+          disabled={!visible || !controls.canAnswer || !!guard.notice}
+          aria-describedby={guard.notice ? keyNotice : undefined}
+        >
           Send answer
         </button>
       </form>
-      <KeyFound guard={guard} receive={receiveKey} />
+      <KeyFound guard={guard} receive={receiveKey} noticeId={keyNotice} />
       {problem && <p role="alert">{problem}</p>}
       {!controls.canAnswer && (
         <p className="history-note">Check the current task before answering.</p>

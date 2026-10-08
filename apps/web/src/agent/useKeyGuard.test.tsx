@@ -135,11 +135,11 @@ describe("key guard at the composer and sealed form boundary", () => {
       expect(f.task.value).not.toContain(key);
       expect(screen.getByRole("alert").textContent).toContain("removed");
       absent(f);
-      fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
-      expect(document.activeElement).toBe(f.task);
       f.submit();
-      expect(f.calls).toEqual([]); // Edit is never a send-anyway acknowledgement.
-      fireEvent.click(screen.getByRole("button", { name: "Discard detected keys" }));
+      expect(f.calls).toEqual([]);
+      expect(screen.queryByRole("button", { name: "Edit message" })).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Discard key and edit" }));
+      expect(document.activeElement).toBe(f.task);
       f.submit();
       await act(async () => {});
       expect(f.calls).toEqual([
@@ -171,6 +171,7 @@ describe("key guard at the composer and sealed form boundary", () => {
       toBase64url(new Uint8Array(await webcrypto.subtle.exportKey("raw", pair.publicKey))),
     );
     fireEvent.input(f.task, { target: { value: `before ${keys[0]} then ${keys[7]} after` } });
+    expect(screen.getByRole("button", { name: "Discard keys and edit" })).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Key to move"), { target: { value: "1" } });
     fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
     expect(f.task.value).toBe("before  then  after");
@@ -264,7 +265,8 @@ describe("key guard at the composer and sealed form boundary", () => {
       expect(f.task.value).toBe("");
       expect(f.calls).toEqual([]);
       expect(screen.queryByRole("button", { name: "Move to Keys" })).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Review message" }));
+      fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
+      expect(f.guard.notice).toBeNull();
       expect(f.task.value).toBe("");
     }
   });

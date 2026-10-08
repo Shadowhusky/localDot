@@ -483,6 +483,26 @@ it("heartbeat uses local monotonic receipt time, with exact threshold and held-s
   ])
     expect(taskStalled({ ...agent, model }, 10000)).toBe(false);
 });
+it("heartbeat warns during the work that follows a settled wait, but not during a recovery pause", () => {
+  const f = fixture(vi.fn<typeof fetch>(), null);
+  const late = (state: { state: "waiting_user" | "paused"; reason: string }) =>
+    taskStalled(
+      {
+        ...f.props.agent,
+        model: {
+          ...f.props.agent.model,
+          state,
+          lastHeartbeat: { t: 999999999, everyMs: 500, ongoing: true, receivedAt: 20 },
+        },
+      },
+      10000,
+    );
+  for (const reason of ["approval", "question", "takeover"])
+    expect(late({ state: "waiting_user", reason })).toBe(true);
+  for (const reason of ["user", "approval", "Waiting for explicit Resume"])
+    expect(late({ state: "paused", reason })).toBe(true);
+  expect(late({ state: "paused", reason: "budget" })).toBe(false);
+});
 it("fenced replacement selects only a separately reconciled Ready candidate, once", async () => {
   const candidate = "01J00000000000000000000009",
     record = {

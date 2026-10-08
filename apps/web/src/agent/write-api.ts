@@ -16,7 +16,7 @@ export class DeliveryFailure extends Error {
     super(
       uncertain
         ? "The reply was lost or could not be verified. This message may already have been accepted."
-        : "The daemon refused this message. Check the computer and task, then try again.",
+        : "This message was not accepted. Check the computer and task, then try again.",
     );
     this.name = "DeliveryFailure";
   }

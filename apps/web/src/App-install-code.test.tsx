@@ -88,7 +88,7 @@ describe("App one-use sign-in", () => {
     expect(window.localStorage.length).toBe(0);
     expect(exchanges(request)).toHaveLength(1);
     await act(async () => pending.resolve(json({ ok: true })));
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
     expect(document.body.textContent).not.toContain(CODE);
   });
@@ -117,7 +117,7 @@ describe("App one-use sign-in", () => {
     await waitFor(() => expect(exchanges(first)).toHaveLength(1));
     view.rerender(<App fetchImpl={next} />);
     await act(async () => pending.resolve(json({ token: TOKEN })));
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     expect(exchanges(first)).toHaveLength(1);
     expect(exchanges(next)).toHaveLength(0);
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
@@ -126,11 +126,11 @@ describe("App one-use sign-in", () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const request = daemon(() => json({ error: "expired" }, 401));
     render(<App fetchImpl={request} />);
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     await waitFor(() => expect(exchanges(request)).toHaveLength(1));
     await act(async () => {});
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
-    expect(screen.queryByRole("heading", { name: "No access token" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sign in to localDot" })).toBeNull();
   });
   it("never lets an older exchange overwrite a newer successful link", async () => {
     const older = deferred<Response>();
@@ -140,7 +140,7 @@ describe("App one-use sign-in", () => {
     render(<App fetchImpl={request} />);
     await waitFor(() => expect(exchanges(request)).toHaveLength(1));
     navigate(OTHER_CODE);
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     await act(async () => older.resolve(json({ token: TOKEN })));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
     expect(exchanges(request)).toHaveLength(2);
@@ -155,10 +155,10 @@ describe("App one-use sign-in", () => {
     render(<App fetchImpl={request} />);
     await waitFor(() => expect(checks).toBe(1));
     navigate(OTHER_CODE);
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     await act(async () => oldCheck.resolve(json({}, 401)));
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
-    expect(screen.queryByRole("heading", { name: "No access token" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Sign in to localDot" })).toBeNull();
   });
   it("refuses malformed success authority and ambiguous fragments without storing them", async () => {
     const request = daemon(() => json({ token: "bad" }));
@@ -177,7 +177,7 @@ describe("App one-use sign-in", () => {
       () => Promise.resolve(json({}, 401)),
     );
     render(<App fetchImpl={request} />);
-    await screen.findByRole("button", { name: "Start computer" });
+    await screen.findAllByRole("button", { name: "Turn on" });
     await act(async () => {});
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
     expect(exchanges(request)).toHaveLength(1);
