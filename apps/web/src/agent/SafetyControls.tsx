@@ -73,6 +73,7 @@ export function SafetyControls({
           visible={visible}
           pending={safety.pending === "approval"}
           onDecision={safety.answerApproval}
+          loadField={safety.readApprovalField}
         >
           <div className="notification-control">
             <button
