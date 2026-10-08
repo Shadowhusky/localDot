@@ -218,10 +218,11 @@ export function PickerPopup({
 
   if (!present) return null;
 
-  // A press inside keeps focus where it is (the trigger, the search field or the list), so a choice
-  // made with the pointer never blurs it.
+  // A mouse press inside keeps focus where it is (the trigger, the search field or the list), so a
+  // choice made with the pointer never blurs it. A touch is left alone: it must still scroll the list.
   const keepFocus = (event: PointerEvent<HTMLDivElement>) => {
-    if (!(event.target as Element).closest("input, button")) event.preventDefault();
+    if (event.pointerType === "mouse" && !(event.target as Element).closest("input, button"))
+      event.preventDefault();
   };
 
   if (presentation === "popover")

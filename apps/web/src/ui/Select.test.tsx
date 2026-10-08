@@ -142,6 +142,14 @@ describe("Select", () => {
     expect(trigger().getAttribute("aria-expanded")).toBe("false");
   });
 
+  it("keeps focus through a mouse press in the list, and leaves a touch free to scroll it", () => {
+    render(<Autonomy />);
+    fireEvent.keyDown(trigger(), { key: "ArrowDown" });
+    const row = screen.getByRole("option", { name: "Watch only" });
+    expect(fireEvent.pointerDown(row, { button: 0, pointerType: "mouse" })).toBe(false);
+    expect(fireEvent.pointerDown(row, { button: 0, pointerType: "touch" })).toBe(true);
+  });
+
   it("opens on a tap's click, not on the touch itself", () => {
     render(<Autonomy />);
     fireEvent.pointerDown(trigger(), { button: 0, pointerType: "touch" });
