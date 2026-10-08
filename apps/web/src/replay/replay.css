@@ -170,7 +170,12 @@
   font-size: 12px;
   color: var(--color-text-2);
 }
-.replay-export-note {
+.replay-export {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.replay-export > span {
   font-size: 12px;
   color: var(--color-text-2);
 }

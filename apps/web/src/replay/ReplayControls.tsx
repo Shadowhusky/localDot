@@ -77,21 +77,19 @@ export function ReplayControls({
         Before / after
       </button>
       {onExport && (
-        <button
-          type="button"
-          disabled={!replay.map || !replay.info}
-          aria-disabled={!support.ok || undefined}
-          aria-describedby={support.ok ? undefined : exportNote}
-          onClick={(event) => {
-            if (support.ok) onExport(event.currentTarget);
-          }}
-        >
-          Export MP4
-        </button>
-      )}
-      {onExport && !support.ok && (
-        <span id={exportNote} className="replay-export-note">
-          {support.reason}
+        <span className="replay-export">
+          <button
+            type="button"
+            disabled={!replay.map || !replay.info}
+            aria-disabled={!support.ok || undefined}
+            aria-describedby={support.ok ? undefined : exportNote}
+            onClick={(event) => {
+              if (support.ok) onExport(event.currentTarget);
+            }}
+          >
+            Export MP4
+          </button>
+          {!support.ok && <span id={exportNote}>{support.reason}</span>}
         </span>
       )}
       <span className="replay-speed-label" role="status">
