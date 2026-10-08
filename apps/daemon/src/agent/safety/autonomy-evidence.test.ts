@@ -152,6 +152,46 @@ describe("consequential steps still stop under Balanced", () => {
     expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
   });
 
+  describe("the desktop's terminal window", () => {
+    const terminal: NativeActionIdentity = {
+      target: {
+        point: { x: 300, y: 200 },
+        source: "ax",
+        role: "terminal",
+        name: "Terminal",
+        app: "Xfce4-terminal",
+      },
+      window: 4,
+      point: { x: 300, y: 200 },
+    };
+    const enter: ComputerAction = { action: "key", keys: ["Return"] };
+    const push: ComputerAction = { action: "type", text: "git push origin main\n" };
+
+    it.each([enter, push])("runs a line while the desktop is signed out: %j", async (action) => {
+      const h = harness(DEFAULT_AUTONOMY);
+      await native(h.ctx, action, terminal);
+      expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([0, 0]);
+    });
+
+    it("asks for Enter once the desktop is signed in", async () => {
+      const h = harness(DEFAULT_AUTONOMY);
+      h.ctx.session.taskAutonomy.signIn("desktop");
+      await native(h.ctx, enter, terminal);
+      expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+      expect(h.asks.mock.calls[0]?.[1]).toMatchObject({ actionClass: "unknown" });
+    });
+
+    it("names a typed push and shows its command once the desktop is signed in", async () => {
+      const h = harness(DEFAULT_AUTONOMY);
+      h.ctx.session.taskAutonomy.signIn("desktop");
+      await native(h.ctx, push, terminal);
+      expect([h.asks.mock.calls.length, h.handoffs.mock.calls.length]).toEqual([1, 0]);
+      const card = h.asks.mock.calls[0]?.[1];
+      expect(card).toMatchObject({ actionClass: "post" });
+      expect(card?.fields).toContainEqual(["Command", "git push origin main\n"]);
+    });
+  });
+
   it.each([
     ["git push", "git push origin main"],
     ["posting data to a remote host", "curl -s -d @report.json https://api.example.test/v1/items"],

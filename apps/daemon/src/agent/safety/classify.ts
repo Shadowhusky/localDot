@@ -45,11 +45,21 @@ const PATTERNS = {
     /密碼|密码|验证码|驗證碼|支付|付款|信用卡|登入|登录|登錄|password|passcode|passphrase|one[ -]?time|verification[ -]?code|2fa|captcha|credit[ -]?card|card[ -]?number|security[ -]?code|cvv|cvc|expiry|expiration|billing|payment|sign[ -]?in|log[ -]?in/i,
   search: /search|搜索|搜尋|\bfind\b|\bquery\b/i,
   enter: /^(?:return|enter|kp_enter)$/i,
+  terminal: /terminal/i,
+  ctrl: /^(?:ctrl|control(?:_l)?)$/i,
+  shift: /^shift(?:_l)?$/i,
   loopback: /^(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|::1|0\.0\.0\.0)$/i,
   bareLoopback:
     /^(?:[^@\s/]+@)?(?:localhost|127(?:\.\d{1,3}){3}|\[::1\]|0\.0\.0\.0)(?::\d+)?(?:\/\S*)?$/i,
   remotePath: /^(?:[^@\s/:]+@)?(\[[0-9a-f:]+\]|[^\s/:]+):/i,
   assignment: /^\w+=/,
+  // A redirection before the program, with its target attached (2>/dev/null) or as the next word.
+  redirect: /^\d*[<>]+(.*)$/,
+  // Reserved words that open or continue a compound command: the command follows them.
+  keywords: /^(?:if|then|elif|else|do|while|until|!|\{)$/,
+  // These name a word before what they run (`for x do …`, `function f { …`); `for x in a b` only
+  // lists words.
+  headers: /^(?:for|select|function)$/,
   substitution:
     /(?:\b(?:ba|z|da|k)?sh|\beval|\bsource|(?:^|\s)\.)\s[^|;]*(?:<\(|\$\(|`)\s*(?:curl|wget)\b/,
   wrappers: new Map<string, Options>([
@@ -70,6 +80,8 @@ const PATTERNS = {
     ["setsid", {}],
     ["time", { value: "fo", long: /^--(?:format|output)$/ }],
     ["command", {}],
+    ["builtin", {}],
+    ["eval", {}],
     ["exec", { value: "a" }],
     [
       "xargs",
@@ -144,10 +156,12 @@ export function classify(facts: RiskFacts): readonly ActionClass[] {
 
 export function nativeActionFacts(action: GuiAction, target: Target | null): RiskFacts {
   if (action.verb === "wait" || action.verb === "scroll") return { operation: action.verb };
+  const terminal = PATTERNS.terminal.test(target?.role ?? "");
   return {
     operation: action.verb,
     ...(action.verb === "key" ? { keys: action.combo } : {}),
     ...(action.verb === "type" ? { newline: /[\r\n]/.test(action.text) } : {}),
+    ...(action.verb === "type" && terminal ? { command: action.text } : {}),
     ...(target
       ? {
           target: {
@@ -184,14 +198,30 @@ function input(facts: RiskFacts): ActionClass[] {
   }
   if (!facts.signedIn) return ["computer"];
   if (!identified) return facts.operation === "type" && !facts.newline ? ["computer"] : ["unknown"];
+  const terminal = PATTERNS.terminal.test(identified.role ?? "");
+  const keys = facts.operation === "key" ? (facts.keys ?? []) : [];
   const submits =
-    (facts.operation === "key" && facts.keys?.some((key) => PATTERNS.enter.test(key))) ||
+    keys.some((key) => PATTERNS.enter.test(key)) ||
+    (terminal && runsLine(keys)) ||
     (facts.operation === "type" && facts.newline === true);
+  // A line run in a terminal is a command that can drive the signed-in browser, like the shell
+  // tool's. A key runs a line it cannot read.
+  if (terminal && submits)
+    return facts.command === undefined ? ["unknown"] : shell(facts.command, true);
   const compose =
     PATTERNS.field.test(identified.role ?? "") &&
     !PATTERNS.searchRole.test(identified.role ?? "") &&
     !PATTERNS.search.test(name);
   return submits && compose ? ["send"] : ["computer"];
+}
+
+// Besides Enter, a terminal runs its line on ctrl+J, ctrl+M or ctrl+O, and on a paste that ends a
+// line.
+function runsLine(keys: readonly string[]): boolean {
+  const has = (pattern: RegExp) => keys.some((key) => pattern.test(key));
+  const ctrl = has(PATTERNS.ctrl);
+  const shift = has(PATTERNS.shift);
+  return (ctrl && has(/^[jmo]$/i)) || (ctrl && shift && has(/^v$/i)) || (shift && has(/^insert$/i));
 }
 
 function secret(target: NativeTargetFacts): boolean {
@@ -259,10 +289,6 @@ function unwrap(args: readonly string[], options: Options): string[] | undefined
   let i = 0;
   for (; i < args.length; i++) {
     const arg = args[i] ?? "";
-    if (arg === "--") {
-      i++;
-      break;
-    }
     if (arg.startsWith("--")) {
       if (!arg.includes("=") && options.long?.test(arg)) i++;
     } else if (/^[-+]/.test(arg)) {
@@ -279,16 +305,26 @@ function unwrap(args: readonly string[], options: Options): string[] | undefined
   return options.code && !code ? undefined : args.slice(i);
 }
 
+// The words a stage runs, after its assignments, redirections, shell keywords and wrappers.
 function program(stage: string): string[] {
   let tokens = words(stage);
   for (;;) {
-    while (PATTERNS.assignment.test(tokens[0] ?? "")) tokens.shift();
-    const name = base(tokens[0]);
-    const options =
-      PATTERNS.wrappers.get(name) ?? (interpreter(name) === SHELL ? SHELL : undefined);
-    const rest = options && unwrap(tokens.slice(1), options);
-    if (!rest) return tokens;
-    tokens = rest;
+    const first = tokens[0] ?? "";
+    const redirect = PATTERNS.redirect.exec(first);
+    if (redirect) tokens = tokens.slice(redirect[1] ? 1 : 2);
+    else if (PATTERNS.assignment.test(first) || PATTERNS.keywords.test(first))
+      tokens = tokens.slice(1);
+    // `coproc NAME { …; }` names the coprocess; otherwise coproc runs a plain command.
+    else if (first === "coproc") tokens = tokens.slice(tokens[2] === "{" ? 2 : 1);
+    else if (PATTERNS.headers.test(first)) tokens = tokens.slice(2);
+    else {
+      const name = base(first);
+      const options =
+        PATTERNS.wrappers.get(name) ?? (interpreter(name) === SHELL ? SHELL : undefined);
+      const rest = options && unwrap(tokens.slice(1), options);
+      if (!rest) return tokens;
+      tokens = rest;
+    }
   }
 }
 
@@ -431,10 +467,12 @@ function stageClass(tokens: readonly string[]): ActionClass | undefined {
 // On a signed-in desktop any command can drive the signed-in browser (xdotool, XTest, DevTools).
 function shell(command: string, signedIn: boolean): ActionClass[] {
   const classes = new Set<ActionClass>(signedIn ? ["computer", "unknown"] : ["computer"]);
+  // A descriptor copy (2>&1) is dropped and a file redirect (&>f, >&f) kept, so neither splits on &.
   const commands = command
     .replace(/\|&/g, "|")
-    .replace(/\d*>&\d*|&>/g, " ")
-    .split(/&&|\|\||[;\n]|&(?!&)/);
+    .replace(/\d*[<>]&(?:\d+|-)/g, " ")
+    .replace(/&>|>&/g, ">")
+    .split(/&&|\|\||[;\r\n]|&(?!&)/);
   for (const text of commands) {
     if (PATTERNS.substitution.test(text) && remote(words(text))) classes.add("download_execute");
     const stages = text
