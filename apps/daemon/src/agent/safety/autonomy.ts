@@ -59,13 +59,16 @@ function siteOf(value: string | undefined): string | undefined {
 }
 
 // A command's destination depends on the shell, its config files and the hosts file, all of which
-// the agent can change, so a command never names a site.
+// the agent can change, so a command never names a site. The browser screen names no app: its
+// "Chromium" is also the desktop browser's name.
 export function placeOf(facts: RiskFacts): Place {
   const target = facts.target;
   const site = facts.operation === "shell" ? undefined : siteOf(target?.url ?? facts.destination);
   return {
     ...(site ? { site } : {}),
-    ...(target?.source === "ax" && target.app ? { app: target.app } : {}),
+    ...(target?.source === "ax" && target.app && facts.screen !== "browser"
+      ? { app: target.app }
+      : {}),
   };
 }
 
@@ -94,12 +97,15 @@ export function screenOf(ctx: ToolCallContext): ScreenName {
 }
 
 // Commands and file changes run on the desktop whichever screen is selected.
-export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDecision {
+export function actingFacts(ctx: ToolCallContext, facts: RiskFacts): RiskFacts {
   const screen = DESKTOP_ONLY.has(facts.operation) ? "desktop" : screenOf(ctx);
-  const place = placeOf(facts);
-  return decide(
-    { ...facts, screen, signedIn: ctx.session.taskAutonomy.signedIn(screen) },
-    ctx.session.autonomy,
-    (actionClass) => ctx.session.taskAutonomy.relaxes(actionClass, place),
+  return { ...facts, screen, signedIn: ctx.session.taskAutonomy.signedIn(screen) };
+}
+
+export function decideAutonomy(ctx: ToolCallContext, facts: RiskFacts): RiskDecision {
+  const acting = actingFacts(ctx, facts);
+  const place = placeOf(acting);
+  return decide(acting, ctx.session.autonomy, (actionClass) =>
+    ctx.session.taskAutonomy.relaxes(actionClass, place),
   );
 }

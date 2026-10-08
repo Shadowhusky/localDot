@@ -1,7 +1,7 @@
 import { ApprovalCardDraft, type ToolName, UploadApproval } from "@localdot/protocol";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { CountedPermit } from "./approvals.ts";
-import { alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
+import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
 import { actionDigest, buildApprovalCard, type RiskFacts } from "./risk.ts";
 
 export interface EffectPermit {
@@ -128,7 +128,7 @@ export async function authorizePrepared(
         ...card,
         fields: uses > 1 ? [...fields, ["Repeat", `× ${uses}`]] : fields,
         ...(upload ? { title: "Upload files", upload } : {}),
-        always: alwaysOptions(decision.actionClass, prepared.facts, ctx.redact),
+        always: alwaysOptions(decision.actionClass, actingFacts(ctx, prepared.facts), ctx.redact),
       }),
       {
         signal: ctx.signal,

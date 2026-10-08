@@ -8,15 +8,18 @@ import {
   BALANCED_AUTONOMY,
   CAREFUL_AUTONOMY,
   DEFAULT_AUTONOMY,
+  type Target,
   ulid,
 } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { projectBrowser } from "../../../../../cells/browser/browserd/src/perception.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
 import type { ToolCallContext } from "../tools/deps.ts";
 import { type ActionBinding, ApprovalBroker, type ApprovalResolution } from "./approvals.ts";
 import { authorizePrepared } from "./authorize.ts";
 import { alwaysOptions, decide, placeOf } from "./autonomy.ts";
+import { nativeActionFacts } from "./classify.ts";
 import type { RiskFacts } from "./risk.ts";
 import { RulesStore } from "./rules.ts";
 import { TaskAutonomy } from "./task-autonomy.ts";
@@ -82,6 +85,12 @@ describe("Always allow options on the card", () => {
       [TASK, { scope: "app", label: "In Notes", app: "Notes" }, ALWAYS],
     ],
     ["work in an unnamed app", "computer", inApp(), [TASK, ALWAYS]],
+    [
+      "work on the browser screen",
+      "computer",
+      { ...inApp("Chromium"), screen: "browser" },
+      [TASK, ALWAYS],
+    ],
     [
       "an app name the target did not identify",
       "computer",
@@ -343,6 +352,14 @@ describe("Always allow precedence", () => {
       "ask",
     ],
     [
+      "an app rule does not reach the browser screen",
+      signedIn(inApp("Chromium")),
+      CAREFUL_AUTONOMY,
+      allow("computer", { scope: "app", label: "In Chromium", app: "Chromium" }),
+      "computer",
+      "ask",
+    ],
+    [
       "an always rule lets the class act everywhere",
       inApp("Terminal"),
       CAREFUL_AUTONOMY,
@@ -531,8 +548,65 @@ describe("Always allow answers", () => {
   });
 });
 
+// Targets exactly as the browser screen's own perception projects them.
+function browserPage(address: string) {
+  const strings = ["root", "#document", "HTML", "BUTTON", address];
+  const projection = projectBrowser(
+    {
+      strings,
+      documents: [
+        {
+          frameId: 0,
+          documentURL: 4,
+          scrollOffsetX: 0,
+          scrollOffsetY: 0,
+          nodes: {
+            nodeName: [1, 2, 3, 3],
+            parentIndex: [-1, 0, 1, 1],
+            backendNodeId: [1, 2, 3, 4],
+            attributes: [[], [], [], []],
+            inputValue: { index: [], value: [] },
+            textValue: { index: [], value: [] },
+          },
+          layout: {
+            nodeIndex: [1, 2, 3],
+            bounds: [
+              [0, 0, 1280, 700],
+              [10, 20, 100, 20],
+              [200, 20, 100, 20],
+            ],
+          },
+        },
+      ],
+    },
+    {
+      nodes: [
+        { ignored: false, backendDOMNodeId: 3, role: { value: "button" }, name: { value: "Send" } },
+        { ignored: false, backendDOMNodeId: 4, role: { value: "button" }, name: { value: "Bold" } },
+      ],
+    },
+    "root",
+    {
+      document: { tabId: "tab", revision: 1, frame: false },
+      content: [0, 100, 1280, 700],
+      width: 1280,
+      height: 700,
+      factor: 1,
+      scrollX: 0,
+      scrollY: 0,
+      focus: "page",
+    },
+    1,
+  );
+  return (name: string) => {
+    const target = projection.targets.find((candidate) => candidate.name === name);
+    if (!target) throw new Error(`no ${name} target`);
+    return target;
+  };
+}
+
 describe("Always allow on this site, end to end", () => {
-  function task(dir: string, policy: AutonomyPolicy = DEFAULT_AUTONOMY) {
+  function task(dir: string, policy: AutonomyPolicy = DEFAULT_AUTONOMY, screen?: "browser") {
     const events: { type: string; data: Record<string, unknown> }[] = [];
     const session = new AgentSession(
       ulid(),
@@ -558,6 +632,7 @@ describe("Always allow on this site, end to end", () => {
       step: ulid(),
       redact: redactor([SECRET]),
       signal,
+      ...(screen ? { screen: { selection: { screen }, finish() {} } } : {}),
     } as unknown as ToolCallContext;
     const send = (url: string, name = "Send") =>
       authorizePrepared(ctx, {
@@ -567,6 +642,20 @@ describe("Always allow on this site, end to end", () => {
         facts: button(name, url),
         revalidate: async () => true,
       });
+    const click = (target: Target) => {
+      const action = {
+        verb: "click" as const,
+        find: { name: target.name ?? "" },
+        speed: "auto" as const,
+      };
+      return authorizePrepared(ctx, {
+        tool: "computer",
+        input: { toolInput: { action: "click" }, action },
+        target: { target, window: null, point: target.point },
+        facts: nativeActionFacts(action, target),
+        revalidate: async () => true,
+      });
+    };
     const card = async () => {
       await vi.waitFor(() => expect(session.pendingApproval).toBeDefined());
       const value = session.pendingApproval;
@@ -583,7 +672,7 @@ describe("Always allow on this site, end to end", () => {
         ...(always ? { always } : {}),
       });
     };
-    return { session, events, send, card, answer };
+    return { session, events, send, click, card, answer };
   }
 
   it("lets the next send on that site act while another origin still asks", async () => {
@@ -640,6 +729,39 @@ describe("Always allow on this site, end to end", () => {
     await next.card();
     expect(await next.answer("deny")).toBe(true);
     expect(await asks).toBeUndefined();
+  });
+
+  it("offers the page's site for a send on the browser screen and lets the next one act", async () => {
+    const dir = home();
+    const t = task(dir, DEFAULT_AUTONOMY, "browser");
+    const pending = t.click(browserPage(`${MAIL}/compose?draft=7#body`)("Send"));
+    const first = await t.card();
+    expect(first.always).toEqual([TASK, site(MAIL)]);
+    expect(first.fields).toContainEqual(["App location", `${MAIL}/compose`]);
+    expect(await t.answer("approve", "site")).toBe(true);
+    expect((await pending)?.approved).toBe(true);
+
+    expect((await t.click(browserPage(`${MAIL}/inbox/42`)("Send")))?.approved).toBe(false);
+    expect(t.session.pendingApproval).toBeUndefined();
+
+    const elsewhere = t.click(browserPage("https://other.example.test/compose")("Send"));
+    expect((await t.card()).always).toEqual([TASK, site("https://other.example.test")]);
+    expect(await t.answer("deny")).toBe(true);
+    expect(await elsewhere).toBeUndefined();
+  });
+
+  it("offers no app on the browser screen, where an app rule does not reach", async () => {
+    const dir = home();
+    new RulesStore(dir).add(
+      "computer",
+      { scope: "app", label: "In Chromium", app: "Chromium" },
+      ulid(),
+    );
+    const t = task(dir, CAREFUL_AUTONOMY, "browser");
+    const pending = t.click(browserPage(`${MAIL}/compose`)("Bold"));
+    expect((await t.card()).always).toEqual([TASK, ALWAYS]);
+    expect(await t.answer("deny")).toBe(true);
+    expect(await pending).toBeUndefined();
   });
 
   it("still hands off a known secret on an allowed site", async () => {

@@ -837,20 +837,25 @@ app.post("/__qa/approval", (c) => {
     signal: controller.signal,
   } as never;
   if (c.req.query("always") === "1") {
-    // A Send button on a mail page through the real authorization, so the card carries the
-    // daemon's own Always allow options: this task and https://mail.example.test.
+    // A Send button on a mail page in the browser screen's own target shape, through the real
+    // authorization, so the card carries the daemon's options: this task and the mail site.
     const target = {
       point: { x: 1180, y: 96 },
-      source: "dom" as const,
+      source: "ax" as const,
       role: "button",
       name: "Send",
+      app: "Chromium",
       url: "https://mail.example.test/compose",
     };
     const action = { verb: "click" as const, find: { name: "Send" }, speed: "auto" as const };
-    void authorizePrepared(ctx, {
+    const onBrowser = {
+      ...(ctx as object),
+      screen: { selection: { screen: "browser" }, finish() {} },
+    } as never;
+    void authorizePrepared(onBrowser, {
       tool: "computer",
       input: { toolInput: { action: "click", target: "Send" }, action },
-      target: { target, window: 9, point: target.point },
+      target: { target, window: null, point: target.point },
       facts: nativeActionFacts(action, target),
       revalidate: async () => true,
     })
