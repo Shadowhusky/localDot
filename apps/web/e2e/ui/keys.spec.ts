@@ -73,6 +73,40 @@ test("keys, a problem shown as the key field takes focus", async ({ page, ui }) 
   await shoot(page, ui, "keys-add-error.png");
 });
 
+test("the Web API fields pair up when wide and stack with even gaps on a phone", async ({
+  page,
+  ui,
+}) => {
+  const sheet = await keys(page, ui);
+  await sheet.getByRole("radio", { name: "Web API" }).click();
+  // Each field from its label's top to the bottom of what it shows: an empty message line counts
+  // as space between fields, which is what must stay even.
+  const field = async (label: string) => {
+    const name = page.locator(".ui-field-label").getByText(label, { exact: true });
+    return sheet.locator(".ui-field", { has: name }).evaluate((element) => {
+      const parts = [
+        ...element.querySelectorAll(".ui-field-label, .ui-field-box, .ui-field-message > *"),
+      ]
+        .map((part) => part.getBoundingClientRect())
+        .filter((box) => box.height > 0);
+      return {
+        top: Math.min(...parts.map((box) => box.top)),
+        bottom: Math.max(...parts.map((box) => box.bottom)),
+      };
+    });
+  };
+  const [hosts, header, format, label] = await Promise.all(
+    ["Hosts", "Header", "Sent as", "Label (optional)"].map(field),
+  );
+  if (header.top === format.top) return;
+  const gaps = [
+    header.top - hosts.bottom,
+    format.top - header.bottom,
+    label.top - format.bottom,
+  ].map(Math.round);
+  expect(new Set(gaps).size, `gaps ${gaps}`).toBe(1);
+});
+
 test("arming Remove, and its running out, move nothing in the list", async ({ page, ui }) => {
   const sheet = await keys(page, ui);
   await expect(sheet.getByText("weather", { exact: true })).toBeVisible();
@@ -91,7 +125,9 @@ test("a saved key folds into the list and a removed one folds away", async ({ pa
   const sheet = await keys(page, ui);
   await sheet.getByLabel("Key", { exact: true }).fill("sk-ant-api03-fixture-value-for-ui");
   await sheet.getByRole("button", { name: "Save key" }).click();
-  await expect(sheet.getByRole("status")).toHaveText("Saved anthropic.");
+  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
+    "Saved anthropic.",
+  );
   const added = sheet.locator(".keys-row[data-id='anthropic']");
   await expect(added).toBeVisible();
   await expect(added).toHaveAttribute("data-fresh", "");

@@ -345,7 +345,7 @@
 
 @media (width < 760px) {
   .keys-pair {
-    grid-template-columns: minmax(0, 1fr);
+    display: contents;
   }
 
   .keys-form-actions {

@@ -14,6 +14,7 @@ import { Combobox } from "../ui/Combobox.tsx";
 import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
+import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Select } from "../ui/Select.tsx";
 import { TextField } from "../ui/TextField.tsx";
@@ -104,6 +105,8 @@ export function KeyForm({
   onHolding,
 }: KeyFormProps) {
   const statusId = useId();
+  // Side by side, Header and Sent as each keep a line for an error, so the pair stays level.
+  const paired = !useMediaQuery(PHONE);
   const [draft, setDraft] = useState<KeyDraft>(EMPTY_DRAFT);
   const [tried, setTried] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -426,7 +429,7 @@ export function KeyForm({
             />
           </Field>
           <div className="keys-pair">
-            <Field label="Header" error={errorFor("header")}>
+            <Field label="Header" error={errorFor("header")} validates={paired}>
               <TextField
                 {...PLAIN}
                 size="lg"
@@ -437,7 +440,7 @@ export function KeyForm({
                 onChange={(e) => set({ header: e.target.value })}
               />
             </Field>
-            <Field label="Sent as" validates>
+            <Field label="Sent as" validates={paired}>
               <Select
                 size="lg"
                 value={draft.format}
