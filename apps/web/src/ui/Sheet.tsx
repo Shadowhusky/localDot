@@ -51,7 +51,7 @@ export interface SheetProps {
   // While set, Escape, the close button, the dim area and a swipe ask before closing.
   dirty?: boolean;
   // A modal sheet dims the page and keeps focus. A non-modal one sits beside the page, which stays
-  // live; Escape and the close button still close it.
+  // live; the close button, and Escape pressed inside the sheet, still close it.
   modal?: boolean;
   // Where focus goes back to when the sheet closes; by default what had it before opening.
   returnFocus?: RefObject<HTMLElement | null>;
@@ -157,6 +157,7 @@ function SheetLayer({
     panel,
     trap: modal,
     modal,
+    beside: !modal,
     onEscape: () => (latest.current.asking ? keepEditing() : requestClose()),
     initialFocus: fieldFor,
     returnFocus,

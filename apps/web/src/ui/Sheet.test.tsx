@@ -230,7 +230,24 @@ describe("Sheet", () => {
     const outside = screen.getByRole("button", { name: "Open settings" });
     outside.focus();
     expect(document.activeElement).toBe(outside);
+  });
+
+  it("beside the page, leaves an Escape pressed in the page to the page", () => {
+    render(<Harness modal={false} />);
+    open();
+    const outside = screen.getByRole("button", { name: "Open settings" });
+    outside.focus();
     pressEscape(outside);
+    expect(closedCount()).toBe("Closed 0");
+    outside.blur();
+    pressEscape(document.body);
+    expect(closedCount()).toBe("Closed 1");
+  });
+
+  it("beside the page, closes on an Escape pressed inside it", () => {
+    render(<Harness modal={false} />);
+    open();
+    pressEscape(screen.getByLabelText("Name"));
     expect(closedCount()).toBe("Closed 1");
   });
 });

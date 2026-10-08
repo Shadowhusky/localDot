@@ -20,6 +20,8 @@ export interface LayerEntry {
   panel(): HTMLElement | null;
   trap: boolean;
   modal: boolean;
+  // Sits beside a live page, which keeps its own Escape: the layer hears it only from inside.
+  beside?: boolean;
   escape(): void;
 }
 
@@ -50,6 +52,14 @@ function insideFrom(index: number, node: EventTarget | null): boolean {
   );
 }
 
+function hears(entry: LayerEntry, target: EventTarget | null): boolean {
+  if (!entry.beside) return true;
+  return (
+    target === document.body ||
+    (target instanceof Node && (entry.root()?.contains(target) ?? false))
+  );
+}
+
 function enter(entry: LayerEntry, last: boolean) {
   const panel = entry.panel();
   if (!panel) return;
@@ -62,7 +72,7 @@ function onKeyDown(event: KeyboardEvent) {
   if (event.key === "Escape") {
     if (event.isComposing || ownedByPicker(event)) return;
     const top = stack.at(-1);
-    if (!top) return;
+    if (!top || !hears(top, event.target)) return;
     event.preventDefault();
     top.escape();
     return;
@@ -149,6 +159,7 @@ export interface LayerOptions {
   panel: RefObject<HTMLElement | null>;
   trap: boolean;
   modal: boolean;
+  beside?: boolean;
   onEscape(): void;
   // Where focus goes on opening; the panel itself when this finds nothing.
   initialFocus?(panel: HTMLElement): HTMLElement | undefined;
@@ -163,7 +174,7 @@ export function useLayer(options: LayerOptions): LayerEntry | undefined {
   latest.current = options;
   const opener = useRef<Element | null>(null);
   const [entry, setEntry] = useState<LayerEntry>();
-  const { active, trap, modal } = options;
+  const { active, trap, modal, beside = false } = options;
 
   useLayoutEffect(() => {
     if (!active) return;
@@ -173,6 +184,7 @@ export function useLayer(options: LayerOptions): LayerEntry | undefined {
       panel: () => latest.current.panel.current,
       trap,
       modal,
+      beside,
       escape: () => latest.current.onEscape(),
     };
     const remove = pushLayer(own);
@@ -184,7 +196,7 @@ export function useLayer(options: LayerOptions): LayerEntry | undefined {
       remove();
       setEntry(undefined);
     };
-  }, [active, trap, modal]);
+  }, [active, trap, modal, beside]);
 
   // After the commit, not during it: React puts focus back on whatever had it before a commit that
   // moved it, which would undo a focus change made while the layer's DOM was updating.
