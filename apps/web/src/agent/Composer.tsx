@@ -73,7 +73,6 @@ export interface Delivery {
   // Wall-clock ms it was sent at.
   readonly at: number;
   readonly phase: "sending" | "accepted" | "refused" | "uncertain";
-  readonly explanation?: string;
 }
 const readyCell = (props: ComposerProps) =>
   props.known &&
@@ -326,7 +325,7 @@ export function Composer(props: ComposerProps) {
         return;
       const failure = error instanceof DeliveryFailure ? error : new DeliveryFailure(true);
       const phase = failure.uncertain ? "uncertain" : "refused";
-      setDelivery({ ...record, phase, explanation: failure.message });
+      setDelivery({ ...record, phase });
       announce("composer", failure.uncertain ? "Not sure dot got that." : "Not sent.");
       if (failure.uncertain) pending.current = { ...record, phase };
     } finally {
