@@ -182,6 +182,16 @@ function fakeX(): XHelper & {
         for (const l of listeners) l({ ev: "press", kind: "key", detail: 35, mono });
         return { keycodes: [35] } as never;
       }
+      if (cmd === "down") {
+        for (const l of listeners)
+          l({ ev: "press", kind: "button", detail: Number(sent.button), mono });
+        return { button: sent.button } as never;
+      }
+      if (cmd === "up") {
+        for (const l of listeners)
+          l({ ev: "release", kind: "button", detail: Number(sent.button), mono });
+        return { button: sent.button, released: true } as never;
+      }
       if (cmd === "release") return { keycodes: [50] } as never;
       if (cmd === "release_all") return { keys: 2, buttons: 1 } as never;
       if (cmd === "settle")
@@ -275,6 +285,14 @@ describe("desktopd input routes", () => {
     expect((await post({ input: { kind: "teleport" } })).status).toBe(400);
     expect(
       (await post({ input: { kind: "drag", from: { x: 0, y: 0 }, to: { x: 1, y: 1 } } })).status,
+    ).toBe(400);
+    expect(
+      (
+        await post({
+          input: { kind: "down", button: "left", at: { x: 0, y: 0 } },
+          injector: "driver",
+        })
+      ).status,
     ).toBe(501);
     expect(
       (await post({ input: { kind: "click", button: "left", count: 1, at: { x: 1, y: 2 } } }))
@@ -368,6 +386,31 @@ describe("desktopd input routes", () => {
       .map((l) => JSON.parse(l));
     expect(lines.map((l) => l.presses)).toEqual([1, 2, 3, [102, 103, 104]]);
     expect(lines[3]).toMatchObject({ done: true, pressMono: 102, injector: "xtest" });
+  });
+
+  it("streams a drag: a line once its button is down, then the result with its release", async () => {
+    const x = fakeX();
+    const res = await fullApp(x).request("/input", {
+      method: "POST",
+      headers: { ...bearer, "content-type": "application/json" },
+      body: JSON.stringify({
+        input: {
+          kind: "drag",
+          from: { x: 10, y: 10 },
+          to: { x: 60, y: 10 },
+          button: "left",
+          durationMs: 50,
+        },
+      }),
+    });
+    expect(res.headers.get("content-type")).toContain("application/x-ndjson");
+    const lines = (await res.text())
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    expect(lines[0]).toEqual({ presses: 1, pressMono: expect.any(Number) });
+    expect(lines.at(-1)).toMatchObject({ done: true, releaseMono: expect.any(Number) });
+    expect(x.calls.filter((c) => c === "down" || c === "up")).toEqual(["down", "up"]);
   });
 
   it("stops pressing a repeated key when its response stream is cancelled", async () => {

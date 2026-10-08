@@ -1,15 +1,18 @@
 import { setTimeout as sleep } from "node:timers/promises";
 import type {
   Injector,
+  Input,
   InputRequest,
   InputResult,
   KeyProgress,
+  Point,
   TypeProgress,
   TypeRequest,
   TypeResult,
 } from "@localdot/protocol";
 import { keyName, keysymOf } from "@localdot/protocol/keys";
-import { type HelperWindow, listWindows } from "./perception/hit-test.ts";
+import { motionSamples } from "@localdot/protocol/motion";
+import { type HelperWindow, listWindows, windowUnder } from "./perception/hit-test.ts";
 import type { XEvent, XHelper } from "./x/helper.ts";
 
 export const PRESS_TIMEOUT_MS = 150;
@@ -17,6 +20,10 @@ const PROGRESS_EVERY = 8;
 const BUTTONS = { left: 1, middle: 2, right: 3 } as const;
 // The gap between the presses of a repeated combo.
 const REPEAT_GAP_MS = 20;
+// A drag waits this long after its press before it moves, and over the drop point before it lets
+// go: apps start a drag on the motion after a press, and a drop target has to answer the drag.
+export const DRAG_PRESS_MS = 50;
+export const DRAG_DROP_MS = 120;
 
 export class NoPressError extends Error {
   constructor(what: string) {
@@ -36,6 +43,13 @@ export class ActivationError extends Error {
   constructor(window: number) {
     super(`could not activate window ${window}`);
     this.name = "ActivationError";
+  }
+}
+
+export class DropChangedError extends Error {
+  constructor() {
+    super("another window is at the drop point now; the drag let go where it started");
+    this.name = "DropChangedError";
   }
 }
 
@@ -69,31 +83,54 @@ async function activate(x: XHelper, window: number | undefined, keyboard: boolea
 // The subscription opens before the helper call, so a raw press that lands before the reply is
 // still seen; resolves with the first `count` matching presses or fails loudly (Review Focus 2).
 // `match` may read the helper's reply: presses before it arrives are kept until it does.
-export async function withPress<R>(
+export function withPress<R>(
   x: XHelper,
   match: (e: XEvent, reply: R) => boolean,
   count: number,
   act: () => Promise<R>,
   timeoutMs = PRESS_TIMEOUT_MS,
 ): Promise<XEvent[]> {
+  return withEvents(x, "press", match, () => count, act, timeoutMs);
+}
+
+// The same for raw releases, as many as the reply says to expect.
+export function withRelease<R>(
+  x: XHelper,
+  match: (e: XEvent, reply: R) => boolean,
+  count: (reply: R) => number,
+  act: () => Promise<R>,
+  timeoutMs = PRESS_TIMEOUT_MS,
+): Promise<XEvent[]> {
+  return withEvents(x, "release", match, count, act, timeoutMs);
+}
+
+async function withEvents<R>(
+  x: XHelper,
+  ev: XEvent["ev"],
+  match: (e: XEvent, reply: R) => boolean,
+  countOf: (reply: R) => number,
+  act: () => Promise<R>,
+  timeoutMs: number,
+): Promise<XEvent[]> {
   const early: XEvent[] = [];
   const hits: XEvent[] = [];
-  let reply: { value: R } | undefined;
+  let reply: { value: R; count: number } | undefined;
   let done!: () => void;
   const complete = new Promise<void>((resolve) => {
     done = resolve;
   });
   const off = x.onEvent((e) => {
-    if (e.ev !== "press") return;
+    if (e.ev !== ev) return;
     if (!reply) early.push(e);
     else if (match(e, reply.value)) {
       hits.push(e);
-      if (hits.length >= count) done();
+      if (hits.length >= reply.count) done();
     }
   });
   try {
     const value = await act();
-    reply = { value };
+    const count = countOf(value);
+    reply = { value, count };
     hits.push(...early.filter((e) => match(e, value)));
     if (hits.length < count) {
       const ac = new AbortController();
@@ -104,7 +141,7 @@ export async function withPress<R>(
       const arrived = complete.then(() => true);
       const ok = await Promise.race([arrived, timeout]);
       ac.abort();
-      if (!ok) throw new NoPressError(`${count} press(es)`);
+      if (!ok) throw new NoPressError(`${count} ${ev}(es)`);
     }
     return hits.slice(0, count);
   } finally {
@@ -141,6 +178,88 @@ const keysyms = (names: readonly string[]) => names.map((name) => keysymOf(keyNa
 // not it.
 const lastKey = (e: XEvent, reply: { keycodes: number[] }) =>
   e.kind === "key" && e.detail === reply.keycodes.at(-1);
+const buttonEvent = (button: number) => (e: XEvent) => e.kind === "button" && e.detail === button;
+
+// Moves the cursor through `samples` on their schedule; a stop ends it between two motions.
+async function glide(
+  x: XHelper,
+  samples: ReturnType<typeof motionSamples>,
+  signal: AbortSignal | undefined,
+): Promise<number | undefined> {
+  const start = performance.now();
+  let mono: number | undefined;
+  for (const sample of samples) {
+    const wait = sample.t - (performance.now() - start);
+    if (wait > 0) await sleep(wait, undefined, { signal });
+    signal?.throwIfAborted();
+    ({ mono } = await x.call<{ mono: number }>("move", sample.at));
+  }
+  return mono;
+}
+
+// A drag lets go only over the window its drop point was in when it was approved: a window that
+// opened or rose over that point since is refused. Popups that appeared during the drag, such as
+// the drag's own icon, do not count.
+async function checkDrop(x: XHelper, to: Point, expected: number): Promise<void> {
+  const windows = await listWindows(x);
+  const top = windowUnder(
+    windows.filter((w) => !w.overrideRedirect || w.id === expected),
+    to,
+  );
+  if ((top?.id ?? 0) !== expected) throw new DropChangedError();
+}
+
+// Press at the start, follow the path, let go at the end. A drag that is stopped or whose drop
+// point changed lets go where it started, which drops nothing anywhere else.
+async function drag(
+  x: XHelper,
+  req: InputRequest,
+  input: Extract<Input, { kind: "drag" }>,
+  armedMono: number,
+  signal: AbortSignal | undefined,
+  onPress: ((p: KeyProgress) => void | Promise<void>) | undefined,
+): Promise<InputResult> {
+  const button = BUTTONS[input.button];
+  const mods = keysyms(input.mods ?? []);
+  const samples = motionSamples([input.from, ...(input.path ?? []), input.to], input.durationMs);
+  let held = false;
+  try {
+    const [press] = await withPress(x, buttonEvent(button), 1, async () => {
+      const reply = await x.call("down", { ...input.from, button, mods });
+      held = true;
+      return reply;
+    });
+    const pressMono = (press as XEvent).mono;
+    await onPress?.({ presses: 1, pressMono });
+    await sleep(DRAG_PRESS_MS, undefined, { signal });
+    await glide(x, samples, signal);
+    await sleep(DRAG_DROP_MS, undefined, { signal });
+    if (req.dropWindow !== undefined) await checkDrop(x, input.to, req.dropWindow);
+    const [release] = await withRelease(
+      x,
+      buttonEvent(button),
+      () => 1,
+      async () => {
+        const reply = await x.call("up", { ...input.to, button });
+        held = false;
+        return reply;
+      },
+    );
+    return {
+      pressMono,
+      presses: [pressMono],
+      releaseMono: (release as XEvent).mono,
+      injector: req.injector,
+      armedMono,
+    };
+  } finally {
+    if (held)
+      await x
+        .call("up", { ...input.from, button })
+        .catch(() => x.call("release_all"))
+        .catch(() => undefined);
+  }
+}
 
 // `signal` is the request's: a Stop closes it, held keys are released at once, and a repeat ends
 // after the press in progress. `onPress` hears each press of a repeat, and a hold once it is down.
@@ -153,17 +272,50 @@ export async function inject(
 ): Promise<InputResult> {
   signal?.throwIfAborted();
   const { input } = req;
-  if (input.kind === "drag") throw new UnsupportedInputError("drag");
   if (input.kind === "wait" || input.kind === "type")
     throw new UnsupportedInputError(`${input.kind} through /input`);
   const driver = req.injector === "driver" ? driverFor(injectors, input.kind) : undefined;
   const combo = input.kind === "key" ? keysyms(input.combo) : [];
   if (input.kind === "key" && input.repeat && input.holdMs)
     throw new RangeError("keys are either repeated or held");
-  const mods = input.kind === "click" ? keysyms(input.mods ?? []) : [];
+  const mods =
+    input.kind === "click" ||
+    input.kind === "scroll" ||
+    input.kind === "drag" ||
+    input.kind === "down"
+      ? keysyms(input.mods ?? [])
+      : [];
   const { mono: armedMono } = await x.call<{ mono: number }>("arm");
   await activate(x, req.window, input.kind === "key");
   const injector: Injector = req.injector;
+
+  if (input.kind === "drag") return drag(x, req, input, armedMono, signal, onPress);
+  if (input.kind === "down") {
+    const button = BUTTONS[input.button];
+    const [press] = await withPress(x, buttonEvent(button), 1, () =>
+      x.call("down", { ...input.at, button, mods }),
+    );
+    const pressMono = (press as XEvent).mono;
+    return { pressMono, presses: [pressMono], injector, armedMono };
+  }
+  if (input.kind === "up") {
+    const button = BUTTONS[input.button];
+    const [release] = await withRelease(
+      x,
+      buttonEvent(button),
+      (reply) => (reply.released ? 1 : 0),
+      () => x.call<{ released: boolean }>("up", { ...input.at, button }),
+    );
+    // A button that was not down has no release: the moment is the reply's.
+    const mono = release?.mono ?? (await x.call<{ mono: number }>("ping")).mono;
+    return {
+      pressMono: mono,
+      presses: [],
+      ...(release ? { releaseMono: release.mono } : {}),
+      injector,
+      armedMono,
+    };
+  }
 
   if (input.kind === "click") {
     const button = BUTTONS[input.button];
@@ -203,7 +355,14 @@ export async function inject(
     }
   }
   if (input.kind === "move") {
-    const { mono } = await x.call<{ mono: number }>("move", { x: input.to.x, y: input.to.y });
+    if (!input.durationMs) {
+      const { mono } = await x.call<{ mono: number }>("move", { x: input.to.x, y: input.to.y });
+      return { pressMono: mono, presses: [], injector, armedMono };
+    }
+    const from = await x.call<Point>("pointer");
+    const mono =
+      (await glide(x, motionSamples([from, input.to], input.durationMs), signal)) ??
+      (await x.call<{ mono: number }>("move", { x: input.to.x, y: input.to.y })).mono;
     return { pressMono: mono, presses: [], injector, armedMono };
   }
   if (input.kind === "scroll") {
@@ -219,6 +378,7 @@ export async function inject(
           y: input.at.y,
           dx: Math.trunc(input.dx),
           dy: Math.trunc(input.dy),
+          mods,
         }),
       PRESS_TIMEOUT_MS + notches * 10,
     );

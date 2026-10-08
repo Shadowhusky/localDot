@@ -25,6 +25,8 @@ export type WindowInfo = z.infer<typeof WindowInfo>;
 export const InputRequest = z.object({
   input: Input,
   window: z.number().int().nonnegative().optional(),
+  // A drag lets go only over the window its drop point was in when it was approved (0: none).
+  dropWindow: z.number().int().nonnegative().optional(),
   injector: Injector.default("xtest"),
   holdMs: z.number().nonnegative().max(500).default(0),
 });
@@ -38,8 +40,9 @@ export const InputResult = z.object({
   armedMono: z.number(),
 });
 export type InputResult = z.infer<typeof InputResult>;
-// /input answers a repeated or held key as NDJSON: a line per press of a repeat, or one once a
-// hold's keys are down; then the InputResult with `done: true`, or an {error, status} line.
+// /input answers a repeated or held key, or a drag, as NDJSON: a line per press of a repeat, or
+// one once a hold's keys or a drag's button are down; then the InputResult with `done: true`, or an
+// {error, status} line.
 export const KeyProgress = z.object({
   presses: z.number().int().positive(),
   pressMono: z.number(),

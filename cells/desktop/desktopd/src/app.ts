@@ -21,6 +21,7 @@ import {
 import { bearerMatches } from "./auth.ts";
 import {
   ActivationError,
+  DropChangedError,
   type Injectors,
   inject,
   NoPressError,
@@ -92,7 +93,7 @@ export const monoNow = (): number => Number(process.hrtime.bigint()) / 1e6;
 function statusOf(err: unknown): number {
   if (err instanceof NoPressError) return 504;
   if (err instanceof UnsupportedInputError) return 501;
-  if (err instanceof ActivationError) return 409;
+  if (err instanceof ActivationError || err instanceof DropChangedError) return 409;
   if (err instanceof RangeError) return 400;
   return 500;
 }
@@ -212,7 +213,9 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
       const parsed = InputRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
       const { input } = parsed.data;
-      if (input.kind !== "key" || !(input.repeat || input.holdMs)) {
+      const long =
+        input.kind === "drag" || (input.kind === "key" && (input.repeat || input.holdMs));
+      if (!long) {
         const result: InputResult = await inject(x, parsed.data, deps.injectors, c.req.raw.signal);
         return c.json(result);
       }

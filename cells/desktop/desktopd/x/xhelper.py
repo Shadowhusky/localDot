@@ -29,6 +29,9 @@ DOUBLE_CLICK_GAP_MS = 90
 MAX_HOLD_MS = 30_000
 # Held keys are released this long after their hold should have ended, if desktopd never asks.
 HOLD_SLACK_MS = 1000
+# A button `down` pressed is released this long after the last pointer command, if nobody asks:
+# the daemon lets go after 60 s without a mouse action.
+BUTTON_HOLD_MS = 90_000
 MAX_KEYSYM = 0x1FFFFFFF
 # Damage inside a rect that was already changing this long before arm() (a spinner, a clock) is
 # ambient. Settle's quiet window is 250 ms, so the previous action's own changes have stopped
@@ -527,6 +530,11 @@ class Commands:
         self.held = []
         self.held_taps = []
         self.hold_until = None
+        # Buttons a `down` pressed, the modifier keycodes held with them, and when they are let go
+        # of at the latest.
+        self.buttons = []
+        self.button_mods = []
+        self.buttons_until = None
         self.d.sync()
 
     # Events queued on the command connection: MappingNotify after our own keymap changes.
@@ -666,7 +674,49 @@ class Commands:
     def cmd_move(self, a):
         self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
         self.d.sync()
+        if self.buttons:
+            self.buttons_until = mono() + BUTTON_HOLD_MS
         return {"mono": mono()}
+
+    # Presses a button (and modifiers) at a point and keeps it down until `up`, release_all, or
+    # BUTTON_HOLD_MS without a pointer command.
+    def cmd_down(self, a):
+        button = int(a["button"])
+        if not 1 <= button <= 3:
+            raise ValueError("button %r is not left, middle or right" % button)
+        if button in self.buttons:
+            raise ValueError("button %d is already down" % button)
+        mods = [self.keycode_for_name(m)[0] for m in a.get("mods", [])]
+        self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
+        try:
+            for kc in mods:
+                self.d.xtest_fake_input(X.KeyPress, kc)
+                self.button_mods.append(kc)
+            self.d.xtest_fake_input(X.ButtonPress, button)
+            self.buttons.append(button)
+            self.d.sync()
+        except Exception:
+            self.release_buttons()
+            raise
+        self.buttons_until = mono() + BUTTON_HOLD_MS
+        return {"button": button}
+
+    # Lets go of a button at a point, and of the modifiers pressed with the last held button.
+    # `released` is false when the button was not down.
+    def cmd_up(self, a):
+        button = int(a["button"])
+        self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
+        down = bool(self.root.query_pointer().mask & (1 << (7 + button)))
+        try:
+            if down:
+                self.d.xtest_fake_input(X.ButtonRelease, button)
+            self.d.sync()
+        finally:
+            if button in self.buttons:
+                self.buttons.remove(button)
+            if not self.buttons:
+                self.release_buttons()
+        return {"button": button, "released": down}
 
     def cmd_click(self, a):
         button = int(a.get("button", 1))
@@ -697,15 +747,23 @@ class Commands:
 
     def cmd_scroll(self, a):
         dx, dy = int(a.get("dx", 0)), int(a.get("dy", 0))
+        mods = [self.keycode_for_name(m)[0] for m in a.get("mods", [])]
         self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
-        self.d.sync()
+        down = []
         notches = 0
-        for button, n in ((5 if dy > 0 else 4, abs(dy)), (7 if dx > 0 else 6, abs(dx))):
-            for _ in range(n):
-                self.d.xtest_fake_input(X.ButtonPress, button)
-                self.d.xtest_fake_input(X.ButtonRelease, button)
-                self.d.sync()
-                notches += 1
+        try:
+            for kc in mods:
+                self.d.xtest_fake_input(X.KeyPress, kc)
+                down.append(kc)
+            self.d.sync()
+            for button, n in ((5 if dy > 0 else 4, abs(dy)), (7 if dx > 0 else 6, abs(dx))):
+                for _ in range(n):
+                    self.d.xtest_fake_input(X.ButtonPress, button)
+                    self.d.xtest_fake_input(X.ButtonRelease, button)
+                    self.d.sync()
+                    notches += 1
+        finally:
+            self.release_keys(down)
         return {"notches": notches}
 
     def keysym_for_name(self, name):
@@ -864,10 +922,24 @@ class Commands:
     def cmd_release(self, a):
         return {"keycodes": self.release_held()}
 
+    def release_buttons(self):
+        buttons, self.buttons, self.buttons_until = self.buttons, [], None
+        mods, self.button_mods = self.button_mods, []
+        try:
+            for b in reversed(buttons):
+                self.d.xtest_fake_input(X.ButtonRelease, b)
+            if buttons:
+                self.d.sync()
+        finally:
+            if mods:
+                self.release_keys(mods)
+        return buttons
+
     # Every key and button the server has down, whoever pressed them: a helper that died while
     # holding keys leaves them down for the next one to release.
     def cmd_release_all(self, a):
         held = self.release_held()
+        pressed = self.release_buttons()
         keymap = self.d.query_keymap()
         keys = [i * 8 + bit for i, byte in enumerate(keymap) for bit in range(8) if byte >> bit & 1]
         mask = self.root.query_pointer().mask
@@ -877,7 +949,7 @@ class Commands:
         for b in buttons:
             self.d.xtest_fake_input(X.ButtonRelease, b)
         self.d.sync()
-        return {"keys": len(set(held) | set(keys)), "buttons": len(buttons)}
+        return {"keys": len(set(held) | set(keys)), "buttons": len(set(pressed) | set(buttons))}
 
     def cmd_arm(self, a):
         return {"mono": self.screen.arm()}
@@ -994,15 +1066,20 @@ def handle(cmds, line):
 
 
 def serve(cmds, fd):
-    """Request lines from `fd` until it closes or a quit; between them, a hold whose time is up is
-    released. However the loop ends, nothing it held stays down."""
+    """Request lines from `fd` until it closes or a quit; between them, a hold or a held button
+    whose time is up is released. However the loop ends, nothing it held stays down."""
     pending = b""
     try:
         while True:
-            wait = None if cmds.hold_until is None else max(0.0, cmds.hold_until - mono()) / 1000
+            deadlines = [t for t in (cmds.hold_until, cmds.buttons_until) if t is not None]
+            wait = max(0.0, min(deadlines) - mono()) / 1000 if deadlines else None
             ready, _, _ = select.select([fd], [], [], wait)
             if not ready:
-                cmds.release_held()
+                now = mono()
+                if cmds.hold_until is not None and now >= cmds.hold_until:
+                    cmds.release_held()
+                if cmds.buttons_until is not None and now >= cmds.buttons_until:
+                    cmds.release_buttons()
                 continue
             chunk = os.read(fd, 65536)
             if not chunk:
@@ -1013,7 +1090,10 @@ def serve(cmds, fd):
                 if not handle(cmds, line.decode("utf-8", "replace")):
                     return
     finally:
-        cmds.release_held()
+        try:
+            cmds.release_held()
+        finally:
+            cmds.release_buttons()
 
 
 def main():
