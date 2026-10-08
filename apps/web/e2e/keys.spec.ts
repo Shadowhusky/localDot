@@ -96,7 +96,9 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   } finally {
     release.resolve();
   }
-  await expect(sheet.getByRole("status")).toHaveText("Saved weather.");
+  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
+    "Saved weather.",
+  );
   await expect(sheet.getByLabel("Key", { exact: true })).toHaveValue("");
   await expect(sheet.locator(".keys-row[data-id='weather']")).toContainText(
     "api.weather.example, Authorization",
@@ -129,7 +131,9 @@ test("save a web API key sealed in the page, list it, remove it", async ({ page 
   await sheet.getByLabel("Base URL").fill("https://bücher.example/openai/v1");
   await sheet.getByLabel("Key", { exact: true }).fill(`${VALUE}-2`);
   await sheet.getByRole("button", { name: "Save key" }).click();
-  await expect(sheet.getByRole("status")).toHaveText("Saved books.");
+  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
+    "Saved books.",
+  );
   await expect(sheet.locator(".keys-row[data-id='books']")).toContainText(
     "OpenAI-compatible, xn--bcher-kva.example",
   );
@@ -172,7 +176,9 @@ test("keeps the sheet usable at 375px with a long key name and reduced motion", 
   await sheet.getByLabel("Label (optional)", { exact: true }).fill(id);
   await sheet.getByLabel("Key", { exact: true }).fill(VALUE);
   await sheet.getByRole("button", { name: "Save key" }).click();
-  await expect(sheet.getByRole("status")).toHaveText(`Saved ${id}.`);
+  await expect(sheet.getByRole("form", { name: "Add a key" }).getByRole("status")).toHaveText(
+    `Saved ${id}.`,
+  );
   const bounds = await sheet.boundingBox();
   expect(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 375).toBe(true);
   expect(await sheet.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
