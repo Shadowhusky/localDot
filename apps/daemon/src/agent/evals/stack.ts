@@ -56,6 +56,8 @@ export interface AgentRunOptions {
   timeoutMs: number;
   limits?: AgentLimits;
   approvalDelayMs?: number;
+  // How long a button held between actions stays down without another pointer action.
+  heldButtonMs?: number;
 }
 
 export interface CallRecord {
@@ -204,6 +206,7 @@ export async function runAgent(o: AgentRunOptions): Promise<AgentRun> {
     frames,
     now: () => clock.nowMicros(),
     sleep: (ms, signal) => sleep(ms, undefined, { signal }),
+    ...(o.heldButtonMs ? { heldButtonMs: o.heldButtonMs } : {}),
   });
   const session = new AgentSession(sessionId, cellId, o.task, eventLog, autonomy);
   session.append("session.start", {

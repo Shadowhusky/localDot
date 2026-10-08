@@ -1,7 +1,7 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Point } from "@localdot/protocol";
+import type { Input, Point } from "@localdot/protocol";
 import sharp from "sharp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import {
@@ -10,10 +10,12 @@ import {
   removeEvalContainers,
   startEvalCell,
 } from "../agent/evals/cell.ts";
+import { decodeImage } from "../agent/evals/checks.ts";
 import { type OracleCall, oracleModel, type Policy } from "../agent/evals/oracle.ts";
 import {
   click,
   drag,
+  findBlock,
   key,
   modifierClick,
   type Rect,
@@ -75,6 +77,12 @@ function down(): { keys: number[]; buttons: number; at: Point } {
     ),
   );
 }
+// A screen worth looking at, when the run keeps its output.
+async function keep(name: string): Promise<void> {
+  const out = process.env.LOCALDOT_EVAL_OUT;
+  if (out) writeFileSync(join(out, name), Buffer.from((await desktop.observe()).image, "base64"));
+}
+
 const nothingDown = () => {
   const { keys, buttons } = down();
   return { keys, buttons };
@@ -261,7 +269,7 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
     shell("pkill -f [s]office; true");
   });
 
-  it("draws a stroke along a drag path in GIMP, and lets go where a stopped drag started", async () => {
+  it("draws a stroke along a drag path in GIMP, and a stopped stroke draws nothing back to its start", async () => {
     shell(
       `mkdir -p ${HOME}/eval && convert -size 640x400 xc:white -strip -define png:color-type=2 ${HOME}/eval/canvas.png`,
     );
@@ -321,17 +329,23 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
     expect(painted.length).toBeGreaterThanOrEqual(8);
     expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
 
-    const from = { x: Math.round(centre.x - 300), y: Math.round(centre.y + 150) };
+    // An L: along the top, then down the right side. Stopped on the second leg, nothing may join
+    // the pointer back to the start, which would cross the column under the first leg's middle.
+    const start = { x: Math.round(centre.x - 250), y: Math.round(centre.y - 150) };
+    const corner = { x: Math.round(centre.x + 250), y: start.y };
+    const end = { x: corner.x, y: Math.round(centre.y + 250) };
+    const unpainted = await luma((await desktop.observe()).image);
     const stop = new AbortController();
     const stopping = desktop
       .input(
         {
           input: {
             kind: "drag",
-            from,
-            to: { x: from.x + 600, y: from.y },
+            from: start,
+            to: end,
+            path: [corner],
             button: "left",
-            durationMs: 6000,
+            durationMs: 4000,
           },
           injector: "xtest",
           holdMs: 0,
@@ -340,13 +354,308 @@ describe.skipIf(!DOCKER_TESTS)("mouse input on a real 2× desktop", () => {
         stop.signal,
       )
       .catch((e: unknown) => e);
-    await sleep(1500);
+    await sleep(3200);
     expect(down().buttons & LEFT_BUTTON).toBe(LEFT_BUTTON);
+    const stoppedAt = down().at;
     stop.abort();
     expect(await stopping).toBeInstanceOf(Error);
     await desktop.release();
-    await sleep(300);
-    expect(down()).toEqual({ keys: [], buttons: 0, at: from });
+    await sleep(1200);
+    const stopped = await luma((await desktop.observe()).image);
+    await keep("stopped-stroke.png");
+    // Let go where the stroke stopped (it may have moved on a sample before the Stop landed).
+    const lifted = down();
+    expect(lifted).toMatchObject({ keys: [], buttons: 0 });
+    expect(Math.hypot(lifted.at.x - stoppedAt.x, lifted.at.y - stoppedAt.y)).toBeLessThan(80);
+    expect(lifted.at.y).toBeGreaterThan(start.y + 40);
+    const crossed: number[] = [];
+    // The first leg's brush reaches some 30 px below it.
+    for (const dx of [-100, 0])
+      for (let y = start.y + 40; y < end.y; y += 4) {
+        const p = model({ x: centre.x + dx, y });
+        if (unpainted.at(p) > 200 && stopped.at(p) < 100) crossed.push(y);
+      }
+    console.log(
+      `first leg after the stop: ${[0.3, 0.6].map((t) => stopped.at(model({ x: start.x + (corner.x - start.x) * t, y: start.y })))}`,
+    );
+    expect(crossed).toEqual([]);
+  });
+
+  describe("a button held between actions over files", () => {
+    const deskTitle = /^desk - Thunar$/;
+    type Rows = Record<"archive" | "share" | "report", Point>;
+    // Thunar sorts folders first: archive, share, then report.txt.
+    async function desk() {
+      shell(
+        `rm -rf ${HOME}/eval/desk && mkdir -p ${HOME}/eval/desk/archive ${HOME}/eval/desk/share && echo q > ${HOME}/eval/desk/report.txt`,
+      );
+      await thunar("eval/desk", deskTitle);
+    }
+    const where = () => ({
+      desk: shell(`ls -A ${HOME}/eval/desk`).split("\n"),
+      archive: shell(`ls -A ${HOME}/eval/desk/archive`),
+      share: shell(`ls -A ${HOME}/eval/desk/share`),
+    });
+    const untouched = { desk: ["archive", "report.txt", "share"], archive: "", share: "" };
+    const press = (p: Point): OracleCall => [
+      "computer",
+      { action: "left_mouse_down", coordinate: [p.x, p.y] },
+    ];
+    const hover = (p: Point): OracleCall => [
+      "computer",
+      { action: "mouse_move", coordinate: [p.x, p.y] },
+    ];
+    const release = (p?: Point): OracleCall => [
+      "computer",
+      { action: "left_mouse_up", ...(p ? { coordinate: [p.x, p.y] } : {}) },
+    ];
+    // One input a turn, then done.
+    const turns = (plan: ((rows: Rows) => OracleCall)[]): Policy => {
+      let rows: Rows | undefined;
+      let turn = 0;
+      return (v) => {
+        const w = windowTitled(v, deskTitle)?.rect as Rect | undefined;
+        if (w && !rows)
+          rows = { archive: thunarRow(w, 0), share: thunarRow(w, 1), report: thunarRow(w, 2) };
+        const next = rows && plan[turn++];
+        return next ? [next(rows as Rows)] : [["done", { summary: "Done." }]];
+      };
+    };
+    const cards = (run: Awaited<ReturnType<typeof agent>>) =>
+      run.events
+        .filter((e) => e.type === "approval.request")
+        .map((e) => e.data as { title: string; preview?: { fields?: [string, string][] } });
+    const autoRelease = (run: Awaited<ReturnType<typeof agent>>) =>
+      run.events.filter(
+        (e) =>
+          e.type === "action.intent" &&
+          (e.data as { label: string }).label === "Release the left button, cancelling the drag",
+      );
+
+    it("asks for the release as a drag from the file to the folder under the drag, and drops it there", async () => {
+      await desk();
+      const run = await agent(
+        "Move report.txt into archive.",
+        turns([(r) => press(r.report), (r) => hover(r.archive), () => release()]),
+      );
+      expect(run.error).toBeUndefined();
+      const fields = cards(run).at(-1)?.preview?.fields ?? [];
+      console.log(`release card: ${JSON.stringify(cards(run).at(-1))}`);
+      expect(fields).toContainEqual(["Target", "report.txt"]);
+      expect(fields).toContainEqual(["Drop target", "archive"]);
+      expect(fields).toContainEqual(["Action", "release a mouse button"]);
+      expect(fields.map(([k]) => k)).toContain("Drag");
+      expect(where()).toEqual({ desk: ["archive", "share"], archive: "report.txt", share: "" });
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+
+    it("asks for a held move over a folder it may not drop on, and drops nothing there", async () => {
+      await desk();
+      const run = await agent(
+        "Put report.txt in share.",
+        turns([(r) => press(r.report), (r) => hover(r.share), () => release()]),
+      );
+      expect(run.assisted.denied).toContain("post");
+      expect(cards(run).find((c) => c.title === "Publish content")?.preview?.fields).toContainEqual(
+        ["Drop target", "share"],
+      );
+      expect(where()).toEqual(untouched);
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+
+    it("cancels the drag when the task ends with the button held over a folder", async () => {
+      await desk();
+      const run = await agent(
+        "Put report.txt in archive.",
+        turns([(r) => press(r.report), (r) => hover(r.archive)]),
+      );
+      expect(run.outcome).toBe("done");
+      await sleep(1000);
+      expect(where()).toEqual(untouched);
+      expect(autoRelease(run)).toHaveLength(1);
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+
+    it("cancels the drag when its release was denied and the task then ends", async () => {
+      await desk();
+      const run = await agent(
+        "Put report.txt in share.",
+        turns([(r) => press(r.report), (r) => hover(r.archive), (r) => release(r.share)]),
+      );
+      expect(run.assisted.denied).toContain("post");
+      await sleep(1000);
+      expect(where()).toEqual(untouched);
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+
+    it("cancels the drag when the task is stopped with the button held over a folder", async () => {
+      await desk();
+      const run = await agent(
+        "Put report.txt in archive.",
+        turns([
+          (r) => press(r.report),
+          (r) => hover(r.archive),
+          () => ["computer", { action: "wait", duration: 30 }],
+        ]),
+        20_000,
+      );
+      expect(run.outcome).toBe("timeout");
+      await sleep(1000);
+      expect(where()).toEqual(untouched);
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+
+    it("cancels the drag before the user takes over", async () => {
+      await desk();
+      let during: ReturnType<typeof where> | undefined;
+      let buttons = -1;
+      const run = await agent(
+        "Hold report.txt over archive, then hand the screen over.",
+        turns([
+          (r) => press(r.report),
+          (r) => hover(r.archive),
+          () => ["request_takeover", { reason: "other", note: "Finish moving the file yourself." }],
+          () => {
+            during = where();
+            buttons = down().buttons;
+            return ["done", { summary: "Handed over." }];
+          },
+        ]),
+      );
+      expect(run.error).toBeUndefined();
+      expect(buttons).toBe(0);
+      expect(during).toEqual(untouched);
+      expect(where()).toEqual(untouched);
+    });
+
+    it("cancels the drag after its time without a mouse action, and that time stands still while an approval waits", async () => {
+      await desk();
+      // Over the list's empty space, below the rows: a folder would spring open under a long hover.
+      const slow = await runAgent({
+        cell,
+        home: mkdtempSync(join(tmpdir(), "localdot-mouse-")),
+        task: "Drag report.txt below the list and let go.",
+        model: oracle(
+          turns([
+            (r) => press(r.report),
+            (r) => hover({ x: r.report.x, y: r.report.y + 28 * 4 }),
+            () => release(),
+          ]),
+        ),
+        timeoutMs: 180_000,
+        heldButtonMs: 12_000,
+        approvalDelayMs: 15_000,
+      });
+      console.log(`after the slow approvals: ${(await titled(/Thunar$/)())?.title}`);
+      expect(slow.error).toBeUndefined();
+      expect(autoRelease(slow)).toEqual([]);
+      const ups = slow.events.filter(
+        (e) => e.type === "action.dispatch" && (e.data as { input: Input }).input.kind === "up",
+      );
+      expect(ups).toHaveLength(1);
+      expect(where()).toEqual(untouched);
+
+      await desk();
+      const idle = await runAgent({
+        cell,
+        home: mkdtempSync(join(tmpdir(), "localdot-mouse-")),
+        task: "Hold report.txt over archive.",
+        model: oracle(
+          turns([
+            (r) => press(r.report),
+            (r) => hover(r.archive),
+            () => ["computer", { action: "wait", duration: 20 }],
+          ]),
+        ),
+        timeoutMs: 180_000,
+        heldButtonMs: 8000,
+      });
+      expect(idle.error).toBeUndefined();
+      expect(autoRelease(idle)).toHaveLength(1);
+      expect(where()).toEqual(untouched);
+      expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    });
+  });
+
+  it("drags a range input and reorders a sortable list on a Chromium page, and a stopped reorder changes nothing", async () => {
+    // XTest presses and min-jerk motion, as the browser screen sends them, into a real page.
+    const page = `<!doctype html><html><head><title>loading</title><style>
+body { margin: 0; font: 20px sans-serif; }
+#origin { position: absolute; left: 0; top: 0; width: 20px; height: 20px; background: #f0f; }
+#volume { position: absolute; left: 100px; top: 100px; width: 600px; height: 40px; margin: 0; }
+ul { position: absolute; left: 100px; top: 250px; width: 300px; list-style: none; margin: 0; padding: 0; }
+li { height: 60px; line-height: 60px; margin: 0 0 10px; padding-left: 16px; background: #ddd; }
+</style></head><body>
+<div id="origin"></div>
+<input id="volume" aria-label="Volume" type="range" min="0" max="100" value="0">
+<ul id="list"><li draggable="true">Alpha</li><li draggable="true">Beta</li><li draggable="true">Gamma</li></ul>
+<script>
+const volume = document.getElementById("volume");
+const list = document.getElementById("list");
+const show = () => {
+  document.title = "range " + volume.value + " order " + [...list.children].map((li) => li.textContent[0]).join("");
+};
+let dragged;
+list.addEventListener("dragstart", (e) => { dragged = e.target; e.dataTransfer.setData("text/plain", ""); });
+list.addEventListener("dragover", (e) => e.preventDefault());
+list.addEventListener("drop", (e) => {
+  e.preventDefault();
+  const onto = e.target.closest("li");
+  if (onto && dragged && onto !== dragged) list.insertBefore(dragged, onto.nextSibling);
+  show();
+});
+volume.addEventListener("input", show);
+show();
+</script></body></html>`;
+    shell(`mkdir -p ${HOME}/eval && cat > ${HOME}/eval/drag.html <<'PAGE'\n${page}\nPAGE`);
+    shell("pkill -f [c]hromium; sleep 1; true");
+    cell.launch(["/usr/local/bin/localdot-chromium", `file://${HOME}/eval/drag.html`]);
+    const browser = await waitFor("the page", titled(/^range \d+ order \w+/), 60_000);
+    await sleep(2000);
+    // The page's own origin, by its magenta mark in the screenshot (model pixels, one per CSS
+    // pixel at 2x), rather than by element boxes.
+    const frame = await decodeImage(Buffer.from((await desktop.observe()).image, "base64"));
+    const origin = findBlock(frame, [255, 0, 255], { x: 0, y: 0, w: 1280, h: 800 });
+    if (!origin) throw new Error("no page origin mark");
+    const at = (x: number, y: number) => ({ x: (origin.x + x) * 2, y: (origin.y + y) * 2 });
+    const drag = (from: Point, to: Point, durationMs: number, signal?: AbortSignal) =>
+      desktop.input(
+        {
+          input: { kind: "drag", from, to, button: "left", durationMs },
+          injector: "xtest",
+          holdMs: 0,
+          window: browser.id,
+          dropWindow: browser.id,
+        },
+        signal,
+      );
+    const title = async () => (await titled(/^range \d+ order \w+/)())?.title ?? "";
+
+    // The thumb at 0 is 8 CSS px into the 600 px track; 80% along is about 80.
+    await drag(at(108, 120), at(580, 120), 600);
+    await sleep(800);
+    const value = Number(/range (\d+)/.exec(await title())?.[1]);
+    console.log(`range after the drag: ${value}`);
+    expect(value).toBeGreaterThanOrEqual(70);
+    expect(value).toBeLessThanOrEqual(90);
+
+    const [alpha, gamma] = [at(250, 280), at(250, 420)];
+    const stop = new AbortController();
+    const stopping = drag(alpha, gamma, 4000, stop.signal).catch((e: unknown) => e);
+    await sleep(2500);
+    stop.abort();
+    expect(await stopping).toBeInstanceOf(Error);
+    await desktop.release();
+    await sleep(1000);
+    expect(await title()).toMatch(/ order ABG/);
+    expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+
+    await drag(alpha, gamma, 900);
+    await sleep(800);
+    await keep("chromium-drags.png");
+    expect(await title()).toMatch(/ order BGA/);
+    expect(nothingDown()).toEqual({ keys: [], buttons: 0 });
+    shell("pkill -f [c]hromium; true");
   });
 
   it("lets go of a button held between actions when the agent stops", async () => {
