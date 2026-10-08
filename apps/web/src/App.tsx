@@ -368,6 +368,13 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const takeoverShown = useRef<string | null>(null);
+  useEffect(() => {
+    const requestId = takeover?.requestId;
+    if (!requestId || requestId === takeoverShown.current) return;
+    takeoverShown.current = requestId;
+    if (narrow) setPane("computer");
+  }, [takeover?.requestId, narrow]);
   const guardStart = () => {
     if (
       !controls.stopping &&
@@ -516,7 +523,13 @@ function Theatre({ api }: { api: ApiClient }) {
           <PaneTabs
             selected={pane}
             onSelect={setPane}
-            waiting={Boolean(agent.model.pendingAsk || agent.model.pendingTakeover)}
+            attention={
+              agent.model.pendingTakeover
+                ? "computer"
+                : agent.model.pendingAsk
+                  ? "conversation"
+                  : undefined
+            }
           />
           <div className="house">
             <div
@@ -590,7 +603,7 @@ function Theatre({ api }: { api: ApiClient }) {
               }}
             >
               <StageColumn
-                before={
+                after={
                   takeover && !agent.model.ended ? (
                     <TakeoverPanel
                       key={takeover.requestId}

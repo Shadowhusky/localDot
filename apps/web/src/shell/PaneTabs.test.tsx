@@ -26,9 +26,23 @@ it("uses one roving tab stop with arrow, Home and End navigation", () => {
   unmount();
 });
 it("keeps attention on the conversation tab without stealing focus", () => {
-  const { unmount } = render(<PaneTabs selected="activity" onSelect={() => {}} waiting />);
+  const { unmount } = render(
+    <PaneTabs selected="activity" onSelect={() => {}} attention="conversation" />,
+  );
   const tab = screen.getByRole("tab", { name: "Conversation, needs your attention" });
   expect(tab.getAttribute("aria-selected")).toBe("false");
   expect(document.activeElement).not.toBe(tab);
+  unmount();
+});
+it("marks only the pane that needs the user", () => {
+  const { container, unmount } = render(
+    <PaneTabs selected="conversation" onSelect={() => {}} attention="computer" />,
+  );
+  expect(screen.getByRole("tab", { name: "Computer, needs your attention" })).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Conversation" })).toBeTruthy();
+  expect(container.querySelectorAll(".pane-waiting")).toHaveLength(1);
+  expect(
+    screen.getByRole("tab", { name: /^Computer/ }).querySelector(".pane-waiting"),
+  ).toBeTruthy();
   unmount();
 });

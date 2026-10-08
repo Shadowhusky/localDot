@@ -446,7 +446,8 @@
   .task-connection {
     display: none;
   }
-  .stage {
+  .stage,
+  .stage-col.manual-column > .takeover-panel {
     width: 100%;
   }
   .caption {

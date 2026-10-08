@@ -5,11 +5,11 @@ const LABELS = { conversation: "Conversation", computer: "Computer", activity: "
 export function PaneTabs({
   selected,
   onSelect,
-  waiting,
+  attention,
 }: {
   selected: TheatrePane;
   onSelect(pane: TheatrePane): void;
-  waiting?: boolean;
+  attention?: TheatrePane;
 }) {
   const tabs = useRef<(HTMLButtonElement | null)[]>([]);
   return (
@@ -19,7 +19,7 @@ export function PaneTabs({
           key={pane}
           type="button"
           role="tab"
-          aria-label={`${LABELS[pane]}${pane === "conversation" && waiting ? ", needs your attention" : ""}`}
+          aria-label={`${LABELS[pane]}${pane === attention ? ", needs your attention" : ""}`}
           id={`tab-${pane}`}
           aria-controls={`pane-${pane}`}
           aria-selected={selected === pane}
@@ -44,7 +44,7 @@ export function PaneTabs({
           }}
         >
           {LABELS[pane]}
-          {pane === "conversation" && waiting && (
+          {pane === attention && (
             <span className="pane-waiting" aria-hidden="true">
               •
             </span>

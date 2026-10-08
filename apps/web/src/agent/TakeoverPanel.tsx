@@ -108,7 +108,7 @@ export function TakeoverPanel({
       <h3>Your turn · {takeover.reason === "2fa" ? "verification" : takeover.reason}</h3>
       <p>{takeover.note}</p>
       <p className="history-note">
-        Click the computer below. Text is sent to the computer and cleared after sending.
+        Click or tap the computer to use it. Text is sent to the computer and cleared after sending.
       </p>
       <fieldset disabled={!visible || !controls.canInput} className="pointer-modes">
         <legend>Pointer</legend>
