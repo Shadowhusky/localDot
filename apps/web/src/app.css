@@ -97,6 +97,15 @@
   position: relative;
 }
 
+/* A full-height hit area, so touch targets reach 44 px without moving the text. */
+.modes button::before {
+  content: "";
+  position: absolute;
+  inset: 50% calc(-0.5 * var(--spacing-modes-gap)) auto;
+  height: var(--spacing-bar);
+  translate: 0 -50%;
+}
+
 .modes button {
   border: 0;
   background: none;
@@ -589,15 +598,42 @@
 }
 @media (width < 760px) {
   .bar {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: var(--spacing-bar-gap);
     padding: 0 12px;
   }
-  .bar .title,
-  .bar .modes {
+  .bar .title {
+    display: none;
+  }
+  .modes {
+    justify-self: start;
+    gap: 0;
+    padding: 2px;
+    border-radius: 8px;
+    background: var(--color-surface);
+  }
+  .modes button {
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 6px;
+  }
+  .modes button::before {
+    inset-inline: 0;
+  }
+  .modes button.on {
+    background: var(--color-surface-2);
+    box-shadow: inset 0 1px 0 var(--color-key-bevel);
+  }
+  .modes button.on::after {
+    content: none;
+  }
+}
+@media (width < 560px) {
+  .brand-name {
     display: none;
   }
 }
-@media (width < 420px) {
+@media (width < 480px) {
   .bar-r > .live {
     display: none;
   }

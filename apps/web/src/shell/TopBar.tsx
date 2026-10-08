@@ -33,7 +33,7 @@ export function TopBar({
       <div className="bar-l">
         <span className="brand">
           <Mascot />
-          localDot
+          <span className="brand-name">localDot</span>
         </span>
         <span className="title">{title}</span>
       </div>
