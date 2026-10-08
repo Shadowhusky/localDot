@@ -151,12 +151,15 @@ function SheetLayer({
   }
   views.sort((a, b) => order.current.indexOf(a.key) - order.current.indexOf(b.key));
 
+  // Only the page's own slide is waited for: something still moving inside it (a row lighting up)
+  // must not keep a page that has gone on the screen.
   useEffect(() => {
     if (leaving.length === 0) return;
     const sheet = panel.current;
     return afterMotion(
       leaving.map((view) => pageOf(sheet, view.key)),
       () => setLeaving([]),
+      false,
     );
   }, [leaving]);
 
