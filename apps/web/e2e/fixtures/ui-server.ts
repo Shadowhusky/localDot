@@ -6,13 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Duplex } from "node:stream";
 import { fileURLToPath } from "node:url";
-import { type KeydRecord, toBase64url, ulid } from "@localdot/protocol";
+import { type KeydRecord, type ToolName, toBase64url, ulid } from "@localdot/protocol";
 import { normalizeCatalog } from "@localdot/providers";
 import { MODELS_DEV_FIXTURE } from "@localdot/providers/testing";
 import type { CodexInstaller, InstalledCodex } from "../../../../harness/codex/src/index.ts";
 import type { ChatgptStatus, CodexAccount } from "../../../daemon/src/agent/codex/account.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
+import { approvalDraft, toolRisk } from "../../../daemon/src/agent/safety/authorize.ts";
+import { classify } from "../../../daemon/src/agent/safety/risk.ts";
 import { AgentSession } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
@@ -809,9 +811,14 @@ app.get("/owned-preview.js", (c) => c.body(DESKTOP_JS, 200, { "content-type": "t
 
 // QA control plane (no auth; loopback only, scratch fixture).
 const pendingApprovals: AbortController[] = [];
-app.post("/__qa/approval", (c) => {
+// A JSON body {tool, input} shows the card the daemon builds for that tool call.
+app.post("/__qa/approval", async (c) => {
   if (!session?.generation) return c.text("no brain", 409);
   const risk = (c.req.query("risk") ?? "high") as "medium" | "high";
+  const call = c.req.header("content-type")?.startsWith("application/json")
+    ? ((await c.req.json()) as { tool: ToolName; input: unknown })
+    : undefined;
+  const facts = call && toolRisk(call.tool, call.input);
   const controller = new AbortController();
   pendingApprovals.push(controller);
   void session
@@ -824,16 +831,24 @@ app.post("/__qa/approval", (c) => {
         digest: "d".repeat(64),
         targetDigest: "t".repeat(64),
       } as never,
-      {
-        actionClass: "send",
-        risk,
-        title: "Send the monthly report to team@example.test",
-        fields: [
-          ["To", "team@example.test"],
-          ["Subject", "Monthly report (sample)"],
-          ["Attachment", "summary.md"],
-        ],
-      } as never,
+      call && facts
+        ? approvalDraft(
+            call.tool,
+            call.input,
+            facts,
+            classify(facts, session.autonomy),
+            (text) => text,
+          )
+        : ({
+            actionClass: "send",
+            risk,
+            title: "Send the monthly report to team@example.test",
+            fields: [
+              ["To", "team@example.test"],
+              ["Subject", "Monthly report (sample)"],
+              ["Attachment", "summary.md"],
+            ],
+          } as never),
       { signal: controller.signal, check: () => {}, revalidate: async () => true } as never,
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
