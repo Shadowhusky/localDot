@@ -73,6 +73,17 @@ async function expectAutonomyRow(sheet: Locator) {
   if (!text || !select) throw new Error("autonomy row missing");
   expect(Math.abs(text.y + text.height / 2 - (select.y + select.height / 2))).toBeLessThan(2);
   expect(select.x).toBeGreaterThan(text.x + text.width);
+  const wrapped = await sheet
+    .locator(".safety-settings > label > span, .safety-locked li > span")
+    .evaluateAll((spans) =>
+      spans.flatMap((span) =>
+        span.getBoundingClientRect().height >
+        1.5 * Number.parseFloat(getComputedStyle(span).lineHeight)
+          ? [span.textContent]
+          : [],
+      ),
+    );
+  expect(wrapped).toEqual([]);
 }
 
 async function expectThemeTiles(sheet: Locator) {

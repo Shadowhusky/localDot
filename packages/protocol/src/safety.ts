@@ -102,7 +102,7 @@ export const ACTION_CLASS_LABELS: Readonly<Record<ActionClass, string>> = Object
   reading: "Read and look",
   browsing: "Browse websites",
   computer: "Work in its computer",
-  download_execute: "Run programs from the internet",
+  download_execute: "Run downloaded programs",
   memory: "Save to its memory",
   send: "Send as you",
   post: "Post or publish as you",

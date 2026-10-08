@@ -16,7 +16,7 @@ const ROWS = [
 ] as const satisfies readonly (keyof AutonomyPolicy)[];
 const locked = (policy: AutonomyPolicy): readonly [ActionClass, string][] => [
   ["upload", policy.send === "handoff" ? "Hand off, like sending" : "Ask"],
-  ["credentials", "Always handed to you"],
+  ["credentials", "Hand off"],
   ["unknown", "Ask"],
 ];
 export function SafetySettings({

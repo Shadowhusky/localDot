@@ -50,7 +50,7 @@ it("lists the ten classes it can change, then the locked ones as plain text", ()
     "Read and look",
     "Browse websites",
     "Work in its computer",
-    "Run programs from the internet",
+    "Run downloaded programs",
     "Save to its memory",
     "Send as you",
     "Post or publish as you",
@@ -61,7 +61,7 @@ it("lists the ten classes it can change, then the locked ones as plain text", ()
   const locked = screen.getByRole("list", { name: "Can't be changed here" });
   expect([...locked.querySelectorAll("li")].map((row) => row.textContent)).toEqual([
     "Upload your filesAsk",
-    "Passwords, codes and card detailsAlways handed to you",
+    "Passwords, codes and card detailsHand off",
     "Unclear steps on signed-in sitesAsk",
   ]);
   expect(within(locked).queryByRole("combobox")).toBeNull();

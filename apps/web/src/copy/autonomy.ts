@@ -15,7 +15,7 @@ const CLASS_WORK: Readonly<Record<ActionClass, string>> = {
   reading: "reading and looking",
   browsing: "browsing websites",
   computer: "working in its computer",
-  download_execute: "running programs from the internet",
+  download_execute: "running downloaded programs",
   memory: "saving to its memory",
   send: "sending messages",
   post: "posting or publishing",
