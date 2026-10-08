@@ -94,6 +94,23 @@ describe("Field", () => {
     expect(described(input)).toEqual(["Choose a provider first"]);
   });
 
+  it("lays a setting's label and control out as one row, still naming the control", () => {
+    render(
+      <Field label="Send messages" inline>
+        <SegmentedControl
+          value="ask"
+          onValueChange={() => {}}
+          items={[
+            { value: "act", label: "Just do it" },
+            { value: "ask", label: "Ask me" },
+          ]}
+        />
+      </Field>,
+    );
+    const group = screen.getByRole("radiogroup", { name: "Send messages" });
+    expect(group.closest(".ui-field")?.hasAttribute("data-inline")).toBe(true);
+  });
+
   it("focuses the chosen segment when a group's label is clicked", () => {
     render(
       <Field label="Speed">
@@ -113,6 +130,16 @@ describe("Field", () => {
 });
 
 describe("TextField", () => {
+  it("draws a code large and monospace, as a field of its own kind", () => {
+    render(
+      <Field label="Sign-in code">
+        <TextField code readOnly value="ABCD-1234" />
+      </Field>,
+    );
+    const input = screen.getByRole("textbox", { name: "Sign-in code" });
+    expect(input.closest(".ui-text-field")?.hasAttribute("data-code")).toBe(true);
+  });
+
   it("draws its affixes inside the edge and sends a press on them to the input", () => {
     const { container } = render(<TextField aria-label="Search" prefix="$" suffix="USD" />);
     const input = screen.getByRole("textbox", { name: "Search" });

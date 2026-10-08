@@ -223,8 +223,7 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
         <Field label="Sign-in code">
           <TextField
             ref={account.code}
-            className="settings-code"
-            size="lg"
+            code
             readOnly
             autoComplete="off"
             spellCheck={false}

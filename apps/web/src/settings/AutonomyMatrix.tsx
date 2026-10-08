@@ -63,7 +63,7 @@ export function AutonomyMatrix({ value, saved, onChange }: AutonomyMatrixProps) 
           {group.rows.map((key) => {
             const changed = !!saved && saved[key] !== policy[key];
             return (
-              <Field key={key} className="settings-autonomy-row" label={LABELS[key]}>
+              <Field key={key} className="settings-autonomy-row" label={LABELS[key]} inline>
                 {changed && (
                   <Badge className="settings-changed" kind="dot" tone="attention" label="Changed" />
                 )}

@@ -60,6 +60,26 @@
     }
   }
 
+  /* A setting's row: the label takes the room left by whatever follows it, the control ends the row,
+     and a message runs under the whole row. */
+  .ui-field[data-inline] {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .ui-field[data-inline] > .ui-field-label {
+    flex: 1 1 0;
+    min-width: 0;
+    color: var(--color-fg-1);
+    font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  .ui-field[data-inline] > .ui-field-message {
+    flex-basis: 100%;
+  }
+
   /* The edge every text-like control draws: a text field, a text area and a picker's trigger. */
   .ui-field-box {
     --_h: calc(var(--spacing) * 8);
@@ -161,6 +181,17 @@
 
   .ui-money-field .ui-input {
     font-variant-numeric: tabular-nums;
+  }
+
+  .ui-text-field[data-code] {
+    --_h: calc(var(--spacing) * 12);
+  }
+
+  .ui-text-field[data-code] .ui-input {
+    font:
+      var(--font-weight-semibold) var(--text-display) / var(--text-display--line-height)
+      var(--font-mono);
+    letter-spacing: 0.12em;
   }
 
   /* One line to start, growing with its text to --_rows lines, then scrolling. */

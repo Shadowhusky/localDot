@@ -8,6 +8,8 @@ export interface TextFieldProps
   size?: "md" | "lg";
   prefix?: ReactNode;
   suffix?: ReactNode;
+  // A code someone reads out or types elsewhere: large monospace, spaced out.
+  code?: boolean;
 }
 
 // A press on the field's padding or an affix lands in the input, as it would on a native field.
@@ -22,6 +24,7 @@ export function TextField({
   size = "md",
   prefix,
   suffix,
+  code = false,
   className,
   type = "text",
   readOnly,
@@ -33,6 +36,7 @@ export function TextField({
     <div
       className={clsx("ui-field-box ui-text-field", className)}
       data-size={size}
+      data-code={code ? "" : undefined}
       data-invalid={control.invalid ? "" : undefined}
       data-unavailable={unavailable ? "" : undefined}
       onPointerDown={focusInput}

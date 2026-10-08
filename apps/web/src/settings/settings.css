@@ -1,5 +1,5 @@
 /* The Settings inspector: flat sections on the sheet's surface, one scroller (the sheet's body).
-   Unlayered, so its few placements of kit parts (a field's label in an autonomy row) win. */
+   It lays kit parts out and never restyles them: the kit's layer comes after this one. */
 .settings-body {
   display: grid;
   gap: calc(var(--spacing) * 8);
@@ -169,26 +169,8 @@
 
 /* A label and its three choices on one line; a phone puts the choices under the label. */
 .settings-autonomy-row {
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  align-items: center;
-  column-gap: calc(var(--spacing) * 2);
   min-height: calc(var(--spacing) * 11);
   border-top: 1px solid var(--color-hairline);
-}
-
-.settings-autonomy-row > .ui-field-label {
-  grid-column: 1;
-  color: var(--color-fg-1);
-  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
-}
-
-.settings-autonomy-row > .settings-changed {
-  grid-column: 2;
-}
-
-.settings-autonomy-row > .ui-segmented {
-  grid-column: 3;
-  grid-row: 1;
 }
 
 .settings-locked {
@@ -311,13 +293,6 @@
   display: none;
 }
 
-.settings-code .ui-input {
-  font:
-    var(--font-weight-semibold) var(--text-display) / var(--text-display--line-height)
-    var(--font-mono);
-  letter-spacing: 0.12em;
-}
-
 .settings-messages:empty {
   display: none;
 }
@@ -400,14 +375,11 @@
 
 @media (width < 760px) {
   .settings-autonomy-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: calc(var(--spacing) * 2);
     padding-block: calc(var(--spacing) * 3);
   }
 
   .settings-autonomy-row > .ui-segmented {
-    grid-column: 1 / -1;
-    grid-row: 2;
+    flex-basis: 100%;
   }
 
   .settings-price-fields {

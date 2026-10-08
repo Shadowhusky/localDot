@@ -29,6 +29,8 @@ export interface FieldProps {
   validates?: boolean;
   // Unavailable while set: the control keeps focus, and the reason takes the description's place.
   disabledReason?: string;
+  // A setting's row: the label in body type on the left, the control at the row's end.
+  inline?: boolean;
   className?: string;
   children: ReactNode;
 }
@@ -40,6 +42,7 @@ export function Field(props: FieldProps) {
     error,
     validates = "error" in props,
     disabledReason,
+    inline = false,
     className,
     children,
   } = props;
@@ -75,7 +78,11 @@ export function Field(props: FieldProps) {
   };
 
   return (
-    <div className={clsx("ui-field", className)} data-invalid={invalid ? "" : undefined}>
+    <div
+      className={clsx("ui-field", className)}
+      data-invalid={invalid ? "" : undefined}
+      data-inline={inline ? "" : undefined}
+    >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: a label's click is pointer-only; keys reach the control itself */}
       <label className="ui-field-label" id={labelId} htmlFor={controlId} onClick={focusControl}>
         {label}
