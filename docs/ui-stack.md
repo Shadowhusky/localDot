@@ -486,24 +486,43 @@ rest of the kit. No screen uses them yet. `feedback.css` adds 1.9 kB gz to the a
   1.5 s; a newer message on a channel replaces one still waiting there (the HUD's status on one
   channel never queues stale states), and channels take turns. `assertive` is for errors that stop
   work and is never held back. Text repeated on purpose gets a trailing no-break space, so it is
-  heard again.
-- **Toasts.** `showToast({ id?, title, description?, tone?, action?, persist? })` and
+  heard again. `withdraw(channel)` drops what still waits on a channel: a toast dismissed before its
+  turn is not read out after it has gone.
+- **Toasts.** `showToast({ id?, title, description?, tone?, action?, persist?, urgency? })` and
   `dismissToast(id)`; `<Toaster anchor={hudRef} />` renders them. The Toaster is absolutely
   positioned in its anchor's positioned box (the stage frame), 8 px under the anchor and centred on
   it, 360 px wide or the box less 16 px a side, so a toast never moves anything. Mount one Toaster.
+  While a toast is up the anchor is measured every frame, so the stack follows it however it moves
+  (a transform, a sibling's change), and an anchor mounted late is picked up.
+  - Layers: the Toaster sits at `--layer-toast` (10), over every control's face (1) and anything drawn
+    on a control (2), so where an opened stack hangs past a short phone stage it covers the page and
+    takes every press inside it. The HUD it hangs from takes `--layer-hud` (11), so a toast swiped
+    up goes back under it; the stage's other parts stay under 10. The stage frame must not form a
+    stacking context of its own (no `z-index`, transform, filter, `opacity` below 1 or `isolation` on
+    it), or the toasts cannot rise over the page around it. Overlays (50) and pickers (60) cover them.
   - Newest in front; the front one and the edges of two behind it show, each step back 5% narrower
     and a little lighter, the rest wait. Only the front toast's time runs (4 s), so each is read in
     turn; a `danger` toast persists unless told otherwise. Time stands still while the stack is
-    hovered, holds focus, is opened by a tap, is being swiped, or the page is hidden.
+    hovered, holds focus, is opened by a tap, is being swiped or pressed, or the page is hidden.
+  - Nothing moves under a pointer or a finger. While the stack is held (hovered, focused, opened by a
+    tap, swiped, or pressed until the press's click is handled), the toasts on it keep their places:
+    one that arrives meanwhile is read out at once and joins the stack, in front, when it is let go.
   - Hover or focus lays the stack out into a column (8 px apart); on touch a tap does, and a press
     elsewhere closes it. Behind toasts are inert until then. The words of a card that comes out from
-    behind fade in once the cards have parted.
+    behind, laid out or handed the front, start at once on `--ease-enter`, and a card going behind
+    covers its words on `--dur-press`.
   - Showing again under an `id` replaces that toast where it is and brings it to the front: an action
-    such as "Check again" can turn "Couldn't confirm the stop" into "Stopped" in place.
-  - A toast is read out through the Announcer when shown; the stack itself is a labelled region, not
-    a live one. Escape on a focused toast dismisses it (focus moves to the next toast) and goes no
-    further. The close button is always there; buttons keep a 28 px face and reach 44 px on touch, so
-    a toast stays 44 px tall.
+    such as "Check again" can turn "Couldn't confirm the stop" into "Stopped" in place. Each toast has
+    a `key` for its element; it stays through an update in place, and a toast shown again while its
+    old element is still being swiped off gets a new one, so it comes back whole.
+  - A toast is read out through the Announcer when shown, politely unless `urgency: "assertive"` (an
+    error that stops work); the stack itself is a labelled region, not a live one. Escape on a focused
+    toast dismisses it and goes no further. Focus in a toast that goes, by Escape, Dismiss, its action
+    or a swipe, moves to the next toast, or with the last one back to where it came into the stack
+    from, or else to the anchor (itself, or its first control). The close button is always there;
+    buttons keep a 28 px face and reach 44 px on touch (the toast's end padding is 10 px there, so
+    its rounded clip leaves the close button its whole reach), so a toast stays 44 px tall. A
+    description beside an action wraps in balanced lines.
   - Motion: it grows down out of the anchor (8 px, scale .96, blur 4 px to sharp) on the spring and
     leaves back into it on `--ease-exit`, sinking under the cards that slide up. Swipe: sideways or up,
     10 px of slop, then 1:1 from the grab point (down gives by a rubber band); a release projected
@@ -520,30 +539,41 @@ rest of the kit. No screen uses them yet. `feedback.css` adds 1.9 kB gz to the a
   `open` rather than rendering it conditionally. Spacing around it belongs inside the part that folds
   (a margin on `.ui-banner`), or a gap stays behind when it is closed. Attention is a 1 px rim, danger
   a tinted fill with an alert glyph, never colour alone. `announce` reads it out each time it opens.
+  Closing while it holds focus (its own dismiss, or an action that closes it), it first gives focus
+  back to where focus came into it from, or else to the control before it, and only then goes inert.
+  Beside the actions, the close button lines up with them.
 - **Progress.** `label`, `value`, `max`, `valueText`, `variant: bar | ring`, ring `size: 16 | 20 | 24`.
   The bar is 4 px, its fill sliding along the track; without a value a 30% stretch sweeps along a
   2 px line in the same 4 px, so a bar that learns its length moves nothing. The ring's arc draws from
-  twelve o'clock; complete, it brightens and draws a check (the download button's ring → check →
-  toast). Reduced motion: the sweep and the turning ring breathe instead.
+  twelve o'clock over a 25% track; complete, it brightens and draws a check (the download button's
+  ring → check → toast). Of unknown length the arc turns alone, with no track, so it never reads as a
+  share. Reduced motion: both stand still, the line drawn whole in fg-3 and the arc where it stands.
 - **Meter.** `label`, `value`, `max` (100), `valueText`: the label and the amount over a 4 px bar. From
   90% the fill turns fg-1 and the amount reads "Almost at limit · …", in words and in the meter's
   value text. `role="meter"` on a drawn bar, since a native `meter` draws differently in each engine.
+  In forced colours every fill, near the limit too, is CanvasText.
 - **Skeleton.** `loading`, `shape: text | block | circle`, `width`, `height`, `lines`, children. A text
   line is one line of the surrounding type tall (`1lh`) with a bar about cap height, so it takes the
   content's own type and the room is the same before and after; blocks take `width` and `height`.
   The bones appear only if loading lasts 200 ms, one sweep of light crosses every bone on the page
   together, and when the content arrives it fades in over the fading bones in the same grid cell.
-  Mark the region `aria-busy` while it loads.
+  Loading again, the content last shown stays (even if the caller has nothing to show meanwhile) and
+  the skeleton is `aria-busy`; a reload under 200 ms changes nothing on screen, and a longer one
+  crosses to the bones at 200 ms and back when the new content arrives, so something always shows.
+  A Skeleton is a block (`display: grid` on a span): for a value inside a sentence ("resets in …"),
+  wrap it in an element of its own that sits in the line, such as an `inline-block` span with a width.
 - **EmptyState.** `title`, detail, `icon`, `actions`, `layout: center | start`: centred in the room a
   list would fill, or a quiet line in fg-3 where the list starts ("What would you like done?"). Show it
   once loaded and empty; while loading, a Skeleton.
-- **Not here.** StatusGlyph, Disclosure and ScrollArea are L9's (`structure.css`). The status lamp is not in §4.2; the
-  `Badge` dot covers a lamp, and T12 removes the top bar's Live / Not live lamp. `Presence`, `useFlip`
-  and `useSpringValue` were not needed: entrances use `data-entering` or `@starting-style`, the stack
-  is laid out with CSS variables, and the swipe uses `springValue` directly.
+- **Not here.** StatusGlyph, Disclosure and ScrollArea are L9's (`structure.css`). The status lamp is
+  not in §4.2; the `Badge` dot covers a lamp, and T12 removes the top bar's Live / Not live lamp.
+  `Presence`, `useFlip` and `useSpringValue` were not needed: entrances use `data-entering` or
+  `@starting-style`, the stack is laid out with CSS variables, and the swipe uses `springValue`
+  directly.
 - **Wiring (T12 and on).** Mount `<Announcer />` once at the root and move the HUD's, the
   conversation's and the caption's live regions onto `announce`. Mount `<Toaster anchor={hud} />`
-  inside the stage frame, with the HUD above it, so a toast swiped up goes back under the HUD. The
+  inside the stage frame, and give the HUD `z-index: var(--layer-hud)`, so a toast swiped up goes back
+  under it (see Layers above). The
   decision card (T18) hangs from the same place; show one or the other. Replace `<progress>` in
   `export/ExportSheet.tsx` and `settings/ChatgptPanel.tsx` with `Progress`. The usage popover
   (`agent/UsageFooter.tsx`) already draws each plan window with `Meter`, its name as the label and
