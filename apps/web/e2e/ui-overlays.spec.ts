@@ -301,6 +301,35 @@ for (const [engine, launch] of Object.entries(ENGINES))
         await context.close();
       });
 
+      test("a menu lines up a label without an icon, and the sheet keeps room for its scrollbar", async () => {
+        const { context, page, seen } = await open(browser, device);
+        // A cross reads as close, so the destructive controls carry no icon.
+        await expect(
+          page.getByRole("button", { name: "Delete recording" }).locator(".ui-icon"),
+        ).toHaveCount(0);
+        const trigger = page.getByRole("button", { name: "Recording actions" });
+        await trigger.scrollIntoViewIfNeeded();
+        await press(trigger);
+        const menu = page.getByRole("menu", { name: "Recording actions" });
+        await settled(menu);
+        const unavailable = menu.getByRole("menuitem", { name: "Delete recording" });
+        await expect(unavailable.locator(".ui-icon")).toHaveCount(0);
+        const label = async (name: string) =>
+          (await box(menu.getByRole("menuitem", { name }).locator(".ui-menu-label"))).x;
+        expect(await label("Delete recording")).toBe(await label("Show files"));
+        await page.keyboard.press("Escape");
+        await expect(menu).toHaveCount(0);
+
+        const sheet = await openSheet(page);
+        expect(
+          await sheet
+            .locator(".ui-sheet-body")
+            .evaluate((body) => getComputedStyle(body).scrollbarGutter),
+        ).toBe("stable");
+        expect(await seen()).toEqual({ violations: [], styles: 0 });
+        await context.close();
+      });
+
       test("a bottom sheet follows the finger from where it was grabbed, then springs back or goes", async () => {
         const { context, page, seen } = await open(browser, device);
         const label = touch ? "Open settings" : "Open as a bottom sheet";

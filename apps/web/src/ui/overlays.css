@@ -184,6 +184,11 @@
     color: var(--color-fg-2);
   }
 
+  /* An item without an icon keeps its label in line with those of the items that have one. */
+  .ui-menu:has(.ui-menu-icon) .ui-menu-item:not(:has(> .ui-menu-icon)) {
+    padding-inline-start: calc(var(--spacing) * 8);
+  }
+
   .ui-menu-text {
     display: flex;
     flex: 1;
@@ -445,6 +450,7 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     padding: var(--spacing) calc(var(--spacing) * 5) calc(var(--spacing) * 5);
+    scrollbar-gutter: stable;
     scrollbar-width: thin;
     scrollbar-color: var(--color-control-pressed) transparent;
   }

@@ -214,7 +214,7 @@ function DialogDemo() {
   const [deleted, setDeleted] = useState(0);
   return (
     <div className="overlays-demo">
-      <Button ref={trigger} icon="x" onClick={() => setOpen(true)}>
+      <Button ref={trigger} onClick={() => setOpen(true)}>
         Delete recording
       </Button>
       <p className="overlays-status">
@@ -322,11 +322,7 @@ function MenuDemo() {
           <MenuItem icon="file" onSelect={() => setChoice("Show files")}>
             Show files
           </MenuItem>
-          <MenuItem
-            icon="x"
-            disabledReason="Stop the task first"
-            onSelect={() => setChoice("Delete")}
-          >
+          <MenuItem disabledReason="Stop the task first" onSelect={() => setChoice("Delete")}>
             Delete recording
           </MenuItem>
         </MenuGroup>
