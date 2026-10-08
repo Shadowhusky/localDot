@@ -32,7 +32,7 @@ export interface FakeScript {
   // How long /release takes before it answers (and is recorded).
   releaseMs?: number;
   // What /held answers; by default the buttons /input pressed with `down` and has not let go.
-  held?: () => HeldResult;
+  held?: () => HeldResult | { status: number; body: string };
 }
 
 export class FakeDesktopd {
@@ -157,7 +157,8 @@ export class FakeDesktopd {
     });
     this.app.post("/held", (c) => {
       this.calls.push({ path: "/held", body: null });
-      return c.json(this.script.held?.() ?? { buttons: [...this.buttons] });
+      const out = this.script.held?.() ?? { buttons: [...this.buttons] };
+      return "status" in out ? c.text(out.body, out.status as 404) : c.json(out);
     });
     this.app.post("/launch", async (c) => {
       const body = await c.req.json();

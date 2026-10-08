@@ -380,7 +380,12 @@ export class ActionGateway {
   // desktopd lets go of a button on its own when nothing reached it for long, or when its helper
   // restarted: a move, scroll or release that goes on from the press needs it still down.
   async #confirmHeld(ctx: ActionContext, d: NativeDevice, held: HeldButton): Promise<void> {
-    const reply = await d.client.held?.();
+    // A desktopd from before /held cannot say.
+    const reply = await d.client
+      .held?.()
+      .catch((error) =>
+        error instanceof DesktopdError && error.status === 404 ? undefined : Promise.reject(error),
+      );
     this.#check(ctx);
     if (!reply || reply.buttons.includes(BUTTON_NUMBER[held.button])) return;
     if (this.#held.get(ctx.cellId) === held) this.#forget(ctx.cellId);

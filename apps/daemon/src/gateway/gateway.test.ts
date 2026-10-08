@@ -1702,6 +1702,16 @@ describe("ActionGateway drags, moves and held buttons", () => {
     }
   });
 
+  it("goes on with a held move when desktopd cannot say which buttons are down", async () => {
+    const s = setup({ hitTest: desk, held: () => ({ status: 404, body: "not found" }) });
+    const { ctx } = agentCtx(s);
+    await s.gateway.run(ctx, { verb: "down", point: { x: 100, y: 200 } });
+    expect((await s.gateway.run(ctx, { verb: "move", point: { x: 600, y: 300 } })).ok).toBe(true);
+    s.fake.script.held = () => ({ status: 500, body: "the helper is gone" });
+    expect(await s.gateway.run(ctx, { verb: "up" })).toMatchObject({ ok: false });
+    expect(inputs(s).map((i) => i.input.kind)).toEqual(["down", "move"]);
+  });
+
   it("refuses a release whose button was let go after its approval, during its travel", async () => {
     const s = setup({ hitTest: desk });
     const { ctx, release } = agentCtx(s);
