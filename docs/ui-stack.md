@@ -38,7 +38,9 @@ No `tw-animate-css` and no `lucide-react`: motion is our own CSS and icons will 
   utility shares a name with a legacy class. Biome parses Tailwind directives
   (`css.parser.tailwindDirectives`).
 - The shadcn generator's `components.json` lives only in a scratch project; see "Generator" below.
-- The preflight reset is **not** in the app yet; see "Preflight" below.
+- `stack.css` imports the token layer between Tailwind's theme and its utilities: `tokens.css`,
+  `base.css` and `motion.css`; see "Token layer" below. Tailwind's preflight is not used; see
+  "Preflight".
 
 ## The spike gallery
 
@@ -173,8 +175,46 @@ Tailwind's preflight was built into the app as an experiment and compared with t
 - the composer's "Choose files" button loses its native chip and reads as plain text;
 - input placeholders get dimmer (`color-mix(currentcolor 50%)`).
 
-So the preflight joins with T03's `base.css`, where gate 6 compares FS10 and FS24 on the T01 harness and
-these four are restyled deliberately.
+T03 keeps it out. `src/ui/base.css` carries the part of a reset the kit needs and leaves list markers,
+link styling, the display of media elements and the fonts of form controls alone, so the legacy screens
+and chat markdown keep their lists, links and file button. Kit components set those themselves; Tailwind
+4's border utilities set their own border style, so they do not need preflight's `border: 0 solid`.
+The heading reset is T03's own (`h1`–`h6 { font: inherit }`): every legacy heading that relied on the
+browser's bold now names its weight (600, the heaviest the type scale allows), and `ui/base.test.ts` fails
+on a heading rule that sets a size without a weight.
+
+## Token layer
+
+T03 (UI plan §4.1). Files: `src/ui/tokens.css`, `base.css`, `motion.css`; tests in
+`src/ui/tokens.test.ts`, `src/ui/base.test.ts` and `e2e/ui-tokens.spec.ts`.
+
+- **One `@theme static` block.** Every token is a CSS variable from the start, before any utility uses
+  it, because the legacy CSS reads them with `var()`. Tailwind's own palette, type scale, radii, shadows,
+  eases and breakpoints are cleared (`--color-*: initial` and the like), so kit code can reach only the
+  roles: `bg-raised`, `text-fg-2`, `text-body`, `rounded-lg`, `shadow-overlay`, `ease-spring`, and the
+  `tablet:`, `laptop:` and `wide:` variants.
+- **Appearances.** Two ramps of the same OKLCH lightness steps, `--graphite-*` and `--midnight-*`. The
+  roles point into Graphite on `:root` and into Midnight under `:root[data-appearance="midnight"]`.
+  Midnight sits at hue 255 and chroma about .02, and fg-2 and fg-3 are shared, so fg-2 against fg-3 is
+  1.59:1 in both (it was 1.24:1 in the old Midnight). The theme picker's preview tiles read the ramps
+  directly.
+- **Modes.** `prefers-contrast: more` brightens fg-2 and fg-3, turns hairlines into field lines, makes
+  the HUD solid and widens the focus ring to 3 px. `prefers-reduced-transparency` makes the HUD solid.
+  `motion.css` maps every duration into 120–150 ms under reduced motion.
+- **HUD alpha .8, not .72.** At .72 the elapsed time (fg-2) on the HUD is 3.4:1 over a white frame; .8
+  is the lowest alpha that keeps 4.5:1.
+- **Legacy names are aliases** in `theme.css`: `--color-surface` → raised, `--color-surface-2` →
+  raised-2, `--color-text`/`-2`/`-3` → fg-1/2/3. `--color-line` maps to the overlay step, not to
+  hairline: legacy CSS uses it for dividers and field edges alike, and hairline would leave the Keys
+  fields at 1.0:1 against the sheet. It keeps its old place on the ramp, one step above raised-2, until
+  its uses split onto hairline and field-line. `theme.css` also keeps the legacy body size (13.5/1.55)
+  over the base layer's 13/18.
+- **A token is declared once, in `tokens.css`.** A legacy `:root` declaration of the same name sits in the
+  components layer and would silently outrank it. The unit test checks the sources; the e2e spec checks
+  every colour role as Chrome and WebKit resolve it from the production build, in both appearances, with
+  and without more contrast.
+- **Stage.** `stage/theme.ts` reads the label font (`--font-ui`) with the colours, so canvas labels use
+  the same stack as the page.
 
 ## Notes for the tasks that build on this
 
