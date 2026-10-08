@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { SafetyControls } from "./SafetyControls.tsx";
@@ -55,4 +55,64 @@ it("drops Pause and the Stop shortcut once the task has finished", () => {
   render(<SafetyControls safety={{ ...safety, canPause: false }} agent={idle} cell={null} />);
   expect(screen.queryByRole("button", { name: "Pause after this step" })).toBeNull();
   expect(screen.queryByText("Stop: Ctrl/Cmd + Shift + .")).toBeNull();
+});
+
+const ID = "01J00000000000000000000003";
+const card = {
+  approvalId: ID,
+  generation: 1,
+  revision: 1,
+  expiresAt: Date.now() + 60_000,
+  actionClass: "send" as const,
+  risk: "high" as const,
+  title: "Send as you",
+  fields: [] as [string, string][],
+  always: [{ scope: "task" as const, label: "For this task" }],
+};
+
+it("puts Always allow in the approval card and confirms the choice after it", () => {
+  const answerApproval = vi.fn(async () => true);
+  const deciding = { ...safety, approval: card, canApprove: true, answerApproval, allowed: null };
+  const view = render(<SafetyControls safety={deciding} agent={agent} cell={null} />);
+  fireEvent.click(screen.getByRole("button", { name: "Always allow…" }));
+  fireEvent.click(screen.getByRole("button", { name: "For this task" }));
+  expect(answerApproval).toHaveBeenCalledWith({
+    approvalId: ID,
+    generation: 1,
+    revision: 1,
+    decision: "approve",
+    always: "task",
+  });
+  const undoAllowed = vi.fn(async () => true);
+  const allowed = {
+    ...safety,
+    undoAllowed,
+    dismissAllowed: vi.fn(),
+    allowed: {
+      session: sessionId,
+      approvalId: ID,
+      actionClass: "send" as const,
+      option: card.always[0],
+      undo: "idle" as const,
+    },
+  } as unknown as SafetyView;
+  const confirmed = {
+    ...agent,
+    model: {
+      ...agent.model,
+      approvalOutcome: {
+        approvalId: ID,
+        decision: "approve" as const,
+        actionClass: "send" as const,
+        rule: { scope: "task" as const, label: "For this task", actionClass: "send" as const },
+      },
+    },
+  };
+  view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
+  expect(screen.queryByRole("button", { name: "Always allow…" })).toBeNull();
+  expect(screen.getByText("Allowed for this task: sending messages.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+  expect(undoAllowed).toHaveBeenCalledOnce();
+  view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} visible={false} />);
+  expect(screen.queryByText("Allowed for this task: sending messages.")).toBeNull();
 });

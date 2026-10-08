@@ -25,6 +25,8 @@ const RELEVANT = new Set<LocalDotEvent["type"]>([
   "safety.pause",
   "approval.request",
   "approval.resolve",
+  "rule.created",
+  "rule.removed",
   "budget.exceeded",
   "subscription.usage",
 ]);
@@ -99,9 +101,40 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
       next = { ...next, approval: ApprovalCard.parse({ ...card, fields: preview.fields }) };
       break;
     }
-    case "approval.resolve":
-      if (model.approval?.approvalId === e.data.approvalId) next = { ...next, approval: null };
+    case "approval.resolve": {
+      const card = model.approval?.approvalId === e.data.approvalId ? model.approval : null;
+      next = {
+        ...next,
+        ...(card ? { approval: null } : {}),
+        approvalOutcome: {
+          approvalId: e.data.approvalId,
+          decision: e.data.decision,
+          ...(card ? { actionClass: card.actionClass } : {}),
+          ...(e.data.note ? { note: e.data.note } : {}),
+        },
+      };
       break;
+    }
+    // The daemon appends a choice's rule.created right after the approval.resolve that saved it.
+    case "rule.created": {
+      const outcome = model.approvalOutcome;
+      if (outcome && !outcome.rule && !outcome.note && outcome.actionClass === e.data.actionClass)
+        next = { ...next, approvalOutcome: { ...outcome, rule: { ...e.data } } };
+      break;
+    }
+    case "rule.removed": {
+      const outcome = model.approvalOutcome,
+        rule = outcome?.rule;
+      if (
+        outcome &&
+        rule &&
+        rule.id === e.data.id &&
+        rule.actionClass === e.data.actionClass &&
+        rule.scope === e.data.scope
+      )
+        next = { ...next, approvalOutcome: { ...outcome, ruleRemoved: true } };
+      break;
+    }
     case "pause.change":
       next = { ...next, safetyPaused: { ...e.data } };
       break;

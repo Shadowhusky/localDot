@@ -670,3 +670,150 @@ it("losing window focus closes decision admission until focus returns", async ()
   });
   expect(f.result.current.canApprove).toBe(true);
 });
+const RULE = "01J00000000000000000000009";
+const offered: Card = {
+  ...card,
+  always: [
+    { scope: "task", label: "For this task" },
+    { scope: "site", label: "On mail.example.test", site: "https://mail.example.test" },
+  ],
+};
+const approve = { approvalId: ID, generation: 1, revision: 1, decision: "approve" };
+it("Always allow sends only a scope the card offered, then keeps the choice for Undo", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+    f = fixture(fetchImpl, offered);
+  await act(async () => {
+    expect(await f.result.current.answerApproval({ ...approve, always: "always" })).toBe(false);
+    expect(await f.result.current.answerApproval({ ...approve, always: "app" })).toBe(false);
+    expect(
+      await f.result.current.answerApproval({ ...approve, decision: "deny", always: "task" }),
+    ).toBe(false);
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+  expect(f.result.current.allowed).toBeNull();
+  await act(async () => {
+    expect(await f.result.current.answerApproval({ ...approve, always: "site" })).toBe(true);
+  });
+  expect(JSON.parse(String(fetchImpl.mock.calls[0]?.[1]?.body))).toEqual({
+    ...approve,
+    always: "site",
+  });
+  expect(f.result.current.allowed).toEqual({
+    session: SESSION,
+    approvalId: ID,
+    actionClass: "send",
+    option: offered.always?.[1],
+    undo: "idle",
+  });
+  act(() => f.result.current.dismissAllowed());
+  expect(f.result.current.allowed).toBeNull();
+});
+it("a card without options refuses any Always allow scope", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+    f = fixture(fetchImpl);
+  await act(async () => {
+    expect(await f.result.current.answerApproval({ ...approve, always: "task" })).toBe(false);
+  });
+  expect(fetchImpl).not.toHaveBeenCalled();
+});
+it.each([
+  ["task", `/api/agent/sessions/${SESSION}/allowances/send`, undefined],
+  ["site", `/api/agent/rules/${RULE}`, RULE],
+] as const)("Undo of a %s choice sends its DELETE once", async (scope, path, ruleId) => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+    f = fixture(fetchImpl, offered);
+  await act(async () => {
+    await f.result.current.answerApproval({ ...approve, always: scope });
+  });
+  await act(async () => {
+    expect(await f.result.current.undoAllowed()).toBe(false);
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  const option = offered.always?.find((value) => value.scope === scope);
+  if (!option) throw new Error("option");
+  const rule = { ...option, actionClass: "send" as const, ...(ruleId ? { id: ruleId } : {}) };
+  f.update({
+    agent: {
+      ...f.props.agent,
+      model: {
+        ...f.props.agent.model,
+        approval: null,
+        approvalOutcome: { approvalId: ID, decision: "approve", actionClass: "send", rule },
+      },
+    },
+  });
+  await act(async () => {
+    expect(await f.result.current.undoAllowed()).toBe(true);
+  });
+  const [url, init] = fetchImpl.mock.calls[1] ?? [];
+  expect(String(url)).toBe(`https://owned.invalid${path}`);
+  expect(init?.method).toBe("DELETE");
+  expect(init?.body).toBeUndefined();
+  expect(f.result.current.allowed?.undo).toBe("done");
+  await act(async () => {
+    expect(await f.result.current.undoAllowed()).toBe(false);
+  });
+  expect(fetchImpl).toHaveBeenCalledTimes(2);
+});
+it("a failed Undo can be tried again, a missing one counts as undone, and a new task forgets it", async () => {
+  const statuses = [204, 500, 404];
+  const fetchImpl = vi.fn<typeof fetch>(
+    async () => new Response(null, { status: statuses.shift() ?? 204 }),
+  );
+  const f = fixture(fetchImpl, offered);
+  await act(async () => {
+    await f.result.current.answerApproval({ ...approve, always: "task" });
+  });
+  f.update({
+    agent: {
+      ...f.props.agent,
+      model: {
+        ...f.props.agent.model,
+        approvalOutcome: {
+          approvalId: ID,
+          decision: "approve",
+          actionClass: "send",
+          rule: { scope: "task", label: "For this task", actionClass: "send" },
+        },
+      },
+    },
+  });
+  await act(async () => {
+    expect(await f.result.current.undoAllowed()).toBe(false);
+  });
+  expect(f.result.current.allowed?.undo).toBe("failed");
+  await act(async () => {
+    expect(await f.result.current.undoAllowed()).toBe(true);
+  });
+  expect(f.result.current.allowed?.undo).toBe("done");
+  f.update({ agent: { ...f.props.agent, sessionId: OTHER } });
+  expect(f.result.current.allowed).toBeNull();
+});
+it("a newer approval card replaces the last choice's status line", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 })),
+    f = fixture(fetchImpl, offered);
+  await act(async () => {
+    await f.result.current.answerApproval({ ...approve, always: "task" });
+  });
+  expect(f.result.current.allowed).not.toBeNull();
+  const snapshot = f.props.agent.snapshot;
+  if (!snapshot) throw new Error("snapshot");
+  f.update({
+    agent: {
+      ...f.props.agent,
+      snapshot: { ...snapshot, approval: { ...offered, approvalId: OTHER } },
+    },
+  });
+  expect(f.result.current.allowed).toBeNull();
+});
+it("keeps the choice when the reply is lost, since the task's record confirms it", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => {
+      throw new TypeError("network");
+    }),
+    f = fixture(fetchImpl, offered);
+  await act(async () => {
+    expect(await f.result.current.answerApproval({ ...approve, always: "task" })).toBe(false);
+  });
+  expect(fetchImpl).toHaveBeenCalledOnce();
+  expect(f.result.current.allowed?.option.scope).toBe("task");
+});

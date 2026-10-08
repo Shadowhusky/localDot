@@ -1,55 +1,155 @@
-import { AutonomyMode, AutonomyPolicy, EDITABLE_ACTION_CLASSES } from "@localdot/protocol";
+import { type ActionClass, AutonomyMode, AutonomyPolicy } from "@localdot/protocol";
+import { AUTONOMY_PRESETS, CLASS_LABELS, CUSTOM_SUMMARY, presetOf } from "../copy/autonomy.ts";
+import type { RulesView } from "./useRules.ts";
+import "../agent/safety.css";
 
-const labels: Record<(typeof EDITABLE_ACTION_CLASSES)[number], string> = {
-  reading: "Read and look",
-  browsing: "Browse websites",
-  computer: "Work in its computer",
-  purchase: "Buy or pay",
-  send: "Send as you",
-  post: "Post or publish as you",
-  delete: "Delete your online data",
-  download_execute: "Run downloaded programs",
-  system_settings: "Change account settings",
-  memory: "Save to its memory",
-};
+const ROWS = [
+  "reading",
+  "browsing",
+  "computer",
+  "download_execute",
+  "memory",
+  "send",
+  "post",
+  "delete",
+  "system_settings",
+  "purchase",
+] as const satisfies readonly (keyof AutonomyPolicy)[];
+const LOCKED: readonly [ActionClass, string][] = [
+  ["upload", "Always needs you"],
+  ["credentials", "Always handed to you"],
+  ["unknown", "Always asks"],
+];
 export function SafetySettings({
   value,
   disabled,
   onChange,
+  rules,
 }: {
   value: AutonomyPolicy;
   disabled?: boolean;
   onChange(value: AutonomyPolicy): void;
+  rules?: RulesView;
 }) {
   const parsed = AutonomyPolicy.safeParse(value);
   if (!parsed.success)
     return <p role="alert">Autonomy settings could not be verified. Reload saved settings.</p>;
+  const active = presetOf(parsed.data);
   return (
-    <fieldset className="role-editor safety-settings" disabled={disabled}>
-      <legend>When the computer should ask</legend>
-      <p>Saved choices apply to new tasks. Your current task keeps its starting policy.</p>
-      {EDITABLE_ACTION_CLASSES.map((key) => (
-        <label key={key}>
-          <span>{labels[key]}</span>
-          <select
-            aria-label={labels[key]}
-            value={parsed.data[key]}
-            onChange={(event) => {
-              const mode = AutonomyMode.safeParse(event.target.value);
-              if (mode.success)
-                onChange(AutonomyPolicy.parse({ ...parsed.data, [key]: mode.data }));
+    <>
+      <fieldset className="role-editor safety-settings" disabled={disabled}>
+        <legend>When the computer should ask</legend>
+        <p>Saved choices apply to new tasks. Your current task keeps its starting policy.</p>
+        <div className="safety-presets">
+          {AUTONOMY_PRESETS.map((preset) => (
+            <button
+              key={preset.name}
+              type="button"
+              aria-pressed={preset === active}
+              onClick={() => {
+                if (preset !== active) onChange(AutonomyPolicy.parse({ ...preset.policy }));
+              }}
+            >
+              {preset.name}
+            </button>
+          ))}
+        </div>
+        <p className="safety-preset-note">
+          {active ? active.summary : `Custom: ${CUSTOM_SUMMARY.toLowerCase()}`}
+        </p>
+        {ROWS.map((key) => (
+          <label key={key}>
+            <span>{CLASS_LABELS[key]}</span>
+            <select
+              aria-label={CLASS_LABELS[key]}
+              value={parsed.data[key]}
+              onChange={(event) => {
+                const mode = AutonomyMode.safeParse(event.target.value);
+                if (mode.success)
+                  onChange(AutonomyPolicy.parse({ ...parsed.data, [key]: mode.data }));
+              }}
+            >
+              <option value="act">Act</option>
+              <option value="ask">Ask</option>
+              <option value="handoff">Hand off</option>
+            </select>
+          </label>
+        ))}
+        <ul className="safety-locked" aria-label="Always the same">
+          {LOCKED.map(([key, mode]) => (
+            <li key={key}>
+              <span>{CLASS_LABELS[key]}</span>
+              <span>{mode}</span>
+            </li>
+          ))}
+        </ul>
+        <p className="safety-hint">Commands always ask once you sign in on its computer.</p>
+      </fieldset>
+      {rules && <AlwaysAllowed rules={rules} />}
+    </>
+  );
+}
+
+function AlwaysAllowed({ rules }: { rules: RulesView }) {
+  return (
+    <fieldset className="role-editor safety-rules">
+      <legend>Always allowed</legend>
+      <p>Choices you made with Always allow on a request. Removing one takes effect right away.</p>
+      {rules.unreadable && (
+        <div className="safety-rules-problem" role="alert">
+          <p className="safety-rules-message">
+            {rules.unreadable} Start over to save new choices. The old file is kept, not deleted.
+          </p>
+          <button
+            type="button"
+            aria-disabled={rules.resetting || undefined}
+            onClick={() => {
+              if (!rules.resetting) rules.reset();
             }}
           >
-            <option value="act">Act</option>
-            <option value="ask">Ask</option>
-            <option value="handoff">Hand off</option>
-          </select>
-        </label>
-      ))}
-      <p>
-        Passwords, codes and card details are always handed to you. Uploads always need you. Unclear
-        steps on signed-in sites always ask, and so do commands once you sign in on its computer.
-      </p>
+            {rules.resetting ? "Starting over…" : "Start over"}
+          </button>
+        </div>
+      )}
+      {rules.phase === "error" && (
+        <div className="safety-rules-problem">
+          <p className="safety-rules-message">Couldn't load this list.</p>
+          <button type="button" onClick={rules.reload}>
+            Try again
+          </button>
+        </div>
+      )}
+      {rules.phase === "loading" && !rules.rules.length && <p role="status">Loading…</p>}
+      {rules.phase === "ready" && !rules.unreadable && !rules.rules.length && (
+        <p>Nothing yet. Use Always allow on a request to add one.</p>
+      )}
+      {rules.rules.length > 0 && (
+        <ul aria-label="Always allowed">
+          {rules.rules.map((rule) => {
+            const name = CLASS_LABELS[rule.actionClass];
+            const busy = rules.removing === rule.id;
+            return (
+              <li key={rule.id}>
+                <span className="safety-rule-text">
+                  <span>{name}</span>
+                  <span className="safety-rule-where">{rule.label}</span>
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${name}: ${rule.label}`}
+                  aria-disabled={busy || undefined}
+                  onClick={() => {
+                    if (!busy) rules.remove(rule.id);
+                  }}
+                >
+                  {busy ? "Removing…" : "Remove"}
+                </button>
+                {rules.failed === rule.id && <p role="status">Couldn't remove this. Try again.</p>}
+              </li>
+            );
+          })}
+        </ul>
+      )}
     </fieldset>
   );
 }

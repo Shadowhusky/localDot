@@ -13,6 +13,7 @@ import type {
 import { RoleEditor } from "./RoleEditor.tsx";
 import { SafetySettings } from "./SafetySettings.tsx";
 import type { ChatgptControls } from "./useChatgpt.ts";
+import type { RulesView } from "./useRules.ts";
 import "./settings.css";
 
 export interface SettingsSheetProps {
@@ -39,6 +40,7 @@ export interface SettingsSheetProps {
   taskControls?: ReactNode;
   autonomy?: AutonomyPolicy;
   onAutonomy?(value: AutonomyPolicy): void;
+  rules?: RulesView;
   manualPrices?: Partial<Record<ModelRole, { input: string; output: string }>>;
   onPrice?(role: ModelRole, value: { input: string; output: string }): void;
   budget?: {
@@ -267,6 +269,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
               value={props.autonomy}
               disabled={props.busy || props.loading}
               onChange={props.onAutonomy}
+              rules={props.rules}
             />
           )}
           {props.budget && props.choices.main?.provider !== "chatgpt" && (

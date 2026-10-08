@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { CellSummary } from "../cells/types.ts";
+import { AllowedNotice, AlwaysAllow } from "./AlwaysAllow.tsx";
 import { ApprovalCard } from "./ApprovalCard.tsx";
 import { notifyApproval } from "./approval-notification.ts";
 import { taskStalled } from "./heartbeat.ts";
@@ -78,6 +79,13 @@ export function SafetyControls({
           pending={safety.pending === "approval"}
           onDecision={safety.answerApproval}
         >
+          <AlwaysAllow
+            card={safety.approval}
+            enabled={visible && safety.canApprove}
+            visible={visible}
+            pending={safety.pending === "approval"}
+            onDecision={safety.answerApproval}
+          />
           <div className="notification-control">
             <button
               type="button"
@@ -89,6 +97,14 @@ export function SafetyControls({
             {notificationError && <p role="status">{notificationError}</p>}
           </div>
         </ApprovalCard>
+      )}
+      {safety.allowed && visible && !safety.approval && (
+        <AllowedNotice
+          choice={safety.allowed}
+          outcome={agent.model.approvalOutcome}
+          onUndo={() => void safety.undoAllowed()}
+          onDismiss={safety.dismissAllowed}
+        />
       )}
       {taskOpen && (
         <div className="safety-task-controls">

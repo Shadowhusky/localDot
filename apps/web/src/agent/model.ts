@@ -1,4 +1,10 @@
-import type { ApprovalCard, EventOf, ScreenSelectionSnapshot } from "@localdot/protocol";
+import type {
+  ActionClass,
+  ApprovalCard,
+  EventOf,
+  RuleChange,
+  ScreenSelectionSnapshot,
+} from "@localdot/protocol";
 import type { TerminalText } from "./terminal-text.ts";
 
 export const AGENT_LIMITS = Object.freeze({
@@ -72,6 +78,15 @@ export interface Reported<T> {
   readonly at: number;
   readonly data: T;
 }
+// The last decision, its note, and the Always allow choice it saved, for the Undo line.
+export interface ApprovalOutcome {
+  readonly approvalId: string;
+  readonly decision: EventOf<"approval.resolve">["data"]["decision"];
+  readonly actionClass?: ActionClass;
+  readonly note?: string;
+  readonly rule?: RuleChange;
+  readonly ruleRemoved?: boolean;
+}
 export interface AgentModel {
   readonly screen?: ScreenSelectionSnapshot;
   readonly lastSeq: number;
@@ -89,6 +104,7 @@ export interface AgentModel {
   readonly questions: ReadonlyMap<string, AgentQuestion>;
   readonly takeovers: ReadonlyMap<string, AgentTakeover>;
   readonly approval?: ApprovalCard | null;
+  readonly approvalOutcome?: ApprovalOutcome;
   readonly safetyPaused?: { readonly paused: boolean; readonly atStepBoundary: boolean };
   readonly safetyPause?: EventOf<"safety.pause">["data"]["pause"];
   readonly pendingAsk: string | null;
