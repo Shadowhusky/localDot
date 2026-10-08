@@ -337,8 +337,8 @@ desktop and on a touch phone, under the production CSP. No screen uses them yet;
   show the list keeping Escape from it, and RadioCards stands in for the theme picker.
 - **Utilities minted by accident.** Kit sources now also mint `.fixed`, `.block` and `.transition`. No
   legacy class or markup uses those names, so they stay inert.
-- **Cost.** App CSS grows 74.2 → 93.2 kB (15.3 → 18.0 kB gzip -9); app JS is unchanged, since no screen
-  imports the kit yet.
+- **Cost.** App CSS grows 74.2 → 93.3 kB (15.4 → 18.1 kB gzip, as Vite reports it); app JS is
+  unchanged, since no screen imports the kit yet.
 
 ## Notes for the tasks that build on this
 
