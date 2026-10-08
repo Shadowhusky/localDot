@@ -24,7 +24,13 @@ import type { AgentMessage, AgentResult } from "./model.ts";
 import { answerText, QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
-import { type ThreadItem, type ThreadKind, type ThreadRow, threadRows } from "./thread.ts";
+import {
+  type ThreadItem,
+  type ThreadKind,
+  type ThreadRow,
+  threadRows,
+  type WorkStep,
+} from "./thread.ts";
 import { reducedMotion, useFollowScroll } from "./useFollowScroll.ts";
 import { usePagedRows } from "./usePagedRows.ts";
 
@@ -64,11 +70,14 @@ interface ThreadContext {
   latestWork: string | undefined;
   onReplay?: () => void;
 }
-type WorkItem = Extract<ThreadItem, { kind: "work" }>;
-type CardOf<K extends ThreadKind> = (props: {
-  item: Extract<ThreadItem, { kind: K }>;
-  thread: ThreadContext;
-}) => ReactNode;
+type ItemOf<K extends ThreadKind> = Extract<ThreadItem, { kind: K }>;
+type WorkItem = ItemOf<"work">;
+// One kind of row in the thread: how it draws, and whether an item rebuilt by a later event still
+// draws as it did, so the row need not redraw.
+interface CardKind<K extends ThreadKind> {
+  draw(props: { item: ItemOf<K>; thread: ThreadContext }): ReactNode;
+  same(was: ItemOf<K>, now: ItemOf<K>, then: ThreadContext, thread: ThreadContext): boolean;
+}
 
 const MessageCard = memo(function MessageCard({
   message,
@@ -106,32 +115,80 @@ const MessageCard = memo(function MessageCard({
   );
 });
 
-const CARDS: { [K in ThreadKind]: CardOf<K> } = {
-  message: ({ item, thread }) => <MessageCard message={item.message} announce={thread.announce} />,
-  question: ({ item, thread }) => (
-    <QuestionCard question={item.question} pending={thread.pendingAsk === item.question.askId} />
-  ),
-  answer: ({ item }) => (
-    <article className="thread-message" data-role="user" aria-label="Your answer">
-      <p className="thread-bubble">{answerText(item.question)}</p>
-    </article>
-  ),
-  result: ({ item, thread }) => (
-    <ResultCard result={item.result} downloads={thread.downloads} onReplay={thread.onReplay} />
-  ),
-  work: ({ item, thread }) => (
-    <LiveWorkLine
-      steps={item.steps}
-      startMs={item.startMs}
-      live={null}
-      ended={item.key === thread.latestWork ? thread.ended : undefined}
-    />
-  ),
+const endedOf = (item: WorkItem, thread: ThreadContext) =>
+  item.key === thread.latestWork ? thread.ended : undefined;
+
+// A turn's steps are rebuilt with every event; they draw the same while what the line shows of
+// them is the same.
+function sameSteps(was: readonly WorkStep[], now: readonly WorkStep[]): boolean {
+  return (
+    was === now ||
+    (was.length === now.length &&
+      was.every((step, index) => {
+        const other = now[index];
+        return (
+          !!other &&
+          step.key === other.key &&
+          step.state === other.state &&
+          step.title === other.title &&
+          step.metric === other.metric &&
+          step.startT === other.startT &&
+          step.endT === other.endT
+        );
+      }))
+  );
+}
+
+const CARDS: { [K in ThreadKind]: CardKind<K> } = {
+  message: {
+    draw: ({ item, thread }) => <MessageCard message={item.message} announce={thread.announce} />,
+    same: (was, now, then, thread) =>
+      was.message === now.message && then.announce === thread.announce,
+  },
+  question: {
+    draw: ({ item, thread }) => (
+      <QuestionCard question={item.question} pending={thread.pendingAsk === item.question.askId} />
+    ),
+    same: (was, now, then, thread) =>
+      was.question === now.question &&
+      (then.pendingAsk === was.question.askId) === (thread.pendingAsk === now.question.askId),
+  },
+  answer: {
+    draw: ({ item }) => (
+      <article className="thread-message" data-role="user" aria-label="Your answer">
+        <p className="thread-bubble">{answerText(item.question)}</p>
+      </article>
+    ),
+    same: (was, now) => was.question === now.question,
+  },
+  result: {
+    draw: ({ item, thread }) => (
+      <ResultCard result={item.result} downloads={thread.downloads} onReplay={thread.onReplay} />
+    ),
+    same: (was, now, then, thread) =>
+      was.result === now.result &&
+      then.downloads === thread.downloads &&
+      then.onReplay === thread.onReplay,
+  },
+  work: {
+    draw: ({ item, thread }) => (
+      <LiveWorkLine
+        steps={item.steps}
+        startMs={item.startMs}
+        live={null}
+        ended={endedOf(item, thread)}
+      />
+    ),
+    same: (was, now, then, thread) =>
+      was.startMs === now.startMs &&
+      endedOf(was, then) === endedOf(now, thread) &&
+      sameSteps(was.steps, now.steps),
+  },
 };
 
 function Card({ item, thread }: { item: ThreadItem; thread: ThreadContext }) {
-  const Render = CARDS[item.kind] as CardOf<ThreadKind>;
-  return <Render item={item as never} thread={thread} />;
+  const { draw: Draw } = CARDS[item.kind] as CardKind<ThreadKind>;
+  return <Draw item={item} thread={thread} />;
 }
 
 interface RowProps {
@@ -140,25 +197,17 @@ interface RowProps {
   thread: ThreadContext;
 }
 
-// Items are rebuilt on every event, so a row compares what it shows: the same message, question
-// or answer draws the same. Results (downloads in flight) and work lines (their steps) always draw.
+// Items are rebuilt on every event and the thread redraws each second while a task runs, so a row
+// redraws only when its card says it draws differently.
 function sameRow(a: RowProps, b: RowProps): boolean {
   const x = a.row.item,
     y = b.row.item;
-  const same =
-    x.kind === y.kind &&
-    ((x.kind === "message" && y.kind === "message" && x.message === y.message) ||
-      (x.kind === "question" &&
-        y.kind === "question" &&
-        x.question === y.question &&
-        a.thread.pendingAsk === b.thread.pendingAsk) ||
-      (x.kind === "answer" && y.kind === "answer" && x.question === y.question));
   return (
-    same &&
+    x.kind === y.kind &&
+    (CARDS[x.kind] as CardKind<ThreadKind>).same(x, y, a.thread, b.thread) &&
     a.row.groupStart === b.row.groupStart &&
     a.row.separator === b.row.separator &&
-    a.fresh === b.fresh &&
-    a.thread.announce === b.thread.announce
+    a.fresh === b.fresh
   );
 }
 
@@ -257,6 +306,9 @@ export function Conversation({
     [items],
   );
   const downloads = useResultDownloads(api, sessionId, results, announce);
+  const replayNow = useRef(onReplay);
+  replayNow.current = onReplay;
+  const replay = useCallback(() => replayNow.current?.(), []);
   const rows = useMemo(() => threadRows(page.rows), [page.rows]);
 
   const announced = useRef({ owner: ownerKey, id: "" });
@@ -484,7 +536,7 @@ export function Conversation({
     ended,
     pendingAsk,
     latestWork: latestWork?.key,
-    onReplay,
+    onReplay: onReplay && replay,
   };
   const empty = !shown.length && !liveWork;
   return (

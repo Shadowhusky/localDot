@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { bytes, count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
@@ -101,101 +101,108 @@ export function useResultDownloads(
     };
   }, [retire]);
 
-  const request = async (resultId: string, file: FileRow): Promise<boolean> => {
-    const owner = current.current;
-    if (
-      active.current ||
-      !owner.api ||
-      !owner.sessionId ||
-      !navigator.onLine ||
-      document.visibilityState === "hidden" ||
-      !valid(file)
-    )
-      return false;
-    const record: Selection = {
-      resultId,
-      file,
-      api: owner.api,
-      sessionId: owner.sessionId,
-      abort: new AbortController(),
-    };
-    if (!present(owner.results, record)) return false;
-    release();
-    active.current = record;
-    const key = fileKey(resultId, file);
-    mark(key, "busy");
-    const owns = () =>
-      mounted.current &&
-      active.current === record &&
-      current.current.api === record.api &&
-      current.current.sessionId === record.sessionId &&
-      present(current.current.results, record) &&
-      !record.abort.signal.aborted;
-    let saved = false;
-    try {
-      // The model's arbitrary path is never a fetch target; only this session's validated name is used.
-      const blob = await downloadResult(
-        record.api,
-        record.sessionId,
-        record.file.name,
-        record.abort.signal,
-      );
-      if (!owns()) return false;
-      const url = URL.createObjectURL(blob);
-      urls.current.add(url);
-      const anchor = document.createElement("a");
-      anchor.href = url;
-      anchor.download = record.file.name;
-      anchor.hidden = true;
-      anchor.rel = "noopener noreferrer";
+  const request = useCallback(
+    async (resultId: string, file: FileRow): Promise<boolean> => {
+      const owner = current.current;
+      if (
+        active.current ||
+        !owner.api ||
+        !owner.sessionId ||
+        !navigator.onLine ||
+        document.visibilityState === "hidden" ||
+        !valid(file)
+      )
+        return false;
+      const record: Selection = {
+        resultId,
+        file,
+        api: owner.api,
+        sessionId: owner.sessionId,
+        abort: new AbortController(),
+      };
+      if (!present(owner.results, record)) return false;
+      release();
+      active.current = record;
+      const key = fileKey(resultId, file);
+      mark(key, "busy");
+      const owns = () =>
+        mounted.current &&
+        active.current === record &&
+        current.current.api === record.api &&
+        current.current.sessionId === record.sessionId &&
+        present(current.current.results, record) &&
+        !record.abort.signal.aborted;
+      let saved = false;
       try {
-        document.body.append(anchor);
-        anchor.click();
-        saved = true;
-        mark(key, "done");
-        current.current.announce?.(`${record.file.name} downloaded.`);
-        const done = setTimeout(() => {
-          timers.current.delete(done);
-          if (mounted.current) mark(key, null);
-        }, DONE_MS);
-        timers.current.add(done);
+        // The model's arbitrary path is never a fetch target; only this session's validated name is used.
+        const blob = await downloadResult(
+          record.api,
+          record.sessionId,
+          record.file.name,
+          record.abort.signal,
+        );
+        if (!owns()) return false;
+        const url = URL.createObjectURL(blob);
+        urls.current.add(url);
+        const anchor = document.createElement("a");
+        anchor.href = url;
+        anchor.download = record.file.name;
+        anchor.hidden = true;
+        anchor.rel = "noopener noreferrer";
+        try {
+          document.body.append(anchor);
+          anchor.click();
+          saved = true;
+          mark(key, "done");
+          current.current.announce?.(`${record.file.name} downloaded.`);
+          const done = setTimeout(() => {
+            timers.current.delete(done);
+            if (mounted.current) mark(key, null);
+          }, DONE_MS);
+          timers.current.add(done);
+        } finally {
+          anchor.remove();
+          const timer = setTimeout(() => {
+            URL.revokeObjectURL(url);
+            urls.current.delete(url);
+            timers.current.delete(timer);
+          }, 1000);
+          timers.current.add(timer);
+        }
+      } catch {
+        if (owns()) {
+          mark(key, "failed");
+          current.current.announce?.(`${record.file.name} couldn't be downloaded. Try again.`);
+        }
       } finally {
-        anchor.remove();
-        const timer = setTimeout(() => {
-          URL.revokeObjectURL(url);
-          urls.current.delete(url);
-          timers.current.delete(timer);
-        }, 1000);
-        timers.current.add(timer);
+        if (active.current === record) {
+          active.current = null;
+          record.abort.abort();
+        }
       }
-    } catch {
-      if (owns()) {
-        mark(key, "failed");
-        current.current.announce?.(`${record.file.name} couldn't be downloaded. Try again.`);
-      }
-    } finally {
-      if (active.current === record) {
-        active.current = null;
-        record.abort.abort();
-      }
-    }
-    return saved;
-  };
-  const cancel = () => {
+      return saved;
+    },
+    [mark, release],
+  );
+  const cancel = useCallback(() => {
     const record = active.current;
     if (!record) return;
     active.current = null;
     record.abort.abort();
     mark(fileKey(record.resultId, record.file), null);
     current.current.announce?.("Download cancelled.");
-  };
-  return {
-    state: (resultId: string, file: FileRow) => states.get(fileKey(resultId, file)),
-    busy: [...states.values()].includes("busy"),
-    request,
-    cancel,
-    sessionId: api ? sessionId : null,
-  };
+  }, [mark]);
+  // The same object until a download's state changes, so the results that show it redraw only then.
+  return useMemo(
+    () => ({
+      state: (resultId: string, file: FileRow) => states.get(fileKey(resultId, file)),
+      busy: [...states.values()].includes("busy"),
+      request,
+      cancel,
+      sessionId: api ? sessionId : null,
+    }),
+    [states, request, cancel, api, sessionId],
+  );
 }
 export type ResultDownloads = ReturnType<typeof useResultDownloads>;
 
