@@ -22,6 +22,7 @@ describe("notify protocol", () => {
       "http://web.push.apple.com/x",
       "https://web.push.apple.com:8443/x",
       "https://push.apple.com.evil.example/x",
+      "https://evilpush.apple.com/x",
       "https://user@web.push.apple.com/x",
       "https://web.push.apple.com/x#frag",
       "https://127.0.0.1/x",
