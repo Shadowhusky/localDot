@@ -12,9 +12,8 @@ function edges(element: HTMLElement) {
 
 export interface ScrollAreaProps extends ComponentProps<"div"> {
   ref?: Ref<HTMLDivElement>;
-  // Which edges fade while content lies past them. A sticky header makes its own top edge, and a
-  // sticky footer its bottom one.
-  fade?: "both" | "top" | "bottom";
+  // Which edges fade while content lies past them. A sticky header makes its own top edge.
+  fade?: "both" | "bottom";
 }
 
 // The edge marks are written straight onto the element, so scrolling never re-renders the panel.
