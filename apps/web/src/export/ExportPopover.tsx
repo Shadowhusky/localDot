@@ -45,6 +45,7 @@ const SPEEDS = [1, 2, 4, 8] as const satisfies readonly ExportSpeed[];
 const SPEED_ITEMS = SPEEDS.map((speed) => ({ value: String(speed), label: `${speed}×` }));
 const NO_STEP = "The playhead isn't on a step";
 const NO_SELECTION = "Press I and O on the timeline to mark a stretch";
+const NO_SELECTION_TOUCH = "On a keyboard, press I and O on the timeline to mark a stretch";
 // The elapsed time and the estimate of what is left move on this beat while a video is saved.
 const TICK_MS = 500;
 const RESULT_TITLE = {
@@ -94,6 +95,7 @@ export function ExportPopover({
   anchor: RefObject<HTMLElement | null>;
 }) {
   const phone = useMediaQuery(PHONE);
+  const touch = useMediaQuery("(pointer: coarse)");
   const live = useExportJob(job);
   // Closing, the panel keeps showing what it showed, while the job may move on under it.
   const shown = useRef(live);
@@ -115,7 +117,12 @@ export function ExportPopover({
         canEncodeVideo("avc", { width: size.w, height: size.h }).catch(() => false),
       ),
     ).then((found) => {
-      if (current) setSizes(found);
+      if (!current) return;
+      setSizes(found);
+      // The size picked for this screen may be one this browser cannot make.
+      setSizeIndex((index) =>
+        found[index] || !found.includes(true) ? index : found.indexOf(true),
+      );
     });
     return () => {
       current = false;
@@ -227,7 +234,11 @@ export function ExportPopover({
                 {
                   value: "selection",
                   label: "Selection",
-                  disabledReason: context.selection ? undefined : NO_SELECTION,
+                  disabledReason: context.selection
+                    ? undefined
+                    : touch
+                      ? NO_SELECTION_TOUCH
+                      : NO_SELECTION,
                 },
               ]}
               value={range}

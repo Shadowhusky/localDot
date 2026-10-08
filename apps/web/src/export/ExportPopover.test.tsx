@@ -156,7 +156,7 @@ describe("Export MP4", () => {
     );
   });
 
-  it("says when this browser cannot make a size, and keeps Save off for it", async () => {
+  it("says when this browser cannot make a size, and starts on one it can", async () => {
     encodable.widths = new Set([1280]);
     const exportContext = context();
     exportContext.source.geometry = { w: 2560, h: 1600, scale: 2 };
@@ -164,10 +164,31 @@ describe("Export MP4", () => {
     const large = screen.getByRole("radio", { name: "1080p" });
     expect(large.getAttribute("aria-disabled")).toBe("true");
     expect(description(large)).toContain("This browser can't make 1080p video");
-    const save = screen.getByRole("button", { name: "Save…" });
-    expect(save.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(screen.getByRole("radio", { name: "720p" }));
-    expect(save.getAttribute("aria-disabled")).toBeNull();
+    expect(screen.getByRole("radio", { name: "720p" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("button", { name: "Save…" }).getAttribute("aria-disabled")).toBeNull();
+  });
+
+  it("starts a 2× screen on 1080p where this browser can make it", async () => {
+    const exportContext = context();
+    exportContext.source.geometry = { w: 2560, h: 1600, scale: 2 };
+    await show(fakeJob(), exportContext);
+    expect(screen.getByRole("radio", { name: "1080p" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("says on a touch screen that marking a stretch needs a keyboard", async () => {
+    vi.stubGlobal(
+      "matchMedia",
+      (query: string) =>
+        ({
+          matches: query === "(pointer: coarse)",
+          addEventListener() {},
+          removeEventListener() {},
+        }) as unknown as MediaQueryList,
+    );
+    await show(fakeJob());
+    expect(description(screen.getByRole("radio", { name: "Selection" }))).toContain(
+      "On a keyboard, press I and O on the timeline to mark a stretch",
+    );
   });
 
   it("keeps a long export off the download path and says which browsers can save it", async () => {
