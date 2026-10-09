@@ -21,13 +21,17 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function setup(screen: { clicksOnly?: boolean; confirms?: boolean } = {}) {
+async function setup(screen: { clicksOnly?: boolean; confirms?: boolean; user?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-manual-stream-")),
     log = new EventLog(home),
     id = log.createSession("Synthetic direct control"),
     session = new AgentSession(id, ulid(), "Synthetic task", log);
   session.beginBrain();
-  const outcome = session.takeover("login", "Sample login").catch(() => ({ by: "stop" as const }));
+  // dot hands the computer over, or the user takes it themselves.
+  if (screen.user) session.takeControl();
+  const outcome = screen.user
+    ? Promise.resolve({ by: "user" as const })
+    : session.takeover("login", "Sample login").catch(() => ({ by: "stop" as const }));
   for (let i = 0; i < 5; i++) await Promise.resolve();
   const requestId = session.pendingTakeover;
   if (!requestId || session.manualControl !== "ready") throw new Error("missing takeover fixture");
@@ -263,6 +267,74 @@ describe("the user's direct control stream", () => {
     ]);
     expect(f.fake.buttons.size).toBe(0);
     expect(await end).toBe(MANUAL_STREAM_CLOSE.changed);
+  });
+
+  it("holds the hand-back of control the user took until a held button is let go", async () => {
+    const f = await setup({ user: true }),
+      client = new DesktopdClient(
+        { baseUrl: "http://owned-desktop.invalid", token: f.fake.token },
+        f.fake.fetchImpl,
+      ),
+      letting = Promise.withResolvers<void>(),
+      acks: string[] = [];
+    const slow = vi.fn<ManualDesktopSource>(
+      (): ManualDesktop => ({
+        screen: { w: 2560, h: 1600 },
+        client,
+        prepare: async () => {},
+        check: () => {},
+        release: () => {},
+        letGo: async () => {
+          await letting.promise;
+          await client.release();
+        },
+      }),
+    );
+    const stream = new ManualStream(f.session, f.requestId, slow, {
+      send: (data) => acks.push(data),
+      close: () => {},
+    });
+    stream.push({ kind: "down", at: { x: 50, y: 60 }, button: "left" });
+    await vi.waitFor(() => expect(acks).toEqual([JSON.stringify({ done: 1 })]));
+    let returned: boolean | undefined;
+    const handing = f.session.handback(f.requestId, undefined).then((ok) => {
+      returned = ok;
+    });
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(returned).toBeUndefined();
+    expect(f.session.controlHeld).toBe(true);
+    expect(f.log.read(f.id).some((event) => event.type === "takeover.end")).toBe(false);
+    letting.resolve();
+    await handing;
+    expect(returned).toBe(true);
+    expect(received(f.fake)).toEqual([
+      { kind: "down", at: { x: 50, y: 60 }, button: "left" },
+      "/release",
+    ]);
+    expect(f.fake.buttons.size).toBe(0);
+    expect(f.session.controlHeld).toBe(false);
+  });
+
+  it("keeps what the user typed out of dot's note when they took the computer themselves", async () => {
+    const f = await setup({ user: true }),
+      ws = f.open(),
+      sentinel = "synthetic-password 中文🙂";
+    await opened(ws);
+    const done = acked(ws, [...sentinel].length);
+    send(ws, typing(sentinel));
+    await done;
+    expect(await f.session.handback(f.requestId, undefined)).toBe(true);
+    const inbox = await f.session.inbox(0, 0, undefined, f.session.beginBrain());
+    expect(inbox.items.map((item) => item.kind)).toEqual(["steer"]);
+    expect(JSON.stringify(inbox.items)).not.toContain("synthetic-password");
+    const events = f.log.read(f.id);
+    expect(JSON.stringify(events)).not.toContain("synthetic-password");
+    expect(events.some((event) => event.type === "message.user")).toBe(false);
+    expect(events.find((event) => event.type === "takeover.end")?.data).toEqual({
+      requestId: f.requestId,
+      by: "user",
+      typed: true,
+    });
   });
 
   it("lets go when the socket closes, and Stop cuts a held button too", async () => {

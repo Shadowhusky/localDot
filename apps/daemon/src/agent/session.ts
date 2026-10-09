@@ -49,7 +49,7 @@ export interface AskAnswer {
   declined?: true;
   // Never journaled: the ask tool types these into their fields and clears them.
   secrets?: SecretAnswers;
-  by: "user" | "timeout" | "stop" | "pause";
+  by: "user" | "timeout" | "stop" | "pause" | "control";
 }
 export interface AskForm {
   question: string;
@@ -118,6 +118,11 @@ interface ControlRecord {
   released: Promise<TakeoverOutcome>;
   resolve(outcome: TakeoverOutcome): void;
   step?: string;
+  // The user has taken the computer: they asked for it, or took the one dot handed over.
+  taken: boolean;
+  // The user took the computer themselves, at this time, from a task in this state, maybe setting
+  // aside dot's question.
+  user?: { since: number; from: SessionStatus; asked: boolean };
 }
 export class SessionStoppedError extends Error {
   constructor() {
@@ -145,6 +150,14 @@ function pause(ms: number, signal: AbortSignal): Promise<void> {
     if (signal.aborted) done();
   });
 }
+
+// What dot hears when the user hands back control they took: never what they did or typed.
+function handedBack(ms: number, asked: boolean): string {
+  const s = Math.max(1, Math.round(ms / 1000));
+  const took = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
+  return `(The user took over the computer for ${took} and has handed it back. The screen may have changed since you last looked: take a screenshot before your next action.${asked ? " They took it instead of answering your question: ask it again if you still need the answer." : ""})`;
+}
+
 export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.reason ?? new SessionStoppedError());
@@ -184,6 +197,10 @@ export class AgentSession {
   plan: PlanItem[] = [];
   readonly abort = new AbortController();
   readonly #inbox: InboxItem[] = [];
+  // Notes to dot that are not the user's words: they never wake a task waiting for them.
+  readonly #notes = new Set<number>();
+  // dot's next input waits for a fresh look at the screen, which the user has had.
+  #lookFirst = false;
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
   readonly #manual = new Map<ManualLease, ManualCall>();
@@ -835,10 +852,31 @@ export class AgentSession {
     this.#wake();
     return { ...item };
   }
+  // Reaches the model with the next fetch of the inbox, as a steer it did not hear from the user:
+  // nothing journals it as the user's message.
+  #note(text: string): void {
+    const item = Object.freeze(
+      InboxItem.parse({ seq: this.#seq + 1, messageId: ulid(), kind: "steer", text }),
+    );
+    this.#seq = item.seq;
+    this.#inbox.push(item);
+    this.#notes.add(item.seq);
+    this.#wake();
+  }
+  // After the user hands back control they took, until dot has looked at the screen again.
+  get lookOwed(): boolean {
+    return this.#lookFirst;
+  }
+  freshLook(): void {
+    this.#lookFirst = false;
+  }
   async waitForUser(waitMs: number, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
     const combined = AbortSignal.any([this.abort.signal, ...(signal ? [signal] : [])]);
-    const unread = () => this.#inbox.some((i) => i.seq > this.#delivered && i.kind !== "resume");
+    const unread = () =>
+      this.#inbox.some(
+        (i) => i.seq > this.#delivered && i.kind !== "resume" && !this.#notes.has(i.seq),
+      );
     const deadline = Date.now() + waitMs;
     while (!unread() && !this.stopped && Date.now() < deadline) {
       await this.#changed(deadline - Date.now(), combined);
@@ -1105,11 +1143,13 @@ export class AgentSession {
     return ask.finish({ declined: true, by: "user" });
   }
 
+  // `taken`: the user chose to do this step themselves, so the computer is theirs at once.
   async takeover(
     reason: string,
     note: string,
     step?: string,
     lease?: ToolLease,
+    taken = false,
   ): Promise<TakeoverOutcome> {
     const generation = lease?.generation ?? this.generation;
     if (!generation) throw new SessionStoppedError();
@@ -1130,6 +1170,7 @@ export class AgentSession {
       released,
       resolve,
       step,
+      taken,
     };
     this.#approvals.cancel(this.id);
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
@@ -1157,10 +1198,17 @@ export class AgentSession {
     void Promise.all(draining)
       .then(() => {
         if (this.#control !== record || this.stopped) return;
-        this.append("takeover.request", { requestId: record.requestId, reason, note }, step);
+        this.append(
+          "takeover.request",
+          { requestId: record.requestId, reason, note, ...(taken ? { by: "user" } : {}) },
+          step,
+        );
         record.held = true;
         this.status = "waiting_user";
         this.append("agent.state", { state: "waiting_user", reason: "takeover" });
+        // The user took it while dot was still handing it over.
+        if (record.taken && !taken)
+          this.append("control.change", { holder: "user", reason: "handoff_request" }, step);
       })
       .catch(() => {
         /* Keep the control fence if publication fails. Stop remains available. */
@@ -1171,6 +1219,87 @@ export class AgentSession {
       ...(lease ? [lease.signal] : []),
     ]);
     return abortable(released, signal);
+  }
+  // The user takes the computer at any moment, whatever dot is doing. dot's step in flight is
+  // cancelled and its brain retired, so nothing of dot's reaches the computer until they hand it
+  // back; the task then carries on from its saved history. A held Pause already keeps dot at a step
+  // boundary, so its brain stays. Control the user already holds is theirs to keep.
+  takeControl(): string {
+    if (this.stopped) throw new SessionStoppedError();
+    const held = this.#control;
+    if (held) {
+      // The user takes the computer dot handed over: from now on it is theirs, as they asked. One
+      // still on its way is journaled theirs once it is held.
+      if (!held.taken) {
+        held.taken = true;
+        if (held.held)
+          this.append("control.change", { holder: "user", reason: "handoff_request" }, held.step);
+      }
+      return held.requestId;
+    }
+    const pause = this.#steps.pause;
+    if ((pause && pause.phase !== "paused") || this.#safetyResuming) throw new PausedStepError();
+    const generation = this.generation;
+    let resolve!: (outcome: TakeoverOutcome) => void;
+    const released = new Promise<TakeoverOutcome>((r) => {
+      resolve = r;
+    });
+    const user = { since: Date.now(), from: this.status, asked: false };
+    const record: ControlRecord = {
+      requestId: ulid(),
+      startedByGeneration: generation?.id ?? 0,
+      held: false,
+      returning: false,
+      manualUnconfirmed: false,
+      typed: false,
+      released,
+      resolve,
+      taken: true,
+      user,
+    };
+    this.#approvals.cancel(this.id);
+    this.#control = record; // Synchronous admission fence, before abort/drain or any await.
+    this.#screenReady = undefined;
+    // A held Pause can't be resumed while the user has the computer; viewers read that from it.
+    if (pause) this.#safetyChanged();
+    const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
+    const releasing = this.releaseInput();
+    if (releasing) draining.push(releasing);
+    if (generation && !pause) {
+      // dot's question waits for the hand-back, when dot can ask it again.
+      user.asked = this.#ask?.finish({ by: "control" }) ?? false;
+      for (const observer of [...this.#controlObservers])
+        if (observer.generation === generation)
+          try {
+            observer.notify();
+          } catch {
+            // The generation is retired below whatever an observer does.
+          }
+      if (this.isCurrent(generation)) this.retireBrain(generation);
+    }
+    for (const call of this.#active.values()) {
+      draining.push(call.settled);
+      call.abort.abort(new ControlHeldError());
+    }
+    void Promise.all(draining)
+      .then(() => {
+        if (this.#control !== record || this.stopped) return;
+        this.append("takeover.request", {
+          requestId: record.requestId,
+          reason: "other",
+          note: "",
+          by: "user",
+        });
+        record.held = true;
+        // A task at rest stays at rest; one at work waits for the user, as for dot's own hand-off.
+        if (record.user?.from === "idle" || this.safetyPause) return;
+        this.status = "waiting_user";
+        this.append("agent.state", { state: "waiting_user", reason: "takeover" });
+      })
+      .catch(() => {
+        /* Keep the control fence if publication fails. Stop remains available. */
+      });
+    return record.requestId;
   }
   endTakeover(requestId: string, note: string | undefined): boolean {
     const record = this.#control;
@@ -1262,8 +1391,15 @@ export class AgentSession {
       record.step,
     );
     this.#control = undefined;
-    this.tainted = false;
-    this.status = this.safetyPause ? "paused" : "running";
+    const user = record.user;
+    if (!user) this.tainted = false;
+    this.status = this.safetyPause ? "paused" : user?.from === "idle" ? "idle" : "running";
+    if (user) {
+      this.#lookFirst = true;
+      this.lastFrameId = undefined;
+      this.#note(handedBack(Date.now() - user.since, user.asked));
+      if (this.safetyPause) this.#safetyChanged();
+    }
     record.resolve({ ...(note ? { note } : {}), by: "user" });
     this.#wake();
     return true;

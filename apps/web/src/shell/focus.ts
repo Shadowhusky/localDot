@@ -15,22 +15,24 @@ export interface FocusInput {
   needsThread: boolean;
   // The user left focus mode since the phone was last turned sideways.
   left: boolean;
+  // The user asked for full screen, which a phone held upright shows as focus mode too.
+  full?: boolean;
 }
 
-// Phone landscape focus mode (design-v2 §8.5): turned sideways while the computer is live, a phone
-// gives the whole screen to the picture.
-export function inFocus({ landscape, live, needsThread, left }: FocusInput): boolean {
-  return landscape && live && !needsThread && !left;
+// Phone landscape focus mode (design-v2 §8.5): turned sideways while the computer is live, or asked
+// for full screen, a phone gives the whole screen to the picture.
+export function inFocus({ landscape, live, needsThread, left, full = false }: FocusInput): boolean {
+  return (landscape || full) && live && !needsThread && !left;
 }
 
-export function useFocusMode(live: boolean, needsThread: boolean) {
+export function useFocusMode(live: boolean, needsThread: boolean, full = false) {
   const landscape = useMediaQuery(LANDSCAPE_PHONE);
   const [left, setLeft] = useState(false);
   // Turning the phone upright forgets the choice, so the next turn sideways focuses again.
   if (left && !landscape) setLeft(false);
   return {
     landscape,
-    focus: inFocus({ landscape, live, needsThread, left }),
+    focus: inFocus({ landscape, live, needsThread, left, full }),
     leave: () => setLeft(true),
   };
 }

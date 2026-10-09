@@ -3,6 +3,7 @@ import {
   microsToMs,
   msToSeconds,
   type PauseSnapshot,
+  type RequestTakeoverInput,
   SESSION_PAUSE_REASONS,
   STALL,
 } from "@localdot/protocol";
@@ -16,15 +17,20 @@ import {
   startedCount,
   stepAt,
 } from "@localdot/stage";
-import type { AgentModel } from "../agent/model.ts";
+import { type AgentModel, heldByUser } from "../agent/model.ts";
 import type { ComputerPhase, HudActionKind, HudState } from "../cells/hud-state.ts";
 import type { DotState } from "../dot/engine/states.ts";
+
+type TakeoverReason = RequestTakeoverInput["reason"];
 
 // What the live task feed knows beyond the timeline. Replay has only the timeline.
 export interface TaskFacts {
   readonly approval: boolean;
   readonly question: string | null;
   readonly takeover: string | null;
+  // The user has the computer: "user" when they asked for it, or the reason dot handed it over once
+  // they took that.
+  readonly yours: TakeoverReason | "user" | null;
   readonly pause: PauseSnapshot["phase"] | null;
   // The reason on the latest agent.state.
   readonly reason: string | null;
@@ -38,6 +44,7 @@ export type TaskRow =
   | "approval"
   | "question"
   | "takeover"
+  | "control"
   | "waiting"
   | "pausing"
   | "paused"
@@ -68,12 +75,14 @@ export interface TaskHud {
 }
 
 export function taskFacts(model: AgentModel): TaskFacts {
+  const yours = heldByUser(model);
   return {
     approval: !!model.approval,
     question: model.pendingAsk ? (model.questions.get(model.pendingAsk)?.question ?? "") : null,
     takeover: model.pendingTakeover
       ? (model.takeovers.get(model.pendingTakeover)?.note ?? "")
       : null,
+    yours: !yours ? null : yours.by === "user" ? "user" : yours.reason,
     pause: model.safetyPause?.phase ?? null,
     reason: model.state?.reason ?? null,
     result: model.results.length > 0,
@@ -206,6 +215,16 @@ const REQUEST: Partial<Record<TaskRow, string>> = {
   approval: "approval.request",
   question: "ask.request",
   takeover: "takeover.request",
+  control: "takeover.request",
+};
+// What dot says while the user has the computer, by why it is theirs.
+const YOUR_TURN: Record<TakeoverReason | "user", string> = {
+  user: "I'll wait here until you hand back.",
+  login: "Your turn. I'll wait here and pick up after you sign in.",
+  "2fa": "Your turn. I'll wait here and pick up after you enter the code.",
+  captcha: "Your turn. I'll wait here and pick up after you finish the check.",
+  payment: "Your turn. I'll wait here and pick up after you enter the payment details.",
+  other: "Your turn. I'll wait here until you hand back.",
 };
 function waitedS(model: SessionModel, row: TaskRow, nowMs: number): number | null {
   const type = REQUEST[row];
@@ -269,6 +288,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   const at = agentStateAt(model, nowMs);
   const state = facts ? settled(at?.state, facts) : at && replayState(model, at, nowMs);
   const reason = facts ? facts.reason : at ? replayReason(model, at, nowMs) : null;
+  if (facts?.yours) return waiting("control", "You're in control", YOUR_TURN[facts.yours]);
   // dot keeps the computer while it waits on an OK or an answer, so the rim keeps its light.
   if (facts?.approval) return waiting("approval", "Needs your OK", "Waiting for your OK.", true);
   if (facts?.question != null)
@@ -337,6 +357,11 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   return running("working", "Working", model.actions.length ? "Working…" : "Starting…", control);
 }
 
+// The thread's foot follows dot's own work. While the user has the computer it says nothing: the
+// turn's line stays in the thread as it was, with the change of hands after it.
+export const footWork = (task: TaskHud | null): TaskHud | null =>
+  task?.row === "control" ? null : task;
+
 export type StatusRow = TaskRow | "computer" | "stopping";
 
 export interface HudAction {
@@ -396,6 +421,7 @@ export const TASK_POSE: Record<TaskRow, DotState> = {
   question: "waiting",
   waiting: "waiting",
   takeover: "your-turn",
+  control: "your-turn",
   pausing: "thinking",
   paused: "resting",
   resuming: "thinking",
@@ -416,6 +442,7 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
   question: "needs_you",
   waiting: "needs_you",
   takeover: "needs_you",
+  control: null,
   pausing: "working",
   paused: null,
   resuming: "working",
@@ -435,6 +462,7 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
 const DOT_SPEAKS = new Set<TaskRow>([
   "question",
   "takeover",
+  "control",
   "acting",
   "working",
   "thinking",

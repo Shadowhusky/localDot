@@ -4,7 +4,6 @@ import type { QuarantineItem } from "../../../../packages/protocol/src/quarantin
 import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { Button } from "../ui/Button.tsx";
-import { Icon } from "../ui/Icon.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { changeDownload, listDownloads } from "./download-api.ts";
 import "../agent/safety.css";
@@ -175,7 +174,7 @@ export function BrowserDownloads({
   return (
     <section className="activity-section browser-downloads" aria-label="Browser downloads">
       <div className="activity-section-head">
-        <h3 className="activity-section-title">Downloads</h3>
+        <h3>Downloads</h3>
         <span className="activity-section-meta">
           {waiting ? `${waiting} waiting` : count(visible.length, "file", "files")}
         </span>
@@ -188,15 +187,16 @@ export function BrowserDownloads({
           data-testid="download-row"
         >
           <div className="activity-row-head">
-            <Icon name="download" className="activity-row-icon" />
-            <span className="activity-row-title">{item.name}</span>
-            <span className="activity-row-metric num">{size(item.bytes)}</span>
             <StatusGlyph
               state={
                 item.state === "released" ? "done" : item.state === "failed" ? "failed" : "todo"
               }
               label={stateLabel(item)}
             />
+            <span className="activity-row-text">
+              <span className="activity-row-title">{item.name}</span>
+            </span>{" "}
+            <span className="activity-row-time num">{size(item.bytes)}</span>
           </div>
           <div className="download-detail">
             <p className="activity-detail-note">

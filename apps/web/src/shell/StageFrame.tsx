@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { type ReactNode, type RefObject, useCallback } from "react";
 import { registerPlace } from "../dot/places.ts";
 import "./stage-frame.css";
 
@@ -19,10 +19,11 @@ export interface StageFrameProps {
   side?: ReactNode;
   // The picture.
   children?: ReactNode;
+  // The 16:10 box, which full screen moves.
+  boxRef?: RefObject<HTMLDivElement | null>;
+  // A double-click on the picture, while it is only watched.
+  onPictureDoubleClick?(): void;
 }
-
-const stageRef = (element: HTMLDivElement | null) =>
-  element ? registerPlace("stage", element) : undefined;
 
 // The stage: one 16:10 box that never moves, with its rim and the light it spills on the floor
 // always mounted and only fading, so who has the computer changes nothing but light.
@@ -35,7 +36,21 @@ export function StageFrame({
   band,
   side,
   children,
+  boxRef,
+  onPictureDoubleClick,
 }: StageFrameProps) {
+  const stageRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      if (!element) return;
+      if (boxRef) boxRef.current = element;
+      const unregister = registerPlace("stage", element);
+      return () => {
+        unregister();
+        if (boxRef) boxRef.current = null;
+      };
+    },
+    [boxRef],
+  );
   const picture = ["stage", live ? "lit" : "", frozen ? "frozen" : ""].filter(Boolean).join(" ");
   return (
     <div className="stage-frame" data-light={light}>
@@ -45,7 +60,10 @@ export function StageFrame({
           <i data-light="dot" />
           <i data-light="you" />
         </div>
-        <div className={picture}>{children}</div>
+        {/* biome-ignore lint/a11y/noStaticElementInteractions: a pointer shortcut; F and the corner button are the keyboard's way */}
+        <div className={picture} onDoubleClick={onPictureDoubleClick}>
+          {children}
+        </div>
         <div className="stage-rim" aria-hidden="true">
           <i data-light="dot" />
           <i data-light="you" />

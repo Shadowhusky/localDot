@@ -11,9 +11,9 @@ afterEach(() => {
 const step = (key: string, startT: number, state: WorkStep["state"] = "done"): WorkStep => ({
   key,
   testId: "step-row",
-  icon: "mouse-pointer-click",
   title: `Step ${key}`,
-  metric: "0.5 s",
+  meta: "",
+  time: "0:01",
   state,
   stateLabel: state,
   startT,
@@ -34,9 +34,9 @@ it("says what dot is doing while it works, with the turn's steps and time under 
   expect(summary()).toBe("Working · 3 steps · 1 failed · 0:42");
   fireEvent.click(screen.getByRole("button", { expanded: false }));
   expect(screen.getAllByRole("listitem").map((item) => item.textContent)).toEqual([
-    "Step a0.5 s",
-    "Step b0.5 s",
-    "Step c0.5 s",
+    "Step a0:01",
+    "Step b0:01",
+    "Step c0:01",
   ]);
 });
 
