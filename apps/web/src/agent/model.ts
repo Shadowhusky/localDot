@@ -187,6 +187,8 @@ export interface AgentFeedState {
   readonly connection: AgentConnection;
   // This connection has delivered a valid in-order or duplicate replay packet.
   readonly replayed: boolean;
+  // The task's history so far has arrived, read whole or from the live feed's first packet.
+  readonly history: boolean;
   readonly streamError: string | null;
   readonly model: AgentModel;
 }

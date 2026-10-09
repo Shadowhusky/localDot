@@ -107,3 +107,27 @@
 .dot-glyph-eye {
   fill: var(--dot-eye);
 }
+
+.dot-loader {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: calc(var(--spacing) * 3);
+  min-height: 100%;
+  padding: calc(var(--spacing) * 6) calc(var(--spacing) * 4);
+  animation: dot-loader-in var(--dur-fade) var(--ease-standard) backwards;
+}
+
+.dot-loader-label {
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-align: center;
+}
+
+@keyframes dot-loader-in {
+  from {
+    opacity: 0;
+  }
+}

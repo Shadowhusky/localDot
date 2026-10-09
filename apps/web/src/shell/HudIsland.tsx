@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { type Ref, useLayoutEffect, useRef } from "react";
 import { clock } from "../copy/format.ts";
 import type { HudAction, Status } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
@@ -28,6 +28,8 @@ export interface HudIslandProps {
   onStopTask(): void;
   onTake(): void;
   onComputer: Record<ComputerKind, () => void>;
+  // Toasts hang from the island.
+  ref?: Ref<HTMLDivElement>;
 }
 
 // Status and the task's controls in one glass island hung on the stage's top edge. Every slot has a
@@ -43,6 +45,7 @@ export function HudIsland({
   onStopTask,
   onTake,
   onComputer,
+  ref,
 }: HudIslandProps) {
   const phone = useMediaQuery(PHONE);
   const row = useRef<HTMLDivElement>(null);
@@ -73,7 +76,7 @@ export function HudIsland({
   const task = shape === "task";
   const control = phone ? 28 : 32;
   return (
-    <div className="island" data-shape={shape} inert={shape === "hidden"}>
+    <div ref={ref} className="island" data-shape={shape} inert={shape === "hidden"}>
       <span className="island-plate" ref={plate} aria-hidden="true" />
       <div className="island-row" ref={row}>
         <span className="island-label">

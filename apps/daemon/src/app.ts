@@ -145,6 +145,21 @@ export function createApp({
     }
   });
 
+  // What a conversation shows of a task, read whole before its live feed opens: the log without the
+  // events it never shows.
+  app.get("/api/sessions/:id/history", (c) => {
+    const id = c.req.param("id");
+    if (!ULID_PATTERN.test(id)) return c.text("invalid session id", 400);
+    const fromSeq = Math.max(0, Number(c.req.query("fromSeq")) || 0);
+    if (!Number.isSafeInteger(fromSeq)) return c.text("invalid sequence", 400);
+    try {
+      return eventStreamResponse(eventLog.logFile(id), fromSeq, c.req.raw.signal, { shown: true });
+    } catch (err) {
+      if (err instanceof UnknownSessionError) return c.text("unknown session", 404);
+      throw err;
+    }
+  });
+
   if (cells) cellRoutes(app, cells);
   if (keys) keyRoutes(app, keys);
   if (agent) agentRoutes(app, agent);

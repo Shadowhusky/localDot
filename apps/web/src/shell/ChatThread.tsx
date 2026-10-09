@@ -1,6 +1,6 @@
 import { type ReactNode, useMemo } from "react";
 import { Conversation } from "../agent/Conversation.tsx";
-import { leftToReplay, useEarlierThread } from "../agent/earlier.ts";
+import { useEarlierThread } from "../agent/earlier.ts";
 import type { LiveWork } from "../agent/LiveWorkLine.tsx";
 import type { SpendCall } from "../agent/model.ts";
 import { threadItems, type WorkStep, withWork, workSteps } from "../agent/thread.ts";
@@ -52,6 +52,7 @@ export function ChatThread({
   computerReady = false,
   sessions = NO_SESSIONS,
   more = false,
+  pending = false,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -70,6 +71,8 @@ export function ChatThread({
   sessions?: readonly string[];
   // Older tasks of the conversation are left out of `sessions`.
   more?: boolean;
+  // Which conversation and task the thread shows is not known yet.
+  pending?: boolean;
 }) {
   const model = agent?.model;
   const ended = model?.ended?.reason;
@@ -87,24 +90,25 @@ export function ChatThread({
     [items, steps, working, spends],
   );
   const latest = useMemo(() => ({ sessionId, items: thread }), [sessionId, thread]);
-  const earlier = useEarlierThread(api, sessions, latest);
+  const earlier = useEarlierThread(api, sessions, latest, agent?.history ?? true);
+  const before = earlier.items;
   const shown = useMemo(() => {
-    if (!earlier.length) return thread;
+    if (!before.length) return thread;
     const own = new Set(thread.map((item) => item.key));
     return [
-      ...earlier.map((item) =>
-        own.has(item.key) ? { ...item, key: `${item.key}@earlier` } : item,
-      ),
+      ...before.map((item) => (own.has(item.key) ? { ...item, key: `${item.key}@earlier` } : item)),
       ...thread,
     ];
-  }, [earlier, thread]);
+  }, [before, thread]);
   return (
     <Conversation
       visible={visible}
       ownerKey={sessions[0] ?? sessionId ?? ""}
       items={shown}
       truncated={model?.historyTruncated ?? false}
-      earlierInReplay={leftToReplay(sessions, sessionId, more)}
+      loading={pending || earlier.opening}
+      earlier={earlier}
+      earlierInReplay={!!sessionId && more && !earlier.more}
       live={working ? live : null}
       ended={ended}
       pendingAsk={model?.pendingAsk ?? null}

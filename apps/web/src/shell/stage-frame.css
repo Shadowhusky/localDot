@@ -137,6 +137,22 @@
   pointer-events: auto;
 }
 
+.boot-curtain {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  display: grid;
+  place-items: center;
+  border-radius: var(--radius-stage);
+  background: var(--color-raised);
+  box-shadow: var(--shadow-stage);
+}
+
+.ui-presence[data-leaving] > .boot-curtain {
+  opacity: 0;
+  transition: opacity var(--dur-snappy) var(--ease-standard);
+}
+
 @media (width < 700px) {
   /* On a phone the curtain covers the stage and the band, so there is never an empty band. */
   .stage-curtain {

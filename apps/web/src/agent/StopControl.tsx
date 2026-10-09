@@ -32,16 +32,6 @@ export function StopControl({ controls }: { controls: TaskControls }) {
           )}
         </section>
       )}
-      {controls.status && (
-        <section className="control-status" aria-label="Task control status">
-          <p role="status">{controls.status.message}</p>
-          {controls.status.phase !== "sending" && (
-            <button type="button" onClick={controls.recheck}>
-              Check task state
-            </button>
-          )}
-        </section>
-      )}
     </>
   );
 }

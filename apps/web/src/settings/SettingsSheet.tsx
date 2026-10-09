@@ -1,6 +1,7 @@
 import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
+import { DotLoader } from "../dot/DotLoader.tsx";
 import {
   KEYS_DESCRIPTION,
   KEYS_TITLE,
@@ -14,7 +15,6 @@ import { Field } from "../ui/Field.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
 import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
-import { Skeleton } from "../ui/Skeleton.tsx";
 import { AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import {
@@ -339,7 +339,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
           </div>
         )}
         {props.loading ? (
-          <Skeleton loading shape="block" height="320px" className="settings-loading" />
+          <DotLoader className="settings-loading" label="Loading your settings" />
         ) : (
           <SettingsSections {...props} />
         )}

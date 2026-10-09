@@ -63,6 +63,7 @@ function daemon(scope: "task" | "day") {
     epoch: 3,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model,
   };

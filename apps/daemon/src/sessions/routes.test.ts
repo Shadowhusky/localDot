@@ -6,6 +6,7 @@ import {
   type LocalDotEvent,
   RecordingInfo,
   SessionIndexPage,
+  ulid,
 } from "@localdot/protocol";
 import { SYNTH_CODEC, synthFrame } from "@localdot/stage/testing";
 import { afterEach, describe, expect, it } from "vitest";
@@ -202,6 +203,39 @@ describe("replay APIs", () => {
     expect(events.at(-1)?.seq).toBe(999);
     const legacy = await request(`/api/sessions/${sessionId}/events`);
     expect(await legacy.json()).toHaveLength(expected.length + 1);
+  });
+
+  it("serves a task's history without the model's thinking or the heartbeats", async () => {
+    const { log, request } = await setup();
+    const sessionId = log.createSession("History");
+    log.append(sessionId, {
+      agent: "main",
+      type: "message.user",
+      data: { messageId: ulid(), text: "Draw a dog", kind: "task" },
+    });
+    log.append(sessionId, { agent: "main", type: "thought.delta", data: { text: "Let me look" } });
+    log.append(sessionId, {
+      agent: "main",
+      type: "heartbeat",
+      data: { ongoing: true, everyMs: 1000 },
+    });
+    log.append(sessionId, {
+      agent: "main",
+      type: "message.assistant",
+      data: { messageId: ulid(), text: "Drew it." },
+    });
+    const response = await request(`/api/sessions/${sessionId}/history`);
+    expect(response.headers.get("content-type")).toBe("application/x-ndjson");
+    const events = (await response.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as LocalDotEvent);
+    expect(events.map((event) => [event.seq, event.type])).toEqual([
+      [0, "message.user"],
+      [3, "message.assistant"],
+    ]);
+    expect((await request(`/api/sessions/${ulid()}/history`)).status).toBe(404);
+    expect((await request("/api/sessions/nope/history")).status).toBe(400);
   });
 
   it("keeps a live video snapshot unchanged while later fragments commit", async () => {

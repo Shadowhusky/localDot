@@ -55,6 +55,7 @@ function fixture(fetchImpl: typeof fetch, approval: Card | null = card) {
     epoch: 7,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model,
   };
