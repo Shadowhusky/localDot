@@ -1,5 +1,12 @@
 import { readdirSync } from "node:fs";
-import { keyLikePresent, NOTES_FILE, ULID_PATTERN, ulid, unifiedDiff } from "@localdot/protocol";
+import {
+  keyLikePresent,
+  NOTES_FILE,
+  ULID_PATTERN,
+  ulid,
+  ulidTime,
+  unifiedDiff,
+} from "@localdot/protocol";
 import { z } from "zod";
 import {
   bootView,
@@ -26,7 +33,7 @@ export type EntrySource =
   | { kind: "unknown" };
 export interface StoredEntry {
   id: string;
-  file: MemoryBook;
+  file: MemoryFile;
   text: string;
   source: EntrySource;
   at: string | null;
@@ -34,6 +41,10 @@ export interface StoredEntry {
   revision: string;
 }
 export const MEMORY_MAX_CHARS = 20_000;
+// A removed entry can come back with Undo this long. After that, or once its file changes again,
+// History keeps no copy of it.
+export const FORGET_AFTER_MS = 10 * 60_000;
+const FORGET_QUEUE = ".forget.json";
 const Book = z.enum(["USER.md", "MEMORY.md"]);
 const File = z.union([Book, z.string().regex(NOTES_FILE)]);
 const Text = z
@@ -55,6 +66,7 @@ const History = z
   .refine((h) => (h.source === "user") === (h.sessionId === undefined));
 type History = z.infer<typeof History>;
 const Pending = z.strictObject({ changeId: Id, history: History });
+const ForgetQueue = z.array(Id).max(10_000);
 const TEMPLATES: Record<MemoryBook, string> = {
   "USER.md": "# About the user\n\n",
   "MEMORY.md": "# Things worth remembering\n\n",
@@ -112,6 +124,18 @@ function stampChanged(
     .join("");
 }
 
+// The entries in before that after no longer has.
+function gone(before: string, after: string): MemoryEntryBlock[] {
+  const kept = new Set(
+    parseMemory(after)
+      .filter(isEntry)
+      .map((e) => e.id),
+  );
+  return parseMemory(before)
+    .filter(isEntry)
+    .filter((e) => !kept.has(e.id));
+}
+
 export class MemoryStore {
   readonly #files: PrivateFiles;
   readonly #now: () => Date;
@@ -121,6 +145,11 @@ export class MemoryStore {
     this.#files.directory(".history");
     this.#files.directory("notes");
     this.#recover();
+    for (const changeId of this.#queued()) {
+      const left = ulidTime(changeId) + FORGET_AFTER_MS - this.#now().getTime();
+      if (left <= 0) this.#forgetSafely(changeId);
+      else this.#forgetLater(changeId, left);
+    }
   }
   #read(file: MemoryFile): string {
     try {
@@ -217,7 +246,7 @@ export class MemoryStore {
       .reverse()
       .map((n) => `notes/${n}` as NotesFile);
   }
-  #view(file: MemoryBook, e: MemoryEntryBlock): StoredEntry {
+  #view(file: MemoryFile, e: MemoryEntryBlock): StoredEntry {
     const src = e.meta.src;
     return {
       id: e.id,
@@ -238,13 +267,14 @@ export class MemoryStore {
     if (entryTextProblem(text) || keyLikePresent(text))
       throw new MemoryError(400, "invalid memory entry text");
   }
-  #userCommit(file: MemoryBook, before: string, after: string): MemoryChangeRecord {
+  #userCommit(file: MemoryFile, before: string, after: string): MemoryChangeRecord {
     if (after.length > MEMORY_MAX_CHARS)
       throw new MemoryError(409, `${file} would pass ${MEMORY_MAX_CHARS} characters`);
     if (after === before) throw new MemoryError(409, "memory did not change");
     return this.#commit({ source: "user", file, before, after });
   }
-  #target(file: MemoryBook, id: string, revision: string) {
+  #target(file: MemoryFile, id: string, revision: string) {
+    if (!File.safeParse(file).success) throw new MemoryError(400, "invalid memory file");
     const before = this.#read(file);
     const blocks = parseMemory(before);
     const target = blocks.filter(isEntry).find((e) => e.id === id);
@@ -253,17 +283,23 @@ export class MemoryStore {
       throw new MemoryError(409, "this entry changed since it was read");
     return { before, blocks, target };
   }
-  #entry(file: MemoryBook, id: string): StoredEntry {
+  #entry(file: MemoryFile, id: string): StoredEntry {
     const found = parseMemory(this.#read(file))
       .filter(isEntry)
       .find((e) => e.id === id);
     if (!found) throw new MemoryError(409, "memory changed during the update");
     return this.#view(file, found);
   }
-  entries(file: MemoryBook): StoredEntry[] {
+  entries(file: MemoryFile): StoredEntry[] {
     return parseMemory(this.read(file))
       .filter(isEntry)
       .map((e) => this.#view(file, e));
+  }
+  // Daily notes with anything in them, the newest day first.
+  notes(): { file: NotesFile; entries: StoredEntry[] }[] {
+    return this.listNotes()
+      .map((file) => ({ file, entries: this.entries(file) }))
+      .filter((day) => day.entries.length > 0);
   }
   addEntry(file: MemoryBook, text: string, pinned = false) {
     this.#checkText(text);
@@ -282,12 +318,14 @@ export class MemoryStore {
     return { change, entry: this.#entry(file, id) };
   }
   editEntry(
-    file: MemoryBook,
+    file: MemoryFile,
     id: string,
     revision: string,
     patch: { text?: string; pinned?: boolean },
   ) {
     if (patch.text !== undefined) this.#checkText(patch.text);
+    if (patch.pinned !== undefined && file.startsWith("notes/"))
+      throw new MemoryError(400, "daily notes are never pinned");
     this.#recover();
     const { before, blocks, target } = this.#target(file, id, revision);
     const { pin: _pin, ...rest } = target.meta;
@@ -301,7 +339,7 @@ export class MemoryStore {
     const after = serializeMemory(blocks.map((b) => (b === target ? { ...target, raw } : b)));
     return { change: this.#userCommit(file, before, after), entry: this.#entry(file, keepId) };
   }
-  deleteEntry(file: MemoryBook, id: string, revision: string) {
+  deleteEntry(file: MemoryFile, id: string, revision: string) {
     this.#recover();
     const { before, blocks, target } = this.#target(file, id, revision);
     return {
@@ -331,8 +369,16 @@ export class MemoryStore {
     const changeId = ulid();
     const pending = Pending.safeParse({ changeId, history });
     if (!pending.success) throw new MemoryError(400, "invalid memory change before persistence");
+    // The user took an entry out: Delete, or Undo of an add.
+    const removes =
+      (history.source === "user" || history.undoes !== undefined) &&
+      gone(history.before, history.after).length > 0;
+    if (removes) this.#queue([...this.#queued(), changeId]);
     this.#files.write(".pending.json", JSON.stringify(pending.data));
     this.#recover();
+    for (const queued of this.#queued())
+      if (queued !== changeId && this.#fileOf(queued) === history.file) this.#forgetSafely(queued);
+    if (removes) this.#forgetLater(changeId, FORGET_AFTER_MS);
     return {
       changeId,
       ...(history.sessionId ? { sessionId: history.sessionId } : {}),
@@ -340,6 +386,69 @@ export class MemoryStore {
       file: history.file as MemoryFile,
       patch: unifiedDiff(history.before, history.after, { path: history.file }),
     };
+  }
+  #queued(): string[] {
+    try {
+      return ForgetQueue.parse(JSON.parse(this.#files.text(FORGET_QUEUE, 512 * 1024) ?? "[]"));
+    } catch {
+      return [];
+    }
+  }
+  #queue(ids: readonly string[]): void {
+    if (ids.length) this.#files.write(FORGET_QUEUE, JSON.stringify(ids));
+    else this.#files.remove(FORGET_QUEUE);
+  }
+  #fileOf(changeId: string): string | undefined {
+    try {
+      return this.#history(changeId).file;
+    } catch {
+      return undefined;
+    }
+  }
+  #forgetLater(changeId: string, ms: number): void {
+    setTimeout(() => this.#forgetSafely(changeId), Math.min(ms, 2 ** 31 - 1)).unref();
+  }
+  #forgetSafely(changeId: string): void {
+    try {
+      this.#forget(changeId);
+    } catch {
+      console.error("memory: an old copy of a removed entry could not be cleared");
+    }
+  }
+  // Removes every History record that still holds an entry this change took out, unless the entry
+  // is back. The change can't be undone after this.
+  #forget(changeId: string): void {
+    this.#queue(this.#queued().filter((id) => id !== changeId));
+    let change: History;
+    try {
+      change = this.#history(changeId);
+    } catch {
+      return;
+    }
+    if (change.undone) return;
+    const live = parseMemory(this.#read(change.file as MemoryFile)).filter(isEntry);
+    const liveIds = new Set(live.map((e) => e.id));
+    const liveTexts = new Set(live.map((e) => e.text));
+    const removed = gone(change.before, change.after).filter((e) => !liveIds.has(e.id));
+    const ids = new Set(removed.map((e) => e.id));
+    const texts = new Set(removed.map((e) => e.text).filter((t) => !liveTexts.has(t)));
+    if (!ids.size) return;
+    const holds = (text: string) =>
+      parseMemory(text)
+        .filter(isEntry)
+        .some((e) => ids.has(e.id) || texts.has(e.text));
+    for (const name of readdirSync(this.#files.directory(".history"))) {
+      const id = name.endsWith(".json") ? name.slice(0, -5) : "";
+      if (!ULID_PATTERN.test(id)) continue;
+      let record: History;
+      try {
+        record = this.#history(id);
+      } catch {
+        continue;
+      }
+      if (record.file === change.file && (holds(record.before) || holds(record.after)))
+        this.#files.remove(`.history/${name}`);
+    }
   }
   #recover(): void {
     const text = this.#files.text(".pending.json", 256 * 1024);

@@ -15,6 +15,7 @@ import { PrivateFiles } from "./private-files.ts";
 const FILE = "people.json";
 const FILE_BYTES = 2 * 1024 * 1024;
 const Day = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+const TaskId = z.string().regex(ULID_PATTERN);
 const Row = z.strictObject({
   id: z.string().regex(ULID_PATTERN),
   name: z.string().min(1).max(100),
@@ -46,7 +47,7 @@ export interface PersonFields {
 
 export class PeopleError extends Error {
   constructor(
-    readonly status: 400 | 404 | 409,
+    readonly status: 400 | 404 | 409 | 413 | 500,
     message: string,
   ) {
     super(message);
@@ -102,17 +103,17 @@ export class PeopleStore {
     try {
       text = this.#files.text(FILE, FILE_BYTES);
     } catch {
-      throw new PeopleError(409, "the people file can't be read");
+      throw new PeopleError(500, "the people file can't be read");
     }
     if (text === undefined) return [];
     try {
       return Stored.parse(JSON.parse(text)).people;
     } catch {
-      throw new PeopleError(409, "the people file is invalid");
+      throw new PeopleError(500, "the people file is invalid");
     }
   }
   #write(people: Row[]): void {
-    if (people.length > PEOPLE_MAX) throw new PeopleError(409, "too many people saved");
+    if (people.length > PEOPLE_MAX) throw new PeopleError(413, "too many people saved");
     this.#files.write(FILE, `${JSON.stringify({ v: 1, people })}\n`);
   }
   list(): StoredPerson[] {
@@ -180,15 +181,15 @@ export class PeopleStore {
     this.#write(people);
     return { person: view(next), created: false };
   }
-  add(fields: PersonFields): StoredPerson {
+  add(fields: PersonFields & { lastAt?: string; sessionId?: string }): StoredPerson {
     const clean = this.#fields(fields);
     const added: Row = {
       id: ulid(),
       ...clean,
       handle: clean.handle ?? null,
       note: clean.note ?? null,
-      lastAt: null,
-      src: "user",
+      lastAt: fields.lastAt === undefined ? null : checked(Day, fields.lastAt),
+      src: fields.sessionId === undefined ? "user" : checked(TaskId, fields.sessionId),
     };
     this.#write([...this.#read(), added]);
     return view(added);

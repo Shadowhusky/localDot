@@ -27,6 +27,7 @@ function setup(options: { canChange?: boolean } = {}) {
   const people = new PeopleStore(home);
   const settings = new SettingsStore(home);
   const appended: string[] = [];
+  const reindexed: string[] = [];
   const deps = {
     home,
     runner: {
@@ -45,6 +46,9 @@ function setup(options: { canChange?: boolean } = {}) {
     },
     keyd: { secrets: async () => [] },
     memory,
+    notesChanged: (file: string) => {
+      reindexed.push(file);
+    },
     people,
     recentActivity: () => [
       {
@@ -77,7 +81,7 @@ function setup(options: { canChange?: boolean } = {}) {
         ? {}
         : { headers: { "content-type": "application/json" }, body: JSON.stringify(body) }),
     });
-  return { home, memory, people, settings, app, send, appended };
+  return { home, memory, people, settings, app, send, appended, reindexed };
 }
 
 describe("memory entry routes", () => {
@@ -144,10 +148,51 @@ describe("memory entry routes", () => {
     expect(memory.read("MEMORY.md")).toBe(before);
     expect(appended).toEqual([]);
   });
+  it("lists daily notes and deletes one, telling search to read the day again", async () => {
+    const { home, memory, send, reindexed } = setup();
+    memory.appendNote(TASK, "Insurer reference is WINDSCREEN-42");
+    const reply = MemoryEntriesReply.parse(
+      await (await send("GET", "/api/agent/memory/entries")).json(),
+    );
+    const day = reply.notes[0];
+    const note = day?.entries[0];
+    if (!day || !note) throw new Error("fixture missing note");
+    expect(day.file).toMatch(/^notes\/\d{4}-\d{2}-\d{2}\.md$/);
+    expect(note).toMatchObject({
+      file: day.file,
+      text: "Insurer reference is WINDSCREEN-42",
+      source: { kind: "task", sessionId: TASK, title: "Renew insurance" },
+    });
+    const del = await send(
+      "DELETE",
+      `/api/agent/memory/entries/${note.id}?file=${day.file}&revision=${note.revision}`,
+    );
+    expect(del.status).toBe(200);
+    expect(readFileSync(join(home, "memory", day.file), "utf8")).not.toContain("WINDSCREEN");
+    expect(reindexed).toEqual([day.file]);
+    const { changeId } = MemoryEntryChangeReply.parse(await del.json());
+    expect((await send("POST", `/api/agent/memory/${changeId}/undo`)).status).toBe(200);
+    expect(reindexed).toEqual([day.file, day.file]);
+    const pin = await send("PUT", `/api/agent/memory/entries/${note.id}`, {
+      file: day.file,
+      revision: memory.entries(day.file)[0]?.revision,
+      pinned: true,
+    });
+    expect(pin.status).toBe(400);
+    const outside = await send(
+      "DELETE",
+      `/api/agent/memory/entries/${note.id}?file=notes/../USER.md&revision=${note.revision}`,
+    );
+    expect(outside.status).toBe(400);
+  });
   it("answers 503 while memory can't change, 404 for an unknown entry and 400 for a bad id", async () => {
     const busy = setup({ canChange: false });
     expect(
       (await busy.send("POST", "/api/agent/memory/entries", { file: "USER.md", text: "x" })).status,
+    ).toBe(503);
+    const added = busy.memory.addEntry("USER.md", "Lives in Lisbon");
+    expect(
+      (await busy.send("POST", `/api/agent/memory/${added.change.changeId}/undo`)).status,
     ).toBe(503);
     const { send } = setup();
     expect(

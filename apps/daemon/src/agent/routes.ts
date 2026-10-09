@@ -20,10 +20,11 @@ import {
   HandbackRequest,
   type KeydRecord,
   MEMORY_ENTRY_ID,
-  MemoryBook,
   MemoryEntriesReply,
   MemoryEntryChangeReply,
   MemoryEntryRevision,
+  MemoryFileName,
+  NOTES_FILE,
   PauseRequest,
   PeopleReply,
   Person,
@@ -99,8 +100,10 @@ export interface AgentRoutesDeps {
   keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
   memory: Pick<
     MemoryStore,
-    "readBoth" | "undo" | "entries" | "addEntry" | "editEntry" | "deleteEntry"
+    "readBoth" | "undo" | "entries" | "notes" | "addEntry" | "editEntry" | "deleteEntry"
   >;
+  // A daily-notes file the user changed, for search to read again.
+  notesChanged?(file: string): void;
   people?: Pick<PeopleStore, "list" | "add" | "edit" | "remove">;
   // The tasks the next one hears about, whether or not the user has switched that off.
   recentActivity?(): RecentTask[];
@@ -878,6 +881,13 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/memory",
     route((c) => c.json(deps.memory.readBoth())),
   );
+  const writable = () => {
+    if (deps.canChangeMemory?.() === false)
+      throw new RouteError(503, "memory is not available to change");
+  };
+  const changed = (file: string) => {
+    if (NOTES_FILE.test(file)) deps.notesChanged?.(file);
+  };
   app.post(
     "/api/agent/memory/:changeId/undo",
     route(async (c) => {
@@ -885,9 +895,9 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (!ULID_PATTERN.test(changeId)) throw new RouteError(400, "invalid memory change id");
       await empty(c.req.raw);
       check(c.req.raw.signal);
-      if (deps.canChangeMemory?.() === false)
-        throw new RouteError(409, "memory is not available to change");
+      writable();
       const change = deps.memory.undo(changeId);
+      changed(change.file);
       if (change.sessionId)
         deps.appendTo(change.sessionId, "memory.change", {
           file: change.file,
@@ -898,10 +908,6 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({ changeId: change.changeId });
     }),
   );
-  const writable = () => {
-    if (deps.canChangeMemory?.() === false)
-      throw new RouteError(503, "memory is not available to change");
-  };
   const titles = (sources: readonly ({ kind: string } & { sessionId?: string })[]) =>
     deps.sessionInfo?.([
       ...new Set(sources.flatMap((s) => (s.kind === "task" && s.sessionId ? [s.sessionId] : []))),
@@ -932,14 +938,17 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         file,
         entries: deps.memory.entries(file),
       }));
-      const info = titles(files.flatMap((f) => f.entries.map((e) => e.source)));
+      const notes = deps.memory.notes();
+      const info = titles([...files, ...notes].flatMap((f) => f.entries.map((e) => e.source)));
+      const shown = (f: { file: string; entries: StoredEntry[] }) => ({
+        file: f.file,
+        entries: f.entries.map((e) => titled(e, info)),
+      });
       return c.json(
         MemoryEntriesReply.parse({
           dir: join(deps.home, "memory").replace(homedir(), "~"),
-          files: files.map((f) => ({
-            file: f.file,
-            entries: f.entries.map((e) => titled(e, info)),
-          })),
+          files: files.map(shown),
+          notes: notes.map(shown),
         }),
       );
     }),
@@ -969,6 +978,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(body.text === undefined ? {} : { text: body.text }),
         ...(body.pinned === undefined ? {} : { pinned: body.pinned }),
       });
+      changed(body.file);
       return c.json(
         MemoryEntryChangeReply.parse({
           changeId: change.changeId,
@@ -981,12 +991,13 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/memory/entries/:id",
     route(async (c) => {
       const id = idParam(c, MEMORY_ENTRY_ID);
-      const file = MemoryBook.safeParse(c.req.query("file"));
+      const file = MemoryFileName.safeParse(c.req.query("file"));
       const revision = MemoryEntryRevision.safeParse(c.req.query("revision"));
       if (!file.success || !revision.success) throw new RouteError(400, "invalid memory entry");
       await empty(c.req.raw);
       writable();
       const { change } = deps.memory.deleteEntry(file.data, id, revision.data);
+      changed(file.data);
       return c.json(MemoryEntryChangeReply.parse({ changeId: change.changeId }));
     }),
   );

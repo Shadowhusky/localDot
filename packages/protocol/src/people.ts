@@ -42,6 +42,9 @@ export const AddPersonRequest = z.strictObject({
   app: PersonApp,
   handle: PersonHandle.optional(),
   note: PersonNote.optional(),
+  // Undo of a delete puts back when dot last reached them and the task that taught it.
+  lastAt: Day.optional(),
+  sessionId: z.string().regex(ULID_PATTERN).optional(),
 });
 export type AddPersonRequest = z.infer<typeof AddPersonRequest>;
 export const EditPersonRequest = z

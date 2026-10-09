@@ -1,8 +1,8 @@
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { MemoryError, MemoryStore } from "./memory.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { FORGET_AFTER_MS, MemoryError, MemoryStore } from "./memory.ts";
 
 const ownedHomes: string[] = [];
 afterEach(() => {
@@ -19,6 +19,13 @@ const SESSION = "01JXYZ0000000000000000SESS";
 function store() {
   const home = ownedTemp(join(tmpdir(), "local dot's memory-"));
   return { home, memory: new MemoryStore(home) };
+}
+// Every History record, as one text.
+function history(home: string): string {
+  const dir = join(home, "memory", ".history");
+  return readdirSync(dir)
+    .map((name) => readFileSync(join(dir, name), "utf8"))
+    .join("\n");
 }
 
 describe("MemoryStore", () => {
@@ -122,6 +129,61 @@ describe("MemoryStore entries", () => {
     memory.undo(removed.change.changeId);
     expect(memory.read("USER.md")).toBe(before);
     expect(memory.entries("USER.md")[0]).toMatchObject({ id: entry.id, pinned: true });
+  });
+
+  it("keeps no copy of a deleted fact in History once its file changes again", () => {
+    const { home, memory } = store();
+    const { entry } = memory.addEntry("MEMORY.md", "Gate code hint is magpie");
+    memory.editEntry("MEMORY.md", entry.id, entry.revision, {
+      text: "Gate code hint is magpie and wren",
+    });
+    memory.addEntry("MEMORY.md", "Lives in Lisbon");
+    const fact = () => memory.entries("MEMORY.md").find((e) => e.id === entry.id);
+    const first = fact();
+    if (!first) throw new Error("fixture missing fact");
+    const removed = memory.deleteEntry("MEMORY.md", first.id, first.revision);
+    // Undo still works until something else changes the file.
+    expect(history(home)).toContain("magpie");
+    memory.undo(removed.change.changeId);
+    const back = fact();
+    if (!back) throw new Error("fixture missing fact");
+    memory.deleteEntry("MEMORY.md", back.id, back.revision);
+    memory.addEntry("MEMORY.md", "Takes the 8:10 train");
+    expect(history(home)).not.toContain("magpie");
+    expect(history(home)).toContain("Lisbon");
+    expect(readdirSync(join(home, "memory"))).not.toContain(".forget.json");
+  });
+
+  it("clears a deleted fact's copies when Undo's window passes", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { home, memory } = store();
+      const { entry } = memory.addEntry("USER.md", "Allergic to penicillin");
+      memory.addEntry("MEMORY.md", "Lives in Lisbon");
+      const removed = memory.deleteEntry("USER.md", entry.id, entry.revision);
+      vi.advanceTimersByTime(FORGET_AFTER_MS - 1);
+      expect(history(home)).toContain("penicillin");
+      vi.advanceTimersByTime(1);
+      expect(history(home)).not.toContain("penicillin");
+      expect(history(home)).toContain("Lisbon");
+      expect(statusOf(() => memory.undo(removed.change.changeId))).toBe(404);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears them at the next start once the window has passed, and after Undo of dot's fact", () => {
+    const { home, memory } = store();
+    const { entry } = memory.addEntry("USER.md", "Allergic to penicillin");
+    memory.deleteEntry("USER.md", entry.id, entry.revision);
+    const saved = memory.apply(SESSION, "MEMORY.md", "append", "- Spare key under the heron");
+    memory.undo(saved.changeId);
+    new MemoryStore(home);
+    expect(history(home)).toContain("penicillin");
+    expect(history(home)).toContain("heron");
+    new MemoryStore(home, { now: () => new Date(Date.now() + FORGET_AFTER_MS) });
+    expect(history(home)).not.toContain("penicillin");
+    expect(history(home)).not.toContain("heron");
   });
 
   it("refuses a stale revision with 409 and an unknown id with 404", () => {
@@ -252,6 +314,39 @@ describe("daily notes", () => {
     expect(JSON.stringify(memory.bootMemory())).not.toContain("insurer");
     memory.undo(change.changeId);
     expect(memory.read("notes/2026-10-08.md")).toBe("# Notes · 2026-10-08\n\n");
+  });
+  it("lists notes with their task, and deletes one as the user without keeping a copy", () => {
+    const { home, memory } = noteStore();
+    memory.appendNote(SESSION, "Locker code hint is otter");
+    memory.appendNote(SESSION, "Quote is 412 a year");
+    expect(memory.notes()).toEqual([
+      {
+        file: "notes/2026-10-08.md",
+        entries: [
+          expect.objectContaining({
+            file: "notes/2026-10-08.md",
+            text: "Locker code hint is otter",
+            source: { kind: "task", sessionId: SESSION },
+            at: "2026-10-08",
+            pinned: false,
+          }),
+          expect.objectContaining({ text: "Quote is 412 a year" }),
+        ],
+      },
+    ]);
+    const otter = memory.entries("notes/2026-10-08.md")[0];
+    if (!otter) throw new Error("fixture missing note");
+    expect(
+      statusOf(() => memory.editEntry(otter.file, otter.id, otter.revision, { pinned: true })),
+    ).toBe(400);
+    memory.deleteEntry(otter.file, otter.id, otter.revision);
+    expect(memory.read("notes/2026-10-08.md")).not.toContain("otter");
+    memory.appendNote(SESSION, "Called back");
+    expect(history(home)).not.toContain("otter");
+    expect(memory.notes()[0]?.entries.map((e) => e.text)).toEqual([
+      "Quote is 412 a year",
+      "Called back",
+    ]);
   });
   it("refuses key-shaped notes and a full day", () => {
     const { home, memory } = noteStore();

@@ -297,6 +297,7 @@ describe("the take control route", () => {
         readBoth: unused,
         undo: unused,
         entries: unused,
+        notes: unused,
         addEntry: unused,
         editEntry: unused,
         deleteEntry: unused,

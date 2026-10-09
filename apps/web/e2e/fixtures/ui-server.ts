@@ -1047,6 +1047,7 @@ const agent: AgentRoutesDeps = {
     }),
   } as AgentRoutesDeps["keyd"],
   memory,
+  notesChanged: (file) => searchFeed.reindexNotes(file),
   people,
   recentActivity: () => recentActivity.list(),
   sessionInfo: (ids) => log.sessionInfo(ids),

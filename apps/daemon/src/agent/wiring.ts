@@ -85,6 +85,7 @@ export interface AgentWiringDeps {
   quarantine?: QuarantineStore;
   // Earlier tasks for the recall tool, from the search index.
   recall?: ToolDeps["recall"];
+  notesChanged?(file: string): void;
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
 // The Codex path hands memory to the model here.
@@ -608,6 +609,7 @@ export function createAgent(d: AgentWiringDeps) {
     catalog,
     keyd: d.keyd,
     memory,
+    notesChanged: d.notesChanged,
     people,
     recentActivity: () => recentActivity.list(),
     sessionInfo: (ids) => d.eventLog.sessionInfo(ids),

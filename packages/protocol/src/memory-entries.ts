@@ -1,9 +1,17 @@
 import { z } from "zod";
+import { NOTES_FILE } from "./events.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { keyLikePresent } from "./key-like.ts";
 
 export const MemoryBook = z.enum(["USER.md", "MEMORY.md"]);
 export type MemoryBook = z.infer<typeof MemoryBook>;
+export const NotesFileName = z.custom<`notes/${string}.md`>(
+  (v) => typeof v === "string" && NOTES_FILE.test(v),
+  "invalid notes file",
+);
+// USER.md, MEMORY.md, or a day's notes dot keeps for itself.
+export const MemoryFileName = z.union([MemoryBook, NotesFileName]);
+export type MemoryFileName = z.infer<typeof MemoryFileName>;
 export const MEMORY_ENTRY_ID = /^(?:[0-9A-HJKMNP-TV-Z]{26}|x[0-9a-f]{16})$/;
 export const MemoryEntryRevision = z.string().regex(/^[0-9a-f]{16}$/);
 export const MemoryEntryText = z
@@ -33,7 +41,7 @@ export const MemoryEntrySource = z.discriminatedUnion("kind", [
 export type MemoryEntrySource = z.infer<typeof MemoryEntrySource>;
 export const MemoryEntry = z.strictObject({
   id: z.string().regex(MEMORY_ENTRY_ID),
-  file: MemoryBook,
+  file: MemoryFileName,
   text: z.string().max(20_000),
   source: MemoryEntrySource,
   at: Day.nullable(),
@@ -46,6 +54,10 @@ export const MemoryEntriesReply = z.strictObject({
   files: z
     .array(z.strictObject({ file: MemoryBook, entries: z.array(MemoryEntry).max(10_000) }))
     .length(2),
+  // Daily notes with anything in them, the newest day first.
+  notes: z
+    .array(z.strictObject({ file: NotesFileName, entries: z.array(MemoryEntry).max(10_000) }))
+    .max(10_000),
 });
 export type MemoryEntriesReply = z.infer<typeof MemoryEntriesReply>;
 export const AddMemoryEntryRequest = z.strictObject({
@@ -56,7 +68,7 @@ export const AddMemoryEntryRequest = z.strictObject({
 export type AddMemoryEntryRequest = z.infer<typeof AddMemoryEntryRequest>;
 export const EditMemoryEntryRequest = z
   .strictObject({
-    file: MemoryBook,
+    file: MemoryFileName,
     revision: MemoryEntryRevision,
     text: MemoryEntryText.optional(),
     pinned: z.boolean().optional(),

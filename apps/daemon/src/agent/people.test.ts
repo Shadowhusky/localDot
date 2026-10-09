@@ -1,6 +1,7 @@
-import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PEOPLE_MAX } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { namedIn, PeopleError, PeopleStore } from "./people.ts";
 
@@ -80,6 +81,44 @@ describe("people dot knows", () => {
     expect(file).not.toContain("quokka_q");
     expect(people.find("quokka")).toEqual([]);
     expect(people.list().map((p) => p.id)).toEqual([keep.id]);
+  });
+
+  it("tells a damaged or full file apart from a change made meanwhile", () => {
+    const { home, people } = store();
+    const rows = Array.from({ length: PEOPLE_MAX }, (_, n) => {
+      const id = `01JXYZ00000000000000${String(n).padStart(6, "0")}`;
+      return {
+        id,
+        name: `P${n}`,
+        app: "Email",
+        handle: null,
+        note: null,
+        lastAt: null,
+        src: "user",
+      };
+    });
+    writeFileSync(join(home, "memory", "people.json"), JSON.stringify({ v: 1, people: rows }), {
+      mode: 0o600,
+    });
+    expect(statusOf(() => people.add({ name: "One more", app: "Email" }))).toBe(413);
+    writeFileSync(join(home, "memory", "people.json"), "{", { mode: 0o600 });
+    expect(statusOf(() => people.list())).toBe(500);
+  });
+
+  it("puts a removed person back with the task that taught dot and the day, for Undo", () => {
+    const { people } = store();
+    const henry = people.record(TASK, { name: "Henry", app: "WeChat", handle: "henry_l" }).person;
+    people.remove(henry.id, henry.revision);
+    const back = people.add({
+      name: "Henry",
+      app: "WeChat",
+      handle: "henry_l",
+      lastAt: "2026-10-08",
+      sessionId: TASK,
+    });
+    expect(back).toMatchObject({ lastAt: "2026-10-08", source: { kind: "task", sessionId: TASK } });
+    expect(statusOf(() => people.add({ name: "Ana", app: "Email", lastAt: "8 Oct" }))).toBe(400);
+    expect(statusOf(() => people.add({ name: "Ana", app: "Email", sessionId: "x" }))).toBe(400);
   });
 
   it("refuses key-shaped, multi-line and empty fields", () => {
