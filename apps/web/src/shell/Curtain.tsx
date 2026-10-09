@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
-import type { ComputerPhase, HudActionKind } from "../cells/hud-state.ts";
+import { type ComputerPhase, type HudActionKind, NEEDS_FRESH_START } from "../cells/hud-state.ts";
 import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
+import { FreshStartButton } from "./FreshStartButton.tsx";
 import "./stage-frame.css";
 
 type ComputerAction = HudAction & { kind: HudActionKind };
@@ -16,6 +17,8 @@ export interface CurtainProps {
   first: boolean;
   // A Turn on is on its way.
   waking: boolean;
+  // The computer is moving onto a new version, from its stop until it is ready again.
+  updating?: boolean;
   // The computer's own words, for a failure.
   caption: string;
   // Why the last request was refused, in place of the usual words.
@@ -24,6 +27,8 @@ export interface CurtainProps {
   onAction(): void;
   // A computer fenced after an unconfirmed step recovers on a fresh one.
   replace?: ReplaceAction;
+  // A computer whose update can't be finished starts again clean, while that is going on too.
+  freshStart?: FreshStartAction;
   showDot: boolean;
 }
 
@@ -31,6 +36,13 @@ export interface ReplaceAction {
   enabled: boolean;
   busy: boolean;
   // How the replacement is going, in place of the usual words.
+  note?: string;
+  run(): void;
+}
+
+export interface FreshStartAction {
+  busy: boolean;
+  // Why the last try didn't finish, in place of the usual words.
   note?: string;
   run(): void;
 }
@@ -44,25 +56,30 @@ export function Curtain({
   phase,
   first,
   waking,
+  updating = false,
   caption,
   notice,
   action,
   onAction,
   replace,
+  freshStart,
   showDot,
 }: CurtainProps) {
   const phone = useMediaQuery(PHONE);
-  const recovering = phase === "unavailable" && !!replace;
-  const copy = recovering
-    ? {
-        title: "Your computer needs a fresh start",
-        sub:
-          replace.note ??
-          "An earlier step couldn't be confirmed. A fresh computer starts clean; its old Downloads are kept.",
-        progress: false,
-        button: { label: "Replace computer" },
-      }
-    : curtainCopy(phase, { first, waking, caption, notice, action });
+  const fresh = phase === "checking" ? undefined : freshStart;
+  const recovering = !fresh && phase === "unavailable" && !!replace;
+  const copy = fresh
+    ? freshStartCopy(fresh)
+    : recovering
+      ? {
+          title: "Your computer needs a fresh start",
+          sub:
+            replace.note ??
+            "An earlier step couldn't be confirmed. A fresh computer starts clean; its old Downloads are kept.",
+          progress: false,
+          button: { label: "Replace computer" },
+        }
+      : curtainCopy(phase, { first, waking, updating, caption, notice, action });
   const enabled = recovering ? replace.enabled : action?.enabled;
   return (
     <section
@@ -87,20 +104,33 @@ export function Curtain({
             <span className="curtain-progress" aria-hidden="true">
               <i />
             </span>
-            {(action || recovering) && copy.button && (
-              <Button
+            {fresh ? (
+              <FreshStartButton
                 variant="primary"
                 size={phone ? "xl" : "lg"}
-                icon={copy.button.icon}
                 className="curtain-button"
-                busy={recovering && replace.busy}
-                disabledReason={enabled ? undefined : "Wait a moment"}
+                busy={fresh.busy}
                 aria-hidden={copy.progress || undefined}
                 tabIndex={copy.progress ? -1 : undefined}
-                onClick={copy.progress ? undefined : recovering ? replace.run : onAction}
-              >
-                {copy.button.label}
-              </Button>
+                run={fresh.run}
+              />
+            ) : (
+              (action || recovering) &&
+              copy.button && (
+                <Button
+                  variant="primary"
+                  size={phone ? "xl" : "lg"}
+                  icon={copy.button.icon}
+                  className="curtain-button"
+                  busy={recovering && replace.busy}
+                  disabledReason={enabled ? undefined : "Wait a moment"}
+                  aria-hidden={copy.progress || undefined}
+                  tabIndex={copy.progress ? -1 : undefined}
+                  onClick={copy.progress ? undefined : recovering ? replace.run : onAction}
+                >
+                  {copy.button.label}
+                </Button>
+              )
             )}
           </div>
         </div>
@@ -123,18 +153,42 @@ interface Copy {
   button?: { label: string; icon?: "power" };
 }
 
+function freshStartCopy({ busy, note }: FreshStartAction): Copy {
+  return busy
+    ? {
+        title: "Starting fresh",
+        sub: "Setting up a clean computer. Your sign-ins stay.",
+        clock: true,
+        progress: true,
+      }
+    : {
+        title: "Your computer needs a fresh start",
+        sub: note ?? NEEDS_FRESH_START,
+        progress: false,
+      };
+}
+
 function curtainCopy(
   phase: ComputerPhase,
   {
     first,
     waking,
+    updating,
     caption,
     notice,
     action,
-  }: Pick<CurtainProps, "first" | "waking" | "caption" | "notice" | "action">,
+  }: Pick<CurtainProps, "first" | "waking" | "updating" | "caption" | "notice" | "action">,
 ): Copy | null {
   const turnOn = { label: "Turn on", icon: "power" as const };
   if (phase === "checking") return null;
+  if (updating && (STARTING.has(phase) || phase === "stopping"))
+    return {
+      title: "Updating your computer",
+      sub: "Your files and sign-ins stay.",
+      clock: true,
+      progress: true,
+      button: turnOn,
+    };
   if (phase === "restarting") {
     const attempt = ATTEMPT.exec(caption);
     return {

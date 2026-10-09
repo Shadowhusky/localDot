@@ -31,6 +31,9 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
       .getByRole("region", { name: "Computer recovery" })
       .getByRole("heading", { name: "This computer is unavailable", exact: true }),
   ),
+  "fresh-start": shows((page) =>
+    page.getByRole("heading", { name: "Your computer needs a fresh start" }),
+  ),
   off: hud("Stopped"),
 };
 

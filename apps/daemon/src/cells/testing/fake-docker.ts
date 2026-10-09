@@ -6,6 +6,10 @@ import { compareApiVersions } from "../docker.ts";
 
 export interface FakeContainer {
   name: string;
+  // Defaults to `id-<name>` as created; it stays the same through a rename.
+  id?: string;
+  // The image ID the container was created from.
+  image?: string;
   body: {
     Image: string;
     Labels?: Record<string, string>;
@@ -56,6 +60,8 @@ export interface FakeDockerState {
   // Rewrites a network inspect reply, for an engine that answers in a shape localdot doesn't expect.
   networkInspect?: (reply: Record<string, unknown>) => unknown;
   imageInspect?: (reference: string, reply: Record<string, unknown>) => unknown;
+  // The image ID a reference names now; a rebuilt image moves its tag to a new ID.
+  imageIds: Map<string, string>;
 }
 
 export interface FakeDocker {
@@ -100,6 +106,7 @@ export async function startFakeDocker(
     failRequests: new Set(),
     loseReplies: new Set(),
     holds: new Map(),
+    imageIds: new Map(),
     ...overrides,
   };
   let networkSeq = 20;
@@ -111,12 +118,16 @@ export async function startFakeDocker(
     state.networks.get(ref) ?? [...state.networks.values()].find((n) => n.Id === ref);
   const mounts = (c: FakeContainer) =>
     ((c.body.HostConfig.Mounts as { Source?: string }[] | undefined) ?? []).map((m) => m.Source);
+  const DEFAULT_IMAGE = `sha256:${"a".repeat(64)}`;
+  const imageId = (reference: string) => state.imageIds.get(reference) ?? DEFAULT_IMAGE;
+  const idOf = (c: FakeContainer) => c.id ?? `id-${c.name}`;
   const containerJson = (c: FakeContainer) => ({
-    Id: `id-${c.name}`,
+    Id: idOf(c),
     Name: `/${c.name}`,
+    Image: c.image ?? imageId(c.body.Image),
     State: { Running: c.running, Paused: c.paused, ExitCode: c.exitCode, Error: "" },
     HostConfig: c.body.HostConfig,
-    Config: { Labels: c.body.Labels ?? {} },
+    Config: { Image: c.body.Image, Labels: c.body.Labels ?? {} },
     NetworkSettings: { Ports: c.running ? c.ports : {}, Networks: c.networks },
   });
 
@@ -132,6 +143,9 @@ export async function startFakeDocker(
         : `client version ${api} is too new. Maximum supported API version is ${max}`,
     });
   }
+
+  const findContainer = (ref: string) =>
+    state.containers.get(ref) ?? [...state.containers.values()].find((c) => idOf(c) === ref);
 
   function handle(
     method: string,
@@ -151,7 +165,7 @@ export async function startFakeDocker(
     if (method === "GET" && image) {
       const reference = segment(image);
       const reply = {
-        Id: `sha256:${"a".repeat(64)}`,
+        Id: imageId(reference),
         Os: "linux",
         Architecture: state.version.Arch,
         RepoDigests: reference.includes("@") ? [reference] : [],
@@ -302,7 +316,7 @@ export async function startFakeDocker(
       return json(
         200,
         containers.map((c) => ({
-          Id: `id-${c.name}`,
+          Id: idOf(c),
           Names: [`/${c.name}`],
           Labels: c.body.Labels ?? {},
         })),
@@ -323,6 +337,8 @@ export async function startFakeDocker(
       }
       state.containers.set(name, {
         name,
+        id: `id-${name}`,
+        image: imageId(spec.Image),
         body: spec,
         running: false,
         paused: false,
@@ -334,6 +350,19 @@ export async function startFakeDocker(
       });
       return json(201, { Id: `id-${name}`, Warnings: [] });
     }
+    const rename = /^\/containers\/([^/]+)\/rename$/.exec(path);
+    if (method === "POST" && rename) {
+      const c = findContainer(segment(rename));
+      if (!c) return notFound("container");
+      const name = query.get("name") ?? "";
+      if (state.containers.has(name))
+        return json(409, { message: `Conflict. The container name "/${name}" is already in use` });
+      state.containers.delete(c.name);
+      c.id = idOf(c);
+      c.name = name;
+      state.containers.set(name, c);
+      return { status: 204 };
+    }
     const archive = /^\/containers\/([^/]+)\/archive$/.exec(path);
     if (method === "PUT" && archive) {
       const c = state.containers.get(segment(archive));
@@ -341,9 +370,6 @@ export async function startFakeDocker(
       for (const [name, data] of untar(raw)) c.files.set(`${query.get("path")}/${name}`, data);
       return { status: 200 };
     }
-    const findContainer = (ref: string) =>
-      state.containers.get(ref) ??
-      [...state.containers.values()].find((c) => `id-${c.name}` === ref);
     const action = /^\/containers\/([^/]+)\/(json|start|stop|pause|unpause)$/.exec(path);
     if (action) {
       const c = findContainer(segment(action));

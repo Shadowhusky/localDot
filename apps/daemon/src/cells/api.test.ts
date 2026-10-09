@@ -5,6 +5,7 @@ import type { Hono } from "hono";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { createApp } from "../app.ts";
 import { EventLog } from "../event-log.ts";
+import { ComputerUpdateRefused } from "./computer-update.ts";
 import { DockerError } from "./docker.ts";
 import { SkippedCellsError } from "./orchestrator.ts";
 import { TicketRegistry } from "./secrets.ts";
@@ -151,6 +152,41 @@ describe("cell API", () => {
     const failed = await app.request(url("/api/cells"), { method: "POST", headers: bearer });
     expect(failed.status).toBe(502);
     expect(await failed.text()).toContain("Docker Desktop");
+  });
+
+  it("answers Update with the starting computer, a plain refusal, Docker's 502 or 503", async () => {
+    const cells = new FakeOrchestrator();
+    const tickets = new TicketRegistry();
+    const cell = await readyCell(cells);
+    const update = vi.fn(async (id: string, _signal: AbortSignal) => {
+      cells.emit({ ...cell, id, state: "starting", updating: true });
+    });
+    const post = (app: Hono) =>
+      app.request(url(`/api/cells/${cell.id}/update`), { method: "POST", headers: bearer });
+    const app = createApp({
+      token: TOKEN,
+      port: PORT,
+      eventLog,
+      cells: { cells, tickets, update },
+    });
+
+    const started = await post(app);
+    expect(started.status).toBe(202);
+    expect(await started.json()).toMatchObject({ id: cell.id, state: "starting", updating: true });
+    expect(update).toHaveBeenCalledWith(cell.id, expect.any(AbortSignal));
+
+    update.mockRejectedValueOnce(new ComputerUpdateRefused("Hand back the computer first."));
+    const refused = await post(app);
+    expect(refused.status).toBe(409);
+    expect(await refused.text()).toBe("Hand back the computer first.");
+
+    update.mockRejectedValueOnce(new DockerError(0, "ECONNREFUSED", "/containers/create"));
+    expect((await post(app)).status).toBe(502);
+
+    const without = createApp({ token: TOKEN, port: PORT, eventLog, cells: { cells, tickets } });
+    const unavailable = await post(without);
+    expect(unavailable.status).toBe(503);
+    expect(await unavailable.text()).toBe("updates unavailable");
   });
 
   it("refuses a create body over 1 KiB with 413", async () => {

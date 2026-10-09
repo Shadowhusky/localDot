@@ -31,6 +31,7 @@ const STATUS: Record<
   failed: { shape: "computer", control: /^Turn on$/, label: "Failed" },
   // A computer that can't carry the task outranks it; the task keeps only its controls.
   fenced: { shape: "task", control: /^Pause$/, label: "Unavailable" },
+  "fresh-start": { shape: "computer", control: /^Turn on$/, label: "Failed" },
   off: { shape: "computer", control: /^Turn on$/, label: "Stopped" },
 };
 
