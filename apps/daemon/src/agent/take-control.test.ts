@@ -153,6 +153,22 @@ describe("the user takes the computer while dot works", () => {
     expect((await h.call("computer", CLICK, generation)).result.ok).toBe(true);
   });
 
+  it("stops a batch at its first step to look again after the user had the computer", async () => {
+    const h = setup();
+    const requestId = h.session.takeControl();
+    await until(() => h.session.manualControl === "ready");
+    expect(await h.session.handback(requestId, undefined)).toBe(true);
+    const generation = h.session.beginBrain();
+    const batch = { action: "batch", steps: [CLICK, { action: "type", text: "x" }] };
+    const first = await h.call("computer", batch, generation);
+    expect(first.result).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(first.result.content.some((part) => part.type === "image")).toBe(true);
+    expect(h.actions).toEqual([]);
+    expect(h.session.lookOwed).toBe(false);
+    expect((await h.call("computer", batch, generation)).result.ok).toBe(true);
+    expect(h.actions).toHaveLength(2);
+  });
+
   it("sets dot's question aside when the user takes the computer, and dot hears to ask again", async () => {
     const h = setup();
     const asking = h.call("ask_user", { question: "Which file?", options: ["A", "B"] });
