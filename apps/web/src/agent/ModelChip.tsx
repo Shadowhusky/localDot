@@ -1,12 +1,12 @@
 import { Fragment, type RefObject, useRef, useState } from "react";
 import type { ModelGroup, ModelOption } from "../settings/model-options.ts";
+import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { Menu, MenuGroup, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
 import { MiddleTruncate } from "../ui/MiddleTruncate.tsx";
 import { mergeHandlers } from "../ui/merge.ts";
 import { triggerProps } from "../ui/Popover.tsx";
 import type { Align, Side } from "../ui/position.ts";
-import { pressHandlers } from "../ui/press.ts";
 import { useTooltip } from "../ui/Tooltip.tsx";
 
 export interface ModelMenuProps {
@@ -86,31 +86,30 @@ export function ModelChip({ name, next, disabledReason, onPeek, ...menu }: Model
   const [open, setOpen] = useState(false);
   const button = useRef<HTMLButtonElement>(null);
   const { triggerProps: tip, tooltip } = useTooltip({
-    content: disabledReason ?? (next ? "Starts with the next task" : undefined),
-    description: disabledReason,
-    showOnPress: !!disabledReason,
+    content: !disabledReason && next ? "Starts with the next task" : undefined,
   });
+  // The menu and the label give the full name; the chip leaves out a family name the rest says.
+  const label = name.replace(/^Claude (?=[A-Za-z])/, "");
   return (
     <>
-      <button
-        {...mergeHandlers({ onPointerEnter: onPeek, onFocus: onPeek }, pressHandlers, tip.handlers)}
+      <Button
+        {...mergeHandlers({ onPointerEnter: onPeek, onFocus: onPeek }, tip.handlers)}
         ref={button}
-        type="button"
+        variant="quiet"
+        size="sm"
         className="composer-model"
+        disabledReason={disabledReason}
         aria-label={next ? `Model for the next task: ${name}` : `Model: ${name}`}
-        aria-disabled={disabledReason ? true : undefined}
         aria-describedby={tip["aria-describedby"]}
         {...triggerProps("menu", open)}
         onClick={() => {
-          if (disabledReason) return;
           onPeek?.();
           setOpen(true);
         }}
       >
-        {/* A long name keeps its last word, often its version, in sight. */}
-        <MiddleTruncate text={name} tail={Math.max(0, name.length - name.lastIndexOf(" "))} />
+        <MiddleTruncate text={label} tail={Math.max(0, label.length - label.lastIndexOf(" "))} />
         <Icon name="chevron-down" size={12} className="composer-model-chevron" />
-      </button>
+      </Button>
       {tooltip}
       <ModelMenu
         {...menu}

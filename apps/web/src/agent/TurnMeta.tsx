@@ -3,8 +3,8 @@ import { spendText, tokenCount } from "../copy/format.ts";
 import { providerName } from "../settings/choices.ts";
 import { subscription } from "../settings/chooser.ts";
 import type { ModelNames } from "../settings/model-names.ts";
+import { Button } from "../ui/Button.tsx";
 import { Popover, triggerProps } from "../ui/Popover.tsx";
-import { pressHandlers } from "../ui/press.ts";
 import { clock } from "./activity.ts";
 import type { ThreadItem } from "./thread.ts";
 
@@ -72,17 +72,17 @@ export function TurnMeta({ item, names }: { item: MetaItem; names?: ModelNames }
     );
   return (
     <div className="thread-meta" data-under={item.work ? "work" : undefined}>
-      <button
-        {...pressHandlers}
+      <Button
         ref={trigger}
-        type="button"
+        variant="quiet"
+        size="sm"
         className="thread-meta-trigger"
         aria-label={`This turn: ${line}`}
         {...triggerProps("dialog", open)}
         onClick={() => setOpen((shown) => !shown)}
       >
         <span className="thread-meta-text num">{line}</span>
-      </button>
+      </Button>
       <Popover
         open={open}
         onClose={() => setOpen(false)}
