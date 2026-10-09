@@ -1,5 +1,4 @@
 import type { DotPlacement } from "@localdot/protocol";
-import { chapters, type SessionModel } from "@localdot/stage";
 import {
   type ReactNode,
   type RefObject,
@@ -8,7 +7,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { recordedPresence } from "../dot/dot-feed.ts";
 import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
@@ -34,6 +32,7 @@ import {
   waitText,
 } from "./export-estimate.ts";
 import {
+  bandLineAt,
   EXPORT_FRAME_RATES,
   EXPORT_QUALITIES,
   type ExportQuality,
@@ -103,13 +102,6 @@ const RESULT_TITLE = {
   downloaded: "Downloaded",
   saved: "Video saved",
 } as const;
-
-function stepLabel(model: SessionModel, atMs: number, endMs: number): string | null {
-  return (
-    chapters(model, endMs).find((chapter) => chapter.startT <= atMs && atMs < chapter.endT)
-      ?.label ?? null
-  );
-}
 
 function optionsText(options: ExportOptions, env: ExportEnvironment): string {
   const size = sizeOf(options.size, env, options.dot);
@@ -260,8 +252,8 @@ export function ExportSheet({
     Math.min(range.toMs, shownEdge ? edgeAt(shownEdge) : context.atMs),
   );
   const frame = frameAt(context.model, shownAt, range, screen);
-  const step = stepLabel(context.model, shownAt, context.whole.toMs);
-  const said = options.dot === "off" ? "" : recordedPresence(context.model, shownAt).line;
+  const caption = bandLineAt(context.model, shownAt);
+  const said = options.dot === "off" ? "" : caption;
   // The handle's time stays in the chip while it fades out.
   const held = useRef<TrimEdge>("from");
   if (hold) held.current = hold.edge;
@@ -310,11 +302,11 @@ export function ExportSheet({
                 </span>
                 <span
                   className="export-preview-caption"
-                  data-shown={options.captions && step ? "" : undefined}
+                  data-shown={options.captions && caption ? "" : undefined}
                   data-place={options.dot === "over" ? "head" : undefined}
                   aria-hidden="true"
                 >
-                  {step}
+                  {caption}
                 </span>
                 <span className="export-preview-bubble" aria-hidden="true">
                   <Glyph />

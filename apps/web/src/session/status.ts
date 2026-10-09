@@ -241,6 +241,18 @@ function waitedS(model: SessionModel, row: TaskRow, nowMs: number): number | nul
   return null;
 }
 
+// Captions that only name dot's state. The band never says them: dot's pose and the island do.
+const THINKING = "Thinking…";
+const CHECKING = "Checking the screen.";
+const WORKING_ON = "Working…";
+const STARTING_OUT = "Starting…";
+export const STATE_CAPTIONS: ReadonlySet<string> = new Set([
+  THINKING,
+  CHECKING,
+  WORKING_ON,
+  STARTING_OUT,
+]);
+
 const PAST_HOLD_MS = 1200;
 const WORKING = new Set(["acting", "observing", "thinking"]);
 // Replay folds the whole recording, so an action's end may still lie ahead of nowMs.
@@ -365,10 +377,9 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     if (done !== current.label && nowMs - current.resultT < PAST_HOLD_MS)
       return running("acting", done, done, control);
   }
-  if (state === "thinking") return running("thinking", "Thinking…", "Thinking…", control);
-  if (state === "observing")
-    return running("observing", "Checking the screen", "Checking the screen.", control);
-  return running("working", "Working", n ? "Working…" : "Starting…", control);
+  if (state === "thinking") return running("thinking", "Thinking…", THINKING, control);
+  if (state === "observing") return running("observing", "Checking the screen", CHECKING, control);
+  return running("working", "Working", n ? WORKING_ON : STARTING_OUT, control);
 }
 
 // The thread's foot follows dot's own work. While the user has the computer it says nothing: the

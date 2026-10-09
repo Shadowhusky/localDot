@@ -668,6 +668,7 @@ function Player({
         status: chapter.status === "blocked" ? "failed" : chapter.status,
         durationMs: chapter.endT - chapter.startT,
         frameId: replay.model.frames.get(chapter.id),
+        ...(chapter.intent ? { intent: chapter.intent } : {}),
       }
     );
   });

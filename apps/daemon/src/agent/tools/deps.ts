@@ -1,4 +1,4 @@
-import type { ToolResult } from "@localdot/protocol";
+import { clipText, INTENT_CHARS, type ToolResult } from "@localdot/protocol";
 import type { ScreenLease } from "../../browser/screen-controller.ts";
 import type { DesktopdClient } from "../../desktopd/client.ts";
 import type { NativeDevice } from "../../desktopd/registry.ts";
@@ -119,6 +119,13 @@ export function tail(s: string, max: number): string {
 export function cut(s: string, max: number): string {
   const chars = [...s];
   return chars.length <= max ? s : `${chars.slice(0, max - 1).join("")}…`;
+}
+
+// The call's line for the user, as plain text: secrets masked first, since a mask can be longer
+// than what it hides, then cut to the event's limit.
+export function intentOf(ctx: ToolCallContext, input: { intent?: string }): { intent?: string } {
+  const line = input.intent ? clipText(ctx.redact(input.intent), INTENT_CHARS) : "";
+  return line ? { intent: line } : {};
 }
 
 export function append(ctx: ToolCallContext, kind: string, data: Record<string, unknown>): void {

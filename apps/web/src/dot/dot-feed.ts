@@ -6,6 +6,7 @@ import {
   type TaskHud,
   taskHud,
 } from "../session/status.ts";
+import { narrationLine } from "../shell/narration.ts";
 import type { Point } from "./engine/engine.ts";
 import type { DotState } from "./engine/states.ts";
 
@@ -60,7 +61,7 @@ export function recordedPresence(
 ): { feed: DotFeed; line: string } {
   return {
     feed: dotFeed({ dotPose: TASK_POSE[hud.row], control: hud.control, row: hud.row }, model, tMs),
-    line: hud.caption,
+    line: narrationLine(hud.row, hud.caption, model, tMs),
   };
 }
 
