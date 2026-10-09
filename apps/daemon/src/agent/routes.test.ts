@@ -47,7 +47,7 @@ function deferred<T = void>() {
   });
   return { promise, resolve };
 }
-async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness"> = {}) {
+async function setup(options: Pick<AgentRoutesDeps, "chatgpt" | "harness" | "claudeCode"> = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-agent-routes-"));
   const events: { type: string; data: unknown }[] = [];
   const session = new AgentSession(SESSION, CELL, "task", {
@@ -618,6 +618,62 @@ describe("agent user routes", () => {
   });
 });
 
+describe("Claude Code (your plan) routes", () => {
+  const signedIn = {
+    state: "signed_in" as const,
+    version: "2.1.290",
+    plan: "max",
+    models: [{ id: "sonnet", name: "Sonnet" }],
+    checkedAt: 1,
+  };
+  function claude() {
+    return { status: vi.fn(async () => signedIn), check: vi.fn(async () => signedIn) };
+  }
+  it("reports the user's Claude Code and checks it again on request", async () => {
+    const claudeCode = claude();
+    const f = await setup({ claudeCode });
+    const status = await f.send("GET", "/api/agent/claude-code");
+    expect(status.status).toBe(200);
+    expect(await status.json()).toEqual(signedIn);
+    const checked = await f.app.request("http://fixture/api/agent/claude-code/check", {
+      method: "POST",
+    });
+    expect(checked.status).toBe(200);
+    expect(claudeCode.check).toHaveBeenCalledTimes(1);
+    const reply = (await (await f.send("GET", "/api/agent/providers")).json()) as {
+      subscriptions: { id: string; available: boolean }[];
+    };
+    expect(reply.subscriptions.find((row) => row.id === "claude-code")).toEqual({
+      id: "claude-code",
+      name: "Claude Code (your plan)",
+      available: true,
+    });
+  });
+  it("has no Claude Code routes where it isn't offered", async () => {
+    const f = await setup();
+    expect((await f.send("GET", "/api/agent/claude-code")).status).toBe(404);
+  });
+  it("saves Claude Code as the main model with no key lookup, and nowhere else", async () => {
+    const f = await setup({ claudeCode: claude() });
+    const settings = {
+      main: { provider: "claude-code", model: "sonnet" },
+      fast: { provider: "anthropic", model: "stored-unavailable", key: "missing-key" },
+    };
+    expect((await f.send("PUT", "/api/agent/settings", settings)).status).toBe(200);
+    expect(f.settings.get()).toEqual(settings);
+    expect(f.deps.keyd.secrets).not.toHaveBeenCalled();
+    for (const bad of [
+      { main: { provider: "claude-code", model: "sonnet", key: "anthropic" } },
+      {
+        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+        fast: { provider: "claude-code", model: "sonnet" },
+      },
+    ])
+      expect((await f.send("PUT", "/api/agent/settings", bad)).status).toBe(400);
+    expect(f.settings.get()).toEqual(settings);
+  });
+});
+
 describe("ChatGPT settings and installation integration", () => {
   it("saves a subscription with inactive paid choices intact and no paid key lookup", async () => {
     const f = await setup();
@@ -696,6 +752,12 @@ describe("ChatGPT settings and installation integration", () => {
         name: "ChatGPT plan",
         available: false,
         reason: "Pinned privacy acceptance is pending.",
+      },
+      {
+        id: "claude-code",
+        name: "Claude Code (your plan)",
+        available: false,
+        reason: "Claude Code isn't available on this computer.",
       },
     ]);
     expect(reply.providers.some((p: { id: string }) => p.id === "chatgpt")).toBe(false);

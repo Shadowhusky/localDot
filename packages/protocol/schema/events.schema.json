@@ -1036,6 +1036,14 @@
                 },
                 "editable": {
                   "type": "boolean"
+                },
+                "checked": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false",
+                    "mixed"
+                  ]
                 }
               },
               "required": [
@@ -2576,6 +2584,14 @@
                 },
                 "editable": {
                   "type": "boolean"
+                },
+                "checked": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false",
+                    "mixed"
+                  ]
                 }
               },
               "required": [
@@ -3893,7 +3909,8 @@
                 "user",
                 "timeout",
                 "stop",
-                "pause"
+                "pause",
+                "control"
               ]
             }
           },
@@ -4072,6 +4089,10 @@
             "note": {
               "type": "string",
               "maxLength": 500
+            },
+            "by": {
+              "type": "string",
+              "const": "user"
             }
           },
           "required": [
@@ -4564,7 +4585,10 @@
           "properties": {
             "provider": {
               "type": "string",
-              "const": "chatgpt"
+              "enum": [
+                "chatgpt",
+                "claude-code"
+              ]
             },
             "plan": {
               "type": "string",

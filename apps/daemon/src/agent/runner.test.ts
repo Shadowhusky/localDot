@@ -400,6 +400,56 @@ describe("ChatGPT provider selection", () => {
   });
 });
 
+describe("Claude Code (your plan)", () => {
+  function claudeSetup(state: "signed_in" | "signed_out" = "signed_in") {
+    const f = setup();
+    const status = vi.fn(async () =>
+      state === "signed_in"
+        ? { state }
+        : { state, reason: "Sign in to Claude Code, then check again." },
+    );
+    f.deps.claudeCode = { driver: { run: f.run }, status };
+    f.setSettings({ main: { provider: "claude-code", model: "sonnet" }, taskBudgetUSD: 5 });
+    return { ...f, status };
+  }
+  it("runs the task on the user's Claude Code, with no key, brain cell or budget", async () => {
+    const f = claudeSetup();
+    const session = await f.runner.start(f.cellId, "Draw a dog");
+    await until(() => f.run.mock.calls.length === 1);
+    expect(f.run.mock.calls[0]?.[1]).toEqual({ model: "sonnet", resume: false });
+    expect(f.secrets).not.toHaveBeenCalled();
+    expect(f.open).not.toHaveBeenCalled();
+    expect(f.beginTask).not.toHaveBeenCalled();
+    expect(f.runner.selectionOf(session.id)).toEqual({ kind: "claude-code", model: "sonnet" });
+    await expect(f.runner.raiseBudget(session.id, 10)).rejects.toThrow("plan's limits");
+    session.stop();
+    await f.live.settled(session.id);
+  });
+  it("refuses to start until Claude Code is signed in, saying how", async () => {
+    const f = claudeSetup("signed_out");
+    await expect(f.runner.start(f.cellId, "Draw a dog")).rejects.toThrow(
+      "Sign in to Claude Code, then check again.",
+    );
+    expect(f.run).not.toHaveBeenCalled();
+    expect(f.live.get(f.cellId)).toBeUndefined();
+  });
+  it("is the main model only, and never takes a key or a price", async () => {
+    const f = claudeSetup();
+    for (const settings of [
+      {
+        main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "k" },
+        fast: { provider: "claude-code", model: "sonnet" },
+      },
+      { main: { provider: "claude-code", model: "sonnet", key: "anthropic-main" } },
+      { main: { provider: "claude-code", model: "Sonnet-5" } },
+    ]) {
+      f.setSettings(settings);
+      await expect(f.runner.start(f.cellId, "Draw a dog")).rejects.toBeInstanceOf(AgentError);
+    }
+    expect(f.status).not.toHaveBeenCalled();
+  });
+});
+
 describe("ChatGPT runner lifecycle", () => {
   it("ends an idle successful task without stopping its desktop", async () => {
     const f = setup(0);

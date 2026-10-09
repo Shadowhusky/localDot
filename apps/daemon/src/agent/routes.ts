@@ -33,12 +33,14 @@ import { type KeydClient, KeydUnavailableError } from "../keyd/client.ts";
 import {
   BindingError,
   CHATGPT,
-  checkChatgptChoice,
+  CLAUDE_CODE,
+  checkPlanChoices,
   pricingOf,
   type ResolvedRole,
   resolveRole,
 } from "./bindings.ts";
 import type { CatalogStore } from "./catalog-store.ts";
+import type { ClaudeCodeSetup } from "./claude-code/setup.ts";
 import { AccountError, type CodexAccount } from "./codex/account.ts";
 import { chatgptRoutes } from "./codex/routes.ts";
 import { type ChatgptSetupControl, SANDBOX_REASONS } from "./codex/setup.ts";
@@ -46,7 +48,7 @@ import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
 import { MemoryError, type MemoryStore } from "./memory.ts";
-import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
+import { AgentError, type AgentRunner, CLAUDE_CODE_OFF, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { PausedStepError } from "./safety/step-barrier.ts";
 import { type AgentSession, ControlHeldError, SessionStoppedError } from "./session.ts";
@@ -98,6 +100,7 @@ export interface AgentRoutesDeps {
     availability(): HarnessAvailability;
     setup: ChatgptSetupControl;
   };
+  claudeCode?: Pick<ClaudeCodeSetup, "status" | "check">;
 }
 
 const JSON_BYTES = 64 * 1024;
@@ -354,6 +357,21 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       }),
     );
   }
+  const claudeCode = deps.claudeCode;
+  if (claudeCode) {
+    app.get(
+      "/api/agent/claude-code",
+      route(async (c) => c.json(await claudeCode.status())),
+    );
+    app.post(
+      "/api/agent/claude-code/check",
+      route(async (c) => {
+        await empty(c.req.raw);
+        check(c.req.raw.signal);
+        return c.json(await claudeCode.check());
+      }),
+    );
+  }
   const session = (id: string) => {
     const value = ULID_PATTERN.test(id) ? deps.runner.get(id) : undefined;
     if (!value) throw new RouteError(404, "no such live task");
@@ -395,7 +413,15 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       return c.json({
         catalog: catalog ? { fetchedAt: catalog.fetchedAt, skipped: catalog.skipped } : null,
         keyLayer,
-        subscriptions: [{ id: CHATGPT, name: "ChatGPT plan", ...harness() }],
+        subscriptions: [
+          { id: CHATGPT, name: "ChatGPT plan", ...harness() },
+          {
+            id: CLAUDE_CODE,
+            name: "Claude Code (your plan)",
+            available: !!claudeCode,
+            ...(claudeCode ? {} : { reason: CLAUDE_CODE_OFF }),
+          },
+        ],
         keys: keys
           .filter((key) => key.kind === "llm")
           .map((key) => ({
@@ -454,11 +480,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
     "/api/agent/settings",
     route(async (c) => {
       const parsed = await json(c.req.raw, AgentSettings);
-      for (const role of ["main", "fast", "local"] as const) {
-        const choice = parsed[role];
-        if (choice?.provider === CHATGPT) checkChatgptChoice(role, choice);
-      }
-      if (parsed.main?.provider !== CHATGPT) {
+      checkPlanChoices(parsed);
+      if (parsed.main?.provider !== CHATGPT && parsed.main?.provider !== CLAUDE_CODE) {
         const keys = await deps.keyd.secrets();
         check(c.req.raw.signal);
         const catalog = deps.catalog.get();

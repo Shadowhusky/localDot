@@ -1,4 +1,5 @@
 import {
+  CLAUDE_CODE_MODEL,
   type ClientKind,
   type KeydRecord,
   type ModelBinding,
@@ -23,6 +24,7 @@ import { immutable } from "./private-files.ts";
 import { RoleChoice } from "./settings.ts";
 export type Role = "main" | "fast" | "local";
 export const CHATGPT = "chatgpt";
+export const CLAUDE_CODE = "claude-code";
 export class BindingError extends Error {
   constructor(
     readonly role: Role,
@@ -39,6 +41,22 @@ export function checkChatgptChoice(role: Role, choice: RoleChoice): void {
   if (choice.price !== undefined) throw new BindingError(role, "the ChatGPT plan needs no price");
   if (!/^[a-z0-9][a-z0-9._-]{0,63}$/.test(choice.model))
     throw new BindingError(role, "unknown ChatGPT model");
+}
+export function checkClaudeCodeChoice(role: Role, choice: RoleChoice): void {
+  if (role !== "main")
+    throw new BindingError(role, "Claude Code (your plan) can only be the main model");
+  if (choice.key !== undefined) throw new BindingError(role, "Claude Code needs no key");
+  if (choice.price !== undefined) throw new BindingError(role, "Claude Code needs no price");
+  if (!CLAUDE_CODE_MODEL.test(choice.model))
+    throw new BindingError(role, "unknown Claude Code model");
+}
+// A plan the user signs in to in its own app, which brings its own models and limits.
+export function checkPlanChoices(settings: Partial<Record<Role, RoleChoice>>): void {
+  for (const role of ["main", "fast", "local"] as const) {
+    const choice = settings[role];
+    if (choice?.provider === CHATGPT) checkChatgptChoice(role, choice);
+    if (choice?.provider === CLAUDE_CODE) checkClaudeCodeChoice(role, choice);
+  }
 }
 export function unpriced(m: CatalogModel): boolean {
   return m.inputUSDPerMTok === 0 && m.outputUSDPerMTok === 0;

@@ -305,6 +305,7 @@ agent = createAgent({
   killSwitch,
   keydPorts,
   codex: { realHome: userInfo().homedir, user: userInfo().username },
+  claudeCode: { realHome: userInfo().homedir },
 });
 const replacement = createReplacementController({
   home,

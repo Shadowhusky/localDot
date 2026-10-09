@@ -13,7 +13,7 @@ export type SubscriptionWindow = z.infer<typeof SubscriptionWindow>;
 
 export const SubscriptionUsageData = z
   .object({
-    provider: z.literal("chatgpt"),
+    provider: z.enum(["chatgpt", "claude-code"]),
     plan: z.string().max(64).optional(),
     windows: z.array(SubscriptionWindow).max(2),
     limitReached: z.boolean(),

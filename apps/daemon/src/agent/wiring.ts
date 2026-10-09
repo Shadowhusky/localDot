@@ -1,5 +1,12 @@
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
+import {
+  query as claudeQuery,
+  type SDKUserMessage,
+  type SpawnedProcess,
+  type SpawnOptions,
+} from "@anthropic-ai/claude-agent-sdk";
 import { serve } from "@hono/node-server";
 import {
   CHATGPT_INSTALL_FIRST,
@@ -39,6 +46,17 @@ import type { KeydMonitor } from "../keyd/monitor.ts";
 import { runtimeLayout } from "../runtime-layout.ts";
 import { BrainCells, imagesWithBrain } from "./brain-cell.ts";
 import { CatalogStore } from "./catalog-store.ts";
+import { ClaudeCodeDriver } from "./claude-code/driver.ts";
+import { claudeCodeInstructions } from "./claude-code/instructions.ts";
+import { localdotServer } from "./claude-code/mcp-server.ts";
+import { claudeCodeOptions } from "./claude-code/options.ts";
+import {
+  type ClaudeCodeLaunch,
+  type ClaudeCodeModel,
+  ClaudeCodeSetup,
+  findClaudeCode,
+  runFile,
+} from "./claude-code/setup.ts";
 import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexDriver } from "./codex/driver.ts";
 import { codexInstructions } from "./codex/instructions.ts";
@@ -50,10 +68,11 @@ import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
 import type { ToolPolicy } from "./policy.ts";
+import { PrivateFiles } from "./private-files.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
-import type { AgentSession } from "./session.ts";
+import type { AgentSession, BrainGeneration } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
@@ -81,6 +100,7 @@ export interface AgentWiringDeps {
   policy?: ToolPolicy;
   toolPort?: number;
   codex?: { realHome: string; user: string };
+  claudeCode?: { realHome: string };
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
@@ -298,6 +318,59 @@ export function createAgent(d: AgentWiringDeps) {
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
     },
   };
+  // A native harness's first look at the task computer: one full screenshot of the selected screen.
+  const observe = async (
+    session: AgentSession,
+    generation: BrainGeneration,
+    signal: AbortSignal,
+  ) => {
+    const lease = session.admit(generation, signal);
+    let screen: ScreenLease | undefined;
+    const endpoint = d.cells.endpoints(session.cellId)?.desktopd;
+    const check = () => {
+      lease.check();
+      screen?.check();
+      const cell = d.cells.get(session.cellId),
+        current = d.cells.endpoints(session.cellId)?.desktopd;
+      if (
+        !ready ||
+        closing ||
+        !d.monitor.health.online ||
+        cell?.state !== "ready" ||
+        cell.paused ||
+        d.killSwitch.isBusy(session.cellId) ||
+        !endpoint ||
+        current?.token !== endpoint.token ||
+        current.baseUrl !== endpoint.baseUrl
+      )
+        throw new AgentError(409, "The task computer changed during observation.");
+    };
+    try {
+      screen = session.screens ? session.screenLease(lease) : undefined;
+      const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
+      if (screen && !binding) throw new AgentError(409, "The selected screen is unavailable.");
+      const observationSignal = screen
+        ? AbortSignal.any([lease.signal, screen.signal])
+        : lease.signal;
+      check();
+      const frame = await d.gateway.observe({
+        sessionId: session.id,
+        cellId: binding?.cellId ?? session.cellId,
+        signal: observationSignal,
+        ...(binding ? { screen: binding } : {}),
+      });
+      check();
+      const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
+      check();
+      session.tainted = true;
+      session.lastFrameId = frame.frameId;
+      session.freshLook();
+      return { frameId: frame.frameId, full: true as const, png: full };
+    } finally {
+      screen?.finish();
+      lease.finish();
+    }
+  };
   const driver =
     auth && roots
       ? new CodexDriver({
@@ -319,55 +392,7 @@ export function createAgent(d: AgentWiringDeps) {
                   context.signal,
                 ),
             }),
-          observe: async (session, generation, signal) => {
-            const lease = session.admit(generation, signal);
-            let screen: ScreenLease | undefined;
-            const endpoint = d.cells.endpoints(session.cellId)?.desktopd;
-            const check = () => {
-              lease.check();
-              screen?.check();
-              const cell = d.cells.get(session.cellId),
-                current = d.cells.endpoints(session.cellId)?.desktopd;
-              if (
-                !ready ||
-                closing ||
-                !d.monitor.health.online ||
-                cell?.state !== "ready" ||
-                cell.paused ||
-                d.killSwitch.isBusy(session.cellId) ||
-                !endpoint ||
-                current?.token !== endpoint.token ||
-                current.baseUrl !== endpoint.baseUrl
-              )
-                throw new AgentError(409, "The task computer changed during observation.");
-            };
-            try {
-              screen = session.screens ? session.screenLease(lease) : undefined;
-              const binding = screen ? d.sessionScreens?.bind(session, screen) : undefined;
-              if (screen && !binding)
-                throw new AgentError(409, "The selected screen is unavailable.");
-              const observationSignal = screen
-                ? AbortSignal.any([lease.signal, screen.signal])
-                : lease.signal;
-              check();
-              const frame = await d.gateway.observe({
-                sessionId: session.id,
-                cellId: binding?.cellId ?? session.cellId,
-                signal: observationSignal,
-                ...(binding ? { screen: binding } : {}),
-              });
-              check();
-              const full = await png.png(session.id, frame.frameId, undefined, observationSignal);
-              check();
-              session.tainted = true;
-              session.lastFrameId = frame.frameId;
-              session.freshLook();
-              return { frameId: frame.frameId, full: true, png: full };
-            } finally {
-              screen?.finish();
-              lease.finish();
-            }
-          },
+          observe,
           instructions: (session) =>
             codexInstructions({
               memory: memory.readBoth(),
@@ -378,6 +403,89 @@ export function createAgent(d: AgentWiringDeps) {
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
         })
       : undefined;
+  const spawnClaudeCode = (options: SpawnOptions): SpawnedProcess =>
+    spawn(options.command, options.args, {
+      cwd: options.cwd,
+      env: options.env,
+      signal: options.signal,
+      stdio: ["pipe", "pipe", "ignore"],
+    });
+  // Starts the user's Claude Code without a prompt, only to read the models it offers.
+  const claudeModels = async (
+    launch: ClaudeCodeLaunch,
+    signal: AbortSignal,
+  ): Promise<ClaudeCodeModel[]> => {
+    const abort = new AbortController();
+    const stop = () => abort.abort();
+    signal.addEventListener("abort", stop, { once: true });
+    const idle: AsyncIterable<SDKUserMessage> = {
+      async *[Symbol.asyncIterator]() {
+        await new Promise((resolve) => abort.signal.addEventListener("abort", resolve));
+      },
+    };
+    const listing = claudeQuery({
+      prompt: idle,
+      options: claudeCodeOptions({
+        launch,
+        instructions: "",
+        server: localdotServer(async () => ({ isError: true, content: [] })),
+        abort,
+        spawn: spawnClaudeCode,
+      }),
+    });
+    const timer = setTimeout(stop, 15_000);
+    try {
+      return (await listing.supportedModels()).map((model) => ({
+        id: model.value,
+        name: model.displayName,
+      }));
+    } finally {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", stop);
+      listing.close();
+      stop();
+    }
+  };
+  const claudeHome = d.claudeCode?.realHome;
+  const claudeSetup = claudeHome
+    ? new ClaudeCodeSetup({
+        home: claudeHome,
+        workDir: () => new PrivateFiles(d.home).directory("claude-code/work"),
+        find: () => findClaudeCode(claudeHome),
+        run: runFile,
+        env: process.env,
+        listModels: claudeModels,
+      })
+    : undefined;
+  const claudeDriver = claudeSetup
+    ? new ClaudeCodeDriver({
+        query: (params) => claudeQuery(params),
+        launch: () => claudeSetup.launch(),
+        spawn: spawnClaudeCode,
+        dispatch: async (session, generation, name, callId, input, signal) =>
+          (
+            await dispatchTool(
+              dispatch,
+              session,
+              name,
+              callId,
+              input,
+              forText(session),
+              generation,
+              signal,
+            )
+          ).result,
+        observe,
+        transcripts,
+        instructions: (session) =>
+          claudeCodeInstructions({
+            memory: memory.readBoth(),
+            skills: runner.skillsOf(session.id),
+            today: new Date(),
+          }),
+        redactorFor: (session) => forText(session),
+      })
+    : undefined;
   const runner = new AgentRunner({
     home: d.home,
     installSession: d.sessionScreens?.install.bind(d.sessionScreens),
@@ -398,6 +506,9 @@ export function createAgent(d: AgentWiringDeps) {
     prepareDesktop: (session) => prepareDesktop(session.cellId, session.id, session.abort.signal),
     waitForUploads: (id, signal) => transfers.wait(id, signal),
     stopSession: (id) => d.killSwitch.stopSession(id),
+    ...(claudeDriver && claudeSetup
+      ? { claudeCode: { driver: claudeDriver, status: () => claudeSetup.status() } }
+      : {}),
     ...(driver && auth
       ? {
           codex: {
@@ -633,6 +744,7 @@ export function createAgent(d: AgentWiringDeps) {
     ...(auth && installer && setup
       ? { chatgpt: { account: auth, installer, availability: platform, setup } }
       : {}),
+    ...(claudeSetup ? { claudeCode: claudeSetup } : {}),
     redactUserText: (text, id, cellId) =>
       forText(
         id ? runner.get(id) : undefined,
@@ -706,6 +818,7 @@ export function createAgent(d: AgentWiringDeps) {
       unsubscribe();
       transfers.close();
       installer?.cancel();
+      claudeSetup?.close();
       const setupClosed = setup?.close();
       const authClosed = auth?.close();
       const containments = [...runner.sessions.values()].map((session) =>

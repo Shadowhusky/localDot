@@ -25,11 +25,13 @@
     "zod": "4.6.5",
     "@localdot/codex-harness": "workspace:*",
     "@modelcontextprotocol/sdk": "1.31.0",
-    "mediabunny": "1.61.0"
+    "mediabunny": "1.61.0",
+    "@anthropic-ai/claude-agent-sdk": "0.3.282"
   },
   "devDependencies": {
     "@types/ws": "8.18.2",
     "ai": "7.0.123",
-    "tsx": "4.23.15"
+    "tsx": "4.23.15",
+    "@anthropic-ai/sdk": "0.127.0"
   }
 }
