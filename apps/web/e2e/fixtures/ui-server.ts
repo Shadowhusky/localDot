@@ -56,6 +56,8 @@ import { ComputerUpdateRefused } from "../../../daemon/src/cells/computer-update
 import type { CellControls } from "../../../daemon/src/cells/orchestrator.ts";
 import { TicketRegistry } from "../../../daemon/src/cells/secrets.ts";
 import { cellStatusRoute } from "../../../daemon/src/cells/status-stream.ts";
+import { desktopStreamRoute } from "../../../daemon/src/cells/stream-proxy.ts";
+import { StreamTuning } from "../../../daemon/src/cells/stream-tuning.ts";
 import { FakeOrchestrator } from "../../../daemon/src/cells/testing/fake-orchestrator.ts";
 import type { CellRecord, CellSummary } from "../../../daemon/src/cells/types.ts";
 import { monotonicClock } from "../../../daemon/src/clock.ts";
@@ -264,6 +266,30 @@ function cellFor(kind: CellKind, id: string): CellSummary | undefined {
 }
 const initial = cellFor(cellKind, cellId);
 if (initial) cells.emit(initial);
+// QA_DESKTOP=<url>,<password> streams a real desktop container's Selkies to the live cell, for
+// measurements (QA_TUNING=0 leaves its quality fixed); the fixture otherwise shows one still frame.
+const [realStream, realPassword] = (env.QA_DESKTOP ?? "").split(",");
+const realDesktop = realStream
+  ? {
+      cells,
+      tickets,
+      vendorDir: fileURLToPath(new URL("../../vendor/selkies", import.meta.url)),
+      tuning:
+        env.QA_TUNING === "0"
+          ? undefined
+          : new StreamTuning({
+              onApply: (_id, quality) => console.log(JSON.stringify({ at: Date.now(), quality })),
+            }),
+    }
+  : undefined;
+if (realStream)
+  cells.endpointsById.set(cellId, {
+    desktopd: { baseUrl: "http://owned-desktop.invalid", token: "" },
+    stream: {
+      baseUrl: realStream,
+      authorization: `Basic ${Buffer.from(`localdot:${realPassword}`).toString("base64")}`,
+    },
+  });
 const origCreate = cells.create.bind(cells);
 cells.create = async (opts) => {
   const created = await origCreate(opts);
@@ -1226,6 +1252,7 @@ attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   cellStatusRoute(cells),
   sessionStreamRoute(log),
   manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
+  ...(realDesktop ? [desktopStreamRoute(realDesktop)] : []),
 ]);
 // Settings > Accounts against the daemon's own routes: the web browser's cookie domains.
 let cookieDomains = [
@@ -1262,6 +1289,7 @@ const routes = createApp({
   port: PORT,
   eventLog: log,
   cells: { cells, tickets, update: updateCell },
+  desktop: realDesktop,
   accounts,
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
   agent,
@@ -2120,6 +2148,19 @@ routes.post("/__qa/pause-uncertain", (c) => {
   const pause = session?.safetyPause;
   if (!session || !pause) return c.text("no pause", 409);
   session.uncertainSafetyPause(pause.requestId, pause.revision);
+  return c.json({ ok: true });
+});
+let screenRevision = 0;
+// dot selects the desktop again, as a new task, a screen switch and a hand-back each do.
+routes.post("/__qa/screen", (c) => {
+  if (!session) return c.text("no session", 409);
+  session.append("screen.switch", {
+    screen: "desktop",
+    cellId,
+    geometry: { w: 2560, h: 1600, scale: 2 },
+    by: "daemon",
+    revision: ++screenRevision,
+  });
   return c.json({ ok: true });
 });
 routes.post("/__qa/step-end", (c) => {

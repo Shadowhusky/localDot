@@ -125,7 +125,10 @@ export function browserProcessSpecs(
     SELKIES_MANUAL_HEIGHT: String(height),
     SELKIES_SCALING_DPI: "96",
     SELKIES_ENCODER: "h264enc",
-    SELKIES_FRAMERATE: "60-60",
+    // Frame rate and quality stay open for the daemon's stream tuner, whose own video starts off.
+    SELKIES_FRAMERATE: "60,10-60",
+    SELKIES_VIDEO_ON_START: "false",
+    SELKIES_USE_PAINT_OVER_QUALITY: "true",
     SELKIES_VIDEO_FULLCOLOR: `${checked.data.fullcolor}|locked`,
     SELKIES_ENABLE_CLIPBOARD: "false",
     SELKIES_FILE_TRANSFERS: "none",

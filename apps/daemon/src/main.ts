@@ -32,6 +32,7 @@ import { streamOptions } from "./cells/spec.ts";
 import { cellStatusRoute } from "./cells/status-stream.ts";
 import { CellStore } from "./cells/store.ts";
 import { desktopStreamRoute } from "./cells/stream-proxy.ts";
+import { StreamTuning } from "./cells/stream-tuning.ts";
 import { monotonicClock } from "./clock.ts";
 import { DesktopdRegistry } from "./desktopd/registry.ts";
 import { findDockerSocket } from "./doctor-socket.ts";
@@ -199,11 +200,13 @@ const browserStreams = new BrowserStreams({
 });
 // The UI remains available while Docker is unavailable or its startup reconcile is waiting.
 // Replacement recovery installs candidate holds before ordinary startup reconciliation.
-const desktop = { cells: orchestrator, tickets, vendorDir: webDir("vendor/selkies") };
+const tuning = new StreamTuning();
+const desktop = { cells: orchestrator, tickets, vendorDir: webDir("vendor/selkies"), tuning };
 const browserViewer = {
   cells: browserStreams,
   tickets: browserTickets,
   vendorDir: desktop.vendorDir,
+  tuning,
 };
 const registry = new DesktopdRegistry(orchestrator, clock);
 const onset = loadOnsetTable(home);
@@ -439,6 +442,7 @@ attachUpgradeRouter(server as Server, { port, token }, [
 ]);
 shutdown.unshift(() => {
   server.close();
+  tuning.close();
 });
 server.on("error", (err: NodeJS.ErrnoException) => {
   fail(err.code === "EADDRINUSE" ? `port ${port} is already in use` : err.message);

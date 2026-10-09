@@ -552,4 +552,29 @@ describe("settings inspector", () => {
     view.rerender(<SettingsSheet {...props()} update={{ ...update, available: false }} />);
     expect(within(sheet()).queryByText(/new version/)).toBeNull();
   });
+
+  it("offers Auto, Sharp and Smooth for the stream in Your computer, on every size", () => {
+    const change = vi.fn();
+    const stream = { value: "auto" as const, saved: true, change };
+    const view = render(<SettingsSheet {...props()} stream={stream} />);
+    const choice = within(sheet()).getByRole("radiogroup", { name: "Stream quality" });
+    expect(within(sheet()).getByRole("button", { name: "Your computer" })).toBeTruthy();
+    expect(
+      within(choice)
+        .getAllByRole("radio")
+        .map((radio) => [radio.textContent, radio.getAttribute("aria-checked")]),
+    ).toEqual([
+      ["Auto", "true"],
+      ["Sharp", "false"],
+      ["Smooth", "false"],
+    ]);
+    fireEvent.click(within(choice).getByRole("radio", { name: "Smooth" }));
+    expect(change).toHaveBeenCalledWith("smooth");
+    view.rerender(<SettingsSheet {...props()} stream={{ ...stream, saved: false }} />);
+    expect(within(sheet()).getByText(/This browser couldn't save it/)).toBeTruthy();
+    view.unmount();
+    onPhone();
+    render(<SettingsSheet {...props()} stream={stream} />);
+    expect(within(sheet()).getByRole("radiogroup", { name: "Stream quality" })).toBeTruthy();
+  });
 });

@@ -7,6 +7,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
 import { FakeWorker, fakeChromium, playInClient } from "../testing/fake-chromium.ts";
+import {
+  closeStreams,
+  FIRST_FRAME_MS,
+  HELD_AFTER_MS,
+  KEEP_MS,
+  STALE_MS,
+  TAP_STALL_MS,
+} from "./live-stream.ts";
 import { Stage, type StageHandle } from "./Stage.tsx";
 
 const CELL = "01JXYZ0000000000000000ABCD";
@@ -19,8 +27,17 @@ const ready: CellSummary = {
 };
 const ticketPath = (n: number) => `/cells/${CELL}/desktop/${String(n).padStart(22, "T")}/`;
 const client = () => document.querySelector<HTMLIFrameElement>("iframe.desktop-frame");
+const clients = () => [...document.querySelectorAll<HTMLIFrameElement>("iframe.desktop-frame")];
+const fakeTimers = () =>
+  vi.useFakeTimers({
+    toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval", "Date"],
+    shouldAdvanceTime: true,
+  });
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  closeStreams();
+});
 
 describe("Stage", () => {
   it("says which browser can show the desktop where frames cannot be tapped", () => {
@@ -50,15 +67,37 @@ describe("Stage in a Chromium browser", () => {
     window.localStorage.clear();
   });
 
-  // The daemon mints ticket n for the n-th request.
-  function daemon() {
+  // The daemon mints ticket n for the n-th request, or, like the real one, keeps the live one.
+  function daemon(keeps = false) {
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
       calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
-      const path = ticketPath(calls.length);
+      const path = ticketPath(keeps ? 1 : calls.length);
       return new Response(JSON.stringify({ ticket: path.split("/")[4], path }), { status: 200 });
     }) as typeof fetch;
     return { api: createApi("a".repeat(43), { fetchImpl }), calls };
+  }
+  const worker = () => FakeWorker.instances[0];
+  const framesSent = () => worker()?.sent.filter((row) => row.message.type === "frames") ?? [];
+  const stops = () => worker()?.sent.filter((row) => row.message.type === "stop") ?? [];
+  // The worker reports a presented frame of the newest tap.
+  const present = () =>
+    act(() =>
+      worker()?.onmessage?.({
+        data: {
+          type: "stats",
+          sourceId: framesSent().at(-1)?.message.sourceId,
+          stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 2560, height: 1600 },
+        },
+      }),
+    );
+  async function streaming(api: ReturnType<typeof daemon>["api"], props = {}) {
+    const view = render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} {...props} />);
+    await waitFor(() => expect(client()).not.toBeNull());
+    playInClient(client() as HTMLIFrameElement, "t1");
+    await waitFor(() => expect(framesSent()).toHaveLength(1));
+    present();
+    return view;
   }
 
   it("renders replay with no cell, ticket, iframe, or live track processor", async () => {
@@ -94,32 +133,33 @@ describe("Stage in a Chromium browser", () => {
     await expect(stage.current?.replay.probe({ op: "stats" })).rejects.toThrow("disabled");
   });
 
-  it("detaches the live viewer for replay and mints a fresh ticket on return", async () => {
+  it("keeps the live client through a visit to Replay, and closes it a minute later", async () => {
+    fakeTimers();
     const { api, calls } = daemon();
     const stage = createRef<StageHandle>();
-    const view = render(
-      <Stage ref={stage} cell={ready} api={api} reconnects={0} listed={[CELL]} />,
+    const at = (mode: "live" | "replay") => (
+      <Stage ref={stage} mode={mode} cell={ready} api={api} reconnects={0} listed={[CELL]} />
     );
+    const view = render(at("live"));
     await waitFor(() => expect(client()).not.toBeNull());
-    const first = client()?.src;
-    playInClient(client() as HTMLIFrameElement, "replay-switch-track");
-    await waitFor(() =>
-      expect(FakeWorker.instances[0]?.sent.some((entry) => entry.message.type === "frames")).toBe(
-        true,
-      ),
-    );
-    view.rerender(
-      <Stage ref={stage} mode="replay" cell={ready} api={api} reconnects={0} listed={[CELL]} />,
-    );
-    expect(client()).toBeNull();
+    const first = client();
+    playInClient(first as HTMLIFrameElement, "replay-switch-track");
+    await waitFor(() => expect(framesSent()).toHaveLength(1));
+    view.rerender(at("replay"));
+    expect(client()).toBe(first);
+    expect(worker()?.sent.at(-1)?.message.type).not.toBe("frames");
+    view.rerender(at("live"));
+    // Back in Watch, the same client's frames are taken again, seeded with the frame it shows.
+    await waitFor(() => expect(framesSent()).toHaveLength(2));
+    expect(client()).toBe(first);
     expect(calls).toHaveLength(1);
-    expect(FakeWorker.instances[0]?.sent.at(-1)?.message.type).not.toBe("frames");
-    view.rerender(
-      <Stage ref={stage} mode="live" cell={ready} api={api} reconnects={0} listed={[CELL]} />,
-    );
-    await waitFor(() => expect(calls).toHaveLength(2));
+    view.rerender(at("replay"));
+    await act(async () => vi.advanceTimersByTime(KEEP_MS));
+    expect(client()).toBeNull();
+    view.rerender(at("live"));
     await waitFor(() => expect(client()).not.toBeNull());
-    expect(client()?.src).not.toBe(first);
+    expect(calls).toHaveLength(2);
+    expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`);
     expect(FakeWorker.instances).toHaveLength(1);
   });
 
@@ -302,7 +342,6 @@ describe("Stage in a Chromium browser", () => {
     expect(calls).toHaveLength(1);
     expect(FakeWorker.instances).toHaveLength(1);
     view.unmount();
-    expect(FakeWorker.instances[0]?.terminated).toBe(true);
     vi.restoreAllMocks();
   });
 
@@ -433,7 +472,7 @@ describe("Stage in a Chromium browser", () => {
     expect(window.localStorage.getItem(gone)).toBeNull();
   });
 
-  it("mints again and loads a fresh client when the daemon socket reconnects", async () => {
+  it("loads a fresh client when a reopened status socket brings a new ticket", async () => {
     const { api, calls } = daemon();
     const view = render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
     await waitFor(() => expect(client()).not.toBeNull());
@@ -441,7 +480,167 @@ describe("Stage in a Chromium browser", () => {
     view.rerender(<Stage cell={ready} api={api} reconnects={1} listed={[CELL]} />);
     await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
     expect(client()).not.toBe(before);
+    expect(clients()).toHaveLength(1);
     expect(calls).toHaveLength(2);
+  });
+
+  it("keeps its client when a reopened status socket finds the same ticket", async () => {
+    const { api, calls } = daemon(true);
+    const view = await streaming(api);
+    const before = client();
+    view.rerender(<Stage cell={ready} api={api} reconnects={1} listed={[CELL]} />);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await act(async () => {});
+    expect(clients()).toHaveLength(1);
+    expect(client()).toBe(before);
+    expect(framesSent()).toHaveLength(1);
+    expect(stops()).toHaveLength(1); // The mount's own.
+  });
+
+  it("keeps its client and frames when the agent selects the same screen again", async () => {
+    const { api, calls } = daemon();
+    const selection = (revision: number) => ({
+      screen: "desktop" as const,
+      cellId: CELL,
+      revision,
+      geometry: { w: 2560, h: 1600, scale: 2 as const },
+    });
+    const view = await streaming(api, { selection: selection(0) });
+    const before = client();
+    // A task starting, the agent switching screens and a hand-back each publish a new revision.
+    for (const revision of [1, 2, 3])
+      view.rerender(
+        <Stage
+          cell={ready}
+          selection={selection(revision)}
+          api={api}
+          reconnects={0}
+          listed={[CELL]}
+        />,
+      );
+    await act(async () => {});
+    expect(clients()).toHaveLength(1);
+    expect(client()).toBe(before);
+    expect(calls).toHaveLength(1);
+    expect(framesSent()).toHaveLength(1);
+    expect(stops()).toHaveLength(1);
+  });
+
+  it("keeps its client, worker and canvas when the stage remounts in another container", async () => {
+    const { api, calls } = daemon();
+    const first = await streaming(api);
+    const before = client();
+    const canvas = document.querySelector("canvas.stage-canvas");
+    first.unmount();
+    const elsewhere = render(
+      <div className="focus">
+        <Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />
+      </div>,
+    );
+    expect(elsewhere.container.querySelector(".focus > canvas.stage-canvas")).toBe(canvas);
+    expect(clients()).toHaveLength(1);
+    expect(client()).toBe(before);
+    // The new stage takes the same client's frames at once, seeded with the frame it shows.
+    expect(framesSent()).toHaveLength(2);
+    expect((framesSent().at(-1)?.message.first as { source?: unknown })?.source).toBe(
+      before?.contentDocument?.getElementById("videoStream"),
+    );
+    expect(calls).toHaveLength(1);
+    expect(FakeWorker.instances).toHaveLength(1);
+    expect(worker()?.terminated).toBe(false);
+  });
+
+  it("closes the worker a minute after its last stage goes", async () => {
+    fakeTimers();
+    const { api } = daemon();
+    const view = await streaming(api);
+    view.unmount();
+    await act(async () => vi.advanceTimersByTime(KEEP_MS - 1000));
+    expect(worker()?.terminated).toBe(false);
+    expect(clients()).toHaveLength(1);
+    await act(async () => vi.advanceTimersByTime(1000));
+    expect(worker()?.terminated).toBe(true);
+    expect(clients()).toHaveLength(0);
+  });
+
+  it("keeps the desktop's client while the browser shows, and switches back to it at once", async () => {
+    const browserId = "01JXYZ0000000000000000ABCE";
+    const calls: string[] = [];
+    const api = createApi("a".repeat(43), {
+      fetchImpl: async (input) => {
+        const path = new URL(String(input)).pathname;
+        calls.push(path);
+        return new Response(
+          JSON.stringify(
+            path.endsWith("browser-stream-ticket")
+              ? { cellId: browserId, path: `/cells/${browserId}/browser/${"B".repeat(22)}/` }
+              : { path: ticketPath(1) },
+          ),
+        );
+      },
+    });
+    const desktop = {
+      screen: "desktop" as const,
+      cellId: CELL,
+      revision: 1,
+      geometry: { w: 2560, h: 1600, scale: 2 as const },
+    };
+    const browser = { ...desktop, screen: "browser" as const, cellId: browserId, revision: 2 };
+    const view = await streaming(api, { selection: desktop, parentId: CELL });
+    const desktopClient = client();
+    view.rerender(
+      <Stage
+        cell={{ ...ready, id: browserId }}
+        parentId={CELL}
+        selection={browser}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+      />,
+    );
+    await waitFor(() => expect(clients()).toHaveLength(2));
+    view.rerender(
+      <Stage
+        cell={ready}
+        parentId={CELL}
+        selection={{ ...desktop, revision: 3 }}
+        api={api}
+        reconnects={0}
+        listed={[CELL]}
+      />,
+    );
+    await waitFor(() => expect(framesSent()).toHaveLength(2));
+    expect(clients()[0]).toBe(desktopClient);
+    expect(calls.filter((path) => path.endsWith("/stream-ticket"))).toHaveLength(1);
+  });
+
+  it("takes the frames afresh, without a new client, when the page is shown again", async () => {
+    const { api, calls } = daemon();
+    await streaming(api);
+    const before = client();
+    fireEvent(document, new Event("visibilitychange"));
+    expect(framesSent()).toHaveLength(2);
+    expect(clients()).toHaveLength(1);
+    expect(client()).toBe(before);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("keeps a thawed page's client showing until its fresh replacement shows a frame", async () => {
+    const { api, calls } = daemon();
+    await streaming(api);
+    const before = client() as HTMLIFrameElement;
+    fireEvent(document, new Event("resume"));
+    await waitFor(() => expect(clients()).toHaveLength(2));
+    expect(calls).toHaveLength(2);
+    const fresh = clients()[1] as HTMLIFrameElement;
+    expect(fresh.getAttribute("src")).toBe(`${ticketPath(2)}#shared`);
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 600)));
+    expect(clients()).toHaveLength(2);
+    expect(clients()[0]).toBe(before);
+    playInClient(fresh, "t2");
+    await waitFor(() => expect(clients()).toHaveLength(1));
+    expect(client()).toBe(fresh);
+    await waitFor(() => expect(framesSent()).toHaveLength(2));
   });
 
   it("mints again after 10 s without a video element in the client, and never while it has one", async () => {
@@ -480,50 +679,88 @@ describe("Stage in a Chromium browser", () => {
     await waitFor(() => expect(frames()).toHaveLength(2));
   });
 
-  it("refreshes a stalled tap only when the client decodes another frame", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+  it("takes a stalled tap again, then replaces the client only if that does not help", async () => {
+    fakeTimers();
     const { api, calls } = daemon();
-    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
-    await waitFor(() => expect(client()).not.toBeNull());
+    await streaming(api);
     const before = client() as HTMLIFrameElement;
-    playInClient(before, "t1");
     let decoded = 10;
-    const video = before.contentDocument?.getElementById("videoStream");
-    Object.defineProperty(video, "getVideoPlaybackQuality", {
-      value: () => ({ totalVideoFrames: decoded }),
-    });
-    await act(async () => vi.advanceTimersByTime(1_000));
-    const worker = FakeWorker.instances[0];
-    const sourceId = worker?.sent.findLast((row) => row.message.type === "frames")?.message
-      .sourceId;
-    act(() =>
-      worker?.onmessage?.({
-        data: {
-          type: "stats",
-          sourceId,
-          stats: { presented: 1, fps: 30, lastFrameAt: 1, width: 1280, height: 800 },
-        },
-      }),
+    Object.defineProperty(
+      before.contentDocument?.getElementById("videoStream"),
+      "getVideoPlaybackQuality",
+      {
+        value: () => ({ totalVideoFrames: decoded }),
+      },
     );
     await act(async () => vi.advanceTimersByTime(30_000));
     expect(calls).toHaveLength(1); // A still desktop has no new frames to present.
+    expect(framesSent()).toHaveLength(1);
     decoded += 1;
     await act(async () => vi.advanceTimersByTime(250));
-    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
-    expect(client()).not.toBe(before);
+    expect(framesSent()).toHaveLength(2);
+    expect(calls).toHaveLength(1);
+    for (let t = 0; t < TAP_STALL_MS + STALE_MS; t += 250) {
+      decoded += 1;
+      await act(async () => vi.advanceTimersByTime(250));
+    }
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await waitFor(() => expect(clients()).toHaveLength(2));
+    expect(clients()[0]).toBe(before);
   });
 
-  it("refreshes after suspended timers resume even without a browser lifecycle event", async () => {
-    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"], shouldAdvanceTime: true });
+  it("replaces the client after suspended timers resume, keeping the old one until then", async () => {
+    fakeTimers();
     const { api, calls } = daemon();
-    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
-    await waitFor(() => expect(client()).not.toBeNull());
-    playInClient(client() as HTMLIFrameElement, "t1");
-    await act(async () => vi.advanceTimersByTime(1000));
+    await streaming(api);
+    const before = client();
     vi.setSystemTime(Date.now() + 30_000);
     await act(async () => vi.advanceTimersByTime(250));
-    await waitFor(() => expect(client()?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`));
-    expect(calls).toHaveLength(2);
+    await waitFor(() => expect(calls).toHaveLength(2));
+    await waitFor(() => expect(clients()).toHaveLength(2));
+    expect(clients()[0]).toBe(before);
+    expect(clients()[1]?.getAttribute("src")).toBe(`${ticketPath(2)}#shared`);
+  });
+
+  it("asks the encoder for a key frame when a fresh tap shows nothing", async () => {
+    fakeTimers();
+    const { api } = daemon();
+    render(<Stage cell={ready} api={api} reconnects={0} listed={[CELL]} />);
+    await waitFor(() => expect(client()).not.toBeNull());
+    const frame = client() as HTMLIFrameElement;
+    const send = vi.fn();
+    Object.assign(frame.contentWindow as object, { selkiesTransport: { readyState: 1, send } });
+    playInClient(frame, "t1");
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(framesSent()).toHaveLength(1);
+    expect(send).not.toHaveBeenCalledWith("REQUEST_KEYFRAME");
+    await act(async () => vi.advanceTimersByTime(FIRST_FRAME_MS + 250));
+    expect(send).toHaveBeenCalledWith("REQUEST_KEYFRAME");
+    present();
+    send.mockClear();
+    await act(async () => vi.advanceTimersByTime(5_000));
+    expect(send).not.toHaveBeenCalledWith("REQUEST_KEYFRAME");
+  });
+
+  it("holds its last picture while the client reconnects, and says so only after a second", async () => {
+    fakeTimers();
+    const { api } = daemon();
+    const onPicture = vi.fn();
+    await streaming(api, { onPicture });
+    expect(onPicture).toHaveBeenLastCalledWith("live");
+    const frame = client() as HTMLIFrameElement;
+    // Selkies reloads its page to reconnect: its video goes, then comes back with a new track.
+    frame.contentDocument?.getElementById("videoStream")?.remove();
+    await act(async () => vi.advanceTimersByTime(HELD_AFTER_MS - 250));
+    expect(onPicture).toHaveBeenLastCalledWith("live");
+    await act(async () => vi.advanceTimersByTime(500));
+    expect(onPicture).toHaveBeenLastCalledWith("held");
+    expect(document.querySelector(".stage-veil")).toBeNull();
+    expect(stops()).toHaveLength(1);
+    playInClient(frame, "t2");
+    await act(async () => vi.advanceTimersByTime(250));
+    expect(framesSent()).toHaveLength(2);
+    present();
+    expect(onPicture).toHaveBeenLastCalledWith("live");
   });
 
   it("removes the client and stops the frames when the cell leaves ready", async () => {
@@ -537,14 +774,16 @@ describe("Stage in a Chromium browser", () => {
     expect(FakeWorker.instances[0]?.sent.at(-1)?.message.type).toBe("stop");
   });
 
-  it("veils the stage while the stream is stalled", () => {
+  it("keeps the picture unveiled while the stream is stalled", () => {
     const { api } = daemon();
     const stalled = { ...ready, stream: { ...ready.stream, connection: "stalled" as const } };
-    const view = render(<Stage cell={stalled} api={api} reconnects={0} listed={[CELL]} />);
-    expect(document.querySelector(".stage-veil.on")?.textContent).toBe("Reconnecting…");
-    const live = { ...ready, stream: { ...ready.stream, connection: "live" as const } };
-    view.rerender(<Stage cell={live} api={api} reconnects={0} listed={[CELL]} />);
-    expect(document.querySelector(".stage-veil.on")).toBeNull();
+    render(<Stage cell={stalled} api={api} reconnects={0} listed={[CELL]} />);
+    expect(document.querySelector(".stage-veil")).toBeNull();
+    expect(
+      worker()
+        ?.sent.filter((row) => row.message.type === "view")
+        .map((row) => row.message.view),
+    ).toContainEqual({ freeze: true, zoom: 1 });
   });
 
   it("detaches a frozen computer, suppresses reconnects, and mints a new ticket only after Resume", async () => {
