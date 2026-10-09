@@ -34,6 +34,7 @@ const PLANNED: IconName[] = [
   "arrow-left",
   "arrow-right",
   "key-round",
+  "settings",
   "sliders-horizontal",
   "copy",
   "clipboard-paste",

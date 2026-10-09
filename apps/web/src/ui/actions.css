@@ -183,6 +183,22 @@
     --_fg-hover: var(--color-danger-fg);
   }
 
+  /* On the island over the picture: a lighter face that reads on glass. */
+  .ui-button[data-variant="glass"] {
+    --_bg: var(--color-glass-hover);
+    --_bg-hover: var(--color-glass-pressed);
+    --_bg-pressed: var(--color-glass-pressed);
+  }
+
+  .ui-button[data-round] {
+    --_pad: calc(var(--spacing) * 3);
+    border-radius: var(--radius-full);
+  }
+
+  .ui-button[data-variant="primary"][data-round] {
+    --_shadow: var(--shadow-porcelain-sm);
+  }
+
   @media (hover: hover) {
     .ui-button:not([aria-disabled="true"], [data-pressed]):hover {
       --_face: var(--_bg-hover);
@@ -317,6 +333,12 @@
 
   .ui-icon-button[data-variant="glass"] {
     color: var(--color-fg-1);
+  }
+
+  /* The island's controls draw their glyphs a size down, so the bars and the square sit light. */
+  .ui-icon-button[data-variant="glass"] > .ui-icon {
+    width: 16px;
+    height: 16px;
   }
 
   /* Porcelain for the one main action. Unavailable, it falls back to a control face with a faint

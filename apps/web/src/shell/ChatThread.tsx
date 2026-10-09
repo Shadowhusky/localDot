@@ -10,7 +10,6 @@ import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { IconButton } from "../ui/IconButton.tsx";
-import { Presence } from "../ui/Presence.tsx";
 import "./conversation.css";
 
 const NO_SPEND: readonly SpendCall[] = [];
@@ -36,10 +35,13 @@ export function NewConversationButton({ run, reason }: NewConversation) {
   );
 }
 
-export function ConversationRail({
+// The conversation in the rail, with Activity (or another view) laid over it when chosen.
+export function ChatThread({
   agent,
   composer,
   answer,
+  cover,
+  covered = false,
   recovery,
   visible = true,
   rows = NO_ROWS,
@@ -50,12 +52,12 @@ export function ConversationRail({
   computerReady = false,
   sessions = NO_SESSIONS,
   more = false,
-  newConversation,
-  titled = true,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
   answer?: ReactNode;
+  cover?: ReactNode;
+  covered?: boolean;
   recovery?: ReactNode;
   visible?: boolean;
   rows?: TimelineRow<StepRowView>[];
@@ -68,9 +70,6 @@ export function ConversationRail({
   sessions?: readonly string[];
   // Older tasks of the conversation are left out of `sessions`.
   more?: boolean;
-  newConversation?: NewConversation;
-  // False where a tab names the rail: its title is left to screen readers.
-  titled?: boolean;
 }) {
   const model = agent?.model;
   const ended = model?.ended?.reason;
@@ -100,34 +99,26 @@ export function ConversationRail({
     ];
   }, [earlier, thread]);
   return (
-    <aside className="rail conversation-rail" aria-label="Conversation">
-      <div className={titled ? "rail-h" : "ui-visually-hidden"}>
-        <h2>Conversation</h2>
-      </div>
-      <Presence show={!!newConversation && !!sessionId}>
-        <span className="conversation-new">
-          {newConversation && <NewConversationButton {...newConversation} />}
-        </span>
-      </Presence>
-      <Conversation
-        visible={visible}
-        ownerKey={sessions[0] ?? sessionId ?? ""}
-        items={shown}
-        truncated={model?.historyTruncated ?? false}
-        earlierInReplay={leftToReplay(sessions, sessionId, more)}
-        live={working ? live : null}
-        ended={ended}
-        pendingAsk={model?.pendingAsk ?? null}
-        api={api}
-        sessionId={sessionId}
-        recovery={recovery}
-        error={agent?.error}
-        onReplay={onReplay}
-        onReplayTask={onReplayTask}
-        computerReady={computerReady}
-        composer={composer}
-        answer={answer}
-      />
-    </aside>
+    <Conversation
+      visible={visible}
+      ownerKey={sessions[0] ?? sessionId ?? ""}
+      items={shown}
+      truncated={model?.historyTruncated ?? false}
+      earlierInReplay={leftToReplay(sessions, sessionId, more)}
+      live={working ? live : null}
+      ended={ended}
+      pendingAsk={model?.pendingAsk ?? null}
+      api={api}
+      sessionId={sessionId}
+      recovery={recovery}
+      error={agent?.error}
+      onReplay={onReplay}
+      onReplayTask={onReplayTask}
+      computerReady={computerReady}
+      composer={composer}
+      answer={answer}
+      cover={cover}
+      covered={covered}
+    />
   );
 }

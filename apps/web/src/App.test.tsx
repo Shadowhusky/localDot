@@ -75,7 +75,9 @@ const keyReply = (path: string): Response | undefined => {
   return undefined;
 };
 const hudButton = () =>
-  within(screen.getByTestId("hud-status").closest(".hud") as HTMLElement).getByRole("button");
+  within(screen.getByTestId("hud-status").closest(".island") as HTMLElement).getAllByRole(
+    "button",
+  )[0] as HTMLElement;
 const noCells = async (input: RequestInfo | URL) =>
   keyReply(new URL(String(input)).pathname) ?? json([]);
 const unauthorized = async () => new Response("unauthorized", { status: 401 });
@@ -206,8 +208,8 @@ describe("App Replay mode", () => {
   it("enables Replay when a session exists and opens it from the top bar", async () => {
     const fixture = historyDaemon();
     render(<App fetchImpl={fixture.fetchImpl} />);
-    const replayButton = screen.getByRole("button", { name: "Replay" });
-    await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
+    const replayButton = screen.getByRole("radio", { name: "Replay" });
+    await waitFor(() => expect(replayButton.hasAttribute("aria-disabled")).toBe(false));
     fireEvent.click(replayButton);
     expect(new URLSearchParams(window.location.search).get("replay")).toBe(fixture.sessionId);
     expect(await screen.findByRole("button", { name: /^All tasks/ })).toBeTruthy();
@@ -227,9 +229,9 @@ describe("App Replay mode", () => {
   it("adds one history entry for Replay so browser Back returns to Watch", async () => {
     const fixture = historyDaemon();
     render(<App fetchImpl={fixture.fetchImpl} />);
-    const replayButton = screen.getByRole("button", { name: "Replay" });
-    const watchButton = screen.getByRole("button", { name: "Watch" });
-    await waitFor(() => expect(replayButton.hasAttribute("disabled")).toBe(false));
+    const replayButton = screen.getByRole("radio", { name: "Replay" });
+    const watchButton = screen.getByRole("radio", { name: "Watch" });
+    await waitFor(() => expect(replayButton.hasAttribute("aria-disabled")).toBe(false));
     const entries = window.history.length;
     for (const leave of [
       () => fireEvent.click(watchButton),
@@ -249,7 +251,7 @@ describe("App Replay mode", () => {
     window.history.back();
     await waitFor(() => expect(screen.queryByRole("main", { name: "Replay" })).toBeNull());
     expect(window.location.search).toBe("");
-    expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
+    expect(screen.getByRole("radio", { name: "Watch" }).getAttribute("aria-checked")).toBe("true");
   });
   it("Space toggles play and Escape goes back to Watch", async () => {
     const fixture = historyDaemon();
@@ -264,8 +266,8 @@ describe("App Replay mode", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(window.location.search).toBe("");
     expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
-    expect(screen.getByRole("button", { name: "Watch" }).getAttribute("aria-current")).toBe("page");
-    expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
+    expect(screen.getByRole("radio", { name: "Watch" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1);
   });
   it("stays up through a long scrub, though WebKit refuses a hundredth address change in ten seconds", async () => {
     const fixture = historyDaemon();
@@ -291,9 +293,11 @@ describe("App Replay mode", () => {
   it("keeps Watch working when no session exists", async () => {
     render(<App fetchImpl={noCells as typeof fetch} />);
     await screen.findAllByRole("button", { name: "Turn on" });
-    const replayButton = screen.getByRole("button", { name: "Replay" });
-    expect(replayButton.hasAttribute("disabled")).toBe(true);
-    expect(replayButton.title).toBe("No sessions yet");
+    const replayButton = screen.getByRole("radio", { name: "Replay" });
+    expect(replayButton.getAttribute("aria-disabled")).toBe("true");
+    expect(
+      document.getElementById(replayButton.getAttribute("aria-describedby") ?? "")?.textContent,
+    ).toBe("No recordings yet");
   });
 });
 
@@ -330,7 +334,7 @@ describe("App token states", () => {
     fireEvent.click(trigger);
     const sheet = screen.getByRole("dialog", { name: "Keys" });
     expect(sheet.getAttribute("aria-modal")).toBe("false");
-    expect(document.querySelector(".theatre-content")?.hasAttribute("inert")).toBe(false);
+    expect(document.querySelector(".watch")?.hasAttribute("inert")).toBe(false);
     fireEvent.keyDown(document.activeElement as Element, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Keys" })).toBeNull());
     expect(document.activeElement).toBe(trigger);
@@ -407,7 +411,7 @@ describe("App token states", () => {
     expect(memoryReads).toHaveLength(1);
   });
 
-  it("keeps Stop computer inside Keys on a phone, where the sheet covers the page's Stop", async () => {
+  it("keeps Shut down inside Keys on a phone, where the sheet covers the page", async () => {
     vi.stubGlobal("matchMedia", (query: string) => ({
       matches: /width < (700|1100)px/.test(query),
       media: query,
@@ -423,11 +427,11 @@ describe("App token states", () => {
       return json({});
     });
     render(<App fetchImpl={fetchImpl} />);
-    await screen.findByRole("button", { name: "Stop computer" });
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Connecting…"));
     fireEvent.click(screen.getByTestId("keys-button"));
     const sheet = screen.getByRole("dialog", { name: "Keys" });
     expect(sheet.getAttribute("aria-modal")).toBe("true");
-    fireEvent.click(within(sheet).getByRole("button", { name: "Stop computer" }));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Shut down" }));
     await waitFor(() =>
       expect(calls.some((call) => call.method === "POST" && call.path.endsWith("/stop"))).toBe(
         true,
@@ -443,7 +447,7 @@ describe("App token states", () => {
       return json({});
     });
     render(<App fetchImpl={fetchImpl} />);
-    await screen.findByRole("button", { name: "Stop computer" });
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Connecting…"));
     const field = screen.getByLabelText("New task") as HTMLTextAreaElement;
     const key = `sk-proj-${"a".repeat(156)}`;
     fireEvent.input(field, { target: { value: `before ${key} after` } });
@@ -484,15 +488,14 @@ describe("App token states", () => {
       return json([]);
     }) as typeof fetch;
     render(<App fetchImpl={fetchImpl} />);
-    // Until the daemon has listed its cells, Start can't create a second computer.
+    // Until the daemon has listed its cells nothing offers Turn on, so no second computer starts.
     expect(screen.getByTestId("hud-status").textContent).toBe("Checking…");
-    expect(hudButton().getAttribute("aria-disabled")).toBe("true");
-    hudButton().click();
-    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("No computer"));
-    const start = hudButton();
-    expect(start.textContent).toBe("Turn on");
+    expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("hidden");
+    expect(screen.queryByRole("button", { name: "Turn on" })).toBeNull();
+    const start = await screen.findByRole("button", { name: "Turn on" });
+    expect(screen.getByTestId("hud-status").textContent).toBe("No computer");
     expect(start.getAttribute("aria-disabled")).toBeNull();
-    expect(screen.getByRole("navigation", { name: "Mode" }).textContent).toBe("WatchReplay");
+    expect(screen.getByRole("radiogroup", { name: "Mode" }).textContent).toBe("WatchReplay");
     start.click();
     await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Starting…"));
     expect(calls).toEqual(["GET /api/cells", "POST /api/cells"]);
@@ -520,7 +523,7 @@ describe("App token states", () => {
     );
 
     window.location.hash = `#token=${TOKEN}`;
-    await waitFor(() => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2));
+    await waitFor(() => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1));
     expect(window.location.hash).toBe("");
     expect(window.localStorage.getItem(TOKEN_KEY)).toBe(TOKEN);
   });
@@ -537,9 +540,8 @@ describe("App token states", () => {
     expect(first?.url).toBe(`ws://${window.location.host}/api/cells/${CELL_ID}/status`);
     expect(first?.protocols).toEqual(["localdot.v1", `localdot.token.${TOKEN}`]);
     act(() => first?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }));
-    expect(screen.getByTestId("hud-status").textContent).toBe("Live");
+    expect(screen.getByTestId("hud-status").textContent).toBe("Ready");
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
-    expect(document.querySelector(".bar .live")?.textContent).toBe("Live");
     watching.unmount();
     expect(first?.closed).toBe(true);
 
@@ -554,7 +556,7 @@ describe("App token states", () => {
     expect(FakeWebSocket.instances).toHaveLength(2);
   });
 
-  it("stops and restarts the computer from the HUD and shows a refused request under the stage", async () => {
+  it("shuts the computer down from Settings, turns it on from the island and says why it refused", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -567,8 +569,14 @@ describe("App token states", () => {
       return json([summary("ready", "live")]);
     }) as typeof fetch;
     render(<App fetchImpl={fetchImpl} />);
-    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Live"));
-    screen.getByRole("button", { name: "Stop computer" }).click();
+    await waitFor(() => expect(screen.getByTestId("hud-status").textContent).toBe("Ready"));
+    expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("ready");
+    fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+    fireEvent.click(
+      within(screen.getByRole("dialog", { name: "Settings" })).getByRole("button", {
+        name: "Shut down",
+      }),
+    );
     await waitFor(() => expect(calls).toContain(`POST /api/cells/${CELL_ID}/stop`));
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("stopped")) }),
@@ -578,7 +586,7 @@ describe("App token states", () => {
     hudButton().click();
     expect(await screen.findByText(DOCKER_DOWN_CAPTION)).toBeTruthy();
     expect(document.body.textContent).not.toContain("ENOENT");
-    expect(calls.filter((call) => !call.endsWith("/live"))).toEqual([
+    expect(calls.filter((call) => call.includes("/api/cells") && !call.endsWith("/live"))).toEqual([
       "GET /api/cells",
       `POST /api/cells/${CELL_ID}/stop`,
       `POST /api/cells/${CELL_ID}/start`,
@@ -591,8 +599,8 @@ describe("App token states", () => {
     const paused = { ...summary("ready", "stalled"), paused: true as const };
     const d = daemon(({ path }) => (path.endsWith("/resume") ? pending.promise : json([paused])));
     render(<App fetchImpl={d.fetchImpl} />);
-    const resume = await screen.findByRole("button", { name: "Resume computer" });
-    const stop = screen.getByRole("button", { name: "Stop computer" });
+    const resume = await screen.findByRole("button", { name: "Continue" });
+    const stop = screen.getByRole("button", { name: "Shut down" });
     act(() => {
       fireEvent.click(resume);
       fireEvent.click(resume);
@@ -609,8 +617,8 @@ describe("App token states", () => {
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
-    expect(screen.getByTestId("hud-status").textContent).toBe("Live");
-    expect(screen.queryByRole("button", { name: "Resume computer" })).toBeNull();
+    expect(screen.getByTestId("hud-status").textContent).toBe("Ready");
+    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
   });
 
   it("leaves a refused Resume paused and shows keyd's safe offline answer until pause changes", async () => {
@@ -621,7 +629,7 @@ describe("App token states", () => {
       path.endsWith("/resume") ? new Response(offline, { status: 503 }) : json([paused]),
     );
     render(<App fetchImpl={d.fetchImpl} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Resume computer" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
     expect(await screen.findByText(offline)).toBeTruthy();
     expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
     expect(d.seen().some((c) => c.endsWith("/start"))).toBe(false);
@@ -693,7 +701,7 @@ describe("App HUD", () => {
 
   const status = () => screen.getByTestId("hud-status").textContent;
   const button = () => hudButton();
-  const caption = () => document.querySelector(".caption")?.textContent ?? "";
+  const caption = () => document.querySelector(".narration")?.textContent ?? "";
   const pushState = (cell: CellSummary) =>
     act(() => FakeWebSocket.instances.at(-1)?.onmessage?.({ data: JSON.stringify(cell) }));
 
@@ -713,25 +721,20 @@ describe("App HUD", () => {
     expect(d.seen()).toEqual(["GET /api/cells", "GET /api/cells"]);
   });
 
-  it("keeps one HUD button through Start, disabled while the create is out, with focus kept", async () => {
+  it("keeps the one Turn on disabled while the create is out, then offers Shut down", async () => {
     const created = deferred<Response>();
     const d = daemon(({ method }) => (method === "POST" ? created.promise : json([])));
     render(<App fetchImpl={d.fetchImpl} />);
-    await waitFor(() => expect(status()).toBe("No computer"));
-    const start = button();
-    start.focus();
+    const start = await screen.findByRole("button", { name: "Turn on" });
+    expect(status()).toBe("No computer");
     start.click();
     await waitFor(() => expect(status()).toBe("Starting…"));
-    expect(button()).toBe(start);
     expect(start.getAttribute("aria-disabled")).toBe("true");
-    expect(document.activeElement).toBe(start);
     start.click();
     expect(d.seen()).toEqual(["GET /api/cells", "POST /api/cells"]);
     created.resolve(json(summary("starting"), 202));
-    await waitFor(() => expect(start.getAttribute("aria-disabled")).toBeNull());
-    expect(button()).toBe(start);
-    expect(start.textContent).toBe("Stop computer");
-    expect(document.activeElement).toBe(start);
+    await waitFor(() => expect(button().textContent).toBe("Shut down"));
+    expect(button().getAttribute("aria-disabled")).toBeNull();
   });
 
   it("stops a computer that is still starting", async () => {
@@ -740,7 +743,7 @@ describe("App HUD", () => {
     );
     render(<App fetchImpl={d.fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Starting…"));
-    screen.getByRole("button", { name: "Stop computer" }).click();
+    screen.getByRole("button", { name: "Shut down" }).click();
     await waitFor(() => expect(d.seen()).toContain(`POST /api/cells/${CELL_ID}/stop`));
   });
 
@@ -754,7 +757,7 @@ describe("App HUD", () => {
     await waitFor(() => expect(status()).toBe("Failed"));
     expect(caption()).toContain("Your computer didn't stop");
     expect(caption()).not.toContain("ENOENT");
-    screen.getByRole("button", { name: "Stop computer" }).click();
+    screen.getByRole("button", { name: "Shut down" }).click();
     await waitFor(() => expect(d.seen()).toContain(`POST /api/cells/${CELL_ID}/stop`));
   });
 
@@ -768,13 +771,12 @@ describe("App HUD", () => {
       return json(saved ? [summary("starting")] : []);
     });
     render(<App fetchImpl={d.fetchImpl} />);
-    await waitFor(() => expect(status()).toBe("No computer"));
-    button().click();
+    (await screen.findByRole("button", { name: "Turn on" })).click();
     await waitFor(() =>
       expect(d.seen()).toEqual(["GET /api/cells", "POST /api/cells", "GET /api/cells"]),
     );
     await waitFor(() => expect(status()).toBe("Starting…"));
-    expect(screen.getByRole("button", { name: "Stop computer" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Shut down" })).toBeTruthy();
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
   });
 
@@ -818,15 +820,15 @@ describe("App HUD", () => {
     expect(status()).toBe("Starting…");
   });
 
-  it("announces the caption politely and names the stream state in the bar", async () => {
+  it("announces the caption politely and lights the stage once the stream is live", async () => {
     render(<App fetchImpl={daemon(() => json([summary("ready", "connecting")])).fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Connecting…"));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-    expect(document.querySelector(".caption")?.getAttribute("aria-live")).toBe("polite");
-    expect(document.querySelector(".bar .live")?.textContent).toBe("Not live");
+    expect(document.querySelector(".narration")?.getAttribute("aria-live")).toBe("polite");
+    expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(false);
     expect(document.body.textContent).not.toContain("Offline");
     pushState(summary("ready", "live"));
-    expect(document.querySelector(".bar .live")?.textContent).toBe("Live");
+    expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
   });
 });
 
@@ -990,7 +992,7 @@ describe("App token hardening", () => {
       expect(window.localStorage.getItem(TOKEN_KEY)).toBe(NEWER);
       expect(screen.queryByRole("heading", { name: "Open localDot from Terminal" })).toBeNull();
       expect(screen.queryByText(/This browser was signed out/)).toBeNull();
-      expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(2);
+      expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1);
     },
   );
 

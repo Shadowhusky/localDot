@@ -1,28 +1,33 @@
 /* The conversation: one scroller holding the thread, with the composer (or the answer panel) held at
    its foot. Messages, questions, results and the work line are rows of one card map. */
 
-/* New conversation floats at the rail's top right, level with its label, so it adds no row. */
-.conversation-rail {
-  position: relative;
-}
-
-.conversation-new {
-  position: absolute;
-  top: calc(var(--spacing-rail-top) - var(--spacing) * 2.5);
-  right: 0;
-  z-index: 2;
-}
-
 .thread-body {
   position: relative;
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
 }
 
-.thread-scroll {
-  flex: 1;
+/* Activity lies over the thread, in the same box above the foot; each keeps its own scroll. */
+.thread-scroll,
+.thread-cover {
+  grid-area: 1 / 1;
+  min-height: 0;
+}
+
+.thread-foot {
+  grid-area: 2 / 1;
+}
+
+.thread-cover {
+  display: grid;
+}
+
+.thread-body:not([data-covered]) > .thread-cover,
+.thread-body[data-covered] > .thread-scroll {
+  visibility: hidden;
 }
 
 .thread-content {
@@ -121,23 +126,38 @@
   margin-top: calc(var(--spacing) * 5);
 }
 
+/* Nothing said yet: one question, one line, three things to try, centred in the thread. */
 .thread-empty {
-  margin-block: calc(var(--spacing) * 2) auto;
-  max-width: 40ch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 2.5);
+  margin-block: auto;
+  text-align: center;
 }
 
 .thread-empty h3 {
   color: var(--color-fg-1);
   font:
-    var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
     var(--font-ui);
-  letter-spacing: var(--text-title-2--letter-spacing);
+  letter-spacing: var(--text-title-3--letter-spacing);
 }
 
 .thread-empty p {
-  margin-top: var(--spacing);
-  color: var(--color-fg-3);
+  max-width: 270px;
+  color: var(--color-fg-2);
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+  text-wrap: pretty;
+}
+
+.thread-suggestions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  margin-top: calc(var(--spacing) * 2);
 }
 
 /* Messages. You on the right in a bubble; dot as plain text under its name. */
@@ -912,27 +932,21 @@
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  padding: calc(var(--spacing) * 2);
-  border-radius: var(--radius-xl);
+  padding: calc(var(--spacing) / 2) calc(var(--spacing) * 2) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-lg);
   background-color: var(--color-raised);
   box-shadow:
-    inset 0 0 0 1px var(--color-field-line),
-    var(--shadow-raised);
+    var(--shadow-raised),
+    0 0 0 1px var(--color-hairline);
   transition: box-shadow var(--dur-hover) var(--ease-standard);
-}
-
-@media (hover: hover) {
-  .composer-card:hover {
-    box-shadow:
-      inset 0 0 0 1px var(--color-field-line-hover),
-      var(--shadow-raised);
-  }
 }
 
 .composer-card:focus-within {
   box-shadow:
-    inset 0 0 0 1px var(--color-fg-2),
-    var(--shadow-raised);
+    var(--shadow-raised),
+    0 0 0 1px var(--color-fg-4),
+    0 0 0 4px var(--color-hairline);
 }
 
 .composer-bar {
@@ -940,7 +954,7 @@
   align-items: center;
   gap: var(--spacing);
   min-height: calc(var(--spacing) * 8);
-  margin-top: var(--spacing);
+  margin: var(--spacing) 0 0 calc(var(--spacing) * -1);
 }
 
 .composer-hint {
@@ -965,26 +979,6 @@
 
 .composer-count {
   padding-inline: var(--spacing);
-}
-
-.composer-model {
-  min-width: 0;
-  max-width: 100%;
-}
-
-.composer-model > .ui-button-content {
-  min-width: 0;
-}
-
-.composer-model-name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.composer-bar .composer-stop > .ui-icon {
-  width: calc(var(--spacing) * 3);
-  height: calc(var(--spacing) * 3);
-  fill: currentColor;
 }
 
 .composer-notice-icon {

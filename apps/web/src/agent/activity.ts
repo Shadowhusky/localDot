@@ -1,5 +1,6 @@
 import { microsToMs, msToSeconds } from "@localdot/protocol";
 import type { KeyUseState } from "@localdot/stage";
+import { clock as runningClock } from "../copy/format.ts";
 import { type KeyUseRowView, type TimelineRow, timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import type { IconName } from "../ui/icons.ts";
@@ -164,8 +165,7 @@ export function seconds(ms: number): string {
 }
 
 export function clock(ms: number): string {
-  const total = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+  return runningClock(Math.round(ms / 1000));
 }
 
 export function diffStat(patches: readonly (string | undefined)[]): string {

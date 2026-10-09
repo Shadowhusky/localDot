@@ -174,7 +174,7 @@ test("after Stop and Resume computer, the live computer keeps the stopped verdic
   await page.getByRole("button", { name: "Resume computer" }).click();
   await expect(status(page)).toHaveText("Task stopped");
   await expect(hudButton(page)).toHaveText("Stop computer");
-  await expect(page.locator(".live")).toHaveText("Live");
+  await expect(page.locator(".live")).toHaveText("Ready");
   await expect(control(page)).toHaveCount(0);
   await expect(page.locator(".task-connection")).toHaveCount(0);
 });

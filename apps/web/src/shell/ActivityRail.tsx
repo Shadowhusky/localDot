@@ -49,8 +49,6 @@ export interface ActivityRailProps {
   asOfMs?: number;
   onSelect?(stepId: string): void;
   planSnapshot?: PlanItemState[];
-  // False where a tab names the rail: its title is left to screen readers.
-  titled?: boolean;
   agent?: AgentModel;
   models?: TaskModelSelection;
   modelName?(provider: string, model: string): string | undefined;
@@ -99,7 +97,6 @@ export function ActivityRail({
   asOfMs,
   onSelect,
   planSnapshot,
-  titled = true,
 }: ActivityRailProps) {
   const replay = asOfMs !== undefined;
   const model = agent ?? EMPTY;
@@ -261,7 +258,8 @@ export function ActivityRail({
 
   return (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
-      <div className={titled ? "rail-h" : "ui-visually-hidden"}>
+      {/* A tab or the column names it on screen; Replay says how far its record runs. */}
+      <div className={replay ? "rail-h" : "ui-visually-hidden"}>
         <h2>Activity</h2>
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
@@ -364,6 +362,14 @@ export function ActivityRail({
             {model.historyTruncated && (
               <p className="activity-note">Older activity is kept in the task log.</p>
             )}
+            {agent && sessionId && (
+              <UsageFooter
+                model={model}
+                selection={models}
+                modelName={modelName}
+                onSpending={onSpending}
+              />
+            )}
           </div>
         </ScrollArea>
         {!replay && started && (
@@ -383,14 +389,6 @@ export function ActivityRail({
           </button>
         )}
       </div>
-      {agent && sessionId && (
-        <UsageFooter
-          model={model}
-          selection={models}
-          modelName={modelName}
-          onSpending={onSpending}
-        />
-      )}
     </aside>
   );
 }

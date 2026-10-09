@@ -51,21 +51,21 @@ import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
-import {
-  ConversationRail,
-  type NewConversation,
-  NewConversationButton,
-} from "./shell/ConversationRail.tsx";
-import { Hud } from "./shell/Hud.tsx";
-import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
+import { Caption } from "./shell/Caption.tsx";
+import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
+import { HudIsland } from "./shell/HudIsland.tsx";
+import { islandShape, pauseSlot, takeSlot } from "./shell/island.ts";
+import { useLayout } from "./shell/layout.ts";
+import { MoreMenu } from "./shell/MoreMenu.tsx";
+import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
-import { StageColumn } from "./shell/StageColumn.tsx";
+import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { Announcer } from "./ui/Announcer.tsx";
-import { PHONE, useMediaQuery } from "./ui/media.ts";
 import { Presence } from "./ui/Presence.tsx";
+import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -73,6 +73,8 @@ export interface AppProps {
 }
 
 type Rejected = "stored" | "link" | "code" | null;
+// What the rail shows: the chat, Activity laid over it, or the controls dot handed over.
+type RailView = "chat" | "activity" | "takeover";
 
 const RETRY_CHECK_MS = 2000;
 const FROM_WATCH = { fromWatch: true };
@@ -391,19 +393,8 @@ function Theatre({ api }: { api: ApiClient }) {
   const browserScreen = useBrowserScreen(api, cell, selectedScreen);
   const physicalStageCell = selectedScreen?.screen === "browser" ? browserScreen.cell : cell;
   const manualGeometry = selectedScreen?.geometry ?? session.model.screen;
-  const [pane, setPane] = useState<TheatrePane>("computer");
-  const [narrow, setNarrow] = useState(
-    () => window.matchMedia?.("(width < 1100px)").matches ?? false,
-  );
-  useEffect(() => {
-    if (!window.matchMedia) return;
-    const media = window.matchMedia("(width < 1100px)");
-    const changed = () => setNarrow(media.matches);
-    changed();
-    media.addEventListener("change", changed);
-    return () => media.removeEventListener("change", changed);
-  }, []);
-  const phone = useMediaQuery(PHONE);
+  const layout = useLayout();
+  const [railView, setRailView] = useState<RailView>("chat");
   const controls = useTaskControls({
     api,
     cell,
@@ -411,7 +402,7 @@ function Theatre({ api }: { api: ApiClient }) {
     agent,
     feed: session.agentFeed,
     suspended: keysOpen || settings.open,
-    manualVisible: !narrow || pane === "computer",
+    manualVisible: true,
     refreshCell: retry,
   });
   const safety = useSafety({
@@ -465,13 +456,19 @@ function Theatre({ api }: { api: ApiClient }) {
     manualLive ? (takeover?.requestId ?? null) : null,
     agent.reconcile,
   );
+  // The rail opens on the hand-over's controls when dot hands the computer over; once it is handed
+  // back, the rail goes back to the chat.
   const takeoverShown = useRef<string | null>(null);
   useEffect(() => {
     const requestId = takeover?.requestId;
     if (!requestId || requestId === takeoverShown.current) return;
     takeoverShown.current = requestId;
-    if (narrow) setPane("computer");
-  }, [takeover?.requestId, narrow]);
+    setRailView("takeover");
+  }, [takeover?.requestId]);
+  const shownView: RailView =
+    (railView === "takeover" && !takeover) || (railView === "activity" && layout === "wide")
+      ? "chat"
+      : railView;
   const guardStart = () => {
     if (
       !controls.stopping &&
@@ -577,13 +574,13 @@ function Theatre({ api }: { api: ApiClient }) {
       !agent.model.pendingTakeover &&
       !agent.snapshot?.pendingTakeover,
   });
-  // The composer offers the task's Stop exactly when the HUD does.
-  const taskStopAction = appStatus.actions.find((action) => action.kind === "stop-task");
+  // The sheets offer Shut down, which the island leaves out; on a phone, where a sheet covers the
+  // island, the task's Stop too.
   const sheetStop = appStatus.actions.find(
-    (action) => action.kind === "stop-task" || action.kind === "stop",
+    (action) => action.kind === "stop" || (layout === "phone" && action.kind === "stop-task"),
   );
   const sheetStopControl = sheetStop && {
-    label: sheetStop.kind === "stop" ? "Stop computer" : sheetStop.busy ? "Stopping…" : "Stop",
+    label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };
@@ -618,30 +615,14 @@ function Theatre({ api }: { api: ApiClient }) {
   const newConversation: NewConversation = {
     run: () => {
       void conversation.startNew();
-      setPane("conversation");
+      setRailView("chat");
     },
     reason: conversationReason,
   };
-  // Only what needs saying: the Activity column already names itself.
-  const taskNote =
-    !task || session.ended
-      ? null
-      : agent.error
-        ? "Activity unavailable"
-        : agent.connection === "lost"
-          ? "Connection lost"
-          : agent.connection === "connecting"
-            ? "Connecting…"
-            : task.phase === "finished"
-              ? "Ready for follow-up"
-              : task.row === "takeover"
-                ? "Your turn"
-                : task.phase === "waiting"
-                  ? "Waiting for you"
-                  : null;
-  // On a phone it covers the computer pane, over a stage that stays where the computer appears.
+  const curtainUp = !replayId && status === "known" && !cell && listed.length === 0;
+  // The curtain over the stage: first-run setup.
   const welcome = (
-    <Presence show={!replayId && status === "known" && !cell && listed.length === 0}>
+    <Presence show={curtainUp}>
       <WelcomeSetup
         modelReady={mainReady}
         loading={settings.phase === "loading" || !settings.saved}
@@ -659,318 +640,329 @@ function Theatre({ api }: { api: ApiClient }) {
       />
     </Presence>
   );
+  const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
+  const showKeys = (trigger: HTMLElement | null) => {
+    keysOrigin.current = trigger;
+    keyCapture.current = null;
+    setKeyPreset(undefined);
+    openKeys();
+  };
+  const wide = layout === "wide";
+  const views: SegmentItem[] = [
+    {
+      value: "chat",
+      label: "Chat",
+      attention: shownView !== "chat" && !!agent.model.pendingAsk,
+    },
+    ...(wide ? [] : [{ value: "activity", label: "Activity" }]),
+    ...(takeover && !agent.model.ended
+      ? [{ value: "takeover", label: "Your turn", attention: shownView !== "takeover" }]
+      : []),
+  ];
+  const activity = (
+    <ActivityRail
+      cellId={cell?.id}
+      releaseReady={
+        cell?.state === "ready" && !cell.paused && !cell.fenced && !cell.replacementPending
+      }
+      models={agent.snapshot?.models}
+      modelName={modelName}
+      onSpending={(trigger) => showSettings(trigger, "spending")}
+      memoryAction={(change) => {
+        const status =
+          controls.status?.kind === "memory" && controls.status.target === change.changeId
+            ? controls.status
+            : null;
+        return {
+          status:
+            change.changeId && controls.memoryUndone.has(change.changeId)
+              ? "undone"
+              : status?.phase === "sending" || status?.phase === "checking"
+                ? "pending"
+                : status?.phase === "uncertain"
+                  ? "uncertain"
+                  : status?.phase === "refused"
+                    ? status.code === 409
+                      ? "conflict"
+                      : "failed"
+                    : "ready",
+          onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
+          onReread: (trigger) => {
+            controls.recheck();
+            setReadMemory(true);
+            showSettings(trigger, "knowledge");
+          },
+        };
+      }}
+      agent={agent.model}
+      rows={rows}
+      keyUses={session.model.keyUses}
+      sessionId={session.sessionId}
+      scale={cell?.scale ?? 2}
+      api={api}
+    />
+  );
+  const handover = takeover && !agent.model.ended && (
+    <div
+      className="takeover-scroll ui-scroll-area"
+      data-shown={shownView === "takeover" || undefined}
+    >
+      <TakeoverPanel
+        key={takeover.requestId}
+        takeover={takeover}
+        controls={{ ...controls, canInput: manualLive }}
+        visible={!replayId && shownView === "takeover" && !keysOpen && !settings.open}
+        manualStatus={agent.snapshot?.manualControl}
+        receiveKey={receiveKey}
+        screen={manualGeometry}
+        pointerMode={pointerMode}
+        onPointerMode={setPointerMode}
+        send={manual.send}
+        drained={manual.drained}
+        typing={typing}
+        onKeyboard={(on) => stage.current?.keyboard(on)}
+        refused={pasteRefused}
+      />
+    </div>
+  );
+  const narration =
+    appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+      ? appStatus.caption.text
+      : "";
   return (
-    <div className={replayId ? "app replaying" : appStatus.control ? "app control" : "app"}>
-      <div className="theatre-content">
-        <TopBar
-          title={
-            replayId
-              ? (shownRecording?.title ?? RECORDED_TASK)
-              : (session.model.title ?? "Your computer")
-          }
-          note={shownRecording?.note}
-          live={stageHud.live}
-          mode={replayId ? "replay" : "watch"}
-          replayEnabled={!!(replayId || newestReplayId)}
-          onMode={(mode) => selectReplay(mode === "watch" ? null : (replayId ?? newestReplayId))}
-          keys={keyStatus(keys.health)}
-          keysOpen={keysOpen}
-          onKeys={() => {
-            keysOrigin.current = keysButton.current;
-            keyCapture.current = null;
-            setKeyPreset(undefined);
-            openKeys();
-          }}
-          keysRef={keysButton}
-          settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
-          actions={
-            narrow && (
-              // Where tabs name the panes, New conversation joins the bar's other app-wide controls.
-              <Presence show={!replayId && !!agent.sessionId}>
-                <NewConversationButton {...newConversation} />
-              </Presence>
+    <div className="app" data-layout={layout} data-replaying={replayId ? "" : undefined}>
+      <TopBar
+        title={
+          replayId
+            ? (shownRecording?.title ?? RECORDED_TASK)
+            : (session.model.title ?? "New conversation")
+        }
+        note={shownRecording?.note}
+        mode={replayId ? "replay" : "watch"}
+        replayEnabled={!!(replayId || newestReplayId)}
+        onMode={(mode) => selectReplay(mode === "watch" ? null : (replayId ?? newestReplayId))}
+        keys={keysState}
+        keysOpen={keysOpen}
+        onKeys={() => showKeys(keysButton.current)}
+        keysRef={keysButton}
+        settingsOpen={settings.open}
+        onSettings={showSettings}
+        settingsRef={settingsButton}
+      />
+      <div className="watch" hidden={!!replayId} inert={!!replayId}>
+        <main className="stage-col" aria-label="Computer">
+          <StageFrame
+            light={appStatus.control ? "dot" : manualLive ? "you" : "none"}
+            live={stageHud.live}
+            frozen={!!stageHud.paused}
+            curtain={welcome}
+            island={
+              <HudIsland
+                status={appStatus}
+                shape={islandShape(appStatus, curtainUp)}
+                pause={pauseSlot({
+                  pause: safety.pause,
+                  canPause: safety.canPause,
+                  canResume: safety.canResume,
+                  handedOver: !!takeover,
+                  budgetHeld: agent.snapshot?.budgetHold === "task",
+                })}
+                take={takeSlot(appStatus)}
+                onPause={() => void safety.requestPause()}
+                onContinue={() => void safety.resume()}
+                onStopTask={taskStop}
+                onTake={() => setRailView("takeover")}
+                onComputer={{
+                  start: guardStart,
+                  stop: guardComputerStop,
+                  resume: guardResume,
+                  retry,
+                }}
+              />
+            }
+            notices={
+              <>
+                <StopControl controls={controls} />
+                <SafetyControls
+                  safety={safety}
+                  agent={agent}
+                  cell={cell}
+                  visible={!keysOpen && !settings.open}
+                  replaying={!!replayId}
+                />
+              </>
+            }
+            band={<Caption text={narration} speaker={appStatus.caption.speaker} />}
+          >
+            {!replayId && selectedScreen && (
+              <div className="screen-label" role="status">
+                {selectedScreen.screen === "browser" ? "Signed-in browser" : "Desktop"}
+                {selectedScreen.screen === "browser" && !browserScreen.cell && (
+                  <span> · {browserScreen.error ?? "Connecting…"}</span>
+                )}
+              </div>
+            )}
+            <Stage
+              ref={stage}
+              mode={replayId ? "replay" : "live"}
+              cell={stageCell}
+              parentId={cell?.id}
+              selection={selectedScreen}
+              api={api}
+              reconnects={reconnects + browserScreen.reconnects}
+              listed={listed}
+              manual={
+                takeover && manualGeometry && !agent.model.ended
+                  ? {
+                      enabled: manualLive,
+                      screen: manualGeometry,
+                      pointer: pointerMode,
+                      send: manual.send,
+                      onTyping: setTyping,
+                      onRefused: setPasteRefused,
+                    }
+                  : undefined
+              }
+            />
+          </StageFrame>
+        </main>
+        {wide && (
+          <RailPanel label="Activity" className="rail-activity">
+            {activity}
+          </RailPanel>
+        )}
+        <RailPanel
+          label="Conversation"
+          className="rail-chat"
+          views={views}
+          view={shownView}
+          onView={(view) => setRailView(view as RailView)}
+          end={
+            layout === "phone" ? (
+              <MoreMenu
+                items={[
+                  ...(agent.sessionId
+                    ? [
+                        {
+                          label: "New conversation",
+                          icon: "compose" as const,
+                          disabledReason: newConversation.reason,
+                          run: newConversation.run,
+                        },
+                      ]
+                    : []),
+                  {
+                    label: "Replay",
+                    icon: "history",
+                    disabledReason: replayId || newestReplayId ? undefined : "No recordings yet",
+                    run: () => selectReplay(replayId ?? newestReplayId),
+                  },
+                  { label: "Settings", icon: "settings", run: (trigger) => showSettings(trigger) },
+                  { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+                ]}
+              />
+            ) : (
+              agent.sessionId && <NewConversationButton {...newConversation} />
             )
           }
-        />
-        <div className="task-controls-area">
-          <div className="task-bar" hidden={!!replayId}>
-            <Hud
-              status={appStatus}
-              onStart={guardStart}
-              onStop={guardComputerStop}
-              onResume={guardResume}
-              onStopSession={taskStop}
-              onRetry={retry}
-            />
-            {taskNote && <span className="task-connection">{taskNote}</span>}
-          </div>
-          <StopControl controls={controls} />
-          <SafetyControls
-            safety={safety}
+        >
+          <ChatThread
+            visible={shownView === "chat"}
             agent={agent}
-            cell={cell}
-            visible={!keysOpen && !settings.open}
-            replaying={!!replayId}
-          />
-        </div>
-        <div className="watch-content" hidden={!!replayId} inert={!!replayId}>
-          <PaneTabs
-            selected={pane}
-            onSelect={setPane}
-            attention={
-              agent.model.pendingTakeover
-                ? "computer"
-                : agent.model.pendingAsk ||
-                    (agent.snapshot?.pause && agent.snapshot.budgetHold === "task")
-                  ? "conversation"
-                  : undefined
+            api={api}
+            rows={rows}
+            computerReady={cell?.state === "ready" && !cell.paused}
+            live={task && !session.ended ? { ...task, nowMs: now } : null}
+            onReplay={
+              agent.sessionId && (agent.model.ended || task?.phase === "finished")
+                ? () => selectReplay(agent.sessionId)
+                : undefined
             }
-          />
-          <div className="house">
-            <div
-              className="pane pane-conversation"
-              id="pane-conversation"
-              role="tabpanel"
-              aria-labelledby="tab-conversation"
-              data-selected={pane === "conversation"}
-              inert={narrow && pane !== "conversation"}
-              onFocusCapture={() => {
-                if (!narrow) setPane("conversation");
-              }}
-            >
-              <ConversationRail
-                visible={!narrow || pane === "conversation"}
-                agent={agent}
-                api={api}
-                rows={rows}
-                computerReady={cell?.state === "ready" && !cell.paused}
-                live={task && !session.ended ? { ...task, nowMs: now } : null}
-                onReplay={
-                  agent.sessionId && (agent.model.ended || task?.phase === "finished")
-                    ? () => selectReplay(agent.sessionId)
-                    : undefined
-                }
-                onReplayTask={selectReplay}
-                sessions={conversation.sessions}
-                more={conversation.more}
-                titled={!narrow}
-                newConversation={narrow ? undefined : newConversation}
-                recovery={
-                  <TaskRecovery
-                    agent={agent}
-                    controls={controls}
-                    onSettings={showSettings}
-                    onContinue={continueTask}
-                  />
-                }
-                answer={
-                  question && !agent.model.ended ? (
-                    <AskForm
-                      key={question.askId}
-                      question={question}
-                      controls={controls}
-                      visible={(!narrow || pane === "conversation") && !keysOpen && !settings.open}
-                      receiveKey={receiveKey}
-                    />
-                  ) : undefined
-                }
-                composer={
-                  <Composer
-                    api={api}
-                    cell={cell}
-                    known={status === "known"}
-                    pending={pending !== null}
-                    controlBlocked={
-                      controls.fenced ||
-                      controls.stopping ||
-                      !!cell?.fenced ||
-                      !!cell?.replacementPending ||
-                      !!safety.approval
-                    }
-                    agent={agent}
-                    keysOpen={keysOpen || settings.open}
-                    receiveKey={receiveKey}
-                    configured={mainReady}
-                    onSettings={showSettings}
-                    onTaskStarted={session.check}
-                    model={
-                      mainChoice &&
-                      (modelName(mainChoice.provider, mainChoice.model) ?? mainChoice.model)
-                    }
-                    stop={
-                      taskStopAction && {
-                        run: taskStop,
-                        busy: !!taskStopAction.busy,
-                        enabled: taskStopAction.enabled,
-                      }
-                    }
-                  />
-                }
-              />
-            </div>
-            <div
-              className={
-                takeover && !agent.model.ended
-                  ? "pane pane-computer manual-pane"
-                  : "pane pane-computer"
-              }
-              id="pane-computer"
-              role="tabpanel"
-              aria-labelledby="tab-computer"
-              data-selected={pane === "computer"}
-              inert={narrow && pane !== "computer"}
-              onFocusCapture={() => {
-                if (!narrow) setPane("computer");
-              }}
-            >
-              <StageColumn
-                after={
-                  takeover && !agent.model.ended ? (
-                    <TakeoverPanel
-                      key={takeover.requestId}
-                      takeover={takeover}
-                      controls={{ ...controls, canInput: manualLive }}
-                      visible={
-                        !replayId && (!narrow || pane === "computer") && !keysOpen && !settings.open
-                      }
-                      manualStatus={agent.snapshot?.manualControl}
-                      receiveKey={receiveKey}
-                      screen={manualGeometry}
-                      pointerMode={pointerMode}
-                      onPointerMode={setPointerMode}
-                      send={manual.send}
-                      drained={manual.drained}
-                      typing={typing}
-                      onKeyboard={(on) => stage.current?.keyboard(on)}
-                      refused={pasteRefused}
-                    />
-                  ) : undefined
-                }
-                live={stageHud.live}
-                frozen={!!stageHud.paused}
-                control={appStatus.control}
-                caption={appStatus.caption.text}
-                cover={phone ? welcome : undefined}
-              >
-                {!phone && welcome}
-                {!replayId && selectedScreen && (
-                  <div className="screen-label" role="status">
-                    {selectedScreen.screen === "browser" ? "Signed-in browser" : "Desktop"}
-                    {selectedScreen.screen === "browser" && !browserScreen.cell && (
-                      <span> · {browserScreen.error ?? "Connecting…"}</span>
-                    )}
+            onReplayTask={selectReplay}
+            sessions={conversation.sessions}
+            more={conversation.more}
+            covered={shownView !== "chat"}
+            cover={
+              <>
+                {!wide && (
+                  <div
+                    className="rail-cover-activity"
+                    data-shown={shownView === "activity" || undefined}
+                  >
+                    {activity}
                   </div>
                 )}
-                <Stage
-                  ref={stage}
-                  mode={replayId ? "replay" : "live"}
-                  cell={stageCell}
-                  parentId={cell?.id}
-                  selection={selectedScreen}
-                  api={api}
-                  control={appStatus.control}
-                  reconnects={reconnects + browserScreen.reconnects}
-                  listed={listed}
-                  manual={
-                    takeover && manualGeometry && !agent.model.ended
-                      ? {
-                          enabled: manualLive,
-                          screen: manualGeometry,
-                          pointer: pointerMode,
-                          send: manual.send,
-                          onTyping: setTyping,
-                          onRefused: setPasteRefused,
-                        }
-                      : undefined
-                  }
-                />
-              </StageColumn>
-            </div>
-            <div
-              className="pane pane-activity"
-              id="pane-activity"
-              role="tabpanel"
-              aria-labelledby="tab-activity"
-              data-selected={pane === "activity"}
-              inert={narrow && pane !== "activity"}
-              onFocusCapture={() => {
-                if (!narrow) setPane("activity");
-              }}
-            >
-              <ActivityRail
-                titled={!narrow}
-                cellId={cell?.id}
-                releaseReady={
-                  cell?.state === "ready" &&
-                  !cell.paused &&
-                  !cell.fenced &&
-                  !cell.replacementPending
-                }
-                models={agent.snapshot?.models}
-                modelName={modelName}
-                onSpending={(trigger) => showSettings(trigger, "spending")}
-                memoryAction={(change) => {
-                  const status =
-                    controls.status?.kind === "memory" && controls.status.target === change.changeId
-                      ? controls.status
-                      : null;
-                  return {
-                    status:
-                      change.changeId && controls.memoryUndone.has(change.changeId)
-                        ? "undone"
-                        : status?.phase === "sending" || status?.phase === "checking"
-                          ? "pending"
-                          : status?.phase === "uncertain"
-                            ? "uncertain"
-                            : status?.phase === "refused"
-                              ? status.code === 409
-                                ? "conflict"
-                                : "failed"
-                              : "ready",
-                    onUndo: controls.canUndoMemory ? (id) => void controls.undo(id) : undefined,
-                    onReread: (trigger) => {
-                      controls.recheck();
-                      setReadMemory(true);
-                      showSettings(trigger, "knowledge");
-                    },
-                  };
-                }}
-                agent={agent.model}
-                rows={rows}
-                keyUses={session.model.keyUses}
-                sessionId={session.sessionId}
-                scale={cell?.scale ?? 2}
-                api={api}
+                {handover}
+              </>
+            }
+            recovery={
+              <TaskRecovery
+                agent={agent}
+                controls={controls}
+                onSettings={showSettings}
+                onContinue={continueTask}
               />
-            </div>
-          </div>
-        </div>
-        {replayId && (
-          <ReplayView
-            api={api}
-            sessionId={replayId}
-            onSelect={selectReplay}
-            onGoLive={() => selectReplay(null)}
-            onDeleted={(id) => {
-              if (id === newestReplayId) setNewestReplayId(null);
-              historyOwner.current++;
-              setHistoryRevision(historyOwner.current);
-              if (id === replayId) selectReplay(null, "replace");
-            }}
-            onTitle={setRecorded}
-            continueTask={{
-              current: conversation.sessions.at(-1) ?? null,
-              reason: conversationReason,
-              run: (id) =>
-                void conversation.continueFrom(id).then((done) => {
-                  if (done) selectReplay(null);
-                }),
-            }}
-            exportJob={exportJob}
-            visible={!keysOpen && !settings.open && !safety.approval}
+            }
+            answer={
+              question && !agent.model.ended ? (
+                <AskForm
+                  key={question.askId}
+                  question={question}
+                  controls={controls}
+                  visible={shownView === "chat" && !keysOpen && !settings.open}
+                  receiveKey={receiveKey}
+                />
+              ) : undefined
+            }
+            composer={
+              <Composer
+                api={api}
+                cell={cell}
+                known={status === "known"}
+                pending={pending !== null}
+                controlBlocked={
+                  controls.fenced ||
+                  controls.stopping ||
+                  !!cell?.fenced ||
+                  !!cell?.replacementPending ||
+                  !!safety.approval
+                }
+                agent={agent}
+                keysOpen={keysOpen || settings.open}
+                receiveKey={receiveKey}
+                configured={mainReady}
+                onSettings={showSettings}
+                onTaskStarted={session.check}
+              />
+            }
           />
-        )}
+        </RailPanel>
       </div>
+      {replayId && (
+        <ReplayView
+          api={api}
+          sessionId={replayId}
+          onSelect={selectReplay}
+          onGoLive={() => selectReplay(null)}
+          onDeleted={(id) => {
+            if (id === newestReplayId) setNewestReplayId(null);
+            historyOwner.current++;
+            setHistoryRevision(historyOwner.current);
+            if (id === replayId) selectReplay(null, "replace");
+          }}
+          onTitle={setRecorded}
+          continueTask={{
+            current: conversation.sessions.at(-1) ?? null,
+            reason: conversationReason,
+            run: (id) =>
+              void conversation.continueFrom(id).then((done) => {
+                if (done) selectReplay(null);
+              }),
+          }}
+          exportJob={exportJob}
+          visible={!keysOpen && !settings.open && !safety.approval}
+        />
+      )}
       <SettingsSheet
         focusSection={settingsSection}
         appearance={appearance}

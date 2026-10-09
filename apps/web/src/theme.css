@@ -54,6 +54,8 @@
   --spacing-client-frame: 2px;
   --spacing-client-frame-off: -20px;
   --radius-stage: var(--radius-lg);
+  /* What a rail is drawn on, so its sticky headers cover what scrolls under them. */
+  --rail-surface: var(--color-void);
   --radius-stop: 1.5px;
   --shadow-hud: inset 0 0 0 1px var(--color-glass-line), 0 8px 24px var(--color-shade-hud);
   --duration-press: 100ms;

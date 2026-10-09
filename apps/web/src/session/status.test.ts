@@ -708,7 +708,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
   it("gives the computer's own HUD back when there is no task", () => {
     expect(statusFor({ computer: live, task: null })).toMatchObject({
       row: "ready",
-      label: "Live",
+      label: "Ready",
       actions: [{ kind: "stop", enabled: true }],
       control: false,
     });
@@ -853,7 +853,7 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["stopped", "stopped", "Task stopped", "idle", null, "system"],
   ["failed", "failed", "Task failed", "error", "blocked", "system"],
   ["ready for more", "ready", "Ready", "idle", null, "system"],
-  ["ready", "ready", "Live", "idle", null, "system"],
+  ["ready", "ready", "Ready", "idle", null, "system"],
 ];
 
 describe("one status model for every surface (T10)", () => {

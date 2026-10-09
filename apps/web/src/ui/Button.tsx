@@ -11,8 +11,11 @@ export type ButtonSize = "sm" | "md" | "lg" | "xl" | "xxl";
 
 // Primary is porcelain: the one main action of a surface, never two on screen at once.
 export interface ButtonProps extends Omit<ComponentProps<"button">, "disabled"> {
-  variant?: "primary" | "secondary" | "quiet" | "destructive";
+  // Glass sits on the island over the picture.
+  variant?: "primary" | "secondary" | "quiet" | "destructive" | "glass";
   size?: ButtonSize;
+  // A pill, as on the island.
+  round?: boolean;
   icon?: IconName;
   busy?: boolean;
   // Unavailable while set. The button keeps focus and gives this as its description and tooltip.
@@ -24,6 +27,7 @@ const ICON_SIZE = { sm: 14, md: 16, lg: 18, xl: 18, xxl: 20 } as const;
 export function Button({
   variant = "secondary",
   size = "md",
+  round = false,
   icon,
   busy = false,
   disabledReason,
@@ -47,6 +51,7 @@ export function Button({
         className={clsx("ui-button", className)}
         data-variant={variant}
         data-size={size}
+        data-round={round ? "" : undefined}
         data-icon={icon ? "" : undefined}
         aria-disabled={inactive || undefined}
         aria-busy={busy || undefined}

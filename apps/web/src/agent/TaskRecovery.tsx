@@ -325,7 +325,7 @@ export function TaskRecovery({
         </p>
       )}
       {hold && (
-        <p className="thread-recovery-reason">The task stays paused until you press Resume task.</p>
+        <p className="thread-recovery-reason">The task stays paused until you press Continue.</p>
       )}
       <Disclosure summary="Recovery options" className="thread-recovery-options">
         <div className="thread-recovery-actions">

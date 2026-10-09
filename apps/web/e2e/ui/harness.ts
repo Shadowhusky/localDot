@@ -108,11 +108,9 @@ export const test = base.extend<{ ui: Harness; fixedClock: boolean }>({
       },
       settle: () => settle(page),
       async still() {
-        await page
-          .locator(".hud .mascot .dot, .welcome-hero .dot, .sign-in .dot")
-          .evaluateAll((dots) => {
-            for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
-          });
+        await page.locator(".welcome-hero .dot, .sign-in .dot").evaluateAll((dots) => {
+          for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
+        });
       },
     });
     // Taken before the fixture stops: requests cut off by the shutdown are not the page's fault.
@@ -146,15 +144,8 @@ async function settle(page: Page) {
 
 // The composer, on a phone once its Conversation tab is chosen.
 export async function composer(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1100) {
-    // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
-    const tab = page.getByRole("tab", { name: /^Conversation/ });
-    await expect(async () => {
-      await tab.click();
-      await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 1000 });
-    }).toPass();
-    await expect(page.locator(".thread-row").first()).toBeVisible();
-  }
+  // The rail opens on the chat; on a phone it sits under the stage.
+  await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
   return page.getByRole("form", { name: "Message dot" });
 }
 

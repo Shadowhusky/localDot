@@ -5,8 +5,9 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { type ApiClient, createApi } from "../lib/api.ts";
 import type { LiveSession } from "../session/useLiveSession.ts";
+import { PauseButton } from "../shell/HudIsland.tsx";
+import { pauseSlot } from "../shell/island.ts";
 import { type AgentFeed, type AgentFeedState, type AgentModel, emptyAgentModel } from "./model.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
 import { TaskRecovery } from "./TaskRecovery.tsx";
 import { useAgentSession } from "./useAgentSession.ts";
 import { useSafety } from "./useSafety.ts";
@@ -137,7 +138,17 @@ function Task({ api, feed }: { api: ApiClient; feed: AgentFeed }) {
   });
   return (
     <>
-      <SafetyControls safety={safety} agent={agent} cell={cell} />
+      <PauseButton
+        slot={pauseSlot({
+          pause: safety.pause,
+          canPause: safety.canPause,
+          canResume: safety.canResume,
+          handedOver: false,
+          budgetHeld: agent.snapshot?.budgetHold === "task",
+        })}
+        onPause={() => void safety.requestPause()}
+        onContinue={() => void safety.resume()}
+      />
       <TaskRecovery agent={agent} controls={controls} onSettings={() => {}} />
     </>
   );
@@ -149,9 +160,10 @@ function open(scope: "task" | "day") {
   render(<Task api={fake.api} feed={fake.feed} />);
   return fake;
 }
-const resume = () => screen.getByRole("button", { name: "Resume task" }) as HTMLButtonElement;
+const resume = () => screen.getByRole("button", { name: "Continue" });
+const held = () => resume().getAttribute("aria-disabled") === "true";
 
-it("a Pause held at the task's spending limit offers the budget form, then Resume once it is raised", async () => {
+it("a Pause held at the task's spending limit offers the budget form, then Continue once it is raised", async () => {
   const fake = open("task");
   const recovery = await screen.findByRole("region", { name: "Task recovery" });
   await waitFor(() =>
@@ -160,32 +172,37 @@ it("a Pause held at the task's spending limit offers the budget form, then Resum
     ),
   );
   expect(recovery.textContent).toContain("dot has spent all of this task's limit");
-  expect(recovery.textContent).toContain("stays paused until you press Resume task");
-  expect(screen.queryByRole("button", { name: /^Continue/ }), "only the Pause resumes").toBeNull();
-  expect(document.body.textContent).toContain("set a new task budget in Conversation, then resume");
-  expect(resume().disabled, "Resume waits for the budget").toBe(true);
+  expect(recovery.textContent).toContain("stays paused until you press Continue");
+  expect(
+    screen.getAllByRole("button", { name: /^Continue/ }),
+    "only the Pause resumes",
+  ).toHaveLength(1);
+  expect(held(), "Continue waits for the budget").toBe(true);
   fireEvent.click(screen.getByRole("radio", { name: "Other" }));
   fireEvent.change(screen.getByRole("textbox", { name: "New limit" }), { target: { value: "8" } });
   fireEvent.click(screen.getByRole("button", { name: "Raise to $8" }));
   await waitFor(() => expect(fake.state.raises).toEqual([8]));
   await waitFor(() => expect(screen.queryByRole("region", { name: "Task recovery" })).toBeNull());
-  await waitFor(() => expect(resume().disabled).toBe(false));
+  await waitFor(() => expect(held()).toBe(false));
   expect(fake.state.resumes, "no Resume was sent before the raise").toEqual([]);
   await act(async () => {
     fireEvent.click(resume());
   });
   expect(fake.state.resumes).toEqual([PAUSE.revision]);
-  await waitFor(() => expect(screen.queryByRole("button", { name: "Resume task" })).toBeNull());
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Continue" })).toBeNull());
   expect(screen.queryByRole("alert")).toBeNull();
 });
 
-it("a Pause held at the shared daily limit explains it and keeps Resume available", async () => {
+it("a Pause held at the shared daily limit explains it and keeps Continue available", async () => {
   const fake = open("day");
   const recovery = await screen.findByRole("region", { name: "Task recovery" });
   expect(recovery.textContent).toContain("today's is used up. It resets at midnight");
   expect(screen.queryByRole("form", { name: "Raise the spending limit" })).toBeNull();
-  expect(screen.queryByRole("button", { name: /^Continue/ }), "only the Pause resumes").toBeNull();
-  await waitFor(() => expect(resume().disabled).toBe(false));
+  expect(
+    screen.getAllByRole("button", { name: /^Continue/ }),
+    "only the Pause resumes",
+  ).toHaveLength(1);
+  await waitFor(() => expect(held()).toBe(false));
   await act(async () => {
     fireEvent.click(resume());
   });
