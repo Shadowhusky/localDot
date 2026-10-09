@@ -26,6 +26,24 @@ const DOCKER_DOWN = "docker unreachable on /networks/create: ENOENT; is Docker D
 const RESTART_NOTE = "desktop container exited with 137; restarting (attempt 2 of 5)";
 
 describe("hudFor", () => {
+  it("reads this viewer's picture beside the daemon's stream state", () => {
+    const phase = (
+      connection: CellSummary["stream"]["connection"],
+      picture?: "none" | "live" | "held",
+    ) => hudFor({ ...known(cell("ready", connection)), picture }).phase;
+    // Another viewer keeps the daemon's stream live while this one's client reconnects.
+    expect(phase("live", "held")).toBe("reconnecting");
+    // This viewer's relay reconnecting: it keeps its picture instead of raising the curtain.
+    expect(phase("connecting", "held")).toBe("reconnecting");
+    expect(phase("none", "held")).toBe("reconnecting");
+    // Frames already shown while the daemon's state catches up.
+    expect(phase("connecting", "live")).toBe("live");
+    expect(phase("stalled", "live")).toBe("reconnecting");
+    expect(phase("connecting", "none")).toBe("connecting");
+    expect(phase("connecting")).toBe("connecting");
+    expect(phase("live")).toBe("live");
+  });
+
   it("keeps frozen computers paused regardless of stream state, with pending controls disabled", () => {
     for (const connection of ["none", "connecting", "live", "stalled", "disconnected"] as const) {
       const paused = { ...cell("ready", connection), paused: true as const };
@@ -35,7 +53,9 @@ describe("hudFor", () => {
         action: { kind: "resume", enabled: true },
         live: false,
       });
-      expect(hud.caption).toContain("programs dot started carry on");
+      expect(hud.caption).toBe(
+        "Your computer is paused. Resume it to carry on, or shut it down for a fresh start.",
+      );
       expect(hudFor(known(paused, "resume")).action).toEqual({ kind: "resume", enabled: false });
       expect(hudFor(known(paused, "stop")).action.enabled).toBe(false);
     }

@@ -7,6 +7,7 @@ import { App } from "./App.tsx";
 import type { CellSummary } from "./cells/types.ts";
 import { TOKEN_KEY } from "./lib/token.ts";
 import { providerFixture } from "./settings/testing.ts";
+import { closeStreams } from "./stage/live-stream.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
@@ -27,6 +28,7 @@ describe("review: selected physical browser visibility", () => {
   });
   afterEach(() => {
     cleanup();
+    closeStreams();
     restore();
     window.history.replaceState(null, "", "/");
   });
@@ -137,7 +139,7 @@ describe("review: selected physical browser visibility", () => {
       });
       await waitFor(() =>
         expect(
-          container.querySelector(`iframe[src*="/cells/${browserId}/browser/"]`),
+          document.querySelector(`iframe[src*="/cells/${browserId}/browser/"]`),
         ).not.toBeNull(),
       );
       expect(container.querySelector(".stage > canvas")).not.toBeNull();

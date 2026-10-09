@@ -259,9 +259,11 @@ export function ActivityRail({
                 )}
                 {(!sessionId || !page.rows.length) && (
                   <p className="activity-empty">
-                    {!sessionId || !entries.length
-                      ? "Steps appear here as dot works."
-                      : "No steps match this filter."}
+                    {sessionId && entries.length
+                      ? "No steps match this filter."
+                      : replay
+                        ? "No steps to show for this recording."
+                        : "Steps appear here as dot works."}
                   </p>
                 )}
               </section>

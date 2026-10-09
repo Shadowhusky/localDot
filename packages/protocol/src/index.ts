@@ -26,6 +26,7 @@ export * from "./screens.ts";
 export * from "./seal.ts";
 export * from "./search.ts";
 export * from "./selftest.ts";
+export * from "./stream-quality.ts";
 export * from "./subscription.ts";
 export * from "./target.ts";
 export * from "./text.ts";

@@ -187,10 +187,6 @@
   text-align: center;
 }
 
-.thread-error {
-  margin-top: calc(var(--spacing) * 5);
-}
-
 /* Nothing said yet: one question, one line, three things to try, centred in the thread. */
 .thread-empty {
   display: flex;
@@ -1354,7 +1350,8 @@
   min-height: 44px;
   padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1.5) calc(var(--spacing) * 1)
     var(--spacing);
-  border-radius: var(--radius-full);
+  /* Half of one line's height, so a field grown to more lines keeps the same corners. */
+  border-radius: calc(var(--spacing) * 5.5);
   background-color: var(--color-raised);
   box-shadow: 0 0 0 1px var(--color-hairline);
 }
@@ -1365,9 +1362,28 @@
     0 0 0 4px var(--color-hairline);
 }
 
-.composer-card[data-layout="pill"] > :is(.composer-key, .composer-notices, .composer-files) {
+.composer-card[data-layout="pill"] > :is(.composer-notices, .composer-files) {
   flex-basis: 100%;
   padding-inline: calc(var(--spacing) * 2);
+}
+
+/* A key taken out of a phone's message floats over the thread, the toolbar's whole width, rather
+   than squeezing into the one-line field. */
+.composer-card[data-layout="pill"] > .composer-key {
+  position: absolute;
+  right: calc(-44px - var(--spacing) * 2);
+  bottom: calc(100% + var(--spacing) * 3);
+  left: calc(-44px - var(--spacing) * 2);
+}
+
+.composer-card[data-layout="pill"] > .composer-key:has(.ui-banner-reveal[data-open]) {
+  border-radius: var(--radius-lg);
+  background-color: var(--color-overlay);
+  box-shadow: var(--shadow-overlay);
+}
+
+.composer-card[data-layout="pill"] > .composer-key .ui-banner {
+  margin: 0;
 }
 
 .composer-card[data-layout="pill"] > .composer-field {

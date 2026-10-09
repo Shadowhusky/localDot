@@ -12,6 +12,7 @@ import {
   useSyncExternalStore,
 } from "react";
 import { Button } from "./Button.tsx";
+import { DetailLines } from "./Disclosure.tsx";
 import { afterMotion } from "./finished.ts";
 import { canFocus, focusWithoutScroll, tabbables } from "./focus.ts";
 import { Icon } from "./Icon.tsx";
@@ -59,6 +60,8 @@ function useAnchoredTo(
       const target = anchor.current;
       const parent = own?.offsetParent;
       if (!own || !target || !(parent instanceof HTMLElement)) return;
+      // A toast rises with its anchor over a sheet's scrim.
+      own.toggleAttribute("data-lifted", target.hasAttribute("data-lifted"));
       const box = parent.getBoundingClientRect();
       const at = target.getBoundingClientRect();
       const top = at.bottom - box.top - parent.clientTop + parent.scrollTop + ANCHOR_GAP;
@@ -245,9 +248,9 @@ const ToastItem = memo(function ToastItem({ toast, onDismiss, onHold }: ToastIte
       }}
     >
       <div className="ui-toast-body">
-        {toast.tone !== "neutral" && (
+        {(toast.icon || toast.tone !== "neutral") && (
           <Icon
-            name={toast.tone === "danger" ? "circle-alert" : "check"}
+            name={toast.icon ?? (toast.tone === "danger" ? "circle-alert" : "check")}
             className="ui-toast-icon"
           />
         )}
@@ -272,6 +275,9 @@ const ToastItem = memo(function ToastItem({ toast, onDismiss, onHold }: ToastIte
           </Button>
         )}
         <IconButton icon="x" size={24} label="Dismiss" onClick={() => onDismiss(id)} />
+        {!!toast.details?.length && (
+          <DetailLines lines={toast.details} className="ui-toast-details" />
+        )}
       </div>
     </li>
   );

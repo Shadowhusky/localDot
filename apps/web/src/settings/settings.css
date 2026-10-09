@@ -413,6 +413,12 @@
     flex-wrap: wrap;
   }
 
+  /* On its own line under the label, aligned with the label's text. */
+  .settings-stream-choice {
+    width: calc(100% - var(--spacing) * 10);
+    margin: calc(var(--spacing) * 2) 0 calc(var(--spacing) * 1.5) calc(var(--spacing) * 10);
+  }
+
   .settings-autonomy-row > .ui-segmented {
     flex-basis: 100%;
   }
@@ -562,4 +568,9 @@
   .memory-person-fields {
     grid-template-columns: minmax(0, 1fr);
   }
+}
+
+/* How the last Stop went: Details sits under the computer's name, past its tile. */
+.settings-stop-details {
+  margin: calc(var(--spacing) * 0.5) 0 calc(var(--spacing) * 0.5) calc(var(--spacing) * 10);
 }

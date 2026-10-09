@@ -220,7 +220,7 @@ for (const pending of ["wait", "shell"] as const)
           await route.fulfill({ status: 503, body: "owned Stop transport unavailable" });
         });
         await stopButton.click();
-        await expect(stopStatus.getByText(/^Could not confirm stopped\./)).toBeVisible();
+        await expect(stopStatus.getByText(/^Couldn't confirm that dot stopped\./)).toBeVisible();
         expect(intercepted).toBe(1);
         const uncertain = (await f.state(owner))[0];
         expect(uncertain?.cell.paused).not.toBe(true);
