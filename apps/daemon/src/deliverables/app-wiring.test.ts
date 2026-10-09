@@ -1,7 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { FileVersionsReply, ProofReply } from "@localdot/protocol";
+import { FileVersionsReply, ProofReply, type ReviseLink, ReviseReply } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 import { AgentSession } from "../agent/session.ts";
 import { createApp } from "../app.ts";
@@ -34,6 +34,15 @@ function setup() {
     frames: new FrameStore(home),
     effects,
     session: () => s,
+    start: async (task: string, revises: ReviseLink) => {
+      const id = log.createSession(task.slice(0, 60));
+      log.append(id, {
+        type: "session.start",
+        agent: "main",
+        data: { screen: { w: 1, h: 1, scale: 1 }, os: "linux", title: "T", revises },
+      });
+      return { id };
+    },
   };
   const app = createApp({
     token: TOKEN,
@@ -55,7 +64,7 @@ function setup() {
       },
       env,
     );
-  return { s, app, call, effects };
+  return { s, app, call, effects, log };
 }
 describe("deliverables in the app", () => {
   it("sits behind the token and the host guard", async () => {
@@ -94,5 +103,28 @@ describe("deliverables in the app", () => {
     );
     expect(open.status).toBe(200);
     expect(effects).toContain(`open:localDot/T (${s.id.slice(-6).toLowerCase()})/report.ods`);
-  });
+  }, 20_000);
+  it("revises an older version in a new task linked to it", async () => {
+    const { s, call, effects, log } = setup();
+    await call("/__qa/files", { method: "POST" });
+    await call("/__qa/revise", { method: "POST" });
+    const res = await call(`/api/agent/sessions/${s.id}/files/totals.csv/revise`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        cellId: "01JXYZ0000000000000000CE11",
+        version: 1,
+        text: "Revise totals.csv: start again",
+      }),
+    });
+    expect(res.status).toBe(202);
+    const { sessionId } = ReviseReply.parse(await res.json());
+    expect(effects.some((e) => e.startsWith("revise:Downloads/revise-"))).toBe(true);
+    const start = log.read(sessionId).find((e) => e.type === "session.start");
+    expect(start?.type === "session.start" && start.data.revises).toEqual({
+      sessionId: s.id,
+      name: "totals.csv",
+      version: 1,
+    });
+  }, 20_000);
 });

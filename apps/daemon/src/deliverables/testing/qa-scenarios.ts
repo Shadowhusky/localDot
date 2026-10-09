@@ -1,6 +1,6 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { ULID_PATTERN, ulid } from "@localdot/protocol";
+import { type ReviseLink, ULID_PATTERN, ulid } from "@localdot/protocol";
 import type { Hono } from "hono";
 import sharp from "sharp";
 import { OutputStore } from "../../agent/output-store.ts";
@@ -8,7 +8,7 @@ import type { AgentSession } from "../../agent/session.ts";
 import type { EventLog } from "../../event-log.ts";
 import type { FrameStore } from "../../gateway/frames.ts";
 import { type Converter, Previews } from "../previews.ts";
-import type { DeliverablesDeps } from "../routes.ts";
+import type { DeliverablesDeps, ReviseDeps } from "../routes.ts";
 import { TaskScanner } from "../task-scan.ts";
 
 export interface DeliverablesFixture {
@@ -18,6 +18,8 @@ export interface DeliverablesFixture {
   frames: FrameStore;
   effects: string[];
   session(): AgentSession | undefined;
+  // Starts a task linked to the version it revises, as the runner does.
+  start?(task: string, revises: ReviseLink): Promise<{ id: string }>;
 }
 // A page image stands in for LibreOffice: the fixture has no real computer.
 const page = sharp({ create: { width: 1240, height: 1754, channels: 3, background: "#ffffff" } })
@@ -52,6 +54,29 @@ export function deliverablesDeps(f: DeliverablesFixture): Omit<DeliverablesDeps,
       quarantine: async () => {},
       launch: async (path) => void f.effects.push(`open:${path.slice(downloads.length + 1)}`),
     },
+    ...(f.start ? { revise: fakeRevise(f, f.start) } : {}),
+  };
+}
+// The copy into the computer is recorded, not made: the fixture has no real computer.
+function fakeRevise(
+  f: DeliverablesFixture,
+  start: NonNullable<DeliverablesFixture["start"]>,
+): ReviseDeps {
+  return {
+    start: (_cellId, task, _signal, opts) => start(task, opts.revises),
+    access: () => ({
+      tools: {
+        putFile: async (path, source) => {
+          await new Response(source).arrayBuffer();
+          f.effects.push(`revise:${path}`);
+          return `~/${path}`;
+        },
+      },
+      signal: new AbortController().signal,
+      check: () => {},
+      release: () => {},
+    }),
+    redactUserText: (text) => text,
   };
 }
 

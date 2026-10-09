@@ -1,5 +1,6 @@
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { UploadAccess } from "../agent/routes.ts";
 import { AgentError } from "../agent/runner.ts";
 import { DesktopdError } from "../desktopd/client.ts";
 import type { ReviseDeps } from "./routes.ts";
@@ -8,7 +9,7 @@ import { cleanFixtures, deliverablesFixture } from "./testing/fixture.ts";
 const CELL = "01JXYZ0000000000000000CE11";
 afterEach(cleanFixtures);
 function fixture(over: Partial<ReviseDeps> = {}) {
-  const put = vi.fn(async (path: string, source: ReadableStream<Uint8Array>) => {
+  const put = vi.fn<UploadAccess["tools"]["putFile"]>(async (path, source) => {
     await new Response(source).arrayBuffer();
     return `~/${path}`;
   });
@@ -48,8 +49,9 @@ describe("revise an ended task's file", () => {
     });
     expect(res.status).toBe(202);
     expect(Object.keys((await res.json()) as object)).toEqual(["sessionId"]);
-    const folder = `Downloads/revise-${f.id.slice(-6).toLowerCase()}-v1`;
-    expect(f.put.mock.calls[0]?.[0]).toBe(`${folder}/totals.csv`);
+    expect(f.put.mock.calls[0]?.[0]).toMatch(
+      new RegExp(`^Downloads/revise-${f.id.slice(-6).toLowerCase()}-v1-[0-9a-z]{6}/totals\\.csv$`),
+    );
     const [cell, task, , opts] = f.start.mock.calls[0] ?? [];
     expect(cell).toBe(CELL);
     expect(task).toMatch(
@@ -89,12 +91,22 @@ describe("revise an ended task's file", () => {
     );
     expect(f.start).not.toHaveBeenCalled();
   });
-  it("reuses a copy already in the computer", async () => {
+  it("copies each revise of a version into a fresh folder, never one dot already changed", async () => {
+    const f = fixture();
+    for (const text of ["Revise totals.csv: add a total", "Revise totals.csv: start again"])
+      expect((await f.post({ cellId: CELL, version: 1, text })).status).toBe(202);
+    const [first, second] = f.put.mock.calls.map((call) => call[0]);
+    expect(first).not.toBe(second);
+    expect(f.put.mock.calls.every((call) => call[4] === true)).toBe(true);
+    expect(f.start.mock.calls[1]?.[1]).toContain(`is on this computer at ~/${second}.`);
+  });
+  it("refuses, without starting anything, when the computer already has that folder", async () => {
     const f = fixture();
     f.put.mockRejectedValueOnce(new DesktopdError(409, "exists", "/files/put"));
-    expect(
-      (await f.post({ cellId: CELL, version: 1, text: "Revise totals.csv: again" })).status,
-    ).toBe(202);
+    expect((await f.post({ cellId: CELL, version: 1, text: "Revise totals.csv: x" })).status).toBe(
+      409,
+    );
+    expect(f.start).not.toHaveBeenCalled();
   });
   it("refuses a missing version, a busy computer and bad bodies without starting anything", async () => {
     const f = fixture();

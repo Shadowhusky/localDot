@@ -107,6 +107,28 @@ describe("previews", () => {
     const v1 = await json(await f.get(`/api/agent/sessions/${id}/files/a.txt/preview?v=1`));
     expect(v1.kind === "text" && v1.lines).toEqual(["first"]);
   });
+  it("never caches the unversioned preview, whose bytes the next version replaces", async () => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    const picture = (background: string) =>
+      sharp({ create: { width: 8, height: 8, channels: 3, background } })
+        .png()
+        .toBuffer();
+    const shown = async () =>
+      Buffer.from(
+        await (await f.get(`/api/agent/sessions/${id}/files/chart.png/preview`)).arrayBuffer(),
+      );
+    f.result(id, { "chart.png": await picture("#ff0000") });
+    const first = await shown();
+    f.result(id, { "chart.png": await picture("#0000ff") });
+    const second = await shown();
+    const v2 = Buffer.from(
+      await (await f.get(`/api/agent/sessions/${id}/files/chart.png/preview?v=2`)).arrayBuffer(),
+    );
+    expect(second.equals(first)).toBe(false);
+    expect(second.equals(v2)).toBe(true);
+    expect(existsSync(join(f.home, "sessions", id, "previews", "chart.png", "0.png"))).toBe(false);
+  });
   it("renders office files and pdfs through the converter, bounds the page image and caches it", async () => {
     const page = await sharp({
       create: { width: 2480, height: 3508, channels: 3, background: "#fff" },

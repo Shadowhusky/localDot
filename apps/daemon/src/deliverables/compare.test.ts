@@ -22,6 +22,20 @@ describe("compare", () => {
     expect(reply.patch).toContain("-Dec,12000\n+Dec,12311");
     expect(reply.patch).not.toContain("-Month,Net");
   });
+  it("masks keys and marks hidden characters on both sides, as the preview does", async () => {
+    const f = deliverablesFixture();
+    const id = f.task();
+    const key = `sk-proj-${"A".repeat(40)}`;
+    f.result(id, { "a.txt": `token=${key}\nname=file\n` });
+    f.result(id, { "a.txt": `token=${key}x\nname=\u202Egnp.exe\n` });
+    const reply = CompareReply.parse(
+      await (await compare(f, id, "a.txt", `from=${id}.1&to=${id}.2`)).json(),
+    );
+    expect(reply.patch).not.toContain("sk-proj-");
+    expect(reply.patch).not.toContain("\u202E");
+    expect(reply.patch).toContain("+name=\uFFFDgnp.exe");
+    expect(reply.patch).toContain("token=••••");
+  });
   it("returns an empty patch for identical versions", async () => {
     const f = deliverablesFixture();
     const id = f.task();

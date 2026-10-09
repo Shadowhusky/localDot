@@ -19,6 +19,7 @@ import {
   microsToMs,
   msToMicros,
   type Point,
+  type ReviseLink,
   type SessionOrigin,
   type TaskModelSelection,
   type ToolName,
@@ -463,6 +464,7 @@ function newSession(
   task: string,
   continues?: string,
   origin?: SessionOrigin,
+  revises?: ReviseLink,
 ): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
@@ -482,6 +484,7 @@ function newSession(
       title,
       ...(continues ? { continues } : {}),
       ...(origin ? { origin } : {}),
+      ...(revises ? { revises } : {}),
     },
   });
   return s;
@@ -1206,11 +1209,17 @@ const agent: AgentRoutesDeps = {
     get sessions() {
       return new Map(session ? [[session.id, session]] : []);
     },
-    start: async (key, task) => {
+    start: async (key, task, _signal, options) => {
       if (key !== cellId) throw new Error("unknown cell");
       if (session && !session.stopped && session.status !== "idle") throw new Error("busy");
       await endLive();
-      session = newSession(task.slice(0, 60), task, conversations.current() ?? undefined);
+      session = newSession(
+        task.slice(0, 60),
+        task,
+        conversations.current() ?? undefined,
+        undefined,
+        options?.revises,
+      );
       conversations.adopt(session.id);
       budgetHold = undefined;
       raisedDuringPause = false;
@@ -1428,6 +1437,8 @@ const deliverablesFixture = {
   frames,
   effects,
   session: () => session,
+  start: (task: string, revises: ReviseLink) =>
+    agent.runner.start(cellId, task, undefined, { revises }),
 };
 // The node bindings pass through: Open on Mac checks the socket address.
 const server: Server = createServer(

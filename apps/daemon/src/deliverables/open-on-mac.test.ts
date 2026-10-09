@@ -7,8 +7,9 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { macName, taskFolder } from "./open-on-mac.ts";
+import { type MacOpener, macName, openOnMac, taskFolder } from "./open-on-mac.ts";
 import { cleanFixtures, deliverablesFixture, PORT } from "./testing/fixture.ts";
 
 afterEach(cleanFixtures);
@@ -74,6 +75,32 @@ describe("open on Mac", () => {
     const again = await post(f, `/api/agent/sessions/${id}/files/report.pdf/open`, ORIGIN);
     expect(await again.json()).toMatchObject({ reused: true });
     expect(f.launched).toEqual([dest, dest]);
+  });
+  it("removes a copy it could not mark as downloaded, so the next Open marks a fresh one", async () => {
+    const f = deliverablesFixture();
+    const source = join(f.home, "report.pdf");
+    writeFileSync(source, "%PDF-1");
+    const quarantined: string[] = [];
+    const launched: string[] = [];
+    let refuse = true;
+    const opener: MacOpener = {
+      downloads: f.downloads,
+      platform: "darwin",
+      quarantine: async (p) => {
+        if (refuse) throw new Error("xattr failed");
+        quarantined.push(p);
+      },
+      launch: async (p) => void launched.push(p),
+    };
+    const file = { name: "report.pdf", label: 1, newest: true };
+    const task = { title: "T", sessionId: ulid() };
+    await expect(openOnMac(opener, source, file, task)).rejects.toThrow("xattr failed");
+    expect(launched).toEqual([]);
+    refuse = false;
+    const opened = await openOnMac(opener, source, file, task);
+    expect(opened.reused).toBe(false);
+    expect(quarantined).toEqual([opened.path]);
+    expect(launched).toEqual([opened.path]);
   });
   it("never replaces a file already in Downloads and refuses kinds that could run", async () => {
     const f = deliverablesFixture();

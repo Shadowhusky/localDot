@@ -12,6 +12,7 @@ import {
   ReviseReply,
   ReviseRequest,
   ULID_PATTERN,
+  ulid,
   unifiedDiff,
 } from "@localdot/protocol";
 import type { Context, Hono } from "hono";
@@ -24,6 +25,7 @@ import { DesktopdError } from "../desktopd/client.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "../gateway/frames.ts";
 import { recordingCard } from "../sessions/summary.ts";
+import { screenLine } from "./excerpt.ts";
 import { fileVersions } from "./lineage.ts";
 import { isLoopbackRequest } from "./loopback.ts";
 import { type MacOpener, OpenRefused, openOnMac } from "./open-on-mac.ts";
@@ -145,7 +147,9 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
       if (!read || read.size > PREVIEW_LIMITS.compareBytes || read.head.includes(0))
         return undefined;
       try {
-        return new TextDecoder("utf-8", { fatal: true }).decode(read.head).replace(/\r\n?/g, "\n");
+        const decoded = new TextDecoder("utf-8", { fatal: true }).decode(read.head);
+        // Masked as the preview masks it: no key shows and nothing disguises itself.
+        return decoded.replace(/\r\n?/g, "\n").split("\n").map(screenLine).join("\n");
       } catch {
         return undefined;
       }
@@ -239,7 +243,8 @@ function reviseRoute(
         (v) => v.sessionId === id && v.version === body.version && v.available,
       );
       if (!chosen) return c.text("That file is no longer available.", 404);
-      const folder = `Downloads/revise-${id.slice(-6).toLowerCase()}-v${chosen.label}`;
+      // A fresh folder each time: an earlier revise may have saved over its copy.
+      const folder = `Downloads/revise-${id.slice(-6).toLowerCase()}-v${chosen.label}-${ulid().slice(-6).toLowerCase()}`;
       let access: UploadAccess | undefined;
       try {
         // Throws AgentError 409 while the user holds control or the computer is changing.
@@ -270,8 +275,7 @@ function reviseRoute(
           );
         } catch (error) {
           void source.body?.cancel().catch(() => {});
-          if (!(error instanceof DesktopdError && error.status === 409)) throw error;
-          copied = `~/${folder}/${name}`;
+          throw error;
         }
       } catch (error) {
         if (error instanceof DownloadError) return c.text("That file is no longer available.", 404);

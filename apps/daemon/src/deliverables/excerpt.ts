@@ -15,17 +15,18 @@ export function decodeHead(head: Uint8Array, complete: boolean): string | undefi
     return undefined;
   }
 }
-function maskKeys(text: string): string {
-  const scan = scanKeyLike(text);
+// One line as it may be shown: key-shaped tokens masked, hidden characters marked.
+export function screenLine(line: string): string {
+  const scan = scanKeyLike(line);
   if (scan.overflow) return "••••";
-  let out = text;
+  let out = line;
   for (const m of [...scan.matches].reverse())
     out = `${out.slice(0, m.start)}••••${out.slice(m.end)}`;
-  return out;
+  return out.replace(HIDDEN, "\uFFFD");
 }
 // Cut in UTF-16 units (what the schema counts) without splitting a character.
 function visible(text: string, max: number): string {
-  const clean = maskKeys(text).replace(HIDDEN, "\uFFFD");
+  const clean = screenLine(text);
   if (clean.length <= max) return clean;
   let out = "";
   for (const ch of clean) {

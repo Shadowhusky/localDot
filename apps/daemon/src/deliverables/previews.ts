@@ -18,7 +18,7 @@ const none = (reason: PreviewReason): Preview => ({
 });
 
 // One preview per stored version; page images are cached beside the task and never change,
-// because a version's bytes never change.
+// because a numbered version's bytes never change.
 export class Previews {
   readonly #files: StoredFiles;
   readonly #pending = new Map<string, Promise<Preview>>();
@@ -63,8 +63,9 @@ export class Previews {
         ),
       };
     }
-    const cache = `sessions/${sessionId}/previews/${name}`;
-    const cached = this.#files.head(`${cache}/${version ?? 0}.png`, PREVIEW_LIMITS.pngBytes);
+    // Without a version the bytes are out/<name>, which a later version replaces: never cached.
+    const cache = version === null ? undefined : `sessions/${sessionId}/previews/${name}`;
+    const cached = cache && this.#files.head(`${cache}/${version}.png`, PREVIEW_LIMITS.pngBytes);
     const madeBy = kind === "image" ? "daemon" : "computer";
     if (cached && cached.size <= PREVIEW_LIMITS.pngBytes) return { png: cached.head, madeBy };
     const limit = kind === "image" ? PREVIEW_LIMITS.imageInputBytes : PREVIEW_LIMITS.convertBytes;
@@ -86,7 +87,7 @@ export class Previews {
       // A page image from the computer that is not a sane PNG is a failed conversion.
       return none(error instanceof PreviewRefused && kind === "image" ? error.reason : "failed");
     }
-    this.#store(cache, `${version ?? 0}.png`, png);
+    if (cache) this.#store(cache, `${version}.png`, png);
     return { png, madeBy };
   }
   #oneAtATime<T>(work: () => Promise<T>): Promise<T> {

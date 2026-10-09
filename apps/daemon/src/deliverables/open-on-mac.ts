@@ -91,7 +91,13 @@ export async function openOnMac(
         continue;
       }
       copyInto(src, dest);
-      await opener.quarantine(dest);
+      try {
+        await opener.quarantine(dest);
+      } catch (error) {
+        // An unmarked copy would be reused, and opened, as identical bytes next time.
+        rmSync(dest, { force: true });
+        throw error;
+      }
       await opener.launch(dest);
       return { path: dest, shown, reused: false };
     }
