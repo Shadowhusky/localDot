@@ -1,11 +1,21 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { showToast } from "../../ui/Toast.tsx";
 import { knownFixture } from "../testing.ts";
-import { factOrder, MemoryEditor } from "./MemoryEditor.tsx";
+import { factOrder, failure, MemoryEditor, undoFailure } from "./MemoryEditor.tsx";
+import { MemoryRequestError } from "./memory-api.ts";
 import { PeopleList, personProblem } from "./PeopleList.tsx";
 
-afterEach(cleanup);
+vi.mock("../../ui/Toast.tsx", async (actual) => ({
+  ...(await actual<typeof import("../../ui/Toast.tsx")>()),
+  showToast: vi.fn(),
+}));
+afterEach(() => {
+  cleanup();
+  vi.mocked(showToast).mockClear();
+});
+const TASK = "01JXYZ0000000000000000TASK";
 const fact = (id: string, text: string, over: object = {}) => ({
   id,
   file: "USER.md" as const,
@@ -84,8 +94,77 @@ describe("memory editor", () => {
         })}
       />,
     );
-    await act(async () => screen.getByRole("button", { name: /From Book flights/ }).click());
+    const link = screen.getByRole("button", { name: /From Book flights/ });
+    expect(link.classList).toContain("ui-button");
+    await act(async () => link.click());
     expect(onOpenTask).toHaveBeenCalledWith("01JXYZ0000000000000000TASK");
+  });
+  it("puts pinned facts under Always remembered", () => {
+    render(
+      <MemoryEditor
+        known={knownFixture({
+          files: {
+            "USER.md": [
+              fact("01JXYZ0000000000000000AAAA", "Lives in Lisbon"),
+              fact("01JXYZ0000000000000000BBBB", "Allergic to penicillin", { pinned: true }),
+            ],
+            "MEMORY.md": [],
+          },
+        })}
+      />,
+    );
+    const pinned = screen.getByRole("list", { name: "Always remembered" });
+    expect(pinned.textContent).toContain("Allergic to penicillin");
+    expect(pinned.textContent).not.toContain("Lisbon");
+    expect(screen.getByRole("list", { name: "About you" }).textContent).toContain("Lisbon");
+  });
+  it("shows daily notes newest first, with Edit and Delete but no pin or add", async () => {
+    const deleteFact = vi.fn(async () => "01JXYZ0000000000000000CHNG");
+    const note = (id: string, text: string) =>
+      fact(id, text, {
+        file: "notes/2026-10-08.md",
+        source: { kind: "task", sessionId: TASK, title: "Call the insurer" },
+      });
+    render(
+      <MemoryEditor
+        known={knownFixture({
+          notes: [
+            note("01JXYZ0000000000000000BBBB", "Quote is 412 a year"),
+            note("01JXYZ0000000000000000AAAA", "Insurer reference is W-42"),
+          ],
+          deleteFact,
+        })}
+      />,
+    );
+    await act(async () => screen.getByRole("radio", { name: "Daily notes" }).click());
+    const list = screen.getByRole("list", { name: "Daily notes" });
+    expect([...list.querySelectorAll(".memory-fact")].map((n) => n.textContent)).toEqual([
+      "Quote is 412 a year",
+      "Insurer reference is W-42",
+    ]);
+    expect(screen.queryByRole("textbox", { name: "New fact" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Always remember" })).toBeNull();
+    expect(screen.queryByText("Show the file")).toBeNull();
+    await act(async () =>
+      screen.getAllByRole("button", { name: "More for this note" })[0]?.click(),
+    );
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toBeTruthy();
+    await act(async () => screen.getByRole("menuitem", { name: "Delete" }).click());
+    expect(deleteFact).toHaveBeenCalledWith(
+      expect.objectContaining({ text: "Quote is 412 a year" }),
+    );
+    expect(vi.mocked(showToast)).toHaveBeenCalledWith(
+      expect.objectContaining({ title: "Note deleted" }),
+    );
+  });
+  it("says what went wrong in words that fit it", () => {
+    expect(failure(new MemoryRequestError("stale"))).toMatch(/changed meanwhile/);
+    expect(failure(new MemoryRequestError("busy"))).toMatch(/control of the computer/);
+    expect(failure(new MemoryRequestError("full"))).toMatch(/Remove something first/);
+    expect(failure(new MemoryRequestError("unreadable"))).toMatch(/couldn't read/);
+    expect(undoFailure(new MemoryRequestError("busy"))).toMatch(/control of the computer/);
+    expect(undoFailure(new MemoryRequestError("stale"))).toMatch(/changed since/);
+    expect(undoFailure(new MemoryRequestError("missing"))).toMatch(/can't be undone any more/);
   });
 });
 
@@ -111,6 +190,46 @@ describe("people", () => {
       name: "Ana",
       app: "Email",
       handle: "ana@example.com",
+    });
+  });
+  it("Undo after removing someone dot learned puts back its task and day", async () => {
+    const addPerson = vi.fn(async () => undefined);
+    const deletePerson = vi.fn(async () => undefined);
+    render(
+      <PeopleList
+        onOpenTask={() => {}}
+        known={knownFixture({
+          addPerson,
+          deletePerson,
+          people: [
+            {
+              id: "01JXYZ0000000000000000PPPP",
+              name: "Henry Liu",
+              app: "WeChat",
+              handle: "henry_l",
+              note: null,
+              lastAt: "2026-10-08",
+              source: { kind: "task", sessionId: TASK, title: "Send the report" },
+              revision: "0123456789abcdef",
+            },
+          ],
+        })}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /From Send the report/ }).classList).toContain(
+      "ui-button",
+    );
+    await act(async () => screen.getByRole("button", { name: "More for Henry Liu" }).click());
+    await act(async () => screen.getByRole("menuitem", { name: "Delete" }).click());
+    const toast = vi.mocked(showToast).mock.calls[0]?.[0];
+    expect(toast?.title).toBe("Removed Henry Liu");
+    await act(async () => toast?.action?.onAction());
+    expect(addPerson).toHaveBeenCalledWith({
+      name: "Henry Liu",
+      app: "WeChat",
+      handle: "henry_l",
+      lastAt: "2026-10-08",
+      sessionId: TASK,
     });
   });
 });

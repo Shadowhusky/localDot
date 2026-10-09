@@ -12,13 +12,22 @@ import { FactRow, factProblem } from "./FactRow.tsx";
 import { MemoryRequestError } from "./memory-api.ts";
 import type { WhatDotKnows } from "./useWhatDotKnows.ts";
 
-const BOOKS = [
+// The two files every task starts with, and the daily notes dot looks up when it needs them.
+type Shelf = MemoryBook | "notes";
+const SHELVES = [
   { value: "USER.md", label: "About you" },
   { value: "MEMORY.md", label: "Notes" },
+  { value: "notes", label: "Daily notes" },
 ] as const;
-const EMPTY: Record<MemoryBook, string> = {
+const EMPTY: Record<Shelf, string> = {
   "USER.md": "Add what dot should always know about you.",
   "MEMORY.md": "dot saves useful facts here. You can add your own.",
+  notes: "dot jots down what it finds during a task here.",
+};
+const FOOTNOTE: Record<Shelf, string> = {
+  "USER.md": "Pinned facts come first in every task.",
+  "MEMORY.md": "Pinned facts come first in every task.",
+  notes: "dot looks these up when it needs them. A task doesn't start with them.",
 };
 
 // Pinned facts first in file order, then the newest, undated ones last: the order a task reads.
@@ -36,6 +45,15 @@ export function factOrder(entries: readonly MemoryEntry[]): MemoryEntry[] {
     .map(({ entry }) => entry);
 }
 
+// Why an Undo did not happen.
+export function undoFailure(error: unknown): string {
+  if (error instanceof MemoryRequestError && error.reason === "stale")
+    return "Couldn't undo: memory changed since.";
+  if (error instanceof MemoryRequestError && error.reason === "missing")
+    return "That can't be undone any more.";
+  return failure(error);
+}
+
 export function failure(error: unknown): string {
   if (error instanceof MemoryRequestError) {
     if (error.reason === "busy")
@@ -44,6 +62,9 @@ export function failure(error: unknown): string {
       return "Memory changed meanwhile. It's up to date now; try again.";
     if (error.reason === "invalid")
       return "localDot couldn't save that. Check the text and try again.";
+    if (error.reason === "full") return "That's as much as dot can keep. Remove something first.";
+    if (error.reason === "unreadable")
+      return "localDot couldn't read what dot knows. Try again later.";
   }
   return "Couldn't reach localDot. Try again.";
 }
@@ -57,12 +78,17 @@ export function MemoryEditor({
   knowledge?: Knowledge;
   onOpenTask?(sessionId: string): void;
 }) {
-  const [book, setBook] = useState<MemoryBook>("USER.md");
+  const [shelf, setShelf] = useState<Shelf>("USER.md");
   const [fact, setFact] = useState("");
   const [problem, setProblem] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
   const [markdown, setMarkdown] = useState(false);
-  const facts = factOrder(known.files[book]);
+  const notes = shelf === "notes";
+  const noun = notes ? "Note" : "Fact";
+  const facts = notes ? known.notes : factOrder(known.files[shelf]);
+  const pinned = facts.filter((entry) => entry.pinned);
+  const rest = facts.filter((entry) => !entry.pinned);
+  const label = SHELVES.find((s) => s.value === shelf)?.label;
   const done = (title: string) => (changeId: string) =>
     showToast({
       title,
@@ -71,14 +97,12 @@ export function MemoryEditor({
         onAction: () =>
           void known
             .undo(changeId)
-            .catch(() =>
-              showToast({ title: "Couldn't undo: memory changed since.", tone: "danger" }),
-            ),
+            .catch((error) => showToast({ title: undoFailure(error), tone: "danger" })),
       },
     });
   const failed = (error: unknown) => showToast({ title: failure(error), tone: "danger" });
   const add = async () => {
-    if (adding) return;
+    if (adding || notes) return;
     const text = fact.trim();
     const issue = factProblem(text);
     if (issue) {
@@ -87,7 +111,7 @@ export function MemoryEditor({
     }
     setAdding(true);
     try {
-      done("Fact saved")(await known.addFact(book, text));
+      done("Fact saved")(await known.addFact(shelf, text));
       setFact("");
     } catch (error) {
       failed(error);
@@ -95,12 +119,41 @@ export function MemoryEditor({
       setAdding(false);
     }
   };
-  const raw = knowledge?.memory
-    ? book === "USER.md"
-      ? knowledge.memory.user
-      : knowledge.memory.memory
-    : null;
+  const raw =
+    knowledge?.memory && !notes
+      ? shelf === "USER.md"
+        ? knowledge.memory.user
+        : knowledge.memory.memory
+      : null;
   const shown = markdown && raw !== null;
+  const row = (entry: MemoryEntry, at: number, list: readonly MemoryEntry[]) => (
+    <FactRow
+      key={entry.id}
+      entry={entry}
+      noun={noun}
+      heading={
+        at === 0 && list === pinned ? (
+          <p id="memory-pinned" className="memory-label">
+            Always remembered
+          </p>
+        ) : undefined
+      }
+      onOpenTask={onOpenTask}
+      onSave={(text) => known.editFact(entry, { text }).then(done(`${noun} saved`))}
+      onTogglePin={
+        notes
+          ? undefined
+          : () =>
+              void known
+                .editFact(entry, { pinned: !entry.pinned })
+                .then(
+                  done(entry.pinned ? "No longer always remembered" : "Always remembered"),
+                  failed,
+                )
+      }
+      onDelete={() => void known.deleteFact(entry).then(done(`${noun} deleted`), failed)}
+    />
+  );
   return (
     <section className="memory-section" aria-labelledby="memory-title">
       <GroupHead
@@ -110,43 +163,47 @@ export function MemoryEditor({
           <SegmentedControl
             size={24}
             aria-label="Memory file"
-            items={BOOKS}
-            value={book}
+            items={SHELVES}
+            value={shelf}
             onValueChange={(value) => {
-              setBook(value as MemoryBook);
+              setShelf(value as Shelf);
               setProblem(null);
             }}
           />
         }
       />
       <Group>
-        <form
-          className="ui-group-row memory-add"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void add();
-          }}
-        >
-          <TextField
-            aria-label="New fact"
-            placeholder={book === "USER.md" ? "Add something about you" : "Add a fact to remember"}
-            value={fact}
-            autoComplete="off"
-            aria-invalid={problem ? true : undefined}
-            onChange={(event) => {
-              setFact(event.target.value);
-              setProblem(null);
+        {!notes && (
+          <form
+            className="ui-group-row memory-add"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void add();
             }}
-          />
-          <Button type="submit" size="sm" busy={adding}>
-            Add
-          </Button>
-          {problem && (
-            <p className="memory-note" role="alert">
-              {problem}
-            </p>
-          )}
-        </form>
+          >
+            <TextField
+              aria-label="New fact"
+              placeholder={
+                shelf === "USER.md" ? "Add something about you" : "Add a fact to remember"
+              }
+              value={fact}
+              autoComplete="off"
+              aria-invalid={problem ? true : undefined}
+              onChange={(event) => {
+                setFact(event.target.value);
+                setProblem(null);
+              }}
+            />
+            <Button type="submit" size="sm" busy={adding}>
+              Add
+            </Button>
+            {problem && (
+              <p className="memory-note" role="alert">
+                {problem}
+              </p>
+            )}
+          </form>
+        )}
         {known.phase !== "ready" && known.phase !== "error" ? (
           <div className="ui-group-row" aria-busy="true">
             <span className="ui-group-row-text">
@@ -164,32 +221,25 @@ export function MemoryEditor({
             }
           />
         ) : facts.length === 0 ? (
-          <GroupRow label="Nothing yet." detail={EMPTY[book]} />
+          <GroupRow label="Nothing yet." detail={EMPTY[shelf]} />
         ) : (
-          <ul className="memory-list" aria-label={book === "USER.md" ? "About you" : "Notes"}>
-            {facts.map((entry) => (
-              <FactRow
-                key={entry.id}
-                entry={entry}
-                onOpenTask={onOpenTask}
-                onSave={(text) => known.editFact(entry, { text }).then(done("Fact saved"))}
-                onTogglePin={() =>
-                  void known
-                    .editFact(entry, { pinned: !entry.pinned })
-                    .then(
-                      done(entry.pinned ? "No longer always remembered" : "Always remembered"),
-                      failed,
-                    )
-                }
-                onDelete={() => void known.deleteFact(entry).then(done("Fact deleted"), failed)}
-              />
-            ))}
-          </ul>
+          <>
+            {pinned.length > 0 && (
+              <ul className="memory-list" aria-labelledby="memory-pinned">
+                {pinned.map(row)}
+              </ul>
+            )}
+            {rest.length > 0 && (
+              <ul className="memory-list" aria-label={label}>
+                {rest.map(row)}
+              </ul>
+            )}
+          </>
         )}
-        {knowledge && (
+        {knowledge && !notes && (
           <GroupRow
             label={shown ? "Hide the file" : "Show the file"}
-            detail={`${known.dir || "~/.localdot/memory"}/${book}`}
+            detail={`${known.dir || "~/.localdot/memory"}/${shelf}`}
             trailing={
               markdown && knowledge.memoryPhase === "loading" ? <Spinner size={14} /> : undefined
             }
@@ -203,7 +253,7 @@ export function MemoryEditor({
           />
         )}
       </Group>
-      <GroupNote>Pinned facts come first in every task.</GroupNote>
+      <GroupNote>{FOOTNOTE[shelf]}</GroupNote>
       {shown && <pre className="settings-well memory-raw">{raw || "Nothing yet."}</pre>}
     </section>
   );

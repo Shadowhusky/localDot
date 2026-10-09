@@ -462,7 +462,6 @@
 }
 
 .memory-actions {
-  gap: 0;
   margin-block: calc(var(--spacing) * -0.5);
 }
 
@@ -474,27 +473,55 @@
   color: var(--color-fg-1);
 }
 
+/* The task a fact came from: a quiet kit button whose words line up with the text around it and take
+   no more height than a line of text. Its reach stays the kit's, 44 px tall on a touch screen. */
+.memory-source-line {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  max-width: 100%;
+}
+
 .memory-source {
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: start;
+  min-width: 0;
+  margin: calc(var(--spacing) * -1.5) calc(var(--spacing) * -3);
+}
+
+@media (pointer: coarse) {
+  .memory-source {
+    margin-block: calc(var(--spacing) * -3.5);
+  }
+}
+
+.memory-source > .ui-button-content {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.memory-source-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   text-decoration: underline;
   text-decoration-color: var(--color-link-line);
   text-underline-offset: 2px;
-  cursor: pointer;
 }
 
-.memory-source:hover {
-  color: var(--color-fg-2);
+/* Over the button's face, which reaches past its words. */
+.memory-source-day {
+  position: relative;
+  flex-shrink: 0;
+  white-space: nowrap;
 }
 
-.memory-source:focus-visible {
-  outline: var(--focus-width) solid var(--color-fg-1);
-  outline-offset: 2px;
-  border-radius: var(--radius-xs);
+/* Over the first pinned fact, inside its row. */
+.memory-label {
+  margin-bottom: var(--spacing);
+  color: var(--color-fg-3);
+  font:
+    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
 }
 
 .memory-note {
@@ -542,10 +569,6 @@
 .memory-person-note {
   display: block;
   color: var(--color-fg-2);
-}
-
-.ui-group-row-detail > .memory-source {
-  display: block;
 }
 
 .memory-raw {

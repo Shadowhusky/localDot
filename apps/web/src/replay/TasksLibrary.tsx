@@ -421,7 +421,9 @@ function TaskRow({
               <StatusGlyph state={verdict.state} label={verdict.label} />
               {match ? (
                 <span className="replay-match">
-                  {MATCH_KIND[match.kind]} · <Highlight text={match.snippet} before={8} />
+                  {/* A narrow row leads with the matched word itself. */}
+                  {!phone && `${MATCH_KIND[match.kind]} · `}
+                  <Highlight text={match.snippet} before={phone ? 0 : 8} />
                 </span>
               ) : (
                 <span className="num">{rowMeta(card, !wide)}</span>

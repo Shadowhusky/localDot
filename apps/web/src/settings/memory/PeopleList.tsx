@@ -8,7 +8,7 @@ import { triggerProps } from "../../ui/Popover.tsx";
 import { Skeleton } from "../../ui/Skeleton.tsx";
 import { TextField } from "../../ui/TextField.tsx";
 import { showToast } from "../../ui/Toast.tsx";
-import { KEY_SHAPED } from "./FactRow.tsx";
+import { KEY_SHAPED, SourceLink } from "./FactRow.tsx";
 import { failure } from "./MemoryEditor.tsx";
 import { initials, personLine, sourceLine } from "./memory-copy.ts";
 import type { WhatDotKnows } from "./useWhatDotKnows.ts";
@@ -91,8 +91,8 @@ function PersonForm({
     >
       <div className="memory-person-fields">
         {field("name", "Name", "Name")}
-        {field("app", "App", "App, such as WeChat or Email")}
-        {field("handle", "Handle", "Handle, number or address")}
+        {field("app", "App", "App, such as Email")}
+        {field("handle", "Handle", "Number, email or ID")}
         {field("note", "Note", "Note (optional)")}
       </div>
       {note && (
@@ -164,7 +164,14 @@ function PersonRow({
           title: `Removed ${person.name}`,
           action: {
             label: "Undo",
-            onAction: () => void known.addPerson(fields(draftOf(person))).catch(() => {}),
+            onAction: () =>
+              void known
+                .addPerson({
+                  ...fields(draftOf(person)),
+                  ...(person.lastAt ? { lastAt: person.lastAt } : {}),
+                  ...(person.source.kind === "task" ? { sessionId: person.source.sessionId } : {}),
+                })
+                .catch(() => {}),
           },
         }),
       (error) => showToast({ title: failure(error), tone: "danger" }),
@@ -178,15 +185,7 @@ function PersonRow({
           <>
             {personLine(person)}
             {person.note && <span className="memory-person-note">{person.note}</span>}
-            {source.sessionId && onOpenTask && (
-              <button
-                type="button"
-                className="memory-source"
-                onClick={() => onOpenTask(source.sessionId as string)}
-              >
-                {source.text}
-              </button>
-            )}
+            {source.sessionId && onOpenTask && <SourceLink {...source} onOpenTask={onOpenTask} />}
           </>
         }
         trailing={

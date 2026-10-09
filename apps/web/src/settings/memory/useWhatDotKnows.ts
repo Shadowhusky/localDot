@@ -27,6 +27,8 @@ interface Known {
   phase: KnowsPhase;
   dir: string;
   files: Record<MemoryBook, MemoryEntry[]>;
+  // Daily notes, the newest first.
+  notes: MemoryEntry[];
   people: Person[];
   recent: RecentTask[];
 }
@@ -34,6 +36,7 @@ const EMPTY: Known = {
   phase: "idle",
   dir: "",
   files: { "USER.md": [], "MEMORY.md": [] },
+  notes: [],
   people: [],
   recent: [],
 };
@@ -60,6 +63,7 @@ export function useWhatDotKnows(api: ApiClient, open: boolean) {
         phase: "ready",
         dir: entries.dir,
         files: Object.fromEntries(entries.files.map((f) => [f.file, f.entries])) as Known["files"],
+        notes: entries.notes.flatMap((day) => day.entries.toReversed()),
         people,
         recent: recent.tasks,
       });

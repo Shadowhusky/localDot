@@ -51,6 +51,7 @@ export function knownFixture(over: Partial<WhatDotKnows> = {}): WhatDotKnows {
     phase: "ready",
     dir: "~/.localdot/memory",
     files: { "USER.md": [], "MEMORY.md": [] },
+    notes: [],
     people: [],
     recent: [],
     reload: () => {},

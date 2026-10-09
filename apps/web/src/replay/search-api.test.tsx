@@ -75,6 +75,10 @@ describe("search in the Tasks library", () => {
       <Highlight text={"Insurer reference is \uE000WINDSCREEN\uE001-42"} before={8} />,
     );
     expect(container.textContent).toBe("…is WINDSCREEN-42");
+    const narrow = render(
+      <Highlight text={"Insurer reference is \uE000WINDSCREEN\uE001-42"} before={0} />,
+    );
+    expect(narrow.container.textContent).toBe("…WINDSCREEN-42");
     const short = render(<Highlight text={"a \uE000b\uE001"} before={8} />);
     expect(short.container.textContent).toBe("a b");
   });

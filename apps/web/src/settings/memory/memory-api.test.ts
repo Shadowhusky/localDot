@@ -18,6 +18,12 @@ const entry = {
   pinned: false,
   revision: "0123456789abcdef",
 };
+const note = {
+  ...entry,
+  id: "01JXYZ0000000000000000NNNN",
+  file: "notes/2026-10-08.md" as const,
+  source: { kind: "task" as const, sessionId: "01JXYZ0000000000000000TASK", title: "Insurance" },
+};
 const person = {
   id: "01JXYZ0000000000000000PPPP",
   name: "Henry",
@@ -47,10 +53,12 @@ describe("memory api", () => {
           { file: "USER.md", entries: [entry] },
           { file: "MEMORY.md", entries: [] },
         ],
+        notes: [{ file: "notes/2026-10-08.md", entries: [note] }],
       }),
     );
     const reply = await loadEntries(client, new AbortController().signal);
     expect(reply.files[0]?.entries[0]?.text).toBe("Lives in Lisbon");
+    expect(reply.notes[0]?.entries[0]?.file).toBe("notes/2026-10-08.md");
   });
   it("sends the revision and maps 409 to stale", async () => {
     const { client, fetchImpl } = api(() => new Response("changed", { status: 409 }));
@@ -75,10 +83,21 @@ describe("memory api", () => {
     expect(String(fetchImpl.mock.calls[0]?.[0])).toContain(
       `/api/agent/memory/entries/${entry.id}?file=USER.md&revision=${entry.revision}`,
     );
-    await deletePerson(client, person);
+    await deleteEntry(client, note);
     expect(String(fetchImpl.mock.calls[1]?.[0])).toContain(
+      `/api/agent/memory/entries/${note.id}?file=notes%2F2026-10-08.md&revision=`,
+    );
+    await deletePerson(client, person);
+    expect(String(fetchImpl.mock.calls[2]?.[0])).toContain(
       `/api/agent/people/${person.id}?revision=${person.revision}`,
     );
+  });
+  it("tells a full or unreadable file apart from a change made meanwhile", async () => {
+    const add = (status: number) =>
+      deletePerson(api(() => new Response("", { status })).client, person);
+    await expect(add(413)).rejects.toMatchObject({ reason: "full" });
+    await expect(add(500)).rejects.toMatchObject({ reason: "unreadable" });
+    await expect(add(409)).rejects.toMatchObject({ reason: "stale" });
   });
   it("maps 503 to busy, 404 to missing and a network failure to offline", async () => {
     const busy = deleteEntry(api(() => new Response("", { status: 503 })).client, entry);

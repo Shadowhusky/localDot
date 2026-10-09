@@ -1,5 +1,5 @@
 import { keyLikePresent, type MemoryEntry } from "@localdot/protocol";
-import { useRef, useState } from "react";
+import { type ReactNode, useRef, useState } from "react";
 import { Button } from "../../ui/Button.tsx";
 import { IconButton } from "../../ui/IconButton.tsx";
 import { Menu, MenuItem } from "../../ui/Menu.tsx";
@@ -18,19 +18,53 @@ export function factProblem(text: string): string | undefined {
   return undefined;
 }
 
-// One fact: its words, where it came from, and pin, edit and delete. Editing happens in place;
-// Escape ends the edit and nothing else.
+// Where something dot knows came from: a quiet link to the task that taught it, or plain words. A
+// long task title shortens; the day after it stays.
+export function SourceLink({
+  text,
+  day = "",
+  sessionId,
+  onOpenTask,
+}: {
+  text: string;
+  day?: string;
+  sessionId?: string;
+  onOpenTask?(sessionId: string): void;
+}) {
+  if (!sessionId || !onOpenTask) return `${text}${day}`;
+  return (
+    <span className="memory-source-line">
+      <Button
+        variant="quiet"
+        size="sm"
+        className="memory-source shrink"
+        onClick={() => onOpenTask(sessionId)}
+      >
+        <span className="memory-source-text">{text}</span>
+      </Button>
+      {day && <span className="memory-source-day">{day}</span>}
+    </span>
+  );
+}
+
+// One fact or daily note: its words, where it came from, and pin (facts only), edit and delete.
+// Editing happens in place; Escape ends the edit and nothing else.
 export function FactRow({
   entry,
+  noun = "Fact",
+  heading,
   onOpenTask,
   onSave,
   onTogglePin,
   onDelete,
 }: {
   entry: MemoryEntry;
+  noun?: "Fact" | "Note";
+  // A label over this row that names the rows from here on.
+  heading?: ReactNode;
   onOpenTask?(sessionId: string): void;
   onSave(text: string): Promise<unknown>;
-  onTogglePin(): void;
+  onTogglePin?(): void;
   onDelete(): void;
 }) {
   const more = useRef<HTMLButtonElement>(null);
@@ -65,7 +99,7 @@ export function FactRow({
     } catch (error) {
       setNote(
         error instanceof MemoryRequestError && error.reason === "stale"
-          ? "This fact changed while you were editing. Your text is kept; save again."
+          ? `This ${noun.toLowerCase()} changed while you were editing. Your text is kept; save again.`
           : error instanceof MemoryRequestError && error.reason === "busy"
             ? "Memory can't change while you have control of the computer."
             : "Couldn't reach localDot. Try again.",
@@ -77,6 +111,7 @@ export function FactRow({
   if (draft !== null)
     return (
       <li className="ui-group-row memory-row" data-editing="">
+        {heading}
         <form
           className="memory-edit"
           onSubmit={(event) => {
@@ -85,7 +120,7 @@ export function FactRow({
           }}
         >
           <TextArea
-            aria-label="Fact"
+            aria-label={noun}
             value={draft}
             maxRows={8}
             autoFocus
@@ -121,42 +156,35 @@ export function FactRow({
     );
   return (
     <li className="ui-group-row memory-row">
+      {heading}
       <div className="ui-group-row-line">
         <span className="ui-group-row-text">
           <span className="memory-fact">{entry.text}</span>
           <span className="ui-group-row-detail">
-            {source.sessionId && onOpenTask ? (
-              <button
-                type="button"
-                className="memory-source"
-                onClick={() => onOpenTask(source.sessionId as string)}
-              >
-                {source.text}
-              </button>
-            ) : (
-              source.text
-            )}
+            <SourceLink {...source} onOpenTask={onOpenTask} />
           </span>
         </span>
-        <span className="ui-group-row-trailing memory-actions">
-          <IconButton
-            icon="pin"
-            label={entry.pinned ? "Stop always remembering" : "Always remember"}
-            aria-pressed={entry.pinned}
-            data-on={entry.pinned ? "" : undefined}
-            className="memory-pin"
-            onClick={onTogglePin}
-          />
+        <span className="ui-group-row-trailing memory-actions pointer-coarse:gap-4">
+          {onTogglePin && (
+            <IconButton
+              icon="pin"
+              label={entry.pinned ? "Stop always remembering" : "Always remember"}
+              aria-pressed={entry.pinned}
+              data-on={entry.pinned ? "" : undefined}
+              className="memory-pin"
+              onClick={onTogglePin}
+            />
+          )}
           <IconButton
             ref={more}
             icon="more-horizontal"
-            label="More for this fact"
+            label={`More for this ${noun.toLowerCase()}`}
             {...triggerProps("menu", menu)}
             onClick={() => setMenu(true)}
           />
         </span>
       </div>
-      <Menu open={menu} onClose={() => setMenu(false)} anchor={more} align="end" label="Fact">
+      <Menu open={menu} onClose={() => setMenu(false)} anchor={more} align="end" label={noun}>
         <MenuItem onSelect={begin}>Edit</MenuItem>
         <MenuItem onSelect={onDelete}>Delete</MenuItem>
       </Menu>

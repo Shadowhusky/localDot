@@ -29,6 +29,21 @@ function server(opts: { staleOnce?: boolean } = {}) {
           { file: "USER.md", entries: facts },
           { file: "MEMORY.md", entries: [] },
         ],
+        notes: [
+          {
+            file: "notes/2026-10-08.md",
+            entries: [
+              { ...FACT, id: "01JXYZ0000000000000000CCCC", file: "notes/2026-10-08.md", text: "a" },
+              { ...FACT, id: "01JXYZ0000000000000000DDDD", file: "notes/2026-10-08.md", text: "b" },
+            ],
+          },
+          {
+            file: "notes/2026-10-07.md",
+            entries: [
+              { ...FACT, id: "01JXYZ0000000000000000EEEE", file: "notes/2026-10-07.md", text: "c" },
+            ],
+          },
+        ],
       });
     if (pathname === "/api/agent/memory/entries" && method === "POST") {
       const body = JSON.parse(String(init?.body));
@@ -76,6 +91,8 @@ describe("what dot knows", () => {
     await waitFor(() => expect(result.current.phase).toBe("ready"));
     expect(result.current.files["USER.md"].map((f) => f.text)).toEqual(["Lives in Lisbon"]);
     expect(result.current.recent.map((t) => t.title)).toEqual(["Book a table"]);
+    // Daily notes come newest first: the newest day, its latest note at the top.
+    expect(result.current.notes.map((n) => n.text)).toEqual(["b", "a", "c"]);
   });
   it("adds a fact, answers its change id and reads again", async () => {
     const { api } = server();

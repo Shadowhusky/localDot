@@ -12,7 +12,14 @@ import {
 } from "@localdot/protocol";
 import type { ApiClient } from "../../lib/api.ts";
 
-export type MemoryFailure = "stale" | "missing" | "busy" | "invalid" | "offline";
+export type MemoryFailure =
+  | "stale"
+  | "missing"
+  | "busy"
+  | "invalid"
+  | "full"
+  | "unreadable"
+  | "offline";
 export class MemoryRequestError extends Error {
   constructor(readonly reason: MemoryFailure) {
     super(reason);
@@ -23,6 +30,8 @@ const REASON: Record<number, MemoryFailure> = {
   400: "invalid",
   404: "missing",
   409: "stale",
+  413: "full",
+  500: "unreadable",
   503: "busy",
 };
 
@@ -98,7 +107,7 @@ export const deleteEntry = (api: ApiClient, entry: MemoryEntry) =>
   call(
     api,
     "DELETE",
-    `/api/agent/memory/entries/${entry.id}?file=${entry.file}&revision=${entry.revision}`,
+    `/api/agent/memory/entries/${entry.id}?file=${encodeURIComponent(entry.file)}&revision=${entry.revision}`,
     (v) => MemoryEntryChangeReply.parse(v),
   );
 export const undoChange = async (api: ApiClient, changeId: string) => {
