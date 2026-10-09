@@ -239,6 +239,18 @@ describe("App Replay mode", () => {
       true,
     );
   });
+  it("opens Replay when the recordings couldn't be listed, so its own Try again is in reach", async () => {
+    const d = daemon(() => json([summary("ready", "live")]));
+    const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) =>
+      new URL(String(input)).pathname === "/api/session-index"
+        ? new Response("unavailable", { status: 503 })
+        : d.fetchImpl(input, init)) as typeof fetch;
+    render(<App fetchImpl={fetchImpl} />);
+    const replayButton = screen.getByRole("radio", { name: "Replay" });
+    await waitFor(() => expect(replayButton.hasAttribute("aria-disabled")).toBe(false));
+    fireEvent.click(replayButton);
+    expect(await screen.findByText("Recordings couldn't load")).toBeTruthy();
+  });
   it("adds one history entry per level, so browser Back goes from a recording to the library to Watch", async () => {
     const fixture = historyDaemon();
     render(<App fetchImpl={fixture.fetchImpl} />);

@@ -274,6 +274,8 @@ function Theatre({ api }: { api: ApiClient }) {
   );
   const playing = replayId === LIBRARY ? null : replayId;
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
+  // The recordings couldn't be listed: Replay opens anyway and says so, with Try again.
+  const [replayUnlisted, setReplayUnlisted] = useState(false);
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
   // An export keeps going when Replay closes or moves to another task.
@@ -449,10 +451,14 @@ function Theatre({ api }: { api: ApiClient }) {
       .get("/api/session-index?limit=1", { signal: controller.signal })
       .then((data) => {
         const page = SessionIndexPage.parse(data);
-        if (!controller.signal.aborted && historyRevision === historyOwner.current)
+        if (!controller.signal.aborted && historyRevision === historyOwner.current) {
           setNewestReplayId(page.sessions[0]?.id ?? null);
+          setReplayUnlisted(false);
+        }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!controller.signal.aborted) setReplayUnlisted(true);
+      });
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
@@ -1101,7 +1107,7 @@ function Theatre({ api }: { api: ApiClient }) {
           )
         }
         mode={replayId ? "replay" : "watch"}
-        replayEnabled={!!(replayId || newestReplayId)}
+        replayEnabled={!!(replayId || newestReplayId || replayUnlisted)}
         onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
         onModeAgain={() => {
           if (playing) selectReplay(LIBRARY);
@@ -1346,7 +1352,9 @@ function Theatre({ api }: { api: ApiClient }) {
                         icon: "history",
                         startsGroup: true,
                         disabledReason:
-                          replayId || newestReplayId ? undefined : "No recordings yet",
+                          replayId || newestReplayId || replayUnlisted
+                            ? undefined
+                            : "No recordings yet",
                         run: () => selectReplay(LIBRARY),
                       },
                       {
