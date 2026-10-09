@@ -134,6 +134,32 @@ describe("guarded Chromium request broker", () => {
     expect(broker.closed).toBe(true);
   });
 
+  // A slow page answers reads slowly; one given up on changed nothing in Chromium.
+  it.each(["cancelled", "timeout"] as const)(
+    "drops a %s page read and its late reply without fencing the connection",
+    async (outcome) => {
+      vi.useFakeTimers();
+      const { broker, receive, fatal, close } = setup();
+      const live = new AbortController();
+      const read = broker.send(
+        "DOMSnapshot.captureSnapshot",
+        { computedStyles: [] },
+        { sessionId: "owned", signal: live.signal },
+      );
+      const refused = expect(read).rejects.toThrow(outcome);
+      if (outcome === "cancelled") live.abort();
+      else await vi.advanceTimersByTimeAsync(CDP_REQUEST_TIMEOUT_MS);
+      await refused;
+      receive({ id: 1, sessionId: "owned", result: { documents: [], strings: [] } });
+      const next = broker.send("Page.getFrameTree", {}, { sessionId: "owned" });
+      receive({ id: 2, sessionId: "owned", result: { frameTree: {} } });
+      await expect(next).resolves.toEqual({ frameTree: {} });
+      expect(fatal).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+      broker.close();
+    },
+  );
+
   it("bounds pending requests and recovers capacity after a legitimate response", async () => {
     const { broker, write, receive } = setup();
     const pending = Array.from({ length: MAX_CDP_PENDING }, () =>

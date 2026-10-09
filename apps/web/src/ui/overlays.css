@@ -196,6 +196,10 @@
     color: var(--color-fg-2);
   }
 
+  .ui-menu-item[aria-checked="true"] > .ui-menu-icon {
+    color: var(--color-fg-1);
+  }
+
   /* An item without an icon keeps its label in line with those of the items that have one. */
   .ui-menu:has(.ui-menu-icon) .ui-menu-item:not(:has(> .ui-menu-icon)) {
     padding-inline-start: calc(var(--spacing) * 9.5);

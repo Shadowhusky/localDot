@@ -168,11 +168,29 @@ describe("the tool dot works with", () => {
     expect(of("browser_navigate", "Opening bbc.co.uk", "browser")).toBe("browsing");
     expect(of("browser_read", "Reading page", "browser")).toBe("browsing");
     expect(of("browser_upload", "Uploading photo.jpg", "browser")).toBe("sending");
+    expect(of("web_search", "Searched the web for “Zelda”", "browser")).toBe("browsing");
+    expect(of("web_search", "Searched the news for “Zelda”", "browser")).toBe("browsing");
+    expect(of("web_search", "Looked at images of “Zelda”", "browser")).toBe("looking");
+    expect(of("web_fetch", "Read en.wikipedia.org", "browser")).toBe("browsing");
+    expect(of("web_fetch", "Looked at a picture from upload.wikimedia.org", "browser")).toBe(
+      "looking",
+    );
     expect(of("find", "Looking for “Save”")).toBe("looking");
     expect(of("recall", "Recall", "think")).toBe("recalling");
+    expect(of("research", "Reading a PDF from iea.org", "browser")).toBe("browsing");
+    expect(of("research", "Writing the report", "file")).toBe("typing");
     expect(of("people", "Look up Mum", "think")).toBe("recalling");
     expect(of("ask_user", "Ask", "ask")).toBe("needs-you");
     expect(toolFor("acting", step(undefined, "", "shell"), undefined)).toBe("terminal");
+  });
+
+  it("reads a page for a connected app's reading tool and sends one for a change", () => {
+    const of = (tool: string, title: string) =>
+      toolFor("acting", step(tool, title, "app"), undefined);
+    expect(of("linear__list_issues", "Linear · List issues")).toBe("browsing");
+    expect(of("github__search_code", "GitHub · Search code")).toBe("browsing");
+    expect(of("linear__create_issue", "Linear · Create issue")).toBe("sending");
+    expect(of("slack__send_message", "Slack · Send message")).toBe("sending");
   });
 
   it("prefers the step's own newer tool over an older action", () => {

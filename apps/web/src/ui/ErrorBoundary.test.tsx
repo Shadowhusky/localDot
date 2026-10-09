@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { useEffect, useState } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { ErrorBoundary } from "./ErrorBoundary.tsx";
@@ -68,4 +68,22 @@ it("floats over the page for a part that has no place of its own", () => {
     </ErrorBoundary>,
   );
   expect(document.querySelector(".ui-part-failed")?.hasAttribute("data-floating")).toBe(true);
+});
+
+it("leaves no card for a quiet part, and draws it again later", () => {
+  vi.useFakeTimers();
+  try {
+    render(
+      <ErrorBoundary quiet>
+        <Part />
+      </ErrorBoundary>,
+    );
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByText("The part")).toBeNull();
+    broken = false;
+    act(() => vi.advanceTimersByTime(5000));
+    expect(screen.getByText("The part")).toBeTruthy();
+  } finally {
+    vi.useRealTimers();
+  }
 });

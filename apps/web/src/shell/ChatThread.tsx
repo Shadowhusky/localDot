@@ -1,14 +1,16 @@
+import type { TaskModelSelection } from "@localdot/protocol";
 import { type ReactNode, useMemo } from "react";
 import { Conversation } from "../agent/Conversation.tsx";
 import { useEarlierThread } from "../agent/earlier.ts";
 import type { LiveWork } from "../agent/LiveWorkLine.tsx";
 import type { AgentWords, SpendCall } from "../agent/model.ts";
-import { threadItems, type WorkStep, withWork, workSteps } from "../agent/thread.ts";
+import { type ModelRef, threadItems, type WorkStep, withWork, workSteps } from "../agent/thread.ts";
 import { billedPerCall } from "../agent/UsageFooter.tsx";
 import type { AgentSessionView } from "../agent/useAgentSession.ts";
 import type { ApiClient } from "../lib/api.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
+import type { ModelNames } from "../settings/model-names.ts";
 import { IconButton } from "../ui/IconButton.tsx";
 import "./conversation.css";
 
@@ -33,6 +35,14 @@ export function NewConversationButton({ run, reason }: NewConversation) {
       onClick={() => run()}
     />
   );
+}
+
+// The task's main model, which names its turns when their calls said nothing.
+function mainOf(selection: TaskModelSelection | undefined): ModelRef | undefined {
+  if (!selection) return undefined;
+  if (selection.kind !== "api") return { route: selection.kind, model: selection.model };
+  const main = selection.roles.find((role) => role.role === "main");
+  return main && { route: main.provider, model: main.model };
 }
 
 // The conversation in the rail, with Activity (or another view) laid over it when chosen.
@@ -61,6 +71,7 @@ export function ChatThread({
   start,
   reveal,
   words,
+  names,
 }: {
   agent?: AgentSessionView;
   composer?: ReactNode;
@@ -94,6 +105,7 @@ export function ChatThread({
   reveal?: number;
   // A streaming message's new words, which redraw only that message.
   words?: AgentWords;
+  names?: ModelNames;
 }) {
   const model = agent?.model;
   const ended = agent?.interrupted ? "interrupted" : model?.ended?.reason;
@@ -114,10 +126,13 @@ export function ChatThread({
     [model],
   );
   const working = !!live && live.phase !== "finished" && !ended;
-  const spends = model && billedPerCall(agent?.snapshot?.models) ? model.spendCalls : NO_SPEND;
+  const selection = agent?.snapshot?.models;
+  const spends = model && billedPerCall(selection) ? model.spendCalls : NO_SPEND;
+  const usage = model?.usageCalls;
+  const mainRoute = useMemo(() => mainOf(selection), [selection]);
   const thread = useMemo(
-    () => withWork(items, steps, working, spends),
-    [items, steps, working, spends],
+    () => withWork(items, steps, working, spends, { usage, main: mainRoute }),
+    [items, steps, working, spends, usage, mainRoute],
   );
   const latest = useMemo(() => ({ sessionId, items: thread }), [sessionId, thread]);
   const earlier = useEarlierThread(api, sessions, latest, agent?.history ?? true);
@@ -160,6 +175,7 @@ export function ChatThread({
       start={start}
       reveal={reveal}
       words={words}
+      names={names}
     />
   );
 }

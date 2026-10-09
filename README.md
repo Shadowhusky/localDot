@@ -24,8 +24,9 @@
 
 ## What it is
 
-localDot is an assistant that does real work on a computer. It clicks, types, drags, reads web
-pages and runs code. It just doesn't do any of that on *your* computer.
+localDot is an assistant that does real work on a computer. It clicks, types, drags, searches
+the web, reads pages, runs code and uses your apps. It just doesn't do any of that on *your*
+computer.
 
 dot (that's the assistant) gets a small, isolated computer of its own. It runs in containers on
 your Mac, and you watch it live in a browser tab or on your phone. You can take over at any
@@ -39,8 +40,18 @@ Three things we cared about most:
   why, and a full list of every step, including the ones that failed.
 - **Your keys never reach the model.** The agent only ever holds stand-ins. A small key service
   on your Mac adds the real key on the way out, and only for the hosts that key belongs to.
-- **Nothing leaves without a reason.** All traffic goes through one gate. Sending as you, paying,
-  passwords and uploads always ask first. Ordinary work on its own computer just runs.
+- **Nothing leaves without a reason.** Everything dot sends out passes one checkpoint on your Mac.
+  Sending as you, paying, passwords and uploads always ask first. Ordinary work on its own
+  computer just runs.
+
+## What dot can do
+
+<picture>
+  <source srcset="docs/readme/capabilities.svg" type="image/svg+xml">
+  <img src="docs/readme/capabilities.png" alt="Pencil sketch of eleven things dot can do: use the screen, a web browser that keeps your sign-ins, a terminal, files, web search for web, images and news, deep research with numbered sources and a cited report, voice, your apps as tools, routines on a schedule, a memory you can edit, and asking you before it acts as you.">
+</picture>
+
+The tour below shows them at work.
 
 ## A quick tour
 
@@ -52,15 +63,62 @@ Three things we cared about most:
 
 The picture is dot's computer, live. The island on top says what's happening and keeps Pause,
 Stop and Take control within reach. dot sits under the picture and tells you what it's doing in
-plain words. The chat is on the right, and you can type into it while dot works.
+plain words. The chat is on the right, and you can type into it while dot works. Send a message
+and dot shows it's thinking straight away. The timer runs on localDot's own clock, so it doesn't
+stick or jump, even after the tab has been in the background. Earlier conversations are one click
+away, grouped by day and searchable.
 
 ### Activity
 
-<img src="docs/readme/activity.png" alt="The Activity tab: the plan, a list of steps with timings and results, and the files that changed">
+<img src="docs/readme/activity.png" alt="The Activity tab: a compact plan strip reading 1 of 4 with the current and next item, Steps and Files tabs, the step list with timings and results, and a usage line with the model and tokens">
 
-The plan, every step with what it did and how long it took (failures and blocked requests
-included), and the files it changed. If something went sideways, this is where you find out
-which step, and why.
+The plan sits on top as a slim strip: how far along it is, what dot is doing now and what comes
+next. Tap it for the whole plan. Under it, **Steps** lists everything dot did and how long it
+took, failures and blocked requests included. **Files** has what it changed, and research tasks
+get **Sources**. One quiet line at the bottom shows the model and the tokens so far, plus the
+money when you pay per call. If something went sideways, this is where you find out which step,
+and why.
+
+The panels are yours to size. Drag the edge between the picture and the side panel, double-click
+it to reset, or focus it and use the arrow keys. localDot remembers the width.
+
+### Search, read and research
+
+<img src="docs/readme/research.png" alt="Two Activity panels from a research task. Left: steps such as Searched the web for air source heat pump performance, Read energysavingtrust.org.uk, Reading a PDF from nrel.gov and Searched the news. Right: the Sources tab with six numbered sources, their sites and passages, 6 of 20 read, and Wrap up now">
+
+dot searches the web, images or news without touching the screen, and without a search key. If
+one search engine doesn't answer, it asks the next. It reads a link the same way, as text or as
+a picture, and it looks at the pictures it finds, which helps before it draws or designs
+something. Neither uses a browser or any of your sign-ins. Both go out through keyd, like the
+web browser's own traffic, and whatever comes back is handed to the model marked as untrusted.
+
+For a bigger question, turn on **Research** in the message box (dot suggests it when a question
+reads like one). dot splits the question into a few smaller ones, reads widely, and numbers every
+page it reads as a source. It stops at 20 sources or 15 minutes unless you change that in
+Settings, and you can tell it to wrap up early or keep going. You get a report with citations,
+as Markdown and as a PDF, with the passages it quoted from each source.
+
+### Pick the model, see what it used
+
+<img src="docs/readme/models.png" alt="Left: the model menu from the message box, grouped as Anthropic, OpenAI, Claude Code and ChatGPT plan, with Manage models at the bottom. Right: a finished turn's line, Claude Sonnet 5.5 · 25.1K tokens, opened to show each model's tokens in and out">
+
+The chip in the message box names the model doing the work. Open it to pick from every model
+you've set up, grouped by provider and plan; **Manage models…** at the bottom takes you to
+Settings. A switch applies from the next task, and the one running keeps its model.
+
+Under each finished reply, a quiet line names the model and the tokens it used. For a reply that
+was just talk it adds the time, and the cost when your provider billed it. Tap the line to see
+each model's tokens.
+
+### Talk to it
+
+<img src="docs/readme/voice.png" width="560" alt="Settings, Voice: speech to text on this device after a one-time download, language, allow online speech (off), read replies aloud (off), and a note that your voice is never saved">
+
+Hold the mic in the message box, or press ⌥Space (Ctrl+Shift+Space off a Mac), and talk. Your
+words land in the message so you can check them before you send. The speech is turned into text
+on your device when the browser can do it, or by a whisper.cpp model you already have on your
+Mac. The browser's online speech service is only used if you allow it. dot can also read its
+replies aloud in your device's own voice. Your voice is never saved.
 
 ### It asks, right where you are
 
@@ -84,12 +142,24 @@ Press **Take control** and the computer is yours: mouse, keyboard, paste, the lo
 or touch anything until you hand it back, and that stretch isn't recorded. Full screen is one
 click away when you want the whole display.
 
+### Your apps, as tools
+
+<img src="docs/readme/connectors.png" width="760" alt="Settings, Connectors: GitHub with its tools listed one by one, each set to Just runs, Asks first or Off, and Linear waiting for a sign-in">
+
+Some jobs are quicker without the screen. In **Settings → Connectors** you can give dot your
+apps directly: GitHub, Linear, Notion, Sentry, Brave Search and DeepWiki are a click away, and any
+other MCP server can be added by its address or the command that runs it. Each tool is set to
+**Just runs**, **Asks first** or **Off**. Reading runs; anything that changes something asks
+first, and the card shows exactly what dot would send. Keys and sign-ins stay in keyd and only
+ever go to their own app. An app that runs as a program gets a sealed cell of its own: read-only,
+none of your files, and no way out except through keyd.
+
 ### On your phone
 
-<img src="docs/readme/phone.png" alt="Three phone screens: watching a task, a sign-in sheet, and Replay with the step list">
+<img src="docs/readme/phone.png" alt="Three phone screens: watching a task, a sign-in sheet, and Replay with the plan strip and step list">
 
-Same app, laid out for a thumb. Put localDot on your tailnet and it works from anywhere, and it
-will nudge your phone when dot needs you.
+Same app, laid out for a thumb. The model and Research live in the More menu. Put localDot on
+your tailnet and it works from anywhere, and it will nudge your phone when dot needs you.
 
 ### Replay and export
 
@@ -102,11 +172,13 @@ your Mac, so closing the tab doesn't cancel them.
 
 ### What it made
 
-<img src="docs/readme/done.png" alt="A finished task: the summary, two files with inline previews, a start and an end screenshot, and Watch replay">
+<img src="docs/readme/done.png" alt="A finished task: the summary, two files with inline previews, a start and an end screenshot, Watch replay, and a quiet line with the model and tokens">
 
 When dot finishes you get the files with previews (images, PDFs, HTML in a sandbox, text, code,
 CSV and spreadsheets, audio and video), a before and after screenshot as proof of work, and
-**Revise** for when it's nearly right. Revised files keep their versions, with Compare.
+**Revise** for when it's nearly right. Revised files keep their versions, with Compare. Open a
+PDF, a document or a deck in full and you can page through it, with thumbnails, and a deck can
+present a slide at a time.
 
 ### Routines
 
@@ -123,11 +195,11 @@ you choose what happens when you're away.
 Setup walks you through a model, a key or a sign-in, how careful dot should be, and turning the
 computer on. It takes about two minutes and you can skip it.
 
-<img src="docs/readme/settings.png" alt="Settings: models, autonomy, always allow, spending, appearance, notifications, what dot knows, accounts, keys and your computer">
+<img src="docs/readme/settings.png" alt="Settings: models, autonomy, always allow, spending, appearance, voice, notifications, what dot knows, accounts, connectors, keys and your computer">
 
-Settings has the rest: models, autonomy, the things you've always allowed, spending limits (off
-until you want them), what dot remembers about you (all of it editable and deletable), the sites
-you're signed in to, and your keys.
+Settings has the rest: models, autonomy, the things you've always allowed, research limits,
+spending limits (off until you want them), voice, what dot remembers about you (all of it
+editable and deletable), the sites you're signed in to, your apps, and your keys.
 
 ### The computer itself
 
@@ -135,9 +207,17 @@ you're signed in to, and your keys.
 
 It's Linux in containers, dressed to feel familiar: menu bar, dock, a launcher, traffic lights.
 It comes with Chromium, LibreOffice, GIMP, a code editor and a terminal. Sign-ins in its web
-browser stay put across restarts and new tasks, so you log in once.
+browser stay put across restarts and new tasks, so you log in once. If the web browser ever
+fails, dot carries on in the desktop's Chromium (without your sign-ins) instead of stopping the
+task or the computer.
 
 <img src="docs/readme/computer-launcher.png" alt="The launcher open over LibreOffice Calc, with calc typed in the search field">
+
+<img src="docs/readme/starting.png" width="600" alt="Starting your computer: dot over a dark curtain, 0:14 · Waiting for the desktop, and a progress bar">
+
+Starting, updating and restarting the computer show real progress from localDot itself, and a
+start names each step on the way, from the network to the desktop to the screen. Refresh the page
+or open a second tab and you see the same count, not a fresh one.
 
 ## Meet dot
 
@@ -148,7 +228,12 @@ browser stay put across restarts and new tasks, so you log in once.
 dot is the little white ball doing the work, and it picks up whatever the job needs. A keyboard
 when it types, a terminal when it runs code, a magnifier when it looks closely, a paper plane
 when something is going out. It glides from one to the next, waves when it needs you, and
-squints happily when it's done. It has no other hobbies.
+squints happily when it's done. When nothing is going on, it says hello and offers the odd tip.
+It has no other hobbies.
+
+At rest, dot is pinned to its spot on the page, so scrolling or dragging a panel carries it
+along with no lag. And dot keeps its troubles to itself: if its own code ever fails,
+it steps out for a few seconds and comes back, and the rest of the app carries on.
 
 <img src="docs/readme/dot-poses.png" alt="Every one of dot's poses at hero and dock size: typing, terminal, browsing, clicking, dragging, looking, thinking, waiting, needs you, sending, saving, remembering, done and something failed">
 
@@ -156,7 +241,7 @@ squints happily when it's done. It has no other hobbies.
 
 <picture>
   <source srcset="docs/readme/system.svg" type="image/svg+xml">
-  <img src="docs/readme/system.png" alt="Pencil sketch: your browser and phone talk to the localDot daemon on your Mac. The daemon runs an isolated computer made of four containers: desktop, web browser, brain and gate. The gate leads to keyd, which holds the real keys and adds them on the way out to model providers and the web.">
+  <img src="docs/readme/system.png" alt="Pencil sketch: your browser and phone talk to the localDot daemon on your Mac. The daemon runs an isolated computer made of four containers: desktop, web browser, brain and gate. The gate leads to keyd, which holds the real keys and adds them on the way out to model providers, the web and your apps. Web search and page reads go from the daemon to keyd with no sign-ins or keys, and your apps go through keyd too, each app that runs as a program in an app cell of its own.">
 </picture>
 
 | Part | What it does |
@@ -165,8 +250,10 @@ squints happily when it's done. It has no other hobbies.
 | **Desktop** | The screen you watch: a Linux desktop streamed as H.264. dot clicks, types and drags here. |
 | **Web browser** | A separate browser that keeps your sign-ins. The desktop can't read its cookies. |
 | **Brain** | The agent loop that talks to the model. It holds stand-in keys only. |
-| **Gate** | The only way out to the network. No LAN, no router, no cloud metadata. |
-| **keyd** | A small Go service that keeps your real keys (in the macOS Keychain, your Linux keyring or an encrypted file) and swaps them in at the edge. |
+| **Gate** | The computer's only way out to the network. No LAN, no router, no cloud metadata. Apps that ignore the proxy are caught here and checked like everything else. |
+| **Web tools** | Web search and page reading, done by the daemon itself through a keyd listener of their own. It reaches public websites only and carries no sign-ins and no keys. |
+| **App cells** | One sealed container for each of your apps that runs as a program: read-only, none of your files, and a gate that only reaches keyd. Apps on the internet are reached through keyd directly. |
+| **keyd** | A small Go service that keeps your real keys (in the macOS Keychain, your Linux keyring or an encrypted file), checks where everything is going, and swaps the keys in at the edge. |
 
 <picture>
   <source srcset="docs/readme/task-loop.svg" type="image/svg+xml">
@@ -175,13 +262,15 @@ squints happily when it's done. It has no other hobbies.
 
 A task goes round a simple loop: act, take a fresh look at the screen, say what happened, repeat.
 dot can batch several actions into one turn and find buttons by name instead of hunting for
-pixels, which is a big part of why it got quicker (see the numbers below).
+pixels, which is a big part of why it got quicker (see the numbers below). Not every step needs
+the screen: searching, reading a page and using one of your apps happen directly, and they show
+up in the same step list.
 
 ## Safety
 
 <picture>
   <source srcset="docs/readme/safety.svg" type="image/svg+xml">
-  <img src="docs/readme/safety.png" alt="Pencil sketch of six walls between dot and the internet: hard checks, purpose check, approvals, the isolated computer, the network gate and stand-in keys. Reading and clicking pass straight through; sending an email as you asks; posting your notes to a random site asks; poking the router is blocked; smuggling out an API key only gets a stand-in.">
+  <img src="docs/readme/safety.png" alt="Pencil sketch of six walls between dot and the internet: hard checks, purpose check, approvals, the isolated computer, the network gate and stand-in keys. Searching, reading and clicking pass straight through; sending an email as you asks; posting your notes to a random site asks; poking the router is blocked; smuggling out an API key only gets a stand-in.">
 </picture>
 
 What asks and what doesn't, on the default **Balanced** setting:
@@ -189,13 +278,16 @@ What asks and what doesn't, on the default **Balanced** setting:
 | dot wants to… | What happens |
 | --- | --- |
 | Click, type, scroll or drag on its own computer | Just runs |
-| Open pages, read, search | Just runs |
+| Open pages, read, search the web | Just runs |
+| Read something with one of your apps | Just runs |
 | Run code or a terminal command on its own computer | Just runs |
 | Send a message or email as you, or post as you | Asks first |
 | Pay for or buy something | Asks first |
 | Enter a password or another secret | Asks you to type it; the model never sees it |
 | Upload your files somewhere | Asks first |
 | Change account settings or delete data on a remote service | Asks first |
+| Change something with one of your apps | Asks first, with exactly what it would send (you can set each tool) |
+| Let an app on its computer connect beyond websites, such as another port | Asks first, naming the app, the host and the port |
 | Send private data somewhere unrelated to the task | Asks first, when the purpose check is on |
 | Reach your LAN, your router or cloud metadata | Blocked |
 | Use an API key | Gets a stand-in; the real key is added at the edge, for that key's hosts only |
@@ -207,7 +299,12 @@ can be scoped: just this once, for this task, for this site, or always, and you 
 The purpose check is optional and recommended. It looks at where data is going (the host, the
 size and shape of what's being sent, whether it overlaps private text dot has seen), never at the
 private content itself, and it only asks when something private is heading somewhere the task
-has no business going.
+has no business going. Web searches count too: a query is checked against every search engine it
+might go to, and so are the pages dot reads and what it sends to your apps.
+
+Search results, pages and whatever your apps return reach the model marked as untrusted, as
+something to read rather than instructions to follow. What your apps return also counts as
+private, so the purpose check keeps an eye on where it goes next.
 
 ## Numbers
 
@@ -243,7 +340,8 @@ details are in [docs/measurements/2026-10-readme-numbers.md](docs/measurements/2
 ## Models
 
 dot needs a main model that can use a computer, meaning it can look at a screenshot and point at
-things. A fast model for titles and quick checks is optional, and so is a local one.
+things. A fast model for titles and quick checks is optional, and so is a local one. Set them up
+in Settings → Models, then switch between them from the chip in the message box.
 
 | Kind | Options | Good to know |
 | --- | --- | --- |
@@ -330,14 +428,16 @@ what each task spent. Spending limits are there when you want them, and off unti
 
 **Where does my data go?**
 Screenshots and the task's text go to the model provider you chose, and dot visits the sites the
-task needs. Pick a local model and the model calls stay on your Mac.
+task needs. Web searches go to public search engines, without your sign-ins. Pick a local model
+and the model calls stay on your Mac.
 
 **Why is it called dot?**
 Look at it.
 
 **Can I build on it?**
-Yes. Skills are plain `SKILL.md` folders, and dot's memory is two Markdown files you can read and
-edit. See [docs/development.md](docs/development.md).
+Yes. Skills are plain `SKILL.md` folders, dot's memory is two Markdown files you can read and
+edit, and any MCP server can become one of dot's tools in Settings → Connectors. See
+[docs/development.md](docs/development.md).
 
 ## Contributing
 

@@ -37,6 +37,8 @@ export function readOnlyAllows(call: Pick<PolicyCall, "tool" | "input">): boolea
       return input.op === "read" || input.op === "list";
     case "browser_navigate":
     case "browser_read":
+    case "web_search":
+    case "web_fetch":
     case "find":
     case "switch_screen":
     case "update_plan":

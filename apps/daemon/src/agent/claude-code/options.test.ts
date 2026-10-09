@@ -1,5 +1,5 @@
 import type { SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
-import { TOOL_NAMES } from "@localdot/protocol";
+import { offeredTools, TOOL_NAMES } from "@localdot/protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { describe, expect, it, vi } from "vitest";
@@ -99,7 +99,7 @@ describe("Claude Code as dot's brain", () => {
     const { server, call } = options();
     const mcp = await connect(server);
     const listed = await mcp.listTools();
-    expect(listed.tools.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
+    expect(listed.tools.map((tool) => tool.name)).toEqual([...offeredTools(false)]);
     expect(LOCALDOT_TOOLS).toHaveLength(TOOL_NAMES.length);
     const codex = codexTools();
     for (const tool of listed.tools)
@@ -110,6 +110,38 @@ describe("Claude Code as dot's brain", () => {
     const reply = await mcp.callTool({ name: "shell", arguments: { command: "ls" } });
     expect(reply).toEqual({ isError: false, content: [{ type: "text", text: "ok" }] });
     expect(call).toHaveBeenCalledWith("shell", { command: "ls" }, expect.any(AbortSignal));
+    await mcp.close();
+  });
+  it("lets the task's connected apps' tools through the same server, and nothing named like them elsewhere", async () => {
+    const ask = (name: string, mcpServer?: { name: string; source: string }) =>
+      onlyLocaldot(name, {}, {
+        signal: new AbortController().signal,
+        ...(mcpServer ? { mcpServer } : {}),
+      } as never);
+    const sdk = { name: "localdot", source: "sdk" };
+    expect((await ask("mcp__localdot__linear__list_issues", sdk))?.behavior).toBe("allow");
+    expect(
+      (await ask("mcp__localdot__linear__list_issues", { name: "localdot", source: "user" }))
+        ?.behavior,
+    ).toBe("deny");
+    expect(
+      (await ask("mcp__other__linear__list_issues", { name: "other", source: "sdk" }))?.behavior,
+    ).toBe("deny");
+    expect((await ask("mcp__localdot__not a tool", sdk))?.behavior).toBe("deny");
+    const call = vi.fn(async () => ({ isError: false, content: [] }));
+    const server = localdotServer(call, false, () => [
+      {
+        name: "linear__list_issues",
+        description: "Linear (the user's connected app): List issues.",
+        inputSchema: { type: "object", properties: {} },
+      },
+    ]);
+    const mcp = await connect(server);
+    const listed = await mcp.listTools();
+    expect(listed.tools.map((tool) => tool.name)).toEqual([
+      ...offeredTools(false),
+      "linear__list_issues",
+    ]);
     await mcp.close();
   });
 });

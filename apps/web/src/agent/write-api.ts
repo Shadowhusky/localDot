@@ -9,6 +9,8 @@ export interface TextDelivery {
   readonly text: string;
   // A new task that revises a file dot handed over before, starting from that version.
   readonly revise?: ReviseLink;
+  // A new task in research mode: dot reads many sources and writes a cited report.
+  readonly research?: true;
 }
 export class DeliveryFailure extends Error {
   constructor(
@@ -39,7 +41,8 @@ export async function deliverText(api: ApiClient, request: TextDelivery): Promis
     (request.revise &&
       (request.mode !== "new" ||
         !ReviseLink.safeParse(request.revise).success ||
-        request.text.length > 7500))
+        request.text.length > 7500)) ||
+    (request.research && (request.mode !== "new" || request.revise))
   )
     throw new DeliveryFailure(false);
   const revise = request.mode === "new" ? request.revise : undefined;
@@ -57,7 +60,7 @@ export async function deliverText(api: ApiClient, request: TextDelivery): Promis
         revise
           ? { cellId: request.cellId, version: revise.version, text: request.text }
           : request.mode === "new"
-            ? { task: request.text }
+            ? { task: request.text, ...(request.research ? { mode: "research" } : {}) }
             : { kind: request.mode, text: request.text },
       ),
       signal: AbortSignal.any([abort.signal, AbortSignal.timeout(15_000)]),

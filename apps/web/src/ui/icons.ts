@@ -322,6 +322,12 @@ export const ICONS = {
       },
     ],
   ],
+  library: [
+    ["path", { d: "m16 6 4 14" }],
+    ["path", { d: "M12 6v14" }],
+    ["path", { d: "M8 8v12" }],
+    ["path", { d: "M4 4v16" }],
+  ],
   contrast: [
     ["circle", { cx: "12", cy: "12", r: "9.5" }],
     ["path", { d: "M12 17.5a5.5 5.5 0 0 0 0-11z", ...FILLED }],
@@ -361,6 +367,11 @@ export const ICONS = {
   "forward-10": [
     ["path", { d: "M21 12a9 9 0 1 1-2.64-6.36L21 8.3" }],
     ["path", { d: "M21 3.5v4.8h-4.8" }],
+  ],
+  mic: [
+    ["path", { d: "M12 19v3" }],
+    ["path", { d: "M19 10v2a7 7 0 0 1-14 0v-2" }],
+    ["rect", { x: "9", y: "2", width: "6", height: "13", rx: "3" }],
   ],
   bell: [
     ["path", { d: "M10.268 21a2 2 0 0 0 3.464 0" }],
@@ -427,6 +438,12 @@ export const ICONS = {
     ["path", { d: "M3 11v-1a4 4 0 0 1 4-4h14" }],
     ["path", { d: "m7 22-4-4 4-4" }],
     ["path", { d: "M21 13v1a4 4 0 0 1-4 4H3" }],
+  ],
+  plug: [
+    ["path", { d: "M12 22v-5" }],
+    ["path", { d: "M9 8V2" }],
+    ["path", { d: "M15 8V2" }],
+    ["path", { d: "M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z" }],
   ],
 } as const satisfies Record<string, IconNode>;
 

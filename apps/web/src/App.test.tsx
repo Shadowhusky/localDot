@@ -12,6 +12,7 @@ import { ONBOARDING_KEY } from "./onboarding/wizard.ts";
 import { providerFixture } from "./settings/testing.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
+import { setListening } from "./voice/listening.ts";
 
 // The attention feed (/api/events) has its own suite (notify/useAttention.test.tsx); these tests
 // follow the computer's and the task's sockets.
@@ -570,8 +571,9 @@ describe("App token states", () => {
     const retrying = render(<App fetchImpl={fetchImpl} />);
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
     act(() => FakeWebSocket.instances[1]?.onclose?.());
-    // Cell retry and live-session retry; a starting computer's downloads are not polled.
-    expect(vi.getTimerCount()).toBe(2);
+    // Cell retry, live-session retry and the curtain's clock; a starting computer's downloads are
+    // not polled.
+    expect(vi.getTimerCount()).toBe(3);
     retrying.unmount();
     expect(vi.getTimerCount()).toBe(0);
     vi.advanceTimersByTime(60_000);
@@ -878,6 +880,21 @@ describe("App HUD", () => {
         document.querySelector(".narration-line")?.textContent?.replace(/^dot: /, ""),
       ),
     );
+  });
+
+  it("has dot say it is listening while the user talks, then go back to its own line", async () => {
+    window.localStorage.setItem(
+      ONBOARDING_KEY,
+      JSON.stringify({ step: "welcome", dismissed: true }),
+    );
+    render(<App fetchImpl={daemon(() => json([summary("ready", "live")])).fetchImpl} />);
+    const line = () =>
+      document.querySelector(".narration-line")?.textContent?.replace(/^dot: /, "");
+    await waitFor(() => expect(Object.values(GREETINGS).flat()).toContain(line()));
+    act(() => setListening(true));
+    await waitFor(() => expect(line()).toBe("Listening…"));
+    act(() => setListening(false));
+    await waitFor(() => expect(Object.values(GREETINGS).flat()).toContain(line()));
   });
 
   it("keeps the stage lit while the stream reconnects, and says so in the island", async () => {

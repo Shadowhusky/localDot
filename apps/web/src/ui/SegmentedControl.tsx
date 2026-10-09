@@ -18,8 +18,12 @@ export interface SegmentItem {
   label: string;
   icon?: IconName;
   disabledReason?: string;
+  // A quiet number after the label, such as how many files a tab holds.
+  count?: number;
   // An amber point at the segment's corner, such as Chat while dot asks and Activity shows.
   attention?: boolean;
+  // A quiet point after the label for something the user has not seen yet, such as a new file.
+  fresh?: boolean;
 }
 
 export interface SegmentTrackProps {
@@ -30,6 +34,8 @@ export interface SegmentTrackProps {
   onReselect?(value: string): void;
   // Track height in px: 32 for a rail's header, 28 for Watch | Replay and filters, 24 inside a list.
   size?: 24 | 28 | 32;
+  // Line: tabs over a hairline, the chosen one underlined. Quiet: no track, a soft thumb.
+  variant?: "line" | "quiet";
   className?: string;
   "aria-label"?: string;
 }
@@ -76,6 +82,13 @@ function Segment({
       >
         {item.icon && <Icon name={item.icon} />}
         <span className="ui-segment-label">{item.label}</span>
+        {item.count !== undefined && (
+          <>
+            {" "}
+            <span className="ui-segment-count num">{item.count}</span>
+          </>
+        )}
+        {item.fresh && <span className="ui-segment-fresh" aria-hidden="true" />}
         {item.attention && <span className="ui-segment-attention" aria-hidden="true" />}
       </button>
       {tooltip}
@@ -90,6 +103,7 @@ export function SegmentTrack({
   onValueChange,
   onReselect,
   size = 28,
+  variant,
   className,
   "aria-label": label,
   parts,
@@ -144,6 +158,7 @@ export function SegmentTrack({
       id={parts.id}
       className={clsx("ui-segmented", className)}
       data-size={size}
+      data-variant={variant}
       style={{ "--_count": items.length, "--_index": Math.max(index, 0) } as CSSProperties}
     >
       <span className="ui-segmented-thumb" data-hidden={index < 0 ? "" : undefined} />

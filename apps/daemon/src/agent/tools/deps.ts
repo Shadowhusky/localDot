@@ -1,5 +1,6 @@
 import { clipText, INTENT_CHARS, type ToolResult } from "@localdot/protocol";
 import type { ScreenLease } from "../../browser/screen-controller.ts";
+import type { ConnectorHub } from "../../connectors/hub.ts";
 import type { DesktopdClient } from "../../desktopd/client.ts";
 import type { NativeDevice } from "../../desktopd/registry.ts";
 import type { DesktopdTools } from "../../desktopd/tools-client.ts";
@@ -12,6 +13,7 @@ import type { EffectPermit } from "../safety/authorize.ts";
 import { screenOf } from "../safety/autonomy.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import type { Transfers } from "../transfers.ts";
+import type { WebAccess } from "../web/cell.ts";
 
 export interface RecallHit {
   title: string;
@@ -71,6 +73,9 @@ export interface ToolDeps {
   sleep(ms: number, signal?: AbortSignal): Promise<void>;
   askTimeoutMs?: number;
   routines?: import("./routine.ts").RoutineToolPort;
+  connectors?: Pick<ConnectorHub, "access" | "check" | "call">;
+  // The web tools' own way out, through keyd, without the screen or the user's sign-ins.
+  web?: WebAccess;
 }
 
 export interface ToolCallContext {

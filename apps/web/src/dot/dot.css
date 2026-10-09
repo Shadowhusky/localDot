@@ -139,8 +139,9 @@
   }
 }
 
-/* The one live dot (design-v2 §10.17): a fixed layer over the page, above the stage, its island and
-   the band, under sheets, menus and dialogs. */
+/* The one live dot (design-v2 §10.17) flies in a fixed layer over the page, above the stage, its
+   island and the band, under sheets, menus and dialogs. At rest it sits inside its place, so the page
+   moves it with the place. */
 .presence {
   position: fixed;
   inset: 0;
@@ -160,6 +161,11 @@
   opacity: 0;
   transition: opacity var(--dur-fade) var(--ease-standard);
   will-change: transform;
+  pointer-events: none;
+}
+
+.presence-slot > .presence-frame {
+  position: relative;
 }
 
 .presence-frame[data-shown] {

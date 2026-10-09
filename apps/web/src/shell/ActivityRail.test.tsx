@@ -112,7 +112,9 @@ describe("ActivityRail", () => {
     const { container } = render(
       <ActivityRail rows={[]} sessionId="one" scale={1} api={api} agent={model} nowMs={2_004} />,
     );
-    expect(container.querySelector(".activity-group, .ui-disclosure")).toBeNull();
+    expect(
+      container.querySelector(".activity-group, .activity-timeline .ui-disclosure"),
+    ).toBeNull();
     expect(screen.queryByRole("button", { name: /^Read the sample data/ })).toBeNull();
     const rows = within(screen.getByRole("region", { name: "Recorded steps" })).getAllByTestId(
       "tool-row",
@@ -130,6 +132,7 @@ describe("ActivityRail", () => {
       "0:02",
     ]);
     expect(rows[3]?.hasAttribute("data-current")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: /^Plan/ }));
     expect(screen.getByRole("list", { name: "Task plan" }).textContent).toBe(
       "Read the sample dataWrite the report",
     );
@@ -156,10 +159,10 @@ describe("ActivityRail", () => {
         },
       ],
     };
-    render(<ActivityRail rows={[]} sessionId="one" scale={1} api={api} agent={model} />);
-    const files = screen.getByRole("region", { name: "Files" });
-    expect(files.textContent).toContain("1 changed");
-    const row = within(files).getByTestId("change-row");
+    render(<ActivityRail rows={[]} sessionId="changed" scale={1} api={api} agent={model} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Files 1" }));
+    const changed = screen.getByRole("region", { name: "Changed" });
+    const row = within(changed).getByTestId("change-row");
     expect(row.textContent?.replace(/\s+/g, " ").trim()).toBe("summary.md Created · +1");
     fireEvent.click(within(row).getByRole("button"));
     expect(within(row).getByLabelText("Unified text diff").textContent).toBe("+# Report");
@@ -239,5 +242,144 @@ describe("ActivityRail", () => {
     expect(filter.getByRole("radio", { name: "Tools" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByTestId("step-row")).toBeNull();
     expect(screen.getAllByTestId("tool-row")).toHaveLength(1);
+  });
+
+  it("pins a compact plan: the count, the item dot is on and the next, unfolding the whole list", () => {
+    const model = {
+      ...emptyAgentModel(),
+      plan: [
+        { id: "a", text: "Open the sheet", status: "done" as const },
+        { id: "b", text: "Check the **totals**", status: "doing" as const },
+        { id: "c", text: "Write the report", status: "todo" as const },
+        { id: "d", text: "Send it", status: "todo" as const },
+      ],
+    };
+    const { container } = render(
+      <ActivityRail rows={[]} sessionId="strip" scale={1} api={api} agent={model} />,
+    );
+    const strip = screen.getByRole("button", { name: /^Plan/ });
+    expect(strip.getAttribute("aria-expanded")).toBe("false");
+    expect(container.querySelector(".plan-strip-count")?.textContent).toBe("1 of 4");
+    expect(
+      [...container.querySelectorAll(".plan-strip-text")].map((line) => [
+        line.textContent,
+        line.getAttribute("title"),
+      ]),
+    ).toEqual([
+      ["Check the totals", "Check the totals"],
+      ["Write the report", "Write the report"],
+    ]);
+    expect(screen.queryByRole("list", { name: "Task plan" })).toBeNull();
+    fireEvent.click(strip);
+    expect(strip.getAttribute("aria-expanded")).toBe("true");
+    expect(container.querySelector(".plan-strip-text")).toBeNull();
+    expect(
+      within(screen.getByRole("list", { name: "Task plan" }))
+        .getAllByRole("listitem")
+        .map((item) => item.textContent),
+    ).toEqual(["Open the sheet", "Check the totals", "Write the report", "Send it"]);
+  });
+
+  it("has no plan strip without a plan", () => {
+    render(
+      <ActivityRail rows={[]} sessionId="no-plan" scale={1} api={api} agent={emptyAgentModel()} />,
+    );
+    expect(screen.queryByRole("button", { name: /^Plan/ })).toBeNull();
+  });
+
+  it("puts steps, files and sources on tabs with counts, each only once it has something", () => {
+    const base = { ...emptyAgentModel(), steps: new Map([tool("a", "x", 1), tool("b", "x", 2)]) };
+    const view = render(
+      <ActivityRail rows={[]} sessionId="tabs" scale={1} api={api} agent={base} />,
+    );
+    const names = () => screen.getAllByRole("tab").map((tab) => tab.textContent);
+    expect(names()).toEqual(["Steps 2"]);
+    const full = {
+      ...base,
+      changes: [
+        { id: "f", type: "file" as const, path: "a.md", op: "create" as const, truncated: false },
+        { id: "m", type: "memory" as const, path: "MEMORY.md", truncated: false },
+      ],
+      research: {
+        startMs: 0,
+        budget: { sources: 20, minutes: 15 },
+        sources: [{ n: 1, url: "https://example.org/a", title: "A page", passages: 0 }],
+      },
+    };
+    view.rerender(<ActivityRail rows={[]} sessionId="tabs" scale={1} api={api} agent={full} />);
+    expect(names()).toEqual(["Steps 2", "Files 2", "Sources 1"]);
+    expect(screen.getByRole("tab", { name: "Steps 2" }).getAttribute("aria-selected")).toBe("true");
+    fireEvent.click(screen.getByRole("tab", { name: "Files 2" }));
+    const files = screen.getByRole("tabpanel", { name: "Files 2" });
+    expect(within(files).getByRole("region", { name: "Changed" }).textContent).toContain("a.md");
+    expect(within(files).getByRole("region", { name: "Memory" }).textContent).toContain(
+      "MEMORY.md",
+    );
+    expect(screen.queryByRole("region", { name: "Recorded steps" })).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Sources 1" }));
+    expect(screen.getByRole("list", { name: "Sources dot read" }).textContent).toContain("A page");
+  });
+
+  it("remembers the chosen tab per task while the page is open", () => {
+    const model = {
+      ...emptyAgentModel(),
+      steps: new Map([tool("a", "x", 1)]),
+      changes: [
+        { id: "f", type: "file" as const, path: "a.md", op: "create" as const, truncated: false },
+      ],
+    };
+    const rail = (sessionId: string) => (
+      <ActivityRail rows={[]} sessionId={sessionId} scale={1} api={api} agent={model} />
+    );
+    const selected = () =>
+      screen.getAllByRole("tab").find((tab) => tab.getAttribute("aria-selected") === "true")
+        ?.textContent;
+    const view = render(rail("memory-a"));
+    fireEvent.click(screen.getByRole("tab", { name: "Files 1" }));
+    view.rerender(rail("memory-b"));
+    expect(selected()).toBe("Steps 1");
+    view.rerender(rail("memory-a"));
+    expect(selected()).toBe("Files 1");
+    view.unmount();
+    render(rail("memory-a"));
+    expect(selected()).toBe("Files 1");
+  });
+
+  it("marks Files when a file is handed over, without leaving the tab the reader is on", () => {
+    const model = { ...emptyAgentModel(), steps: new Map([tool("a", "x", 1)]) };
+    const handed = {
+      ...model,
+      results: [
+        {
+          id: "r",
+          summary: "Done",
+          files: [{ name: "report.pdf", path: "report.pdf", bytes: 10 }],
+        },
+      ],
+    };
+    const rail = (agent: typeof model) => (
+      <ActivityRail rows={[]} sessionId="fresh" scale={1} api={api} agent={agent} historyLoaded />
+    );
+    const view = render(rail(model));
+    view.rerender(rail(handed));
+    const files = screen.getByRole("tab", { name: "Files 1" });
+    expect(files.querySelector(".ui-segment-fresh")).toBeTruthy();
+    expect(files.getAttribute("aria-selected")).toBe("false");
+    fireEvent.click(files);
+    expect(files.querySelector(".ui-segment-fresh")).toBeNull();
+    fireEvent.click(screen.getByRole("tab", { name: "Steps 1" }));
+    expect(
+      screen.getByRole("tab", { name: "Files 1" }).querySelector(".ui-segment-fresh"),
+    ).toBeNull();
+  });
+
+  it("keeps the usage line out of the scroller, at the rail's foot", () => {
+    const { container } = render(
+      <ActivityRail rows={[]} sessionId="usage" scale={1} api={api} agent={emptyAgentModel()} />,
+    );
+    const usage = container.querySelector(".activity-usage");
+    expect(usage).toBeTruthy();
+    expect(container.querySelector(".activity-scroll")?.contains(usage)).toBe(false);
+    expect(container.querySelector(".activity-rail")?.lastElementChild).toBe(usage);
   });
 });

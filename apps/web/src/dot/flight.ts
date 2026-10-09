@@ -20,7 +20,8 @@ const UP: Path = { x: spring(1, 0.38), y: spring(1, 0.52) };
 // Size leads on the way out and trails on the way in.
 const GROW = spring(1, 0.26);
 const SHRINK = spring(1, 0.5);
-// A place that moves under a resting dot, such as a reflow, is followed rather than flown to.
+// A new box for the place dot is at, or a place that moves under it mid-flight, is followed rather
+// than flown to.
 const FOLLOW = spring(1, 0.3);
 const STILL: Path = { x: FOLLOW, y: FOLLOW };
 // Out of the island's badge slot dot grows first, then travels.

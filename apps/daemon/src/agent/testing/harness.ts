@@ -47,6 +47,7 @@ export function toolHarness(
     approvalTtlMs?: number;
     run?: SessionRun;
     routines?: RoutineToolPort;
+    web?: ToolDeps["web"];
   } = {},
 ) {
   const home = mkdtempSync(join(tmpdir(), "local dot's tool api-"));
@@ -182,6 +183,7 @@ export function toolHarness(
     sleep: async () => {},
     ...(opts.askTimeoutMs ? { askTimeoutMs: opts.askTimeoutMs } : {}),
     ...(opts.routines ? { routines: opts.routines } : {}),
+    ...(opts.web ? { web: opts.web } : {}),
   };
   const transcripts = new TranscriptStore(home);
   const app = createToolApi({

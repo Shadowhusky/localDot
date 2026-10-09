@@ -1,5 +1,5 @@
-import { TOOL_NAMES } from "@localdot/protocol";
-import { workingRules } from "@localdot/protocol/guidance";
+import { offeredTools } from "@localdot/protocol";
+import { researchSection, workingRules } from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
 import { codexInstructions } from "./instructions.ts";
 import { CODEX_TOOL_DESCRIPTIONS, codexTools } from "./mcp-tools.ts";
@@ -54,11 +54,19 @@ describe("Codex developer instructions", () => {
       skills: [],
       today: new Date("2026-10-09T12:00:00Z"),
     });
-    expect(text).toContain(TOOL_NAMES.join(", "));
+    expect(text).toContain(`server's: ${offeredTools(false).join(", ")}.`);
+    expect(text).not.toContain("research");
     expect(text).toContain("browser_upload");
     expect(text).toContain(workingRules("batch"));
     expect(text.length).toBeLessThan(4300);
     expect(text).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
+  });
+  it("adds the research rules and tool only in research mode", () => {
+    const base = { memory: { user: "", memory: "" }, skills: [], today: new Date() };
+    const research = codexInstructions({ ...base, research: { sources: 18, minutes: 11 } });
+    expect(research).toContain(`server's: ${offeredTools(true).join(", ")}.`);
+    expect(research).toContain(researchSection({ sources: 18, minutes: 11 }));
+    expect(codexInstructions(base)).not.toContain("# Research mode");
   });
   it("lists skills as files in the task computer, with no host paths", () => {
     const text = codexInstructions({
@@ -137,5 +145,16 @@ describe("routine runs", () => {
     expect(text).toContain("# This run");
     expect(text).toContain("not watching");
     expect(codexInstructions(input)).not.toContain("# This run");
+  });
+});
+
+describe("research mode's tool", () => {
+  it("is listed to the plan's model only for a research task, with the schema the daemon checks", () => {
+    expect(codexTools().map((tool) => tool.name)).not.toContain("research");
+    const research = codexTools(CODEX_TOOL_DESCRIPTIONS, true).find(
+      (tool) => tool.name === "research",
+    );
+    expect(research?.description).toContain("op pdf");
+    expect(JSON.stringify(research?.inputSchema)).toContain('"enum":["source","pdf","report"]');
   });
 });

@@ -63,6 +63,16 @@ export class BrowserTargetError extends Error {
   }
 }
 
+// A page that adds frames or rewrites its URL as it settles changes its document under a read, or
+// still attaches a frame: the same read a moment later can succeed.
+export const PAGE_READ_ATTEMPTS = 5;
+export const PAGE_READ_RETRY_MS = 150;
+export function pageChanged(error: unknown): boolean {
+  return (
+    error instanceof BrowserTargetError && (error.reason === "stale" || error.reason === "unready")
+  );
+}
+
 export interface BrowserDocument {
   readonly tabId: string;
   readonly revision: number;

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import type { QuestionAnswerRequest } from "@localdot/protocol";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ProofStrip } from "../deliverables/ProofStrip.tsx";
 import { createApi } from "../lib/api.ts";
@@ -12,7 +12,7 @@ import { AskForm } from "./AskForm.tsx";
 import { type ActivityEntry, entryView } from "./activity.ts";
 import { AskDraft } from "./ask-draft.ts";
 import { type AgentQuestion, type AgentResult, emptyAgentModel } from "./model.ts";
-import { PlanView } from "./PlanView.tsx";
+import { PlanStrip } from "./PlanStrip.tsx";
 import { QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, useResultDownloads } from "./ResultFiles.tsx";
 import { sayHandedOver } from "./useHandOff.ts";
@@ -88,13 +88,15 @@ describe("a block of dot's words", () => {
 describe("a tight line of dot's words", () => {
   it("reads plan items as plain words", () => {
     const { container } = render(
-      <PlanView
+      <PlanStrip
         plan={[
           { id: "1", text: "**Open** the `totals` sheet", status: "done" },
           { id: "2", text: "## Check [May](https://x.test/may)", status: "doing" },
         ]}
       />,
     );
+    expect(container.querySelector(".plan-strip-text")?.textContent).toBe("Check May");
+    fireEvent.click(container.querySelector(".ui-disclosure-trigger") as HTMLElement);
     expect([...container.querySelectorAll(".plan-text")].map((item) => item.textContent)).toEqual([
       "Open the totals sheet",
       "Check May",

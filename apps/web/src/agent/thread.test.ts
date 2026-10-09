@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
-import type { AgentMessage, AgentQuestion, AgentResult } from "./model.ts";
+import {
+  AGENT_LIMITS,
+  type AgentMessage,
+  type AgentQuestion,
+  type AgentResult,
+  type UsageCall,
+} from "./model.ts";
 import {
   controlLine,
+  type ThreadItem,
   threadItems,
   threadRows,
   timeLabel,
@@ -215,6 +222,123 @@ describe("the work line of each turn", () => {
       "message",
       "work",
     ]);
+  });
+});
+
+describe("the meta line of each finished turn", () => {
+  const used = (atMs: number, extra: Partial<UsageCall> = {}): UsageCall => ({
+    atMs,
+    role: "main",
+    route: "anthropic",
+    model: "claude-sonnet-5-5",
+    inputTokens: 1000,
+    outputTokens: 200,
+    ...extra,
+  });
+  const spent = (atMs: number, usd: number, estimated = false) => ({
+    atMs,
+    route: "anthropic",
+    model: "claude-sonnet-5-5",
+    usd,
+    estimated,
+  });
+  const meta = (thread: ThreadItem[]) => thread.filter((item) => item.kind === "meta");
+
+  it("ends a turn that only talked with its model, how long it took, its tokens and what was billed", () => {
+    const items = threadItems([
+      message("hi", 1),
+      message("hello", 2, "assistant", { doneAt: 4_500_000 }),
+    ]);
+    const thread = withWork(items, [], false, [spent(3000, 0.01), spent(4000, 0.02)], {
+      usage: [used(3000), used(4000, { reasoningTokens: 50 })],
+    });
+    expect(thread.map((item) => item.kind)).toEqual(["message", "message", "meta"]);
+    expect(meta(thread)[0]).toMatchObject({
+      models: [
+        {
+          route: "anthropic",
+          model: "claude-sonnet-5-5",
+          calls: 2,
+          inputTokens: 2000,
+          outputTokens: 400,
+          reasoningTokens: 50,
+        },
+      ],
+      durationMs: 3500,
+      usd: 0.03,
+      work: false,
+    });
+  });
+
+  it("says no amount when any call's cost was only estimated", () => {
+    const items = threadItems([message("hi", 1), message("hello", 2, "assistant")]);
+    const thread = withWork(items, [], false, [spent(3000, 0.01), spent(3500, 0.02, true)], {
+      usage: [used(3000)],
+    });
+    expect(meta(thread)[0]).not.toHaveProperty("usd");
+  });
+
+  it("follows a turn's work line, leads with the main model and keeps each turn's own calls", () => {
+    const items = threadItems([
+      message("task", 1),
+      message("done", 3, "assistant"),
+      message("followup", 10, "user", { kind: "followup" }),
+      message("again", 11, "assistant"),
+    ]);
+    const thread = withWork(items, [step("a", 2000)], false, [], {
+      usage: [
+        used(2100, { role: "fast", route: "openai", model: "gpt-6-luna" }),
+        used(2200),
+        used(10_500, { model: "claude-opus-5-5" }),
+      ],
+    });
+    expect(thread.map((item) => item.key)).toEqual([
+      "message-task",
+      "message-done",
+      "work-message-task",
+      "meta-message-task",
+      "message-followup",
+      "message-again",
+      "meta-message-followup",
+    ]);
+    const [first, second] = meta(thread);
+    expect(first).toMatchObject({ work: true });
+    expect(first?.kind === "meta" && first.models.map((row) => row.model)).toEqual([
+      "claude-sonnet-5-5",
+      "gpt-6-luna",
+    ]);
+    expect(second?.kind === "meta" && second.models.map((row) => row.model)).toEqual([
+      "claude-opus-5-5",
+    ]);
+  });
+
+  it("waits for the latest turn to finish", () => {
+    const items = threadItems([message("hi", 1), message("hello", 2, "assistant")]);
+    const live = withWork(items, [], true, [], { usage: [used(3000)] });
+    expect(meta(live)).toEqual([]);
+  });
+
+  it("names the task's model when the calls said nothing, and has no line without a model or a reply", () => {
+    const items = threadItems([message("hi", 1), message("hello", 2, "assistant")]);
+    const main = { route: "claude-code", model: "sonnet" };
+    expect(meta(withWork(items, [], false, [], { main }))[0]).toMatchObject({
+      models: [],
+      main,
+    });
+    expect(meta(withWork(items, [], false))).toEqual([]);
+    expect(meta(withWork(threadItems([message("hi", 1)]), [], false, [], { main }))).toEqual([]);
+  });
+
+  it("counts no tokens for a turn older than the calls a full list still holds", () => {
+    const items = threadItems([
+      message("old", 1),
+      message("reply", 2, "assistant"),
+      message("new", 10, "user", { kind: "followup" }),
+      message("reply2", 11, "assistant"),
+    ]);
+    const usage = Array.from({ length: AGENT_LIMITS.usageCalls }, (_, n) => used(9000 + n));
+    const lines = meta(withWork(items, [], false, [], { usage }));
+    expect(lines.map((item) => item.key)).toEqual(["meta-message-new"]);
   });
 });
 

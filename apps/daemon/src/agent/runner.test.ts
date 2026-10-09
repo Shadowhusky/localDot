@@ -520,6 +520,21 @@ describe("signing in to a site from Settings", () => {
     await f.live.settled(task.id);
   });
 
+  // Stop contains the computer; a task that only waits for a follow-up has nothing to contain.
+  it("ends a finished task without stopping the computer when the next one starts", async () => {
+    const f = setup();
+    const { closed } = screens(f);
+    const first = await f.runner.start(f.cellId, "Fixture task");
+    await until(() => first.status === "idle");
+    const next = await f.runner.start(f.cellId, "Another task");
+    expect(first.stopped).toBe(true);
+    expect(closed).not.toHaveBeenCalled();
+    expect(f.containment).not.toHaveBeenCalled();
+    expect(f.live.get(f.cellId)).toBe(next.id);
+    next.stop();
+    await f.live.settled(next.id);
+  });
+
   it("ends the hold without stopping the computer when the web browser can't open", async () => {
     const f = setup();
     const browser = screens(f, true);
@@ -1403,4 +1418,28 @@ it("native Pause receipt uncertainty runs the existing revoke and computer conta
   await until(() => f.containment.mock.calls.length === 1);
   expect(f.containment).toHaveBeenCalledWith(session.id);
   expect(session.safetyPause?.resumeAvailable).toBe(false);
+});
+
+describe("connected apps", () => {
+  it("shows each model start the connectors as the user's settings stand then", async () => {
+    const f = setup();
+    const spec = {
+      name: "linear__list_issues",
+      app: "Linear",
+      description: "Linear (the user's connected app): List issues.",
+      inputSchema: { type: "object" },
+    };
+    const snapshot = { specs: [spec], get: () => undefined };
+    f.deps.connectors = vi.fn(() => snapshot);
+    let seen: unknown;
+    f.run.mockImplementationOnce(async (session) => {
+      seen = session.connectors;
+      return 0;
+    });
+    const task = await f.runner.start(f.cellId, "Check my issues");
+    await until(() => seen !== undefined);
+    expect(seen).toBe(snapshot);
+    task.stop();
+    await f.live.settled(task.id);
+  });
 });

@@ -1,4 +1,4 @@
-import type { SelfTestReport } from "@localdot/protocol";
+import type { ComputerOperation, SelfTestReport } from "@localdot/protocol";
 
 export type Scale = 1 | 2;
 
@@ -24,6 +24,8 @@ export interface CellSummary {
   updating?: true;
   // Its update can't be finished; a fresh start is the way back.
   needsFreshStart?: true;
+  // The start, update or stop going on, from when the daemon began it.
+  operation?: ComputerOperation;
   id: string;
   state: CellState;
   scale: Scale;

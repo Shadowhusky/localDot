@@ -7,6 +7,7 @@ import {
   type CheckIns,
   type ClaudeCodeStatus,
   DEFAULT_AGENT_LIMITS,
+  DEFAULT_RESEARCH_BUDGET,
   freezeAutonomy,
   isJevKey,
   type KeydRecord,
@@ -26,6 +27,7 @@ import {
 } from "@localdot/protocol";
 import type { Catalog } from "@localdot/providers";
 import type { CellSummary } from "../cells/types.ts";
+import { NO_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
 import type { StopOutcome } from "../gateway/kill-switch.ts";
 import type { LiveSessions } from "../gateway/live.ts";
@@ -51,6 +53,7 @@ import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
 import type { RecentActivity } from "./recent-activity.ts";
+import { ResearchLog } from "./research.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
 import { gatewayCompletion } from "./safety/judge-model.ts";
@@ -105,6 +108,8 @@ export interface TaskStartOptions {
   readonly run?: SessionRun;
   // The handed-over file this task revises, from a task that has ended.
   readonly revises?: ReviseLink;
+  // Research mode, within the user's research budget.
+  readonly research?: boolean;
 }
 export class AgentError extends Error {
   constructor(
@@ -136,6 +141,8 @@ export interface AgentRunnerDeps {
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
   memory: Pick<MemoryStore, "bootMemory">;
+  // The connected apps' tools a task is shown, as the user's settings stand when its model starts.
+  connectors?(): TaskConnectors;
   recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
@@ -338,8 +345,13 @@ export class AgentRunner {
         const old = this.sessions.get(current);
         if (old?.status !== "idle" || old.controlHeld)
           throw new AgentError(409, "a task is already running on this computer");
-        // A hold the user handed back ends by itself.
-        if (!this.holds(current)) old.stop();
+        // A hold the user handed back ends by itself. A finished task ends as it would after its
+        // idle time: Stop would also stop the computer the next task is about to use.
+        const waiting = this.#runtime.get(current);
+        if (waiting?.idleWait) {
+          waiting.released = true;
+          waiting.idleWait.abort();
+        } else if (!this.holds(current)) old.stop();
         await (signal
           ? abortable(this.deps.live.settled(current), signal)
           : this.deps.live.settled(current));
@@ -442,6 +454,11 @@ export class AgentRunner {
         },
       );
       session.earlier = earlier;
+      if (options.research)
+        session.research = new ResearchLog(
+          settings.research ?? DEFAULT_RESEARCH_BUDGET,
+          (type, data) => session.append(type, data),
+        );
       // dot's earlier replies may repeat what a page said: they never unlock memory writes.
       if (earlier.length) session.tainted = true;
       session.recent = recent;
@@ -474,6 +491,7 @@ export class AgentRunner {
           ...(continues ? { continues } : {}),
           ...(origin?.success ? { origin: origin.data } : {}),
           ...(revises?.success ? { revises: revises.data } : {}),
+          ...(session.research ? { research: session.research.budget } : {}),
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
         if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
@@ -1133,6 +1151,7 @@ export class AgentRunner {
         await session.waitForTools();
         await this.deps.waitForUploads(session.cellId, session.abort.signal);
         await this.#online(session);
+        session.connectors = this.deps.connectors?.() ?? NO_CONNECTORS;
         const epoch = rt.epoch;
         let code: number | undefined;
         try {
@@ -1371,6 +1390,8 @@ export class AgentRunner {
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
           ...(session.recent.length ? { recent: [...session.recent] } : {}),
           ...(session.run ? { run: session.run } : {}),
+          ...(session.connectors.specs.length ? { connectors: [...session.connectors.specs] } : {}),
+          ...(session.research ? { research: session.research.budget } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,

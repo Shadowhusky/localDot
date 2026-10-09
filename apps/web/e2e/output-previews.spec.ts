@@ -209,10 +209,12 @@ async function load(page: Page, activeComposer = false) {
   await expect(
     page.getByRole("region", { name: "Conversation history", includeHidden: true }),
   ).toContainText("sample sales table");
-  // A phone has no top bar; elsewhere the visible sample title also prevents these screenshots
-  // implying real application execution.
-  if (!isPhone(page))
+  // A phone has no top bar and keeps the plan in its Activity sheet; elsewhere the visible sample
+  // title also prevents these screenshots implying real application execution.
+  if (!isPhone(page)) {
+    await expect(page.locator(".plan-strip-count").first()).toHaveText("1 of 1");
     await expect(page.locator(".bar-title")).toHaveText("Sample · monthly report");
+  }
   return { errors, external, sockets };
 }
 

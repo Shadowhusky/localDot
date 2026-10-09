@@ -5,7 +5,8 @@ import type { ToolName } from "@localdot/protocol";
 // files. A prompt injection can make the brain ask for anything; this decides (trust rule 5).
 export interface PolicyCall {
   sessionId: string;
-  tool: ToolName;
+  // A v1 tool, or a connected app's tool by dot's name for it.
+  tool: ToolName | string;
   input: unknown;
   // The session has read untrusted text (a page, a file, command output) since the user last
   // spoke: M5's rules can ask for approval more readily then.

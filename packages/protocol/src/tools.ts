@@ -2,10 +2,12 @@ import { z } from "zod";
 import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { ResearchInput } from "./research.ts";
 import { SwitchScreenInput } from "./screens.ts";
 import { PeopleInput } from "./tools/people.ts";
 import { RecallInput } from "./tools/recall.ts";
 import { FollowUpAtInput, RoutineToolInput } from "./tools/routine.ts";
+import { WebFetchInput, WebSearchInput } from "./tools/web.ts";
 
 // The v1 tool table (spec "The agent"): the only tools a brain may declare and the only ones the
 // daemon's tool API runs, including M7's isolated browser screen.
@@ -17,6 +19,8 @@ export const TOOL_NAMES = [
   "browser_navigate",
   "browser_upload",
   "browser_act",
+  "web_search",
+  "web_fetch",
   "find",
   "switch_screen",
   "update_plan",
@@ -28,12 +32,18 @@ export const TOOL_NAMES = [
   "done",
   "routine",
   "follow_up_at",
+  "research",
 ] as const;
 export const ToolName = z.enum(TOOL_NAMES);
 export type ToolName = z.infer<typeof ToolName>;
 
 export function isToolName(name: string): name is ToolName {
   return (TOOL_NAMES as readonly string[]).includes(name);
+}
+
+// The tools a model is offered: research is declared only to a task in research mode.
+export function offeredTools(research: boolean): readonly ToolName[] {
+  return research ? TOOL_NAMES : TOOL_NAMES.filter((name) => name !== "research");
 }
 
 // The model's screen: every screenshot is 1280×800 and every model point is in these pixels once
@@ -344,6 +354,8 @@ export const TOOL_INPUTS = {
   browser_navigate: BrowserNavigateInput,
   browser_upload: BrowserUploadInput,
   browser_act: BrowserAction,
+  web_search: WebSearchInput,
+  web_fetch: WebFetchInput,
   find: FindInput,
   switch_screen: SwitchScreenInput,
   update_plan: UpdatePlanInput,
@@ -355,10 +367,12 @@ export const TOOL_INPUTS = {
   done: DoneInput,
   routine: RoutineToolInput,
   follow_up_at: FollowUpAtInput,
+  research: ResearchInput,
 } as const satisfies Record<ToolName, z.ZodType>;
 
 // A tool's answer to the brain. Images are screenshots the daemon stored (by frameId) and sends
-// as PNG, which keyd can size for the budget (P4a-R27).
+// as PNG, which keyd can size for the budget (P4a-R27). A web image is a picture from the web,
+// never the screen: no action is ever based on it.
 export const ToolContent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("text"), text: z.string() }),
   z.object({
@@ -367,6 +381,12 @@ export const ToolContent = z.discriminatedUnion("type", [
     // A zoom: this region of the frame (model pixels), scaled up.
     region: z.object({ x: z.number(), y: z.number(), w: z.number(), h: z.number() }).optional(),
     mediaType: z.literal("image/png"),
+    data: z.string(),
+  }),
+  z.object({
+    type: z.literal("web_image"),
+    url: z.string().max(2048),
+    mediaType: z.literal("image/jpeg"),
     data: z.string(),
   }),
 ]);

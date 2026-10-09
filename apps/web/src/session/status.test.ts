@@ -17,6 +17,7 @@ import {
   type TaskFacts,
   taskFacts,
   taskHud,
+  withSending,
 } from "./status.ts";
 
 const ID = "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N";
@@ -1144,4 +1145,19 @@ it("says dot is starting until its first action, even in a Replay that holds the
   const model = foldEvents(emptyModel(), typed());
   expect(taskHud(model, 5)).toMatchObject({ row: "working", caption: "Starting…" });
   expect(taskHud(model, 5000)).toMatchObject({ row: "working", caption: "Working…" });
+});
+
+describe("a message just sent", () => {
+  const ready = statusFor({ computer: live, task: null });
+  it("shows dot thinking at once while the computer is otherwise ready", () => {
+    const shown = withSending(ready, true);
+    expect(shown.label).toBe("Thinking…");
+    expect(shown.dotPose).toBe("thinking");
+    expect(shown.row).toBe("thinking");
+  });
+  it("leaves every other state alone", () => {
+    expect(withSending(ready, false)).toBe(ready);
+    const asking = { ...ready, row: "question" as const, label: "Needs your answer" };
+    expect(withSending(asking, true)).toBe(asking);
+  });
 });

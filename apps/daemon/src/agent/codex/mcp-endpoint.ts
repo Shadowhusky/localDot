@@ -25,7 +25,12 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { AgentSession, BrainGeneration } from "../session.ts";
-import { codexTools, type McpCallResult, toCallToolResult } from "./mcp-tools.ts";
+import {
+  codexTools,
+  connectorDescriptors,
+  type McpCallResult,
+  toCallToolResult,
+} from "./mcp-tools.ts";
 export const MAX_MCP_CONNECTIONS = 4;
 export const MAX_MCP_MESSAGE_BYTES = 4 * 1024 * 1024;
 export const MAX_SOCKET_PATH_BYTES = 103;
@@ -564,7 +569,12 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
       mcp.onerror = () => retireConnection(connection);
       mcp.setRequestHandler(ListToolsRequestSchema, () => {
         if (!validOwner() || connection.closed) throw new McpEndpointError();
-        return { tools: codexTools() };
+        return {
+          tools: [
+            ...codexTools(undefined, !!input.session.research),
+            ...connectorDescriptors(input.session.connectors),
+          ],
+        };
       });
       mcp.setRequestHandler(CallToolRequestSchema, (req, extra) => {
         const capture = connection.calls.get(extra.requestId);

@@ -26,6 +26,9 @@ export interface GroupRowProps {
   trailing?: ReactNode;
   // A row that opens something: the whole row is the button, with a chevron after its value.
   onSelect?(trigger: HTMLButtonElement): void;
+  // A row that shows what sits under it (by id) in place: its chevron points down, then up.
+  expanded?: boolean;
+  controls?: string;
   className?: string;
   // What opens under the row, inside the same group cell.
   children?: ReactNode;
@@ -37,6 +40,8 @@ export function GroupRow({
   leading,
   trailing,
   onSelect,
+  expanded,
+  controls,
   className,
   children,
 }: GroupRowProps) {
@@ -50,7 +55,13 @@ export function GroupRow({
       {(trailing || onSelect) && (
         <span className="ui-group-row-trailing">
           {trailing}
-          {onSelect && <Icon name="chevron-right" size={16} className="ui-group-row-chevron" />}
+          {onSelect && (
+            <Icon
+              name={expanded === undefined ? "chevron-right" : "chevron-down"}
+              size={16}
+              className="ui-group-row-chevron"
+            />
+          )}
         </span>
       )}
     </>
@@ -62,6 +73,9 @@ export function GroupRow({
         className={clsx("ui-group-row", className)}
         data-leading={leading ? "" : undefined}
         data-link=""
+        data-expanded={expanded || undefined}
+        aria-expanded={expanded}
+        aria-controls={controls}
         onClick={(event) => onSelect(event.currentTarget)}
       >
         {body}

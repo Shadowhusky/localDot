@@ -17,12 +17,12 @@ import {
 } from "../agent/activity.ts";
 import { ChangeRow, type UndoStatus } from "../agent/ChangeRow.tsx";
 import { type AgentChange, type AgentModel, emptyAgentModel } from "../agent/model.ts";
-import { PlanView } from "../agent/PlanView.tsx";
+import { PlanStrip } from "../agent/PlanStrip.tsx";
+import { ResearchSources } from "../agent/ResearchSources.tsx";
 import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
 import { usePagedRows } from "../agent/usePagedRows.ts";
 import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
-import { count } from "../copy/format.ts";
 import { isLoopbackPage } from "../deliverables/api.ts";
 import { HandedOverFiles, latestFiles } from "../deliverables/HandedOverFiles.tsx";
 import type { ApiClient } from "../lib/api.ts";
@@ -33,7 +33,8 @@ import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { pressHandlers } from "../ui/press.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
-import { SegmentedControl } from "../ui/SegmentedControl.tsx";
+import { SegmentedControl, type SegmentItem } from "../ui/SegmentedControl.tsx";
+import { TabPanel, Tabs } from "../ui/Tabs.tsx";
 import "../agent/activity.css";
 
 export interface ActivityRailProps {
@@ -49,6 +50,8 @@ export interface ActivityRailProps {
   asOfMs?: number;
   // The session's now, for the clock on the step dot is taking.
   nowMs?: number;
+  // The task's history is in, so a file handed over from now on is new.
+  historyLoaded?: boolean;
   onSelect?(stepId: string): void;
   planSnapshot?: PlanItemState[];
   agent?: AgentModel;
@@ -72,6 +75,14 @@ const entryKey = (entry: ActivityEntry) => entry.key;
 // Long enough for a row's detail to finish opening before it is brought into view.
 const REVEAL_AFTER = 300;
 const EMPTY = emptyAgentModel();
+// dot is still at the task, so the user can still change how far it reads.
+const WORKING = new Set(["thinking", "acting", "observing", "waiting_user", "paused"]);
+
+type RailTab = "steps" | "files" | "sources";
+// Per task, for as long as the page is open: the tab the user chose, and how many handed-over
+// files they have seen.
+const chosenTabs = new Map<string, RailTab>();
+const seenFiles = new Map<string, number>();
 
 function reveal(element: Element | null) {
   element?.scrollIntoView?.({ block: "nearest", behavior: reducedMotion() ? "auto" : "smooth" });
@@ -93,6 +104,7 @@ export function ActivityRail({
   onSpending,
   asOfMs,
   nowMs,
+  historyLoaded = false,
   onSelect,
   planSnapshot,
 }: ActivityRailProps) {
@@ -122,9 +134,42 @@ export function ActivityRail({
   const plan = planSnapshot ?? model.plan;
   const handed = useMemo(() => latestFiles(model.results).length, [model.results]);
   const started = !!sessionId || !!plan.length;
-  // The Files list and usage sit under the steps, so a new step is followed in the frame it lands
-  // in: a glide would first push them down a row and then pull them back.
-  const follow = useFollowScroll(`${owner}:${filter}`, !replay && started, { glide: false });
+  const [downloads, setDownloads] = useState(0);
+  const fileChanges = model.changes.filter((change) => change.type !== "memory");
+  const memoryChanges = model.changes.filter((change) => change.type === "memory");
+  const files = (sessionId ? handed : 0) + downloads + model.changes.length;
+  const research = sessionId ? model.research : undefined;
+  const [picked, setPicked] = useState<RailTab | null>(null);
+  // A tab chosen before any task started stays chosen once one does.
+  const lastOwner = useRef(owner);
+  if (lastOwner.current !== owner) {
+    const before = chosenTabs.get(lastOwner.current);
+    if (lastOwner.current === "" && before && !chosenTabs.has(owner)) chosenTabs.set(owner, before);
+    lastOwner.current = owner;
+  }
+  const wanted = chosenTabs.get(owner) ?? "steps";
+  // A tab stays while it is chosen, so a download's last word is not whisked away with it.
+  const tab: RailTab =
+    (wanted === "files" && (files > 0 || picked === "files")) || (wanted === "sources" && research)
+      ? wanted
+      : "steps";
+  const choose = (next: string) => {
+    chosenTabs.set(owner, next as RailTab);
+    setPicked(next as RailTab);
+  };
+  useEffect(() => {
+    if (historyLoaded && (tab === "files" || !seenFiles.has(owner))) seenFiles.set(owner, handed);
+  }, [historyLoaded, owner, tab, handed]);
+  const fresh = tab !== "files" && handed > (seenFiles.get(owner) ?? handed);
+  const tabs: SegmentItem[] = [
+    { value: "steps", label: "Steps", count: entries.length || undefined },
+    ...(tab === "files" || files > 0
+      ? [{ value: "files", label: "Files", count: files || undefined, fresh }]
+      : []),
+    ...(research ? [{ value: "sources", label: "Sources", count: research.sources.length }] : []),
+  ];
+  const onSteps = tab === "steps";
+  const follow = useFollowScroll(`${owner}:${filter}:${tab}`, !replay && started && onSteps);
   const timeline = useRef<HTMLElement>(null);
 
   const steps = entries.filter((entry) => entry.row.kind === "step");
@@ -205,6 +250,18 @@ export function ActivityRail({
     );
   };
 
+  const changeRow = (change: AgentChange) => (
+    <ChangeRow
+      key={change.id}
+      id={`${domId}-change-${change.id}`}
+      change={change}
+      changes={model.changes}
+      open={openKey === `change-${change.id}`}
+      onToggle={(trigger) => toggleKey(`change-${change.id}`, trigger)}
+      {...(change.type === "memory" ? memoryAction?.(change) : {})}
+    />
+  );
+
   return (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
       {/* A tab or the column names it on screen; Replay's transport says how far its record runs. */}
@@ -212,15 +269,32 @@ export function ActivityRail({
         <h2>Activity</h2>
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>
+      {plan.length > 0 && (
+        <PlanStrip plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
+      )}
+      {(started || tabs.length > 1) && (
+        <Tabs
+          id={`${domId}-tabs`}
+          aria-label="Activity"
+          variant="line"
+          className="activity-tabs"
+          items={tabs}
+          value={tab}
+          onValueChange={choose}
+        />
+      )}
       <div className="activity-body">
         <ScrollArea
           ref={follow.ref}
           className="activity-scroll"
-          fade={plan.length ? "bottom" : "both"}
           onScroll={(event) => {
             // Only the reader leaving the live end holds the page; the rail's own glides do not.
             const pane = event.currentTarget;
-            if (!follow.onScroll() && pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32)
+            if (
+              onSteps &&
+              !follow.onScroll() &&
+              pane.scrollHeight - pane.clientHeight - pane.scrollTop >= 32
+            )
               page.freeze();
           }}
           onWheel={follow.interrupt}
@@ -229,44 +303,28 @@ export function ActivityRail({
           onKeyDown={follow.interrupt}
         >
           <div className="activity-content">
-            {!started && (
-              <p className="activity-empty">Plan and steps appear here once dot starts.</p>
-            )}
-            {plan.length > 0 && (
-              <PlanView plan={plan} label={replay ? "Plan at replay time" : "Task plan"} />
-            )}
-            {cellId && !replay && (
-              <BrowserDownloads
-                key={cellId}
-                api={api}
-                cellId={cellId}
-                releaseReady={releaseReady}
-              />
-            )}
-            {started && (
-              <section className="activity-steps" aria-labelledby={`${domId}-steps`}>
-                <div className="activity-steps-head">
-                  <h3 id={`${domId}-steps`}>Steps</h3>
-                  {/* With no steps yet there is nothing to filter; the row keeps its height. */}
-                  <span
-                    className="activity-filter"
-                    data-idle={entries.length ? undefined : ""}
-                    inert={!entries.length}
-                  >
-                    <SegmentedControl
-                      aria-label="Activity filter"
-                      size={24}
-                      items={FILTERS}
-                      value={filter}
-                      onValueChange={(value) => setFilter(value as ActivityFilter)}
-                    />
-                  </span>
+            <TabPanel tabsId={`${domId}-tabs`} value="steps" selected={tab}>
+              {!started && (
+                <p className="activity-empty">Plan and steps appear here once dot starts.</p>
+              )}
+              {started && entries.length > 0 && (
+                <div className="activity-filter">
+                  <SegmentedControl
+                    aria-label="Activity filter"
+                    size={24}
+                    variant="quiet"
+                    items={FILTERS}
+                    value={filter}
+                    onValueChange={(value) => setFilter(value as ActivityFilter)}
+                  />
                 </div>
-                {page.hasOlder && (
-                  <Button variant="quiet" size="sm" className="activity-page" onClick={page.older}>
-                    Older steps
-                  </Button>
-                )}
+              )}
+              {page.hasOlder && (
+                <Button variant="quiet" size="sm" className="activity-page" onClick={page.older}>
+                  Older steps
+                </Button>
+              )}
+              {started && (
                 <section
                   ref={timeline}
                   className="activity-timeline"
@@ -275,74 +333,87 @@ export function ActivityRail({
                 >
                   {sessionId && page.rows.map(renderEntry)}
                 </section>
-                {page.hasNewer && (
-                  <Button variant="quiet" size="sm" className="activity-page" onClick={page.newer}>
-                    Newer steps
-                  </Button>
-                )}
-                {page.retained && (
-                  <p className="activity-note">This page stays put while dot keeps working.</p>
-                )}
-                {(!sessionId || !page.rows.length) && (
-                  <p className="activity-empty">
-                    {sessionId && entries.length
-                      ? "No steps match this filter."
-                      : (empty ??
-                        (replay
-                          ? "No steps to show for this recording."
-                          : "Steps appear here as dot works."))}
-                  </p>
-                )}
-              </section>
-            )}
-            {(model.changes.length > 0 || handed > 0) && (
-              <section className="activity-section" aria-labelledby={`${domId}-files`}>
-                <div className="activity-section-head">
-                  <h3 id={`${domId}-files`}>Files</h3>
-                  <span className="activity-section-meta num">
-                    {[
-                      handed > 0 && count(handed, "handed over", "handed over"),
-                      model.changes.length > 0 && `${model.changes.length} changed`,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}
-                  </span>
-                </div>
-                {handed > 0 && sessionId && (
+              )}
+              {page.hasNewer && (
+                <Button variant="quiet" size="sm" className="activity-page" onClick={page.newer}>
+                  Newer steps
+                </Button>
+              )}
+              {page.retained && (
+                <p className="activity-note">This page stays put while dot keeps working.</p>
+              )}
+              {started && (!sessionId || !page.rows.length) && (
+                <p className="activity-empty">
+                  {sessionId && entries.length
+                    ? "No steps match this filter."
+                    : (empty ??
+                      (replay
+                        ? "No steps to show for this recording."
+                        : "Steps appear here as dot works."))}
+                </p>
+              )}
+              {model.historyTruncated && (
+                <p className="activity-note">Older activity is kept in the task log.</p>
+              )}
+            </TabPanel>
+            <TabPanel tabsId={`${domId}-tabs`} value="files" selected={tab}>
+              {handed > 0 && sessionId && (
+                <section className="activity-section" aria-labelledby={`${domId}-handed`}>
+                  <div className="activity-section-head">
+                    <h3 id={`${domId}-handed`}>Handed over</h3>
+                    <span className="activity-section-meta num">{handed}</span>
+                  </div>
                   <HandedOverFiles
                     api={api}
                     sessionId={sessionId}
                     results={model.results}
                     onMac={isLoopbackPage()}
                   />
-                )}
-                {model.changes.map((change) => (
-                  <ChangeRow
-                    key={change.id}
-                    id={`${domId}-change-${change.id}`}
-                    change={change}
-                    changes={model.changes}
-                    open={openKey === `change-${change.id}`}
-                    onToggle={(trigger) => toggleKey(`change-${change.id}`, trigger)}
-                    {...(change.type === "memory" ? memoryAction?.(change) : {})}
-                  />
-                ))}
-              </section>
-            )}
-            {model.historyTruncated && (
-              <p className="activity-note">Older activity is kept in the task log.</p>
-            )}
-            {agent && sessionId && (
-              <UsageFooter
-                model={model}
-                selection={models}
-                modelName={modelName}
-                onSpending={onSpending}
-              />
+                </section>
+              )}
+              {cellId && !replay && (
+                <BrowserDownloads
+                  key={cellId}
+                  api={api}
+                  cellId={cellId}
+                  releaseReady={releaseReady}
+                  onCount={setDownloads}
+                />
+              )}
+              {fileChanges.length > 0 && (
+                <section className="activity-section" aria-labelledby={`${domId}-changed`}>
+                  <div className="activity-section-head">
+                    <h3 id={`${domId}-changed`}>Changed</h3>
+                    <span className="activity-section-meta num">{fileChanges.length}</span>
+                  </div>
+                  {fileChanges.map(changeRow)}
+                </section>
+              )}
+              {memoryChanges.length > 0 && (
+                <section className="activity-section" aria-labelledby={`${domId}-memory`}>
+                  <div className="activity-section-head">
+                    <h3 id={`${domId}-memory`}>Memory</h3>
+                    <span className="activity-section-meta num">{memoryChanges.length}</span>
+                  </div>
+                  {memoryChanges.map(changeRow)}
+                </section>
+              )}
+              {!files && <p className="activity-empty">Files dot hands over appear here.</p>}
+            </TabPanel>
+            {research && sessionId && (
+              <TabPanel tabsId={`${domId}-tabs`} value="sources" selected={tab}>
+                <ResearchSources
+                  research={research}
+                  nowMs={replay ? asOfMs : nowMs}
+                  working={!replay && !ended && WORKING.has(model.state?.state ?? "")}
+                  api={api}
+                  sessionId={sessionId}
+                />
+              </TabPanel>
             )}
           </div>
         </ScrollArea>
-        {!replay && started && (
+        {!replay && started && onSteps && (
           <button
             {...pressHandlers}
             type="button"
@@ -359,6 +430,14 @@ export function ActivityRail({
           </button>
         )}
       </div>
+      {agent && sessionId && (
+        <UsageFooter
+          model={model}
+          selection={models}
+          modelName={modelName}
+          onSpending={onSpending}
+        />
+      )}
     </aside>
   );
 }

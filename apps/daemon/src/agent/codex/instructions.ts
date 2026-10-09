@@ -1,5 +1,16 @@
-import { type RecentLine, type SessionRun, TOOL_NAMES } from "@localdot/protocol";
-import { CHECK_MEMORY_FIRST, thisRunSection, workingRules } from "@localdot/protocol/guidance";
+import {
+  offeredTools,
+  type RecentLine,
+  type ResearchBudget,
+  type SessionRun,
+} from "@localdot/protocol";
+import {
+  CHECK_MEMORY_FIRST,
+  connectedAppsSection,
+  researchSection,
+  thisRunSection,
+  workingRules,
+} from "@localdot/protocol/guidance";
 
 export interface CodexInstructionsInput {
   memory: { user: string; memory: string };
@@ -7,6 +18,9 @@ export interface CodexInstructionsInput {
   skills: readonly { name: string; description: string; path: string }[];
   today: Date;
   run?: SessionRun;
+  research?: ResearchBudget;
+  // The connected apps whose tools the server also has.
+  apps?: readonly string[];
 }
 const escapeText = (t: string) =>
   t.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
@@ -25,7 +39,7 @@ export function nativeInstructions(input: CodexInstructionsInput, rules: Harness
   return `You are dot, the assistant in localDot. You work on its task computer: an Ubuntu desktop with Chromium, LibreOffice, a terminal and VSCodium. Today is ${input.today.toISOString().slice(0, 10)}.
 
 # Your tools
-Your only tools are the localdot MCP server's: ${TOOL_NAMES.join(", ")}. ${rules.tools}
+Your only tools are the localdot MCP server's: ${offeredTools(!!input.research).join(", ")}${input.apps?.length ? ", and the connected apps' tools" : ""}. ${rules.tools}
 
 # How you work
 - ${rules.screen}
@@ -41,7 +55,7 @@ ${escapeText(input.memory.user.trim())}
 </user_file>
 <user_file name="MEMORY.md">
 ${escapeText(input.memory.memory.trim())}
-</user_file>${recent}${skills}${thisRunSection(input.run)}`;
+</user_file>${recent}${skills}${connectedAppsSection(input.apps ?? [])}${thisRunSection(input.run)}${researchSection(input.research)}`;
 }
 export function codexInstructions(input: CodexInstructionsInput): string {
   return nativeInstructions(input, {

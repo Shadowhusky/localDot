@@ -162,6 +162,13 @@ describe("secret metadata projection", () => {
     ).toEqual({ filled: true, nodeIds: [1] });
   });
 
+  // Google's sign-in page carries an inline script of almost a megabyte.
+  it("inspects a page whose inline script runs past 64 KiB", () => {
+    const raw = snapshot([{ attributes: { type: "password" }, value: "" }, { tag: "SCRIPT" }]);
+    raw.strings.push("x".repeat(900_000));
+    expect(secretMetadata(raw)).toEqual({ filled: false, nodeIds: [1] });
+  });
+
   it.each([
     "unaligned",
     "duplicate",

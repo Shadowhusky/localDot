@@ -31,6 +31,9 @@ const (
 	// Judge is the daemon's own listener for the purpose check: it reaches only the hosts its web
 	// API keys are bound to.
 	Judge Role = "judge"
+	// Connector is one of the user's apps: a program in its own cell, or the daemon reaching a remote
+	// server for it. It reaches the web like a desktop, with only its own keys swapped in.
+	Connector Role = "connector"
 )
 
 // Policy is a cell's egress: Web is the general web, Gateway the LLM gateway, Bound only the hosts
@@ -46,7 +49,7 @@ func ForRole(r Role) (Policy, error) {
 	switch r {
 	case Brain:
 		return Policy{Role: r, Gateway: true}, nil
-	case Desktop, Browser:
+	case Desktop, Browser, Connector:
 		return Policy{Role: r, Web: true}, nil
 	case Judge:
 		return Policy{Role: r, Bound: true}, nil

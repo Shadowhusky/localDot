@@ -8,7 +8,7 @@ import {
   type BrowserObservationOptions,
 } from "./observation.ts";
 import { projectBrowser } from "./perception.ts";
-import type { BrowserDocument } from "./targets.ts";
+import { type BrowserDocument, BrowserTargetError } from "./targets.ts";
 
 const identity = {
   browserCellId: "01J00000000000000000000001",
@@ -311,14 +311,30 @@ describe("admitted full-page reading", () => {
     await f.observation.close();
   });
 
-  it.each(["text", "title", "control", "document", "secret"] as const)(
-    "refuses %s changes between the two page reads",
+  it.each(["text", "title"] as const)(
+    "reads again a page whose %s changed between its two reads",
     async (kind) => {
       const f = await setup(),
         p = readingPage(f);
       f.hooks.set("DOMSnapshot.captureSnapshot:2", async () => {
         if (kind === "text") p.nodes.nodeValue[p.paragraph] = p.value("Changed content");
         if (kind === "title") p.root.title = p.value("Changed title");
+      });
+      const page = await f.observation.read(permit, "tab", {}, signal());
+      if (kind === "text") expect(page.text).toContain("Changed content");
+      else expect(page.title).toBe("Changed title");
+      expect(f.counts.get("DOMSnapshot.captureSnapshot")).toBe(4);
+      expect(f.capture.masked).not.toHaveBeenCalled();
+      await f.observation.close();
+    },
+  );
+
+  it.each(["control", "document", "secret"] as const)(
+    "refuses %s changes between the two page reads",
+    async (kind) => {
+      const f = await setup(),
+        p = readingPage(f);
+      f.hooks.set("DOMSnapshot.captureSnapshot:2", async () => {
         if (kind === "document") f.state.stale = true;
         if (kind === "secret") p.root.nodes.inputValue.value[1] = 12;
         if (kind === "control")
@@ -654,6 +670,35 @@ describe("leased browser observation", () => {
     expect(found.target).toMatchObject({ checked: "true" });
     await f.observation.close();
   });
+  // A page that adds frames or rewrites its URL as it settles changes its document mid-read.
+  it.each(["read", "observe"] as const)(
+    "reads again a page whose document changed under the %s",
+    async (kind) => {
+      const f = await setup();
+      readingPage(f);
+      f.hooks.set("DOMSnapshot.captureSnapshot:1", () => {
+        throw new BrowserTargetError("stale");
+      });
+      const result =
+        kind === "read"
+          ? f.observation.read(permit, "tab", { maxChars: 1000 }, signal())
+          : f.observation.observe(permit, "tab", signal());
+      await expect(result).resolves.toBeDefined();
+      expect(f.counts.get("DOMSnapshot.captureSnapshot")).toBeGreaterThan(2);
+      await f.observation.close();
+    },
+  );
+  it("stops reading a page that keeps changing", async () => {
+    const f = await setup();
+    readingPage(f);
+    for (let count = 1; count <= 100; count++)
+      f.hooks.set(`DOMSnapshot.captureSnapshot:${count}`, () => {
+        throw new BrowserTargetError("stale");
+      });
+    await expect(f.observation.observe(permit, "tab", signal())).rejects.toThrow("unavailable");
+    expect(f.counts.get("DOMSnapshot.captureSnapshot")).toBeLessThan(10);
+    await f.observation.close();
+  });
   it("reads actual accessibility focus and invalidates a focus change during the query", async () => {
     const f = await setup();
     const first = required(f.state.accessibility.nodes[0]);
@@ -667,11 +712,30 @@ describe("leased browser observation", () => {
         properties: [{ name: "focused", value: { value: true } }],
       });
     });
-    await expect(
-      f.observation.lookup(permit, "tab", { kind: "focused" }, f.abort.signal),
-    ).rejects.toThrow("stale");
+    const moved = await f.observation.lookup(permit, "tab", { kind: "focused" }, f.abort.signal);
+    expect(moved.target?.name).not.toBe("Continue");
+    expect(JSON.stringify(moved)).not.toContain(privateCanary);
+    expect(f.counts.get("Accessibility.getFullAXTree")).toBe(6);
   });
-  it.each(["takeover", "abort", "geometry", "hit", "frame"] as const)(
+  it("looks again at a point whose hit changed during hit revalidation", async () => {
+    const f = await setup();
+    f.hooks.set("DOM.getNodeForLocation:1", async () => {
+      f.hooks.set("DOM.getNodeForLocation:2", () => {
+        f.state.hit = 14;
+      });
+    });
+    await expect(
+      f.observation.lookup(
+        permit,
+        "tab",
+        { kind: "hitTest", point: { x: 100, y: 150 } },
+        f.abort.signal,
+      ),
+    ).resolves.toHaveProperty("target");
+    expect(f.counts.get("DOM.getNodeForLocation")).toBe(4);
+    expect(f.capture.masked).not.toHaveBeenCalled();
+  });
+  it.each(["takeover", "abort", "geometry", "frame"] as const)(
     "refuses a %s during hit revalidation",
     async (change) => {
       const f = await setup();
@@ -688,10 +752,6 @@ describe("leased browser observation", () => {
         if (change === "geometry")
           f.state.geometry = { ...f.state.geometry, scrollX: f.state.geometry.scrollX + 1 };
         if (change === "frame") f.state.hitFrame = "foreign-frame";
-        if (change === "hit")
-          f.hooks.set("DOM.getNodeForLocation:2", () => {
-            f.state.hit = 14;
-          });
       });
       await expect(
         f.observation.lookup(
@@ -784,14 +844,28 @@ describe("leased browser observation", () => {
     await fixture.observation.close();
   });
 
-  it.each(["geometry", "mask", "secret", "focus", "document"])(
-    "discards captured pixels after a late %s change",
+  it.each(["geometry", "mask"])(
+    "captures again after a late %s change and publishes only the later frame",
     async (kind) => {
       const fixture = await setup();
       fixture.hooks.set("capture:1", () => {
         if (kind === "geometry") fixture.state.geometry = { ...fixture.state.geometry, width: 799 };
         if (kind === "mask")
           required(required(fixture.state.snapshot.documents[0]).layout.bounds[2])[0] = 50;
+      });
+      await expect(
+        fixture.observation.observe(permit, "tab", fixture.abort.signal),
+      ).resolves.toHaveProperty("frame");
+      expect(fixture.capture.masked).toHaveBeenCalledTimes(2);
+      await fixture.control.close();
+    },
+  );
+
+  it.each(["secret", "focus", "document"])(
+    "discards captured pixels after a late %s change",
+    async (kind) => {
+      const fixture = await setup();
+      fixture.hooks.set("capture:1", () => {
         if (kind === "secret")
           required(fixture.state.snapshot.documents[0]).nodes.inputValue.value[1] = 12;
         if (kind === "focus") fixture.state.secretFocused = true;

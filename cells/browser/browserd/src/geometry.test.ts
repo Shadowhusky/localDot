@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { BrowserGeometry } from "./geometry.ts";
 import type { BrowserNative } from "./native.ts";
-import type { BrowserDocument } from "./targets.ts";
+import { type BrowserDocument, BrowserTargetError } from "./targets.ts";
 
 function setup(scale: 1 | 2 = 2) {
   const controller = new AbortController();
@@ -176,6 +176,27 @@ describe("browser measured geometry", () => {
     await expect(peer.geometry.read("tab", peer.controller.signal)).rejects.toThrow(
       change === "surface" ? "unavailable" : "stale",
     );
+  });
+
+  // A page that adds frames or rewrites its URL as it settles changes its document mid-read.
+  it("measures again a page whose document changed under the read", async () => {
+    const peer = setup();
+    peer.check.mockImplementationOnce(() => {
+      throw new BrowserTargetError("stale");
+    });
+    await expect(peer.geometry.read("tab", peer.controller.signal)).resolves.toMatchObject({
+      focus: "page",
+    });
+    expect(peer.targets.window).toHaveBeenCalledTimes(1);
+  });
+
+  it("stops measuring a page that keeps changing", async () => {
+    const peer = setup();
+    peer.check.mockImplementation(() => {
+      throw new BrowserTargetError("unready");
+    });
+    await expect(peer.geometry.read("tab", peer.controller.signal)).rejects.toThrow("unavailable");
+    expect(peer.targets.command.mock.calls.length).toBeLessThan(10);
   });
 
   it("stops after cancellation during the first asynchronous response", async () => {

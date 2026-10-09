@@ -3,7 +3,8 @@
 # inbound relays only on the egress network, where Docker delivers the ports it publishes.
 # A desktop's gate relays keyd out and desktopd and the stream in, and with a capture token runs
 # ldgate for the programs that ignore the proxy; a brain's gate (LD_ROLE=brain, Part 5a) relays keyd
-# and the daemon's tool API out, and nothing in.
+# and the daemon's tool API out, and nothing in; a connector's gate (LD_ROLE=connector) relays keyd
+# out and nothing else.
 # Out means host.docker.internal on Docker Desktop. Docker Engine has no such name and can't reach
 # the host's 127.0.0.1, so there the daemon mounts keyd's and its own sockets (LD_KEYD_SOCKET,
 # LD_TOOL_SOCKET) instead.
@@ -13,6 +14,7 @@ set -eu
 case "$LD_ROLE" in
   brain) : "${LD_TOOL_PORT:?}" ;;
   desktop) : "${LD_EGRESS_ADDR:?}" "${LD_DESKTOP_ADDR:?}" ;;
+  connector) ;;
   *) echo "gate: unknown role" >&2; exit 1 ;;
 esac
 relays=""
@@ -49,6 +51,10 @@ case "$LD_ROLE" in
     tool=$!
     echo "gate (brain): keyd $LD_INTERNAL_ADDR:3128 -> $keyd_to; tool API $LD_INTERNAL_ADDR:4751 -> $tool_to"
     relays="$keyd $tool"
+    ;;
+  connector)
+    echo "gate (connector): keyd $LD_INTERNAL_ADDR:3128 -> $keyd_to"
+    relays="$keyd"
     ;;
   desktop)
     : "${LD_EGRESS_ADDR:?}" "${LD_DESKTOP_ADDR:?}"

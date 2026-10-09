@@ -37,6 +37,21 @@ describe("bounded agent projection", () => {
     expect(events.reduce(projectAgentEvent, model)).toBe(model);
     expect(events[0]?.data).toEqual({ messageId: message, text: "pre" });
   });
+  it("keeps when a reply was whole and each call's tokens at its time, for the turn's line", () => {
+    const usage = { role: "main", route: "anthropic", model: "claude-sonnet-5-5" };
+    const model = reduce([
+      ev(0, "message.delta", { messageId: message, text: "pa" }),
+      ev(1, "model.usage", { ...usage, inputTokens: 10, outputTokens: 2 }),
+      ev(2, "model.usage", { ...usage, inputTokens: 5, outputTokens: 1, reasoningTokens: 3 }),
+      ev(3, "message.assistant", { messageId: message, text: "part" }),
+    ]);
+    expect(model.messages.get(message)).toMatchObject({ at: 0, doneAt: 3000, final: true });
+    expect(model.usageCalls).toEqual([
+      { ...usage, atMs: 1, inputTokens: 10, outputTokens: 2 },
+      { ...usage, atMs: 2, inputTokens: 5, outputTokens: 1, reasoningTokens: 3 },
+    ]);
+    expect(model.usage[0]).toMatchObject({ inputTokens: 15, outputTokens: 3, calls: 2 });
+  });
   it("keeps the line dot gave a call on the step it starts", () => {
     const model = reduce([
       ev(

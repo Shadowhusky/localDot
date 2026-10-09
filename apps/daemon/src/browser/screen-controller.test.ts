@@ -661,7 +661,7 @@ describe("session screen coordinator", () => {
 
   it("failed recording attachment stops the session and contains both cells", async () => {
     const f = fixture();
-    f.deps.attachRecording.mockRejectedValueOnce(new Error("disk failure"));
+    f.deps.attachRecording.mockRejectedValue(new Error("disk failure"));
     await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow();
     expect(f.deps.publish).not.toHaveBeenCalled();
     expect(f.deps.fenceSession).toHaveBeenCalledTimes(1);
@@ -747,10 +747,51 @@ describe("session screen coordinator", () => {
     const f = fixture();
     await f.controller.switchTo("browser", f.scope);
     await f.controller.takeOver();
-    f.deps.attachRecording.mockRejectedValueOnce(new Error("reattach failed"));
+    f.deps.attachRecording.mockRejectedValue(new Error("reattach failed"));
     await expect(f.controller.handback(f.scope)).rejects.toThrow();
     expect(f.deps.contain).toHaveBeenCalledTimes(1);
     expect(f.deps.publish).toHaveBeenCalledTimes(1);
+  });
+
+  // A web browser whose recording ended, as one does when its stream changes format, costs dot the
+  // web browser, never the task or the computer.
+  it("goes on, recorded on the desktop, when the web browser's recording can't attach", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    f.deps.attachRecording.mockImplementation(async (selection) => {
+      if (selection.screen === "browser") throw new Error("the browser recording ended");
+    });
+    await expect(f.controller.switchTo("browser", f.scope)).rejects.toThrow(ScreenUnavailableError);
+    expect(f.controller.selection).toMatchObject({ screen: "desktop", revision: 2 });
+    expect(f.deps.publish).toHaveBeenLastCalledWith(
+      expect.objectContaining({ screen: "desktop", revision: 2, by: "daemon" }),
+    );
+    expect(f.deps.attachRecording).toHaveBeenLastCalledWith(
+      expect.objectContaining({ screen: "desktop", revision: 2 }),
+      expect.anything(),
+    );
+    expect(f.holder()).toBe("user");
+    expect(f.deps.fenceSession).not.toHaveBeenCalled();
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    const lease = f.controller.lease(f.scope);
+    expect(lease.selection.screen).toBe("desktop");
+    lease.finish();
+    await f.controller.close();
+  });
+
+  it("hands back on the desktop when the web browser's recording can't attach", async () => {
+    const f = fixture();
+    await f.controller.switchTo("browser", f.scope);
+    await f.controller.takeOver();
+    f.deps.attachRecording.mockImplementation(async (selection) => {
+      if (selection.screen === "browser") throw new Error("the browser recording ended");
+    });
+    expect(await f.controller.handback(f.scope)).toMatchObject({ screen: "desktop", by: "daemon" });
+    expect(f.controller.selection.screen).toBe("desktop");
+    expect(f.holder()).toBe("user");
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    f.controller.lease(f.scope).finish();
+    await f.controller.close();
   });
 
   it("refuses a replaced browser and a forged action lease", async () => {
@@ -809,7 +850,7 @@ describe("session screen coordinator", () => {
     const f = fixture();
     await f.controller.switchTo("browser", f.scope);
     await f.controller.takeOver();
-    f.deps.attachRecording.mockRejectedValueOnce(new Error("failed handback"));
+    f.deps.attachRecording.mockRejectedValue(new Error("failed handback"));
     await expect(f.controller.handback(f.scope)).rejects.toThrow();
     await expect(f.controller.takeOver()).rejects.toThrow();
   });
@@ -929,6 +970,42 @@ describe("a page opened for the user", () => {
     await f.controller.finish();
     expect(f.deps.browser.stop).not.toHaveBeenCalled();
     expect(f.deps.contain).not.toHaveBeenCalled();
+  });
+
+  // A page that fences browserd as it opens leaves the hand-over nothing to reach: that browser is
+  // stopped, and the one started in its place must still take the user's input.
+  it("hands the user the browser that replaced one they couldn't be given", async () => {
+    const f = fixture();
+    f.client.navigate.mockRejectedValue(new BrowserClientError("unavailable"));
+    f.deps.browser.stop.mockImplementation(async () => f.replace());
+    await f.controller.openForUser("https://accounts.google.com/", f.scope);
+    f.client.control.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    await f.controller.takeOver();
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+    const scope = { signal: f.abort.signal, check: () => {} };
+    const granted = () => {
+      try {
+        f.controller.manualAccess(scope).finish();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    await until(granted);
+    const manual = f.controller.manualAccess(scope);
+    await manual.input({ kind: "text", text: "a" });
+    manual.finish();
+    const replacement = f.deps.browser.endpoints().instance;
+    expect(replacement).not.toBe(f.endpoint.instance);
+    expect(f.client.manual).toHaveBeenCalledWith(
+      expect.objectContaining({ instance: replacement }),
+      { kind: "text", text: "a" },
+      expect.anything(),
+    );
+    expect(f.holder()).toBe("user");
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    await f.controller.handback(f.scope);
+    await f.controller.close();
   });
 
   it("opens only before anyone has used the screens", async () => {

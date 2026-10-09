@@ -1,5 +1,12 @@
-import { useEffect, useState } from "react";
+import type { ComputerOperationKind, ComputerOperationStep } from "@localdot/protocol";
+import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { type ComputerPhase, type HudActionKind, NEEDS_FRESH_START } from "../cells/hud-state.ts";
+import {
+  expectedMsFor,
+  type OperationClock,
+  progressAt,
+  type Timing,
+} from "../cells/operation-clock.ts";
 import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction } from "../session/status.ts";
@@ -29,6 +36,10 @@ export interface CurtainProps {
   replace?: ReplaceAction;
   // A computer whose update can't be finished starts again clean, while that is going on too.
   freshStart?: FreshStartAction;
+  // The start, update or stop the daemon is on, on this page's clock.
+  operation?: OperationClock | null;
+  // The computer came up: the progress fills before the curtain lifts.
+  ready?: boolean;
   showDot: boolean;
 }
 
@@ -50,6 +61,13 @@ export interface FreshStartAction {
 const STARTING = new Set<ComputerPhase>(["starting", "connecting"]);
 const ATTEMPT = /attempt (\d+) of (\d+)/;
 
+const STEP_WORDS: Partial<Record<ComputerOperationStep, string>> = {
+  network: "Preparing the network…",
+  desktop: "Starting the desktop…",
+  ready: "Waiting for the desktop…",
+  screen: "Connecting the screen…",
+};
+
 // The stage while there is no picture (design-v2 §11 A, B): dot asleep in a pool of light over one
 // porcelain action. The column keeps its height whatever it says, so dot never moves on it.
 export function Curtain({
@@ -63,6 +81,8 @@ export function Curtain({
   onAction,
   replace,
   freshStart,
+  operation,
+  ready = false,
   showDot,
 }: CurtainProps) {
   const phone = useMediaQuery(PHONE);
@@ -81,6 +101,11 @@ export function Curtain({
         }
       : curtainCopy(phase, { first, waking, updating, caption, notice, action });
   const enabled = recovering ? replace.enabled : action?.enabled;
+  // A fresh start is its own long job, beside the old computer's stop and the new one's start.
+  const timing = useTiming(!!copy?.progress, fresh ? null : operation, copy?.kind ?? "start");
+  const now = useSecondTicks(timing?.since ?? 0, !!timing && !ready);
+  // A ready computer whose screen is on its way is on the last step, whatever was said before.
+  const step = phase === "connecting" ? "screen" : timing?.step;
   return (
     <section
       className="curtain"
@@ -92,18 +117,16 @@ export function Curtain({
           {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
           <h2 className="curtain-title">{copy.title}</h2>
           <p className="curtain-sub">
-            {copy.clock && (
+            {copy.clock && timing && (
               <>
-                <StartClock />
+                <span className="num">{clock((now - timing.since) / 1000)}</span>
                 {" · "}
               </>
             )}
-            {copy.sub}
+            {(copy.steps && step && STEP_WORDS[step]) || copy.sub}
           </p>
           <div className="curtain-act" data-progress={copy.progress || undefined}>
-            <span className="curtain-progress" aria-hidden="true">
-              <i />
-            </span>
+            <CurtainProgress timing={timing && { ...timing, step }} now={now} done={ready} />
             {fresh ? (
               <FreshStartButton
                 variant="primary"
@@ -150,6 +173,10 @@ interface Copy {
   sub: string;
   clock?: boolean;
   progress: boolean;
+  // What is going on, for its expected length until the daemon says.
+  kind?: ComputerOperationKind;
+  // The step the computer is on says more than the usual words.
+  steps?: boolean;
   button?: { label: string; icon?: "power" };
 }
 
@@ -160,6 +187,7 @@ function freshStartCopy({ busy, note }: FreshStartAction): Copy {
         sub: "Setting up a clean computer. Your sign-ins stay.",
         clock: true,
         progress: true,
+        kind: "first-start",
       }
     : {
         title: "Your computer needs a fresh start",
@@ -187,6 +215,7 @@ function curtainCopy(
       sub: "Your files and sign-ins stay.",
       clock: true,
       progress: true,
+      kind: "update",
       button: turnOn,
     };
   if (phase === "restarting") {
@@ -196,6 +225,7 @@ function curtainCopy(
       sub: attempt ? `Attempt ${attempt[1]} of ${attempt[2]}` : "It stopped unexpectedly.",
       clock: true,
       progress: true,
+      kind: "restart",
       button: turnOn,
     };
   }
@@ -205,6 +235,8 @@ function curtainCopy(
       sub: "The first start takes about a minute.",
       clock: true,
       progress: true,
+      kind: first ? "first-start" : "start",
+      steps: true,
       button: turnOn,
     };
   if (phase === "stopping")
@@ -212,6 +244,7 @@ function curtainCopy(
       title: "Shutting down your computer",
       sub: "Your files are kept.",
       progress: true,
+      kind: "stop",
       button: turnOn,
     };
   if (phase === "failed")
@@ -247,13 +280,73 @@ function curtainCopy(
   };
 }
 
-// How long the computer has been starting, from when this page saw it start.
-function StartClock() {
-  const [since] = useState(Date.now);
-  const [now, setNow] = useState(since);
+// What the curtain counts from while it shows progress: the daemon's operation, the last one it
+// had while the progress goes on, or, before the daemon has said, when the progress first showed.
+function useTiming(
+  on: boolean,
+  operation: OperationClock | null | undefined,
+  kind: ComputerOperationKind,
+): Timing | null {
+  const [held, setHeld] = useState<Timing | null>(null);
+  const next = on
+    ? (operation ?? held ?? { since: Date.now(), expectedMs: expectedMsFor(kind), kind })
+    : null;
+  if (next !== held) setHeld(next);
+  return next;
+}
+
+const TICK_SLACK_MS = 15;
+
+// This page's now, read again on each whole second since `since`, so every page counting from the
+// same start turns its clock over at the same moment.
+function useSecondTicks(since: number, on: boolean): number {
+  const [, setTick] = useState(0);
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-  return <span className="num">{clock((now - since) / 1000)}</span>;
+    if (!on) return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const arm = () => {
+      const into = (((Date.now() - since) % 1000) + 1000) % 1000;
+      timer = setTimeout(
+        () => {
+          setTick((n) => n + 1);
+          arm();
+        },
+        1000 - into + TICK_SLACK_MS,
+      );
+    };
+    arm();
+    return () => clearTimeout(timer);
+  }, [since, on]);
+  return Date.now();
+}
+
+// Moves on with the operation and never back; only the computer coming up fills it. Each time it
+// shows again it starts where the operation is, without sweeping there.
+function CurtainProgress({
+  timing,
+  now,
+  done,
+}: {
+  timing: Timing | null;
+  now: number;
+  done: boolean;
+}) {
+  const shown = useRef({ on: false, run: 0, value: 0 });
+  if (!!timing !== shown.current.on)
+    shown.current = {
+      on: !!timing,
+      run: shown.current.run + (timing ? 1 : 0),
+      value: timing ? 0 : shown.current.value,
+    };
+  if (timing)
+    shown.current.value = Math.max(shown.current.value, done ? 1 : progressAt(timing, now));
+  return (
+    <span className="curtain-progress" aria-hidden="true">
+      <i
+        key={shown.current.run}
+        data-done={(timing && done) || undefined}
+        style={{ "--progress": shown.current.value } as CSSProperties}
+      />
+    </span>
+  );
 }

@@ -103,6 +103,13 @@ describe("independent observation editable projection", () => {
     expect(result.mask.redactions).toHaveLength(0);
   });
 
+  it("P4 projects a page whose inline script runs past 64 KiB", () => {
+    const { snapshot, ax } = fixture();
+    snapshot.strings.push("x".repeat(900_000));
+    const result = projectBrowser(snapshot, ax, "root", geometry, 1);
+    expect(result.targets.some((target) => target.name === "Continue")).toBe(true);
+  });
+
   it("I1 must not publish editable descendant contents through an ancestor AX name", () => {
     const { snapshot, ax } = fixture();
     const result = projectBrowser(snapshot, ax, "root", geometry, 1);
@@ -298,7 +305,25 @@ describe("independent observation capture ownership", () => {
       expect(f.capture.alive).toBe(false);
     },
   );
-  it.each(["document", "geometry", "mask"])(
+  it.each(["geometry", "mask"])(
+    "O3 %s changing after a successful capture publishes only a later capture",
+    async (change) => {
+      const f = await ownerFixture();
+      const pending = f.observation.observe(permit, "tab", new AbortController().signal);
+      await f.requested;
+      if (change === "geometry") f.state.shifted = true;
+      if (change === "mask") f.metadata.snapshot.documents[0]!.layout.bounds[1]![0] = 60;
+      f.output.write(imagePacket(1));
+      for (let tries = 0; tries < 500 && f.packets.length < 2; tries++)
+        await new Promise((resolve) => setTimeout(resolve, 2));
+      expect(f.packets).toHaveLength(2);
+      f.output.write(imagePacket(2));
+      const result = await pending;
+      expect(result.frame.image).toBe(imagePacket(2).subarray(8).toString("base64"));
+      expect(f.fatal).not.toHaveBeenCalled();
+    },
+  );
+  it.each(["document"])(
     "O3 %s changing after a successful capture prevents any publication",
     async (change) => {
       const f = await ownerFixture();

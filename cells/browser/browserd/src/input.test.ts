@@ -3,7 +3,7 @@ import { BrowserControl } from "./control.ts";
 import type { BrowserGeometrySnapshot } from "./geometry.ts";
 import { BrowserInput, type BrowserInputOptions } from "./input.ts";
 import type { BrowserNative } from "./native.ts";
-import type { NativeEvent } from "./native-schema.ts";
+import { type NativeEvent, nativeRequest } from "./native-schema.ts";
 import type { BrowserDocument } from "./targets.ts";
 
 const identity = {
@@ -440,6 +440,15 @@ describe("guarded browser input", () => {
       { quietMs: 250, firstMs: 1500, timeoutMs: 3000 },
       expect.any(AbortSignal),
     );
+  });
+  // The gateway names the input it settles after, which only the desktop's helper reads.
+  it("settles after a named input with the arguments the native helper takes", async () => {
+    const f = await setup();
+    const request = { verb: "click", quietMs: 300, firstMs: 800, timeoutMs: 3000 };
+    await f.input.timing(permit, "tab", { kind: "settle", request }, f.abort.signal);
+    const sent = f.nativeCommand.mock.lastCall?.[1];
+    expect(sent).toEqual({ quietMs: 300, firstMs: 800, timeoutMs: 3000 });
+    expect(nativeRequest("settle", sent, 2)).toBeDefined();
   });
   it.each(["clock", "settle"] as const)(
     "cancels pending %s on takeover without releasing a stale result",

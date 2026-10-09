@@ -4,6 +4,7 @@ import { type ApiClient, ApiError } from "../lib/api.ts";
 import { openSocket } from "../lib/socket.ts";
 import { describeRequestError } from "./errors.ts";
 import type { CellStatus, CellView, Pending } from "./hud-state.ts";
+import { followOperation, type OperationClock } from "./operation-clock.ts";
 import { parseCell, parseCells } from "./parse.ts";
 import type { CellState, CellSummary } from "./types.ts";
 
@@ -14,6 +15,8 @@ export interface CellController extends CellView {
   listed: string[];
   // Times the status socket has reopened after its first open.
   reconnects: number;
+  // The start, update or stop going on, anchored when its summary arrived.
+  operation: OperationClock | null;
   start(): void;
   stop(): void;
   resume(): void;
@@ -37,6 +40,7 @@ function useStreamed(cell: CellSummary | null): boolean {
 // daemon has answered the list, Start is disabled, so it never creates a second computer.
 export function useCell(api: ApiClient): CellController {
   const [cell, setCell] = useState<CellSummary | null>(null);
+  const [operation, setOperation] = useState<OperationClock | null>(null);
   const [listed, setListed] = useState<string[]>([]);
   const [status, setStatus] = useState<CellStatus>("listing");
   const [pending, setPending] = useState<Pending | null>("list");
@@ -66,6 +70,8 @@ export function useCell(api: ApiClient): CellController {
   const show = useCallback((next: CellSummary | null) => {
     stateRef.current = next?.state ?? null;
     pausedRef.current = !!next?.paused;
+    const arrived = Date.now();
+    setOperation((last) => followOperation(last, next, arrived));
     setCell(next);
   }, []);
 
@@ -251,6 +257,7 @@ export function useCell(api: ApiClient): CellController {
     error,
     listed,
     reconnects,
+    operation,
     start,
     stop,
     resume,

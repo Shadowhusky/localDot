@@ -2,7 +2,13 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { PassThrough } from "node:stream";
 import type { Options, SDKUserMessage, SpawnedProcess } from "@anthropic-ai/claude-agent-sdk";
-import { MAX_BATCH_STEPS, parseEvent, TOOL_NAMES, type ToolResult, ulid } from "@localdot/protocol";
+import {
+  MAX_BATCH_STEPS,
+  offeredTools,
+  parseEvent,
+  type ToolResult,
+  ulid,
+} from "@localdot/protocol";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -249,7 +255,7 @@ describe("Claude Code driver", () => {
     expect(first[0]).toMatchObject({ type: "text", text: "Draw a dog" });
     expect(first[1]).toMatchObject({ type: "image", source: { media_type: "image/png" } });
     const tools = await (await fake.mcp()).listTools();
-    expect(tools.tools.map((tool) => tool.name)).toEqual([...TOOL_NAMES]);
+    expect(tools.tools.map((tool) => tool.name)).toEqual([...offeredTools(false)]);
     await fake.call("shell", { command: "ls" });
     expect(f.dispatch).toHaveBeenLastCalledWith(
       f.session,
@@ -265,6 +271,51 @@ describe("Claude Code driver", () => {
     expect(fake.child.killed).toBe(true);
     expect(f.driver.retirementConfirmed(f.session.id)).toBe(true);
     expect(f.session.generation).toBeUndefined();
+  });
+
+  it("shows the task's connected apps' tools and passes their calls on, but no others", async () => {
+    const f = fixture();
+    const spec = {
+      name: "linear__list_issues",
+      app: "Linear",
+      description: "Linear (the user's connected app): List issues.",
+      inputSchema: { type: "object", properties: {} },
+    };
+    f.session.connectors = {
+      specs: [spec],
+      get: (name) =>
+        name === spec.name
+          ? {
+              exposed: spec.name,
+              connectorId: "linear",
+              app: "Linear",
+              tool: "list_issues",
+              spec,
+              schema: {},
+            }
+          : undefined,
+    };
+    const result = f.run();
+    const fake = await f.started();
+    const tools = await (await fake.mcp()).listTools();
+    expect(tools.tools.map((tool) => tool.name)).toEqual([
+      ...offeredTools(false),
+      "linear__list_issues",
+    ]);
+    await fake.call("linear__list_issues", { team: "ENG" });
+    expect(f.dispatch).toHaveBeenLastCalledWith(
+      f.session,
+      expect.anything(),
+      "linear__list_issues",
+      expect.stringMatching(/^claude-/),
+      { team: "ENG" },
+      expect.any(AbortSignal),
+    );
+    const calls = f.dispatch.mock.calls.length;
+    expect(await fake.call("github__delete_repo", {})).toMatchObject({ isError: true });
+    expect(f.dispatch.mock.calls.length).toBe(calls);
+    await fake.call("done", { summary: "ok" });
+    await result;
   });
 
   it("checks each action against the newest screenshot dot had seen when it chose it", async () => {

@@ -325,12 +325,34 @@ terminal output private. This command sends no model turn, quota request or usag
 it has not been run as part of offline acceptance. Live model acceptance still needs a
 separate explicit opt-in.
 
+## Connectors
+
+Settings → Connectors lets dot use the user's apps through MCP tools as well as through the screen.
+Connectors live in `<home>/connectors.json`; their tools, as last listed, in
+`<home>/connector-tools.json`. Neither holds a key.
+
+- **Remote apps** (streamable HTTP or SSE) are reached by the daemon through a keyd listener of
+  their own (role `connector`): keyd swaps the key's stand-in for the key at the server's host.
+  Sign-in apps use OAuth with PKCE in the user's browser; the access token goes straight into keyd
+  as `connector-<id>`. There is no refresh: when the app stops taking it, the user signs in again.
+- **Programs** (`npx`, `uvx` and the like) run in a connector cell: an internal network, a gate
+  that relays only keyd (`LD_ROLE=connector`) and a read-only container with no host mounts, built
+  by `cells/connector/build.sh` as `localdot/connector:dev`. MCP runs over the container's stdin
+  and stdout.
+- Keys named `connector-*` are never given to the computer, only to their connector.
+- Each task's harness (brain, ChatGPT plan, Claude Code) is shown the enabled tools as
+  `<app>__<tool>` with sanitized descriptions and schemas. Every call goes through the safety
+  classifier (read-only tools run; changes ask with their exact arguments, and a yes for the task
+  covers that tool only), the purpose check for its arguments, and marks the task as having read
+  private data.
+
 ## README images
 
 The pencil diagrams and charts in `docs/readme/` are drawn by `docs/diagrams/build.mjs` with
 roughjs and the Kalam handwriting font (SIL Open Font License, in `docs/diagrams/fonts/`). The
 lettering is converted to outlines, so the SVGs render anywhere without the font. Each run
-writes an SVG and a PNG of every drawing (PNGs go through `pngquant` when it is installed):
+writes an SVG and a PNG of every drawing; the PNG is the fallback, made at two thirds of the
+sheet's size and put through `pngquant` when it is installed:
 
 ```sh
 cd docs/diagrams
@@ -341,4 +363,5 @@ pnpm build                  # or: node build.mjs system safety
 The numbers in the charts come from the measurements listed in
 [measurements/2026-10-readme-numbers.md](measurements/2026-10-readme-numbers.md). The
 screenshots and the tour come from the fixture daemon (`apps/web/e2e/fixtures/ui-server.ts`)
-with sample data only.
+with sample data only. `QA_ACTIVITY=research` starts it on a research task part-way through, with
+web searches, page reads and numbered sources.

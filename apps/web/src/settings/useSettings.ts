@@ -24,6 +24,7 @@ import {
   formOf,
   type PriceDraft,
   pickerKeys,
+  type ResearchDraft,
   type SettingsDraft,
   type SpendingDraft,
   sameDraft,
@@ -42,17 +43,21 @@ export function useSettings(
   const [saved, setSaved] = useState<AgentSettingsDocument | null>(null);
   const [index, setIndex] = useState<ProviderIndex | null>(null);
   const [draft, setDraft] = useState<SettingsDraft | null>(null);
+  // Both accounts are read once the user looks over the models they can switch to.
+  const [browsing, setBrowsing] = useState(false);
   // Each account is read while it is chosen or saved, so the app knows whether a task can start on
   // it rather than taking a status not yet read for one that says no.
   const chatgpt = useChatgpt(
     api,
     (open && accountVisible && draft?.choices.main?.provider === "chatgpt") ||
-      saved?.main?.provider === "chatgpt",
+      saved?.main?.provider === "chatgpt" ||
+      browsing,
   );
   const claudeCode = useClaudeCode(
     api,
     (open && draft?.choices.main?.provider === "claude-code") ||
-      saved?.main?.provider === "claude-code",
+      saved?.main?.provider === "claude-code" ||
+      browsing,
   );
   const subscriptionModels = providedModels.length
     ? providedModels
@@ -260,6 +265,10 @@ export function useSettings(
     const d = current.current.draft;
     if (d) edit({ ...d, checkIns: { ...d.checkIns, [key]: next } });
   };
+  const research = (next: ResearchDraft) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, research: next });
+  };
   const purposeCheck = (on: boolean) => {
     const d = current.current.draft;
     if (d) edit({ ...d, purposeCheck: on });
@@ -392,6 +401,64 @@ export function useSettings(
       abort.abort();
     }
   };
+  // Saves another main model outside Settings, checked as Settings checks it. False when it wasn't
+  // saved; an unconfirmed save reads the saved settings back.
+  const chooseMain = async (choice: RoleChoice): Promise<boolean> => {
+    const owner = current.current,
+      previous = owner.saved;
+    if (
+      owner.open ||
+      !previous ||
+      mutating.current ||
+      unresolved.current ||
+      document.hidden ||
+      blocked.current ||
+      owner.api !== api ||
+      loadedFor.current !== api
+    )
+      return false;
+    const abort = new AbortController();
+    mutating.current = abort;
+    setBusy(true);
+    let sent = false;
+    try {
+      const fresh = await loadProviderIndex(api, abort.signal);
+      if (!mounted.current || current.current.api !== api) return false;
+      owner.index = fresh;
+      setIndex(fresh);
+      const accountModels =
+        choice.provider === "chatgpt"
+          ? chatgpt.models
+          : choice.provider === "claude-code"
+            ? claudeCode.models
+            : [];
+      const checked = validateForm(
+        formOf({ ...previous, main: choice }),
+        previous,
+        fresh,
+        accountModels,
+      );
+      if (!checked.ok) return false;
+      sent = true;
+      writing.current = true;
+      const next = await saveSettings(api, checked.document, abort.signal);
+      if (!mounted.current || current.current.api !== api) return false;
+      owner.saved = next;
+      setSaved(next);
+      return true;
+    } catch (failure) {
+      if (sent && (!(failure instanceof SettingsFailure) || failure.uncertain) && mounted.current)
+        queueMicrotask(() => void read(false, true));
+      return false;
+    } finally {
+      if (mutating.current === abort) {
+        mutating.current = null;
+        writing.current = false;
+        if (mounted.current) setBusy(false);
+      }
+      abort.abort();
+    }
+  };
   const reload = () => {
     if (!mutating.current && !document.hidden && !blocked.current) {
       current.current.revision++;
@@ -472,11 +539,14 @@ export function useSettings(
     },
     spending,
     checkIn,
+    research,
     purposeCheck,
     recentActivity,
     save,
     refresh,
     reload,
+    chooseMain,
+    browseAccounts: () => setBrowsing(true),
     captureKey,
     keySaved,
     dirty: !!draft && !!saved && !sameDraft(draft, formOf(saved)),

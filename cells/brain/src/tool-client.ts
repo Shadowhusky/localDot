@@ -35,6 +35,8 @@ const WAITS_ON_USER = new Set([
   "browser_navigate",
   "browser_upload",
   "browser_act",
+  "web_search",
+  "web_fetch",
   "remember",
   "done",
   "routine",

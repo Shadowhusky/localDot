@@ -87,11 +87,17 @@ const PLANNED: IconName[] = [
   "code",
   // What dot knows: a fact it always reads.
   "pin",
+  // Settings: the user's connected apps.
+  "plug",
   // Export: stepping a custom speed.
   "minus",
   "plus",
   // Settings › Notifications: a phone's row.
   "smartphone",
+  // Talking to dot: the composer's mic and Settings › Voice.
+  "mic",
+  // Research: many sources.
+  "library",
 ];
 
 describe("Icon", () => {

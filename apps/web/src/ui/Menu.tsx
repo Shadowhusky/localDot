@@ -28,7 +28,7 @@ interface MenuState {
 const MenuContext = createContext<MenuState | null>(null);
 
 function items(menu: HTMLElement): HTMLElement[] {
-  return [...menu.querySelectorAll<HTMLElement>("[role=menuitem]")];
+  return [...menu.querySelectorAll<HTMLElement>("[role=menuitem], [role=menuitemradio]")];
 }
 
 export interface MenuProps {
@@ -44,8 +44,8 @@ export interface MenuProps {
   children: ReactNode;
 }
 
-// Opened from the keyboard it lands on the first item; opened by a press it waits for the pointer
-// or an arrow key, the way a desktop menu does.
+// Opened from the keyboard it lands on the chosen item, else the first; opened by a press it waits
+// for the pointer or an arrow key, the way a desktop menu does.
 export function Menu({ label, className, children, ...props }: MenuProps) {
   const panel = useRef<HTMLDivElement>(null);
   const search = useRef({ text: "", at: 0 });
@@ -107,7 +107,11 @@ export function Menu({ label, className, children, ...props }: MenuProps) {
         kind="menu"
         trap={false}
         panelRef={panel}
-        initialFocus={(menu) => (lastModality() === "keyboard" ? items(menu)[0] : undefined)}
+        initialFocus={(menu) => {
+          if (lastModality() !== "keyboard") return undefined;
+          const list = items(menu);
+          return list.find((item) => item.getAttribute("aria-checked") === "true") ?? list[0];
+        }}
         panelProps={{
           role: "menu",
           "aria-label": label,
@@ -132,6 +136,8 @@ export interface MenuItemProps {
   disabledReason?: string;
   // The text typeahead matches, when the label is not plain text.
   textValue?: string;
+  // One choice of several: a check marks the chosen one.
+  checked?: boolean;
   children: ReactNode;
 }
 
@@ -141,17 +147,21 @@ export function MenuItem({
   kbd,
   disabledReason,
   textValue,
+  checked,
   children,
 }: MenuItemProps) {
   const menu = useContext(MenuContext);
   const labelId = useId();
   const reasonId = useId();
   const keys = kbd && formatKeys(kbd);
+  const glyph = checked ? "check" : checked === undefined ? icon : undefined;
   return (
     <button
       {...pressHandlers}
       type="button"
-      role="menuitem"
+      {...(checked === undefined
+        ? { role: "menuitem" }
+        : { role: "menuitemradio", "aria-checked": checked })}
       tabIndex={-1}
       className="ui-menu-item"
       data-label={textValue ?? (typeof children === "string" ? children : undefined)}
@@ -172,7 +182,7 @@ export function MenuItem({
         onSelect();
       }}
     >
-      {icon && <Icon name={icon} size={18} className="ui-menu-icon" />}
+      {glyph && <Icon name={glyph} size={18} className="ui-menu-icon" />}
       <span className="ui-menu-text">
         <span id={labelId} className="ui-menu-label">
           {children}

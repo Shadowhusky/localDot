@@ -73,7 +73,57 @@ function key(menu: HTMLElement, name: string) {
   fireEvent.keyDown(document.activeElement ?? menu, { key: name });
 }
 
+function Choices() {
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [size, setSize] = useState("Medium");
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        {...triggerProps("menu", open)}
+        onClick={() => setOpen(true)}
+      >
+        Recording actions
+      </button>
+      <Menu open={open} onClose={() => setOpen(false)} anchor={trigger} label="Recording actions">
+        <MenuGroup label="Size">
+          {["Small", "Medium", "Large"].map((name) => (
+            <MenuItem key={name} checked={size === name} onSelect={() => setSize(name)}>
+              {name}
+            </MenuItem>
+          ))}
+        </MenuGroup>
+        <MenuSeparator />
+        <MenuItem onSelect={() => {}}>More sizes…</MenuItem>
+      </Menu>
+    </>
+  );
+}
+
 describe("Menu", () => {
+  it("marks the chosen one of several, lands on it from the keyboard and moves past it", () => {
+    render(<Choices />);
+    const menu = openWithKeyboard();
+    const radios = screen.getAllByRole("menuitemradio");
+    expect(radios.map((radio) => radio.getAttribute("aria-checked"))).toEqual([
+      "false",
+      "true",
+      "false",
+    ]);
+    expect(radios[1]?.querySelector(".ui-menu-icon")).not.toBeNull();
+    expect(radios[0]?.querySelector(".ui-menu-icon")).toBeNull();
+    expect(focused()).toBe("Medium");
+    key(menu, "ArrowDown");
+    key(menu, "ArrowDown");
+    expect(focused()).toBe("More sizes…");
+    key(menu, "Home");
+    fireEvent.click(document.activeElement as HTMLElement);
+    openWithKeyboard();
+    expect(focused()).toBe("Small");
+  });
+
   it("opened from the keyboard lands on the first item and moves with arrows, Home and End", () => {
     render(<Harness />);
     const menu = openWithKeyboard();

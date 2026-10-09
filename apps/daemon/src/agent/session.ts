@@ -24,8 +24,10 @@ import {
 } from "@localdot/protocol";
 import type { ScreenName, ScreenSwitchData } from "../../../../packages/protocol/src/screens.ts";
 import type { ScreenController, ScreenLease, ScreenScope } from "../browser/screen-controller.ts";
+import { NO_CONNECTORS as NO_TASK_CONNECTORS, type TaskConnectors } from "../connectors/hub.ts";
 import type { EventLog } from "../event-log.ts";
 import type { GuiAction, NativeActionIdentity } from "../gateway/gateway.ts";
+import type { ResearchLog } from "./research.ts";
 import {
   type ActionBinding,
   ApprovalBroker,
@@ -222,8 +224,12 @@ export class AgentSession {
     | undefined;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
+  // Research mode: the task's numbered sources and its budget.
+  research: ResearchLog | undefined;
   // The user's last few tasks when this one started.
   recent: readonly RecentLine[] = [];
+  // The connected apps' tools this task's model was shown.
+  connectors: TaskConnectors = NO_TASK_CONNECTORS;
   toolCalls = 0;
   // The user's optional hard stop: the most tool calls between two of their messages.
   actionLimit: number | undefined;
@@ -952,6 +958,8 @@ export class AgentSession {
       this.actionsSinceUser = 0;
       this.actionLimitReached = false;
     }
+    // A follow-up to finished research is new research: it gets room of its own.
+    if (kind === "followup" && this.research?.stopped) this.research.more();
     this.#wake();
     return { ...item };
   }
@@ -965,6 +973,10 @@ export class AgentSession {
     this.#inbox.push(item);
     this.#notes.add(item.seq);
     this.#wake();
+  }
+  // A word to dot from localDot rather than the user, heard with dot's next look at its inbox.
+  remind(text: string): void {
+    if (!this.stopped) this.#note(text);
   }
   // After the user hands back control they took, until dot has looked at the screen again.
   get lookOwed(): boolean {

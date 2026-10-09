@@ -6,7 +6,10 @@ import type { LiveFacts } from "../agent/conversation-list.ts";
 import { createApi } from "../lib/api.ts";
 import { ConversationList } from "./ConversationList.tsx";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const HOUR = 3_600_000;
 let next = 0;
@@ -73,6 +76,8 @@ function open(
 const rows = () => screen.getAllByRole("option");
 
 it("lists conversations by day, each with its status and the current one marked", async () => {
+  // Mid-afternoon, so an hour or two ago is still today whenever the suite runs.
+  vi.useFakeTimers({ toFake: ["Date"], now: new Date(2026, 9, 9, 15) });
   const today = entry("Book the hotel", HOUR);
   const running = entry("Tidy my Downloads", 2 * HOUR, null);
   const failed = entry("Summarise the deck", 26 * HOUR, "error");

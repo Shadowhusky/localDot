@@ -54,9 +54,15 @@
   grid-area: 2 / 1 / 3 / -1;
 }
 
+/* A panel's width handle straddles its left edge, centred in the gap before it. */
+.rail-resize-chat {
+  grid-area: 1 / 2 / 3 / 3;
+  --_gap: var(--gutter);
+}
+
 @media (--wide) {
   .app {
-    grid-template-columns: minmax(0, 1fr) 320px var(--rail-w);
+    grid-template-columns: minmax(0, 1fr) var(--activity-w) var(--rail-w);
     column-gap: var(--rail-inset);
   }
 
@@ -67,6 +73,16 @@
 
   .rail-chat {
     grid-area: 1 / 3 / 3 / 4;
+  }
+
+  .rail-resize-activity {
+    grid-area: 1 / 2 / 3 / 3;
+    --_gap: calc(var(--gutter) + var(--rail-inset));
+  }
+
+  .rail-resize-chat {
+    grid-area: 1 / 3 / 3 / 4;
+    --_gap: var(--rail-inset);
   }
 }
 

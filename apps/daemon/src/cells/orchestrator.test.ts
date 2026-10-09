@@ -86,6 +86,7 @@ async function setup(
     readyTimeoutMs?: number;
     restartBackoffMs?: number[];
     sleep?: (ms: number) => Promise<void>;
+    now?: () => number;
     makeStore?: (home: string) => CellStore;
     externalKeydPorts?: () => Iterable<number>;
     labels?: Record<string, string>;
@@ -105,6 +106,7 @@ async function setup(
     probeDesktopd: opts.probeDesktopd ?? (async () => probe()),
     probeStream: async () => (opts.stream ?? (() => true))(),
     sleep: opts.sleep ?? (async () => {}),
+    ...(opts.now ? { now: opts.now } : {}),
     readyTimeoutMs: opts.readyTimeoutMs ?? 5000,
     ...(opts.labels ? { labels: opts.labels } : {}),
     watchEveryMs: 0,
@@ -474,6 +476,119 @@ describe("CellOrchestrator lifecycle", () => {
   });
 });
 
+describe("CellOrchestrator operations", () => {
+  // Each readiness probe takes this long on the daemon's clock.
+  const BOOT_MS = 9_000;
+  const timed = () => {
+    const clock = { now: 1_000_000 };
+    return {
+      clock,
+      now: () => clock.now,
+      desktopd: (store: CellStore) => () => {
+        clock.now += BOOT_MS;
+        return runningDesktop(store)();
+      },
+    };
+  };
+  const steps = (changes: CellSummary[], id: string) =>
+    changes.filter((c) => c.id === id).map((c) => [c.state, c.operation?.step]);
+
+  it("reports a first start from when the daemon began it, step by step, until the screen is up", async () => {
+    const { clock, now, desktopd } = timed();
+    const { orchestrator, changes, stateOf } = await setup({ now, desktopd });
+    const cell = await orchestrator.create({ scale: 2 });
+    expect(cell.operation).toMatchObject({
+      kind: "first-start",
+      startedAt: 1_000_000,
+      expectedMs: 60_000,
+    });
+    await stateOf(cell.id, "ready");
+    expect(steps(changes, cell.id)).toEqual([
+      ["starting", "network"],
+      ["starting", "desktop"],
+      ["starting", "ready"],
+      ["ready", "screen"],
+    ]);
+    expect(new Set(changes.map((c) => c.operation?.startedAt))).toEqual(new Set([1_000_000]));
+    clock.now += 500;
+    expect(orchestrator.get(cell.id)?.operation).toMatchObject({
+      step: "screen",
+      elapsedMs: BOOT_MS + 500,
+    });
+    orchestrator.updateStream(cell.id, { connection: "live", viewers: 1 });
+    expect(orchestrator.get(cell.id)).not.toHaveProperty("operation");
+    orchestrator.updateStream(cell.id, { connection: "stalled" });
+    expect(orchestrator.get(cell.id)).not.toHaveProperty("operation");
+  });
+
+  it("keeps how long each kind took with the computer, as the next one's expected time", async () => {
+    const { clock, now, desktopd } = timed();
+    const { orchestrator, home, changes, stateOf } = await setup({ now, desktopd });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const from = changes.length;
+    await orchestrator.stop(cell.id);
+    expect(changes.slice(from)[0]?.operation).toMatchObject({
+      kind: "stop",
+      step: "shutdown",
+      expectedMs: 5_000,
+    });
+    expect(orchestrator.get(cell.id)).not.toHaveProperty("operation");
+    clock.now += 60_000;
+    await orchestrator.start(cell.id);
+    await waitUntil(() => orchestrator.get(cell.id)?.state === "ready");
+    expect(changes.slice(from).find((c) => c.operation?.kind === "start")?.operation).toMatchObject(
+      { startedAt: clock.now - BOOT_MS, expectedMs: 20_000 },
+    );
+    expect(new CellStore(home).timings(cell.id)).toEqual({
+      "first-start": BOOT_MS,
+      start: BOOT_MS,
+      stop: expect.any(Number),
+    });
+
+    // The next daemon on the same home expects what this computer took last time.
+    orchestrator.dispose();
+    const next = new CellOrchestrator({
+      docker: new DockerClient(fake.socketPath),
+      store: new CellStore(home),
+      images,
+      probeDesktopd: async () => healthy,
+      probeStream: async () => true,
+      sleep: async () => {},
+      now,
+      watchEveryMs: 0,
+    });
+    made.push(next);
+    const seen: CellSummary[] = [];
+    next.subscribe((c) => seen.push(c));
+    await next.stop(cell.id);
+    await next.start(cell.id);
+    expect(seen.find((c) => c.operation?.kind === "start")?.operation?.expectedMs).toBe(BOOT_MS);
+  });
+
+  it("names a crash restart, expecting a start plus its wait, and keeps no time for it", async () => {
+    const { now, desktopd } = timed();
+    const { orchestrator, store, home, changes, stateOf } = await setup({
+      now,
+      desktopd,
+      restartBackoffMs: [4_000, 8_000],
+    });
+    const cell = await orchestrator.create({ scale: 2 });
+    await stateOf(cell.id, "ready");
+    const desktop = fake.state.containers.get(store.get(cell.id)?.docker.desktop ?? "");
+    if (desktop) {
+      desktop.running = false;
+      desktop.exitCode = 137;
+    }
+    await waitUntil(() => changes.some((c) => c.operation?.kind === "restart"));
+    expect(changes.find((c) => c.operation?.kind === "restart")?.operation).toMatchObject({
+      expectedMs: 20_000 + 4_000,
+    });
+    await waitUntil(() => desktop?.starts === 2 && orchestrator.get(cell.id)?.state === "ready");
+    expect(new CellStore(home).timings(cell.id)).toEqual({ "first-start": BOOT_MS });
+  });
+});
+
 describe("CellOrchestrator restarts", () => {
   it("a user start() during a restart's backoff leaves exactly one watch loop", async () => {
     const held: (() => void)[] = [];
@@ -653,6 +768,7 @@ describe("CellOrchestrator operation queue", () => {
       "stopped",
       "starting",
       "starting",
+      "starting",
       "ready",
     ]);
     expect({ gate: gate?.starts, desktop: desktop?.starts }).toEqual({ gate: 2, desktop: 2 });
@@ -825,6 +941,7 @@ describe("CellOrchestrator background loops", () => {
     answer.resolve(healthy);
     await new Promise((r) => setTimeout(r, 50));
     expect(changes.filter((c) => c.id === cell.id).map((c) => c.state)).toEqual([
+      "starting",
       "starting",
       "starting",
       "stopping",

@@ -2,6 +2,7 @@ import {
   ApprovalCard,
   LocalDotEvent as EventSchema,
   type LocalDotEvent,
+  MAX_RESEARCH_SOURCES,
   microsToMs,
   STALL,
   ulidTime,
@@ -184,9 +185,21 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
         reasoningPartial: (old?.reasoningPartial ?? false) || e.data.reasoningTokens === undefined,
       };
       const rows = [...model.usage.filter((value) => value !== old), row];
+      const call = {
+        atMs: microsToMs(e.t),
+        role: e.data.role,
+        route: e.data.route,
+        model: e.data.model,
+        inputTokens: e.data.inputTokens,
+        outputTokens: e.data.outputTokens,
+        ...(e.data.reasoningTokens === undefined
+          ? {}
+          : { reasoningTokens: e.data.reasoningTokens }),
+      };
       next = {
         ...next,
         usage: rows.slice(-12),
+        usageCalls: [...model.usageCalls, call].slice(-L.usageCalls),
         usagePartial:
           model.usagePartial ||
           rows.length > 12 ||
@@ -302,6 +315,7 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
             role: "assistant",
             text: e.data.text,
             final: true,
+            doneAt: e.t,
           },
           L.messages,
         ),
@@ -471,6 +485,33 @@ export function projectAgentEvent(model: AgentModel, event: LocalDotEvent): Agen
     }
     case "session.start":
       if (e.data.origin) next = { ...next, origin: e.data.origin };
+      if (e.data.research)
+        next = {
+          ...next,
+          research: { startMs: microsToMs(e.t), budget: { ...e.data.research }, sources: [] },
+        };
+      break;
+    case "research.budget":
+      if (model.research) {
+        const { stopped, ...budget } = e.data;
+        next = {
+          ...next,
+          research: {
+            startMs: model.research.startMs,
+            budget,
+            sources: model.research.sources,
+            ...(stopped ? { stopped } : {}),
+          },
+        };
+      }
+      break;
+    case "research.source":
+      if (model.research && e.data.n <= MAX_RESEARCH_SOURCES) {
+        const sources = model.research.sources.filter((source) => source.n !== e.data.n);
+        sources.push({ ...e.data });
+        sources.sort((a, b) => a.n - b.n);
+        next = { ...next, research: { ...model.research, sources } };
+      }
       break;
     case "routine.proposed":
       next = {

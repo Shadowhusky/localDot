@@ -2,7 +2,7 @@ import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { LocalDotEvent } from "@localdot/protocol";
-import { synthFrame } from "@localdot/stage/testing";
+import { type SynthFrame, synthFrame } from "@localdot/stage/testing";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { decodeJournal } from "./journal.ts";
 import { readManifest } from "./manifest.ts";
@@ -41,6 +41,20 @@ function journalTimes(dir: string): number[] {
   } catch {
     return [];
   }
+}
+function withLevel(frame: SynthFrame, level: number): SynthFrame {
+  const data = frame.data.slice();
+  for (let i = 0; i + 6 < data.length; i++)
+    if (
+      data[i] === 0 &&
+      data[i + 1] === 0 &&
+      data[i + 2] === 1 &&
+      ((data[i + 3] ?? 0) & 0x1f) === 7
+    ) {
+      data[i + 6] = level;
+      return { ...frame, data };
+    }
+  throw new Error("the frame has no SPS");
 }
 describe("session recording policy", () => {
   it.each(["authority", "event"] as const)(
@@ -163,6 +177,20 @@ describe("session recording policy", () => {
       note: "the stream changed format",
     });
     expect(feed.stopped).toBe(true);
+  });
+  // A viewer that asks for fewer frames makes the encoder pick a lower level for the same picture.
+  it("keeps recording when only the stream's level changes", async () => {
+    const { rec, feed } = await setup();
+    feed.frame(synthFrame(opts, 0), 10, 64, 64);
+    await rec.drain();
+    const relevelled = withLevel(synthFrame(opts, 15), 0x1f);
+    feed.frame(relevelled, 20, 64, 64);
+    feed.frame(synthFrame(opts, 16), 30, 64, 64);
+    await rec.drain();
+    expect(rec.manifest).toMatchObject({ state: "recording", codec: "avc1.42c01e", width: 64 });
+    expect(rec.manifest.note).toBeUndefined();
+    expect(rec.manifest.lastMicros).toBe(30);
+    expect(feed.stopped).toBe(false);
   });
   it("ends cleanly after the first committed fragment crosses the size cap", async () => {
     const { rec, feed } = await setup({ sizeCapBytes: 1 });

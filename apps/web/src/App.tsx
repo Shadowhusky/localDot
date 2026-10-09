@@ -15,8 +15,10 @@ import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
+import { ModelChip, ModelMenu } from "./agent/ModelChip.tsx";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
+import { requestResearch, researchWait } from "./agent/research.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { workSteps } from "./agent/thread.ts";
@@ -84,17 +86,27 @@ import { RowMenu } from "./routines/RowMenu.tsx";
 import { useRoutines } from "./routines/useRoutines.ts";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
+import {
+  footWork,
+  type HudAction,
+  statusFor,
+  taskFacts,
+  taskHud,
+  withSending,
+} from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { useSeenReporting } from "./session/useSeenReporting.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { subscription } from "./settings/chooser.ts";
 import { useWhatDotKnows } from "./settings/memory/useWhatDotKnows.ts";
+import { modelNames } from "./settings/model-names.ts";
+import { currentOption, type ModelOption, modelGroups } from "./settings/model-options.ts";
 import { purposeJudge } from "./settings/PurposeCheck.tsx";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useAccounts } from "./settings/useAccounts.ts";
+import { useConnectors } from "./settings/useConnectors.ts";
 import { useDesktopSignIn } from "./settings/useDesktopSignIn.ts";
 import { useNotifications } from "./settings/useNotifications.ts";
 import { useRules } from "./settings/useRules.ts";
@@ -123,7 +135,9 @@ import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
 import { atWork, narrationLine } from "./shell/narration.ts";
+import { ACTIVITY_WIDTH, CHAT_WIDTH } from "./shell/panel-width.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
+import { ResizeHandle } from "./shell/ResizeHandle.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
@@ -134,7 +148,7 @@ import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
-import { Announcer } from "./ui/Announcer.tsx";
+import { Announcer, announce } from "./ui/Announcer.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
@@ -146,6 +160,13 @@ import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
 import { showToast, Toaster } from "./ui/Toast.tsx";
 import "./app.css";
+import { speechLanguage } from "./voice/language.ts";
+import { useListening } from "./voice/listening.ts";
+import { useVoicePrefs } from "./voice/prefs.ts";
+import { useReadAloud } from "./voice/read-aloud.ts";
+import { useVoiceSupport, voiceRoute } from "./voice/support.ts";
+import { browserLanguages } from "./voice/useVoice.ts";
+import { LISTENING_LINE } from "./voice/words.ts";
 
 export interface AppProps {
   fetchImpl?: typeof fetch;
@@ -303,6 +324,9 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
   code: "expired",
 };
 
+// How long a sent message shows dot thinking with no word from the task before the real status returns.
+const SENDING_HOLD_MS = 20_000;
+
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
   const showDot = useShowDot();
@@ -382,6 +406,7 @@ function Theatre({ api }: { api: ApiClient }) {
     error,
     listed,
     reconnects,
+    operation,
     start,
     stop,
     resume,
@@ -404,6 +429,10 @@ function Theatre({ api }: { api: ApiClient }) {
           ? claudeModels
           : providerIndex?.providers.find((row) => row.id === provider)?.models
       )?.find((model) => model.id === id)?.name,
+    [providerIndex, accountModels, claudeModels],
+  );
+  const names = useMemo(
+    () => modelNames(providerIndex, { chatgpt: accountModels, claudeCode: claudeModels }),
     [providerIndex, accountModels, claudeModels],
   );
   const mainChoice = settings.saved?.main;
@@ -544,6 +573,19 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => controller.abort();
   }, [api, session.sessionId, session.ended, historyRevision]);
   const agent = useAgentSession(api, cell, session);
+  // Talking to dot: its listening pose and line, Settings → Voice, and replies read aloud.
+  const hearing = useListening();
+  const voicePrefs = useVoicePrefs();
+  const voiceBrowser = browserLanguages();
+  const voiceLanguage = speechLanguage(voicePrefs.value.language, voiceBrowser);
+  const voiceSupport = useVoiceSupport(api, voiceLanguage);
+  useReadAloud({
+    on: voicePrefs.value.readAloud,
+    sessionId: agent.sessionId,
+    history: !!agent.history,
+    messages: agent.model.messages,
+    language: voiceLanguage,
+  });
   // The conversation the user just chose: its thread clears at once and stays clear until the
   // chosen conversation is the one on show, so the one left behind never draws again.
   const [switching, setSwitching] = useState<{ to: string | null } | null>(null);
@@ -699,6 +741,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const settingsKnowledge = useKnowledge(api, null, settings.open);
   const whatDotKnows = useWhatDotKnows(api, settings.open);
   const settingsNotifications = useNotifications(api, settings.open);
+  const settingsConnectors = useConnectors(api, settings.open);
   const settingsAccounts = useAccounts(
     api,
     cell?.state === "ready" && !cell.paused ? cell.id : null,
@@ -934,11 +977,16 @@ function Theatre({ api }: { api: ApiClient }) {
     offer: ownHold ? (site, failed) => void signIn.start(site, failed) : undefined,
   });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
-  const now = useNowMs(session.model, session.version, (t) => {
-    if (!shownTask) return false;
-    const hud = taskHud(session.model, t, facts);
-    return hud.phase === "running" || hud.elapsedS !== null;
-  });
+  const now = useNowMs(
+    session.model,
+    session.version,
+    (t) => {
+      if (!shownTask) return false;
+      const hud = taskHud(session.model, t, facts);
+      return hud.phase === "running" || hud.elapsedS !== null;
+    },
+    session.clock,
+  );
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
   // The daemon refuses an Update in these cases too; the button says so before it is pressed.
@@ -964,7 +1012,7 @@ function Theatre({ api }: { api: ApiClient }) {
     !!session.sessionId && (agent.connection === "lost" || agent.availability === "error"),
     LINK_LOST_MS,
   );
-  const appStatus = statusFor({
+  const baseStatus = statusFor({
     computer: {
       ...computer,
       action: {
@@ -1000,6 +1048,19 @@ function Theatre({ api }: { api: ApiClient }) {
       !agent.model.pendingTakeover &&
       !agent.snapshot?.pendingTakeover,
   });
+  // From the moment a message is sent until the task's first word, dot is shown thinking.
+  const [sendingSince, setSendingSince] = useState<number | null>(null);
+  const sendingAnswered = baseStatus.row !== "ready" && baseStatus.row !== "done";
+  useEffect(() => {
+    if (sendingSince === null) return;
+    if (sendingAnswered) {
+      setSendingSince(null);
+      return;
+    }
+    const timer = setTimeout(() => setSendingSince(null), SENDING_HOLD_MS);
+    return () => clearTimeout(timer);
+  }, [sendingSince, sendingAnswered]);
+  const appStatus = withSending(baseStatus, sendingSince !== null);
   // The sheets offer Shut down, which the island leaves out; on a phone, where a sheet covers the
   // island, the task's Stop too.
   const sheetStop = appStatus.actions.find(
@@ -1097,6 +1158,69 @@ function Theatre({ api }: { api: ApiClient }) {
     computer: !!cell || listed.length > 0,
   });
   const keysState = useMemo(() => keyStatus(keys.health), [keys.health]);
+  const chatgptReady = settings.chatgpt.canStart;
+  const claudeReady = settings.claudeCode.canStart;
+  const modelChoices = useMemo(
+    () =>
+      modelGroups(
+        settings.saved,
+        providerIndex,
+        {
+          chatgpt: { ready: chatgptReady, models: accountModels },
+          claudeCode: { ready: claudeReady, models: claudeModels },
+        },
+        names,
+      ),
+    [settings.saved, providerIndex, chatgptReady, accountModels, claudeReady, claudeModels, names],
+  );
+  // The model being saved, which the chip shows meanwhile.
+  const [modelSaving, setModelSaving] = useState<ModelOption | null>(null);
+  const [phoneModels, setPhoneModels] = useState(false);
+  const phoneModelsAnchor = useRef<HTMLElement | null>(null);
+  const taskModels = agent.snapshot?.models;
+  // The task runs on another model than the one saved now: the next task takes the saved one.
+  const modelChanged =
+    !!mainChoice &&
+    !!taskModels &&
+    !agent.model.ended &&
+    (taskModels.kind === "api"
+      ? !taskModels.roles.some(
+          (role) =>
+            role.role === "main" &&
+            role.provider === mainChoice.provider &&
+            role.model === mainChoice.model,
+        )
+      : taskModels.kind !== mainChoice.provider || taskModels.model !== mainChoice.model);
+  // A task at work keeps its model; one chosen meanwhile starts with the next task.
+  const taskWorking = !!taskModels && !agent.model.ended && agent.snapshot?.status !== "idle";
+  const modelNext = modelChanged && taskWorking;
+  const modelLabel =
+    modelSaving?.name ?? (mainChoice ? names.name(mainChoice.provider, mainChoice.model) : "");
+  const chooseModel = async (option: ModelOption) => {
+    setModelSaving(option);
+    const saved = await settings.chooseMain(option.choice);
+    setModelSaving(null);
+    if (!saved) {
+      showToast({
+        title: `Couldn't switch to ${option.name}`,
+        description: "Try again, or choose it in Settings.",
+        tone: "danger",
+      });
+      return;
+    }
+    announce(
+      "model",
+      taskWorking
+        ? `${option.name} starts with the next task.`
+        : `dot uses ${option.name} from your next message.`,
+    );
+  };
+  const modelMenu = {
+    groups: modelChoices,
+    current: modelSaving?.id ?? currentOption(settings.saved),
+    working: taskWorking,
+    onChoose: (option: ModelOption) => void chooseModel(option),
+  };
   const wide = layout === "wide";
   const views: SegmentItem[] = [
     {
@@ -1153,6 +1277,7 @@ function Theatre({ api }: { api: ApiClient }) {
       scale={cell?.scale ?? 2}
       api={api}
       nowMs={now}
+      historyLoaded={agent.history === true}
     />
   );
   const shape = islandShape(appStatus, curtain.up || opening);
@@ -1372,8 +1497,8 @@ function Theatre({ api }: { api: ApiClient }) {
     }
   };
   const tipAction = idle?.action;
-  const bandLine = idle ? idle.text : narration;
-  const bandSpeaker = idle ? "dot" : speaker;
+  const bandLine = hearing ? LISTENING_LINE : idle ? idle.text : narration;
+  const bandSpeaker = hearing || idle ? "dot" : speaker;
   const pendingQuestion = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
@@ -1516,6 +1641,8 @@ function Theatre({ api }: { api: ApiClient }) {
                         : undefined
                     }
                     freshStart={freshStart.curtain}
+                    operation={operation}
+                    ready={curtain.lifting}
                     showDot={showDot.value}
                   />
                 </Presence>
@@ -1554,15 +1681,17 @@ function Theatre({ api }: { api: ApiClient }) {
                     line={bandLine}
                     speaker={bandSpeaker}
                     reveal={!!asked && narration === asked}
-                    forUser={!atWork(appStatus.row)}
+                    forUser={hearing || !atWork(appStatus.row)}
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
-                    idle={!!idle}
+                    idle={!hearing && !!idle}
                     action={
-                      tipAction && {
-                        label: tipAction.label,
-                        run: (trigger) => openTip(tipAction, trigger),
-                      }
+                      hearing || !tipAction
+                        ? undefined
+                        : {
+                            label: tipAction.label,
+                            run: (trigger) => openTip(tipAction, trigger),
+                          }
                     }
                     onHover={setOverBand}
                   />
@@ -1661,6 +1790,22 @@ function Theatre({ api }: { api: ApiClient }) {
             <ErrorBoundary>{activity}</ErrorBoundary>
           </RailPanel>
         )}
+        {wide && (
+          <ResizeHandle
+            panel={ACTIVITY_WIDTH}
+            property="--activity-w"
+            label="Activity width"
+            className="rail-resize-activity"
+          />
+        )}
+        {(wide || layout === "laptop") && (
+          <ResizeHandle
+            panel={CHAT_WIDTH}
+            property="--rail-w"
+            label="Conversation width"
+            className="rail-resize-chat"
+          />
+        )}
         <RailPanel
           label="Conversation"
           className="rail-chat"
@@ -1684,6 +1829,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               reveal={reveal}
+              names={names}
               computerReady={cell?.state === "ready" && !cell.paused}
               computerUpdating={!!cell?.updating}
               live={foot && !session.ended ? { ...foot, nowMs: now } : null}
@@ -1724,6 +1870,26 @@ function Theatre({ api }: { api: ApiClient }) {
                         icon: "message-circle",
                         run: () => setConversationsOpen(true),
                       },
+                      {
+                        label: "Research a question",
+                        icon: "library",
+                        disabledReason: researchWait(agent),
+                        run: requestResearch,
+                      },
+                      ...(mainChoice
+                        ? [
+                            {
+                              label: `${modelNext ? "Next task" : "Model"}: ${modelLabel}`,
+                              icon: "cpu" as const,
+                              disabledReason: modelSaving ? "Saving…" : undefined,
+                              run: (trigger: HTMLButtonElement) => {
+                                settings.browseAccounts();
+                                phoneModelsAnchor.current = trigger;
+                                setPhoneModels(true);
+                              },
+                            },
+                          ]
+                        : []),
                       {
                         label: "Replay",
                         icon: "history",
@@ -1824,6 +1990,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 <Composer
                   api={api}
                   cell={cell}
+                  onSending={(on) => setSendingSince(on ? Date.now() : null)}
                   known={status === "known"}
                   pending={pending !== null}
                   controlBlocked={
@@ -1841,9 +2008,34 @@ function Theatre({ api }: { api: ApiClient }) {
                   onTaskStarted={session.check}
                   layout={phone ? "pill" : "card"}
                   reply={askDraft ? replyAsk : undefined}
+                  modelChanged={modelChanged}
+                  model={
+                    mainChoice && (
+                      <ModelChip
+                        {...modelMenu}
+                        name={modelLabel}
+                        next={modelNext}
+                        disabledReason={modelSaving ? "Saving…" : undefined}
+                        onPeek={settings.browseAccounts}
+                        onManage={(trigger) => showSettings(trigger, "models")}
+                      />
+                    )
+                  }
                 />
               }
             />
+            {phone && (
+              <ModelMenu
+                {...modelMenu}
+                open={phoneModels}
+                onClose={() => setPhoneModels(false)}
+                anchor={phoneModelsAnchor}
+                side="top"
+                align="end"
+                dim
+                onManage={(trigger) => showSettings(trigger, "models")}
+              />
+            )}
           </ErrorBoundary>
         </RailPanel>
       </div>
@@ -1877,6 +2069,15 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
+          voice={{
+            prefs: voicePrefs.value,
+            saved: voicePrefs.saved,
+            change: voicePrefs.change,
+            route: voiceRoute(voiceSupport.support, voicePrefs.value.online, voiceLanguage),
+            browser: voiceBrowser,
+            downloading: voiceSupport.downloading,
+            download: voiceSupport.download,
+          }}
           stopNote={stopNote}
           stream={streamChoice}
           stop={sheetStopControl}
@@ -1971,6 +2172,7 @@ function Theatre({ api }: { api: ApiClient }) {
           notifications={settingsNotifications}
           accounts={settingsAccounts}
           signIn={signIn}
+          connectors={settingsConnectors}
           rules={rules}
           spending={
             settings.draft
@@ -1980,6 +2182,11 @@ function Theatre({ api }: { api: ApiClient }) {
           checkIns={
             settings.draft
               ? { value: settings.draft.checkIns, change: settings.checkIn }
+              : undefined
+          }
+          research={
+            settings.draft
+              ? { value: settings.draft.research, change: settings.research }
               : undefined
           }
           purposeCheck={
@@ -2114,23 +2321,27 @@ function Theatre({ api }: { api: ApiClient }) {
         </ErrorBoundary>
       </Presence>
       {showDot.value && (
-        <PresenceLayer
-          place={place}
-          feed={
-            onboarding.open
-              ? {
-                  state: STEP_DOT[setupStep],
-                  control: false,
-                  attention: false,
-                  focus: null,
-                  dispatched: null,
-                  done: false,
-                  nod: setupStep,
-                }
-              : dotFeed(appStatus, session.sessionId ? session.model : null, now)
-          }
-          line={onboarding.open || bandSpeaker !== "dot" ? "" : bandLine}
-        />
+        <ErrorBoundary quiet>
+          <PresenceLayer
+            place={place}
+            feed={
+              onboarding.open
+                ? {
+                    state: STEP_DOT[setupStep],
+                    control: false,
+                    attention: false,
+                    focus: null,
+                    dispatched: null,
+                    done: false,
+                    nod: setupStep,
+                  }
+                : hearing
+                  ? { ...dotFeed(appStatus, null, now), state: "listening", tool: null }
+                  : dotFeed(appStatus, session.sessionId ? session.model : null, now)
+            }
+            line={onboarding.open || bandSpeaker !== "dot" || hearing ? "" : bandLine}
+          />
+        </ErrorBoundary>
       )}
       <Announcer />
     </div>

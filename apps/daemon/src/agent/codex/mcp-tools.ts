@@ -2,15 +2,19 @@ import {
   BrowserAction,
   ComputerAction,
   ComputerStep,
+  type ConnectorToolSpec,
   FOLLOW_UP_TOOL_DESCRIPTION,
   MAX_BATCH_STEPS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
+  offeredTools,
+  RESEARCH_TOOL_DESCRIPTION,
   ROUTINE_TOOL_DESCRIPTION,
   TOOL_INPUTS,
-  TOOL_NAMES,
   type ToolName,
   type ToolResult,
+  WEB_FETCH_TOOL_DESCRIPTION,
+  WEB_SEARCH_TOOL_DESCRIPTION,
 } from "@localdot/protocol";
 import { z } from "zod";
 
@@ -67,6 +71,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     '(text: keys such as "Return", after clicking the element), or scroll (scroll_direction, scroll_amount). ' +
     "The element is found again wherever it is now; give coordinate {x, y} too as a fallback for when the ref " +
     "is stale. Password fields are never filled: ask with an ask_user secret field.",
+  web_search: WEB_SEARCH_TOOL_DESCRIPTION,
+  web_fetch: WEB_FETCH_TOOL_DESCRIPTION,
   find:
     "Find the desktop's controls whose names contain text (role optional, such as push button, menu item or " +
     "check box), in every window top first. Returns each one's role, name, window and the point to click.",
@@ -102,10 +108,12 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   done: "Finish the task: a summary for the user, the paths of any files in the home to hand over (a revised file keeps its name), and what you checked about them.",
   routine: ROUTINE_TOOL_DESCRIPTION,
   follow_up_at: FOLLOW_UP_TOOL_DESCRIPTION,
+  research: RESEARCH_TOOL_DESCRIPTION,
 };
 
 export interface McpToolDescriptor {
-  name: ToolName;
+  // A v1 tool, or a connected app's tool by dot's name for it.
+  name: ToolName | string;
   description: string;
   inputSchema: Record<string, unknown>;
 }
@@ -117,8 +125,9 @@ function jsonSchema(schema: z.ZodType): Record<string, unknown> {
 
 export function codexTools(
   descriptions: Record<ToolName, string> = CODEX_TOOL_DESCRIPTIONS,
+  research = false,
 ): McpToolDescriptor[] {
-  return TOOL_NAMES.map((name) => ({
+  return offeredTools(research).map((name) => ({
     name,
     description: descriptions[name],
     inputSchema: jsonSchema(
@@ -131,11 +140,22 @@ export function codexTools(
   }));
 }
 
+// The connected apps' tools a task was shown, on the same server as localDot's own.
+export function connectorDescriptors(connectors: {
+  readonly specs: readonly ConnectorToolSpec[];
+}): McpToolDescriptor[] {
+  return connectors.specs.map((spec) => ({
+    name: spec.name,
+    description: spec.description,
+    inputSchema: spec.inputSchema,
+  }));
+}
+
 export interface McpCallResult {
   [key: string]: unknown;
   content: (
     | { type: "text"; text: string }
-    | { type: "image"; data: string; mimeType: "image/png" }
+    | { type: "image"; data: string; mimeType: "image/png" | "image/jpeg" }
   )[];
   isError: boolean;
 }

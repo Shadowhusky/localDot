@@ -49,6 +49,71 @@
   padding: 0 calc(var(--spacing) * 3) 0 calc(var(--spacing) * 4);
 }
 
+/* A panel's width handle: a hairline in the gap that thickens under the pointer or while held. The
+   hit area is wider than the line, and the line keeps clear of the panel's rounded corners. */
+.rail-resize {
+  position: relative;
+  z-index: 2;
+  justify-self: start;
+  width: calc(var(--spacing) * 4);
+  height: auto;
+  margin: var(--rail-inset) 0;
+  padding: 0;
+  overflow: visible;
+  border: 0;
+  background: none;
+  translate: calc(-50% - var(--_gap) / 2) 0;
+  cursor: col-resize;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.rail-resize::after {
+  content: "";
+  position: absolute;
+  inset-block: var(--radius-xl);
+  left: 50%;
+  width: 1px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-hairline);
+  translate: -50% 0;
+  transition:
+    width var(--dur-hover) var(--ease-standard),
+    background-color var(--dur-hover) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .rail-resize:hover::after {
+    width: 3px;
+    background-color: var(--color-fg-3);
+  }
+}
+
+.rail-resize[data-dragging]::after {
+  width: 3px;
+  background-color: var(--color-fg-2);
+  transition-duration: var(--dur-press);
+}
+
+.rail-resize:focus-visible {
+  outline: none;
+}
+
+.rail-resize:focus-visible::after {
+  width: 3px;
+  background-color: var(--color-fg-1);
+}
+
+.app[data-full] .rail-resize {
+  visibility: hidden;
+}
+
+@media (width < 1100px), (pointer: coarse) and (orientation: landscape) and (height < 500px) {
+  .rail-resize {
+    display: none;
+  }
+}
+
 .rail-actions {
   display: flex;
   flex: none;

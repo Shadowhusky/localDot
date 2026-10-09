@@ -35,6 +35,12 @@ import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
 import { type GateRelay, listenOnSocket } from "../cells/relay.ts";
+import { ConnectorCells, connectorImages } from "../connectors/cell.ts";
+import { ConnectorHub } from "../connectors/hub.ts";
+import { CellAndRemoteLinks } from "../connectors/links.ts";
+import { ConnectorSignIn } from "../connectors/oauth.ts";
+import { RemoteLinks } from "../connectors/remote.ts";
+import { ConnectorStore } from "../connectors/store.ts";
 import type { ComputerAccess } from "../deliverables/convert.ts";
 import { DesktopdClient } from "../desktopd/client.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
@@ -90,6 +96,7 @@ import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
 import type { RoutineToolPort } from "./tools/routine.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
+import { WebCell } from "./web/cell.ts";
 export interface AgentWiringDeps {
   fences?: import("./safety/fences.ts").ComputerFences;
   home: string;
@@ -239,6 +246,30 @@ export function createAgent(d: AgentWiringDeps) {
     keyd: d.keyd,
     ports: { reserve: () => brains.reservePort(), release: (port) => brains.releasePort(port) },
   });
+  const connectorPorts = {
+    reserve: () => brains.reservePort(),
+    release: (port: number) => brains.releasePort(port),
+  };
+  const remoteLinks = new RemoteLinks({ keyd: d.keyd, ports: connectorPorts });
+  const webCell = new WebCell({ keyd: d.keyd, ports: connectorPorts });
+  const connectorCells = new ConnectorCells({
+    docker: d.docker,
+    keyd: d.keyd,
+    ports: connectorPorts,
+    images: connectorImages(),
+    home: d.home,
+    ...(d.relay ? { relay: d.relay } : {}),
+  });
+  const connectors = new ConnectorHub({
+    store: new ConnectorStore(d.home),
+    links: new CellAndRemoteLinks({ remote: remoteLinks, cells: connectorCells }),
+    keys: () => d.keyd.secrets(),
+  });
+  const connectorSignIn = new ConnectorSignIn({
+    hub: connectors,
+    keyd: d.keyd,
+    fetchFor: (id) => remoteLinks.signIn(id),
+  });
   const skills = () => listSkills(BUILTIN_SKILLS, join(d.home, "skills"));
   const installSkills = async (cellId: string, signal: AbortSignal): Promise<SkillSummary[]> => {
     signal.throwIfAborted();
@@ -353,6 +384,8 @@ export function createAgent(d: AgentWiringDeps) {
       stopForUncertainty: (session, reason) => runner.contain(session, reason),
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
       ...(d.routines ? { routines: d.routines } : {}),
+      connectors,
+      web: webCell,
     },
   };
   // A native harness's first look at the task computer: one full screenshot of the selected screen.
@@ -438,6 +471,8 @@ export function createAgent(d: AgentWiringDeps) {
               skills: runner.skillsOf(session.id),
               today: new Date(),
               ...(session.run ? { run: session.run } : {}),
+              ...(session.research ? { research: session.research.budget } : {}),
+              apps: session.connectors.specs.map((spec) => spec.app),
             }),
           redactorFor: (session) => forText(session),
           waitForAuthResume: (session) => runner.waitForAuthResume(session),
@@ -524,6 +559,8 @@ export function createAgent(d: AgentWiringDeps) {
             skills: runner.skillsOf(session.id),
             today: new Date(),
             ...(session.run ? { run: session.run } : {}),
+            ...(session.research ? { research: session.research.budget } : {}),
+            apps: session.connectors.specs.map((spec) => spec.app),
           }),
         redactorFor: (session) => forText(session),
       })
@@ -543,6 +580,7 @@ export function createAgent(d: AgentWiringDeps) {
     settings: () => settings.get(),
     catalog: () => catalog.get(),
     memory,
+    connectors: () => connectors.forTask(),
     recentActivity,
     transcripts,
     conversations,
@@ -854,6 +892,8 @@ export function createAgent(d: AgentWiringDeps) {
     runner,
     routes,
     connections,
+    connectors,
+    connectorSignIn,
     computerAccess,
     // Legacy scripted tasks share the same client/transfer owner and pre-recording boundary.
     // Unlike agent tasks, they have no AgentSession whose runner can contain a lost reply.
@@ -877,6 +917,8 @@ export function createAgent(d: AgentWiringDeps) {
       startPromise = (async () => {
         await brains.sweep();
         if (closing) throw new Error("agent is closed");
+        // Connector cells an earlier run left end with it.
+        await connectorCells.sweep().catch(() => console.error("connector cleanup failed"));
         if (installer) {
           try {
             await installer.verifiedInstallation(new AbortController().signal);
@@ -949,6 +991,8 @@ export function createAgent(d: AgentWiringDeps) {
           ...containments,
           runner.close(),
           judgeCell.close(),
+          webCell.close(),
+          connectors.close(),
           ...activeClients.map((tools) => tools.close()),
           ...retiring,
         ]);

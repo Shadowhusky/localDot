@@ -106,6 +106,27 @@ describe("CellKeydWiring.refresh", () => {
     expect(cell.valid.size).toBe(0);
   });
 
+  it("never gives the computer a stand-in for a connector's key", async () => {
+    const record = sampleRecord("01JXYZ0000000000000000ABCD");
+    const dockerClient = new DockerClient(docker.socketPath);
+    vi.spyOn(dockerClient, "request").mockResolvedValue({ State: { Running: false } });
+    const write = vi.spyOn(dockerClient, "putArchive").mockResolvedValue();
+    const wiring = new CellKeydWiring({
+      keyd: new KeydClient(keyd.socketPath, 1000),
+      docker: dockerClient,
+    });
+    keyd.records.set("weather", http("weather"));
+    keyd.records.set("connector-github", http("connector-github"));
+    await wiring.wire(record);
+    expect(Object.keys(keyd.cells.get(record.id)?.surrogates ?? {})).toEqual(["weather"]);
+    expect(String(write.mock.calls[0]?.[2])).not.toContain("CONNECTOR_GITHUB");
+    await wiring.revoke(record.id);
+    await wiring.refresh(record);
+    expect(Object.keys(keyd.cells.get(record.id)?.surrogates ?? {})).not.toContain(
+      "connector-github",
+    );
+  });
+
   it("gives keyd the gate's capture token only when keyd says it takes one", async () => {
     const record = sampleRecord("01JXYZ0000000000000000ABCD");
     record.tokens.capture = "c".repeat(43);

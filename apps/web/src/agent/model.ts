@@ -2,6 +2,9 @@ import type {
   ActionClass,
   ApprovalCard,
   EventOf,
+  ResearchBudget,
+  ResearchSourceData,
+  ResearchStop,
   RuleChange,
   ScreenSelectionSnapshot,
   SessionOrigin,
@@ -18,6 +21,7 @@ export const AGENT_LIMITS = Object.freeze({
   results: 64,
   routineProposals: 16,
   spendCalls: 2048,
+  usageCalls: 2048,
   messageText: 20_000,
   outputText: 65_536,
   patchText: 8192,
@@ -30,6 +34,8 @@ export interface AgentMessage {
   readonly role: "user" | "assistant";
   readonly text: string;
   readonly final: boolean;
+  // When dot's reply was whole: the session time (µs) of its final text.
+  readonly doneAt?: number;
   readonly kind?: EventOf<"message.user">["data"]["kind"];
   // A follow-up sent while dot was still working, so it waits for the task to finish.
   readonly queued?: boolean;
@@ -97,10 +103,28 @@ export type RoutineProposal = EventOf<"routine.proposed">["data"] & {
   readonly id: string;
   readonly seq: number;
 };
+// A research task: its budget, why gathering stopped, and its numbered sources in order.
+export interface AgentResearch {
+  // Session time (ms) the research began, for the minutes it has used.
+  readonly startMs: number;
+  readonly budget: ResearchBudget;
+  readonly stopped?: ResearchStop;
+  readonly sources: readonly ResearchSourceData[];
+}
 export type UsageRow = EventOf<"model.usage">["data"] & {
   readonly calls: number;
   readonly reasoningPartial: boolean;
 };
+// One model call's tokens, at its session time, as the provider reported them.
+export interface UsageCall {
+  readonly atMs: number;
+  readonly role: string;
+  readonly route: string;
+  readonly model: string;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly reasoningTokens?: number;
+}
 // One model call's cost, at its session time, as keyd charged it.
 export interface SpendCall {
   readonly atMs: number;
@@ -159,8 +183,10 @@ export interface AgentModel {
   readonly results: readonly AgentResult[];
   // What started the task when the user did not: a routine or a follow-up.
   readonly origin?: SessionOrigin;
+  readonly research: AgentResearch | null;
   readonly routineProposals: ReadonlyMap<string, RoutineProposal>;
   readonly usage: readonly UsageRow[];
+  readonly usageCalls: readonly UsageCall[];
   readonly usagePartial: boolean;
   readonly retry: Reported<EventOf<"model.retry">["data"]> | null;
   // The model call waits out that retry: no later state has said otherwise.
@@ -195,7 +221,9 @@ export function emptyAgentModel(): AgentModel {
     changes: [],
     results: [],
     routineProposals: new Map(),
+    research: null,
     usage: [],
+    usageCalls: [],
     usagePartial: false,
     retry: null,
     retrying: false,

@@ -16,10 +16,15 @@ import {
   CLAUDE_CODE_SIGN_IN,
   CLAUDE_CODE_UPDATE,
   type ClaudeCodeStatus,
+  type ComputerOperation,
+  type ComputerOperationStep,
+  DEFAULT_RESEARCH_BUDGET,
+  EXPECTED_OPERATION_MS,
   type KeydRecord,
   microsToMs,
   msToMicros,
   type Point,
+  type ResearchBudget,
   type ReviseLink,
   type SessionOrigin,
   type TaskModelSelection,
@@ -47,6 +52,7 @@ import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import { PeopleStore } from "../../../daemon/src/agent/people.ts";
 import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
+import { ResearchLog } from "../../../daemon/src/agent/research.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { AgentError } from "../../../daemon/src/agent/runner.ts";
 import {
@@ -74,6 +80,10 @@ import { StreamTuning } from "../../../daemon/src/cells/stream-tuning.ts";
 import { FakeOrchestrator } from "../../../daemon/src/cells/testing/fake-orchestrator.ts";
 import type { CellRecord, CellSummary } from "../../../daemon/src/cells/types.ts";
 import { monotonicClock } from "../../../daemon/src/clock.ts";
+import { ConnectorHub, type ConnectorLinks } from "../../../daemon/src/connectors/hub.ts";
+import { ConnectorSignIn } from "../../../daemon/src/connectors/oauth.ts";
+import { ConnectorStore } from "../../../daemon/src/connectors/store.ts";
+import { type FakeTool, fakeApp } from "../../../daemon/src/connectors/testing/fake-app.ts";
 import {
   deliverableScenarios,
   deliverablesDeps,
@@ -285,7 +295,7 @@ function cellFor(kind: CellKind, id: string): CellSummary | undefined {
     case "none":
       return undefined;
     case "starting":
-      return { ...b, state: "starting", stream: none };
+      return { ...b, state: "starting", stream: none, operation: operation("start", "ready") };
     case "connecting":
       return { ...b, state: "ready", stream: none };
     case "live":
@@ -312,6 +322,36 @@ function cellFor(kind: CellKind, id: string): CellSummary | undefined {
 }
 const initial = cellFor(cellKind, cellId);
 if (initial) cells.emit(initial);
+// A start takes this long here; a longer one lets a page reload part way through, as on a computer.
+const START_MS = Number(env.QA_START_MS ?? 1500);
+function operation(
+  kind: "first-start" | "start",
+  step: ComputerOperationStep,
+  startedAt = Date.now(),
+): ComputerOperation {
+  return { kind, step, startedAt, elapsedMs: 0, expectedMs: EXPECTED_OPERATION_MS[kind] };
+}
+// The steps the daemon reports, then ready with its screen up.
+function startCell(id: string, kind: "first-start" | "start"): void {
+  const startedAt = Date.now();
+  const step = (name: ComputerOperationStep) => {
+    const c = cells.get(id);
+    if (c?.state === "starting") cells.emit({ ...c, operation: operation(kind, name, startedAt) });
+  };
+  step("network");
+  setTimeout(() => step("desktop"), START_MS * 0.1);
+  setTimeout(() => step("ready"), START_MS * 0.2);
+  setTimeout(() => {
+    const c = cells.get(id);
+    if (c?.state !== "starting") return;
+    const { operation: _op, ...rest } = c;
+    cells.emit({
+      ...rest,
+      state: "ready",
+      stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
+    });
+  }, START_MS);
+}
 // QA_DESKTOP=<url>,<password> streams a real desktop container's Selkies to the live cell, for
 // measurements (QA_TUNING=0 leaves its quality fixed); the fixture otherwise shows one still frame.
 const [realStream, realPassword] = (env.QA_DESKTOP ?? "").split(",");
@@ -341,21 +381,13 @@ cells.create = async (opts) => {
   const created = await origCreate(opts);
   cellId = created.id;
   cells.emit(created);
-  setTimeout(() => {
-    const c = cells.get(created.id);
-    if (c && c.state === "starting")
-      cells.emit({
-        ...c,
-        state: "ready",
-        stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
-      });
-  }, 1500);
-  return created;
+  startCell(created.id, "first-start");
+  return cells.get(created.id) ?? created;
 };
 cells.stop = async (id) => {
   const c = cells.get(id);
   if (!c) throw new Error("unknown");
-  const { paused: _p, ...rest } = c as CellSummary & { paused?: boolean };
+  const { paused: _p, operation: _op, ...rest } = c as CellSummary & { paused?: boolean };
   cells.emit({
     ...(rest as CellSummary),
     state: "stopped",
@@ -365,15 +397,7 @@ cells.stop = async (id) => {
 const origStart = cells.start.bind(cells);
 cells.start = async (id) => {
   await origStart(id);
-  setTimeout(() => {
-    const c = cells.get(id);
-    if (c && c.state === "starting")
-      cells.emit({
-        ...c,
-        state: "ready",
-        stream: { connection: "live", viewers: 1, lastUpstreamAt: 1 },
-      });
-  }, 1500);
+  startCell(id, "start");
 };
 
 // Update: the computer stops, comes back on the new version and is ready a moment later.
@@ -467,6 +491,7 @@ function newSession(
   continues?: string,
   origin?: SessionOrigin,
   revises?: ReviseLink,
+  research?: ResearchBudget,
 ): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
@@ -487,9 +512,126 @@ function newSession(
       ...(continues ? { continues } : {}),
       ...(origin ? { origin } : {}),
       ...(revises ? { revises } : {}),
+      ...(research ? { research } : {}),
     },
   });
+  if (research) s.research = new ResearchLog(research, (type, data) => s.append(type, data));
   return s;
+}
+
+// What a research task reads, as the sample: a few sub-questions and pages from public sources.
+const RESEARCH_PLAN = [
+  { id: "p1", text: "How well do heat pumps work below -15 °C?", status: "done" },
+  { id: "p2", text: "What do they cost to install and run in the UK?", status: "doing" },
+  { id: "p3", text: "Which models do independent tests rate highest?", status: "todo" },
+  { id: "p4", text: "What grants and tariffs apply in 2026?", status: "todo" },
+];
+const RESEARCH_SOURCES = [
+  [
+    "https://www.energysavingtrust.org.uk/advice/air-source-heat-pumps",
+    "Air source heat pumps: costs and savings",
+    2,
+  ],
+  ["https://www.iea.org/reports/the-future-of-heat-pumps", "The Future of Heat Pumps: analysis", 3],
+  [
+    "https://www.nrel.gov/docs/fy25osti/cold-climate-heat-pump-field-study.pdf",
+    "Cold-climate heat pump field study",
+    1,
+  ],
+  ["https://www.gov.uk/apply-boiler-upgrade-scheme", "Apply for the Boiler Upgrade Scheme", 1],
+  ["https://en.wikipedia.org/wiki/Air_source_heat_pump", "Air source heat pump", 0],
+  [
+    "https://www.which.co.uk/reviews/air-source-heat-pumps/article/best-heat-pumps",
+    "Best air source heat pumps tested",
+    2,
+  ],
+  [
+    "https://www.ofgem.gov.uk/information-consumers/energy-advice-households/heat-pump-tariffs",
+    "Heat pump tariffs explained",
+    0,
+  ],
+  [
+    "https://www.heatpumps.org.uk/technical-guides/sizing-for-cold-weather",
+    "Sizing a heat pump for cold weather",
+    1,
+  ],
+] as const;
+// Adds the next n sample pages to a research task's sources, as dot reads them.
+function readSources(s: AgentSession, n: number) {
+  const research = s.research;
+  if (!research) return "this task is not research";
+  for (const [url, title, passages] of RESEARCH_SOURCES.slice(
+    research.sources.length,
+    research.sources.length + n,
+  )) {
+    const step = ulid();
+    s.append("step.start", { kind: "browser", planItem: "p2", intent: `Reading ${title}` }, step);
+    s.append("tool.start", { tool: "browser_read", title: "Reading page" }, step);
+    s.append("tool.end", { ok: true }, step);
+    s.append("step.end", { status: "ok" }, step);
+    const added = research.add(url, title);
+    if (added && passages)
+      research.quote(
+        added.source,
+        Array.from({ length: passages }, (_, i) => `Sample passage ${i + 1} from ${title}.`),
+      );
+  }
+  return undefined;
+}
+
+// QA_ACTIVITY=research: a research task part-way through, finding pages with web_search and
+// reading them with web_fetch (a PDF with the research tool), as the daemon records them.
+function seedResearchTask(s: AgentSession) {
+  const research = s.research;
+  if (!research) return;
+  const a: Append = (type, data, step) => {
+    skew += type === "step.end" ? 1_100_000 : 320_000;
+    s.append(type, data, step);
+  };
+  const tool = (name: string, title: string) => {
+    const step = ulid();
+    a("step.start", { kind: "browser" }, step);
+    a("tool.start", { tool: name, title }, step);
+    a("tool.end", { ok: true }, step);
+    a("step.end", { status: "ok" }, step);
+  };
+  const read = (from: number, to: number) => {
+    for (const [url, title, passages] of RESEARCH_SOURCES.slice(from, to)) {
+      const site = new URL(url).hostname.replace(/^www\./, "");
+      if (url.endsWith(".pdf")) tool("research", `Reading a PDF from ${site}`);
+      else tool("web_fetch", `Read ${site}`);
+      const added = research.add(url, title);
+      if (added && passages)
+        research.quote(
+          added.source,
+          Array.from({ length: passages }, (_, i) => `Sample passage ${i + 1} from ${title}.`),
+        );
+    }
+  };
+  a("message.user", {
+    messageId: ulid(),
+    kind: "task",
+    text: "How well do air source heat pumps work in a cold UK winter, and what do they cost to run?",
+  });
+  a("agent.state", { state: "thinking" });
+  a("message.assistant", {
+    messageId: ulid(),
+    text: "I'll split this into four questions, read widely and write you a cited report.",
+  });
+  a("plan.set", { items: RESEARCH_PLAN });
+  tool("web_search", "Searched the web for “air source heat pump performance below -15 °C”");
+  read(0, 3);
+  tool("web_search", "Searched the news for “heat pump running costs UK 2026”");
+  read(3, 6);
+  a("model.usage", {
+    role: "main",
+    route: "anthropic",
+    model: "claude-sonnet-5-5",
+    inputTokens: 64_200,
+    outputTokens: 3_150,
+  });
+  s.setStatus("running");
+  a("agent.state", { state: "acting" });
 }
 
 // An ended task: what the user asked, dot's reply and result. It continues `continues`.
@@ -992,13 +1134,22 @@ for (let n = 0; n < Number(env.QA_EARLIER ?? 0); n++)
   );
 if (withSession && initial) {
   heldAt = base.nowMicros();
+  const researching = env.QA_ACTIVITY === "research";
   session = newSession(
-    env.QA_ACTIVITY === "long" ? "Sample · dog drawing" : "Sample · monthly report",
+    env.QA_ACTIVITY === "long"
+      ? "Sample · dog drawing"
+      : researching
+        ? "Sample · heat pump research"
+        : "Sample · monthly report",
     "Sample task",
     earlier,
+    undefined,
+    undefined,
+    researching ? DEFAULT_RESEARCH_BUDGET : undefined,
   );
   attachLive(session);
   if (env.QA_ACTIVITY === "long") seedLongTask(session);
+  else if (researching) seedResearchTask(session);
   else seedTask(session, phase === "finished");
   skew -= base.nowMicros() - heldAt;
   heldAt = undefined;
@@ -1309,6 +1460,7 @@ const agent: AgentRoutesDeps = {
         conversations.current() ?? undefined,
         undefined,
         options?.revises,
+        options?.research ? (settingsStore.get().research ?? DEFAULT_RESEARCH_BUDGET) : undefined,
       );
       conversations.adopt(session.id);
       budgetHold = undefined;
@@ -1323,11 +1475,19 @@ const agent: AgentRoutesDeps = {
         if (s.stopped) return;
         s.append("message.assistant", {
           messageId: ulid(),
-          text: "Sample reply: I received the task.",
+          text: s.research
+            ? "I'll split this into four questions, read widely and write you a cited report."
+            : "Sample reply: I received the task.",
         });
         s.append("plan.set", {
-          items: [{ id: "one", text: "Do the sample thing", status: "doing" }],
+          items: s.research
+            ? RESEARCH_PLAN
+            : [{ id: "one", text: "Do the sample thing", status: "doing" }],
         });
+        if (s.research) {
+          s.append("agent.state", { state: "acting" });
+          readSources(s, 3);
+        }
       }, 800);
       return s;
     },
@@ -1601,10 +1761,66 @@ const accounts: AccountsDeps = {
     close: () => {},
   }),
 };
+// Connected apps: each answers in memory with its own tools. POST /__qa/connectors adds GitHub
+// (ready, its key saved), Linear (waiting for a sign-in) and Brave Search (needing its key).
+const CONNECTOR_TOOLS: Record<string, FakeTool[]> = {
+  github: [
+    {
+      name: "list_issues",
+      description: "List issues in a repository, newest first.",
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: "search_code",
+      description: "Search code across your repositories.",
+      annotations: { readOnlyHint: true },
+    },
+    {
+      name: "get_pull_request",
+      description: "Get a pull request's details, checks and reviews.",
+      annotations: { readOnlyHint: true },
+    },
+    { name: "create_issue", description: "Create an issue in a repository." },
+    { name: "add_issue_comment", description: "Comment on an issue or pull request." },
+    { name: "merge_pull_request", description: "Merge a pull request." },
+    {
+      name: "delete_branch",
+      description: "Delete a branch.",
+      annotations: { destructiveHint: true },
+    },
+  ],
+};
+const connectorLinks: ConnectorLinks = {
+  open: (config, signal) => fakeApp(CONNECTOR_TOOLS[config.id] ?? []).links.open(config, signal),
+};
+const connectorHub = new ConnectorHub({
+  store: new ConnectorStore(HOME),
+  links: connectorLinks,
+  keys: async () => keys,
+});
+const connectorSignIn = new ConnectorSignIn({
+  hub: connectorHub,
+  keyd: { status: async () => ({ sealKey }) as never, putSecret: async () => ({}) as never },
+  fetchFor: async () => ({
+    fetch: async () => new Response("", { status: 404 }),
+    close: async () => {},
+  }),
+});
 const routes = createApp({
   token: TOKEN,
   port: PORT,
   eventLog: log,
+  connectors: {
+    hub: connectorHub,
+    keyd: {
+      secrets: async () => keys,
+      deleteSecret: async (id) => {
+        keys = keys.filter((k) => k.id !== id);
+        return true;
+      },
+    },
+    signIn: connectorSignIn,
+  },
   cells: { cells, tickets, update: updateCell },
   desktop: realDesktop,
   accounts,
@@ -1624,6 +1840,8 @@ const routes = createApp({
   deliverables: deliverablesDeps(deliverablesFixture),
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
   notify: notify.routes,
+  // No speech model on the fixture's computer: the browser's own speech, or none, is used.
+  voice: { speech: () => null },
   routines: {
     store: routineStore,
     scheduler: { replan: planRoutines },
@@ -2558,6 +2776,58 @@ routes.post("/__qa/export/:step", async (c) => {
   return reply("unknown step");
 });
 routes.post("/__qa/keys", () => reply(keySteps()));
+routes.post("/__qa/connectors", async (c) => {
+  const at = new Date().toISOString();
+  keys = [
+    ...keys.filter((k) => k.id !== "connector-github"),
+    {
+      id: "connector-github",
+      kind: "http",
+      hosts: ["api.githubcopilot.com"],
+      header: "authorization",
+      format: "bearer",
+      createdAt: at,
+      updatedAt: at,
+    },
+  ];
+  for (const id of connectorHub.configs().map((config) => config.id)) await connectorHub.remove(id);
+  const github = connectorHub.add({
+    id: "github",
+    name: "GitHub",
+    catalog: "github",
+    server: {
+      kind: "remote",
+      url: "https://api.githubcopilot.com/mcp/",
+      transport: "http",
+      auth: { kind: "key", secret: "connector-github" },
+    },
+  });
+  await connectorHub.refresh(github.id);
+  await connectorHub.update(github.id, { tools: { delete_branch: { enabled: false } } });
+  connectorHub.add({
+    id: "linear",
+    name: "Linear",
+    catalog: "linear",
+    server: {
+      kind: "remote",
+      url: "https://mcp.linear.app/mcp",
+      transport: "http",
+      auth: { kind: "oauth" },
+    },
+  });
+  connectorHub.add({
+    id: "brave",
+    name: "Brave Search",
+    catalog: "brave",
+    server: {
+      kind: "local",
+      command: "npx",
+      args: ["-y", "@brave/brave-search-mcp-server"],
+      env: [{ name: "BRAVE_API_KEY", secret: "connector-brave" }],
+    },
+  });
+  return c.json({ connectors: await connectorHub.views() });
+});
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/actions", () => reply(liveActions()));
@@ -2646,6 +2916,11 @@ function nextStep(owned: AgentSession, planItem: string) {
     liveStep,
   );
 }
+// A research task reads its next sample pages: n of them.
+routes.post("/__qa/research", (c) => {
+  if (!session) return c.text("no session", 409);
+  return reply(readSources(session, Number(c.req.query("n") ?? 1)));
+});
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)

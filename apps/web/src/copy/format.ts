@@ -11,6 +11,12 @@ export function bytes(value: number): string {
   return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }
 
+const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 });
+
+// Tokens as a glance reads them: 18.4K tokens.
+export const tokenCount = (value: number) =>
+  `${compact.format(value)} ${plurals.select(value) === "one" ? "token" : "tokens"}`;
+
 // Whole dollars without cents; anything else to the cent.
 export const dollars = (value: number) =>
   `$${value.toLocaleString(undefined, {

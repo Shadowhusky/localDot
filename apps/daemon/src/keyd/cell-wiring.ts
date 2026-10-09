@@ -1,4 +1,9 @@
-import { SECRET_ID_PATTERN, SURROGATE_PATTERN, surrogateEnvName } from "@localdot/protocol";
+import {
+  isConnectorSecret,
+  SECRET_ID_PATTERN,
+  SURROGATE_PATTERN,
+  surrogateEnvName,
+} from "@localdot/protocol";
 import type { DockerClient } from "../cells/docker.ts";
 import type { CellOrchestrator } from "../cells/orchestrator.ts";
 import { type TarFile, tar } from "../cells/tar.ts";
@@ -124,8 +129,12 @@ export class CellKeydWiring implements CellKeyd {
     await this.deps.keyd.closeCell(cellId);
   }
 
+  // A connector's key works only through its connector, where every call is checked: the
+  // computer's programs never get a stand-in for it.
   async #webSecrets(): Promise<string[]> {
-    return (await this.deps.keyd.secrets()).filter((s) => s.kind === "http").map((s) => s.id);
+    return (await this.deps.keyd.secrets())
+      .filter((s) => s.kind === "http" && !isConnectorSecret(s.id))
+      .map((s) => s.id);
   }
 
   async #write(record: CellRecord, files: TarFile[]): Promise<void> {

@@ -44,10 +44,13 @@ export function BrowserDownloads({
   api,
   cellId,
   releaseReady,
+  onCount,
 }: {
   api: ApiClient;
   cellId: string;
   releaseReady: boolean;
+  // How many downloads the list holds, as it changes, and none once it is gone.
+  onCount?(count: number): void;
 }) {
   const [items, setItems] = useState<QuarantineItem[]>([]);
   const [decision, setDecision] = useState<Decision | null>(null);
@@ -108,6 +111,8 @@ export function BrowserDownloads({
     (item) => item.state === "held" || item.state === "releasing",
   ).length;
   const polling = releaseReady || waiting > 0;
+  useEffect(() => onCount?.(visible.length), [onCount, visible.length]);
+  useEffect(() => () => onCount?.(0), [onCount]);
   useEffect(() => {
     if (!polling) return;
     let stopped = false;
@@ -190,7 +195,9 @@ export function BrowserDownloads({
               label={stateLabel(item)}
             />
             <span className="activity-row-text">
-              <span className="activity-row-title">{item.name}</span>
+              <span className="activity-row-title" title={item.name}>
+                {item.name}
+              </span>
             </span>{" "}
             <span className="activity-row-time num">{size(item.bytes)}</span>
           </div>

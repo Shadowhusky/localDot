@@ -1,7 +1,14 @@
 import { createHash } from "node:crypto";
+import { setTimeout as sleep } from "node:timers/promises";
 import { z as schema } from "zod";
 import type { BrowserNative } from "./native.ts";
-import type { BrowserDocument, BrowserTargets } from "./targets.ts";
+import {
+  type BrowserDocument,
+  type BrowserTargets,
+  PAGE_READ_ATTEMPTS,
+  PAGE_READ_RETRY_MS,
+  pageChanged,
+} from "./targets.ts";
 
 const documentCoordinate = schema.number().finite().min(0).max(0x7ffffffe);
 const viewportDimension = schema.number().finite().positive().max(32768);
@@ -96,105 +103,113 @@ export class BrowserGeometry {
   }
 
   async read(tabId: string, signal: AbortSignal): Promise<BrowserGeometrySnapshot> {
-    try {
-      this.#check(signal);
-      const tabs = [...this.targets.tabs()];
-      if (tabs.length > 256 || tabs.some((tab) => !tab.ready))
-        throw new BrowserGeometryError("unavailable");
-      const documents = tabs.map((tab) => {
-        const roots = this.targets.documents(tab.id).filter((document) => !document.frame);
-        if (roots.length !== 1 || !roots[0]) throw new BrowserGeometryError("unavailable");
-        return roots[0];
-      });
-      const document = documents.find((entry) => entry.tabId === tabId);
-      if (!document) throw new BrowserGeometryError("unavailable");
-      const hashes = new Map<BrowserDocument, string>();
-      for (const entry of documents) {
-        const frame = await this.targets.command(entry, "Page.getFrameTree", {}, signal);
-        this.#check(signal, documents);
-        hashes.set(entry, hashUrl(frame));
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.#measure(tabId, signal);
+      } catch (error) {
+        if (signal.aborted) throw new BrowserGeometryError("aborted");
+        if (error instanceof BrowserGeometryError) throw error;
+        if (!pageChanged(error) || attempt >= PAGE_READ_ATTEMPTS)
+          throw new BrowserGeometryError("unavailable");
       }
-      const urlHash = hashes.get(document);
-      if (!urlHash || [...hashes.values()].filter((value) => value === urlHash).length !== 1)
-        throw new BrowserGeometryError("unavailable");
-      const bounds = await this.targets.window(tabId, signal);
-      this.#check(signal, documents);
-      if (!["normal", "maximized"].includes(bounds.windowState))
-        throw new BrowserGeometryError("unavailable");
-      const { windows } = await this.native.command("windows", {}, signal);
-      this.#check(signal, documents);
-      const active = windows.filter((window) => window.active);
-      const window = active[0];
-      if (active.length !== 1 || !window) throw new BrowserGeometryError("unavailable");
-      const expected: Rect = [
-        bounds.left * this.scale,
-        bounds.top * this.scale,
-        bounds.width * this.scale,
-        bounds.height * this.scale,
-      ];
-      if (!sameRect(expected, window.frame, this.scale))
-        throw new BrowserGeometryError("unavailable");
-      const first = await this.native.command("surface", { window: window.id }, signal);
-      this.#check(signal, documents);
-      const raw = await this.targets.command(document, "Page.getLayoutMetrics", {}, signal);
-      this.#check(signal, documents);
-      const metrics = metricsSchema.safeParse(raw);
-      if (!metrics.success) throw new BrowserGeometryError("unavailable");
-      const second = await this.native.command("surface", { window: window.id }, signal);
-      this.#check(signal, documents);
-      const page = second.page;
-      if (
-        !page ||
-        !first.page ||
-        first.window !== window.id ||
-        second.window !== window.id ||
-        page.urlHash !== urlHash ||
-        first.page.urlHash !== urlHash ||
-        page.focus !== first.page.focus ||
-        !sameRect(first.page.frame, page.frame) ||
-        !sameRect(first.page.windowFrame, page.windowFrame) ||
-        !sameRect(page.windowFrame, window.frame)
-      )
-        throw new BrowserGeometryError("unavailable");
-      const screen: Rect = [0, 0, 1280 * this.scale, 800 * this.scale];
-      if (!inside(page.frame, page.windowFrame) || !inside(page.frame, screen))
-        throw new BrowserGeometryError("unavailable");
-      const viewport = metrics.data.cssVisualViewport;
-      const layout = metrics.data.cssLayoutViewport;
-      const factor = this.scale * viewport.zoom;
-      if (
-        viewport.pageX !== layout.pageX ||
-        viewport.pageY !== layout.pageY ||
-        viewport.clientWidth * factor > page.frame[2] + 0.01 ||
-        viewport.clientHeight * factor > page.frame[3] + 0.01 ||
-        page.frame[2] - viewport.clientWidth * factor > 40 * this.scale ||
-        page.frame[3] - viewport.clientHeight * factor > 40 * this.scale
-      )
-        throw new BrowserGeometryError("unavailable");
-      const current = this.targets.tabs();
-      if (
-        current.length !== tabs.length ||
-        current.some((tab, position) => !tab.ready || tab.id !== tabs[position]?.id)
-      )
-        throw new BrowserGeometryError("stale");
-      this.#check(signal, documents);
-      const snapshot = Object.freeze({
-        document,
-        content: Object.freeze([...page.frame]) as Rect,
-        width: viewport.clientWidth,
-        height: viewport.clientHeight,
-        factor,
-        scrollX: layout.pageX,
-        scrollY: layout.pageY,
-        focus: page.focus,
-      });
-      this.#snapshots.add(snapshot);
-      return snapshot;
-    } catch (error) {
-      if (signal.aborted) throw new BrowserGeometryError("aborted");
-      if (error instanceof BrowserGeometryError) throw error;
-      throw new BrowserGeometryError("unavailable");
+      await sleep(PAGE_READ_RETRY_MS, undefined, { signal }).catch(() => {});
     }
+  }
+
+  async #measure(tabId: string, signal: AbortSignal): Promise<BrowserGeometrySnapshot> {
+    this.#check(signal);
+    const tabs = [...this.targets.tabs()];
+    if (tabs.length > 256 || tabs.some((tab) => !tab.ready))
+      throw new BrowserGeometryError("unavailable");
+    const documents = tabs.map((tab) => {
+      const roots = this.targets.documents(tab.id).filter((document) => !document.frame);
+      if (roots.length !== 1 || !roots[0]) throw new BrowserGeometryError("unavailable");
+      return roots[0];
+    });
+    const document = documents.find((entry) => entry.tabId === tabId);
+    if (!document) throw new BrowserGeometryError("unavailable");
+    const hashes = new Map<BrowserDocument, string>();
+    for (const entry of documents) {
+      const frame = await this.targets.command(entry, "Page.getFrameTree", {}, signal);
+      this.#check(signal, documents);
+      hashes.set(entry, hashUrl(frame));
+    }
+    const urlHash = hashes.get(document);
+    if (!urlHash || [...hashes.values()].filter((value) => value === urlHash).length !== 1)
+      throw new BrowserGeometryError("unavailable");
+    const bounds = await this.targets.window(tabId, signal);
+    this.#check(signal, documents);
+    if (!["normal", "maximized"].includes(bounds.windowState))
+      throw new BrowserGeometryError("unavailable");
+    const { windows } = await this.native.command("windows", {}, signal);
+    this.#check(signal, documents);
+    const active = windows.filter((window) => window.active);
+    const window = active[0];
+    if (active.length !== 1 || !window) throw new BrowserGeometryError("unavailable");
+    const expected: Rect = [
+      bounds.left * this.scale,
+      bounds.top * this.scale,
+      bounds.width * this.scale,
+      bounds.height * this.scale,
+    ];
+    if (!sameRect(expected, window.frame, this.scale))
+      throw new BrowserGeometryError("unavailable");
+    const first = await this.native.command("surface", { window: window.id }, signal);
+    this.#check(signal, documents);
+    const raw = await this.targets.command(document, "Page.getLayoutMetrics", {}, signal);
+    this.#check(signal, documents);
+    const metrics = metricsSchema.safeParse(raw);
+    if (!metrics.success) throw new BrowserGeometryError("unavailable");
+    const second = await this.native.command("surface", { window: window.id }, signal);
+    this.#check(signal, documents);
+    const page = second.page;
+    if (
+      !page ||
+      !first.page ||
+      first.window !== window.id ||
+      second.window !== window.id ||
+      page.urlHash !== urlHash ||
+      first.page.urlHash !== urlHash ||
+      page.focus !== first.page.focus ||
+      !sameRect(first.page.frame, page.frame) ||
+      !sameRect(first.page.windowFrame, page.windowFrame) ||
+      !sameRect(page.windowFrame, window.frame)
+    )
+      throw new BrowserGeometryError("unavailable");
+    const screen: Rect = [0, 0, 1280 * this.scale, 800 * this.scale];
+    if (!inside(page.frame, page.windowFrame) || !inside(page.frame, screen))
+      throw new BrowserGeometryError("unavailable");
+    const viewport = metrics.data.cssVisualViewport;
+    const layout = metrics.data.cssLayoutViewport;
+    const factor = this.scale * viewport.zoom;
+    if (
+      viewport.pageX !== layout.pageX ||
+      viewport.pageY !== layout.pageY ||
+      viewport.clientWidth * factor > page.frame[2] + 0.01 ||
+      viewport.clientHeight * factor > page.frame[3] + 0.01 ||
+      page.frame[2] - viewport.clientWidth * factor > 40 * this.scale ||
+      page.frame[3] - viewport.clientHeight * factor > 40 * this.scale
+    )
+      throw new BrowserGeometryError("unavailable");
+    const current = this.targets.tabs();
+    if (
+      current.length !== tabs.length ||
+      current.some((tab, position) => !tab.ready || tab.id !== tabs[position]?.id)
+    )
+      throw new BrowserGeometryError("stale");
+    this.#check(signal, documents);
+    const snapshot = Object.freeze({
+      document,
+      content: Object.freeze([...page.frame]) as Rect,
+      width: viewport.clientWidth,
+      height: viewport.clientHeight,
+      factor,
+      scrollX: layout.pageX,
+      scrollY: layout.pageY,
+      focus: page.focus,
+    });
+    this.#snapshots.add(snapshot);
+    return snapshot;
   }
 
   point(
