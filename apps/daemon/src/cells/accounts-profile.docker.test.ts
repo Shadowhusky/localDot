@@ -10,7 +10,7 @@ import { BrowserClient, type BrowserScope } from "../browser/client.ts";
 import { AccountsProfile } from "./accounts-profile.ts";
 import { DockerClient } from "./docker.ts";
 import { ISOLATED_GATEWAY_OPTION } from "./spec.ts";
-import { DOCKER_TESTS, docker, publishedPort } from "./testing/docker-cli.ts";
+import { DOCKER_TESTS, docker, dockerExec, publishedPort } from "./testing/docker-cli.ts";
 
 // Log in once in a real browser cell, then keep the sign-in through a stopped browser, a new
 // browser cell (as after Replace computer), the move from a computer's own old profile into the
@@ -23,6 +23,7 @@ const PREFIX = process.env.LOCALDOT_ACCOUNTS_TEST_PREFIX || "ldtest-accounts-";
 const LABEL = process.env.LOCALDOT_ACCOUNTS_TEST_LABEL || "dev.localdot.test=accounts";
 const IMAGE = process.env.LOCALDOT_BROWSER_IMAGE ?? "";
 const DESKTOP_IMAGE = process.env.LOCALDOT_DESKTOP_IMAGE ?? "";
+const PORT = process.env.LOCALDOT_ACCOUNTS_TEST_PORT ?? "";
 const SUBNET = "10.231.79";
 const BROWSER_IP = `${SUBNET}.3`;
 const SECCOMP = join(import.meta.dirname, "browser-seccomp.json");
@@ -128,6 +129,7 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
     outside: `${PREFIX}accountsout`,
     gate: `${PREFIX}accountsgate`,
     legacy: `${PREFIX}profile-${ulid()}`,
+    crashed: `${PREFIX}crashed`,
     accounts: profile.volume,
     desktop: "desk",
   };
@@ -143,7 +145,7 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
       sh(`docker rm -fv ${name}`);
     removeEvalContainers({ label: LABEL, namePrefix: PREFIX }, `${PREFIX}${names.desktop}`);
     sh(`docker network rm ${names.network} ${names.outside}`);
-    sh(`docker volume rm ${names.legacy} ${names.accounts}`);
+    sh(`docker volume rm ${names.legacy} ${names.accounts} ${names.crashed}`);
   };
 
   async function startBrowser(volume: string): Promise<Running> {
@@ -258,9 +260,11 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
   }
 
   // As the orchestrator stops a browser: SIGTERM, so Chromium closes and writes its profile.
-  function stopBrowser(running: Running) {
+  // Killed, it dies as when Docker or the Mac goes down under it.
+  function stopBrowser(running: Running, kill = false) {
     running.client.close();
-    docker("stop", "-t", "10", running.name);
+    if (kill) docker("kill", running.name);
+    else docker("stop", "-t", "10", running.name);
     running.attached.kill();
     docker("rm", "-fv", running.name);
   }
@@ -303,7 +307,7 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
       "--network",
       names.outside,
       "-p",
-      "127.0.0.1::7701",
+      `127.0.0.1:${PORT}:7701`,
       "--entrypoint",
       "/usr/bin/python3",
       DESKTOP_IMAGE,
@@ -383,6 +387,27 @@ describe.skipIf(!DOCKER_TESTS)("sign-ins persist in the shared browser profile",
     const third = await startBrowser(names.accounts);
     expect(await title(third, "http://login.localdot.test/whoami")).toBe(`cookie ${COOKIE}`);
     stopBrowser(third);
+  }, 600_000);
+
+  // After one unclean exit Chromium asks to restore pages on every start until someone answers,
+  // and while it asks, neither dot nor a sign-in can be shown the browser's screen.
+  it("shows the browser's screen in every cell after one that died without closing Chromium", async () => {
+    docker("volume", "create", "--label", LABEL, names.crashed);
+    const killed = await startBrowser(names.crashed);
+    // Chromium records a running session in the profile some seconds after it starts.
+    const recorded = () =>
+      dockerExec(killed.name, "cat", "/profile/chromium/Default/Preferences").out.includes(
+        '"exit_type":"Crashed"',
+      );
+    for (let i = 0; i < 60 && !recorded(); i++) await sleep(500);
+    stopBrowser(killed, true);
+    for (let restarts = 0; restarts < 2; restarts++) {
+      const running = await startBrowser(names.crashed);
+      await expect(running.client.clock(running.permit, running.tab, scope)).resolves.toMatchObject(
+        { mono: expect.any(Number) },
+      );
+      stopBrowser(running);
+    }
   }, 600_000);
 
   it("leaves the computer, before and after a restart, with no way to the sign-ins", async () => {

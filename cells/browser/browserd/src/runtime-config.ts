@@ -215,6 +215,9 @@ export function browserProcessSpecs(
         "--profile-directory=Default",
         "--no-first-run",
         "--no-default-browser-check",
+        // The shared profile outlives its cells: after one unclean stop, Chromium shows "Restore
+        // pages?" on every later start until someone answers it, and nothing can take the screen.
+        "--hide-crash-restore-bubble",
         "--disable-background-networking",
         "--disable-component-update",
         "--disable-sync",
