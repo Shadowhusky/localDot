@@ -227,6 +227,12 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await expect(sheet.getByText("Before this can be saved:")).toHaveCount(0);
       await expect.poll(async () => (await savedMain())?.key).toBe(name);
       await context.close();
+      // The fixture's keys outlive the test; the next engine starts with no Google key again.
+      const removed = await fetch(`${origin}/api/keys/${name}`, {
+        method: "DELETE",
+        headers: { authorization: `Bearer ${TOKEN}` },
+      });
+      expect(removed.ok).toBe(true);
     });
 
     test("Escape from a picker keeps the sheet and the choice", async () => {
