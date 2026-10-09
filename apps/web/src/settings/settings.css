@@ -440,3 +440,67 @@
     flex: 1;
   }
 }
+
+.settings-accounts {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.settings-accounts-list {
+  display: grid;
+  list-style: none;
+}
+
+.settings-accounts-list li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0 calc(var(--spacing) * 3);
+  min-height: calc(var(--spacing) * 13);
+  padding-block: calc(var(--spacing) * 1.5);
+  border-top: 1px solid var(--color-hairline);
+}
+
+.settings-accounts-tile {
+  display: grid;
+  place-items: center;
+  width: calc(var(--spacing) * 8);
+  height: calc(var(--spacing) * 8);
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  color: var(--color-fg-2);
+}
+
+.settings-accounts-text {
+  display: grid;
+  min-width: 0;
+}
+
+.settings-accounts-site {
+  font-weight: var(--font-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.settings-accounts-hosts {
+  display: block;
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-accounts-slot {
+  width: calc(var(--spacing) * 18);
+}
+
+/* The status shares the row with Sign out of all, so a status or a failure moves nothing. */
+.settings-accounts-footer > .settings-note {
+  min-width: 0;
+}
+
+.settings-accounts-footer > .ui-button {
+  flex: none;
+}

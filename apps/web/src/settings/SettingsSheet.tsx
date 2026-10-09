@@ -18,6 +18,7 @@ import { matches, PHONE, useMediaQuery } from "../ui/media.ts";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
+import { AccountsSection } from "./AccountsSection.tsx";
 import { AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
 import {
@@ -31,6 +32,7 @@ import {
 import { CHATGPT } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { RoleCard } from "./RoleCard.tsx";
+import type { AccountsView } from "./useAccounts.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { RulesView } from "./useRules.ts";
 import "./settings.css";
@@ -83,6 +85,7 @@ export interface SettingsSheetProps {
     change(value: string, useDefault: boolean): void;
   };
   knowledge?: Knowledge;
+  accounts?: AccountsView;
   // A phone's sheet covers the page and its Stop, so it carries one, with what Stop reports.
   stop?: { label: string; enabled: boolean; run(): void };
   taskControls?: ReactNode;
@@ -410,6 +413,12 @@ function SettingsSections(props: SettingsSheetProps) {
       {props.knowledge && (
         <Section id="settings-knowledge" title="What dot knows">
           <KnowledgeSection knowledge={props.knowledge} />
+        </Section>
+      )}
+
+      {props.accounts && (
+        <Section id="settings-accounts" title="Accounts">
+          <AccountsSection accounts={props.accounts} />
         </Section>
       )}
 

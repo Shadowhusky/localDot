@@ -46,6 +46,7 @@ import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
 import { type SettingsSection, SettingsSheet } from "./settings/SettingsSheet.tsx";
 import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
+import { useAccounts } from "./settings/useAccounts.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
@@ -409,6 +410,11 @@ function Theatre({ api }: { api: ApiClient }) {
   const [typing, setTyping] = useState(false);
   const [pasteRefused, setPasteRefused] = useState<string | null>(null);
   const settingsKnowledge = useKnowledge(api, null, settings.open);
+  const settingsAccounts = useAccounts(
+    api,
+    cell?.state === "ready" && !cell.paused ? cell.id : null,
+    settings.open,
+  );
   const { rereadMemory } = settingsKnowledge;
   // A memory change's "Read memory again" opens Settings on what dot knows, read afresh.
   const [readMemory, setReadMemory] = useState(false);
@@ -967,6 +973,7 @@ function Theatre({ api }: { api: ApiClient }) {
         savedAutonomy={settings.saved?.autonomy ?? DEFAULT_AUTONOMY}
         onAutonomy={settings.changeAutonomy}
         knowledge={settingsKnowledge}
+        accounts={settingsAccounts}
         rules={rules}
         budget={
           settings.draft
