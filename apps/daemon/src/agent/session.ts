@@ -31,7 +31,7 @@ export type SessionStatus = "starting" | "running" | "waiting_user" | "paused" |
 export interface AskAnswer {
   option?: string;
   text?: string;
-  by: "user" | "timeout" | "stop" | "pause";
+  by: "user" | "timeout" | "stop" | "pause" | "control";
 }
 export interface TakeoverOutcome {
   note?: string;
@@ -78,8 +78,9 @@ interface ControlRecord {
   step?: string;
   // The user has taken the computer: they asked for it, or took the one dot handed over.
   taken: boolean;
-  // The user took the computer themselves, at this time, from a task in this state.
-  user?: { since: number; from: SessionStatus };
+  // The user took the computer themselves, at this time, from a task in this state, maybe setting
+  // aside dot's question.
+  user?: { since: number; from: SessionStatus; asked: boolean };
 }
 export class SessionStoppedError extends Error {
   constructor() {
@@ -95,10 +96,10 @@ export class ControlHeldError extends Error {
 }
 
 // What dot hears when the user hands back control they took: never what they did or typed.
-function handedBack(ms: number): string {
+function handedBack(ms: number, asked: boolean): string {
   const s = Math.max(1, Math.round(ms / 1000));
   const took = s < 60 ? `${s} s` : `${Math.floor(s / 60)} min ${s % 60} s`;
-  return `(The user took over the computer for ${took} and has handed it back. The screen may have changed since you last looked: take a screenshot before your next action.)`;
+  return `(The user took over the computer for ${took} and has handed it back. The screen may have changed since you last looked: take a screenshot before your next action.${asked ? " They took it instead of answering your question: ask it again if you still need the answer." : ""})`;
 }
 
 export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -744,11 +745,12 @@ export class AgentSession {
     this.#notes.add(item.seq);
     this.#wake();
   }
-  // True once after the user hands back control they took, until dot looks at the screen again.
-  freshLook(): boolean {
-    const owed = this.#lookFirst;
+  // After the user hands back control they took, until dot has looked at the screen again.
+  get lookOwed(): boolean {
+    return this.#lookFirst;
+  }
+  freshLook(): void {
     this.#lookFirst = false;
-    return owed;
   }
   async waitForUser(waitMs: number, signal?: AbortSignal): Promise<boolean> {
     signal?.throwIfAborted();
@@ -1013,6 +1015,9 @@ export class AgentSession {
         record.held = true;
         this.status = "waiting_user";
         this.append("agent.state", { state: "waiting_user", reason: "takeover" });
+        // The user took it while dot was still handing it over.
+        if (record.taken && !taken)
+          this.append("control.change", { holder: "user", reason: "handoff_request" }, step);
       })
       .catch(() => {
         /* Keep the control fence if publication fails. Stop remains available. */
@@ -1032,10 +1037,12 @@ export class AgentSession {
     if (this.stopped) throw new SessionStoppedError();
     const held = this.#control;
     if (held) {
-      // The user takes the computer dot handed over: from now on it is theirs, as they asked.
-      if (held.held && !held.taken) {
+      // The user takes the computer dot handed over: from now on it is theirs, as they asked. One
+      // still on its way is journaled theirs once it is held.
+      if (!held.taken) {
         held.taken = true;
-        this.append("control.change", { holder: "user", reason: "handoff_request" }, held.step);
+        if (held.held)
+          this.append("control.change", { holder: "user", reason: "handoff_request" }, held.step);
       }
       return held.requestId;
     }
@@ -1046,6 +1053,7 @@ export class AgentSession {
     const released = new Promise<TakeoverOutcome>((r) => {
       resolve = r;
     });
+    const user = { since: Date.now(), from: this.status, asked: false };
     const record: ControlRecord = {
       requestId: ulid(),
       startedByGeneration: generation?.id ?? 0,
@@ -1056,7 +1064,7 @@ export class AgentSession {
       released,
       resolve,
       taken: true,
-      user: { since: Date.now(), from: this.status },
+      user,
     };
     this.#approvals.cancel(this.id);
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
@@ -1067,6 +1075,8 @@ export class AgentSession {
     const releasing = this.releaseInput();
     if (releasing) draining.push(releasing);
     if (generation && !pause) {
+      // dot's question waits for the hand-back, when dot can ask it again.
+      user.asked = this.#ask?.finish({ by: "control" }) ?? false;
       for (const observer of [...this.#controlObservers])
         if (observer.generation === generation)
           try {
@@ -1187,7 +1197,8 @@ export class AgentSession {
     this.status = this.safetyPause ? "paused" : user?.from === "idle" ? "idle" : "running";
     if (user) {
       this.#lookFirst = true;
-      this.#note(handedBack(Date.now() - user.since));
+      this.lastFrameId = undefined;
+      this.#note(handedBack(Date.now() - user.since, user.asked));
       if (this.safetyPause) this.#safetyChanged();
     }
     record.resolve({ ...(note ? { note } : {}), by: "user" });

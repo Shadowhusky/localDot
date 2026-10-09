@@ -338,7 +338,7 @@ export const AskAnswer = event(
       .regex(/^[A-F]$/)
       .optional(),
     text: z.string().max(2000).optional(),
-    by: z.enum(["user", "timeout", "stop", "pause"]),
+    by: z.enum(["user", "timeout", "stop", "pause", "control"]),
   }),
 );
 export const TakeoverReason = z.enum(["login", "2fa", "captcha", "payment", "other"]);

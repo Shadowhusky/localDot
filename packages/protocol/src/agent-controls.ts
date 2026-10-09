@@ -27,6 +27,9 @@ export type HandbackRequest = z.infer<typeof HandbackRequest>;
 // The user took the computer themselves: the control their input and hand-back name.
 export const TakeControlReply = z.strictObject({ requestId: Id });
 export type TakeControlReply = z.infer<typeof TakeControlReply>;
+// With no task at work, the session the user's control belongs to.
+export const TakeComputerReply = z.strictObject({ sessionId: Id, requestId: Id });
+export type TakeComputerReply = z.infer<typeof TakeComputerReply>;
 export const BudgetRaiseRequest = z.strictObject({
   budgetUSD: z
     .number()

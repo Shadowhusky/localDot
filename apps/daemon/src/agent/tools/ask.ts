@@ -27,6 +27,8 @@ export async function askUserTool(
   if (answer.by === "timeout")
     return { ok: false, content: [text("The user did not answer within 30 minutes.")] };
   if (answer.by === "stop") return { ok: false, content: [text("The question was cancelled.")] };
+  if (answer.by === "control")
+    return { ok: false, content: [text("The user took the computer instead of answering.")] };
   const picked = answer.option ? options["ABCDEF".indexOf(answer.option)] : undefined;
   return {
     ok: true,

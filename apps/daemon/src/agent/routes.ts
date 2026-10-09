@@ -17,6 +17,7 @@ import {
   QuestionAnswerRequest,
   ResumeSafetyRequest,
   scanKeyLike,
+  type TakeComputerReply,
   type TakeControlReply,
   TakeoverInputRequest,
   ULID_PATTERN,
@@ -70,6 +71,8 @@ export interface AgentRoutesDeps {
         | "budgetHoldOf"
         | "sessions"
         | "release"
+        | "hold"
+        | "holds"
       >
     >;
   conversations?: Pick<Conversations, "current" | "snapshot" | "begin" | "select" | "has">;
@@ -525,6 +528,7 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
         ...(s.pendingAsk ? { pendingAsk: s.pendingAsk } : {}),
         ...(s.pendingTakeover ? { pendingTakeover: s.pendingTakeover } : {}),
         ...(s.manualControl ? { manualControl: s.manualControl } : {}),
+        ...(deps.runner.holds?.(s.id) ? { holder: true } : {}),
       });
     }),
   );
@@ -535,6 +539,8 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const parsed = await json(c.req.raw, Message);
       check(c.req.raw.signal);
       if (s.stopped) throw new RouteError(409, "task has stopped");
+      if (deps.runner.holds?.(s.id))
+        throw new RouteError(409, "hand back the computer, then message dot");
       s.post(parsed.kind, redact(parsed.text, s.id, s.cellId));
       return c.body(null, 202);
     }),
@@ -628,9 +634,27 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       const s = active(c.req.param("id") ?? "");
       await empty(c.req.raw);
       check(c.req.raw.signal);
-      if (s.stopped || deps.taskMutationReady?.(s) === false)
+      // A hold the user handed back is ending; the computer's own route starts the next one.
+      if (
+        s.stopped ||
+        deps.taskMutationReady?.(s) === false ||
+        (deps.runner.holds?.(s.id) && !s.controlHeld)
+      )
         throw new RouteError(409, "the computer is not ready to hand over");
       return c.json({ requestId: s.takeControl() } satisfies TakeControlReply, 202);
+    }),
+  );
+  // The user takes the computer whether or not a task is at work on it.
+  app.post(
+    "/api/cells/:id/takeover",
+    route(async (c) => {
+      const cellId = c.req.param("id") ?? "";
+      if (!ULID_PATTERN.test(cellId)) throw new RouteError(400, "invalid computer id");
+      await empty(c.req.raw);
+      check(c.req.raw.signal);
+      if (!deps.runner.hold) throw new RouteError(503, "taking control is unavailable");
+      const reply = await deps.runner.hold(cellId, c.req.raw.signal);
+      return c.json(reply satisfies TakeComputerReply, 202);
     }),
   );
   app.post(

@@ -4,6 +4,7 @@ const UNANSWERED = {
   timeout: "No answer in time, so dot carried on.",
   stop: "The task stopped before an answer.",
   pause: "The task paused before an answer.",
+  control: "You took the computer instead. dot will ask again if it still needs to know.",
 } as const;
 
 // dot's question in the thread. The answer panel takes the composer's place while it waits; the

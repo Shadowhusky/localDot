@@ -119,6 +119,54 @@ describe("the user takes the computer while dot works", () => {
     expect(h.actions).toEqual([]);
     expect((await h.call("computer", CLICK, generation)).result.ok).toBe(true);
     expect(h.actions).toHaveLength(1);
+    // Looking again did nothing on the computer, so nothing failed.
+    const ends = h.events().filter((event) => event.type === "step.end");
+    expect(ends.map((event) => event.data.status)).toEqual(["cancelled", "ok"]);
+  });
+
+  it("forgets the frame from before the user had the computer, so a zoom looks afresh", async () => {
+    const h = setup();
+    h.session.lastFrameId = ulid();
+    const requestId = h.session.takeControl();
+    await until(() => h.session.manualControl === "ready");
+    expect(await h.session.handback(requestId, undefined)).toBe(true);
+    expect(h.session.lastFrameId).toBeUndefined();
+  });
+
+  it("owes a look until a screenshot succeeds, and a wait's screenshot pays it", async () => {
+    const h = setup();
+    const requestId = h.session.takeControl();
+    await until(() => h.session.manualControl === "ready");
+    expect(await h.session.handback(requestId, undefined)).toBe(true);
+    const generation = h.session.beginBrain();
+    const observe = h.tools.gateway.observe;
+    h.tools.gateway.observe = async () => {
+      throw new Error("capture failed");
+    };
+    expect((await h.call("computer", CLICK, generation)).result.ok).toBe(false);
+    h.tools.gateway.observe = observe;
+    expect(h.session.lookOwed).toBe(true);
+    expect((await h.call("computer", { action: "wait", duration: 0 }, generation)).result.ok).toBe(
+      true,
+    );
+    expect(h.session.lookOwed).toBe(false);
+    expect((await h.call("computer", CLICK, generation)).result.ok).toBe(true);
+  });
+
+  it("sets dot's question aside when the user takes the computer, and dot hears to ask again", async () => {
+    const h = setup();
+    const asking = h.call("ask_user", { question: "Which file?", options: ["A", "B"] });
+    await until(() => !!h.session.pendingAsk);
+    const requestId = h.session.takeControl();
+    await asking;
+    expect(h.events().find((event) => event.type === "ask.answer")?.data).toMatchObject({
+      by: "control",
+    });
+    await until(() => h.session.manualControl === "ready");
+    expect(await h.session.handback(requestId, undefined)).toBe(true);
+    const generation = h.session.beginBrain();
+    const inbox = await h.session.inbox(0, 0, undefined, generation);
+    expect(inbox.items[0]?.text).toMatch(/ask it again/);
   });
 
   it("takes the computer from a task at rest and leaves it at rest, its note waiting for the user", async () => {
@@ -175,6 +223,30 @@ describe("the user takes the computer while dot works", () => {
     expect(h.session.inboxSequence).toBe(0);
   });
 
+  it("journals the user taking dot's hand-over while it is still on its way, once it is held", async () => {
+    const h = setup();
+    const verdict = Promise.withResolvers<{ kind: "act" }>();
+    h.deps.policy = { decide: () => verdict.promise };
+    const clicking = h.call("computer", CLICK);
+    await turns();
+    h.deps.policy = actPolicy;
+    const asked = h.call("request_takeover", { reason: "login", note: "Sign in" });
+    await turns();
+    expect(h.session.manualControl).toBe("waiting");
+    const requestId = h.session.takeControl();
+    verdict.resolve({ kind: "act" });
+    await clicking;
+    await until(() => h.session.manualControl === "ready");
+    expect(h.session.pendingTakeover).toBe(requestId);
+    const types = h
+      .events()
+      .filter((event) => event.type === "takeover.request" || event.type === "control.change")
+      .map((event) => event.type);
+    expect(types).toEqual(["takeover.request", "control.change"]);
+    expect(await h.session.handback(requestId, undefined)).toBe(true);
+    expect((await asked).result.ok).toBe(true);
+  });
+
   it("marks a step the user chose to do themselves as theirs from the start", async () => {
     const h = setup();
     void h.session
@@ -197,12 +269,13 @@ describe("the user takes the computer while dot works", () => {
 });
 
 describe("the take control route", () => {
-  function routes() {
+  function routes(holder = false) {
     const home = mkdtempSync(join(tmpdir(), "localdot-take-control-")),
       log = new EventLog(home),
-      id = log.createSession("Synthetic task");
-    const session = new AgentSession(id, ulid(), "Synthetic task", log);
-    session.beginBrain();
+      id = log.createSession("Synthetic task"),
+      cellId = ulid();
+    const session = new AgentSession(id, cellId, "Synthetic task", log);
+    if (!holder) session.beginBrain();
     const unused = () => {
       throw new Error("unexpected dependency access");
     };
@@ -211,6 +284,11 @@ describe("the take control route", () => {
         start: unused,
         get: (key) => (key === id ? session : undefined),
         raiseBudget: unused,
+        holds: (key) => holder && key === id,
+        hold: async (key) => {
+          if (key !== cellId) throw new Error("unexpected computer");
+          return { sessionId: id, requestId: session.takeControl() };
+        },
       },
       settings: { get: unused, put: unused },
       catalog: { get: unused, refresh: unused },
@@ -229,12 +307,23 @@ describe("the take control route", () => {
       log.close();
       rmSync(home, { force: true, recursive: true });
     });
-    const take = (path = id) =>
-      app.request(`http://127.0.0.1:4747/api/agent/sessions/${path}/takeover`, {
+    const post = (path: string, body?: unknown) =>
+      app.request(`http://127.0.0.1:4747${path}`, {
         method: "POST",
-        headers: { authorization: "Bearer inert-token" },
+        headers: {
+          authorization: "Bearer inert-token",
+          ...(body ? { "content-type": "application/json" } : {}),
+        },
+        ...(body ? { body: JSON.stringify(body) } : {}),
       });
-    return { session, take };
+    const take = (path = id) => post(`/api/agent/sessions/${path}/takeover`);
+    const snapshot = async () =>
+      (await (
+        await app.request(`http://127.0.0.1:4747/api/agent/sessions/${id}`, {
+          headers: { authorization: "Bearer inert-token" },
+        })
+      ).json()) as Record<string, unknown>;
+    return { session, cellId, post, take, snapshot };
   }
 
   it("hands the user the computer and names the control to hand back, once", async () => {
@@ -245,6 +334,29 @@ describe("the take control route", () => {
     expect(f.session.pendingTakeover).toBe(requestId);
     expect(await (await f.take()).json()).toEqual({ requestId });
     expect((await f.take(ulid())).status).toBe(404);
+  });
+
+  it("takes the computer with no task at work through the computer's own route", async () => {
+    const f = routes(true);
+    const reply = await f.post(`/api/cells/${f.cellId}/takeover`);
+    expect(reply.status).toBe(202);
+    expect(await reply.json()).toEqual({
+      sessionId: f.session.id,
+      requestId: f.session.pendingTakeover,
+    });
+    expect((await f.post("/api/cells/not-a-computer/takeover")).status).toBe(400);
+  });
+
+  it("marks the user's own hold, which takes no messages and no take once handed back", async () => {
+    const f = routes(true);
+    expect((await f.snapshot()).holder).toBe(true);
+    const message = await f.post(`/api/agent/sessions/${f.session.id}/messages`, {
+      kind: "followup",
+      text: "Now save it",
+    });
+    expect(message.status).toBe(409);
+    expect((await f.take()).status).toBe(409);
+    expect(f.session.controlHeld).toBe(false);
   });
 
   it("refuses while a Pause is settling or the task has stopped", async () => {
