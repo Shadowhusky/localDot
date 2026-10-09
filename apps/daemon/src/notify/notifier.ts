@@ -16,8 +16,10 @@ import type { WebPushSender } from "./webpush.ts";
 export const SETTLE_MS = 1_500;
 const REMEMBERED_KEYS = 512;
 
-// A routine run's news, as Spec 1's routine.run app event carries it (title: "<name>: <outcome>").
+// A routine run's news: the routine.run app event (title: "<name>: <outcome>").
 export interface RoutineRunNotice {
+  type: "routine.run";
+  routineId: string;
   runId: string;
   outcome:
     | "pending"
@@ -35,6 +37,9 @@ export interface RoutineRunNotice {
   title: string;
 }
 
+export const isRoutineRun = (event: { type: string }): event is RoutineRunNotice =>
+  event.type === "routine.run";
+
 export interface NotifierDeps {
   ledger: Pick<AttentionLedger, "subscribe" | "current" | "approvalExpiresAt" | "isRoutine">;
   store: Pick<NotifyStore, "settings">;
@@ -42,6 +47,8 @@ export interface NotifierDeps {
   push: Pick<WebPushSender, "sendAll">;
   presence: Pick<PresenceBoard, "snapshot" | "waitForShown">;
   publish(event: AttentionChangeEvent): void;
+  // Where routine results come from. Without it a routine's session is announced like any other.
+  routineRuns?(listener: (run: RoutineRunNotice) => void): () => void;
   now(): Date;
   timeZone(): string;
   settleMs?: number;
@@ -54,12 +61,19 @@ export class Notifier {
   constructor(private readonly deps: NotifierDeps) {}
 
   start(): () => void {
+    const routines = this.deps.routineRuns;
+    const unrun = routines?.((run) => void this.notifyRoutine(run));
     const unsubscribe = this.deps.ledger.subscribe((item) => {
       this.deps.publish({ type: "attention.change", item, page: false });
       const notice = noticeOf(item);
       if (!notice) return;
       // A routine's own policy decides what its results say, through routine.run.
-      if (notice.event !== "needs_you" && this.deps.ledger.isRoutine(item.sessionId ?? "")) return;
+      if (
+        notice.event !== "needs_you" &&
+        routines &&
+        this.deps.ledger.isRoutine(item.sessionId ?? "")
+      )
+        return;
       const timer = setTimeout(() => {
         this.#timers.delete(timer);
         if (this.deps.ledger.current(item.sessionId ?? "")?.key !== item.key) return;
@@ -69,6 +83,7 @@ export class Notifier {
     });
     return () => {
       unsubscribe();
+      unrun?.();
       for (const timer of this.#timers) clearTimeout(timer);
       this.#timers.clear();
     };

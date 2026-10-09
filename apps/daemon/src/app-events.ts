@@ -41,6 +41,9 @@ export function appEventsRoute(events: AppEvents, presence?: PresenceBoard): Upg
         ws.on("error", () => {});
         const seen = presence?.connect(local);
         const unsubscribe = events.subscribe((event) => {
+          // A notification a tab shows itself stands in for this Mac's banner: other devices
+          // have their own pushes.
+          if (event.type === "attention.change" && event.page && !local) return;
           if (ws.bufferedAmount > MAX_BUFFERED_BYTES) ws.terminate();
           else ws.send(JSON.stringify(event));
         });

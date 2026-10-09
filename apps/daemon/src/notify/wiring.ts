@@ -3,7 +3,7 @@ import type { EventLog } from "../event-log.ts";
 import type { KeydClient } from "../keyd/client.ts";
 import { AttentionLedger } from "./attention.ts";
 import { type MacNotifier, macNotifier } from "./mac.ts";
-import { Notifier } from "./notifier.ts";
+import { isRoutineRun, Notifier } from "./notifier.ts";
 import { PresenceBoard } from "./presence.ts";
 import type { NotifyRoutesDeps } from "./routes.ts";
 import { NotifyStore } from "./store.ts";
@@ -13,7 +13,7 @@ export interface NotifyWiringDeps {
   home: string;
   eventLog: Pick<EventLog, "subscribe">;
   keyd: Pick<KeydClient, "pushKey" | "pushSend">;
-  events: Pick<AppEvents, "publish">;
+  events: Pick<AppEvents, "publish" | "subscribe">;
   mac?: MacNotifier;
   now?: () => Date;
   timeZone?: () => string;
@@ -41,6 +41,10 @@ export function createNotify(d: NotifyWiringDeps): NotifyWiring {
     push: new WebPushSender({ keyd: d.keyd, store }),
     presence,
     publish: (event) => d.events.publish(event),
+    routineRuns: (listener) =>
+      d.events.subscribe((event) => {
+        if (isRoutineRun(event)) listener(event);
+      }),
     now,
     timeZone: d.timeZone ?? (() => Intl.DateTimeFormat().resolvedOptions().timeZone),
     ...(d.settleMs === undefined ? {} : { settleMs: d.settleMs }),

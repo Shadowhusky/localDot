@@ -155,6 +155,20 @@ describe("AttentionLedger", () => {
     expect(ledger.seen(stopped)).toBe(false);
   });
 
+  it("keeps the task's title for a follow-up once a Done was seen, until the session ends", () => {
+    const id = session();
+    log.append(id, state("done"));
+    ledger.seen(id);
+    log.append(id, draft("message.user", { messageId: ulid(), text: "And the gas", kind: "task" }));
+    log.append(id, state("acting"));
+    log.append(id, state("done"));
+    expect(changes.at(-1)).toMatchObject({ level: "done", task: "Pay the electricity bill" });
+    log.append(id, draft("session.end", { reason: "done" }));
+    ledger.seen(id);
+    log.append(id, state("done"));
+    expect(changes.at(-1)).toMatchObject({ level: "done", task: null });
+  });
+
   it("carries the task's own title, never one that looks like a key", () => {
     const id = session("Pay   the\nelectricity bill");
     log.append(id, state("done"));

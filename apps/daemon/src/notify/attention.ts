@@ -47,6 +47,9 @@ export class AttentionLedger {
     if (event.type === "approval.request") this.#expires.set(sessionId, event.data.expiresAt);
     const next = this.#next(sessionId, this.#items.get(sessionId), event);
     if (next) this.#set(next);
+    // A continued task starts a session of its own, so an ended one's title and origin go; a Done
+    // or Failed it left stays until seen.
+    if (event.type === "session.end") this.#forget(sessionId);
   }
 
   // The user looked at the session: Done and Failed are read. Needs you and Blocked stay.
@@ -169,9 +172,7 @@ export class AttentionLedger {
     if (before?.key === item.key) return;
     if (item.level === "none") {
       this.#items.delete(id);
-      this.#tasks.delete(id);
       this.#expires.delete(id);
-      this.#routines.delete(id);
     } else {
       this.#items.delete(id);
       this.#items.set(id, item);
@@ -191,10 +192,14 @@ export class AttentionLedger {
       if (this.#items.size <= MAX_SESSIONS) return;
       if (ATTENTION_RANK[item.level] < ATTENTION_RANK.needs_you) {
         this.#items.delete(id);
-        this.#tasks.delete(id);
-        this.#expires.delete(id);
-        this.#routines.delete(id);
+        this.#forget(id);
       }
     }
+  }
+
+  #forget(sessionId: string): void {
+    this.#tasks.delete(sessionId);
+    this.#expires.delete(sessionId);
+    this.#routines.delete(sessionId);
   }
 }

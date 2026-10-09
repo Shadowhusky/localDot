@@ -139,6 +139,26 @@ describe("app events", () => {
     socket.close();
   });
 
+  it("asks only tabs on this Mac to show a notification themselves", async () => {
+    setPublicOrigin("https://mac.example.ts.net");
+    const { events, open } = await start();
+    const mac = await open();
+    const phone = await open(true, "mac.example.ts.net");
+    const heard = (socket: WebSocket) => {
+      const got: AttentionChangeEvent[] = [];
+      socket.on("message", (data) => got.push(JSON.parse(String(data))));
+      return got;
+    };
+    const onMac = heard(mac);
+    const onPhone = heard(phone);
+    events.publish({ ...change, page: true });
+    events.publish(change);
+    await vi.waitFor(() => expect(onPhone).toEqual([change]));
+    await vi.waitFor(() => expect(onMac).toEqual([{ ...change, page: true }, change]));
+    mac.close();
+    phone.close();
+  });
+
   it("closes a socket that sends more than 1 KiB at once", async () => {
     const { presence, open } = await start();
     const socket = await open();
