@@ -27,6 +27,7 @@ const report = await runDoctor({
   port: parsePort(process.env.LOCALDOT_PORT),
   signal: controller.signal,
   keyd: new KeydClient(keydSocketPath(localdotHome())),
+  home: localdotHome(),
 });
 for (const check of report.checks) {
   console.log(`${check.ok ? "ok  " : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`);

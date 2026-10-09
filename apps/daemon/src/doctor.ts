@@ -1,4 +1,5 @@
 import { createServer } from "node:net";
+import { join } from "node:path";
 import type { HairpinGuard, KeydStatus, KeydVault } from "@localdot/protocol";
 import {
   compareApiVersions,
@@ -12,6 +13,7 @@ import { imageVerdict } from "./doctor-image.ts";
 import { runDoctorNetworkProbe } from "./doctor-network.ts";
 import type { DockerSocket } from "./doctor-socket.ts";
 import type { KeydClient } from "./keyd/client.ts";
+import { lockHolder } from "./lock.ts";
 import {
   dockerRuntime,
   dockerRuntimeChecks,
@@ -43,6 +45,8 @@ export interface DoctorDeps {
   // How long the first /version may take before the socket counts as not answering.
   versionDeadlineMs?: number;
   keyd?: Pick<KeydClient, "status">;
+  // The daemon's home: when its own daemon is running, the port is in use by localDot itself.
+  home?: string;
   // This machine; detected when absent.
   host?: HostPlatform;
 }
@@ -61,7 +65,10 @@ export async function runDoctor(deps: DoctorDeps): Promise<DoctorReport> {
   const host = deps.host ?? detectHost();
   const checks = [...hostChecks(host), ...(await dockerChecks(deps, host))];
   if (deps.signal?.aborted) return { ok: false, checks };
-  checks.push(await portCheck(deps.port), ...(deps.keyd ? await keydChecks(deps.keyd) : []));
+  checks.push(
+    await portCheck(deps.port, deps.home),
+    ...(deps.keyd ? await keydChecks(deps.keyd) : []),
+  );
   return { ok: !deps.signal?.aborted && checks.every((c) => c.ok), checks };
 }
 
@@ -275,11 +282,16 @@ async function imageCheck(
   }
 }
 
-function portCheck(port: number): Promise<DoctorCheck> {
+function portCheck(port: number, home: string | undefined): Promise<DoctorCheck> {
   const name = `port-${port}`;
   return new Promise((resolve) => {
     const probe = createServer();
     probe.once("error", (err: NodeJS.ErrnoException) => {
+      // A daemon that could not listen exits, so a live one for this home holds the port.
+      if (err.code === "EADDRINUSE" && home && lockHolder(join(home, "daemon.lock"))) {
+        resolve({ name, ok: true, detail: `localDot is running on 127.0.0.1:${port}` });
+        return;
+      }
       resolve({
         name,
         ok: false,

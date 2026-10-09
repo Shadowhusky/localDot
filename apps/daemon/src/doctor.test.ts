@@ -1,4 +1,7 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { DockerClient, DockerError } from "./cells/docker.ts";
 import { type FakeDocker, startFakeDocker } from "./cells/testing/fake-docker.ts";
@@ -218,6 +221,30 @@ describe("runDoctor", () => {
     const report = await runDoctor({ docker: new DockerClient(fake.socketPath), images, port });
     expect(byName(report)[`port-${port}`]).toMatchObject({ ok: false });
     await new Promise<void>((r) => holder.close(() => r()));
+  });
+
+  it("counts the port as fine when this home's own running daemon holds it", async () => {
+    fake = await startFakeDocker();
+    const holder = createServer();
+    await new Promise<void>((r) => holder.listen(0, "127.0.0.1", r));
+    const port = (holder.address() as { port: number }).port;
+    const home = mkdtempSync(join(tmpdir(), "localdot-doctor-home-"));
+    try {
+      const check = async () =>
+        byName(
+          await runDoctor({ docker: new DockerClient(fake?.socketPath ?? ""), images, port, home }),
+        )[`port-${port}`];
+      expect(await check()).toMatchObject({ ok: false });
+      writeFileSync(join(home, "daemon.lock"), `${process.pid}\n`);
+      expect(await check()).toEqual({
+        name: `port-${port}`,
+        ok: true,
+        detail: `localDot is running on 127.0.0.1:${port}`,
+      });
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      await new Promise<void>((r) => holder.close(() => r()));
+    }
   });
 });
 

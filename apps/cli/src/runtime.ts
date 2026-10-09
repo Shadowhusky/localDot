@@ -98,6 +98,7 @@ export const runtime: Runtime = {
       port: context.port,
       signal: context.signal,
       keyd: new KeydClient(keydSocketPath(context.home)),
+      home: context.home,
     });
     for (const check of report.checks) {
       io.out(`${check.ok ? "ok  " : "FAIL"} ${check.name.padEnd(24)} ${check.detail}`);
