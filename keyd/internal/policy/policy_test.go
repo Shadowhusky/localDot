@@ -143,3 +143,51 @@ func TestValidBindingHost(t *testing.T) {
 		}
 	}
 }
+
+func TestOtherDecisions(t *testing.T) {
+	desktop, _ := ForRole(Desktop)
+	brain, _ := ForRole(Brain)
+	bound := map[string]bool{"api.example.test": true}
+	cases := []struct {
+		name     string
+		p        Policy
+		target   Target
+		captured bool
+		want     Decision
+	}{
+		{"another port asks", desktop, Target{"chat.example.com", 8080}, false, Decision{Ask: true}},
+		{"a proxy's CONNECT to 80 asks", desktop, Target{"example.com", 80}, false, Decision{Ask: true}},
+		{"captured plain http is web traffic", desktop, Target{"example.com", 80}, true, Decision{Allow: true}},
+		{"a captured other port asks", desktop, Target{"example.com", 5222}, true, Decision{Ask: true}},
+		{"an address asks on any port", desktop, Target{"203.0.113.9", 443}, true, Decision{Ask: true}},
+		{"smtp never", desktop, Target{"mail.example.com", 25}, false, Decision{Reason: ReasonSMTP}},
+		{"smtp to an address never", desktop, Target{"203.0.113.9", 25}, true, Decision{Reason: ReasonSMTP}},
+		{"a bound host only on 443", desktop, Target{"api.example.test", 8443}, true, Decision{Reason: ReasonBoundPort}},
+		{"deny list", desktop, Target{"printer.local", 9100}, true, Decision{Reason: ReasonHostDenied}},
+		{"brain has no web", brain, Target{"example.com", 8080}, true, Decision{Reason: ReasonNoWeb}},
+	}
+	for _, c := range cases {
+		if got := c.p.Other(c.target, bound, c.captured); got != c.want {
+			t.Errorf("%s: %+v, want %+v", c.name, got, c.want)
+		}
+	}
+}
+
+func TestParseAddress(t *testing.T) {
+	good := map[string]Target{
+		"203.0.113.9:8080":           {"203.0.113.9", 8080},
+		"[2001:db8::1]:443":          {"2001:db8::1", 443},
+		"[::ffff:203.0.113.9]:5222":  {"203.0.113.9", 5222},
+		"[2001:DB8:0:0:0:0:0:1]:443": {"2001:db8::1", 443},
+	}
+	for in, want := range good {
+		if got, reason := ParseAddress(in); reason != "" || got != want {
+			t.Errorf("ParseAddress(%q) = %+v, %q", in, got, reason)
+		}
+	}
+	for _, in := range []string{"203.0.113.9", "203.0.113.9:0", "203.0.113.9:080", "[fe80::1%eth0]:443", "example.com:443", "203.0.113.9:65536"} {
+		if _, reason := ParseAddress(in); reason != ReasonHostInvalid {
+			t.Errorf("ParseAddress(%q) = %q, want %q", in, reason, ReasonHostInvalid)
+		}
+	}
+}

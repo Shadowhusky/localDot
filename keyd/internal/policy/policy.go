@@ -1,5 +1,6 @@
-// Package policy decides where a cell may connect: by role, by port, by name. It works on names
-// only; addresses are netguard's job, and IP literals are refused so no request skips the names.
+// Package policy decides where a cell may connect: by role, by port, by name. It works on names;
+// addresses are netguard's job. An IP literal is refused on the web's doors, so no request there
+// skips the names, and waits for the user anywhere else.
 package policy
 
 import (
@@ -17,6 +18,8 @@ const (
 	ReasonPort        = "port-not-allowed"
 	ReasonHostDenied  = "host-denied"
 	ReasonNoWeb       = "web-not-allowed"
+	ReasonSMTP        = "smtp-blocked"
+	ReasonBoundPort   = "bound-host-port"
 )
 
 type Role string
@@ -50,8 +53,10 @@ type Target struct {
 }
 
 type Decision struct {
-	Allow  bool
-	MITM   bool
+	Allow bool
+	MITM  bool
+	// Ask holds the connection until the user allows or refuses it.
+	Ask    bool
 	Reason string
 }
 
@@ -66,6 +71,30 @@ func (p Policy) Connect(t Target, intercepted map[string]bool) Decision {
 		return Decision{Allow: true, MITM: true}
 	}
 	return p.web(t)
+}
+
+// Other decides a CONNECT that Connect refuses for its port, or one to an address from
+// ParseAddress. SMTP and other roles never; a host a secret is bound to only on 443; plain http
+// that the gate captured from a program ignoring the proxy is web traffic; anything else waits for
+// the user. The address itself is netguard's to check, before asking and again at the dial.
+func (p Policy) Other(t Target, intercepted map[string]bool, captured bool) Decision {
+	_, err := netip.ParseAddr(t.Host)
+	address := err == nil
+	switch {
+	case !p.Web:
+		return Decision{Reason: ReasonNoWeb}
+	case t.Port == 25:
+		return Decision{Reason: ReasonSMTP}
+	case address:
+		return Decision{Ask: true}
+	case Denied(t.Host):
+		return Decision{Reason: ReasonHostDenied}
+	case intercepted[t.Host]:
+		return Decision{Reason: ReasonBoundPort}
+	case t.Port == 80 && captured:
+		return Decision{Allow: true}
+	}
+	return Decision{Ask: true}
 }
 
 // PlainHTTP decides an absolute-form http:// request. keyd never swaps on one. t must come from
@@ -124,6 +153,24 @@ func ParseHostPort(hostport string, defaultPort int) (Target, string) {
 		return Target{}, ReasonHostInvalid
 	}
 	return Target{Host: host, Port: port}, ""
+}
+
+// ParseAddress reads host:port whose host is an IP literal, for Other only: the address comes back
+// in its one written form, an IPv4-mapped one as IPv4, and a zone is refused.
+func ParseAddress(hostport string) (Target, string) {
+	host, portText, err := net.SplitHostPort(hostport)
+	if err != nil || !canonicalPort(portText) {
+		return Target{}, ReasonHostInvalid
+	}
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 1 || port > 65535 {
+		return Target{}, ReasonHostInvalid
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil || addr.Zone() != "" {
+		return Target{}, ReasonHostInvalid
+	}
+	return Target{Host: addr.Unmap().String(), Port: port}, ""
 }
 
 // Denied reports whether host is a local or reserved name that no cell may reach by name.

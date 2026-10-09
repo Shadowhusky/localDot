@@ -64,6 +64,9 @@ type Line struct {
 	Host         string  `json:"host,omitempty"`
 	Path         string  `json:"path,omitempty"`
 	SNI          string  `json:"sni,omitempty"`
+	DestPort     int     `json:"destPort,omitempty"`
+	Via          string  `json:"via,omitempty"`
+	App          string  `json:"app,omitempty"`
 	Route        string  `json:"route,omitempty"`
 	Model        string  `json:"model,omitempty"`
 	Status       int     `json:"status,omitempty"`
@@ -300,8 +303,8 @@ func (l *Log) Close() error {
 // redact rewrites and caps every text field but Time and Prev, which are Write's own. It cuts after
 // rewriting, so a cut never leaves part of a token unrewritten.
 func redact(l Line) Line {
-	for _, field := range []*string{&l.Kind, &l.Cell, &l.Mode, &l.Method, &l.Host, &l.Path, &l.SNI, &l.Route,
-		&l.Model, &l.Decision, &l.Reason, &l.SecretID, &l.SurrogateID, &l.Usage} {
+	for _, field := range []*string{&l.Kind, &l.Cell, &l.Mode, &l.Method, &l.Host, &l.Path, &l.SNI, &l.Via, &l.App,
+		&l.Route, &l.Model, &l.Decision, &l.Reason, &l.SecretID, &l.SurrogateID, &l.Usage} {
 		*field = clip(redactText(*field), maxField)
 	}
 	l.Detail = clip(redactText(l.Detail), maxDetail)

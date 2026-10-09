@@ -459,8 +459,9 @@ func TestASurrogateOnAConnectIsRefusedAndAlerted(t *testing.T) {
 	}
 }
 
-// Reserved names, addresses spelled as names and non-canonical ports are refused before any dial,
-// each audited as a CONNECT; an allowed name is audited as the policy writes it.
+// Reserved names, addresses spelled as names, non-canonical ports, SMTP and destinations netguard
+// refuses are refused before any dial and before anyone is asked, each audited as a CONNECT; an
+// allowed name is audited as the policy writes it.
 func TestConnectAuthoritiesAreCheckedBeforeAnyDial(t *testing.T) {
 	w := newWorld(t)
 	w.tlsUpstream("www.example.test", http.HandlerFunc(func(rw http.ResponseWriter, _ *http.Request) { io.WriteString(rw, "ok") }))
@@ -476,15 +477,16 @@ func TestConnectAuthoritiesAreCheckedBeforeAnyDial(t *testing.T) {
 		"127.1:443":               policy.ReasonHostInvalid,
 		"0x7f.0x1:443":            policy.ReasonHostInvalid,
 		"2130706433:443":          policy.ReasonHostInvalid,
-		"[::ffff:7f00:1]:443":     policy.ReasonIPLiteral,
+		"[::ffff:7f00:1]:443":     ReasonAddress,
 		"www.example.test:0443":   policy.ReasonHostInvalid,
 		"www.example.test:65536":  policy.ReasonHostInvalid,
-		"www.example.test:80":     policy.ReasonPort,
+		"www.example.test:80":     ReasonAddress,
+		"www.example.test:25":     policy.ReasonSMTP,
 		"a_b.example.test:443":    policy.ReasonHostInvalid,
 		"*.example.test:443":      policy.ReasonHostInvalid,
 		"www.example.test..:443":  policy.ReasonHostInvalid,
 		":443":                    policy.ReasonHostInvalid,
-		"www.example.test.:44300": policy.ReasonPort,
+		"www.example.test.:44300": ReasonAddress,
 	} {
 		before := len(w.lines())
 		resp, _ := rawRequest(t, c, connectLine(authority, tokenLine()))

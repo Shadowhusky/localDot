@@ -55,6 +55,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /v1/cells/{id}", s.closeCell)
 	mux.HandleFunc("POST /v1/cells/{id}/revoke", s.revoke)
 	mux.HandleFunc("POST /v1/cells/{id}/surrogates", s.mint)
+	mux.HandleFunc("GET /v1/cells/{id}/asks", s.listAsks)
+	mux.HandleFunc("POST /v1/cells/{id}/asks/{ask}", s.answerAsk)
 	mux.HandleFunc("PUT /v1/cells/{id}/task", s.beginTask)
 	mux.HandleFunc("DELETE /v1/cells/{id}/task", s.endTask)
 	mux.HandleFunc("GET /v1/cells/{id}/model-admission", s.getModelAdmission)
@@ -247,6 +249,45 @@ func (s *Server) mint(w http.ResponseWriter, r *http.Request) {
 	reply(w, http.StatusOK, map[string]any{"surrogates": out})
 }
 
+func (s *Server) listAsks(w http.ResponseWriter, r *http.Request) {
+	asks, err := s.Manager.Asks(r.PathValue("id"))
+	if err != nil {
+		managerFailure(w, err)
+		return
+	}
+	reply(w, http.StatusOK, map[string]any{"asks": asks})
+}
+
+// answerAsk is the daemon's answer for one held connection. app is the program the daemon found
+// behind it, kept in the audit line only.
+func (s *Server) answerAsk(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Decision string `json:"decision"`
+		App      string `json:"app"`
+	}
+	if !decode(w, r, &body) {
+		return
+	}
+	if (body.Decision != "allow" && body.Decision != "deny") || len(body.App) > 128 || !printable(body.App) {
+		fail(w, http.StatusBadRequest, "bad-request", "decision is allow or deny; app is at most 128 printable characters")
+		return
+	}
+	if err := s.Manager.AnswerAsk(r.PathValue("id"), r.PathValue("ask"), body.Decision == "allow", body.App); err != nil {
+		managerFailure(w, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func printable(text string) bool {
+	for _, r := range text {
+		if r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Server) beginTask(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		TaskID    string          `json:"taskId"`
@@ -386,7 +427,7 @@ func managerFailure(w http.ResponseWriter, err error) {
 		fail(w, http.StatusConflict, "task-pricing-conflict", "task pricing is immutable")
 	case errors.Is(err, llm.ErrTaskChanged):
 		fail(w, http.StatusConflict, "conflict", "task attachment changed")
-	case errors.Is(err, egress.ErrUnknownCell):
+	case errors.Is(err, egress.ErrUnknownCell), errors.Is(err, egress.ErrUnknownAsk):
 		fail(w, http.StatusNotFound, "not-found", err.Error())
 	case errors.Is(err, egress.ErrCellExists), errors.Is(err, egress.ErrPortInUse), errors.Is(err, egress.ErrCellChanged):
 		fail(w, http.StatusConflict, "conflict", err.Error())

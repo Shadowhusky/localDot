@@ -126,3 +126,25 @@ func TestDialerReportsResolveFailures(t *testing.T) {
 		}
 	}
 }
+
+func TestCheckRefusesWhatADialWouldWithoutConnecting(t *testing.T) {
+	_, ap, seen := listen(t)
+	port := strconv.Itoa(int(ap.Port()))
+	r := &fakeResolver{answers: map[string][][]netip.Addr{
+		"rebind.example.test": {addrs("8.8.8.8", "192.168.1.10")},
+		"public.example.test": {addrs("8.8.8.8")},
+	}}
+	d := &Dialer{Guard: New(noOwn), Resolver: r}
+	for _, addr := range []string{"rebind.example.test:" + port, "169.254.169.254:80", "10.0.0.1:8080", "[fe80::1]:443"} {
+		if err := d.Check(context.Background(), "tcp", addr); !errors.As(err, new(*DeniedError)) {
+			t.Errorf("%s: err = %v, want DeniedError", addr, err)
+		}
+	}
+	if err := d.Check(context.Background(), "tcp", "public.example.test:8080"); err != nil {
+		t.Errorf("public name: %v", err)
+	}
+	if err := d.Check(context.Background(), "tcp", "missing.example.test:8080"); !errors.As(err, new(*ResolveError)) {
+		t.Errorf("missing name: %v", err)
+	}
+	noConnection(t, seen)
+}

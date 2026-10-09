@@ -102,12 +102,16 @@ func (r *Registry) Inspect(d Dest, method string, u *url.URL, h http.Header) Ver
 	return v
 }
 
-// targets reports whether u, if it names a host, names d's once the policy has normalised it.
+// targets reports whether u, if it names a host, names d's once the policy has normalised it. A
+// CONNECT to an address names it as policy.ParseAddress writes it.
 func targets(u *url.URL, d Dest) bool {
 	if u.Host == "" {
 		return true
 	}
 	t, reason := policy.ParseHostPort(u.Host, 443)
+	if reason == policy.ReasonIPLiteral {
+		t, reason = policy.ParseAddress(u.Host)
+	}
 	return reason == "" && t.Host == d.Host
 }
 

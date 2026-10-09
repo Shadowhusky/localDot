@@ -13,6 +13,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/shadowhusky/localdot/keyd/internal/audit"
 	"github.com/shadowhusky/localdot/keyd/internal/cellca"
@@ -28,6 +29,7 @@ var (
 	ErrCellChanged   = errors.New("egress: the cell was revoked or replaced during this request")
 	ErrManagerClosed = errors.New("egress: the cell manager is closed")
 	cellIDPattern    = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	tokenPattern     = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
 )
 
 // RequestError is a request the manager refuses as malformed.
@@ -48,6 +50,8 @@ var DefaultPorts = PortRange{Min: 4760, Max: 4789}
 type ManagerDeps struct {
 	Deps
 	Ports PortRange
+	// AskHold is how long a held connection waits for the user; 0 is DefaultAskHold.
+	AskHold time.Duration
 	// CellsDir holds <cell>/ca.pem, the public half of each cell's CA.
 	CellsDir string
 }
@@ -57,6 +61,9 @@ type OpenRequest struct {
 	Role    string   `json:"role"`
 	Port    int      `json:"port"`
 	Secrets []string `json:"secrets"`
+	// CaptureToken is the desktop gate's credential for the connections it captures; the daemon
+	// keeps it for the cell's life, since the gate's environment cannot change.
+	CaptureToken string `json:"captureToken,omitempty"`
 }
 
 // Opened is everything a cell holds: its listener, its proxy token, the public half of its CA
@@ -118,6 +125,9 @@ func (m *Manager) Open(req OpenRequest) (Opened, error) {
 	if req.Port < m.d.Ports.Min || req.Port > m.d.Ports.Max {
 		return Opened{}, badRequest("port %d is outside %d-%d", req.Port, m.d.Ports.Min, m.d.Ports.Max)
 	}
+	if req.CaptureToken != "" && (p.Role != policy.Desktop || !tokenPattern.MatchString(req.CaptureToken)) {
+		return Opened{}, badRequest("a capture token is 43 base64url characters, for a desktop cell only")
+	}
 	m.policyMu.Lock()
 	defer m.policyMu.Unlock()
 	bindings, err := m.bindings(p, req.Secrets)
@@ -145,7 +155,10 @@ func (m *Manager) Open(req OpenRequest) (Opened, error) {
 	if err != nil {
 		return Opened{}, err
 	}
-	cell, err := Open(Config{CellID: req.CellID, Policy: p, Port: req.Port, Token: token, CA: ca}, m.d.Deps)
+	if token == req.CaptureToken {
+		return Opened{}, errors.New("egress: the proxy token collided with the capture token")
+	}
+	cell, err := Open(Config{CellID: req.CellID, Policy: p, Port: req.Port, Token: token, CaptureToken: req.CaptureToken, CA: ca, AskHold: m.d.AskHold}, m.d.Deps)
 	if err != nil {
 		return Opened{}, err
 	}
@@ -345,6 +358,36 @@ func (m *Manager) EndTask(cellID string) error {
 	m.d.Budget.End(cellID)
 	mc.cell.Revoke()
 	m.admin(cellID, mc.cell.Port(), "task-end", "")
+	return nil
+}
+
+// Asks lists the connections a cell holds for the user's answer.
+func (m *Manager) Asks(cellID string) ([]Ask, error) {
+	m.mu.Lock()
+	mc, ok := m.cells[cellID]
+	m.mu.Unlock()
+	if !ok {
+		return nil, ErrUnknownCell
+	}
+	return mc.cell.Asks(), nil
+}
+
+// AnswerAsk lets one held connection through or refuses it.
+func (m *Manager) AnswerAsk(cellID, askID string, allow bool, app string) error {
+	m.mu.Lock()
+	mc, ok := m.cells[cellID]
+	m.mu.Unlock()
+	if !ok {
+		return ErrUnknownCell
+	}
+	if err := mc.cell.Answer(askID, allow, app); err != nil {
+		return err
+	}
+	decision := "deny"
+	if allow {
+		decision = "allow"
+	}
+	m.admin(cellID, mc.cell.Port(), "ask-answer", decision+" "+askID)
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -40,10 +41,16 @@ func (c *Cell) newConnectProxy() *goproxy.ProxyHttpServer {
 }
 
 func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.ConnectAction, string) {
-	line := audit.Line{Kind: audit.KindConnect, Method: http.MethodConnect, Host: hostport}
+	via := viaOf(ctx.Req)
+	line := audit.Line{Kind: audit.KindConnect, Method: http.MethodConnect, Host: hostport, Via: via}
 	// Inspect holds the authority to the destination's host, so it gets the parsed one; a host that
 	// does not parse keeps its own reason unless a surrogate was found.
 	t, reason := policy.ParseHostPort(hostport, 0)
+	address := false
+	if reason == policy.ReasonIPLiteral {
+		t, reason = policy.ParseAddress(hostport)
+		address = reason == ""
+	}
 	if v := c.deps.Registry.Inspect(keys.Dest{Cell: c.cfg.CellID, Scheme: "connect", Host: t.Host}, http.MethodConnect, ctx.Req.URL, ctx.Req.Header); !v.Allow && (reason == "" || v.SurrogateID != "") {
 		line.SecretID, line.SurrogateID = v.SecretID, v.SurrogateID
 		return c.refuseConnect(ctx, line, v.Reason)
@@ -52,7 +59,13 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 		return c.refuseConnect(ctx, line, reason)
 	}
 	line.Host = t.Host
-	d := c.cfg.Policy.Connect(t, c.interceptedHosts())
+	var d policy.Decision
+	if !address {
+		d = c.cfg.Policy.Connect(t, c.interceptedHosts())
+	}
+	if address || d.Reason == policy.ReasonPort {
+		return c.handleOther(ctx, t, via, line)
+	}
 	if !d.Allow {
 		return c.refuseConnect(ctx, line, d.Reason)
 	}
@@ -65,6 +78,30 @@ func (c *Cell) handleConnect(hostport string, ctx *goproxy.ProxyCtx) (*goproxy.C
 		return c.refuseConnect(ctx, line, ReasonInterceptionUnavailable)
 	}
 	return c.hijack(func(client net.Conn) { c.passthrough(client, t, line) }), hostport
+}
+
+// handleOther is every CONNECT but the web's 443: it is tunnelled as raw TCP when policy allows it
+// outright, or once the daemon answers yes for the user.
+func (c *Cell) handleOther(ctx *goproxy.ProxyCtx, t policy.Target, via string, line audit.Line) (*goproxy.ConnectAction, string) {
+	line.DestPort = t.Port
+	g := c.current()
+	d := c.cfg.Policy.Other(t, c.interceptedHosts(), via == ViaCapture)
+	if !d.Allow && !d.Ask {
+		return c.refuseConnect(ctx, line, d.Reason)
+	}
+	// Keys go only to their own hosts over 443, where keyd terminates them; nothing else may carry
+	// a bound host's answers past the scrubber.
+	if len(c.boundTo(keys.Dest{Cell: c.cfg.CellID, Scheme: "https", Host: t.Host})) > 0 {
+		return c.refuseConnect(ctx, line, policy.ReasonBoundPort)
+	}
+	if d.Ask {
+		app, reason := c.ask(ctx.Req, g, t, via)
+		line.App = app
+		if reason != "" {
+			return c.refuseConnect(ctx, line, reason)
+		}
+	}
+	return c.hijack(func(client net.Conn) { c.tunnel(client, g, t, line) }), net.JoinHostPort(t.Host, strconv.Itoa(t.Port))
 }
 
 func (c *Cell) hijack(fn func(client net.Conn)) *goproxy.ConnectAction {

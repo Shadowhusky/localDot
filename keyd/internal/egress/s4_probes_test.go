@@ -194,8 +194,9 @@ func TestS4Probes(t *testing.T) {
 	})
 	t.Run("plain http inside CONNECT and a Host that differs from the tunnel are refused", func(t *testing.T) {
 		// iron-proxy delivered CONNECT example.com:80 + Host: postman-echo.com to postman-echo.com.
-		if _, resp := rawConnect(t, s.desktop, "example.com:80"); resp.Header.Get("X-Keyd-Reason") != policy.ReasonPort {
-			t.Fatalf("CONNECT :80: %q", resp.Header.Get("X-Keyd-Reason"))
+		// keyd never routes by an inner Host, and a CONNECT to 80 has no tunnel without the user.
+		if _, resp := rawConnect(t, s.desktop, "example.com:80"); resp.StatusCode != http.StatusForbidden {
+			t.Fatalf("CONNECT :80: %d %q", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"))
 		}
 		for _, check := range []struct {
 			auth   string
