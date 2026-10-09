@@ -154,16 +154,19 @@ export function useFullScreen({ available, phone, frame }: FullScreenOptions) {
   };
 }
 
+const BARS = ".island-anchor, .control-strip";
+
 // Full screen's controls fade after a still moment, and come back when the pointer moves near the
-// screen's top or foot, where they are. Moving over the picture itself leaves them hidden, since
-// that is where the user works.
+// screen's top or foot, where they are, or onto one of them. Moving over the picture itself leaves
+// them hidden, since that is where the user works.
 export function useEdgeStill(active: boolean, ms = STILL_MS): boolean {
   const [still, setStill] = useState(false);
   useEffect(() => {
     if (!active) return;
     let timer = setTimeout(() => setStill(true), ms);
     const moved = (event: PointerEvent) => {
-      if (!nearEdge(event.clientY, window.innerHeight)) return;
+      const onBar = event.target instanceof Element && !!event.target.closest(BARS);
+      if (!onBar && !nearEdge(event.clientY, window.innerHeight)) return;
       clearTimeout(timer);
       setStill(false);
       timer = setTimeout(() => setStill(true), ms);

@@ -177,6 +177,23 @@ describe("useEdgeStill", () => {
     expect(result.current).toBe(false);
   });
 
+  it("comes back when the pointer reaches a control away from the edge", () => {
+    vi.useFakeTimers();
+    const strip = document.body.appendChild(document.createElement("div"));
+    strip.className = "control-strip";
+    const button = strip.appendChild(document.createElement("button"));
+    const { result } = renderHook(() => useEdgeStill(true));
+    act(() => vi.advanceTimersByTime(STILL_MS));
+    expect(result.current).toBe(true);
+    act(() => {
+      button.dispatchEvent(
+        new MouseEvent("pointerdown", { bubbles: true, clientY: window.innerHeight / 2 }),
+      );
+    });
+    expect(result.current).toBe(false);
+    strip.remove();
+  });
+
   it("is never still while full screen is off", () => {
     vi.useFakeTimers();
     const { result } = renderHook(() => useEdgeStill(false));
