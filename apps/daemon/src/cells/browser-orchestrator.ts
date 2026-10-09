@@ -6,6 +6,7 @@ import {
   closeBrowserKeyd,
   openBrowserKeyd,
 } from "../keyd/browser-wiring.ts";
+import { AccountsProfile } from "./accounts-profile.ts";
 import { readBrowserHealth, validateBrowserHealth } from "./browser-health.ts";
 import { type BrowserLedger, BrowserLedgerStore, BrowserLifecycleError } from "./browser-ledger.ts";
 import {
@@ -16,12 +17,7 @@ import {
   requireFreshBrowserNames,
   retireBrowserResources,
 } from "./browser-resources.ts";
-import {
-  browserNames,
-  browserNetworkSpec,
-  browserSpec,
-  profileVolumeSpec,
-} from "./browser-spec.ts";
+import { browserNames, browserNetworkSpec, browserSpec } from "./browser-spec.ts";
 import type { DockerClient } from "./docker.ts";
 import type { BrowserImages } from "./images.ts";
 import { hostAddress } from "./ipv4.ts";
@@ -68,6 +64,7 @@ export interface BrowserOrchestratorDeps {
   parentAvailable(parentCellId: string): boolean;
   externalKeydPorts?(): Iterable<number>;
   namePrefix?: string;
+  accountsLabels?: Readonly<Record<string, string>>;
   readyTimeoutMs?: number;
   probe?: typeof readBrowserHealth;
   sendInput?: typeof sendContainerInput;
@@ -81,6 +78,8 @@ export class BrowserOrchestrator {
   readonly #ready = new Map<string, ReadyBrowser>();
   readonly #state = new Map<string, CellState>();
   readonly #listeners = new Set<(parentCellId: string) => void>();
+  readonly #accounts: AccountsProfile;
+  #attaching: Promise<void> = Promise.resolve();
 
   subscribe(listener: (parentCellId: string) => void): () => void {
     this.#listeners.add(listener);
@@ -101,6 +100,29 @@ export class BrowserOrchestrator {
 
   constructor(private readonly deps: BrowserOrchestratorDeps) {
     this.#ledger = new BrowserLedgerStore(deps.home, deps.store.keydPorts);
+    this.#accounts = new AccountsProfile({
+      home: deps.home,
+      docker: deps.docker,
+      prefix: deps.namePrefix ?? NAME_PREFIX,
+      image: () => deps.images.browser,
+      ...(deps.accountsLabels ? { labels: deps.accountsLabels } : {}),
+    });
+  }
+
+  // The computer whose browser has the saved sign-ins open, or is opening them.
+  profileHolder(): string | undefined {
+    for (const [parent, state] of this.#state)
+      if (state === "ready" || state === "starting" || state === "stopping") return parent;
+    return undefined;
+  }
+
+  // Signs out of every site: each browser lets go of the profile, which is then made again empty.
+  clearAccounts(): Promise<void> {
+    const parents = this.#ledger.list().map((record) => record.parentCellId);
+    return this.#exclusive(new AbortController().signal, async () => {
+      await Promise.all(parents.map((parent) => this.stop(parent)));
+      await this.#accounts.wipe();
+    });
   }
 
   reservedKeydPorts(): number[] {
@@ -218,6 +240,7 @@ export class BrowserOrchestrator {
           throw new BrowserLifecycleError("Browser reset ownership changed");
         this.#association(record);
         await closeBrowserKeyd(this.deps.keyd, record);
+        await this.#adoptBeforeRetire(record);
       } else {
         if (
           !this.resetRetired(parent, source) ||
@@ -266,6 +289,46 @@ export class BrowserOrchestrator {
     );
     if (unknown || result.some((entry) => entry.status === "rejected"))
       throw new BrowserLifecycleError("Browser recovery needs attention");
+  }
+
+  // Replace computer deletes this computer's own old profile: copy it first if sign-ins were
+  // never moved to the shared profile.
+  async #adoptBeforeRetire(record: BrowserLedger): Promise<void> {
+    if (await this.#accounts.migrated()) return;
+    await this.#contain(record);
+    await this.#exclusive(new AbortController().signal, () =>
+      this.#accounts.ensure(browserNames(record.id, record.prefix).profileVolume),
+    );
+  }
+
+  // One browser at a time opens the saved sign-ins: attaching waits its turn and a browser of
+  // another computer lets go first.
+  #exclusive<T>(signal: AbortSignal, run: () => Promise<T>): Promise<T> {
+    const previous = this.#attaching;
+    const turn = Promise.withResolvers<void>();
+    this.#attaching = previous.then(() => turn.promise);
+    const waited = new Promise<void>((resolve, reject) => {
+      const abort = () => reject(new BrowserLifecycleError("Browser start was cancelled"));
+      signal.addEventListener("abort", abort, { once: true });
+      void previous.then(() => {
+        signal.removeEventListener("abort", abort);
+        resolve();
+      });
+      if (signal.aborted) abort();
+    });
+    return waited.then(run).finally(turn.resolve);
+  }
+
+  async #attachProfile(parent: string, check: () => void): Promise<void> {
+    for (const holder of await this.#accounts.holders()) {
+      const owner = this.#ledger.list().find((record) => record.resources.browser === holder);
+      if (!owner || owner.parentCellId === parent)
+        throw new BrowserLifecycleError("Saved sign-ins are in use");
+      await this.stop(owner.parentCellId);
+      check();
+    }
+    if ((await this.#accounts.holders()).length)
+      throw new BrowserLifecycleError("Saved sign-ins are in use");
   }
 
   #fence(parent: string): void {
@@ -390,28 +453,6 @@ export class BrowserOrchestrator {
       stage = "profile attachment";
       await requireDetachedProfile(this.deps.docker, record);
       check();
-      const profile = (await inspectBrowserResources(this.deps.docker, record)).find(
-        (entry) => entry.kind === "volumes",
-      );
-      check();
-      if (!profile) {
-        await this.deps.docker.request({
-          method: "POST",
-          path: "/volumes/create",
-          body: {
-            ...profileVolumeSpec(names.profileVolume, record.id, parent),
-            Labels: browserLabels(record, "profile"),
-          },
-        });
-        check();
-        if (
-          !(await inspectBrowserResources(this.deps.docker, record)).some(
-            (entry) => entry.kind === "volumes",
-          )
-        )
-          throw new BrowserLifecycleError();
-        check();
-      }
       const subnets: string[] = [];
       stage = "network creation";
       for (const [kind, field] of [
@@ -457,15 +498,8 @@ export class BrowserOrchestrator {
       };
       this.deps.store.saveBrowser(cell);
       stage = "container creation";
-      for (const [field, spec] of [
-        ["gate", gateSpec(cell, this.deps.images.gate)],
-        [
-          "browser",
-          browserSpec(cell, this.deps.images.browser, {
-            fullcolor: this.deps.streamFullcolor ?? false,
-          }),
-        ],
-      ] as const) {
+      const owned = record;
+      const create = async (field: "gate" | "browser", spec: object) => {
         check();
         const created = await this.deps.docker.request<{ Id?: unknown }>({
           method: "POST",
@@ -473,14 +507,32 @@ export class BrowserOrchestrator {
           query: { name: names[field] },
           body: {
             ...spec,
-            Labels: browserLabels(record, field),
-            ...(field === "browser" ? { Hostname: `browser-${record.id.toLowerCase()}` } : {}),
+            Labels: browserLabels(owned, field),
+            ...(field === "browser" ? { Hostname: `browser-${owned.id.toLowerCase()}` } : {}),
           },
         });
-        record.resources[field] = dockerId(created?.Id);
-        this.#ledger.save(record);
+        owned.resources[field] = dockerId(created?.Id);
+        this.#ledger.save(owned);
         check();
-      }
+      };
+      await create("gate", gateSpec(cell, this.deps.images.gate));
+      stage = "profile attachment";
+      await this.#exclusive(signal, async () => {
+        check();
+        await this.#accounts.ensure(names.profileVolume);
+        check();
+        await this.#attachProfile(parent, check);
+        stage = "container creation";
+        await create(
+          "browser",
+          browserSpec(
+            cell,
+            this.deps.images.browser,
+            { fullcolor: this.deps.streamFullcolor ?? false },
+            this.#accounts.volume,
+          ),
+        );
+      });
       const { gate, browser, internalNetwork, egressNetwork } = record.resources;
       if (!gate || !browser || !internalNetwork || !egressNetwork)
         throw new BrowserLifecycleError();
@@ -488,7 +540,8 @@ export class BrowserOrchestrator {
       this.deps.store.saveBrowser(cell);
       const resources = await inspectBrowserResources(this.deps.docker, record);
       check();
-      if (resources.length !== 5) throw new BrowserLifecycleError();
+      if (resources.filter((entry) => entry.kind !== "volumes").length !== 4)
+        throw new BrowserLifecycleError();
       stage = "key listener creation";
       material = await openBrowserKeyd(this.deps.keyd, record, signal);
       check();

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, expect, it, vi } from "vitest";
@@ -49,7 +49,7 @@ function fixture() {
     phase: "retained",
   });
   const profile = browserNames(browserId).profileVolume;
-  const volumes = new Map([
+  const volumes = new Map<string, Record<string, string>>([
     [oldRecord.docker.homeVolume, { "localdot.cell": old, "localdot.role": "home" }],
     [
       profile,
@@ -79,8 +79,26 @@ function fixture() {
     }),
   };
   const docker = new DockerClient(join(home, "unused.sock"));
+  const copy = "c".repeat(64);
   const request = vi.spyOn(docker, "request").mockImplementation(async (input) => {
     if (input.path === "/containers/json") return [];
+    if (input.path === "/volumes" && input.method === "GET")
+      return {
+        Volumes: [...volumes].map(([Name, Labels]) => ({ Name, Labels, CreatedAt: "" })),
+      };
+    if (input.path === "/volumes/create" && input.method === "POST") {
+      const body = input.body as { Name: string; Labels: Record<string, string> };
+      events.push(`make:${body.Name}`);
+      volumes.set(body.Name, body.Labels);
+      return { Name: body.Name };
+    }
+    if (input.path === "/containers/create") {
+      const body = input.body as { HostConfig: { Mounts: { Source: string }[] } };
+      events.push(`copy:${body.HostConfig.Mounts.map((mount) => mount.Source).join(">")}`);
+      return { Id: copy };
+    }
+    if (input.path === `/containers/${copy}/wait`) return { StatusCode: 0 };
+    if (input.path.startsWith(`/containers/${copy}`)) return undefined;
     const name = input.path.startsWith("/volumes/")
       ? decodeURIComponent(input.path.slice(9))
       : undefined;
@@ -200,7 +218,7 @@ it("composes real computer/browser retirement, grant closure and durable publica
   expect(done.phase).toBe("ready");
   expect(f.store.get(old)).toBeUndefined();
   expect(f.ledgers.forParent(old)).toBeUndefined();
-  expect(f.volumes.size).toBe(0);
+  expect([...f.volumes.keys()]).toEqual(["localdot-accounts"]);
   expect(f.keys.size).toBe(0);
   expect(f.events[0]).toBe("drain");
   expect(f.events.at(-1)).toBe("create");
@@ -214,6 +232,26 @@ it("composes real computer/browser retirement, grant closure and durable publica
   await restarted.restoreReady();
   expect(restartedHolds.candidateHeld(fresh)).toBe(false);
   expect(f.create).toHaveBeenCalledOnce();
+});
+it("copies the computer's own sign-ins into the shared profile before erasing its old profile", async () => {
+  const f = fixture();
+  const profile = browserNames(browserId).profileVolume;
+  await f.controller.reset(old, confirmation);
+  const copied = f.events.indexOf(`copy:${profile}>localdot-accounts`);
+  expect(f.events.indexOf("make:localdot-accounts")).toBeLessThan(copied);
+  expect(copied).toBeGreaterThan(-1);
+  expect(copied).toBeLessThan(f.events.indexOf(`erase:${profile}`));
+  expect(f.volumes.get("localdot-accounts")?.["localdot.role"]).toBe("accounts-profile");
+});
+it("erases an old profile without copying once sign-ins already live in the shared profile", async () => {
+  const f = fixture();
+  writeFileSync(
+    join(f.home, "accounts-profile.json"),
+    JSON.stringify({ v: 1, owner: "00000000-0000-4000-8000-000000000009", migration: "done" }),
+  );
+  await f.controller.reset(old, confirmation);
+  expect(f.events.some((event) => event.startsWith("copy:"))).toBe(false);
+  expect(f.volumes.size).toBe(0);
 });
 it("leaves source records and volumes intact when task drain or key closure is unconfirmed", async () => {
   const f = fixture();
@@ -267,7 +305,7 @@ it("retries the same transaction after physical cleanup succeeds but computer-re
     remove(id);
   });
   await expect(f.controller.reset(old, confirmation)).rejects.toThrow();
-  expect(f.volumes.size).toBe(0);
+  expect([...f.volumes.keys()]).toEqual(["localdot-accounts"]);
   expect(f.store.get(old)).toBeDefined();
   expect(f.controller.status(old, requestId)?.phase).toBe("retiring");
   expect(f.create).not.toHaveBeenCalled();

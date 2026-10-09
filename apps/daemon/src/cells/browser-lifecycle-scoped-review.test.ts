@@ -217,7 +217,7 @@ describe("independent lifecycle correction boundaries", () => {
     expect(f.owner.reservedKeydPorts()).toContain(record.keydPort);
     f.docker.before = undefined;
     await f.owner.remove(f.parent.id, { purgeProfile: true });
-    expect(f.docker.volumes.size).toBe(0);
+    expect([...f.docker.volumes.keys()]).toEqual(["localdot-review-accounts"]);
     expect(f.ledger.list()).toEqual([]);
     expect(f.store.getBrowser(record.id)).toBeUndefined();
   });
@@ -228,7 +228,7 @@ describe("independent lifecycle correction boundaries", () => {
     await f.owner.remove(f.parent.id, { purgeProfile: true });
     expect(f.docker.containers.size).toBe(0);
     expect(f.docker.networks.size).toBe(0);
-    expect(f.docker.volumes.size).toBe(0);
+    expect([...f.docker.volumes.keys()]).toEqual(["localdot-review-accounts"]);
     expect(f.listeners.size).toBe(0);
     expect(f.ledger.list()).toEqual([]);
   });
