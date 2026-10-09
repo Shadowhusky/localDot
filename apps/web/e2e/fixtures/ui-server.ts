@@ -470,7 +470,8 @@ const planItems = (finished: boolean) => [
   { id: "send", text: "Email the report to the team", status: "skipped" },
 ];
 
-function finishTask(s: AgentSession, a: Append) {
+// done: end as the real runner does, with agent.state done, which raises a Done notification.
+function finishTask(s: AgentSession, a: Append, done = false) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -495,7 +496,7 @@ function finishTask(s: AgentSession, a: Append) {
     ],
   });
   s.setStatus("idle");
-  a("agent.state", { state: "idle" });
+  a("agent.state", { state: done ? "done" : "idle" });
 }
 
 function seedTask(s: AgentSession, finished: boolean) {
@@ -2126,13 +2127,13 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(): string | undefined {
+function finish(done = false): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append);
+  finishTask(owned, append, done);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -2327,7 +2328,7 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", () => reply(finish()));
+routes.post("/__qa/finish", (c) => reply(finish(c.req.query("done") === "1")));
 // The daemon goes away under the live task (no end is recorded) and comes back without it.
 routes.post("/__qa/crash", async (c) => {
   if (!session || session.stopped) return c.text("no live task", 409);
