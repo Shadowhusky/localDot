@@ -451,6 +451,16 @@
     letter-spacing: var(--text-body--letter-spacing);
   }
 
+  /* Roomy: a group that stands on its own on a page, as first-run setup's do, rows 12 / 16 in. */
+  .ui-group[data-roomy] .ui-group-row {
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 4);
+  }
+
+  /* A roomy row that ends in a button stays 48 tall. */
+  .ui-group[data-roomy] .ui-group-row:has(.ui-group-row-trailing .ui-button) {
+    padding-block: calc(var(--spacing) * 2.5);
+  }
+
   .ui-group > .ui-group-row:first-child,
   .ui-group > :first-child > .ui-group-row:first-child {
     box-shadow: none;
@@ -611,6 +621,15 @@
 
     .ui-group-row[data-leading] {
       --_rule: inset 52px 1px 0 var(--color-raised), inset 0 1px 0 var(--color-separator);
+    }
+
+    .ui-group[data-roomy] .ui-group-row {
+      --_rule: inset 0 1px 0 var(--color-separator);
+      padding: calc(var(--spacing) * 2.75) calc(var(--spacing) * 3.5);
+    }
+
+    .ui-group[data-roomy] .ui-group-row:has(.ui-group-row-trailing .ui-button) {
+      padding-block: calc(var(--spacing) * 0.5);
     }
 
     .ui-group-row-label,

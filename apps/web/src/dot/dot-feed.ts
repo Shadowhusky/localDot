@@ -15,6 +15,8 @@ export interface DotFeed {
   dispatched: string | null;
   // The task has just finished well.
   done: boolean;
+  // Changes when dot should blink that it heard, as each setup step arrives.
+  nod?: string;
 }
 
 const ATTENTION = new Set<StatusRow>(["approval", "question", "waiting", "recovery", "limit"]);

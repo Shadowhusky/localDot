@@ -1,9 +1,7 @@
 import { expect, test } from "@playwright/test";
 import { setupServer } from "./fixtures/setup-server.ts";
 
-test("installer progress hands off once to first-run setup and settings", async ({
-  page,
-}, info) => {
+test("installer progress hands off once to first-run setup", async ({ page }, info) => {
   const f = await setupServer();
   const errors: string[] = [],
     external: string[] = [],
@@ -35,6 +33,8 @@ test("installer progress hands off once to first-run setup and settings", async 
     await expect(page.getByRole("heading", { name: "Starting localDot" })).toBeVisible();
     const link = f.issue();
     f.channel.finish("ready", link);
+    await expect(page.getByRole("heading", { name: "Hi, I'm dot." })).toBeVisible();
+    await page.getByRole("button", { name: "Finish later" }).click();
     await expect(page.getByRole("heading", { name: "Your computer is off" })).toBeVisible();
     await expect(page).toHaveURL(`${f.origin}/`);
     const curtainBounds = await page.locator(".curtain").boundingBox();
@@ -51,13 +51,9 @@ test("installer progress hands off once to first-run setup and settings", async 
       .getByRole("region", { name: "Finish setting up" })
       .getByRole("button", { name: "Continue setup" });
     await review.click();
-    const settings = page.getByRole("dialog", { name: "Settings", exact: true });
-    await expect(settings).toBeVisible();
-    expect(await settings.evaluate((sheet) => sheet.scrollTop), "the header stays in place").toBe(
-      0,
-    );
-    await settings.getByRole("button", { name: "Close settings" }).click();
-    await expect(review).toBeFocused();
+    await expect(page.getByRole("heading", { name: "How should dot think?" })).toBeVisible();
+    await page.getByRole("button", { name: "Finish later" }).click();
+    await expect(review).toBeVisible();
     const start = page.locator(".curtain").getByRole("button", { name: "Turn on" });
     await start.scrollIntoViewIfNeeded();
     await expect(start).toBeEnabled();

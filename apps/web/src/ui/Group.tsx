@@ -4,9 +4,16 @@ import { Icon } from "./Icon.tsx";
 import type { IconName } from "./icons.ts";
 
 // A grouped list: rows on one raised surface, a separator between each, as in a settings pane. A
-// Switch or an inline Field takes the row's place when given the ui-group-row class.
-export function Group({ className, ...props }: ComponentProps<"div">) {
-  return <div {...props} className={clsx("ui-group", className)} />;
+// Switch or an inline Field takes the row's place when given the ui-group-row class. Roomy rows sit
+// further in, for a group that stands on its own on a page.
+export function Group({
+  className,
+  roomy = false,
+  ...props
+}: ComponentProps<"div"> & { roomy?: boolean }) {
+  return (
+    <div {...props} className={clsx("ui-group", className)} data-roomy={roomy ? "" : undefined} />
+  );
 }
 
 export interface GroupRowProps {

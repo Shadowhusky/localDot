@@ -569,6 +569,14 @@
     }
   }
 
+  /* One chip chosen from a row of them, as a provider is. */
+  .ui-chip[aria-pressed="true"],
+  .ui-chip[aria-pressed="true"]:hover {
+    background-color: var(--color-fg-1);
+    box-shadow: none;
+    color: var(--color-void);
+  }
+
   .ui-chip[data-pressed] {
     scale: 0.97;
     transition-duration: var(--dur-press);
