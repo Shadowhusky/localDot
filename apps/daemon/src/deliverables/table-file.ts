@@ -3,32 +3,38 @@ import { decodeHead, maskText, visible } from "./excerpt.ts";
 
 const V = VIEWER_LIMITS;
 
+function filled(cells: readonly string[]): number {
+  let width = cells.length;
+  while (width > 0 && cells[width - 1] === "") width--;
+  return width;
+}
+
 // The rows a table shows (the first ones, cut to the shown columns and cell length, masked) and how
-// many it has. Empty rows count only when a row with something in it follows.
+// many it has. Empty rows count only when a row with something in it follows. A row whose cells
+// past the shown columns were left out says how wide it is.
 export class Grid {
   readonly rows: string[][] = [];
   total = 0;
   columns = 0;
   #blank = 0;
 
-  add(cells: readonly string[], repeat = 1): void {
-    let width = cells.length;
-    while (width > 0 && cells[width - 1] === "") width--;
+  add(cells: readonly string[], repeat = 1, width = filled(cells)): void {
     if (width === 0) {
       this.#blank += repeat;
       return;
     }
-    for (; this.#blank > 0; this.#blank--) {
-      this.total++;
-      if (this.rows.length < V.tableRows) this.rows.push([]);
-    }
+    this.total += this.#blank;
+    for (let i = Math.min(this.#blank, V.tableRows - this.rows.length); i > 0; i--)
+      this.rows.push([]);
+    this.#blank = 0;
     this.columns = Math.max(this.columns, width);
     this.total += repeat;
-    const shown = Math.min(width, V.tableColumns);
-    for (let i = 0; i < repeat && this.rows.length < V.tableRows; i++)
-      this.rows.push(
-        cells.slice(0, shown).map((cell) => visible(cell, V.tableCellChars, maskText)),
-      );
+    const room = Math.min(repeat, V.tableRows - this.rows.length);
+    if (room <= 0) return;
+    const shown = Array.from({ length: Math.min(width, V.tableColumns) }, (_, i) =>
+      visible(cells[i] ?? "", V.tableCellChars, maskText),
+    );
+    for (let i = 0; i < room; i++) this.rows.push([...shown]);
   }
 }
 

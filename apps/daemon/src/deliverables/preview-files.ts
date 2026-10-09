@@ -6,6 +6,7 @@ import { requestOrigin } from "../guard.ts";
 import { decodeHead, maskText } from "./excerpt.ts";
 import { rasterType } from "./image-preview.ts";
 import type { PreviewLinks } from "./preview-links.ts";
+import { quietPage } from "./quiet-page.ts";
 import { StoredFiles } from "./stored.ts";
 
 const V = VIEWER_LIMITS;
@@ -27,6 +28,7 @@ const BASE = {
   "x-content-type-options": "nosniff",
   "cache-control": "no-store",
   "referrer-policy": "no-referrer",
+  "x-dns-prefetch-control": "off",
 };
 // Opened on its own, any of these files is an inert, script-less document of no origin.
 export const INERT_POLICY = "default-src 'none'; sandbox";
@@ -35,6 +37,8 @@ export const SVG_POLICY = "default-src 'none'; img-src data:; style-src 'unsafe-
 
 // A page dot made: no script, form, plugin, frame, font or connection; pictures only embedded or
 // from the same task's files, stylesheets inline or from them; framed only by localDot; sandboxed.
+// WebKit acts on connection hints and new-window links before this applies: quietPage takes those
+// out of the page itself.
 export function htmlPolicy(origin: string, base: string): string {
   const own = `${origin}${base}`;
   return [
@@ -52,8 +56,8 @@ interface Served {
   type: string;
   policy: string;
   cap?: number;
-  // Text is read whole and masked; anything else streams as stored.
-  text?: boolean;
+  // Text is read whole and served as this makes it, or not at all; anything else streams as stored.
+  text?: (text: string) => string | undefined;
 }
 
 // One task's files by preview link, for the full preview's frame, pictures and players. Only the
@@ -87,8 +91,8 @@ export function previewFileRoutes(
       const head = c.req.method === "HEAD";
       if (served.text) {
         const text = decodeHead(read(fd, 0, size), true);
-        if (text === undefined) return c.text("not text", 415, BASE);
-        const body = maskText(text.replace(/\r\n?/g, "\n"));
+        const body = text === undefined ? undefined : served.text(text.replace(/\r\n?/g, "\n"));
+        if (body === undefined) return c.text("not shown", 415, BASE);
         headers["content-type"] = served.type;
         return new Response(head ? null : body, { status: 200, headers });
       }
@@ -124,18 +128,23 @@ function servedAs(name: string, origin: string, base: string): Served | undefine
   const ext = fileExtension(name);
   if (kind === "picture") return { type: "picture", policy: INERT_POLICY, cap: V.pictureBytes };
   if (kind === "svg")
-    return { type: "image/svg+xml", policy: SVG_POLICY, cap: V.svgBytes, text: true };
+    return { type: "image/svg+xml", policy: SVG_POLICY, cap: V.svgBytes, text: maskText };
   if (kind === "pdf") return { type: "application/pdf", policy: INERT_POLICY, cap: V.pdfBytes };
   if (kind === "html")
     return {
       type: "text/html; charset=utf-8",
       policy: htmlPolicy(origin, base),
       cap: V.htmlBytes,
-      text: true,
+      text: quietPage,
     };
   // A page's own stylesheet.
   if (ext === "css")
-    return { type: "text/css; charset=utf-8", policy: INERT_POLICY, cap: V.htmlBytes, text: true };
+    return {
+      type: "text/css; charset=utf-8",
+      policy: INERT_POLICY,
+      cap: V.htmlBytes,
+      text: maskText,
+    };
   const media = MEDIA[ext];
   return media ? { type: media, policy: INERT_POLICY } : undefined;
 }

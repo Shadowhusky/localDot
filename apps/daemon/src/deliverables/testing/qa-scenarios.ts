@@ -83,7 +83,8 @@ function fakeRevise(
 
 // /__qa/files hands over one file of every kind; /__qa/revise answers a follow-up with v2 of
 // totals.csv; /__qa/previews hands over real files of every kind the full preview shows, the page
-// and the SVG carrying scripts that would call /__qa/canary if they ever ran.
+// and the SVG carrying scripts that would call /__qa/canary if they ever ran. ?probe=<port> also
+// points the page's connection hints and links at that port, for a listener counting connections.
 export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
   const outputs = new OutputStore(f.home);
   const observe = (s: AgentSession, step: string, n: number) => {
@@ -149,10 +150,11 @@ export function deliverableScenarios(app: Hono, f: DeliverablesFixture): void {
     const s = f.session();
     if (!s) return c.text("no session", 409);
     const video = join(f.assets, "clip.mp4");
+    const probe = Number(c.req.query("probe"));
     hand(s, "Here is the quarter's report, with its data, chart and notes.", {
       "report.pdf": samplePdf(),
       "chart.png": await sampleChart(),
-      "summary.html": SAMPLE_PAGE,
+      "summary.html": samplePage(Number.isInteger(probe) && probe > 0 ? probe : undefined),
       "summary.css": SAMPLE_STYLES,
       "diagram.svg": SAMPLE_SVG,
       "orders.xlsx": sampleWorkbook(),
@@ -242,7 +244,27 @@ function sampleLog(): string {
   return `${lines.join("\n")}\n`;
 }
 
-const SAMPLE_PAGE = `<!doctype html>
+// Each way a page could reach a server with no script: hints to connect, fetch or render ahead, a
+// link that opens a window, and one that reports the click.
+function probeTags(port: number): { head: string; body: string } {
+  const at = `http://127.0.0.1:${port}`;
+  return {
+    head: [
+      `<link rel="preconnect" href="${at}">`,
+      `<link rel="dns-prefetch" href="${at}">`,
+      `<link rel="prefetch" href="${at}/prefetch">`,
+      `<link rel="preload" as="image" href="${at}/preload.png">`,
+      `<link rel="modulepreload" href="${at}/module.js">`,
+      `<link rel="prerender" href="${at}/prerender">`,
+      `<link rel="stylesheet" href="${at}/remote.css">`,
+    ].join("\n"),
+    body: `<p class="links"><a href="${at}/window" target="_blank">New window</a> · <a href="${at}/page" ping="${at}/ping">Tracked link</a></p>`,
+  };
+}
+
+function samplePage(probe?: number): string {
+  const tags = probe === undefined ? { head: "", body: "" } : probeTags(probe);
+  return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -251,6 +273,7 @@ const SAMPLE_PAGE = `<!doctype html>
 <link rel="stylesheet" href="summary.css">
 <link rel="stylesheet" href="https://fonts.example.test/brand.css">
 <script>fetch("/__qa/canary?from=inline")</script>
+${tags.head}
 </head>
 <body>
 <header>
@@ -272,9 +295,11 @@ const SAMPLE_PAGE = `<!doctype html>
 <p class="links"><a href="javascript:fetch('/__qa/canary?from=javascript')">Open the dashboard</a> · <a href="https://example.test/report">Full report</a></p>
 <form action="https://example.test/submit"><button id="send">Send feedback</button></form>
 <iframe src="https://example.test/embed" title="embed"></iframe>
+${tags.body}
 </body>
 </html>
 `;
+}
 
 const SAMPLE_STYLES = `body { margin: 0; padding: 48px 56px; font: 16px/1.5 -apple-system, "Helvetica Neue", sans-serif; color: #1d2330; background: #f6f7f9; }
 header { max-width: 640px; }

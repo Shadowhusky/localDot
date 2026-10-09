@@ -1,3 +1,4 @@
+import { createServer } from "node:net";
 import { expect, type Page, test } from "@playwright/test";
 import { startUiFixture, TOKEN, type UiFixture } from "../fixtures/start-ui-fixture.ts";
 import { FIXTURE_START } from "./harness.ts";
@@ -5,7 +6,8 @@ import { FIXTURE_START } from "./harness.ts";
 // The full preview of a page and an SVG dot made: their scripts never run (inline, handlers,
 // javascript: links, a meta refresh), nothing they ask for leaves the Mac, and the frame holds only
 // the task's own files. Requests are watched, not intercepted, so timing stays real; a request to the
-// web counts when it got a response or failed for any reason but the page's policy.
+// web counts when it got a response or failed for any reason but the page's policy. A connection
+// hint fires no request, so a listener the page points at counts the connections themselves.
 const AT = ["c14", "w39"];
 // Blocking service workers injects a probe into every frame, which throws inside the sandboxed one.
 test.use({ serviceWorkers: "allow" });
@@ -40,9 +42,16 @@ test("a page and an SVG preview inert, with nothing leaving the Mac", async ({ p
     { QA_SCENARIO: "running", QA_NOW: FIXTURE_START },
     "ui-previews",
   );
+  const connections: string[] = [];
+  const listener = createServer((socket) => {
+    connections.push(`${socket.remoteAddress}:${socket.remotePort}`);
+    socket.destroy();
+  });
+  await new Promise<void>((resolve) => listener.listen(0, "127.0.0.1", resolve));
+  const probe = (listener.address() as { port: number }).port;
   try {
     const seen = watch(page, fixture);
-    const handed = await page.request.post(`${fixture.origin}/__qa/previews`);
+    const handed = await page.request.post(`${fixture.origin}/__qa/previews?probe=${probe}`);
     expect(handed.ok(), await handed.text()).toBe(true);
     await page.goto(`${fixture.origin}/#token=${TOKEN}`);
     const card = page.getByRole("region", { name: "Task result" }).last();
@@ -76,6 +85,17 @@ test("a page and an SVG preview inert, with nothing leaving the Mac", async ({ p
     await page.waitForTimeout(1600);
     expect(page.frames().some((f) => f.url().includes("summary.html"))).toBe(true);
 
+    // A link that opens a window or reports the click reaches nothing when tapped. A tap can leave
+    // the frame on the browser's own blocked page, so the page opens again after each.
+    for (const name of ["New window", "Tracked link"]) {
+      const link = content.getByRole("link", { name });
+      await (test.info().project.name === "w39" ? link.tap() : link.click());
+      await page.waitForTimeout(800);
+      await page.getByRole("button", { name: "Next file" }).click();
+      await page.getByRole("button", { name: "Previous file" }).click();
+      await expect(content.getByRole("heading", { name: "Quarter in brief" })).toBeVisible();
+    }
+
     // An SVG with a script and an onload handler is drawn as a picture only.
     await page.getByRole("button", { name: "Next file" }).click();
     await page.getByRole("button", { name: "Next file" }).click();
@@ -97,7 +117,9 @@ test("a page and an SVG preview inert, with nothing leaving the Mac", async ({ p
     expect(seen.all.filter((url) => url.includes("/__qa/canary"))).toEqual([]);
     expect(seen.left).toEqual([]);
     expect(seen.errors).toEqual([]);
+    expect(connections).toEqual([]);
   } finally {
+    listener.close();
     await fixture.close();
   }
 });

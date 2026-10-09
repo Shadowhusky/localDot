@@ -186,7 +186,7 @@ export function deliverableRoutes(app: Hono, deps: DeliverablesDeps): void {
     if (!read) reply = { kind: "none", reason: "missing" };
     else if (kind === "table") reply = delimitedTable(name, read.head.subarray(0, cap), read.size);
     else if (read.size > cap) reply = { kind: "none", reason: "too_large" };
-    else reply = await sheetTable(name, read.head, sheet);
+    else reply = await sheetTable(name, read.head, sheet, c.req.raw.signal);
     return c.json(TableFileReply.parse(reply));
   });
   app.get(`${file}/compare`, async (c) => {

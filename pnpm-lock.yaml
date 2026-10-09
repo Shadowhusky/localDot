@@ -80,6 +80,9 @@ importers:
       mediabunny:
         specifier: 1.61.0
         version: 1.61.0
+      parse5:
+        specifier: 8.0.1
+        version: 8.0.1
       sharp:
         specifier: 0.35.5
         version: 0.35.5(@types/node@24.19.0)

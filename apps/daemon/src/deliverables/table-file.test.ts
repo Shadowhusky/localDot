@@ -5,6 +5,13 @@ import { delimitedTable } from "./table-file.ts";
 import { odsOf, xlsxOf, zipOf } from "./testing/sample-files.ts";
 
 const KEY = `sk-proj-${"Q".repeat(40)}`;
+const sheetOf = (rows: string) =>
+  zipOf({
+    "xl/workbook.xml": '<workbook><sheets><sheet name="S" r:id="rId1"/></sheets></workbook>',
+    "xl/_rels/workbook.xml.rels":
+      '<Relationships><Relationship Id="rId1" Target="worksheets/s.xml"/></Relationships>',
+    "xl/worksheets/s.xml": `<worksheet><sheetData>${rows}</sheetData></worksheet>`,
+  });
 const csv = (text: string, size?: number) =>
   delimitedTable("a.csv", Buffer.from(text), size ?? Buffer.byteLength(text));
 
@@ -73,6 +80,45 @@ describe("workbooks", () => {
       rows: [["", "ab"], [], ["TRUE", "", "#DIV/0!"]],
       totalRows: 3,
       columns: 3,
+    });
+  });
+
+  it("stays small and quick whatever column a cell claims", async () => {
+    const rows = Array.from(
+      { length: 3 },
+      (_, i) =>
+        `<row r="${i + 1}"><c r="A${i + 1}" t="inlineStr"><is><t>a</t></is></c><c r="FZZZZZ${i + 1}" t="inlineStr"><is><t>far</t></is></c><c r="XFE${i + 1}"><v>1</v></c></row>`,
+    );
+    const started = performance.now();
+    const reply = await sheetTable("a.xlsx", sheetOf(rows.join("")), 0);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(reply).toMatchObject({ kind: "table", totalRows: 3, columns: 16_384 });
+    if (reply.kind !== "table") throw new Error("not a table");
+    expect(reply.rows[0]).toHaveLength(VIEWER_LIMITS.tableColumns);
+    expect(reply.rows[0]?.[0]).toBe("a");
+  });
+
+  it("counts rows a file skips without walking them", async () => {
+    const rows = Array.from(
+      { length: 2000 },
+      (_, i) => `<row r="${1 + i * 1_048_577}"><c><v>${i}</v></c></row>`,
+    );
+    const started = performance.now();
+    const reply = await sheetTable("a.xlsx", sheetOf(rows.join("")), 0);
+    expect(performance.now() - started).toBeLessThan(1000);
+    expect(reply).toMatchObject({ kind: "table", totalRows: 2000 + 1999 * 1_048_576 });
+    if (reply.kind !== "table") throw new Error("not a table");
+    expect(reply.rows).toHaveLength(VIEWER_LIMITS.tableRows);
+    expect(reply.rows.slice(0, 2)).toEqual([["0"], []]);
+  });
+
+  it("stops reading a workbook when its request ends", async () => {
+    const rows = Array.from({ length: 5000 }, (_, i) => `<row><c><v>${i}</v></c></row>`);
+    const ended = new AbortController();
+    ended.abort();
+    expect(await sheetTable("a.xlsx", sheetOf(rows.join("")), 0, ended.signal)).toEqual({
+      kind: "none",
+      reason: "failed",
     });
   });
 

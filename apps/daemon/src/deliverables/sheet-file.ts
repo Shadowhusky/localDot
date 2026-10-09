@@ -80,11 +80,15 @@ function attr(attrs: string, local: string): string | undefined {
   return m ? decode(m[1] ?? m[2] ?? "") : undefined;
 }
 
-// Parsing a large workbook gives the daemon's other work a turn every few thousand elements.
+// Parsing a large workbook gives the daemon's other work a turn every few thousand elements, and
+// stops there once nobody waits for it.
 const SLICE = 8192;
-function turns(): () => Promise<void> | undefined {
+function turns(signal?: AbortSignal): () => Promise<void> | undefined {
   let n = 0;
-  return () => (++n % SLICE === 0 ? new Promise((resolve) => setImmediate(resolve)) : undefined);
+  return () =>
+    ++n % SLICE === 0
+      ? new Promise<void>((resolve) => setImmediate(resolve)).then(() => signal?.throwIfAborted())
+      : undefined;
 }
 
 function xmlOf(zip: Zip, name: string): string | undefined {
@@ -98,16 +102,20 @@ export async function sheetTable(
   name: string,
   bytes: Buffer,
   sheet: number,
+  signal?: AbortSignal,
 ): Promise<TableFileReply> {
   try {
     const zip = new Zip(bytes);
-    return await (fileExtension(name) === "ods" ? ods(zip, sheet) : xlsx(zip, sheet));
+    const turn = turns(signal);
+    return await (fileExtension(name) === "ods" ? ods(zip, sheet, turn) : xlsx(zip, sheet, turn));
   } catch (error) {
     return { kind: "none", reason: error instanceof ZipRefused ? error.reason : "failed" };
   }
 }
 
-async function xlsx(zip: Zip, wanted: number): Promise<TableFileReply> {
+type Turn = ReturnType<typeof turns>;
+
+async function xlsx(zip: Zip, wanted: number, turn: Turn): Promise<TableFileReply> {
   const workbook = xmlOf(zip, "xl/workbook.xml");
   if (workbook === undefined) throw new ZipRefused("failed");
   const sheets: { name: string; rel: string }[] = [];
@@ -134,10 +142,10 @@ async function xlsx(zip: Zip, wanted: number): Promise<TableFileReply> {
   const path = chosen && targets.get(chosen.rel);
   const xml = path === undefined ? undefined : xmlOf(zip, path);
   if (xml === undefined) return tableReply(grid, names, wanted, chosen ? null : 0);
-  const strings = await sharedStrings(xmlOf(zip, "xl/sharedStrings.xml"));
+  const strings = await sharedStrings(xmlOf(zip, "xl/sharedStrings.xml"), turn);
   const formats = cellFormats(xmlOf(zip, "xl/styles.xml"));
-  const turn = turns();
   let row: string[] = [];
+  let width = 0;
   let next = 1;
   let column = 0;
   let cell: { type: string; style: number } | undefined;
@@ -152,8 +160,9 @@ async function xlsx(zip: Zip, wanted: number): Promise<TableFileReply> {
     }
     if (t.name === "row") {
       if (t.close) {
-        grid.add(row);
+        grid.add(row, 1, width);
         row = [];
+        width = 0;
         continue;
       }
       const at = Number(attr(t.attrs, "r") ?? next) || next;
@@ -164,7 +173,8 @@ async function xlsx(zip: Zip, wanted: number): Promise<TableFileReply> {
       if (t.empty) grid.add([]);
     } else if (t.name === "c") {
       if (t.close) {
-        if (cell) placeCell(row, column, cellText(cell, value, strings, formats, date1904));
+        if (cell && placeCell(row, column, cellText(cell, value, strings, formats, date1904)))
+          width = Math.max(width, column + 1);
         column++;
         cell = undefined;
         into = undefined;
@@ -184,26 +194,31 @@ async function xlsx(zip: Zip, wanted: number): Promise<TableFileReply> {
   return tableReply(grid, names, wanted, grid.total);
 }
 
-function placeCell(row: string[], column: number, text: string): void {
-  if (column >= V.tableColumns * 4 && text === "") return;
+// Whether the cell holds anything. One past the shown columns only widens the row: nothing pads the
+// row out to it.
+function placeCell(row: string[], column: number, text: string): boolean {
+  if (text === "") return false;
+  if (column >= V.tableColumns) return true;
   while (row.length < column) row.push("");
   row[column] = text;
+  return true;
 }
 
+// A cell reference's column, never past Excel's last (XFD, the 16,384th).
+const LAST_COLUMN = 16_384;
 function columnIndex(ref: string): number {
   let n = 0;
-  for (const ch of ref) {
-    const code = ch.charCodeAt(0);
+  for (let i = 0; i < ref.length && n <= LAST_COLUMN; i++) {
+    const code = ref.charCodeAt(i);
     if (code < 65 || code > 90) break;
     n = n * 26 + code - 64;
   }
-  return Math.max(0, n - 1);
+  return Math.max(0, Math.min(n, LAST_COLUMN) - 1);
 }
 
-async function sharedStrings(xml: string | undefined): Promise<string[]> {
+async function sharedStrings(xml: string | undefined, turn: Turn): Promise<string[]> {
   const out: string[] = [];
   if (xml === undefined) return out;
-  const turn = turns();
   let current: string | undefined;
   let phonetic = false;
   let text = false;
@@ -284,7 +299,7 @@ function cellText(
   return `${iso.slice(0, 10)} ${iso.slice(11, 16)}`;
 }
 
-async function ods(zip: Zip, wanted: number): Promise<TableFileReply> {
+async function ods(zip: Zip, wanted: number, turn: Turn): Promise<TableFileReply> {
   const xml = xmlOf(zip, "content.xml");
   if (xml === undefined) throw new ZipRefused("failed");
   const names: string[] = [];
@@ -297,7 +312,6 @@ async function ods(zip: Zip, wanted: number): Promise<TableFileReply> {
   let hidden = 0;
   // Only text inside a paragraph shows: the layout between elements is not the cell's.
   let paragraph = 0;
-  const turn = turns();
   for (const t of xmlTokens(xml)) {
     const pause = turn();
     if (pause) await pause;

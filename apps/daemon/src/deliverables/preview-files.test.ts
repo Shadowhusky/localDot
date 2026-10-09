@@ -159,6 +159,23 @@ describe("the preview route", () => {
     expect(body).not.toContain("\r");
   });
 
+  it("takes out of a page what WebKit would connect for before its policy applies", async () => {
+    const { save, load, link } = setup();
+    save(
+      "page.html",
+      `<link rel=stylesheet href=page.css><link rel=preconnect href=https://a.example><p><a href=https://b.example target=_blank ping=https://c.example>b</a></p>`,
+    );
+    save("deep.html", `${"<div>".repeat(300)}x`);
+    const base = await link();
+    const page = await load(`${base}page.html`);
+    expect(page.headers.get("x-dns-prefetch-control")).toBe("off");
+    const body = await page.text();
+    expect(body).toContain('<link rel="stylesheet" href="page.css">');
+    expect(body).toContain('<a href="https://b.example">b</a>');
+    expect(body).not.toMatch(/preconnect|target|ping/);
+    expect((await load(`${base}deep.html`)).status).toBe(415);
+  });
+
   it("serves an SVG as an inert picture, never as a document that runs", async () => {
     const { save, load, link } = setup();
     save(
@@ -226,8 +243,8 @@ describe("the preview route", () => {
     save("page.html", "<p>one</p>");
     save("page.html", "<p>two</p>");
     const base = await link();
-    expect(await (await load(`${base}page.html?v=1`)).text()).toBe("<p>one</p>");
-    expect(await (await load(`${base}page.html`)).text()).toBe("<p>two</p>");
+    expect(await (await load(`${base}page.html?v=1`)).text()).toContain("<p>one</p>");
+    expect(await (await load(`${base}page.html`)).text()).toContain("<p>two</p>");
     const css = await load(`${base}page.css`);
     expect(css.headers.get("content-type")).toBe("text/css; charset=utf-8");
   });
@@ -301,5 +318,16 @@ describe("text and tables for the full preview", () => {
     expect((await table(1)).kind === "table" && (await table(1))).toMatchObject({
       rows: [["Day"], ["2026-10-09"]],
     });
+  });
+
+  it("stops reading a workbook once its request is gone", async () => {
+    const { task, save, call } = setup();
+    save("long.xlsx", xlsxOf([{ name: "S", rows: Array.from({ length: 5000 }, (_, i) => [i]) }]));
+    const gone = new AbortController();
+    gone.abort();
+    const reply = await call(`/api/agent/sessions/${task}/files/long.xlsx/table`, {
+      signal: gone.signal,
+    });
+    expect(await reply.json()).toEqual({ kind: "none", reason: "failed" });
   });
 });
