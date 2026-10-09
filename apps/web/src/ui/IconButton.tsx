@@ -6,9 +6,10 @@ import { joinIds, mergeHandlers } from "./merge.ts";
 import { pressHandlers } from "./press.ts";
 import { useTooltip } from "./Tooltip.tsx";
 
-export type IconButtonSize = 24 | 28 | 32 | 36 | 44;
+// 52 is a porcelain play disc on a picture.
+export type IconButtonSize = 24 | 28 | 32 | 36 | 44 | 52;
 
-const ICON_SIZE = { 24: 14, 28: 16, 32: 18, 36: 18, 44: 22 } as const;
+const ICON_SIZE = { 24: 14, 28: 16, 32: 18, 36: 18, 44: 22, 52: 22 } as const;
 
 export interface IconButtonProps
   extends Omit<ComponentProps<"button">, "disabled" | "children" | "aria-label"> {

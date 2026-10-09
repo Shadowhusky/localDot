@@ -7,8 +7,8 @@ export interface PresenceInput {
   showDot: boolean;
   // The curtain covers the stage: nothing is known yet, or the computer is off, starting or failed.
   curtain: boolean;
-  // The stage isn't on screen, as in Replay.
-  stageHidden: boolean;
+  // Replay is open: dot sits in its own band, or beside the chosen recording, whatever Watch shows.
+  replaying: boolean;
   // A phone's keyboard is up and the band has collapsed.
   keyboard: boolean;
   // First-run setup covers the app.
@@ -18,13 +18,13 @@ export interface PresenceInput {
 export function presencePlace({
   showDot,
   curtain,
-  stageHidden,
+  replaying,
   keyboard,
   setup,
 }: PresenceInput): PresencePlace | null {
   if (!showDot) return null;
   if (setup) return "intro";
-  if (stageHidden) return null;
+  if (replaying) return "dock";
   if (curtain) return "hero";
   return keyboard ? "badge" : "dock";
 }

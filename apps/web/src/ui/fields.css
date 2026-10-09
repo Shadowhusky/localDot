@@ -110,6 +110,15 @@
     }
   }
 
+  /* A search bar on a phone: a raised fill and no edge until it has focus. */
+  .ui-text-field[data-filled]:not(:focus-within) {
+    border-color: transparent;
+  }
+
+  .ui-text-field[data-filled] {
+    background-color: var(--color-raised);
+  }
+
   .ui-text-field:focus-within,
   .ui-text-area:focus {
     border-color: var(--color-fg-2);

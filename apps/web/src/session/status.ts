@@ -391,7 +391,7 @@ const COMPUTER_POSE: Record<ComputerPhase, DotState> = {
   failed: "error",
   unavailable: "error",
 };
-const TASK_POSE: Record<TaskRow, DotState> = {
+export const TASK_POSE: Record<TaskRow, DotState> = {
   approval: "waiting",
   question: "waiting",
   waiting: "waiting",
