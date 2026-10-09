@@ -287,10 +287,240 @@
   white-space: nowrap;
 }
 
+.focus-side {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: calc(var(--spacing) * 4);
+}
+
 .focus-controls {
   display: flex;
   flex-direction: column;
   gap: calc(var(--spacing) * 2.5);
+}
+
+/* The control tools join the column as its own buttons. */
+.control-tools[data-compact] {
+  display: contents;
+}
+
+.focus-hint {
+  display: none;
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-align: center;
+}
+
+/* Focus mode held upright, after Full screen (design-v2 §8.5 turned on its side): the picture across
+   the screen's width at its middle, dot and its step above it, the controls in a row under it with
+   a word on turning the phone for a bigger picture. */
+@media (orientation: portrait) {
+  .app[data-focus] .stage-band,
+  .app[data-focus] .stage-side {
+    --_margin: calc((100dvh - (100vw - 16px) / 1.6) / 2);
+    right: 0;
+    left: 0;
+    width: auto;
+    height: var(--_margin);
+  }
+
+  .app[data-focus] .stage-band {
+    top: auto;
+    bottom: 100%;
+  }
+
+  .app[data-focus] .stage-side {
+    top: 100%;
+    bottom: auto;
+  }
+
+  .app[data-focus] .focus-controls {
+    flex-direction: row;
+  }
+
+  .app[data-focus] .focus-hint {
+    display: block;
+  }
+}
+
+/* A glass button in the picture's corner while the user watches: full screen, also a double-click
+   or F away. It shows only while the pointer is over the picture. */
+.stage-expand {
+  position: absolute;
+  right: calc(var(--spacing) * 3);
+  bottom: calc(var(--spacing) * 3);
+  z-index: 4;
+  display: flex;
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  opacity: 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.stage-expand:has(:focus-visible) {
+  opacity: 1;
+}
+
+@media (hover: hover) {
+  .stage-box:hover .stage-expand {
+    opacity: 1;
+  }
+}
+
+/* While the user has the computer (design-v2 §11 F): the control strip at the band's right, under
+   the stage's right edge, with what a keyboard and mouse on this side can't do directly. Nothing
+   appears above or below the stage. */
+.control-strip {
+  position: absolute;
+  top: calc(var(--spacing) * 6.5);
+  right: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--spacing);
+  height: 44px;
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-raised);
+  box-shadow:
+    var(--shadow-raised),
+    0 0 0 1px var(--color-hairline);
+  animation: control-strip-in var(--dur-fade) var(--ease-standard) both;
+}
+
+.control-strip > .ui-button {
+  --_quiet-fg: var(--color-fg-1);
+}
+
+.control-strip > .ui-button svg {
+  color: var(--color-fg-2);
+}
+
+.control-strip-chevron {
+  margin-left: calc(var(--spacing) * -0.5);
+}
+
+.control-strip-divider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 calc(var(--spacing) * 0.5);
+  background-color: var(--color-separator);
+}
+
+@keyframes control-strip-in {
+  from {
+    opacity: 0;
+  }
+}
+
+/* The line beside dot leaves the strip its room. */
+.stage-band:has(.control-strip) .narration {
+  width: min(600px, 100% - var(--line-x) - var(--control-strip-w) - calc(var(--spacing) * 6));
+}
+
+/* As wide as the popover's content box: its 320 less its padding. */
+.type-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: calc(var(--spacing) * 3);
+  width: min(288px, 100vw - 48px);
+}
+
+.type-text > .ui-field {
+  align-self: stretch;
+}
+
+.type-text-field {
+  -webkit-text-security: disc;
+}
+
+@media (--phone) {
+  .control-strip {
+    display: none;
+  }
+
+  .type-text {
+    width: auto;
+  }
+}
+
+/* Full screen (design-v2 §11 G): the stage takes the whole screen, 16:10 and square-cornered, its
+   rim inside the screen's edge. The house fades away behind it as it travels; the band folds, dot
+   moves into the island and the control strip floats over the picture's foot. */
+.app[data-full] .stage-col {
+  position: fixed;
+  inset: 0;
+  z-index: var(--layer-island);
+  justify-content: center;
+  align-items: center;
+  padding: 0;
+}
+
+.app[data-full] .stage-col::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-color: var(--color-void);
+  animation: full-house-in var(--dur-default) var(--ease-standard) both;
+}
+
+@keyframes full-house-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.app[data-full] .stage-col > .stage-frame {
+  flex: none;
+  width: min(100vw, 100dvh * 1.6);
+}
+
+.app[data-full] :is(.stage-box > .stage, .stage-rim) {
+  border-radius: 0;
+}
+
+.app[data-full] .stage-spill {
+  display: none;
+}
+
+.app[data-full] .stage-band {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  flex: none;
+  height: 0;
+  min-height: 0;
+}
+
+.app[data-full] .narrator {
+  display: none;
+}
+
+.app[data-full] .control-strip {
+  top: auto;
+  right: auto;
+  bottom: calc(var(--spacing) * 4);
+  left: 50%;
+  translate: -50% 0;
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  transition: opacity var(--dur-default) var(--ease-standard);
+}
+
+/* The house's own regions stay put behind the stage, out of reach, once it has arrived. */
+.app[data-full] > .bar,
+.app[data-full] .rail-panel {
+  visibility: hidden;
+  transition: visibility 0s var(--dur-gentle);
 }
 
 /* The curtain (design-v2 §4, §11 A–B): the stage's own box while there is no picture. dot sleeps in

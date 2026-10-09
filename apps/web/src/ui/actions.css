@@ -170,11 +170,12 @@
     font-weight: var(--font-weight-semibold);
   }
 
+  /* A quiet label reads in fg-2 unless its group lights it brighter through --_quiet-fg. */
   .ui-button[data-variant="quiet"] {
     --_bg: transparent;
     --_bg-hover: var(--color-control);
     --_bg-pressed: var(--color-control-hover);
-    --_fg: var(--color-fg-2);
+    --_fg: var(--_quiet-fg, var(--color-fg-2));
     --_fg-hover: var(--color-fg-1);
   }
 
@@ -197,6 +198,10 @@
   .ui-button[data-round] {
     --_pad: calc(var(--spacing) * 3);
     border-radius: var(--radius-full);
+  }
+
+  .ui-button[data-round]:is([data-size="xl"], [data-size="xxl"]) {
+    --_pad: calc(var(--spacing) * 4.5);
   }
 
   .ui-button[data-variant="primary"][data-round] {
@@ -393,6 +398,12 @@
     --_face: transparent;
     --_image: var(--porcelain-pressed);
     color: var(--color-porcelain-ink);
+  }
+
+  /* A toggle that is on reads as the switch's on track: a light face, the glyph in the house's ink. */
+  .ui-icon-button[aria-pressed="true"]:not([aria-disabled="true"], [data-variant="primary"]) {
+    --_face: var(--color-fg-1);
+    color: var(--color-void);
   }
 
   .ui-icon-button[data-variant="primary"][aria-disabled="true"] {

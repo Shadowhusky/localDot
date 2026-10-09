@@ -12,6 +12,12 @@ describe("focus mode", () => {
     expect(inFocus(base)).toBe(true);
   });
 
+  it("gives an upright phone's screen to the picture once the user asks for full screen", () => {
+    expect(inFocus({ ...base, landscape: false, full: true })).toBe(true);
+    expect(inFocus({ ...base, landscape: false, full: true, live: false })).toBe(false);
+    expect(inFocus({ ...base, landscape: false, full: true, needsThread: true })).toBe(false);
+  });
+
   it("stays out while upright, without a live picture, while the thread is needed or once left", () => {
     expect(inFocus({ ...base, landscape: false })).toBe(false);
     expect(inFocus({ ...base, live: false })).toBe(false);

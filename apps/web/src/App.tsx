@@ -13,14 +13,15 @@ import { useAskDraft } from "./agent/ask-draft.ts";
 import { composerReply } from "./agent/ask-form.ts";
 import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
 import { uploadFile } from "./agent/file-transfer.ts";
+import { heldByUser } from "./agent/model.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
-import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { workSteps } from "./agent/thread.ts";
 import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
+import { useHandBack } from "./agent/useHandBack.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
@@ -57,7 +58,7 @@ import { STEP_DOT } from "./onboarding/wizard.ts";
 import { RECORDED_TASK, type RecordedTitle, ReplayView } from "./replay/ReplayView.tsx";
 import { timelineRows } from "./session/key-uses.ts";
 import { stepRows } from "./session/session-view.ts";
-import { type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
+import { footWork, type HudAction, statusFor, taskFacts, taskHud } from "./session/status.ts";
 import { useLiveSession } from "./session/useLiveSession.ts";
 import { useNowMs } from "./session/useNowMs.ts";
 import { matchingKeys } from "./settings/choices.ts";
@@ -68,22 +69,26 @@ import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
+import { ControlStrip, ControlTools } from "./shell/ControlStrip.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
+import { useEdgeStill, useFullScreen, useFullScreenKeys } from "./shell/fullscreen.ts";
 import { HudIsland, type StageFields } from "./shell/HudIsland.tsx";
 import {
   islandAttention,
   islandDecision,
   islandShape,
   pauseSlot,
+  takeReason,
   takeSlot,
 } from "./shell/island.ts";
-import { useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
+import { useCentreRoom, useKeyboardFit, useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
+import { narrationLine } from "./shell/narration.ts";
 import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
@@ -96,10 +101,11 @@ import { Announcer } from "./ui/Announcer.tsx";
 import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { IconButton } from "./ui/IconButton.tsx";
+import { isApple } from "./ui/Kbd.tsx";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
-import { Toaster } from "./ui/Toast.tsx";
+import { showToast, Toaster } from "./ui/Toast.tsx";
 import "./app.css";
 
 export interface AppProps {
@@ -107,8 +113,8 @@ export interface AppProps {
 }
 
 type Rejected = "stored" | "link" | "code" | null;
-// What the rail shows: the chat, Activity laid over it, or the controls dot handed over.
-type RailView = "chat" | "activity" | "takeover";
+// What the rail shows: the chat, or Activity laid over it.
+type RailView = "chat" | "activity";
 
 const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
@@ -120,6 +126,8 @@ const LIBRARY = "library";
 const replayAddress = (selected: string | null) =>
   selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
+const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
+const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
 
 export function App({ fetchImpl }: AppProps) {
   const [token, setToken] = useState(() => storedToken());
@@ -447,6 +455,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const [activityOpen, setActivityOpen] = useState(false);
   if (activityOpen && !phone) setActivityOpen(false);
   const island = useRef<HTMLDivElement>(null);
+  const bar = useRef<HTMLElement>(null);
   const controls = useTaskControls({
     api,
     cell,
@@ -456,6 +465,7 @@ function Theatre({ api }: { api: ApiClient }) {
     suspended: settings.open,
     manualVisible: true,
     refreshCell: retry,
+    lookLive: session.check,
   });
   const safety = useSafety({
     api,
@@ -503,6 +513,7 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const yours = !!takeover && takeover === heldByUser(agent.model);
   const askDraft = useAskDraft(question);
   const answer = useRef(controls.answer);
   answer.current = controls.answer;
@@ -542,30 +553,42 @@ function Theatre({ api }: { api: ApiClient }) {
     return plan.kind === "answer" ? "answered" : "declined";
   };
   const manualLive =
-    !!takeover &&
-    controls.canInput &&
-    physicalStageCell?.state === "ready" &&
-    !physicalStageCell.paused;
+    yours && controls.canInput && physicalStageCell?.state === "ready" && !physicalStageCell.paused;
   const manual = useManualChannel(
     api,
     manualLive ? agent.sessionId : null,
     manualLive ? (takeover?.requestId ?? null) : null,
     agent.reconcile,
   );
-  // The rail opens on the hand-over's controls when dot hands the computer over; once it is handed
-  // back, the rail goes back to the chat.
-  const takeoverShown = useRef<string | null>(null);
+  const { send: sendManual } = manual;
+  // A right-click on a phone is for the next tap only.
+  const sendToComputer = useCallback(
+    (input: Parameters<typeof sendManual>[0]) => {
+      sendManual(input);
+      if (input.kind === "click" && input.button === "right") setPointerMode("click");
+    },
+    [sendManual],
+  );
   useEffect(() => {
-    const requestId = takeover?.requestId;
-    if (!requestId || requestId === takeoverShown.current) return;
-    takeoverShown.current = requestId;
-    setRailView("takeover");
-  }, [takeover?.requestId]);
+    if (pasteRefused) showToast({ title: pasteRefused, tone: "danger" });
+  }, [pasteRefused]);
+  const lastScreen = useRef(shownScreen);
+  useEffect(() => {
+    if (replayId || lastScreen.current === shownScreen) return;
+    lastScreen.current = shownScreen;
+    showToast({
+      id: "screen",
+      title:
+        shownScreen === "browser" ? "dot moved to the web browser" : "dot is back on the desktop",
+    });
+  }, [replayId, shownScreen]);
+  const browserProblem =
+    !replayId && shownScreen === "browser" && !browserScreen.cell ? browserScreen.error : undefined;
+  useEffect(() => {
+    if (browserProblem) showToast({ id: "screen", title: browserProblem, tone: "danger" });
+  }, [browserProblem]);
   const shownView: RailView =
-    (railView === "takeover" && !takeover) ||
-    (railView === "activity" && (layout === "wide" || phone))
-      ? "chat"
-      : railView;
+    railView === "activity" && (layout === "wide" || phone) ? "chat" : railView;
   const guardStart = () => {
     if (
       !controls.stopping &&
@@ -637,12 +660,18 @@ function Theatre({ api }: { api: ApiClient }) {
     return () => clearTimeout(timer);
   }, [opened]);
   const facts = taskFacts(agent.model);
+  // The user's own time on the computer, with no task: the island shows it only while they hold it.
+  const ownHold =
+    agent.snapshot?.holder === true ||
+    (session.ended && agent.history === true && agent.model.messages.size === 0);
+  const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
   const now = useNowMs(session.model, session.version, (t) => {
-    if (!session.sessionId) return false;
+    if (!shownTask) return false;
     const hud = taskHud(session.model, t, facts);
     return hud.phase === "running" || hud.elapsedS !== null;
   });
-  const task = session.sessionId && !opening ? taskHud(session.model, now, facts) : null;
+  const task = shownTask ? taskHud(session.model, now, facts) : null;
+  const foot = footWork(task);
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -727,6 +756,14 @@ function Theatre({ api }: { api: ApiClient }) {
     reason: conversationReason,
   };
   const curtain = useCurtain(appStatus.computer, !!replayId);
+  const stageBox = useRef<HTMLDivElement>(null);
+  const fullScreen = useFullScreen({
+    available: !curtain.up && !replayId,
+    phone,
+    frame: stageBox,
+  });
+  // A phone shows full screen as focus mode; a wider screen gives the stage the whole screen.
+  const full = fullScreen.on && !phone;
   const computerAction = appStatus.actions.find(
     (action): action is HudAction & { kind: HudActionKind } => action.kind !== "stop-task",
   );
@@ -746,6 +783,7 @@ function Theatre({ api }: { api: ApiClient }) {
     replaying: !!replayId,
     keyboard,
     setup: onboarding.open,
+    full,
   });
   const chosenKey =
     mainChoice?.provider === "chatgpt"
@@ -775,9 +813,6 @@ function Theatre({ api }: { api: ApiClient }) {
       attention: shownView !== "chat" && !!agent.model.pendingAsk,
     },
     ...(wide || phone ? [] : [{ value: "activity", label: "Activity" }]),
-    ...(takeover && !agent.model.ended
-      ? [{ value: "takeover", label: "Your turn", attention: shownView !== "takeover" }]
-      : []),
   ];
   const activity = (
     <ActivityRail
@@ -820,32 +855,15 @@ function Theatre({ api }: { api: ApiClient }) {
       sessionId={session.sessionId}
       scale={cell?.scale ?? 2}
       api={api}
+      nowMs={now}
     />
   );
-  const handover = takeover && !agent.model.ended && (
-    <div
-      className="takeover-scroll ui-scroll-area"
-      data-shown={shownView === "takeover" || undefined}
-    >
-      <TakeoverPanel
-        key={takeover.requestId}
-        takeover={takeover}
-        controls={{ ...controls, canInput: manualLive }}
-        visible={!replayId && shownView === "takeover" && !settings.open}
-        manualStatus={agent.snapshot?.manualControl}
-        receiveKey={receiveKey}
-        screen={manualGeometry}
-        pointerMode={pointerMode}
-        onPointerMode={setPointerMode}
-        send={manual.send}
-        drained={manual.drained}
-        typing={typing}
-        onKeyboard={(on) => stage.current?.keyboard(on)}
-        refused={pasteRefused}
-      />
-    </div>
-  );
   const shape = islandShape(appStatus, curtain.up || opening);
+  // While the user has the computer the island rises into the top bar's centre, where it fits.
+  const [islandWidth, setIslandWidth] = useState(0);
+  const centreRoom = useCentreRoom(bar);
+  const centre =
+    shape === "control" && islandWidth > 0 && islandWidth <= centreRoom ? islandWidth : undefined;
   const sheetsClosed = !settings.open;
   const decision = replayId
     ? null
@@ -912,19 +930,38 @@ function Theatre({ api }: { api: ApiClient }) {
         : askIn === "island"
           ? askOver("island")
           : undefined;
+  // A task live on the computer gives the user its own control; with none, the user's own hold
+  // starts.
+  const liveTask = !!agent.sessionId && !session.ended && !ownHold;
+  // Take control works whatever dot is doing: it does an approval's step instead of dot, takes the
+  // computer dot handed over, or takes it from dot at work, at rest or paused.
   const take = () => {
-    if (decision !== "approval" || !approval) {
-      setRailView("takeover");
+    if (decision === "approval" && approval) {
+      if (!safety.canApprove || safety.pending) return;
+      void safety.answerApproval({
+        approvalId: approval.approvalId,
+        generation: approval.generation,
+        revision: approval.revision,
+        decision: "take_control",
+      });
       return;
     }
-    if (!safety.canApprove || safety.pending) return;
-    void safety.answerApproval({
-      approvalId: approval.approvalId,
-      generation: approval.generation,
-      revision: approval.revision,
-      decision: "take_control",
-    });
+    if (liveTask) void controls.take();
+    else void controls.takeComputer();
   };
+  const takeBlocked = takeReason({
+    task: liveTask,
+    ready: liveTask ? controls.canTake : controls.canTakeComputer,
+    pause: safety.pause?.phase,
+  });
+  const takeState = takeSlot(appStatus, {
+    decision,
+    blocked: takeBlocked,
+    taking: controls.taking,
+  });
+  const unconfirmed = agent.snapshot?.manualControl === "unconfirmed";
+  const handBack = useHandBack({ takeover, controls, drained: manual.drained, unconfirmed });
+  const inputBlocked = manualLive ? undefined : "Wait for the computer to be ready";
   const replacement = safety.replacement?.phase;
   // The curtain speaks while it is up; under it the band is quiet. On a phone, where the decision
   // is a sheet below, dot asks it aloud.
@@ -932,10 +969,14 @@ function Theatre({ api }: { api: ApiClient }) {
     ? ""
     : phone && approvalView && approval
       ? decisionWords(approval).line
-      : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
-        ? appStatus.caption.text
-        : "";
-  const speaker = phone && approvalView ? "dot" : appStatus.caption.speaker;
+      : yours && unconfirmed
+        ? UNCONFIRMED_LINE
+        : yours && phone
+          ? PHONE_CONTROL_LINE
+          : appStatus.caption.speaker === "dot" || appStatus.computer !== "live"
+            ? narrationLine(appStatus.row, appStatus.caption.text, agent.model.said)
+            : "";
+  const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
   const asked = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
@@ -948,10 +989,21 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const { focus, leave: leaveFocus } = useFocusMode(
     !curtain.up && !replayId,
-    !!question || (!!takeover && !agent.model.ended),
+    !!question,
+    fullScreen.on && phone,
   );
-  const still = useStill(focus) && !islandAttention(appStatus);
-  const working = !!task;
+  const touchStill = useStill(focus);
+  const edgeStill = useEdgeStill(full);
+  const still = (touchStill || edgeStill) && !islandAttention(appStatus);
+  useFullScreenKeys({
+    enabled: !phone && !curtain.up && !replayId,
+    apple: isApple(),
+    full,
+    yours,
+    enter: fullScreen.enter,
+    exit: fullScreen.exit,
+  });
+  const working = !!task && !yours;
   const stepCount = useMemo(
     () => (focus && working ? workSteps(rows, agent.model).length : 0),
     [focus, working, rows, agent.model],
@@ -969,10 +1021,11 @@ function Theatre({ api }: { api: ApiClient }) {
   return (
     <div
       ref={page}
-      className="app"
+      className={appStatus.control && !replayId ? "app control" : "app"}
       data-layout={layout}
       data-replaying={replayId ? "" : undefined}
       data-focus={focus ? "" : undefined}
+      data-full={full ? "" : undefined}
       data-still={still ? "" : undefined}
       data-keyboard={keyboard ? "" : undefined}
       data-setup={onboarding.open ? "" : undefined}
@@ -1025,12 +1078,16 @@ function Theatre({ api }: { api: ApiClient }) {
         settingsOpen={settings.open}
         onSettings={showSettings}
         settingsRef={settingsButton}
+        centre={centre}
+        ref={bar}
       />
       <div className="watch" hidden={!!replayId} inert={!!replayId}>
         <main className="stage-col" aria-label="Computer">
           <ErrorBoundary>
             <StageFrame
-              light={appStatus.control ? "dot" : manualLive ? "you" : "none"}
+              boxRef={stageBox}
+              onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
+              light={appStatus.control ? "dot" : yours ? "you" : "none"}
               live={stageHud.live}
               frozen={!!stageHud.paused}
               curtain={
@@ -1072,13 +1129,19 @@ function Theatre({ api }: { api: ApiClient }) {
                     shape={shape}
                     badge={place === "badge"}
                     pause={pause}
-                    take={takeSlot(appStatus, decision)}
+                    take={takeState}
+                    handBack={handBack.slot}
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
                     onStopTask={taskStop}
                     onTake={take}
+                    onHandBack={() => void handBack.run()}
                     onComputer={onComputer}
                     decision={grown}
+                    rise={centre !== undefined}
+                    full={full}
+                    onExitFull={fullScreen.exit}
+                    onRowWidth={setIslandWidth}
                     fields={askFields}
                     notices={
                       <>
@@ -1097,37 +1160,57 @@ function Theatre({ api }: { api: ApiClient }) {
                 </>
               }
               band={
-                <NarratorBand
-                  line={narration}
-                  speaker={speaker}
-                  reveal={!!asked && narration === asked}
-                  showDot={showDot.value}
-                  note={focus && stepCount ? `Step ${stepCount}` : undefined}
-                />
+                <>
+                  <NarratorBand
+                    line={narration}
+                    speaker={speaker}
+                    reveal={!!asked && narration === asked}
+                    showDot={showDot.value}
+                    note={focus && stepCount ? `Step ${stepCount}` : undefined}
+                  />
+                  {yours && !phone && (
+                    <ControlStrip
+                      send={sendToComputer}
+                      blocked={inputBlocked}
+                      full={full}
+                      onFullScreen={fullScreen.toggle}
+                    />
+                  )}
+                </>
               }
               side={
                 focus && (
                   <FocusControls
-                    take={takeSlot(appStatus, decision)}
+                    take={takeState}
                     pause={shape === "task" ? pause : null}
                     stop={appStatus.actions.find((action) => action.kind === "stop-task")}
                     onTake={take}
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
                     onStop={taskStop}
-                    onLeave={leaveFocus}
+                    onLeave={() => {
+                      leaveFocus();
+                      fullScreen.exit();
+                    }}
+                    tools={
+                      yours ? (
+                        <ControlTools
+                          compact
+                          send={sendToComputer}
+                          blocked={inputBlocked}
+                          typing={typing}
+                          onKeyboard={(on) => stage.current?.keyboard(on)}
+                          rightClick={pointerMode === "right"}
+                          onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                          handBack={handBack.slot}
+                          onHandBack={() => void handBack.run()}
+                        />
+                      ) : undefined
+                    }
                   />
                 )
               }
             >
-              {!replayId && selectedScreen && (
-                <div className="screen-label" role="status">
-                  {selectedScreen.screen === "browser" ? "Web browser" : "Desktop"}
-                  {selectedScreen.screen === "browser" && !browserScreen.cell && (
-                    <span> · {browserScreen.error ?? "Connecting…"}</span>
-                  )}
-                </div>
-              )}
               <Stage
                 ref={stage}
                 mode={replayId ? "replay" : "live"}
@@ -1140,18 +1223,31 @@ function Theatre({ api }: { api: ApiClient }) {
                 reconnects={reconnects + browserScreen.reconnects}
                 listed={listed}
                 manual={
-                  takeover && manualGeometry && !agent.model.ended
+                  yours && manualGeometry && !agent.model.ended
                     ? {
                         enabled: manualLive,
                         screen: manualGeometry,
                         pointer: pointerMode,
-                        send: manual.send,
+                        send: sendToComputer,
                         onTyping: setTyping,
                         onRefused: setPasteRefused,
                       }
                     : undefined
                 }
               />
+              {!phone && !yours && !full && stageHud.live && (
+                <span className="stage-expand">
+                  <IconButton
+                    variant="glass"
+                    round
+                    size={32}
+                    icon="expand"
+                    label="Full screen"
+                    kbd={["F"]}
+                    onClick={fullScreen.enter}
+                  />
+                </span>
+              )}
             </StageFrame>
           </ErrorBoundary>
         </main>
@@ -1175,7 +1271,7 @@ function Theatre({ api }: { api: ApiClient }) {
               api={api}
               rows={rows}
               computerReady={cell?.state === "ready" && !cell.paused}
-              live={task && !session.ended ? { ...task, nowMs: now } : null}
+              live={foot && !session.ended ? { ...foot, nowMs: now } : null}
               onReplay={
                 agent.sessionId && (agent.model.ended || task?.phase === "finished")
                   ? () => selectReplay(agent.sessionId)
@@ -1226,6 +1322,13 @@ function Theatre({ api }: { api: ApiClient }) {
                         run: (trigger) => showSettings(trigger),
                       },
                       { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+                      {
+                        label: "Full screen",
+                        icon: "expand",
+                        disabledReason:
+                          curtain.up || replayId ? "Turn on your computer first" : undefined,
+                        run: () => fullScreen.enter(),
+                      },
                     ]}
                   />
                 )
@@ -1242,17 +1345,31 @@ function Theatre({ api }: { api: ApiClient }) {
               }
               covered={shownView !== "chat"}
               cover={
-                <>
-                  {!wide && !phone && (
-                    <div
-                      className="rail-cover-activity"
-                      data-shown={shownView === "activity" || undefined}
-                    >
-                      {activity}
-                    </div>
-                  )}
-                  {handover}
-                </>
+                !wide &&
+                !phone && (
+                  <div
+                    className="rail-cover-activity"
+                    data-shown={shownView === "activity" || undefined}
+                  >
+                    {activity}
+                  </div>
+                )
+              }
+              tools={
+                phone &&
+                yours && (
+                  <ControlTools
+                    send={sendToComputer}
+                    blocked={inputBlocked}
+                    typing={typing}
+                    onKeyboard={(on) => stage.current?.keyboard(on)}
+                    rightClick={pointerMode === "right"}
+                    onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                    handBack={handBack.slot}
+                    onHandBack={() => void handBack.run()}
+                    onFullScreen={fullScreen.enter}
+                  />
+                )
               }
               recovery={
                 <TaskRecovery

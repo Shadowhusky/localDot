@@ -7,6 +7,7 @@ import { type HudState, hudFor } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { DotState } from "../dot/engine/states.ts";
 import {
+  footWork,
   liveState,
   past,
   progressive,
@@ -416,6 +417,51 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     });
     const ended = [...requested, ev("takeover.end", 4000, { requestId: ID, by: "user" })];
     expect(view(ended, 4500).task).toMatchObject({ row: "working", control: true });
+  });
+
+  it("puts the user in control of a computer they took, or took from dot's hand-over", () => {
+    const took = [
+      ...typed(),
+      ev("takeover.request", 1500, { requestId: ID, reason: "other", note: "", by: "user" }),
+      ev("agent.state", 1501, { state: "waiting_user", reason: "takeover" }),
+    ];
+    expect(view(took, 9500)).toMatchObject({
+      task: { row: "control", phase: "waiting", label: "You're in control" },
+      status: {
+        caption: { speaker: "dot", text: "I'll wait here until you hand back." },
+        actions: stopsTask,
+        control: false,
+        attention: null,
+        dotPose: "your-turn",
+        elapsedS: 8,
+      },
+    });
+    const handed = [
+      ...typed(),
+      ev("takeover.request", 1500, { requestId: ID, reason: "login", note: "Sign in for me" }),
+    ];
+    expect(view(handed, 9500).task).toMatchObject({ row: "takeover", label: "Your turn" });
+    const taken = [
+      ...handed,
+      ev("control.change", 2000, { holder: "user", reason: "handoff_request" }),
+    ];
+    expect(view(taken, 9500).task).toMatchObject({
+      row: "control",
+      caption: "Your turn. I'll wait here and pick up after you sign in.",
+    });
+    const back = [...took, ev("takeover.end", 4000, { requestId: ID, by: "user" })];
+    expect(view(back, 4500).task).toMatchObject({ row: "working", control: true });
+  });
+
+  it("leaves the thread's foot quiet while the user has the computer, even from a finished task", () => {
+    const finished = [...typed(), ev("agent.state", 1100, { state: "done" })];
+    const took = [
+      ...finished,
+      ev("takeover.request", 1500, { requestId: ID, reason: "other", note: "", by: "user" }),
+    ];
+    expect(view(took, 9500).task?.row).toBe("control");
+    expect(footWork(view(took, 9500).task)).toBeNull();
+    expect(footWork(view(typed(), 900).task)).toMatchObject({ row: "acting" });
   });
 
   it("names the Pause's resuming and unconfirmed phases", () => {

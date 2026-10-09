@@ -47,7 +47,9 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
   });
   switch (e.type) {
     case "takeover.request":
-      return mark("takeover", "Asked you to take control", "user");
+      return e.data.by === "user"
+        ? mark("takeover", "You took control", "user")
+        : mark("takeover", "Asked you to take control", "user");
     // The recording keeps that the user typed, never what.
     case "takeover.end":
       return e.data.by === "stop"

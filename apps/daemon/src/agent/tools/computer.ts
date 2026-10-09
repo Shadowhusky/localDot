@@ -25,10 +25,13 @@ import type { AgentSession } from "../session.ts";
 import { append, frame, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const MAX_WAIT_MS = 30_000;
+const LOOK_AGAIN =
+  "Not done: the user had the computer, so the screen may have changed. Here is the screen now; look again before acting.";
 
 export const UNCHANGED = "The screen did not change: it still matches your last screenshot.";
 
-// The screen after an action: no new image when it is the very screen the model last saw.
+// The screen after an action, which counts as a fresh look: no new image when it is the very screen
+// the model last saw.
 export async function observation(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -38,9 +41,12 @@ export async function observation(
   ctx.check();
   if (basedOn && basedOn !== frameId && deps.png.same?.(ctx.session.id, basedOn, frameId)) {
     ctx.session.lastFrameId = frameId;
+    ctx.session.freshLook();
     return text(UNCHANGED);
   }
-  return frame(deps, ctx, frameId);
+  const image = await frame(deps, ctx, frameId);
+  ctx.session.freshLook();
+  return image;
 }
 
 async function screenshot(
@@ -264,6 +270,12 @@ export async function runInput(
   // An element found at dispatch is checked by its own identity, not the screenshot's pixels.
   const action = gui(a, options.find ? undefined : options.basedOn, options.find);
   if (typeof action === "string") return fail(action);
+  // What dot saw before the user had the computer may be gone: it acts on a fresh look.
+  if (action.verb !== "wait" && session.lookOwed) {
+    const o = await deps.gateway.observe(selected);
+    ctx.check();
+    return { ok: false, notes: [text(LOOK_AGAIN)], frameId: o.frameId, stale: true };
+  }
   // The browser screen presses one key at a time and keeps no button down between actions:
   // refused before approval.
   if (ctx.screen?.selection.screen === "browser") {
