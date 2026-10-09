@@ -19,6 +19,7 @@ const task = (row: TaskHud["row"], phase: TaskHud["phase"] = "running"): TaskHud
   label: "",
   caption: "",
   elapsedS: null,
+  countdownS: null,
   control: phase === "running",
 });
 const status = (row: TaskHud["row"], phase?: TaskHud["phase"]) =>
@@ -48,6 +49,8 @@ describe("dot's feed from the status model", () => {
     expect(dotFeed(status("approval", "waiting"), null, 0).attention).toBe(true);
     expect(dotFeed(status("question", "waiting"), null, 0).attention).toBe(true);
     expect(dotFeed(status("recovery", "waiting"), null, 0).attention).toBe(true);
+    expect(dotFeed(status("limit", "waiting"), null, 0).attention).toBe(true);
+    expect(dotFeed(status("retrying"), null, 0).attention).toBe(false);
     expect(dotFeed(status("acting"), null, 0).attention).toBe(false);
     expect(dotFeed(status("takeover", "waiting"), null, 0).attention).toBe(false);
   });

@@ -1,4 +1,4 @@
-import { type ReactNode, useLayoutEffect, useRef } from "react";
+import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction, Status } from "../session/status.ts";
@@ -41,6 +41,8 @@ export interface HudIslandProps {
   decision?: ReactNode;
   // Short notes that drop from the island, under it or under the decision it grew into.
   notices?: ReactNode;
+  // Toasts hang from the island, or from the decision it grew into.
+  ref?: RefObject<HTMLDivElement | null>;
 }
 
 // Status and the task's controls in one glass island hung on the stage's top edge. Every slot has a
@@ -59,9 +61,11 @@ export function HudIsland({
   onComputer,
   decision,
   notices,
+  ref,
 }: HudIslandProps) {
   const phone = useMediaQuery(HANDHELD);
-  const anchor = useRef<HTMLDivElement>(null);
+  const own = useRef<HTMLDivElement>(null);
+  const anchor = ref ?? own;
   const row = useRef<HTMLDivElement>(null);
   const plate = useRef<HTMLSpanElement>(null);
   const card = useRef<HTMLDivElement>(null);
@@ -102,7 +106,7 @@ export function HudIsland({
     observer.observe(content);
     if (open && card.current) observer.observe(card.current);
     return () => observer.disconnect();
-  }, [open]);
+  }, [open, anchor]);
 
   const stop = status.actions.find((action) => action.kind === "stop-task");
   const computerActions = status.actions.filter(
@@ -135,7 +139,11 @@ export function HudIsland({
           </span>
           {task && (
             <span className="island-elapsed num" data-testid="hud-elapsed" aria-live="off">
-              {status.elapsedS === null ? "" : clock(status.elapsedS)}
+              {status.countdownS !== null
+                ? `in ${status.countdownS} s`
+                : status.elapsedS === null
+                  ? ""
+                  : clock(status.elapsedS)}
             </span>
           )}
           <span className="island-controls">

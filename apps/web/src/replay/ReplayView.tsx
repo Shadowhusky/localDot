@@ -1,6 +1,7 @@
 import { microsToMs } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
 import { useEffect, useRef, useState } from "react";
+import { DotLoader } from "../dot/DotLoader.tsx";
 import { ExportButton } from "../export/ExportButton.tsx";
 import { ExportPopover } from "../export/ExportPopover.tsx";
 import { type ExportContext, exportContext } from "../export/export-context.ts";
@@ -17,6 +18,7 @@ import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { useMediaQuery } from "../ui/media.ts";
 import { triggerProps } from "../ui/Popover.tsx";
+import { Presence } from "../ui/Presence.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet } from "../ui/Sheet.tsx";
@@ -149,6 +151,11 @@ export function ReplayView({
     const timer = setTimeout(write, wait);
     return () => clearTimeout(timer);
   }, [replay.tMs, replay.playing, replay.map, sessionId]);
+
+  // The task's recording opens once; a live one that reopens as it grows keeps its picture.
+  const [opened, setOpened] = useState<string | null>(null);
+  if (replay.status !== "loading" && opened !== sessionId) setOpened(sessionId);
+  const opening = opened !== sessionId;
 
   const card = replay.card;
   // A task picked from the library is named from its row until its own card loads.
@@ -308,6 +315,9 @@ export function ReplayView({
               reconnects={0}
               listed={[]}
             />
+            <Presence show={opening}>
+              <DotLoader className="replay-opening" label="Opening this task" />
+            </Presence>
             <GapCard kind={gapKind} />
             {replay.status === "error" && !gapKind && (
               <p className="replay-error" role="alert">

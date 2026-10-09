@@ -133,6 +133,7 @@ export function resolveRole(
     model.outputUSDPerMTok = 0;
     delete model.cacheReadUSDPerMTok;
     delete model.cacheWriteUSDPerMTok;
+    delete model.reasoningUSDPerMTok;
   } else {
     if (isOpenRouterRouterId(provider.id, model.id))
       throw new BindingError(
@@ -150,6 +151,7 @@ export function resolveRole(
       // input-price fallback instead of retaining a discount from an incompletely priced record.
       delete model.cacheReadUSDPerMTok;
       delete model.cacheWriteUSDPerMTok;
+      delete model.reasoningUSDPerMTok;
     } else if (choice.price)
       throw new BindingError(
         role,

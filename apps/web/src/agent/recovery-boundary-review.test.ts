@@ -140,6 +140,7 @@ it.each(["gap", "takeover", "replacement"] as const)(
       epoch: 1,
       connection: "live",
       replayed: true,
+      history: true,
       streamError: null,
       model,
     };

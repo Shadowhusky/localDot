@@ -259,8 +259,8 @@ func TestCellLifecycle(t *testing.T) {
 func TestBudgetAndModels(t *testing.T) {
 	f := newFixture(t)
 	code, body := f.call(t, "GET", "/v1/budget", nil)
-	if code != 200 || body["perTaskUSD"] != 5.0 || body["perDayUSD"] != 20.0 {
-		t.Fatalf("budget: %d %v", code, body)
+	if code != 200 || body["perTaskUSD"] != 0.0 || body["perDayUSD"] != 0.0 {
+		t.Fatalf("no limits until the user sets them: %d %v", code, body)
 	}
 	if code, _ := f.call(t, "PUT", "/v1/budget", map[string]any{"perTaskUSD": 50, "perDayUSD": 20}); code != 400 {
 		t.Fatalf("task over day: %d", code)

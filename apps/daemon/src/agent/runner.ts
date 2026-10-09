@@ -3,11 +3,13 @@ import { CHATGPT_SWITCHED_OFF } from "@localdot/codex-harness";
 import {
   type AgentLimits,
   BootConfig,
+  type CheckIns,
   DEFAULT_AGENT_LIMITS,
   type KeydRecord,
   type ModelBinding,
   SESSION_PAUSE_REASONS,
   type SkillSummary,
+  STALL,
   type TaskModelSelection,
   type TaskPricing,
   ULID_PATTERN,
@@ -43,6 +45,7 @@ import { RulesStore } from "./safety/rules.ts";
 import { SafetyIntentStore } from "./safety/store.ts";
 import { AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
+import { type DayLimitKeyd, syncDayLimit } from "./spending.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const BRAIN_DONE = 0;
@@ -52,6 +55,14 @@ const IDLE_MS = 30 * 60 * 1000;
 const TERMINAL_SNAPSHOTS = 256;
 const SESSION_PAUSES = new Set<string | undefined>(SESSION_PAUSE_REASONS);
 export const RAISE_BUDGET_FIRST = "Raise this task's budget before resuming it.";
+// The brain checks in only where the user asked it to.
+export function agentLimits(checkIns: CheckIns | undefined): AgentLimits {
+  return {
+    ...DEFAULT_AGENT_LIMITS,
+    ...(checkIns?.steps === undefined ? {} : { maxTurns: checkIns.steps }),
+    ...(checkIns?.failures === undefined ? {} : { maxFailedCalls: checkIns.failures }),
+  };
+}
 export interface TerminalTaskSnapshot {
   readonly sessionId: string;
   readonly cellId: string;
@@ -81,7 +92,8 @@ export interface AgentRunnerDeps {
   installSession?(session: AgentSession, cell: CellSummary): void;
   brains: Pick<BrainCells, "open" | "start" | "exited" | "close"> &
     Partial<Pick<BrainCells, "retireSession">>;
-  keyd: Pick<KeydClient, "secrets" | "beginTask" | "modelAdmission" | "setModelAdmission">;
+  keyd: Pick<KeydClient, "secrets" | "beginTask" | "modelAdmission" | "setModelAdmission"> &
+    DayLimitKeyd;
   keydHealth?(): KeydHealth;
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
@@ -110,6 +122,7 @@ type ModelSelection =
 interface Runtime {
   session: AgentSession;
   selection: ModelSelection;
+  limits: AgentLimits;
   skills: SkillSummary[];
   epoch: number;
   brain?: BrainCell;
@@ -268,6 +281,11 @@ export class AgentRunner {
         const keys = await this.deps.keyd.secrets();
         signal?.throwIfAborted();
         const roles = this.resolveRoles(keys, settings);
+        // Settings saved while keyd was away reach it here, before the task's first model call.
+        await syncDayLimit(this.deps.keyd, settings.dayBudgetUSD).catch(() =>
+          console.error("keyd's daily spending limit could not be updated"),
+        );
+        signal?.throwIfAborted();
         selection = {
           kind: "api",
           roles,
@@ -302,9 +320,11 @@ export class AgentRunner {
         new RulesStore(this.deps.home),
       );
       session.earlier = earlier;
+      session.actionLimit = settings.checkIns?.actions;
       const rt: Runtime = {
         session,
         selection,
+        limits: agentLimits(settings.checkIns),
         skills: [],
         epoch: 0,
         initialized: false,
@@ -810,7 +830,11 @@ export class AgentRunner {
           crashes = 0;
           session.append(
             "agent.state",
-            code === BRAIN_DONE ? { state: "done" } : { state: "idle", reason: "gave up" },
+            session.actionLimitReached
+              ? { state: "idle", reason: STALL.actionLimit }
+              : code === BRAIN_DONE
+                ? { state: "done" }
+                : { state: "idle", reason: "gave up" },
           );
           session.setStatus("idle");
           const idleWait = new AbortController();
@@ -986,7 +1010,7 @@ export class AgentRunner {
           proxy: { url: brain.proxyUrl, token: brain.proxyToken },
           memory: this.deps.memory.readBoth(),
           skills,
-          limits: this.deps.limits ?? DEFAULT_AGENT_LIMITS,
+          limits: this.deps.limits ?? rt.limits,
           resume,
           inboxAfter: session.delivered,
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),

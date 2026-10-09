@@ -5,6 +5,7 @@ import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
+import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import "./stage-frame.css";
 
 type ComputerAction = HudAction & { kind: HudActionKind };
@@ -69,7 +70,7 @@ export function Curtain({
       data-dot={showDot ? "" : undefined}
       aria-label={copy ? copy.title : "Your computer"}
     >
-      {copy && (
+      {copy ? (
         <div className="curtain-col">
           {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
           <h2 className="curtain-title">{copy.title}</h2>
@@ -102,6 +103,12 @@ export function Curtain({
               </Button>
             )}
           </div>
+        </div>
+      ) : (
+        // Nothing is known yet: dot wakes where it will sit, and no words that could turn out wrong.
+        <div className="curtain-col" role="status">
+          {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
+          <VisuallyHidden>Starting localDot</VisuallyHidden>
         </div>
       )}
     </section>

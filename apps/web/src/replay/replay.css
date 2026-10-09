@@ -31,6 +31,19 @@
   padding-bottom: calc(var(--spacing) * 4);
 }
 
+.replay-loading {
+  min-height: 320px;
+}
+
+/* Over the stage's well until the task's recording has opened. */
+.replay-opening {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  border-radius: inherit;
+  background-color: var(--color-well);
+}
+
 .replay-day-title {
   padding: 0 calc(var(--spacing) * 2) var(--spacing);
   color: var(--color-fg-3);

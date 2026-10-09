@@ -18,9 +18,11 @@ import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
+import { Spinner } from "../ui/Spinner.tsx";
 import { SentFiles } from "./Attachments.tsx";
 import { fileName, splitAttachments } from "./attachments.ts";
 import { CopyButton } from "./CopyButton.tsx";
+import { type EarlierThread, OPENING_ROWS } from "./earlier.ts";
 import { HistoryPages } from "./HistoryPages.tsx";
 import { type LiveWork, LiveWorkLine } from "./LiveWorkLine.tsx";
 import type { AgentMessage, AgentResult } from "./model.ts";
@@ -28,6 +30,7 @@ import { Outbox } from "./outbox.ts";
 import { answerText, QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
+import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
 import {
   type ThreadItem,
   type ThreadKind,
@@ -38,8 +41,9 @@ import {
 import { reducedMotion, useFollowScroll } from "./useFollowScroll.ts";
 import { usePagedRows } from "./usePagedRows.ts";
 
-// The thread mounts at most this many items; scrolling to either end moves it by half.
-const WINDOW = 200;
+// The thread mounts at most this many items, the newest on opening; scrolling to either end moves it
+// by half.
+const WINDOW = OPENING_ROWS;
 // The foot (the live work line and the composer) sits under the thread and stays put while it
 // scrolls. Only on a very short column (a phone on its side) does it join the end of the thread
 // instead, which keeps one scroller and room to read. Only the column's height decides, so typing, a
@@ -55,8 +59,6 @@ const END_BELOW = 400;
 // A recovery card brought into view sits this far under the scroller's faded top edge.
 const REVEAL_MARGIN = 16;
 const itemKey = (item: ThreadItem) => item.key;
-// How long a newly shown task's history may take to arrive.
-const LOADING_MS = 600;
 
 // What the jump button says has arrived: one kind by its name, a mix as updates. Your answers are
 // messages too.
@@ -227,10 +229,13 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
         startMs={item.startMs}
         live={null}
         ended={endedOf(item, thread)}
+        spend={item.spend}
       />
     ),
     same: (was, now, then, thread) =>
       was.startMs === now.startMs &&
+      was.spend?.usd === now.spend?.usd &&
+      was.spend?.estimated === now.spend?.estimated &&
       endedOf(was, then) === endedOf(now, thread) &&
       sameSteps(was.steps, now.steps),
   },
@@ -291,6 +296,11 @@ const Row = memo(function Row({ row, fresh, thread }: RowProps) {
 export interface ConversationProps {
   items: readonly ThreadItem[];
   truncated: boolean;
+  // The history the thread opens on is still arriving: it shows message-shaped bones meanwhile, then
+  // all of it at once, already at the end.
+  loading?: boolean;
+  // The conversation's earlier tasks, read in one at a time as the reader scrolls up.
+  earlier?: Pick<EarlierThread, "more" | "reading" | "older">;
   // The conversation goes back further than the thread shows.
   earlierInReplay?: boolean;
   visible?: boolean;
@@ -327,6 +337,8 @@ export interface ConversationProps {
 export function Conversation({
   items,
   truncated,
+  loading = false,
+  earlier,
   earlierInReplay = false,
   visible = true,
   ownerKey = "",
@@ -401,17 +413,18 @@ export function Conversation({
     );
   }, [completed, ownerKey, visible]);
 
-  // Items that arrive at the end once the thread has drawn its history ease in; history, which may
-  // come in a few batches as the task loads, appears as it is.
-  const known = useRef({ owner: ownerKey, keys: new Set<string>(), since: performance.now() });
+  // The history the thread opens on appears as it is; only items that arrive at the end after it
+  // ease in.
+  const known = useRef({ owner: ownerKey, keys: new Set<string>(), drawn: false });
   if (known.current.owner !== ownerKey)
-    known.current = { owner: ownerKey, keys: new Set(), since: performance.now() };
-  const settled =
-    known.current.keys.size > 0 && performance.now() - known.current.since > LOADING_MS;
+    known.current = { owner: ownerKey, keys: new Set(), drawn: false };
+  const settled = known.current.drawn;
   const lastKnown = rows.findLastIndex((row) => known.current.keys.has(row.item.key));
   useLayoutEffect(() => {
+    if (loading) return;
     for (const row of rows) known.current.keys.add(row.item.key);
-  }, [rows]);
+    known.current.drawn = true;
+  }, [rows, loading]);
 
   // A card brought into view holds the reader there; until they move on their own, what still
   // arrives (history loading in batches) counts as read.
@@ -431,8 +444,8 @@ export function Conversation({
         .map((item) => item.kind)
     : [];
 
-  const paging = useRef({ page, following: follow.following, jump: follow.jump });
-  paging.current = { page, following: follow.following, jump: follow.jump };
+  const paging = useRef({ page, following: follow.following, jump: follow.jump, earlier });
+  paging.current = { page, following: follow.following, jump: follow.jump, earlier };
   const observer = useRef<IntersectionObserver | null>(null);
   const scroller = useRef<HTMLDivElement | null>(null);
   // Reaching either end of the mounted window moves it; the rows in view stay mounted and in place.
@@ -440,10 +453,12 @@ export function Conversation({
   const held = useRef(false);
   const reached = useRef({ older: false, newer: false });
   const moveAt = useCallback((edge: "older" | "newer") => {
-    const { page: now, following } = paging.current;
+    const { page: now, following, earlier: tasks } = paging.current;
     if (held.current) return;
-    if (edge === "older" && !following() && now.hasOlder) now.older();
-    else if (edge === "newer" && now.hasNewer) now.newer();
+    if (edge === "older" && !following()) {
+      if (now.hasOlder) now.older();
+      else if (tasks?.more && !tasks.reading) tasks.older();
+    } else if (edge === "newer" && now.hasNewer) now.newer();
   }, []);
   const edges = useMemo(() => {
     const watch = (edge: "older" | "newer") => (element: HTMLElement | null) => {
@@ -477,6 +492,12 @@ export function Conversation({
     else if (reached.current.newer) moveAt("newer");
   };
   useEffect(() => () => observer.current?.disconnect(), []);
+  // An earlier task read in while the reader waits at the top comes into the page at once.
+  const total = items.length;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: a longer thread is the trigger.
+  useEffect(() => {
+    if (reached.current.older) moveAt("older");
+  }, [total, moveAt]);
   const attach = useCallback(
     (element: HTMLDivElement | null) => {
       scroller.current = element;
@@ -642,8 +663,9 @@ export function Conversation({
     replayTask: onReplayTask && replayTask,
   };
   const empty = !shown.length && !liveWork;
+  const olderTasks = !!earlier?.more;
   // What setup has left reads from its top; the thread follows its end again once it has gone.
-  const startShown = empty && !!start;
+  const startShown = empty && !loading && !!start;
   const followNow = useRef(follow);
   followNow.current = follow;
   useLayoutEffect(() => {
@@ -688,25 +710,26 @@ export function Conversation({
             // biome-ignore lint/a11y/noNoninteractiveTabindex: Keyboard users focus the history to scroll it.
             tabIndex={0}
           >
-            {(earlierInReplay || truncated) && !page.hasOlder && (
+            {(earlierInReplay || truncated) && !page.hasOlder && !olderTasks && !loading && (
               <p className="thread-note thread-start">
                 {earlierInReplay
                   ? "Earlier messages are in Replay."
                   : "Earlier messages are kept in the task log."}
               </p>
             )}
-            {page.hasOlder && (
-              <p className="thread-note thread-older" ref={edges.older}>
-                Loading earlier…
-              </p>
+            {(page.hasOlder || olderTasks) && !loading && (
+              <div className="thread-older" ref={edges.older}>
+                {earlier?.reading && <Spinner size={16} label="Loading earlier messages" />}
+              </div>
             )}
             <HistoryPages
-              older={page.hasOlder}
-              newer={page.hasNewer}
+              older={!loading && (page.hasOlder || olderTasks)}
+              newer={!loading && page.hasNewer}
               onOlder={() => {
                 held.current = true;
                 follow.release();
-                page.older();
+                if (page.hasOlder) page.older();
+                else earlier?.older();
                 if (scroller.current) scroller.current.scrollTop = 0;
               }}
               onNewer={() => {
@@ -716,7 +739,9 @@ export function Conversation({
                 if (scroller.current) scroller.current.scrollTop = 0;
               }}
             />
-            {empty && start ? (
+            {loading ? (
+              <ThreadSkeleton />
+            ) : startShown ? (
               <div className="thread-empty thread-start-steps">{start}</div>
             ) : empty ? (
               <div className="thread-empty">

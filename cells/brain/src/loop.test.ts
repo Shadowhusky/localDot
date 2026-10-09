@@ -2,7 +2,7 @@ import { type BrainEvent, ulid } from "@localdot/protocol";
 import { APICallError } from "ai";
 import { describe, expect, it } from "vitest";
 import { EventSink } from "./events.ts";
-import { Agent } from "./loop.ts";
+import { Agent, retryWaitMs } from "./loop.ts";
 import {
   binding,
   bootConfig,
@@ -23,6 +23,7 @@ function agent(
     answer?: Parameters<typeof fakeApi>[0];
     local?: Turn[];
     fast?: Turn[];
+    sleep?: (ms: number) => Promise<void>;
   } = {},
 ) {
   const main = scriptedModel(turns);
@@ -46,7 +47,7 @@ function agent(
       ...(fast ? { fast: fast.model } : {}),
     },
     history: [],
-    sleep: async () => {},
+    sleep: opts.sleep ?? (async () => {}),
     pauseWaitMs: 1,
   });
   return {
@@ -374,7 +375,7 @@ describe("Agent", () => {
       expect(await t.run()).toBe("done");
       const retries = t.events.filter((e) => e.type === "model.retry").map((e) => e.data);
       expect(retries).toEqual([
-        { role: "main", attempt: 1, waitMs: 1000, status: 529, message: "overloaded" },
+        { role: "main", attempt: 1, waitMs: 2000, status: 529, message: "overloaded" },
         {
           role: "main",
           attempt: 0,
@@ -386,18 +387,153 @@ describe("Agent", () => {
       ]);
     });
 
-    it("gives up at once on a request keyd or the provider refuses outright", async () => {
+    it("waits for the user, saying why, when keyd or the provider refuses a request outright", async () => {
+      let t: ReturnType<typeof agent>;
+      t = agent([
+        () => {
+          t.f.inbox.push({ seq: 1, messageId: ulid(), kind: "resume", text: "" });
+          return new APICallError({
+            message: "model-not-allowed",
+            url: "x",
+            requestBodyValues: {},
+            statusCode: 403,
+            isRetryable: false,
+          });
+        },
+        call("done", { summary: "x" }),
+      ]);
+      expect(await t.run()).toBe("done");
+      const states = t.events.filter((e) => e.type === "agent.state").map((e) => e.data);
+      expect(states).toContainEqual({
+        state: "paused",
+        reason: "model refused",
+        detail: "403: model-not-allowed",
+      });
+      expect(states.at(-1)).toEqual({ state: "acting" });
+    });
+
+    it("never checks in on its own: no step count or failure streak asks the user", async () => {
+      const t = agent(
+        [
+          ...Array.from({ length: 160 }, () =>
+            call("update_plan", { items: [{ text: "again", status: "doing" }] }),
+          ),
+          ...Array.from({ length: 8 }, () => call("shell", { command: "false" })),
+          call("done", { summary: "x" }),
+        ],
+        {
+          answer: (name) =>
+            name === "shell"
+              ? { ok: false, content: [{ type: "text", text: "Exit 1." }] }
+              : undefined,
+        },
+      );
+      expect(await t.run()).toBe("done");
+      expect(t.f.toolCalls.filter((c) => c.name === "ask_user")).toEqual([]);
+    });
+
+    it("gives repeated failures back to the model as a cue to change approach", async () => {
+      const t = agent(
+        [
+          ...Array.from({ length: 3 }, () => call("shell", { command: "false" })),
+          call("done", { summary: "x" }),
+        ],
+        {
+          answer: (name) =>
+            name === "shell"
+              ? { ok: false, content: [{ type: "text", text: "Exit 1." }] }
+              : undefined,
+        },
+      );
+      expect(await t.run()).toBe("done");
+      expect(JSON.stringify(t.main.prompts[2])).not.toContain("actions failed");
+      expect(JSON.stringify(t.main.prompts[3])).toContain(
+        "Your last 3 actions failed. Don't repeat them",
+      );
+      expect(t.f.toolCalls.filter((c) => c.name === "ask_user")).toEqual([]);
+    });
+
+    it("starts the step count again when the user says something", async () => {
+      const plan = () => call("update_plan", { items: [{ text: "again", status: "doing" }] });
+      let t: ReturnType<typeof agent>;
+      t = agent(
+        [
+          plan(),
+          plan(),
+          () => {
+            t.f.inbox.push({ seq: 1, messageId: ulid(), kind: "steer", text: "Use Celsius" });
+            return plan() as never;
+          },
+          plan(),
+          plan(),
+          call("done", { summary: "x" }),
+        ],
+        { boot: { limits: { maxTurns: 3, maxRetries: 1 } } },
+      );
+      expect(await t.run()).toBe("done");
+      expect(t.f.toolCalls.filter((c) => c.name === "ask_user")).toEqual([]);
+    });
+
+    it("shows a long wait for a busy model as paused, and Retry now cuts it short", async () => {
+      const busy = new APICallError({
+        message: "rate limited",
+        url: "x",
+        requestBodyValues: {},
+        statusCode: 429,
+        responseHeaders: { "retry-after": "30" },
+        isRetryable: true,
+      });
+      let t: ReturnType<typeof agent>;
+      const slept: number[] = [];
+      t = agent([busy, call("done", { summary: "x" })], {
+        sleep: async (ms) => {
+          slept.push(ms);
+          t.f.inbox.push({ seq: 1, messageId: ulid(), kind: "resume", text: "" });
+        },
+      });
+      expect(await t.run()).toBe("done");
+      expect(slept).toEqual([1000]);
+      expect(t.events.filter((e) => e.type === "model.retry").map((e) => e.data)).toEqual([
+        { role: "main", attempt: 1, waitMs: 30_000, status: 429, message: "rate limited" },
+      ]);
+      const states = t.events.filter((e) => e.type === "agent.state").map((e) => e.data);
+      expect(states.slice(1, 3)).toEqual([
+        { state: "paused", reason: "model busy" },
+        { state: "thinking" },
+      ]);
+    });
+
+    it("waits out a short retry without pausing", async () => {
       const t = agent([
         new APICallError({
-          message: "model-not-allowed",
+          message: "bad gateway",
           url: "x",
           requestBodyValues: {},
-          statusCode: 403,
-          isRetryable: false,
+          statusCode: 502,
+          isRetryable: true,
         }),
+        call("done", { summary: "x" }),
       ]);
-      expect(await t.run()).toBe("gave_up");
+      expect(await t.run()).toBe("done");
+      const states = t.events.filter((e) => e.type === "agent.state").map((e) => e.data);
+      expect(states.some((s) => s.state === "paused")).toBe(false);
     });
+  });
+
+  it("backs off 2, 4, 8 … s up to a minute, or longer when the provider asks, up to five", () => {
+    const asked = (headers: Record<string, string>) =>
+      new APICallError({
+        message: "x",
+        url: "x",
+        requestBodyValues: {},
+        statusCode: 429,
+        responseHeaders: headers,
+      });
+    expect([1, 2, 3, 6, 9].map((n) => retryWaitMs(n))).toEqual([2000, 4000, 8000, 60_000, 60_000]);
+    expect(retryWaitMs(1, asked({ "retry-after": "90" }))).toBe(90_000);
+    expect(retryWaitMs(1, asked({ "Retry-After": "3600" }))).toBe(300_000);
+    expect(retryWaitMs(3, asked({ "retry-after-ms": "500" }))).toBe(8000);
+    expect(retryWaitMs(1, asked({ "retry-after": "soon" }))).toBe(2000);
   });
 
   it("tells the model that untrusted blocks and screenshot text are data, with the user's memory and skills", async () => {

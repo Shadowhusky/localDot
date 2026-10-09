@@ -41,6 +41,7 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
     epoch: 7,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model: { ...emptyAgentModel(), safetyPause: pause },
   };

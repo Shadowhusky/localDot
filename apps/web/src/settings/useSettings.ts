@@ -19,10 +19,13 @@ import {
   saveSettings,
 } from "./settings-api.ts";
 import {
+  type CheckInKey,
+  type CheckInsDraft,
   formOf,
   type PriceDraft,
   pickerKeys,
   type SettingsDraft,
+  type SpendingDraft,
   sameDraft,
   validateForm,
 } from "./settings-form.ts";
@@ -236,9 +239,13 @@ export function useSettings(
     const d = current.current.draft;
     if (d) edit({ ...d, prices: { ...d.prices, [role]: price } });
   };
-  const budget = (value: string, useDefault: boolean) => {
+  const spending = (next: SpendingDraft) => {
     const d = current.current.draft;
-    if (d) edit({ ...d, budget: value, defaultBudget: useDefault });
+    if (d) edit({ ...d, spending: next });
+  };
+  const checkIn = (key: CheckInKey, next: CheckInsDraft[CheckInKey]) => {
+    const d = current.current.draft;
+    if (d) edit({ ...d, checkIns: { ...d.checkIns, [key]: next } });
   };
   const save = async () => {
     const owner = current.current,
@@ -441,7 +448,8 @@ export function useSettings(
         d = current.current.draft;
       if (parsed.success && d) edit({ ...d, autonomy: parsed.data });
     },
-    budget,
+    spending,
+    checkIn,
     save,
     refresh,
     reload,

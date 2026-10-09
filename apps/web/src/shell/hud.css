@@ -3,14 +3,15 @@
 @custom-media --phone (width < 700px),
   (pointer: coarse) and (orientation: landscape) and (height < 500px);
 /* A point at the middle of the stage's top edge: the island hangs from it, and what the island
-   grows into and drops follows the island's own size. */
+   grows into and drops follows the island's own size. Its foot is the island's, or the decision's
+   it grew into, so toasts hang from there. */
 .island-anchor {
   position: absolute;
   top: calc(var(--island-h) / -2);
   left: 50%;
   z-index: var(--layer-island);
   width: 0;
-  height: var(--island-h);
+  height: var(--_drop, var(--island-h));
 }
 
 .island {

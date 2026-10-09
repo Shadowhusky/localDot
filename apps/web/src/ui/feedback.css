@@ -15,7 +15,6 @@
     );
     z-index: var(--layer-toast);
     width: var(--_width);
-    height: var(--_extent, 0px);
     translate: -50% 0;
   }
 
@@ -30,9 +29,8 @@
     position: absolute;
     top: 0;
     left: 0;
-    z-index: var(--_z, 1);
+    z-index: 1;
     width: 100%;
-    height: var(--_height, auto);
     overflow: hidden;
     border-radius: var(--radius-island);
     background-color: var(--color-glass-solid);
@@ -41,45 +39,24 @@
     box-shadow: var(--shadow-glass);
     color: var(--color-fg-1);
     transform-origin: 50% 0;
-    translate: 0 var(--_y, 0px);
-    scale: var(--_scale, 1);
     touch-action: none;
     -webkit-user-select: none;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
     transition:
       translate var(--dur-default) var(--ease-spring),
-      scale var(--dur-default) var(--ease-spring),
-      height var(--dur-default) var(--ease-spring),
       opacity var(--dur-fade) var(--ease-enter);
   }
 
-  /* A toast further back is a thinner layer of the material, so its edge shows under the one in
-     front over any picture. */
-  .ui-toast::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background-color: var(--color-fg-1);
-    opacity: var(--_veil, 0);
-    pointer-events: none;
-    transition: opacity var(--dur-default) var(--ease-standard);
-  }
-
   /* Inserted holding this, then let go (see Toast.tsx): it drops 8 px out of the island as it
-     fades in. One revealed behind the front only fades in where it stands. */
+     fades in. */
   .ui-toast[data-entering] {
     opacity: 0;
-    translate: 0 calc(var(--_y, 0px) - var(--spacing) * 2);
+    translate: 0 calc(var(--spacing) * -2);
     transition: none;
   }
 
-  .ui-toast[data-entering="behind"] {
-    translate: 0 var(--_y, 0px);
-  }
-
-  /* One sent away by hand stays on top as it goes; one that fades sinks under those sliding up. */
+  /* One sent away by hand stays on top as it goes; one that fades sinks under the next. */
   .ui-toast[data-leaving="swipe"] {
     z-index: 4;
   }
@@ -93,7 +70,6 @@
     transition: opacity var(--dur-exit) var(--ease-exit);
   }
 
-  /* Words coming out from behind start at once and slow down; covered, they go quickly. */
   .ui-toast-body {
     display: flex;
     align-items: center;
@@ -101,12 +77,6 @@
     min-height: calc(var(--spacing) * 10);
     padding: calc(var(--spacing) * 2) calc(var(--spacing) * 1.5) calc(var(--spacing) * 2)
       calc(var(--spacing) * 3.5);
-    transition: opacity var(--dur-fade) var(--ease-enter);
-  }
-
-  .ui-toast[data-covered] > .ui-toast-body {
-    opacity: 0;
-    transition: opacity var(--dur-press) var(--ease-exit);
   }
 
   /* A leading glyph carries its own side bearing, so the padding before it is optically smaller. */
@@ -156,6 +126,50 @@
     /* Room for the close button's whole reach, which the toast's rounded clip would cut. */
     .ui-toast-body {
       padding-inline-end: calc(var(--spacing) * 2.5);
+    }
+  }
+
+  /* A part of the page that failed: a calm card in its place, the rest of the page untouched. */
+  .ui-part-failed {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    min-height: calc(var(--spacing) * 20);
+    padding: calc(var(--spacing) * 4);
+  }
+
+  .ui-part-failed[data-floating] {
+    position: fixed;
+    inset: auto 0 calc(var(--spacing) * 6);
+    z-index: var(--layer-toast);
+    height: auto;
+    min-height: 0;
+    pointer-events: none;
+  }
+
+  .ui-part-failed-card {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2.5);
+    max-width: 100%;
+    pointer-events: auto;
+    animation: ui-part-failed-in var(--dur-fade) var(--ease-standard) backwards;
+  }
+
+  .ui-part-failed-icon {
+    flex: none;
+    color: var(--color-fg-3);
+  }
+
+  .ui-part-failed-title {
+    color: var(--color-fg-1);
+    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  }
+
+  @keyframes ui-part-failed-in {
+    from {
+      opacity: 0;
     }
   }
 
@@ -626,8 +640,7 @@
 
     .ui-toast[data-entering],
     .ui-toast[data-leaving="fade"] {
-      translate: 0 var(--_y, 0px);
-      scale: var(--_scale, 1);
+      translate: none;
       filter: none;
     }
 

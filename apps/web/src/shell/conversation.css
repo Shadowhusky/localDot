@@ -119,6 +119,64 @@
   text-align: center;
 }
 
+/* Holds its row whether or not an earlier task is being read in, so nothing moves when it is. */
+.thread-older {
+  display: grid;
+  place-items: center;
+  height: calc(var(--spacing) * 8);
+  margin-bottom: calc(var(--spacing) * 2);
+  color: var(--color-fg-3);
+}
+
+/* Message-shaped bones at the end of the thread, where the newest messages will land. */
+.thread-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: calc(var(--spacing) * 5);
+  margin-top: auto;
+}
+
+.thread-bone {
+  position: relative;
+  overflow: hidden;
+  height: 44px;
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-xl) var(--radius-sm);
+  background-color: color-mix(in srgb, var(--color-raised) 40%, transparent);
+}
+
+.thread-bone[data-size="m"] {
+  height: 68px;
+}
+
+.thread-bone[data-size="l"] {
+  height: 92px;
+}
+
+.thread-bone[data-side="user"] {
+  align-self: flex-end;
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl);
+}
+
+.thread-bone::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background-image: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--color-raised) 45%, transparent) 50%,
+    transparent
+  );
+  translate: -100% 0;
+  animation: thread-bone-sweep 1.6s var(--ease-standard) infinite;
+}
+
+@keyframes thread-bone-sweep {
+  to {
+    translate: 100% 0;
+  }
+}
+
 .thread-newer {
   margin-top: calc(var(--spacing) * 5);
   text-align: center;
@@ -1242,6 +1300,11 @@
   .thread-row,
   .thread-recovery {
     translate: none;
+  }
+
+  .thread-bone::after {
+    animation: none;
+    opacity: 0;
   }
 
   .thread-jump,

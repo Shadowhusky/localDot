@@ -46,6 +46,7 @@ function terminal(status: 200 | 404) {
       epoch: 2,
       connection: "ended",
       replayed: true,
+      history: true,
       streamError: null,
       model,
     }),

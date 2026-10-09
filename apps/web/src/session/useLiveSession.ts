@@ -1,4 +1,4 @@
-import { ULID_PATTERN } from "@localdot/protocol";
+import { type LocalDotEvent, ULID_PATTERN } from "@localdot/protocol";
 import { emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
 import { type RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AgentFeed } from "../agent/model.ts";
@@ -6,6 +6,7 @@ import { createAgentFeed } from "../agent/reducer.ts";
 import type { CellSummary } from "../cells/types.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { openSocket, type SocketHandle } from "../lib/socket.ts";
+import { readTaskHistory } from "../replay/useReplay.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
 import { syncClock } from "./clock-sync.ts";
 
@@ -226,35 +227,64 @@ export function useLiveSession(
         setVersion((v) => v + 1);
       }
     }, REACT_HZ_MS);
-    socket = openSocket({
-      url: api.socketUrl(`/api/sessions/${sessionId}/stream`),
-      protocols: api.socketProtocols(),
-      handlers: {
-        onOpen: () => {
-          if (!disposed) agentFeed.connection("live");
+    // The task's history arrives whole, so the thread draws it at once; the live feed then goes on
+    // from its last event, which it sends again to confirm it holds the same history.
+    const reading = new AbortController();
+    const live = () => {
+      if (disposed) return;
+      const through = agentFeed.read().model.lastSeq;
+      const from = through > 0 ? `?fromSeq=${through}` : "";
+      socket = openSocket({
+        url: api.socketUrl(`/api/sessions/${sessionId}/stream${from}`),
+        protocols: api.socketProtocols(),
+        handlers: {
+          onOpen: () => {
+            if (!disposed) agentFeed.connection("live");
+          },
+          onClose: () => {
+            if (!disposed && !closed) agentFeed.connection("lost");
+          },
+          onMessage: (data) => {
+            if (disposed) return;
+            const event = agentFeed.accept(data);
+            if (!event) return;
+            foldEvents(modelRef.current, [event]);
+            stage.current?.pushEvents([event]);
+            dirty.current = true;
+            if (event.type === "session.end") end();
+          },
         },
-        onClose: () => {
-          if (!disposed && !closed) agentFeed.connection("lost");
-        },
-        onMessage: (data) => {
+      });
+    };
+    const end = () => {
+      closed = true;
+      over.current.add(sessionId);
+      agentFeed.connection("ended");
+      socket?.close();
+      setEnded(true);
+    };
+    if (agentFeed.read().history) live();
+    else {
+      const events: LocalDotEvent[] = [];
+      readTaskHistory(api, sessionId, reading.signal, (batch) => {
+        for (const event of batch) events.push(event);
+      }).then(
+        () => {
           if (disposed) return;
-          const event = agentFeed.accept(data);
-          if (!event) return;
-          foldEvents(modelRef.current, [event]);
-          stage.current?.pushEvents([event]);
-          dirty.current = true;
-          if (event.type === "session.end") {
-            closed = true;
-            over.current.add(sessionId);
-            agentFeed.connection("ended");
-            socket?.close();
-            setEnded(true);
-          }
+          agentFeed.load(events);
+          foldEvents(modelRef.current, events);
+          stage.current?.pushEvents(events);
+          dirty.current = false;
+          setVersion((v) => v + 1);
+          if (agentFeed.read().model.ended) end();
+          else live();
         },
-      },
-    });
+        () => live(),
+      );
+    }
     return () => {
       disposed = true;
+      reading.abort();
       clearInterval(clockTimer);
       clearInterval(flush);
       if (!closed) socket?.close();

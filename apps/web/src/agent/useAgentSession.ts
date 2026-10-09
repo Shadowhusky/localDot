@@ -31,6 +31,8 @@ export interface AgentSessionView {
   // A verified terminal snapshot permits memory history actions, never task or desktop input.
   readonly readFresh?: boolean;
   readonly authorityEpoch?: number | null;
+  // The task's history so far has arrived, so its thread can be drawn whole.
+  readonly history?: boolean;
   readonly connection: ReturnType<LiveSession["agentFeed"]["read"]>["connection"];
   reconcile(): void;
 }
@@ -184,6 +186,7 @@ export function useAgentSession(
     availability: owned ? view.availability : "loading",
     error: current.streamError ?? (owned ? view.error : null),
     authorityEpoch: owned ? view.epoch : null,
+    history: matches && current.history,
     readFresh,
     fresh: Boolean(
       matches &&
