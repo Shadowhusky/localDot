@@ -26,7 +26,8 @@ export function ExportButton({
     <Button
       ref={ref}
       className="replay-export"
-      icon="download"
+      variant="quiet"
+      icon="share"
       aria-label="Export MP4"
       data-ring={ring ? "" : undefined}
       {...triggerProps("dialog", open)}

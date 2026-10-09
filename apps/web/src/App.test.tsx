@@ -214,14 +214,17 @@ describe("App Replay mode", () => {
     return { sessionId, fetchImpl, historyCalls };
   }
 
-  it("enables Replay when a session exists and opens it from the top bar", async () => {
+  it("enables Replay when a session exists, opens its library from the top bar and plays a recording from it", async () => {
     const fixture = historyDaemon();
     render(<App fetchImpl={fixture.fetchImpl} />);
     const replayButton = screen.getByRole("radio", { name: "Replay" });
     await waitFor(() => expect(replayButton.hasAttribute("aria-disabled")).toBe(false));
     fireEvent.click(replayButton);
+    expect(new URLSearchParams(window.location.search).get("replay")).toBe("library");
+    const library = await screen.findByRole("main", { name: "Replay" });
+    expect(within(library).getByRole("textbox", { name: "Search recordings" })).toBeTruthy();
+    fireEvent.click(await within(library).findByRole("button", { name: "Organize my notes" }));
     expect(new URLSearchParams(window.location.search).get("replay")).toBe(fixture.sessionId);
-    expect(await screen.findByRole("button", { name: /^All tasks/ })).toBeTruthy();
     await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
     expect(
       within(screen.getByRole("main", { name: "Replay" })).getByText(
@@ -235,7 +238,7 @@ describe("App Replay mode", () => {
       true,
     );
   });
-  it("adds one history entry for Replay so browser Back returns to Watch", async () => {
+  it("adds one history entry per level, so browser Back goes from a recording to the library to Watch", async () => {
     const fixture = historyDaemon();
     render(<App fetchImpl={fixture.fetchImpl} />);
     const replayButton = screen.getByRole("radio", { name: "Replay" });
@@ -248,21 +251,27 @@ describe("App Replay mode", () => {
     ]) {
       fireEvent.click(replayButton);
       expect(window.history.length).toBe(entries + 1);
-      await waitFor(() => expect(new URLSearchParams(window.location.search).has("t")).toBe(true));
+      await screen.findByRole("main", { name: "Replay" });
       leave();
       await waitFor(() => expect(window.location.search).toBe(""));
       expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
       expect(window.history.length).toBe(entries + 1);
     }
     fireEvent.click(replayButton);
-    expect(window.history.length).toBe(entries + 1);
-    await screen.findByRole("main", { name: "Replay" });
+    fireEvent.click(await screen.findByRole("button", { name: "Organize my notes" }));
+    expect(window.history.length).toBe(entries + 2);
+    await waitFor(() => expect(new URLSearchParams(window.location.search).has("t")).toBe(true));
+    window.history.back();
+    await waitFor(() =>
+      expect(new URLSearchParams(window.location.search).get("replay")).toBe("library"),
+    );
+    await screen.findByRole("textbox", { name: "Search recordings" });
     window.history.back();
     await waitFor(() => expect(screen.queryByRole("main", { name: "Replay" })).toBeNull());
     expect(window.location.search).toBe("");
     expect(screen.getByRole("radio", { name: "Watch" }).getAttribute("aria-checked")).toBe("true");
   });
-  it("Space toggles play and Escape goes back to Watch", async () => {
+  it("Space toggles play, and Escape goes up to the library and then to Watch", async () => {
     const fixture = historyDaemon();
     window.history.replaceState(null, "", `/?replay=${fixture.sessionId}&t=12000`);
     render(<App fetchImpl={fixture.fetchImpl} />);
@@ -273,10 +282,22 @@ describe("App Replay mode", () => {
     fireEvent.keyDown(window, { key: " " });
     expect(screen.getByRole("button", { name: "Pause replay" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
+    expect(new URLSearchParams(window.location.search).get("replay")).toBe("library");
+    await screen.findByRole("textbox", { name: "Search recordings" });
+    fireEvent.keyDown(window, { key: "Escape" });
     expect(window.location.search).toBe("");
     expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
     expect(screen.getByRole("radio", { name: "Watch" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1);
+  });
+  it("goes back from a playing recording to the library when Replay is pressed again", async () => {
+    const fixture = historyDaemon();
+    window.history.replaceState(null, "", `/?replay=${fixture.sessionId}`);
+    render(<App fetchImpl={fixture.fetchImpl} />);
+    await waitFor(() => expect(screen.getAllByTestId("replay-chapter")).toHaveLength(2));
+    fireEvent.click(screen.getByRole("radio", { name: "Replay" }));
+    expect(new URLSearchParams(window.location.search).get("replay")).toBe("library");
+    expect(await screen.findByRole("button", { name: "Organize my notes" })).toBeTruthy();
   });
   it("stays up through a long scrub, though WebKit refuses a hundredth address change in ten seconds", async () => {
     const fixture = historyDaemon();

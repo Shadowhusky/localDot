@@ -4,7 +4,7 @@ import { type PresenceInput, presencePlace } from "./presence-rules.ts";
 const LIVE: PresenceInput = {
   showDot: true,
   curtain: false,
-  stageHidden: false,
+  replaying: false,
   keyboard: false,
 };
 
@@ -20,8 +20,8 @@ describe("where the one live dot is", () => {
     expect(presencePlace({ ...LIVE, keyboard: true, curtain: true })).toBe("hero");
   });
 
-  it("is nowhere while the stage is out of view, or when it is off", () => {
-    expect(presencePlace({ ...LIVE, stageHidden: true })).toBeNull();
+  it("docks in Replay whatever the curtain or the keyboard does, and is nowhere when it is off", () => {
+    expect(presencePlace({ ...LIVE, replaying: true, curtain: true, keyboard: true })).toBe("dock");
     for (const curtain of [false, true])
       for (const keyboard of [false, true])
         expect(presencePlace({ ...LIVE, showDot: false, curtain, keyboard })).toBeNull();
@@ -29,8 +29,8 @@ describe("where the one live dot is", () => {
 
   it("sits above first-run setup, over whatever the app would show, unless it is off", () => {
     for (const curtain of [false, true])
-      for (const stageHidden of [false, true])
-        expect(presencePlace({ ...LIVE, setup: true, curtain, stageHidden })).toBe("intro");
+      for (const replaying of [false, true])
+        expect(presencePlace({ ...LIVE, setup: true, curtain, replaying })).toBe("intro");
     expect(presencePlace({ ...LIVE, setup: true, showDot: false })).toBeNull();
   });
 });

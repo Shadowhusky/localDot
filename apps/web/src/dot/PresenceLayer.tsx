@@ -6,6 +6,7 @@ import { Glyph } from "./Glyph.tsx";
 import { onPlaces } from "./places.ts";
 import { Presence } from "./presence.ts";
 import type { PresencePlace } from "./presence-rules.ts";
+import { useReplayPresence } from "./replay-presence.ts";
 import "./dot.css";
 
 const RESTING_MS = 60_000;
@@ -21,8 +22,10 @@ export interface PresenceLayerProps {
 }
 
 // The one live dot (design-v2 §10.17), mounted once at the app's root and drawn over the place that
-// keeps room for it: the hero on the curtain, the dock beside the stage or the island's badge.
-export function PresenceLayer({ place, feed, line }: PresenceLayerProps) {
+// keeps room for it: the hero on the curtain, the dock beside the stage or the island's badge. While
+// Replay is open it plays the recording's dot instead of the live one.
+export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
+  const { feed, line } = useReplayPresence() ?? now;
   const reduced = useMediaQuery(REDUCED_MOTION);
   const frame = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLSpanElement>(null);

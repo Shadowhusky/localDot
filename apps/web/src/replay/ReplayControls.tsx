@@ -1,12 +1,13 @@
 import { REPLAY_SPEEDS } from "@localdot/stage";
 import type { ReactNode } from "react";
+import type { ApiClient } from "../lib/api.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { Select } from "../ui/Select.tsx";
-import { Switch } from "../ui/Switch.tsx";
 import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import { speedLabel, timeLabel } from "./replay-view.ts";
+import { Scrubber } from "./Scrubber.tsx";
 import type { ReplayState } from "./useReplay.ts";
 
 const SPEEDS = REPLAY_SPEEDS.map((speed) => ({
@@ -14,60 +15,82 @@ const SPEEDS = REPLAY_SPEEDS.map((speed) => ({
   label: `${speed === 0.5 ? "½" : speed}×`,
 }));
 export const LOADING = "The recording is still loading";
+const SKIP_MS = 10_000;
 
+// The transport (design-v2 §10.23): a glass bar hung over the foot of the recording, with the
+// scrubber between the time played and the whole length. A phone keeps play and the scrubber.
 export function ReplayControls({
+  api,
   replay,
-  label,
+  compact = false,
   noVideo = false,
+  screens,
   exportControl,
 }: {
+  api: ApiClient;
   replay: ReplayState;
-  // What is happening at the playhead.
-  label: string;
+  compact?: boolean;
   // The recording has no video; the card that said so has gone.
   noVideo?: boolean;
+  // Desktop | Browser, when the task recorded both.
+  screens?: ReactNode;
   exportControl?: ReactNode;
 }) {
   const loading = replay.map ? undefined : LOADING;
+  const size = compact ? 28 : 36;
   return (
     // biome-ignore lint/a11y/useSemanticElements: a fieldset would draw a frame and claim min-content width.
-    <div className="replay-transport" role="group" aria-label="Playback controls">
-      <div className="replay-transport-main">
+    <div
+      className="replay-transport"
+      role="group"
+      aria-label="Playback controls"
+      data-compact={compact ? "" : undefined}
+    >
+      {!compact && (
         <IconButton
-          label="Previous step"
-          icon="skip-back"
-          kbd={["ArrowLeft"]}
+          variant="glass"
+          round
+          size={size}
+          label="Back 10 seconds"
+          icon="back-10"
+          kbd={["J"]}
           disabledReason={loading}
-          onClick={() => replay.run({ kind: "step", dir: -1 })}
+          onClick={() => replay.run({ kind: "jump", ms: -SKIP_MS })}
         />
+      )}
+      <IconButton
+        variant="glass"
+        round
+        size={size}
+        label={replay.playing ? "Pause replay" : "Play replay"}
+        icon={replay.playing ? "pause" : "play"}
+        kbd={[" "]}
+        disabledReason={loading}
+        onClick={() => replay.run({ kind: "toggle-play" })}
+      />
+      {!compact && (
         <IconButton
-          variant="primary"
-          size={36}
-          label={replay.playing ? "Pause replay" : "Play replay"}
-          icon={replay.playing ? "pause" : "play"}
-          kbd={[" "]}
+          variant="glass"
+          round
+          size={size}
+          label="Forward 10 seconds"
+          icon="forward-10"
+          kbd={["L"]}
           disabledReason={loading}
-          onClick={() => replay.run({ kind: "toggle-play" })}
+          onClick={() => replay.run({ kind: "jump", ms: SKIP_MS })}
         />
-        <IconButton
-          label="Next step"
-          icon="skip-forward"
-          kbd={["ArrowRight"]}
-          disabledReason={loading}
-          onClick={() => replay.run({ kind: "step", dir: 1 })}
-        />
-        <output className="replay-time num" aria-label="Replay time">
-          {timeLabel(replay.tMs)} / {timeLabel(replay.map?.endMs ?? 0)}
-        </output>
-        <span className="replay-now">
-          <span className="replay-now-label">{label}</span>
-          {replay.idleNow && <span className="replay-now-idle">Idle skipped</span>}
-        </span>
-        {noVideo && <Badge className="replay-no-video">No video</Badge>}
-      </div>
-      <div className="replay-transport-side">
-        <span className="replay-speed">
+      )}
+      <output className="replay-time num" aria-label="Replay time">
+        {timeLabel(replay.tMs)}
+      </output>
+      {replay.sessionId && <Scrubber api={api} sessionId={replay.sessionId} replay={replay} />}
+      <span className="replay-length num">{timeLabel(replay.map?.endMs ?? 0)}</span>
+      {!compact && (
+        <span className="replay-transport-side">
+          {screens}
           <Select
+            className="replay-speed"
+            appearance="inline"
             aria-label="Playback speed"
             value={String(replay.speed)}
             items={SPEEDS}
@@ -76,26 +99,29 @@ export function ReplayControls({
               if (speed !== undefined) replay.setSpeed(speed);
             }}
           />
-        </span>
-        <span className="replay-skip">
-          <Switch
-            label="Skip idle"
-            checked={replay.skipIdle}
-            onCheckedChange={(checked) => replay.setSkipIdle(checked)}
-          />
-        </span>
-        <span className="replay-toggle" data-on={replay.compare ? "" : undefined}>
           <Button
             variant="quiet"
+            size="sm"
+            className="replay-toggle"
+            aria-pressed={replay.skipIdle}
+            onClick={() => replay.setSkipIdle(!replay.skipIdle)}
+          >
+            <span className="replay-toggle-label">Skip idle</span>
+          </Button>
+          <Button
+            variant="quiet"
+            size="sm"
+            className="replay-toggle"
             aria-pressed={replay.compare !== null}
             disabledReason={replay.model.steps.length ? undefined : "No steps to compare yet"}
             onClick={() => replay.run({ kind: "compare" })}
           >
-            Compare
+            <span className="replay-toggle-label">Compare</span>
           </Button>
+          {noVideo && <Badge className="replay-no-video">No video</Badge>}
+          {exportControl}
         </span>
-        {exportControl}
-      </div>
+      )}
       <VisuallyHidden className="replay-speed-label" role="status">
         {speedLabel(replay.speed, replay.idleNow)}
       </VisuallyHidden>

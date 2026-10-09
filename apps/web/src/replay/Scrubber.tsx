@@ -11,7 +11,6 @@ import {
 } from "@localdot/stage";
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
-import { Icon } from "../ui/Icon.tsx";
 import { ReplayImage } from "./ReplayImage.tsx";
 import { scrubberModel, timeLabel } from "./replay-view.ts";
 import type { ReplayState } from "./useReplay.ts";
@@ -258,24 +257,22 @@ export function Scrubber({
               data-tone={tick.tone}
               style={{ left: `${tick.x * 100}%` }}
               aria-hidden="true"
-            >
-              {tick.tone === "failure" && <Icon name="x" size={12} />}
-            </span>
+            />
           ))}
         <span ref={head} className="replay-playhead" aria-hidden="true">
           <span className="replay-knob" />
         </span>
       </div>
       <div
-        className="replay-preview"
+        className="replay-preview-pop"
         data-shown={hover !== null ? "" : undefined}
         style={{ transform: `translateX(${previewX}px)` }}
         aria-hidden="true"
       >
         <ReplayImage api={api} sessionId={sessionId} frameId={hovered?.frameId ?? null} />
-        <span className="replay-preview-meta">
+        <span className="replay-preview-pop-meta">
           <span className="num">{timeLabel(shownAt)}</span>
-          <span className="replay-preview-label">{labelAt(shownAt)}</span>
+          <span className="replay-preview-pop-label">{labelAt(shownAt)}</span>
         </span>
       </div>
     </div>
