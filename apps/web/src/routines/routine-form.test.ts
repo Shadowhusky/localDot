@@ -88,4 +88,13 @@ describe("routine form", () => {
     const result = draftFromForm(formFromRoutine(saved, "Europe/London", now));
     expect(result.ok && result.draft).toEqual(saved);
   });
+  it("refuses a one-off whose time has passed, unless an edit leaves it as it was", () => {
+    const clock = { tz: "Europe/London", now };
+    const passed = { ...fresh(), kind: "once", date: "2026-10-12", time: "10:00" } as const;
+    const result = draftFromForm(passed, clock);
+    expect(!result.ok && result.errors.time).toBe("That time has passed. Pick a later one.");
+    expect(draftFromForm({ ...passed, time: "10:01" }, clock).ok).toBe(true);
+    const saved = { kind: "once", date: "2026-10-12", time: "10:00" } as const;
+    expect(draftFromForm(passed, { ...clock, saved }).ok).toBe(true);
+  });
 });

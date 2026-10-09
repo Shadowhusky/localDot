@@ -42,6 +42,23 @@ export const WEEK: readonly { day: number; short: string; long: string }[] = [
   { day: 0, short: "Sun", long: "Sunday" },
 ];
 
+// The local "YYYY-MM-DDTHH:MM" of an instant, which orders like the instant itself.
+const localMinute = (tz: string, now: number) => {
+  const parts = Object.fromEntries(
+    new Intl.DateTimeFormat("en-CA", {
+      timeZone: tz,
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    })
+      .formatToParts(new Date(now))
+      .map((part) => [part.type, part.value]),
+  );
+  return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+};
 const today = (tz: string, now: number) =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: tz,
@@ -144,9 +161,18 @@ function whenOf(form: RoutineFormState, errors: FormErrors): RoutineWhen | undef
   }
 }
 
+// A one-off whose time has passed would never run. `saved` is the schedule as it is now, which an
+// edit that leaves it alone may keep.
+export interface FormClock {
+  tz: string;
+  now: number;
+  saved?: RoutineWhen;
+}
+
 // Every problem at once, keyed by field, or the draft the daemon takes.
 export function draftFromForm(
   form: RoutineFormState,
+  clock?: FormClock,
 ): { ok: true; draft: RoutineDraft } | { ok: false; errors: FormErrors } {
   const errors: FormErrors = {};
   const name = form.name.trim();
@@ -156,6 +182,13 @@ export function draftFromForm(
   else if (/[\r\n]/.test(name)) errors.name = "Keep the name on one line.";
   if (!instruction) errors.instruction = "Say what dot should do.";
   const when = whenOf(form, errors);
+  if (
+    clock &&
+    when?.kind === "once" &&
+    JSON.stringify(when) !== JSON.stringify(clock.saved) &&
+    `${when.date}T${when.time}` <= localMinute(clock.tz, clock.now)
+  )
+    errors.time = "That time has passed. Pick a later one.";
   if (form.ends && !/^\d{4}-\d{2}-\d{2}$/.test(form.until)) errors.until = "Pick the last day.";
   const budget = Number(form.budget);
   if (form.limited && !(form.budget && Number.isFinite(budget) && budget >= 0.01 && budget <= 100))

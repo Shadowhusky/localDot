@@ -1,6 +1,7 @@
 import type { Routine, RoutineRun } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import {
+  budgetText,
   nextRunText,
   originLine,
   outcomeGlyph,
@@ -128,5 +129,12 @@ describe("routine copy", () => {
         "Europe/London",
       ),
     ).toBe("Morning bills · started by a routine at 08:30");
+  });
+});
+
+describe("spending limit", () => {
+  it("names the user's usual limit when the routine has none of its own", () => {
+    expect(budgetText(null)).toBe("Your usual limit");
+    expect(budgetText(0.5)).toBe("$0.50");
   });
 });

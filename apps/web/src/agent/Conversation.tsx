@@ -14,6 +14,7 @@ import { count } from "../copy/format.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { RoutineCard } from "../routines/RoutineCard.tsx";
 import { originLine } from "../routines/routine-copy.ts";
+import { useRoutineSeen } from "../routines/seen.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
@@ -409,6 +410,8 @@ export function Conversation({
     [items],
   );
   const downloads = useResultDownloads(api, sessionId, results, announce);
+  const origin = items.find((item): item is ItemOf<"origin"> => item.kind === "origin")?.origin;
+  useRoutineSeen(api, origin?.kind === "routine" ? origin.routineId : undefined, visible);
   const replayNow = useRef(onReplay);
   replayNow.current = onReplay;
   const replay = useCallback(() => replayNow.current?.(), []);

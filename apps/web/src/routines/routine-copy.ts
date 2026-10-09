@@ -161,6 +161,11 @@ export const MISSED: Record<MissedPolicy, string> = {
   skip: "Skip it",
 };
 
+// Without a limit of its own, a run follows the user's usual spending settings.
+export function budgetText(usd: number | null): string {
+  return usd === null ? "Your usual limit" : `$${usd.toFixed(2)}`;
+}
+
 export function waitText(minutes: number): string {
   if (minutes < 60) return `${minutes} min`;
   const hours = minutes / 60;

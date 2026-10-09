@@ -9,13 +9,14 @@ import { Switch } from "../ui/Switch.tsx";
 import { DeleteRoutine } from "./DeleteRoutine.tsx";
 import { RoutineForm } from "./RoutineForm.tsx";
 import { RunHistory } from "./RunHistory.tsx";
-import { AWAY, MISSED, NOTIFY, nextRunText, waitText } from "./routine-copy.ts";
+import { AWAY, budgetText, MISSED, NOTIFY, nextRunText, waitText } from "./routine-copy.ts";
 import {
   draftFromForm,
   type FormErrors,
   formFromRoutine,
   type RoutineFormState,
 } from "./routine-form.ts";
+import { markRoutineSeen } from "./seen.ts";
 import type { RoutinesView } from "./useRoutines.ts";
 
 export type RoutineTarget =
@@ -33,8 +34,6 @@ export interface RoutineSheetProps {
   onAnswer?(): void;
   returnFocus?: RefObject<HTMLElement | null>;
 }
-
-const money = (usd: number) => `$${usd.toFixed(2)}`;
 
 // One routine: what it does and how its runs went, and the form to change it; or a new one.
 export function RoutineSheet({
@@ -78,7 +77,11 @@ export function RoutineSheet({
 
   const save = async () => {
     if (!form) return;
-    const result = draftFromForm(form);
+    const result = draftFromForm(form, {
+      tz: zone,
+      now: Date.now(),
+      ...(target?.mode === "detail" && routine ? { saved: routine.when } : {}),
+    });
     if (!result.ok) {
       setErrors(result.errors);
       return;
@@ -299,14 +302,22 @@ function RoutineDetail({
         <GroupRow label="Tell me" trailing={NOTIFY[routine.notify]} />
         <GroupRow label="If a run is missed" trailing={MISSED[routine.missedPolicy]} />
         <GroupRow label="Wait for my answer" trailing={waitText(routine.approvalWindowMinutes)} />
-        <GroupRow
-          label="Spending limit per run"
-          trailing={routine.budgetUSD === null ? "None" : money(routine.budgetUSD)}
-        />
+        <GroupRow label="Spending limit per run" trailing={budgetText(routine.budgetUSD)} />
       </Group>
       <div>
         <GroupHead title="Recent runs" />
-        <RunHistory runs={runs} tz={routine.tz} onOpen={onWatch} onAnswer={onAnswer} />
+        <RunHistory
+          runs={runs}
+          tz={routine.tz}
+          onOpen={
+            onWatch &&
+            ((sessionId) => {
+              markRoutineSeen(routines.api.seen, routine.id);
+              onWatch(sessionId);
+            })
+          }
+          onAnswer={onAnswer}
+        />
       </div>
     </div>
   );

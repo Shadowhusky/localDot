@@ -3,9 +3,7 @@ import { Button } from "../ui/Button.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { StatusGlyph } from "../ui/StatusGlyph.tsx";
 import { useRoutinesControl } from "./context.ts";
-import { AWAY, NOTIFY, nextRunText } from "./routine-copy.ts";
-
-const money = (usd: number) => `$${usd.toFixed(2)}`;
+import { AWAY, budgetText, NOTIFY, nextRunText } from "./routine-copy.ts";
 
 // A routine dot drafted in the chat. Nothing runs until Save routine; the card then says when it
 // runs next, in the place its buttons held.
@@ -33,7 +31,7 @@ export function RoutineCard({ proposal }: { proposal: RoutineProposal }) {
         <dt>Tell me</dt>
         <dd>{NOTIFY[shown.notify]}</dd>
         <dt>Spending limit</dt>
-        <dd>{shown.budgetUSD === null ? "None" : money(shown.budgetUSD)}</dd>
+        <dd>{budgetText(shown.budgetUSD)}</dd>
       </dl>
       {open ? (
         <div className="routine-card-actions">
