@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { canOpenOnMac, fileExtension, fileKind, JsonPreview, ReviseLink } from "./deliverables.ts";
+import {
+  canOpenOnMac,
+  fileExtension,
+  fileKind,
+  JsonPreview,
+  ReviseLink,
+  textFormat,
+  viewerKind,
+} from "./deliverables.ts";
 import { parseEvent } from "./events.ts";
 import { ulid } from "./ids.ts";
 import { DoneInput } from "./tools.ts";
@@ -53,6 +61,45 @@ describe("file kinds", () => {
       "noext",
     ])
       expect(canOpenOnMac(name), name).toBe(false);
+  });
+});
+
+describe("full preview kinds", () => {
+  it("shows each common format its own way and anything else as details", () => {
+    const kinds = Object.fromEntries(
+      ["a.PNG", "a.svg", "a.pdf", "a.htm", "a.py", "a.log", "a.tsv", "a.ods", "a.m4a", "a.mov"]
+        .concat(["a.docx", "a.zip", "a.tiff", "README"])
+        .map((name) => [name, viewerKind(name)]),
+    );
+    expect(kinds).toEqual({
+      "a.PNG": "picture",
+      "a.svg": "svg",
+      "a.pdf": "pdf",
+      "a.htm": "html",
+      "a.py": "text",
+      "a.log": "text",
+      "a.tsv": "table",
+      "a.ods": "sheet",
+      "a.m4a": "audio",
+      "a.mov": "video",
+      "a.docx": "page",
+      "a.zip": "details",
+      "a.tiff": "details",
+      README: "details",
+    });
+    expect(["a.md", "a.json", "a.log", "a.txt", "a.ts"].map(textFormat)).toEqual([
+      "markdown",
+      "json",
+      "log",
+      "plain",
+      "code",
+    ]);
+  });
+  it("previews code as text but never opens it on the Mac", () => {
+    for (const name of ["a.py", "a.sh", "a.ts"]) {
+      expect(fileKind(name), name).toBe("text");
+      expect(canOpenOnMac(name), name).toBe(false);
+    }
   });
 });
 
