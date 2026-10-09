@@ -82,12 +82,18 @@ function recorded(durationMs: number, host?: "ready") {
   return { card, fetchImpl };
 }
 
+// Where the trim tool's handles stand.
+const handles = (sheet: HTMLElement) =>
+  within(sheet)
+    .getAllByRole("slider")
+    .map((handle) => handle.getAttribute("aria-valuetext"));
+
 it("opens Export on a result's part of the recording, kept inside it, and forgets the request", async () => {
   const task = recorded(60_000);
   window.history.replaceState(null, "", `/?replay=${task.card.id}&t=10000&export=10000-900000`);
   render(<App fetchImpl={task.fetchImpl} />);
   const sheet = await screen.findByRole("dialog", { name: "Export video" });
-  expect(within(sheet).getByText("0:10 – 1:00")).toBeTruthy();
+  expect(handles(sheet)).toEqual(["0:10.0", "1:00.0"]);
   expect(within(sheet).getByRole("radio", { name: "Selection" }).getAttribute("aria-checked")).toBe(
     "true",
   );
@@ -101,5 +107,5 @@ it("opens Export from the link through the host when this browser can't make the
   window.history.replaceState(null, "", `/?replay=${task.card.id}&export=0-20000`);
   render(<App fetchImpl={task.fetchImpl} />);
   const sheet = await screen.findByRole("dialog", { name: "Export video" });
-  expect(within(sheet).getByText("0:00 – 0:20")).toBeTruthy();
+  expect(handles(sheet)).toEqual(["0:00.0", "0:20.0"]);
 });

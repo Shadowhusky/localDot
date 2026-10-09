@@ -1,9 +1,9 @@
-import type { DotPlacement, ScreenName } from "@localdot/protocol";
-import { chapters, observeAt, type SessionModel } from "@localdot/stage";
+import type { DotPlacement } from "@localdot/protocol";
+import { chapters, type SessionModel } from "@localdot/stage";
 import {
-  type CSSProperties,
   type ReactNode,
   type RefObject,
+  useDeferredValue,
   useEffect,
   useRef,
   useState,
@@ -37,10 +37,10 @@ import {
   EXPORT_FRAME_RATES,
   EXPORT_QUALITIES,
   type ExportQuality,
+  type ExportRequest,
   fileSize,
   PRIVACY_NOTE,
   planExport,
-  speedText,
   videoLength,
 } from "./export-plan.ts";
 import {
@@ -69,10 +69,10 @@ import {
 import { type HostExports, useHostExports } from "./host-exports.ts";
 import { busy, type ExportJob, type ExportJobState, useExportJob } from "./job.ts";
 import { DOWNLOAD_LIMIT, exportSupport, LONG_EXPORT } from "./sink.ts";
+import { EDGE_LABEL, Trim, type TrimHold } from "./Trim.tsx";
+import { fitTrim, frameAt, type TrimEdge, type TrimRange, trimTimeLabel } from "./trim.ts";
 import { useExportEnvironment } from "./useExportEnvironment.ts";
 import "./export.css";
-
-type RangeKey = "whole" | "chapter" | "selection";
 
 const TITLE = "Export video";
 const NO_STEP = "The playhead isn't on a step";
@@ -103,24 +103,6 @@ const RESULT_TITLE = {
   downloaded: "Downloaded",
   saved: "Video saved",
 } as const;
-
-// The picture the export opens on: the moment at the playhead when it is in range, else the range's
-// first, else the first after it.
-function previewFrame(
-  model: SessionModel,
-  atMs: number,
-  range: { fromMs: number; toMs: number },
-  screen: ScreenName,
-): string | null {
-  const at = Math.max(range.fromMs, Math.min(range.toMs, atMs));
-  const shown = observeAt(model, at, screen);
-  if (shown) return shown.frameId;
-  return (
-    model.observes.find(
-      (entry) => entry.t >= range.fromMs && (entry.screen ?? "desktop") === screen,
-    )?.frameId ?? null
-  );
-}
 
 function stepLabel(model: SessionModel, atMs: number, endMs: number): string | null {
   return (
@@ -178,19 +160,25 @@ export function ExportSheet({
     context,
     where === "host" ? (hostView.host?.maxPixels ?? null) : null,
   );
-  const [range, setRange] = useState<RangeKey>(context.selection ? "selection" : "whole");
+  const [range, setRange] = useState<TrimRange>(() =>
+    fitTrim(context.selection ?? context.whole, context.whole),
+  );
+  // The end of the range the preview shows, once one has moved; the playhead's moment until then.
+  const [shownEdge, setShownEdge] = useState<TrimEdge | null>(null);
+  const [hold, setHold] = useState<TrimHold | null>(null);
   const [choices, setChoices] = useState<ExportChoices>(storedChoices);
   const [calibration] = useState(storedCalibration);
 
   const support = exportSupport();
-  const chosen = context[range] ?? context.whole;
+  // The estimates follow a moving handle as fast as they can be worked out, never holding it back.
+  const chosen = useDeferredValue(range);
   const options = optionsFor(choices, env);
   const request = exportRequest(context.sessionId, chosen, choices, env);
 
-  const outcome = (rowOptions: ExportOptions): Outcome | null => {
+  const outcome = (rowOptions: ExportOptions, base: ExportRequest = request): Outcome | null => {
     try {
       const rowRequest = {
-        ...request,
+        ...base,
         ...rowOptions,
         dot: rowOptions.dot === "off" ? undefined : rowOptions.dot,
         size: sizeOf(rowOptions.size, env, rowOptions.dot),
@@ -226,6 +214,11 @@ export function ExportSheet({
   };
   const choose = (patch: Partial<ExportChoices>) => update({ ...choices, ...patch });
   const option = (patch: Partial<ExportOptions>) => update(withOption(choices, env, patch));
+  const trim = (next: TrimRange, edge: TrimEdge) => {
+    setRange(next);
+    setShownEdge(edge);
+    if (state.note) job.reset();
+  };
   const placeDot = (place: DotPlacement) =>
     update({ ...withOption(choices, env, { dot: place }), place });
 
@@ -260,17 +253,18 @@ export function ExportSheet({
     const scroller = bodyRef.current?.closest(".ui-sheet-body");
     if (working && scroller) scroller.scrollTop = 0;
   }, [working]);
-  const frame = previewFrame(
-    context.model,
-    context.atMs,
-    chosen,
-    context.source.screen ?? "desktop",
+  const screen = context.source.screen ?? "desktop";
+  const edgeAt = (edge: TrimEdge) => (edge === "from" ? range.fromMs : range.toMs);
+  const shownAt = Math.max(
+    range.fromMs,
+    Math.min(range.toMs, shownEdge ? edgeAt(shownEdge) : context.atMs),
   );
-  const shownAt = Math.max(chosen.fromMs, Math.min(chosen.toMs, context.atMs));
+  const frame = frameAt(context.model, shownAt, range, screen);
   const step = stepLabel(context.model, shownAt, context.whole.toMs);
   const said = options.dot === "off" ? "" : recordedPresence(context.model, shownAt).line;
-  const span = context.whole.toMs - context.whole.fromMs;
-  const share = (time: number) => (span > 0 ? (time - context.whole.fromMs) / span : 0);
+  // The handle's time stays in the chip while it fades out.
+  const held = useRef<TrimEdge>("from");
+  if (hold) held.current = hold.edge;
   const cap = maxFrameRate(env, choices.speed);
 
   const presetRow = (preset: PresetChoice, label: string) => {
@@ -298,9 +292,22 @@ export function ExportSheet({
       <div className="export-views">
         <div className="export-options" inert={working} data-shown={working ? undefined : ""}>
           <div className="export-recording">
-            <div className="export-preview" data-dot={options.dot}>
+            <div
+              className="export-preview"
+              data-dot={options.dot}
+              data-held={hold ? "" : undefined}
+            >
               <div className="export-preview-picture">
-                <ReplayImage api={api} sessionId={context.sessionId} frameId={frame} full />
+                <ReplayImage
+                  api={api}
+                  sessionId={context.sessionId}
+                  frameId={frame}
+                  full={!hold?.dragging}
+                />
+                <span className="export-preview-time num" aria-hidden="true">
+                  <span className="export-preview-time-label">{EDGE_LABEL[held.current]}</span>
+                  {trimTimeLabel(edgeAt(held.current))}
+                </span>
                 <span
                   className="export-preview-caption"
                   data-shown={options.captions && step ? "" : undefined}
@@ -321,25 +328,27 @@ export function ExportSheet({
                 </span>
               </span>
             </div>
-            <div className="export-range">
-              <span className="export-range-label num">
-                {timeLabel(chosen.fromMs)} – {timeLabel(chosen.toMs)}
-              </span>
-              <span className="export-range-meta num">
-                {current ? `${videoLength(current.durationS)} at ${speedText(choices.speed)}` : "–"}
-              </span>
-              <span
-                className="export-range-track"
-                aria-hidden="true"
-                style={
-                  { "--_from": share(chosen.fromMs), "--_to": share(chosen.toMs) } as CSSProperties
-                }
-              >
-                <span className="export-range-chosen" />
-                <span className="export-range-edge" />
-                <span className="export-range-edge" data-end="" />
-              </span>
-            </div>
+            <Trim
+              api={api}
+              sessionId={context.sessionId}
+              model={context.model}
+              screen={screen}
+              whole={context.whole}
+              shortcuts={{
+                whole: context.whole,
+                chapter: context.chapter,
+                selection: context.selection,
+              }}
+              unavailable={{
+                chapter: NO_STEP,
+                selection: touch ? NO_SELECTION_TOUCH : NO_SELECTION,
+              }}
+              range={range}
+              onRange={trim}
+              snap={choices.snap}
+              onSnap={(snap) => choose({ snap })}
+              onHold={setHold}
+            />
           </div>
           <RadioCards
             aria-label="Preset"
@@ -354,33 +363,6 @@ export function ExportSheet({
             ]}
           />
           <Group>
-            <Field label="Range" inline className="ui-group-row export-row">
-              <SegmentedControl
-                size={24}
-                items={[
-                  { value: "whole", label: "Whole" },
-                  {
-                    value: "chapter",
-                    label: "This step",
-                    disabledReason: context.chapter ? undefined : NO_STEP,
-                  },
-                  {
-                    value: "selection",
-                    label: "Selection",
-                    disabledReason: context.selection
-                      ? undefined
-                      : touch
-                        ? NO_SELECTION_TOUCH
-                        : NO_SELECTION,
-                  },
-                ]}
-                value={range}
-                onValueChange={(value) => {
-                  setRange(value as RangeKey);
-                  if (state.note) job.reset();
-                }}
-              />
-            </Field>
             <SpeedRow speed={choices.speed} onSpeed={(speed) => choose({ speed })} />
             <Switch
               className="ui-group-row"
@@ -513,11 +495,10 @@ export function ExportSheet({
           where !== "page" ? "Export" : support.ok && support.save === "picker" ? "Save…" : "Save"
         }
         onSave={() => {
-          if (current)
-            void job.start(context, request, {
-              durationS: current.durationS,
-              fitted: current.fitted,
-            });
+          const final = exportRequest(context.sessionId, range, choices, env);
+          const made = outcome(options, final);
+          if (made)
+            void job.start(context, final, { durationS: made.durationS, fitted: made.fitted });
         }}
         job={job}
         onClose={onClose}

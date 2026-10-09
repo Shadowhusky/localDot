@@ -39,12 +39,11 @@
   gap: calc(var(--spacing) * 4);
 }
 
-/* What is exported: the picture at the playhead and the stretch of the recording. */
+/* What is exported: the picture at a handle, and under it the trim tool. */
 .export-recording {
   display: grid;
-  grid-template-columns: calc(var(--spacing) * 36) minmax(0, 1fr);
-  align-items: center;
-  gap: calc(var(--spacing) * 4);
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
 }
 
 /* The picture, and under it dot's band when dot goes under the picture: it opens as a row of the
@@ -54,7 +53,7 @@
   display: grid;
   grid-template-rows: auto 0fr;
   overflow: hidden;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   background-color: var(--color-void);
   transition: grid-template-rows var(--dur-default) var(--ease-spring);
 }
@@ -196,86 +195,6 @@
   bottom: auto;
 }
 
-.export-range {
-  display: grid;
-  gap: 2px;
-  min-width: 0;
-}
-
-.export-range-label {
-  color: var(--color-fg-1);
-  font:
-    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-title-3--letter-spacing);
-}
-
-.export-range-meta {
-  color: var(--color-fg-3);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-/* The chosen range, bracketed on the whole recording the way the scrubber marks a selection. The
-   band and its brackets span the track and move by translate and scale, as the played bar does. */
-.export-range-track {
-  position: relative;
-  height: calc(var(--spacing) * 3);
-  margin-top: calc(var(--spacing) * 2);
-  overflow: clip;
-}
-
-.export-range-track::before {
-  content: "";
-  position: absolute;
-  top: 50%;
-  inset-inline: 0;
-  height: var(--spacing);
-  border-radius: var(--radius-full);
-  background-color: var(--color-control);
-  translate: 0 -50%;
-}
-
-.export-range-chosen,
-.export-range-edge {
-  position: absolute;
-  inset: 0;
-  translate: calc(var(--_from) * 100%) 0;
-  transition: translate var(--dur-default) var(--ease-spring);
-}
-
-.export-range-chosen {
-  background-color: var(--color-state-selected);
-  transform-origin: left;
-  scale: calc(var(--_to) - var(--_from)) 1;
-  transition:
-    translate var(--dur-default) var(--ease-spring),
-    scale var(--dur-default) var(--ease-spring);
-}
-
-/* Ends a track's width before its mark, so a range to the end never leaves it wholly outside the
-   track, where browsers skip painting it. */
-.export-range-edge[data-end] {
-  translate: calc((var(--_to) - 1) * 100%) 0;
-}
-
-.export-range-edge::before {
-  content: "";
-  position: absolute;
-  inset-block: 0;
-  left: 0;
-  width: var(--spacing);
-  border-left: 2px solid var(--color-fg-2);
-  border-radius: var(--radius-xs) 0 0 var(--radius-xs);
-}
-
-.export-range-edge[data-end]::before {
-  right: 0;
-  left: auto;
-  border-right: 2px solid var(--color-fg-2);
-  border-left: 0;
-  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
-}
-
 /* Each preset's size and wait, in a fixed column so a changing estimate moves nothing. */
 .export-estimate {
   display: grid;
@@ -400,17 +319,348 @@
   margin-left: auto;
 }
 
+/* While a handle is held, its moment in a glass chip over the picture's corner. */
+.export-preview-time {
+  position: absolute;
+  top: calc(var(--spacing) * 2);
+  left: calc(var(--spacing) * 2);
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  height: calc(var(--spacing) * 6);
+  padding: 0 calc(var(--spacing) * 2.5);
+  border-radius: var(--radius-full);
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+  color: var(--color-fg-1);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity var(--dur-text-out) var(--ease-standard);
+  pointer-events: none;
+}
+
+.export-preview-time-label {
+  color: var(--color-fg-2);
+}
+
+.export-preview[data-held] .export-preview-time {
+  opacity: 1;
+  transition-duration: var(--dur-fade);
+}
+
+.export-preview[data-held] .export-preview-caption[data-place="head"] {
+  opacity: 0;
+}
+
+/* The trim tool. The strip shows the recording's key frames end to end; a porcelain handle stands
+   at each end of the part that goes in the video, outside it, so the two and the frame's top and
+   bottom edges read as one bracket. What is left out stays visible, dimmed. Every moving part spans
+   the film and moves by translate and scale, as the scrubber's played bar does. */
+.trim {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.trim-strip {
+  --_h: calc(var(--spacing) * 12);
+  --_hw: 14px;
+  --_reach: 10px;
+  --_glide: var(--dur-default) var(--ease-spring);
+  position: relative;
+  height: var(--_h);
+  margin-bottom: calc(var(--spacing) * 2.5);
+  padding-inline: var(--_hw);
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.trim-film {
+  position: relative;
+  height: 100%;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-well);
+}
+
+/* Out of flow, so the last tile running past the end never widens the sheet. */
+.trim-tiles {
+  position: absolute;
+  inset: 0;
+  display: flex;
+}
+
+.trim-tile {
+  flex: none;
+  height: 100%;
+  aspect-ratio: 16 / 10;
+}
+
+.trim-tile > :is(img, .replay-image-empty) {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.trim-shade,
+.trim-frame {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  transition:
+    translate var(--_glide),
+    scale var(--_glide);
+}
+
+.trim-shade {
+  background-color: rgba(10, 11, 13, 0.64);
+}
+
+.trim-shade[data-side="from"] {
+  transform-origin: left;
+  scale: var(--_from) 1;
+}
+
+.trim-shade[data-side="to"] {
+  transform-origin: right;
+  scale: calc(1 - var(--_to)) 1;
+}
+
+.trim-frame {
+  transform-origin: left;
+  translate: calc(var(--_from) * 100%) 0;
+  scale: calc(var(--_to) - var(--_from)) 1;
+  box-shadow:
+    inset 0 2px 0 var(--color-you),
+    inset 0 -2px 0 var(--color-you);
+}
+
+/* Each handle rides a rail of no width from the film's left edge, moved by its share of the film's
+   measured width, so nothing reaches past the strip to scroll the sheet sideways. */
+.trim-rail {
+  position: absolute;
+  inset-block: 0;
+  left: var(--_hw);
+  width: 0;
+  pointer-events: none;
+  transition: translate var(--_glide);
+}
+
+.trim-rail[data-rail="from"] {
+  translate: calc(var(--_from) * var(--_film)) 0;
+}
+
+.trim-rail[data-rail="to"] {
+  translate: calc(var(--_to) * var(--_film)) 0;
+}
+
+.trim-handle {
+  position: absolute;
+  inset-block: 0;
+  display: grid;
+  place-items: center;
+  width: var(--_hw);
+  background-image: var(--porcelain);
+  box-shadow: var(--shadow-porcelain-sm);
+  cursor: ew-resize;
+  pointer-events: auto;
+  touch-action: none;
+  outline: none;
+  transition: box-shadow var(--dur-hover) var(--ease-standard);
+}
+
+.trim-handle[data-edge="from"] {
+  right: 100%;
+  border-radius: var(--radius-md) 0 0 var(--radius-md);
+}
+
+.trim-handle[data-edge="to"] {
+  left: 100%;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+}
+
+/* The grip, and a reach wider than the face so the handle is easy to take. The reach grows inward
+   only: outward it would run past the sheet's edge at either end of the strip. */
+.trim-handle::before {
+  content: "";
+  width: 3px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background-color: rgba(11, 12, 14, 0.36);
+  transition:
+    background-color var(--dur-press) var(--ease-standard),
+    scale var(--dur-snappy) var(--ease-spring);
+}
+
+.trim-handle::after {
+  content: "";
+  position: absolute;
+  inset-block: -6px;
+}
+
+.trim-handle[data-edge="from"]::after {
+  left: 0;
+  right: calc(var(--_reach) * -1);
+}
+
+.trim-handle[data-edge="to"]::after {
+  left: calc(var(--_reach) * -1);
+  right: 0;
+}
+
+.trim-handle:focus-visible {
+  box-shadow:
+    var(--shadow-porcelain-sm),
+    0 0 0 var(--focus-offset) var(--color-void),
+    0 0 0 calc(var(--focus-offset) + var(--focus-width)) var(--color-fg-1);
+}
+
+.trim-strip[data-dragging] :is(.trim-shade, .trim-frame, .trim-rail) {
+  transition: none;
+}
+
+.trim-strip[data-dragging="from"] .trim-handle[data-edge="from"],
+.trim-strip[data-dragging="to"] .trim-handle[data-edge="to"] {
+  background-image: var(--porcelain-pressed);
+}
+
+.trim-strip[data-dragging="from"] .trim-handle[data-edge="from"]::before,
+.trim-strip[data-dragging="to"] .trim-handle[data-edge="to"]::before {
+  background-color: rgba(11, 12, 14, 0.62);
+  scale: 1 1.15;
+}
+
+/* dot's steps under the strip, each a bar as long as it took; a step whose start or end a handle
+   snapped to lights up. */
+.trim-steps {
+  position: absolute;
+  top: calc(100% + var(--spacing) * 1.5);
+  inset-inline: var(--_hw);
+  height: 3px;
+  pointer-events: none;
+}
+
+.trim-step {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  min-width: 4px;
+  padding-inline: 1px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-step-tick);
+  background-clip: content-box;
+  transition: background-color var(--dur-hover) var(--ease-standard);
+}
+
+.trim-step[data-snapped] {
+  background-color: var(--color-fg-1);
+}
+
+.trim-times {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: calc(var(--spacing) * 3);
+}
+
+.trim-time {
+  width: calc(var(--spacing) * 32);
+}
+
+.trim-time .ui-field-affix {
+  color: var(--color-fg-3);
+}
+
+.trim-length {
+  overflow: hidden;
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.trim-shortcuts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
+}
+
+.trim-shortcuts > .ui-segmented {
+  flex: none;
+}
+
+.trim-snap.ui-choice {
+  flex: none;
+  gap: calc(var(--spacing) * 2);
+  min-height: 0;
+  padding-block: 0;
+}
+
+.trim-snap .ui-choice-text {
+  flex: none;
+}
+
+.trim-snap .ui-choice-label {
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* A finger takes a bigger handle: a taller strip, wider faces, and the full 44 px reach. */
+@media (pointer: coarse) {
+  .trim-strip {
+    --_h: calc(var(--spacing) * 14);
+    --_hw: 22px;
+    --_reach: calc(44px - var(--_hw));
+  }
+
+  .trim-handle::before {
+    width: 4px;
+    height: 20px;
+  }
+
+  .trim-time {
+    width: calc(var(--spacing) * 30);
+  }
+
+  .trim-snap.ui-choice {
+    min-height: calc(var(--spacing) * 11);
+  }
+}
+
+/* A phone gives the shortcuts the full width and Snap to steps a row of its own. */
 @media (--phone) {
-  .export-recording {
-    grid-template-columns: calc(var(--spacing) * 28) minmax(0, 1fr);
-    gap: calc(var(--spacing) * 3);
+  .trim-shortcuts {
+    display: grid;
+    justify-content: stretch;
+    gap: var(--spacing);
+  }
+
+  .trim-shortcuts > .ui-segmented {
+    display: grid;
+    width: 100%;
+  }
+
+  .trim-snap.ui-choice {
+    justify-content: space-between;
+  }
+
+  .trim-snap .ui-choice-text {
+    flex: 1;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .export-range-chosen,
-  .export-range-edge,
-  .export-preview {
+  .export-preview,
+  .trim-shade,
+  .trim-frame,
+  .trim-rail {
     transition: none;
   }
 }

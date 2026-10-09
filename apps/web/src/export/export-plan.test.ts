@@ -8,7 +8,6 @@ import {
   fileSize,
   PRIVACY_NOTE,
   planExport,
-  speedText,
   validSize,
   videoLength,
 } from "./export-plan.ts";
@@ -66,12 +65,6 @@ describe("deterministic MP4 export plan", () => {
     expect(planExport({ ...request, speed: 16 }, model, [], []).frames).toBe(113);
     for (const speed of [0.2, 16.5, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])
       expect(() => planExport({ ...request, speed }, model, [], [])).toThrow(RangeError);
-  });
-
-  it("names speeds plainly", () => {
-    expect(speedText(2)).toBe("2×");
-    expect(speedText(0.25)).toBe("0.25×");
-    expect(speedText(1.333333)).toBe("1.33×");
   });
 
   it("counts the moving part of the video at its speed", () => {

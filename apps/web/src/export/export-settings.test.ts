@@ -228,6 +228,7 @@ describe("remembered choices", () => {
       },
       place: "over" as const,
       speed: 2.5,
+      snap: false,
     };
     expect(parseChoices(JSON.stringify(kept))).toEqual(kept);
   });

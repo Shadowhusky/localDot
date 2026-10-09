@@ -148,6 +148,8 @@ const speed = (name: string) =>
   within(screen.getByRole("radiogroup", { name: "Speed" })).getByRole("radio", { name });
 
 const more = () => fireEvent.click(screen.getByRole("button", { name: /More options/ }));
+const field = (name: string) => screen.getByRole<HTMLInputElement>("textbox", { name });
+const times = () => [field("Start time").value, field("End time").value];
 
 const started = (job: ReturnType<typeof fakeJob>) => job.start.mock.calls[0] as unknown[];
 
@@ -166,11 +168,17 @@ afterEach(() => {
 });
 
 describe("Export video", () => {
-  it("leads with the presets, each with its size and wait, from the kit's controls", async () => {
+  it("opens on the trim tool, then the presets, each with its size and wait, from the kit's controls", async () => {
     const panel = await show(fakeJob());
     expect(panel.querySelector("select, input[type=file], progress, meter")).toBe(null);
     const presets = screen.getByRole("radiogroup", { name: "Preset" });
-    expect(panel.querySelector("[role=radiogroup]")).toBe(presets);
+    const [first, second] = panel.querySelectorAll("[role=radiogroup], [role=slider]");
+    expect(first).toBe(screen.getByRole("slider", { name: "Start" }));
+    expect(
+      screen.getByRole("radiogroup", { name: "Range" }).compareDocumentPosition(presets) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(second).toBe(screen.getByRole("slider", { name: "End" }));
     expect(preset("Quality")).toHaveProperty("checked", true);
     expect(presets.textContent).toContain("1920 × 1200 · 60 fps · sharpest");
     expect(presets.textContent).toContain("1280 × 800 · 15 fps · smallest");
@@ -182,7 +190,7 @@ describe("Export video", () => {
     expect(presets.querySelectorAll(".export-estimate[data-hidden]")).toHaveLength(1);
     for (const name of ["Range", "Speed"])
       expect(screen.getByRole("radiogroup", { name })).toBeTruthy();
-    expect(panel.textContent).toContain("0:00 – 1:00");
+    expect(times()).toEqual(["0:00.0", "1:00.0"]);
     expect(panel.textContent).toMatch(/1:00 video · about [\d.]+ MB · ready in /);
   });
 
@@ -226,12 +234,12 @@ describe("Export video", () => {
     expect(off.getAttribute("aria-disabled")).toBe("true");
     expect(description(off)).toContain("Press I and O on the timeline to mark a stretch");
     cleanup();
-    const panel = await show(fakeJob(), context({ selection: { fromMs: 5_000, toMs: 35_000 } }));
+    await show(fakeJob(), context({ selection: { fromMs: 5_000, toMs: 35_000 } }));
     const on = screen.getByRole("radio", { name: "Selection" });
     expect(on.getAttribute("aria-checked")).toBe("true");
-    expect(panel.textContent).toContain("0:05 – 0:35");
+    expect(times()).toEqual(["0:05.0", "0:35.0"]);
     fireEvent.click(screen.getByRole("radio", { name: "This step" }));
-    expect(panel.textContent).toContain("0:15 – 0:17");
+    expect(times()).toEqual(["0:15.0", "0:17.5"]);
   });
 
   it("starts the export with the preset and speed chosen", async () => {
@@ -469,6 +477,163 @@ describe("Export video", () => {
     expect(job.save).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(job.reset).toHaveBeenCalledOnce();
+  });
+});
+
+// The strip's film spans 600 px from x = 100: on a minute's recording, a pixel is 100 ms.
+function layOut(panel: HTMLElement) {
+  const film = panel.querySelector<HTMLElement>(".trim-film");
+  if (!film) throw new Error("no strip");
+  const box = (left: number, width: number) =>
+    ({
+      left,
+      right: left + width,
+      width,
+      top: 0,
+      bottom: 48,
+      height: 48,
+      x: left,
+      y: 0,
+    }) as DOMRect;
+  film.getBoundingClientRect = () => box(100, 600);
+  const [from, to] = screen.getAllByRole("slider");
+  if (!from || !to) throw new Error("no handles");
+  return { from, to };
+}
+
+const press = (target: Element, type: string, clientX: number) =>
+  fireEvent(target, new MouseEvent(type, { bubbles: true, cancelable: true, clientX, button: 0 }));
+
+function withSteps(starts: number[], endMs = 60_000): ExportContext {
+  const base = context();
+  base.model.steps = starts.map((startT, index) => ({
+    id: `s${index}`,
+    kind: "gui",
+    startT,
+    endT: starts[index + 1] ?? endMs,
+    status: "ok",
+  }));
+  return base;
+}
+
+describe("Trimming the video", () => {
+  it("drags a handle one to one from where it was taken, and exports that part", async () => {
+    const job = fakeJob();
+    const panel = await show(job);
+    const { from, to } = layOut(panel);
+    // Taken 5 px left of its edge, the handle keeps that offset under the pointer.
+    press(from, "pointerdown", 95);
+    expect(panel.querySelector(".export-preview[data-held]")).not.toBe(null);
+    press(from, "pointermove", 395);
+    expect(times()).toEqual(["0:30.0", "1:00.0"]);
+    expect(panel.querySelector(".export-preview-time")?.textContent).toBe("Start0:30.0");
+    press(from, "pointerup", 395);
+    expect(panel.querySelector(".export-preview[data-held]")).toBe(null);
+    press(to, "pointerdown", 705);
+    press(to, "pointermove", 655);
+    press(to, "pointerup", 655);
+    expect(times()).toEqual(["0:30.0", "0:55.0"]);
+    expect(panel.textContent).toMatch(/0:25 video · about/);
+    fireEvent.click(screen.getByRole("button", { name: "Save…" }));
+    expect(started(job)[1]).toMatchObject({ fromMs: 30_000, toMs: 55_000 });
+    expect(started(job)[2]).toMatchObject({ durationS: 25 });
+  });
+
+  it("keeps the handles apart and inside the recording", async () => {
+    const panel = await show(fakeJob());
+    const { from, to } = layOut(panel);
+    press(from, "pointerdown", 100);
+    press(from, "pointermove", 900);
+    press(from, "pointerup", 900);
+    expect(times()).toEqual(["0:59.5", "1:00.0"]);
+    press(to, "pointerdown", 700);
+    press(to, "pointermove", -50);
+    press(to, "pointerup", -50);
+    expect(times()).toEqual(["0:59.5", "1:00.0"]);
+    press(from, "pointerdown", 695);
+    press(from, "pointermove", 0);
+    press(from, "pointerup", 0);
+    expect(times()).toEqual(["0:00.0", "1:00.0"]);
+  });
+
+  it("snaps a dragged handle to dot's step edges while Snap to steps is on", async () => {
+    const panel = await show(fakeJob(), withSteps([0, 15_500, 23_000]));
+    const { from } = layOut(panel);
+    expect(panel.querySelectorAll(".trim-step")).toHaveLength(3);
+    press(from, "pointerdown", 100);
+    // 0:15.0 is 5 px from the step that starts at 0:15.5.
+    press(from, "pointermove", 250);
+    expect(times()[0]).toBe("0:15.5");
+    expect(panel.querySelectorAll(".trim-step[data-snapped]")).toHaveLength(2);
+    press(from, "pointermove", 220);
+    expect(times()[0]).toBe("0:12.0");
+    expect(panel.querySelector(".trim-step[data-snapped]")).toBe(null);
+    press(from, "pointerup", 220);
+    fireEvent.click(screen.getByRole("switch", { name: "Snap to steps" }));
+    press(from, "pointerdown", 220);
+    press(from, "pointermove", 250);
+    press(from, "pointerup", 250);
+    expect(times()[0]).toBe("0:15.0");
+    expect(JSON.parse(localStorage.getItem("localdot.export.v2") ?? "{}")).toMatchObject({
+      snap: false,
+    });
+  });
+
+  it("keeps a press on a handle from the sheet's own drag", async () => {
+    const panel = await show(fakeJob());
+    const { from } = layOut(panel);
+    const sheet = vi.fn();
+    panel.addEventListener("pointerdown", sheet);
+    press(from, "pointerdown", 95);
+    press(from, "pointerup", 95);
+    expect(sheet).not.toHaveBeenCalled();
+  });
+
+  it("takes typed times, kept inside the recording, and puts back what it can't read", async () => {
+    const job = fakeJob();
+    await show(job);
+    fireEvent.change(field("End time"), { target: { value: "0:45" } });
+    fireEvent.keyDown(field("End time"), { key: "Enter" });
+    fireEvent.change(field("Start time"), { target: { value: "12.25" } });
+    fireEvent.blur(field("Start time"));
+    expect(times()).toEqual(["0:12.2", "0:45.0"]);
+    fireEvent.change(field("Start time"), { target: { value: "soon" } });
+    fireEvent.blur(field("Start time"));
+    fireEvent.change(field("End time"), { target: { value: "5:00" } });
+    fireEvent.keyDown(field("End time"), { key: "Enter" });
+    expect(times()).toEqual(["0:12.2", "1:00.0"]);
+    fireEvent.click(screen.getByRole("button", { name: "Save…" }));
+    expect(started(job)[1]).toMatchObject({ fromMs: 12_250, toMs: 60_000 });
+  });
+
+  it("nudges a focused handle with the keyboard", async () => {
+    await show(fakeJob(), withSteps([0, 15_500, 23_000]));
+    const start = screen.getByRole("slider", { name: "Start" });
+    fireEvent.keyDown(start, { key: "ArrowRight" });
+    fireEvent.keyDown(start, { key: "ArrowRight", shiftKey: true });
+    expect(start.getAttribute("aria-valuetext")).toBe("0:01.1");
+    fireEvent.keyDown(start, { key: "ArrowRight", altKey: true });
+    expect(times()[0]).toBe("0:15.5");
+    const end = screen.getByRole("slider", { name: "End" });
+    fireEvent.keyDown(end, { key: "Home" });
+    expect(times()).toEqual(["0:15.5", "0:16.0"]);
+    expect(end.getAttribute("aria-valuemin")).toBe("16000");
+  });
+
+  it("sets both handles from Whole, This step and Selection, and shows which one they hold", async () => {
+    await show(fakeJob(), context({ selection: { fromMs: 5_000, toMs: 35_000 } }));
+    const range = screen.getByRole("radiogroup", { name: "Range" });
+    const checked = () =>
+      within(range)
+        .getAllByRole("radio")
+        .filter((radio) => radio.getAttribute("aria-checked") === "true")
+        .map((radio) => radio.textContent);
+    expect(checked()).toEqual(["Selection"]);
+    fireEvent.keyDown(screen.getByRole("slider", { name: "End" }), { key: "ArrowLeft" });
+    expect(checked()).toEqual([]);
+    fireEvent.click(within(range).getByRole("radio", { name: "Whole" }));
+    expect(times()).toEqual(["0:00.0", "1:00.0"]);
+    expect(checked()).toEqual(["Whole"]);
   });
 });
 

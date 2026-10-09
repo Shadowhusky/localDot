@@ -47,6 +47,8 @@ export interface ExportChoices {
   speed: number;
   skipIdle: boolean;
   overlays: boolean;
+  // Whether a dragged trim handle stops at the edges of dot's steps.
+  snap: boolean;
 }
 
 // What this recording and this browser allow. Unknown (null) allows, so nothing is held back while
@@ -80,6 +82,7 @@ export const DEFAULT_CHOICES: ExportChoices = {
   speed: 1,
   skipIdle: true,
   overlays: true,
+  snap: true,
 };
 
 export const sizeKey = (size: ExportSize) => `${size.w}x${size.h}`;
@@ -333,6 +336,7 @@ export function parseChoices(text: string | null): ExportChoices {
     speed,
     skipIdle: flag(value.skipIdle, fallback.skipIdle),
     overlays: flag(value.overlays, fallback.overlays),
+    snap: flag(value.snap, fallback.snap),
   };
 }
 
