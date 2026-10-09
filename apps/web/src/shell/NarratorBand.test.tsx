@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { LINE_HOLD_MS, NarratorBand } from "./NarratorBand.tsx";
 
@@ -65,15 +65,39 @@ it("lets a line too long for its two lines be read whole, by hover or by a tap",
     return this.classList.contains("narration-line") ? 44 : 0;
   });
   render(<NarratorBand line={long} speaker="dot" showDot />);
-  const clamped = line() as HTMLElement;
-  expect(clamped.title).toBe(long);
-  expect(clamped.getAttribute("role")).toBe("button");
-  act(() => clamped.click());
+  const opener = screen.getByRole("button", { name: "Show the whole line" });
+  expect(opener.title).toBe(long);
+  act(() => opener.click());
   expect(document.querySelector('[role="dialog"]')?.textContent).toBe(long);
+});
+
+it("announces a clamped line as plain text, its opener outside the live region", () => {
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.classList.contains("narration-line") ? 66 : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.classList.contains("narration-line") ? 44 : 0;
+  });
+  render(<NarratorBand line="A line too long for its two lines" speaker="dot" showDot />);
+  const live = document.querySelector('[aria-live="polite"]') as HTMLElement;
+  expect(live.querySelector('[role="button"], [tabindex]')).toBeNull();
+  const opener = screen.getByRole("button", { name: "Show the whole line" });
+  expect(live.contains(opener)).toBe(false);
+  act(() => {
+    fireEvent.keyDown(opener, { key: "Enter" });
+  });
+  expect(document.querySelector('[role="dialog"]')?.textContent).toBe(
+    "A line too long for its two lines",
+  );
 });
 
 it("leaves a line that fits as plain text", () => {
   render(<NarratorBand line="Opening the report" speaker="dot" showDot />);
   expect(line()?.hasAttribute("title")).toBe(false);
   expect(line()?.hasAttribute("role")).toBe(false);
+  expect(screen.queryByRole("button", { name: "Show the whole line" })).toBeNull();
 });

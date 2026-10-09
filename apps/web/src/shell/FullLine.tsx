@@ -29,32 +29,39 @@ export function useClamped(text: string) {
   return { ref, clamped };
 }
 
-// A clamped line still says everything: a hover names it whole, and a tap or Enter opens it whole
-// above the band. What opened stays open while the band moves on to the next line.
+// A clamped line still says everything: a hover names it whole, and a click, a tap or Enter opens it
+// whole above the band. Its opener lies over the line, outside the band's live region, so the line
+// is announced as plain text. The opener stays while it has focus or its line is open, so the band
+// moving on never drops focus; what opened stays open while the band moves on to the next line.
 export function useFullLine(text: string, content: ReactNode) {
   const { ref, clamped } = useClamped(text);
+  const opener = useRef<HTMLSpanElement>(null);
   const [opened, setOpened] = useState<ReactNode>(null);
+  const [focused, setFocused] = useState(false);
   const open = () => setOpened(content);
-  const lineProps = clamped
-    ? {
-        title: text,
-        role: "button",
-        tabIndex: 0,
-        ...triggerProps("dialog", opened !== null),
-        onClick: open,
-        onKeyDown: (event: KeyboardEvent) => {
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          open();
-        },
-      }
-    : {};
+  const openerProps = {
+    title: text,
+    role: "button",
+    tabIndex: 0,
+    "aria-label": "Show the whole line",
+    ...triggerProps("dialog", opened !== null),
+    onClick: open,
+    onKeyDown: (event: KeyboardEvent) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      open();
+    },
+    onFocus: () => setFocused(true),
+    onBlur: () => setFocused(false),
+  };
+  const opens = clamped || focused || opened !== null;
+  const control = opens ? <span ref={opener} className="narration-open" {...openerProps} /> : null;
   const full = (
-    <FullLine anchor={ref} open={opened !== null} onClose={() => setOpened(null)}>
+    <FullLine anchor={opener} open={opened !== null} onClose={() => setOpened(null)}>
       {opened}
     </FullLine>
   );
-  return { ref, clamped, lineProps, full };
+  return { ref, clamped, opener: control, full };
 }
 
 function FullLine({

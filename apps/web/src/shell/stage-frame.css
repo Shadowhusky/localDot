@@ -142,10 +142,6 @@
   position: absolute;
   top: var(--line-y);
   left: var(--line-x);
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  justify-content: center;
   width: calc(100% - var(--line-x));
   height: var(--line-h);
   color: var(--color-fg-1);
@@ -157,6 +153,14 @@
 
 .narration[data-speaker="system"] {
   color: var(--color-fg-2);
+}
+
+.narration-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  height: 100%;
 }
 
 .narration-line {
@@ -175,8 +179,10 @@
   opacity: 0;
 }
 
-/* A line longer than its lines opens whole on a click or a tap. */
-.narration-line[role="button"] {
+/* A line longer than its lines opens whole on a click, a tap or Enter. */
+.narration-open {
+  position: absolute;
+  inset: 0;
   cursor: pointer;
   border-radius: var(--radius-xs);
 }

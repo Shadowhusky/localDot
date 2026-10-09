@@ -828,7 +828,7 @@ describe("App HUD", () => {
     render(<App fetchImpl={daemon(() => json([summary("ready", "connecting")])).fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Connecting…"));
     await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
-    expect(document.querySelector(".narration")?.getAttribute("aria-live")).toBe("polite");
+    expect(document.querySelector(".narration-text")?.getAttribute("aria-live")).toBe("polite");
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(false);
     expect(document.body.textContent).not.toContain("Offline");
     pushState(summary("ready", "live"));

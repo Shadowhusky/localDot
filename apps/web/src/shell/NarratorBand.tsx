@@ -32,29 +32,31 @@ export function NarratorBand({ line, speaker, showDot, note, reveal = false }: N
   return (
     <div className="narrator" data-dot={showDot ? "" : undefined}>
       {showDot && <PresenceSlot name="dock" className="narrator-dock" />}
-      <p className="narration" data-speaker={speaker} aria-live="polite">
-        {text && (
-          <span
-            ref={whole.ref}
-            className="narration-line"
-            key={text}
-            data-leaving={leaving || undefined}
-            {...whole.lineProps}
-          >
-            {speaker === "dot" && (
-              <span className={showDot ? "ui-visually-hidden" : "narration-speaker"}>
-                {showDot ? "dot: " : "dot"}
-              </span>
-            )}
-            {content}
-          </span>
-        )}
-        {text && warning && (
-          <span className="narration-warning" data-leaving={leaving || undefined}>
-            {warning}
-          </span>
-        )}
-      </p>
+      <div className="narration" data-speaker={speaker}>
+        <p className="narration-text" aria-live="polite">
+          {text && (
+            <span
+              ref={whole.ref}
+              className="narration-line"
+              key={text}
+              data-leaving={leaving || undefined}
+            >
+              {speaker === "dot" && (
+                <span className={showDot ? "ui-visually-hidden" : "narration-speaker"}>
+                  {showDot ? "dot: " : "dot"}
+                </span>
+              )}
+              {content}
+            </span>
+          )}
+          {text && warning && (
+            <span className="narration-warning" data-leaving={leaving || undefined}>
+              {warning}
+            </span>
+          )}
+        </p>
+        {whole.opener}
+      </div>
       {note && <p className="narrator-note num">{note}</p>}
       {whole.full}
     </div>
