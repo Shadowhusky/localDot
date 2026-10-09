@@ -254,20 +254,6 @@
   opacity: 1;
 }
 
-.stage > .screen-label {
-  position: absolute;
-  z-index: 4;
-  top: 12px;
-  left: 12px;
-  max-width: calc(100% - 24px);
-  padding: 6px 10px;
-  border-radius: 8px;
-  background-color: var(--color-glass-solid);
-  color: var(--color-fg-2);
-  font-size: 12px;
-  pointer-events: none;
-}
-
 .stage > canvas,
 .stage > .stage-veil {
   position: absolute;
