@@ -7,13 +7,15 @@ import { canvasColour, GLOSS_STOPS, PEARL_STOPS, PROP, SHEEN_STOPS, VOID } from 
 import { type Arc, eyeGeometry } from "./eye-geometry.ts";
 import { LOD_DETAIL, type LodDetail, lodFor } from "./lod.ts";
 import { type PropLayer, paintProps } from "./prop-paint.ts";
-import { addView, type Frameable, now, removeView } from "./scheduler.ts";
+import { addView, type Frameable, kick, now, removeView } from "./scheduler.ts";
 
 const SVG = "http://www.w3.org/2000/svg";
 // A view left unrendered this long (off screen, hidden tab) jumps ahead instead of replaying it.
 const RESYNC_MS = 10_000;
 // Below this activity nothing moves fast enough to need every frame.
 const CALM = 2;
+// A prop's slow loops draw at half the display rate.
+const LOOP_GAP_MS = 33;
 let uid = 0;
 
 const num = (v: number) => (Math.abs(v) < 1e-4 ? "0" : v.toFixed(3));
@@ -197,46 +199,57 @@ export class DotView implements Frameable {
 
   setState(state: DotState): void {
     this.engine.setState(state, now());
+    kick();
   }
 
   setControl(on: boolean): void {
     this.engine.setControl(on, now());
+    kick();
   }
 
   setReducedMotion(on: boolean): void {
     this.engine.setReducedMotion(on, now());
+    kick();
   }
 
   react(name: Reaction): void {
     this.engine.react(name, now());
+    kick();
   }
 
   setFocus(p: Point | null): void {
     this.engine.setFocus(p, now());
+    kick();
   }
 
   setBias(b: Point): void {
     this.engine.setBias(b, now());
+    kick();
   }
 
   setPlaces(places: Partial<{ composer: Point; card: Point }>): void {
     this.engine.setPlaces(places, now());
+    kick();
   }
 
   say(ms: number): void {
     this.engine.say(now(), ms);
+    kick();
   }
 
   hop(): void {
     this.engine.hop(now());
+    kick();
   }
 
   setTool(tool: DotTool | null): void {
     this.engine.setTool(tool, now());
+    kick();
   }
 
   beat(key: string, n: number): void {
     this.engine.beat(key, n, now());
+    kick();
   }
 
   setSize(size: number): void {
@@ -263,11 +276,18 @@ export class DotView implements Frameable {
     delete this.root.dataset.skin;
   }
 
-  frame(t: number): void {
+  frame(t: number): number {
     if (t - this.lastFrame > RESYNC_MS) this.engine.skipTo(t);
     this.lastFrame = t;
-    if (this.engine.activity(t) < CALM && t - this.lastRender < this.detail.calmGapMs) return;
-    this.render(t);
+    if (this.engine.activity(t) >= CALM) {
+      this.render(t);
+      return 0;
+    }
+    const gap = this.engine.looping(t)
+      ? Math.min(LOOP_GAP_MS, this.detail.calmGapMs)
+      : this.detail.calmGapMs;
+    if (t - this.lastRender >= gap) this.render(t);
+    return Math.max(0, Math.min(this.lastRender + gap, this.engine.nextEventAt()) - t);
   }
 
   private image(className: string, parent: Element): HTMLImageElement {

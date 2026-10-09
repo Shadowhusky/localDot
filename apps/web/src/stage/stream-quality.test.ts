@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CRFS,
   FRAMERATES,
+  framerateCeiling,
+  HANDHELD_FRAMERATE,
   PROBE_TICKS,
   QualityController,
   type QualitySample,
@@ -196,6 +198,28 @@ describe("QualityController", () => {
     const controller = new QualityController();
     run(controller, { ...clear, rttMs: null, baseRttMs: null }, 30);
     expect(controller.quality).toEqual({ framerate: 60, crf: 25 });
+  });
+});
+
+describe("a handheld viewer", () => {
+  it("is a touch device, which asks for 30 fps at most", () => {
+    expect(framerateCeiling((query) => query === "(pointer: coarse)")).toBe(HANDHELD_FRAMERATE);
+    expect(framerateCeiling(() => false)).toBe(60);
+  });
+
+  it("starts at its ceiling, steps down from it for a slow device and never recovers past it", () => {
+    const controller = new QualityController("auto", HANDHELD_FRAMERATE);
+    expect(controller.quality).toEqual({ framerate: 30, crf: 25 });
+    run(controller, { ...slowDevice, decodedFps: 30, presentedFps: 15 }, 4);
+    expect(controller.quality.framerate).toBe(24);
+    run(
+      controller,
+      { ...clear, decodedFps: 24, presentedFps: 24 },
+      RECOVER_TICKS + PROBE_TICKS + 40,
+    );
+    expect(controller.quality.framerate).toBe(30);
+    controller.prefer("smooth");
+    expect(controller.quality.framerate).toBe(30);
   });
 });
 

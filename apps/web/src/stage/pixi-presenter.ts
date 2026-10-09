@@ -7,7 +7,9 @@ import {
   Application,
   Container,
   DOMAdapter,
+  extensions,
   ImageSource,
+  isSafari,
   Matrix,
   Rectangle,
   RenderTexture,
@@ -15,6 +17,7 @@ import {
   Texture,
   WebWorkerAdapter,
 } from "pixi.js";
+import { FRAME_UPLOAD, frameUploader } from "./frame-upload.ts";
 import { videoPlacement } from "./geometry.ts";
 import { Overlays } from "./overlays.ts";
 import type { Presenter } from "./pump.ts";
@@ -28,6 +31,8 @@ export interface PresenterOptions {
   // Reports, once, a frame of another size than the session's screen.
   warn(message: string): void;
 }
+
+let frameUploads = false;
 
 // --color-stage-dim over the picture: what is left of each pixel under its 42 % veil.
 const DIM_LEVEL = 0.58;
@@ -44,7 +49,8 @@ export class PixiPresenter implements Presenter {
   presented = 0;
   warned = false;
   #source: ImageSource | null = null;
-  #pending: VideoFrame | null = null;
+  // The newest frame, uploaded at the next render; one it supersedes is closed unseen.
+  #next: VideoFrame | null = null;
   #frameSize: { w: number; h: number } | null = null;
   #screen: { w: number; h: number } | null = null;
   #backdrop = false;
@@ -53,6 +59,10 @@ export class PixiPresenter implements Presenter {
 
   static async create(canvas: OffscreenCanvas, opts: PresenterOptions): Promise<PixiPresenter> {
     DOMAdapter.set(WebWorkerAdapter);
+    if (!frameUploads) {
+      frameUploads = true;
+      extensions.add(frameUploader(isSafari()));
+    }
     const app = new Application();
     await app.init({
       canvas,
@@ -88,6 +98,12 @@ export class PixiPresenter implements Presenter {
   // Owns the frame: it is closed after its upload, or at once when a newer one supersedes it.
   present(frame: VideoFrame, options?: { backdrop?: boolean }): void {
     this.#backdrop = options?.backdrop === true;
+    this.#next?.close();
+    this.#next = frame;
+    this.presented += 1;
+  }
+
+  #upload(frame: VideoFrame): void {
     this.video.visible = true;
     const w = frame.displayWidth;
     const h = frame.displayHeight;
@@ -97,8 +113,10 @@ export class PixiPresenter implements Presenter {
         resource: frame,
         width: w,
         height: h,
+        alphaMode: "premultiplied-alpha",
         autoGarbageCollect: false,
       });
+      this.#source.uploadMethodId = FRAME_UPLOAD;
       this.video.texture = new Texture({ source: this.#source });
       this.#frameSize = { w, h };
       this.#place();
@@ -106,9 +124,15 @@ export class PixiPresenter implements Presenter {
       this.#source.resource = frame;
       this.#source.update();
     }
-    this.#pending?.close();
-    this.#pending = frame;
-    this.presented += 1;
+  }
+
+  get hasFrame(): boolean {
+    return this.#next !== null;
+  }
+
+  // What changes the picture over time without a new scene: the dim's level, the fields' fade.
+  fades(now: number): number[] {
+    return [this.#tint(now), this.overlays.fieldsAlpha(now)];
   }
 
   setScreen(screen: { w: number; h: number } | null): void {
@@ -117,8 +141,8 @@ export class PixiPresenter implements Presenter {
   }
 
   clearVideo(): void {
-    this.#pending?.close();
-    this.#pending = null;
+    this.#next?.close();
+    this.#next = null;
     this.video.visible = false;
     this.video.texture = Texture.EMPTY;
     this.#source?.destroy();
@@ -166,6 +190,10 @@ export class PixiPresenter implements Presenter {
     if (reducedMotion) this.#dim.ms = 0;
   }
 
+  #tint(now: number): number {
+    return Math.round(255 * this.#dimLevel(now));
+  }
+
   #dimLevel(now: number): number {
     const { from, to, start, ms } = this.#dim;
     const k = ms > 0 ? Math.min(1, (now - start) / ms) : 1;
@@ -173,12 +201,16 @@ export class PixiPresenter implements Presenter {
   }
 
   render(): void {
-    const level = Math.round(255 * this.#dimLevel(performance.now()));
-    this.video.tint = (level << 16) | (level << 8) | level;
-    this.app.renderer.render(this.app.stage);
-    const pending = this.#pending;
-    this.#pending = null;
-    pending?.close();
+    const frame = this.#next;
+    this.#next = null;
+    try {
+      if (frame) this.#upload(frame);
+      const level = this.#tint(performance.now());
+      this.video.tint = (level << 16) | (level << 8) | level;
+      this.app.renderer.render(this.app.stage);
+    } finally {
+      frame?.close();
+    }
   }
 
   // Oracle (Task 16): a crop of the composite, or of the overlays alone (the video sprite hidden),

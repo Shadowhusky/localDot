@@ -15,6 +15,7 @@ import { OracleCapture } from "./oracle.ts";
 import { PixiPresenter } from "./pixi-presenter.ts";
 import { meanLuma, type ProbeRect, wallNow } from "./probe.ts";
 import { type Presenter, type PumpStats, pumpFrames } from "./pump.ts";
+import { RenderGate, sceneKey } from "./render-gate.ts";
 import type {
   FieldMark,
   StageClock,
@@ -50,7 +51,9 @@ let clock: StageClock | null = null;
 let viewport = { w: 1, h: 1 };
 let lastScene: Scene | null = null;
 const oracle = new OracleCapture();
+const gate = new RenderGate();
 let animationFrame: number | null = null;
+let idleLook: ReturnType<typeof setTimeout> | null = null;
 
 // The rings on the fields dot will fill, on the screen shown.
 function showFields(): void {
@@ -61,9 +64,11 @@ function showFields(): void {
   );
 }
 
-function scheduleTick(): void {
-  if (animationFrame !== null) cancelAnimationFrame(animationFrame);
-  animationFrame = requestAnimationFrame(tick);
+// Looks at the stage on the next display frame, sooner than an idle look would.
+function wake(): void {
+  if (idleLook !== null) clearTimeout(idleLook);
+  idleLook = null;
+  if (animationFrame === null) animationFrame = requestAnimationFrame(tick);
 }
 
 function sessionNow(): number | null {
@@ -99,6 +104,7 @@ function probing(inner: Presenter): Presenter {
       // the newest one (P3-C12).
       oracle.onFrame(frame, at, presented);
       inner.present(frame);
+      wake();
     },
   };
 }
@@ -110,6 +116,7 @@ function tick(): void {
     animationFrame = requestAnimationFrame(tick);
     return;
   }
+  const now = performance.now();
   if (presenter) {
     const screen = screenNow();
     presenter.setScreen(selection || model.screen ? screen : null);
@@ -128,34 +135,47 @@ function tick(): void {
       zoom,
       focus,
     });
-    presenter.setCamera(cam);
     const scene = t === null ? null : sceneAt(model, t, view);
     lastScene = scene;
-    presenter.draw(scene);
-    try {
-      presenter.render();
-      // Uploading a texture does not make it visible. Manual admission acknowledges only
-      // a successful canvas render, and a retired pump cannot publish its pending stats.
-      if (pendingStats?.generation === sourceGeneration) {
-        scope.postMessage({
-          type: "stats",
-          sourceId: pendingStats.sourceId,
-          stats: pendingStats.stats,
-        });
-        pendingStats = undefined;
+    const key = sceneKey(scene, cam, screen, presenter.fades(now));
+    if (gate.due(now, key, presenter.hasFrame || oracle.enabled)) {
+      presenter.setCamera(cam);
+      presenter.draw(scene);
+      try {
+        presenter.render();
+        // Uploading a texture does not make it visible. Manual admission acknowledges only
+        // a successful canvas render, and a retired pump cannot publish its pending stats.
+        if (pendingStats?.generation === sourceGeneration) {
+          scope.postMessage({
+            type: "stats",
+            sourceId: pendingStats.sourceId,
+            stats: pendingStats.stats,
+          });
+          pendingStats = undefined;
+        }
+        if (oracle.enabled && t !== null)
+          oracle.onTick(presenter, model, t, scene, cam, viewport, screen);
+      } catch (err) {
+        gate.invalidate();
+        report(err);
       }
-      if (oracle.enabled && t !== null)
-        oracle.onTick(presenter, model, t, scene, cam, viewport, screen);
-    } catch (err) {
-      report(err);
     }
   }
-  animationFrame = requestAnimationFrame(tick);
+  // An idle look still waits for a display frame, so a hidden page gets none.
+  const wait = gate.wait(now);
+  if (wait > 0) idleLook = setTimeout(wake, wait);
+  else animationFrame = requestAnimationFrame(tick);
 }
 
 let queue = Promise.resolve();
 scope.onmessage = (e) => {
-  queue = queue.then(() => handle(e.data));
+  queue = queue.then(async () => {
+    await handle(e.data);
+    // A frame wakes the stage when the pump hands it over.
+    if (e.data.type === "frame") return;
+    gate.invalidate();
+    if (presenter) wake();
+  });
 };
 scope.postMessage({ type: "caps", tracks: typeof MediaStreamTrackProcessor === "function" });
 async function handle(m: WorkerIn): Promise<void> {
@@ -173,7 +193,6 @@ async function handle(m: WorkerIn): Promise<void> {
         });
         oracle.dpr = m.dpr;
         if (fields.length) showFields();
-        scheduleTick();
         return;
       }
       case "resize":
@@ -223,7 +242,6 @@ async function handle(m: WorkerIn): Promise<void> {
         }
         if (m.view.fields !== undefined || m.view.selection !== undefined) showFields();
         replay?.invalidate();
-        scheduleTick();
         return;
       case "theme":
         presenter?.overlays.setTheme(m.theme);

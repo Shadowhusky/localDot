@@ -605,6 +605,15 @@
   transition: opacity var(--dur-default) var(--ease-standard);
 }
 
+/* A phone blurs glass again for every frame of the picture under it: there it is solid. */
+@media (pointer: coarse) {
+  .app[data-full] .control-strip {
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 /* The house's own regions stay put behind the stage, out of reach, once it has arrived. */
 .app[data-full] > .bar,
 .app[data-full] .rail-panel {

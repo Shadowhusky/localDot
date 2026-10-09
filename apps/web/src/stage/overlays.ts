@@ -256,6 +256,13 @@ export class Overlays {
       };
   }
 
+  // How far the rings on the fields have faded in.
+  fieldsAlpha(now: number): number {
+    if (!this.#fields) return 0;
+    const { since, fadeMs } = this.#fields;
+    return fadeMs > 0 ? Math.min(1, (now - since) / fadeMs) : 1;
+  }
+
   draw(scene: Scene | null): void {
     this.#targetG.clear();
     this.#dragG.clear();
@@ -272,9 +279,8 @@ export class Overlays {
     if (scene.target) this.#drawTarget(scene.target, accent);
     if (this.#fields) {
       // dot holds the computer while it waits, and these are where it will type.
-      const { marks, since, fadeMs } = this.#fields;
-      const alpha = fadeMs > 0 ? Math.min(1, (performance.now() - since) / fadeMs) : 1;
-      for (const mark of marks)
+      const alpha = this.fieldsAlpha(performance.now());
+      for (const mark of this.#fields.marks)
         this.#drawTarget(
           { rect: mark.bbox ?? null, point: mark.point, alpha, scale: 1 },
           this.#theme.xenon,
