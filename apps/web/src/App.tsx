@@ -39,9 +39,12 @@ import { useFreshStart } from "./cells/useFreshStart.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
+import { restingBand, useIdleLine, usePageHidden } from "./dot/idle-line.ts";
 import { PresenceLayer } from "./dot/PresenceLayer.tsx";
 import { presencePlace } from "./dot/presence-rules.ts";
 import { useShowDot } from "./dot/show-dot.ts";
+import type { TipAction } from "./dot/tips.ts";
+import { hasExported } from "./export/export-estimate.ts";
 import { createHostExports } from "./export/host-exports.ts";
 import { createExportJob } from "./export/job.ts";
 import { useExportToast } from "./export/useExportToast.tsx";
@@ -134,7 +137,7 @@ import { useHeldFor } from "./ui/held.ts";
 import { IconButton } from "./ui/IconButton.tsx";
 import { isApple } from "./ui/Kbd.tsx";
 import { MenuItem, MenuSeparator } from "./ui/Menu.tsx";
-import { useMediaQuery } from "./ui/media.ts";
+import { TOUCH, useMediaQuery } from "./ui/media.ts";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
@@ -526,6 +529,8 @@ function Theatre({ api }: { api: ApiClient }) {
   const [routinesOpen, setRoutinesOpen] = useState(false);
   if (routinesOpen && !phone) setRoutinesOpen(false);
   const [routineTarget, setRoutineTarget] = useState<RoutineTarget | null>(null);
+  // Read once dot first rests, so its tips know whether there are routines and Open at login.
+  const [tipsRead, setTipsRead] = useState(false);
   const routines = useRoutines(
     api,
     railView === "routines" ||
@@ -533,7 +538,7 @@ function Theatre({ api }: { api: ApiClient }) {
       routineTarget !== null ||
       agent.model.routineProposals.size > 0
       ? "live"
-      : settings.open
+      : settings.open || tipsRead
         ? "read"
         : "off",
   );
@@ -1198,6 +1203,49 @@ function Theatre({ api }: { api: ApiClient }) {
                 )
               : "";
   const speaker = (phone && approvalView) || yours ? "dot" : appStatus.caption.speaker;
+  const resting = restingBand({
+    row: appStatus.row,
+    computer: appStatus.computer,
+    attention: appStatus.attention,
+    line: narration,
+    covered: curtain.up || !!replayId || onboarding.open || yours || !!error,
+  });
+  useEffect(() => {
+    if (resting) setTipsRead(true);
+  }, [resting]);
+  const [overBand, setOverBand] = useState(false);
+  const pageHidden = usePageHidden();
+  const touch = useMediaQuery(TOUCH);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: read again each time dot comes to rest
+  const exported = useMemo(() => hasExported(), [resting]);
+  const idle = useIdleLine({
+    resting,
+    held: pageHidden || overBand || settings.open,
+    signals: {
+      touch: touch || phone,
+      apple: isApple(),
+      recordings: !!newestReplayId,
+      routines: routines.reply?.routines.length,
+      exported,
+      purposeCheck: settings.draft?.purposeCheck,
+      openAtLogin: routines.reply?.startAtLogin,
+      update: computerUpdate.available,
+      freshStart: freshStart.available,
+    },
+  });
+  const openTip = (action: TipAction, trigger: HTMLElement) => {
+    switch (action.opens) {
+      case "settings":
+        return goToSettings(trigger, action.section);
+      case "replay":
+        return selectReplay(LIBRARY);
+      case "routine":
+        return newRoutine(trigger);
+    }
+  };
+  const tipAction = idle?.action;
+  const bandLine = idle ? idle.text : narration;
+  const bandSpeaker = idle ? "dot" : speaker;
   const asked = agent.model.pendingAsk
     ? agent.model.questions.get(agent.model.pendingAsk)?.question
     : undefined;
@@ -1387,12 +1435,20 @@ function Theatre({ api }: { api: ApiClient }) {
               band={
                 <>
                   <NarratorBand
-                    line={narration}
-                    speaker={speaker}
+                    line={bandLine}
+                    speaker={bandSpeaker}
                     reveal={!!asked && narration === asked}
                     forUser={!atWork(appStatus.row)}
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
+                    idle={!!idle}
+                    action={
+                      tipAction && {
+                        label: tipAction.label,
+                        run: (trigger) => openTip(tipAction, trigger),
+                      }
+                    }
+                    onHover={setOverBand}
                   />
                   {yours && !phone && (
                     <ControlStrip
@@ -1920,7 +1976,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
               : dotFeed(appStatus, session.sessionId ? session.model : null, now)
           }
-          line={onboarding.open || speaker !== "dot" ? "" : narration}
+          line={onboarding.open || bandSpeaker !== "dot" ? "" : bandLine}
         />
       )}
       <Announcer />
