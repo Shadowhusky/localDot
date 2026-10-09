@@ -511,14 +511,12 @@ for (const [edge, sheet] of [
       const root = sheet ? page.getByRole("dialog") : page.locator(".task-bar");
       await root.getByRole("button", { name: "Stop", exact: true }).click();
       await held;
-      const status = sheet
-        ? root.getByRole("region", { name: "Stop status" })
-        : page.locator(".theatre-content").getByRole("region", { name: "Stop status" });
+      const status = sheet ? root : page.getByRole("region", { name: "Notifications" });
       if (edge === "unknown") {
-        await expect(status).toContainText("Could not confirm stopped");
-        await page.getByRole("button", { name: "Check task and computer" }).click();
-        await page.locator(".task-bar").getByRole("button", { name: "Stop", exact: true }).click(); // Actual 404 after live ownership ended.
-        await expect(status).toContainText("Could not confirm stopped");
+        await expect(status).toContainText("Couldn't confirm that dot stopped");
+        if (!sheet) await status.getByRole("button", { name: "Check again" }).click();
+        await page.getByTestId("hud-stop-session").click(); // Actual 404 after live ownership ended.
+        await expect(status).toContainText("Couldn't confirm that dot stopped");
         expect(f.cells.get(f.cellId)?.paused).toBeUndefined();
         expect(f.cells.get(f.cellId)?.state).toBe("ready");
       } else

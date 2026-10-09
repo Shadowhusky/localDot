@@ -263,8 +263,6 @@ describe("token layer", () => {
 });
 
 describe("focus", () => {
-  // The approval card's ring predates the token layer; it goes when that card moves onto the kit.
-  const RAW_RING_ALLOWED = ["agent/safety.css"];
   const RAW_COLOUR = /#[0-9a-f]{3,8}\b|\b(?:rgba?|hsla?|oklch|oklab|color)\(|xenon/i;
 
   async function focusRules() {
@@ -275,7 +273,7 @@ describe("focus", () => {
           rules.push({ path, selector: selector.replace(/\s+/g, " "), body });
       }
     }
-    expect(rules.map((rule) => rule.path)).toContain("agent/safety.css");
+    expect(rules.length).toBeGreaterThan(0);
     return rules;
   }
 
@@ -284,7 +282,7 @@ describe("focus", () => {
       /:focus-visible \{\s*outline: var\(--focus-width\) solid var\(--color-fg-1\);/,
     );
     const raw = (await focusRules())
-      .filter(({ path, body }) => RAW_COLOUR.test(body) && !RAW_RING_ALLOWED.includes(path))
+      .filter(({ body }) => RAW_COLOUR.test(body))
       .map(({ path, selector }) => `${path} ${selector}`);
     expect(raw).toEqual([]);
   });

@@ -11,6 +11,7 @@ import { providerFixture } from "./settings/testing.ts";
 import { fakeChromium } from "./testing/fake-chromium.ts";
 import { FakeWebSocket } from "./testing/fake-websocket.ts";
 
+const OFFLINE_SAID = "Key protection is off. Run localdot doctor in Terminal, then resume.";
 const TOKEN = "a".repeat(43);
 const NEWER = "b".repeat(43);
 const CELL_ID = "01JXYZ0000000000000000ABCD";
@@ -594,7 +595,7 @@ describe("App token states", () => {
     const paused = { ...summary("ready", "stalled"), paused: true as const };
     const d = daemon(({ path }) => (path.endsWith("/resume") ? pending.promise : json([paused])));
     render(<App fetchImpl={d.fetchImpl} />);
-    const resume = await screen.findByRole("button", { name: "Continue" });
+    const resume = await screen.findByRole("button", { name: "Resume" });
     const stop = screen.getByRole("button", { name: "Shut down" });
     act(() => {
       fireEvent.click(resume);
@@ -613,7 +614,7 @@ describe("App token states", () => {
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
     expect(screen.getByTestId("hud-status").textContent).toBe("Ready");
-    expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Resume" })).toBeNull();
   });
 
   it("leaves a refused Resume paused and shows keyd's safe offline answer until pause changes", async () => {
@@ -624,17 +625,17 @@ describe("App token states", () => {
       path.endsWith("/resume") ? new Response(offline, { status: 503 }) : json([paused]),
     );
     render(<App fetchImpl={d.fetchImpl} />);
-    fireEvent.click(await screen.findByRole("button", { name: "Continue" }));
-    expect(await screen.findByText(offline)).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Resume" }));
+    expect(await screen.findByText(OFFLINE_SAID)).toBeTruthy();
     expect(screen.getByTestId("hud-status").textContent).toBe("Paused");
     expect(d.seen().some((c) => c.endsWith("/start"))).toBe(false);
     act(() => FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(paused) }));
-    expect(screen.getByText(offline)).toBeTruthy();
+    expect(screen.getByText(OFFLINE_SAID)).toBeTruthy();
     act(() =>
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("ready", "live")) }),
     );
     // Each line dot's band shows stays for a second before the next.
-    await waitFor(() => expect(screen.queryByText(offline)).toBeNull(), { timeout: 2000 });
+    await waitFor(() => expect(screen.queryByText(OFFLINE_SAID)).toBeNull(), { timeout: 2000 });
   });
 
   it("mints a fresh stream ticket each time the status socket reopens, not on its first open", async () => {
@@ -716,7 +717,7 @@ describe("App HUD", () => {
     });
     render(<App fetchImpl={d.fetchImpl} />);
     await waitFor(() => expect(status()).toBe("Unavailable"));
-    expect(caption()).toContain("localDot's daemon isn't answering.");
+    expect(caption()).toContain("localDot isn't answering.");
     expect(screen.queryByText("No computer")).toBeNull();
     up = true;
     screen.getByRole("button", { name: "Try again" }).click();

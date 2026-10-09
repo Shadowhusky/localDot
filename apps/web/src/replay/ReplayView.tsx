@@ -59,7 +59,8 @@ import { useReplay } from "./useReplay.ts";
 import "./replay.css";
 
 // Below a laptop the library has no room for its preview, so a row opens its recording at once.
-const PREVIEW_ROOM = "(width >= 1100px)";
+// Wide enough for the chosen recording beside the list.
+export const PREVIEW_ROOM = "(width >= 1100px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
 const NOTICE_MS = 3000;
 // The transport fades this long into playback without the pointer moving over the picture.

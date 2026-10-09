@@ -53,6 +53,8 @@ export function Collapse({ open, id, className, children }: CollapseProps) {
 export interface DisclosureProps extends Omit<ComponentProps<"button">, "children" | "onToggle"> {
   summary: ReactNode;
   meta?: ReactNode;
+  // A quiet line of text rather than a row: inside a toast, or under a row's name.
+  inline?: boolean;
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?(open: boolean): void;
@@ -63,6 +65,7 @@ export interface DisclosureProps extends Omit<ComponentProps<"button">, "childre
 export function Disclosure({
   summary,
   meta,
+  inline = false,
   open,
   defaultOpen = false,
   onOpenChange,
@@ -79,7 +82,11 @@ export function Disclosure({
     onOpenChange?.(next);
   };
   return (
-    <div className={clsx("ui-disclosure", className)} data-open={shown || undefined}>
+    <div
+      className={clsx("ui-disclosure", className)}
+      data-open={shown || undefined}
+      data-inline={inline || undefined}
+    >
       <button
         {...mergeHandlers(props, pressHandlers)}
         type="button"
@@ -109,5 +116,24 @@ export function Disclosure({
         {children}
       </Collapse>
     </div>
+  );
+}
+
+// A few plain lines behind a quiet Details, such as the parts of a cleanup that couldn't be confirmed.
+export function DetailLines({
+  lines,
+  className,
+}: {
+  lines: readonly string[];
+  className?: string;
+}) {
+  return (
+    <Disclosure inline summary="Details" className={className}>
+      <ul className="ui-detail-lines">
+        {lines.map((line) => (
+          <li key={line}>{line}</li>
+        ))}
+      </ul>
+    </Disclosure>
   );
 }

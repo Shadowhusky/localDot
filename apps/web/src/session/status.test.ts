@@ -818,6 +818,12 @@ const STATES: Record<string, Status> = {
   "question, reconnecting": at([...typed(), asked(1500)], 9500, stream("stalled")),
   "task stopping": statusFor({ computer: live, task: typing(), stop: "stopping" }),
   "stop unconfirmed": statusFor({ computer: live, task: typing(), stop: "unconfirmed" }),
+  "out of touch": statusFor({ computer: live, task: typing(), link: "lost" }),
+  "frozen by Stop": statusFor({
+    computer: computerIn({ paused: true }),
+    task: null,
+    stop: "stopped",
+  }),
   approval: at([...start(), approvalRequest(1500)]),
   question: at([...typed(), asked(1500)]),
   takeover: at([...typed(), takeoverRequest(1500)]),
@@ -855,7 +861,11 @@ const STATES: Record<string, Status> = {
 const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "system"][] = [
   // A task Stop outranks every row.
   ["task stopping", "stopping", "Stopping…", "resting", "working", "dot"],
-  ["stop unconfirmed", "stopping", "Stop unconfirmed", "error", "blocked", "dot"],
+  ["stop unconfirmed", "stopping", "Stop not confirmed", "error", "blocked", "dot"],
+  // A Stop that paused the computer names what happened, and leaves the computer's own controls.
+  ["frozen by Stop", "computer", "Stopped", "resting", null, "system"],
+  // A running task whose feed has been out of touch for a moment keeps its row and says so.
+  ["out of touch", "acting", "Reconnecting…", "reconnecting", "working", "system"],
   // 1. The computer is not live, or nothing runs on it. A computer that is off, failing or not
   // up yet holds the row over an open task; a late picture or a list check does not.
   ["checking", "computer", "Checking…", "waking", null, "system"],
@@ -1035,6 +1045,7 @@ describe("one status model for every surface (T10)", () => {
       "pausing",
       "approval",
       "question",
+      "out of touch",
       "reconnecting, task running",
       "approval, reconnecting",
       "question, reconnecting",
@@ -1060,6 +1071,10 @@ describe("one status model for every surface (T10)", () => {
       { kind: "resume", enabled: false },
       { kind: "stop", enabled: false },
     ]);
+    expect(STATES["frozen by Stop"]?.actions.map((action) => action.kind)).toEqual([
+      "resume",
+      "stop",
+    ]);
     expect(STATES.off?.actions).toEqual([{ kind: "start", enabled: true }]);
     // The task keeps its Stop on a computer that can't carry it. With no computer, that Stop is
     // the only control, so Welcome's Turn on waits until the task ends.
@@ -1067,4 +1082,8 @@ describe("one status model for every surface (T10)", () => {
       if (name.endsWith(", task open")) expect(status.actions, name).toEqual(stopsTask);
     expect(STATES.done?.actions).toEqual([{ kind: "stop", enabled: true }]);
   });
+});
+
+it("says nothing about a lost link once the task is over", () => {
+  expect(statusFor({ computer: live, task: null, link: "lost" }).label).toBe("Ready");
 });
