@@ -35,6 +35,12 @@ export default defineConfig({
   resolve: { tsconfigPaths: true },
   // Lightning CSS compiles @custom-media, so a breakpoint is named once like any other token.
   css: { transformer: "lightningcss", lightningcss: { drafts: { customMedia: true } } },
-  build: { outDir: "dist", target: "es2024", sourcemap: true },
+  build: {
+    outDir: "dist",
+    target: "es2024",
+    sourcemap: true,
+    // export.html is the daemon's own page: its headless browser makes videos there.
+    rolldownOptions: { input: { index: "index.html", export: "export.html" } },
+  },
   worker: { format: "es" },
 });

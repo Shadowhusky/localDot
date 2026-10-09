@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../lib/api.ts";
 import { ExportSheet } from "./ExportSheet.tsx";
 import type { ExportContext } from "./export-context.ts";
+import type { HostExports, HostExportsView } from "./host-exports.ts";
 import type { ExportJob, ExportJobState } from "./job.ts";
 import { LONG_EXPORT } from "./sink.ts";
 
@@ -26,6 +27,7 @@ const IDLE: ExportJobState = {
   file: null,
   note: null,
   context: null,
+  where: null,
 };
 
 function context(patch: Partial<ExportContext> = {}, endMs = 60_000): ExportContext {
@@ -60,13 +62,32 @@ function fakeJob(state: Partial<ExportJobState> = {}) {
   } satisfies ExportJob;
 }
 
+// A host that never answered: this page makes the video, as before.
+const PAGE: HostExportsView = { host: null, exports: [] };
+
+function fakeHost(view: HostExportsView = PAGE): HostExports {
+  return {
+    view: () => view,
+    subscribe: () => () => {},
+    refresh: vi.fn(),
+    start: vi.fn(),
+    cancel: vi.fn(),
+    retry: vi.fn(),
+    remove: vi.fn(),
+    link: vi.fn(),
+    dispose: vi.fn(),
+  };
+}
+
 function Harness({
   job,
   exportContext,
+  host = fakeHost(),
   onClose = () => {},
 }: {
   job: ExportJob;
   exportContext: ExportContext;
+  host?: HostExports;
   onClose?: () => void;
 }) {
   const anchor = useRef<HTMLButtonElement>(null);
@@ -78,6 +99,7 @@ function Harness({
       <ExportSheet
         api={{} as ApiClient}
         job={job}
+        host={host}
         context={exportContext}
         open
         onClose={onClose}
@@ -87,8 +109,13 @@ function Harness({
   );
 }
 
-async function show(job: ExportJob, exportContext = context(), onClose?: () => void) {
-  render(<Harness job={job} exportContext={exportContext} onClose={onClose} />);
+async function show(
+  job: ExportJob,
+  exportContext = context(),
+  onClose?: () => void,
+  host?: HostExports,
+) {
+  render(<Harness job={job} exportContext={exportContext} onClose={onClose} host={host} />);
   await act(async () => {});
   return screen.getByRole("dialog", { name: "Export video" });
 }
@@ -376,5 +403,65 @@ describe("Export video", () => {
     expect(job.save).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
     expect(job.reset).toHaveBeenCalledOnce();
+  });
+});
+
+describe("Export video made by the host", () => {
+  const ready = (maxPixels = { mp4: 2560 * 1600, webm: 0 }): HostExportsView => ({
+    host: { state: "ready", maxPixels },
+    exports: [],
+  });
+
+  it("asks the host to make it, with what the host can encode, not this browser", async () => {
+    vi.stubGlobal("VideoEncoder", undefined);
+    encodable.widths = new Set();
+    const job = fakeJob();
+    const panel = await show(job, screenContext(), undefined, fakeHost(ready()));
+    expect(screen.getByRole("radiogroup", { name: "Preset" }).textContent).toContain(
+      "2560 × 1600 · 60 fps · sharpest",
+    );
+    expect(panel.textContent).not.toContain("keep it open");
+    more();
+    expect(description(screen.getByRole("radio", { name: "WebM" }))).toContain(
+      "This computer can't make WebM video",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Export" }));
+    expect(job.start).toHaveBeenCalledOnce();
+  });
+
+  it("waits while the host checks what it can make", async () => {
+    await show(
+      fakeJob(),
+      context(),
+      undefined,
+      fakeHost({ host: { state: "checking", maxPixels: { mp4: 0, webm: 0 } }, exports: [] }),
+    );
+    const button = screen.getByRole("button", { name: "Export" });
+    expect(button.getAttribute("aria-disabled")).toBe("true");
+    expect(description(button)).toContain("Checking what this computer can make");
+  });
+
+  it("says the video goes on if the page closes, and that a page-made one needs the page", async () => {
+    const running = { phase: "exporting" as const, done: 420, total: 1000, startedAt: 0 };
+    const host = await show(fakeJob({ ...running, where: "host" }));
+    expect(host.textContent).toContain("It keeps going if you close this page or switch apps.");
+    cleanup();
+    const page = await show(fakeJob({ ...running, where: "page" }));
+    expect(page.textContent).toContain(
+      "This page makes the video, so keep it open until it's saved.",
+    );
+    cleanup();
+    const options = await show(fakeJob());
+    expect(options.textContent).toContain("keep it open until it's saved");
+  });
+
+  it("shows a host's video getting ready before its frames are counted", async () => {
+    const panel = await show(
+      fakeJob({ phase: "exporting", where: "host", startedAt: performance.now() }),
+    );
+    expect(panel.textContent).toContain("Getting the recording ready");
+    expect(
+      screen.getByRole("progressbar", { name: "Export progress" }).hasAttribute("aria-valuenow"),
+    ).toBe(false);
   });
 });

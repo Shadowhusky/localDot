@@ -306,3 +306,67 @@
     transition: none;
   }
 }
+
+/* Exported videos, at the head of Replay's library: the recording's picture with the video's state
+   over it, a ring while it is made and its format once it is ready. */
+.export-row-badge {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.export-row:is([data-phase="queued"], [data-phase="making"]) .export-row-badge {
+  background-color: var(--color-edge);
+}
+
+/* A tag that reads over any picture, light or dark. */
+.export-row-format {
+  place-self: end start;
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  margin: calc(var(--spacing) * 1.25);
+  padding: 0 calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-tag);
+  background-color: var(--color-edge);
+  -webkit-backdrop-filter: blur(var(--blur-glass));
+  backdrop-filter: blur(var(--blur-glass));
+  color: var(--color-fg-1);
+  font: var(--text-tag--font-weight) var(--text-tag) / var(--text-tag--line-height) var(--font-ui);
+  letter-spacing: var(--text-tag--letter-spacing);
+  text-transform: uppercase;
+}
+
+.export-row[data-phase="failed"] .ui-list-row-thumbnail {
+  opacity: 0.55;
+}
+
+.export-list-more {
+  margin: var(--spacing) calc(var(--spacing) * 1.5) 0;
+}
+
+/* Under the progress: whether the page has to stay open. */
+.export-progress-note {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* The island's toast while a video is made: a ring and the percentage, in a slot of its own width
+   so the pill keeps its size as the count goes up. */
+.export-toast {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  vertical-align: top;
+}
+
+.export-toast .ui-progress {
+  color: var(--color-fg-2);
+}
+
+.export-toast-percent {
+  min-width: 4ch;
+  color: var(--color-fg-2);
+  font-variant-numeric: tabular-nums;
+}

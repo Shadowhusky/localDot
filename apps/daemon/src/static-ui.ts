@@ -28,16 +28,21 @@ export const UI_CSP = {
 };
 
 export function serveUi(app: Hono, dir: string): void {
-  app.get("/", (c) => {
-    const file = readStatic(dir, "/index.html");
-    if (!file) return c.text(BUILD_HINT, 503, NOSNIFF);
-    return c.body(file.body, 200, {
-      ...NOSNIFF,
-      ...UI_CSP,
-      "content-type": file.type,
-      "cache-control": "no-store",
+  // The export page is the daemon's own: its headless browser makes videos there.
+  for (const [path, page] of [
+    ["/", "/index.html"],
+    ["/export.html", "/export.html"],
+  ] as const)
+    app.get(path, (c) => {
+      const file = readStatic(dir, page);
+      if (!file) return c.text(BUILD_HINT, 503, NOSNIFF);
+      return c.body(file.body, 200, {
+        ...NOSNIFF,
+        ...UI_CSP,
+        "content-type": file.type,
+        "cache-control": "no-store",
+      });
     });
-  });
   // Rooted at dist/assets, so an encoded separator ("/assets/..%2findex.html") can't reach the
   // page and serve it with the assets' immutable caching.
   app.get("/assets/*", (c) => {

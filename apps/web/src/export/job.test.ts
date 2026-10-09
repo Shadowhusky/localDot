@@ -1,9 +1,12 @@
 // @vitest-environment jsdom
+import type { ExportStart, HostExport } from "@localdot/protocol";
 import { emptyModel } from "@localdot/stage";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { hostExport } from "../testing/host-export.ts";
 import type { ExportContext } from "./export-context.ts";
 import type { ExportRequest } from "./export-plan.ts";
 import type { ExportOut } from "./export-protocol.ts";
+import type { HostExports, HostExportsView } from "./host-exports.ts";
 import type { ExportSink } from "./sink.ts";
 
 type Result = Extract<ExportOut, { type: "done" | "cancelled" | "error" }>;
@@ -245,5 +248,160 @@ describe("what a finished export leaves behind", () => {
       time: 1.5,
       size: 2,
     });
+  });
+});
+
+// The daemon's side of the host's videos, played by hand.
+function fakeHost(ready = true) {
+  let view: HostExportsView = {
+    host: ready
+      ? { state: "ready", maxPixels: { mp4: 4_096_000, webm: 4_096_000 } }
+      : { state: "unavailable", maxPixels: { mp4: 0, webm: 0 } },
+    exports: [],
+  };
+  const listeners = new Set<() => void>();
+  const show = (exports: HostExport[]) => {
+    view = { ...view, exports };
+    for (const listener of listeners) listener();
+  };
+  const host = {
+    view: () => view,
+    subscribe(listener: () => void) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    refresh: vi.fn(),
+    start: vi.fn(async (start: ExportStart) => {
+      const made = hostExport({ phase: "queued", request: start.request, screen: start.screen });
+      show([made]);
+      return made;
+    }),
+    cancel: vi.fn(async () => {}),
+    retry: vi.fn(async () => {}),
+    remove: vi.fn(async () => {}),
+    link: vi.fn(async () => `http://127.0.0.1:4750/export-files/${"T".repeat(43)}`),
+    dispose: vi.fn(),
+  } satisfies HostExports;
+  return { host, show };
+}
+
+describe("an export the host makes", () => {
+  it("asks the host to make it, shows its progress, then saves the host's file", async () => {
+    const names: string[] = [];
+    vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement,
+    ) {
+      names.push(`${this.download} ${this.href}`);
+    });
+    localStorage.clear();
+    const { host, show } = fakeHost();
+    const job = createExportJob(host);
+    await job.start(
+      { ...context, source: { ...context.source, screen: "browser" } },
+      request,
+      expected,
+    );
+    expect(host.start).toHaveBeenCalledWith({ request, screen: "browser" });
+    expect(run.sink).toBeNull();
+    const made = host.view().exports[0] as HostExport;
+    expect(job.snapshot()).toMatchObject({ phase: "exporting", where: "host", done: 0, total: 0 });
+    show([{ ...made, phase: "making", done: 450, total: 1800, elapsedMs: 1000 }]);
+    expect(job.snapshot()).toMatchObject({ phase: "exporting", done: 450, total: 1800 });
+    show([
+      {
+        ...made,
+        phase: "done",
+        done: 1800,
+        total: 1800,
+        elapsedMs: 4000,
+        bytes: 2_000_000,
+        durationS: 30,
+      },
+    ]);
+    expect(job.snapshot()).toMatchObject({
+      phase: "ready",
+      file: { name: made.name, bytes: 2_000_000, durationS: 30, ms: 4000 },
+    });
+    expect(JSON.parse(localStorage.getItem("localdot.export-calibration.v1") ?? "")).toEqual({
+      time: 2,
+      size: 2,
+    });
+    job.save();
+    await vi.waitFor(() => expect(job.snapshot().phase).toBe("downloaded"));
+    expect(host.link).toHaveBeenCalledWith(made.id);
+    expect(names).toEqual([`${made.name} http://127.0.0.1:4750/export-files/${"T".repeat(43)}`]);
+  });
+
+  // The page that asked goes away (an app switch, a locked phone, a reload): the video goes on.
+  it("leaves the host's video running when the page goes away", async () => {
+    const { host } = fakeHost();
+    const job = createExportJob(host);
+    await job.start(context, request, expected);
+    job.dispose();
+    expect(host.cancel).not.toHaveBeenCalled();
+    expect(run.cancel).not.toHaveBeenCalled();
+  });
+
+  it("takes up a video another page started, or one still going after a reload", () => {
+    const { host, show } = fakeHost();
+    const running = hostExport({ done: 15, total: 30, elapsedMs: 500 });
+    show([running]);
+    const job = createExportJob(host);
+    expect(job.snapshot()).toMatchObject({ phase: "exporting", where: "host", done: 15 });
+    show([{ ...running, phase: "done", bytes: 10, durationS: 2 }]);
+    expect(job.snapshot().phase).toBe("ready");
+  });
+
+  it("still shows this tab's video after a reload, finished while the page was away", async () => {
+    sessionStorage.clear();
+    const { host, show } = fakeHost();
+    const first = createExportJob(host);
+    await first.start(context, request, expected);
+    const made = host.view().exports[0] as HostExport;
+    first.dispose();
+    show([{ ...made, phase: "done", bytes: 10, durationS: 2 }, hostExport({ phase: "done" })]);
+    const reloaded = createExportJob(host);
+    expect(reloaded.snapshot()).toMatchObject({ phase: "ready", file: { name: made.name } });
+    reloaded.save();
+    await vi.waitFor(() => expect(reloaded.snapshot().phase).toBe("downloaded"));
+    reloaded.reset();
+    expect(createExportJob(host).snapshot().phase).toBe("options");
+  });
+
+  it("cancels on the host and says nothing was saved", async () => {
+    const { host, show } = fakeHost();
+    const job = createExportJob(host);
+    await job.start(context, request, expected);
+    const made = host.view().exports[0] as HostExport;
+    job.cancel();
+    expect(host.cancel).toHaveBeenCalledWith(made.id);
+    show([]);
+    expect(job.snapshot()).toMatchObject({ phase: "options", note: CANCELLED_NOTE });
+  });
+
+  it("says why the host couldn't make it", async () => {
+    const { host, show } = fakeHost();
+    const job = createExportJob(host);
+    await job.start(context, request, expected);
+    const made = host.view().exports[0] as HostExport;
+    show([
+      { ...made, phase: "failed", error: "localDot restarted before this video was finished." },
+    ]);
+    expect(job.snapshot()).toMatchObject({
+      phase: "options",
+      note: "localDot restarted before this video was finished.",
+    });
+  });
+
+  it("makes the video in this page when the host can't", async () => {
+    vi.stubGlobal("showSaveFilePicker", undefined);
+    const { host } = fakeHost(false);
+    const job = createExportJob(host);
+    const starting = job.start(context, request, expected);
+    await vi.waitFor(() => expect(run.sink).not.toBeNull());
+    expect(host.start).not.toHaveBeenCalled();
+    expect(job.snapshot().where).toBe("page");
+    run.finish({ type: "cancelled" });
+    await starting;
   });
 });

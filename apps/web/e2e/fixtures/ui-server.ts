@@ -66,6 +66,11 @@ import { DesktopdRegistry } from "../../../daemon/src/desktopd/registry.ts";
 import { FakeDesktopd } from "../../../daemon/src/desktopd/testing/fake-desktopd.ts";
 import { EventLog } from "../../../daemon/src/event-log.ts";
 import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
+import { ChromeRenderer } from "../../../daemon/src/exports/chrome.ts";
+import { ExportJobs } from "../../../daemon/src/exports/jobs.ts";
+import { exportsStreamRoute } from "../../../daemon/src/exports/routes.ts";
+import { ExportStore } from "../../../daemon/src/exports/store.ts";
+import { FakeRenderer } from "../../../daemon/src/exports/testing/fake-renderer.ts";
 import { FrameStore } from "../../../daemon/src/gateway/frames.ts";
 import type { GuiAction } from "../../../daemon/src/gateway/gateway.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
@@ -1268,7 +1273,20 @@ await new Promise<void>((resolve, reject) => {
   server.listen(REQUESTED_PORT, "127.0.0.1", resolve);
 });
 const PORT = (server.address() as AddressInfo).port;
+// QA_EXPORTS=fake: videos move only when /__qa/export/* says; none: the host can't make videos
+// (Export falls back to the page); otherwise this Mac's Chrome makes them for real.
+const exportsMode = env.QA_EXPORTS ?? "chrome";
+const fakeRenderer = new FakeRenderer();
+if (exportsMode === "none") fakeRenderer.able = null;
+const exportJobs = new ExportJobs({
+  store: new ExportStore(HOME),
+  renderer:
+    exportsMode === "chrome"
+      ? new ChromeRenderer({ origin: `http://127.0.0.1:${PORT}`, token: TOKEN })
+      : fakeRenderer,
+});
 attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
+  exportsStreamRoute(exportJobs),
   cellStatusRoute(cells),
   sessionStreamRoute(log),
   manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
@@ -1314,6 +1332,7 @@ const routes = createApp({
   gateway: { registry, clock, eventLog: log, live, killSwitch, frames },
   agent,
   recorder,
+  exports: exportJobs,
   replay: {
     home: HOME,
     eventLog: log,
@@ -2151,6 +2170,27 @@ routes.post("/__qa/approval", async (c) => {
     }),
   );
 });
+// The video the fake renderer is making: counts it to ?done of ?total, finishes it, or fails it.
+routes.post("/__qa/export/:step", async (c) => {
+  if (exportsMode !== "fake") return reply("start the fixture with QA_EXPORTS=fake");
+  const rendering = fakeRenderer.renders.find((entry) => !entry.settled);
+  if (!rendering) return reply("no video is being made");
+  const step = c.req.param("step");
+  if (step === "progress") {
+    rendering.io.progress(Number(c.req.query("done") ?? 0), Number(c.req.query("total") ?? 0));
+    return reply(undefined);
+  }
+  if (step === "finish") {
+    await rendering.io.write(0, new Uint8Array(Number(c.req.query("bytes") ?? 1024)));
+    rendering.finish(Number(c.req.query("frames") ?? 1800));
+    return reply(undefined);
+  }
+  if (step === "fail") {
+    rendering.fail(c.req.query("message") ?? undefined);
+    return reply(undefined);
+  }
+  return reply("unknown step");
+});
 routes.post("/__qa/keys", () => reply(keySteps()));
 routes.post("/__qa/pointer", () => reply(pointerSteps()));
 routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
@@ -2397,6 +2437,7 @@ const shutdown = async () => {
   teardown = true;
   for (const a of pendingApprovals) a.abort();
   try {
+    exportJobs.close();
     if (session) {
       live.stop(session.id);
       session.stop();

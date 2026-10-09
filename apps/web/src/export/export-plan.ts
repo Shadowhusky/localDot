@@ -1,9 +1,18 @@
 import {
   type ActivitySpan,
+  EXPORT_FORMATS,
+  EXPORT_FRAME_RATES,
+  EXPORT_QUALITIES,
+  type ExportFrameRate,
+  type ExportQuality,
+  type ExportRequest,
+  type ExportSize,
   microsToMs,
   type RecordingGap,
   type RecordingGapReason,
   ULID_PATTERN,
+  validSize,
+  validSpeed,
 } from "@localdot/protocol";
 import {
   buildPlaybackMap,
@@ -18,36 +27,21 @@ import {
 } from "@localdot/stage";
 import { timeLabel } from "../replay/replay-view.ts";
 
-export const EXPORT_FRAME_RATES = [10, 15, 24, 30, 50, 60] as const;
-export type ExportFrameRate = (typeof EXPORT_FRAME_RATES)[number];
-export const EXPORT_QUALITIES = ["low", "medium", "high"] as const;
-export type ExportQuality = (typeof EXPORT_QUALITIES)[number];
-export const EXPORT_FORMATS = ["mp4", "webm"] as const;
-export type ExportFormat = (typeof EXPORT_FORMATS)[number];
-export const SPEED_LIMITS = { min: 0.25, max: 16 } as const;
-// The largest picture an export makes: the computer's own screen.
-export const MAX_EXPORT_SIZE = { w: 2560, h: 1600 } as const;
+export {
+  EXPORT_FORMATS,
+  EXPORT_FRAME_RATES,
+  EXPORT_QUALITIES,
+  type ExportFormat,
+  type ExportFrameRate,
+  type ExportQuality,
+  type ExportRequest,
+  type ExportSize,
+  MAX_EXPORT_SIZE,
+  SPEED_LIMITS,
+  validSize,
+  validSpeed,
+} from "@localdot/protocol";
 
-export interface ExportSize {
-  w: number;
-  h: number;
-}
-
-export interface ExportRequest {
-  sessionId: string;
-  fromMs: number;
-  toMs: number;
-  // Session time per second of video: 2 plays twice as fast, 0.5 at half speed.
-  speed: number;
-  skipIdle: boolean;
-  captions: boolean;
-  // dot's pointer, clicks and typing drawn over the picture.
-  overlays: boolean;
-  size: ExportSize;
-  fps: ExportFrameRate;
-  quality: ExportQuality;
-  format: ExportFormat;
-}
 export interface ExportPlan {
   frames: number;
   fps: ExportFrameRate;
@@ -62,23 +56,6 @@ export interface ExportPlan {
 }
 export const PRIVACY_NOTE =
   "This video shows everything on the computer's screen in the range you chose. Fields marked secret appear as dots. Stretches where you had control were never recorded.";
-
-export function validSpeed(speed: number): boolean {
-  return Number.isFinite(speed) && speed >= SPEED_LIMITS.min && speed <= SPEED_LIMITS.max;
-}
-
-export function validSize(size: ExportSize): boolean {
-  return (
-    Number.isSafeInteger(size.w) &&
-    Number.isSafeInteger(size.h) &&
-    size.w % 2 === 0 &&
-    size.h % 2 === 0 &&
-    size.w >= 16 &&
-    size.h >= 16 &&
-    Math.max(size.w, size.h) <= MAX_EXPORT_SIZE.w &&
-    size.w * size.h <= MAX_EXPORT_SIZE.w * MAX_EXPORT_SIZE.h
-  );
-}
 
 export function speedText(speed: number): string {
   return `${Number(speed.toFixed(2))}×`;

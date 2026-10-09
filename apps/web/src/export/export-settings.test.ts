@@ -4,6 +4,7 @@ import {
   type ExportEnvironment,
   exportRequest,
   fitOptions,
+  hostEncodable,
   maxFrameRate,
   optionsFor,
   parseChoices,
@@ -168,5 +169,14 @@ describe("remembered choices", () => {
     expect(
       parseChoices(JSON.stringify({ preset: "fast", speed: 99, custom: { fps: 25, size: "4k" } })),
     ).toEqual({ ...DEFAULT_CHOICES, preset: "fast" });
+  });
+});
+
+describe("what the host can make", () => {
+  it("allows every size up to the largest picture the host encodes in each format", () => {
+    expect(hostEncodable(SCREEN, { mp4: 2560 * 1600, webm: 1280 * 800 })).toEqual({
+      mp4: { "480p": true, "720p": true, "1080p": true, source: true },
+      webm: { "480p": true, "720p": true, "1080p": false, source: false },
+    });
   });
 });

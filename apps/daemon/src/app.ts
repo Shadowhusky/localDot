@@ -11,6 +11,8 @@ import { desktopRoutes, type StreamProxyDeps } from "./cells/stream-proxy.ts";
 import { type DoctorSelfTestsDeps, doctorSelfTestRoutes } from "./doctor-selftests.ts";
 import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
+import type { ExportJobs } from "./exports/jobs.ts";
+import { ExportLinks, exportRoutes } from "./exports/routes.ts";
 import { type GatewayRoutesDeps, gatewayRoutes } from "./gateway/routes.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { installCodeRoutes } from "./install-code-routes.ts";
@@ -40,6 +42,7 @@ export interface AppOptions {
   installCodes?: InstallCodes;
   serviceReadiness?: Pick<ManagedServiceReadiness, "snapshot">;
   doctorSelfTests?: DoctorSelfTestsDeps;
+  exports?: ExportJobs;
 }
 
 export function createApp({
@@ -58,6 +61,7 @@ export function createApp({
   installCodes,
   serviceReadiness,
   doctorSelfTests,
+  exports,
 }: AppOptions): Hono {
   if (installCodes && !installCodes.belongsTo(token, port)) {
     throw new Error("install codes belong to another daemon");
@@ -169,5 +173,6 @@ export function createApp({
   if (agent) agentRoutes(app, agent);
   if (cells && gateway) gatewayRoutes(app, cells.cells, gateway);
   if (replay) replayRoutes(app, replay);
+  if (exports) exportRoutes(app, exports, new ExportLinks());
   return app;
 }
