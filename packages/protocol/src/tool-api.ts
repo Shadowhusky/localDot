@@ -10,6 +10,7 @@ import {
   ThoughtDelta,
 } from "./events.ts";
 import { ULID_PATTERN } from "./ids.ts";
+import { SessionRun } from "./routines.ts";
 
 // The brain's tool API (spec "Ports": 4751). The brain calls only these, through its gate, with
 // its own bearer token; everything it may do to the computer or the user goes through them.
@@ -103,6 +104,8 @@ export const BootConfig = z.object({
   inboxAfter: z.number().int().nonnegative(),
   // What was said earlier in the conversation this task continues.
   earlier: EarlierTurns.optional(),
+  // Present when a routine started this task: the brain is told it runs unattended.
+  run: SessionRun.optional(),
 });
 export type BootConfig = z.infer<typeof BootConfig>;
 

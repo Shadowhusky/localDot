@@ -17,6 +17,7 @@ export * from "./manual-input.ts";
 export * from "./patch.ts";
 export * from "./recording.ts";
 export * from "./release.ts";
+export * from "./routines.ts";
 export * from "./safety.ts";
 export * from "./screens.ts";
 export * from "./seal.ts";
