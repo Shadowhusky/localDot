@@ -76,14 +76,16 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
           {view.link && copy.action === "copy-link" && (
             <Field
               label="Sign-in link"
-              description="It couldn't be copied. Touch and hold it to copy. It works once, for one minute."
+              description="Copy it by hand: touch and hold, then tap Copy. It works once, for one minute."
               className="settings-notify-link"
             >
               <TextField
                 size="sm"
                 readOnly
                 value={view.link}
-                onFocus={(event) => event.currentTarget.select()}
+                onFocus={(event) =>
+                  event.currentTarget.setSelectionRange(0, view.link?.length ?? 0)
+                }
               />
             </Field>
           )}
