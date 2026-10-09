@@ -83,8 +83,11 @@ describe("handler generation and control fences", () => {
     const h = setup();
     const held = h.call("request_takeover", { reason: "login", note: "Sign in" });
     await turns();
+    const recall = vi.fn(() => []);
+    h.tools.recall = recall;
     const desktop = vi.spyOn(h.tools, "desktop"),
       memory = vi.spyOn(h.tools.memory, "apply"),
+      people = vi.spyOn(required(h.tools.people), "find"),
       png = vi.spyOn(h.tools.png, "png"),
       policy = vi.spyOn(required(h.deps.policy), "decide");
     const before = policy.mock.calls.length;
@@ -97,6 +100,8 @@ describe("handler generation and control fences", () => {
       shell: { command: "pwd" },
       files: { op: "read", path: "a" },
       remember: { file: "USER.md", op: "append", text: "x" },
+      recall: { query: "x" },
+      people: { op: "find", query: "x" },
       done: { summary: "Done" },
       update_plan: { items: [] },
       ask_user: { question: "x" },
@@ -107,6 +112,8 @@ describe("handler generation and control fences", () => {
     }
     expect(desktop).not.toHaveBeenCalled();
     expect(memory).not.toHaveBeenCalled();
+    expect(recall).not.toHaveBeenCalled();
+    expect(people).not.toHaveBeenCalled();
     expect(png).not.toHaveBeenCalled();
     expect(policy.mock.calls.length).toBe(before);
     h.session.stop();

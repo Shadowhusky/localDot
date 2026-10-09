@@ -44,7 +44,9 @@ import { FramePng } from "./frame-png.ts";
 import type { ManualDesktop } from "./manual-input.ts";
 import { MemoryStore } from "./memory.ts";
 import { OutputStore } from "./output-store.ts";
+import { PeopleStore } from "./people.ts";
 import type { ToolPolicy } from "./policy.ts";
+import { RecentActivity } from "./recent-activity.ts";
 import { redactor } from "./redact.ts";
 import type { AgentRoutesDeps, UploadAccess } from "./routes.ts";
 import { AgentError, AgentRunner } from "./runner.ts";
@@ -53,6 +55,7 @@ import type { AgentSession } from "./session.ts";
 import { SettingsStore } from "./settings.ts";
 import { listSkills, skillDesktopPath, skillFiles } from "./skills.ts";
 import { createToolApi } from "./tool-api.ts";
+import type { ToolDeps } from "./tools/deps.ts";
 import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
@@ -80,6 +83,8 @@ export interface AgentWiringDeps {
   sessionScreens?: Pick<SessionScreens, "install" | "bind" | "manual">;
   transfers?: Transfers;
   quarantine?: QuarantineStore;
+  // Earlier tasks for the recall tool, from the search index.
+  recall?: ToolDeps["recall"];
 }
 export const BUILTIN_SKILLS = runtimeLayout.skills;
 // The Codex path hands memory to the model here.
@@ -90,8 +95,13 @@ function tainting<T extends { user: string; memory: string }>(session: AgentSess
 
 export function createAgent(d: AgentWiringDeps) {
   const memory = new MemoryStore(d.home),
+    people = new PeopleStore(d.home),
     settings = new SettingsStore(d.home),
     catalog = new CatalogStore(d.home);
+  const recentActivity = new RecentActivity({
+    log: d.eventLog,
+    isLive: (id) => d.live.cellOf(id) !== undefined,
+  });
   const conversations = new Conversations(d.home, d.eventLog);
   const transcripts = new TranscriptStore(d.home),
     png = new FramePng(d.frames, d.gateway),
@@ -286,6 +296,8 @@ export function createAgent(d: AgentWiringDeps) {
       },
       png,
       memory,
+      people,
+      ...(d.recall ? { recall: d.recall } : {}),
       saveOutput: (id, name, source, scope) => outputs.save(id, name, source, scope),
       stopForUncertainty: (session, reason) => runner.contain(session, reason),
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
@@ -368,7 +380,8 @@ export function createAgent(d: AgentWiringDeps) {
           },
           instructions: (session) =>
             codexInstructions({
-              memory: tainting(session, memory.readBoth()),
+              memory: tainting(session, memory.bootMemory()),
+              recent: session.recent,
               skills: runner.skillsOf(session.id),
               today: new Date(),
             }),
@@ -390,6 +403,7 @@ export function createAgent(d: AgentWiringDeps) {
     settings: () => settings.get(),
     catalog: () => catalog.get(),
     memory,
+    recentActivity,
     transcripts,
     conversations,
     installSkills,
@@ -594,6 +608,9 @@ export function createAgent(d: AgentWiringDeps) {
     catalog,
     keyd: d.keyd,
     memory,
+    people,
+    recentActivity: () => recentActivity.list(),
+    sessionInfo: (ids) => d.eventLog.sessionInfo(ids),
     skills,
     canChangeMemory: () =>
       [...runner.sessions.values()].every(

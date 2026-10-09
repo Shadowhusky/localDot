@@ -2,6 +2,7 @@ import {
   type BrowserNavigateInput,
   clipText,
   isToolName,
+  type PeopleInput,
   TOOL_INPUTS,
   type ToolName,
   type ToolResult,
@@ -26,7 +27,9 @@ import { computerTool } from "./computer.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
+import { peopleTool, SAVE_UNNAMED, saveRefused } from "./people.ts";
 import { updatePlanTool } from "./plan.ts";
+import { recallTool } from "./recall.ts";
 import { rememberTool } from "./remember.ts";
 import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
@@ -57,6 +60,8 @@ const STEP_KIND: Record<ToolName, string> = {
   ask_user: "ask",
   request_takeover: "ask",
   remember: "think",
+  recall: "think",
+  people: "think",
   done: "think",
 };
 
@@ -225,6 +230,8 @@ async function dispatchAdmitted(
           "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
         ),
       };
+    if (name === "people" && saveRefused(session, frozen as PeopleInput))
+      return { status: 200, result: fail(SAVE_UNNAMED) };
     // Public pages open in the web browser, where the user's sign-ins are; local addresses
     // only resolve on the desktop.
     let fellBack = false;
@@ -325,6 +332,12 @@ async function dispatchAdmitted(
         break;
       case "remember":
         result = await rememberTool(t, ctx, input);
+        break;
+      case "recall":
+        result = await recallTool(t, ctx, input);
+        break;
+      case "people":
+        result = await peopleTool(t, ctx, input);
         break;
       case "done":
         result = await doneTool(t, ctx, input);

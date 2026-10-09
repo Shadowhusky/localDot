@@ -3,6 +3,8 @@ import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { SwitchScreenInput } from "./screens.ts";
+import { PeopleInput } from "./tools/people.ts";
+import { RecallInput } from "./tools/recall.ts";
 
 // The v1 tool table (spec "The agent"): the only tools a brain may declare and the only ones the
 // daemon's tool API runs, including M7's isolated browser screen.
@@ -18,6 +20,8 @@ export const TOOL_NAMES = [
   "ask_user",
   "request_takeover",
   "remember",
+  "recall",
+  "people",
   "done",
 ] as const;
 export const ToolName = z.enum(TOOL_NAMES);
@@ -230,7 +234,7 @@ export const RequestTakeoverInput = z.object({
 export type RequestTakeoverInput = z.infer<typeof RequestTakeoverInput>;
 
 export const RememberInput = z.object({
-  file: z.enum(["USER.md", "MEMORY.md"]),
+  file: z.enum(["USER.md", "MEMORY.md", "notes"]),
   op: z.enum(["append", "replace"]),
   text: z.string().max(4000),
   old_text: z.string().max(4000).optional(),
@@ -257,6 +261,8 @@ export const TOOL_INPUTS = {
   ask_user: AskUserInput,
   request_takeover: RequestTakeoverInput,
   remember: RememberInput,
+  recall: RecallInput,
+  people: PeopleInput,
   done: DoneInput,
 } as const satisfies Record<ToolName, z.ZodType>;
 

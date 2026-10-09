@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
 import {
   CHATGPT_INSTALL_FIRST,
   CHATGPT_SWITCHED_OFF,
@@ -7,14 +9,29 @@ import {
 } from "@localdot/codex-harness";
 import {
   ActionClass,
+  AddMemoryEntryRequest,
+  AddPersonRequest,
   ApprovalAnswer,
   BudgetRaiseRequest,
   CLAUDE_PLAN_REFUSAL,
   ContinueConversation,
+  EditMemoryEntryRequest,
+  EditPersonRequest,
   HandbackRequest,
   type KeydRecord,
+  MEMORY_ENTRY_ID,
+  MemoryBook,
+  MemoryEntriesReply,
+  MemoryEntryChangeReply,
+  MemoryEntryRevision,
   PauseRequest,
+  PeopleReply,
+  Person,
+  PersonChangeReply,
+  PersonRevision,
   QuestionAnswerRequest,
+  RecentActivityReply,
+  type RecentTask,
   ResumeSafetyRequest,
   scanKeyLike,
   type TakeComputerReply,
@@ -44,7 +61,8 @@ import { chatgptRoutes } from "./codex/routes.ts";
 import type { Conversations } from "./conversation.ts";
 import { DOWNLOAD_NAME, DownloadError, downloadFile, TRANSFER_BYTES } from "./download.ts";
 import { type ManualDesktop, ManualInputUncertain, sendManualInput } from "./manual-input.ts";
-import { MemoryError, type MemoryStore } from "./memory.ts";
+import { MemoryError, type MemoryStore, type StoredEntry } from "./memory.ts";
+import { PeopleError, type PeopleStore, type StoredPerson } from "./people.ts";
 import { AgentError, type AgentRunner, RAISE_BUDGET_FIRST } from "./runner.ts";
 import { RuleError, RulesStore, ruleChange } from "./safety/rules.ts";
 import { PausedStepError } from "./safety/step-barrier.ts";
@@ -79,7 +97,14 @@ export interface AgentRoutesDeps {
   settings: Pick<SettingsStore, "get" | "put">;
   catalog: Pick<CatalogStore, "get" | "refresh">;
   keyd: Pick<KeydClient, "secrets"> & DayLimitKeyd;
-  memory: Pick<MemoryStore, "readBoth" | "undo">;
+  memory: Pick<
+    MemoryStore,
+    "readBoth" | "undo" | "entries" | "addEntry" | "editEntry" | "deleteEntry"
+  >;
+  people?: Pick<PeopleStore, "list" | "add" | "edit" | "remove">;
+  // The tasks the next one hears about, whether or not the user has switched that off.
+  recentActivity?(): RecentTask[];
+  sessionInfo?(ids: readonly string[]): Map<string, { title: string | null; startedAt: string }>;
   skills(): SkillInfo[];
   canChangeMemory?(): boolean;
   taskMutationReady?(session: AgentSession): boolean;
@@ -214,6 +239,7 @@ function fail(error: unknown): Response {
     );
   if (error instanceof MemoryError)
     return new Response("memory change is unavailable", { status: error.status });
+  if (error instanceof PeopleError) return new Response(error.message, { status: error.status });
   if (error instanceof SettingsError)
     return new Response("agent settings are unavailable", { status: error.status });
   if (error instanceof RuleError) return new Response(error.message, { status: error.status });
@@ -862,15 +888,165 @@ export function agentRoutes(app: Hono, deps: AgentRoutesDeps): void {
       if (deps.canChangeMemory?.() === false)
         throw new RouteError(409, "memory is not available to change");
       const change = deps.memory.undo(changeId);
-      deps.appendTo(change.sessionId, "memory.change", {
-        file: change.file,
-        patch: change.patch,
-        changeId: change.changeId,
-        undoes: change.undoes,
-      });
+      if (change.sessionId)
+        deps.appendTo(change.sessionId, "memory.change", {
+          file: change.file,
+          patch: change.patch,
+          changeId: change.changeId,
+          undoes: change.undoes,
+        });
       return c.json({ changeId: change.changeId });
     }),
   );
+  const writable = () => {
+    if (deps.canChangeMemory?.() === false)
+      throw new RouteError(503, "memory is not available to change");
+  };
+  const titles = (sources: readonly ({ kind: string } & { sessionId?: string })[]) =>
+    deps.sessionInfo?.([
+      ...new Set(sources.flatMap((s) => (s.kind === "task" && s.sessionId ? [s.sessionId] : []))),
+    ]) ?? new Map<string, { title: string | null }>();
+  const titled = <T extends { source: StoredEntry["source"] | StoredPerson["source"] }>(
+    item: T,
+    info: Map<string, { title: string | null }>,
+  ) => ({
+    ...item,
+    source:
+      item.source.kind === "task"
+        ? {
+            kind: "task" as const,
+            sessionId: item.source.sessionId,
+            title: info.get(item.source.sessionId)?.title ?? null,
+          }
+        : item.source,
+  });
+  const idParam = (c: Context, pattern: RegExp) => {
+    const id = c.req.param("id") ?? "";
+    if (!pattern.test(id)) throw new RouteError(400, "invalid id");
+    return id;
+  };
+  app.get(
+    "/api/agent/memory/entries",
+    route((c) => {
+      const files = (["USER.md", "MEMORY.md"] as const).map((file) => ({
+        file,
+        entries: deps.memory.entries(file),
+      }));
+      const info = titles(files.flatMap((f) => f.entries.map((e) => e.source)));
+      return c.json(
+        MemoryEntriesReply.parse({
+          dir: join(deps.home, "memory").replace(homedir(), "~"),
+          files: files.map((f) => ({
+            file: f.file,
+            entries: f.entries.map((e) => titled(e, info)),
+          })),
+        }),
+      );
+    }),
+  );
+  app.post(
+    "/api/agent/memory/entries",
+    route(async (c) => {
+      const body = await json(c.req.raw, AddMemoryEntryRequest);
+      writable();
+      const { change, entry } = deps.memory.addEntry(body.file, body.text, body.pinned ?? false);
+      return c.json(
+        MemoryEntryChangeReply.parse({
+          changeId: change.changeId,
+          entry: titled(entry, titles([entry.source])),
+        }),
+        201,
+      );
+    }),
+  );
+  app.put(
+    "/api/agent/memory/entries/:id",
+    route(async (c) => {
+      const id = idParam(c, MEMORY_ENTRY_ID);
+      const body = await json(c.req.raw, EditMemoryEntryRequest);
+      writable();
+      const { change, entry } = deps.memory.editEntry(body.file, id, body.revision, {
+        ...(body.text === undefined ? {} : { text: body.text }),
+        ...(body.pinned === undefined ? {} : { pinned: body.pinned }),
+      });
+      return c.json(
+        MemoryEntryChangeReply.parse({
+          changeId: change.changeId,
+          entry: titled(entry, titles([entry.source])),
+        }),
+      );
+    }),
+  );
+  app.delete(
+    "/api/agent/memory/entries/:id",
+    route(async (c) => {
+      const id = idParam(c, MEMORY_ENTRY_ID);
+      const file = MemoryBook.safeParse(c.req.query("file"));
+      const revision = MemoryEntryRevision.safeParse(c.req.query("revision"));
+      if (!file.success || !revision.success) throw new RouteError(400, "invalid memory entry");
+      await empty(c.req.raw);
+      writable();
+      const { change } = deps.memory.deleteEntry(file.data, id, revision.data);
+      return c.json(MemoryEntryChangeReply.parse({ changeId: change.changeId }));
+    }),
+  );
+  const people = deps.people;
+  if (people) {
+    const personView = (person: StoredPerson) =>
+      Person.parse(titled(person, titles([person.source])));
+    app.get(
+      "/api/agent/people",
+      route((c) => {
+        const list = people.list();
+        const info = titles(list.map((p) => p.source));
+        return c.json(PeopleReply.parse({ people: list.map((p) => titled(p, info)) }));
+      }),
+    );
+    app.post(
+      "/api/agent/people",
+      route(async (c) => {
+        const body = await json(c.req.raw, AddPersonRequest);
+        writable();
+        return c.json(PersonChangeReply.parse({ person: personView(people.add(body)) }), 201);
+      }),
+    );
+    app.put(
+      "/api/agent/people/:id",
+      route(async (c) => {
+        const id = idParam(c, ULID_PATTERN);
+        const { revision, ...patch } = await json(c.req.raw, EditPersonRequest);
+        writable();
+        return c.json(
+          PersonChangeReply.parse({ person: personView(people.edit(id, revision, patch)) }),
+        );
+      }),
+    );
+    app.delete(
+      "/api/agent/people/:id",
+      route(async (c) => {
+        const id = idParam(c, ULID_PATTERN);
+        const revision = PersonRevision.safeParse(c.req.query("revision"));
+        if (!revision.success) throw new RouteError(400, "invalid person");
+        await empty(c.req.raw);
+        writable();
+        people.remove(id, revision.data);
+        return c.json(PersonChangeReply.parse({}));
+      }),
+    );
+  }
+  const recent = deps.recentActivity;
+  if (recent)
+    app.get(
+      "/api/agent/recent-activity",
+      route((c) =>
+        c.json(
+          RecentActivityReply.parse({
+            enabled: deps.settings.get().recentActivity !== "off",
+            tasks: recent(),
+          }),
+        ),
+      ),
+    );
   app.get(
     "/api/agent/skills",
     route((c) =>

@@ -63,5 +63,7 @@ export const AgentSettingsDocument = z.strictObject({
   checkIns: CheckIns.optional(),
   // Auto when absent.
   purposeCheck: PurposeCheck.optional(),
+  // On when absent: each task starts knowing the user's last few tasks.
+  recentActivity: z.enum(["on", "off"]).optional(),
 });
 export type AgentSettingsDocument = z.infer<typeof AgentSettingsDocument>;

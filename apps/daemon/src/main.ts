@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { serve } from "@hono/node-server";
 import { manualStreamRoute } from "./agent/manual-stream.ts";
+import { MemoryStore } from "./agent/memory.ts";
 import { ComputerFences } from "./agent/safety/fences.ts";
 import { createReplacementController } from "./agent/safety/replacement-controller.ts";
 import { Transfers } from "./agent/transfers.ts";
@@ -53,6 +54,9 @@ import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
 import { ScreenRecordings } from "./recorder/screen-recordings.ts";
+import { recallHits } from "./search/recall-hits.ts";
+import { SearchFeed } from "./search/search-feed.ts";
+import { SearchIndex } from "./search/search-index.ts";
 import { retainManagedDaemonLease } from "./service-lease.ts";
 import { ManagedServiceReadiness, managedServiceFromEnv } from "./service-readiness.ts";
 import { SessionIndex } from "./sessions/index-store.ts";
@@ -265,6 +269,9 @@ keydMonitor.subscribe((now, before) => {
       .catch(() => console.error("keyd: a computer could not reconnect"));
   }
 });
+const searchIndex = new SearchIndex(home, { sessions: eventLog });
+const searchFeed = new SearchFeed({ index: searchIndex, eventLog, notes: new MemoryStore(home) });
+const stopSearchFeed = searchFeed.start();
 const transfers = new Transfers();
 const quarantine = await QuarantineStore.open(home);
 const downloads = new BrowserDownloadCollector({ store: quarantine, transfers });
@@ -296,6 +303,7 @@ agent = createAgent({
   killSwitch,
   keydPorts,
   codex: { realHome: userInfo().homedir, user: userInfo().username },
+  recall: (query, limit, exclude) => recallHits(searchIndex, query, limit, exclude),
 });
 const replacement = createReplacementController({
   home,
@@ -355,6 +363,8 @@ shutdown.push(
   () => recorder.stopAll(SHUTDOWN_FINALIZE_MS),
   () => browserStreams.dispose(),
   () => sessionIndex?.close(),
+  () => stopSearchFeed(),
+  () => searchIndex.close(),
   () => eventLog.close(),
 );
 keydMonitor.start();
@@ -370,6 +380,7 @@ const app = createApp({
     ? { doctorSelfTests: { cells: orchestrator, readiness: serviceReadiness } }
     : {}),
   agent: agent.routes,
+  search: { index: searchIndex, feed: searchFeed },
   recorder,
   replay: {
     home,

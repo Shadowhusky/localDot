@@ -10,6 +10,7 @@ import { LiveSessions } from "../gateway/live.ts";
 import type { KeydHealth } from "../keyd/monitor.ts";
 import type { BrainCell, OpenBrain } from "./brain-cell.ts";
 import { MemoryStore } from "./memory.ts";
+import { RecentActivity } from "./recent-activity.ts";
 import { agentRoutes } from "./routes.ts";
 import { AgentRunner, type AgentRunnerDeps } from "./runner.ts";
 import type { AgentSettings } from "./settings.ts";
@@ -332,4 +333,98 @@ it("bounds daemon-lifetime terminal history and preserves the newest exact owner
     cellId: h.cellId,
     status: "ended",
   });
+});
+
+it("boots a task with memory's boot view, not the raw files", async () => {
+  const h = setup();
+  h.deps.idleMs = 0;
+  const memory = new MemoryStore(h.home);
+  memory.addEntry("USER.md", "Allergic to penicillin", true);
+  const session = await h.runner.start(h.cellId, "Use what you know");
+  await h.ready();
+  expect(h.boots[0]?.memory.user).toBe(
+    "## Always remember\n- Allergic to penicillin\n\n# About the user\n\n",
+  );
+  expect(JSON.stringify(h.boots[0]?.memory)).not.toContain("<!-- ld:");
+  h.exit();
+  await h.live.settled(session.id);
+});
+
+it("boots the next task without a memory entry deleted through the entries route", async () => {
+  const h = setup();
+  h.deps.idleMs = 0;
+  const memory = new MemoryStore(h.home);
+  const app = new Hono();
+  agentRoutes(app, {
+    home: h.home,
+    runner: h.runner,
+    memory,
+    settings: new SettingsStore(h.home),
+    catalog: { get: h.deps.catalog, refresh: async () => required(h.deps.catalog()) },
+    keyd: { secrets: async () => [] },
+    skills: () => [],
+    desktop: () => {
+      throw new Error("unexpected desktop access");
+    },
+    redactUserText: (text) => text,
+    appendTo: (id, type, data) => {
+      h.log.append(id, { agent: "main", type, data } as never);
+    },
+    canChangeMemory: () => true,
+  });
+  memory.addEntry("MEMORY.md", "Prefers window seats");
+  const drop = memory.addEntry("MEMORY.md", "Renews car insurance in September").entry;
+  const first = await h.runner.start(h.cellId, "First task");
+  await h.ready(1);
+  expect(h.boots[0]?.memory.memory).toContain("Renews car insurance in September");
+  h.exit(0);
+  await h.live.settled(first.id);
+  const res = await app.request(
+    `/api/agent/memory/entries/${drop.id}?file=MEMORY.md&revision=${drop.revision}`,
+    { method: "DELETE" },
+  );
+  expect(res.status).toBe(200);
+  const second = await h.runner.start(h.cellId, "Second task");
+  await h.ready(2);
+  expect(h.boots[1]?.memory.memory).toContain("Prefers window seats");
+  expect(h.boots[1]?.memory.memory).not.toContain("Renews car insurance");
+  h.exit(1);
+  await h.live.settled(second.id);
+});
+
+it("tells the next task what the user asked lately, marked private, unless they turned it off", async () => {
+  const h = setup();
+  h.deps.idleMs = 0;
+  h.deps.recentActivity = new RecentActivity({
+    log: h.log,
+    isLive: (id) => h.live.cellOf(id) !== undefined,
+  });
+  const first = await h.runner.start(h.cellId, "Send Henry the quarterly report on WeChat");
+  await h.ready(1);
+  expect(h.boots[0]?.recent).toBeUndefined();
+  h.exit(0);
+  await h.live.settled(first.id);
+  const second = await h.runner.start(h.cellId, "What did I do last?");
+  await h.ready(2);
+  expect(h.boots[1]?.recent).toEqual([
+    {
+      title: "Send Henry the quarterly report on WeChat",
+      outcome: expect.stringMatching(/^(done|stopped|error|interrupted)$/),
+      day: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
+    },
+  ]);
+  expect(second.taint.sources).toContainEqual({ kind: "memory", origin: "recent activity" });
+  expect(second.taint.overlap("the quarterly report on WeChat").overlaps).toBe(true);
+  h.exit(1);
+  await h.live.settled(second.id);
+  h.setSettings({
+    main: { provider: "anthropic", model: "claude-sonnet-5-5", key: "anthropic" },
+    recentActivity: "off",
+  });
+  const third = await h.runner.start(h.cellId, "Start fresh");
+  await h.ready(3);
+  expect(h.boots[2]?.recent).toBeUndefined();
+  expect(third.taint.sources).not.toContainEqual({ kind: "memory", origin: "recent activity" });
+  h.exit(2);
+  await h.live.settled(third.id);
 });

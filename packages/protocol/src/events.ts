@@ -255,10 +255,11 @@ export const PauseChange = event(
   z.object({ paused: z.boolean(), atStepBoundary: z.boolean() }),
 );
 // changeId names the change so the UI can undo it; undoes names the change an undo reverted.
+export const NOTES_FILE = /^notes\/\d{4}-\d{2}-\d{2}\.md$/;
 export const MemoryChange = event(
   "memory.change",
   z.object({
-    file: z.enum(["USER.md", "MEMORY.md"]),
+    file: z.union([z.enum(["USER.md", "MEMORY.md"]), z.string().regex(NOTES_FILE)]),
     patch: z.string(),
     changeId: z.string().regex(ULID_PATTERN).optional(),
     undoes: z.string().regex(ULID_PATTERN).optional(),

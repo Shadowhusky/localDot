@@ -6,11 +6,19 @@ import type { DesktopdTools } from "../../desktopd/tools-client.ts";
 import type { ActionContext, ActionGateway, NativeScreenBinding } from "../../gateway/gateway.ts";
 import type { FramePng } from "../frame-png.ts";
 import type { MemoryStore } from "../memory.ts";
+import type { PeopleStore } from "../people.ts";
 import type { Redactor } from "../redact.ts";
 import type { EffectPermit } from "../safety/authorize.ts";
 import { screenOf } from "../safety/autonomy.ts";
 import type { AgentSession, BrainGeneration, ToolLease } from "../session.ts";
 import type { Transfers } from "../transfers.ts";
+
+export interface RecallHit {
+  title: string;
+  day: string;
+  kind: "title" | "user" | "assistant" | "summary" | "step" | "file" | "note";
+  snippet: string;
+}
 
 export interface ToolDeps {
   uploads?: {
@@ -42,7 +50,10 @@ export interface ToolDeps {
   // when the session has no screen controller.
   device?(cellId: string): NativeDevice | undefined;
   png: Pick<FramePng, "png">;
-  memory: Pick<MemoryStore, "apply">;
+  memory: Pick<MemoryStore, "apply" | "appendNote">;
+  // Earlier tasks matching a query, never the asking task itself.
+  recall?(query: string, limit: number, excludeSessionId: string): RecallHit[];
+  people?: Pick<PeopleStore, "find" | "record">;
   // Where a done task's files are kept for the result card: <home>/sessions/<id>/out/<name>.
   saveOutput(
     sessionId: string,

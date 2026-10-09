@@ -253,7 +253,7 @@ function runnerFor(h: ReturnType<typeof toolHarness>, f: Awaited<ReturnType<type
     keyd: f.client,
     settings: () => ({}),
     catalog: () => undefined,
-    memory: { readBoth: () => ({ user: "", memory: "" }) },
+    memory: { bootMemory: () => ({ user: "", memory: "" }) },
     transcripts: h.transcripts,
     installSkills: unexpected,
     waitForUploads: async () => {},

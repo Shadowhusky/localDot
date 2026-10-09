@@ -220,6 +220,8 @@ describe("Agent", () => {
         "computer",
         "done",
         "files",
+        "people",
+        "recall",
         "remember",
         "request_takeover",
         "shell",

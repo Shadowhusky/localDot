@@ -90,6 +90,16 @@ export function approvalDraft(
     if (typeof object.old_text === "string") add("Old text", object.old_text);
     if (typeof object.new_text === "string") add("New text", object.new_text);
     if (typeof object.text === "string" && tool === "remember") add("Memory", object.text);
+    if (typeof object.query === "string" && (tool === "recall" || tool === "people"))
+      add("Search", object.query);
+    if (tool === "people")
+      for (const [key, label] of [
+        ["name", "Name"],
+        ["app", "App"],
+        ["handle", "Handle"],
+        ["note", "Note"],
+      ] as const)
+        if (typeof object[key] === "string") add(label, object[key]);
   }
   return ApprovalRequestDraft.parse({
     ...card,
@@ -240,6 +250,10 @@ export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
       return { operation: "navigate", destination: String(input.url) };
     case "remember":
       return { operation: "memory_write" };
+    case "recall":
+      return { operation: "files_read" };
+    case "people":
+      return { operation: input.op === "save" ? "memory_write" : "files_read" };
     case "done":
       return {
         operation:

@@ -4,6 +4,7 @@ import type {
   AskFieldValue,
   AskRequestField,
   PauseSnapshot,
+  RecentLine,
   RuleChange,
 } from "@localdot/protocol";
 import {
@@ -173,6 +174,8 @@ export class AgentSession {
   #heardOthers = false;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
+  // The user's last few tasks when this one started.
+  recent: readonly RecentLine[] = [];
   toolCalls = 0;
   // The user's optional hard stop: the most tool calls between two of their messages.
   actionLimit: number | undefined;

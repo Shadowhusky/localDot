@@ -87,9 +87,11 @@ describe("memory persistence boundaries", () => {
       "fixture disk failure",
     );
     const recovered = new MemoryStore(h);
-    expect(recovered.read("USER.md")).toBe("# About the user\n\n- recovered\n");
+    expect(recovered.read("USER.md")).toMatch(
+      /^# About the user\n\n- recovered <!-- ld:id=[0-9A-Z]{26} src=[0-9A-Z]{26} at=\d{4}-\d{2}-\d{2} -->\n$/,
+    );
     expect(new MemoryStore(h).read("USER.md")).toBe(recovered.read("USER.md"));
-    expect(readdirSync(join(h, "memory")).sort()).toEqual([".history", "USER.md"]);
+    expect(readdirSync(join(h, "memory")).sort()).toEqual([".history", "USER.md", "notes"]);
     expect(readdirSync(join(h, "memory/.history"))).toHaveLength(1);
     for (const name of readdirSync(join(h, "memory/.history")))
       expect(statSync(join(h, "memory/.history", name)).mode & 0o777).toBe(0o600);

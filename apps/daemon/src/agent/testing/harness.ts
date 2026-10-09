@@ -12,6 +12,7 @@ import { CAREFUL_AUTONOMY, ulid } from "@localdot/protocol";
 import { EventLog } from "../../event-log.ts";
 import type { ActionContext, ActionOutcome, GuiAction } from "../../gateway/gateway.ts";
 import { MemoryStore } from "../memory.ts";
+import { PeopleStore } from "../people.ts";
 import { actPolicy, type ToolPolicy } from "../policy.ts";
 import { redactor } from "../redact.ts";
 import { AgentSession } from "../session.ts";
@@ -159,6 +160,7 @@ export function toolHarness(
     }),
     png: { png: async (_s, frameId) => Buffer.from(`png:${frameId}`) },
     memory: new MemoryStore(home),
+    people: new PeopleStore(home),
     saveOutput: async (_s, name, source, scope) => {
       scope.check();
       const bytes = Buffer.from(await new Response(source).arrayBuffer());

@@ -8,6 +8,7 @@ import {
   isJevKey,
   type KeydRecord,
   type ModelBinding,
+  type RecentLine,
   SESSION_PAUSE_REASONS,
   type SkillSummary,
   STALL,
@@ -41,6 +42,7 @@ import type { CodexAccount } from "./codex/account.ts";
 import { CodexCleanupError, type CodexDriver } from "./codex/driver.ts";
 import type { Conversations } from "./conversation.ts";
 import type { MemoryStore } from "./memory.ts";
+import type { RecentActivity } from "./recent-activity.ts";
 import { SafetyController } from "./safety/controller.ts";
 import type { ComputerFences } from "./safety/fences.ts";
 import { gatewayCompletion } from "./safety/judge-model.ts";
@@ -105,7 +107,8 @@ export interface AgentRunnerDeps {
   keydHealth?(): KeydHealth;
   settings(): AgentSettings;
   catalog(): Catalog | undefined;
-  memory: Pick<MemoryStore, "readBoth">;
+  memory: Pick<MemoryStore, "bootMemory">;
+  recentActivity?: Pick<RecentActivity, "list">;
   transcripts: TranscriptStore;
   conversations?: Pick<Conversations, "current" | "earlier" | "adopt"> &
     Partial<Pick<Conversations, "title">>;
@@ -329,6 +332,13 @@ export class AgentRunner {
         continues = undefined;
         earlier = [];
       }
+      let recent: RecentLine[] = [];
+      if (settings.recentActivity !== "off" && this.deps.recentActivity)
+        try {
+          recent = this.deps.recentActivity.list().map(({ sessionId: _, ...line }) => line);
+        } catch {
+          console.error("recent activity could not be read");
+        }
       const id = this.deps.eventLog.createSession(task.slice(0, 200));
       const session = new AgentSession(
         id,
@@ -339,6 +349,7 @@ export class AgentRunner {
         new RulesStore(this.deps.home),
       );
       session.earlier = earlier;
+      session.recent = recent;
       session.actionLimit = settings.checkIns?.actions;
       const rt: Runtime = {
         session,
@@ -368,6 +379,8 @@ export class AgentRunner {
         });
         session.append("message.user", { messageId: ulid(), text: task, kind: "task" });
         if (earlier.length) session.taint.add("recall", "earlier conversation", earlier.join("\n"));
+        if (recent.length)
+          session.taint.add("memory", "recent activity", recent.map((r) => r.title).join("\n"));
         this.#safety(rt);
         this.deps.live.start(
           cellId,
@@ -1129,7 +1142,7 @@ export class AgentRunner {
         const models = Object.fromEntries(
           selection.roles.map((role) => [role.role, bindingOf(role, brain?.surrogates ?? {})]),
         ) as Record<Role, ModelBinding>;
-        const memory = this.deps.memory.readBoth();
+        const memory = this.deps.memory.bootMemory();
         taintMemory(session.taint, memory);
         const boot = BootConfig.parse({
           sessionId: session.id,
@@ -1146,6 +1159,7 @@ export class AgentRunner {
           resume,
           inboxAfter: session.delivered,
           ...(session.earlier.length ? { earlier: [...session.earlier] } : {}),
+          ...(session.recent.length ? { recent: [...session.recent] } : {}),
         });
         session.publishBrain(generation, {
           toolToken: brain.toolToken,
