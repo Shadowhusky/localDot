@@ -612,56 +612,71 @@ export interface StopNote {
 }
 
 // The computer's rows: Shut down, or on a phone the task's Stop, with how the last Stop went under
-// its name and any cleanup it couldn't confirm behind Details; then the stream's quality.
+// its name and any cleanup it couldn't confirm behind Details; then the stream's quality. Start at
+// login and Stop everything follow in a group of their own.
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
   const { stop, stopNote: note, stream, freshStart, stopAll, startAtLogin: login } = props;
   const update = props.update?.available ? props.update : undefined;
   const phone = useMediaQuery(PHONE);
   return (
-    <div>
-      <Group>
-        {(stop || note) && (
-          <GroupRow
-            leading={<IconTile icon="power" />}
-            label="Your computer"
-            detail={note && <span role="status">{note.line}</span>}
-            trailing={
-              stop && (
-                <Button
-                  size="sm"
-                  icon="stop"
-                  disabledReason={
-                    stop.enabled && !update?.busy ? undefined : "Not available right now"
-                  }
-                  onClick={() => stop.run()}
-                >
-                  {stop.label}
-                </Button>
-              )
-            }
-          >
-            {!!note?.details?.length && (
-              <DetailLines lines={note.details} className="settings-stop-details" />
+    <>
+      {(stop || note || update || freshStart || stream) && (
+        <div>
+          <Group>
+            {(stop || note) && (
+              <GroupRow
+                leading={<IconTile icon="power" />}
+                label="Your computer"
+                detail={note && <span role="status">{note.line}</span>}
+                trailing={
+                  stop && (
+                    <Button
+                      size="sm"
+                      icon="stop"
+                      disabledReason={
+                        stop.enabled && !update?.busy ? undefined : "Not available right now"
+                      }
+                      onClick={() => stop.run()}
+                    >
+                      {stop.label}
+                    </Button>
+                  )
+                }
+              >
+                {!!note?.details?.length && (
+                  <DetailLines lines={note.details} className="settings-stop-details" />
+                )}
+              </GroupRow>
             )}
-          </GroupRow>
-        )}
-        {update && <UpdateRow update={update} />}
-        {freshStart && <FreshStartRow freshStart={freshStart} />}
-        {stream && (
-          <GroupRow
-            leading={<IconTile icon="monitor" />}
-            label="Stream quality"
-            trailing={phone ? undefined : <StreamChoice stream={stream} size={24} />}
-          >
-            {phone && <StreamChoice stream={stream} size={32} className="settings-stream-choice" />}
-          </GroupRow>
-        )}
-      </Group>
+            {update && <UpdateRow update={update} />}
+            {freshStart && <FreshStartRow freshStart={freshStart} />}
+            {stream && (
+              <GroupRow
+                leading={<IconTile icon="monitor" />}
+                label="Stream quality"
+                trailing={phone ? undefined : <StreamChoice stream={stream} size={24} />}
+              >
+                {phone && (
+                  <StreamChoice stream={stream} size={32} className="settings-stream-choice" />
+                )}
+              </GroupRow>
+            )}
+          </Group>
+          {stream && (
+            <GroupNote>
+              {stream.saved
+                ? "Auto follows your connection and this device. When either slows, Sharp keeps text crisp and Smooth keeps motion fluid."
+                : "Applied for this visit. This browser couldn't save it."}
+            </GroupNote>
+          )}
+        </div>
+      )}
       {(login || stopAll) && (
         <Group>
           {login && (
             <Switch
               className="ui-group-row"
+              leading={<IconTile icon="play" />}
               label="Start localDot when I log in"
               description={
                 login.state === "unavailable"
@@ -695,14 +710,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           )}
         </Group>
       )}
-      {stream && (
-        <GroupNote>
-          {stream.saved
-            ? "Auto follows your connection and this device. When either slows, Sharp keeps text crisp and Smooth keeps motion fluid."
-            : "Applied for this visit. This browser couldn't save it."}
-        </GroupNote>
-      )}
-    </div>
+    </>
   );
 }
 
