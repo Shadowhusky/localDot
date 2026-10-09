@@ -1,5 +1,7 @@
 /* The HUD island (design-v2 §10.15): glass hung on the stage's top edge, half over the house and
    half over the computer's menu bar. */
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
 /* A point at the middle of the stage's top edge: the island hangs from it, and what the island
    grows into and drops follows the island's own size. Its foot is the island's, or the decision's
    it grew into, so toasts hang from there. */
@@ -170,14 +172,16 @@
 }
 
 /* A slot that joins with a new shape fades in as the glass reaches it. */
-.island-row > * {
+.island-row > :not(.island-controls),
+.island-controls > * {
   transition:
     opacity var(--dur-text-in) var(--ease-standard) calc(var(--dur-text-in) / 2),
     color var(--dur-hover) var(--ease-standard);
 }
 
 @starting-style {
-  .island-row > * {
+  .island-row > :not(.island-controls),
+  .island-controls > * {
     opacity: 0;
   }
 }
@@ -240,6 +244,11 @@
   font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
+/* The controls are the row's own items; the group only lets focus mode set them aside at once. */
+.island-controls {
+  display: contents;
+}
+
 .island-divider {
   flex: none;
   width: 1px;
@@ -252,7 +261,7 @@
   margin-left: calc(var(--spacing) * 1.5);
 }
 
-@media (width < 700px) {
+@media (--phone) {
   .island-row {
     padding: 0 calc(var(--spacing) / 2) 0 calc(var(--spacing) * 3);
   }
@@ -265,6 +274,31 @@
     width: 50px;
     padding-left: calc(var(--spacing) * 1.5);
   }
+}
+
+/* Focus mode (design-v2 §8.5): the island becomes a status pill inside the picture's top edge, its
+   controls in the margin instead. It fades after a still moment and comes back at a touch, or at
+   once when dot needs the user. */
+.app[data-focus] .island-anchor {
+  top: 8px;
+  transition: opacity var(--dur-default) var(--ease-standard);
+}
+
+.app[data-still] .island-anchor {
+  opacity: 0;
+}
+
+.app[data-focus] .island-row {
+  padding-right: calc(var(--spacing) * 3);
+}
+
+.app[data-focus] .island-controls {
+  display: none;
+}
+
+.app[data-focus] .island .island-label {
+  width: auto;
+  max-width: 420px;
 }
 
 @media (prefers-reduced-motion: reduce) {

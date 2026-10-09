@@ -41,6 +41,27 @@ describe("decisionWords", () => {
   });
 });
 
+describe("decisionWords line", () => {
+  it("has dot ask in the first person, for the narration while it waits", () => {
+    expect(decisionWords({ actionClass: "send", title: "Send this email?" }).line).toBe(
+      "Can I send this email?",
+    );
+    expect(decisionWords({ actionClass: "unknown", title: "" }).line).toBe("Can I take this step?");
+    for (const actionClass of ActionClass.options) {
+      const { line } = decisionWords({ actionClass, title: ACTION_CLASS_LABELS[actionClass] });
+      expect(line, actionClass).toMatch(/^Can I [a-z].*\?$/);
+      expect(bannedWords(line, true), actionClass).toEqual([]);
+    }
+  });
+
+  it("keeps a statement as the daemon said it", () => {
+    expect(
+      decisionWords({ actionClass: "browsing", title: "WeChat wants to connect to host:8080" })
+        .line,
+    ).toBe("WeChat wants to connect to host:8080");
+  });
+});
+
 describe("defaultScope", () => {
   const task = [{ scope: "task" as const, label: "For this task" }];
   it("answers once for anything that acts as you", () => {

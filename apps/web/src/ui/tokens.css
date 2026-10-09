@@ -435,8 +435,8 @@
     }
   }
 
-  /* A phone reads at 15 px and keeps the island at 32. */
-  @media (width < 700px) {
+  /* A phone reads at 15 px and keeps the island at 32, upright or held sideways. */
+  @media (width < 700px), (pointer: coarse) and (orientation: landscape) and (height < 500px) {
     :root {
       --band-min: 88px;
       --text-reading: 0.9375rem;

@@ -1,5 +1,7 @@
 /* The conversation: one scroller holding the thread, with the composer (or the answer panel) held at
    its foot. Messages, questions, results and the work line are rows of one card map. */
+@custom-media --phone (width < 700px),
+  (pointer: coarse) and (orientation: landscape) and (height < 500px);
 
 .thread-body {
   position: relative;
@@ -1132,6 +1134,102 @@
   .composer-bar {
     min-height: calc(var(--spacing) * 11);
   }
+}
+
+/* A phone's toolbar (design-v2 §11 M): Activity, the message field and More on glass over the
+   thread's foot, which fades into it. Every target is 44 px; the field grows upward as it fills. */
+@media (--phone) {
+  .rail-panel.rail-chat .thread-dock {
+    padding: 0;
+  }
+
+  .rail-panel .thread-live,
+  .rail-panel .thread-dock > .answer-panel {
+    padding-inline: calc(var(--spacing) * 4);
+  }
+
+  .thread-toolbar {
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    gap: calc(var(--spacing) * 2);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3)
+      calc(var(--spacing) * 3 + env(safe-area-inset-bottom));
+    background-color: var(--_toolbar);
+    -webkit-backdrop-filter: blur(20px) saturate(160%);
+    backdrop-filter: blur(20px) saturate(160%);
+    --_toolbar: color-mix(in srgb, var(--color-void) 78%, transparent);
+  }
+
+  .thread-toolbar::before {
+    content: "";
+    position: absolute;
+    right: 0;
+    bottom: 100%;
+    left: 0;
+    height: calc(var(--spacing) * 6);
+    background: linear-gradient(transparent, var(--_toolbar));
+    pointer-events: none;
+  }
+
+  .thread-toolbar > .thread-composer {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .toolbar-button {
+    --_icon-fg: var(--color-fg-1);
+  }
+}
+
+/* The message field as one rounded pill: attach inside on the left, Send inside on the right, and
+   anything that comes and goes (a key taken out, a problem, files) above the line. */
+.composer-card[data-layout="pill"] {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  min-height: 44px;
+  padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1.5) calc(var(--spacing) * 1)
+    var(--spacing);
+  border-radius: var(--radius-full);
+  background-color: var(--color-raised);
+  box-shadow: 0 0 0 1px var(--color-hairline);
+}
+
+.composer-card[data-layout="pill"]:focus-within {
+  box-shadow:
+    0 0 0 1px var(--color-fg-4),
+    0 0 0 4px var(--color-hairline);
+}
+
+.composer-card[data-layout="pill"] > :is(.composer-key, .composer-notices, .composer-files) {
+  flex-basis: 100%;
+  padding-inline: calc(var(--spacing) * 2);
+}
+
+.composer-card[data-layout="pill"] > .composer-field {
+  flex: 1;
+  order: 2;
+  width: auto;
+  min-width: 0;
+}
+
+.composer-card[data-layout="pill"] > .composer-bar {
+  display: contents;
+}
+
+.composer-card[data-layout="pill"] .composer-bar > .ui-icon-button:first-child {
+  order: 1;
+  align-self: flex-end;
+}
+
+.composer-card[data-layout="pill"] .composer-hint {
+  display: none;
+}
+
+.composer-card[data-layout="pill"] :is(.composer-pop, .composer-send) {
+  order: 3;
+  margin-bottom: 2px;
 }
 
 /* The answer panel takes the composer's place while dot waits. */

@@ -64,6 +64,8 @@ export interface ComposerProps {
   configured?: boolean;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
+  // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
+  layout?: "card" | "pill";
 }
 export interface Delivery {
   readonly id: number;
@@ -558,7 +560,9 @@ export function Composer(props: ComposerProps) {
   };
 
   const choosing = mode !== "new" && props.agent.snapshot?.status !== "idle";
-  if (!choosing && menu) setMenu(false);
+  // A phone's field has room for its text and Send only; there a message is read after the step.
+  const pill = props.layout === "pill";
+  if ((!choosing || pill) && menu) setMenu(false);
   const typing = useRef({ submit, touch, choosing });
   useLayoutEffect(() => {
     typing.current = { submit, touch, choosing };
@@ -690,6 +694,7 @@ export function Composer(props: ComposerProps) {
       <form
         ref={form}
         className="composer-card"
+        data-layout={pill ? "pill" : undefined}
         aria-label="Message dot"
         data-dragging={dragging || undefined}
         onSubmit={(event) => {
@@ -739,7 +744,7 @@ export function Composer(props: ComposerProps) {
         </Collapse>
         <ComposerField
           label={newConversation ? "New task" : "Message"}
-          placeholder={newConversation ? "Ask dot to do something" : "Message dot"}
+          placeholder={newConversation && !pill ? "Ask dot to do something" : "Message dot"}
           unavailable={!!unavailable}
           describedBy={guard.notice ? keyNotice : undefined}
           events={events}
@@ -748,6 +753,8 @@ export function Composer(props: ComposerProps) {
           <FileButton
             label="Attach files"
             icon="paperclip"
+            size={pill ? 36 : 28}
+            round={pill}
             multiple
             onFiles={(files) => uploads.select(files)}
             disabledReason={attachReason}
@@ -760,8 +767,8 @@ export function Composer(props: ComposerProps) {
               <span className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</span>
             )}
           </Pop>
-          <Pop shown={choosing}>
-            {choosing && (
+          <Pop shown={choosing && !pill}>
+            {choosing && !pill && (
               <IconButton
                 ref={more}
                 className="composer-more"
