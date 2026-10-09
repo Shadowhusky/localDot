@@ -42,6 +42,7 @@ export interface RoutineToolPort {
     nextDueAt: string | null;
   }[];
   pause(routineId: string): boolean;
+  name(routineId: string): string | undefined;
   followUp(sessionId: string, at: string, note: string): { routineId: string; summary: string };
 }
 

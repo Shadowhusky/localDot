@@ -281,7 +281,7 @@ async function dispatchAdmitted(
         throw new Error("The selected screen does not match this tool call.");
       ctx.check();
     }
-    const facts = toolRisk(name, frozen);
+    const facts = toolRisk(name, frozen, (id) => deps.tools.routines?.name(id));
     if (facts) {
       ctx.permit = await authorizePrepared(ctx, {
         tool: name,

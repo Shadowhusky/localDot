@@ -1,7 +1,8 @@
 import { ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PROXY_TOKEN, toolHarness } from "../testing/harness.ts";
-import type { RoutineToolPort } from "./routine.ts";
+import type { ToolCallContext, ToolDeps } from "./deps.ts";
+import { followUpAtTool, type RoutineToolPort } from "./routine.ts";
 
 const harnesses: ReturnType<typeof toolHarness>[] = [];
 afterEach(() => {
@@ -23,6 +24,7 @@ function port() {
     })),
     list: vi.fn(() => []),
     pause: vi.fn(() => true),
+    name: vi.fn((_id: string) => "Morning bills"),
     followUp: vi.fn(() => ({
       routineId: ulid(),
       summary: "Once on 12 Oct 2026 at 15:00 · London time",
@@ -37,7 +39,7 @@ describe("routine tool", () => {
     harnesses.push(h);
     const result = await h.call("routine", {
       op: "propose",
-      name: "Morning bills",
+      name: `Morning bills ${PROXY_TOKEN}`,
       instruction: `Use ${PROXY_TOKEN} and check statements`,
       when: { kind: "weekdays", time: "08:30" },
     });
@@ -45,12 +47,13 @@ describe("routine tool", () => {
     expect(result.body.content[0]?.text).toContain("Save routine");
     expect(h.events().some((e) => e.type === "approval.request")).toBe(false);
     const card = h.events().find((e) => e.type === "routine.proposed");
-    expect(card?.data).toMatchObject({ name: "Morning bills", profile: "ask_first" });
+    expect(card?.data).toMatchObject({ profile: "ask_first" });
     expect(JSON.stringify(card)).not.toContain(PROXY_TOKEN);
-    expect(routines.propose).toHaveBeenCalledWith(
-      h.session.id,
-      expect.objectContaining({ name: "Morning bills" }),
-    );
+    // What is stored is replayed later as the run's task, so a known secret never reaches it.
+    const stored = routines.propose.mock.calls[0]?.[1];
+    expect(stored?.name).toContain("Morning bills");
+    expect(stored?.instruction).toContain("check statements");
+    expect(JSON.stringify(stored)).not.toContain(PROXY_TOKEN);
   });
   it("propose without a schedule is refused and records nothing", async () => {
     const routines = port();
@@ -72,6 +75,7 @@ describe("routine tool", () => {
     expect(request?.data).toMatchObject({
       actionClass: "system_settings",
       title: "Pause a routine",
+      preview: { fields: expect.arrayContaining([["Routine", "Morning bills"]]) },
     });
     expect(routines.pause).toHaveBeenCalledWith(id);
   });
@@ -100,6 +104,26 @@ describe("routine tool", () => {
     });
     expect((await pending).body.ok).toBe(false);
     expect(routines.followUp).not.toHaveBeenCalled();
+  });
+  it("follow_up_at stores the note without a known secret", async () => {
+    // A known secret in the call hands off before the handler runs, so the handler is called
+    // directly: what it stores is replayed later as the follow-up's task.
+    const routines = port();
+    const ctx = {
+      check: () => {},
+      redact: (value: string) => value.replaceAll(PROXY_TOKEN, "[redacted]"),
+      session: { id: ulid() },
+    } as unknown as ToolCallContext;
+    const result = await followUpAtTool({ routines } as unknown as ToolDeps, ctx, {
+      at: "2026-10-12T15:00",
+      note: `Retry with ${PROXY_TOKEN} if the parcel is late`,
+    });
+    expect(result.ok).toBe(true);
+    expect(routines.followUp).toHaveBeenCalledWith(
+      expect.any(String),
+      "2026-10-12T15:00",
+      "Retry with [redacted] if the parcel is late",
+    );
   });
   it("is unavailable without the routines port", async () => {
     const h = toolHarness();

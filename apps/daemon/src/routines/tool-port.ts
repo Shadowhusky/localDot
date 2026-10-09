@@ -1,5 +1,6 @@
 import {
   HOUR_STEPS,
+  LocalDate,
   type RoutineToolWhen,
   type RoutineWhen,
   RoutineWhen as WhenSchema,
@@ -98,6 +99,9 @@ export function routineToolPort(deps: {
           };
         });
     },
+    name(routineId) {
+      return deps.store.get(routineId)?.name;
+    },
     pause(routineId) {
       const routine = deps.store.get(routineId);
       if (routine?.kind !== "routine" || routine.state !== "active") return false;
@@ -106,6 +110,8 @@ export function routineToolPort(deps: {
     },
     followUp(sessionId, at, note) {
       const [date, time] = at.split("T") as [string, string];
+      if (!LocalDate.safeParse(date).success)
+        throw new RoutineError(400, "That date isn't a real date.");
       const [hh, mm] = time.split(":").map(Number) as [number, number];
       const due = zonedToUtc(parseDateKey(date), hh, mm, deps.zone());
       const now = deps.now();

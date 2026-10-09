@@ -83,6 +83,38 @@ describe("tool port", () => {
       when: { kind: "once", date: "2026-10-12", time: "15:00" },
     });
   });
+  it("answers an impossible date or a two-line name in plain words", () => {
+    const f = fixture();
+    const session = ulid();
+    const plain = (message: string) =>
+      expect.objectContaining({ name: "RoutineError", status: 400, message });
+    expect(() =>
+      f.port.propose(session, {
+        name: "Bills",
+        instruction: "Check bills",
+        when: { kind: "daily", time: "08:30", until: "2026-02-30" },
+      }),
+    ).toThrow(plain("The end date isn't a real date."));
+    expect(() =>
+      f.port.propose(session, {
+        name: "Bills\nand more",
+        instruction: "Check bills",
+        when: { kind: "daily", time: "08:30" },
+      }),
+    ).toThrow(plain("A routine's name is one line of up to 80 characters."));
+    expect(() => f.port.followUp(session, "2026-10-32T10:00", "x")).toThrow(
+      plain("That date isn't a real date."),
+    );
+  });
+  it("names the routine it would pause", () => {
+    const f = fixture();
+    const routine = f.store.create(
+      { name: "Morning bills", instruction: "a", when: { kind: "daily", time: "08:30" } },
+      { state: "active" },
+    );
+    expect(f.port.name(routine.id)).toBe("Morning bills");
+    expect(f.port.name(ulid())).toBeUndefined();
+  });
   it("pause only pauses an active routine", () => {
     const f = fixture();
     const active = f.store.create(
