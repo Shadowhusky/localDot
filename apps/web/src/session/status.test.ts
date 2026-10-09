@@ -1105,3 +1105,9 @@ it("never leaves an interrupted task silent: dot says so and asks to carry on", 
   });
   expect(status.actions).toEqual([{ kind: "stop", enabled: true }]);
 });
+
+it("says dot is starting until its first action, even in a Replay that holds them all", () => {
+  const model = foldEvents(emptyModel(), typed());
+  expect(taskHud(model, 5)).toMatchObject({ row: "working", caption: "Starting…" });
+  expect(taskHud(model, 5000)).toMatchObject({ row: "working", caption: "Working…" });
+});
