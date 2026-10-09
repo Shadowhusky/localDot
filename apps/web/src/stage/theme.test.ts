@@ -15,6 +15,7 @@ describe("theme tokens", () => {
   it("reads every overlay colour and the label font from the CSS tokens", () => {
     const vars: Record<string, string> = {
       "--color-xenon": "#3fb5de",
+      "--color-attention": "#e9b44c",
       "--color-xenon-a10": "rgba(63, 181, 222, 0.1)",
       "--color-cursor-fill": "#ffffff",
       "--color-cursor-rim": "#121316",
@@ -40,6 +41,7 @@ describe("theme tokens", () => {
     expect(theme.font).toBe('system-ui, -apple-system, "Segoe UI Variable Text", sans-serif');
     expect(theme.dragUnder.alpha).toBeCloseTo(0.12, 6);
     expect(Object.keys(theme).sort()).toEqual([
+      "attention",
       "cursorFill",
       "cursorRim",
       "dragUnder",

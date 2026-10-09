@@ -178,7 +178,7 @@ describe("Export video", () => {
     expect(custom.getAttribute("aria-disabled")).toBe("true");
     expect(description(custom)).toContain("Set under More options");
     // Every row keeps a slot for its estimate, so nothing moves as they are worked out.
-    expect(presets.querySelectorAll(".export-estimate")).toHaveLength(3);
+    expect(presets.querySelectorAll(".export-estimate")).toHaveLength(4);
     expect(presets.querySelectorAll(".export-estimate[data-hidden]")).toHaveLength(1);
     for (const name of ["Range", "Speed"])
       expect(screen.getByRole("radiogroup", { name })).toBeTruthy();
@@ -258,6 +258,69 @@ describe("Export video", () => {
       format: "mp4",
     });
     expect(expected).toMatchObject({ durationS: 20, fitted: { bytes: expect.any(Number) } });
+  });
+
+  it("makes Showcase with dot under the picture, at the recording's own pace, sized with its band", async () => {
+    const job = fakeJob();
+    const panel = await show(job);
+    expect(screen.getByRole("radiogroup", { name: "Preset" }).textContent).toContain(
+      "1920 × 1410 · 60 fps · with dot",
+    );
+    fireEvent.click(speed("3×"));
+    more();
+    fireEvent.click(screen.getByRole("switch", { name: /Skip idle/ }));
+    fireEvent.click(preset("Showcase"));
+    expect(speed("1×").getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("switch", { name: /Skip idle/ })).toHaveProperty("checked", true);
+    expect(screen.getByRole("switch", { name: /Show dot/ })).toHaveProperty("checked", true);
+    expect(
+      screen.getByRole("radio", { name: "Under the picture" }).getAttribute("aria-checked"),
+    ).toBe("true");
+    expect(panel.querySelector(".export-preview")?.getAttribute("data-dot")).toBe("under");
+    fireEvent.click(screen.getByRole("button", { name: "Save…" }));
+    expect(started(job)[1]).toMatchObject({
+      speed: 1,
+      skipIdle: true,
+      captions: false,
+      dot: "under",
+      size: { w: 1920, h: 1410 },
+      fps: 60,
+      quality: "high",
+    });
+  });
+
+  it("puts dot on the picture on request, and remembers where", async () => {
+    const job = fakeJob();
+    const panel = await show(job);
+    expect(screen.queryByRole("radio", { name: "On the picture" })).toBeNull();
+    fireEvent.click(screen.getByRole("switch", { name: /Show dot/ }));
+    // Quality's picture with dot under it is what Showcase makes.
+    expect(preset("Showcase")).toHaveProperty("checked", true);
+    fireEvent.click(screen.getByRole("radio", { name: "On the picture" }));
+    expect(preset("Custom")).toHaveProperty("checked", true);
+    expect(panel.querySelector(".export-preview")?.getAttribute("data-dot")).toBe("over");
+    fireEvent.click(screen.getByRole("button", { name: "Save…" }));
+    expect(started(job)[1]).toMatchObject({ dot: "over", size: { w: 1920, h: 1200 } });
+    cleanup();
+    await show(fakeJob());
+    const over = () => screen.getByRole("radio", { name: "On the picture" });
+    expect(over().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("switch", { name: /Show dot/ }));
+    expect(preset("Quality")).toHaveProperty("checked", true);
+    fireEvent.click(screen.getByRole("switch", { name: /Show dot/ }));
+    expect(over().getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("keeps Quality and Fast clean of dot and the step caption", async () => {
+    const job = fakeJob();
+    await show(job);
+    fireEvent.click(preset("Showcase"));
+    fireEvent.click(preset("Fast"));
+    expect(screen.getByRole("switch", { name: /Show dot/ })).toHaveProperty("checked", false);
+    fireEvent.click(screen.getByRole("button", { name: "Save…" }));
+    const request = started(job)[1] as Record<string, unknown>;
+    expect(request).toMatchObject({ captions: false, size: { w: 1280, h: 800 } });
+    expect("dot" in request).toBe(false);
   });
 
   it("takes any speed, typed or stepped", async () => {

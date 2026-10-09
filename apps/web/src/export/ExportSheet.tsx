@@ -1,4 +1,4 @@
-import type { ScreenName } from "@localdot/protocol";
+import type { DotPlacement, ScreenName } from "@localdot/protocol";
 import { chapters, observeAt, type SessionModel } from "@localdot/stage";
 import {
   type CSSProperties,
@@ -8,6 +8,8 @@ import {
   useRef,
   useState,
 } from "react";
+import { recordedPresence } from "../dot/dot-feed.ts";
+import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { ReplayImage } from "../replay/ReplayImage.tsx";
 import { timeLabel } from "../replay/replay-view.ts";
@@ -42,9 +44,11 @@ import {
   videoLength,
 } from "./export-plan.ts";
 import {
+  choosePreset,
   type ExportChoices,
   type ExportEnvironment,
   type ExportOptions,
+  encodable,
   exportRequest,
   fitOptions,
   frameRateAllowed,
@@ -81,7 +85,15 @@ const QUALITY_LABEL: Record<ExportQuality, string> = {
   medium: "Medium",
   high: "High",
 };
-const PRESET_NOTE = { quality: "sharpest", fast: "smallest" } as const;
+const PRESET_NOTE = {
+  quality: "sharpest",
+  fast: "smallest",
+  showcase: "with dot",
+} as const;
+const PLACES = [
+  { value: "under", label: "Under the picture" },
+  { value: "over", label: "On the picture" },
+] as const;
 // The elapsed time and the estimate of what is left move on this beat while a video is saved.
 const TICK_MS = 500;
 const PAGE_NOTE = "This page makes the video, so keep it open until it's saved.";
@@ -118,7 +130,7 @@ function stepLabel(model: SessionModel, atMs: number, endMs: number): string | n
 }
 
 function optionsText(options: ExportOptions, env: ExportEnvironment): string {
-  const size = sizeOf(options.size, env);
+  const size = sizeOf(options.size, env, options.dot);
   return `${size.w} × ${size.h} · ${options.fps} fps`;
 }
 
@@ -177,7 +189,12 @@ export function ExportSheet({
 
   const outcome = (rowOptions: ExportOptions): Outcome | null => {
     try {
-      const rowRequest = { ...request, ...rowOptions, size: sizeOf(rowOptions.size, env) };
+      const rowRequest = {
+        ...request,
+        ...rowOptions,
+        dot: rowOptions.dot === "off" ? undefined : rowOptions.dot,
+        size: sizeOf(rowOptions.size, env, rowOptions.dot),
+      };
       const plan = planExport(rowRequest, context.model, context.activity, context.gaps);
       return {
         ...estimateExport(plan, rowRequest, calibration),
@@ -191,11 +208,13 @@ export function ExportSheet({
   const presets = {
     quality: presetOptions("quality", env, choices.speed),
     fast: presetOptions("fast", env, choices.speed),
+    showcase: presetOptions("showcase", env, choices.speed),
     custom: fitOptions(choices.custom, env, choices.speed),
   } satisfies Record<PresetChoice, ExportOptions>;
   const outcomes = {
     quality: outcome(presets.quality),
     fast: outcome(presets.fast),
+    showcase: outcome(presets.showcase),
     custom: outcome(presets.custom),
   };
   const current = outcome(options);
@@ -207,8 +226,10 @@ export function ExportSheet({
   };
   const choose = (patch: Partial<ExportChoices>) => update({ ...choices, ...patch });
   const option = (patch: Partial<ExportOptions>) => update(withOption(choices, env, patch));
+  const placeDot = (place: DotPlacement) =>
+    update({ ...withOption(choices, env, { dot: place }), place });
 
-  const canMake = env.encodable[options.format][options.size];
+  const canMake = encodable(env, options.format, options.size, options.dot);
   const maker = where === "page" ? "This browser" : "This computer";
   const blocked =
     where === "checking"
@@ -245,11 +266,9 @@ export function ExportSheet({
     chosen,
     context.source.screen ?? "desktop",
   );
-  const step = stepLabel(
-    context.model,
-    Math.max(chosen.fromMs, Math.min(chosen.toMs, context.atMs)),
-    context.whole.toMs,
-  );
+  const shownAt = Math.max(chosen.fromMs, Math.min(chosen.toMs, context.atMs));
+  const step = stepLabel(context.model, shownAt, context.whole.toMs);
+  const said = options.dot === "off" ? "" : recordedPresence(context.model, shownAt).line;
   const span = context.whole.toMs - context.whole.fromMs;
   const share = (time: number) => (span > 0 ? (time - context.whole.fromMs) / span : 0);
   const cap = maxFrameRate(env, choices.speed);
@@ -279,14 +298,27 @@ export function ExportSheet({
       <div className="export-views">
         <div className="export-options" inert={working} data-shown={working ? undefined : ""}>
           <div className="export-recording">
-            <div className="export-preview">
-              <ReplayImage api={api} sessionId={context.sessionId} frameId={frame} full />
-              <span
-                className="export-preview-caption"
-                data-shown={choices.captions && step ? "" : undefined}
-                aria-hidden="true"
-              >
-                {step}
+            <div className="export-preview" data-dot={options.dot}>
+              <div className="export-preview-picture">
+                <ReplayImage api={api} sessionId={context.sessionId} frameId={frame} full />
+                <span
+                  className="export-preview-caption"
+                  data-shown={options.captions && step ? "" : undefined}
+                  data-place={options.dot === "over" ? "head" : undefined}
+                  aria-hidden="true"
+                >
+                  {step}
+                </span>
+                <span className="export-preview-bubble" aria-hidden="true">
+                  <Glyph />
+                  {said && <span className="export-preview-said">{said}</span>}
+                </span>
+              </div>
+              <span className="export-preview-band" aria-hidden="true">
+                <span className="export-preview-band-inner">
+                  <Glyph />
+                  <span className="export-preview-said">{said}</span>
+                </span>
               </span>
             </div>
             <div className="export-range">
@@ -313,13 +345,11 @@ export function ExportSheet({
             aria-label="Preset"
             className="export-presets"
             value={choices.preset}
-            onValueChange={(value) => {
-              const preset = value as PresetChoice;
-              update({ ...choices, preset });
-            }}
+            onValueChange={(value) => update(choosePreset(choices, value as PresetChoice))}
             options={[
               presetRow("quality", "Quality"),
               presetRow("fast", "Fast"),
+              presetRow("showcase", "Showcase"),
               presetRow("custom", "Custom"),
             ]}
           />
@@ -352,6 +382,23 @@ export function ExportSheet({
               />
             </Field>
             <SpeedRow speed={choices.speed} onSpeed={(speed) => choose({ speed })} />
+            <Switch
+              className="ui-group-row"
+              label="Show dot"
+              description="dot and what it's doing, as in the app"
+              checked={options.dot !== "off"}
+              onCheckedChange={(on) => option({ dot: on ? choices.place : "off" })}
+            />
+            <Collapse open={options.dot !== "off"}>
+              <Field label="Position" inline className="ui-group-row export-row">
+                <SegmentedControl
+                  size={24}
+                  items={PLACES}
+                  value={options.dot === "off" ? choices.place : options.dot}
+                  onValueChange={(place) => placeDot(place as DotPlacement)}
+                />
+              </Field>
+            </Collapse>
           </Group>
           <Disclosure
             summary="More options"
@@ -366,7 +413,7 @@ export function ExportSheet({
                     value: size,
                     label: sizeLabel(size),
                     disabledReason:
-                      env.encodable[options.format][size] === false
+                      encodable(env, options.format, size, options.dot) === false
                         ? `${maker} can't make ${sizeLabel(size)} video`
                         : undefined,
                   }))}
@@ -408,7 +455,7 @@ export function ExportSheet({
                       value: "webm",
                       label: "WebM",
                       disabledReason:
-                        env.encodable.webm[options.size] === false
+                        encodable(env, "webm", options.size, options.dot) === false
                           ? `${maker} can't make WebM video`
                           : undefined,
                     },
@@ -421,8 +468,8 @@ export function ExportSheet({
                 className="ui-group-row"
                 label="Show the current step"
                 description="A small caption at the foot of the video"
-                checked={choices.captions}
-                onCheckedChange={(captions) => choose({ captions })}
+                checked={options.captions}
+                onCheckedChange={(captions) => option({ captions })}
               />
               <Switch
                 className="ui-group-row"

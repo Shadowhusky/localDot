@@ -7,6 +7,11 @@ const AT_WORK = new Set<StatusRow>(["acting", "working", "thinking", "observing"
 // sentence, at about two lines beside dot on the widest stage.
 const MAX_CHARS = 240;
 const STOP = /[.!?…]["'”’)\]]*$/;
+// Each line stays at least this long, so a quick run of steps never flickers; then it fades out
+// over this long before the next fades in.
+export const LINE_HOLD_MS = 1000;
+export const LINE_OUT_MS = 120;
+export const LINE_IN_MS = 180;
 
 // The band's line while dot works: its own latest sentence for the step at hand, or the status
 // caption when it has said nothing since the last step ended.

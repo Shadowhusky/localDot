@@ -1,5 +1,11 @@
 import { type SessionModel, startedCount } from "@localdot/stage";
-import type { Status, StatusRow } from "../session/status.ts";
+import {
+  type Status,
+  type StatusRow,
+  TASK_POSE,
+  type TaskHud,
+  taskHud,
+} from "../session/status.ts";
 import type { Point } from "./engine/engine.ts";
 import type { DotState } from "./engine/states.ts";
 
@@ -42,6 +48,19 @@ export function dotFeed(
         : null,
     dispatched: action?.dispatch ? action.id : null,
     done: status.row === "done",
+  };
+}
+
+// What dot did and said at a moment of a recording: Replay's band and an exported video show the
+// same states, gaze and line.
+export function recordedPresence(
+  model: SessionModel,
+  tMs: number,
+  hud: TaskHud = taskHud(model, tMs),
+): { feed: DotFeed; line: string } {
+  return {
+    feed: dotFeed({ dotPose: TASK_POSE[hud.row], control: hud.control, row: hud.row }, model, tMs),
+    line: hud.caption,
   };
 }
 

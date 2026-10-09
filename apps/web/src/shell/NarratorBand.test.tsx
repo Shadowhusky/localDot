@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { LINE_HOLD_MS, NarratorBand } from "./NarratorBand.tsx";
+import { NarratorBand } from "./NarratorBand.tsx";
+import { LINE_HOLD_MS } from "./narration.ts";
 
 afterEach(() => {
   cleanup();

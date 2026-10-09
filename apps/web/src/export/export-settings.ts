@@ -1,3 +1,5 @@
+import { DOT_PLACEMENTS, type DotPlacement } from "@localdot/protocol";
+import { withBand } from "./dot-band.ts";
 import {
   EXPORT_FORMATS,
   EXPORT_FRAME_RATES,
@@ -9,6 +11,7 @@ import {
   type ExportSize,
   MAX_EXPORT_SIZE,
   SPEED_LIMITS,
+  validSize,
   validSpeed,
 } from "./export-plan.ts";
 
@@ -20,8 +23,10 @@ const FIXED_SIZES: Record<Exclude<SizeChoice, "source">, ExportSize> = {
   "1080p": { w: 1920, h: 1200 },
 };
 
-export type ExportPreset = "quality" | "fast";
+export const PRESETS = ["quality", "fast", "showcase"] as const;
+export type ExportPreset = (typeof PRESETS)[number];
 export type PresetChoice = ExportPreset | "custom";
+export type DotChoice = "off" | DotPlacement;
 
 // What the presets set; the rest of the choices are kept across them.
 export interface ExportOptions {
@@ -29,14 +34,17 @@ export interface ExportOptions {
   fps: ExportFrameRate;
   quality: ExportQuality;
   format: ExportFormat;
+  dot: DotChoice;
+  captions: boolean;
 }
 
 export interface ExportChoices {
   preset: PresetChoice;
   // The viewer's own values, used while the preset is custom.
   custom: ExportOptions;
+  // Where dot goes when the viewer turns it on.
+  place: DotPlacement;
   speed: number;
-  captions: boolean;
   skipIdle: boolean;
   overlays: boolean;
 }
@@ -48,7 +56,8 @@ export interface ExportEnvironment {
   source: ExportSize | null;
   // Frames per second the recording was made at, while things moved on the screen.
   sourceRate: number | null;
-  encodable: Record<ExportFormat, Partial<Record<SizeChoice, boolean>>>;
+  // Whether a video of each size ("1920x1200") can be made, by format.
+  encodable: Record<ExportFormat, Record<string, boolean>>;
 }
 
 export const UNKNOWN_ENVIRONMENT: ExportEnvironment = {
@@ -59,12 +68,32 @@ export const UNKNOWN_ENVIRONMENT: ExportEnvironment = {
 
 export const DEFAULT_CHOICES: ExportChoices = {
   preset: "quality",
-  custom: { size: "1080p", fps: 30, quality: "medium", format: "mp4" },
+  custom: {
+    size: "1080p",
+    fps: 30,
+    quality: "medium",
+    format: "mp4",
+    dot: "off",
+    captions: false,
+  },
+  place: "under",
   speed: 1,
-  captions: false,
   skipIdle: true,
   overlays: true,
 };
+
+export const sizeKey = (size: ExportSize) => `${size.w}x${size.h}`;
+
+// Every size a video of this recording can have: each choice, with and without dot's band.
+export function videoSizes(env: ExportEnvironment): ExportSize[] {
+  const sizes = new Map<string, ExportSize>();
+  for (const choice of SIZE_CHOICES)
+    for (const dot of ["off", "under"] as const) {
+      const size = sizeOf(choice, env, dot);
+      sizes.set(sizeKey(size), size);
+    }
+  return [...sizes.values()];
+}
 
 // What the host can make: every size up to the largest picture it encodes in each format.
 export function hostEncodable(
@@ -73,33 +102,63 @@ export function hostEncodable(
 ): ExportEnvironment["encodable"] {
   const fits = (format: ExportFormat) =>
     Object.fromEntries(
-      SIZE_CHOICES.map((choice) => {
-        const size = sizeOf(choice, env);
-        return [choice, size.w * size.h <= maxPixels[format]];
-      }),
-    ) as Record<SizeChoice, boolean>;
+      videoSizes(env).map((size) => [sizeKey(size), size.w * size.h <= maxPixels[format]]),
+    );
   return { mp4: fits("mp4"), webm: fits("webm") };
 }
 
 const even = (value: number) => Math.max(16, 2 * Math.round(value / 2));
 
-// The recording's own size, made smaller to fit the largest export when it is bigger.
-export function sourceSize(source: ExportSize): ExportSize {
-  const scale = Math.min(1, MAX_EXPORT_SIZE.w / source.w, MAX_EXPORT_SIZE.h / source.h);
-  return { w: even(source.w * scale), h: even(source.h * scale) };
+// The recording's own size, made smaller to fit the largest export when it is bigger, band and all.
+export function sourceSize(source: ExportSize, band = false): ExportSize {
+  const total = (size: ExportSize) => (band ? withBand(size) : size);
+  const whole = total(source);
+  let scale = Math.min(
+    1,
+    MAX_EXPORT_SIZE.w / source.w,
+    MAX_EXPORT_SIZE.h / source.h,
+    Math.sqrt((MAX_EXPORT_SIZE.w * MAX_EXPORT_SIZE.h) / (whole.w * whole.h)),
+  );
+  let size = { w: even(source.w * scale), h: even(source.h * scale) };
+  while (!validSize(total(size)) && size.w > 16) {
+    scale *= 0.995;
+    size = { w: even(source.w * scale), h: even(source.h * scale) };
+  }
+  return size;
 }
 
-export function sizeOf(choice: SizeChoice, env: ExportEnvironment): ExportSize {
-  if (choice !== "source") return FIXED_SIZES[choice];
-  return env.source ? sourceSize(env.source) : FIXED_SIZES["1080p"];
+// The video's whole size: the picture, and dot's band under it when it has one.
+export function sizeOf(
+  choice: SizeChoice,
+  env: ExportEnvironment,
+  dot: DotChoice = "off",
+): ExportSize {
+  const band = dot === "under";
+  const picture =
+    choice !== "source"
+      ? FIXED_SIZES[choice]
+      : env.source
+        ? sourceSize(env.source, band)
+        : FIXED_SIZES["1080p"];
+  return band ? withBand(picture) : picture;
 }
 
 export function sizeLabel(choice: SizeChoice): string {
   return choice === "source" ? "Original" : choice;
 }
 
-const encodes = (env: ExportEnvironment, format: ExportFormat, size: SizeChoice) =>
-  env.encodable[format][size] !== false;
+// Whether this size can be made in this format, as far as is known yet.
+export function encodable(
+  env: ExportEnvironment,
+  format: ExportFormat,
+  size: SizeChoice,
+  dot: DotChoice = "off",
+): boolean | undefined {
+  return env.encodable[format][sizeKey(sizeOf(size, env, dot))];
+}
+
+const encodes = (env: ExportEnvironment, format: ExportFormat, size: SizeChoice, dot: DotChoice) =>
+  encodable(env, format, size, dot) !== false;
 
 // The fastest frame rate worth making: one the recording has new pictures for. At 2× a 30 fps
 // recording has 60 new pictures every second of video; slowed down, dot's pointer still moves at the
@@ -120,27 +179,49 @@ export function presetOptions(
   speed: number,
 ): ExportOptions {
   const cap = maxFrameRate(env, speed);
+  const clean = { format: "mp4", dot: "off", captions: false } as const;
   if (preset === "quality")
     return {
+      ...clean,
       size:
         (env.source ? (["source", "1080p", "720p"] as const) : (["1080p", "720p"] as const)).find(
-          (size) => encodes(env, "mp4", size),
+          (size) => encodes(env, "mp4", size, "off"),
         ) ?? "480p",
       fps: cap,
       quality: "high",
-      format: "mp4",
+    };
+  if (preset === "showcase")
+    return {
+      ...clean,
+      size:
+        (["1080p", "720p"] as const).find((size) => encodes(env, "mp4", size, "under")) ?? "480p",
+      fps: cap >= 60 ? 60 : cap >= 30 ? 30 : cap,
+      quality: "high",
+      dot: "under",
     };
   const small = env.source !== null && env.source.w < FIXED_SIZES["720p"].w;
   return {
-    size: small ? "source" : encodes(env, "mp4", "720p") ? "720p" : "480p",
+    ...clean,
+    size: small ? "source" : encodes(env, "mp4", "720p", "off") ? "720p" : "480p",
     fps: Math.min(15, cap) as ExportFrameRate,
     quality: "low",
-    format: "mp4",
   };
 }
 
+// Choosing a preset; Showcase also plays the recording at its own pace with the waits left out.
+export function choosePreset(choices: ExportChoices, preset: PresetChoice): ExportChoices {
+  return preset === "showcase"
+    ? { ...choices, preset, speed: 1, skipIdle: true }
+    : { ...choices, preset };
+}
+
 const same = (a: ExportOptions, b: ExportOptions) =>
-  a.size === b.size && a.fps === b.fps && a.quality === b.quality && a.format === b.format;
+  a.size === b.size &&
+  a.fps === b.fps &&
+  a.quality === b.quality &&
+  a.format === b.format &&
+  a.dot === b.dot &&
+  a.captions === b.captions;
 
 // Custom values this recording and browser cannot make become the nearest they can.
 export function fitOptions(
@@ -148,17 +229,13 @@ export function fitOptions(
   env: ExportEnvironment,
   speed: number,
 ): ExportOptions {
-  const format = encodes(env, options.format, options.size) ? options.format : "mp4";
-  const size = encodes(env, format, options.size)
+  const { dot } = options;
+  const format = encodes(env, options.format, options.size, dot) ? options.format : "mp4";
+  const size = encodes(env, format, options.size, dot)
     ? options.size
-    : ([...SIZE_CHOICES].reverse().find((choice) => encodes(env, format, choice)) ?? "480p");
+    : ([...SIZE_CHOICES].reverse().find((choice) => encodes(env, format, choice, dot)) ?? "480p");
   const cap = maxFrameRate(env, speed);
-  return {
-    size,
-    format,
-    quality: options.quality,
-    fps: Math.min(options.fps, cap) as ExportFrameRate,
-  };
+  return { ...options, size, format, fps: Math.min(options.fps, cap) as ExportFrameRate };
 }
 
 export function optionsFor(choices: ExportChoices, env: ExportEnvironment): ExportOptions {
@@ -175,9 +252,7 @@ export function withOption(
 ): ExportChoices {
   const next = fitOptions({ ...optionsFor(choices, env), ...patch }, env, choices.speed);
   const preset =
-    (["quality", "fast"] as const).find((name) =>
-      same(next, presetOptions(name, env, choices.speed)),
-    ) ?? "custom";
+    PRESETS.find((name) => same(next, presetOptions(name, env, choices.speed))) ?? "custom";
   return { ...choices, preset, custom: preset === "custom" ? next : choices.custom };
 }
 
@@ -194,9 +269,10 @@ export function exportRequest(
     toMs: range.toMs,
     speed: choices.speed,
     skipIdle: choices.skipIdle,
-    captions: choices.captions,
+    captions: options.captions,
     overlays: choices.overlays,
-    size: sizeOf(options.size, env),
+    ...(options.dot !== "off" && { dot: options.dot }),
+    size: sizeOf(options.size, env, options.dot),
     fps: options.fps,
     quality: options.quality,
     format: options.format,
@@ -243,15 +319,18 @@ export function parseChoices(text: string | null): ExportChoices {
   const fallback = DEFAULT_CHOICES;
   const speed = typeof value.speed === "number" && validSpeed(value.speed) ? value.speed : 1;
   return {
-    preset: oneOf(["quality", "fast", "custom"] as const, value.preset, fallback.preset),
+    preset: oneOf([...PRESETS, "custom"] as const, value.preset, fallback.preset),
     custom: {
       size: oneOf(SIZE_CHOICES, custom.size, fallback.custom.size),
       fps: oneOf(EXPORT_FRAME_RATES, custom.fps, fallback.custom.fps),
       quality: oneOf(EXPORT_QUALITIES, custom.quality, fallback.custom.quality),
       format: oneOf(EXPORT_FORMATS, custom.format, fallback.custom.format),
+      dot: oneOf(["off", ...DOT_PLACEMENTS] as const, custom.dot, fallback.custom.dot),
+      // Before presets set it, the step caption was kept apart from them.
+      captions: flag(custom.captions, flag(value.captions, fallback.custom.captions)),
     },
+    place: oneOf(DOT_PLACEMENTS, value.place, fallback.place),
     speed,
-    captions: flag(value.captions, fallback.captions),
     skipIdle: flag(value.skipIdle, fallback.skipIdle),
     overlays: flag(value.overlays, fallback.overlays),
   };

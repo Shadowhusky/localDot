@@ -47,20 +47,122 @@
   gap: calc(var(--spacing) * 4);
 }
 
+/* The picture, and under it dot's band when dot goes under the picture: it opens as a row of the
+   video's own proportion (112 to 1024), dot at the corner and its line beside it. */
 .export-preview {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto 0fr;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background-color: var(--color-void);
+  transition: grid-template-rows var(--dur-default) var(--ease-spring);
+}
+
+.export-preview[data-dot="under"] {
+  grid-template-rows: auto 1fr;
+}
+
+.export-preview::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  pointer-events: none;
+}
+
+.export-preview-picture {
   position: relative;
   aspect-ratio: 16 / 10;
   overflow: hidden;
-  border-radius: var(--radius-sm);
   background-color: var(--color-well);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 
-.export-preview > :is(img, .replay-image-empty) {
+.export-preview-picture > :is(img, .replay-image-empty) {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
+}
+
+.export-preview-band {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.export-preview-band-inner {
+  position: relative;
+  display: block;
+  aspect-ratio: 1024 / 112;
+  min-height: 14px;
+  background: radial-gradient(
+    ellipse 46% 106% at 50% 0,
+    rgba(220, 228, 238, 0.07),
+    transparent 70%
+  );
+}
+
+.export-preview .dot-glyph {
+  flex: none;
+  color: var(--dot-body, var(--color-fg-1));
+}
+
+.export-preview-band-inner > .dot-glyph {
+  position: absolute;
+  top: 10.7%;
+  left: 1.95%;
+  width: 7.03%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.export-preview-said {
+  overflow: hidden;
+  min-width: 0;
+  color: var(--color-fg-1);
+  font:
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.export-preview-band-inner > .export-preview-said {
+  position: absolute;
+  top: 50%;
+  right: 4%;
+  left: 10.94%;
+  translate: 0 -50%;
+}
+
+/* On the picture: dot in the lower left corner with its line in a glass bubble beside it. */
+.export-preview-bubble {
+  position: absolute;
+  bottom: var(--spacing);
+  left: var(--spacing);
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  max-width: calc(100% - var(--spacing) * 3);
+  opacity: 0;
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+.export-preview[data-dot="over"] .export-preview-bubble {
+  opacity: 1;
+}
+
+.export-preview-bubble > .dot-glyph {
+  width: 13px;
+  height: 13px;
+}
+
+.export-preview-bubble > .export-preview-said {
+  padding: 1px calc(var(--spacing) * 1.5);
+  border-radius: var(--radius-full);
+  background-color: color-mix(in oklab, var(--color-glass-solid) 92%, transparent);
 }
 
 /* Where the burned-in caption sits in the video, on the same material. */
@@ -87,6 +189,11 @@
 
 .export-preview-caption[data-shown] {
   opacity: 1;
+}
+
+.export-preview-caption[data-place="head"] {
+  top: var(--spacing);
+  bottom: auto;
 }
 
 .export-range {
@@ -302,7 +409,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .export-range-chosen,
-  .export-range-edge {
+  .export-range-edge,
+  .export-preview {
     transition: none;
   }
 }

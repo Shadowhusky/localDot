@@ -3,10 +3,7 @@ import { RevealedText } from "../agent/ApprovalValue.tsx";
 import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { useFullLine } from "./FullLine.tsx";
-
-// Each line stays at least this long, so a quick run of steps never flickers.
-export const LINE_HOLD_MS = 1000;
-const LINE_OUT_MS = 120;
+import { LINE_HOLD_MS, LINE_OUT_MS } from "./narration.ts";
 
 export interface NarratorBandProps {
   line: string;

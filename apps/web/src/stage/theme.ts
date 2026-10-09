@@ -6,6 +6,7 @@ export interface ThemeColor {
 export interface StageTheme {
   font: string;
   xenon: ThemeColor;
+  attention: ThemeColor;
   cursorFill: ThemeColor;
   cursorRim: ThemeColor;
   hudSolid: ThemeColor;
@@ -26,6 +27,7 @@ type ColorKey = Exclude<keyof StageTheme, "font">;
 
 const TOKENS: Record<ColorKey, string> = {
   xenon: "--color-xenon",
+  attention: "--color-attention",
   cursorFill: "--color-cursor-fill",
   cursorRim: "--color-cursor-rim",
   hudSolid: "--color-glass-solid",
