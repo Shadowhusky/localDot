@@ -49,7 +49,11 @@ import { needsPrice, pickerKeys } from "./settings/settings-form.ts";
 import { useRules } from "./settings/useRules.ts";
 import { useSettings } from "./settings/useSettings.ts";
 import { ActivityRail } from "./shell/ActivityRail.tsx";
-import { ConversationRail } from "./shell/ConversationRail.tsx";
+import {
+  ConversationRail,
+  type NewConversation,
+  NewConversationButton,
+} from "./shell/ConversationRail.tsx";
 import { Hud } from "./shell/Hud.tsx";
 import { PaneTabs, type TheatrePane } from "./shell/PaneTabs.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
@@ -579,6 +583,30 @@ function Theatre({ api }: { api: ApiClient }) {
   useEffect(() => {
     document.title = appStatus.title;
   }, [appStatus.title]);
+  const newConversation: NewConversation = {
+    run: () => {
+      void conversation.startNew();
+      setPane("conversation");
+    },
+    reason: conversationReason,
+  };
+  // Only what needs saying: the Activity column already names itself.
+  const taskNote =
+    !task || session.ended
+      ? null
+      : agent.error
+        ? "Activity unavailable"
+        : agent.connection === "lost"
+          ? "Connection lost"
+          : agent.connection === "connecting"
+            ? "Connecting…"
+            : task.phase === "finished"
+              ? "Ready for follow-up"
+              : task.row === "takeover"
+                ? "Your turn"
+                : task.phase === "waiting"
+                  ? "Waiting for you"
+                  : null;
   // On a phone it covers the computer pane, over a stage that stays where the computer appears.
   const welcome = (
     <Presence show={!replayId && status === "known" && !cell && listed.length === 0}>
@@ -623,6 +651,14 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
           keysRef={keysButton}
           settings={{ open: settings.open, run: showSettings, ref: settingsButton }}
+          actions={
+            narrow && (
+              // Where tabs name the panes, New conversation joins the bar's other app-wide controls.
+              <Presence show={!replayId && !!agent.sessionId}>
+                <NewConversationButton {...newConversation} />
+              </Presence>
+            )
+          }
         />
         <div className="task-controls-area">
           <div className="task-bar" hidden={!!replayId}>
@@ -634,23 +670,7 @@ function Theatre({ api }: { api: ApiClient }) {
               onStopSession={taskStop}
               onRetry={retry}
             />
-            {task && !session.ended && (
-              <span className="task-connection">
-                {agent.error
-                  ? "Activity unavailable"
-                  : agent.connection === "lost"
-                    ? "Connection lost"
-                    : agent.connection === "connecting"
-                      ? "Connecting…"
-                      : task.phase === "finished"
-                        ? "Ready for follow-up"
-                        : task.row === "takeover"
-                          ? "Your turn"
-                          : task.phase === "waiting"
-                            ? "Waiting for you"
-                            : "Task activity"}
-              </span>
-            )}
+            {taskNote && <span className="task-connection">{taskNote}</span>}
           </div>
           <StopControl controls={controls} />
           <SafetyControls
@@ -679,7 +699,7 @@ function Theatre({ api }: { api: ApiClient }) {
               className="pane pane-conversation"
               id="pane-conversation"
               role="tabpanel"
-              aria-label="Conversation"
+              aria-labelledby="tab-conversation"
               data-selected={pane === "conversation"}
               inert={narrow && pane !== "conversation"}
               onFocusCapture={() => {
@@ -700,10 +720,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 }
                 onReplayTask={selectReplay}
                 sessions={conversation.sessions}
-                newConversation={{
-                  run: () => void conversation.startNew(),
-                  reason: conversationReason,
-                }}
+                newConversation={narrow ? undefined : newConversation}
                 recovery={
                   <TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />
                 }
@@ -760,7 +777,7 @@ function Theatre({ api }: { api: ApiClient }) {
               }
               id="pane-computer"
               role="tabpanel"
-              aria-label="Computer"
+              aria-labelledby="tab-computer"
               data-selected={pane === "computer"}
               inert={narrow && pane !== "computer"}
               onFocusCapture={() => {
@@ -836,7 +853,7 @@ function Theatre({ api }: { api: ApiClient }) {
               className="pane pane-activity"
               id="pane-activity"
               role="tabpanel"
-              aria-label="Activity"
+              aria-labelledby="tab-activity"
               data-selected={pane === "activity"}
               inert={narrow && pane !== "activity"}
               onFocusCapture={() => {

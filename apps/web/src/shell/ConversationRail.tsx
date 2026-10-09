@@ -20,6 +20,18 @@ export interface NewConversation {
   reason?: string;
 }
 
+export function NewConversationButton({ run, reason }: NewConversation) {
+  return (
+    <IconButton
+      icon="square-pen"
+      size={32}
+      label="New conversation"
+      disabledReason={reason}
+      onClick={() => run()}
+    />
+  );
+}
+
 export function ConversationRail({
   agent,
   composer,
@@ -80,13 +92,7 @@ export function ConversationRail({
       </div>
       <Presence show={!!newConversation && !!sessionId}>
         <span className="conversation-new">
-          <IconButton
-            icon="square-pen"
-            size={32}
-            label="New conversation"
-            disabledReason={newConversation?.reason}
-            onClick={() => newConversation?.run()}
-          />
+          {newConversation && <NewConversationButton {...newConversation} />}
         </span>
       </Presence>
       <Conversation

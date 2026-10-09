@@ -140,7 +140,8 @@ test("New conversation starts afresh and stays new after a refresh", async ({
   const fixture = await ui.open("continued");
   const old = await shownTask(request, fixture.origin);
   let rail = await chat(page);
-  await rail.getByRole("button", { name: "New conversation" }).click();
+  // Beside the rail's label on a wide screen; in the top bar where tabs name the panes.
+  await page.getByRole("button", { name: "New conversation" }).click();
   await expect(rail.getByRole("heading", { name: "What would you like done?" })).toBeVisible();
   await expect(rail.getByText(LATEST)).toHaveCount(0);
   await refresh(page);
@@ -156,8 +157,8 @@ test("New conversation starts afresh and stays new after a refresh", async ({
 
 test("New conversation waits while dot works", async ({ page, ui }) => {
   await ui.open("running");
-  const rail = await chat(page);
-  await expect(rail.getByRole("button", { name: "New conversation" })).toHaveAttribute(
+  await chat(page);
+  await expect(page.getByRole("button", { name: "New conversation" })).toHaveAttribute(
     "aria-disabled",
     "true",
   );
