@@ -200,12 +200,12 @@ const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> 
   [STALL.modelUnavailable]: {
     row: "recovery",
     label: "Model not answering",
-    caption: "The model isn't answering.",
+    caption: "The model isn't answering. Try again, or change the model.",
   },
   [STALL.modelRefused]: {
     row: "recovery",
     label: "Model turned down a request",
-    caption: "The model turned down my request.",
+    caption: "The model turned down my request. Try again, or change the model.",
   },
   [STALL.keyd]: { row: "recovery", label: "Keys are offline", caption: "I can't reach your keys." },
 };
@@ -304,7 +304,11 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     return running("pausing", "Pausing after this step", "Pausing after this step.", acting);
   if (facts?.pause === "resuming") return running("resuming", "Resuming…", "Resuming…", false);
   if (facts?.pause === "uncertain")
-    return waiting("paused", "Pause unconfirmed", "Pause is unconfirmed.");
+    return waiting(
+      "paused",
+      "Pause not confirmed",
+      "Couldn't confirm the pause. Use Stop to be sure.",
+    );
   if (facts?.pause) return waiting("paused", "Paused", "Paused.");
 
   // A busy or unreachable model is tried again by itself, and the wait counts down.
@@ -329,12 +333,16 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     const stall = STALLED[reason ?? ""];
     return stall
       ? waiting(stall.row, stall.label, stall.caption)
-      : waiting("recovery", "Paused", "Paused.");
+      : waiting("recovery", "Paused", "I've paused. The chat says how to go on.");
   }
   if (state === "error")
     return /restarting/.test(reason ?? "")
       ? running("working", "Starting again…", "Starting again where I left off.", false)
-      : waiting("recovery", "Needs attention", "The task needs attention.");
+      : waiting(
+          "recovery",
+          "Needs attention",
+          "I can't go on by myself. The chat says what to do.",
+        );
   if (state === "done") return finished("done", "Done", "Done.");
   if (state === "idle" && reason === STALL.actionLimit)
     return waiting("limit", "Reached your action limit", "I stopped at the action limit you set.");
@@ -462,6 +470,9 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
 };
 // Rows whose caption is dot's own words: its narration, its question or its note to the user.
 const DOT_SPEAKS = new Set<TaskRow>([
+  "limit",
+  "retrying",
+  "recovery",
   "question",
   "takeover",
   "control",

@@ -673,9 +673,16 @@ function Player({
           </Presence>
           <GapCard kind={gapKind} />
           {replay.status === "error" && !gapKind && (
-            <p className="replay-error" role="alert">
-              Some of the recording couldn't load. The steps are still here.
-            </p>
+            <div className="replay-error" role="alert">
+              <p className="replay-gap-title">
+                {chapterRows.length
+                  ? "Part of this recording couldn't load"
+                  : "This recording couldn't load"}
+              </p>
+              <p className="replay-gap-body">
+                {chapterRows.length ? "Its steps are still here." : "Try again in a moment."}
+              </p>
+            </div>
           )}
           {replay.compare && (
             <CompareView
