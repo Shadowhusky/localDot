@@ -786,6 +786,102 @@
   color: var(--color-fg-3);
 }
 
+/* A finished turn's last line: the model and what its calls reported, quiet under dot's words or in
+   line with the work line's text. It opens on each model's tokens. */
+.thread-row[data-kind="meta"]:not([data-group-start]) {
+  margin-top: var(--spacing);
+}
+
+.thread-meta {
+  display: flex;
+  min-width: 0;
+  color: var(--color-fg-3);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+}
+
+.thread-meta[data-under="work"] {
+  margin-top: calc(var(--spacing) * -1.5);
+  padding-inline-start: calc(var(--spacing) * 5.5);
+}
+
+.thread-meta-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-meta-trigger {
+  display: inline-flex;
+  min-width: 0;
+  max-width: calc(100% + var(--spacing) * 3);
+  margin: calc(var(--spacing) * -0.5) calc(var(--spacing) * -1.5);
+  padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 1.5);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-align: start;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--dur-hover) var(--ease-standard),
+    color var(--dur-hover) var(--ease-standard);
+}
+
+@media (hover: hover) {
+  .thread-meta-trigger:not([data-pressed]):hover {
+    background-color: var(--color-control);
+    color: var(--color-fg-2);
+  }
+}
+
+.thread-meta-trigger[data-pressed],
+.thread-meta-trigger[aria-expanded="true"] {
+  background-color: var(--color-control-pressed);
+  color: var(--color-fg-2);
+}
+
+.thread-meta-trigger:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.thread-meta-models {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  margin: 0;
+}
+
+.thread-meta-models > div {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.thread-meta-models dt {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--spacing) * 2);
+  color: var(--color-fg-1);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.thread-meta-role,
+.thread-meta-models dd {
+  color: var(--color-fg-2);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+.thread-meta-models dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
 /* A result: what dot says it did, the files it handed over, and the proof of the work. */
 .result-card {
   display: grid;
@@ -1440,6 +1536,80 @@
 .composer-research[data-suggested] > .composer-research-hint {
   opacity: 1;
   scale: 1;
+}
+
+/* The main model: a quiet pull-down in the row. Its name shortens before anything else moves. */
+.composer-model {
+  display: inline-flex;
+  flex: 0 1 auto;
+  align-items: center;
+  gap: calc(var(--spacing) / 2);
+  min-width: calc(var(--spacing) * 16);
+  height: calc(var(--spacing) * 7);
+  padding: 0 var(--spacing) 0 calc(var(--spacing) * 1.5);
+  border: 0;
+  border-radius: var(--radius-lg);
+  background-color: transparent;
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color var(--dur-hover) var(--ease-standard),
+    color var(--dur-hover) var(--ease-standard),
+    scale var(--dur-snappy) var(--ease-spring);
+}
+
+@media (hover: hover) {
+  .composer-model:not([aria-disabled="true"]):hover {
+    background-color: var(--color-control);
+    color: var(--color-fg-1);
+  }
+}
+
+.composer-model[aria-expanded="true"] {
+  background-color: var(--color-control);
+  color: var(--color-fg-1);
+}
+
+.composer-model[data-pressed] {
+  scale: 0.97;
+  transition-duration: var(--dur-press);
+}
+
+.composer-model[aria-disabled="true"] {
+  opacity: var(--opacity-disabled);
+  cursor: default;
+}
+
+.composer-model:focus-visible {
+  outline: var(--focus-width) solid var(--color-fg-1);
+  outline-offset: var(--focus-offset);
+}
+
+.composer-model-chevron {
+  flex-shrink: 0;
+  color: var(--color-fg-3);
+}
+
+/* fg-3 is too faint on the overlay surface, as the kit's menu notes. */
+.model-menu-note {
+  max-width: calc(var(--spacing) * 60);
+  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2.5) calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  text-wrap: pretty;
+}
+
+@media (pointer: coarse) {
+  .composer-model {
+    height: calc(var(--spacing) * 11);
+  }
 }
 
 /* Controls that come and go along the row grow in from where they sit, and shrink away there. */

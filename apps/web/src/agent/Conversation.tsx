@@ -16,6 +16,7 @@ import type { ApiClient } from "../lib/api.ts";
 import { RoutineCard } from "../routines/RoutineCard.tsx";
 import { originLine } from "../routines/routine-copy.ts";
 import { useRoutineSeen } from "../routines/seen.ts";
+import type { ModelNames } from "../settings/model-names.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
@@ -36,6 +37,7 @@ import { QuestionCard } from "./QuestionCard.tsx";
 import { ResultCard, type ResultDownloads, useResultDownloads } from "./ResultFiles.tsx";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 import { ThreadSkeleton } from "./ThreadSkeleton.tsx";
+import { TurnMeta } from "./TurnMeta.tsx";
 import {
   controlLine,
   type ThreadItem,
@@ -96,6 +98,7 @@ interface ThreadContext {
   latestWork: string | undefined;
   onReplay?: () => void;
   replayTask?: (sessionId: string) => void;
+  names?: ModelNames;
 }
 type ItemOf<K extends ThreadKind> = Extract<ThreadItem, { kind: K }>;
 type WorkItem = ItemOf<"work">;
@@ -291,6 +294,17 @@ const CARDS: { [K in ThreadKind]: CardKind<K> } = {
       endedOf(was, then) === endedOf(now, thread) &&
       sameSteps(was.steps, now.steps),
   },
+  meta: {
+    draw: ({ item, thread }) => <TurnMeta item={item} names={thread.names} />,
+    same: (was, now, then, thread) =>
+      then.names === thread.names &&
+      was.work === now.work &&
+      was.durationMs === now.durationMs &&
+      was.usd === now.usd &&
+      was.main?.route === now.main?.route &&
+      was.main?.model === now.main?.model &&
+      JSON.stringify(was.models) === JSON.stringify(now.models),
+  },
 };
 
 function Card({ item, thread }: { item: ThreadItem; thread: ThreadContext }) {
@@ -384,6 +398,8 @@ export interface ConversationProps {
   // Counts the conversations the user chose: each one's thread comes in anew.
   reveal?: number;
   words?: AgentWords;
+  // Names the models the turns' lines report.
+  names?: ModelNames;
 }
 
 export function Conversation({
@@ -415,6 +431,7 @@ export function Conversation({
   start,
   reveal = 0,
   words,
+  names,
 }: ConversationProps) {
   // While its task is live, the latest turn's work line sits in the foot, always in view; once the
   // turn is over it joins the thread as that turn's last row.
@@ -497,7 +514,7 @@ export function Conversation({
     setLeft({ owner: ownerKey, keys: new Set(items.map(itemKey)) });
   const unread = left
     ? items
-        .filter((item) => item.kind !== "work" && !left.keys.has(item.key))
+        .filter((item) => item.kind !== "work" && item.kind !== "meta" && !left.keys.has(item.key))
         .map((item) => item.kind)
     : [];
 
@@ -704,6 +721,7 @@ export function Conversation({
     latestWork: latestWork?.key,
     onReplay: onReplay && replay,
     replayTask: onReplayTask && replayTask,
+    names,
   };
   const empty = !shown.length && !liveWork;
   const olderTasks = !!earlier?.more;

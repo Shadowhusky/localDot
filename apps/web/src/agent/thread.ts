@@ -3,18 +3,32 @@ import { microsToMs, ULID_PATTERN, ulidTime } from "@localdot/protocol";
 import type { TimelineRow } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import { activityRows, type EntryView, entryView, foldKeyUses } from "./activity.ts";
-import type {
-  AgentMessage,
-  AgentModel,
-  AgentQuestion,
-  AgentResult,
-  AgentTakeover,
-  RoutineProposal,
-  SpendCall,
+import {
+  AGENT_LIMITS,
+  type AgentMessage,
+  type AgentModel,
+  type AgentQuestion,
+  type AgentResult,
+  type AgentTakeover,
+  type RoutineProposal,
+  type SpendCall,
+  type UsageCall,
 } from "./model.ts";
 
 export type Speaker = "user" | "dot";
 export type WorkStep = EntryView & { key: string };
+export interface ModelRef {
+  readonly route: string;
+  readonly model: string;
+}
+// A model one turn called, with the tokens its provider reported for those calls.
+export interface TurnModel extends ModelRef {
+  readonly role: string;
+  readonly calls: number;
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly reasoningTokens?: number;
+}
 
 interface Item<K extends string> {
   kind: K;
@@ -41,6 +55,19 @@ export type ThreadItem =
       startMs: number | null;
       // What the turn's model calls cost, when any cost something.
       spend?: { usd: number; estimated: boolean };
+    })
+  // A finished turn's quiet last line: the model, and what the turn's calls reported.
+  | (Item<"meta"> & {
+      turn: string;
+      // The models the turn called, its main one first.
+      models: readonly TurnModel[];
+      // The task's model, when the turn's calls said nothing of theirs.
+      main?: ModelRef;
+      durationMs?: number;
+      // What the turn's calls cost, only when the provider billed every one.
+      usd?: number;
+      // The turn's work line, just above, already says how long it took and what it cost.
+      work: boolean;
     });
 
 export type ThreadKind = ThreadItem["kind"];
@@ -187,15 +214,101 @@ const startsTurn = (item: ThreadItem) =>
 const startOf = (item: ThreadItem) =>
   item.kind === "message" && item.message.at !== undefined ? microsToMs(item.message.at) : null;
 
+// When an item of dot's was last seen, in session ms.
+function seenAt(item: ThreadItem): number | null {
+  const at =
+    item.kind === "message"
+      ? (item.message.doneAt ?? item.message.at)
+      : item.kind === "result"
+        ? item.result.at
+        : item.kind === "question"
+          ? item.question.at
+          : undefined;
+  return at === undefined ? null : microsToMs(at);
+}
+
+const said = (item: ThreadItem) =>
+  item.kind === "result" ||
+  item.kind === "question" ||
+  item.kind === "routine" ||
+  (item.kind === "message" && item.message.role === "assistant");
+
+function turnModels(calls: readonly UsageCall[]): TurnModel[] {
+  const models = new Map<string, TurnModel>();
+  for (const call of calls) {
+    const id = `${call.role}\0${call.route}\0${call.model}`;
+    const was = models.get(id);
+    const reasoning =
+      was?.reasoningTokens === undefined && call.reasoningTokens === undefined
+        ? undefined
+        : (was?.reasoningTokens ?? 0) + (call.reasoningTokens ?? 0);
+    models.set(id, {
+      role: call.role,
+      route: call.route,
+      model: call.model,
+      calls: (was?.calls ?? 0) + 1,
+      inputTokens: (was?.inputTokens ?? 0) + call.inputTokens,
+      outputTokens: (was?.outputTokens ?? 0) + call.outputTokens,
+      ...(reasoning === undefined ? {} : { reasoningTokens: reasoning }),
+    });
+  }
+  const all = [...models.values()];
+  return [...all.filter((row) => row.role === "main"), ...all.filter((row) => row.role !== "main")];
+}
+
+interface Turn {
+  key: string;
+  start: number | null;
+  items: ThreadItem[];
+}
+
+// A finished turn's last line, once dot said or did something and there is a model to name.
+function turnMeta(
+  turn: Turn,
+  own: readonly WorkStep[],
+  calls: readonly UsageCall[],
+  bills: readonly SpendCall[],
+  billsWhole: boolean,
+  main?: ModelRef,
+): Extract<ThreadItem, { kind: "meta" }> | null {
+  const models = turnModels(calls);
+  if (!(turn.items.some(said) || own.length) || !(models.length || main)) return null;
+  const ends = [
+    ...turn.items.map(seenAt),
+    ...own.map((step) => step.endT ?? step.startT),
+    ...calls.map((call) => call.atMs),
+    ...bills.map((call) => call.atMs),
+  ].filter((t): t is number => t !== null);
+  const last = ends.length ? Math.max(...ends) : null;
+  const usd = bills.reduce((sum, call) => sum + call.usd, 0);
+  const billed = usd > 0 && billsWhole && !bills.some((call) => call.estimated);
+  return {
+    kind: "meta",
+    key: `meta-${turn.key}`,
+    speaker: "dot",
+    turn: turn.key,
+    models,
+    ...(!models.length && main ? { main } : {}),
+    ...(turn.start !== null && last !== null && last >= turn.start
+      ? { durationMs: last - turn.start }
+      : {}),
+    ...(billed ? { usd } : {}),
+    work: own.length > 0,
+  };
+}
+
 // Each turn that worked on the computer ends with a line of what it did. The latest turn also has one
-// while the task is live, steps or not, so the thread is never silent while dot works.
+// while the task is live, steps or not, so the thread is never silent while dot works. A finished
+// turn then ends with its model and what its calls reported; `main` names the task's model when they
+// said nothing.
 export function withWork(
   items: readonly ThreadItem[],
   steps: readonly WorkStep[],
   live: boolean,
   spends: readonly SpendCall[] = [],
+  { usage = [], main }: { usage?: readonly UsageCall[]; main?: ModelRef } = {},
 ): ThreadItem[] {
-  const turns: { key: string; start: number | null; items: ThreadItem[] }[] = [];
+  const turns: Turn[] = [];
   for (const item of items) {
     const turn = turns.at(-1);
     if (startsTurn(item) || !turn)
@@ -215,36 +328,63 @@ export function withWork(
     }
     return at;
   };
-  const owned = new Map<number, WorkStep[]>();
-  for (const step of steps) {
-    const at = turnAt(step.startT);
-    owned.set(at, [...(owned.get(at) ?? []), step]);
-  }
-  const spent = new Map<number, { usd: number; estimated: boolean }>();
-  for (const call of spends) {
-    const at = turnAt(call.atMs);
-    const sum = spent.get(at) ?? { usd: 0, estimated: false };
-    spent.set(at, { usd: sum.usd + call.usd, estimated: sum.estimated || call.estimated });
-  }
+  const byTurn = <T>(rows: readonly T[], time: (row: T) => number) => {
+    const turned = new Map<number, T[]>();
+    for (const row of rows) {
+      const at = turnAt(time(row));
+      const own = turned.get(at);
+      if (own) own.push(row);
+      else turned.set(at, [row]);
+    }
+    return turned;
+  };
+  const owned = byTurn(steps, (step) => step.startT);
+  const charged = byTurn(spends, (call) => call.atMs);
+  const called = byTurn(usage, (call) => call.atMs);
+  // A full list may have lost its oldest calls: a turn from before them has no whole count.
+  const counted = (start: number | null, calls: readonly { atMs: number }[], limit: number) =>
+    calls.length < limit || (start !== null && start >= (calls[0]?.atMs ?? 0));
   return turns.flatMap((turn, index) => {
     const own = owned.get(index) ?? [];
     const latest = index === turns.length - 1;
-    if (!own.length && !(latest && live)) return turn.items;
-    const spend = spent.get(index);
-    // The line closes dot's own part of the turn: the computer changing hands after it stays after.
+    const open = latest && live;
+    const bills = charged.get(index) ?? [];
+    const usd = bills.reduce((sum, call) => sum + call.usd, 0);
+    const work = own.length > 0 || open;
+    // The lines close dot's own part of the turn: the computer changing hands after it stays after.
     let end = turn.items.length;
     while (end > 0 && turn.items[end - 1]?.kind === "control") end--;
+    const calls = counted(turn.start, usage, AGENT_LIMITS.usageCalls)
+      ? (called.get(index) ?? [])
+      : [];
+    const meta = open
+      ? null
+      : turnMeta(
+          turn,
+          own,
+          calls,
+          bills,
+          counted(turn.start, spends, AGENT_LIMITS.spendCalls),
+          main,
+        );
+    if (!work && !meta) return turn.items;
+    const estimated = bills.some((call) => call.estimated);
     return [
       ...turn.items.slice(0, end),
-      {
-        kind: "work" as const,
-        key: `work-${turn.key}`,
-        speaker: "dot" as const,
-        turn: turn.key,
-        steps: own,
-        startMs: turn.start ?? own[0]?.startT ?? null,
-        ...(spend && spend.usd > 0 ? { spend } : {}),
-      },
+      ...(work
+        ? [
+            {
+              kind: "work" as const,
+              key: `work-${turn.key}`,
+              speaker: "dot" as const,
+              turn: turn.key,
+              steps: own,
+              startMs: turn.start ?? own[0]?.startT ?? null,
+              ...(usd > 0 ? { spend: { usd, estimated } } : {}),
+            },
+          ]
+        : []),
+      ...(meta ? [meta] : []),
       ...turn.items.slice(end),
     ];
   });
