@@ -174,6 +174,16 @@ describe("the model's advertised tools and instructions", () => {
       "Only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves",
     );
   });
+
+  it("keeps every sign-in in the web browser", () => {
+    const tools = toolSet(binding());
+    expect(tools.switch_screen?.description).toContain(
+      "Every sign-in happens here, never in the desktop's Chromium: switch here first, then ask for the details with ask_user fields.",
+    );
+    expect(tools.request_takeover?.description).toContain(
+      "Hand over a sign-in on the web browser screen: one made in the desktop's Chromium isn't kept.",
+    );
+  });
 });
 
 describe("routine runs", () => {

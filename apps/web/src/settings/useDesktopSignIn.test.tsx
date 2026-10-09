@@ -20,7 +20,11 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-function setup(sites: (string | null)[], offer?: (site: string) => void, watching = true) {
+function setup(
+  sites: (string | null)[],
+  offer?: (site: string, failed: (message: string) => void) => void,
+  watching = true,
+) {
   const fetchImpl = vi.fn<typeof fetch>(async () => Response.json({ site: sites.shift() ?? null }));
   const api = createApi("fixture", { origin: ORIGIN, fetchImpl });
   const hook = renderHook(
@@ -51,7 +55,22 @@ it("offers a sign-in page's site in the web browser while the user holds the des
     }),
   );
   toasts.show.mock.calls.at(-1)?.[0].action.onAction();
-  expect(offer).toHaveBeenCalledWith("google.com");
+  expect(offer).toHaveBeenCalledWith("google.com", expect.any(Function));
+});
+
+it("says in a toast why the web browser didn't open from the offer", async () => {
+  const offer = vi.fn((_site: string, failed: (message: string) => void) =>
+    failed("The web browser couldn't open. Try again in a moment."),
+  );
+  setup(["google.com"], offer);
+  await act(async () => {});
+  toasts.show.mock.calls.at(-1)?.[0].action.onAction();
+  expect(toasts.show).toHaveBeenLastCalledWith({
+    id: "desktop-sign-in-failed",
+    tone: "danger",
+    title: "Couldn't open google.com",
+    description: "The web browser couldn't open. Try again in a moment.",
+  });
 });
 
 it("leaves the asking to dot during a task, and goes quiet once the user stops watching", async () => {

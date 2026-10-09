@@ -16,7 +16,12 @@ import { CodexAuthOwner } from "./codex/auth-owner.ts";
 import { CodexCleanupError } from "./codex/driver.ts";
 import { Conversations } from "./conversation.ts";
 import { MemoryStore } from "./memory.ts";
-import { AgentError, AgentRunner, type AgentRunnerDeps } from "./runner.ts";
+import {
+  AgentError,
+  AgentRunner,
+  type AgentRunnerDeps,
+  SIGN_IN_BROWSER_WAIT_MS,
+} from "./runner.ts";
 import { ComputerFences } from "./safety/fences.ts";
 import { type AgentSession, abortable } from "./session.ts";
 import { AgentSettings } from "./settings.ts";
@@ -343,6 +348,53 @@ describe("signing in to a site from Settings", () => {
     await until(() => f.live.get(f.cellId) === undefined);
     expect(browser.closed).not.toHaveBeenCalled();
     expect(f.containment).not.toHaveBeenCalled();
+  });
+
+  it("keeps the user in control of the desktop when the web browser can't start", async () => {
+    const f = setup();
+    const browser = screens(f);
+    const startBrowser = vi.fn(async () => {
+      throw new Error("the web browser couldn't start");
+    });
+    f.deps.startBrowser = startBrowser;
+    const first = await f.runner.hold(f.cellId);
+    const held = f.runner.get(first.sessionId);
+    if (!held) throw new Error("fixture missing hold");
+    await until(() => held.manualControl === "ready");
+    const failure = await f.runner
+      .signIn(f.cellId, "google.com", "https://accounts.google.com/")
+      .catch((error: unknown) => error);
+    expect((failure as AgentError).status).toBe(503);
+    expect(startBrowser).toHaveBeenCalledWith(f.cellId);
+    expect(browser.opened).toEqual([]);
+    expect(held.stopped).toBe(false);
+    expect(held.manualControl).toBe("ready");
+    expect(f.live.get(f.cellId)).toBe(first.sessionId);
+    held.stop();
+    await f.live.settled(first.sessionId);
+  });
+
+  it("says to try again while the web browser is still starting, and lets it go on", async () => {
+    const f = setup();
+    screens(f);
+    const starting = deferred<void>();
+    f.deps.startBrowser = vi.fn(() => starting.promise);
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const signing = f.runner
+        .signIn(f.cellId, "google.com", "https://accounts.google.com/")
+        .catch((error: unknown) => error);
+      await vi.advanceTimersByTimeAsync(SIGN_IN_BROWSER_WAIT_MS);
+      expect(((await signing) as AgentError).status).toBe(503);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(f.live.get(f.cellId)).toBeUndefined();
+    starting.resolve();
+    const reply = await f.runner.signIn(f.cellId, "google.com", "https://accounts.google.com/");
+    expect(f.live.get(f.cellId)).toBe(reply.sessionId);
+    f.runner.get(reply.sessionId)?.stop();
+    await f.live.settled(reply.sessionId);
   });
 });
 

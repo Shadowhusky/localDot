@@ -857,7 +857,7 @@ function Theatre({ api }: { api: ApiClient }) {
     api,
     cellId: askCell,
     watching: manualLive && shownScreen === "desktop" && !settings.open && !replayId,
-    offer: ownHold ? (site) => void signIn.start(site) : undefined,
+    offer: ownHold ? (site, failed) => void signIn.start(site, failed) : undefined,
   });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
   const now = useNowMs(session.model, session.version, (t) => {

@@ -19,6 +19,7 @@ function setup() {
     home,
     env: { PATH: process.env.PATH, LOCALDOT_DESKTOPD_TOKEN: "secret-token-value-0123456789" },
     browser: {
+      page: async () => ({ url: "https://accounts.google.com/signin" }),
       read: async () => {
         throw new NoPageError();
       },
@@ -99,5 +100,12 @@ describe("desktopd's tool routes", () => {
     expect((await post("/browser/navigate", { url: "example.com" })).status).toBe(200);
     expect(navigations).toEqual(["https://example.com/"]);
     expect((await post("/browser/read", {})).status).toBe(409);
+  });
+
+  it("gives the front page's address alone", async () => {
+    const { app } = setup();
+    const res = await app.request("/browser/page");
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ url: "https://accounts.google.com/signin" });
   });
 });

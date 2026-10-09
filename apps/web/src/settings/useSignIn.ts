@@ -4,12 +4,16 @@ import { ControlFailure } from "../agent/control-api.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { signInTo } from "./accounts-api.ts";
 
+// Longer than the daemon waits for the web browser to start, shorter than a request may last.
+export const SIGN_IN_WAIT_MS = 30_000;
+
 export interface SignInView {
   // The site whose sign-in page is opening.
   pending: string | null;
   failure: string | null;
-  // False when nothing opened; true once the web browser is on its way.
-  start(site: string): Promise<boolean>;
+  // False when nothing opened; true once the web browser is on its way. A failure goes to
+  // `failed` when given, otherwise to `failure`.
+  start(site: string, failed?: (message: string) => void): Promise<boolean>;
   clear(): void;
 }
 
@@ -37,11 +41,11 @@ export function useSignIn(
   const latest = useRef(opened);
   latest.current = opened;
   const start = useCallback(
-    async (typed: string) => {
+    async (typed: string, failed: (message: string) => void = setFailure) => {
       const site = signInSite(typed);
       if (busy.current) return false;
       if (!site) {
-        setFailure(
+        failed(
           typed.trim()
             ? "The web browser opens public sites only, like google.com."
             : "Enter a site, like google.com.",
@@ -49,25 +53,28 @@ export function useSignIn(
         return false;
       }
       if (!cellId) {
-        setFailure("Turn on your computer first.");
+        failed("Turn on your computer first.");
         return false;
       }
       busy.current = true;
       setPending(site);
       setFailure(null);
+      const wait = new AbortController();
+      const timer = setTimeout(() => wait.abort(), SIGN_IN_WAIT_MS);
       try {
-        await signInTo(api, cellId, site, new AbortController().signal);
+        await signInTo(api, cellId, site, wait.signal);
         latest.current(site);
         return true;
       } catch (error) {
-        // A reply that never came may only mean the web browser is still starting.
-        if (error instanceof ControlFailure && error.uncertain && error.status === undefined) {
+        // A reply that never came in time may only mean the web browser is still starting.
+        if (wait.signal.aborted) {
           latest.current(site);
           return true;
         }
-        setFailure(signInFailure(error));
+        failed(signInFailure(error));
         return false;
       } finally {
+        clearTimeout(timer);
         busy.current = false;
         setPending(null);
       }

@@ -5,6 +5,7 @@ import { desktopSignIn } from "./accounts-api.ts";
 
 export const DESKTOP_SIGN_IN_EVERY_MS = 4000;
 const TOAST = "desktop-sign-in";
+const FAILED = "desktop-sign-in-failed";
 
 // While the user works on the desktop, a sign-in page in its own browser, which keeps no sign-ins,
 // brings a calm toast offering the site in the web browser. With a task on the computer, dot is the
@@ -18,7 +19,7 @@ export function useDesktopSignIn({
   api: ApiClient;
   cellId: string | null;
   watching: boolean;
-  offer?(site: string): void;
+  offer?(site: string, failed: (message: string) => void): void;
 }): void {
   const [site, setSite] = useState<string | null>(null);
   const latest = useRef(offer);
@@ -66,7 +67,15 @@ export function useDesktopSignIn({
         ? {
             action: {
               label: "Open in web browser",
-              onAction: () => latest.current?.(site),
+              onAction: () =>
+                latest.current?.(site, (message) =>
+                  showToast({
+                    id: FAILED,
+                    tone: "danger",
+                    title: `Couldn't open ${site}`,
+                    description: message,
+                  }),
+                ),
             },
           }
         : {}),

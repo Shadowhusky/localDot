@@ -111,6 +111,7 @@ describe("authenticated desktop tool boundaries", () => {
       await stream.cancel();
     }
     expect((await app.request("/files/fetch?path=x")).status).toBe(401);
+    expect((await app.request("/browser/page")).status).toBe(401);
     expect(shell).not.toHaveBeenCalled();
     expect(browser.navigate).not.toHaveBeenCalled();
     expect(readdirSync(home)).toEqual([]);

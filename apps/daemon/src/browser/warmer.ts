@@ -59,7 +59,8 @@ export class BrowserWarmer {
   }
 
   #check(parent: string): void {
-    if (this.#disposed || this.#checking.has(parent) || !this.deps.browser.endpoints(parent)) {
+    const probed = this.deps.browser.endpoints(parent);
+    if (this.#disposed || this.#checking.has(parent) || !probed) {
       if (!this.#checking.has(parent)) this.#silent.delete(parent);
       return;
     }
@@ -75,6 +76,8 @@ export class BrowserWarmer {
         this.#silent.set(parent, silent);
         if (answer === "silent" && silent < SILENT_SWEEPS) return;
         this.#silent.delete(parent);
+        // Only the browser that was asked is stopped, never one started since.
+        if (this.deps.browser.endpoints(parent)?.instance !== probed.instance) return;
         this.deps.report?.(
           answer === "silent"
             ? "the web browser stopped answering; starting it again"

@@ -34,6 +34,10 @@ export class SessionScreens {
     },
   ) {}
 
+  async startBrowser(cellId: string): Promise<void> {
+    await this.deps.browser.start(cellId);
+  }
+
   install(session: AgentSession, cell: CellSummary): void {
     if (session.cellId !== cell.id) throw new Error("The session computer changed.");
     session.attachScreens(
