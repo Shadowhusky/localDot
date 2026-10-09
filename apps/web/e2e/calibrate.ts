@@ -159,7 +159,7 @@ async function run() {
       deviceScaleFactor: 2,
     });
     await page.goto(`${daemon.origin}/?probe=1#token=${daemon.token}`);
-    await page.getByTestId("hud-status").filter({ hasText: "Live" }).waitFor({ timeout: 120_000 });
+    await page.getByTestId("hud-status").filter({ hasText: "Ready" }).waitFor({ timeout: 120_000 });
     await page.waitForFunction(
       () => Number(document.querySelector("canvas.stage-canvas")?.getAttribute("data-frames")) > 0,
       null,

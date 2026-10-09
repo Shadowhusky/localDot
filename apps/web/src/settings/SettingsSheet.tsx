@@ -318,7 +318,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
       footer={footer}
     >
       <div id="settings-sheet-body" className="settings-body">
-        {phone && (
+        {(phone || props.stop) && (
           // What Stop reports stays after Stop itself has gone.
           <div className="settings-stop">
             {props.stop && (
@@ -333,7 +333,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
                 </Button>
               </div>
             )}
-            {props.taskControls}
+            {phone && props.taskControls}
           </div>
         )}
         {props.loading ? (

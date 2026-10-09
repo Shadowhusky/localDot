@@ -43,7 +43,7 @@ test("the puppet runs a multi-app sequence live in the Theatre with the overlays
     if (message.type() === "error") console.error(`Theatre console: ${message.text()}`);
   });
   await page.goto(`${daemon.origin}/#token=${daemon.token}`);
-  await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 120_000 });
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready", { timeout: 120_000 });
   await expect
     .poll(
       async () => Number(await page.locator("canvas.stage-canvas").getAttribute("data-frames")),

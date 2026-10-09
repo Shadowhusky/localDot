@@ -59,7 +59,7 @@
   gap: calc(var(--spacing-gutter) * 2) var(--spacing-gutter);
 }
 
-.gallery-stages .stage {
+.gallery-stages .stage-frame {
   width: 100%;
 }
 

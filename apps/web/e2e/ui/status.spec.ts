@@ -1,35 +1,38 @@
 import { UI_SCENARIOS, type UiScenarioName } from "../fixtures/ui-scenarios.ts";
 import { expect, test } from "./harness.ts";
 
-// The status model's verdict for each scenario, read where people see it: the HUD's first control,
-// its label, dot's pose in the HUD badge, the xenon rim and the tab title. The control comes first:
-// a task's Stop shows its feed has arrived, so a label the task could still replace is final.
-const STATUS: Record<UiScenarioName, { control: string; label: string; pose: string; rim?: true }> =
-  {
-    "first-run": { control: "Turn on", label: "No computer", pose: "sleeping" },
-    "model-ready": { control: "Turn on", label: "No computer", pose: "sleeping" },
-    starting: { control: "Stop computer", label: "Starting…", pose: "waking" },
-    ready: { control: "Stop computer", label: "Live", pose: "idle" },
-    "chatgpt-plan": { control: "Stop computer", label: "Live", pose: "idle" },
-    running: { control: "Stop", label: "Select the Net total cell", pose: "acting", rim: true },
-    approval: { control: "Stop", label: "Needs your OK", pose: "waiting" },
-    ask: { control: "Stop", label: "Has a question", pose: "waiting" },
-    takeover: { control: "Stop", label: "Your turn", pose: "your-turn" },
-    budget: { control: "Stop", label: "Paused · Limit reached", pose: "resting" },
-    done: { control: "Stop computer", label: "Done", pose: "idle" },
-    continued: { control: "Stop computer", label: "Done", pose: "idle" },
-    reconnecting: {
-      control: "Stop",
-      label: "Select the Net total cell",
-      pose: "acting",
-      rim: true,
-    },
-    paused: { control: "Resume computer", label: "Paused", pose: "resting" },
-    failed: { control: "Turn on", label: "Failed", pose: "error" },
-    // A computer that can't carry the task outranks it; the task keeps only its Stop.
-    fenced: { control: "Stop", label: "Unavailable", pose: "error" },
-    off: { control: "Turn on", label: "Stopped", pose: "sleeping" },
-  };
+// The status model's verdict for each scenario, read where people see it: the island's shape, its
+// first control and its label, the stage's light and the tab title. The control comes first: a
+// task's controls show its feed has arrived, so a label the task could still replace is final. Under
+// the first-run curtain the island is hidden and offers nothing.
+const STATUS: Record<
+  UiScenarioName,
+  { shape: string; control?: RegExp; label: string; light?: "dot" }
+> = {
+  "first-run": { shape: "hidden", label: "No computer" },
+  "model-ready": { shape: "hidden", label: "No computer" },
+  starting: { shape: "computer", control: /^Shut down$/, label: "Starting…" },
+  ready: { shape: "ready", control: /^Take control$/, label: "Ready" },
+  "chatgpt-plan": { shape: "ready", control: /^Take control$/, label: "Ready" },
+  running: { shape: "task", control: /^Pause$/, label: "Select the Net total cell", light: "dot" },
+  approval: { shape: "task", control: /^Pause$/, label: "Needs your OK" },
+  ask: { shape: "task", control: /^Pause$/, label: "Has a question" },
+  takeover: { shape: "task", control: /^Pause$/, label: "Your turn" },
+  budget: { shape: "task", control: /^(Pause|Continue)$/, label: "Paused · Limit reached" },
+  done: { shape: "ready", control: /^Take control$/, label: "Done" },
+  continued: { shape: "ready", control: /^Take control$/, label: "Done" },
+  reconnecting: {
+    shape: "task",
+    control: /^Pause$/,
+    label: "Select the Net total cell",
+    light: "dot",
+  },
+  paused: { shape: "computer", control: /^Continue$/, label: "Paused" },
+  failed: { shape: "computer", control: /^Turn on$/, label: "Failed" },
+  // A computer that can't carry the task outranks it; the task keeps only its controls.
+  fenced: { shape: "task", control: /^Pause$/, label: "Unavailable" },
+  off: { shape: "computer", control: /^Turn on$/, label: "Stopped" },
+};
 
 test.beforeEach(() => {
   test.skip(!["c14", "w39"].includes(test.info().project.name), "One check per engine");
@@ -37,26 +40,25 @@ test.beforeEach(() => {
 
 for (const scenario of Object.keys(UI_SCENARIOS) as UiScenarioName[])
   test(`status ${scenario}`, async ({ page, ui }) => {
-    const { control, label, pose, rim } = STATUS[scenario];
+    const { shape, control, label, light } = STATUS[scenario];
     await ui.open(scenario);
-    await expect(page.locator(".hud button").first()).toHaveText(control);
+    const island = page.locator(".island");
+    await expect(island).toHaveAttribute("data-shape", shape);
+    if (control) await expect(island.getByRole("button").first()).toHaveAccessibleName(control);
+    else await expect(island.getByRole("button")).toHaveCount(0);
     await expect(page.getByTestId("hud-status")).toHaveText(label);
-    await expect(page.locator(".hud .mascot")).toHaveAttribute("data-state", pose);
-    await expect(page.locator(".hud .mascot > .dot")).toHaveCount(1);
-    await expect(page.locator(".app")).toHaveClass(rim ? /\bcontrol\b/ : /^app$/);
+    await expect(page.locator(".stage-frame")).toHaveAttribute("data-light", light ?? "none");
     await expect(page).toHaveTitle(`localDot — ${label}`);
   });
 
-test("dot's badge follows the task as it moves between states", async ({ page, ui }) => {
+test("the island keeps its controls as dot moves between states", async ({ page, ui }) => {
   await ui.open("running");
-  const badge = page.locator(".hud .mascot");
-  await expect(badge).toHaveAttribute("data-state", "acting");
-  for (const [step, pose] of [
-    ["ask", "waiting"],
-    ["paused", "resting"],
-    ["ready", "waiting"],
-  ] as const) {
+  const stop = page.locator(".island").getByRole("button", { name: "Stop" });
+  await expect(stop).toBeVisible();
+  const before = await stop.elementHandle();
+  for (const step of ["ask", "approval"] as const) {
     await ui.step(step);
-    await expect(badge, step).toHaveAttribute("data-state", pose);
+    await expect(page.locator(".island"), step).toHaveAttribute("data-shape", "task");
+    expect(await stop.evaluate((element, first) => element === first, before), step).toBe(true);
   }
 });

@@ -5,15 +5,8 @@ import { expect, runAt, test } from "./harness.ts";
 runAt("c14", "w39");
 
 async function conversation(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1100) {
-    // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
-    const tab = page.getByRole("tab", { name: /^Conversation/ });
-    await expect(async () => {
-      await tab.click();
-      await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 1000 });
-    }).toPass();
-    await expect(page.locator(".thread-row").first()).toBeVisible();
-  }
+  // The rail opens on the chat; on a phone it sits under the stage.
+  await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
   return page.getByRole("complementary", { name: "Conversation" });
 }
 

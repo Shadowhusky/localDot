@@ -6,7 +6,7 @@ import { timelineRows } from "../session/key-uses.ts";
 import type { StepRowView } from "../session/session-view.ts";
 import type { Status } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
-import { Hud } from "../shell/Hud.tsx";
+import { HudIsland } from "../shell/HudIsland.tsx";
 import { ANNOUNCE_GAP, Announcer } from "../ui/Announcer.tsx";
 import { Conversation } from "./Conversation.tsx";
 import type { AgentMessage } from "./model.ts";
@@ -131,7 +131,7 @@ it("completed announcements are bounded, key-guarded and retired on owner replac
   vi.useRealTimers();
 });
 
-it("HUD live status contains only phase while elapsed time and Stop remain outside it", () => {
+it("the island's live status holds only the phase, with elapsed time and Stop outside it", () => {
   const working: Status = {
     row: "working",
     computer: "live",
@@ -146,19 +146,22 @@ it("HUD live status contains only phase while elapsed time and Stop remain outsi
   };
   const props = {
     status: working,
-    onStart: vi.fn(),
-    onStop: vi.fn(),
-    onStopSession: vi.fn(),
-    onResume: vi.fn(),
-    onRetry: vi.fn(),
+    shape: "task" as const,
+    pause: { kind: "pause" as const },
+    take: { primary: false },
+    onPause: vi.fn(),
+    onContinue: vi.fn(),
+    onStopTask: vi.fn(),
+    onTake: vi.fn(),
+    onComputer: { start: vi.fn(), stop: vi.fn(), resume: vi.fn(), retry: vi.fn() },
   };
-  const v = render(<Hud {...props} />);
+  const v = render(<HudIsland {...props} />);
   const status = screen.getByRole("status");
   const stop = screen.getByRole("button", { name: /^Stop$/ });
   expect(status.textContent).toBe("Working");
   expect(status.contains(stop)).toBe(false);
   expect(status.contains(screen.getByTestId("hud-elapsed"))).toBe(false);
-  v.rerender(<Hud {...props} status={{ ...working, elapsedS: 2 }} />);
+  v.rerender(<HudIsland {...props} status={{ ...working, elapsedS: 2 }} />);
   expect(screen.getByRole("status")).toBe(status);
   expect(status.textContent).toBe("Working");
 });

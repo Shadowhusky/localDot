@@ -24,7 +24,7 @@ test("an idle computer logs no failed requests and is checked for tasks at a cal
     if (/\/api\/cells\/[^/]+\/live$/.test(new URL(request.url()).pathname)) looks++;
   });
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  await expect(page.getByTestId("hud-status")).toHaveText("Live");
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready");
   await page.waitForTimeout(60_000);
   expect(errors).toEqual([]);
   expect(looks).toBeGreaterThan(0);

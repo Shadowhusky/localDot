@@ -247,7 +247,7 @@ describe("token layer", () => {
       media: ["prefers-reduced-motion: reduce"],
     });
     const durations = [...normal.keys()].filter((name) => name.startsWith("--dur-"));
-    expect(durations).toHaveLength(8);
+    expect(durations).toHaveLength(12);
     for (const name of durations) {
       const ms = Number(/^(\d+)ms$/.exec(reduced.get(name) ?? "")?.[1]);
       expect(ms, name).toBeGreaterThanOrEqual(120);

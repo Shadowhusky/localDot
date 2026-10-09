@@ -60,7 +60,7 @@ it("guides an empty authenticated workspace without starting tasks or saving pol
   );
   expect(methods.every((method) => method === "GET")).toBe(true);
 });
-it("offers one Turn on control whose state the task bar and first-run footer share", async () => {
+it("offers one Turn on, on the curtain, with the island hidden under it", async () => {
   localStorage.setItem(TOKEN_KEY, "a".repeat(43));
   const posts: string[] = [];
   const created = Promise.withResolvers<Response>();
@@ -84,16 +84,15 @@ it("offers one Turn on control whose state the task bar and first-run footer sha
   }) as typeof fetch;
   render(<App fetchImpl={fetchImpl} />);
   await screen.findByRole("heading", { name: "Set up localDot" });
-  const [bar, footer] = screen.getAllByRole("button", { name: "Turn on" });
-  if (!bar || !footer) throw new Error("expected two Turn on controls");
+  const [footer, ...more] = screen.getAllByRole("button", { name: "Turn on" });
+  if (!footer) throw new Error("expected a Turn on control");
+  expect(more).toEqual([]);
+  expect(document.querySelector(".island")?.getAttribute("data-shape")).toBe("hidden");
   expect(screen.queryByRole("button", { name: /^Start/ })).toBeNull();
-  expect(bar.getAttribute("aria-disabled")).toBeNull();
   expect(footer.getAttribute("aria-disabled")).toBeNull();
   fireEvent.click(footer);
   expect(posts).toEqual(["/api/cells"]);
-  await waitFor(() => expect(bar.getAttribute("aria-disabled")).toBe("true"));
-  expect(footer.getAttribute("aria-disabled")).toBe("true");
-  fireEvent.click(bar);
+  await waitFor(() => expect(footer.getAttribute("aria-disabled")).toBe("true"));
   fireEvent.click(footer);
   expect(posts).toEqual(["/api/cells"]);
 });

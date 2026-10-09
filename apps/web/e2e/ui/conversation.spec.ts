@@ -11,15 +11,10 @@ test.beforeEach(() => {
 const EARLIER = "Find last month's sales table";
 const LATEST = /^Summarise the sample sales table/;
 
-// The conversation's column, its tab chosen on a phone.
+// The rail, on its chat.
 async function chat(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1100) {
-    const tab = page.getByRole("tab", { name: /^Conversation/ });
-    await expect(async () => {
-      await tab.click();
-      await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 1000 });
-    }).toPass();
-  }
+  const view = page.getByRole("radio", { name: "Chat" });
+  if ((await view.getAttribute("aria-checked")) !== "true") await view.click();
   return page.getByRole("complementary", { name: "Conversation" });
 }
 
@@ -68,7 +63,7 @@ test("a refresh reopens the conversation, its earlier task included", async ({ p
   rail = await chat(page);
   await expect(rail.getByText(EARLIER)).toBeVisible();
   await expect(rail.getByText(LATEST)).toBeVisible();
-  await expect(rail.getByRole("heading", { name: "What would you like done?" })).toHaveCount(0);
+  await expect(rail.getByRole("heading", { name: "What should we do?" })).toHaveCount(0);
 });
 
 test("after Stop and Resume, the next message continues the conversation", async ({
@@ -143,13 +138,16 @@ test("New conversation starts afresh and stays new after a refresh", async ({
   const fixture = await ui.open("continued");
   const old = await shownTask(request, fixture.origin);
   let rail = await chat(page);
-  // Beside the rail's label on a wide screen; in the top bar where tabs name the panes.
-  await page.getByRole("button", { name: "New conversation" }).click();
-  await expect(rail.getByRole("heading", { name: "What would you like done?" })).toBeVisible();
+  // In the rail's header; on a phone, first in More.
+  if ((page.viewportSize()?.width ?? 0) < 700) {
+    await page.getByRole("button", { name: "More" }).click();
+    await page.getByRole("menuitem", { name: "New conversation" }).click();
+  } else await page.getByRole("button", { name: "New conversation" }).click();
+  await expect(rail.getByRole("heading", { name: "What should we do?" })).toBeVisible();
   await expect(rail.getByText(LATEST)).toHaveCount(0);
   await refresh(page);
   rail = await chat(page);
-  await expect(rail.getByRole("heading", { name: "What would you like done?" })).toBeVisible();
+  await expect(rail.getByRole("heading", { name: "What should we do?" })).toBeVisible();
   await expect(rail.getByText(EARLIER)).toHaveCount(0);
   await send(page, "Plan a picnic");
   const fresh = await latestTask(request, fixture.origin, old);

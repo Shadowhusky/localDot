@@ -326,6 +326,12 @@
   --dur-default: 470ms;
   /* Sheets, the curtain, the stage materialising, full screen. */
   --dur-gentle: 670ms;
+  /* The stage's light: the rim and the spill come up and go down. */
+  --dur-light-in: 400ms;
+  --dur-light-out: 300ms;
+  /* A label's new words, the dim over the picture, the island leaving under the curtain. */
+  --dur-text-in: 180ms;
+  --dur-dim: 200ms;
   /* Loops, which reduced motion stops rather than shortens. */
   --loop-sweep: 1400ms;
   --loop-turn: 1200ms;
@@ -381,9 +387,18 @@
     --color-glass-solid: var(--midnight-glass-solid);
   }
 
+  /* Under the laptop layout the stage spans its column and the band under it is shorter. */
+  @media (width < 1100px) {
+    :root {
+      --gutter: 16px;
+      --band-min: 104px;
+    }
+  }
+
   /* A phone reads at 15 px and keeps the island at 32. */
   @media (width < 700px) {
     :root {
+      --band-min: 88px;
       --text-reading: 0.9375rem;
       --text-reading--letter-spacing: -0.015em;
       --text-narration: 0.9375rem;

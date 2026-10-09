@@ -15,6 +15,7 @@ import { Glyph } from "../dot/Glyph.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
+import { Chip } from "../ui/Chip.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SentFiles } from "./Attachments.tsx";
@@ -45,6 +46,11 @@ const WINDOW = 200;
 // question or a field unfolding never moves the foot; the gap between the two heights covers the
 // task bar coming and going.
 const FOOT_FROM = 480;
+const SUGGESTIONS = [
+  "Tidy my Downloads folder",
+  "Fill in a spreadsheet from a PDF",
+  "Find a table for two on Friday",
+];
 const END_BELOW = 400;
 // A recovery card brought into view sits this far under the scroller's faded top edge.
 const REVEAL_MARGIN = 16;
@@ -301,6 +307,10 @@ export interface ConversationProps {
   // one. The composer stays mounted, so a draft survives.
   composer?: ReactNode;
   answer?: ReactNode;
+  // Another view of the task (Activity) laid over the thread, above the foot, so the composer
+  // stays put under both.
+  cover?: ReactNode;
+  covered?: boolean;
   onReplay?: () => void;
   // Opens an earlier task of the conversation in Replay.
   onReplayTask?: (sessionId: string) => void;
@@ -322,6 +332,8 @@ export function Conversation({
   error,
   composer,
   answer,
+  cover,
+  covered = false,
   onReplay,
   onReplayTask,
   computerReady = false,
@@ -502,13 +514,17 @@ export function Conversation({
     const inView = Math.max(0, Math.min(dockHost.offsetHeight, bottom - top));
     jump.current.style.setProperty("--thread-foot-shown", `${Math.round(inView)}px`);
   }, [dockHost]);
+  const coveredNow = useRef(covered);
+  coveredNow.current = covered;
   const placeDock = useCallback(() => {
     const column = body.current;
     if (!column || !foot.current || !end.current) return;
     const height = column.clientHeight;
     const under = dockHost.parentElement === foot.current;
     const target =
-      height >= FOOT_FROM || (under && height >= END_BELOW) ? foot.current : end.current;
+      coveredNow.current || height >= FOOT_FROM || (under && height >= END_BELOW)
+        ? foot.current
+        : end.current;
     // Moving an element takes the focus out of it, so the foot moves once the focus has left it.
     if (dockHost.parentElement !== target && !dockHost.contains(document.activeElement))
       target.append(dockHost);
@@ -538,6 +554,9 @@ export function Conversation({
       shown?.disconnect();
     };
   }, [placeDock, footShown, dockHost]);
+  // A cover keeps the foot under it, so the foot is placed again as one comes or goes.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: covered is read through its ref
+  useLayoutEffect(placeDock, [covered, placeDock]);
 
   // Whether the thread's last row is in view; below it there may only be the foot.
   const history = useRef<HTMLElement>(null);
@@ -611,11 +630,20 @@ export function Conversation({
     replayTask: onReplayTask && replayTask,
   };
   const empty = !shown.length && !liveWork;
+  // A suggestion is put in the composer as if typed, so it is read and checked the same way.
+  const suggest = (text: string) => {
+    const field = dockHost.querySelector("textarea");
+    if (!field || field.readOnly) return;
+    field.focus();
+    field.setRangeText(text, 0, field.value.length, "end");
+    field.dispatchEvent(new Event("input", { bubbles: true }));
+  };
   return (
-    <div className="thread-body" ref={body}>
+    <div className="thread-body" ref={body} data-covered={covered || undefined}>
       <ScrollArea
         ref={attach}
         className="thread-scroll"
+        inert={covered}
         fade="both"
         onScroll={() => {
           seeEnd();
@@ -667,12 +695,19 @@ export function Conversation({
             />
             {empty ? (
               <div className="thread-empty">
-                <h3>What would you like done?</h3>
+                <h3>What should we do?</h3>
                 <p>
                   {computerReady
-                    ? "Write a task below and dot does it on your computer."
-                    : "Turn on your computer, then write a task below."}
+                    ? "dot works on its own computer. Watch, step in or stop it at any time."
+                    : "Turn on your computer, then ask dot to do something."}
                 </p>
+                <div className="thread-suggestions">
+                  {SUGGESTIONS.map((text) => (
+                    <Chip key={text} variant="outline" onClick={() => suggest(text)}>
+                      {text}
+                    </Chip>
+                  ))}
+                </div>
               </div>
             ) : (
               rows.map((row, index) => (
@@ -702,11 +737,16 @@ export function Conversation({
           <div className="thread-end" ref={end} />
         </div>
       </ScrollArea>
+      {cover && (
+        <div className="thread-cover" inert={!covered}>
+          {cover}
+        </div>
+      )}
       <span
         className="thread-jump"
         ref={jump}
-        data-shown={jumpShown || undefined}
-        inert={!jumpShown}
+        data-shown={(jumpShown && !covered) || undefined}
+        inert={!jumpShown || covered}
       >
         <Button
           size="sm"
@@ -730,7 +770,7 @@ export function Conversation({
       <div className="thread-foot" ref={foot} />
       {createPortal(
         <Outbox.Provider value={outbox}>
-          <Collapse open={!!liveWork} className="thread-live">
+          <Collapse open={!!liveWork && !covered} className="thread-live">
             {footWork && (
               <LiveWorkLine
                 steps={footWork.steps}

@@ -56,12 +56,8 @@ export interface ComposerProps {
   keysOpen: boolean;
   receiveKey: KeyIntake["receive"];
   configured?: boolean;
-  // The main model's name, offered on a new task as the way to change it.
-  model?: string;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
-  // The running task's Stop, while there is one.
-  stop?: { run(): void; busy: boolean; enabled: boolean };
 }
 export interface Delivery {
   readonly id: number;
@@ -733,7 +729,7 @@ export function Composer(props: ComposerProps) {
         </Collapse>
         <ComposerField
           label={newConversation ? "New task" : "Message"}
-          placeholder={newConversation ? "Ask dot to do something…" : "Message dot…"}
+          placeholder={newConversation ? "Ask dot to do something" : "Message dot"}
           unavailable={!!unavailable}
           describedBy={guard.notice ? keyNotice : undefined}
           events={events}
@@ -747,45 +743,11 @@ export function Composer(props: ComposerProps) {
             disabledReason={attachReason}
           />
           <div className="composer-hint">
-            {mode === "new" && props.configured !== false && props.model ? (
-              <Button
-                variant="quiet"
-                size="sm"
-                className="composer-model"
-                aria-label={`Model: ${props.model}. Change in Settings`}
-                onClick={(event) => props.onSettings?.(event.currentTarget)}
-              >
-                <span className="composer-model-name">{props.model}</span>
-                <Icon name="chevron-down" size={12} />
-              </Button>
-            ) : (
-              note && <span className="composer-note">{note}</span>
-            )}
+            {note && <span className="composer-note">{note}</span>}
           </div>
           <Pop shown={near}>
             {near && (
               <span className="composer-count num">{`${(LIMIT - text.length).toLocaleString()} left`}</span>
-            )}
-          </Pop>
-          <Pop shown={!!props.stop}>
-            {props.stop && (
-              <IconButton
-                className="composer-stop"
-                variant="filled"
-                round
-                size={touch ? 32 : 28}
-                icon="stop"
-                label="Stop task"
-                kbd={["Mod", "Shift", "."]}
-                disabledReason={
-                  props.stop.busy
-                    ? "Stopping…"
-                    : props.stop.enabled
-                      ? undefined
-                      : "Reconnecting to the task…"
-                }
-                onClick={props.stop.run}
-              />
             )}
           </Pop>
           <Pop shown={choosing}>
@@ -836,7 +798,7 @@ export function Composer(props: ComposerProps) {
               type="submit"
               className="composer-send"
               variant="primary"
-              size={touch ? 32 : 28}
+              size={32}
               icon="arrow-up"
               label={sendLabel}
               kbd={touch ? undefined : ["Enter"]}

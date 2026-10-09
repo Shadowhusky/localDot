@@ -660,20 +660,6 @@ describe("the composer's controls", () => {
       .split(" ")
       .map((id) => document.getElementById(id)?.textContent ?? "")
       .join(" ");
-  it("offers the task's Stop beside Send only while there is one, and says when it is stopping", () => {
-    const run = vi.fn();
-    const f = setup(undefined, { stop: { run, busy: false, enabled: true } });
-    fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
-    expect(run).toHaveBeenCalledOnce();
-    f.update({ stop: { run, busy: true, enabled: false } });
-    const stop = screen.getByRole("button", { name: "Stop task" });
-    expect(stop.getAttribute("aria-disabled")).toBe("true");
-    fireEvent.click(stop);
-    expect(run).toHaveBeenCalledOnce();
-    f.update({ stop: undefined });
-    expect(screen.queryByRole("button", { name: "Stop task" })).toBeNull();
-    expect(f.requests).toEqual([]);
-  });
   it("counts what is left only near the limit, where typing stops", () => {
     const f = setup();
     expect(f.field.maxLength).toBe(8000);
@@ -717,35 +703,6 @@ describe("the composer's controls", () => {
       "Enter",
     );
   });
-  it("lets Stop shrink away before it goes", async () => {
-    const finished = Promise.withResolvers<void>();
-    Object.defineProperty(Element.prototype, "getAnimations", {
-      configurable: true,
-      value(this: Element) {
-        return this.matches("[data-leaving]")
-          ? [
-              {
-                finished: finished.promise,
-                effect: { getComputedTiming: () => ({ endTime: 150 }) },
-              },
-            ]
-          : [];
-      },
-    });
-    try {
-      const run = vi.fn();
-      const f = setup(undefined, { stop: { run, busy: false, enabled: true } });
-      f.update({ stop: undefined });
-      const leaving = f.container.querySelector(".composer-stop")?.closest(".composer-pop");
-      expect(leaving?.hasAttribute("data-leaving")).toBe(true);
-      expect(leaving?.hasAttribute("inert")).toBe(true);
-      await act(async () => finished.resolve());
-      expect(f.container.querySelector(".composer-stop")).toBeNull();
-      expect(run).not.toHaveBeenCalled();
-    } finally {
-      Reflect.deleteProperty(Element.prototype, "getAnimations");
-    }
-  });
   it("sends during a takeover with no files, and says when files can be added", async () => {
     const f = setup(undefined, {
       agent: { ...agent, model: { ...agent.model, pendingTakeover: otherSession } },
@@ -778,7 +735,6 @@ describe("the composer's controls", () => {
       cell: null,
       known: true,
       configured: true,
-      model: "Claude Sonnet 5.5",
       agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
     });
     f.input("Summarise the report");
@@ -792,20 +748,16 @@ describe("the composer's controls", () => {
     expect(f.field.value).toBe("Summarise the report");
     expect(f.requests).toEqual([]);
   });
-  it("names the main model on a new task and opens Settings from it", () => {
-    const onSettings = vi.fn();
+  it("asks for a task as a prompt, with no model or Stop of its own", () => {
     setup(undefined, {
       configured: true,
-      model: "Claude Sonnet 5.5",
-      onSettings,
       agent: { ...agent, sessionId: null, snapshot: null, fresh: false },
     });
     expect(screen.getByRole("textbox", { name: "New task" }).getAttribute("placeholder")).toBe(
-      "Ask dot to do something…",
+      "Ask dot to do something",
     );
-    const chip = screen.getByRole("button", { name: /^Model: Claude Sonnet 5\.5/ });
-    fireEvent.click(chip);
-    expect(onSettings).toHaveBeenCalledExactlyOnceWith(chip);
+    expect(screen.queryByRole("button", { name: /^Model:/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Stop/ })).toBeNull();
   });
   it("invites a message that continues the conversation while an ended task is on show", async () => {
     const f = setup(
@@ -820,7 +772,7 @@ describe("the composer's controls", () => {
       },
     );
     expect(screen.getByRole("textbox", { name: "Message" }).getAttribute("placeholder")).toBe(
-      "Message dot…",
+      "Message dot",
     );
     f.input("Now make it blue");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send" })));

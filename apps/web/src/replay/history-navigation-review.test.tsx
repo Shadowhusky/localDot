@@ -98,8 +98,8 @@ function fixture(count = 2) {
 }
 async function open(f: ReturnType<typeof fixture>) {
   render(<App fetchImpl={f.fetchImpl} />);
-  const button = screen.getByRole("button", { name: "Replay" });
-  await waitFor(() => expect(button.hasAttribute("disabled")).toBe(false));
+  const button = screen.getByRole("radio", { name: "Replay" });
+  await waitFor(() => expect(button.hasAttribute("aria-disabled")).toBe(false));
   fireEvent.click(button);
   await screen.findByRole("heading", { name: "Newest notes" });
   return button;
@@ -136,7 +136,7 @@ async function travel(delta: number) {
   return replayParam();
 }
 async function watch() {
-  fireEvent.click(screen.getByRole("button", { name: "Watch" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Watch" }));
   await waitFor(() => expect(window.location.search).toBe(""));
 }
 function enterApp() {
@@ -183,7 +183,7 @@ it("keeps remaining history reachable after deleting the selected newest session
   expect(f.deleted).toEqual([f.cards[0]?.id]);
   expect(screen.queryByRole("main", { name: "Replay" })).toBeNull();
   expect(
-    button.hasAttribute("disabled"),
+    button.hasAttribute("aria-disabled"),
     "remaining older recording must still be reachable from Replay",
   ).toBe(false);
   fireEvent.click(button);
@@ -197,12 +197,12 @@ it("deleting an older unselected session leaves the selected newest replay avail
   await remove("Older notes");
   expect(f.deleted).toEqual([f.cards[1]?.id]);
   expect(new URLSearchParams(window.location.search).get("replay")).toBe(f.cards[0]?.id);
-  expect(screen.getByRole("button", { name: "Replay" }).hasAttribute("disabled")).toBe(false);
+  expect(screen.getByRole("radio", { name: "Replay" }).hasAttribute("aria-disabled")).toBe(false);
 });
 it("deleting the final recording legitimately disables Replay", async () => {
   const f = fixture(1);
   const button = await open(f);
   await remove("Newest notes");
   expect(f.deleted).toHaveLength(1);
-  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(button.hasAttribute("aria-disabled")).toBe(true);
 });

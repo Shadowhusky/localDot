@@ -296,7 +296,7 @@ export function ChatgptPanel({ account }: { account: ChatgptControls }) {
         onClose={() => setConfirm(null)}
         anchor={more}
         title={confirm === "logout" ? "Sign out of ChatGPT?" : "Refresh this account?"}
-        description="This pauses current ChatGPT work. When the account is ready, use Resume task to continue."
+        description="This pauses current ChatGPT work. When the account is ready, press Continue on the computer."
       >
         <Button onClick={() => setConfirm(null)}>Keep account</Button>
         <Button
