@@ -89,9 +89,12 @@ export function browserGatewayDevice(options: {
         owner,
       );
     },
-    find: (request) => {
+    find: ({ node, name, role, app }) => {
       const owner = scope();
-      return hit(client.lookup(permit, tabId, { kind: "find", ...request }, owner), owner);
+      if (node !== undefined)
+        return hit(client.lookup(permit, tabId, { kind: "node", node, role, name }, owner), owner);
+      if (name === undefined) return Promise.reject(new BrowserClientError("request"));
+      return hit(client.lookup(permit, tabId, { kind: "find", name, role, app }, owner), owner);
     },
     input: async (request, signal, onPress) => {
       const owner = scope(signal);

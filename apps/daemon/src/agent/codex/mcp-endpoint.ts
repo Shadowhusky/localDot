@@ -385,7 +385,7 @@ export async function openMcpEndpoint(input: McpEndpointInput): Promise<McpEndpo
           if (record) record.dispatched = true;
           let toolInput = args;
           if (
-            name === "computer" &&
+            (name === "computer" || name === "browser_act") &&
             typeof args === "object" &&
             args !== null &&
             !Array.isArray(args)

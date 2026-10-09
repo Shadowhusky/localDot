@@ -1,10 +1,13 @@
 import {
   clipText,
+  type ElementsRequest,
+  type ElementsResult,
   type FindRequest,
   type HitTestResult,
   type Point,
   type Rect,
   type Target,
+  type WireElement,
 } from "@localdot/protocol";
 import type { XHelper } from "../x/helper.ts";
 import type { Screenshots } from "./capture.ts";
@@ -204,9 +207,32 @@ export async function hitTest(
   return done({ ...target, point });
 }
 
-export async function findTarget(deps: PerceptionDeps, req: FindRequest): Promise<HitTestResult> {
+// The front Chromium window: the page browser_read reads and browser_act acts on.
+function frontChromium(windows: HelperWindow[]): HelperWindow | undefined {
+  return windows.find((w) => appToolkit(w.cls) === "chromium" && !w.overrideRedirect);
+}
+
+// A page element by its node, only while it keeps the role and name it was listed with.
+async function nodeTarget(
+  deps: PerceptionDeps,
+  req: FindRequest & { node: number },
+): Promise<HitTestResult> {
   const t0 = performance.now();
-  const wanted = req.name.toLowerCase();
+  const win = frontChromium(await listWindows(deps.x));
+  const target = win && deps.cdp ? await deps.cdp.node(win, req.node).catch(() => null) : null;
+  const same =
+    target &&
+    (req.role === undefined || (target.role ?? "") === req.role) &&
+    (req.name === undefined || (target.name ?? "") === req.name);
+  return same && win
+    ? { target, window: win.id, windowFrame: frameOf(win), ms: Math.round(performance.now() - t0) }
+    : { target: null, window: null, ms: Math.round(performance.now() - t0) };
+}
+
+export async function findTarget(deps: PerceptionDeps, req: FindRequest): Promise<HitTestResult> {
+  if (req.node !== undefined) return nodeTarget(deps, { ...req, node: req.node });
+  const t0 = performance.now();
+  const wanted = (req.name ?? "").toLowerCase();
   const { windows, generation } = await windowStack(deps.x);
   const searched = windows.filter(
     (w) => !DECOR_CLASSES.has(w.cls) && (!req.app || w.cls.toLowerCase() === req.app.toLowerCase()),
@@ -235,4 +261,78 @@ export async function findTarget(deps: PerceptionDeps, req: FindRequest): Promis
     if (match) return found(elementTarget(win, match, q), win);
   }
   return { target: null, window: null, ms: Math.round(performance.now() - t0) };
+}
+
+// How well a name answers a search: whole, from its start, from a word's start, or inside it.
+function rank(name: string, wanted: string): number | undefined {
+  const lower = name.toLowerCase();
+  if (lower === wanted) return 0;
+  if (lower.startsWith(wanted)) return 1;
+  const at = lower.indexOf(wanted);
+  if (at < 0) return undefined;
+  return /[\p{L}\p{N}]/u.test(lower[at - 1] ?? "") ? 3 : 2;
+}
+
+// The controls whose names contain the text, best matches first and then top window first: the
+// apps' own accessibility trees, and in a Chromium window its page's interactive elements too.
+export async function findElements(
+  deps: PerceptionDeps,
+  req: ElementsRequest,
+): Promise<ElementsResult> {
+  const t0 = performance.now();
+  const limit = req.limit ?? 30;
+  const wanted = (req.text ?? "").toLowerCase();
+  const role = req.role?.toLowerCase();
+  const { windows, generation } = await windowStack(deps.x);
+  const found: { element: WireElement; rank: number }[] = [];
+  const consider = (element: WireElement) => {
+    const r = rank(element.name ?? "", wanted);
+    if (r === undefined || (role && !(element.role ?? "").toLowerCase().includes(role))) return;
+    found.push({ element, rank: r });
+  };
+  let cut = false;
+  for (const win of windows.filter((w) => !DECOR_CLASSES.has(w.cls))) {
+    const left = FIND_BUDGET_MS - (performance.now() - t0);
+    if (left <= 0) {
+      cut = true;
+      break;
+    }
+    // A Chromium window's page is CDP's; its tree's page part is in other units, so only the
+    // browser's own controls above the page are taken from the tree, and nothing without CDP.
+    let above = Number.POSITIVE_INFINITY;
+    if (appToolkit(win.cls) === "chromium" && !win.overrideRedirect) {
+      const page = deps.cdp ? await deps.cdp.elements(win, 300).catch(() => undefined) : undefined;
+      if (!page) continue;
+      for (const element of page.elements) consider(element);
+      above = page.origin.y;
+    }
+    if (!deps.native) continue;
+    const q = await nativeQuery(deps, win, windows);
+    const tree = await deps.native.tree(win, q, Math.min(TREE_BUDGET_MS, left), generation);
+    if ("unknown" in tree) {
+      cut = true;
+      continue;
+    }
+    for (const el of tree.elements) {
+      const target = elementTarget(win, el, q);
+      if (target.point.y < above) consider(target);
+    }
+  }
+  const best = found.sort((a, b) => a.rank - b.rank).map((f) => f.element);
+  return { elements: best.slice(0, limit), truncated: cut || best.length > limit };
+}
+
+// The front Chromium page's interactive elements in view, as browser_read lists them.
+export async function pageElements(
+  deps: PerceptionDeps,
+  req: ElementsRequest,
+): Promise<ElementsResult> {
+  const win = frontChromium(await listWindows(deps.x));
+  if (!win || !deps.cdp) return { elements: [], truncated: false };
+  const page = await deps.cdp.elements(win, req.limit ?? 30);
+  return {
+    elements: page.elements,
+    ...(page.url ? { url: page.url } : {}),
+    truncated: page.truncated,
+  };
 }

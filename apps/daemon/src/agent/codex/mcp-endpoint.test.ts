@@ -217,6 +217,18 @@ describe("private Codex MCP capability", () => {
     ]);
     expect(f.results).toEqual(["computer", "computer"]);
   });
+  it("bases browser_act's coordinate on the turn's screenshot, whatever the caller says", async () => {
+    const f = await fixture();
+    await call(f.c, "browser_act", {
+      action: "click",
+      ref: "e4",
+      coordinate: [100, 200],
+      basedOn: ulid(),
+    });
+    expect(f.calls.map((c) => c.input)).toEqual([
+      { action: "click", ref: "e4", coordinate: [100, 200], basedOn: f.frame },
+    ]);
+  });
   it("dispatches unknown names through the same daemon policy and generation context", async () => {
     let context: unknown;
     const f = await fixture({

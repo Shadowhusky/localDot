@@ -3,6 +3,7 @@ import type {
   AskFieldRecord,
   AskFieldValue,
   AskRequestField,
+  PageElement,
   PauseSnapshot,
   RuleChange,
 } from "@localdot/protocol";
@@ -146,6 +147,8 @@ export class AgentSession {
   boot: BootConfig | undefined;
   toolToken: string | undefined;
   lastFrameId: string | undefined;
+  // The elements the last browser_read listed, by ref, on the screen it read.
+  pageRefs: { cellId: string; elements: ReadonlyMap<string, PageElement> } | undefined;
   tainted = false;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];

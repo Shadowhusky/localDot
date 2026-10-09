@@ -24,7 +24,7 @@ export interface ToolDeps {
   desktop(
     cellId: string,
   ):
-    | Pick<
+    | (Pick<
         DesktopdTools,
         | "shell"
         | "readFile"
@@ -34,13 +34,14 @@ export interface ToolDeps {
         | "fetchFile"
         | "browserRead"
         | "browserNavigate"
-      >
+      > &
+        Partial<Pick<DesktopdTools, "elements">>)
     | undefined;
   launcher(cellId: string): Pick<DesktopdClient, "launch"> | undefined;
   // The desktop's input device while its computer takes input: where a secret answer is typed
   // when the session has no screen controller.
   device?(cellId: string): NativeDevice | undefined;
-  png: Pick<FramePng, "png">;
+  png: Pick<FramePng, "png"> & Partial<Pick<FramePng, "same">>;
   memory: Pick<MemoryStore, "apply">;
   // Where a done task's files are kept for the result card: <home>/sessions/<id>/out/<name>.
   saveOutput(

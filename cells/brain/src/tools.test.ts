@@ -6,7 +6,7 @@ import { binding, bootConfig } from "./testing/scripted.ts";
 import { toolSet } from "./tools.ts";
 
 describe("the model's advertised tools and instructions", () => {
-  it("exposes exactly twelve daemon-dispatched tools with no execute functions", () => {
+  it("exposes exactly fourteen daemon-dispatched tools with no execute functions", () => {
     const tools = toolSet(binding());
     expect(Object.keys(tools).sort()).toEqual(
       [
@@ -15,6 +15,8 @@ describe("the model's advertised tools and instructions", () => {
         "files",
         "browser_read",
         "browser_upload",
+        "browser_act",
+        "find",
         "browser_navigate",
         "switch_screen",
         "update_plan",
@@ -44,6 +46,19 @@ describe("the model's advertised tools and instructions", () => {
       expect(description, action).toContain(action);
     for (const field of ["path", "button", "start_coordinate", "modifier"])
       expect(description, field).toContain(field);
+  });
+  it("asks for fewer turns with the tools the model has", () => {
+    const prompt = (over: Parameters<typeof binding>[0]) =>
+      systemPrompt(bootConfig(), binding(over), [], new Date("2026-10-09T00:00:00Z"));
+    expect(prompt({ computer: "generic" })).toContain("into one computer batch");
+    expect(prompt({ computer: "anthropic-toolset" })).toContain("several computer calls");
+    for (const text of [prompt({ computer: "generic" }), prompt({ computer: "anthropic-toolset" })])
+      expect(text).toContain("act on its elements by ref with browser_act");
+    const blind = prompt({ vision: false });
+    expect(blind).toContain("act on its elements by ref with browser_act");
+    expect(blind).not.toContain("find locates");
+    expect(toolSet(binding({ vision: false })).find).toBeUndefined();
+    expect(toolSet(binding({ vision: false })).browser_act).toBeDefined();
   });
   it("does not label model-written memory as user instructions or allow it to close its delimiter", () => {
     const prompt = systemPrompt(

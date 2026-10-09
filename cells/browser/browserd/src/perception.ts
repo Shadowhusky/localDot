@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
-import type { BrowserReadResult, Target } from "@localdot/protocol";
+import {
+  type BrowserReadResult,
+  checkedOf,
+  type PageElement,
+  type Target,
+} from "@localdot/protocol";
 import { z as schema } from "zod";
 import type { BrowserCaptureMask, BrowserMaskRect } from "./capture-mask.ts";
 import type { BrowserGeometrySnapshot } from "./geometry.ts";
@@ -81,6 +86,23 @@ const roles = new Set([
   "listitem",
 ]);
 
+// What a person can click, type into or choose: listed with refs when the page is read.
+const interactive = new Set([
+  "button",
+  "link",
+  "textbox",
+  "searchbox",
+  "combobox",
+  "checkbox",
+  "radio",
+  "switch",
+  "slider",
+  "tab",
+  "menuitem",
+  "option",
+]);
+const MAX_ELEMENTS = 300;
+
 export class BrowserPerceptionError extends Error {
   constructor(readonly reason: "metadata" | "secret" | "geometry") {
     super(`Browser perception refused: ${reason}`);
@@ -94,6 +116,8 @@ export interface BrowserProjection {
   readonly focused: Target | null;
   readonly page?: BrowserReadResult;
   targetForNode(backendNodeId: number): Target | null;
+  // The target listed for exactly this node.
+  targetOf(backendNodeId: number): Target | null;
 }
 
 function text(value: string): string {
@@ -409,6 +433,7 @@ export function projectBrowser(
         : undefined;
     const targets: Target[] = [];
     const projected = new Map<number, Target>();
+    const elements: PageElement[] = [];
     let focused: Target | null = null;
     const seen = new Set<number>();
     for (const node of accessibility.nodes) {
@@ -454,6 +479,24 @@ export function projectBrowser(
       const target = targets.at(-1);
       if (!target) throw new BrowserPerceptionError("metadata");
       projected.set(nodeId, target);
+      if (page && interactive.has(role) && elements.length < MAX_ELEMENTS && target.bbox) {
+        const property = (key: string) =>
+          node.properties?.find((item) => item.name === key)?.value.value;
+        const checked = checkedOf(property("checked"));
+        const expanded = property("expanded");
+        elements.push(
+          Object.freeze({
+            ref: `e${nodeId}`,
+            role: target.role ?? role,
+            name: target.name ?? "",
+            box: target.bbox,
+            ...(checked ? { checked } : {}),
+            ...(property("disabled") === true ? { disabled: true as const } : {}),
+            ...(typeof expanded === "boolean" ? { expanded } : {}),
+            ...(isSecret ? { secret: true as const } : {}),
+          }),
+        );
+      }
       if (
         node.properties?.some(
           (property) => property.name === "focused" && property.value.value === true,
@@ -497,7 +540,8 @@ export function projectBrowser(
       signature,
       focused,
       targetForNode,
-      ...(page ? { page } : {}),
+      targetOf: (nodeId: number) => projected.get(nodeId) ?? null,
+      ...(page ? { page: Object.freeze({ ...page, elements }) } : {}),
     });
   } catch (error) {
     if (error instanceof BrowserPerceptionError) throw error;

@@ -3,6 +3,8 @@ import {
   BootConfig,
   type BrainEvent,
   BrainEvents,
+  ComputerAction,
+  computerWorkMs,
   InboxReply,
   MODEL_SCREEN,
   PauseSnapshot,
@@ -32,6 +34,7 @@ const WAITS_ON_USER = new Set([
   "browser_read",
   "browser_navigate",
   "browser_upload",
+  "browser_act",
   "remember",
   "done",
 ]);
@@ -228,6 +231,10 @@ export class ToolClient {
   tool(name: string, callId: string, input: unknown, signal?: AbortSignal): Promise<ToolResult> {
     let timeoutMs: number | undefined = TOOL_WORK_MS;
     if (name === "shell") timeoutMs = ((ShellInput.parse(input).timeout_sec ?? 120) + 10) * 1000;
+    else if (name === "computer") {
+      const action = ComputerAction.safeParse(input);
+      if (action.success) timeoutMs = computerWorkMs(action.data);
+    }
     // The user has thirty minutes; a secret answer is then typed into its field.
     else if (name === "ask_user") timeoutMs = 31 * 60_000;
     else if (name === "request_takeover") timeoutMs = undefined;

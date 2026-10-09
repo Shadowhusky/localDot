@@ -1,5 +1,7 @@
 import {
+  BrowserAction,
   ComputerAction,
+  MAX_BATCH_ACTIONS,
   MAX_DRAG_MS,
   MODEL_SCREEN,
   TOOL_INPUTS,
@@ -13,6 +15,7 @@ import { z } from "zod";
 // `computer` takes localDot's provider-neutral ComputerAction in model pixels; its `basedOn` is not
 // the model's to give (the endpoint uses the full-frame basis explicitly submitted for this turn).
 export const CodexComputerInput = ComputerAction.omit({ basedOn: true });
+export const CodexBrowserActInput = BrowserAction.omit({ basedOn: true });
 
 const W = MODEL_SCREEN.width;
 const H = MODEL_SCREEN.height;
@@ -31,8 +34,12 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
     "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
     "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
-    "(region {x, y, w, h}, returns that part enlarged), cursor_position. " +
-    "Each action can return a new screenshot. Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.",
+    "(region {x, y, w, h}, returns that part enlarged), cursor_position, batch (steps: up to " +
+    `${MAX_BATCH_ACTIONS} of the actions above but screenshot, zoom and cursor_position, run in order with one ` +
+    "screenshot at the end; for predictable sequences such as click a field, type, press Tab, type, press " +
+    "Return; it stops at a step that fails, whose target changed, or that needs the user's approval, and " +
+    "says which). Each action can return a new screenshot; when the screen did not change, it says so " +
+    "instead of sending the same image. Use zoom to read small details. Actions in this turn still use its initial full-frame basis. If the screen changed, localDot cancels this turn before any retry.",
   shell:
     "Run one bash command in the virtual computer's terminal, as its user, in their home. Returns the " +
     "exit status and the end of the output.",
@@ -45,6 +52,15 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Open an http or https page. Public sites open in the web browser, which keeps the user's sign-ins; localhost and local addresses open in the desktop's Chromium. The screen switches to match.",
   browser_upload:
     "Assign 1–10 desktop-home files (100 MiB total maximum) to the currently open file chooser in the web browser, after explicit approval of the exact files and receiving page. This does not submit the page's form. Never retry an uncertain upload automatically.",
+  browser_act:
+    "Act on an element of the page that browser_read listed, by its ref (such as e12): click, fill " +
+    "(text; submit presses Return after), select (text: the option to choose), check, uncheck, press " +
+    '(text: keys such as "Return", after clicking the element), or scroll (scroll_direction, scroll_amount). ' +
+    "The element is found again wherever it is now; give coordinate {x, y} too as a fallback for when the ref " +
+    "is stale. Password fields are never filled: ask with an ask_user secret field.",
+  find:
+    "Find the desktop's controls whose names contain text (role optional, such as push button, menu item or " +
+    "check box), in every window top first. Returns each one's role, name, window and the point to click.",
   switch_screen:
     "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. When a site needs the user to sign in, ask for the details with ask_user fields. Request a fresh screenshot after switching; shell and files remain on the desktop.",
   update_plan:
@@ -87,7 +103,13 @@ export function codexTools(): McpToolDescriptor[] {
   return TOOL_NAMES.map((name) => ({
     name,
     description: CODEX_TOOL_DESCRIPTIONS[name],
-    inputSchema: jsonSchema(name === "computer" ? CodexComputerInput : TOOL_INPUTS[name]),
+    inputSchema: jsonSchema(
+      name === "computer"
+        ? CodexComputerInput
+        : name === "browser_act"
+          ? CodexBrowserActInput
+          : TOOL_INPUTS[name],
+    ),
   }));
 }
 

@@ -172,9 +172,50 @@ export const HitTestResult = z.object({
 });
 export type HitTestResult = z.infer<typeof HitTestResult>;
 
+// By name, or a web page's element by its DevTools node as browser_read listed it, whose role and
+// name must still be the ones listed.
 export const FindRequest = z.object({
-  name: z.string().min(1).max(256),
+  name: z.string().min(1).max(256).optional(),
+  node: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
   role: z.string().max(64).optional(),
   app: z.string().max(128).optional(),
 });
 export type FindRequest = z.infer<typeof FindRequest>;
+
+// What an element shows besides its name: a field's value, a box's tick, a closed or open list.
+export const ElementState = z.object({
+  value: z.string().max(200).optional(),
+  checked: z.enum(["true", "false", "mixed"]).optional(),
+  disabled: z.literal(true).optional(),
+  expanded: z.boolean().optional(),
+});
+export type ElementState = z.infer<typeof ElementState>;
+
+// An accessibility tree's `checked` property as an element's state.
+export function checkedOf(value: unknown): ElementState["checked"] {
+  if (value === true || value === "true") return "true";
+  if (value === false || value === "false") return "false";
+  return value === "mixed" ? "mixed" : undefined;
+}
+
+// The controls whose names contain `text` in every window, top first; or with `page`, the
+// interactive elements of the page in the front Chromium window, each with its DevTools node.
+export const ElementsRequest = z.object({
+  text: z.string().min(1).max(200).optional(),
+  role: z.string().min(1).max(64).optional(),
+  page: z.boolean().optional(),
+  limit: z.number().int().min(1).max(300).default(30),
+});
+export type ElementsRequest = z.input<typeof ElementsRequest>;
+export const WireElement = WireTarget.extend({
+  node: z.number().int().positive().max(Number.MAX_SAFE_INTEGER).optional(),
+  state: ElementState.optional(),
+});
+export type WireElement = z.infer<typeof WireElement>;
+export const ElementsResult = z.object({
+  elements: z.array(WireElement).max(300),
+  // The page's address, with `page`.
+  url: z.string().optional(),
+  truncated: z.boolean(),
+});
+export type ElementsResult = z.infer<typeof ElementsResult>;

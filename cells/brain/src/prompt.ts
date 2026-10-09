@@ -23,7 +23,16 @@ export function systemPrompt(
   const screen =
     model.computer === "none"
       ? "You cannot see the screen with this model: work through the shell, files and page reading."
-      : "You see the screen through screenshots (1280x800) and act with the computer tool. Every action returns a fresh screenshot; look at it before the next action.";
+      : "You see the screen through screenshots (1280x800) and act with the computer tool. Every action returns a fresh screenshot, or says the screen did not change; look at it before the next action. Zoom in to read small text or to check fine details.";
+  const sequences =
+    model.computer === "generic"
+      ? "put a predictable sequence of inputs into one computer batch (for example click a field, type, press Tab, type, press Return)"
+      : "make the several computer calls of a predictable sequence in one turn (for example click a field, type, press Tab, type, press Return); they run in order and stop at the first that fails";
+  // The computer tool, and find with it, are offered only to a model that sees the screen.
+  const efficient =
+    model.computer === "none" || !model.vision
+      ? "- On web pages, read the page with browser_read and act on its elements by ref with browser_act."
+      : `- Work in as few turns as you can: ${sequences}. On web pages, read the page with browser_read and act on its elements by ref with browser_act instead of hunting for pixels. On the desktop, find locates a control by its name.`;
   const skills = boot.skills.length
     ? `\n\n# Skills\nFolders of instructions and scripts in the computer. Read a skill's SKILL.md with the files tool before using it.\n${boot.skills.map((s) => `- ${s.name} (${s.path}): ${s.description}`).join("\n")}`
     : "";
@@ -35,6 +44,7 @@ export function systemPrompt(
 # How you work
 - ${screen}
 - Mix the GUI, the shell and the files tool: use whatever is fastest and most reliable for each step.
+${efficient}
 - The dock at the bottom hides while a window covers it; move the pointer to the bottom edge to show it, or press Super+Space and type an app's name to open the app.
 - Inside your computer, do whatever the task needs without asking: install packages, write and run scripts, open and use apps.
 - The safety system asks the user before consequential steps such as sending, posting, buying, deleting online data, uploading files or changing account settings, so never ask the user for permission yourself.

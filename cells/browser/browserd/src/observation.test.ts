@@ -278,7 +278,7 @@ describe("admitted full-page reading", () => {
     async (scale) => {
       const f = await setup(scale);
       readingPage(f);
-      const page = await f.observation.read(permit, "tab", {}, signal());
+      const { elements, ...page } = await f.observation.read(permit, "tab", {}, signal());
       expect(page).toEqual({
         url: "https://example.test/article",
         title: "Public article",
@@ -286,6 +286,14 @@ describe("admitted full-page reading", () => {
         outline: "button Continue",
         truncated: false,
       });
+      // The controls in view by ref, fields by their kind alone and the password box marked.
+      expect(elements?.map(({ box: _box, ...element }) => element)).toEqual([
+        { ref: "e13", role: "button", name: "Continue" },
+        { ref: "e14", role: "textbox", name: "Input field" },
+        { ref: "e15", role: "textbox", name: "Input field" },
+        { ref: "e17", role: "textbox", name: "Protected field", secret: true },
+      ]);
+      expect(JSON.stringify(elements)).not.toContain(privateCanary);
       expect(JSON.stringify(page)).not.toContain(privateCanary);
       expect(f.capture.masked).not.toHaveBeenCalled();
       expect(f.nativeCommand).not.toHaveBeenCalled();
@@ -578,6 +586,24 @@ describe("leased browser observation", () => {
         )
       ).target,
     ).toBeNull();
+  });
+  it("finds a listed element by its node only while it keeps its listed role and name", async () => {
+    const f = await setup();
+    const lookup = (request: Record<string, unknown>) =>
+      f.observation.lookup(permit, "tab", { kind: "node", ...request }, f.abort.signal);
+    expect((await lookup({ node: 13, role: "button", name: "Continue" })).target).toMatchObject({
+      role: "button",
+      name: "Continue",
+    });
+    expect((await lookup({ node: 13, role: "button", name: "Cancel" })).target).toBeNull();
+    expect((await lookup({ node: 13, role: "link" })).target).toBeNull();
+    // A field is listed by its kind alone; the node still finds it.
+    expect((await lookup({ node: 14, role: "textbox", name: "Input field" })).target).toMatchObject(
+      { name: "Input field" },
+    );
+    expect((await lookup({ node: 999 })).target).toBeNull();
+    await expect(lookup({ node: -1 })).rejects.toThrow();
+    await f.observation.close();
   });
   it("reads actual accessibility focus and invalidates a focus change during the query", async () => {
     const f = await setup();

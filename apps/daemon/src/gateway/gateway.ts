@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import {
   clipText,
+  type FindRequest,
   type Input,
   type InputResult,
   microsToMs,
@@ -61,13 +62,15 @@ const UNKNOWN_TARGET_PX = 24;
 const MIN_TARGET_PX = 16;
 export const CHANGED_WHILE_DECIDING =
   "The screen changed while the user was deciding. Look again before acting.";
+// A page element found by its node is no longer the one listed: gone, off screen or renamed.
+export const ELEMENT_GONE = "that element is no longer on the page as it was read";
 
 export type GuiAction =
   | {
       verb: "click";
       label?: string;
       point?: Point;
-      find?: { name: string; role?: string; app?: string };
+      find?: FindRequest;
       button?: "left" | "right" | "middle";
       count?: 1 | 2 | 3;
       // Modifier keys held down through the click.
@@ -89,6 +92,7 @@ export type GuiAction =
       verb: "scroll";
       label?: string;
       point?: Point;
+      find?: FindRequest;
       dx: number;
       dy: number;
       mods?: string[];
@@ -583,10 +587,15 @@ export class ActionGateway {
     const cursor = this.#cursor.get(ctx.cellId) ?? centre;
     let found: Lookup | undefined;
     let point: Point;
-    if (action.verb === "click" && action.find) {
+    if ((action.verb === "click" || action.verb === "scroll") && action.find) {
       found = await d.client.find(action.find);
       if (!found.target)
-        throw new Cancelled("preflight", `no element named ${JSON.stringify(action.find.name)}`);
+        throw new Cancelled(
+          "preflight",
+          action.find.node === undefined
+            ? `no element named ${JSON.stringify(action.find.name)}`
+            : ELEMENT_GONE,
+        );
       point = found.target.point;
     } else if (action.point) {
       point = toDevice(action.point, { ...MODEL_SCREEN, scale });

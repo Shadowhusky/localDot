@@ -21,11 +21,13 @@ import {
   DESKTOP_FALLBACK,
   opensInWebBrowser,
 } from "./browser.ts";
+import { browserActTool } from "./browser-act.ts";
 import { browserUploadTool } from "./browser-upload.ts";
 import { computerTool } from "./computer.ts";
 import { append, fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 import { doneTool } from "./done.ts";
 import { filesTool } from "./files.ts";
+import { findTool } from "./find.ts";
 import { updatePlanTool } from "./plan.ts";
 import { rememberTool } from "./remember.ts";
 import { switchScreenTool } from "./screen.ts";
@@ -52,6 +54,8 @@ const STEP_KIND: Record<ToolName, string> = {
   browser_read: "browser",
   browser_navigate: "browser",
   browser_upload: "browser",
+  browser_act: "gui",
+  find: "gui",
   switch_screen: "browser",
   update_plan: "think",
   ask_user: "ask",
@@ -183,8 +187,11 @@ async function dispatchAdmitted(
         status: 400,
         result: fail(`Invalid ${name} input: ${redact(clipText(parsed.error.message, 1000))}`),
       };
+    // A batch's every step is an action.
+    const steps =
+      name === "computer" ? ((parsed.data as { steps?: unknown[] }).steps?.length ?? 1) : 1;
     session.toolCalls += 1;
-    session.actionsSinceUser += 1;
+    session.actionsSinceUser += steps;
     const limit = session.actionLimit ?? deps.maxToolCalls;
     if (limit !== undefined && session.actionsSinceUser > limit) {
       session.actionLimitReached = true;
@@ -244,7 +251,14 @@ async function dispatchAdmitted(
       ctx.check();
     }
     if (
-      ["computer", "browser_read", "browser_navigate", "browser_upload"].includes(name) &&
+      [
+        "computer",
+        "browser_read",
+        "browser_navigate",
+        "browser_upload",
+        "browser_act",
+        "find",
+      ].includes(name) &&
       session.screens
     ) {
       const screen = session.screenLease(lease);
@@ -307,6 +321,15 @@ async function dispatchAdmitted(
         break;
       case "browser_upload":
         result = await browserUploadTool(t, ctx, input);
+        break;
+      case "browser_act":
+        append(ctx, "step.start", { kind: "gui" });
+        result = await browserActTool(t, ctx, input);
+        ctx.check();
+        append(ctx, "step.end", { status: result.ok ? "ok" : "failed" });
+        break;
+      case "find":
+        result = await findTool(t, ctx, input);
         break;
       case "switch_screen":
         result = await switchScreenTool(ctx, input);

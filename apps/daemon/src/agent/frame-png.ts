@@ -33,6 +33,13 @@ export class FramePng {
     private readonly detail?: FrameDetail,
   ) {}
 
+  // Two stored frames with the same bytes: the screen did not change between them.
+  same(sessionId: string, a: string, b: string): boolean {
+    const first = this.frames.path(sessionId, a);
+    const second = this.frames.path(sessionId, b);
+    return !!first && !!second && readFileSync(first).equals(readFileSync(second));
+  }
+
   async png(
     sessionId: string,
     frameId: string,
