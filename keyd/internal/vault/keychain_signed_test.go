@@ -278,20 +278,12 @@ func TestSignedMigrationClosedWithoutBindingRetiresTheUnboundHeads(t *testing.T)
 	}
 }
 
-// addUnreadable adds an item to the service that keyd cannot read without a Keychain prompt, as one
-// an earlier keyd stored and adopt could not move: the security tool made it, so its partition list
-// does not name keyd's team.
+// addUnreadable adds an item of the earlier keyd's to the service, which keyd refuses to read until
+// it adopts the item. A temporary keychain enforces no partition list, so no other item there
+// refuses keyd.
 func (k signedKeychain) addUnreadable(t *testing.T, account, data string) {
 	t.Helper()
-	trusted := os.Getenv("KEYD_EARLIER_BIN")
-	if trusted == "" {
-		self, err := os.Executable()
-		if err != nil {
-			t.Fatal(err)
-		}
-		trusted = self
-	}
-	tempkeychain.Security(t, "add-generic-password", "-s", k.Service, "-a", account, "-w", data, "-T", trusted, k.path)
+	tempkeychain.Security(t, "add-generic-password", "-s", k.Service, "-a", account, "-w", data, "-T", os.Getenv("KEYD_EARLIER_BIN"), k.path)
 	if _, err := k.find(context.Background(), account); err == nil || errors.Is(err, ErrNotFound) || errors.Is(err, ErrReenter) {
 		t.Fatalf("keyd's read of an item it cannot read: %v", err)
 	}
@@ -300,7 +292,16 @@ func (k signedKeychain) addUnreadable(t *testing.T, account, data string) {
 // A head keyd cannot read may be bound, retired or unbound. While one does not read, no start begins
 // the migration, so nothing is bound for an index that names another destination, and a migration
 // that runs does not end, since the head may be one it must retire.
-func TestSignedMigrationWaitsForAHeadItCannotRead(t *testing.T) {
+//
+// The only head keyd cannot read in a temporary keychain is an earlier keyd's item, which needs
+// KEYD_EARLIER_BIN to name a keyd from before generation 2, and none does once generation 2 is
+// deployed. So the signed run leaves this out; KEYD_SIGNED_UNREADABLE=1 with KEYD_SIGNED_VAULT=1
+// runs it. TestMigrationBeginsOnlyOnceItReadsEveryHead and TestMigrationEndsOnlyOnceItReadsEveryHead
+// cover both cases in every run, with a helper whose read of the head fails.
+func TestUnreadableSignedMigrationWaitsForAHeadItCannotRead(t *testing.T) {
+	if os.Getenv("KEYD_SIGNED_UNREADABLE") != "1" || os.Getenv("KEYD_EARLIER_BIN") == "" {
+		t.Skip("set KEYD_SIGNED_UNREADABLE=1 and KEYD_EARLIER_BIN to a keyd from before generation 2")
+	}
 	t.Run("before it begins", func(t *testing.T) {
 		k := newSignedKeychain(t)
 		k.storeEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
@@ -335,35 +336,35 @@ func TestSignedMigrationWaitsForAHeadItCannotRead(t *testing.T) {
 	})
 }
 
-// Items the security tool made carry its partition, not keyd's team's, so keyd cannot read them
-// without a prompt: a staged copy and, with an earlier keyd, an item of that keyd's. Adopt counts
-// them, leaves them as they are and still moves the items after them.
-func TestSignedAdoptMovesPastItemsItCannotRead(t *testing.T) {
+// Adopt puts back a staged copy keyd made, moves every item of the earlier keyd's, and a second adopt
+// moves nothing. That adopt counts the items it cannot read and still moves the items after them,
+// TestNativeItemsAgainstATemporaryKeychain checks (KEYD_TEMP_KEYCHAIN_TEST=1) with a read that
+// refuses: a temporary keychain enforces no partition list, so no item here refuses keyd.
+func TestSignedAdoptPutsBackStagedCopiesAndMovesEarlierItems(t *testing.T) {
 	k := newSignedKeychain(t)
 	self, err := os.Executable()
 	if err != nil {
 		t.Fatal(err)
 	}
-	tempkeychain.Security(t, "add-generic-password", "-s", k.Service+".moving", "-a", "aaa-unreadable.0", "-w", "9999:6162", "-T", self, k.path)
-	unreadable, moves := 1, 0
+	// This executable is signed as keyd, so an item that trusts it is keyd's.
+	tempkeychain.Security(t, "add-generic-password", "-s", k.Service+".moving", "-a", "staged.0", "-w", "9999:6162", "-T", self, k.path)
+	moves := 0
 	if earlier := os.Getenv("KEYD_EARLIER_BIN"); earlier != "" {
-		tempkeychain.Security(t, "add-generic-password", "-s", k.Service, "-a", "aaa-unreadable", "-w", "keyd:9999:1", "-T", earlier, k.path)
-		unreadable++
 		moves = k.addEarlier(t, "deepseek", []byte("sk-legacy-deepseek-value"))
 	}
 	moved, failed, err := k.Adopt()
-	if err != nil || moved != moves || failed != unreadable {
-		t.Fatalf("Adopt = %d moved, %d failed, %v; want %d moved, %d failed", moved, failed, err, moves, unreadable)
+	if err != nil || moved != moves || failed != 0 {
+		t.Fatalf("Adopt = %d moved, %d failed, %v; want %d moved", moved, failed, err, moves)
+	}
+	if head := k.head(t, "staged.0"); head != "9999:6162" {
+		t.Fatalf("the staged copy was put back as %q", head)
 	}
 	if moves > 0 {
 		if head := k.head(t, "deepseek"); !strings.HasPrefix(head, "keyd:") {
 			t.Fatalf("the adopted item holds %q", head)
 		}
-		if _, err := k.find(context.Background(), "aaa-unreadable"); err == nil {
-			t.Fatal("keyd read the item it could not adopt")
-		}
 	}
-	if moved, failed, err := k.Adopt(); err != nil || moved != 0 || failed != unreadable {
+	if moved, failed, err := k.Adopt(); err != nil || moved != 0 || failed != 0 {
 		t.Fatalf("a second Adopt = %d moved, %d failed, %v", moved, failed, err)
 	}
 }
