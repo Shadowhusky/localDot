@@ -18,7 +18,8 @@ export const LOADING = "The recording is still loading";
 const SKIP_MS = 10_000;
 
 // The transport (design-v2 §10.23): a glass bar hung over the foot of the recording, with the
-// scrubber between the time played and the whole length. A phone keeps play and the scrubber.
+// scrubber between the time played and the whole length. A phone keeps play, the scrubber and the
+// no-video chip.
 export function ReplayControls({
   api,
   replay,
@@ -85,6 +86,7 @@ export function ReplayControls({
       </output>
       {replay.sessionId && <Scrubber api={api} sessionId={replay.sessionId} replay={replay} />}
       <span className="replay-length num">{timeLabel(replay.map?.endMs ?? 0)}</span>
+      {compact && noVideo && <Badge className="replay-no-video">No video</Badge>}
       {compact && exportControl}
       {!compact && (
         <span className="replay-transport-side">
