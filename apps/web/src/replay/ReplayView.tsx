@@ -10,7 +10,9 @@ import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { setReplayPresence } from "../dot/replay-presence.ts";
 import { ExportButton } from "../export/ExportButton.tsx";
 import { ExportSheet } from "../export/ExportSheet.tsx";
+import { ExportsList } from "../export/ExportsList.tsx";
 import { type ExportContext, exportContext } from "../export/export-context.ts";
+import { type HostExports, hostCanMake, useHostExports } from "../export/host-exports.ts";
 import type { ExportJob } from "../export/job.ts";
 import { exportSupport } from "../export/sink.ts";
 import { useExportProbe } from "../export/useExportProbe.ts";
@@ -118,6 +120,7 @@ export interface ReplayViewProps {
   // Takes a task's conversation up again, in Watch.
   continueTask?: ContinueTask;
   exportJob: ExportJob;
+  hostExports: HostExports;
   visible?: boolean;
   // Settings → Appearance → Show dot.
   showDot?: boolean;
@@ -135,6 +138,7 @@ export function ReplayView({
   onTitle,
   continueTask,
   exportJob,
+  hostExports,
   visible = true,
   showDot = true,
 }: ReplayViewProps) {
@@ -162,6 +166,7 @@ export function ReplayView({
     <Library
       api={api}
       tasks={tasks}
+      hostExports={hostExports}
       chosen={chosen}
       onChoose={setChosen}
       onOpen={onSelect}
@@ -183,6 +188,7 @@ export function ReplayView({
       onTitle={onTitle}
       continueTask={proceed}
       exportJob={exportJob}
+      hostExports={hostExports}
       visible={visible}
       showDot={showDot}
     />
@@ -227,6 +233,7 @@ function useEscape(enabled: boolean, run: () => void) {
 function Library({
   api,
   tasks,
+  hostExports,
   chosen,
   onChoose,
   onOpen,
@@ -238,6 +245,7 @@ function Library({
 }: {
   api: ApiClient;
   tasks: TaskIndex;
+  hostExports: HostExports;
   chosen: string | null;
   onChoose(id: string): void;
   onOpen(id: string): void;
@@ -289,6 +297,13 @@ function Library({
           )}
         </div>
         <ScrollArea className="replay-library-scroll" fade="bottom">
+          {search.trim() === "" && filter === "all" && (
+            <ExportsList
+              api={api}
+              host={hostExports}
+              cover={(id) => tasks.cards.find((entry) => entry.id === id)?.coverFrameId ?? null}
+            />
+          )}
           <TaskList
             api={api}
             index={tasks}
@@ -488,6 +503,7 @@ function Player({
   onTitle,
   continueTask,
   exportJob: job,
+  hostExports,
   visible,
   showDot,
 }: {
@@ -501,10 +517,12 @@ function Player({
   onTitle?(title: RecordedTitle | null): void;
   continueTask?: ContinueTask;
   exportJob: ExportJob;
+  hostExports: HostExports;
   visible: boolean;
   showDot: boolean;
 }) {
   const stage = useRef<StageHandle>(null);
+  const onHost = hostCanMake(useHostExports(hostExports));
   const area = useRef<HTMLElement>(null);
   const replay = useReplay(api, sessionId, stage, { onGoLive, onExit: onLibrary });
   const phone = useMediaQuery(HANDHELD);
@@ -768,7 +786,11 @@ function Player({
                   job={job}
                   open={exportOpen}
                   disabledReason={
-                    support.ok ? (replay.info && replay.map ? undefined : LOADING) : support.reason
+                    onHost || support.ok
+                      ? replay.info && replay.map
+                        ? undefined
+                        : LOADING
+                      : support.reason
                   }
                   onOpen={() => {
                     replay.run({ kind: "pause" });
@@ -835,6 +857,7 @@ function Player({
           key={exporting.key}
           api={api}
           job={job}
+          host={hostExports}
           context={exporting.context}
           open={exporting.open}
           anchor={exportTrigger}

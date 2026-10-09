@@ -12,6 +12,8 @@ import { type DeliverablesDeps, deliverableRoutes } from "./deliverables/routes.
 import { type DoctorSelfTestsDeps, doctorSelfTestRoutes } from "./doctor-selftests.ts";
 import { errorCode } from "./error-code.ts";
 import { type EventLog, UnknownSessionError } from "./event-log.ts";
+import type { ExportJobs } from "./exports/jobs.ts";
+import { ExportLinks, exportRoutes } from "./exports/routes.ts";
 import { type GatewayRoutesDeps, gatewayRoutes } from "./gateway/routes.ts";
 import { isAllowedHost, isAllowedOrigin, tokenFromHeaders } from "./guard.ts";
 import { installCodeRoutes } from "./install-code-routes.ts";
@@ -46,6 +48,7 @@ export interface AppOptions {
   installCodes?: InstallCodes;
   serviceReadiness?: Pick<ManagedServiceReadiness, "snapshot">;
   doctorSelfTests?: DoctorSelfTestsDeps;
+  exports?: ExportJobs;
   notify?: NotifyRoutesDeps;
   routines?: RoutineRoutesDeps;
 }
@@ -68,6 +71,7 @@ export function createApp({
   installCodes,
   serviceReadiness,
   doctorSelfTests,
+  exports,
   notify,
   routines,
 }: AppOptions): Hono {
@@ -185,5 +189,6 @@ export function createApp({
   if (replay) replayRoutes(app, replay);
   if (deliverables) deliverableRoutes(app, { ...deliverables, port });
   if (notify) notifyRoutes(app, notify);
+  if (exports) exportRoutes(app, exports, new ExportLinks());
   return app;
 }

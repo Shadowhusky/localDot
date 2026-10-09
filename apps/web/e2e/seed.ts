@@ -48,7 +48,10 @@ export function seedHome(options: {
   return { home, seed: JSON.parse(output) as SeedResult };
 }
 
-export async function startReplayDaemon(home: string): Promise<RunningDaemon> {
+export async function startReplayDaemon(
+  home: string,
+  env: Record<string, string> = {},
+): Promise<RunningDaemon> {
   const directory = mkdtempSync(join(tmpdir(), "ldr-"));
   const socket = join(directory, "api.sock");
   const docker = createServer((request, response) => {
@@ -68,7 +71,7 @@ export async function startReplayDaemon(home: string): Promise<RunningDaemon> {
   try {
     docker.listen(socket);
     await once(docker, "listening");
-    const daemon = await startDaemon({ DOCKER_HOST: `unix://${socket}` }, { home });
+    const daemon = await startDaemon({ ...env, DOCKER_HOST: `unix://${socket}` }, { home });
     let stopped = false;
     return {
       ...daemon,
