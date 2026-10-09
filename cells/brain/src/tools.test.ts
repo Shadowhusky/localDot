@@ -1,4 +1,5 @@
 import { GenericComputerInput } from "@localdot/protocol";
+import { workingRules } from "@localdot/protocol/guidance";
 import { describe, expect, it } from "vitest";
 import { imagesInToolResults, languageModel } from "./models.ts";
 import { systemPrompt } from "./prompt.ts";
@@ -50,15 +51,27 @@ describe("the model's advertised tools and instructions", () => {
   it("asks for fewer turns with the tools the model has", () => {
     const prompt = (over: Parameters<typeof binding>[0]) =>
       systemPrompt(bootConfig(), binding(over), [], new Date("2026-10-09T00:00:00Z"));
-    expect(prompt({ computer: "generic" })).toContain("into one computer batch");
-    expect(prompt({ computer: "anthropic-toolset" })).toContain("several computer calls");
-    for (const text of [prompt({ computer: "generic" }), prompt({ computer: "anthropic-toolset" })])
-      expect(text).toContain("act on its elements by ref with browser_act");
-    const blind = prompt({ vision: false });
-    expect(blind).toContain("act on its elements by ref with browser_act");
-    expect(blind).not.toContain("find locates");
+    expect(prompt({ computer: "generic" })).toContain(workingRules("batch"));
+    expect(prompt({ computer: "anthropic-toolset" })).toContain(workingRules("calls"));
+    expect(prompt({ computer: "anthropic-legacy" })).toContain(workingRules("calls"));
+    for (const blind of [prompt({ vision: false }), prompt({ computer: "none" })]) {
+      expect(blind).toContain(workingRules("none"));
+      expect(blind).toContain("You cannot see the screen");
+    }
     expect(toolSet(binding({ vision: false })).find).toBeUndefined();
     expect(toolSet(binding({ vision: false })).browser_act).toBeDefined();
+  });
+  it("keeps the prompt short and free of localDot's internal names", () => {
+    for (const over of [{ computer: "generic" as const }, {}, { vision: false }]) {
+      const prompt = systemPrompt(
+        bootConfig({ memory: { user: "", memory: "" } }),
+        binding(over),
+        [],
+        new Date("2026-10-09T00:00:00Z"),
+      );
+      expect(prompt.length).toBeLessThan(4000);
+      expect(prompt).not.toMatch(/signed-in browser|\bcells?\b|surrogate|\bkeyd\b/i);
+    }
   });
   it("does not label model-written memory as user instructions or allow it to close its delimiter", () => {
     const prompt = systemPrompt(
