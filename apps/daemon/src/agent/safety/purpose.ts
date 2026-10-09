@@ -275,7 +275,9 @@ function pastes(combo: unknown): boolean {
 // typing into a desktop app or a field whose page is unknown carries nothing to a host either.
 export function outboundOf(tool: ToolName, input: unknown, facts: RiskFacts): Outbound[] {
   const object = (input ?? {}) as Record<string, unknown>;
-  if (tool === "browser_navigate" && typeof object.url === "string") {
+  // A PDF research reads is fetched by its address, as a page is opened.
+  const opens = tool === "browser_navigate" || (tool === "research" && object.op === "pdf");
+  if (opens && typeof object.url === "string") {
     const url = webAddress(object.url);
     const where = url && reach(url);
     if (!where || (where.destination && !where.carried)) return [];

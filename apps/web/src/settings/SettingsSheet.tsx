@@ -35,7 +35,7 @@ import {
 } from "./choices.ts";
 import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
-import { CheckIns, SpendingLimits } from "./Limits.tsx";
+import { CheckIns, ResearchLimits, SpendingLimits } from "./Limits.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
 import type { WhatDotKnows } from "./memory/useWhatDotKnows.ts";
 import { NotificationsSection } from "./NotificationsSection.tsx";
@@ -51,7 +51,7 @@ import {
   sectionTitle,
   spendingValue,
 } from "./sections.ts";
-import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.ts";
+import type { CheckInKey, CheckInsDraft, ResearchDraft, SpendingDraft } from "./settings-form.ts";
 import type { AccountsView } from "./useAccounts.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
 import type { ClaudeCodeControls } from "./useClaudeCode.ts";
@@ -114,6 +114,7 @@ export interface SettingsSheetProps {
     value: CheckInsDraft;
     change(key: CheckInKey, next: CheckInsDraft[CheckInKey]): void;
   };
+  research?: { value: ResearchDraft; change(next: ResearchDraft): void };
   purposeCheck?: PurposeCheckControl;
   knowledge?: Knowledge;
   known?: WhatDotKnows;
@@ -267,6 +268,7 @@ export function SettingsSheet(props: SettingsSheetProps) {
     props.autonomy,
     props.spending?.value,
     props.checkIns?.value,
+    props.research?.value,
     props.manualPrices,
   ]);
   const canSave = !!props.save?.enabled && !props.error;
@@ -952,6 +954,9 @@ function SectionContent({
           {props.purposeCheck && <PurposeCheck control={props.purposeCheck} />}
           {props.checkIns && (
             <CheckIns value={props.checkIns.value} onChange={props.checkIns.change} />
+          )}
+          {props.research && (
+            <ResearchLimits value={props.research.value} onChange={props.research.change} />
           )}
         </>
       );

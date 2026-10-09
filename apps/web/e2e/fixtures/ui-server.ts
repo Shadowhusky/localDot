@@ -16,10 +16,12 @@ import {
   CLAUDE_CODE_SIGN_IN,
   CLAUDE_CODE_UPDATE,
   type ClaudeCodeStatus,
+  DEFAULT_RESEARCH_BUDGET,
   type KeydRecord,
   microsToMs,
   msToMicros,
   type Point,
+  type ResearchBudget,
   type ReviseLink,
   type SessionOrigin,
   type TaskModelSelection,
@@ -47,6 +49,7 @@ import { manualStreamRoute } from "../../../daemon/src/agent/manual-stream.ts";
 import { MemoryStore } from "../../../daemon/src/agent/memory.ts";
 import { PeopleStore } from "../../../daemon/src/agent/people.ts";
 import { RecentActivity } from "../../../daemon/src/agent/recent-activity.ts";
+import { ResearchLog } from "../../../daemon/src/agent/research.ts";
 import type { AgentRoutesDeps } from "../../../daemon/src/agent/routes.ts";
 import { AgentError } from "../../../daemon/src/agent/runner.ts";
 import {
@@ -467,6 +470,7 @@ function newSession(
   continues?: string,
   origin?: SessionOrigin,
   revises?: ReviseLink,
+  research?: ResearchBudget,
 ): AgentSession {
   const s = new AgentSession(
     log.createSession(title),
@@ -487,9 +491,71 @@ function newSession(
       ...(continues ? { continues } : {}),
       ...(origin ? { origin } : {}),
       ...(revises ? { revises } : {}),
+      ...(research ? { research } : {}),
     },
   });
+  if (research) s.research = new ResearchLog(research, (type, data) => s.append(type, data));
   return s;
+}
+
+// What a research task reads, as the sample: a few sub-questions and pages from public sources.
+const RESEARCH_PLAN = [
+  { id: "p1", text: "How well do heat pumps work below -15 °C?", status: "done" },
+  { id: "p2", text: "What do they cost to install and run in the UK?", status: "doing" },
+  { id: "p3", text: "Which models do independent tests rate highest?", status: "todo" },
+  { id: "p4", text: "What grants and tariffs apply in 2026?", status: "todo" },
+];
+const RESEARCH_SOURCES = [
+  [
+    "https://www.energysavingtrust.org.uk/advice/air-source-heat-pumps",
+    "Air source heat pumps: costs and savings",
+    2,
+  ],
+  ["https://www.iea.org/reports/the-future-of-heat-pumps", "The Future of Heat Pumps: analysis", 3],
+  [
+    "https://www.nrel.gov/docs/fy25osti/cold-climate-heat-pump-field-study.pdf",
+    "Cold-climate heat pump field study",
+    1,
+  ],
+  ["https://www.gov.uk/apply-boiler-upgrade-scheme", "Apply for the Boiler Upgrade Scheme", 1],
+  ["https://en.wikipedia.org/wiki/Air_source_heat_pump", "Air source heat pump", 0],
+  [
+    "https://www.which.co.uk/reviews/air-source-heat-pumps/article/best-heat-pumps",
+    "Best air source heat pumps tested",
+    2,
+  ],
+  [
+    "https://www.ofgem.gov.uk/information-consumers/energy-advice-households/heat-pump-tariffs",
+    "Heat pump tariffs explained",
+    0,
+  ],
+  [
+    "https://www.heatpumps.org.uk/technical-guides/sizing-for-cold-weather",
+    "Sizing a heat pump for cold weather",
+    1,
+  ],
+] as const;
+// Adds the next n sample pages to a research task's sources, as dot reads them.
+function readSources(s: AgentSession, n: number) {
+  const research = s.research;
+  if (!research) return "this task is not research";
+  for (const [url, title, passages] of RESEARCH_SOURCES.slice(
+    research.sources.length,
+    research.sources.length + n,
+  )) {
+    const step = ulid();
+    s.append("step.start", { kind: "browser", planItem: "p2", intent: `Reading ${title}` }, step);
+    s.append("tool.start", { tool: "browser_read", title: "Reading page" }, step);
+    s.append("tool.end", { ok: true }, step);
+    s.append("step.end", { status: "ok" }, step);
+    const added = research.add(url, title);
+    if (added && passages)
+      research.quote(
+        added.source,
+        Array.from({ length: passages }, (_, i) => `Sample passage ${i + 1} from ${title}.`),
+      );
+  }
+  return undefined;
 }
 
 // An ended task: what the user asked, dot's reply and result. It continues `continues`.
@@ -1309,6 +1375,7 @@ const agent: AgentRoutesDeps = {
         conversations.current() ?? undefined,
         undefined,
         options?.revises,
+        options?.research ? (settingsStore.get().research ?? DEFAULT_RESEARCH_BUDGET) : undefined,
       );
       conversations.adopt(session.id);
       budgetHold = undefined;
@@ -1323,11 +1390,19 @@ const agent: AgentRoutesDeps = {
         if (s.stopped) return;
         s.append("message.assistant", {
           messageId: ulid(),
-          text: "Sample reply: I received the task.",
+          text: s.research
+            ? "I'll split this into four questions, read widely and write you a cited report."
+            : "Sample reply: I received the task.",
         });
         s.append("plan.set", {
-          items: [{ id: "one", text: "Do the sample thing", status: "doing" }],
+          items: s.research
+            ? RESEARCH_PLAN
+            : [{ id: "one", text: "Do the sample thing", status: "doing" }],
         });
+        if (s.research) {
+          s.append("agent.state", { state: "acting" });
+          readSources(s, 3);
+        }
       }, 800);
       return s;
     },
@@ -2648,6 +2723,11 @@ function nextStep(owned: AgentSession, planItem: string) {
     liveStep,
   );
 }
+// A research task reads its next sample pages: n of them.
+routes.post("/__qa/research", (c) => {
+  if (!session) return c.text("no session", 409);
+  return reply(readSources(session, Number(c.req.query("n") ?? 1)));
+});
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
   for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)

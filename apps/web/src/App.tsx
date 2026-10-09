@@ -17,6 +17,7 @@ import { uploadFile } from "./agent/file-transfer.ts";
 import { taskStalled } from "./agent/heartbeat.ts";
 import { markdownToPlain } from "./agent/markdown.ts";
 import { heldByUser } from "./agent/model.ts";
+import { requestResearch, researchWait } from "./agent/research.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
 import { workSteps } from "./agent/thread.ts";
@@ -1747,6 +1748,12 @@ function Theatre({ api }: { api: ApiClient }) {
                         run: () => setConversationsOpen(true),
                       },
                       {
+                        label: "Research a question",
+                        icon: "library",
+                        disabledReason: researchWait(agent),
+                        run: requestResearch,
+                      },
+                      {
                         label: "Replay",
                         icon: "history",
                         startsGroup: true,
@@ -2011,6 +2018,11 @@ function Theatre({ api }: { api: ApiClient }) {
           checkIns={
             settings.draft
               ? { value: settings.draft.checkIns, change: settings.checkIn }
+              : undefined
+          }
+          research={
+            settings.draft
+              ? { value: settings.draft.research, change: settings.research }
               : undefined
           }
           purposeCheck={

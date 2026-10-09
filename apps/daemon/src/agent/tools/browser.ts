@@ -1,4 +1,3 @@
-import { isIP } from "node:net";
 import {
   type BrowserNavigateInput,
   type BrowserNavigateResult,
@@ -21,24 +20,7 @@ import {
   text,
 } from "./deps.ts";
 import { ELEMENTS_HEADER, elementLine, pageElement } from "./elements.ts";
-
-const LOCAL_SUFFIXES = [".localhost", ".local", ".internal", ".lan", ".home.arpa"];
-
-// What the web browser can open (its own navigation rule): public names on the default port.
-// Everything else, such as a server dot started on the desktop, stays in the desktop's Chromium.
-export function opensInWebBrowser(url: URL): boolean {
-  const host = url.hostname.replace(/\.$/u, "").toLowerCase();
-  return (
-    (url.protocol === "https:" || url.protocol === "http:") &&
-    !url.port &&
-    !url.username &&
-    !url.password &&
-    host.includes(".") &&
-    isIP(host) === 0 &&
-    host !== "localhost" &&
-    !LOCAL_SUFFIXES.some((suffix) => host.endsWith(suffix))
-  );
-}
+import { sourceLine } from "./research.ts";
 
 export const DESKTOP_FALLBACK =
   "The web browser couldn't start, so this page opened in the desktop's Chromium, which doesn't keep sign-ins: don't sign in there.";
@@ -94,6 +76,13 @@ export async function browserReadTool(
     url: page.url,
     elements: new Map(elements.map((e) => [e.ref, e])),
   };
+  // In research mode a page read is a numbered source, unless the budget is reached.
+  const source = sourceLine(ctx.session.research, ctx.redact(page.url), ctx.redact(page.title));
+  if (source.refused) {
+    append(ctx, "tool.end", { ok: false });
+    append(ctx, "step.end", { status: "blocked" });
+    return fail(source.refused);
+  }
   append(ctx, "tool.end", { ok: true });
   append(ctx, "step.end", { status: "ok" });
   const listed = elements.length
@@ -103,12 +92,13 @@ export async function browserReadTool(
     ok: true,
     content: [
       text(
-        untrusted(
-          `web page ${ctx.redact(page.url)}`,
-          ctx.redact(
-            `Title: ${page.title}\nURL: ${page.url}\n\n${page.text}${page.truncated ? "\n(page text cut)" : ""}\n\nOutline:\n${page.outline}${listed}`,
+        (source.line ?? "") +
+          untrusted(
+            `web page ${ctx.redact(page.url)}`,
+            ctx.redact(
+              `Title: ${page.title}\nURL: ${page.url}\n\n${page.text}${page.truncated ? "\n(page text cut)" : ""}\n\nOutline:\n${page.outline}${listed}`,
+            ),
           ),
-        ),
       ),
     ],
   };

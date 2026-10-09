@@ -3,6 +3,7 @@ import {
   HandbackRequest,
   keyLikePresent,
   QuestionAnswerRequest,
+  ResearchChange,
   StopOutcome,
   TakeComputerReply,
   TakeControlReply,
@@ -139,6 +140,17 @@ export function raiseTaskBudget(
   const parsed = BudgetRaiseRequest.safeParse({ budgetUSD });
   if (!parsed.success) throw new ControlFailure(false);
   return controlRequest(api, `${sessionPath(sessionId)}/budget`, parsed.data, 204, signal, empty);
+}
+// Research: wrap up now, or keep going with more sources and minutes.
+export function changeResearch(
+  api: ApiClient,
+  sessionId: string,
+  change: ResearchChange["change"],
+  signal: AbortSignal,
+) {
+  const parsed = ResearchChange.safeParse({ change });
+  if (!parsed.success) throw new ControlFailure(false);
+  return controlRequest(api, `${sessionPath(sessionId)}/research`, parsed.data, 204, signal, empty);
 }
 export function resumeTask(api: ApiClient, sessionId: string, signal: AbortSignal) {
   return controlRequest(api, `${sessionPath(sessionId)}/resume`, undefined, 204, signal, empty);
