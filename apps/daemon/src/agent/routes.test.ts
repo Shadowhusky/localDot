@@ -442,6 +442,43 @@ describe("agent user routes", () => {
     expect(await taking).toMatchObject({ note: "[redacted]", by: "user" });
     expect(JSON.stringify(f.events)).not.toContain("credential-fixture");
   });
+  it("takes field answers and declines, keeping secret answers out of every event", async () => {
+    const f = await setup();
+    const secret = "credential-fixture and the rest";
+    const asking = f.session.askFields(
+      {
+        question: "Sign in",
+        fields: [
+          { id: "email", kind: "text", label: "Email" },
+          { id: "password", kind: "secret", label: "Password" },
+        ],
+      },
+      0,
+    );
+    const askId = f.session.pendingAsk;
+    expect((await f.send("POST", endpoint("answer"), { askId, text: "hi" })).status).toBe(409);
+    expect(
+      (await f.send("POST", endpoint("answer"), { askId, fields: { email: "ada" } })).status,
+    ).toBe(409);
+    expect(
+      (
+        await f.send("POST", endpoint("answer"), {
+          askId,
+          fields: { email: "credential-fixture", password: secret },
+        })
+      ).status,
+    ).toBe(204);
+    const answer = await asking;
+    expect(answer.fields).toEqual({ email: "[redacted]", password: { provided: true } });
+    expect(answer.secrets?.take("password")).toBe(secret);
+    expect(JSON.stringify(f.events)).not.toContain("credential-fixture");
+    const plain = f.session.ask("Which?", ["One", "Two"], false, 0);
+    expect(
+      (await f.send("POST", endpoint("answer"), { askId: f.session.pendingAsk, declined: true }))
+        .status,
+    ).toBe(204);
+    expect(await plain).toEqual({ declined: true, by: "user" });
+  });
   it("keeps takeover held across messages/resume/stale handback and accepts only the matching user handback", async () => {
     const f = await setup();
     const taking = f.session.takeover("login", "note");

@@ -1,7 +1,15 @@
-import type { ApprovalRequestDraft, PauseSnapshot, RuleChange } from "@localdot/protocol";
+import type {
+  ApprovalRequestDraft,
+  AskFieldRecord,
+  AskFieldValue,
+  AskRequestField,
+  PauseSnapshot,
+  RuleChange,
+} from "@localdot/protocol";
 import {
   type ApprovalCard,
   type AutonomyPolicy,
+  askValueProblem,
   type BootConfig,
   type EventDraft,
   freezeAutonomy,
@@ -24,6 +32,7 @@ import { RepeatGuard } from "./safety/repeat-guard.ts";
 import { RuleError, type RulesStore } from "./safety/rules.ts";
 import { PausedStepError, StepBarrier } from "./safety/step-barrier.ts";
 import { TaskAutonomy } from "./safety/task-autonomy.ts";
+import { SecretAnswers } from "./secret-answers.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const AGENT = "main";
@@ -31,7 +40,24 @@ export type SessionStatus = "starting" | "running" | "waiting_user" | "paused" |
 export interface AskAnswer {
   option?: string;
   text?: string;
+  // Per field id, as the journal and the model may see them: a secret only as provided.
+  fields?: Readonly<Record<string, AskFieldRecord>>;
+  declined?: true;
+  // Never journaled: the ask tool types these into their fields and clears them.
+  secrets?: SecretAnswers;
   by: "user" | "timeout" | "stop" | "pause";
+}
+export interface AskForm {
+  question: string;
+  fields: readonly AskRequestField[];
+  submit?: string;
+  decline?: string;
+}
+interface Question {
+  question: string;
+  options: string[];
+  allowText: boolean;
+  form?: Omit<AskForm, "question">;
 }
 export interface TakeoverOutcome {
   note?: string;
@@ -141,7 +167,13 @@ export class AgentSession {
   #brain: { generation: BrainGeneration; abort: AbortController } | undefined;
   #delivered = 0;
   #ask:
-    | { askId: string; options: string[]; allowText: boolean; finish(a: AskAnswer): boolean }
+    | {
+        askId: string;
+        options: string[];
+        allowText: boolean;
+        fields?: readonly AskRequestField[];
+        finish(a: AskAnswer): boolean;
+      }
     | undefined;
   #control: ControlRecord | undefined;
   #screens: ScreenController | undefined;
@@ -352,9 +384,12 @@ export class AgentSession {
       this.uncertainSafetyPause(pause.requestId, pause.revision);
     }
     const question = this.#question(
-      "I repeated the same action twice. What should I change before continuing? Resume is a separate control.",
-      ["I will change the instructions", "I want to take control"],
-      true,
+      {
+        question:
+          "I repeated the same action twice. What should I change before continuing? Resume is a separate control.",
+        options: ["I will change the instructions", "I want to take control"],
+        allowText: true,
+      },
       0,
       undefined,
       this.abort.signal,
@@ -818,6 +853,31 @@ export class AgentSession {
     generation = this.generation,
     signal?: AbortSignal,
   ): Promise<AskAnswer> {
+    return this.#owned({ question, options, allowText }, timeoutMs, step, generation, signal);
+  }
+  // A question answered per field (HITL.md): secret answers come back apart from everything stored.
+  askFields(
+    { question, ...form }: AskForm,
+    timeoutMs: number,
+    step?: string,
+    generation = this.generation,
+    signal?: AbortSignal,
+  ): Promise<AskAnswer> {
+    return this.#owned(
+      { question, options: [], allowText: false, form },
+      timeoutMs,
+      step,
+      generation,
+      signal,
+    );
+  }
+  #owned(
+    prompt: Question,
+    timeoutMs: number,
+    step: string | undefined,
+    generation: BrainGeneration | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<AskAnswer> {
     if (!generation) throw new SessionStoppedError();
     this.check(generation, signal);
     const combined = AbortSignal.any([
@@ -825,14 +885,10 @@ export class AgentSession {
       generation.signal,
       ...(signal ? [signal] : []),
     ]);
-    return this.#question(question, options, allowText, timeoutMs, step, combined, () =>
-      this.isCurrent(generation),
-    );
+    return this.#question(prompt, timeoutMs, step, combined, () => this.isCurrent(generation));
   }
   #question(
-    question: string,
-    options: string[],
-    allowText: boolean,
+    { question, options, allowText, form }: Question,
     timeoutMs: number,
     step: string | undefined,
     combined: AbortSignal,
@@ -858,7 +914,18 @@ export class AgentSession {
         if (this.#ask?.askId === askId) this.#ask = undefined;
         try {
           beforeAnswer?.(answer);
-          this.append("ask.answer", { askId, ...answer }, step);
+          this.append(
+            "ask.answer",
+            {
+              askId,
+              ...(answer.option ? { option: answer.option } : {}),
+              ...(answer.text ? { text: answer.text } : {}),
+              ...(answer.fields ? { fields: answer.fields } : {}),
+              ...(answer.declined ? { declined: true } : {}),
+              by: answer.by,
+            },
+            step,
+          );
         } catch (error) {
           // Abort listeners cannot throw into the event loop or leave a tool waiting forever.
           reject(error);
@@ -877,6 +944,7 @@ export class AgentSession {
             question,
             options: options.map((text, i) => ({ key: keys[i], text })),
             allowText,
+            ...form,
           },
           step,
         );
@@ -888,7 +956,13 @@ export class AgentSession {
         reject(error);
         return;
       }
-      this.#ask = { askId, options: keys, allowText, finish };
+      this.#ask = {
+        askId,
+        options: keys,
+        allowText,
+        ...(form ? { fields: form.fields } : {}),
+        finish,
+      };
       if (!this.safetyPause) this.status = "waiting_user";
       if (timeoutMs > 0) timer = setTimeout(() => finish({ by: "timeout" }), timeoutMs);
       combined.addEventListener("abort", aborted, { once: true });
@@ -897,7 +971,7 @@ export class AgentSession {
   }
   answer(askId: string, option: string | undefined, text: string | undefined): boolean {
     const ask = this.#ask;
-    if (!ask || ask.askId !== askId || this.stopped) return false;
+    if (!ask || ask.askId !== askId || ask.fields || this.stopped) return false;
     if (
       (option && !ask.options.includes(option)) ||
       (text && (!ask.allowText || text.length > 8000)) ||
@@ -905,6 +979,37 @@ export class AgentSession {
     )
       return false;
     return ask.finish({ ...(option ? { option } : {}), ...(text ? { text } : {}), by: "user" });
+  }
+  // Every field but a QR code needs its answer. `redact` cleans what may be stored or shown to the
+  // model; secret answers are kept apart, unredacted, for typing.
+  answerFields(
+    askId: string,
+    values: Readonly<Record<string, AskFieldValue>>,
+    redact: (text: string) => string,
+  ): boolean {
+    const ask = this.#ask;
+    const fields = ask?.fields;
+    if (!ask || ask.askId !== askId || !fields || this.stopped) return false;
+    if (Object.keys(values).some((id) => !fields.some((field) => field.id === id))) return false;
+    const value = (id: string) => (Object.hasOwn(values, id) ? values[id] : undefined);
+    if (fields.some((field) => askValueProblem(field, value(field.id)) !== undefined)) return false;
+    const record: Record<string, AskFieldRecord> = {};
+    const secrets: [string, string][] = [];
+    for (const field of fields) {
+      const answer = value(field.id);
+      if (answer === undefined) continue;
+      if (field.kind === "secret" && typeof answer === "string") {
+        secrets.push([field.id, answer]);
+        record[field.id] = { provided: true };
+      } else record[field.id] = typeof answer === "string" ? redact(answer.trim()) : answer;
+    }
+    return ask.finish({ fields: record, secrets: new SecretAnswers(secrets), by: "user" });
+  }
+  // "Not now": dot is told the user declined.
+  decline(askId: string): boolean {
+    const ask = this.#ask;
+    if (!ask || ask.askId !== askId || this.stopped) return false;
+    return ask.finish({ declined: true, by: "user" });
   }
 
   async takeover(

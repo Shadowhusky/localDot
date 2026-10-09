@@ -870,6 +870,85 @@ describe("session-owned screen authority", () => {
     expect(desktop).not.toHaveBeenCalled();
   });
 
+  it("types a secret answer into the web browser's own field, and nothing once the screen changed", async () => {
+    const secret = "s3cret phrase for the mail";
+    const field = {
+      point: { x: 400, y: 300 },
+      bbox: { x: 320, y: 290, w: 160, h: 20 },
+      source: "dom" as const,
+      role: "textbox",
+      name: "Password",
+      url: "https://mail.example.test/login",
+      secret: true,
+    };
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    f.client.lookup.mockImplementation((async () => ({
+      target: field,
+      window: 0,
+      ms: 1,
+    })) as never);
+    f.client.input.mockImplementation((async () => ({
+      pressMono: 1,
+      presses: [1],
+      injector: "xtest",
+      armedMono: 0,
+    })) as never);
+    f.client.type.mockImplementation((async (
+      _p: unknown,
+      _t: unknown,
+      request: { text: string },
+    ) => ({
+      done: true,
+      count: [...request.text].length,
+      firstPressMono: 1,
+      injector: "xtest",
+      armedMono: 0,
+    })) as never);
+    const login = {
+      question: "Sign in to your mail",
+      fields: [{ id: "password", kind: "secret", label: "Password", target: [400, 300] }],
+    };
+    const asking = h.callTool("ask_user", login);
+    await until(() => f.session.pendingAsk !== undefined);
+    const request = f.log.read(f.id).find((e) => e.type === "ask.request");
+    expect(request?.data).toMatchObject({
+      fields: [
+        {
+          target: {
+            screen: "browser",
+            point: { x: 800, y: 600 },
+            bbox: { x: 640, y: 580, w: 320, h: 40 },
+          },
+        },
+      ],
+    });
+    f.session.answerFields(f.session.pendingAsk ?? "", { password: secret }, (t) => t);
+    expect((await asking).result.ok).toBe(true);
+    expect(f.client.input.mock.calls.at(-1)?.at(2)).toMatchObject({
+      input: { kind: "click", at: { x: 400, y: 300 } },
+    });
+    expect(f.client.type.mock.calls.at(-1)?.at(2)).toMatchObject({ text: secret, masked: true });
+
+    f.client.type.mockClear();
+    bindDesktop(h);
+    const again = h.callTool("ask_user", login);
+    await until(() => f.session.pendingAsk !== undefined);
+    const generation = f.session.generation;
+    if (!generation) throw new Error("the brain is gone");
+    const lease = f.session.admit(generation);
+    await f.session.switchScreen("desktop", lease);
+    lease.finish();
+    f.session.answerFields(f.session.pendingAsk ?? "", { password: secret }, (t) => t);
+    const moved = await again;
+    expect(moved.result.content).toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining("The field moved; ask again.") }),
+    );
+    expect(f.client.type).not.toHaveBeenCalled();
+    expect(JSON.stringify(f.log.read(f.id))).not.toContain(secret);
+  });
+
   it("opens a public page in the web browser from the desktop by switching the screen first", async () => {
     const f = fixture();
     await f.ready();
