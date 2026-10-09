@@ -9,7 +9,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { AskForm } from "./agent/AskForm.tsx";
 import { Composer } from "./agent/Composer.tsx";
-import { SafetyControls } from "./agent/SafetyControls.tsx";
+import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
 import { TaskRecovery } from "./agent/TaskRecovery.tsx";
@@ -60,8 +60,9 @@ import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
+import { ApprovalDecision, DecisionSheet, QuestionDecision } from "./shell/DecisionIsland.tsx";
 import { HudIsland } from "./shell/HudIsland.tsx";
-import { islandShape, pauseSlot, takeSlot } from "./shell/island.ts";
+import { islandDecision, islandShape, pauseSlot, takeSlot } from "./shell/island.ts";
 import { useKeyboardUp, useLayout } from "./shell/layout.ts";
 import { MoreMenu } from "./shell/MoreMenu.tsx";
 import { NarratorBand } from "./shell/NarratorBand.tsx";
@@ -524,11 +525,11 @@ function Theatre({ api }: { api: ApiClient }) {
       ? hudFor({ cell: stageCell, status, pending })
       : hud;
   const facts = taskFacts(agent.model);
-  const now = useNowMs(
-    session.model,
-    session.version,
-    (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
-  );
+  const now = useNowMs(session.model, session.version, (t) => {
+    if (!session.sessionId) return false;
+    const hud = taskHud(session.model, t, facts);
+    return hud.phase === "running" || hud.elapsedS !== null;
+  });
   const task = session.sessionId ? taskHud(session.model, now, facts) : null;
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
@@ -743,6 +744,59 @@ function Theatre({ api }: { api: ApiClient }) {
       />
     </div>
   );
+  const shape = islandShape(appStatus, curtain.up);
+  const sheetsClosed = !keysOpen && !settings.open;
+  const phone = layout === "phone";
+  const decision = replayId
+    ? null
+    : islandDecision({
+        shape,
+        approval: !!safety.approval && sheetsClosed,
+        question: !!question && !agent.model.ended && sheetsClosed,
+        chatShown: shownView === "chat" || wide || phone,
+      });
+  const approval = safety.approval;
+  const approvalView = approval && decision === "approval" && (
+    <ApprovalDecision
+      key={`${approval.approvalId}:${approval.generation}:${approval.revision}`}
+      card={approval}
+      enabled={safety.canApprove}
+      pending={safety.pending === "approval"}
+      onDecision={safety.answerApproval}
+      loadField={safety.readApprovalField}
+      layout={phone ? "sheet" : "island"}
+    />
+  );
+  const grown =
+    phone || !decision
+      ? undefined
+      : decision === "approval"
+        ? approvalView
+        : question && (
+            <QuestionDecision question={question.question}>
+              <AskForm
+                key={question.askId}
+                question={question}
+                controls={controls}
+                visible
+                receiveKey={receiveKey}
+              />
+            </QuestionDecision>
+          );
+  const take = () => {
+    if (decision !== "approval" || !approval) {
+      setRailView("takeover");
+      return;
+    }
+    if (!safety.canApprove || safety.pending) return;
+    void safety.answerApproval({
+      approvalId: approval.approvalId,
+      generation: approval.generation,
+      revision: approval.revision,
+      decision: "take_control",
+    });
+  };
+  const replacement = safety.replacement?.phase;
   // The curtain speaks while it is up; under it the band is quiet.
   const narration =
     !curtain.up && (appStatus.caption.speaker === "dot" || appStatus.computer !== "live")
@@ -787,6 +841,23 @@ function Theatre({ api }: { api: ApiClient }) {
                   notice={error}
                   action={computerAction}
                   onAction={() => computerAction && onComputer[computerAction.kind]()}
+                  replace={
+                    cell?.fenced
+                      ? {
+                          enabled: safety.canReplace,
+                          busy: safety.replacing,
+                          note:
+                            replacement === "blocked"
+                              ? "The fresh computer couldn't be checked, so the old one stays off."
+                              : replacement === "ready"
+                                ? "The fresh computer is ready. Opening it…"
+                                : replacement
+                                  ? "Setting the old computer aside and starting a fresh one."
+                                  : undefined,
+                          run: () => void safety.replace(),
+                        }
+                      : undefined
+                  }
                   showDot={showDot.value}
                 />
               </Presence>
@@ -794,7 +865,7 @@ function Theatre({ api }: { api: ApiClient }) {
             island={
               <HudIsland
                 status={appStatus}
-                shape={islandShape(appStatus, curtain.up)}
+                shape={shape}
                 badge={place === "badge"}
                 pause={pauseSlot({
                   pause: safety.pause,
@@ -803,25 +874,26 @@ function Theatre({ api }: { api: ApiClient }) {
                   handedOver: !!takeover,
                   budgetHeld: agent.snapshot?.budgetHold === "task",
                 })}
-                take={takeSlot(appStatus)}
+                take={takeSlot(appStatus, decision)}
                 onPause={() => void safety.requestPause()}
                 onContinue={() => void safety.resume()}
                 onStopTask={taskStop}
-                onTake={() => setRailView("takeover")}
+                onTake={take}
                 onComputer={onComputer}
+                decision={grown}
+                notices={
+                  <>
+                    <StopControl controls={controls} inIsland />
+                    <SafetyNotes
+                      safety={safety}
+                      agent={agent}
+                      cell={cell}
+                      visible={sheetsClosed}
+                      replaying={!!replayId}
+                    />
+                  </>
+                }
               />
-            }
-            notices={
-              <>
-                <StopControl controls={controls} />
-                <SafetyControls
-                  safety={safety}
-                  agent={agent}
-                  cell={cell}
-                  visible={!keysOpen && !settings.open}
-                  replaying={!!replayId}
-                />
-              </>
             }
             band={
               <NarratorBand
@@ -842,6 +914,7 @@ function Theatre({ api }: { api: ApiClient }) {
             <Stage
               ref={stage}
               mode={replayId ? "replay" : "live"}
+              dim={decision !== null}
               cell={stageCell}
               parentId={cell?.id}
               selection={selectedScreen}
@@ -944,7 +1017,7 @@ function Theatre({ api }: { api: ApiClient }) {
             }
             recovery={<TaskRecovery agent={agent} controls={controls} onSettings={showSettings} />}
             answer={
-              question && !agent.model.ended ? (
+              question && !agent.model.ended && decision !== "question" ? (
                 <AskForm
                   key={question.askId}
                   question={question}
@@ -1099,6 +1172,11 @@ function Theatre({ api }: { api: ApiClient }) {
         onClose={closeKeys}
         discardRef={keysDiscard}
       />
+      {phone && approvalView && (
+        <DecisionSheet label={appStatus.label} elapsedS={appStatus.elapsedS}>
+          {approvalView}
+        </DecisionSheet>
+      )}
       {showDot.value && (
         <PresenceLayer
           place={place}

@@ -23,8 +23,9 @@ export interface SelectProps {
   items?: readonly PickerItem[];
   groups?: readonly PickerGroup[];
   placeholder?: string;
-  // 32 px, or 36 px in a form; 44 px on a touch screen either way.
-  size?: "md" | "lg";
+  // 32 px, or 36 px in a form; 44 px on a touch screen either way. Inline, sm is 12 px text on any
+  // screen, as a decision's scope beside its buttons.
+  size?: "sm" | "md" | "lg";
   // A control face, or inline in a grouped list: just the value and a chevron, no box.
   appearance?: "field" | "inline";
   className?: string;

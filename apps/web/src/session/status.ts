@@ -151,6 +151,23 @@ function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): stri
   return step && pausing(model, step, at, nowMs) ? "pausing" : at.state;
 }
 
+// A wait for the user counts from dot's request, so the island shows how long dot has waited.
+const REQUEST: Partial<Record<TaskRow, string>> = {
+  approval: "approval.request",
+  question: "ask.request",
+  takeover: "takeover.request",
+};
+function waitedS(model: SessionModel, row: TaskRow, nowMs: number): number | null {
+  const type = REQUEST[row];
+  if (!type) return null;
+  for (let i = model.marks.length - 1; i >= 0; i--) {
+    const mark = model.marks[i];
+    if (mark?.type === type && mark.t <= nowMs)
+      return Math.floor(msToSeconds(Math.max(0, nowMs - mark.t)));
+  }
+  return null;
+}
+
 const PAST_HOLD_MS = 1200;
 const WORKING = new Set(["acting", "observing", "thinking"]);
 // Replay folds the whole recording, so an action's end may still lie ahead of nowMs.
@@ -179,7 +196,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
     phase: "waiting",
     label,
     caption,
-    elapsedS: null,
+    elapsedS: waitedS(model, row, nowMs),
     control: false,
   });
   const running = (row: TaskRow, label: string, caption: string, control: boolean): TaskHud => ({

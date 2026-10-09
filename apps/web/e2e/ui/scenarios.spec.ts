@@ -17,7 +17,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   ready: hud("Ready"),
   "chatgpt-plan": hud("Ready"),
   running: hud("Select the Net total cell"),
-  approval: shows((page) => page.getByRole("dialog", { name: /^Send the monthly report/ })),
+  approval: shows((page) => page.getByRole("dialog", { name: "Send this email?" })),
   ask: hud("Has a question"),
   takeover: hud("Your turn"),
   budget: hud("Paused · Limit reached"),

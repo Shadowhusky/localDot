@@ -190,6 +190,7 @@ async function handle(m: WorkerIn): Promise<void> {
         if (m.view.freeze !== undefined) freeze = m.view.freeze;
         if (m.view.reducedMotion !== undefined)
           view = { ...view, reducedMotion: m.view.reducedMotion };
+        if (m.view.dim !== undefined) presenter?.setDim(m.view.dim, view.reducedMotion);
         if (m.view.selection !== undefined) {
           selection = m.view.selection;
           view = {
