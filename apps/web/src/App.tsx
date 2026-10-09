@@ -97,6 +97,7 @@ import { useTabAttention } from "./shell/tab-attention.ts";
 import type { StreamPicture } from "./stage/live-stream.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import { useStreamPreference } from "./stage/stream-preference.ts";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
 import { Button } from "./ui/Button.tsx";
@@ -258,6 +259,7 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
   const showDot = useShowDot();
+  const streamChoice = useStreamPreference();
   const [replayId, setReplayId] = useState<string | null>(() =>
     replayAddress(new URLSearchParams(window.location.search).get("replay")),
   );
@@ -1441,6 +1443,7 @@ function Theatre({ api }: { api: ApiClient }) {
           sectionRequest={settingsAt.request}
           appearance={appearance}
           showDot={showDot}
+          stream={streamChoice}
           taskControls={<StopControl controls={controls} />}
           stop={sheetStopControl}
           open={settings.open}

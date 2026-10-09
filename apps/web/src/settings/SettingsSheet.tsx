@@ -6,10 +6,13 @@ import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ShowDotControl } from "../dot/show-dot.ts";
 import { KeysPanel, type KeysPanelProps } from "../keys/KeysPanel.tsx";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
+import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
+import { STREAM_PREFERENCES } from "../stage/stream-quality.ts";
 import { Button } from "../ui/Button.tsx";
 import { Group, GroupHead, GroupNote, GroupRow, IconTile } from "../ui/Group.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { matches, PHONE, REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
+import { SegmentedControl } from "../ui/SegmentedControl.tsx";
 import { Sheet, SheetNavItem, useConfirmDiscard } from "../ui/Sheet.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { Switch } from "../ui/Switch.tsx";
@@ -58,6 +61,8 @@ export interface SettingsSheetProps {
   sectionRequest?: number;
   appearance?: AppearanceControl;
   showDot?: ShowDotControl;
+  // How this browser's live view gives way when the connection or the device slows.
+  stream?: StreamPreferenceControl;
   choices: Partial<Record<ModelRole, RoleChoice>>;
   providers: readonly ProviderModels[];
   keys: readonly PickerKey[];
@@ -394,7 +399,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     knowledge: !!props.knowledge,
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
-    computer: !!props.stop,
+    computer: !!props.stop || !!props.stream,
   };
   return SECTIONS.filter((section) => has[section.id]).map((section) => section.id);
 }
@@ -538,7 +543,7 @@ function SectionList({
   };
   return (
     <>
-      {(props.stop || props.taskControls) && <ComputerControls props={props} />}
+      {(props.stop || props.taskControls || props.stream) && <ComputerControls props={props} />}
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
         {(["spending", "appearance", "knowledge", "accounts", "keys"] as const).map(row)}
@@ -547,26 +552,60 @@ function SectionList({
   );
 }
 
+const STREAM_CHOICES = [
+  { value: "auto", label: "Auto" },
+  { value: "sharp", label: "Sharp" },
+  { value: "smooth", label: "Smooth" },
+] as const;
+
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
+  const { stop, stream } = props;
   return (
     <div>
-      {props.stop && (
+      {(stop || stream) && (
         <Group>
-          <GroupRow
-            leading={<IconTile icon="power" />}
-            label="Your computer"
-            trailing={
-              <Button
-                size="sm"
-                icon="stop"
-                disabledReason={props.stop.enabled ? undefined : "Not available right now"}
-                onClick={() => props.stop?.run()}
-              >
-                {props.stop.label}
-              </Button>
-            }
-          />
+          {stop && (
+            <GroupRow
+              leading={<IconTile icon="power" />}
+              label="Your computer"
+              trailing={
+                <Button
+                  size="sm"
+                  icon="stop"
+                  disabledReason={stop.enabled ? undefined : "Not available right now"}
+                  onClick={() => stop.run()}
+                >
+                  {stop.label}
+                </Button>
+              }
+            />
+          )}
+          {stream && (
+            <GroupRow
+              leading={<IconTile icon="monitor" />}
+              label="Stream quality"
+              trailing={
+                <SegmentedControl
+                  size={24}
+                  aria-label="Stream quality"
+                  value={stream.value}
+                  items={STREAM_CHOICES}
+                  onValueChange={(next) => {
+                    const choice = STREAM_PREFERENCES.find((each) => each === next);
+                    if (choice) stream.change(choice);
+                  }}
+                />
+              }
+            />
+          )}
         </Group>
+      )}
+      {stream && (
+        <GroupNote>
+          {stream.saved
+            ? "Auto adjusts to your connection and this device. When things slow down, Sharp keeps text crisp and Smooth keeps motion fluid."
+            : "Applied for this visit. This browser couldn't save it."}
+        </GroupNote>
       )}
       {props.taskControls}
     </div>
