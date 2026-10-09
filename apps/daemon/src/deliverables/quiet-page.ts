@@ -1,4 +1,11 @@
-import { type DefaultTreeAdapterTypes as Html, parse, serialize } from "parse5";
+import {
+  type DefaultTreeAdapterMap,
+  defaultTreeAdapter,
+  type DefaultTreeAdapterTypes as Html,
+  parse,
+  serialize,
+  type TreeAdapter,
+} from "parse5";
 import { maskText } from "./excerpt.ts";
 
 // A frame with no script parses as the browser does with scripting off: <noscript> holds markup.
@@ -9,6 +16,36 @@ const XLINK = "http://www.w3.org/1999/xlink";
 // Each holds a page of its own, which nothing here reads: WebKit acts on the hints in a srcdoc
 // before the policy applies. The policy loads none of them anyway.
 const FRAMES = new Set(["iframe", "frame", "object", "embed"]);
+
+class TooMuch extends Error {}
+
+// Reading stops once the page nests deeper than can be checked, as parsing slows with every level,
+// or builds more elements than it could be written with: formatting left open in one paragraph is
+// made again in every paragraph after it. A tag takes three bytes at least.
+function read(html: string): Html.Document | undefined {
+  let open = 0;
+  let made = 0;
+  const most = html.length / 3 + 16;
+  const treeAdapter: TreeAdapter<DefaultTreeAdapterMap> = {
+    ...defaultTreeAdapter,
+    createElement: (tagName, namespaceURI, attrs) => {
+      if (++made > most) throw new TooMuch();
+      return defaultTreeAdapter.createElement(tagName, namespaceURI, attrs);
+    },
+    onItemPush: () => {
+      if (++open > DEPTH) throw new TooMuch();
+    },
+    onItemPop: () => {
+      open--;
+    },
+  };
+  try {
+    return parse(html, { ...OPTIONS, treeAdapter });
+  } catch (error) {
+    if (error instanceof TooMuch) return undefined;
+    throw error;
+  }
+}
 
 function opensOrReports(attr: Html.Element["attrs"][number]): boolean {
   if (attr.namespace === XLINK) return attr.name === "show";
@@ -55,8 +92,9 @@ function quiet(node: Html.ParentNode, depth: number): number {
 // browser will read it, so neither the masking nor writing it out again brings anything back.
 // Undefined when it cannot be served that way.
 export function quietPage(html: string): string | undefined {
-  const page = parse(html, OPTIONS);
-  if (quiet(page, 0) === Number.POSITIVE_INFINITY) return undefined;
+  const page = read(html);
+  if (!page || quiet(page, 0) === Number.POSITIVE_INFINITY) return undefined;
   const served = maskText(serialize(page, OPTIONS));
-  return quiet(parse(served, OPTIONS), 0) === 0 ? served : undefined;
+  const again = read(served);
+  return again && quiet(again, 0) === 0 ? served : undefined;
 }

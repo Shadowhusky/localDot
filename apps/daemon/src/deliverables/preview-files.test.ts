@@ -176,6 +176,15 @@ describe("the preview route", () => {
     expect((await load(`${base}deep.html`)).status).toBe(415);
   });
 
+  it("turns a page away as soon as it nests too deep, without reading the rest", async () => {
+    const { save, load, link } = setup();
+    save("lists.html", "<ul>".repeat(100_000));
+    const base = await link();
+    const started = performance.now();
+    expect((await load(`${base}lists.html`)).status).toBe(415);
+    expect(performance.now() - started).toBeLessThan(500);
+  });
+
   it("serves an SVG as an inert picture, never as a document that runs", async () => {
     const { save, load, link } = setup();
     save(

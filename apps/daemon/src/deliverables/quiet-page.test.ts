@@ -114,4 +114,14 @@ describe("a page as the preview serves it", () => {
     expect(quietPage(nest(200))).toContain("x");
     expect(quietPage(nest(300))).toBe(undefined);
   });
+
+  it("serves nothing that builds far more elements than it is written with", () => {
+    const left = ["b", "i", "u", "s", "em", "strong", "small", "code"]
+      .map((tag) => `<${tag}>`.repeat(3))
+      .join("");
+    // Formatting left open in one paragraph is made again in every paragraph after it.
+    expect(quietPage(`<p>${left}${"<p>x".repeat(30_000)}`)).toBe(undefined);
+    const page = `<p><b>Totals</p>${"<p>Net rose in every region.</p>".repeat(1000)}`;
+    expect(quietPage(page)).toContain("<p><b>Net rose in every region.</b></p>");
+  });
 });
