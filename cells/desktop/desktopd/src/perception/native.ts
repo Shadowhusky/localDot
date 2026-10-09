@@ -40,7 +40,8 @@ export interface NativeAccessibility {
     budgetMs: number,
     generation: number,
   ): Promise<NativeTree>;
-  content(win: HelperWindow, budgetMs: number): Promise<Rect | null>;
+  // `c`: Chromium's device scale factor, the unit its own accessible frames are in.
+  content(win: HelperWindow, budgetMs: number, c: number): Promise<Rect | null>;
 }
 
 // Past its own deadline the helper is inside one application call at most; this long is allowed
@@ -178,10 +179,10 @@ export class AtspiAccessibility implements NativeAccessibility {
     return { elements: answer.elements };
   }
 
-  async content(win: HelperWindow, budgetMs: number): Promise<Rect | null> {
+  async content(win: HelperWindow, budgetMs: number, c: number): Promise<Rect | null> {
     const answer = await this.#call<{ frame: Rect | null }>(
       "content",
-      { window: wire(win), kit: "chromium" },
+      { window: wire(win), kit: "chromium", c },
       budgetMs,
     );
     return "unknown" in answer ? null : answer.frame;

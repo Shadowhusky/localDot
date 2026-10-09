@@ -1,11 +1,18 @@
 import { useSyncExternalStore } from "react";
 import { suggestedExportName } from "../replay/replay-view.ts";
 import type { ExportContext } from "./export-context.ts";
+import {
+  calibrationFrom,
+  type ExportEstimate,
+  keepCalibration,
+  storedCalibration,
+} from "./export-estimate.ts";
 import type { ExportRequest } from "./export-plan.ts";
 import { type ExportHandle, startExport } from "./exporter.ts";
 import {
   downloadFile,
   type ExportSink,
+  exportFileName,
   exportSupport,
   type MemorySink,
   memorySink,
@@ -21,6 +28,8 @@ export interface ExportFile {
   name: string;
   bytes: number;
   durationS: number;
+  // How long it took to make.
+  ms: number;
 }
 
 export interface ExportJobState {
@@ -40,7 +49,7 @@ export interface ExportJobState {
 export interface ExportJob {
   snapshot(): ExportJobState;
   subscribe(listener: () => void): () => void;
-  start(context: ExportContext, request: ExportRequest, durationS: number): Promise<void>;
+  start(context: ExportContext, request: ExportRequest, expected: ExpectedExport): Promise<void>;
   cancel(): void;
   save(): void;
   // The popover was put away: a saved or downloaded file or a note has been seen and goes; a running
@@ -48,6 +57,12 @@ export interface ExportJob {
   dismiss(): void;
   reset(): void;
   dispose(): void;
+}
+
+export interface ExpectedExport {
+  durationS: number;
+  // The fitted estimate, before this browser's own calibration.
+  fitted: ExportEstimate;
 }
 
 export const CANCELLED_NOTE = "Cancelled. Nothing was saved.";
@@ -94,7 +109,7 @@ export function createExportJob(): ExportJob {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    async start(context, request, durationS) {
+    async start(context, request, { durationS, fitted }) {
       if (busy(state.phase)) return;
       const support = exportSupport();
       if (!support.ok) {
@@ -104,18 +119,20 @@ export function createExportJob(): ExportJob {
       const mine = ++run;
       release();
       const suggested = suggestedExportName(new Date());
-      let name =
+      let name = exportFileName(
         context.source.screen === "browser"
           ? suggested.replace(/\.mp4$/, "-browser.mp4")
-          : suggested;
+          : suggested,
+        request.format,
+      );
       set({ ...IDLE, phase: support.save === "picker" ? "picking" : "exporting", context });
       let sink: ExportSink | MemorySink | null;
       try {
         if (support.save === "picker") {
-          const picked = await pickFileSink(name);
+          const picked = await pickFileSink(name, request.format);
           sink = picked;
           if (picked) name = picked.name;
-        } else sink = memorySink();
+        } else sink = memorySink(undefined, request.format);
       } catch {
         if (mine === run) set({ phase: "options", note: OPEN_FAILED, context: null });
         return;
@@ -128,7 +145,8 @@ export function createExportJob(): ExportJob {
         set({ phase: "options", context: null });
         return;
       }
-      set({ phase: "exporting", startedAt: performance.now() });
+      const startedAt = performance.now();
+      set({ phase: "exporting", startedAt });
       const exporting = startExport({ request, ...context, sink });
       handle = exporting;
       exporting.onProgress((progress) => {
@@ -137,11 +155,14 @@ export function createExportJob(): ExportJob {
       const result = await exporting.done;
       if (mine !== run) return;
       handle = null;
+      const ms = performance.now() - startedAt;
       if (result.type === "done" && "blob" in sink) {
         held = sink.blob();
-        set({ phase: "ready", file: { name, bytes: held.size, durationS } });
+        keepCalibration(calibrationFrom(fitted, { bytes: held.size, ms }, storedCalibration()));
+        set({ phase: "ready", file: { name, bytes: held.size, durationS, ms } });
       } else if (result.type === "done") {
-        set({ phase: "saved", file: { name, bytes: result.bytes, durationS } });
+        keepCalibration(calibrationFrom(fitted, { bytes: result.bytes, ms }, storedCalibration()));
+        set({ phase: "saved", file: { name, bytes: result.bytes, durationS, ms } });
       } else {
         set({
           phase: "options",

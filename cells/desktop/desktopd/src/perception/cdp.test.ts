@@ -178,6 +178,144 @@ describe("ChromiumPerception against a scripted DevTools endpoint", () => {
     await cdp.close();
   });
 
+  const metrics = () => ({
+    result: {
+      value: {
+        dpr: 2,
+        chromeW: 0,
+        chromeH: 87,
+        innerWidth: 1280,
+        innerHeight: 686,
+        url: "file:///opt/localdot/marker.html",
+      },
+    },
+  });
+  // A CSS-pixel quad at (x, y), w × h.
+  const quad = (x: number, y: number, w = 100, h = 40) => ({
+    model: { border: [x, y, x + w, y, x + w, y + h, x, y + h] },
+  });
+
+  it("lists the interactive elements in view in reading order, with their state and nodes", async () => {
+    const boxes: Record<number, ReturnType<typeof quad>> = {
+      1: quad(40, 300),
+      2: quad(40, 100, 300),
+      3: quad(40, 900),
+      4: quad(400, 100),
+      5: quad(40, 200),
+    };
+    const { port } = await scriptedChromium({
+      "Accessibility.enable": () => ({}),
+      "Runtime.evaluate": metrics,
+      "Accessibility.getFullAXTree": () => ({
+        nodes: [
+          { backendDOMNodeId: 1, role: { value: "button" }, name: { value: "Send" } },
+          {
+            backendDOMNodeId: 2,
+            role: { value: "textbox" },
+            name: { value: "Email" },
+            value: { value: "robin@example.com" },
+          },
+          { backendDOMNodeId: 3, role: { value: "link" }, name: { value: "Below the fold" } },
+          {
+            backendDOMNodeId: 4,
+            role: { value: "textbox" },
+            name: { value: "Password" },
+            value: { value: "secret" },
+          },
+          {
+            backendDOMNodeId: 5,
+            role: { value: "checkbox" },
+            name: { value: "Remember me" },
+            properties: [{ name: "checked", value: { value: "true" } }],
+          },
+          { backendDOMNodeId: 6, role: { value: "StaticText" }, name: { value: "Hello" } },
+          { backendDOMNodeId: 7, ignored: true, role: { value: "button" } },
+        ],
+      }),
+      "DOM.getBoxModel": (p) => boxes[p.backendNodeId as number],
+      "DOM.describeNode": (p) => ({
+        node: { attributes: p.backendNodeId === 4 ? ["type", "password"] : ["type", "text"] },
+      }),
+    });
+    const cdp = new ChromiumPerception({ port, originProvider: async () => ({ x: 0, y: 228 }) });
+    const page = await cdp.elements(win, 10);
+    expect(page.url).toBe("file:///opt/localdot/marker.html");
+    expect(page.origin).toEqual({ x: 0, y: 228 });
+    expect(page.elements.map((e) => [e.node, e.role, e.name, e.state, e.secret])).toEqual([
+      [2, "textbox", "Email", { value: "robin@example.com" }, undefined],
+      [4, "textbox", "Password", undefined, true],
+      [5, "checkbox", "Remember me", { checked: "true" }, undefined],
+      [1, "button", "Send", undefined, undefined],
+    ]);
+    expect(page.elements[0]?.bbox).toEqual({ x: 80, y: 428, w: 600, h: 80 });
+    expect((await cdp.elements(win, 2)).truncated).toBe(true);
+    await cdp.close();
+  });
+
+  it("lists what is in view on a long page scrolled down, past its first 400 elements", async () => {
+    const above = 450;
+    const { port } = await scriptedChromium({
+      "Accessibility.enable": () => ({}),
+      "Runtime.evaluate": metrics,
+      "Accessibility.getFullAXTree": () => ({
+        nodes: Array.from({ length: above + 3 }, (_, i) => ({
+          backendDOMNodeId: i + 1,
+          role: { value: "link" },
+          name: { value: `Link ${i + 1}` },
+        })),
+      }),
+      "DOM.getBoxModel": (p) => {
+        const node = p.backendNodeId as number;
+        return node > above ? quad(40, 100 + (node - above) * 50) : quad(40, -5000 + node);
+      },
+      "DOM.describeNode": () => ({ node: { attributes: [] } }),
+    });
+    const cdp = new ChromiumPerception({ port, originProvider: async () => ({ x: 0, y: 228 }) });
+    const page = await cdp.elements(win, 10);
+    expect(page.elements.map((e) => e.name)).toEqual(["Link 451", "Link 452", "Link 453"]);
+    expect(page.truncated).toBe(false);
+    await cdp.close();
+  });
+
+  it("finds an element by its node only while some of it is in view, cut to the view", async () => {
+    const boxes: Record<number, ReturnType<typeof quad>> = { 1: quad(40, 660), 2: quad(40, 700) };
+    const { port } = await scriptedChromium({
+      "Accessibility.enable": () => ({}),
+      "Runtime.evaluate": metrics,
+      "Accessibility.getPartialAXTree": (p) => ({
+        nodes: [
+          {
+            backendDOMNodeId: p.backendNodeId,
+            role: { value: "button" },
+            name: { value: "Go" },
+            properties: [{ name: "checked", value: { value: "false" } }],
+          },
+        ],
+      }),
+      "DOM.getBoxModel": (p) => boxes[p.backendNodeId as number],
+      "DOM.describeNode": () => ({ node: { attributes: [] } }),
+    });
+    const origins: number[] = [];
+    const cdp = new ChromiumPerception({
+      port,
+      originProvider: async (_w, dpr) => {
+        origins.push(dpr);
+        return { x: 0, y: 228 };
+      },
+    });
+    // 26 of its 40 CSS px are above the bottom of the 686 px view.
+    expect(await cdp.node(win, 1)).toMatchObject({
+      role: "button",
+      name: "Go",
+      bbox: { x: 80, y: 1548, w: 200, h: 52 },
+      point: { x: 180, y: 1574 },
+      checked: "false",
+    });
+    expect(await cdp.node(win, 2)).toBeNull();
+    expect(origins[0]).toBe(2);
+    await cdp.close();
+  });
+
   it("opens a new session once the page's socket has closed", async () => {
     const { port, seen, drop } = await scriptedChromium({
       "Accessibility.enable": () => ({}),

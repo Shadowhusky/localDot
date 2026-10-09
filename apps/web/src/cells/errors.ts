@@ -8,7 +8,7 @@ const RESUME_ANSWERS: Record<string, string> = {
   "the computer is restarting: resume it once it is ready":
     "Your computer is restarting. Resume it once it's ready.",
   "the computer is changing state; try again": "Your computer is busy. Try again in a moment.",
-  "the key layer is offline: start keyd, then resume the computer":
+  "key protection is off: turn it back on, then resume the computer":
     "Key protection is off. Run localdot doctor in Terminal, then resume.",
 };
 

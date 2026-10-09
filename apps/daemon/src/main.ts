@@ -17,6 +17,7 @@ import { BrowserStreams } from "./browser/streams.ts";
 import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery } from "./cells/browser-recovery.ts";
+import { ComputerUpdates, updateComputer } from "./cells/computer-update.ts";
 import { DockerClient } from "./cells/docker.ts";
 import { browserImagesFromEnv, imagesFromEnv } from "./cells/images.ts";
 import { CellOrchestrator } from "./cells/orchestrator.ts";
@@ -127,7 +128,10 @@ let agent: ReturnType<typeof createAgent> | undefined;
 let browser: BrowserOrchestrator | undefined;
 const store = new CellStore(home, keydPorts);
 const stream = streamOptions(process.env);
+const images = imagesFromEnv();
+const updates = new ComputerUpdates({ home, docker, images, stream });
 const orchestrator = new CellOrchestrator({
+  updates,
   diagnosticAdmission: (id) => live.admitIdleOperation(id),
   externalKeydPorts: () => [
     ...(agent?.reservedPorts() ?? []),
@@ -152,7 +156,7 @@ const orchestrator = new CellOrchestrator({
   docker,
   keyd: keydWiring,
   store,
-  images: imagesFromEnv(),
+  images,
   streamFullcolor: stream.fullcolor,
   probeDesktopd,
   probeStream,
@@ -356,9 +360,13 @@ const startup = () =>
       resetAvailable = true;
     },
   });
-void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup()).catch((error) =>
-  console.error(describeStartupError(error)),
-);
+void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup())
+  .catch((error) => console.error(describeStartupError(error)))
+  .finally(() => {
+    if (shuttingDown) return;
+    const records = () => orchestrator.list().flatMap((cell) => orchestrator.record(cell.id) ?? []);
+    shutdown.unshift(updates.watch(records, (id) => orchestrator.notify(id)));
+  });
 const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(
   () => keydEvents.stop(),
@@ -398,7 +406,14 @@ const app = createApp({
     thumbs: new Thumbnails(home, frames),
     live,
   },
-  cells: { cells: orchestrator, tickets, replacement, reset },
+  cells: {
+    cells: orchestrator,
+    tickets,
+    replacement,
+    reset,
+    update: (id, signal) =>
+      updateComputer({ cells: orchestrator, live, runner: agent.runner }, id, signal),
+  },
   desktop,
   browser: browserViewer,
   accounts: { cells: orchestrator, browser },

@@ -1,11 +1,13 @@
 import { anthropic } from "@ai-sdk/anthropic";
 import {
   AskUserInput,
+  BrowserActInput,
   BrowserNavigateInput,
   BrowserReadInput,
   BrowserUploadInput,
   DoneInput,
   FilesInput,
+  FindInput,
   GenericComputerInput,
   type ModelBinding,
   PeopleInput,
@@ -19,7 +21,7 @@ import {
 import { type ToolSet, tool } from "ai";
 
 const GENERIC_ACTIONS =
-  'Actions: screenshot; left_click, right_click, middle_click, double_click, triple_click (coordinate, or where the cursor is without one; text holds modifier keys down during the click, e.g. "shift" or "ctrl+shift"); left_click_drag (start_coordinate and coordinate, or path: 2 to 64 [x, y] points to follow, such as a stroke when drawing; optional button, text modifiers and duration up to 10 seconds; one approval covers the whole path); mouse_move (coordinate: hovers, or drags while a button is down); left_mouse_down and left_mouse_up (optional coordinate and button; the button stays down until left_mouse_up, at most 60 seconds; a mouse_move, a scroll and the left_mouse_up while it is down drag from where it went down, and a drop on a send, post or delete control on a web page, or a file carried onto a web page, asks first); type (text; optional coordinate to click first, clear to select all and delete first, submit to press Return after); key (text: X key names joined by +, e.g. "ctrl+s", "Return", "Page_Up", "ctrl++"; repeat up to 100 presses); hold_key (text, duration up to 30 seconds); scroll (coordinate or where the cursor is, scroll_direction, scroll_amount, text modifiers); wait (duration in seconds); zoom (region [x0, y0, x1, y1]); cursor_position.';
+  'Actions: screenshot; left_click, right_click, middle_click, double_click, triple_click (coordinate, or where the cursor is without one; text holds modifier keys down during the click, e.g. "shift" or "ctrl+shift"); left_click_drag (start_coordinate and coordinate, or path: 2 to 64 [x, y] points to follow, such as a stroke when drawing; optional button, text modifiers and duration up to 10 seconds; one approval covers the whole path); mouse_move (coordinate: hovers, or drags while a button is down); left_mouse_down and left_mouse_up (optional coordinate and button; the button stays down until left_mouse_up, at most 60 seconds; a mouse_move, a scroll and the left_mouse_up while it is down drag from where it went down, and a drop on a send, post or delete control on a web page, or a file carried onto a web page, asks first); type (text; optional coordinate to click first, clear to select all and delete first, submit to press Return after); key (text: X key names joined by +, e.g. "ctrl+s", "Return", "Page_Up", "ctrl++"; repeat up to 100 presses); hold_key (text, duration up to 30 seconds); scroll (coordinate or where the cursor is, scroll_direction, scroll_amount, text modifiers); wait (duration in seconds); zoom (region [x0, y0, x1, y1]) to read small text or check details; cursor_position; batch (steps: 1 to 8 of the actions above but screenshot, zoom and cursor_position, each with its own fields, run in order with one screenshot at the end; use it for predictable sequences such as click a field, type, press Tab, type, press Return; it stops at a step that fails, whose target changed since your screenshot, or that needs the user\'s approval, and says which). When the screen did not change, an action says so instead of sending the same screenshot again.';
 
 function computerTool(b: ModelBinding) {
   switch (b.computer) {
@@ -45,6 +47,12 @@ function computerTool(b: ModelBinding) {
   }
 }
 
+const findTool = tool({
+  description:
+    'Find controls on the desktop by name: the buttons, menus, fields and other controls whose names contain text (role narrows it, such as "push button", "menu item" or "check box"), in every window, top first, with the point to click. Faster and more precise than looking for them in a screenshot.',
+  inputSchema: FindInput,
+});
+
 // The v1 tool table (spec "Tools"). No tool has an execute function:
 // the loop runs every call through the daemon's tool API itself.
 export function toolSet(b: ModelBinding): ToolSet {
@@ -63,9 +71,15 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     browser_read: tool({
       description:
-        "Read the text and outline of the page open on the selected screen: the web browser or the desktop's Chromium. Faster than screenshots for reading.",
+        "Read the text and outline of the page open on the selected screen: the web browser or the desktop's Chromium, and the interactive elements in view, each with a ref (such as e12), role, name, state and box. Faster than screenshots for reading; act on the elements with browser_act.",
       inputSchema: BrowserReadInput,
     }),
+    browser_act: tool({
+      description:
+        'Act on an element browser_read listed, by its ref: click; fill (text, which replaces what the field holds; submit presses Return after); select (text: the option to choose in a list); check or uncheck; press (text: keys such as "Return" or "ctrl+a", after clicking the element); scroll (scroll_direction, scroll_amount). The element is found wherever it is now, so there is no pixel hunting; give its coordinate too as a fallback for when the page changed. Returns a screenshot. Password fields are never filled: ask the user with an ask_user secret field.',
+      inputSchema: BrowserActInput,
+    }),
+    ...(computer ? { find: findTool } : {}),
     browser_navigate: tool({
       description:
         "Open an http or https page and get a screenshot. Public sites open in the web browser, which keeps the user's sign-ins; localhost and local addresses open in the desktop's Chromium. The screen switches to match.",

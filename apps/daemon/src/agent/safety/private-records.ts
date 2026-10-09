@@ -28,7 +28,8 @@ export class PrivateRecords<T> {
       | "computer-resets"
       | "computer-reset-holds"
       | "computer-reset-releases"
-      | "computer-updates",
+      | "computer-updates"
+      | "computer-image-updates",
     private readonly parse: (value: unknown, id: string) => T,
   ) {
     let dir = resolve(home);
@@ -146,16 +147,7 @@ export class PrivateRecords<T> {
       this.#directory(this.dir);
       renameSync(temp, target);
       renamed = true;
-      const parent = openSync(
-        this.dir,
-        constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY,
-      );
-      try {
-        if (!fstatSync(parent).isDirectory()) throw new Error("unsafe private directory");
-        fsyncSync(parent);
-      } finally {
-        closeSync(parent);
-      }
+      this.#syncDirectory();
     } catch (e) {
       if (open)
         try {
@@ -166,6 +158,24 @@ export class PrivateRecords<T> {
           unlinkSync(temp);
         } catch {}
       throw e;
+    }
+  }
+  remove(id: string): void {
+    const target = this.#path(id);
+    if (this.read(id) === undefined) return;
+    unlinkSync(target);
+    this.#syncDirectory();
+  }
+  #syncDirectory(): void {
+    const parent = openSync(
+      this.dir,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_DIRECTORY,
+    );
+    try {
+      if (!fstatSync(parent).isDirectory()) throw new Error("unsafe private directory");
+      fsyncSync(parent);
+    } finally {
+      closeSync(parent);
     }
   }
 }

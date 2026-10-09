@@ -7,7 +7,8 @@ export type CellKind =
   | "paused"
   | "stopped"
   | "failed"
-  | "fenced";
+  | "fenced"
+  | "fresh-start";
 
 export type ScenarioStep =
   | "approval"
@@ -84,6 +85,11 @@ export const UI_SCENARIOS = {
     about: "The computer needs recovery",
     boot: { QA_CELL: "fenced" },
     step: "cell/fenced",
+  },
+  "fresh-start": {
+    about: "An update that can't be finished leaves the computer needing a fresh start",
+    boot: { QA_CELL: "fresh-start", QA_SESSION: "0" },
+    step: "cell/fresh-start",
   },
   off: {
     about: "The computer is turned off",

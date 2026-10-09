@@ -145,7 +145,9 @@ describe("Stop, resume and a paused computer", () => {
     const { app } = setup(true, true);
     const res = await app.request(`/api/cells/${CELL}/resume`, { method: "POST" });
     expect(res.status).toBe(503);
-    expect(await res.text()).toBe("the key layer is offline: start keyd, then resume the computer");
+    expect(await res.text()).toBe(
+      "key protection is off: turn it back on, then resume the computer",
+    );
   });
 
   it("refuses to resume a computer that is not paused, or an unknown one", async () => {

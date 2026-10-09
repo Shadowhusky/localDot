@@ -93,6 +93,9 @@ const Cell = z.strictObject({
     .strictObject({ revision: z.number().int().positive().max(Number.MAX_SAFE_INTEGER) })
     .optional(),
   replacementPending: z.literal(true).optional(),
+  updateAvailable: z.literal(true).optional(),
+  updating: z.literal(true).optional(),
+  needsFreshStart: z.literal(true).optional(),
 });
 export async function runStop(options: StopOptions, io: StopIO): Promise<number> {
   const { home, cellId, signal } = options,

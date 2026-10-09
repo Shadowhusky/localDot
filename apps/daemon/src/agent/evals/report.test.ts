@@ -54,6 +54,10 @@ describe("taskReport", () => {
     expect(report({}).costUSD).toBe(0);
   });
 
+  it("counts the model's turns from its transcript, which keeps the last one", () => {
+    expect(report({ run: { ...run, turns: 5 } }).modelTurns).toBe(5);
+  });
+
   it("reports a pass as assisted when the simulated user did handed-over inputs", () => {
     expect(report({}).status).toBe("pass-assisted");
     expect(report({ analysis: { ...analysis, handoffs: 0 } }).status).toBe("pass");

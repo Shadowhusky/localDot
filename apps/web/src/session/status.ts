@@ -59,6 +59,7 @@ export type TaskRow =
   | "done"
   | "ready"
   | "stopped"
+  | "interrupted"
   | "failed";
 
 export interface TaskHud {
@@ -185,11 +186,14 @@ function replayState(model: SessionModel, at: AgentStateAt, nowMs: number): stri
   return step && pausing(model, step, at, nowMs) ? "pausing" : at.state;
 }
 
+// A task whose log stops short of its end: localDot went away under it.
+const INTERRUPTED_CAPTION = "I was cut off before I finished. Shall I continue?";
+
 // What a task paused on, other than its own Pause or a question, says on the HUD.
 const STALLED: Record<string, { row: TaskRow; label: string; caption: string }> = {
   [STALL.budget]: {
     row: "limit",
-    label: "Reached your spending limit",
+    label: "Spending limit reached",
     caption: "I stopped at the spending limit you set.",
   },
   [STALL.modelBusy]: {
@@ -283,6 +287,8 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (model.ended && model.ended.t <= nowMs) {
     if (model.ended.reason === "done") return finished("done", "Done", "Done.");
     if (model.ended.reason === "stopped") return finished("stopped", "Task stopped", "Stopped.");
+    if (model.ended.reason === "interrupted")
+      return finished("interrupted", "Task interrupted", INTERRUPTED_CAPTION);
     return finished("failed", "Task failed", "The task failed.");
   }
   const at = agentStateAt(model, nowMs);
@@ -362,7 +368,7 @@ export function taskHud(model: SessionModel, nowMs: number, facts?: TaskFacts): 
   if (state === "thinking") return running("thinking", "Thinking…", "Thinking…", control);
   if (state === "observing")
     return running("observing", "Checking the screen", "Checking the screen.", control);
-  return running("working", "Working", model.actions.length ? "Working…" : "Starting…", control);
+  return running("working", "Working", n ? "Working…" : "Starting…", control);
 }
 
 // The thread's foot follows dot's own work. While the user has the computer it says nothing: the
@@ -444,6 +450,7 @@ export const TASK_POSE: Record<TaskRow, DotState> = {
   observing: "observing",
   done: "idle",
   stopped: "idle",
+  interrupted: "idle",
   ready: "idle",
   failed: "error",
 };
@@ -465,11 +472,13 @@ const TASK_ATTENTION: Record<TaskRow, Attention | null> = {
   observing: "working",
   done: "done",
   stopped: null,
+  interrupted: null,
   ready: null,
   failed: "blocked",
 };
 // Rows whose caption is dot's own words: its narration, its question or its note to the user.
 const DOT_SPEAKS = new Set<TaskRow>([
+  "interrupted",
   "limit",
   "retrying",
   "recovery",
@@ -500,7 +509,7 @@ const DOWN = new Set<ComputerPhase>([
 // A task Stop outranks everything. A frozen computer outranks any task, its Stop included; a
 // computer that is down outranks it too but leaves its Stop. A finished task keeps its verdict
 // only while the computer is live.
-const LOST_CAPTION = "Lost touch with the task for a moment. Reconnecting.";
+const LOST_CAPTION = "I've lost touch with your Mac. Reconnecting…";
 const UNCONFIRMED_CAPTION = "I couldn't confirm that I stopped. Press Stop again to be sure.";
 
 export function statusFor({
@@ -549,7 +558,7 @@ export function statusFor({
     computer: computer.phase,
     label,
     caption: lost
-      ? { speaker: "system", text: LOST_CAPTION }
+      ? { speaker: "dot", text: LOST_CAPTION }
       : halting === "unconfirmed"
         ? { speaker: "dot", text: UNCONFIRMED_CAPTION }
         : {

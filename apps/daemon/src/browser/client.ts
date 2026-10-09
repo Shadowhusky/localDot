@@ -129,7 +129,8 @@ const RESPONSE_LIMIT = 12 * 1024 * 1024;
 export type BrowserLookup =
   | { kind: "focused" }
   | { kind: "hitTest"; point: Point }
-  | { kind: "find"; name: string; role?: string; app?: string };
+  | { kind: "find"; name: string; role?: string; app?: string }
+  | { kind: "node"; node: number; role?: string; name?: string };
 
 // Both the model and the task timeline show these messages.
 const REFUSALS = {

@@ -80,6 +80,9 @@ const PLANNED: IconName[] = [
   "code",
   // What dot knows: a fact it always reads.
   "pin",
+  // Export: stepping a custom speed.
+  "minus",
+  "plus",
 ];
 
 describe("Icon", () => {

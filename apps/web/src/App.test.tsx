@@ -633,7 +633,7 @@ describe("App token states", () => {
   it("leaves a refused Resume paused and shows keyd's safe offline answer until pause changes", async () => {
     window.localStorage.setItem(TOKEN_KEY, TOKEN);
     const paused = { ...summary("ready", "stalled"), paused: true as const };
-    const offline = "the key layer is offline: start keyd, then resume the computer";
+    const offline = "key protection is off: turn it back on, then resume the computer";
     const d = daemon(({ path }) =>
       path.endsWith("/resume") ? new Response(offline, { status: 503 }) : json([paused]),
     );

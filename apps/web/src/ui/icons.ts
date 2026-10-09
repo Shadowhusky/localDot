@@ -340,6 +340,11 @@ export const ICONS = {
     ["path", { d: "m16 6-4-4-4 4" }],
     ["path", { d: "M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" }],
   ],
+  minus: [["path", { d: "M5 12h14" }]],
+  plus: [
+    ["path", { d: "M5 12h14" }],
+    ["path", { d: "M12 5v14" }],
+  ],
   filter: [
     ["path", { d: "M3 6h18" }],
     ["path", { d: "M7 12h10" }],

@@ -15,6 +15,8 @@ export const TOOL_NAMES = [
   "browser_read",
   "browser_navigate",
   "browser_upload",
+  "browser_act",
+  "find",
   "switch_screen",
   "update_plan",
   "ask_user",
@@ -37,8 +39,7 @@ export const MODEL_SCREEN = { width: 1280, height: 800 } as const;
 
 // Schemas are flat objects with optional fields, never unions: Gemini refuses some JSON Schema
 // shapes (S5: draft-07 tuples), and one shape per tool keeps every provider on the same wire.
-const COMPUTER_ACTIONS = [
-  "screenshot",
+const STEP_ACTIONS = [
   "left_click",
   "right_click",
   "middle_click",
@@ -48,28 +49,34 @@ const COMPUTER_ACTIONS = [
   "key",
   "scroll",
   "wait",
-  "zoom",
-  "cursor_position",
   "mouse_move",
   "left_click_drag",
   "left_mouse_down",
   "left_mouse_up",
   "hold_key",
 ] as const;
+const COMPUTER_ACTIONS = [
+  ...STEP_ACTIONS,
+  "screenshot",
+  "zoom",
+  "cursor_position",
+  "batch",
+] as const;
 export const ComputerActionName = z.enum(COMPUTER_ACTIONS);
 export type ComputerActionName = z.infer<typeof ComputerActionName>;
 
-// localDot's generic computer tool (spec "Catalog"): Anthropic-style actions, a coordinate that is
-// a length-2 number array (Gemini rejects z.tuple), in the space the tool's description declares.
-export const GenericComputerInput = z.object({
-  action: ComputerActionName,
+// A batch is at most this many steps as the model writes them; a type with its options is several
+// daemon actions, so the daemon takes twice as many.
+export const MAX_BATCH_STEPS = 8;
+export const MAX_BATCH_ACTIONS = 2 * MAX_BATCH_STEPS;
+
+const genericFields = {
   coordinate: z.array(z.number()).length(2).optional(),
   start_coordinate: z.array(z.number()).length(2).optional(),
   text: z.string().max(4000).optional(),
   scroll_direction: z.enum(["up", "down", "left", "right"]).optional(),
   scroll_amount: z.number().int().min(1).max(30).optional(),
   duration: z.number().min(0).max(30).optional(),
-  region: z.array(z.number()).length(4).optional(),
   repeat: z.number().int().min(1).max(100).optional(),
   // type only: click `coordinate` first, select all and delete before typing, press Return after.
   clear: z.boolean().optional(),
@@ -78,31 +85,38 @@ export const GenericComputerInput = z.object({
   path: z.array(z.array(z.number()).length(2)).min(2).max(64).optional(),
   // left_click_drag, left_mouse_down and left_mouse_up: another button than the left one.
   button: z.enum(["left", "right", "middle"]).optional(),
+};
+
+const GenericComputerStep = z.object({ action: z.enum(STEP_ACTIONS), ...genericFields });
+
+// localDot's generic computer tool (spec "Catalog"): Anthropic-style actions, a coordinate that is
+// a length-2 number array (Gemini rejects z.tuple), in the space the tool's description declares.
+export const GenericComputerInput = z.object({
+  action: ComputerActionName,
+  ...genericFields,
+  region: z.array(z.number()).length(4).optional(),
+  // batch: these steps in order, with one screenshot at the end.
+  steps: z.array(GenericComputerStep).min(1).max(MAX_BATCH_STEPS).optional(),
 });
 export type GenericComputerInput = z.infer<typeof GenericComputerInput>;
 
 const ModelPoint = z.object({ x: z.number().int(), y: z.number().int() });
 export const MAX_DRAG_MS = 10_000;
 
-// What the brain sends the daemon for one computer action, whatever the provider said: points in
-// model pixels (MODEL_SCREEN), keys as X-style names. A click, scroll or button press without a
-// point acts where the cursor is.
-export const ComputerAction = z.object({
-  action: z.enum([
-    "screenshot",
-    "click",
-    "type",
-    "key",
-    "hold_key",
-    "scroll",
-    "move",
-    "drag",
-    "mouse_down",
-    "mouse_up",
-    "wait",
-    "zoom",
-    "cursor_position",
-  ]),
+const INPUT_ACTIONS = [
+  "click",
+  "type",
+  "key",
+  "hold_key",
+  "scroll",
+  "move",
+  "drag",
+  "mouse_down",
+  "mouse_up",
+  "wait",
+] as const;
+
+const computerFields = {
   point: ModelPoint.optional(),
   // drag: the whole way, start first.
   path: z.array(ModelPoint).min(2).max(64).optional(),
@@ -118,13 +132,34 @@ export const ComputerAction = z.object({
   dy: z.number().int().min(-30).max(30).optional(),
   // wait and hold_key: how long. drag: how long the motion takes, up to MAX_DRAG_MS.
   ms: z.number().int().min(0).max(30_000).optional(),
+};
+
+// One input of a batch: it shares the batch's screenshot basis.
+export const ComputerStep = z.object({ action: z.enum(INPUT_ACTIONS), ...computerFields });
+export type ComputerStep = z.infer<typeof ComputerStep>;
+
+// What the brain sends the daemon for one computer action, whatever the provider said: points in
+// model pixels (MODEL_SCREEN), keys as X-style names. A click, scroll or button press without a
+// point acts where the cursor is.
+export const ComputerAction = z.object({
+  action: z.enum([...INPUT_ACTIONS, "screenshot", "zoom", "cursor_position", "batch"]),
+  ...computerFields,
   region: z
     .object({ x: z.number().int(), y: z.number().int(), w: z.number().int(), h: z.number().int() })
     .optional(),
+  // batch: the inputs, run in order until one fails, changed under its point or needs the user.
+  steps: z.array(ComputerStep).min(1).max(MAX_BATCH_ACTIONS).optional(),
   // The screenshot the model based this action on (the freshness check, spec "Harness rules").
   basedOn: z.string().regex(ULID_PATTERN).optional(),
 });
 export type ComputerAction = z.infer<typeof ComputerAction>;
+
+const WORK_MS = 120_000;
+// How long one call's own work may take, approvals and questions aside: a batch gets a share for
+// each step.
+export function computerWorkMs(action: Pick<ComputerAction, "steps">): number {
+  return WORK_MS + (action.steps ? 30_000 * (action.steps.length - 1) : 0);
+}
 
 export const ShellInput = z.object({
   command: z.string().min(1).max(8000),
@@ -158,6 +193,34 @@ export const BrowserUploadInput = z.strictObject({
     .refine((files) => new Set(files).size === files.length),
 });
 export type BrowserUploadInput = z.infer<typeof BrowserUploadInput>;
+
+// browser_act: one element of the page browser_read listed, by its ref ("e12"). Its coordinate,
+// in the computer tool's space, is where to act instead when the ref is stale or not given.
+export const BrowserActInput = z.object({
+  action: z.enum(["click", "fill", "select", "check", "uncheck", "press", "scroll"]),
+  ref: z.string().min(2).max(24).optional(),
+  coordinate: z.array(z.number()).length(2).optional(),
+  // fill: the text. select: the option's text. press: keys such as "Return" or "ctrl+a".
+  text: z.string().max(4000).optional(),
+  // fill: press Return after typing.
+  submit: z.boolean().optional(),
+  scroll_direction: z.enum(["up", "down", "left", "right"]).optional(),
+  scroll_amount: z.number().int().min(1).max(30).optional(),
+});
+export type BrowserActInput = z.infer<typeof BrowserActInput>;
+// What the daemon runs: the coordinate in model pixels, and the screenshot it was chosen on.
+export const BrowserAction = BrowserActInput.extend({
+  basedOn: z.string().regex(ULID_PATTERN).optional(),
+});
+export type BrowserAction = z.infer<typeof BrowserAction>;
+
+// find: the desktop's controls whose names contain the text, from the apps' accessibility trees.
+export const FindInput = z.object({
+  text: z.string().min(1).max(200),
+  // A role such as "push button", "menu item" or "check box" narrows the search.
+  role: z.string().min(1).max(64).optional(),
+});
+export type FindInput = z.infer<typeof FindInput>;
 
 export const PlanItemStatus = z.enum(["todo", "doing", "done", "skipped"]);
 export const UpdatePlanInput = z.object({
@@ -256,6 +319,8 @@ export const TOOL_INPUTS = {
   browser_read: BrowserReadInput,
   browser_navigate: BrowserNavigateInput,
   browser_upload: BrowserUploadInput,
+  browser_act: BrowserAction,
+  find: FindInput,
   switch_screen: SwitchScreenInput,
   update_plan: UpdatePlanInput,
   ask_user: AskUserInput,

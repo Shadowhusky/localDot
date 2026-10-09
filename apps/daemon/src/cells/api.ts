@@ -19,9 +19,13 @@ export interface CellApiDeps {
   tickets: TicketRegistry;
   replacement?: ReturnType<typeof createReplacementController>;
   reset?: ReturnType<typeof createComputerResetController>;
+  update?(id: string, signal: AbortSignal): Promise<void>;
 }
 
-export function cellRoutes(app: Hono, { cells, tickets, replacement, reset }: CellApiDeps): void {
+export function cellRoutes(
+  app: Hono,
+  { cells, tickets, replacement, reset, update }: CellApiDeps,
+): void {
   // A stream ticket lives only while its cell is ready (P2-R2): stopping, failing or removing the
   // cell revokes it, so no stream path stays open for a computer that is off.
   cells.subscribe((cell) => {
@@ -122,6 +126,18 @@ export function cellRoutes(app: Hono, { cells, tickets, replacement, reset }: Ce
       withDocker(c, async () => {
         await cells.stop(id);
         return c.body(null, 202);
+      }),
+    ),
+  );
+
+  // Answers once the updated computer is starting; it reports Ready like any start.
+  app.post("/api/cells/:id/update", (c) =>
+    withCell(c, (id) =>
+      withDocker(c, async () => {
+        if (!update) return c.text("updates unavailable", 503);
+        await update(id, c.req.raw.signal);
+        const cell = cells.get(id);
+        return cell ? c.json(cell, 202) : c.text("unknown cell", 404);
       }),
     ),
   );

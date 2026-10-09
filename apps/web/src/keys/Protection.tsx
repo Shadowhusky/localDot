@@ -1,14 +1,11 @@
-import { useEffect, useState } from "react";
+import { CommandChip } from "../shell/CommandChip.tsx";
 import { Badge } from "../ui/Badge.tsx";
-import { Button } from "../ui/Button.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import type { IconName } from "../ui/icons.ts";
-import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import type { KeydHealth } from "./keys-api.ts";
 
-const DOCTOR = "localdot doctor";
-const COPIED_MS = 1500;
+export const DOCTOR = "localdot doctor";
 
 type Tone = "ok" | "wait" | "bad";
 
@@ -81,36 +78,6 @@ function Glyph({ tone }: { tone: Exclude<Tone, "ok"> }) {
   return <span className="keys-status-ring" aria-hidden="true" />;
 }
 
-// A command to run in Terminal, copied with one press where the browser allows it.
-function Command() {
-  const [copied, setCopied] = useState(false);
-  useEffect(() => {
-    if (!copied) return;
-    const timer = window.setTimeout(() => setCopied(false), COPIED_MS);
-    return () => window.clearTimeout(timer);
-  }, [copied]);
-  if (typeof navigator === "undefined" || typeof navigator.clipboard?.writeText !== "function")
-    return <code className="keys-code">{DOCTOR}</code>;
-  return (
-    <>
-      <Button
-        size="sm"
-        icon={copied ? "check" : "copy"}
-        aria-label={`Copy the command ${DOCTOR}`}
-        onClick={() => {
-          void navigator.clipboard.writeText(DOCTOR).then(
-            () => setCopied(true),
-            () => {},
-          );
-        }}
-      >
-        <code className="keys-code">{DOCTOR}</code>
-      </Button>
-      <VisuallyHidden role="status">{copied ? "Copied" : ""}</VisuallyHidden>
-    </>
-  );
-}
-
 const TILE: Record<string, IconName> = {
   "Key isolation": "lock",
   "Audit log": "file-text",
@@ -139,7 +106,7 @@ export function Protection({ health }: { health: KeydHealth | null }) {
                   <p>{status.problem}</p>
                   <div className="keys-status-fix">
                     <span>To fix it, run this in Terminal:</span>
-                    <Command />
+                    <CommandChip text={DOCTOR} />
                   </div>
                   {status.details && (
                     <Disclosure summary="Details" className="keys-status-details">

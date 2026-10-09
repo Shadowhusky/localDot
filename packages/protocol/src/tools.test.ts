@@ -26,6 +26,8 @@ describe("the v1 tool table", () => {
       "browser_read",
       "browser_navigate",
       "browser_upload",
+      "browser_act",
+      "find",
       "switch_screen",
       "update_plan",
       "ask_user",

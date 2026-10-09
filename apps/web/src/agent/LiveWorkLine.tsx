@@ -64,7 +64,7 @@ export function LiveWorkLine({
   spend?: { usd: number; estimated: boolean };
   // Given for the latest turn while its task has not ended.
   live: LiveWork | null;
-  ended?: "done" | "stopped" | "error";
+  ended?: "done" | "stopped" | "interrupted" | "error";
 }) {
   const [open, setOpen] = useState(false);
   const running = live?.phase === "running";
@@ -93,9 +93,11 @@ export function LiveWorkLine({
         : "Waiting for you"
       : ended === "stopped"
         ? took("Stopped", "after")
-        : ended === "error"
-          ? took("Ended", "after")
-          : took("Worked", "for");
+        : ended === "interrupted"
+          ? took("Interrupted", "after")
+          : ended === "error"
+            ? took("Ended", "after")
+            : took("Worked", "for");
   const meta = [
     count(steps.length, "step", "steps"),
     failed ? `${failed} failed` : "",
@@ -138,7 +140,7 @@ export function LiveWorkLine({
                       : "ask"
                     : ended === "stopped"
                       ? "skipped"
-                      : ended === "error"
+                      : ended === "error" || ended === "interrupted"
                         ? "failed"
                         : "done"
               }

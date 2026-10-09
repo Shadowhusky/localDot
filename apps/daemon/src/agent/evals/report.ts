@@ -59,7 +59,7 @@ export function taskReport(input: {
   landed: boolean;
   verdict: Verdict;
   noop?: Verdict;
-  run: Pick<AgentRun, "outcome" | "error" | "wallMs" | "calls">;
+  run: Pick<AgentRun, "outcome" | "error" | "wallMs" | "calls"> & Partial<Pick<AgentRun, "turns">>;
   analysis: RunAnalysis;
   maxHandoffs: number;
   denied?: readonly string[];
@@ -97,7 +97,7 @@ export function taskReport(input: {
     ...(run.error ? { error: run.error } : {}),
     ...(input.harnessError ? { harnessError: input.harnessError } : {}),
     wallSeconds: run.wallMs / 1000,
-    modelTurns: analysis.modelTurns,
+    modelTurns: run.turns ?? analysis.modelTurns,
     toolCalls: run.calls.length,
     failedCalls: run.calls.filter((c) => !c.ok && !c.skipped).length,
     skippedCalls: run.calls.filter((c) => c.skipped).length,

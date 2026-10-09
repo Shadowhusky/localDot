@@ -50,6 +50,11 @@ export interface HudState {
 // crashed cell as "Reconnecting…".
 const RESTART_NOTE = /; restarting \(attempt (\d+) of (\d+)\)$/;
 const STARTING = "Starting your computer. The first start takes about a minute.";
+const UPDATING = "Updating your computer. Your files and sign-ins stay.";
+const UPDATE_UNFINISHED = "The update didn't finish";
+const UPDATE_RECORDS_UNREADABLE = "localDot can't read its update records";
+export const NEEDS_FRESH_START =
+  "The update couldn't be finished. Start fresh to use your computer again.";
 
 export function hudFor({ cell, status, pending, picture = "none" }: CellView): HudState {
   const idle = pending === null;
@@ -103,6 +108,11 @@ export function hudFor({ cell, status, pending, picture = "none" }: CellView): H
       "retry",
       false,
     );
+  // The daemon stops the computer, moves it onto the new build and starts it: one step to the user.
+  if (cell.updating && (cell.state === "stopping" || cell.state === "starting"))
+    return hud("starting", "Updating…", UPDATING, "stop", false);
+  // Start still retries the update, but the curtain offers Start fresh as the way back.
+  if (cell.needsFreshStart) return hud("failed", "Failed", NEEDS_FRESH_START, "start");
   switch (cell.state) {
     case "starting": {
       if (cell.paused)
@@ -165,6 +175,10 @@ const DOCKER_ERROR = /^docker (unreachable|\d+) on /;
 // carry Docker's own text, which stays out of the caption.
 function describeCellError(error: string | undefined): string {
   if (!error) return "Your computer could not start.";
+  if (error.startsWith(UPDATE_UNFINISHED))
+    return "The update didn't finish. Turn on your computer to finish it.";
+  if (error.startsWith(UPDATE_RECORDS_UNREADABLE))
+    return "localDot can't read its update records. Restart localDot, then turn on your computer.";
   if (error.startsWith(STOP_FAILED)) {
     return DOCKER_ERROR.test(error.slice(STOP_FAILED.length))
       ? `Your computer didn't stop: ${DOCKER_DOWN}, then stop it again.`

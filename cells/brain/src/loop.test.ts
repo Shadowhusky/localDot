@@ -214,12 +214,14 @@ describe("Agent", () => {
       const tools = (t.main.model.doStreamCalls[0]?.tools ?? []).map((tool) => tool.name);
       expect(tools.sort()).toEqual([
         "ask_user",
+        "browser_act",
         "browser_navigate",
         "browser_read",
         "browser_upload",
         "computer",
         "done",
         "files",
+        "find",
         "people",
         "recall",
         "remember",
@@ -722,6 +724,126 @@ describe("Agent", () => {
       "key",
       undefined,
     ]);
+  });
+
+  it("sends a batch as one daemon call that shares the turn's screenshot", async () => {
+    const t = agent(
+      [
+        call("computer", {
+          action: "batch",
+          steps: [
+            { action: "left_click", coordinate: [500, 500] },
+            { action: "type", text: "Robin", submit: true },
+            { action: "key", text: "Tab" },
+          ],
+        }),
+        call("done", { summary: "x" }),
+      ],
+      { boot: { models: { main: binding({ computer: "generic", coords: "per1000" }) } } },
+    );
+    expect(await t.run()).toBe("done");
+    const basis = (t.f.toolCalls[0] as { input: { action: string } }).input.action;
+    expect(basis).toBe("screenshot");
+    expect(t.f.toolCalls[1]?.input).toMatchObject({
+      action: "batch",
+      steps: [
+        { action: "click", point: { x: 640, y: 400 } },
+        { action: "type", text: "Robin" },
+        { action: "key", keys: ["Return"] },
+        { action: "key", keys: ["Tab"] },
+      ],
+      basedOn: expect.any(String),
+    });
+    expect(t.f.toolCalls).toHaveLength(3);
+  });
+
+  it("gives back only the turn's newest screenshot when it ran several screen actions", async () => {
+    const t = agent([
+      calls(
+        ["computer", { action: "left_click", coordinate: [10, 10] }],
+        ["computer", { action: "key", text: "Tab" }],
+      ),
+      call("done", { summary: "x" }),
+    ]);
+    expect(await t.run()).toBe("done");
+    const tool = (t.main.prompts[1] as { role: string; content: unknown[] }[]).findLast(
+      (m) => m.role === "tool",
+    );
+    const [first, second] = (tool?.content ?? []).map((part) => JSON.stringify(part));
+    expect(first).not.toContain("iVBORw0KGgo=");
+    expect(first).toContain(
+      "Screenshot left out: a later action in this turn returned a newer one.",
+    );
+    expect(second).toContain("iVBORw0KGgo=");
+  });
+
+  it("skips the turn's later screen actions once a browser_act failed", async () => {
+    const t = agent(
+      [
+        calls(
+          ["browser_act", { action: "click", ref: "e4" }],
+          ["computer", { action: "key", text: "Return" }],
+        ),
+        call("done", { summary: "x" }),
+      ],
+      {
+        answer: (name) =>
+          name === "browser_act"
+            ? { ok: false, content: [{ type: "text", text: "e4 is no longer on the page" }] }
+            : undefined,
+      },
+    );
+    await t.run();
+    expect(t.f.toolCalls.map((c) => c.name)).toEqual(["computer", "browser_act", "done"]);
+  });
+
+  it("acts by ref with a coordinate on the model's grid, in model pixels with its screenshot", async () => {
+    const t = agent(
+      [
+        call("browser_act", { action: "click", ref: "e4", coordinate: [500, 500] }),
+        call("done", { summary: "x" }),
+      ],
+      { boot: { models: { main: binding({ computer: "generic", coords: "per1000" }) } } },
+    );
+    await t.run();
+    expect(t.f.toolCalls[1]?.input).toEqual({
+      action: "click",
+      ref: "e4",
+      coordinate: [640, 400],
+      basedOn: expect.any(String),
+    });
+  });
+
+  it("puts the boxes of listed elements on the model's grid", async () => {
+    const page =
+      'Interactive elements on screen:\ne12 button "Save [1, 2, 3, 4]" [640, 400, 1280, 800]\nplain text [640, 400, 1280, 800]';
+    const t = agent(
+      [calls(["browser_read", {}], ["find", { text: "Save" }]), call("done", { summary: "x" })],
+      {
+        boot: { models: { main: binding({ computer: "generic", coords: "per1000" }) } },
+        answer: (name) =>
+          name === "browser_read"
+            ? { ok: true, content: [{ type: "text", text: page }] }
+            : name === "find"
+              ? {
+                  ok: true,
+                  content: [
+                    {
+                      type: "text",
+                      text: '- push button "Save" in "Notes" at (640, 400) [0, 0, 1280, 800]',
+                    },
+                  ],
+                }
+              : undefined,
+      },
+    );
+    await t.run();
+    const tool = JSON.stringify(
+      (t.main.prompts[1] as { role: string }[]).findLast((m) => m.role === "tool"),
+    );
+    expect(tool).toContain('e12 button \\"Save [1, 2, 3, 4]\\" [500, 500, 1000, 1000]');
+    expect(tool).toContain("plain text [640, 400, 1280, 800]");
+    expect(tool).toContain("at (500, 500) [0, 0, 1000, 1000]");
   });
 
   it("puts screenshots in a user message for clients whose tool results cannot carry images", async () => {

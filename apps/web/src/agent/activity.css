@@ -204,6 +204,14 @@
   min-height: 36px;
 }
 
+.activity-filter {
+  display: contents;
+}
+
+.activity-filter[data-idle] {
+  visibility: hidden;
+}
+
 .activity-steps-head h3,
 .activity-section-head h3 {
   color: var(--color-fg-1);

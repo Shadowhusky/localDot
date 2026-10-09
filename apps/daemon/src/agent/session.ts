@@ -3,6 +3,7 @@ import type {
   AskFieldRecord,
   AskFieldValue,
   AskRequestField,
+  PageElement,
   PauseSnapshot,
   RecentLine,
   RuleChange,
@@ -172,6 +173,10 @@ export class AgentSession {
   // Something other than the user has reached the model in this task: what dot plans after that
   // may follow a page's instructions, so the purpose check keeps the plan from before.
   #heardOthers = false;
+  // The elements the last browser_read listed, by ref, with the screen, tab and page it read.
+  pageRefs:
+    | { cellId: string; tabId?: string; url: string; elements: ReadonlyMap<string, PageElement> }
+    | undefined;
   // What was said earlier in the conversation this task continues.
   earlier: readonly string[] = [];
   // The user's last few tasks when this one started.
@@ -641,6 +646,7 @@ export class AgentSession {
     );
     lease.check();
     this.lastFrameId = undefined;
+    this.pageRefs = undefined;
     return result;
   }
   async screensSettled(): Promise<void> {
@@ -1350,6 +1356,8 @@ export class AgentSession {
       record.step,
     );
     this.#control = undefined;
+    // Whatever the user did on the computer, a page read before it is no longer one to act on.
+    this.pageRefs = undefined;
     const user = record.user;
     if (!user) this.tainted = false;
     this.status = this.safetyPause ? "paused" : user?.from === "idle" ? "idle" : "running";

@@ -128,6 +128,25 @@ describe("leased browser gateway device", () => {
       expect(f.device.clocks.toDaemonMicros(50)).toBe(100_000);
     },
   );
+  it("finds a listed element by its node, and anything else by its name", async () => {
+    const f = fixture(2);
+    const found = await f.device.client.find({ node: 13, role: "button", name: "Continue" });
+    expect(f.client.lookup).toHaveBeenLastCalledWith(
+      f.options.permit,
+      f.options.tabId,
+      { kind: "node", node: 13, role: "button", name: "Continue" },
+      expect.anything(),
+    );
+    expect(found.target?.point).toEqual({ x: 80, y: 100 });
+    await f.device.client.find({ name: "Continue" });
+    expect(f.client.lookup).toHaveBeenLastCalledWith(
+      f.options.permit,
+      f.options.tabId,
+      { kind: "find", name: "Continue" },
+      expect.anything(),
+    );
+    await expect(f.device.client.find({ role: "button" })).rejects.toThrow();
+  });
   it("sends a drag's every point in model pixels and keeps no button down past one request", async () => {
     const f = fixture(2);
     const drag = {

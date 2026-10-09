@@ -2,13 +2,15 @@ import { ulid } from "@localdot/protocol";
 import { emptyModel } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import {
-  EXPORT_FPS,
-  EXPORT_SIZES,
+  EXPORT_FRAME_RATES,
   type ExportRequest,
-  estimateBytes,
+  exportBitrate,
+  exportSpeedLabel,
   fileSize,
   PRIVACY_NOTE,
   planExport,
+  speedText,
+  validSize,
   videoLength,
 } from "./export-plan.ts";
 
@@ -24,6 +26,10 @@ function fixture(endMs = 60_000) {
     skipIdle: false,
     size: { w: 1280, h: 800 },
     captions: true,
+    overlays: true,
+    fps: 30,
+    quality: "high",
+    format: "mp4",
   };
   return { model, request };
 }
@@ -32,10 +38,59 @@ describe("deterministic MP4 export plan", () => {
   it("renders 30 frames per output second at the chosen speed", () => {
     const { model, request } = fixture();
     const plan = planExport({ ...request, speed: 4 }, model, [{ from: 0, to: 60_000_000 }], []);
-    expect(EXPORT_FPS).toBe(30);
     expect(plan.frames).toBe(450);
     expect(plan.durationS).toBe(15);
     expect(plan.sessionMsAt(449)).toBeCloseTo(59_866.6667, 1);
+  });
+
+  it.each(EXPORT_FRAME_RATES)("samples session time evenly at %s fps", (fps) => {
+    const { model, request } = fixture();
+    const plan = planExport({ ...request, fps }, model, [], []);
+    expect(plan.fps).toBe(fps);
+    expect(plan.frames).toBe(60 * fps);
+    expect(plan.durationS).toBe(60);
+    for (const frame of [0, 1, fps, plan.frames - 1])
+      expect(plan.sessionMsAt(frame)).toBeCloseTo((frame * 1000) / fps, 6);
+  });
+
+  it("maps any speed from a quarter to sixteen times onto session time, so 3× stays smooth", () => {
+    const { model, request } = fixture();
+    const three = planExport({ ...request, speed: 3, fps: 60 }, model, [], []);
+    expect(three.frames).toBe(1200);
+    expect(three.durationS).toBe(20);
+    // Every frame moves on by the same 50 ms of session time: no frame repeats, none jumps.
+    for (let frame = 1; frame < three.frames; frame++)
+      expect(three.sessionMsAt(frame) - three.sessionMsAt(frame - 1)).toBeCloseTo(50, 6);
+    const odd = planExport({ ...request, speed: 2.5 }, model, [], []);
+    expect(odd.frames).toBe(720);
+    expect(odd.labelAt(0)).toBe("Playing at 2.5×");
+    expect(planExport({ ...request, speed: 0.25 }, model, [], []).frames).toBe(7200);
+    expect(planExport({ ...request, speed: 16 }, model, [], []).frames).toBe(113);
+    for (const speed of [0.2, 16.5, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])
+      expect(() => planExport({ ...request, speed }, model, [], [])).toThrow(RangeError);
+  });
+
+  it("names speeds plainly", () => {
+    expect(speedText(2)).toBe("2×");
+    expect(speedText(0.25)).toBe("0.25×");
+    expect(speedText(1.333333)).toBe("1.33×");
+    expect(exportSpeedLabel(1, false)).toBeNull();
+    expect(exportSpeedLabel(1, true)).toBe("Idle skipped");
+    expect(exportSpeedLabel(3, true)).toBe("Playing at 3× · idle skipped");
+  });
+
+  it("counts the moving part of the video at its speed", () => {
+    const { model, request } = fixture();
+    const activity = [
+      { from: 10_000_000, to: 12_000_000 },
+      { from: 40_000_000, to: 41_000_000 },
+    ];
+    const once = planExport(request, model, activity, []);
+    const twice = planExport({ ...request, speed: 2 }, model, activity, []);
+    expect(once.movingS).toBeGreaterThan(3);
+    expect(once.movingS).toBeLessThan(10);
+    expect(twice.movingS).toBeCloseTo(once.movingS / 2, 6);
+    expect(planExport(request, model, [{ from: 0, to: 90_000_000 }], []).movingS).toBe(60);
   });
 
   it("compresses idle stretches when skipping idle and labels them", () => {
@@ -103,13 +158,37 @@ describe("deterministic MP4 export plan", () => {
     expect(planExport({ ...request, speed: 4 }, model, [], []).labelAt(0)).toBe("Playing at 4×");
   });
 
-  it("offers 720p and 1080p and estimates their files from the encoder's rate", () => {
-    expect(EXPORT_SIZES.map((size) => size.label)).toEqual(["720p", "1080p"]);
-    const [small, large] = EXPORT_SIZES;
-    const minute = estimateBytes(small, 60);
-    expect(minute / (1024 * 1024)).toBeGreaterThan(20);
-    expect(minute / (1024 * 1024)).toBeLessThan(25);
-    expect(estimateBytes(large, 60)).toBeGreaterThan(2 * minute);
+  it("asks the encoder for more bits as the picture, the frame rate and the quality grow", () => {
+    const small = { w: 1280, h: 800 };
+    const large = { w: 2560, h: 1600 };
+    expect(exportBitrate(large, 30, "high")).toBeGreaterThan(
+      3.5 * exportBitrate(small, 30, "high"),
+    );
+    expect(exportBitrate(small, 60, "high")).toBeGreaterThan(exportBitrate(small, 30, "high"));
+    expect(exportBitrate(small, 60, "high")).toBeLessThan(2 * exportBitrate(small, 30, "high"));
+    expect(exportBitrate(small, 30, "medium")).toBeGreaterThan(exportBitrate(small, 30, "low"));
+    expect(exportBitrate(large, 60, "high") / 1e6).toBeCloseTo(12.1, 0);
+    expect(exportBitrate({ w: 16, h: 16 }, 10, "low")).toBe(200_000);
+  });
+
+  it("takes any even size up to the computer's own screen", () => {
+    for (const size of [
+      { w: 2560, h: 1600 },
+      { w: 320, h: 192 },
+      { w: 1600, h: 2560 },
+    ])
+      expect(validSize(size)).toBe(true);
+    for (const size of [
+      { w: 2562, h: 1600 },
+      { w: 2560, h: 1602 },
+      { w: 1279, h: 800 },
+      { w: 8, h: 8 },
+      { w: 2560.5, h: 1600 },
+    ])
+      expect(validSize(size)).toBe(false);
+  });
+
+  it("writes sizes and lengths plainly", () => {
     expect(fileSize(2048)).toBe("2 KB");
     expect(fileSize(3.25 * 1024 * 1024)).toBe("3.3 MB");
     expect(fileSize(78.4 * 1024 * 1024)).toBe("78 MB");
@@ -144,7 +223,14 @@ describe("deterministic MP4 export plan", () => {
 
   it("rejects malformed export parameters and out-of-range frame indexes", () => {
     const { model, request } = fixture();
-    for (const patch of [{ speed: 3 }, { size: { w: 1279, h: 800 } }, { sessionId: "../other" }])
+    for (const patch of [
+      { speed: 32 },
+      { size: { w: 1279, h: 800 } },
+      { sessionId: "../other" },
+      { fps: 25 },
+      { quality: "best" },
+      { format: "mov" },
+    ])
       expect(() => planExport({ ...request, ...patch } as ExportRequest, model, [], [])).toThrow(
         RangeError,
       );
