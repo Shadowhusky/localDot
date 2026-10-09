@@ -9,12 +9,8 @@ export interface StageFrameProps {
   light: StageLight;
   live: boolean;
   frozen: boolean;
-  // Over the picture while a decision is open.
-  dim?: boolean;
   // The HUD island, hung on the stage's top edge.
   island?: ReactNode;
-  // Notes that hang under the island, over the picture, out of the page's flow.
-  notices?: ReactNode;
   // Covers the stage, or the stage and the band on a phone, while there is no picture to show.
   curtain?: ReactNode;
   // Under the stage: dot's place and its line.
@@ -32,9 +28,7 @@ export function StageFrame({
   light,
   live,
   frozen,
-  dim = false,
   island,
-  notices,
   curtain,
   band,
   children,
@@ -53,9 +47,7 @@ export function StageFrame({
           <i data-light="dot" />
           <i data-light="you" />
         </div>
-        <div className="stage-dim" data-on={dim || undefined} aria-hidden="true" />
         {island}
-        {notices && <div className="stage-notices">{notices}</div>}
       </div>
       <div className="stage-band">{band}</div>
       {curtain && <div className="stage-curtain">{curtain}</div>}

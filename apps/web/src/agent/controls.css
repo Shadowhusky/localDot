@@ -29,25 +29,6 @@
   font: inherit;
   resize: vertical;
 }
-.control-status button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 44px;
-  min-width: 44px;
-  box-sizing: border-box;
-  padding: 8px 12px;
-  border: 1px solid var(--color-line);
-  border-radius: 6px;
-  background: var(--color-surface-2);
-  color: var(--color-text);
-  font: inherit;
-  cursor: pointer;
-}
-.control-status button:disabled {
-  cursor: default;
-  opacity: 0.6;
-}
 .takeover-panel {
   width: 100%;
   max-width: 720px;

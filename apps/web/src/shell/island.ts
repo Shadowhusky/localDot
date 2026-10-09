@@ -65,13 +65,39 @@ export function pauseSlot({
   }
 }
 
+// What grows out of the island: an approval always, and a question while the chat that holds it
+// is out of sight. A phone shows the approval in a sheet instead and keeps the question in its
+// thread, which is always in sight there.
+export type IslandDecision = "approval" | "question" | null;
+
+export interface DecisionInput {
+  shape: IslandShape;
+  approval: boolean;
+  question: boolean;
+  chatShown: boolean;
+}
+
+export function islandDecision({
+  shape,
+  approval,
+  question,
+  chatShown,
+}: DecisionInput): IslandDecision {
+  if (shape !== "task") return null;
+  if (approval) return "approval";
+  return question && !chatShown ? "question" : null;
+}
+
 export interface TakeSlot {
   // dot has asked for the user: Take control becomes the island's porcelain action.
   primary: boolean;
   reason?: string;
 }
 
-export const takeSlot = (status: Status): TakeSlot =>
+// While dot waits on an approval, Take control answers it: the user does the step themselves.
+export const takeSlot = (status: Status, decision: IslandDecision = null): TakeSlot =>
   status.row === "takeover"
     ? { primary: true }
-    : { primary: false, reason: "dot hands you the computer when it needs you" };
+    : decision === "approval"
+      ? { primary: false }
+      : { primary: false, reason: "dot hands you the computer when it needs you" };

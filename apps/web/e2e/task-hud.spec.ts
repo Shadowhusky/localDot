@@ -79,26 +79,24 @@ test("an approval puts the decision first and takes control from dot", async ({ 
   await expect(page.locator(".task-connection")).toHaveText("Waiting for you");
 });
 
-test("after Approve once, dot has control again and a late heartbeat still warns", async ({
-  page,
-}) => {
+test("after Send, dot has control again and a quiet task still warns", async ({ page }) => {
   await open(page);
   await qa(page, "approval?risk=medium");
   await expectWaiting(page, "Needs your OK");
-  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(status(page)).toHaveText("Select the Net total cell");
   await expect(control(page)).toHaveCount(1);
   await qa(page, "heartbeat");
   await expect(
-    page.getByText("The task heartbeat is late. You can use Stop if you want to contain it."),
+    page.getByText("dot is taking longer than usual. Use Stop if it seems stuck."),
   ).toBeVisible();
 });
 
-test("Replay after Approve once shows dot back at work, not still waiting", async ({ page }) => {
+test("Replay after Send shows dot back at work, not still waiting", async ({ page }) => {
   await open(page);
   await qa(page, "approval?risk=medium");
   await expectWaiting(page, "Needs your OK");
-  await page.getByRole("button", { name: "Approve once", exact: true }).click();
+  await page.getByRole("button", { name: "Send", exact: true }).click();
   await expect(status(page)).toHaveText("Select the Net total cell");
   await page
     .getByRole("navigation", { name: "Mode" })

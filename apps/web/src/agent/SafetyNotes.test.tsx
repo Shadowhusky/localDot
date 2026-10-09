@@ -2,12 +2,12 @@
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
+import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { SafetyView } from "./useSafety.ts";
 
 afterEach(cleanup);
-const line = () => document.querySelector(".sr-only[role=status]")?.textContent;
+const line = () => document.querySelector(".ui-visually-hidden[role=status]")?.textContent;
 
 const sessionId = "01J00000000000000000000002";
 const cellId = "01J00000000000000000000001";
@@ -38,13 +38,31 @@ const safety = {
   requestPause: vi.fn(),
 } as unknown as SafetyView;
 
-it("says a late heartbeat in words that fit Watch and Replay", () => {
-  const view = render(<SafetyControls safety={safety} agent={agent} cell={null} />);
-  expect(screen.getByText(/heartbeat is late/).textContent).toContain("use Stop");
-  view.rerender(<SafetyControls safety={safety} agent={agent} cell={null} replaying />);
-  expect(screen.getByText(/heartbeat is late/).textContent).toBe(
-    "The live task's heartbeat is late. Switch to Watch if you want to stop it.",
+it("says a task gone quiet in words that fit Watch and Replay", () => {
+  const view = render(<SafetyNotes safety={safety} agent={agent} cell={null} />);
+  expect(screen.getByText(/longer than usual/).textContent).toBe(
+    "dot is taking longer than usual. Use Stop if it seems stuck.",
   );
+  view.rerender(<SafetyNotes safety={safety} agent={agent} cell={null} replaying />);
+  expect(screen.getByText(/longer than usual/).textContent).toBe(
+    "The live task is taking longer than usual. Switch to Watch to stop it.",
+  );
+});
+
+it("drops a decision the computer could not take as a note with a way to check again", () => {
+  const checkAgain = vi.fn();
+  const failed = {
+    ...safety,
+    allowed: null,
+    dismissAllowed: vi.fn(),
+    error: "Your decision could not be confirmed.",
+    checkAgain,
+  } as unknown as SafetyView;
+  render(<SafetyNotes safety={failed} agent={agent} cell={null} />);
+  const note = screen.getByRole("alert");
+  expect(note.className).toContain("island-note");
+  fireEvent.click(screen.getByRole("button", { name: "Check task status" }));
+  expect(checkAgain).toHaveBeenCalledOnce();
 });
 
 const ID = "01J00000000000000000000003";
@@ -60,19 +78,7 @@ const card = {
   always: [{ scope: "task" as const, label: "For this task" }],
 };
 
-it("puts Always allow in the approval card and confirms the choice after it", () => {
-  const answerApproval = vi.fn(async () => true);
-  const deciding = { ...safety, approval: card, canApprove: true, answerApproval, allowed: null };
-  const view = render(<SafetyControls safety={deciding} agent={agent} cell={null} />);
-  fireEvent.click(screen.getByRole("button", { name: "Always allow…" }));
-  fireEvent.click(screen.getByRole("button", { name: "For this task" }));
-  expect(answerApproval).toHaveBeenCalledWith({
-    approvalId: ID,
-    generation: 1,
-    revision: 1,
-    decision: "approve",
-    always: "task",
-  });
+it("confirms an Always allow choice under the island and hides it while a sheet covers it", () => {
   const undoAllowed = vi.fn(async () => true);
   const allowed = {
     ...safety,
@@ -98,14 +104,14 @@ it("puts Always allow in the approval card and confirms the choice after it", ()
       },
     },
   };
-  view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
-  expect(screen.queryByRole("button", { name: "Always allow…" })).toBeNull();
+  const view = render(<SafetyNotes safety={allowed} agent={confirmed} cell={null} />);
   expect(line()).toBe("Allowed for this task: sending messages.");
+  expect(document.querySelector(".always-notice")?.className).toContain("island-note");
   fireEvent.click(
     screen.getByRole("button", { name: "Undo allowing sending messages for this task" }),
   );
   expect(undoAllowed).toHaveBeenCalledOnce();
-  view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} visible={false} />);
+  view.rerender(<SafetyNotes safety={allowed} agent={confirmed} cell={null} visible={false} />);
   expect(line()).toBe("");
   expect(document.querySelector(".always-notice")).toBeNull();
 });
@@ -138,46 +144,16 @@ it("keeps the status line's time running while Settings is open", () => {
         },
       },
     };
-    const view = render(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
+    const view = render(<SafetyNotes safety={allowed} agent={confirmed} cell={null} />);
     expect(line()).toBe("Allowed for this task: sending messages.");
     act(() => vi.advanceTimersByTime(5_000));
-    view.rerender(
-      <SafetyControls safety={allowed} agent={confirmed} cell={null} visible={false} />,
-    );
+    view.rerender(<SafetyNotes safety={allowed} agent={confirmed} cell={null} visible={false} />);
     act(() => vi.advanceTimersByTime(2_000));
-    view.rerender(<SafetyControls safety={allowed} agent={confirmed} cell={null} />);
+    view.rerender(<SafetyNotes safety={allowed} agent={confirmed} cell={null} />);
     expect(line()).toBe("Allowed for this task: sending messages.");
     act(() => vi.advanceTimersByTime(1_500));
     expect(dismissAllowed).toHaveBeenCalledOnce();
   } finally {
     vi.useRealTimers();
   }
-});
-
-it.each([
-  ["ready", {}, {}, true],
-  ["the task cannot take a decision", { canApprove: false }, {}, false],
-  ["a decision is being sent", { pending: "approval" }, {}, false],
-  ["Settings or Keys is open", {}, { visible: false }, false],
-  ["the card has expired", { approval: { ...card, expiresAt: Date.now() - 1 } }, {}, false],
-])("lets Always allow approve only while Approve once can, when %s", (_name, over, props, can) => {
-  const answerApproval = vi.fn(async () => true);
-  const deciding = {
-    ...safety,
-    approval: card,
-    canApprove: true,
-    pending: null,
-    answerApproval,
-    allowed: null,
-    ...over,
-  } as unknown as SafetyView;
-  render(<SafetyControls safety={deciding} agent={agent} cell={null} {...props} />);
-  const button = (name: string) =>
-    screen.getByRole("button", { name, hidden: true }) as HTMLButtonElement;
-  expect(button("Approve once").disabled).toBe(!can);
-  expect(button("Always allow…").disabled).toBe(!can);
-  const option = button("For this task");
-  expect(option.disabled).toBe(!can);
-  fireEvent.click(option);
-  expect(answerApproval).toHaveBeenCalledTimes(can ? 1 : 0);
 });

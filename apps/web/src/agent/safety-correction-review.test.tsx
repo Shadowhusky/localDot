@@ -4,7 +4,7 @@ import { act, cleanup, render, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { type AgentFeed, type AgentFeedState, emptyAgentModel } from "./model.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
+import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyProps, useSafety } from "./useSafety.ts";
 
@@ -301,12 +301,12 @@ it.each([
   if (mode === "blocked") f.update({ blocked: true });
   if (mode === "hidden") f.update({ agent: { ...f.props.agent } });
   const view = render(
-    <SafetyControls safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />,
+    <SafetyNotes safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />,
   );
   expect(notices).toHaveLength(mode === "current blurred" ? 1 : 0);
   if (mode === "current blurred") {
     view.rerender(
-      <SafetyControls safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />,
+      <SafetyNotes safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />,
     );
     expect(notices).toHaveLength(1);
     act(() => notices[0]?.onclick?.());

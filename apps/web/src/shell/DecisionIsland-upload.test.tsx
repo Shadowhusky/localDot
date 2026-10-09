@@ -2,9 +2,9 @@
 import { type ApprovalCard as Card, LocalDotEvent, type UploadApproval } from "@localdot/protocol";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { ApprovalCard } from "./ApprovalCard.tsx";
-import { emptyAgentModel } from "./model.ts";
-import { projectAgentEvent } from "./reducer.ts";
+import { emptyAgentModel } from "../agent/model.ts";
+import { projectAgentEvent } from "../agent/reducer.ts";
+import { ApprovalDecision } from "./DecisionIsland.tsx";
 
 afterEach(cleanup);
 function required<T>(value: T | undefined | null): T {
@@ -32,7 +32,7 @@ function card(): Card & { upload: UploadApproval } {
     },
   };
 }
-it("preserves all ten complete paths and checksums through the event projection and approval portal", () => {
+it("preserves all ten complete paths and checksums through the event projection and the decision", () => {
   const expected = card();
   const { fields, ...data } = expected;
   const event = LocalDotEvent.parse({
@@ -46,9 +46,10 @@ it("preserves all ten complete paths and checksums through the event projection 
   });
   const projected = projectAgentEvent(emptyAgentModel(), event).approval;
   expect(projected).toEqual(expected);
-  render(<ApprovalCard card={required(projected)} pending={false} onDecision={vi.fn()} />);
+  render(<ApprovalDecision card={required(projected)} pending={false} onDecision={vi.fn()} />);
   const dialog = screen.getByRole("dialog");
-  expect(dialog.parentElement?.parentElement).toBe(document.body);
+  for (const sum of within(dialog).getAllByRole("button", { name: "File checksum" }))
+    fireEvent.click(sum);
   expect(screen.getByText("Page receiving files · embedded frame")).toBeTruthy();
   expect(screen.getByText("https://receiver.test:8443")).toBeTruthy();
   expect(within(dialog).getAllByRole("listitem")).toHaveLength(10);
@@ -62,8 +63,8 @@ it("preserves all ten complete paths and checksums through the event projection 
 it("answers with only the immutable approval identity, not editable file metadata", () => {
   const value = card(),
     decide = vi.fn();
-  render(<ApprovalCard card={value} pending={false} onDecision={decide} />);
-  fireEvent.click(screen.getByRole("button", { name: "Approve once" }));
+  render(<ApprovalDecision card={value} pending={false} onDecision={decide} />);
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
   expect(decide).toHaveBeenCalledExactlyOnceWith({
     approvalId: value.approvalId,
     generation: 1,
@@ -75,14 +76,14 @@ it("renders a source path as inert text and does not turn it into links or HTML"
   const value = card();
   const file = required(value.upload.files[0]);
   file.path = '~/folder/<img src=x onerror="alert(1)">/report.txt';
-  render(<ApprovalCard card={value} pending={false} onDecision={vi.fn()} />);
+  render(<ApprovalDecision card={value} pending={false} onDecision={vi.fn()} />);
   expect(screen.getByText(file.path)).toBeTruthy();
   expect(document.querySelector(".approval-upload img, .approval-upload a")).toBeNull();
 });
 it("refuses a duplicate or incomplete file preview instead of approving a partial list", () => {
   const value = card();
   value.upload.files[1] = required(value.upload.files[0]);
-  render(<ApprovalCard card={value} pending={false} onDecision={vi.fn()} />);
+  render(<ApprovalDecision card={value} pending={false} onDecision={vi.fn()} />);
   expect(screen.getByRole("alert").textContent).toContain("could not be verified");
-  expect(screen.queryByRole("button", { name: "Approve once" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
 });
