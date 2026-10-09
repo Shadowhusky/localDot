@@ -9,9 +9,12 @@ import type { StreamEndpoint } from "./types.ts";
 // The cell image's own start values (SELKIES_FRAMERATE, Selkies' CRF default): what a capture
 // runs at while no visible viewer asks for less.
 export const FULL_QUALITY: StreamQuality = { framerate: 60, crf: 25 };
-// A change makes Selkies send every viewer a key frame, so changes are spaced this far apart.
-export const APPLY_GAP_MS = 2000;
-export const RETRY_MS = { min: 1000, max: 15_000 };
+// Changes are spaced at least this far apart, however often the viewers change their minds.
+const APPLY_GAP_MS = 2000;
+const RETRY_MS = { min: 1000, max: 15_000 };
+// Selkies refuses a connection from an address that connected less than 500 ms before, and every
+// socket of the daemon's comes from one address: the tuner keeps clear of a viewer's.
+const JOIN_GAP_MS = 700;
 
 export interface ViewerWish {
   paused: boolean;
@@ -38,13 +41,47 @@ export interface TunedViewer {
   leave(): void;
 }
 
+// A viewer's round trip on its own stream socket: a ping waits behind every byte queued for it, in
+// the daemon and on the link, as its frames do. The client hears it each second as the rtt_ms of the
+// stream_stats message Selkies' client already reads; a ping still out counts for as long as it has
+// been.
+export function probeViewer(ws: WebSocket, everyMs = 1000): () => void {
+  let sentAt: number | null = null;
+  let smoothed: number | null = null;
+  const onPong = () => {
+    if (sentAt === null) return;
+    const rtt = Date.now() - sentAt;
+    sentAt = null;
+    smoothed = smoothed === null ? rtt : smoothed * 0.6 + rtt * 0.4;
+  };
+  ws.on("pong", onPong);
+  const timer = setInterval(() => {
+    if (ws.readyState !== WebSocket.OPEN) return;
+    const now = Date.now();
+    const waited = sentAt === null ? 0 : now - sentAt;
+    if (smoothed !== null || waited > 0) {
+      const stats = { rtt_ms: Math.round(Math.max(smoothed ?? 0, waited)) };
+      ws.send(JSON.stringify({ type: "stream_stats", displayId: "primary", stats }));
+    }
+    if (sentAt === null) {
+      sentAt = now;
+      ws.ping();
+    }
+  }, everyMs);
+  return () => {
+    clearInterval(timer);
+    ws.off("pong", onPong);
+  };
+}
+
 export interface StreamTuningOptions {
   applyGapMs?: number;
+  joinGapMs?: number;
   retryMs?: { min: number; max: number };
   onApply?(cellId: string, quality: StreamQuality): void;
 }
 type TuningOptions = StreamTuningOptions &
-  Required<Pick<StreamTuningOptions, "applyGapMs" | "retryMs">>;
+  Required<Pick<StreamTuningOptions, "applyGapMs" | "joinGapMs" | "retryMs">>;
 
 // Sets each computer's capture to what its viewers can take. Viewers join Selkies as viewers, whose
 // settings it ignores, so the daemon holds one controller socket per computer for the settings
@@ -56,7 +93,7 @@ export class StreamTuning {
   readonly #opts: TuningOptions;
 
   constructor(opts: StreamTuningOptions = {}) {
-    this.#opts = { applyGapMs: APPLY_GAP_MS, retryMs: RETRY_MS, ...opts };
+    this.#opts = { applyGapMs: APPLY_GAP_MS, joinGapMs: JOIN_GAP_MS, retryMs: RETRY_MS, ...opts };
   }
 
   join(cellId: string, endpoint: () => StreamEndpoint | undefined): TunedViewer {
@@ -67,6 +104,7 @@ export class StreamTuning {
     }
     const owner = cell;
     owner.endpoint = endpoint;
+    owner.joinedAt = Date.now();
     const wish: ViewerWish = { paused: false };
     owner.viewers.add(wish);
     let left = false;
@@ -110,6 +148,7 @@ export class StreamTuning {
 class CellTuning {
   readonly viewers = new Set<ViewerWish>();
   endpoint: () => StreamEndpoint | undefined = () => undefined;
+  joinedAt = Number.NEGATIVE_INFINITY;
   readonly #id: string;
   readonly #opts: TuningOptions;
   #socket: WebSocket | undefined;
@@ -131,7 +170,8 @@ class CellTuning {
   update(): void {
     if (this.#closed) return;
     const wanted = sharedQuality(this.viewers);
-    if (!this.#socket && !this.#retry && !same(wanted, FULL_QUALITY)) this.#connect();
+    if (!this.#socket && !this.#retry && !same(wanted, FULL_QUALITY))
+      this.#connectAfter(this.joinedAt + this.#opts.joinGapMs - Date.now());
     this.#schedule();
   }
 
@@ -219,7 +259,14 @@ class CellTuning {
   #again(): void {
     if (this.#closed || this.#retry) return;
     const { min, max } = this.#opts.retryMs;
-    const wait = Math.min(max, min * 2 ** Math.max(0, this.#failures - 1));
+    this.#connectAfter(Math.min(max, min * 2 ** Math.max(0, this.#failures - 1)));
+  }
+
+  #connectAfter(wait: number): void {
+    if (wait <= 0) {
+      this.#connect();
+      return;
+    }
     this.#retry = setTimeout(() => {
       this.#retry = undefined;
       if (!this.#closed && !this.#socket) this.#connect();

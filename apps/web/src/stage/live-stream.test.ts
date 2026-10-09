@@ -76,29 +76,41 @@ it("asks again for a ticket the daemon refused, less often each time", async () 
   expect(clients()).toHaveLength(0);
 });
 
-it("tells its relay each second what this viewer can take, and that a hidden page asks for nothing", async () => {
+it("tells its relay each second what this viewer can take, from the round trip the relay reports, and that a hidden page asks for nothing", async () => {
   const restore = fakeChromium();
   let visibility: DocumentVisibilityState = "visible";
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
   try {
-    const paths: string[] = [];
-    const fetchImpl = (async (input: RequestInfo | URL) => {
-      const { pathname } = new URL(String(input));
-      paths.push(pathname);
-      return pathname === "/healthz" ? new Response("ok") : Response.json({ path: ticket(1) });
-    }) as typeof fetch;
-    const api = createApi("a".repeat(43), { fetchImpl });
+    const { api } = daemon(() => Response.json({ path: ticket(1) }));
     const { stream } = holdStream({ api, cellId: CELL, surface: "desktop" }, () => [CELL]);
     stream.connect(() => {});
     await vi.advanceTimersByTimeAsync(250);
     const [frame] = clients();
-    if (!frame) throw new Error("no client");
+    const view = frame?.contentWindow;
+    if (!frame || !view) throw new Error("no client");
     playInClient(frame, "track-1");
     const send = vi.fn();
-    Object.assign(frame.contentWindow as object, { selkiesTransport: { readyState: 1, send } });
-    await vi.advanceTimersByTimeAsync(2_000);
+    const asked: unknown[] = [];
+    view.addEventListener("message", (event) => asked.push(event.data));
+    // Selkies' client, once asked, keeps its numbers with the relay's round trip each second.
+    let rtt = 80;
+    const stats = { open: false, latest: null as { t: number; rtt_ms: number } | null };
+    Object.assign(view, { selkiesTransport: { readyState: 1, send }, stream_stats: stats });
+    const second = async () => {
+      if (stats.open) stats.latest = { t: Date.now(), rtt_ms: rtt };
+      await vi.advanceTimersByTimeAsync(1_000);
+    };
+    await second();
     expect(send).toHaveBeenCalledWith(qualityMessage({ visible: true, framerate: 60, crf: 25 }));
-    expect(paths.filter((path) => path === "/healthz").length).toBeGreaterThan(0);
+    expect(asked).toContainEqual({ type: "statsOpen", open: true });
+
+    stats.open = true;
+    for (let n = 0; n < 5; n++) await second();
+    rtt = 1_500;
+    for (let n = 0; n < 2; n++) await second();
+    expect(send).toHaveBeenLastCalledWith(
+      qualityMessage({ visible: true, framerate: 60, crf: 41 }),
+    );
 
     send.mockClear();
     visibility = "hidden";

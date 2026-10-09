@@ -41,7 +41,7 @@ describe("QualityController", () => {
     expect(controller.quality).toEqual({ framerate: 60, crf: 25 });
   });
 
-  it("gives up detail before frames on a queued link, one step every few seconds", () => {
+  it("gives up only detail on a queued link, one step every few seconds", () => {
     const controller = new QualityController("desktop");
     const seen = run(controller, queued, 9).map((q) => `${q.framerate}/${q.crf}`);
     expect(seen).toEqual([
@@ -56,8 +56,7 @@ describe("QualityController", () => {
       "60/34",
     ]);
     run(controller, queued, 30);
-    expect(controller.quality.crf).toBe(CRFS.at(-1));
-    expect(controller.quality.framerate).toBeLessThan(60);
+    expect(controller.quality).toEqual({ framerate: 60, crf: CRFS.at(-1) });
   });
 
   it("drops all the detail at once when the queue is already long", () => {
@@ -65,9 +64,11 @@ describe("QualityController", () => {
     expect(controller.tick(flooded)).toEqual({ framerate: 60, crf: CRFS.at(-1) });
   });
 
-  it("spares a slow device frames before detail", () => {
+  it("spares a slow device frames before detail, once it has lagged for a few seconds", () => {
     const controller = new QualityController("desktop");
-    run(controller, slowDevice, 2);
+    run(controller, slowDevice, 3);
+    expect(controller.quality).toEqual({ framerate: 60, crf: 25 });
+    controller.tick(slowDevice);
     expect(controller.quality).toEqual({ framerate: FRAMERATES[1], crf: 25 });
   });
 
@@ -85,7 +86,7 @@ describe("QualityController", () => {
 
   it("recovers one step at a time, the last one taken first, after a clear spell", () => {
     const controller = new QualityController("desktop");
-    run(controller, slowDevice, 2);
+    run(controller, slowDevice, 4);
     run(controller, queued, 5);
     expect(controller.quality).toEqual({ framerate: 45, crf: 28 });
     run(controller, clear, RECOVER_TICKS - 1);
@@ -133,7 +134,7 @@ describe("QualityController", () => {
 
   it("never raises a phone above its frame rate", () => {
     const controller = new QualityController("phone");
-    run(controller, slowDevice, 2);
+    run(controller, slowDevice, 4);
     expect(controller.quality.framerate).toBe(24);
     run(controller, clear, 200);
     expect(controller.quality).toEqual({ framerate: 30, crf: 25 });

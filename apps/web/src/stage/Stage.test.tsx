@@ -26,7 +26,6 @@ const ready: CellSummary = {
   stream: { connection: "none", viewers: 0, lastUpstreamAt: null },
 };
 const ticketPath = (n: number) => `/cells/${CELL}/desktop/${String(n).padStart(22, "T")}/`;
-const pinged = (input: RequestInfo | URL) => new URL(String(input)).pathname === "/healthz";
 const client = () => document.querySelector<HTMLIFrameElement>("iframe.desktop-frame");
 const clients = () => [...document.querySelectorAll<HTMLIFrameElement>("iframe.desktop-frame")];
 const fakeTimers = () =>
@@ -68,12 +67,10 @@ describe("Stage in a Chromium browser", () => {
     window.localStorage.clear();
   });
 
-  // The daemon mints ticket n for the n-th request, or, like the real one, keeps the live one. The
-  // stream's link pings are answered and not counted.
+  // The daemon mints ticket n for the n-th request, or, like the real one, keeps the live one.
   function daemon(keeps = false) {
     const calls: string[] = [];
     const fetchImpl = (async (input: RequestInfo | URL, init?: RequestInit) => {
-      if (pinged(input)) return new Response("ok");
       calls.push(`${init?.method ?? "GET"} ${new URL(String(input)).pathname}`);
       const path = ticketPath(keeps ? 1 : calls.length);
       return new Response(JSON.stringify({ ticket: path.split("/")[4], path }), { status: 200 });
@@ -364,7 +361,6 @@ describe("Stage in a Chromium browser", () => {
     const calls: string[] = [];
     const api = createApi("a".repeat(43), {
       fetchImpl: async (input) => {
-        if (pinged(input)) return new Response("ok");
         const path = new URL(String(input)).pathname;
         calls.push(path);
         if (path.endsWith("browser-stream-ticket"))
@@ -572,7 +568,6 @@ describe("Stage in a Chromium browser", () => {
     const calls: string[] = [];
     const api = createApi("a".repeat(43), {
       fetchImpl: async (input) => {
-        if (pinged(input)) return new Response("ok");
         const path = new URL(String(input)).pathname;
         calls.push(path);
         return new Response(
@@ -821,8 +816,7 @@ describe("Stage in a Chromium browser", () => {
     const late = Promise.withResolvers<Response>();
     let tickets = 0;
     const api = createApi("fake-token", {
-      fetchImpl: async (input) => {
-        if (pinged(input)) return json("ok");
+      fetchImpl: async () => {
         tickets++;
         return tickets === 1 ? late.promise : json({ path: ticketPath(tickets) });
       },

@@ -6,7 +6,7 @@ import { refuse, type UpgradeContext, type UpgradeRoute } from "../upgrade-route
 import type { CellApi } from "./orchestrator.ts";
 import { readCapped } from "./readiness.ts";
 import type { TicketRegistry } from "./secrets.ts";
-import type { StreamTuning, TunedViewer } from "./stream-tuning.ts";
+import { probeViewer, type StreamTuning, type TunedViewer } from "./stream-tuning.ts";
 import type { StreamEndpoint } from "./types.ts";
 import { StallWatchdog } from "./watchdog.ts";
 
@@ -223,6 +223,7 @@ function relay(
   );
   let client: WebSocket | undefined;
   let tuned: TunedViewer | undefined;
+  let unprobe: (() => void) | undefined;
   let drain: NodeJS.Timeout | undefined;
   let finished = false;
   // 1012 sends the client back to reconnect, with a fresh ticket once its cell is ready again.
@@ -248,6 +249,7 @@ function relay(
     clearInterval(drain);
     drain = undefined;
     tuned?.leave();
+    unprobe?.();
     watchdog.stop();
     streams.close(id, viewer, last, watchdog.lastAt);
   };
@@ -262,7 +264,10 @@ function relay(
     opts.wss.handleUpgrade(req, socket, head, (ws) => {
       socket.off("close", abandon);
       client = ws;
-      if (!finished) tuned = deps.tuning?.join(id, () => deps.cells.endpoints(id)?.stream);
+      if (!finished && deps.tuning) {
+        tuned = deps.tuning.join(id, () => deps.cells.endpoints(id)?.stream);
+        unprobe = probeViewer(ws);
+      }
       ws.on("message", (data, isBinary) => {
         if (!isBinary && tuned?.consume(data.toString())) return;
         if (upstream.readyState === WebSocket.OPEN) upstream.send(data, { binary: isBinary });

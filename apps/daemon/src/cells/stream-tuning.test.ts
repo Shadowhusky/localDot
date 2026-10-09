@@ -1,8 +1,8 @@
 import type { IncomingMessage } from "node:http";
 import { qualityMessage } from "@localdot/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { type WebSocket, WebSocketServer } from "ws";
-import { FULL_QUALITY, StreamTuning, sharedQuality } from "./stream-tuning.ts";
+import { WebSocket, WebSocketServer } from "ws";
+import { FULL_QUALITY, probeViewer, StreamTuning, sharedQuality } from "./stream-tuning.ts";
 
 const AUTH = `Basic ${Buffer.from("localdot:streamtoken").toString("base64")}`;
 const stops: (() => void)[] = [];
@@ -45,6 +45,7 @@ function tuning(opts: ConstructorParameters<typeof StreamTuning>[0] = {}) {
   const applied: { framerate: number; crf: number }[] = [];
   const tuner = new StreamTuning({
     applyGapMs: 0,
+    joinGapMs: 0,
     retryMs: { min: 20, max: 40 },
     onApply: (_id, quality) => applied.push(quality),
     ...opts,
@@ -131,7 +132,18 @@ describe("StreamTuning", () => {
     expect(selkies.sockets).toHaveLength(1);
   });
 
-  it("spaces its changes, each of which costs the viewers a key frame", async () => {
+  it("connects no sooner after a viewer than Selkies takes another connection from the daemon", async () => {
+    const selkies = await fakeSelkies();
+    const { tuner } = tuning({ joinGapMs: 150 });
+    const joined = Date.now();
+    tuner
+      .join("cell", () => selkies.endpoint)
+      .consume(qualityMessage({ visible: true, framerate: 30, crf: 25 }));
+    await until("the tuner", () => selkies.sockets.length === 1);
+    expect(Date.now() - joined).toBeGreaterThanOrEqual(140);
+  });
+
+  it("spaces its changes however often the viewers change their minds", async () => {
     const selkies = await fakeSelkies();
     const { tuner, applied } = tuning({ applyGapMs: 150 });
     const viewer = tuner.join("cell", () => selkies.endpoint);
@@ -194,5 +206,36 @@ describe("StreamTuning", () => {
     await until("the close", () => closed);
     await new Promise((r) => setTimeout(r, 80));
     expect(selkies.sockets).toHaveLength(1);
+  });
+});
+
+describe("probeViewer", () => {
+  it("tells the client its stream's round trip, and how long a ping has gone unanswered", async () => {
+    const wss = new WebSocketServer({ port: 0, host: "127.0.0.1" });
+    await new Promise((r) => wss.once("listening", r));
+    const { port } = wss.address() as { port: number };
+    const accepted = new Promise<WebSocket>((r) => wss.once("connection", r));
+    const viewer = new WebSocket(`ws://127.0.0.1:${port}`, { autoPong: false });
+    let answering = true;
+    viewer.on("ping", (data) => {
+      if (answering) viewer.pong(data);
+    });
+    const trips: number[] = [];
+    viewer.on("message", (data) => {
+      const message = JSON.parse(String(data));
+      expect(message).toMatchObject({ type: "stream_stats", displayId: "primary" });
+      trips.push(message.stats.rtt_ms);
+    });
+    const relay = await accepted;
+    const stop = probeViewer(relay, 20);
+    stops.push(() => {
+      stop();
+      viewer.terminate();
+      wss.close();
+    });
+    await until("a round trip", () => trips.length >= 3);
+    expect(trips.every((ms) => ms >= 0 && ms < 100)).toBe(true);
+    answering = false;
+    await until("a growing wait", () => (trips.at(-1) ?? 0) >= 300);
   });
 });

@@ -33,7 +33,8 @@ const MINT_RETRY_MS = { min: 1_000, max: 15_000 };
 // that may have restarted under the same client.
 export const TUNE_MS = 1_000;
 const REPORT_EVERY_MS = 10_000;
-export const PING_TIMEOUT_MS = 2_000;
+// A round trip the relay reported longer ago than this is no longer news.
+const STATS_FRESH_MS = 3_000;
 const TICKET_PATH = /^\/cells\/[^/]+\/(?:desktop|browser)\/[A-Za-z0-9_-]{22}\/$/;
 const OPEN = 1;
 // HAVE_CURRENT_DATA: the client's video has shown a frame.
@@ -63,20 +64,32 @@ interface Transport {
   send?(data: string): void;
 }
 
+// What Selkies' client keeps of its stream's numbers once they are asked for: each second, its own
+// with the last the server (here the daemon's relay) sent.
+interface ClientStats {
+  open?: boolean;
+  latest?: { t?: number; rtt_ms?: unknown } | null;
+}
+
 function look(client: Client | null) {
   let doc: Document | null = null;
   let transport: Transport | null | undefined;
+  let stats: ClientStats | null | undefined;
   try {
     doc = client?.frame.contentDocument ?? null;
-    transport = (client?.frame.contentWindow as { selkiesTransport?: Transport | null } | null)
-      ?.selkiesTransport;
+    const view = client?.frame.contentWindow as {
+      selkiesTransport?: Transport | null;
+      stream_stats?: ClientStats | null;
+    } | null;
+    transport = view?.selkiesTransport;
+    stats = view?.stream_stats;
   } catch {}
   const element = doc?.getElementById("videoStream") as ClientVideo | null | undefined;
   const video = element?.tagName === "VIDEO" ? element : null;
   const stream = video?.srcObject as { getVideoTracks?: () => { id: string }[] } | null | undefined;
   const track =
     typeof stream?.getVideoTracks === "function" ? stream.getVideoTracks()[0] : undefined;
-  return { video, track, transport };
+  return { video, track, transport, stats };
 }
 
 let host: HTMLElement | null = null;
@@ -119,7 +132,7 @@ export class LiveStream {
   #listeners = new Set<() => void>();
   readonly #quality = new QualityController(deviceClass());
   readonly #trips = new RoundTrips();
-  #pinging = false;
+  #tripAt = 0;
   #tunedAt = 0;
   #source: FrameSource | null = null;
   #presentedCount = 0;
@@ -317,6 +330,8 @@ export class LiveStream {
     const source = tapVideoTrack(video);
     if (!source) return;
     this.#source = source;
+    // The stage's count starts again with the new tap.
+    this.#counted = null;
     client.tapped = source.trackId;
     this.#presentedAt = now;
     this.#tappedAt = now;
@@ -326,11 +341,11 @@ export class LiveStream {
     else source.stop();
   }
 
-  // One second of the stream: what the decoder produced, what the stage presented, and how long
-  // the link takes, decide the quality this viewer asks the daemon for.
+  // One second of the stream: what the decoder produced, what the stage presented, and the round
+  // trip the relay measured on the stream's own socket, decide the quality this viewer asks for.
   #tune(client: Client, now: number): void {
     this.#tunedAt = now;
-    this.#ping();
+    this.#roundTrip(client, now);
     const decoded = Math.max(client.decoded, this.#source?.delivered?.() ?? 0);
     const last = this.#counted;
     this.#counted = { client, at: now, decoded, presented: this.#presentedCount };
@@ -339,7 +354,7 @@ export class LiveStream {
       return;
     }
     const seconds = (now - last.at) / 1000;
-    // A new tap restarts both counts.
+    // A count that went down started again, with a new pump.
     const since = (count: number, before: number) => (count >= before ? count - before : count);
     const quality = this.#quality.tick({
       rttMs: this.#trips.smoothed,
@@ -350,26 +365,23 @@ export class LiveStream {
     this.#report(client, { visible: true, ...quality }, now);
   }
 
-  // The daemon's own health route, through the same link as the stream: a queue there is a queue
-  // in front of the stream.
-  #ping(): void {
-    if (this.#pinging) return;
-    this.#pinging = true;
-    const started = performance.now();
-    Promise.resolve()
-      .then(() =>
-        this.target.api.fetch(new URL("/healthz", window.location.origin), {
-          cache: "no-store",
-          signal: AbortSignal.timeout(PING_TIMEOUT_MS),
-        }),
-      )
-      .then(
-        () => this.#trips.add(performance.now() - started),
-        () => this.#trips.add(PING_TIMEOUT_MS),
-      )
-      .finally(() => {
-        this.#pinging = false;
-      });
+  // Selkies' client keeps the numbers only once they are asked for, as its own stats panel does.
+  #roundTrip(client: Client, now: number): void {
+    const { stats } = look(client);
+    if (!stats?.open) {
+      try {
+        client.frame.contentWindow?.postMessage(
+          { type: "statsOpen", open: true },
+          window.location.origin,
+        );
+      } catch {}
+      return;
+    }
+    const { t, rtt_ms: rtt } = stats.latest ?? {};
+    if (typeof t !== "number" || typeof rtt !== "number" || t === this.#tripAt) return;
+    if (now - t > STATS_FRESH_MS) return;
+    this.#tripAt = t;
+    this.#trips.add(rtt);
   }
 
   #report(client: Client | null, report: StreamQualityReport, now: number): void {

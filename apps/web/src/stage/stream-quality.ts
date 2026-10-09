@@ -1,14 +1,15 @@
 import type { StreamQuality } from "@localdot/protocol";
 
 // What this viewer can take of its computer's stream, decided once a second from what it sees: the
-// round trip to the daemon (a queue on the link means the stream outruns the network) and the frames
-// its decoder produced against those the stage presented (a gap means the device can't keep up).
-// The daemon runs the shared capture at the most constrained visible viewer's choice.
+// round trip on the stream's own socket (a queue in front of the frames means the stream outruns the
+// network) and the frames its decoder produced against those the stage presented (a gap means the
+// device can't keep up). The daemon runs the shared capture at the most constrained visible
+// viewer's choice.
 
 export type DeviceClass = "phone" | "desktop";
 
 export interface QualitySample {
-  // Smoothed round trip of the latest pings, and the lowest of the last minute: the empty link.
+  // Smoothed round trip of the stream, and the lowest of the last minute: the empty link.
   rttMs: number | null;
   baseRttMs: number | null;
   // Frames the client decoded, and the stage presented, in the last second.
@@ -17,9 +18,9 @@ export interface QualitySample {
 }
 
 export const FRAMERATES = [60, 45, 30, 24, 18, 12] as const;
-// x264 CRF: each step up costs about a quarter of the bit rate, and the picture softens. Still
+// x264 CRF: each step up saves about a fifth of the bit rate, and the picture softens. Still
 // screens are sharpened again by Selkies' paint-over whatever the step.
-export const CRFS = [25, 28, 31, 34, 37] as const;
+export const CRFS = [25, 28, 31, 34, 37, 41] as const;
 // A phone shows a small picture of a large screen: half the frames are plenty.
 const PHONE_TOP_FRAMERATE = 30;
 
@@ -29,8 +30,10 @@ export const QUEUE_MS = { bad: 150, severe: 600, clear: 60 };
 export const DEVICE_KEEPS = 0.75;
 // Fewer decoded frames than this a second is too still a screen to judge the device by.
 export const MOTION_FPS = 8;
-// Seconds of trouble before a step down, and of quiet between steps down.
+// Seconds of trouble before a step down (a device gets longer: a stage that just started, or a
+// busy moment, presents a little late), and of quiet between steps down.
 const BAD_TICKS = 2;
+const DEVICE_BAD_TICKS = 4;
 const COOLDOWN_TICKS = 3;
 // Seconds of a clear link before a step back up. A step up that brings trouble back within
 // PROBE_TICKS doubles the wait, up to RECOVER_MAX_TICKS; one that holds halves it again.
@@ -82,13 +85,15 @@ export class QualityController {
       this.#clear = 0;
       this.#bad++;
       const severe = queue !== null && queue > QUEUE_MS.severe;
-      if ((this.#bad >= BAD_TICKS || severe) && this.#cooldown === 0) {
+      const due = network ? this.#bad >= BAD_TICKS || severe : this.#bad >= DEVICE_BAD_TICKS;
+      if (due && this.#cooldown === 0) {
         if (this.#probe !== null) this.#recover = Math.min(RECOVER_MAX_TICKS, this.#recover * 2);
         this.#probe = null;
-        // A slow device is spared frames first; a slow link keeps the frames and loses detail, all
-        // of it at once when the queue is already long.
+        // A slow device is spared frames first. A slow link loses detail only, all of it at once
+        // when the queue is already long: fewer frames of a moving screen each change more, and
+        // cost as many bits or more (2560x1600 scrolling: 30 fps took 6.1 Mbps where 60 took 3.7).
         if (device) this.#lower(["framerate", "crf"], 1);
-        else this.#lower(["crf", "framerate"], severe ? CRFS.length : 1);
+        else this.#lower(["crf"], severe ? CRFS.length : 1);
       }
       return this.quality;
     }
@@ -134,7 +139,7 @@ export class QualityController {
   }
 }
 
-// Round trips of the pings: smoothed, and the lowest of the last WINDOW of them.
+// Round trips of the stream: smoothed, and the lowest of the last WINDOW of them.
 export class RoundTrips {
   static readonly WINDOW = 60;
   readonly #recent: number[] = [];

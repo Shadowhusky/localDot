@@ -11,8 +11,6 @@ import { Stage } from "./Stage.tsx";
 const A = "01JXYZ0000000000000000AAAA",
   B = "01JXYZ0000000000000000BBBB";
 const path = (id: string) => `/cells/${id}/desktop/${"T".repeat(22)}/`;
-// The stream's link pings, answered and not counted as ticket requests.
-const pinged = (input: RequestInfo | URL) => new URL(String(input)).pathname === "/healthz";
 const cell = (id: string): CellSummary => ({
   id,
   state: "ready",
@@ -36,12 +34,8 @@ it.each(["cell", "api"] as const)(
     const restore = fakeChromium();
     const pending = Promise.withResolvers<Response>();
     let requests = 0;
-    const fetchImpl = vi.fn<typeof fetch>(async (input) =>
-      pinged(input)
-        ? new Response("ok")
-        : ++requests === 1
-          ? Response.json({ path: path(A) })
-          : pending.promise,
+    const fetchImpl = vi.fn<typeof fetch>(async () =>
+      ++requests === 1 ? Response.json({ path: path(A) }) : pending.promise,
     );
     const api = createApi("fixture", { fetchImpl });
     const input = vi.fn<(command: ManualStreamInput) => void>();
@@ -150,8 +144,7 @@ it.each(["cell", "api"] as const)(
 it("keeps the shown computer under the user's hand through a status socket reconnect", async () => {
   const restore = fakeChromium();
   let requests = 0;
-  const fetchImpl = vi.fn<typeof fetch>(async (input) => {
-    if (pinged(input)) return new Response("ok");
+  const fetchImpl = vi.fn<typeof fetch>(async () => {
     requests++;
     return Response.json({ path: path(A) });
   });
