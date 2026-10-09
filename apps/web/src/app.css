@@ -14,7 +14,7 @@
   height: 100dvh;
   min-height: 0;
   padding-right: var(--rail-inset);
-  overflow: hidden;
+  overflow: clip;
   background-color: var(--color-void);
 }
 
