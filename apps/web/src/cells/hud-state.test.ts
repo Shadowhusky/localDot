@@ -158,6 +158,22 @@ describe("hudFor", () => {
     expect(hudFor(known(cell("ready", "live"), "stop")).action.enabled).toBe(false);
   });
 
+  it("keeps a known computer on show while a list check is out, with its control held", () => {
+    expect(hudFor(known(cell("ready", "live"), "list"))).toMatchObject({
+      phase: "live",
+      action: { kind: "stop", enabled: false },
+    });
+  });
+
+  it("calls a stream that drops after the first picture a reconnect, not a start", () => {
+    for (const connection of ["none", "connecting"] as const)
+      expect(hudFor({ ...known(cell("ready", connection)), streamed: true })).toMatchObject({
+        phase: "reconnecting",
+        label: "Reconnecting…",
+        action: { kind: "stop", enabled: true },
+      });
+  });
+
   it("shows a crash restart as reconnecting, with the attempt from the orchestrator's note", () => {
     expect(hudFor(known(cell("starting", "none", RESTART_NOTE)))).toEqual({
       phase: "restarting",
@@ -176,7 +192,8 @@ describe("hudFor", () => {
     const cases: [CellView, ComputerPhase][] = [
       [{ cell: null, status: "listing", pending: "list" }, "checking"],
       [{ cell: null, status: "unknown", pending: null }, "unavailable"],
-      [known(cell("ready", "live"), "list"), "checking"],
+      [known(cell("ready", "live"), "list"), "live"],
+      [known(cell("stopped"), "list"), "stopped"],
       [known({ ...cell("ready", "live"), ...paused }, "list"), "frozen"],
       [known(null, "create"), "starting"],
       [known(null), "none"],
@@ -195,6 +212,9 @@ describe("hudFor", () => {
       [known(cell("ready", "disconnected")), "reconnecting"],
       [known(cell("ready", "connecting")), "connecting"],
       [known(cell("ready", "none")), "connecting"],
+      [{ ...known(cell("ready", "none")), streamed: true }, "reconnecting"],
+      [{ ...known(cell("ready", "connecting")), streamed: true }, "reconnecting"],
+      [{ ...known(cell("ready", "live")), streamed: true }, "live"],
     ];
     for (const [view, phase] of cases) {
       const hud = hudFor(view);

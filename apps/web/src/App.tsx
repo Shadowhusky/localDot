@@ -315,6 +315,7 @@ function Theatre({ api }: { api: ApiClient }) {
     cell,
     status,
     pending,
+    streamed,
     error,
     listed,
     reconnects,
@@ -410,7 +411,7 @@ function Theatre({ api }: { api: ApiClient }) {
     }
     wasSettingsOpen.current = settings.open;
   }, [settings.open]);
-  const hud = hudFor({ cell, status, pending });
+  const hud = hudFor({ cell, status, pending, streamed });
   const stage = useRef<StageHandle>(null);
   const conversation = useConversation(api);
   const session = useLiveSession(

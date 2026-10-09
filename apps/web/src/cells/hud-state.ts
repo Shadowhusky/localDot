@@ -12,6 +12,9 @@ export interface CellView {
   cell: CellSummary | null;
   status: CellStatus;
   pending: Pending | null;
+  // This page has had a picture from the computer since it last came up: a stream that drops or
+  // reconnects after that is a reconnect under the last picture, never the computer starting.
+  streamed?: boolean;
 }
 
 export type HudActionKind = "start" | "stop" | "retry" | "resume";
@@ -47,7 +50,7 @@ export interface HudState {
 const RESTART_NOTE = /; restarting \(attempt (\d+) of (\d+)\)$/;
 const STARTING = "Starting your computer. The first start takes about a minute.";
 
-export function hudFor({ cell, status, pending }: CellView): HudState {
+export function hudFor({ cell, status, pending, streamed = false }: CellView): HudState {
   const idle = pending === null;
   const hud = (
     phase: ComputerPhase,
@@ -74,10 +77,11 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
       "retry",
     );
   }
-  if (pending === "list")
-    return cell?.paused
-      ? hud("frozen", "Paused", "Checking your paused computer.", "resume", false)
-      : hud("checking", "Checking…", "Looking for your computer.", cell ? "stop" : "start");
+  // A list check on a known computer keeps showing it, its controls held until the answer.
+  if (pending === "list" && !cell)
+    return hud("checking", "Checking…", "Looking for your computer.", "start");
+  if (pending === "list" && cell?.paused)
+    return hud("frozen", "Paused", "Checking your paused computer.", "resume", false);
   if (!cell) {
     // The create's answer brings the cell id that Stop needs.
     if (pending === "create") return hud("starting", "Starting…", STARTING, "stop", false);
@@ -151,7 +155,9 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
     case "disconnected":
       return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");
     default:
-      return hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
+      return streamed
+        ? hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop")
+        : hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
   }
 }
 
