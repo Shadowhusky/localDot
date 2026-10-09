@@ -2,6 +2,7 @@ package egress
 
 import (
 	"bufio"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -356,4 +357,41 @@ func TestAProgramThatGivesUpIsNoLongerHeld(t *testing.T) {
 		t.Fatal("the abandoned connection is still held")
 	}
 	w.waitLine(func(l audit.Line) bool { return l.Reason == ReasonClientGone && l.DestPort == 5222 })
+}
+
+func TestACapturedProgramMaySpeakItsOwnProtocolOn443ButTLSKeepsItsSNI(t *testing.T) {
+	w := newWorld(t)
+	conns := w.echoUpstream("chat.example.test", "443")
+	c := w.cell("c1", policy.Desktop)
+	sub, cancel := w.events.Subscribe(8)
+	defer cancel()
+	conn, br := connectAs(t, c, "chat.example.test:443", testCaptureToken, sourceHeader+": 5000\r\n")
+	if resp := reply(t, br); resp.StatusCode != http.StatusOK {
+		t.Fatalf("captured :443: %d", resp.StatusCode)
+	}
+	echoes(t, conn, br)
+	noAsk(t, sub)
+	conn.Close()
+	w.waitLine(func(l audit.Line) bool { return l.Via == ViaCapture && l.Mode == "raw" && l.Decision == audit.Allow })
+	// The proxy's own 443 is still TLS only.
+	conn, br = connectAs(t, c, "chat.example.test:443", testToken, "")
+	reply(t, br)
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	io.WriteString(conn, "hello\n")
+	if line, err := br.ReadString('\n'); err == nil {
+		t.Fatalf("proxy :443 relayed %q", line)
+	}
+	w.waitLine(func(l audit.Line) bool { return l.Via == ViaProxy && l.Reason == ReasonNotTLS })
+	// A captured ClientHello for another name than the one connected to is refused.
+	conn, br = connectAs(t, c, "chat.example.test:443", testCaptureToken, "")
+	reply(t, br)
+	conn.SetDeadline(time.Now().Add(3 * time.Second))
+	go tls.Client(conn, &tls.Config{ServerName: "other.example.test", InsecureSkipVerify: true}).Handshake()
+	if _, err := br.ReadByte(); err == nil {
+		t.Fatal("a mismatched SNI got an answer")
+	}
+	w.waitLine(func(l audit.Line) bool { return l.Via == ViaCapture && l.Reason == ReasonSNIMismatch })
+	if conns.Load() != 1 {
+		t.Fatalf("%d upstream connections", conns.Load())
+	}
 }

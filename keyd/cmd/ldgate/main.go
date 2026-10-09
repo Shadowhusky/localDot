@@ -26,6 +26,8 @@ const (
 	dnsPort     = 5353
 	// keyd holds a connection for the user for at most two minutes; its answer comes within this.
 	answerWithin = 3 * time.Minute
+	// A program that connected to an address says within this which name it means, if it ever does.
+	sniffWithin = 1500 * time.Millisecond
 )
 
 var tokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{43}$`)
@@ -75,7 +77,7 @@ func run() error {
 	capture := &gate.Capture{
 		Keyd: net.JoinHostPort("host.docker.internal", strconv.Itoa(port)), Token: token,
 		Self: netip.MustParseAddr(linkAddr), Pool: pool, Original: gate.OriginalDst, Dial: d.DialContext,
-		Answer: answerWithin, Limit: 256,
+		Answer: answerWithin, Limit: 256, Sniff: sniffWithin,
 	}
 	go func() { failed <- capture.Serve(captured) }()
 	fmt.Fprintf(os.Stderr, "ldgate: capture %s, dns %s and %s\n", at(linkAddr, capturePort), at(self.String(), dnsPort), at(linkAddr, dnsPort))

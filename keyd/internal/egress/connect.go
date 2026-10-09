@@ -138,6 +138,21 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 		finish(audit.Error, ReasonClientGone, err)
 		return
 	}
+	// A program that ignores the proxy may speak its own protocol on 443. That is no more than its
+	// captured port 80 may do, so it is relayed raw; anything that starts as TLS is still held to
+	// its SNI.
+	if line.Via == ViaCapture {
+		first, err := readStart(client, 10*time.Second)
+		if err != nil {
+			finish(audit.Deny, ReasonNotTLS, err)
+			return
+		}
+		client = &replayConn{Conn: client, pending: first}
+		if !looksTLS(first) {
+			c.raw(client, g, t, line, start)
+			return
+		}
+	}
 	sni, hello, err := peekSNI(client, 10*time.Second)
 	if err != nil {
 		finish(audit.Deny, ReasonNotTLS, err)
@@ -168,6 +183,61 @@ func (c *Cell) passthrough(client net.Conn, t policy.Target, line audit.Line) {
 		return
 	}
 	finish(audit.Allow, "", nil)
+}
+
+// raw relays a captured connection to its named host as it is, with what was read already.
+func (c *Cell) raw(client net.Conn, g *generation, t policy.Target, line audit.Line, start time.Time) {
+	line.Mode = "raw"
+	up, err := c.deps.Dialer.DialContext(g.ctx, "tcp", absolute(net.JoinHostPort(t.Host, strconv.Itoa(t.Port))))
+	if err != nil {
+		line.Decision, line.Reason = dialOutcome(err)
+		line.Detail, line.DurationMs = err.Error(), msSince(start)
+		c.record(line)
+		return
+	}
+	defer up.Close()
+	defer g.track(up)()
+	line.BytesIn, line.BytesOut = splice(client, up)
+	line.Status, line.DurationMs = http.StatusOK, msSince(start)
+	line.Decision = audit.Allow
+	if g.ctx.Err() != nil {
+		line.Decision, line.Reason = audit.Error, ReasonRevoked
+	}
+	c.record(line)
+}
+
+// readStart reads the first bytes a program sends, at least the two that tell TLS apart.
+func readStart(conn net.Conn, timeout time.Duration) ([]byte, error) {
+	if err := conn.SetReadDeadline(time.Now().Add(timeout)); err != nil {
+		return nil, err
+	}
+	defer conn.SetReadDeadline(time.Time{})
+	buf := make([]byte, 4096)
+	n, err := io.ReadAtLeast(conn, buf, 2)
+	if err != nil {
+		return nil, err
+	}
+	return buf[:n], nil
+}
+
+// looksTLS reports whether a stream starts with a TLS handshake record (type 22, version 3.x).
+func looksTLS(start []byte) bool {
+	return len(start) >= 2 && start[0] == 0x16 && start[1] == 0x03
+}
+
+// replayConn reads what was already read from Conn before reading Conn again.
+type replayConn struct {
+	net.Conn
+	pending []byte
+}
+
+func (c *replayConn) Read(p []byte) (int, error) {
+	if len(c.pending) > 0 {
+		n := copy(p, c.pending)
+		c.pending = c.pending[n:]
+		return n, nil
+	}
+	return c.Conn.Read(p)
 }
 
 // sameHost compares in ASCII only: strings.EqualFold also folds Unicode, which would take U+212A

@@ -2,6 +2,7 @@ package gate
 
 import (
 	"bufio"
+	"crypto/tls"
 	"encoding/base64"
 	"errors"
 	"io"
@@ -103,7 +104,7 @@ func newCapture(t *testing.T, k *fakeKeyd, dst netip.AddrPort) *fixture {
 			}
 			return f.dst, nil
 		},
-		Dial: d.DialContext, Answer: 2 * time.Second, Limit: 8,
+		Dial: d.DialContext, Answer: 2 * time.Second, Limit: 8, Sniff: 300 * time.Millisecond,
 	}
 	go f.capture.Serve(ln)
 	return f
@@ -227,5 +228,38 @@ func TestKeydClosingTheTunnelClosesTheProgramsConnection(t *testing.T) {
 		t.Fatal(err)
 	}
 	k.cut <- struct{}{}
+	refused(t, conn)
+}
+
+func TestAnAddressIsAskedForByTheNameItsTLSOrHTTPGives(t *testing.T) {
+	k := newFakeKeyd(t, func(*http.Request) (int, time.Duration) { return http.StatusOK, 0 })
+	f := newCapture(t, k, netip.MustParseAddrPort("93.184.216.34:443"))
+	conn := f.dial(t)
+	go tls.Client(conn, &tls.Config{ServerName: "Chat.Example.com", InsecureSkipVerify: true}).Handshake()
+	if req := <-k.requests; req.Host != "chat.example.com:443" {
+		t.Fatalf("host %q", req.Host)
+	}
+	f.to(netip.MustParseAddrPort("93.184.216.34:80"))
+	conn = f.dial(t)
+	request := "GET / HTTP/1.1\r\nHost: www.example.com:80\r\nAccept: */*\r\n\r\n"
+	io.WriteString(conn, request)
+	if req := <-k.requests; req.Host != "www.example.com:80" {
+		t.Fatalf("host %q", req.Host)
+	}
+	// What the program sent while the gate listened reaches the tunnel first.
+	got := make([]byte, len(request))
+	if _, err := io.ReadFull(conn, got); err != nil || string(got) != request {
+		t.Fatalf("echo %q %v", got, err)
+	}
+}
+
+func TestANameKeydRefusesByNameLeavesTheAddress(t *testing.T) {
+	k := newFakeKeyd(t, func(*http.Request) (int, time.Duration) { return http.StatusForbidden, 0 })
+	f := newCapture(t, k, netip.MustParseAddrPort("93.184.216.34:80"))
+	conn := f.dial(t)
+	io.WriteString(conn, "GET / HTTP/1.1\r\nHost: printer.local\r\n\r\n")
+	if req := <-k.requests; req.Host != "93.184.216.34:80" {
+		t.Fatalf("host %q", req.Host)
+	}
 	refused(t, conn)
 }
