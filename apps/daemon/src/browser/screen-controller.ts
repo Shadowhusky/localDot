@@ -57,7 +57,7 @@ export interface ScreenControllerDeps {
   readonly parentCellId: string;
   readonly desktopGeometry: ScreenGeometry;
   desktopReady(): boolean;
-  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop">;
+  browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
   // The browser outlives sessions, so its control revisions are counted across them.
   revision?(instance: string): number;
   client?(endpoint: ReadyBrowser): Client;
@@ -81,11 +81,13 @@ export class ScreenControlError extends Error {
   }
 }
 export class ScreenUnavailableError extends Error {
-  constructor(screen: ScreenName) {
+  constructor(screen: ScreenName, starting = false) {
     super(
-      screen === "browser"
-        ? "The web browser is still starting. Try switching to it again in a few seconds."
-        : "The desktop isn't ready right now. Try switching to it again in a moment.",
+      screen === "desktop"
+        ? "The desktop isn't ready right now. Try switching to it again in a moment."
+        : starting
+          ? "The web browser is still starting. Try switching to it again in a few seconds."
+          : "The web browser isn't available. Carry on with the desktop, which has none of the user's sign-ins, or tell the user what you couldn't do.",
     );
     this.name = "ScreenUnavailableError";
   }
@@ -552,7 +554,10 @@ export class ScreenController {
             // The agent asked for a screen that is unavailable. That is an ordinary tool
             // failure once no grant this call requested can still be live.
             if (granted) await this.#revoke().catch(() => this.#retireBrowser());
-            throw new ScreenUnavailableError(screen);
+            throw new ScreenUnavailableError(
+              screen,
+              this.deps.browser.get(this.deps.parentCellId)?.state === "starting",
+            );
           }
           throw new ScreenControlError();
         }

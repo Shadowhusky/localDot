@@ -3,7 +3,7 @@ import { ulid } from "@localdot/protocol";
 import { describe, expect, it, vi } from "vitest";
 import type { BrowserControlRequest } from "../../../../packages/protocol/src/browser-control.ts";
 import type { BrowserDownloadBinding } from "../../../../packages/protocol/src/browser-downloads.ts";
-import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
+import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { BrowserClientError, type BrowserScope } from "./client.ts";
 import {
   ScreenControlError,
@@ -327,6 +327,7 @@ function fixture(downloads?: ScreenControllerDeps["downloads"]) {
     browser: {
       start: vi.fn(async () => current),
       endpoints: vi.fn(() => current),
+      get: vi.fn<BrowserOrchestrator["get"]>(() => undefined),
       stop: vi.fn(async () => {}),
     },
     client: () => client,
@@ -398,6 +399,20 @@ describe("session screen coordinator", () => {
     expect(f.controller.browserAccess(lease).tabId).toBe(second);
     expect(f.client.clock.mock.calls.map(([, tabId]) => tabId)).toEqual([f.tabId, second, second]);
     lease.finish();
+    await f.controller.close();
+  });
+
+  it("says the web browser is starting only while it is", async () => {
+    const f = fixture();
+    vi.mocked(f.deps.browser.start).mockRejectedValue(new Error("synthetic start failure"));
+    const refusal = () => f.controller.switchTo("browser", f.scope);
+    await expect(refusal()).rejects.toThrow(/isn't available.*tell the user/u);
+    vi.mocked(f.deps.browser.get).mockReturnValue({
+      id: f.endpoint.browserCellId,
+      parentCellId: f.endpoint.parentCellId,
+      state: "starting",
+    });
+    await expect(refusal()).rejects.toThrow("still starting");
     await f.controller.close();
   });
 

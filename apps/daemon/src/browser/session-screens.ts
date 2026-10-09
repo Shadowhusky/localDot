@@ -22,7 +22,7 @@ export class SessionScreens {
   constructor(
     private readonly deps: {
       cells: Pick<CellApi, "get" | "subscribe" | "stop">;
-      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop">;
+      browser: Pick<BrowserOrchestrator, "start" | "endpoints" | "stop" | "get">;
       streams: BrowserStreams;
       recordings: Pick<ScreenRecordings, "attach" | "fence">;
       registry: Pick<DesktopdRegistry, "for">;

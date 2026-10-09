@@ -66,12 +66,12 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     browser_navigate: tool({
       description:
-        "Open an http or https page and get a screenshot. Public sites open in the web browser, which keeps the user's sign-ins, and the screen switches there; localhost and local addresses open in the desktop's Chromium.",
+        "Open an http or https page and get a screenshot. Public sites open in the web browser, which keeps the user's sign-ins; localhost and local addresses open in the desktop's Chromium. The screen switches to match.",
       inputSchema: BrowserNavigateInput,
     }),
     browser_upload: tool({
       description:
-        "Assign desktop files to the currently open file chooser on the isolated browser screen. First open the page's file picker. Supply 1–10 paths inside the desktop home, at most 100 MiB total. The user must approve the exact files and receiving page. This assigns the files; a page may still require Submit. Never retry an uncertain upload automatically.",
+        "Assign desktop files to the currently open file chooser in the web browser. First open the page's file picker. Supply 1–10 paths inside the desktop home, at most 100 MiB total. The user must approve the exact files and receiving page. This assigns the files; a page may still require Submit. Never retry an uncertain upload automatically.",
       inputSchema: BrowserUploadInput,
     }),
     update_plan: tool({

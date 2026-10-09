@@ -229,10 +229,12 @@ async function dispatchAdmitted(
           "Memory can only be saved from the user’s own request or reply. Ask the user to confirm the fact first.",
         ),
       };
-    // Public pages open in the web browser, where the user's sign-ins are, by default.
+    // Public pages open in the web browser, where the user's sign-ins are; local addresses
+    // only resolve on the desktop.
     let fellBack = false;
     const page = name === "browser_navigate" && webUrl((frozen as BrowserNavigateInput).url);
-    if (page && opensInWebBrowser(page) && session.screens?.selection.screen === "desktop") {
+    const shown = session.screens?.selection.screen;
+    if (page && opensInWebBrowser(page) && shown === "desktop") {
       try {
         await session.switchScreen("browser", lease);
       } catch (error) {
@@ -240,6 +242,9 @@ async function dispatchAdmitted(
         if (!(error instanceof ScreenUnavailableError)) throw error;
         fellBack = true;
       }
+      ctx.check();
+    } else if (page && !opensInWebBrowser(page) && shown === "browser") {
+      await session.switchScreen("desktop", lease);
       ctx.check();
     }
     if (

@@ -335,6 +335,7 @@ describe("ChatGPT runner lifecycle", () => {
         throw new Error("unused browser start");
       }),
       endpoints: () => undefined,
+      get: () => undefined,
       stop: vi.fn(async () => {}),
     };
     const streams = new BrowserStreams({

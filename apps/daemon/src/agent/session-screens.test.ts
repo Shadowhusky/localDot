@@ -17,7 +17,7 @@ import { screenGatewayBinding } from "../browser/gateway-binding.ts";
 import { ScreenController, type ScreenControllerDeps } from "../browser/screen-controller.ts";
 import { SessionScreens } from "../browser/session-screens.ts";
 import { BrowserStreams } from "../browser/streams.ts";
-import type { ReadyBrowser } from "../cells/browser-orchestrator.ts";
+import type { BrowserOrchestrator, ReadyBrowser } from "../cells/browser-orchestrator.ts";
 import { type CellSummary, NO_STREAM } from "../cells/types.ts";
 import { EventLog } from "../event-log.ts";
 import type { NativeScreenBinding } from "../gateway/gateway.ts";
@@ -167,6 +167,7 @@ function fixture(
     browser: {
       start: vi.fn(async () => endpoint),
       endpoints: () => endpoint,
+      get: vi.fn<BrowserOrchestrator["get"]>(() => undefined),
       stop: vi.fn(async () => {}),
     },
     client: () => client,
@@ -588,6 +589,23 @@ describe("session-owned screen authority", () => {
     return { ...h, call: (input: unknown) => callTool("computer", input), callTool };
   }
 
+  function bindDesktop(h: ReturnType<typeof tools>) {
+    const browserBinding = h.tools.bindScreen;
+    h.tools.bindScreen = (session, lease) =>
+      lease.selection.screen === "desktop"
+        ? {
+            cellId: session.cellId,
+            parentCellId: session.cellId,
+            scale: lease.selection.geometry.scale,
+            device: {} as NativeScreenBinding["device"],
+            signal: lease.signal,
+            check: () => lease.check(),
+            stream: () => NO_STREAM,
+            subscribe: () => () => {},
+          }
+        : (browserBinding?.(session, lease) as NativeScreenBinding);
+  }
+
   function uploads(f: ReturnType<typeof fixture>) {
     const h = tools(f),
       transfers = new Transfers();
@@ -892,20 +910,7 @@ describe("session-owned screen authority", () => {
     await f.ready();
     const h = tools(f);
     vi.mocked(f.deps.browser.start).mockRejectedValueOnce(new Error("browser cell stopped"));
-    const browserBinding = h.tools.bindScreen;
-    h.tools.bindScreen = (session, lease) =>
-      lease.selection.screen === "desktop"
-        ? {
-            cellId: session.cellId,
-            parentCellId: session.cellId,
-            scale: lease.selection.geometry.scale,
-            device: {} as NativeScreenBinding["device"],
-            signal: lease.signal,
-            check: () => lease.check(),
-            stream: () => NO_STREAM,
-            subscribe: () => () => {},
-          }
-        : (browserBinding?.(session, lease) as NativeScreenBinding);
+    bindDesktop(h);
     const desktop = vi.spyOn(h.tools, "desktop");
     const navigated = await h.callTool("browser_navigate", { url: "https://mail.example.test/" });
     expect(navigated.result.ok).toBe(true);
@@ -917,6 +922,20 @@ describe("session-owned screen authority", () => {
     expect(desktop).toHaveBeenCalledWith(f.session.cellId);
     expect(f.client.navigate).not.toHaveBeenCalled();
     expect(f.session.stopped).toBe(false);
+  });
+
+  it("goes back to the desktop for a local address while the web browser is shown", async () => {
+    const f = fixture();
+    await f.ready();
+    const h = tools(f);
+    bindDesktop(h);
+    expect((await h.callTool("switch_screen", { screen: "browser" })).result.ok).toBe(true);
+    const desktop = vi.spyOn(h.tools, "desktop");
+    const navigated = await h.callTool("browser_navigate", { url: "http://localhost:5173/" });
+    expect(navigated.result.ok).toBe(true);
+    expect(f.screens.selection.screen).toBe("desktop");
+    expect(desktop).toHaveBeenCalledWith(f.session.cellId);
+    expect(f.client.navigate).not.toHaveBeenCalled();
   });
 
   it("dispatches switch_screen through the real controller, clears the old frame and keeps shell/files on the desktop", async () => {
@@ -972,9 +991,9 @@ describe("session-owned screen authority", () => {
       expect(refused.result.ok).toBe(false);
       expect(refused.result.final).toBeUndefined();
       expect(refused.result.content).toContainEqual(
-        expect.objectContaining({ text: expect.stringContaining("web browser is still starting") }),
+        expect.objectContaining({ text: expect.stringContaining("web browser isn't available") }),
       );
-      expect(JSON.stringify(refused.result.content)).not.toContain("signed-in");
+      expect(JSON.stringify(refused.result.content)).not.toMatch(/signed-in|starting|again/u);
       expect(f.session.stopped).toBe(false);
       expect(f.physicalStop).not.toHaveBeenCalled();
       expect(f.holder()).toBe("user");
