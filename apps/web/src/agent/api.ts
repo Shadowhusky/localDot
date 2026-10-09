@@ -49,6 +49,7 @@ const fields = new Set([
   "models",
   "autonomy",
   "approval",
+  "connection",
   "pause",
   "budgetHold",
   "screen",

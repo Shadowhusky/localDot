@@ -97,8 +97,6 @@ const WORK: Readonly<Record<ActionClass, string>> = {
 };
 
 const WAITS = "dot waits here; nothing times out.";
-// A connection is the app's, not dot's: dot keeps working, and the app tries again once allowed.
-const RETRIES = "The app tries again once you allow it; nothing times out.";
 
 // The daemon's own words for this action and its reason win; its plain class name becomes a
 // question.
@@ -110,19 +108,19 @@ export function decisionWords(
   const always = ALWAYS_ASKS[actionClass];
   const title =
     card.title === ACTION_CLASS_LABELS[actionClass] ? QUESTION[actionClass] : card.title;
+  // A connection is the app's, not dot's: dot keeps working, so its reason stands alone.
   const network = actionClass === "network";
-  const waits = network ? RETRIES : WAITS;
   return {
     title,
     primary: verb,
     secondary: `Don't ${verb.toLowerCase()}`,
-    why: card.why
-      ? `${card.why} ${waits}`
-      : always
-        ? `${always} always needs your OK. ${waits}`
-        : network
-          ? `Apps reach websites freely; anything else waits for your OK. ${waits}`
-          : `Your settings ask before ${WORK[actionClass]}. ${waits}`,
+    why: network
+      ? (card.why ?? "Apps reach websites on their own; anything else waits for your OK.")
+      : card.why
+        ? `${card.why} ${WAITS}`
+        : always
+          ? `${always} always needs your OK. ${WAITS}`
+          : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
     line: (network && connectionLine(card.fields)) || askLine(actionClass, title),
   };
 }

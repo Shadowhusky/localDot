@@ -30,7 +30,7 @@ describe("decisionWords", () => {
   });
 
   it("says why in one plain sentence that promises no timeout", () => {
-    for (const actionClass of ActionClass.options) {
+    for (const actionClass of ActionClass.options.filter((c) => c !== "network")) {
       const words = decisionWords({ actionClass, title: "" });
       expect(words.why, actionClass).toMatch(/nothing times out\.$/);
       expect(bannedWords(Object.values(words).join(" "), true), actionClass).toEqual([]);
@@ -84,14 +84,17 @@ describe("a connection's card", () => {
       ["For the task", "Message Henry"],
     ] as [string, string][],
   };
-  it("asks Allow or Don't allow, says the app tries again, and dot names the app aloud", () => {
+  it("asks Allow or Don't allow with its own reason, and dot names the app aloud", () => {
     expect(decisionWords(card)).toEqual({
       title: card.title,
       primary: "Allow",
       secondary: "Don't allow",
-      why: `${card.why} The app tries again once you allow it; nothing times out.`,
+      why: card.why,
       line: "WeChat is trying to reach a new server.",
     });
+    expect(decisionWords({ ...card, why: undefined }).why).toBe(
+      "Apps reach websites on their own; anything else waits for your OK.",
+    );
     const unnamed = { ...card, fields: [["App", "Not known"]] as [string, string][] };
     expect(decisionWords(unnamed).line).toBe("An app is trying to reach a new server.");
   });
