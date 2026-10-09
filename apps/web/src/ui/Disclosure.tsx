@@ -55,6 +55,8 @@ export interface DisclosureProps extends Omit<ComponentProps<"button">, "childre
   meta?: ReactNode;
   // A quiet line of text rather than a row: inside a toast, or under a row's name.
   inline?: boolean;
+  // A pinned strip whose summary spans several lines, such as a plan's progress.
+  strip?: boolean;
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?(open: boolean): void;
@@ -66,6 +68,7 @@ export function Disclosure({
   summary,
   meta,
   inline = false,
+  strip = false,
   open,
   defaultOpen = false,
   onOpenChange,
@@ -86,6 +89,7 @@ export function Disclosure({
       className={clsx("ui-disclosure", className)}
       data-open={shown || undefined}
       data-inline={inline || undefined}
+      data-strip={strip || undefined}
     >
       <button
         {...mergeHandlers(props, pressHandlers)}

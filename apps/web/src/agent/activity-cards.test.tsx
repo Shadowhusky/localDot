@@ -74,8 +74,9 @@ describe("activity rows and inspection", () => {
       ]),
       changes: [change],
     };
-    render(<ActivityRail api={api} sessionId="one" scale={1} rows={[]} agent={model} />);
-    expect(document.querySelector(".plan-count")?.textContent).toBe("1 of 4 done");
+    render(<ActivityRail api={api} sessionId="plan-states" scale={1} rows={[]} agent={model} />);
+    expect(document.querySelector(".plan-strip-count")?.textContent).toBe("1 of 4");
+    fireEvent.click(screen.getByRole("button", { name: /^Plan/ }));
     expect(
       within(screen.getByRole("list", { name: "Task plan" }))
         .getAllByRole("img")
@@ -83,9 +84,11 @@ describe("activity rows and inspection", () => {
     ).toEqual(["Next", "In progress", "Done", "Skipped"]);
     const row = screen.getByTestId("tool-row");
     expect(within(row).getByRole("img", { name: "Running" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("tab", { name: /^Files/ }));
     expect(
-      within(screen.getByRole("region", { name: "Files" })).getAllByTestId("change-row"),
+      within(screen.getByRole("tabpanel", { name: /^Files/ })).getAllByTestId("change-row"),
     ).toHaveLength(1);
+    fireEvent.click(screen.getByRole("tab", { name: /^Steps/ }));
     fireEvent.click(within(row).getByRole("button"));
     expect(screen.getAllByLabelText("Unified text diff")).toHaveLength(1);
     expect(screen.getByLabelText("Unified text diff").textContent).toBe("+sample");

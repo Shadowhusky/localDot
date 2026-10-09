@@ -595,6 +595,28 @@
     outline-offset: 2px;
   }
 
+  /* A strip: the summary takes the width over lines of its own, the chevron sits at the end of its
+     first line, and the panel unfolds quickly. */
+  .ui-disclosure[data-strip] > .ui-disclosure-trigger {
+    align-items: flex-start;
+    padding: calc(var(--spacing) * 2);
+    color: var(--color-fg-1);
+  }
+
+  .ui-disclosure[data-strip] > .ui-disclosure-trigger > .ui-disclosure-chevron {
+    order: 1;
+    margin-top: calc(var(--spacing) * 0.5);
+  }
+
+  .ui-disclosure[data-strip] :is(.ui-disclosure-label, .ui-disclosure-summary) {
+    display: block;
+  }
+
+  .ui-disclosure[data-strip] > .ui-collapse {
+    transition-duration: var(--dur-dim);
+    transition-timing-function: var(--ease-enter);
+  }
+
   .ui-detail-lines {
     display: grid;
     gap: var(--spacing);

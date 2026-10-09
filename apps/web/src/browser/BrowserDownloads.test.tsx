@@ -254,7 +254,8 @@ it("shows a held download in Activity before any task has started", async () => 
   const f = fixture();
   render(<ActivityRail rows={[]} sessionId={null} cellId={parent} scale={1} api={f.api} />);
   expect(screen.getByText("Plan and steps appear here once dot starts.")).toBeTruthy();
-  const downloads = await screen.findByRole("region", { name: "Browser downloads" });
+  fireEvent.click(await screen.findByRole("tab", { name: "Files 1" }));
+  const downloads = screen.getByRole("region", { name: "Browser downloads" });
   expect(within(downloads).getByText("report.pdf")).toBeTruthy();
   expect(within(downloads).getByText("1 waiting")).toBeTruthy();
 });
@@ -263,12 +264,14 @@ it("keeps an open download decision, in one scroller, when a task starts", async
   const view = render(
     <ActivityRail rows={[]} sessionId={null} cellId={parent} releaseReady scale={1} api={f.api} />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+  fireEvent.click(await screen.findByRole("tab", { name: "Files 1" }));
+  fireEvent.click(screen.getByRole("button", { name: "Review" }));
   expect(screen.getByRole("alertdialog")).toBeTruthy();
   view.rerender(
     <ActivityRail rows={[]} sessionId="task" cellId={parent} releaseReady scale={1} api={f.api} />,
   );
   expect(screen.getByRole("alertdialog")).toBeTruthy();
+  expect(screen.getByRole("tab", { name: "Files 1" }).getAttribute("aria-selected")).toBe("true");
   expect(f.fetchImpl.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
   expect(view.container.querySelectorAll(".ui-scroll-area")).toHaveLength(1);
   expect(
