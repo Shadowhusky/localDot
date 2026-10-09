@@ -286,6 +286,24 @@ it("keeps direct control open while the user's own input is landing", () => {
     expect(f.result.current.canInput).toBe(false);
   }
 });
+it("lets the user hand back while dot checks that their last input reached the computer", async () => {
+  const fetchImpl = vi.fn<typeof fetch>(async () => new Response(null, { status: 204 }));
+  const f = fixture(fetchImpl, true);
+  f.update({
+    agent: {
+      ...f.props.agent,
+      snapshot: { ...snapshotOf(f), pendingTakeover: ID, manualControl: "unconfirmed" },
+    },
+  });
+  expect(f.result.current.canInput).toBe(false);
+  expect(f.result.current.canHandback).toBe(true);
+  let sent = false;
+  await act(async () => {
+    sent = await f.result.current.handback(ID);
+  });
+  expect(sent).toBe(true);
+  expect(String(fetchImpl.mock.calls[0]?.[0])).toMatch(/\/takeover\/done$/);
+});
 it.each(["modal", "pane", "feed"])("closes direct control on %s", (reason) => {
   const f = fixture(vi.fn<typeof fetch>(), true);
   expect(f.result.current.canInput).toBe(true);

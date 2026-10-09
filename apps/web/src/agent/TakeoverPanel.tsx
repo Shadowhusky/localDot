@@ -341,10 +341,14 @@ export function TakeoverPanel({
       >
         Return control to dot
       </Button>
-      {(manualStatus === "unconfirmed" || manualStatus === "returning") && (
-        <p role="status">
-          Input or hand-back is still unconfirmed. Agent control remains blocked. Use Stop to
-          contain the computer.
+      {manualStatus === "unconfirmed" && (
+        <p role="status" className="history-note">
+          Checking that your last input reached the computer…
+        </p>
+      )}
+      {manualStatus === "returning" && (
+        <p role="status" className="history-note">
+          Handing control back to dot…
         </p>
       )}
       {manualStatus === "waiting" && <p role="status">Preparing manual control…</p>}

@@ -25,6 +25,7 @@ export function quarantineAccess(
   const session = deps.session(id);
   const generation = session?.generation;
   let action: ToolLease | ManualLease | undefined;
+  let cutBy: AbortSignal | undefined;
   const check = () => {
     signal.throwIfAborted();
     const cell = deps.cell(id),
@@ -55,13 +56,19 @@ export function quarantineAccess(
   if (session?.controlHeld) {
     const request = session.pendingTakeover;
     if (!request) return undefined;
-    action = session.admitManual(request, signal);
-  } else if (session && generation) action = session.admit(generation, signal);
+    const manual = session.admitManual(request, signal);
+    action = manual;
+    // A hand-back does not wait for a file still on its way: it stops it.
+    cutBy = manual.returning;
+  } else if (session && generation) {
+    action = session.admit(generation, signal);
+    cutBy = action.signal;
+  }
   try {
     check();
     const transfer = deps.transfers.acquire(
       id,
-      [signal, ...(action ? [action.signal] : session ? [session.abort.signal] : [])],
+      [signal, ...(cutBy ? [cutBy] : session ? [session.abort.signal] : [])],
       check,
     );
     return {

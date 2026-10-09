@@ -54,6 +54,8 @@ interface Operation {
 const idleStop: StopStatus = { phase: "idle", errors: [] };
 // "busy" while the user's own input stream is delivering, which never closes their control.
 const manualReady = (state: string | undefined) => state === "ready" || state === "busy";
+// While the daemon checks that the user's last input landed, a hand-back waits for that check.
+const handbackReady = (state: string | undefined) => manualReady(state) || state === "unconfirmed";
 export function useTaskControls(props: Props) {
   const current = useRef(props);
   const operation = useRef<Operation | null>(null);
@@ -184,7 +186,7 @@ export function useTaskControls(props: Props) {
             record.kind === "budget" ||
             record.kind === "resume" ||
             record.kind === "memory" ||
-            props.agent.snapshot?.manualControl === "ready"))
+            handbackReady(props.agent.snapshot?.manualControl)))
       ) {
         operation.current = null;
         setStatus(null);
@@ -297,7 +299,7 @@ export function useTaskControls(props: Props) {
       !available() ||
       operation.current ||
       now.agent.model.pendingTakeover !== requestId ||
-      !manualReady(now.agent.snapshot?.manualControl)
+      !handbackReady(now.agent.snapshot?.manualControl)
     )
       return Promise.resolve(false);
     return perform("handback", requestId, (record) =>
@@ -452,7 +454,7 @@ export function useTaskControls(props: Props) {
       props.manualVisible &&
       manualReady(props.agent.snapshot?.manualControl),
     canHandback:
-      available(props) && !operation.current && manualReady(props.agent.snapshot?.manualControl),
+      available(props) && !operation.current && handbackReady(props.agent.snapshot?.manualControl),
   };
 }
 export type TaskControls = ReturnType<typeof useTaskControls>;

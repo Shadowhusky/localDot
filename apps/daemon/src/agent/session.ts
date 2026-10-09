@@ -36,6 +36,10 @@ import { SecretAnswers } from "./secret-answers.ts";
 import type { TranscriptStore } from "./transcript.ts";
 
 export const AGENT = "main";
+// How long a hand-back waits for the user's input to land and the computer to confirm it.
+const HANDBACK_WAIT_MS = 5000;
+// After input whose landing was unknown, the computer is asked again this much later each time.
+const CONFIRM_RETRY_MS = { first: 250, max: 5000 };
 export type SessionStatus = "starting" | "running" | "waiting_user" | "paused" | "idle" | "ended";
 export interface AskAnswer {
   option?: string;
@@ -83,16 +87,23 @@ export interface ToolLease {
 export interface ManualLease {
   readonly requestId: string;
   readonly signal: AbortSignal;
+  // Also aborts once the user hands control back: input already on its way still lands, but
+  // nothing waits for more.
+  readonly returning: AbortSignal;
   check(): void;
   // The user typed under this control. The takeover's end says so, never what was typed.
   typed(): void;
-  // A lost dispatch acknowledgment keeps the control fence until Stop contains the desktop.
-  finish(uncertain?: boolean): void;
+  // Input whose landing is unknown fences control until `confirm`, the computer's answer that
+  // everything sent before it has landed, succeeds; with no way to confirm, until Stop.
+  finish(uncertain?: boolean, confirm?: () => Promise<void>): void;
 }
 interface ActiveCall {
   abort: AbortController;
   settled: Promise<void>;
   finish(): void;
+}
+interface ManualCall extends ActiveCall {
+  returning: AbortController;
 }
 interface ControlRecord {
   requestId: string;
@@ -100,6 +111,9 @@ interface ControlRecord {
   held: boolean;
   returning: boolean;
   manualUnconfirmed: boolean;
+  confirm?: () => Promise<void>;
+  confirming?: Promise<boolean>;
+  settling?: boolean;
   typed: boolean;
   released: Promise<TakeoverOutcome>;
   resolve(outcome: TakeoverOutcome): void;
@@ -118,6 +132,19 @@ export class ControlHeldError extends Error {
   }
 }
 
+// Resolves after `ms`, or as soon as `signal` aborts.
+function pause(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const done = () => {
+      clearTimeout(timer);
+      signal.removeEventListener("abort", done);
+      resolve();
+    };
+    const timer = setTimeout(done, ms);
+    signal.addEventListener("abort", done, { once: true });
+    if (signal.aborted) done();
+  });
+}
 export function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> {
   return new Promise((resolve, reject) => {
     const abort = () => reject(signal.reason ?? new SessionStoppedError());
@@ -159,7 +186,7 @@ export class AgentSession {
   readonly #inbox: InboxItem[] = [];
   readonly #waiters = new Set<() => void>();
   readonly #active = new Map<ToolLease, ActiveCall>();
-  readonly #manual = new Map<ManualLease, ActiveCall>();
+  readonly #manual = new Map<ManualLease, ManualCall>();
   // Input the agent keeps down between tool calls (a mouse button): how to let go of it.
   readonly #held = new Set<() => Promise<void>>();
   #releasing: Promise<void> | undefined;
@@ -689,7 +716,8 @@ export class AgentSession {
       this.#manual.size
     )
       throw new ControlHeldError();
-    const abort = new AbortController();
+    const abort = new AbortController(),
+      returning = new AbortController();
     const signal = AbortSignal.any([this.abort.signal, requestSignal, abort.signal]);
     let resolve!: () => void;
     const settled = new Promise<void>((r) => {
@@ -699,6 +727,7 @@ export class AgentSession {
     const lease: ManualLease = {
       requestId,
       signal,
+      returning: AbortSignal.any([signal, returning.signal]),
       check: () => {
         if (
           signal.aborted ||
@@ -713,16 +742,65 @@ export class AgentSession {
       typed: () => {
         record.typed = true;
       },
-      finish: (uncertain = false) => {
+      finish: (uncertain = false, confirm) => {
         if (finished) return;
         finished = true;
-        if (uncertain) record.manualUnconfirmed = true;
+        if (uncertain) {
+          record.manualUnconfirmed = true;
+          if (confirm) record.confirm = confirm;
+        }
         this.#manual.delete(lease);
         resolve();
+        if (uncertain) this.#settleManual(record);
       },
     };
-    this.#manual.set(lease, { abort, settled, finish: () => lease.finish() });
+    this.#manual.set(lease, { abort, returning, settled, finish: () => lease.finish() });
     return lease;
+  }
+  // The computer's answer that everything sent before it has landed lifts the fence that input
+  // whose landing was unknown put up. dot observes the screen afresh once it has control back.
+  #confirmManual(record: ControlRecord): Promise<boolean> {
+    if (!record.manualUnconfirmed) return Promise.resolve(true);
+    const confirm = record.confirm;
+    if (!confirm || this.#control !== record || this.stopped) return Promise.resolve(false);
+    if (!record.confirming) {
+      const attempt = Promise.resolve()
+        .then(confirm)
+        .then(
+          () => {
+            if (this.#control !== record || this.stopped) return false;
+            record.manualUnconfirmed = false;
+            return true;
+          },
+          () => false,
+        );
+      record.confirming = attempt;
+      void attempt.finally(() => {
+        if (record.confirming === attempt) record.confirming = undefined;
+      });
+    }
+    return record.confirming;
+  }
+  // A computer that cannot answer yet is asked again, a little later each time, until it confirms
+  // or the user's control ends.
+  #settleManual(record: ControlRecord): void {
+    if (record.settling || !record.confirm) return;
+    record.settling = true;
+    void (async () => {
+      try {
+        for (
+          let wait = 0;
+          ;
+          wait = Math.min(CONFIRM_RETRY_MS.max, wait * 2 || CONFIRM_RETRY_MS.first)
+        ) {
+          if (wait) await pause(wait, this.abort.signal);
+          if (this.#control !== record || this.stopped || !record.manualUnconfirmed) return;
+          if (await this.#confirmManual(record)) return;
+        }
+      } finally {
+        record.settling = false;
+      }
+    })();
   }
   cancelManual(): void {
     for (const call of this.#manual.values()) call.abort.abort(new ControlHeldError());
@@ -1127,23 +1205,26 @@ export class AgentSession {
       signal?.aborted
     )
       return false;
-    record.returning = true; // Close admission synchronously before cancelling or awaiting input.
-    const draining = [...this.#manual.values()].map((call) => call.settled);
-    this.cancelManual();
+    record.returning = true; // Close admission synchronously before awaiting input.
+    // Input already on its way lands first; a stream waiting with a button down lets go of it.
+    const draining = [...this.#manual.values()].map((call) => {
+      call.returning.abort(new ControlHeldError());
+      return call.settled;
+    });
+    const deadline = AbortSignal.any([
+      this.abort.signal,
+      AbortSignal.timeout(HANDBACK_WAIT_MS),
+      ...(signal ? [signal] : []),
+    ]);
     try {
-      await abortable(
-        Promise.all(draining),
-        AbortSignal.any([
-          this.abort.signal,
-          AbortSignal.timeout(5000),
-          ...(signal ? [signal] : []),
-        ]),
-      );
+      await abortable(Promise.all(draining), deadline);
+      if (!(await abortable(this.#confirmManual(record), deadline)))
+        return this.#keepControl(record);
     } catch {
-      return false;
+      return this.#keepControl(record);
     }
     if (this.#control !== record || this.stopped || this.#manual.size || record.manualUnconfirmed)
-      return false;
+      return this.#keepControl(record);
     const generation = this.generation;
     if (this.#screens && generation) {
       try {
@@ -1161,6 +1242,11 @@ export class AgentSession {
     // screens and recorder fenced until prepareScreens confirms the replacement's grant.
     if (this.#screens) this.lastFrameId = undefined;
     return this.#endControl(record, note);
+  }
+  // A hand-back that cannot finish leaves the user in control, free to try again.
+  #keepControl(record: ControlRecord): false {
+    if (this.#control === record && !this.stopped) record.returning = false;
+    return false;
   }
   #endControl(record: ControlRecord, note: string | undefined): boolean {
     // Persist the user's hand-back note before waking any replacement brain.

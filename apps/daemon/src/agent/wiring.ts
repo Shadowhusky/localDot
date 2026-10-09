@@ -473,8 +473,7 @@ export function createAgent(d: AgentWiringDeps) {
     const target = browser ? undefined : d.registry.for(session.cellId);
     if (!browser && !target) return undefined;
     const endpoint = target?.client.endpoint;
-    const check = () => {
-      scope.check();
+    const unchanged = () => {
       const current = d.cells.get(session.cellId);
       const now = d.cells.endpoints(session.cellId)?.desktopd;
       if (
@@ -492,6 +491,10 @@ export function createAgent(d: AgentWiringDeps) {
         (!browser && (now?.baseUrl !== endpoint?.baseUrl || now?.token !== endpoint?.token))
       )
         throw new AgentError(409, "manual control changed");
+    };
+    const check = () => {
+      scope.check();
+      unchanged();
     };
     check();
     const unsubscribe = d.cells.subscribe((next) => {
@@ -535,6 +538,13 @@ export function createAgent(d: AgentWiringDeps) {
       release: unsubscribe,
       letGo: async () => {
         await target.client.release();
+      },
+      // desktopd's input helper takes one command at a time, in order: it answers this one once
+      // everything sent before it has landed.
+      confirm: async () => {
+        unchanged();
+        await target.client.release();
+        unchanged();
       },
     };
   };

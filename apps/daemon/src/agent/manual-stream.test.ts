@@ -21,7 +21,7 @@ afterEach(async () => {
   vi.restoreAllMocks();
 });
 
-async function setup(screen: { clicksOnly?: boolean } = {}) {
+async function setup(screen: { clicksOnly?: boolean; confirms?: boolean } = {}) {
   const home = mkdtempSync(join(tmpdir(), "localdot-manual-stream-")),
     log = new EventLog(home),
     id = log.createSession("Synthetic direct control"),
@@ -61,6 +61,13 @@ async function setup(screen: { clicksOnly?: boolean } = {}) {
               await client.release();
             },
           }),
+      ...(screen.confirms
+        ? {
+            confirm: async () => {
+              await client.release();
+            },
+          }
+        : {}),
     }),
   );
   const server: Server = createServer((_request, response) => {
@@ -337,6 +344,80 @@ describe("the user's direct control stream", () => {
     expect(f.log.read(f.id).find((event) => event.type === "takeover.end")?.data).toEqual({
       requestId: f.requestId,
       by: "stop",
+      typed: true,
+    });
+  });
+
+  it("settles a click the computer could not confirm, then takes input and hands back", async () => {
+    const f = await setup({ confirms: true }),
+      ws = f.open(),
+      click = { kind: "click", at: { x: 40, y: 50 }, button: "left", count: 1 } as const;
+    f.fake.script.input = () => ({ status: 504, body: "1 press(es) not seen" });
+    await opened(ws);
+    const end = closed(ws);
+    send(ws, [click]);
+    expect(await end).toBe(MANUAL_STREAM_CLOSE.uncertain);
+    await vi.waitFor(() => expect(f.session.manualControl).toBe("ready"));
+    expect(received(f.fake)).toEqual([click, "/release"]);
+    f.fake.script.input = undefined;
+    const again = f.open();
+    await opened(again);
+    const done = acked(again, 1);
+    send(again, [{ kind: "key", combo: ["enter"] }]);
+    await done;
+    expect(await f.session.handback(f.requestId, undefined)).toBe(true);
+  });
+
+  it("lets input already on its way land when the page's socket drops just before hand-back", async () => {
+    const f = await setup(),
+      entered = Promise.withResolvers<AbortSignal | undefined>(),
+      lands = Promise.withResolvers<void>();
+    const slow = vi.fn<ManualDesktopSource>(
+      (): ManualDesktop => ({
+        screen: { w: 2560, h: 1600 },
+        client: {
+          input: async () => {
+            throw new Error("unexpected input");
+          },
+          type: (request: { text: string }, _progress: unknown, signal?: AbortSignal) => {
+            entered.resolve(signal);
+            return new Promise((resolve, reject) => {
+              signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+              void lands.promise.then(() =>
+                resolve({
+                  done: true,
+                  count: [...request.text].length,
+                  firstPressMono: 1,
+                  armedMono: 0,
+                  injector: "xtest",
+                }),
+              );
+            });
+          },
+        } as unknown as ManualDesktop["client"],
+        prepare: async () => {},
+        check: () => {},
+        release: () => {},
+        letGo: async () => {},
+      }),
+    );
+    const stream = new ManualStream(f.session, f.requestId, slow, {
+      send: () => {},
+      close: () => {},
+    });
+    stream.push({ kind: "text", text: "424242" });
+    const signal = await entered.promise;
+    // The page lost its socket (hidden, or reconnecting), so its own drain cannot see this input.
+    stream.end(1000, "closed");
+    const back = f.session.handback(f.requestId, undefined);
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(signal?.aborted).toBe(false);
+    lands.resolve();
+    expect(await back).toBe(true);
+    expect(f.session.manualControl).toBeUndefined();
+    expect(f.log.read(f.id).find((event) => event.type === "takeover.end")?.data).toEqual({
+      requestId: f.requestId,
+      by: "user",
       typed: true,
     });
   });
