@@ -82,7 +82,10 @@ export async function runCli(
     options.signal.throwIfAborted();
     if (command.kind === "open") return await runtime.open(context, io);
     if (command.kind === "stop")
-      return await runtime.stop({ ...context, cellId: command.cellId }, io);
+      return await runtime.stop(
+        { ...context, cellId: command.cellId, ...(command.all ? { all: true } : {}) },
+        io,
+      );
     if (command.kind === "reset-computer" && command.operation !== "preview")
       return await runtime.resetComputer(
         {

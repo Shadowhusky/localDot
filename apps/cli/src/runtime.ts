@@ -49,7 +49,10 @@ export interface Runtime {
     io: ConsoleIO,
   ): Promise<number>;
   open(context: RuntimeContext, io: ConsoleIO): Promise<number>;
-  stop(context: RuntimeContext & { cellId?: string }, io: ConsoleIO): Promise<number>;
+  stop(
+    context: RuntimeContext & { cellId?: string; all?: boolean },
+    io: ConsoleIO,
+  ): Promise<number>;
   resetComputer(
     context: RuntimeContext & { cellId: string; operation: "reset" | "status"; requestId?: string },
     io: ConsoleIO,

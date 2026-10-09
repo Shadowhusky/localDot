@@ -279,3 +279,16 @@ describe("start at login commands", () => {
     expect(f.runtime.context).not.toHaveBeenCalled();
   });
 });
+
+describe("stop everything", () => {
+  it("parses stop --all and refuses mixing it with --cell", () => {
+    expect(parseArgs(["stop", "--all"])).toEqual({ kind: "stop", all: true });
+    expect(parseArgs(["stop", "--all", "--cell", cell])).toBeUndefined();
+    expect(HELP).toContain("localdot stop --all");
+  });
+  it("routes stop --all to the stop runtime", async () => {
+    const f = fixture(["stop", "--all"], { LOCALDOT_HOME: "/private/test-home" });
+    expect(await f.run()).toBe(0);
+    expect(f.runtime.stop).toHaveBeenCalledWith(expect.objectContaining({ all: true }), f.io);
+  });
+});

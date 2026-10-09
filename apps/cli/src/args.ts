@@ -10,7 +10,7 @@ export type Command =
   | { kind: "start-at-login"; operation: "on" | "off" | "status" }
   | { kind: "update"; version?: string }
   | { kind: "logs"; follow: boolean }
-  | { kind: "stop"; cellId?: string }
+  | { kind: "stop"; cellId?: string; all?: true }
   | {
       kind: "reset-computer";
       cellId: string;
@@ -96,6 +96,8 @@ export function parseArgs(args: readonly string[]): Command | undefined {
     RELEASE_VERSION.test(args[2])
   )
     return { kind: "update", version: args[2] };
+  if (args.length === 2 && args[0] === "stop" && args[1] === "--all")
+    return { kind: "stop", all: true };
   if (
     args.length === 3 &&
     args[0] === "stop" &&
@@ -118,6 +120,7 @@ Usage:
                                 Install the latest stable or an exact newer release; keep data
   localdot open                 Print a fresh, single-use sign-in link
   localdot stop [--cell <id>]   Stop agent actions and revoke access
+  localdot stop --all           Stop every task, pause routines and freeze every computer
   localdot reset-computer --cell <id>
                                 Explain reset without changing anything
   localdot reset-computer --cell <id> --erase-computer [--request <id>]

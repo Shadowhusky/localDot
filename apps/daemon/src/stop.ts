@@ -8,11 +8,13 @@ import {
   realpathSync,
 } from "node:fs";
 import { isAbsolute, join } from "node:path";
-import { StopOutcome, ULID_PATTERN } from "@localdot/protocol";
+import { StopAllOutcome, StopOutcome, ULID_PATTERN } from "@localdot/protocol";
 import { z } from "zod";
 export interface StopOptions {
   home: string;
   cellId?: string;
+  // Every task, routine and computer at once.
+  all?: boolean;
   signal: AbortSignal;
   port?: number;
 }
@@ -101,6 +103,7 @@ export async function runStop(options: StopOptions, io: StopIO): Promise<number>
   try {
     signal.throwIfAborted();
     if (cellId !== undefined && !ULID_PATTERN.test(cellId)) throw new Error("Invalid computer id");
+    if (options.all && cellId !== undefined) throw new Error("Choose --all or --cell");
     if (!Number.isInteger(port) || port < 1 || port > 65535) throw new Error("Invalid port");
     token = tokenAt(home);
   } catch {
@@ -161,6 +164,21 @@ export async function runStop(options: StopOptions, io: StopIO): Promise<number>
     }
   };
   try {
+    if (options.all) {
+      const outcome = StopAllOutcome.parse(await request("/api/stop-all?by=cli", 202, "POST"));
+      owned.throwIfAborted();
+      if (!outcome.confirmed) {
+        io.err(
+          "Stop everything is unconfirmed. Keep your computers unavailable and check their status before continuing.",
+        );
+        return 1;
+      }
+      const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+      io.out(
+        `Everything stopped: ${count(outcome.sessions.length, "task", "tasks")} stopped, ${count(outcome.cells.length, "computer", "computers")} frozen, ${count(outcome.routinesPaused, "routine", "routines")} paused.`,
+      );
+      return 0;
+    }
     const cells = z
       .array(Cell)
       .max(1024)
