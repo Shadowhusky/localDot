@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { RevealedText } from "../agent/ApprovalValue.tsx";
 import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
+import { useFullLine } from "./FullLine.tsx";
 
 // Each line stays at least this long, so a quick run of steps never flickers.
 export const LINE_HOLD_MS = 1000;
@@ -26,18 +27,26 @@ export function NarratorBand({ line, speaker, showDot, note, reveal = false }: N
     () => (revealed ? hiddenWarning(revealText(text)) : undefined),
     [revealed, text],
   );
+  const content = revealed ? <RevealedText text={text} /> : text;
+  const whole = useFullLine(text, content);
   return (
     <div className="narrator" data-dot={showDot ? "" : undefined}>
       {showDot && <PresenceSlot name="dock" className="narrator-dock" />}
       <p className="narration" data-speaker={speaker} aria-live="polite">
         {text && (
-          <span className="narration-line" key={text} data-leaving={leaving || undefined}>
+          <span
+            ref={whole.ref}
+            className="narration-line"
+            key={text}
+            data-leaving={leaving || undefined}
+            {...whole.lineProps}
+          >
             {speaker === "dot" && (
               <span className={showDot ? "ui-visually-hidden" : "narration-speaker"}>
                 {showDot ? "dot: " : "dot"}
               </span>
             )}
-            {revealed ? <RevealedText text={text} /> : text}
+            {content}
           </span>
         )}
         {text && warning && (
@@ -47,6 +56,7 @@ export function NarratorBand({ line, speaker, showDot, note, reveal = false }: N
         )}
       </p>
       {note && <p className="narrator-note num">{note}</p>}
+      {whole.full}
     </div>
   );
 }

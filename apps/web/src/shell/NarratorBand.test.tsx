@@ -6,6 +6,7 @@ import { LINE_HOLD_MS, NarratorBand } from "./NarratorBand.tsx";
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 const line = () => document.querySelector(".narration-line");
@@ -48,4 +49,31 @@ it("shows the hidden characters in dot's question, with a warning, and only whil
   act(() => vi.advanceTimersByTime(LINE_HOLD_MS + 120));
   expect(line()?.textContent).toBe("dot: Signing in");
   expect(document.querySelector(".narration-warning")).toBeNull();
+});
+
+it("lets a line too long for its two lines be read whole, by hover or by a tap", () => {
+  const long =
+    "Please sign in to Telegram Web. It is open on the computer and showing a code to scan, or you can log in by phone number instead";
+  vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.classList.contains("narration-line") ? 66 : 0;
+  });
+  vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return this.classList.contains("narration-line") ? 44 : 0;
+  });
+  render(<NarratorBand line={long} speaker="dot" showDot />);
+  const clamped = line() as HTMLElement;
+  expect(clamped.title).toBe(long);
+  expect(clamped.getAttribute("role")).toBe("button");
+  act(() => clamped.click());
+  expect(document.querySelector('[role="dialog"]')?.textContent).toBe(long);
+});
+
+it("leaves a line that fits as plain text", () => {
+  render(<NarratorBand line="Opening the report" speaker="dot" showDot />);
+  expect(line()?.hasAttribute("title")).toBe(false);
+  expect(line()?.hasAttribute("role")).toBe(false);
 });
