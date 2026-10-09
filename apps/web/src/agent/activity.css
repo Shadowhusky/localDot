@@ -158,7 +158,7 @@
   align-items: start;
   align-content: center;
   min-height: 32px;
-  padding-block: 7px;
+  padding-block: calc(var(--spacing) * 2);
   color: var(--color-fg-1);
   font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
   letter-spacing: var(--text-body--letter-spacing);
@@ -227,7 +227,7 @@
    row's face bleeds 8 px past the text so the current step's raised face has room. */
 .activity-row {
   margin-inline: calc(var(--spacing) * -2);
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   transition:
     opacity var(--dur-fade) var(--ease-enter),
     translate var(--dur-default) var(--ease-spring);
@@ -353,7 +353,7 @@ button.activity-row-head[data-pressed] {
   display: grid;
   gap: calc(var(--spacing) * 3);
   min-width: 0;
-  padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 3) 34px;
+  padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 3) calc(var(--spacing) * 8.5);
 }
 
 .activity-detail-actions {
@@ -537,7 +537,7 @@ button.activity-row-head[data-pressed] {
   margin-inline: calc(var(--spacing) * -2);
   padding: 0 calc(var(--spacing) * 2);
   border: 0;
-  border-radius: 9px;
+  border-radius: var(--radius-md);
   background-color: transparent;
   color: var(--color-fg-3);
   font:

@@ -192,7 +192,7 @@
 @media (orientation: portrait) {
   .app[data-focus] .stage-col {
     justify-content: center;
-    padding: 0 8px;
+    padding: 0 calc(var(--spacing) * 2);
   }
 
   .app[data-focus] .stage-col > .stage-frame {

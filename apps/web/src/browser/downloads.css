@@ -6,7 +6,7 @@
 .download-detail {
   display: grid;
   gap: calc(var(--spacing) * 2);
-  padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2) 34px;
+  padding: 0 calc(var(--spacing) * 2) calc(var(--spacing) * 2) calc(var(--spacing) * 8.5);
 }
 
 .download-actions {
