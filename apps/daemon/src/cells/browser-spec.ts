@@ -35,18 +35,13 @@ export function browserNetworkSpec(
   return { ...spec, Labels: { ...spec.Labels, "localdot.parent": parentCellId } };
 }
 
-export function profileVolumeSpec(name: string, id: string, parentCellId: string) {
-  return {
-    Name: name,
-    Labels: {
-      "localdot.cell": id,
-      "localdot.parent": parentCellId,
-      "localdot.role": "profile",
-    },
-  };
-}
-
-export function browserSpec(record: BrowserCellRecord, image: string, stream: StreamOptions) {
+// The profile is the shared accounts volume, never one named after this cell.
+export function browserSpec(
+  record: BrowserCellRecord,
+  image: string,
+  stream: StreamOptions,
+  profileVolume: string,
+) {
   const d = record.docker;
   return {
     Image: image,
@@ -71,7 +66,7 @@ export function browserSpec(record: BrowserCellRecord, image: string, stream: St
     },
     HostConfig: {
       NetworkMode: d.internalNetwork,
-      Mounts: [{ Type: "volume", Source: d.profileVolume, Target: "/profile" }],
+      Mounts: [{ Type: "volume", Source: profileVolume, Target: "/profile" }],
       ReadonlyRootfs: true,
       CapDrop: ["ALL"],
       SecurityOpt: ["no-new-privileges", `seccomp=${SECCOMP}`],

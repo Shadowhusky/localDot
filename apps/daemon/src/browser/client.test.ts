@@ -73,6 +73,25 @@ const typeRequest = {
 const typeResult = { done: true, count: 2, firstPressMono: 1, armedMono: 0, injector: "xtest" };
 
 describe("daemon browser client", () => {
+  it("reads cookie domains and signs out of a site, refusing a reply that carries more", async () => {
+    let body = "";
+    let reply: unknown = { domains: [{ domain: "google.com", count: 2 }] };
+    const f = await fixture((request, response) => {
+      request.on("data", (chunk) => {
+        body += chunk;
+      });
+      request.on("end", () =>
+        send(response, request.url === "/accounts/sign-out" ? { cookies: 2 } : reply),
+      );
+    });
+    expect(await f.client.cookieDomains(f.scope)).toEqual([{ domain: "google.com", count: 2 }]);
+    expect(await f.client.signOut("google.com", f.scope)).toBe(2);
+    expect(JSON.parse(body)).toEqual({ site: "google.com" });
+    expect(f.seen.map((entry) => entry.path)).toEqual(["/accounts/cookies", "/accounts/sign-out"]);
+    reply = { domains: [{ domain: "google.com", count: 2, value: "secret" }] };
+    await expect(f.client.cookieDomains(f.scope)).rejects.toThrow("could not be read");
+  });
+
   it("sends only the private manual permit and accepts count-only confirmations", async () => {
     let body: unknown;
     const f = await fixture((request, response) => {
@@ -194,9 +213,7 @@ describe("daemon browser client", () => {
       response.writeHead(302, { location: "http://127.0.0.1:1/stolen" });
       response.end("private-token-body");
     });
-    await expect(f.client.health(f.scope)).rejects.toThrow(
-      /^The signed-in browser is not responding\.$/,
-    );
+    await expect(f.client.health(f.scope)).rejects.toThrow(/^The web browser is not responding\.$/);
     expect(f.seen).toHaveLength(1);
   });
 
@@ -232,7 +249,7 @@ describe("daemon browser client", () => {
       throw new Error("private session details");
     };
     await expect(f.client.health(f.scope)).rejects.toThrow(
-      /^The signed-in browser or the selected screen changed during the request\.$/,
+      /^The web browser or the selected screen changed during the request\.$/,
     );
     expect(f.seen).toEqual([]);
   });
@@ -318,7 +335,7 @@ describe("daemon browser client", () => {
         response.end(events.map((event) => `${JSON.stringify(event)}\n`).join(""));
       });
       await expect(f.client.type(f.permit, f.tab, typeRequest, f.scope, () => {})).rejects.toThrow(
-        /^The signed-in browser sent a reply that could not be read\.$/,
+        /^The web browser sent a reply that could not be read\.$/,
       );
     },
   );

@@ -125,9 +125,9 @@ describe("independent records and profile boundaries", () => {
 
   it("only the named profile is persistent and inherited config is explicitly temporary", () => {
     const record = sampleBrowserRecord();
-    const spec = browserSpec(record, "fixture-image", streamOptions());
+    const spec = browserSpec(record, "fixture-image", streamOptions(), "localdot-accounts");
     expect(spec.HostConfig.Mounts).toEqual([
-      { Type: "volume", Source: record.docker.profileVolume, Target: "/profile" },
+      { Type: "volume", Source: "localdot-accounts", Target: "/profile" },
     ]);
     expect(Object.hasOwn(spec.HostConfig.Tmpfs, "/config")).toBe(true);
     expect(spec.HostConfig.Tmpfs["/config"]).toMatch(/uid=1000,gid=1000,mode=0700/u);

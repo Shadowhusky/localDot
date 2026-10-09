@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Server } from "node:http";
 import { setTimeout as sleep } from "node:timers/promises";
+import { BrowserAccounts } from "./accounts.ts";
 import { BrowserCapture } from "./capture.ts";
 import { BrowserControl } from "./control.ts";
 import { BrowserDownloadService } from "./download-service.ts";
@@ -334,6 +335,7 @@ export class BrowserRuntime {
         navigation: this.#navigation,
         downloads: this.#downloads,
         uploads: this.#uploads,
+        accounts: new BrowserAccounts(targets),
         ready: () => this.ready,
         fence: () => {
           void this.stop().catch(() => {});

@@ -13,6 +13,7 @@ import { BrowserDownloadCollector } from "./browser/download-collector.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
 import { BrowserStreams } from "./browser/streams.ts";
+import { BrowserWarmer } from "./browser/warmer.ts";
 import { BrowserOrchestrator } from "./cells/browser-orchestrator.ts";
 import { BrowserRecovery } from "./cells/browser-recovery.ts";
 import { DockerClient } from "./cells/docker.ts";
@@ -168,6 +169,8 @@ try {
 } catch {
   fences.closeAdmission();
 }
+const browserAvailable = (id: string) =>
+  !shuttingDown && browserRecovery.available && orchestrator.browserAvailable(id);
 browser = new BrowserOrchestrator({
   home,
   store,
@@ -175,11 +178,15 @@ browser = new BrowserOrchestrator({
   keyd,
   images: browserImagesFromEnv(),
   streamFullcolor: stream.fullcolor,
-  parentAvailable: (id) =>
-    !shuttingDown && browserRecovery.available && orchestrator.browserAvailable(id),
+  parentAvailable: browserAvailable,
   externalKeydPorts: () => [...orchestrator.reservedKeydPorts(), ...(agent?.reservedPorts() ?? [])],
 });
 const browserRecovery = new BrowserRecovery(browser);
+const browserWarmer = new BrowserWarmer({
+  cells: orchestrator,
+  browser,
+  available: browserAvailable,
+});
 const browserTickets = new TicketRegistry();
 const browserStreams = new BrowserStreams({
   parents: orchestrator,
@@ -340,6 +347,7 @@ const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
 shutdown.push(
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
+  () => browserWarmer.dispose(),
   () => browserRecovery.close(),
   () => agent?.close(),
   () => orchestrator.dispose(),
@@ -374,6 +382,7 @@ const app = createApp({
   cells: { cells: orchestrator, tickets, replacement, reset },
   desktop,
   browser: browserViewer,
+  accounts: { cells: orchestrator, browser },
   ui: { dir: webDir("dist") },
   gateway: {
     registry,

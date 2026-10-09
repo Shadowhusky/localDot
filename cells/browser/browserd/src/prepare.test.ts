@@ -9,10 +9,13 @@ import {
   BROWSER_PREPARATION_DRAIN_MS,
   prepareBrowserRuntime,
 } from "./prepare.ts";
-import { prepareProfilePreferences } from "./profile-preferences.ts";
+import { prepareProfilePreferences, releaseProfileLocks } from "./profile-preferences.ts";
 import { browserRuntimeConfig } from "./runtime-config.ts";
 
-vi.mock("./profile-preferences.ts", () => ({ prepareProfilePreferences: vi.fn() }));
+vi.mock("./profile-preferences.ts", () => ({
+  prepareProfilePreferences: vi.fn(),
+  releaseProfileLocks: vi.fn(),
+}));
 
 vi.mock("node:child_process", () => ({ spawn: vi.fn() }));
 vi.mock("node:fs/promises", () => ({ lstat: vi.fn(), mkdir: vi.fn(), open: vi.fn() }));
@@ -162,6 +165,10 @@ describe("private browser runtime preparation", () => {
     expect(test.inputs).toEqual([`${config.streamToken}\n`, "", ""]);
     expect(spawn).toHaveBeenCalledTimes(3);
     expect(prepareProfilePreferences).toHaveBeenCalledWith(PROFILE, expect.any(AbortSignal));
+    expect(releaseProfileLocks).toHaveBeenCalledWith(PROFILE, expect.any(AbortSignal));
+    expect(vi.mocked(releaseProfileLocks).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(spawn).mock.invocationCallOrder[0] as number,
+    );
     expect(vi.mocked(prepareProfilePreferences).mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(spawn).mock.invocationCallOrder[0] as number,
     );
