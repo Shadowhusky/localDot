@@ -96,6 +96,7 @@ import { type DispatchDeps, dispatchTool } from "./tools/index.ts";
 import type { RoutineToolPort } from "./tools/routine.ts";
 import { TranscriptStore } from "./transcript.ts";
 import { type TransferLease, Transfers } from "./transfers.ts";
+import { WebCell } from "./web/cell.ts";
 export interface AgentWiringDeps {
   fences?: import("./safety/fences.ts").ComputerFences;
   home: string;
@@ -250,6 +251,7 @@ export function createAgent(d: AgentWiringDeps) {
     release: (port: number) => brains.releasePort(port),
   };
   const remoteLinks = new RemoteLinks({ keyd: d.keyd, ports: connectorPorts });
+  const webCell = new WebCell({ keyd: d.keyd, ports: connectorPorts });
   const connectorCells = new ConnectorCells({
     docker: d.docker,
     keyd: d.keyd,
@@ -383,6 +385,7 @@ export function createAgent(d: AgentWiringDeps) {
       sleep: (ms, signal) => sleep(ms, undefined, { signal }),
       ...(d.routines ? { routines: d.routines } : {}),
       connectors,
+      web: webCell,
     },
   };
   // A native harness's first look at the task computer: one full screenshot of the selected screen.
@@ -988,6 +991,7 @@ export function createAgent(d: AgentWiringDeps) {
           ...containments,
           runner.close(),
           judgeCell.close(),
+          webCell.close(),
           connectors.close(),
           ...activeClients.map((tools) => tools.close()),
           ...retiring,

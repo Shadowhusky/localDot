@@ -1,0 +1,267 @@
+{
+ "batchcomplete": "",
+ "continue": {
+  "gsroffset": 8,
+  "continue": "gsroffset||"
+ },
+ "query": {
+  "pages": {
+   "133098696": {
+    "pageid": 133098696,
+    "ns": 6,
+    "title": "File:Ausdaueranzeige (einfach) - The Legend of Zelda BotW, TotK.svg",
+    "index": 8,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 328,
+      "width": 34,
+      "height": 34,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0c/Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/500px-Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 480,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0c/Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/960px-Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0c/Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/500px-Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 480,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/0c/Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/960px-Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/0/0c/Ausdaueranzeige_%28einfach%29_-_The_Legend_of_Zelda_BotW%2C_TotK.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Ausdaueranzeige_(einfach)_-_The_Legend_of_Zelda_BotW,_TotK.svg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=133098696",
+      "mime": "image/svg+xml"
+     }
+    ]
+   },
+   "133098701": {
+    "pageid": 133098701,
+    "ns": 6,
+    "title": "File:Continue Chat - The Legend of Zelda BotW, TotK.svg",
+    "index": 5,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 455,
+      "width": 26,
+      "height": 19,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8e/Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/500px-Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 351,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8e/Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/960px-Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8e/Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/500px-Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 351,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/8/8e/Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/960px-Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/8/8e/Continue_Chat_-_The_Legend_of_Zelda_BotW%2C_TotK.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Continue_Chat_-_The_Legend_of_Zelda_BotW,_TotK.svg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=133098701",
+      "mime": "image/svg+xml"
+     }
+    ]
+   },
+   "138597437": {
+    "pageid": 138597437,
+    "ns": 6,
+    "title": "File:NYCC 2017 Cosplay of The Legend of Zelda Breath of the Wild 01.jpg",
+    "index": 7,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 1546942,
+      "width": 2080,
+      "height": 2371,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e1/NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg/500px-NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 547,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e1/NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg/960px-NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e1/NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg/500px-NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 547,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/e/e1/NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg/960px-NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/e/e1/NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:NYCC_2017_Cosplay_of_The_Legend_of_Zelda_Breath_of_the_Wild_01.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=138597437",
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   "133098702": {
+    "pageid": 133098702,
+    "ns": 6,
+    "title": "File:Next Goal - The Legend of Zelda BotW, TotK.svg",
+    "index": 6,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 386,
+      "width": 10,
+      "height": 10,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b3/Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/500px-Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 480,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b3/Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/960px-Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b3/Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/500px-Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 480,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/b/b3/Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg/960px-Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/b/b3/Next_Goal_-_The_Legend_of_Zelda_BotW%2C_TotK.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:Next_Goal_-_The_Legend_of_Zelda_BotW,_TotK.svg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=133098702",
+      "mime": "image/svg+xml"
+     }
+    ]
+   },
+   "100081109": {
+    "pageid": 100081109,
+    "ns": 6,
+    "title": "File:THE LEGEND OF ZELDA BREATE OF THE WILD.webp",
+    "index": 2,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 45224,
+      "width": 550,
+      "height": 188,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/af/THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp/500px-THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 164,
+      "responsiveUrls": {
+       "2": "https://upload.wikimedia.org/wikipedia/commons/a/af/THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/af/THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp/500px-THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 164,
+       "srcset": "https://upload.wikimedia.org/wikipedia/commons/a/af/THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail_unscaled 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/af/THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:THE_LEGEND_OF_ZELDA_BREATE_OF_THE_WILD.webp",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=100081109",
+      "mime": "image/webp"
+     }
+    ]
+   },
+   "63652463": {
+    "pageid": 63652463,
+    "ns": 6,
+    "title": "File:The Legend of Zelda - Breath of the Wild cosplay.jpg",
+    "index": 3,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 8343851,
+      "width": 4272,
+      "height": 2848,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/34/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg/500px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 320,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/34/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg/960px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/34/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg/500px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 320,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/3/34/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg/960px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/3/34/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=63652463",
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   "74646689": {
+    "pageid": 74646689,
+    "ns": 6,
+    "title": "File:The Legend of Zelda - Breath of the Wild cosplay 2.jpg",
+    "index": 4,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 2004511,
+      "width": 2516,
+      "height": 2112,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/08/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg/500px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 403,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/08/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg/960px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/08/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg/500px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 403,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/0/08/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg/960px-The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/0/08/The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:The_Legend_of_Zelda_-_Breath_of_the_Wild_cosplay_2.jpg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=74646689",
+      "mime": "image/jpeg"
+     }
+    ]
+   },
+   "57334472": {
+    "pageid": 57334472,
+    "ns": 6,
+    "title": "File:The Legend of Zelda Breath of the Wild.svg",
+    "index": 1,
+    "imagerepository": "local",
+    "imageinfo": [
+     {
+      "size": 98408,
+      "width": 1875,
+      "height": 828,
+      "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/The_Legend_of_Zelda_Breath_of_the_Wild.svg/500px-The_Legend_of_Zelda_Breath_of_the_Wild.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+      "thumbwidth": 480,
+      "thumbheight": 212,
+      "responsiveUrls": {
+       "2": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/The_Legend_of_Zelda_Breath_of_the_Wild.svg/960px-The_Legend_of_Zelda_Breath_of_the_Wild.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail"
+      },
+      "thumbattribs": {
+       "src": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/The_Legend_of_Zelda_Breath_of_the_Wild.svg/500px-The_Legend_of_Zelda_Breath_of_the_Wild.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+       "decoding": "async",
+       "loading": "lazy",
+       "width": 480,
+       "height": 212,
+       "srcset": "https://thumb.wikimedia.org/wikipedia/commons/thumb/a/ae/The_Legend_of_Zelda_Breath_of_the_Wild.svg/960px-The_Legend_of_Zelda_Breath_of_the_Wild.svg.png?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail 2x"
+      },
+      "url": "https://upload.wikimedia.org/wikipedia/commons/a/ae/The_Legend_of_Zelda_Breath_of_the_Wild.svg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+      "descriptionurl": "https://commons.wikimedia.org/wiki/File:The_Legend_of_Zelda_Breath_of_the_Wild.svg",
+      "descriptionshorturl": "https://commons.wikimedia.org/w/index.php?curid=57334472",
+      "mime": "image/svg+xml"
+     }
+    ]
+   }
+  }
+ }
+}

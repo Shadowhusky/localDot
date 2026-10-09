@@ -42,4 +42,5 @@ export * from "./tool-api.ts";
 export * from "./tools/people.ts";
 export * from "./tools/recall.ts";
 export * from "./tools/routine.ts";
+export * from "./tools/web.ts";
 export * from "./tools.ts";

@@ -51,9 +51,9 @@ export type ResearchInput = z.infer<typeof ResearchInput>;
 
 export const RESEARCH_TOOL_DESCRIPTION =
   "Research mode's source list and report. op source: record a page or file you rely on (url, title, " +
-  "passages: up to 8 exact quotes you use); pages you read with browser_read are listed by themselves, " +
-  "so add their passages here. Returns the number to cite as [n]. op pdf: read a PDF by its url; it is " +
-  "downloaded in the computer, its text comes back and it becomes a source. op report: write the report " +
-  "from title, summary (2 to 4 sentences) and body (Markdown, organised by sub-question, with [n] after " +
-  "each claim); the sources section is added for you, and file names it. Returns the Markdown and PDF " +
-  "paths to hand over with done.";
+  "passages: up to 8 exact quotes you use); pages you read with web_fetch or browser_read are listed by " +
+  "themselves, so add their passages here. Returns the number to cite as [n]. op pdf: read a PDF by its " +
+  "url; it is downloaded in the computer, its text comes back and it becomes a source. op report: write " +
+  "the report from title, summary (2 to 4 sentences) and body (Markdown, organised by sub-question, with " +
+  "[n] after each claim); the sources section is added for you, and file names it. Returns the Markdown " +
+  "and PDF paths to hand over with done.";

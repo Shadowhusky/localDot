@@ -8,7 +8,7 @@ import { binding, bootConfig } from "./testing/scripted.ts";
 import { toolSet } from "./tools.ts";
 
 describe("the model's advertised tools and instructions", () => {
-  it("exposes exactly sixteen daemon-dispatched tools with no execute functions", () => {
+  it("exposes exactly the daemon-dispatched tools with no execute functions", () => {
     const tools = toolSet(binding());
     expect(Object.keys(tools).sort()).toEqual(
       [
@@ -18,6 +18,8 @@ describe("the model's advertised tools and instructions", () => {
         "browser_read",
         "browser_upload",
         "browser_act",
+        "web_search",
+        "web_fetch",
         "find",
         "browser_navigate",
         "switch_screen",
@@ -35,6 +37,12 @@ describe("the model's advertised tools and instructions", () => {
     expect(Object.values(tools).every((tool) => tool.execute === undefined)).toBe(true);
     expect(tools.computer?.type).toBe("provider");
     expect(toolSet(binding({ computer: "anthropic-legacy" })).computer).toBeDefined();
+  });
+  it("offers web search and page reading to every model, sighted or not", () => {
+    for (const tools of [toolSet(binding()), toolSet(binding({ vision: false }))]) {
+      expect(tools.web_search?.description).toContain('kind "images"');
+      expect(tools.web_fetch?.description).toContain("without opening the browser");
+    }
   });
   it("offers research, with its rules and budget, only to a research task", () => {
     expect(toolSet(binding()).research).toBeUndefined();

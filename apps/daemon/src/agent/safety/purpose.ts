@@ -6,8 +6,10 @@ import {
   type PurposeCheck,
   type TaintKind,
   type ToolName,
+  type WebSearchKind,
 } from "@localdot/protocol";
 import { ownerOf } from "../../sites.ts";
+import { searchAddresses } from "../web/engines.ts";
 import { type CommandLine, commandLines } from "./classify.ts";
 import type { RiskFacts } from "./risk.ts";
 import type { TaskTaint } from "./taint.ts";
@@ -289,8 +291,27 @@ export function outboundOf(tool: ToolName | string, input: unknown, facts: RiskF
         text: JSON.stringify(object),
       },
     ];
-  // A PDF research reads is fetched by its address, as a page is opened.
-  const opens = tool === "browser_navigate" || (tool === "research" && object.op === "pdf");
+  // A search carries its query to every engine it may ask.
+  if (tool === "web_search" && typeof object.query === "string")
+    return searchAddresses(object.query, object.kind as WebSearchKind | undefined).flatMap(
+      (url): Outbound[] => {
+        const where = reach(url);
+        return where
+          ? [
+              {
+                kind: "open_page",
+                ...(where.destination && { destination: where.destination }),
+                text: where.carried,
+              },
+            ]
+          : [];
+      },
+    );
+  // A page read or a PDF research reads is fetched by its address, as a page is opened.
+  const opens =
+    tool === "browser_navigate" ||
+    tool === "web_fetch" ||
+    (tool === "research" && object.op === "pdf");
   if (opens && typeof object.url === "string") {
     const url = webAddress(object.url);
     const where = url && reach(url);

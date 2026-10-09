@@ -65,6 +65,11 @@ describe("routine policy", () => {
     expect(readOnlyAllows({ tool: "request_takeover", input: {} })).toBe(false);
   });
 
+  it("read-only may search the web and read pages, as it may open and read them", () => {
+    expect(readOnlyAllows({ tool: "web_search", input: { query: "x" } })).toBe(true);
+    expect(readOnlyAllows({ tool: "web_fetch", input: { url: "https://a.example/" } })).toBe(true);
+  });
+
   it("after an approval expires, only update_plan and done are allowed", async () => {
     const expired = new ExpiredRuns();
     const h = routineHarness("ask_first", expired);

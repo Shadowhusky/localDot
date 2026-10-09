@@ -19,6 +19,7 @@ import {
   offeredTools,
   TOOL_INPUTS,
   TOOL_NAMES,
+  ToolContent,
 } from "./tools.ts";
 
 const base = { v: 1, id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", seq: 0, t: 0, agent: "main" } as const;
@@ -34,6 +35,8 @@ describe("the v1 tool table", () => {
       "browser_navigate",
       "browser_upload",
       "browser_act",
+      "web_search",
+      "web_fetch",
       "find",
       "switch_screen",
       "update_plan",
@@ -61,6 +64,33 @@ describe("the v1 tool table", () => {
       expect(isToolName(name)).toBe(false);
     }
     expect(Object.keys(TOOL_INPUTS).sort()).toEqual([...TOOL_NAMES].sort());
+  });
+
+  it("searches the web and reads pages in flat, bounded shapes", () => {
+    const search = TOOL_INPUTS.web_search;
+    expect(search.safeParse({ query: "Zelda" }).success).toBe(true);
+    expect(search.safeParse({ query: "Zelda", kind: "images", count: 20 }).success).toBe(true);
+    for (const input of [
+      { query: "" },
+      { query: "x".repeat(401) },
+      { query: "x", kind: "videos" },
+      { query: "x", count: 0 },
+      { query: "x", count: 21 },
+      { query: "x", count: 2.5 },
+    ])
+      expect(search.safeParse(input).success, JSON.stringify(input)).toBe(false);
+    const fetch = TOOL_INPUTS.web_fetch;
+    expect(fetch.safeParse({ url: "https://example.org/", max_chars: 500 }).success).toBe(true);
+    for (const input of [{ url: "" }, { url: "https://a.org/", max_chars: 100 }, {}])
+      expect(fetch.safeParse(input).success).toBe(false);
+  });
+
+  it("carries a web picture apart from screenshots, never with a frame", () => {
+    const picture = { type: "web_image", url: "https://a.org/i.jpg", mediaType: "image/jpeg" };
+    expect(ToolContent.safeParse({ ...picture, data: "AA==" }).success).toBe(true);
+    expect(
+      ToolContent.safeParse({ ...picture, mediaType: "image/png", data: "AA==" }).success,
+    ).toBe(false);
   });
 
   it("takes daily notes, bounded recall and flat people lookups", () => {

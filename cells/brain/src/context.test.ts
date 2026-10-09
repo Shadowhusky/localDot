@@ -2,11 +2,13 @@ import type { ModelMessage } from "ai";
 import { describe, expect, it } from "vitest";
 import {
   compactionEntry,
+  estimateTokens,
   fromTranscript,
   imagePart,
   inboxTranscript,
   newestFullFrame,
   parseMarker,
+  picturePart,
   pruneScreenshots,
   resultParts,
   safeCut,
@@ -35,6 +37,28 @@ describe("screenshots in context", () => {
     const back = await fromTranscript(stored, async (ref) => `again-${ref.frameId}`, 1);
     expect(JSON.stringify(back)).toContain(`again-${B}`);
     expect(JSON.stringify(back)).not.toContain(`again-${A}`);
+  });
+
+  it("keeps web pictures apart from screenshots: never a basis, never stored, never fetched again", async () => {
+    const picture = (n: number): ModelMessage => ({
+      role: "user",
+      content: [picturePart(`https://th.example.net/${n}.jpg`, `jpeg-${n}`) as never],
+    });
+    const history = [shot(A), picture(1), picture(2), picture(3), picture(4), picture(5)];
+    expect(newestFullFrame(history)).toBe(A);
+    const pruned = JSON.stringify(pruneScreenshots(history));
+    expect(pruned).toContain(`data-${A}`);
+    expect(pruned).not.toContain("jpeg-1");
+    for (const n of [2, 3, 4, 5]) expect(pruned).toContain(`jpeg-${n}`);
+    expect(pruned).toContain("(A picture from https://th.example.net/1.jpg was shown here.)");
+    expect(estimateTokens(history)).toBeLessThan(6 * 1600 + 100);
+    const stored = toTranscript(history);
+    expect(JSON.stringify(stored)).not.toMatch(/jpeg-|data-/);
+    const back = JSON.stringify(
+      await fromTranscript(stored, async (ref) => `again-${ref.frameId}`),
+    );
+    expect(back).toContain(`again-${A}`);
+    expect(back).toContain("(A picture from https://th.example.net/5.jpg was shown here.)");
   });
 
   it("replays a compaction entry over the messages it replaced", async () => {
@@ -170,6 +194,30 @@ it("keeps a tool call and result together, drops stored screenshot data, and rou
     "pixel-secret",
   );
   for (const target of [-1, 0.5, Infinity]) expect(() => safeCut([], target)).toThrow(RangeError);
+});
+
+it("sends web pictures as JPEG images in the result, or after it for clients without them", () => {
+  const result = {
+    ok: true,
+    content: [
+      { type: "text" as const, text: "results" },
+      {
+        type: "web_image" as const,
+        url: "https://th.example.net/1.jpg",
+        mediaType: "image/jpeg" as const,
+        data: "jpeg-bytes",
+      },
+    ],
+  };
+  const inline = resultParts("call", "web_search", result, true);
+  expect(JSON.stringify(inline.part)).toContain('"mediaType":"image/jpeg"');
+  const after = resultParts("call", "web_search", result, false);
+  expect(after.part.output).toEqual({
+    type: "text",
+    value: "results\n(images in the next message)",
+  });
+  expect(after.images).toHaveLength(1);
+  expect(newestFullFrame([{ role: "user", content: after.images as never }])).toBeUndefined();
 });
 
 it("selects only retained full-frame pixels and creates exact durable inbox records", () => {

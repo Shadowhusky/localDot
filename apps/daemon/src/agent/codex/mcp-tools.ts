@@ -13,6 +13,8 @@ import {
   TOOL_INPUTS,
   type ToolName,
   type ToolResult,
+  WEB_FETCH_TOOL_DESCRIPTION,
+  WEB_SEARCH_TOOL_DESCRIPTION,
 } from "@localdot/protocol";
 import { z } from "zod";
 
@@ -69,6 +71,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     '(text: keys such as "Return", after clicking the element), or scroll (scroll_direction, scroll_amount). ' +
     "The element is found again wherever it is now; give coordinate {x, y} too as a fallback for when the ref " +
     "is stale. Password fields are never filled: ask with an ask_user secret field.",
+  web_search: WEB_SEARCH_TOOL_DESCRIPTION,
+  web_fetch: WEB_FETCH_TOOL_DESCRIPTION,
   find:
     "Find the desktop's controls whose names contain text (role optional, such as push button, menu item or " +
     "check box), in every window top first. Returns each one's role, name, window and the point to click.",
@@ -151,7 +155,7 @@ export interface McpCallResult {
   [key: string]: unknown;
   content: (
     | { type: "text"; text: string }
-    | { type: "image"; data: string; mimeType: "image/png" }
+    | { type: "image"; data: string; mimeType: "image/png" | "image/jpeg" }
   )[];
   isError: boolean;
 }
