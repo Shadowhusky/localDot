@@ -5,6 +5,9 @@ import type { ModelMessage, ToolResultPart } from "ai";
 // screenshot in the stored transcript, become a marker naming their frame, so a restarted brain can
 // fetch the newest again.
 export const KEEP_SCREENSHOTS = 3;
+// Pictures from the web are never screenshots: the newest few stay apart from them, older ones and
+// stored ones become a note of where they came from, and no action is ever based on one.
+export const KEEP_PICTURES = 4;
 const MARKER =
   /^\[\[localdot:frame ([0-9A-HJKMNP-TV-Z]{26})(?: region (\d+),(\d+),(\d+),(\d+))?\]\]$/;
 
@@ -58,6 +61,28 @@ const isImage = (p: unknown): p is ImagePart =>
   (p as ImagePart).type === "file" &&
   typeof (p as ImagePart).providerOptions?.localdot?.frame === "string";
 
+interface PicturePart {
+  type: "file";
+  data: { type: "data"; data: string };
+  mediaType: string;
+  providerOptions: { localdot: { picture: string } };
+}
+
+export function picturePart(url: string, base64: string): PicturePart {
+  return {
+    type: "file",
+    data: { type: "data", data: base64 },
+    mediaType: "image/jpeg",
+    providerOptions: { localdot: { picture: `(A picture from ${url} was shown here.)` } },
+  };
+}
+
+const isPicture = (p: unknown): p is PicturePart =>
+  typeof p === "object" &&
+  p !== null &&
+  (p as PicturePart).type === "file" &&
+  typeof (p as PicturePart).providerOptions?.localdot?.picture === "string";
+
 // Every content array an image can sit in: a user message's content, and a tool result's
 // content output.
 function contentArrays(m: ModelMessage): unknown[][] {
@@ -70,18 +95,29 @@ function contentArrays(m: ModelMessage): unknown[][] {
   return [];
 }
 
-// A copy with every image but the newest `keep` turned into its marker.
+// A copy with every screenshot but the newest `keep` turned into its marker, and every picture but
+// the newest `pictures` into its note.
 export function pruneScreenshots(
   messages: ModelMessage[],
   keep = KEEP_SCREENSHOTS,
+  pictures = KEEP_PICTURES,
 ): ModelMessage[] {
   if (!Number.isSafeInteger(keep) || keep < 0) throw new RangeError("Invalid screenshot count");
+  if (!Number.isSafeInteger(pictures) || pictures < 0)
+    throw new RangeError("Invalid picture count");
   const copy = structuredClone(messages);
   let seen = 0;
+  let seenPictures = 0;
   for (let i = copy.length - 1; i >= 0; i--) {
     for (const arr of contentArrays(copy[i] as ModelMessage).reverse()) {
       for (let j = arr.length - 1; j >= 0; j--) {
         const part = arr[j];
+        if (isPicture(part)) {
+          seenPictures += 1;
+          if (seenPictures > pictures)
+            arr[j] = { type: "text", text: part.providerOptions.localdot.picture };
+          continue;
+        }
         if (!isImage(part)) continue;
         seen += 1;
         if (seen > keep) arr[j] = { type: "text", text: part.providerOptions.localdot.frame };
@@ -93,7 +129,7 @@ export function pruneScreenshots(
 
 // The stored form: no image data at all.
 export function toTranscript(messages: ModelMessage[]): TranscriptMessage[] {
-  return pruneScreenshots(messages, 0).map((m) => {
+  return pruneScreenshots(messages, 0, 0).map((m) => {
     if (m.role === "system") throw new Error("System prompts are not transcript messages");
     return { role: m.role, content: m.content };
   });
@@ -180,22 +216,22 @@ export function resultParts(
   toolName: string,
   result: ToolResult,
   imagesInResults: boolean,
-): { part: ToolResultPart; images: ImagePart[] } {
+): { part: ToolResultPart; images: (ImagePart | PicturePart)[] } {
   const texts: string[] = [];
-  const images: ImagePart[] = [];
-  const value: ({ type: "text"; text: string } | ImagePart)[] = [];
+  const images: (ImagePart | PicturePart)[] = [];
+  const value: ({ type: "text"; text: string } | ImagePart | PicturePart)[] = [];
   for (const c of result.content as ToolContent[]) {
     if (c.type === "text") {
       texts.push(c.text);
       value.push({ type: "text", text: c.text });
-    } else {
-      const img = imagePart(
-        { frameId: c.frameId, ...(c.region ? { region: c.region } : {}) },
-        c.data,
-      );
-      images.push(img);
-      value.push(img);
+      continue;
     }
+    const img =
+      c.type === "web_image"
+        ? picturePart(c.url, c.data)
+        : imagePart({ frameId: c.frameId, ...(c.region ? { region: c.region } : {}) }, c.data);
+    images.push(img);
+    value.push(img);
   }
   if (!result.ok && texts.length === 0) texts.push("The tool failed.");
   if (imagesInResults) {
@@ -212,7 +248,7 @@ export function resultParts(
     };
   }
   const note = images.length
-    ? `${texts.join("\n")}${texts.length ? "\n" : ""}(screenshot in the next message)`
+    ? `${texts.join("\n")}${texts.length ? "\n" : ""}(${images.some(isPicture) ? "images" : "screenshot"} in the next message)`
     : texts.join("\n") || "Done.";
   return {
     part: {
@@ -232,7 +268,7 @@ export function estimateTokens(messages: ModelMessage[]): number {
   const walk = (v: unknown) => {
     if (typeof v === "string") chars += v.length;
     else if (Array.isArray(v)) for (const x of v) walk(x);
-    else if (isImage(v)) images += 1;
+    else if (isImage(v) || isPicture(v)) images += 1;
     else if (v && typeof v === "object") for (const x of Object.values(v)) walk(x);
   };
   for (const m of messages) walk(m.content);

@@ -139,6 +139,10 @@ function toolOfStep(step: StepState): DotTool | null {
       return "browsing";
     case "browser_upload":
       return "sending";
+    // Searching and reading the web is browsing; looking at pictures is looking.
+    case "web_search":
+    case "web_fetch":
+      return title.startsWith("Looked at") ? "looking" : "browsing";
     // Research reads PDFs like pages, and writes its report at the keyboard.
     case "research":
       return title.startsWith("Writing") ? "typing" : "browsing";

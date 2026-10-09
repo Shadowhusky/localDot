@@ -1,6 +1,6 @@
 import { ComputerAction } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
-import { codexTools } from "./mcp-tools.ts";
+import { codexTools, toCallToolResult } from "./mcp-tools.ts";
 
 describe("Codex's computer tool", () => {
   const computer = codexTools().find((tool) => tool.name === "computer");
@@ -50,6 +50,42 @@ describe("Codex's element tools", () => {
     expect(tool("find")?.inputSchema).toMatchObject({
       properties: { text: { type: "string" }, role: { type: "string" } },
       required: ["text"],
+    });
+  });
+});
+
+describe("Codex's web tools", () => {
+  it("search and read pages with the same flat schemas the daemon checks", () => {
+    const tools = Object.fromEntries(codexTools().map((tool) => [tool.name, tool]));
+    expect(tools.web_search?.description).toContain('kind "images"');
+    expect(tools.web_search?.inputSchema).toMatchObject({
+      type: "object",
+      required: ["query"],
+      properties: { kind: { enum: ["web", "images", "news"] }, count: { maximum: 20 } },
+    });
+    expect(tools.web_fetch?.inputSchema).toMatchObject({ required: ["url"] });
+  });
+
+  it("hand a web picture over as an image, never as a screenshot", () => {
+    expect(
+      toCallToolResult({
+        ok: true,
+        content: [
+          { type: "text", text: "results" },
+          {
+            type: "web_image",
+            url: "https://th.example/1.jpg",
+            mediaType: "image/jpeg",
+            data: "AA",
+          },
+        ],
+      }),
+    ).toEqual({
+      content: [
+        { type: "text", text: "results" },
+        { type: "image", data: "AA", mimeType: "image/jpeg" },
+      ],
+      isError: false,
     });
   });
 });

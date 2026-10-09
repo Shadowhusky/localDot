@@ -1,6 +1,13 @@
-import { ApprovalRequestDraft, clipText, type ToolName, UploadApproval } from "@localdot/protocol";
+import {
+  ApprovalRequestDraft,
+  clipText,
+  type ToolName,
+  UploadApproval,
+  type WebSearchKind,
+} from "@localdot/protocol";
 import { repeatsWhileHeld } from "@localdot/protocol/keys";
 import type { ToolCallContext } from "../tools/deps.ts";
+import { searchAddresses } from "../web/engines.ts";
 import { OncePermit } from "./approvals.ts";
 import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
 import { handoffFor } from "./handoff.ts";
@@ -106,7 +113,10 @@ export function approvalDraft(
     if (typeof object.old_text === "string") add("Old text", object.old_text);
     if (typeof object.new_text === "string") add("New text", object.new_text);
     if (typeof object.text === "string" && tool === "remember") add("Memory", object.text);
-    if (typeof object.query === "string" && (tool === "recall" || tool === "people"))
+    if (
+      typeof object.query === "string" &&
+      (tool === "recall" || tool === "people" || tool === "web_search")
+    )
       add("Search", object.query);
     if (tool === "people")
       for (const [key, label] of [
@@ -298,7 +308,16 @@ export function toolRisk(
     case "find":
       return { operation: "observe" };
     case "browser_navigate":
+    case "web_fetch":
       return { operation: "navigate", destination: String(input.url) };
+    // A search opens the first engine's results page for the query, as browser_navigate would.
+    case "web_search":
+      return {
+        operation: "navigate",
+        destination:
+          searchAddresses(String(input.query), input.kind as WebSearchKind | undefined)[0]?.href ??
+          "",
+      };
     case "remember":
       return { operation: "memory_write" };
     case "recall":

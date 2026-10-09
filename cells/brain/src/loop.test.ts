@@ -142,6 +142,50 @@ describe("Agent", () => {
     expect(JSON.stringify(t.f.transcript)).toContain("[[localdot:frame ");
   });
 
+  it("shows web pictures to the model but bases screen actions only on screenshots", async () => {
+    const frames: string[] = [];
+    const t = agent(
+      [
+        call("web_search", { query: "Zelda", kind: "images" }),
+        call("computer", { action: "left_click", coordinate: [640, 400] }),
+        call("done", { summary: "Drawn" }),
+      ],
+      {
+        answer: (name) => {
+          if (name === "web_search")
+            return {
+              ok: true,
+              content: [
+                { type: "text", text: "1. Zelda" },
+                {
+                  type: "web_image",
+                  url: "https://th.example.net/1.jpg",
+                  mediaType: "image/jpeg",
+                  data: "/9j/picture",
+                },
+              ],
+            };
+          if (name !== "computer") return undefined;
+          frames.push(ulid());
+          return {
+            ok: true,
+            content: [
+              { type: "image", frameId: frames.at(-1) ?? "", mediaType: "image/png", data: "iVBO" },
+            ],
+          };
+        },
+      },
+    );
+    expect(await t.run()).toBe("done");
+    const click = t.f.toolCalls[2]?.input as { basedOn?: string };
+    expect(click.basedOn).toBe(frames[0]);
+    expect(JSON.stringify(t.main.prompts[1])).toContain("/9j/picture");
+    expect(JSON.stringify(t.f.transcript)).not.toContain("/9j/picture");
+    expect(JSON.stringify(t.f.transcript)).toContain(
+      "(A picture from https://th.example.net/1.jpg was shown here.)",
+    );
+  });
+
   it("converts the 0–1000 grid for Gemini and Qwen, and refuses coordinates outside it", async () => {
     const t = agent(
       [
@@ -231,6 +275,8 @@ describe("Agent", () => {
         "shell",
         "switch_screen",
         "update_plan",
+        "web_fetch",
+        "web_search",
       ]);
     });
 

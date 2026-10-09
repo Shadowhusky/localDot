@@ -13,7 +13,8 @@ describe("dot's working rules", () => {
         "keyboard shortcuts, the address bar and search boxes over menus",
         "browser_read, then browser_act by ref on web pages",
         "If something fails twice, change approach",
-        "search the web in the browser",
+        "Call web_search first for facts, current information or looks",
+        '(a character, logo, place, product, style); for looks, view kind "images" before drawing or designing',
       ])
         expect(rules, rule).toContain(rule);
   });
@@ -121,7 +122,8 @@ describe("research mode", () => {
       "# Research mode",
       "about 25 sources and 12 minutes",
       "update_plan with 3 to 6 sub-questions",
-      "opening results pages by URL",
+      "Find sources with web_search",
+      "Read promising pages with web_fetch, or browser_read",
       "Prefer primary sources",
       "research op pdf",
       "research op source",

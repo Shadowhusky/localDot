@@ -168,6 +168,13 @@ describe("the tool dot works with", () => {
     expect(of("browser_navigate", "Opening bbc.co.uk", "browser")).toBe("browsing");
     expect(of("browser_read", "Reading page", "browser")).toBe("browsing");
     expect(of("browser_upload", "Uploading photo.jpg", "browser")).toBe("sending");
+    expect(of("web_search", "Searched the web for “Zelda”", "browser")).toBe("browsing");
+    expect(of("web_search", "Searched the news for “Zelda”", "browser")).toBe("browsing");
+    expect(of("web_search", "Looked at images of “Zelda”", "browser")).toBe("looking");
+    expect(of("web_fetch", "Read en.wikipedia.org", "browser")).toBe("browsing");
+    expect(of("web_fetch", "Looked at a picture from upload.wikimedia.org", "browser")).toBe(
+      "looking",
+    );
     expect(of("find", "Looking for “Save”")).toBe("looking");
     expect(of("recall", "Recall", "think")).toBe("recalling");
     expect(of("research", "Reading a PDF from iea.org", "browser")).toBe("browsing");

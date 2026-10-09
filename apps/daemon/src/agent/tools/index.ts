@@ -36,6 +36,7 @@ import { researchRefusal, researchTool, withResearchNote } from "./research.ts";
 import { followUpAtTool, routineTool } from "./routine.ts";
 import { switchScreenTool } from "./screen.ts";
 import { shellTool } from "./shell.ts";
+import { webFetchTool, webSearchTool } from "./web.ts";
 import { opensInWebBrowser } from "./web-page.ts";
 import { startWorkClock } from "./work-clock.ts";
 
@@ -60,6 +61,8 @@ const STEP_KIND: Record<ToolName, string> = {
   browser_navigate: "browser",
   browser_upload: "browser",
   browser_act: "gui",
+  web_search: "browser",
+  web_fetch: "browser",
   find: "gui",
   switch_screen: "browser",
   update_plan: "think",
@@ -356,6 +359,12 @@ async function dispatchAdmitted(
         ctx.check();
         append(ctx, "step.end", { status: result.ok ? "ok" : "failed" });
         break;
+      case "web_search":
+        result = await webSearchTool(t, ctx, input);
+        break;
+      case "web_fetch":
+        result = await webFetchTool(t, ctx, input);
+        break;
       case "find":
         result = await findTool(t, ctx, input);
         break;
@@ -410,7 +419,11 @@ async function dispatchAdmitted(
       result: {
         ...result,
         content: result.content.map((c) =>
-          c.type === "text" ? { ...c, text: redact(c.text) } : c,
+          c.type === "text"
+            ? { ...c, text: redact(c.text) }
+            : c.type === "web_image"
+              ? { ...c, url: redact(c.url) }
+              : c,
         ),
       },
     };

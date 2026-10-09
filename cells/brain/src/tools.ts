@@ -24,6 +24,10 @@ import {
   ShellInput,
   SwitchScreenInput,
   UpdatePlanInput,
+  WEB_FETCH_TOOL_DESCRIPTION,
+  WEB_SEARCH_TOOL_DESCRIPTION,
+  WebFetchInput,
+  WebSearchInput,
 } from "@localdot/protocol";
 import { jsonSchema, type ToolSet, tool } from "ai";
 
@@ -98,6 +102,8 @@ export function toolSet(
       inputSchema: BrowserActInput,
     }),
     ...(computer ? { find: findTool } : {}),
+    web_search: tool({ description: WEB_SEARCH_TOOL_DESCRIPTION, inputSchema: WebSearchInput }),
+    web_fetch: tool({ description: WEB_FETCH_TOOL_DESCRIPTION, inputSchema: WebFetchInput }),
     browser_navigate: tool({
       description:
         "Open an http or https page and get a screenshot. Public sites open in the web browser, which keeps the user's sign-ins; localhost and local addresses open in the desktop's Chromium. The screen switches to match.",

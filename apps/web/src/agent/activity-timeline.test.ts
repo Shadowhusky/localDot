@@ -53,6 +53,32 @@ describe("the activity timeline", () => {
     expect(keys(entries)).toEqual(["step-a:k1,k3,k5", "key-k4:", "step-b:"]);
   });
 
+  it("says what a web search or page read did, as the browser's steps do", () => {
+    const [search, read] = foldKeyUses([
+      stepRow("s", 1, undefined, {
+        kind: "browser",
+        status: "ok",
+        tool: { name: "web_search", title: "Looked at images of “Zelda”", ok: true },
+      }),
+      stepRow("r", 2, undefined, {
+        kind: "browser",
+        status: "failed",
+        note: "The site answered 404.",
+        tool: { name: "web_fetch", title: "Read example.org", ok: false },
+      }),
+    ]) as [ActivityEntry, ActivityEntry];
+    expect(entryView(search, [], false)).toMatchObject({
+      title: "Looked at images of “Zelda”",
+      meta: "Browser",
+      state: "done",
+    });
+    expect(entryView(read, [], false)).toMatchObject({
+      title: "Read example.org",
+      meta: "The site answered 404.",
+      failed: true,
+    });
+  });
+
   it("keeps allowed key uses as rows when there is no step to hold them", () => {
     expect(keys(foldKeyUses([key(1), key(2)]))).toEqual(["key-k1:", "key-k2:"]);
   });

@@ -12,7 +12,14 @@ const PDF_MODEL_CHARS = 30_000;
 const OFF = "Research mode is off for this task. Read pages with browser_read instead.";
 
 // The gathering tools: once the budget is reached they take nothing new, and say why.
-const GATHERING = new Set(["browser_read", "browser_navigate", "shell", "research"]);
+const GATHERING = new Set([
+  "browser_read",
+  "browser_navigate",
+  "web_search",
+  "web_fetch",
+  "shell",
+  "research",
+]);
 
 // Single quotes for the shell, closed and reopened around each quote in the text.
 export function shellQuote(value: string): string {
@@ -56,10 +63,12 @@ export function researchRefusal(
 ): string | undefined {
   const research = session.research;
   if (!research?.stopped) return undefined;
+  if (name === "web_search") return research.stopNote();
   const fields = input as { url?: unknown; op?: unknown };
   const url = typeof fields.url === "string" ? fields.url : undefined;
   const opens =
     name === "browser_navigate" ||
+    name === "web_fetch" ||
     (name === "research" && (fields.op === "pdf" || fields.op === "source"));
   if (!opens || !url || research.find(url)) return undefined;
   return research.stopNote();
