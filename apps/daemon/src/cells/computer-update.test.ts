@@ -16,6 +16,7 @@ import {
   CellControlConflict,
   CellOrchestrator,
   type OrchestratorDeps,
+  UPDATE_NEEDS_FRESH_START,
   UPDATE_RECORDS_UNREADABLE,
   UPDATE_UNFINISHED,
 } from "./orchestrator.ts";
@@ -288,7 +289,14 @@ describe("an update interrupted by a daemon restart", () => {
     await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
     expect(orchestrator.get(id)).toMatchObject({ state: "failed", error: UPDATE_UNFINISHED });
     expect(orchestrator.get(id)?.updateAvailable).toBe(true);
-    await expect(orchestrator.start(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    // Docker refuses the rename again when recovery tries it.
+    await expect(orchestrator.start(id)).rejects.toThrow(UPDATE_NEEDS_FRESH_START);
+    expect(orchestrator.get(id)).toMatchObject({
+      state: "failed",
+      error: UPDATE_NEEDS_FRESH_START,
+      needsFreshStart: true,
+    });
+    expect(orchestrator.get(id)).not.toHaveProperty("updateAvailable");
     expect(new ComputerUpdateStore(home).read(id)?.phase).toBe("renaming");
     orchestrator.dispose();
 
@@ -302,6 +310,7 @@ describe("an update interrupted by a daemon restart", () => {
     expect(fake.state.containers.size).toBe(2);
     expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
     expect(restarted.orchestrator.get(id)?.state).toBe("stopped");
+    expect(restarted.orchestrator.get(id)).not.toHaveProperty("needsFreshStart");
 
     await restarted.orchestrator.start(id);
     await waitUntil(() => restarted.orchestrator.get(id)?.state === "ready");
@@ -465,7 +474,8 @@ describe("an update that can't be finished", () => {
     });
 
     const restarted = boot();
-    await expect(restarted.orchestrator.start(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    await expect(restarted.orchestrator.start(id)).rejects.toThrow(UPDATE_NEEDS_FRESH_START);
+    expect(restarted.orchestrator.get(id)?.needsFreshStart).toBe(true);
     expect(fake.state.containers.has(`${record.docker.desktop}-update`)).toBe(true);
 
     await restarted.orchestrator.remove(id, { purgeHome: true });
@@ -473,6 +483,48 @@ describe("an update that can't be finished", () => {
     expect(fake.state.volumes.has(record.docker.homeVolume)).toBe(false);
     expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
     expect(restarted.orchestrator.get(id)).toBeUndefined();
+  });
+
+  it("needs a fresh start when one new container is gone after the old ones were retired", async () => {
+    const { updates, orchestrator, home, id, record } = await setup({ keyd: keyd() });
+    rebuild();
+    await updates.check(record);
+    interrupt(renameOf(record, "desktop"));
+    await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    expect(orchestrator.get(id)).not.toHaveProperty("needsFreshStart");
+    fake.state.failRequests.clear();
+    fake.state.containers.delete(`${record.docker.desktop}-update`);
+
+    await expect(orchestrator.start(id)).rejects.toThrow(UPDATE_NEEDS_FRESH_START);
+    expect(orchestrator.get(id)).toMatchObject({
+      state: "failed",
+      error: UPDATE_NEEDS_FRESH_START,
+      needsFreshStart: true,
+    });
+    expect(orchestrator.get(id)).not.toHaveProperty("updateAvailable");
+    await expect(orchestrator.update(id)).rejects.toThrow();
+
+    await orchestrator.discardUpdate(id);
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
+    expect(orchestrator.get(id)).not.toHaveProperty("needsFreshStart");
+  });
+
+  it("keeps trying when Docker didn't answer, and finishes once it does", async () => {
+    const { updates, orchestrator, home, id, record } = await setup();
+    rebuild();
+    await updates.check(record);
+    interrupt(renameOf(record, "desktop"));
+    await expect(orchestrator.update(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    fake.state.failRequests.clear();
+    fake.state.loseReplies.add(renameOf(record, "desktop"));
+
+    await expect(orchestrator.start(id)).rejects.toThrow(UPDATE_UNFINISHED);
+    expect(orchestrator.get(id)).not.toHaveProperty("needsFreshStart");
+
+    await orchestrator.start(id);
+    await waitUntil(() => orchestrator.get(id)?.state === "ready");
+    expect(fake.state.containers.get(record.docker.desktop)?.image).toBe(NEW_DESKTOP);
+    expect(new ComputerUpdateStore(home).read(id)).toBeUndefined();
   });
 
   it("lets Remove through while Docker keeps refusing the last step", async () => {

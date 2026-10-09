@@ -33,6 +33,7 @@ import { type HudActionKind, hudFor } from "./cells/hud-state.ts";
 import { useBrowserScreen } from "./cells/useBrowserScreen.ts";
 import { useCell } from "./cells/useCell.ts";
 import { useComputerUpdate, useUpdateNotice } from "./cells/useComputerUpdate.ts";
+import { useFreshStart } from "./cells/useFreshStart.ts";
 import { presetOf } from "./copy/autonomy.ts";
 import { decisionWords } from "./copy/decision.ts";
 import { dotFeed } from "./dot/dot-feed.ts";
@@ -342,6 +343,7 @@ function Theatre({ api }: { api: ApiClient }) {
     selectReady,
   } = useCell(api);
   const computerUpdate = useComputerUpdate(api, cell);
+  const freshStart = useFreshStart(api, cell, selectReady);
   const keys = useKeys(api);
   const settings = useSettings(api);
   const rules = useRules(api, settings.open);
@@ -1190,6 +1192,7 @@ function Theatre({ api }: { api: ApiClient }) {
                           }
                         : undefined
                     }
+                    freshStart={freshStart.curtain}
                     showDot={showDot.value}
                   />
                 </Presence>
@@ -1515,6 +1518,7 @@ function Theatre({ api }: { api: ApiClient }) {
           stream={streamChoice}
           stop={sheetStopControl}
           update={updateWait ? { ...computerUpdate, waitReason: updateWait } : computerUpdate}
+          freshStart={freshStart.available ? { ...freshStart, waitReason: updateWait } : undefined}
           open={settings.open}
           keysPanel={keysPanel}
           choices={settings.draft?.choices ?? {}}

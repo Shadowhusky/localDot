@@ -456,7 +456,7 @@
     visibility 0s linear var(--dur-fade);
 }
 
-.settings-update-error {
+.settings-computer-error {
   color: var(--color-danger-fg);
 }
 

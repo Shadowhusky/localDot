@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { type CellView, type ComputerPhase, hudFor } from "./hud-state.ts";
+import { type CellView, type ComputerPhase, hudFor, NEEDS_FRESH_START } from "./hud-state.ts";
 import type { CellSummary } from "./types.ts";
 
 const cell = (
@@ -244,5 +244,26 @@ describe("hudFor", () => {
     const unreadable =
       "localDot can't read its update records. Restart localDot, then turn on your computer.";
     expect(hudFor(known(cell("failed", "none", unreadable))).caption).toBe(unreadable);
+  });
+
+  it("names Start fresh when an update can't be finished, whatever the daemon's words", () => {
+    const refused = "Your computer's update can't be finished. Start fresh to use it again.";
+    for (const state of ["failed", "stopped"] as const) {
+      const hud = hudFor(known({ ...cell(state, "none", refused), needsFreshStart: true }));
+      expect(hud).toMatchObject({
+        phase: "failed",
+        caption: NEEDS_FRESH_START,
+        action: { kind: "start", enabled: true },
+      });
+    }
+    expect(NEEDS_FRESH_START).toMatch(/Start fresh/);
+    // Without the mark, the same words read as an ordinary failure to start.
+    expect(hudFor(known(cell("failed", "none", refused))).caption).toBe(
+      "Your computer could not start.",
+    );
+    // A fenced computer still recovers through Replace computer.
+    expect(
+      hudFor(known({ ...cell("ready"), fenced: { revision: 1 }, needsFreshStart: true })).phase,
+    ).toBe("unavailable");
   });
 });

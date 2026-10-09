@@ -10,6 +10,7 @@ import {
   CellControlConflict,
   type CellOrchestrator,
   UnknownCellError,
+  UPDATE_NEEDS_FRESH_START,
   UPDATE_RECORDS_UNREADABLE,
   UPDATE_UNFINISHED,
 } from "./orchestrator.ts";
@@ -95,6 +96,12 @@ export class ComputerUpdateStore {
 }
 
 const failure = () => new CellControlConflict(UPDATE_UNFINISHED);
+// A refusal that trying again can't clear: what the update needs to go on was changed or taken.
+class Lasting extends CellControlConflict {
+  constructor() {
+    super(UPDATE_UNFINISHED);
+  }
+}
 const NOT_HERE = "The new version isn't on this Mac yet.";
 
 export interface ComputerUpdatesDeps {
@@ -114,6 +121,7 @@ export class ComputerUpdates {
   readonly #everyMs: number;
   readonly #available = new Map<string, boolean>();
   readonly #unfinished = new Set<string>();
+  readonly #stuck = new Set<string>();
   readonly #ledger: ComputerUpdateStore | undefined;
 
   constructor(deps: ComputerUpdatesDeps) {
@@ -132,7 +140,13 @@ export class ComputerUpdates {
 
   // A new version is ready, or an earlier update is waiting to be finished.
   available(id: string): boolean {
+    if (this.#stuck.has(id)) return false;
     return this.#available.get(id) === true || this.#unfinished.has(id);
+  }
+
+  // Its update can't be finished or rolled back, so only a fresh start brings it back.
+  needsFreshStart(id: string): boolean {
+    return this.#stuck.has(id);
   }
 
   // Without its records an interrupted update can't be told apart, so every computer waits.
@@ -240,8 +254,10 @@ export class ComputerUpdates {
     this.#store();
     try {
       return await this.#recover(record, save);
-    } catch {
-      throw failure();
+    } catch (error) {
+      if (!(error instanceof Lasting)) throw failure();
+      this.#stuck.add(record.id);
+      throw new CellControlConflict(UPDATE_NEEDS_FRESH_START);
     }
   }
 
@@ -265,7 +281,7 @@ export class ComputerUpdates {
         (owner.gate === candidates.gate && owner.desktop === candidates.desktop)
       )
     )
-      throw failure();
+      throw new Lasting();
     if (entry.phase === "creating") {
       await this.#rollBack(entry, record);
       return record;
@@ -296,6 +312,7 @@ export class ComputerUpdates {
         );
     }
     this.#available.delete(record.id);
+    this.#stuck.delete(record.id);
     if (entry) this.#settle(record.id);
   }
 
@@ -306,7 +323,7 @@ export class ComputerUpdates {
       this.#write(entry);
     };
     const { gate, desktop } = entry.candidates;
-    if (!gate || !desktop || !record.ownership) throw failure();
+    if (!gate || !desktop || !record.ownership) throw new Lasting();
     if (entry.phase === "creating") step("retiring");
     if (entry.phase === "retiring") {
       await retireExactContainers(
@@ -319,14 +336,19 @@ export class ComputerUpdates {
     for (const role of ROLES) {
       const id = entry.candidates[role] as string;
       const raw = await this.#container(id);
-      if (!raw || !ours(raw, record.id, role, entry.operationId)) throw failure();
+      if (!raw || !ours(raw, record.id, role, entry.operationId)) throw new Lasting();
       if (raw.Name === `/${record.docker[role]}`) continue;
-      if (raw.Name !== `/${temporary(record, role)}`) throw failure();
-      await this.#docker.request({
-        method: "POST",
-        path: `/containers/${encodeURIComponent(id)}/rename`,
-        query: { name: record.docker[role] },
-      });
+      if (raw.Name !== `/${temporary(record, role)}`) throw new Lasting();
+      await this.#docker
+        .request({
+          method: "POST",
+          path: `/containers/${encodeURIComponent(id)}/rename`,
+          query: { name: record.docker[role] },
+        })
+        .catch((error: unknown) => {
+          // Docker answered and refused; one that didn't answer may yet.
+          throw error instanceof DockerError && error.status !== 0 ? new Lasting() : error;
+        });
     }
     const next: CellRecord = { ...record, ownership: { ...record.ownership, gate, desktop } };
     if (!equal(record.ownership, next.ownership)) save(next);
@@ -360,6 +382,7 @@ export class ComputerUpdates {
   #settle(cellId: string): void {
     this.#store().remove(cellId);
     this.#unfinished.delete(cellId);
+    this.#stuck.delete(cellId);
   }
 
   // The container an update made under the temporary name: this update's when `operationId` is

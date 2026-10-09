@@ -584,6 +584,47 @@ describe("settings inspector", () => {
     expect(within(sheet()).getByText("A new version of your computer is ready")).toBeTruthy();
   });
 
+  it("offers Start fresh for the computer behind a confirm, and holds it while dot works", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+    const run = vi.fn();
+    const freshStart = { available: true, busy: false, error: null, run };
+    const view = render(<SettingsSheet {...props()} freshStart={freshStart} />);
+    expect(
+      within(sheet()).getByText("Erases your computer's files. Your sign-ins stay."),
+    ).toBeTruthy();
+    fireEvent.click(within(sheet()).getByRole("button", { name: "Start fresh" }));
+    const dialog = screen.getByRole("alertdialog", { name: "Start fresh?" });
+    expect(
+      within(dialog).getByText("Your computer's files are erased. Your sign-ins are kept."),
+    ).toBeTruthy();
+    expect(run).not.toHaveBeenCalled();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Start fresh" }));
+    expect(run).toHaveBeenCalledOnce();
+    act(() => {
+      vi.advanceTimersByTime(300);
+    });
+
+    view.rerender(
+      <SettingsSheet
+        {...props()}
+        freshStart={{ ...freshStart, waitReason: "Wait for dot to finish" }}
+      />,
+    );
+    const held = within(sheet()).getByRole("button", { name: "Start fresh" });
+    expect(held.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(held);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(run).toHaveBeenCalledOnce();
+
+    view.rerender(
+      <SettingsSheet
+        {...props()}
+        freshStart={{ ...freshStart, error: "Starting fresh didn't finish. Try again." }}
+      />,
+    );
+    expect(within(sheet()).getByText("Starting fresh didn't finish. Try again.")).toBeTruthy();
+  });
+
   it("offers Auto, Sharp and Smooth for the stream in Your computer, on every size", () => {
     const change = vi.fn();
     const stream = { value: "auto" as const, saved: true, change };

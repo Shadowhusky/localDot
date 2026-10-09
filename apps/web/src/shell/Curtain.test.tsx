@@ -1,9 +1,15 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
-import { Curtain } from "./Curtain.tsx";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { Curtain, type FreshStartAction } from "./Curtain.tsx";
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const curtain = (phase: "starting" | "stopping", updating: boolean) =>
   render(
@@ -28,4 +34,63 @@ it("says the computer is updating through its stop and its start", () => {
   }
   curtain("starting", false);
   expect(screen.getByRole("heading").textContent).toBe("Starting your computer");
+});
+
+const stuck = (freshStart: FreshStartAction, onAction = () => {}) =>
+  render(
+    <Curtain
+      phase="failed"
+      first={false}
+      waking={false}
+      caption="Some other words"
+      action={{ kind: "start", enabled: true }}
+      onAction={onAction}
+      replace={{ enabled: true, busy: false, run: () => {} }}
+      freshStart={freshStart}
+      showDot={false}
+    />,
+  );
+
+it("names Start fresh as the way out of an update that can't be finished", () => {
+  stuck({ busy: false, run: () => {} });
+  expect(screen.getByRole("heading").textContent).toBe("Your computer needs a fresh start");
+  expect(
+    screen.getByText("The update couldn't be finished. Start fresh to use your computer again."),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Replace computer" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /Start again|Turn on/ })).toBeNull();
+});
+
+it("asks before Start fresh erases the computer, and Cancel leaves it be", () => {
+  const run = vi.fn();
+  const onAction = vi.fn();
+  stuck({ busy: false, run }, onAction);
+  fireEvent.click(screen.getByRole("button", { name: "Start fresh" }));
+  const dialog = screen.getByRole("alertdialog", { name: "Start fresh?" });
+  expect(
+    within(dialog).getByText("Your computer's files are erased. Your sign-ins are kept."),
+  ).toBeTruthy();
+  expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Cancel" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  act(() => {
+    vi.advanceTimersByTime(300);
+  });
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(run).not.toHaveBeenCalled();
+
+  fireEvent.click(screen.getByRole("button", { name: "Start fresh" }));
+  const again = screen.getByRole("alertdialog", { name: "Start fresh?" });
+  fireEvent.click(within(again).getByRole("button", { name: "Start fresh" }));
+  expect(run).toHaveBeenCalledOnce();
+  expect(onAction).not.toHaveBeenCalled();
+});
+
+it("shows a fresh start going on, then why it didn't finish", () => {
+  stuck({ busy: true, run: () => {} });
+  expect(screen.getByRole("heading").textContent).toBe("Starting fresh");
+  expect(screen.getByText(/Setting up a clean computer/)).toBeTruthy();
+  cleanup();
+  stuck({ busy: false, note: "Starting fresh didn't finish. Try again.", run: () => {} });
+  expect(screen.getByText("Starting fresh didn't finish. Try again.")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Start fresh" })).toBeTruthy();
 });

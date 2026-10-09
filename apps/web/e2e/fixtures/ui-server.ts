@@ -262,6 +262,14 @@ function cellFor(kind: CellKind, id: string): CellSummary | undefined {
       return { ...b, state: "failed", stream: none, error: "not ready after 120s" };
     case "fenced":
       return { ...b, state: "ready", fenced: { revision: 1 } } as CellSummary;
+    case "fresh-start":
+      return {
+        ...b,
+        state: "failed",
+        stream: none,
+        error: "Your computer's update can't be finished. Start fresh to use it again.",
+        needsFreshStart: true,
+      };
   }
 }
 const initial = cellFor(cellKind, cellId);
@@ -2119,6 +2127,7 @@ const STEPS: Record<ScenarioStep, () => string | undefined | Promise<string | un
   },
   "cell/failed": () => setCell("failed"),
   "cell/fenced": () => setCell("fenced"),
+  "cell/fresh-start": () => setCell("fresh-start"),
 };
 const reply = (problem: string | undefined) =>
   problem ? new Response(problem, { status: 409 }) : Response.json({ ok: true });

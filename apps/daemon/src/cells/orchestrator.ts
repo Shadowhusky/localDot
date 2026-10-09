@@ -53,7 +53,7 @@ export interface OrchestratorDeps {
   diagnosticAdmission?(id: string): { release(): void } | undefined;
   updates?: Pick<
     ComputerUpdates,
-    "available" | "pending" | "prepare" | "swap" | "recover" | "discard"
+    "available" | "needsFreshStart" | "pending" | "prepare" | "swap" | "recover" | "discard"
   >;
   diagnosticProbe?(
     endpoint: CellEndpoints["desktopd"],
@@ -179,6 +179,8 @@ const objectPath = (kind: "containers" | "networks" | "volumes", name: string, a
 export const UPDATE_UNFINISHED = "The update didn't finish. Turn on your computer to finish it.";
 export const UPDATE_RECORDS_UNREADABLE =
   "localDot can't read its update records. Restart localDot, then turn on your computer.";
+export const UPDATE_NEEDS_FRESH_START =
+  "Your computer's update can't be finished. Start fresh to use it again.";
 const UPDATE_UNDONE = "Your computer couldn't be updated. It's back as it was.";
 const UPDATE_STOPPED = "Your computer couldn't be updated. Turn it on to keep using it.";
 
@@ -626,7 +628,16 @@ export class CellOrchestrator {
       this.#records.set(id, repaired);
       this.#invalidRecords.delete(id);
     }
-    const record = await this.#finishUpdate(this.#require(id));
+    const record = await this.#finishUpdate(this.#require(id)).catch((error: unknown) => {
+      if (this.deps.updates?.needsFreshStart(id))
+        this.#set(id, {
+          state: "failed",
+          restarts: 0,
+          stream: NO_STREAM,
+          error: UPDATE_NEEDS_FRESH_START,
+        });
+      throw error;
+    });
     if (await this.#startContainers(record, 0)) this.#detach(id, this.#waitReady(record));
   }
 
@@ -665,8 +676,10 @@ export class CellOrchestrator {
       if (!this.#current(id, stopping)) throw error;
       if (updates.pending(id)) {
         const unfinished =
-          error instanceof CellControlConflict && error.message === UPDATE_RECORDS_UNREADABLE
-            ? UPDATE_RECORDS_UNREADABLE
+          error instanceof CellControlConflict &&
+          (error.message === UPDATE_RECORDS_UNREADABLE ||
+            error.message === UPDATE_NEEDS_FRESH_START)
+            ? error.message
             : UPDATE_UNFINISHED;
         this.#set(id, { state: "failed", restarts: 0, stream: NO_STREAM, error: unfinished });
         throw new CellControlConflict(unfinished);
@@ -1810,6 +1823,7 @@ export class CellOrchestrator {
       ...(live.error ? { error: live.error } : {}),
       ...(live.paused ? { paused: true as const } : {}),
       ...(this.#updating.has(record.id) ? { updating: true as const } : {}),
+      ...(this.deps.updates?.needsFreshStart(record.id) ? { needsFreshStart: true as const } : {}),
       ...(!this.#updating.has(record.id) &&
       !this.#held(record.id) &&
       this.deps.updates?.available(record.id)

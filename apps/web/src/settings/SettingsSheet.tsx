@@ -2,11 +2,13 @@ import type { AutonomyPolicy } from "@localdot/protocol";
 import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import { type ComputerUpdate, UPDATE_READY } from "../cells/useComputerUpdate.ts";
+import type { FreshStart } from "../cells/useFreshStart.ts";
 import { spendText } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import type { ShowDotControl } from "../dot/show-dot.ts";
 import { KeysPanel, type KeysPanelProps } from "../keys/KeysPanel.tsx";
 import { type AppearanceControl, AppearancePicker } from "../onboarding/AppearancePicker.tsx";
+import { FreshStartButton } from "../shell/FreshStartButton.tsx";
 import type { StreamPreferenceControl } from "../stage/stream-preference.ts";
 import { STREAM_PREFERENCES } from "../stage/stream-quality.ts";
 import { Button } from "../ui/Button.tsx";
@@ -106,6 +108,8 @@ export interface SettingsSheetProps {
   stop?: { label: string; enabled: boolean; run(): void };
   // A new version of the computer, while one is ready or going on.
   update?: ComputerUpdate;
+  // Erases the computer and starts a clean one, unless dot is at work or the user holds it.
+  freshStart?: FreshStart & { waitReason?: string };
   // On a phone, how the task's Stop went, which stays after Stop itself has gone; it drops from
   // the island on a wider screen.
   stopNote?: StopNote;
@@ -403,7 +407,7 @@ function shownSections(props: SettingsSheetProps): SettingsSection[] {
     knowledge: !!props.knowledge,
     accounts: !!props.accounts,
     keys: !!props.keysPanel,
-    computer: !!props.stop || !!props.update?.available || !!props.stream,
+    computer: !!props.stop || !!props.update?.available || !!props.freshStart || !!props.stream,
   };
   return SECTIONS.filter((section) => has[section.id]).map((section) => section.id);
 }
@@ -547,9 +551,11 @@ function SectionList({
   };
   return (
     <>
-      {(props.stop || props.stopNote || props.update?.available || props.stream) && (
-        <ComputerControls props={props} />
-      )}
+      {(props.stop ||
+        props.stopNote ||
+        props.update?.available ||
+        props.freshStart ||
+        props.stream) && <ComputerControls props={props} />}
       <Group>{(["models", "autonomy", "rules"] as const).map(row)}</Group>
       <Group>
         {(["spending", "appearance", "knowledge", "accounts", "keys"] as const).map(row)}
@@ -596,7 +602,7 @@ export interface StopNote {
 // The computer's rows: Shut down, or on a phone the task's Stop, with how the last Stop went under
 // its name and any cleanup it couldn't confirm behind Details; then the stream's quality.
 function ComputerControls({ props }: { props: SettingsSheetProps }) {
-  const { stop, stopNote: note, stream } = props;
+  const { stop, stopNote: note, stream, freshStart } = props;
   const update = props.update?.available ? props.update : undefined;
   const phone = useMediaQuery(PHONE);
   return (
@@ -628,6 +634,7 @@ function ComputerControls({ props }: { props: SettingsSheetProps }) {
           </GroupRow>
         )}
         {update && <UpdateRow update={update} />}
+        {freshStart && <FreshStartRow freshStart={freshStart} />}
         {stream && (
           <GroupRow
             leading={<IconTile icon="monitor" />}
@@ -661,7 +668,7 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
       }
       detail={
         update.error && !update.busy ? (
-          <span className="settings-update-error">{update.error}</span>
+          <span className="settings-computer-error">{update.error}</span>
         ) : (
           "Your files and sign-ins stay. It restarts in about a minute."
         )
@@ -676,6 +683,34 @@ function UpdateRow({ update }: { update: ComputerUpdate }) {
         >
           Update
         </Button>
+      }
+    />
+  );
+}
+
+function FreshStartRow({
+  freshStart,
+}: {
+  freshStart: NonNullable<SettingsSheetProps["freshStart"]>;
+}) {
+  return (
+    <GroupRow
+      leading={<IconTile icon="history" />}
+      label="Start over with a clean computer"
+      detail={
+        freshStart.error && !freshStart.busy ? (
+          <span className="settings-computer-error">{freshStart.error}</span>
+        ) : (
+          "Erases your computer's files. Your sign-ins stay."
+        )
+      }
+      trailing={
+        <FreshStartButton
+          size="sm"
+          busy={freshStart.busy}
+          disabledReason={freshStart.busy ? undefined : freshStart.waitReason}
+          run={freshStart.run}
+        />
       }
     />
   );
