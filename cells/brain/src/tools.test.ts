@@ -141,7 +141,7 @@ describe("the model's advertised tools and instructions", () => {
     );
     for (const computer of ["anthropic-toolset", "anthropic-legacy"] as const)
       expect(systemPrompt(bootConfig(), binding({ computer }), [], today)).toContain(
-        "say such a line in a message before computer actions",
+        "say such a line before computer actions",
       );
     const tools = toolSet(generic);
     // What the provider is sent: the field and its description.

@@ -131,7 +131,7 @@ export function toolSet(b: ModelBinding): ToolSet {
     }),
     done: tool({
       description:
-        "Finish the task: a summary for the user, and the paths of any files in the computer they should get.",
+        "Finish the task: a summary for the user, the paths of any files in the computer they should get (a revised file keeps its name), and what you checked about them.",
       inputSchema: DoneInput,
     }),
     routine: tool({ description: ROUTINE_TOOL_DESCRIPTION, inputSchema: RoutineToolInput }),

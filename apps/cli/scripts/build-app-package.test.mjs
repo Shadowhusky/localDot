@@ -51,6 +51,7 @@ async function fixture() {
     "dist/sandbox-runtime/vendor/java-proxy-agent/srt-proxy-agent.jar": "fixture jar\n",
     "skills/office-files/SKILL.md": "# Fixture office files\n",
     "web/dist/index.html": "<!doctype html>\n",
+    "web/dist/export.html": "<!doctype html>\n",
     "web/dist/assets/index.js": "export {};\n",
     "web/dist/assets/licenses/mediabunny-1.61.0.txt": "MPL-2.0\n",
     "web/vendor/selkies/LICENSE": "MPL-2.0\n",

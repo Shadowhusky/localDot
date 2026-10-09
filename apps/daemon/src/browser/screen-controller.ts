@@ -286,9 +286,12 @@ export class ScreenController {
     this.#actions.abort();
     const completion = Promise.withResolvers<void>();
     this.#holding = completion.promise;
+    // As at a screen switch, a browser that can't confirm the hand-back is stopped on its own;
+    // only one that can't be stopped either contains the session and its computer.
+    const handBack = () => this.#revoke().catch(() => this.#retireBrowser());
     const waits = [
       this.#safe(() => this.deps.fenceRecording()),
-      this.#revoke(),
+      handBack(),
       this.#tail,
       ...this.#active,
     ];
@@ -299,10 +302,7 @@ export class ScreenController {
           throw new ScreenControlError();
         }
         // A browser preparation already in flight may have returned while the queue drained.
-        await this.#revoke().catch(async () => {
-          await this.#fail();
-          throw new ScreenControlError();
-        });
+        await handBack();
         if (epoch === this.#epoch && !this.#closed && !this.#failed) this.#userReady = true;
       })
       .then(completion.resolve, completion.reject);
@@ -545,7 +545,7 @@ export class ScreenController {
           return result;
         } catch {
           if (epoch !== this.#epoch || (this.#held && !handback) || this.#closed) {
-            await this.#revoke().catch(() => this.#fail());
+            await this.#revoke().catch(() => this.#retireBrowser());
           } else if (handback || integrity) {
             // An unrecorded screen, an unjournaled selection or a daemon handback that cannot
             // complete is uncertainty the session cannot continue past.

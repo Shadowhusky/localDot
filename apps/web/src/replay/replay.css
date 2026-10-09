@@ -330,45 +330,6 @@
     var(--font-ui);
 }
 
-.replay-files > ul {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.replay-file {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  align-items: center;
-  column-gap: calc(var(--spacing) * 2.5);
-  min-height: 40px;
-  padding: var(--spacing) 0;
-  color: var(--color-fg-3);
-}
-
-.replay-file-text {
-  display: grid;
-  min-width: 0;
-}
-
-.replay-file-name {
-  overflow: hidden;
-  color: var(--color-fg-1);
-  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.replay-file-path {
-  overflow: hidden;
-  color: var(--color-fg-3);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-  font-weight: var(--font-weight-normal);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .replay-preview-foot {
   display: grid;
   flex: none;

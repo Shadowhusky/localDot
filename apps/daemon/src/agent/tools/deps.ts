@@ -62,7 +62,7 @@ export interface ToolDeps {
     name: string,
     source: ReadableStream<Uint8Array>,
     scope: { signal: AbortSignal; check(): void },
-  ): Promise<{ path: string; bytes: number }>;
+  ): Promise<{ path: string; bytes: number; version?: number }>;
   // Called after synchronous session.stop(); must still revoke/freeze already-fenced sessions.
   stopForUncertainty(
     session: AgentSession,

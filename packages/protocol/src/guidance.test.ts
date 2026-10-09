@@ -56,7 +56,7 @@ describe("dot's working rules", () => {
       "Give every computer, browser_act and shell call its intent, in that voice.",
     );
     expect(workingRules("calls")).toContain(
-      "Give every browser_act and shell call its intent, in that voice, and say such a line in a message before computer actions.",
+      "Give every browser_act and shell call its intent, in that voice, and say such a line before computer actions.",
     );
     expect(workingRules("none")).toContain("Give every browser_act and shell call its intent");
     expect(workingRules("none")).not.toContain("computer actions");

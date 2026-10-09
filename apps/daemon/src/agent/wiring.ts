@@ -34,6 +34,7 @@ import type { SessionScreens } from "../browser/session-screens.ts";
 import type { DockerClient } from "../cells/docker.ts";
 import { CellControlConflict, type CellOrchestrator } from "../cells/orchestrator.ts";
 import type { PortRange } from "../cells/ports.ts";
+import type { ComputerAccess } from "../deliverables/convert.ts";
 import type { DesktopdRegistry } from "../desktopd/registry.ts";
 import { DesktopdTools } from "../desktopd/tools-client.ts";
 import type { EventLog } from "../event-log.ts";
@@ -793,12 +794,33 @@ export function createAgent(d: AgentWiringDeps) {
       d.eventLog.append(id, { type, agent: "main", data } as never);
     },
   };
+  // A computer for one daemon-initiated job (file previews), admitted like a user upload: refused
+  // while the user holds control or Stop is running, and aborted by Stop.
+  const computerAccess = (
+    cellId: string,
+    signal: AbortSignal,
+  ): ComputerAccess | "busy" | undefined => {
+    let access: UploadAccess | undefined;
+    try {
+      access = upload(cellId, signal);
+    } catch (error) {
+      if (error instanceof AgentError && error.status === 409) return "busy";
+      throw error;
+    }
+    const tools = access ? desktop(cellId) : undefined;
+    if (!access || !tools) {
+      access?.release();
+      return undefined;
+    }
+    return { tools, signal: access.signal, check: access.check, release: access.release };
+  };
   let server: ReturnType<typeof serve> | undefined,
     startPromise: Promise<void> | undefined,
     closePromise: Promise<void> | undefined;
   return {
     runner,
     routes,
+    computerAccess,
     // Legacy scripted tasks share the same client/transfer owner and pre-recording boundary.
     // Unlike agent tasks, they have no AgentSession whose runner can contain a lost reply.
     async prepareDesktopTask(cellId: string, sessionId: string, signal: AbortSignal) {

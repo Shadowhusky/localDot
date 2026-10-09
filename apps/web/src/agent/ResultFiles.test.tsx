@@ -68,6 +68,11 @@ afterEach(() => {
 });
 const apiFor = (fetchImpl: typeof fetch) =>
   createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
+// A card also reads each file's versions, previews and the task's proof; only these fetch a file.
+const downloadPath = (url: string) =>
+  /\/files\/[^/]+(?:\/versions\/\d+)?$/.test(new URL(url).pathname);
+const downloadsOf = (fetchImpl: { mock: { calls: unknown[][] } }) =>
+  fetchImpl.mock.calls.map((call) => String(call[0])).filter(downloadPath);
 describe("user-activated inert result downloads", () => {
   it("keeps every schema-admitted result file available without automatically downloading any", () => {
     const fetchImpl = vi.fn<typeof fetch>();
@@ -89,18 +94,18 @@ describe("user-activated inert result downloads", () => {
       />,
     );
     expect(screen.getAllByRole("button", { name: /^Download report-/ })).toHaveLength(32);
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(downloadsOf(fetchImpl)).toEqual([]);
     expect(created).not.toHaveBeenCalled();
   });
   it("uses only authenticated session/name, never the model path, and releases its inert object URL", async () => {
     const fetchImpl = vi.fn<typeof fetch>(async () => response()),
       api = apiFor(fetchImpl);
     const view = render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
-    expect(fetchImpl).not.toHaveBeenCalled();
+    expect(downloadsOf(fetchImpl)).toEqual([]);
     expect(created).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
     await waitFor(() => expect(clicked).toHaveBeenCalledOnce());
-    expect(String(fetchImpl.mock.calls[0]?.[0])).toBe(
+    expect(downloadsOf(fetchImpl)[0]).toBe(
       `http://127.0.0.1:4747/api/agent/sessions/${SESSION}/files/report.html`,
     );
     expect(created.mock.calls[0]?.[0]).toBeInstanceOf(Blob);
@@ -119,7 +124,7 @@ describe("user-activated inert result downloads", () => {
       button.click();
       button.click();
     });
-    expect(fetchImpl).toHaveBeenCalledOnce();
+    expect(downloadsOf(fetchImpl)).toHaveLength(1);
     view.rerender(<ResultFiles api={api} sessionId={OTHER} results={results} />);
     await act(async () => late.resolve(response()));
     expect(created).not.toHaveBeenCalled();
@@ -136,15 +141,16 @@ describe("user-activated inert result downloads", () => {
         cancelled = true;
       },
     });
-    const api = apiFor(
-      async () =>
-        new Response(body, {
-          headers: {
-            "content-type": "application/octet-stream",
-            "content-disposition": disposition("report.html"),
-            "x-content-type-options": "nosniff",
-          },
-        }),
+    const api = apiFor(async (url) =>
+      downloadPath(String(url))
+        ? new Response(body, {
+            headers: {
+              "content-type": "application/octet-stream",
+              "content-disposition": disposition("report.html"),
+              "x-content-type-options": "nosniff",
+            },
+          })
+        : new Response("not found", { status: 404 }),
     );
     render(<ResultFiles api={api} sessionId={SESSION} results={results} />);
     fireEvent.click(screen.getByRole("button", { name: "Download report.html" }));
@@ -157,6 +163,30 @@ describe("user-activated inert result downloads", () => {
 });
 
 describe("the result card", () => {
+  it("downloads the version its card shows, not the newest copy a later result left", async () => {
+    const fetchImpl = vi.fn<typeof fetch>(async (url) =>
+      downloadPath(String(url))
+        ? new Response("v1", {
+            headers: {
+              "content-type": "application/octet-stream",
+              "content-disposition": disposition("totals.csv"),
+              "x-content-type-options": "nosniff",
+            },
+          })
+        : new Response("not found", { status: 404 }),
+    );
+    const earlier = {
+      id: "first",
+      summary: "First pass",
+      files: [{ name: "totals.csv", path: "Documents/totals.csv", bytes: 2, version: 1 }],
+    };
+    render(<ResultFiles api={apiFor(fetchImpl)} sessionId={SESSION} results={[earlier]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Download totals.csv" }));
+    await waitFor(() => expect(clicked).toHaveBeenCalledOnce());
+    expect(downloadsOf(fetchImpl)).toEqual([
+      `http://127.0.0.1:4747/api/agent/sessions/${SESSION}/files/totals.csv/versions/1`,
+    ]);
+  });
   it("keeps multiline result text plain and sizes each file", () => {
     const result = {
       id: "r",
@@ -206,12 +236,19 @@ describe("the result card", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Download all 2 files" }));
     await waitFor(() => expect(clicked).toHaveBeenCalledTimes(2));
-    expect(fetchImpl.mock.calls.map((call) => String(call[0]).split("/").at(-1))).toEqual([
-      "a.txt",
-      "b.txt",
-    ]);
+    expect(downloadsOf(fetchImpl).map((url) => url.split("/").at(-1))).toEqual(["a.txt", "b.txt"]);
   });
 
+  it("still lists a result's files, with nothing to do, when its task is gone", () => {
+    function Gone() {
+      const downloads = useResultDownloads(null, null, results);
+      return <ResultCard result={results[0] as AgentResult} downloads={downloads} />;
+    }
+    render(<Gone />);
+    const download = screen.getByRole("button", { name: "Download report.html" });
+    expect(download.getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByText("12 bytes")).toBeTruthy();
+  });
   it("offers a replay of the task only when given one", () => {
     const onReplay = vi.fn();
     const result = { id: "r", summary: "Done", files: [] };

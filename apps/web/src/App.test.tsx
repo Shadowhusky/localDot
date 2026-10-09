@@ -82,6 +82,7 @@ const keyReply = (path: string): Response | undefined => {
       hairpin: { state: "active", addresses: 1 },
     });
   if (path === "/api/keys") return json({ keys: [] });
+  if (path === "/api/exports") return new Response("not found", { status: 404 });
   if (path === "/api/notify/attention") return json({ items: [] });
   return undefined;
 };
@@ -525,7 +526,7 @@ describe("App token states", () => {
     expect(await screen.findByText(/This browser was signed out/)).toBeTruthy();
     expect(window.localStorage.getItem(TOKEN_KEY)).toBeNull();
     await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(fetchImpl).toHaveBeenCalledTimes(7);
+    expect(fetchImpl).toHaveBeenCalledTimes(8);
   });
 
   it("takes a well-formed token link opened in the tab that already shows the page", async () => {

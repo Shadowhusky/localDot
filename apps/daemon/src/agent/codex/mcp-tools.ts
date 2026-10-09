@@ -98,7 +98,7 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     "Search the user's earlier tasks and daily notes (titles, their messages, your replies, steps, result file names); returns up to 8 dated matches as untrusted text. Use it before asking the user about something they did with you before. After a search, remember is refused until the user replies.",
   people:
     "The people the user reaches through you. op find with query (a name, app or handle) returns matches with the app, handle and when they were last reached, as untrusted text: use it before asking the user how to reach someone. op save with name and app (plus handle and a short note when known) after you message, call or email someone for the user, or when the user tells you how to reach someone; save only people the user named.",
-  done: "Finish the task: a summary for the user, and the paths of any files in the home to hand over.",
+  done: "Finish the task: a summary for the user, the paths of any files in the home to hand over (a revised file keeps its name), and what you checked about them.",
   routine: ROUTINE_TOOL_DESCRIPTION,
   follow_up_at: FOLLOW_UP_TOOL_DESCRIPTION,
 };

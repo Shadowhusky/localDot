@@ -62,6 +62,7 @@ import {
   storedChoices,
   withOption,
 } from "./export-settings.ts";
+import { type HostExports, useHostExports } from "./host-exports.ts";
 import { busy, type ExportJob, type ExportJobState, useExportJob } from "./job.ts";
 import { DOWNLOAD_LIMIT, exportSupport, LONG_EXPORT } from "./sink.ts";
 import { useExportEnvironment } from "./useExportEnvironment.ts";
@@ -83,6 +84,8 @@ const QUALITY_LABEL: Record<ExportQuality, string> = {
 const PRESET_NOTE = { quality: "sharpest", fast: "smallest" } as const;
 // The elapsed time and the estimate of what is left move on this beat while a video is saved.
 const TICK_MS = 500;
+const PAGE_NOTE = "This page makes the video, so keep it open until it's saved.";
+const HOST_NOTE = "It keeps going if you close this page or switch apps.";
 const RESULT_TITLE = {
   ready: "Your video is ready",
   downloaded: "Downloaded",
@@ -128,6 +131,7 @@ interface Outcome extends ExportEstimate {
 export function ExportSheet({
   api,
   job,
+  host,
   context,
   open,
   onClose,
@@ -135,6 +139,7 @@ export function ExportSheet({
 }: {
   api: ApiClient;
   job: ExportJob;
+  host: HostExports;
   context: ExportContext;
   open: boolean;
   onClose(): void;
@@ -146,7 +151,21 @@ export function ExportSheet({
   const shown = useRef(live);
   if (open) shown.current = live;
   const state = shown.current;
-  const env = useExportEnvironment(context);
+  const hostView = useHostExports(host);
+  useEffect(() => {
+    if (open) host.refresh();
+  }, [open, host]);
+  // The host makes the video when it can; this page makes it only when the host can't.
+  const where =
+    hostView.host?.state === "ready"
+      ? "host"
+      : hostView.host?.state === "checking"
+        ? "checking"
+        : "page";
+  const env = useExportEnvironment(
+    context,
+    where === "host" ? (hostView.host?.maxPixels ?? null) : null,
+  );
   const [range, setRange] = useState<RangeKey>(context.selection ? "selection" : "whole");
   const [choices, setChoices] = useState<ExportChoices>(storedChoices);
   const [calibration] = useState(storedCalibration);
@@ -190,17 +209,24 @@ export function ExportSheet({
   const option = (patch: Partial<ExportOptions>) => update(withOption(choices, env, patch));
 
   const canMake = env.encodable[options.format][options.size];
-  const blocked = !support.ok
-    ? support.reason
-    : current === null
-      ? "Nothing was recorded in this range"
-      : canMake === undefined
-        ? "Checking what this browser can make"
-        : canMake === false
-          ? `This browser can't make ${sizeLabel(options.size)} video`
-          : support.save === "download" && current.bytes > DOWNLOAD_LIMIT
-            ? LONG_EXPORT
-            : undefined;
+  const maker = where === "page" ? "This browser" : "This computer";
+  const blocked =
+    where === "checking"
+      ? "Checking what this computer can make"
+      : where === "page" && !support.ok
+        ? support.reason
+        : current === null
+          ? "Nothing was recorded in this range"
+          : canMake === undefined
+            ? "Checking what this browser can make"
+            : canMake === false
+              ? `${maker} can't make ${sizeLabel(options.size)} video`
+              : where === "page" &&
+                  support.ok &&
+                  support.save === "download" &&
+                  current.bytes > DOWNLOAD_LIMIT
+                ? LONG_EXPORT
+                : undefined;
   const summary =
     state.phase === "options" && state.note
       ? state.note
@@ -341,7 +367,7 @@ export function ExportSheet({
                     label: sizeLabel(size),
                     disabledReason:
                       env.encodable[options.format][size] === false
-                        ? `This browser can't make ${sizeLabel(size)} video`
+                        ? `${maker} can't make ${sizeLabel(size)} video`
                         : undefined,
                   }))}
                   value={options.size}
@@ -383,7 +409,7 @@ export function ExportSheet({
                       label: "WebM",
                       disabledReason:
                         env.encodable.webm[options.size] === false
-                          ? "This browser can't make WebM video"
+                          ? `${maker} can't make WebM video`
                           : undefined,
                     },
                   ]}
@@ -414,7 +440,9 @@ export function ExportSheet({
               />
             </Group>
           </Disclosure>
-          <GroupNote className="export-privacy">{PRIVACY_NOTE}</GroupNote>
+          <GroupNote className="export-privacy">
+            {where === "page" ? `${PAGE_NOTE} ${PRIVACY_NOTE}` : PRIVACY_NOTE}
+          </GroupNote>
         </div>
         <div className="export-status" inert={!working} data-shown={working ? "" : undefined}>
           {working && <ExportStatus state={state} open={open} />}
@@ -434,7 +462,9 @@ export function ExportSheet({
       <ExportActions
         state={state}
         blocked={blocked}
-        picker={support.ok && support.save === "picker"}
+        label={
+          where !== "page" ? "Export" : support.ok && support.save === "picker" ? "Save…" : "Save"
+        }
         onSave={() => {
           if (current)
             void job.start(context, request, {
@@ -559,6 +589,11 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
             </p>
           </>
         )}
+        {state.note && (
+          <p className="export-file-meta" role="alert">
+            {state.note}
+          </p>
+        )}
       </div>
     );
   }
@@ -577,23 +612,31 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
       </p>
       <Progress
         label="Export progress"
-        value={picking ? undefined : state.done}
+        value={picking || !state.total ? undefined : state.done}
         max={state.total || 1}
         valueText={`${percent}%`}
       />
       <p className="export-progress-line num">
         {picking
           ? "Waiting for a place to save it"
-          : `${percent}% · ${remaining === null ? "working out the time left" : `about ${timeLabel(remaining)} left`}`}
+          : state.waiting
+            ? "Waiting to start"
+            : !state.total
+              ? "Getting the recording ready"
+              : `${percent}% · ${remaining === null ? "working out the time left" : `about ${timeLabel(remaining)} left`}`}
       </p>
       {!picking && (
-        <Disclosure summary="Details" className="export-details">
-          <p className="export-details-text num">
-            {state.done.toLocaleString()} of {state.total.toLocaleString()} frames ·{" "}
-            {timeLabel(elapsed)} so far
-          </p>
-          <p className="export-details-text">Keep this tab open until it's saved.</p>
-        </Disclosure>
+        <>
+          <p className="export-progress-note">{state.where === "host" ? HOST_NOTE : PAGE_NOTE}</p>
+          <Disclosure summary="Details" className="export-details">
+            <p className="export-details-text num">
+              {state.total
+                ? `${state.done.toLocaleString()} of ${state.total.toLocaleString()} frames · `
+                : ""}
+              {timeLabel(elapsed)} so far
+            </p>
+          </Disclosure>
+        </>
       )}
     </div>
   );
@@ -602,15 +645,15 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
 function ExportActions({
   state,
   blocked,
-  picker,
+  label,
   onSave,
   job,
   onClose,
 }: {
   state: ExportJobState;
   blocked: string | undefined;
-  // The browser asks where to save before the video is made.
-  picker: boolean;
+  // Export when the host makes it; Save… when this browser asks where to save it first.
+  label: string;
   onSave(): void;
   job: ExportJob;
   onClose(): void;
@@ -657,7 +700,7 @@ function ExportActions({
   return (
     <div className="export-actions">
       <Button variant="primary" disabledReason={blocked} onClick={onSave}>
-        {picker ? "Save…" : "Save"}
+        {label}
       </Button>
     </div>
   );

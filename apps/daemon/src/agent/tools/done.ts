@@ -10,7 +10,7 @@ export async function doneTool(
   if (!ctx.permit?.consume(input, null))
     return fail("Execution approval is unavailable or already used. Do not retry automatically.");
   const desktop = deps.desktop(ctx.session.cellId);
-  const files: { name: string; path: string; bytes: number }[] = [];
+  const files: { name: string; path: string; bytes: number; version?: number }[] = [];
   const problems: string[] = [];
   const taken = new Set<string>();
   for (const path of input.files ?? []) {
@@ -33,7 +33,12 @@ export async function doneTool(
         check: ctx.check,
       });
       ctx.check();
-      files.push({ name: ctx.redact(name), path: ctx.redact(path), bytes: saved.bytes });
+      files.push({
+        name: ctx.redact(name),
+        path: ctx.redact(path),
+        bytes: saved.bytes,
+        ...(saved.version === undefined ? {} : { version: saved.version }),
+      });
     } catch (error) {
       ctx.check();
       problems.push(`${path}: ${error instanceof Error ? error.message : String(error)}`);
@@ -52,6 +57,9 @@ export async function doneTool(
       ],
     };
   ctx.check();
+  const checked = input.checked?.trim();
+  if (checked)
+    append(ctx, "step.verify", { status: "success", evidence: cut(ctx.redact(checked), 200) });
   append(ctx, "task.result", { summary: cut(ctx.redact(input.summary), 8000), files });
   return { ok: true, final: true, content: [text("Task finished.")] };
 }

@@ -75,3 +75,33 @@ describe("task text delivery response boundary", () => {
     );
   });
 });
+
+describe("revising a file of an ended task", () => {
+  const link = { sessionId, name: "totals.csv", version: 1 };
+  it("posts the text to the revise route and takes the new task's id from the reply", async () => {
+    const next = "01JXYZ0000000000000000NEXT";
+    const f = setup(() => Response.json({ sessionId: next }, { status: 202 }));
+    const sent = {
+      cellId,
+      sessionId: null,
+      mode: "new" as const,
+      text: "Revise totals.csv: add a total row",
+      revise: link,
+    };
+    expect(await deliverText(f.api, sent)).toBe(next);
+    expect(f.fetchImpl).toHaveBeenCalledWith(
+      `http://127.0.0.1:4790/api/agent/sessions/${sessionId}/files/totals.csv/revise`,
+      expect.objectContaining({ body: JSON.stringify({ cellId, version: 1, text: sent.text }) }),
+    );
+  });
+  it("refuses a link on a follow-up, a malformed link and text over 7,500 characters before sending", async () => {
+    const f = setup(() => new Response(null, { status: 202 }));
+    for (const bad of [
+      { ...request, revise: link },
+      { ...request, mode: "new" as const, sessionId: null, revise: { ...link, name: "../x" } },
+      { ...request, mode: "new" as const, sessionId: null, text: "x".repeat(7501), revise: link },
+    ])
+      await expect(deliverText(f.api, bad)).rejects.toBeInstanceOf(DeliveryFailure);
+    expect(f.fetchImpl).not.toHaveBeenCalled();
+  });
+});

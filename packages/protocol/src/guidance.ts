@@ -37,7 +37,7 @@ const SEQUENCES: Record<Exclude<ScreenHands, "none">, string> = {
 const INTENT_RULE: Record<ScreenHands, string> = {
   batch: "Give every computer, browser_act and shell call its intent, in that voice.",
   calls:
-    "Give every browser_act and shell call its intent, in that voice, and say such a line in a message before computer actions.",
+    "Give every browser_act and shell call its intent, in that voice, and say such a line before computer actions.",
   none: "Give every browser_act and shell call its intent, in that voice.",
 };
 
@@ -64,7 +64,7 @@ export function workingRules(hands: ScreenHands): string {
     "Use request_takeover only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in the note what they need to do, then wait for them to hand control back.",
     "If a site or connection is blocked, tell the user; never get around it with tunnels, proxies or port forwards.",
     `Write to the user briefly, in plain words ("your computer", "the browser"); never name tools or localDot's internal parts. ${INTENT_RULE[hands]}`,
-    "When the task is done, call done with a short summary and the paths of files the user should get.",
+    "When the task is complete, call done with a short summary, the files to hand over and what you checked about them.",
   ]
     .map((rule) => `- ${rule}`)
     .join("\n");
