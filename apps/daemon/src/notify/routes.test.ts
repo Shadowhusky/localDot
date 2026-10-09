@@ -44,6 +44,7 @@ beforeEach(() => {
         },
       },
       notifier: { test: async () => ({ mac: "shown", phones: [] }) },
+      banner: "none",
     },
   });
 });
@@ -56,6 +57,7 @@ describe("notify routes", () => {
   it("needs the install token on every route", async () => {
     for (const [method, path] of [
       ["GET", "/api/notify/settings"],
+      ["GET", "/api/notify/host"],
       ["PUT", "/api/notify/settings"],
       ["GET", "/api/notify/key"],
       ["GET", "/api/notify/subscriptions"],
@@ -66,6 +68,12 @@ describe("notify routes", () => {
       ["POST", "/api/notify/seen"],
     ] as const)
       expect((await app.request(url(path), { method })).status, `${method} ${path}`).toBe(401);
+  });
+
+  it("says how this computer shows banners", async () => {
+    expect(await (await app.request(url("/api/notify/host"), { headers: bearer })).json()).toEqual({
+      banner: "none",
+    });
   });
 
   it("reads and saves settings, refusing anything else", async () => {
