@@ -100,14 +100,14 @@
   height: calc(var(--spacing) * 16);
   overflow: hidden;
   border-radius: var(--radius-row);
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
 }
 
 .appearance-swatch::after {
   position: absolute;
   inset: 22% 18%;
   border-radius: var(--radius-xs);
-  background: linear-gradient(135deg, #dfe6f2, #b9cde4);
+  background: linear-gradient(135deg, var(--color-porcelain-top), var(--color-porcelain-bottom));
   content: "";
 }
 
