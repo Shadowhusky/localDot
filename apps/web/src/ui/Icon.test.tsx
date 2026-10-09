@@ -78,6 +78,9 @@ const PLANNED: IconName[] = [
   // First-run setup: the ChatGPT plan and coding plans (design-v2 §11 A0).
   "message-circle",
   "code",
+  // Export: stepping a custom speed.
+  "minus",
+  "plus",
 ];
 
 describe("Icon", () => {

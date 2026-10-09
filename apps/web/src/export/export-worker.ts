@@ -1,21 +1,25 @@
-import { cameraFor, sceneAt } from "@localdot/stage";
+import { cameraFor, observeAt, sceneAt } from "@localdot/stage";
 import {
-  CanvasSource,
+  canEncodeVideo,
   Mp4OutputFormat,
   Output,
-  QUALITY_HIGH,
+  Quality,
   StreamTarget,
   type StreamTargetChunk,
+  type VideoEncodingConfig,
+  VideoSample,
+  VideoSampleSource,
+  WebMOutputFormat,
 } from "mediabunny";
 import { Rectangle } from "pixi.js";
 import { ObserveBackdrop } from "../replay/backdrop.ts";
-import { sourceAt } from "../replay/decode-policy.ts";
 import { replayGeometry, replayView } from "../replay/recording-source.ts";
-import { ReplayVideo } from "../replay/replay-video.ts";
 import { PixiPresenter } from "../stage/pixi-presenter.ts";
-import { ExportBurnIn } from "./burn-in.ts";
-import { EXPORT_FPS, planExport } from "./export-plan.ts";
+import { burnInText, ExportBurnIn } from "./burn-in.ts";
+import { frameLook, pickFrames } from "./export-frames.ts";
+import { type ExportPlan, type ExportRequest, planExport } from "./export-plan.ts";
 import type { ExportIn, ExportOut, ExportSourceSample } from "./export-protocol.ts";
+import { ExportVideo } from "./export-video.ts";
 
 const scope = self as unknown as {
   postMessage(message: ExportOut, transfer?: Transferable[]): void;
@@ -36,10 +40,38 @@ function cancelled(): void {
   cancellation.signal.throwIfAborted();
 }
 
+// Every export asks for the graphics chip's encoder and takes the browser's own where there is none.
+// The encoder's real-time mode is left alone: it holds each frame to the clock and made a video
+// several times slower to export (lane L13's measurements).
+async function encoding(request: ExportRequest, plan: ExportPlan): Promise<VideoEncodingConfig> {
+  const codec = request.format === "webm" ? "vp9" : "avc";
+  const config: VideoEncodingConfig = {
+    codec,
+    quality: new Quality({ bitrate: plan.bitrate, bitrateMode: "variable" }),
+    keyFrameInterval: 5,
+  };
+  const hardware = await canEncodeVideo(codec, {
+    width: request.size.w,
+    height: request.size.h,
+    quality: config.quality,
+    frameRate: plan.fps,
+    hardwareAcceleration: "prefer-hardware",
+  }).catch(() => false);
+  return { ...config, hardwareAcceleration: hardware ? "prefer-hardware" : "no-preference" };
+}
+
+interface Held {
+  sample: VideoSample;
+  from: number;
+}
+
 async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void> {
   let presenter: PixiPresenter | undefined;
-  let video: ReplayVideo | undefined;
+  let video: ExportVideo | undefined;
   let backdrop: ObserveBackdrop | undefined;
+  let samples: AsyncGenerator<VideoSample | null, void, unknown> | undefined;
+  // The last picture rendered, from the frame it first shows on.
+  let held: Held | null = null;
   const originalEncode = VideoEncoder.prototype.encode;
   let peakEncodeQueue = 0;
   VideoEncoder.prototype.encode = function (frame, options) {
@@ -47,10 +79,10 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
     peakEncodeQueue = Math.max(peakEncodeQueue, this.encodeQueueSize);
   };
   try {
-    const plan = planExport(start.request, start.model, start.activity, start.gaps);
-    if (start.request.sessionId !== start.source.sessionId)
-      throw new Error("Mismatched export source.");
-    const { w: width, h: height } = start.request.size;
+    const { request } = start;
+    const plan = planExport(request, start.model, start.activity, start.gaps);
+    if (request.sessionId !== start.source.sessionId) throw new Error("Mismatched export source.");
+    const { w: width, h: height } = request.size;
     const canvas = new OffscreenCanvas(width, height);
     presenter = await PixiPresenter.create(canvas, {
       width,
@@ -60,22 +92,24 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
       warn() {},
     });
     cancelled();
-    presenter.setScreen(replayGeometry(start.model, start.source));
-    const screen = replayGeometry(start.model, start.source) ?? { w: 1280, h: 800 };
-    const camera = cameraFor({
-      stageW: width,
-      stageH: height,
-      desktopW: screen.w,
-      desktopH: screen.h,
-      zoom: 1,
-    });
-    presenter.setCamera(camera);
+    const screen = replayGeometry(start.model, start.source);
+    presenter.setScreen(screen);
+    presenter.setCamera(
+      cameraFor({
+        stageW: width,
+        stageH: height,
+        desktopW: screen?.w ?? 1280,
+        desktopH: screen?.h ?? 800,
+        zoom: 1,
+      }),
+    );
     const burnIn = new ExportBurnIn(start.theme, width, height);
     presenter.screen.addChild(burnIn);
     backdrop = new ObserveBackdrop(start.source);
-    if (start.source.video)
-      video = await ReplayVideo.open(start.source, cancellation.signal, { sequential: true });
+    if (start.source.video) video = await ExportVideo.open(start.source, cancellation.signal);
     cancelled();
+    const picks = pickFrames(plan, video ?? null, start.gaps);
+    samples = video?.samples(picks.videoTimes);
     let bytes = 0;
     let chunk = 0;
     const writable = new WritableStream<StreamTargetChunk>({
@@ -91,62 +125,88 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
       },
     });
     output = new Output({
-      format: new Mp4OutputFormat({ fastStart: false }),
+      format:
+        request.format === "webm"
+          ? new WebMOutputFormat()
+          : new Mp4OutputFormat({ fastStart: false }),
       target: new StreamTarget(writable, { chunked: true, chunkSize: 4 * 1024 * 1024 }),
     });
-    const canvasSource = new CanvasSource(canvas, {
-      codec: "avc",
-      bitrate: QUALITY_HIGH,
-      keyFrameInterval: 2,
-      latencyMode: "quality",
-    });
-    output.addVideoTrack(canvasSource, { frameRate: EXPORT_FPS });
+    const encoder = new VideoSampleSource(await encoding(request, plan));
+    output.addVideoTrack(encoder, { frameRate: plan.fps });
     await output.start();
+    const view = replayView(start.source, { reducedMotion: false });
+    const screenName = start.source.screen ?? "desktop";
     const hashes: string[] | null = start.hashes ? [] : null;
     let peakOpenFrames = 0;
     let sourceSamples: ExportSourceSample[] = [];
+    let picture: string | null = null;
+    let look: string | null = null;
+    // A picture is encoded once it is known how long it stays: until the frame that looks different,
+    // or for a second at most, so a still stretch still has a frame every second.
+    const emit = async (shown: Held, until: number) => {
+      try {
+        shown.sample.setTimestamp(shown.from / plan.fps);
+        shown.sample.setDuration((until - shown.from) / plan.fps);
+        cancelled();
+        await encoder.add(shown.sample);
+      } finally {
+        shown.sample.close();
+      }
+    };
     for (let index = 0; index < plan.frames; index++) {
       cancelled();
-      const time = plan.sessionMsAt(index);
-      const source =
-        plan.gapAt(index) === "user-control"
-          ? "hold"
-          : sourceAt(time, {
-              hasVideo: !!video,
-              firstMs: video?.firstMs ?? null,
-              lastMs: video?.lastMs ?? null,
-              gaps: start.gaps,
-            });
+      const time = picks.times[index] ?? 0;
+      const source = picks.sources[index] ?? "hold";
       if (start.probe) sourceSamples.push({ tMs: time, source });
-      let frame: VideoFrame | null = null;
+      let incoming: VideoSample | null = null;
       try {
-        if (source === "video" && video) frame = await video.want(time, "play");
-        else if (source === "backdrop") frame = await backdrop.frameAt(start.model, time);
-        cancelled();
-        peakOpenFrames = Math.max(
-          peakOpenFrames,
-          (video?.stats().openFrames ?? 0) + Number(source === "backdrop" && !!frame),
-        );
-        if (frame) {
-          presenter.present(frame, { backdrop: source === "backdrop" });
-          frame = null;
-        } else if (source === "backdrop") presenter.clearVideo();
-        presenter.draw(
-          sceneAt(start.model, time, replayView(start.source, { reducedMotion: false })),
-        );
-        burnIn.draw(plan.labelAt(index), plan.captionAt(index), plan.gapAt(index));
-        presenter.render();
-        if (hashes) {
-          const { pixels } = presenter.app.renderer.extract.pixels({
-            target: presenter.app.stage,
-            frame: new Rectangle(0, 0, width, height),
-            clearColor: start.theme.void.color,
-          });
-          const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", pixels.slice().buffer));
-          hashes.push(Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join(""));
+        if (source === "video" && samples) {
+          incoming = (await samples.next()).value ?? null;
+          if (incoming) picture = `video ${incoming.timestamp}`;
+        } else if (source === "backdrop") {
+          picture = `screenshot ${observeAt(start.model, time, screenName)?.frameId ?? ""}`;
         }
         cancelled();
-        await canvasSource.add(index / EXPORT_FPS, 1 / EXPORT_FPS);
+        peakOpenFrames = Math.max(peakOpenFrames, Number(!!incoming) + Number(!!held));
+        const scene = request.overlays ? sceneAt(start.model, time, view) : null;
+        const label = plan.labelAt(index);
+        const caption = plan.captionAt(index);
+        const gap = plan.gapAt(index);
+        const next = frameLook(picture, scene, burnInText(label, caption, gap));
+        const changed = next !== look;
+        if (!held || changed || index - held.from >= plan.fps) {
+          let sample: VideoSample;
+          if (!held || changed) {
+            if (incoming) presenter.present(incoming.toVideoFrame());
+            else if (source === "backdrop") {
+              const still = await backdrop.frameAt(start.model, time);
+              cancelled();
+              if (still) presenter.present(still, { backdrop: true });
+              else presenter.clearVideo();
+            }
+            presenter.draw(scene);
+            burnIn.draw(label, caption, gap);
+            presenter.render();
+            if (hashes) {
+              const { pixels } = presenter.app.renderer.extract.pixels({
+                target: presenter.app.stage,
+                frame: new Rectangle(0, 0, width, height),
+                clearColor: start.theme.void.color,
+              });
+              const hash = new Uint8Array(
+                await crypto.subtle.digest("SHA-256", pixels.slice().buffer),
+              );
+              hashes.push(Array.from(hash, (byte) => byte.toString(16).padStart(2, "0")).join(""));
+            }
+            sample = new VideoSample(canvas, { timestamp: index / plan.fps });
+            look = next;
+          } else {
+            sample = held.sample.clone();
+            if (hashes) hashes.push(hashes.at(-1) ?? "");
+          }
+          if (held) await emit(held, index);
+          held = { sample, from: index };
+        } else if (hashes) hashes.push(hashes.at(-1) ?? "");
         if (index % 15 === 0 || index === plan.frames - 1)
           post({
             type: "progress",
@@ -160,11 +220,13 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
           sourceSamples = [];
         }
       } finally {
-        frame?.close();
+        incoming?.close();
       }
     }
+    if (held) await emit(held, plan.frames);
+    held = null;
     cancelled();
-    canvasSource.close();
+    encoder.close();
     await output.finalize();
     cancelled();
     post({ type: "done", frames: plan.frames, bytes, hashes });
@@ -181,6 +243,8 @@ async function render(start: Extract<ExportIn, { type: "start" }>): Promise<void
     );
   } finally {
     VideoEncoder.prototype.encode = originalEncode;
+    held?.sample.close();
+    await samples?.return(undefined).catch(() => {});
     video?.close();
     backdrop?.close();
     presenter?.clearVideo();

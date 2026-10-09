@@ -7,7 +7,7 @@ import { type DotFeed, dotFeed } from "../dot/dot-feed.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { setReplayPresence } from "../dot/replay-presence.ts";
 import { ExportButton } from "../export/ExportButton.tsx";
-import { ExportPopover } from "../export/ExportPopover.tsx";
+import { ExportSheet } from "../export/ExportSheet.tsx";
 import { type ExportContext, exportContext } from "../export/export-context.ts";
 import type { ExportJob } from "../export/job.ts";
 import { exportSupport } from "../export/sink.ts";
@@ -783,7 +783,7 @@ function Player({
         </RailPanel>
       )}
       {exporting && (
-        <ExportPopover
+        <ExportSheet
           key={exporting.key}
           api={api}
           job={job}

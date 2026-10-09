@@ -51,8 +51,13 @@ const request: ExportRequest = {
   speed: 2,
   skipIdle: true,
   captions: true,
+  overlays: true,
   size: { w: 1280, h: 800 },
+  fps: 30,
+  quality: "high",
+  format: "mp4",
 };
+const expected = { durationS: 30, fitted: { bytes: 1_000_000, ms: 2000 } };
 const done = (bytes: number) => ({ type: "done" as const, frames: 30, bytes, hashes: null });
 
 beforeEach(() => {
@@ -86,7 +91,7 @@ describe("an export without a save picker", () => {
     const job = createExportJob();
     const seen: string[] = [];
     job.subscribe(() => seen.push(job.snapshot().phase));
-    const starting = job.start(context, request, 30);
+    const starting = job.start(context, request, expected);
     await vi.waitFor(() => expect(job.snapshot().phase).toBe("exporting"));
     expect(job.snapshot().context).toBe(context);
     run.progress({ type: "progress", done: 12, total: 40, openFrames: 1, encodeQueue: 1 });
@@ -123,7 +128,7 @@ describe("an export without a save picker", () => {
   it("keeps a finished video waiting to be saved when the popover is put away", async () => {
     vi.stubGlobal("showSaveFilePicker", undefined);
     const job = createExportJob();
-    const starting = job.start(context, request, 30);
+    const starting = job.start(context, request, expected);
     await vi.waitFor(() => expect(run.sink).not.toBeNull());
     await run.sink?.close();
     run.finish(done(0));
@@ -141,7 +146,7 @@ describe("an export through the save picker", () => {
       vi.fn(async () => ({ name: "Quarterly.mp4", createWritable: async () => stream })),
     );
     const job = createExportJob();
-    const starting = job.start(context, request, 12);
+    const starting = job.start(context, request, { ...expected, durationS: 12 });
     expect(job.snapshot().phase).toBe("picking");
     await vi.waitFor(() => expect(job.snapshot().phase).toBe("exporting"));
     run.finish(done(5000));
@@ -160,7 +165,7 @@ describe("an export through the save picker", () => {
       }),
     );
     const job = createExportJob();
-    await job.start(context, request, 12);
+    await job.start(context, request, { ...expected, durationS: 12 });
     expect(job.snapshot()).toMatchObject({ phase: "options", note: null });
   });
 });
@@ -169,7 +174,7 @@ describe("an export that does not finish", () => {
   it("says a cancelled export saved nothing, until the popover is put away", async () => {
     vi.stubGlobal("showSaveFilePicker", undefined);
     const job = createExportJob();
-    const starting = job.start(context, request, 30);
+    const starting = job.start(context, request, expected);
     await vi.waitFor(() => expect(job.snapshot().phase).toBe("exporting"));
     job.cancel();
     expect(run.cancel).toHaveBeenCalledOnce();
@@ -185,7 +190,7 @@ describe("an export that does not finish", () => {
     const job = createExportJob();
     const listener = vi.fn();
     job.subscribe(listener);
-    const starting = job.start(context, request, 30);
+    const starting = job.start(context, request, expected);
     await vi.waitFor(() => expect(job.snapshot().phase).toBe("exporting"));
     listener.mockClear();
     job.dispose();
@@ -200,10 +205,45 @@ describe("an export that does not finish", () => {
   it("says why when the browser cannot make video", async () => {
     vi.stubGlobal("VideoEncoder", undefined);
     const job = createExportJob();
-    await job.start(context, request, 30);
+    await job.start(context, request, expected);
     expect(job.snapshot()).toMatchObject({
       phase: "options",
       note: "Export needs Chrome, Edge or Safari 17 or later",
+    });
+  });
+});
+
+describe("what a finished export leaves behind", () => {
+  it("names a WebM video for its format and saves it as one", async () => {
+    vi.stubGlobal("showSaveFilePicker", undefined);
+    const job = createExportJob();
+    const starting = job.start(context, { ...request, format: "webm" }, expected);
+    await vi.waitFor(() => expect(run.sink).not.toBeNull());
+    await run.sink?.write(0, new Uint8Array(16));
+    await run.sink?.close();
+    run.finish(done(16));
+    await starting;
+    expect(job.snapshot().file?.name).toBe("localdot-2026-10-08-0901.webm");
+  });
+
+  it("learns how this browser's export compared with the estimate", async () => {
+    localStorage.clear();
+    const stream = { write: vi.fn(), close: vi.fn(async () => {}), abort: vi.fn() };
+    vi.stubGlobal(
+      "showSaveFilePicker",
+      vi.fn(async () => ({ name: "a.mp4", createWritable: async () => stream })),
+    );
+    const clock = vi.spyOn(performance, "now").mockReturnValue(1000);
+    const job = createExportJob();
+    const starting = job.start(context, request, expected);
+    await vi.waitFor(() => expect(job.snapshot().phase).toBe("exporting"));
+    clock.mockReturnValue(1000 + 3000);
+    run.finish(done(2_000_000));
+    await starting;
+    expect(job.snapshot().file?.ms).toBe(3000);
+    expect(JSON.parse(localStorage.getItem("localdot.export-calibration.v1") ?? "")).toEqual({
+      time: 1.5,
+      size: 2,
     });
   });
 });

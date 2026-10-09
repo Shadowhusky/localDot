@@ -126,9 +126,9 @@ test("export popover floats, keeps its size, collapses to a ring and cancels wit
   await openForExport(page, uiSession.seed.sessionId);
   await page.evaluate(() => window.__localdot?.replay?.seek(1000, "exact"));
   const before = await page.getByRole("main", { name: "Replay" }).boundingBox();
-  const trigger = page.getByRole("button", { name: "Export MP4", exact: true });
+  const trigger = page.getByRole("button", { name: "Export video", exact: true });
   await trigger.click();
-  const panel = page.getByRole("dialog", { name: "Export MP4" });
+  const panel = page.getByRole("dialog", { name: "Export video" });
   await expect(panel).toBeVisible();
   const save = panel.getByRole("button", { name: "Save…" });
   await expect(save).not.toHaveAttribute("aria-disabled", "true");
