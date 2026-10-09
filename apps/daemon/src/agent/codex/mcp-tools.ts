@@ -26,7 +26,8 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
     `button; mods; ms up to ${MAX_DRAG_MS} for the motion; one approval covers the whole path), move (point: ` +
     "hovers, or drags while a button is down), mouse_down (point optional, button, mods: the button stays " +
     "down until mouse_up, at most 60 s; a move, a scroll and the mouse_up while it is down drag from where " +
-    "it went down, and a drop on something that sends, uploads or deletes asks first), " +
+    "it went down, and a drop on a send, post or delete control on a web page, or a file carried " +
+    "onto a web page, asks first), " +
     "mouse_up (point optional, button), type (text), key (keys: X key names such as Return, Page_Up or plus, " +
     "several for a combo like ctrl+l; repeat up to 100 presses), hold_key (keys, ms up to 30000 to keep them " +
     "down), scroll (point or where the cursor is, dx and dy in steps of -30..30, mods), wait (ms), zoom " +
