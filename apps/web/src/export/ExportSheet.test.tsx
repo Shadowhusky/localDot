@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../lib/api.ts";
 import { ExportSheet } from "./ExportSheet.tsx";
 import type { ExportContext } from "./export-context.ts";
+import { planExport } from "./export-plan.ts";
 import type { HostExports, HostExportsView } from "./host-exports.ts";
 import type { ExportJob, ExportJobState } from "./job.ts";
 import { LONG_EXPORT } from "./sink.ts";
@@ -18,6 +19,10 @@ vi.mock("mediabunny", () => ({
 }));
 const rate = vi.hoisted(() => ({ fps: 60 as number | null }));
 vi.mock("./source-rate.ts", () => ({ probeFrameRate: async () => rate.fps }));
+vi.mock("./export-plan.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("./export-plan.ts")>();
+  return { ...actual, planExport: vi.fn(actual.planExport) };
+});
 
 const sessionId = "01K00000000000000000000000";
 const IDLE: ExportJobState = {
@@ -298,6 +303,20 @@ describe("Export video", () => {
     });
   });
 
+  it("shows Showcase's row as Showcase makes it, whatever speed and Skip idle are set", async () => {
+    rate.fps = 30;
+    await show(fakeJob(), screenContext());
+    const row = () => preset("Showcase").closest("label")?.textContent;
+    const made = row();
+    expect(made).toContain("1920 × 1410 · 30 fps · with dot");
+    fireEvent.click(speed("3×"));
+    more();
+    fireEvent.click(screen.getByRole("switch", { name: /Skip idle/ }));
+    expect(row()).toBe(made);
+    fireEvent.click(preset("Showcase"));
+    expect(row()).toBe(made);
+  });
+
   it("puts dot on the picture on request, and remembers where", async () => {
     const job = fakeJob();
     const panel = await show(job);
@@ -307,6 +326,9 @@ describe("Export video", () => {
     expect(preset("Showcase")).toHaveProperty("checked", true);
     fireEvent.click(screen.getByRole("radio", { name: "On the picture" }));
     expect(preset("Custom")).toHaveProperty("checked", true);
+    expect(description(preset("Custom"))).toContain(
+      "1920 × 1200 · 60 fps · high quality · with dot",
+    );
     expect(panel.querySelector(".export-preview")?.getAttribute("data-dot")).toBe("over");
     fireEvent.click(screen.getByRole("button", { name: "Save…" }));
     expect(started(job)[1]).toMatchObject({ dot: "over", size: { w: 1920, h: 1200 } });
@@ -481,46 +503,51 @@ describe("Export video", () => {
   });
 
   it("previews the caption the video will show: dot's line at the playhead", async () => {
-    const at = (type: string, tMs: number, data: object, step?: string, seq = 0) =>
-      ({
-        v: 1,
-        id: sessionId,
-        seq,
-        t: msToMicros(tMs),
-        agent: "main",
-        ...(step ? { step } : {}),
-        type,
-        data,
-      }) as LocalDotEvent;
-    const model = foldEvents(emptyModel(), [
-      at("session.start", 0, { screen: { w: 1280, h: 800, scale: 1 }, os: "linux" }, undefined, 0),
-      at("message.user", 0, { messageId: sessionId, text: "Sum the sales", kind: "task" }, "", 1),
-      at("agent.state", 15_000, { state: "acting" }, undefined, 2),
-      at(
-        "step.start",
-        15_000,
-        { kind: "gui", intent: "Opening the monthly report to read the sales table" },
-        "s1",
-        3,
-      ),
-      at(
-        "action.intent",
-        15_010,
-        { verb: "click", label: "Open monthly-report.ods", risk: "none" },
-        "s1",
-        4,
-      ),
-      at("action.result", 15_400, { ok: true }, "s1", 5),
-      at("step.end", 15_450, { status: "ok" }, "s1", 6),
-      at("agent.state", 15_500, { state: "thinking" }, undefined, 7),
-    ]);
-    model.ended = { t: 60_000, reason: "done" };
-    await show(fakeJob(), context({ model }));
+    await show(fakeJob(), context({ model: reportModel() }));
     expect(document.querySelector(".export-preview-caption")?.textContent).toBe(
       "Opening the monthly report to read the sales table",
     );
   });
 });
+
+// dot opens a report at 0:15 and the task ends at 1:00.
+function reportModel() {
+  const at = (type: string, tMs: number, data: object, step?: string, seq = 0) =>
+    ({
+      v: 1,
+      id: sessionId,
+      seq,
+      t: msToMicros(tMs),
+      agent: "main",
+      ...(step ? { step } : {}),
+      type,
+      data,
+    }) as LocalDotEvent;
+  const model = foldEvents(emptyModel(), [
+    at("session.start", 0, { screen: { w: 1280, h: 800, scale: 1 }, os: "linux" }, undefined, 0),
+    at("message.user", 0, { messageId: sessionId, text: "Sum the sales", kind: "task" }, "", 1),
+    at("agent.state", 15_000, { state: "acting" }, undefined, 2),
+    at(
+      "step.start",
+      15_000,
+      { kind: "gui", intent: "Opening the monthly report to read the sales table" },
+      "s1",
+      3,
+    ),
+    at(
+      "action.intent",
+      15_010,
+      { verb: "click", label: "Open monthly-report.ods", risk: "none" },
+      "s1",
+      4,
+    ),
+    at("action.result", 15_400, { ok: true }, "s1", 5),
+    at("step.end", 15_450, { status: "ok" }, "s1", 6),
+    at("agent.state", 15_500, { state: "thinking" }, undefined, 7),
+  ]);
+  model.ended = { t: 60_000, reason: "done" };
+  return model;
+}
 
 // The strip's film spans 600 px from x = 100: on a minute's recording, a pixel is 100 ms.
 function layOut(panel: HTMLElement) {
@@ -581,6 +608,25 @@ describe("Trimming the video", () => {
     expect(started(job)[2]).toMatchObject({ durationS: 25 });
   });
 
+  it("previews the handle that is held, even before it moves", async () => {
+    const panel = await show(fakeJob(), context({ model: reportModel() }));
+    const caption = () => panel.querySelector(".export-preview-caption")?.textContent;
+    expect(caption()).toBe("Opening the monthly report to read the sales table");
+    const { to } = layOut(panel);
+    press(to, "pointerdown", 705);
+    expect(panel.querySelector(".export-preview-time")?.textContent).toBe("End1:00.0");
+    expect(caption()).toBe("Done.");
+  });
+
+  it("works out no estimates again while a handle is only held", async () => {
+    const panel = await show(fakeJob());
+    const { from } = layOut(panel);
+    vi.mocked(planExport).mockClear();
+    press(from, "pointerdown", 95);
+    expect(panel.querySelector(".export-preview[data-held]")).not.toBe(null);
+    expect(planExport).not.toHaveBeenCalled();
+  });
+
   it("keeps the handles apart and inside the recording", async () => {
     const panel = await show(fakeJob());
     const { from, to } = layOut(panel);
@@ -638,14 +684,14 @@ describe("Trimming the video", () => {
     fireEvent.keyDown(field("End time"), { key: "Enter" });
     fireEvent.change(field("Start time"), { target: { value: "12.25" } });
     fireEvent.blur(field("Start time"));
-    expect(times()).toEqual(["0:12.2", "0:45.0"]);
+    expect(times()).toEqual(["0:12.3", "0:45.0"]);
     fireEvent.change(field("Start time"), { target: { value: "soon" } });
     fireEvent.blur(field("Start time"));
     fireEvent.change(field("End time"), { target: { value: "5:00" } });
     fireEvent.keyDown(field("End time"), { key: "Enter" });
-    expect(times()).toEqual(["0:12.2", "1:00.0"]);
+    expect(times()).toEqual(["0:12.3", "1:00.0"]);
     fireEvent.click(screen.getByRole("button", { name: "Save…" }));
-    expect(started(job)[1]).toMatchObject({ fromMs: 12_250, toMs: 60_000 });
+    expect(started(job)[1]).toMatchObject({ fromMs: 12_300, toMs: 60_000 });
   });
 
   it("nudges a focused handle with the keyboard", async () => {

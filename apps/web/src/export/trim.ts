@@ -13,8 +13,8 @@ export type TrimShortcut = "whole" | "chapter" | "selection";
 export const MIN_TRIM_MS = 500;
 // How near, in pixels, a dragged handle comes to a step's edge before it stops there.
 export const SNAP_PX = { fine: 8, coarse: 14 } as const;
-// A dragged handle moves in tenths of a second, the steps the times are shown in.
-const DRAG_STEP_MS = 100;
+// A dragged or typed handle moves in tenths of a second, the steps the times are shown in.
+const STEP_MS = 100;
 // Thumbnails keep the picture's own proportion.
 const TILE_RATIO = 1.6;
 
@@ -108,12 +108,7 @@ export function dragEdge(
   snap: { edges: readonly number[]; reachMs: number } | null,
 ): { range: TrimRange; snapped: number | null } {
   const snapped = snap ? snapTo(timeMs, snap.edges, snap.reachMs) : null;
-  const next = moveEdge(
-    range,
-    whole,
-    edge,
-    snapped ?? Math.round(timeMs / DRAG_STEP_MS) * DRAG_STEP_MS,
-  );
+  const next = moveEdge(range, whole, edge, snapped ?? Math.round(timeMs / STEP_MS) * STEP_MS);
   const at = edge === "from" ? next.fromMs : next.toMs;
   return { range: next, snapped: snapped !== null && Math.round(snapped) === at ? snapped : null };
 }
@@ -155,8 +150,8 @@ export function trimTimeLabel(ms: number): string {
   return `${timeLabel(Math.floor(tenths / 10) * 1000)}.${tenths % 10}`;
 }
 
-// A typed moment: "1:05", "1:05.3", "65", "65.3 s" or "1:02:03", in milliseconds. Null when it
-// isn't one.
+// A typed moment: "1:05", "1:05.3", "65", "65.3 s" or "1:02:03", in milliseconds on the nearest
+// tenth of a second. Null when it isn't one.
 export function parseTrimTime(text: string): number | null {
   const match = /^\s*((?:\d+:){0,2})(\d+(?:[.,]\d*)?)\s*s?\s*$/i.exec(text);
   if (!match) return null;
@@ -165,7 +160,7 @@ export function parseTrimTime(text: string): number | null {
   if (head.length > 0 && seconds >= 60) return null;
   if (head.length === 2 && (head[1] ?? 0) >= 60) return null;
   const total = head.reduce((sum, part) => sum * 60 + part, 0) * 60 + seconds;
-  return Number.isFinite(total) ? Math.round(total * 1000) : null;
+  return Number.isFinite(total) ? Math.round((total * 1000) / STEP_MS) * STEP_MS : null;
 }
 
 // Which of Whole, This step and Selection the handles hold, if any.

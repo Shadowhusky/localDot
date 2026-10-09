@@ -4,6 +4,7 @@ import {
   type RefObject,
   useDeferredValue,
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -26,6 +27,7 @@ import { Switch } from "../ui/Switch.tsx";
 import { TextField } from "../ui/TextField.tsx";
 import type { ExportContext } from "./export-context.ts";
 import {
+  type Calibration,
   type ExportEstimate,
   estimateExport,
   storedCalibration,
@@ -114,6 +116,31 @@ interface Outcome extends ExportEstimate {
   fitted: ExportEstimate;
 }
 
+function outcomeOf(
+  context: ExportContext,
+  env: ExportEnvironment,
+  calibration: Calibration,
+  options: ExportOptions,
+  base: ExportRequest,
+): Outcome | null {
+  try {
+    const request = {
+      ...base,
+      ...options,
+      dot: options.dot === "off" ? undefined : options.dot,
+      size: sizeOf(options.size, env, options.dot),
+    };
+    const plan = planExport(request, context.model, context.activity, context.gaps);
+    return {
+      ...estimateExport(plan, request, calibration),
+      durationS: plan.durationS,
+      fitted: estimateExport(plan, request),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export function ExportSheet({
   api,
   job,
@@ -165,39 +192,32 @@ export function ExportSheet({
   // The estimates follow a moving handle as fast as they can be worked out, never holding it back.
   const chosen = useDeferredValue(range);
   const options = optionsFor(choices, env);
-  const request = exportRequest(context.sessionId, chosen, choices, env);
-
-  const outcome = (rowOptions: ExportOptions, base: ExportRequest = request): Outcome | null => {
-    try {
-      const rowRequest = {
-        ...base,
-        ...rowOptions,
-        dot: rowOptions.dot === "off" ? undefined : rowOptions.dot,
-        size: sizeOf(rowOptions.size, env, rowOptions.dot),
-      };
-      const plan = planExport(rowRequest, context.model, context.activity, context.gaps);
-      return {
-        ...estimateExport(plan, rowRequest, calibration),
-        durationS: plan.durationS,
-        fitted: estimateExport(plan, rowRequest),
-      };
-    } catch {
-      return null;
-    }
-  };
-  const presets = {
-    quality: presetOptions("quality", env, choices.speed),
-    fast: presetOptions("fast", env, choices.speed),
-    showcase: presetOptions("showcase", env, choices.speed),
-    custom: fitOptions(choices.custom, env, choices.speed),
-  } satisfies Record<PresetChoice, ExportOptions>;
-  const outcomes = {
-    quality: outcome(presets.quality),
-    fast: outcome(presets.fast),
-    showcase: outcome(presets.showcase),
-    custom: outcome(presets.custom),
-  };
-  const current = outcome(options);
+  const { presets, outcomes, current } = useMemo(() => {
+    const request = exportRequest(context.sessionId, chosen, choices, env);
+    const outcome = (rowOptions: ExportOptions, base = request) =>
+      outcomeOf(context, env, calibration, rowOptions, base);
+    // Showcase is made at 1× with idle skipped, so its row says what choosing it would make.
+    const showcase = choices.preset === "showcase" ? choices : choosePreset(choices, "showcase");
+    const presets = {
+      quality: presetOptions("quality", env, choices.speed),
+      fast: presetOptions("fast", env, choices.speed),
+      showcase: presetOptions("showcase", env, showcase.speed),
+      custom: fitOptions(choices.custom, env, choices.speed),
+    } satisfies Record<PresetChoice, ExportOptions>;
+    return {
+      presets,
+      outcomes: {
+        quality: outcome(presets.quality),
+        fast: outcome(presets.fast),
+        showcase: outcome(
+          presets.showcase,
+          exportRequest(context.sessionId, chosen, showcase, env),
+        ),
+        custom: outcome(presets.custom),
+      },
+      current: outcome(optionsFor(choices, env)),
+    };
+  }, [context, chosen, choices, env, calibration]);
 
   const update = (next: ExportChoices) => {
     setChoices(next);
@@ -247,9 +267,10 @@ export function ExportSheet({
   }, [working]);
   const screen = context.source.screen ?? "desktop";
   const edgeAt = (edge: TrimEdge) => (edge === "from" ? range.fromMs : range.toMs);
+  const shownOf = hold?.edge ?? shownEdge;
   const shownAt = Math.max(
     range.fromMs,
-    Math.min(range.toMs, shownEdge ? edgeAt(shownEdge) : context.atMs),
+    Math.min(range.toMs, shownOf ? edgeAt(shownOf) : context.atMs),
   );
   const frame = frameAt(context.model, shownAt, range, screen);
   const caption = bandLineAt(context.model, shownAt);
@@ -267,7 +288,7 @@ export function ExportSheet({
       label,
       description:
         preset === "custom"
-          ? `${optionsText(presets.custom, env)} · ${QUALITY_LABEL[presets.custom.quality].toLowerCase()} quality`
+          ? `${optionsText(presets.custom, env)} · ${QUALITY_LABEL[presets.custom.quality].toLowerCase()} quality${presets.custom.dot === "off" ? "" : " · with dot"}`
           : `${optionsText(presets[preset], env)} · ${PRESET_NOTE[preset]}`,
       disabledReason: unavailable ? NOT_CUSTOM : undefined,
       aside: (
@@ -441,7 +462,7 @@ export function ExportSheet({
               <Switch
                 className="ui-group-row"
                 label="Show the current step"
-                description="A small caption at the foot of the video"
+                description="A small caption on the video"
                 checked={options.captions}
                 onCheckedChange={(captions) => option({ captions })}
               />
@@ -488,7 +509,7 @@ export function ExportSheet({
         }
         onSave={() => {
           const final = exportRequest(context.sessionId, range, choices, env);
-          const made = outcome(options, final);
+          const made = outcomeOf(context, env, calibration, options, final);
           if (made)
             void job.start(context, final, { durationS: made.durationS, fitted: made.fitted });
         }}

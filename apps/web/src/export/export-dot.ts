@@ -9,7 +9,7 @@ import {
   TextStyle,
   Texture,
 } from "pixi.js";
-import { type DotFeed, sayMs } from "../dot/dot-feed.ts";
+import { type RecordedPresence, sayMs } from "../dot/dot-feed.ts";
 import { DotEngine, type Point } from "../dot/engine/engine.ts";
 import type { DotState } from "../dot/engine/states.ts";
 import { gazeTo } from "../dot/gaze.ts";
@@ -38,11 +38,6 @@ const GLOW_FALLOFF = [
   [1, 0.023],
   [1.25, 0],
 ] as const;
-
-export interface Presence {
-  feed: DotFeed;
-  line: string;
-}
 
 const css = (c: ThemeColor) =>
   `rgba(${(c.color >> 16) & 255},${(c.color >> 8) & 255},${c.color & 255},${c.alpha})`;
@@ -169,7 +164,7 @@ export class ExportDot extends Container {
     plates: DotPlates | null;
     seed: number;
     t: number;
-    first: Presence;
+    first: RecordedPresence;
   }) {
     super();
     const layout = dotLayout(o.size, o.placement);
@@ -263,7 +258,7 @@ export class ExportDot extends Container {
   }
 
   // Moves dot to video time t (ms, never backwards) with what the recording shows at that moment.
-  update(t: number, { feed, line }: Presence): void {
+  update(t: number, { feed, line, forUser }: RecordedPresence): void {
     const engine = this.#engine;
     const dt = Math.max(0, t - this.#t);
     this.#t = t;
@@ -294,7 +289,7 @@ export class ExportDot extends Container {
     this.#markLevel = approach(this.#markLevel, feed.attention, dt, MARK_MS, MARK_MS);
     this.#mark.alpha = this.#markLevel;
 
-    const shown = this.#track.at(line, t);
+    const shown = this.#track.at(line, t, forUser);
     if (shown.text !== this.#shown) this.#say(shown.text);
     this.#words.alpha = shown.alpha;
   }

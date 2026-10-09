@@ -1,9 +1,10 @@
-import { type ActionState, emptyModel, type SessionModel } from "@localdot/stage";
+import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
+import { type ActionState, emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { hudFor } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
-import { statusFor, type TaskHud } from "../session/status.ts";
-import { dotFeed, sayMs } from "./dot-feed.ts";
+import { STATE_CAPTIONS, statusFor, type TaskHud, taskHud } from "../session/status.ts";
+import { dotFeed, recordedPresence, sayMs } from "./dot-feed.ts";
 
 const cell: CellSummary = {
   id: "01JXYZ0000000000000000ABCD",
@@ -76,5 +77,50 @@ describe("dot's feed from the status model", () => {
     expect(sayMs("Done.")).toBe(500);
     expect(sayMs("Checking February's net total against revenue minus returns.")).toBe(1360);
     expect(sayMs("word ".repeat(40))).toBe(2200);
+  });
+});
+
+describe("dot in a recording", () => {
+  let seq = 0;
+  const ev = (type: string, tMs: number, data: object, step?: string) =>
+    ({
+      v: 1,
+      id: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N",
+      seq: seq++,
+      t: msToMicros(tMs),
+      agent: "main",
+      ...(step ? { step } : {}),
+      type,
+      data,
+    }) as LocalDotEvent;
+  const recorded = foldEvents(emptyModel(), [
+    ev("session.start", 0, { screen: { w: 1280, h: 800, scale: 1 }, os: "linux" }),
+    ev("message.user", 0, {
+      messageId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P1A",
+      text: "Text Mum",
+      kind: "task",
+    }),
+    ev("agent.state", 100, { state: "acting" }),
+    ev("step.start", 100, { kind: "gui", intent: "Opening Telegram to send your message" }, "s1"),
+    ev("action.intent", 110, { verb: "click", label: "Click “Telegram”", risk: "none" }, "s1"),
+    ev("action.result", 500, { ok: true }, "s1"),
+    ev("step.end", 550, { status: "ok" }, "s1"),
+    ev("agent.state", 600, { state: "thinking" }),
+    ev("session.end", 3000, { reason: "done" }),
+  ]);
+
+  it("says what dot is doing, as Replay's band does, never a word for its state", () => {
+    expect(STATE_CAPTIONS.has(taskHud(recorded, 2000).caption)).toBe(true);
+    for (const t of [300, 2000])
+      expect(recordedPresence(recorded, t)).toMatchObject({
+        line: "Opening Telegram to send your message",
+        forUser: false,
+      });
+  });
+
+  it("marks the end's line as one for the user", () => {
+    const end = recordedPresence(recorded, 3000);
+    expect(end.line).toBe(taskHud(recorded, 3000).caption);
+    expect(end.forUser).toBe(true);
   });
 });

@@ -191,12 +191,13 @@ describe("typed times", () => {
   it.each([
     ["1:05", 65_000],
     ["1:05.3", 65_300],
-    [" 0:07,25 ", 7_250],
+    [" 0:07,25 ", 7_300],
+    ["12.24", 12_200],
     ["65", 65_000],
     ["65.3 s", 65_300],
     ["1:02:03", 3_723_000],
     ["0:00", 0],
-  ])("reads %j as %i ms", (text, ms) => {
+  ])("reads %j as %i ms, on the tenth of a second the handles show", (text, ms) => {
     expect(parseTrimTime(text)).toBe(ms);
   });
 

@@ -126,7 +126,7 @@ function make(placement: "under" | "over" = "under", line = "Opening the report.
     plates: null,
     seed: 7,
     t: 0,
-    first: { feed: feed(), line },
+    first: { feed: feed(), line, forUser: false },
   });
 }
 
@@ -156,11 +156,16 @@ describe("dot in an exported video", () => {
     const setState = vi.spyOn(DotEngine.prototype, "setState");
     const setControl = vi.spyOn(DotEngine.prototype, "setControl");
     const dot = make();
-    dot.update(0, { feed: feed(), line: "Opening the report." });
-    dot.update(33, { feed: feed({ state: "acting" }), line: "Opening the report." });
+    dot.update(0, { feed: feed(), line: "Opening the report.", forUser: false });
+    dot.update(33, {
+      feed: feed({ state: "acting" }),
+      line: "Opening the report.",
+      forUser: false,
+    });
     dot.update(67, {
       feed: feed({ state: "acting", control: false }),
       line: "Opening the report.",
+      forUser: false,
     });
     expect(setState.mock.calls).toEqual([["acting", 33]]);
     expect(setControl.mock.calls).toEqual([[false, 67]]);
@@ -170,8 +175,8 @@ describe("dot in an exported video", () => {
   it("looks toward the action point on the picture, up and to the right of its dock", () => {
     const setFocus = vi.spyOn(DotEngine.prototype, "setFocus");
     const dot = make();
-    dot.update(0, { feed: feed({ focus: { x: 0.8, y: 0.2 } }), line: "" });
-    dot.update(16, { feed: feed({ focus: { x: 0.8, y: 0.2 } }), line: "" });
+    dot.update(0, { feed: feed({ focus: { x: 0.8, y: 0.2 } }), line: "", forUser: false });
+    dot.update(16, { feed: feed({ focus: { x: 0.8, y: 0.2 } }), line: "", forUser: false });
     const looks = setFocus.mock.calls.filter(([point]) => point !== null);
     expect(looks).toHaveLength(1);
     const [point] = looks[0] ?? [];
@@ -185,10 +190,10 @@ describe("dot in an exported video", () => {
     const dot = make();
     expect(say).toHaveBeenCalledTimes(1);
     const sent = feed({ state: "acting", dispatched: "a1" });
-    dot.update(10, { feed: sent, line: "Opening the report." });
-    dot.update(20, { feed: sent, line: "Opening the report." });
-    dot.update(30, { feed: feed({ done: true }), line: "Done." });
-    dot.update(40, { feed: feed({ done: true }), line: "Done." });
+    dot.update(10, { feed: sent, line: "Opening the report.", forUser: false });
+    dot.update(20, { feed: sent, line: "Opening the report.", forUser: false });
+    dot.update(30, { feed: feed({ done: true }), line: "Done.", forUser: false });
+    dot.update(40, { feed: feed({ done: true }), line: "Done.", forUser: false });
     expect(react.mock.calls.map(([name]) => name)).toEqual(["dispatch", "success"]);
     expect(say).toHaveBeenCalledTimes(2);
     expect(say.mock.calls[1]?.[0]).toBe(30);
@@ -196,19 +201,26 @@ describe("dot in an exported video", () => {
 
   it("shows each line as the band does, and puts it on glass only on the picture", () => {
     const dot = make("over", "Opening the report.");
-    dot.update(0, { feed: feed(), line: "Opening the report." });
+    dot.update(0, { feed: feed(), line: "Opening the report.", forUser: false });
     expect(drawn.bubbles).toHaveLength(1);
     const words = dot.children.at(-1) as unknown as { alpha: number; children: { text: string }[] };
     expect(words.children[1]?.text).toBe("Opening the report.");
-    dot.update(500, { feed: feed(), line: "Saving it." });
+    dot.update(500, { feed: feed(), line: "Saving it.", forUser: false });
     expect(words.children[1]?.text).toBe("Opening the report.");
-    dot.update(LINE_HOLD_MS + LINE_OUT_MS, { feed: feed(), line: "Saving it." });
+    dot.update(LINE_HOLD_MS + LINE_OUT_MS, { feed: feed(), line: "Saving it.", forUser: false });
     expect(words.children[1]?.text).toBe("Saving it.");
     expect(words.alpha).toBe(0);
     expect(drawn.bubbles).toHaveLength(2);
+    dot.update(LINE_HOLD_MS + 600, { feed: feed(), line: "Which file?", forUser: true });
+    dot.update(LINE_HOLD_MS + 600 + LINE_OUT_MS, {
+      feed: feed(),
+      line: "Which file?",
+      forUser: true,
+    });
+    expect(words.children[1]?.text).toBe("Which file?");
     drawn.bubbles.length = 0;
     const under = make("under");
-    under.update(0, { feed: feed(), line: "Opening the report." });
+    under.update(0, { feed: feed(), line: "Opening the report.", forUser: false });
     expect(drawn.bubbles).toEqual([]);
   });
 });

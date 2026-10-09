@@ -139,6 +139,23 @@ describe("deterministic MP4 export plan", () => {
     expect(planExport({ ...request, captions: false }, model, [], gaps).captionAt(30)).toBeNull();
   });
 
+  it("burns in a line for the user at once, without waiting out the last line's hold", () => {
+    const { model, request } = fixture(3000);
+    model.agentStates.push({ t: 1600, state: "error" });
+    model.stepIndex.set("open", 0);
+    model.steps.push({
+      id: "open",
+      kind: "gui",
+      startT: 1000,
+      endT: 1300,
+      status: "ok",
+      intent: "Opening Telegram",
+    });
+    const plan = planExport(request, model, [], []);
+    expect(plan.captionAt(47)).toBe("Opening Telegram");
+    expect(plan.captionAt(48)).toBe("I can't go on by myself. The chat says what to do.");
+  });
+
   it("asks the encoder for more bits as the picture, the frame rate and the quality grow", () => {
     const small = { w: 1280, h: 800 };
     const large = { w: 2560, h: 1600 };

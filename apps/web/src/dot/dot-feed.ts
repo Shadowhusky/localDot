@@ -6,7 +6,7 @@ import {
   type TaskHud,
   taskHud,
 } from "../session/status.ts";
-import { narrationLine } from "../shell/narration.ts";
+import { atWork, narrationLine } from "../shell/narration.ts";
 import type { Point } from "./engine/engine.ts";
 import type { DotState } from "./engine/states.ts";
 
@@ -52,16 +52,24 @@ export function dotFeed(
   };
 }
 
+export interface RecordedPresence {
+  feed: DotFeed;
+  line: string;
+  // The line is for the user (a question, an approval, a problem, the end), not about dot's work.
+  forUser: boolean;
+}
+
 // What dot did and said at a moment of a recording: Replay's band and an exported video show the
 // same states, gaze and line.
 export function recordedPresence(
   model: SessionModel,
   tMs: number,
   hud: TaskHud = taskHud(model, tMs),
-): { feed: DotFeed; line: string } {
+): RecordedPresence {
   return {
     feed: dotFeed({ dotPose: TASK_POSE[hud.row], control: hud.control, row: hud.row }, model, tMs),
     line: narrationLine(hud.row, hud.caption, model, tMs),
+    forUser: !atWork(hud.row),
   };
 }
 

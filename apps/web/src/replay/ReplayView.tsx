@@ -713,7 +713,9 @@ function Player({
               />
             )
           }
-          band={<NarratorBand line={line} speaker="dot" showDot={showDot} />}
+          band={
+            <NarratorBand line={line} speaker="dot" showDot={showDot} forUser={recorded.forUser} />
+          }
         >
           <Stage
             key={sessionId}

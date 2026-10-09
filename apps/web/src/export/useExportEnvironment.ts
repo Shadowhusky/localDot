@@ -1,5 +1,5 @@
 import { canEncodeVideo } from "mediabunny";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { replayGeometry } from "../replay/recording-source.ts";
 import type { ExportContext } from "./export-context.ts";
 import type { ExportFormat } from "./export-plan.ts";
@@ -68,5 +68,5 @@ export function useExportEnvironment(
       current = false;
     };
   }, [context, onHost]);
-  return host ? { ...env, encodable: hostEncodable(env, host) } : env;
+  return useMemo(() => (host ? { ...env, encodable: hostEncodable(env, host) } : env), [env, host]);
 }

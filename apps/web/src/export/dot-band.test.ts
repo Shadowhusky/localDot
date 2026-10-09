@@ -84,6 +84,34 @@ describe("the line dot says", () => {
     expect(track.at("Second.", 5000 + LINE_OUT_MS).text).toBe("Second.");
   });
 
+  it("brings a line for the user in at once, fading the last line out first", () => {
+    const track = new LineTrack("Opening the report.", 0);
+    expect(track.at("Which report?", 200, true)).toEqual({
+      text: "Opening the report.",
+      alpha: 1,
+    });
+    expect(track.at("Which report?", 200 + LINE_OUT_MS / 2, true).alpha).toBeLessThan(0.5);
+    expect(track.at("Which report?", 200 + LINE_OUT_MS, true)).toEqual({
+      text: "Which report?",
+      alpha: 0,
+    });
+  });
+
+  it("keeps fading a line out when a line for the user arrives during the fade", () => {
+    const track = new LineTrack("First.", 0);
+    track.at("Second.", 100);
+    const fading = track.at("Second.", LINE_HOLD_MS + LINE_OUT_MS / 2);
+    expect(track.at("Done.", LINE_HOLD_MS + LINE_OUT_MS / 2, true)).toEqual(fading);
+    expect(track.at("Done.", LINE_HOLD_MS + LINE_OUT_MS, true).text).toBe("Done.");
+  });
+
+  it("brings the first line after a silence in at once", () => {
+    const track = new LineTrack("First.", 0);
+    track.at("", 2000);
+    expect(track.at("", 2000 + LINE_OUT_MS).text).toBe("");
+    expect(track.at("Second.", 2200)).toEqual({ text: "Second.", alpha: 0 });
+  });
+
   it("fades out to nothing when dot goes quiet", () => {
     const track = new LineTrack("Done.", 0);
     expect(track.at("", 500).text).toBe("Done.");

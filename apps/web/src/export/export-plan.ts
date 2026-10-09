@@ -25,7 +25,7 @@ import {
 } from "@localdot/stage";
 import { timeLabel } from "../replay/replay-view.ts";
 import { taskHud } from "../session/status.ts";
-import { LINE_HOLD_MS, narrationLine } from "../shell/narration.ts";
+import { atWork, LINE_HOLD_MS, narrationLine } from "../shell/narration.ts";
 
 export {
   EXPORT_FORMATS,
@@ -104,21 +104,28 @@ function knownEnd(model: SessionModel, activity: ActivitySpan[]): number {
   return endMs;
 }
 
-// The caption at a moment of the recording: the band's line then, before any hold.
-export function bandLineAt(model: SessionModel, time: number): string {
+// The caption at a moment of the recording: the band's line then, before any hold, and whether it
+// is for the user, so it skips the hold.
+function bandAt(model: SessionModel, time: number): { line: string; forUser: boolean } {
   const hud = taskHud(model, time);
-  return narrationLine(hud.row, hud.caption, model, time);
+  return { line: narrationLine(hud.row, hud.caption, model, time), forUser: !atWork(hud.row) };
 }
 
+export const bandLineAt = (model: SessionModel, time: number) => bandAt(model, time).line;
+
 // The band's line at each frame, each held long enough to read in the video, as the band holds it.
-function heldLines(frames: number, fps: number, lineAt: (frame: number) => string): string[] {
+function heldLines(
+  frames: number,
+  fps: number,
+  lineAt: (frame: number) => { line: string; forUser: boolean },
+): string[] {
   const hold = Math.ceil((LINE_HOLD_MS * fps) / 1000);
   const lines: string[] = [];
   let since = 0;
   for (let frame = 0; frame < frames; frame++) {
     const shown = lines[frame - 1];
-    const line = lineAt(frame);
-    if (shown === undefined || (line !== shown && (!shown || frame - since >= hold))) {
+    const { line, forUser } = lineAt(frame);
+    if (shown === undefined || (line !== shown && (!shown || forUser || frame - since >= hold))) {
       lines.push(line);
       since = frame;
     } else lines.push(shown);
@@ -207,7 +214,7 @@ export function planExport(
     captionAt(frame) {
       sessionMsAt(frame);
       if (!captions) return null;
-      captionTrack ??= heldLines(frames, fps, (index) => bandLineAt(model, sessionMsAt(index)));
+      captionTrack ??= heldLines(frames, fps, (index) => bandAt(model, sessionMsAt(index)));
       return captionTrack[frame] || null;
     },
     gapAt(frame) {

@@ -63,22 +63,30 @@ export function dotLayout(size: ExportSize, placement: DotPlacement): DotLayout 
 const easeOut = (x: number) => 1 - (1 - Math.min(1, Math.max(0, x))) ** 3;
 
 // The line on show at each moment of the video, timed as the band times it in the app: a new line
-// waits until the last has shown for its hold, the last fades out, then the new one fades in.
+// waits until the last has shown for its hold, the last fades out, then the new one fades in. A line
+// for the user, or the first after a silence, doesn't wait.
 export class LineTrack {
   #text: string;
   #since: number;
-  #next: { line: string; at: number } | null = null;
+  #next: { line: string; leave: number } | null = null;
 
   constructor(line: string, t: number) {
     this.#text = line;
     this.#since = t;
   }
 
-  at(line: string, t: number): { text: string; alpha: number } {
+  at(line: string, t: number, forUser = false): { text: string; alpha: number } {
     if (line === this.#text) this.#next = null;
-    else if (this.#next?.line !== line) this.#next = { line, at: this.#next?.at ?? t };
+    else if (this.#next?.line !== line) {
+      const pending = this.#next?.leave;
+      const leave =
+        forUser || !this.#text
+          ? Math.min(pending ?? t, t)
+          : (pending ?? Math.max(t, this.#since + LINE_HOLD_MS));
+      this.#next = { line, leave };
+    }
     if (this.#next) {
-      const leave = Math.max(this.#next.at, this.#since + LINE_HOLD_MS);
+      const { leave } = this.#next;
       const swap = leave + (this.#text ? LINE_OUT_MS : 0);
       if (t >= swap) {
         this.#text = this.#next.line;
