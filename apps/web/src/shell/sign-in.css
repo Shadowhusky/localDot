@@ -80,10 +80,11 @@
 
 .command-chip code {
   min-width: 0;
-  overflow-x: auto;
   color: var(--color-fg-1);
   font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
-  white-space: nowrap;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-wrap: pretty;
   user-select: all;
 }
 

@@ -1,4 +1,4 @@
-import type { ClaudeCodeStatus } from "@localdot/protocol";
+import { CLAUDE_CODE_MODELS, type ClaudeCodeStatus } from "@localdot/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ApiClient } from "../lib/api.ts";
 import { loadClaudeCode } from "./settings-api.ts";
@@ -59,7 +59,8 @@ export function useClaudeCode(api: ApiClient, active: boolean) {
     status,
     checking,
     error,
-    models: ready ? status.models : [],
+    // Until Claude Code is set up, its own aliases stand in so the chosen model reads by name.
+    models: ready ? status.models : CLAUDE_CODE_MODELS,
     canStart: ready,
     check: () => run(true),
   };

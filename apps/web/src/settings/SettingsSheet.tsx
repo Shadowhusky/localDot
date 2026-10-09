@@ -526,9 +526,10 @@ function SectionList({
 }) {
   const main = props.choices.main;
   const mainName = main
-    ? (props.providers
-        .find((row) => row.id === main.provider)
-        ?.models.find((model) => model.id === main.model)?.name ?? main.model)
+    ? ((subscription(main.provider)
+        ? props.subscriptionModels
+        : props.providers.find((row) => row.id === main.provider)?.models
+      )?.find((model) => model.id === main.model)?.name ?? main.model)
     : "";
   const values: Partial<Record<SettingsSection, string>> = {
     models: props.loading ? "" : mainName,

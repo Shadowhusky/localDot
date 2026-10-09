@@ -40,6 +40,7 @@ function fixture(first: unknown) {
       <>
         <ClaudeCodePanel claude={claude} />
         <output data-testid="ready">{String(claude.canStart)}</output>
+        <output data-testid="models">{claude.models.map((model) => model.name).join(", ")}</output>
       </>
     );
   }
@@ -67,6 +68,7 @@ describe("Claude Code in Settings", () => {
     await screen.findByText("claude auth login");
     expect(screen.getByText("Sign in to Claude Code, then check again.")).toBeTruthy();
     expect(screen.getByTestId("ready").textContent).toBe("false");
+    expect(screen.getByTestId("models").textContent).toBe("Claude Sonnet, Claude Opus");
     f.set(signedIn);
     // Too soon after the last look: nothing is asked.
     fireEvent.focus(window);
@@ -76,6 +78,7 @@ describe("Claude Code in Settings", () => {
     await waitFor(() => expect(screen.getByTestId("ready").textContent).toBe("true"));
     expect(f.calls).toEqual(["GET /api/agent/claude-code", "POST /api/agent/claude-code/check"]);
     expect(screen.getByText("Signed in · Max plan")).toBeTruthy();
+    expect(screen.getByTestId("models").textContent).toBe("Sonnet");
     expect(screen.queryByText("claude auth login")).toBeNull();
     expect(
       screen.getByText("Uses your plan's limits. localDot never sees your Claude sign-in."),
