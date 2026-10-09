@@ -1,3 +1,5 @@
+import { revealText } from "./reveal-text.ts";
+
 export const MARKDOWN_LIMITS = Object.freeze({
   chars: 20_000,
   nodes: 512,
@@ -342,4 +344,50 @@ export function parseMarkdown(raw: string): { blocks: Block[]; truncated: boolea
     });
   }
   return { blocks, truncated: raw.length > MARKDOWN_LIMITS.chars };
+}
+
+// A link the parser won't make (a path, an unsafe address) is left as written; plain keeps its text.
+const LINK_SOURCE = /!?\[([^\]\n]{0,512})\]\([^)\n]{0,2048}\)/g;
+// A piece that ends a sentence or leads into the next runs on after a space; others are set apart.
+const RUNS_ON = /[.!?…:;,]["'”’)\]]*$/u;
+
+const inlineText = (nodes: readonly Inline[]): string =>
+  nodes
+    .map((node) =>
+      "children" in node
+        ? inlineText(node.children)
+        : node.kind === "text"
+          ? node.text.replace(LINK_SOURCE, "$1")
+          : node.text,
+    )
+    .join("");
+
+const listText = (list: List): string[] =>
+  list.items.flatMap((item) => [
+    inlineText(item.children),
+    ...(item.list ? listText(item.list) : []),
+  ]);
+
+function blockText(block: Block): string[] {
+  if (block.kind === "code") return [block.text];
+  if (block.kind === "list") return listText(block);
+  if (block.kind === "table") return [block.head, ...block.rows].flat().map(inlineText);
+  if (block.kind === "rule") return [];
+  return [inlineText(block.children)];
+}
+
+// dot's Markdown as one line of plain words, for a place too tight for blocks: its marks, heading
+// and list markers, code fences and link addresses go, and its blocks run on as one line. Only
+// spaces, tabs and line breaks collapse, so a hidden character stays for a reveal to show; text
+// whose marks alone hold one (a link's address) is kept as written.
+export function markdownToPlain(text: string): string {
+  let line = "";
+  for (const piece of parseMarkdown(text).blocks.flatMap(blockText)) {
+    const words = piece.replace(/[ \t\n]+/g, " ").replace(/^ | $/g, "");
+    if (words) line = line ? `${line}${RUNS_ON.test(line) ? " " : " · "}${words}` : words;
+  }
+  const was = revealText(text);
+  if (!was.hidden) return line;
+  const now = revealText(line);
+  return now.hidden === was.hidden && now.bidi === was.bidi ? line : text;
 }

@@ -36,6 +36,7 @@ import {
 import { CopyButton } from "./CopyButton.tsx";
 import { FileTransferFailure } from "./file-transfer.ts";
 import { KeyFound } from "./KeyFound.tsx";
+import { markdownToPlain } from "./markdown.ts";
 import { hiddenWarning, plainReveal, revealText } from "./reveal-text.ts";
 import "../shell/decision.css";
 
@@ -92,7 +93,8 @@ export function AskForm({ draft, layout, answer, reason, upload, receiveKey }: A
   const waiting = state.sending ? "Wait a moment" : undefined;
   const incomplete = submitProblem(fields, state.draft);
   const choice = fields.length === 1 && fields[0]?.kind === "choice" ? fields[0] : undefined;
-  const asked = useMemo(() => revealText(question.question), [question.question]);
+  const plain = useMemo(() => markdownToPlain(question.question), [question.question]);
+  const asked = useMemo(() => revealText(plain), [plain]);
 
   // Typing starts in the first field when it takes typing and nothing else has focus, so a question
   // never takes the keys from what you were typing elsewhere. A phone keeps its keyboard down until
@@ -213,7 +215,7 @@ export function AskForm({ draft, layout, answer, reason, upload, receiveKey }: A
       ) : (
         <div className="decision-body">
           <h2 id={titleId} tabIndex={-1} className="decision-title">
-            <RevealedText text={question.question} />
+            <RevealedText text={plain} />
           </h2>
           {asked.hidden && <p className="decision-warning">{hiddenWarning(asked)}</p>}
           {body}
@@ -249,7 +251,7 @@ function AskFieldControl({
   const raw = state.draft.values[field.id];
   const text = typeof raw === "string" ? raw : "";
   const filled = fieldValue(field, state.draft, fields) !== undefined;
-  const named = useMemo(() => revealText(field.label), [field.label]);
+  const named = useMemo(() => revealText(markdownToPlain(field.label)), [field.label]);
   const label = plainReveal(named.parts);
   // A problem shows once the field has been left with something in it, and then as it is typed.
   const problem = state.keys.has(field.id)
@@ -329,7 +331,7 @@ function AskFieldControl({
           {field.options.map((option) => (
             <Checkbox
               key={option}
-              label={option}
+              label={markdownToPlain(option)}
               checked={picked.includes(option)}
               disabledReason={reason}
               onCheckedChange={(on) =>
@@ -405,7 +407,7 @@ function fieldNote(warning?: string, site?: string, hint?: string): ReactNode {
         ) : (
           "dot types this in for you and never sees it. "
         ))}
-      {hint && <RevealedText text={hint} />}
+      {hint && <RevealedText text={markdownToPlain(hint)} />}
     </>
   );
 }
@@ -507,7 +509,7 @@ function ChoiceRows({
           }}
           options={field.options.map((option, index) => ({
             value: String(index),
-            label: option,
+            label: markdownToPlain(option),
             ...(touch || field.options.length < 2
               ? {}
               : { preview: <Kbd keys={[String(index + 1)]} /> }),
@@ -644,7 +646,7 @@ function QrAnswer({ value, hint }: { value: string; hint?: string }) {
         <div className="ask-qr-code">
           {hint && (
             <p className="ask-qr-hint">
-              <RevealedText text={hint} />
+              <RevealedText text={markdownToPlain(hint)} />
             </p>
           )}
           {link ? (

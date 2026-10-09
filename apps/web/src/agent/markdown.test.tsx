@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { MARKDOWN_LIMITS, parseMarkdown, safeMarkdownLink } from "./markdown.ts";
+import { MARKDOWN_LIMITS, markdownToPlain, parseMarkdown, safeMarkdownLink } from "./markdown.ts";
 import { SafeMarkdown } from "./SafeMarkdown.tsx";
 
 afterEach(cleanup);
@@ -207,5 +207,65 @@ describe("the Markdown dot writes in a reply", () => {
     const started = performance.now();
     parseMarkdown(`| a |\n|-${" ".repeat(20_000)}x\n# a${" ".repeat(20_000)}b`);
     expect(performance.now() - started).toBeLessThan(200);
+  });
+});
+
+describe("dot's Markdown as one plain line", () => {
+  it.each([
+    ["## Summary\n\nI **couldn't** create `notes.md`.", "Summary · I couldn't create notes.md."],
+    [
+      "I couldn't create the file.\n\nWhat I checked:\n- This computer has no printer\n- The driver is *missing*",
+      "I couldn't create the file. What I checked: This computer has no printer · The driver is missing",
+    ],
+    [
+      "1. Open the sheet\n2. Add the totals\n   - by month",
+      "Open the sheet · Add the totals · by month",
+    ],
+    ["- [x] Booked\n- [ ] Paid", "Booked · Paid"],
+    ["See [the sheet](https://x.test/s) and [notes](notes/today.md).", "See the sheet and notes."],
+    ["![the chart](https://x.test/c.png)", "the chart"],
+    ["Run this:\n\n```sh\nls   -la\n```", "Run this: ls -la"],
+    ["> Quoted __words__ here", "Quoted words here"],
+    ["| Month | Total |\n| --- | ---: |\n| May | 12 |", "Month · Total · May · 12"],
+    ["---\n\n#### Done", "Done"],
+    ["  Many\t\tspaces\n  and lines  ", "Many spaces and lines"],
+    ["Plain words, snake_case_name and 5 * 3.", "Plain words, snake_case_name and 5 * 3."],
+    ["\\*not emphasis\\*", "*not emphasis*"],
+    ["", ""],
+  ])("reads %j as %j", (text, plain) => {
+    expect(markdownToPlain(text)).toBe(plain);
+  });
+
+  it.each([
+    "\u202e",
+    "\u2066",
+    "\u200f",
+    "\u061c",
+    "\u200b",
+    "\u00ad",
+    "\u00a0",
+    "\u3000",
+    "\u{e0041}",
+  ])("keeps the hidden character %j wherever the marks put it", (hidden) => {
+    for (const text of [
+      `**Pay${hidden}now**`,
+      `# Pay${hidden}now`,
+      `- Pay${hidden}now`,
+      `Pay \`${hidden}\` now`,
+      `[Pay${hidden}now](https://x.test)`,
+      `> Pay${hidden}now`,
+    ])
+      expect(markdownToPlain(text)).toContain(hidden);
+  });
+
+  it("keeps marks as written when they alone hold a hidden character", () => {
+    expect(markdownToPlain("[invoice](https://x.test/\u202epdf.exe)")).toBe(
+      "[invoice](https://x.test/\u202epdf.exe)",
+    );
+    expect(markdownToPlain("-\u00a0item")).toBe("-\u00a0item");
+    expect(markdownToPlain("one\rtwo")).toBe("one\rtwo");
+    expect(markdownToPlain("**Pay** \u202eit [here](https://x.test/\u202e)")).toBe(
+      "Pay \u202eit here",
+    );
   });
 });

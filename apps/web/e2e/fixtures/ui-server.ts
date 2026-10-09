@@ -519,7 +519,11 @@ const planItems = (finished: boolean) => [
 ];
 
 // done: end as the real runner does, with agent.state done, which raises a Done notification.
-function finishTask(s: AgentSession, a: Append, done = false) {
+// A summary written as dot writes one when it couldn't finish: a heading, a list and bold words.
+const MARKDOWN_SUMMARY =
+  "## Couldn't print the report\n\nI made **summary.md**, but this computer has no printer, so nothing was printed.\n\n### What I checked\n\n- **Printers:** none are set up on this computer\n- **Drivers:** the `cups` service isn't installed\n- **Your files:** `summary.md` and `totals.csv` are ready to print elsewhere";
+
+function finishTask(s: AgentSession, a: Append, done = false, markdown = false) {
   a("message.assistant", {
     messageId: ulid(),
     text: "## Report ready\n\nThe **monthly total** is 12,480. I saved `summary.md` and updated `totals.csv`.",
@@ -536,8 +540,9 @@ function finishTask(s: AgentSession, a: Append, done = false) {
     { mode: 0o600 },
   );
   a("task.result", {
-    summary:
-      "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
+    summary: markdown
+      ? MARKDOWN_SUMMARY
+      : "Sample monthly report prepared.\nOne validation command failed; the totals were checked another way.",
     files: [
       { name: "summary.md", path: "summary.md", bytes: 48 },
       { name: "totals.csv", path: "totals.csv", bytes: 32 },
@@ -2396,13 +2401,13 @@ function endLiveStep() {
   session.append("step.end", { status: "ok" }, liveStep);
   liveStep = undefined;
 }
-function finish(done = false): string | undefined {
+function finish(done = false, markdown = false): string | undefined {
   const owned = session;
   if (!owned) return "no session";
   const append: Append = (type, data, step) => owned.append(type, data, step);
   endLiveStep();
   append("plan.set", { items: planItems(true) });
-  finishTask(owned, append, done);
+  finishTask(owned, append, done, markdown);
 }
 function setCell(kind: CellKind): undefined {
   const next = cellFor(kind, cellId);
@@ -2619,7 +2624,9 @@ routes.post("/__qa/heartbeat", (c) => {
   session.append("heartbeat", { ongoing: true, everyMs: 500 });
   return c.json({ ok: true });
 });
-routes.post("/__qa/finish", (c) => reply(finish(c.req.query("done") === "1")));
+routes.post("/__qa/finish", (c) =>
+  reply(finish(c.req.query("done") === "1", c.req.query("markdown") === "1")),
+);
 // The daemon goes away under the live task (no end is recorded) and comes back without it.
 routes.post("/__qa/crash", async (c) => {
   if (!session || session.stopped) return c.text("no live task", 409);
