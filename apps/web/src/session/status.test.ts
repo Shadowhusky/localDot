@@ -814,6 +814,8 @@ const STATES: Record<string, Status> = {
   "failed, task open": underTask(computerIn(FAILED)),
   "fenced, task open": underTask(computerIn(FENCED)),
   "reconnecting, task running": underTask(stream("stalled")),
+  "approval, reconnecting": at([...start(), approvalRequest(1500)], 9500, stream("stalled")),
+  "question, reconnecting": at([...typed(), asked(1500)], 9500, stream("stalled")),
   "task stopping": statusFor({ computer: live, task: typing(), stop: "stopping" }),
   "stop unconfirmed": statusFor({ computer: live, task: typing(), stop: "unconfirmed" }),
   approval: at([...start(), approvalRequest(1500)]),
@@ -879,6 +881,9 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["fenced, task open", "computer", "Unavailable", "error", "blocked", "system"],
   // A reconnect leaves dot in charge, but the label says why the picture holds still.
   ["reconnecting, task running", "acting", "Reconnecting…", "acting", "working", "dot"],
+  // What waits on the user keeps its label through a reconnect.
+  ["approval, reconnecting", "approval", "Needs your OK", "waiting", "needs_you", "system"],
+  ["question, reconnecting", "question", "Needs your answer", "waiting", "needs_you", "dot"],
   // 2–4. Approval, question, takeover.
   ["approval", "approval", "Needs your OK", "waiting", "needs_you", "system"],
   ["question", "question", "Needs your answer", "waiting", "needs_you", "dot"],
@@ -1031,6 +1036,8 @@ describe("one status model for every surface (T10)", () => {
       "approval",
       "question",
       "reconnecting, task running",
+      "approval, reconnecting",
+      "question, reconnecting",
     ];
     const stopping = ["task stopping", "stop unconfirmed"];
     for (const [name, status] of Object.entries(STATES))
