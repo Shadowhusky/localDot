@@ -23,8 +23,8 @@ export function useNowMs(
   const shown = useRef({ model, t: 0 });
   const wall = viewerWallMs();
   let now = anchor.t + (wall - anchor.wall);
-  const daemonNow = clock ? sessionMsAt(wall, clock) : Number.NaN;
-  if (Number.isFinite(daemonNow)) now = Math.max(now, daemonNow);
+  if (clock && Number.isFinite(clock.offsetMicros - clock.originMicros))
+    now = Math.max(now, sessionMsAt(wall, clock));
   if (shown.current.model === model) now = Math.max(now, shown.current.t);
   shown.current = { model, t: now };
   const ticking = running(now);
