@@ -1,7 +1,11 @@
-import { microsToMs } from "@localdot/protocol";
+import { microsToMs, type SessionCard, type SessionVerdict } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
-import { useEffect, useRef, useState } from "react";
+import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { bytes } from "../copy/format.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
+import { type DotFeed, dotFeed } from "../dot/dot-feed.ts";
+import { PresenceSlot } from "../dot/PresenceSlot.tsx";
+import { setReplayPresence } from "../dot/replay-presence.ts";
 import { ExportButton } from "../export/ExportButton.tsx";
 import { ExportPopover } from "../export/ExportPopover.tsx";
 import { type ExportContext, exportContext } from "../export/export-context.ts";
@@ -11,25 +15,42 @@ import { useExportProbe } from "../export/useExportProbe.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import { type StepRowView, stepRows } from "../session/session-view.ts";
-import { taskHud } from "../session/status.ts";
+import { TASK_POSE, taskHud } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
+import { HANDHELD } from "../shell/layout.ts";
+import { NarratorBand } from "../shell/NarratorBand.tsx";
+import { RailPanel } from "../shell/RailPanel.tsx";
+import { StageFrame } from "../shell/StageFrame.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
+import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
 import { Icon } from "../ui/Icon.tsx";
+import { IconButton } from "../ui/IconButton.tsx";
 import { useMediaQuery } from "../ui/media.ts";
-import { triggerProps } from "../ui/Popover.tsx";
 import { Presence } from "../ui/Presence.tsx";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { SegmentedControl } from "../ui/SegmentedControl.tsx";
-import { Sheet } from "../ui/Sheet.tsx";
 import { CompareView } from "./CompareView.tsx";
 import { GapCard, type GapKind } from "./GapCard.tsx";
 import { LOADING, ReplayControls } from "./ReplayControls.tsx";
-import { recordedLabel, replayKey, taskTitle } from "./replay-view.ts";
-import { Scrubber } from "./Scrubber.tsx";
+import { ReplayImage } from "./ReplayImage.tsx";
+import { useRecordingSummary } from "./recording-summary.ts";
+import {
+  type LibraryFilter,
+  libraryTotal,
+  previewMeta,
+  recordedLabel,
+  replayKey,
+  taskTitle,
+  timeLabel,
+} from "./replay-view.ts";
 import {
   type ContinueTask,
   continuable,
+  DeleteTask,
+  shownCards,
+  type TaskIndex,
   TaskList,
   TasksSearch,
   useTaskIndex,
@@ -37,19 +58,37 @@ import {
 import { useReplay } from "./useReplay.ts";
 import "./replay.css";
 
-// The task list keeps a rail of its own only where the picture keeps its size beside it; elsewhere
-// it opens as a sheet from the bar.
-const LIBRARY_RAIL = "(width >= 1880px)";
+// Below a laptop the library has no room for its preview, so a row opens its recording at once.
+const PREVIEW_ROOM = "(width >= 1100px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
 const NOTICE_MS = 3000;
+// The transport fades this long into playback without the pointer moving over the picture.
+const TRANSPORT_STILL_MS = 2000;
 const SCREENS = [
   { value: "desktop", label: "Desktop" },
   { value: "browser", label: "Browser" },
+] as const;
+const FILTERS = [
+  { value: "all", label: "All" },
+  { value: "finished", label: "Finished" },
+  { value: "stopped", label: "Stopped" },
+] as const;
+const RAIL_VIEWS = [
+  { value: "recordings", label: "Recordings" },
+  { value: "steps", label: "Steps" },
 ] as const;
 const NO_VIDEO = new Set(["none", "failed", "expired"]);
 // WebKit throws on the hundred-and-first address change in ten seconds, which would take the whole
 // page down mid-scrub, so the paused time reaches the address at most this often.
 const ADDRESS_EVERY_MS = 300;
+const RESTING: DotFeed = {
+  state: "resting",
+  control: false,
+  attention: false,
+  focus: null,
+  dispatched: null,
+  done: false,
+};
 
 export const RECORDED_TASK = "Recorded task";
 
@@ -57,38 +96,413 @@ export interface RecordedTitle {
   sessionId: string;
   title: string;
   note: string;
+  verdict: SessionVerdict;
 }
 
+export interface ReplayViewProps {
+  api: ApiClient;
+  // The recording to play, or null for the library of recordings.
+  sessionId: string | null;
+  // Opens a recording in the player.
+  onSelect(id: string): void;
+  // Back from the player to the library.
+  onLibrary(): void;
+  onGoLive(): void;
+  onDeleted(id: string): void;
+  // What the top bar names while a recording plays; null once it closes.
+  onTitle?(title: RecordedTitle | null): void;
+  // Takes a task's conversation up again, in Watch.
+  continueTask?: ContinueTask;
+  exportJob: ExportJob;
+  visible?: boolean;
+  // Settings → Appearance → Show dot.
+  showDot?: boolean;
+}
+
+// Replay (design-v2 §11 H): the library of recordings in the stage's column with the chosen one
+// beside it, or one recording playing on the stage with its steps beside it.
 export function ReplayView({
   api,
   sessionId,
   onSelect,
+  onLibrary,
+  onGoLive,
+  onDeleted,
+  onTitle,
+  continueTask,
+  exportJob,
+  visible = true,
+  showDot = true,
+}: ReplayViewProps) {
+  const tasks = useTaskIndex(api);
+  const [chosen, setChosen] = useState<string | null>(sessionId);
+  if (sessionId && chosen !== sessionId) setChosen(sessionId);
+  useEffect(() => () => setReplayPresence(null), []);
+  const cards = tasks.cards;
+  // Continue on the conversation already open, or on a task still running, goes back to Watch.
+  const proceed: ContinueTask | undefined = continueTask && {
+    current: continueTask.current,
+    reason: continueTask.reason,
+    run: (id) => {
+      const live = cards.find((card) => card.id === id)?.verdict === "live";
+      if (live || id === continueTask.current) onGoLive();
+      else continueTask.run(id);
+    },
+  };
+  const titled = useRef(onTitle);
+  titled.current = onTitle;
+  useEffect(() => {
+    if (sessionId === null) titled.current?.(null);
+  }, [sessionId]);
+  return sessionId === null ? (
+    <Library
+      api={api}
+      tasks={tasks}
+      chosen={chosen}
+      onChoose={setChosen}
+      onOpen={onSelect}
+      onGoLive={onGoLive}
+      onDeleted={onDeleted}
+      continueTask={proceed}
+      visible={visible}
+      showDot={showDot}
+    />
+  ) : (
+    <Player
+      api={api}
+      sessionId={sessionId}
+      tasks={tasks}
+      onSelect={onSelect}
+      onLibrary={onLibrary}
+      onGoLive={onGoLive}
+      onDeleted={onDeleted}
+      onTitle={onTitle}
+      continueTask={proceed}
+      exportJob={exportJob}
+      visible={visible}
+      showDot={showDot}
+    />
+  );
+}
+
+// A phone's pushed screen: back on the left, the screen's name in the middle.
+function NavBar({ back, onBack, title }: { back: string; onBack(): void; title: string }) {
+  return (
+    <nav className="replay-nav" aria-label={title}>
+      <Button variant="quiet" className="replay-nav-back" onClick={onBack}>
+        <span className="replay-nav-back-label">
+          <Icon name="chevron-left" size={22} />
+          {back}
+        </span>
+      </Button>
+      <h1 className="replay-nav-title">{title}</h1>
+    </nav>
+  );
+}
+
+function useEscape(enabled: boolean, run: () => void) {
+  const latest = useRef(run);
+  latest.current = run;
+  useEffect(() => {
+    if (!enabled) return;
+    const key = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || event.defaultPrevented) return;
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest("dialog, [aria-modal='true'], input, textarea, [role='listbox']")
+      )
+        return;
+      latest.current();
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [enabled]);
+}
+
+function Library({
+  api,
+  tasks,
+  chosen,
+  onChoose,
+  onOpen,
+  onGoLive,
+  onDeleted,
+  continueTask,
+  visible,
+  showDot,
+}: {
+  api: ApiClient;
+  tasks: TaskIndex;
+  chosen: string | null;
+  onChoose(id: string): void;
+  onOpen(id: string): void;
+  onGoLive(): void;
+  onDeleted(id: string): void;
+  continueTask?: ContinueTask;
+  visible: boolean;
+  showDot: boolean;
+}) {
+  const phone = useMediaQuery(HANDHELD);
+  const roomy = useMediaQuery(PREVIEW_ROOM) && !phone;
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<LibraryFilter>("all");
+  const shown = shownCards(tasks.cards, search, filter);
+  const card = shown.find((entry) => entry.id === chosen) ?? shown[0] ?? null;
+  useEscape(visible, onGoLive);
+  useEffect(() => {
+    if (!roomy || !card) setReplayPresence({ feed: RESTING, line: "" });
+  }, [roomy, card]);
+  return (
+    <div className="replay" data-view="library">
+      <main className="replay-library" aria-label="Replay">
+        {phone ? (
+          <NavBar back="Watch" onBack={onGoLive} title="Replay" />
+        ) : (
+          <h1 className="ui-visually-hidden">Replay</h1>
+        )}
+        <div className="replay-library-head">
+          <TasksSearch
+            size={phone ? "md" : "sm"}
+            filled={phone}
+            value={search}
+            onChange={setSearch}
+          />
+          {!phone && (
+            <SegmentedControl
+              aria-label="Show"
+              size={28}
+              items={FILTERS}
+              value={filter}
+              onValueChange={(value) => setFilter(value as LibraryFilter)}
+            />
+          )}
+          {!phone && tasks.cards.length > 0 && (
+            <span className="replay-library-total num">
+              {libraryTotal(tasks.cards, tasks.more)}
+            </span>
+          )}
+        </div>
+        <ScrollArea className="replay-library-scroll" fade="bottom">
+          <TaskList
+            api={api}
+            index={tasks}
+            search={search}
+            filter={filter}
+            selectedId={roomy ? (card?.id ?? null) : null}
+            onSelect={roomy ? onChoose : onOpen}
+            onDeleted={onDeleted}
+            continueTask={continueTask}
+            variant={phone ? "phone" : "library"}
+          />
+        </ScrollArea>
+      </main>
+      {roomy && (
+        <RailPanel label="Chosen recording" className="replay-rail">
+          {card ? (
+            <RecordingPreview
+              key={card.id}
+              api={api}
+              card={card}
+              showDot={showDot}
+              onWatch={() => onOpen(card.id)}
+              continueTask={continueTask}
+              onDeleted={(gone) => {
+                tasks.forget(gone.id);
+                onDeleted(gone.id);
+              }}
+            />
+          ) : (
+            <EmptyState className="replay-rail-empty" title="Choose a recording">
+              Its picture, what dot said and the files it made show here.
+            </EmptyState>
+          )}
+        </RailPanel>
+      )}
+    </div>
+  );
+}
+
+// The chosen recording in the rail: its picture to play, dot's last line, and what to do with it.
+function RecordingPreview({
+  api,
+  card,
+  showDot,
+  onWatch,
+  continueTask,
+  onDeleted,
+}: {
+  api: ApiClient;
+  card: SessionCard;
+  showDot: boolean;
+  onWatch(): void;
+  continueTask?: ContinueTask;
+  onDeleted(card: SessionCard): void;
+}) {
+  const summary = useRecordingSummary(api, card.id);
+  const now = useMemo(() => new Date(), []);
+  const remove = useRef<HTMLButtonElement>(null);
+  const [deleting, setDeleting] = useState<SessionCard | null>(null);
+  const line = summary?.line ?? "";
+  useEffect(() => setReplayPresence({ feed: RESTING, line }), [line]);
+  const title = taskTitle(card);
+  return (
+    <ScrollArea className="replay-preview" fade="bottom">
+      <div className="replay-poster">
+        <ReplayImage api={api} sessionId={card.id} frameId={card.coverFrameId} full />
+        <span className="replay-poster-play">
+          <IconButton
+            variant="primary"
+            round
+            size={52}
+            icon="play"
+            label="Play this recording"
+            onClick={onWatch}
+          />
+        </span>
+      </div>
+      <div className="replay-says" data-dot={showDot ? "" : undefined}>
+        {showDot && <PresenceSlot name="dock" className="replay-says-dot" />}
+        <p className="replay-says-line">
+          {showDot ? <span className="ui-visually-hidden">dot: </span> : null}
+          {line}
+        </p>
+      </div>
+      <div className="replay-preview-body">
+        <h2 className="replay-preview-title">{title}</h2>
+        <p className="replay-preview-meta num">
+          {previewMeta(card, now, summary?.spend ?? undefined)}
+        </p>
+        <div className="replay-preview-actions">
+          {continueTask && (
+            <Button
+              variant="primary"
+              size="lg"
+              icon="continue"
+              disabledReason={continuable(card, continueTask) ? continueTask.reason : undefined}
+              onClick={() => continueTask.run(card.id)}
+            >
+              {card.verdict === "live" ? "Watch it live" : "Continue this conversation"}
+            </Button>
+          )}
+          <Button size="lg" icon="play" onClick={onWatch}>
+            Watch replay
+          </Button>
+        </div>
+        {summary && summary.files.length > 0 && (
+          <section className="replay-files" aria-labelledby={`${card.id}-files`}>
+            <h3 id={`${card.id}-files`} className="replay-files-title">
+              Files
+            </h3>
+            <ul>
+              {summary.files.map((file) => (
+                <li key={file.path} className="replay-file">
+                  <Icon name="file-text" size={16} />
+                  <span className="replay-file-text">
+                    <span className="replay-file-name">{file.name}</span>
+                    <span className="replay-file-path num">{bytes(file.bytes)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )}
+      </div>
+      <div className="replay-preview-foot">
+        <Button ref={remove} variant="destructive" icon="trash" onClick={() => setDeleting(card)}>
+          Delete recording…
+        </Button>
+      </div>
+      <DeleteTask
+        api={api}
+        card={deleting}
+        anchor={remove}
+        onClose={() => setDeleting(null)}
+        onDeleted={(gone) => {
+          setDeleting(null);
+          onDeleted(gone);
+        }}
+      />
+    </ScrollArea>
+  );
+}
+
+// The island over a recording: what dot was doing at the playhead and when; no controls.
+function ReplayIsland({ label, time }: { label: string; time: string }) {
+  return (
+    <div className="island-anchor">
+      <div className="island" data-shape="replay">
+        <span className="island-plate" aria-hidden="true" />
+        <div className="island-row">
+          <Badge className="island-tag">Replay</Badge>
+          <span className="island-label">
+            <span className="island-label-text">{label}</span>
+          </span>
+          <span className="island-elapsed num">{time}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// The transport stays while paused, or while the pointer moves over the picture or focus is in it.
+function useTransportShown(playing: boolean, area: RefObject<HTMLElement | null>): boolean {
+  const [shown, setShown] = useState(true);
+  useEffect(() => {
+    const element = area.current;
+    if (!playing || !element) {
+      setShown(true);
+      return;
+    }
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const wake = () => {
+      setShown(true);
+      clearTimeout(timer);
+      timer = setTimeout(() => setShown(false), TRANSPORT_STILL_MS);
+    };
+    wake();
+    const events = ["pointermove", "pointerdown", "focusin"] as const;
+    for (const name of events) element.addEventListener(name, wake);
+    return () => {
+      clearTimeout(timer);
+      for (const name of events) element.removeEventListener(name, wake);
+    };
+  }, [playing, area]);
+  return shown;
+}
+
+function Player({
+  api,
+  sessionId,
+  tasks,
+  onSelect,
+  onLibrary,
   onGoLive,
   onDeleted,
   onTitle,
   continueTask,
   exportJob: job,
-  visible = true,
+  visible,
+  showDot,
 }: {
   api: ApiClient;
   sessionId: string;
+  tasks: TaskIndex;
   onSelect(id: string): void;
+  onLibrary(): void;
   onGoLive(): void;
   onDeleted(id: string): void;
-  // What the top bar names while this recording plays; null once Replay closes.
   onTitle?(title: RecordedTitle | null): void;
-  // Takes this task's conversation up again, in Watch.
   continueTask?: ContinueTask;
   exportJob: ExportJob;
-  visible?: boolean;
+  visible: boolean;
+  showDot: boolean;
 }) {
   const stage = useRef<StageHandle>(null);
-  const replay = useReplay(api, sessionId, stage, { onGoLive });
-  const tasks = useTaskIndex(api);
-  const [search, setSearch] = useState("");
-  const railed = useMediaQuery(LIBRARY_RAIL);
-  const [library, setLibrary] = useState(false);
-  const libraryTrigger = useRef<HTMLButtonElement>(null);
+  const area = useRef<HTMLElement>(null);
+  const replay = useReplay(api, sessionId, stage, { onGoLive, onExit: onLibrary });
+  const phone = useMediaQuery(HANDHELD);
+  const [railView, setRailView] = useState<"recordings" | "steps">("steps");
   const exportTrigger = useRef<HTMLButtonElement>(null);
   // The popover is keyed by each opening, so its choices start fresh, and it stays mounted while it
   // closes.
@@ -104,6 +518,7 @@ export function ReplayView({
   commands.current = replay.run;
   const titled = useRef(onTitle);
   titled.current = onTitle;
+  const transportShown = useTransportShown(replay.playing, area);
 
   useEffect(() => {
     if (!visible || exportOpen) return;
@@ -160,12 +575,15 @@ export function ReplayView({
   const card = replay.card;
   // A task picked from the library is named from its row until its own card loads.
   const named = card ?? tasks.cards.find((entry) => entry.id === sessionId) ?? null;
+  const now = useMemo(() => new Date(), []);
+  const note = named ? recordedLabel(named, now) : "";
   useEffect(() => {
     if (named)
       titled.current?.({
         sessionId,
         title: taskTitle(named),
         note: recordedLabel(named, new Date()),
+        verdict: named.verdict,
       });
   }, [named, sessionId]);
   useEffect(() => () => titled.current?.(null), []);
@@ -181,6 +599,12 @@ export function ReplayView({
   }, [whole, noticeKey]);
 
   const hud = taskHud(replay.model, replay.tMs);
+  const feed = dotFeed(
+    { dotPose: TASK_POSE[hud.row], control: hud.control, row: hud.row },
+    replay.model,
+    replay.tMs,
+  );
+  useEffect(() => setReplayPresence({ feed, line: hud.caption }));
   const support = exportSupport();
   const endedAt = replay.map?.endMs ?? 0;
   const baseRows = stepRows(replay.model);
@@ -208,179 +632,144 @@ export function ReplayView({
   const browser = card?.recordings?.browser;
   const twoScreens =
     replay.screen === "browser" || (!!browser && browser.bytes > 0 && !NO_VIDEO.has(browser.state));
-  const live = replay.info?.live || card?.verdict === "live";
-  const select = (id: string) => {
-    setLibrary(false);
-    if (id !== sessionId) onSelect(id);
-  };
-  const list = (
-    <TaskList
+  const steps = (
+    <ActivityRail
+      rows={timelineRows(chapterRows, replay.model.keyUses)}
       api={api}
-      index={tasks}
-      search={search}
-      selectedId={sessionId}
-      onSelect={select}
-      onDeleted={onDeleted}
-      continueTask={continueTask}
+      sessionId={sessionId}
+      scale={replay.model.screen?.scale ?? 1}
+      asOfMs={replay.tMs}
+      onSelect={replay.selectStep}
+      planSnapshot={planAt(replay.model, replay.tMs)}
     />
   );
 
   return (
-    <div className="replay" data-library={railed ? "rail" : "sheet"}>
-      {railed && (
-        <aside className="rail replay-library" aria-label="Tasks">
-          <div className="rail-h">
-            <h2>Tasks</h2>
-            {tasks.cards.length > 0 && (
-              <span className="num">
-                {tasks.cards.length}
-                {tasks.more ? "+" : ""}
-              </span>
-            )}
-          </div>
-          <ScrollArea className="replay-library-scroll" fade="bottom">
-            <div className="replay-library-search">
-              <TasksSearch value={search} onChange={setSearch} />
-            </div>
-            {list}
-          </ScrollArea>
-        </aside>
-      )}
-      <main className="replay-main" aria-label="Replay">
+    <div className="replay" data-view="player">
+      {phone && <NavBar back="Replay" onBack={onLibrary} title={note || title} />}
+      <main ref={area} className="stage-col replay-main" aria-label="Replay">
         <h1 className="ui-visually-hidden">{title}</h1>
-        <div className="replay-bar">
-          <Button
-            variant="quiet"
-            icon="chevron-left"
-            className="replay-back"
-            aria-label={live ? "Jump to live" : "Back to Watch"}
-            onClick={onGoLive}
-          >
-            <span className="replay-back-text">{live ? "Jump to live" : "Back to Watch"}</span>
-          </Button>
-          <div className="replay-bar-end">
-            {continueTask &&
-              !live &&
-              continuable({ id: sessionId, verdict: card?.verdict ?? "done" }, continueTask) && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  icon="continue"
-                  className="replay-continue"
-                  disabledReason={continueTask.reason}
-                  onClick={() => continueTask.run(sessionId)}
-                >
-                  Continue conversation
-                </Button>
-              )}
-            {twoScreens && (
-              <SegmentedControl
-                size={24}
-                aria-label="Recording screen"
-                items={SCREENS}
-                value={replay.screen}
-                onValueChange={(screen) => replay.setScreen(screen as "desktop" | "browser")}
-              />
-            )}
-            {!railed && (
-              <span className="replay-library-slot">
-                <Button
-                  ref={libraryTrigger}
-                  variant="secondary"
-                  className="replay-library-trigger"
-                  aria-label={`All tasks, showing ${title}`}
-                  {...triggerProps("dialog", library)}
-                  onClick={() => setLibrary(true)}
-                >
-                  <span className="replay-library-trigger-text" data-phone="">
-                    {title}
-                  </span>
-                  <span className="replay-library-trigger-text" data-phone="hidden">
-                    All tasks
-                  </span>
-                  <Icon name="chevron-down" size={14} />
-                </Button>
-              </span>
-            )}
-          </div>
-        </div>
-        <div className="replay-frame">
-          <div className={`stage lit replay-stage${hud.control ? " control" : ""}`}>
-            <Stage
-              key={sessionId}
-              ref={stage}
-              mode="replay"
-              api={api}
-              cell={null}
-              reconnects={0}
-              listed={[]}
-            />
-            <Presence show={opening}>
-              <DotLoader className="replay-opening" label="Opening this task" />
-            </Presence>
-            <GapCard kind={gapKind} />
-            {replay.status === "error" && !gapKind && (
-              <p className="replay-error" role="alert">
-                Some of the recording couldn't load. The steps are still here.
-              </p>
-            )}
-            {replay.compare && (
-              <CompareView
-                key={activeStep?.id ?? "compare"}
-                api={api}
-                sessionId={sessionId}
-                frames={replay.compare}
-                label={chapterRows.find((row) => row.id === activeStep?.id)?.label}
-                onClose={() => replay.run({ kind: "exit" })}
-              />
-            )}
-          </div>
-          <div className="replay-rim" data-on={hud.control ? "" : undefined} aria-hidden="true" />
-        </div>
-        <Scrubber api={api} sessionId={sessionId} replay={replay} />
-        <ReplayControls
-          replay={replay}
-          label={hud.label}
-          noVideo={!!whole && noticeOver}
-          exportControl={
-            <ExportButton
-              ref={exportTrigger}
-              job={job}
-              open={exportOpen}
-              disabledReason={
-                support.ok ? (replay.info && replay.map ? undefined : LOADING) : support.reason
-              }
-              onOpen={() => {
-                replay.run({ kind: "pause" });
-                const context = job.snapshot().context ?? exportContext(api, sessionId, replay);
-                setExporting((was) => ({ context, open: true, key: (was?.key ?? 0) + 1 }));
-              }}
-            />
+        <StageFrame
+          light={hud.control ? "dot" : "none"}
+          live
+          frozen={false}
+          island={
+            phone ? undefined : <ReplayIsland label={hud.label} time={timeLabel(replay.tMs)} />
           }
-        />
-      </main>
-      <ActivityRail
-        rows={timelineRows(chapterRows, replay.model.keyUses)}
-        api={api}
-        sessionId={sessionId}
-        scale={replay.model.screen?.scale ?? 1}
-        asOfMs={replay.tMs}
-        onSelect={replay.selectStep}
-        planSnapshot={planAt(replay.model, replay.tMs)}
-      />
-      {!railed && (
-        <Sheet
-          open={library}
-          onClose={() => setLibrary(false)}
-          title="Tasks"
-          modal
-          returnFocus={libraryTrigger}
+          band={<NarratorBand line={hud.caption} speaker="dot" showDot={showDot} />}
         >
-          <div className="replay-library-search">
-            <TasksSearch value={search} onChange={setSearch} />
+          <Stage
+            key={sessionId}
+            ref={stage}
+            mode="replay"
+            api={api}
+            cell={null}
+            reconnects={0}
+            listed={[]}
+          />
+          <Presence show={opening}>
+            <DotLoader className="replay-opening" label="Opening this recording" />
+          </Presence>
+          <GapCard kind={gapKind} />
+          {replay.status === "error" && !gapKind && (
+            <p className="replay-error" role="alert">
+              Some of the recording couldn't load. The steps are still here.
+            </p>
+          )}
+          {replay.compare && (
+            <CompareView
+              key={activeStep?.id ?? "compare"}
+              api={api}
+              sessionId={sessionId}
+              frames={replay.compare}
+              label={chapterRows.find((row) => row.id === activeStep?.id)?.label}
+              onClose={() => replay.run({ kind: "exit" })}
+            />
+          )}
+          <div className="replay-transport-slot" data-shown={transportShown ? "" : undefined}>
+            <ReplayControls
+              api={api}
+              replay={replay}
+              compact={phone}
+              noVideo={!!whole && noticeOver}
+              screens={
+                twoScreens && (
+                  <SegmentedControl
+                    size={24}
+                    aria-label="Recording screen"
+                    items={SCREENS}
+                    value={replay.screen}
+                    onValueChange={(screen) => replay.setScreen(screen as "desktop" | "browser")}
+                  />
+                )
+              }
+              exportControl={
+                <ExportButton
+                  ref={exportTrigger}
+                  job={job}
+                  open={exportOpen}
+                  disabledReason={
+                    support.ok ? (replay.info && replay.map ? undefined : LOADING) : support.reason
+                  }
+                  onOpen={() => {
+                    replay.run({ kind: "pause" });
+                    const context = job.snapshot().context ?? exportContext(api, sessionId, replay);
+                    setExporting((was) => ({ context, open: true, key: (was?.key ?? 0) + 1 }));
+                  }}
+                />
+              }
+            />
           </div>
-          {list}
-        </Sheet>
+        </StageFrame>
+      </main>
+      {phone ? (
+        <>
+          <section className="replay-steps" aria-label="Steps">
+            {steps}
+          </section>
+          {continueTask && (
+            <div className="replay-toolbar">
+              <Button
+                variant="primary"
+                size="xl"
+                round
+                icon="continue"
+                disabledReason={
+                  named && continuable(named, continueTask) ? continueTask.reason : undefined
+                }
+                onClick={() => continueTask.run(sessionId)}
+              >
+                {named?.verdict === "live" ? "Watch it live" : "Continue this conversation"}
+              </Button>
+            </div>
+          )}
+        </>
+      ) : (
+        <RailPanel
+          label="Recording"
+          className="replay-rail"
+          views={RAIL_VIEWS}
+          view={railView}
+          onView={(view) => setRailView(view as "recordings" | "steps")}
+        >
+          {railView === "steps" ? (
+            steps
+          ) : (
+            <ScrollArea className="replay-rail-scroll" fade="bottom">
+              <TaskList
+                api={api}
+                index={tasks}
+                search=""
+                selectedId={sessionId}
+                onSelect={(id) => {
+                  if (id !== sessionId) onSelect(id);
+                }}
+                onDeleted={onDeleted}
+                variant="rail"
+              />
+            </ScrollArea>
+          )}
+        </RailPanel>
       )}
       {exporting && (
         <ExportPopover

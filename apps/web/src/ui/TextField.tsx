@@ -10,6 +10,8 @@ export interface TextFieldProps
   suffix?: ReactNode;
   // A code someone reads out or types elsewhere: large monospace, spaced out.
   code?: boolean;
+  // A raised fill with no edge until focused, as a phone's search bar.
+  filled?: boolean;
 }
 
 // A press on the field's padding or an affix lands in the input, as it would on a native field.
@@ -25,6 +27,7 @@ export function TextField({
   prefix,
   suffix,
   code = false,
+  filled = false,
   className,
   type = "text",
   readOnly,
@@ -37,6 +40,7 @@ export function TextField({
       className={clsx("ui-field-box ui-text-field", className)}
       data-size={size}
       data-code={code ? "" : undefined}
+      data-filled={filled ? "" : undefined}
       data-invalid={control.invalid ? "" : undefined}
       data-unavailable={unavailable ? "" : undefined}
       onPointerDown={focusInput}

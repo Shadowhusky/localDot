@@ -179,7 +179,11 @@
     --_fg-hover: var(--color-fg-1);
   }
 
+  /* Red words on no face of their own, so a destructive step never shouts. */
   .ui-button[data-variant="destructive"] {
+    --_bg: transparent;
+    --_bg-hover: var(--color-control);
+    --_bg-pressed: var(--color-control-hover);
     --_fg: var(--color-danger-fg);
     --_fg-hover: var(--color-danger-fg);
   }
@@ -311,6 +315,11 @@
   .ui-icon-button[data-size="44"] {
     --_size: calc(var(--spacing) * 11);
     border-radius: var(--radius-group);
+  }
+
+  .ui-icon-button[data-size="52"] {
+    --_size: calc(var(--spacing) * 13);
+    border-radius: var(--radius-full);
   }
 
   .ui-icon-button:is([data-round], [data-variant="glass"], [data-variant="primary"]) {

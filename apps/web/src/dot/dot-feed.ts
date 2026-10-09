@@ -21,7 +21,11 @@ export interface DotFeed {
 
 const ATTENTION = new Set<StatusRow>(["approval", "question", "waiting", "recovery", "limit"]);
 
-export function dotFeed(status: Status, model: SessionModel | null, nowMs: number): DotFeed {
+export function dotFeed(
+  status: Pick<Status, "dotPose" | "control" | "row">,
+  model: SessionModel | null,
+  nowMs: number,
+): DotFeed {
   const action = model ? currentAction(model, nowMs) : undefined;
   // An action that waits on the computer (a page load, a download) is watched, not acted out.
   const state =

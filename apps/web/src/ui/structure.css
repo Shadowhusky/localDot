@@ -195,6 +195,12 @@
     white-space: nowrap;
   }
 
+  .ui-list-row-meta > :last-child {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
   .ui-list-row-meta {
     display: flex;
     align-items: center;
@@ -260,13 +266,82 @@
     transition: opacity var(--dur-hover) var(--ease-standard);
   }
 
-  /* A phone has no hover: the row is shorter and its actions always show. */
+  /* Without a trailing value the row gives its column to the title. */
+  .ui-list-row:has(> .ui-list-row-trailing:empty) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .ui-list-row[data-thumbnail]:has(> .ui-list-row-trailing:empty) {
+    grid-template-columns: var(--_thumb) minmax(0, 1fr) auto;
+  }
+
+  .ui-list-row > .ui-list-row-trailing:empty {
+    display: none;
+  }
+
+  /* A narrower list, and a phone, which also has no hover: the row is shorter and smaller. */
+  .ui-list-row[data-compact] {
+    --_thumb: 80px;
+    height: 72px;
+    column-gap: calc(var(--spacing) * 3);
+  }
+
+  .ui-list-row[data-compact] .ui-list-row-title {
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    letter-spacing: var(--text-body--letter-spacing);
+  }
+
   @media (--phone) {
     .ui-list-row {
       --_thumb: 80px;
       height: 72px;
       column-gap: calc(var(--spacing) * 3);
     }
+
+    .ui-list-row-title {
+      font-size: var(--text-body);
+      line-height: var(--text-body--line-height);
+      letter-spacing: var(--text-body--letter-spacing);
+    }
+  }
+
+  /* A row that swipes: it slides over its action's face, which waits behind it. */
+  .ui-list-row-swipe {
+    --_face: 88px;
+    position: relative;
+    overflow: hidden;
+    border-radius: var(--radius-group);
+  }
+
+  .ui-list-row-swipe > .ui-list-row {
+    z-index: 1;
+    touch-action: pan-y;
+  }
+
+  .ui-list-row-swipe > .ui-list-row:not([data-selected]) {
+    background-color: var(--color-void);
+  }
+
+  .ui-list-row-face {
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: var(--_face);
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-group);
+    background-color: var(--color-danger-bg);
+    color: var(--color-danger-fg);
+    font:
+      var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-3--letter-spacing);
+    cursor: pointer;
+  }
+
+  .ui-list-row-face:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: calc(var(--focus-width) * -1);
   }
 
   @media (hover: none) {

@@ -258,8 +258,8 @@ export function ActivityRail({
 
   return (
     <aside className="rail r activity-rail" aria-label="Plan and steps">
-      {/* A tab or the column names it on screen; Replay says how far its record runs. */}
-      <div className={replay ? "rail-h" : "ui-visually-hidden"}>
+      {/* A tab or the column names it on screen; Replay's transport says how far its record runs. */}
+      <div className="ui-visually-hidden">
         <h2>Activity</h2>
         {replay && <span className="num">As of {timeLabel(asOfMs)}</span>}
       </div>

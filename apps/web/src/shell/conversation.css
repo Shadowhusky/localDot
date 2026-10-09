@@ -51,22 +51,19 @@
   outline-offset: calc(var(--focus-width) * -1);
 }
 
+/* One rhythm down the thread (design-v2 §10.21): every message, card and work line 14 apart. */
 .thread-row {
   display: grid;
   min-width: 0;
-  margin-top: calc(var(--spacing) * 1.5);
+  margin-top: calc(var(--spacing) * 3.5);
   transition:
     opacity var(--dur-fade) var(--ease-standard),
     translate var(--dur-default) var(--ease-spring);
 }
 
-.thread-row[data-group-start] {
-  margin-top: calc(var(--spacing) * 5);
-}
-
-/* A card under dot's words keeps a little more air than a line of text. */
-.thread-row:is([data-kind="result"], [data-kind="question"]):not([data-group-start]) {
-  margin-top: calc(var(--spacing) * 3);
+/* A work line sits with the words it follows. */
+.thread-row[data-kind="work"]:not([data-group-start]) {
+  margin-top: calc(var(--spacing) * 2);
 }
 
 .thread-row:first-child,
@@ -113,19 +110,6 @@
   flex: 1;
   height: 1px;
   background-color: var(--color-separator);
-}
-
-.thread-who {
-  display: flex;
-  align-items: center;
-  gap: calc(var(--spacing) * 1.5);
-  margin-bottom: var(--spacing);
-  color: var(--color-fg-3);
-  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-}
-
-.thread-who > .dot-glyph {
-  color: var(--color-fg-2);
 }
 
 .thread-note {
@@ -241,7 +225,7 @@
   margin-top: calc(var(--spacing) * 2);
 }
 
-/* Messages. You on the right in a bubble; dot as plain text under its name. */
+/* Messages. You on the right in a bubble; dot as plain text on the left, with no name. */
 .thread-message {
   position: relative;
   min-width: 0;
@@ -274,10 +258,12 @@
 }
 
 .thread-bubble {
-  max-width: 85%;
-  padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
-  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-sm) var(--radius-xl);
+  max-width: 86%;
+  padding: calc(var(--spacing) * 2.25) calc(var(--spacing) * 3.5);
+  border-radius: var(--radius-xl) var(--radius-xl) var(--radius-tail) var(--radius-xl);
   background-color: var(--color-raised-2);
+  font: var(--text-row) / var(--text-row--line-height) var(--font-ui);
+  letter-spacing: var(--text-row--letter-spacing);
   white-space: pre-wrap;
 }
 
@@ -333,20 +319,33 @@
   }
 }
 
-/* dot's words, as Markdown. */
+/* dot's words, as Markdown (design-v2 §10.22), on the reading type with 8 between blocks. */
 .safe-markdown > * + * {
   margin-top: calc(var(--spacing) * 2);
 }
 
 .safe-markdown p {
   white-space: pre-wrap;
+  text-wrap: pretty;
+}
+
+.safe-markdown strong {
+  font-weight: var(--font-weight-semibold);
+}
+
+/* A table's first row before its delimiter arrives keeps the height the row will have. */
+.safe-markdown p[data-row] {
+  display: flex;
+  align-items: center;
+  min-height: 30px;
 }
 
 .safe-markdown a {
-  color: inherit;
+  color: var(--color-fg-1);
   text-decoration: underline;
-  text-decoration-color: var(--color-fg-3);
-  text-underline-offset: calc(var(--spacing) * 0.75);
+  text-decoration-color: var(--color-link-line);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
   transition: text-decoration-color var(--dur-hover) var(--ease-standard);
 }
 
@@ -356,19 +355,57 @@
   }
 }
 
-.safe-markdown h3 {
+/* Each link names the host it goes to, so where it leads is never a surprise. */
+.md-host {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 16px;
+  margin-left: var(--spacing);
+  padding: 0 calc(var(--spacing) * 1.25);
+  border-radius: var(--radius-tag);
+  background-color: var(--color-control);
+  color: var(--color-fg-3);
   font:
-    var(--font-weight-semibold) var(--text-title-3) / var(--text-title-3--line-height)
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+  vertical-align: 1px;
+  white-space: nowrap;
+}
+
+.safe-markdown a.md-image {
+  margin-left: 0;
+  text-decoration: none;
+}
+
+.safe-markdown :is(h3, h4) {
+  font:
+    var(--text-title-3--font-weight) var(--text-title-3) / var(--text-title-3--line-height)
     var(--font-ui);
   letter-spacing: var(--text-title-3--letter-spacing);
 }
 
+.safe-markdown h3[data-level="1"] {
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-title-2);
+  line-height: var(--text-title-2--line-height);
+  letter-spacing: var(--text-title-2--letter-spacing);
+}
+
 .safe-markdown h4 {
-  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  font-weight: var(--font-weight-semibold);
+  font-size: var(--text-row);
+  line-height: var(--text-row--line-height);
+  letter-spacing: var(--text-row--letter-spacing);
 }
 
 .safe-markdown > :is(h3, h4):not(:first-child) {
   margin-top: calc(var(--spacing) * 4);
+}
+
+.safe-markdown > :is(h3, h4) + * {
+  margin-top: calc(var(--spacing) * 1.5);
 }
 
 .safe-markdown :is(ul, ol) {
@@ -377,36 +414,101 @@
   padding-left: calc(var(--spacing) * 5);
 }
 
+.safe-markdown li {
+  padding-left: 2px;
+}
+
+.safe-markdown li > :is(ul, ol) {
+  margin-top: var(--spacing);
+  padding-left: calc(var(--spacing) * 4.5);
+}
+
 .safe-markdown li::marker {
   color: var(--color-fg-3);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A task list: a read-only box for each item; a done one is filled and its words quieter. */
+.safe-markdown .md-tasks {
+  padding-left: 0;
+  list-style: none;
+}
+
+.md-tasks > li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  column-gap: calc(var(--spacing) * 2);
+  padding-left: 0;
+}
+
+.md-tasks > li > :is(ul, ol) {
+  flex-basis: 100%;
+}
+
+.md-box {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: var(--size-checkbox);
+  height: var(--size-checkbox);
+  margin-top: calc(var(--spacing) * 0.75);
+  border-radius: var(--radius-xs);
+  box-shadow: inset 0 0 0 1px var(--color-fg-3);
+  color: var(--color-void);
+}
+
+.md-box[data-done] {
+  background-color: var(--color-fg-2);
+  box-shadow: none;
+}
+
+.safe-markdown .md-box > .ui-icon {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.6;
+}
+
+.md-tasks > li[data-task="done"] > .md-item {
+  color: var(--color-fg-2);
 }
 
 .safe-markdown code {
   font-family: var(--font-mono);
-  font-size: var(--text-callout);
+  font-size: var(--text-mono);
 }
 
 .safe-markdown :not(pre) > code {
-  padding: 0 var(--spacing);
-  border-radius: var(--radius-xs);
-  background-color: var(--color-control);
+  padding: 1px calc(var(--spacing) * 1.25);
+  border-radius: var(--radius-tag);
+  background-color: var(--color-inline-code);
+  line-height: var(--text-body--line-height);
 }
 
 .safe-markdown blockquote {
   padding-left: calc(var(--spacing) * 3);
-  box-shadow: inset 2px 0 0 var(--color-fg-4);
+  box-shadow: inset 2px 0 0 var(--color-quote-bar);
   color: var(--color-fg-2);
   white-space: pre-wrap;
 }
 
-.safe-markdown hr {
+.safe-markdown > hr {
   height: 1px;
+  margin-block: calc(var(--spacing) * 3.5);
   border: 0;
-  background-color: var(--color-hairline);
+  background-color: var(--color-separator);
 }
 
+.safe-markdown > hr + * {
+  margin-top: 0;
+}
+
+/* A code block: its language and Copy in a 30 px head, the code scrolling inside the block only. */
 .md-code {
+  display: flex;
+  flex-direction: column;
   min-width: 0;
+  overflow: hidden;
   border-radius: var(--radius-md);
   background-color: var(--color-well);
   box-shadow: inset 0 0 0 1px var(--color-hairline);
@@ -414,16 +516,19 @@
 
 .md-code-head {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: calc(var(--spacing) * 2);
-  padding: var(--spacing) var(--spacing) 0 calc(var(--spacing) * 3);
+  height: 30px;
+  padding: 0 var(--spacing) 0 calc(var(--spacing) * 3);
+  box-shadow: inset 0 -1px 0 var(--color-hairline);
 }
 
 .md-code-language {
   color: var(--color-fg-3);
   font:
-    var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
     var(--font-ui);
   letter-spacing: var(--text-footnote--letter-spacing);
 }
@@ -437,9 +542,12 @@
 }
 
 .md-code pre {
-  padding: var(--spacing) calc(var(--spacing) * 3) calc(var(--spacing) * 3);
-  border-radius: var(--radius-md);
-  font: var(--text-callout) / var(--text-body--line-height) var(--font-mono);
+  max-height: 360px;
+  min-height: calc(var(--text-mono--line-height) + var(--spacing) * 5.5);
+  overflow-y: auto;
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3) calc(var(--spacing) * 3);
+  color: var(--color-code-text);
+  font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
   white-space: pre;
   tab-size: 2;
 }
@@ -449,9 +557,10 @@
   outline-offset: calc(var(--focus-width) * -1);
 }
 
+/* A table scrolls sideways inside its own box; numbers line up on the right. */
 .md-table {
   border-radius: var(--radius-md);
-  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  box-shadow: inset 0 0 0 1px var(--color-separator);
 }
 
 .md-table table {
@@ -462,21 +571,23 @@
 }
 
 .md-table :is(th, td) {
-  padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 3);
+  height: 30px;
+  padding: 0 calc(var(--spacing) * 2.5);
   text-align: start;
-  vertical-align: top;
-}
-
-.md-table th {
-  color: var(--color-fg-2);
-  font-size: var(--text-callout);
-  font-weight: var(--font-weight-semibold);
+  vertical-align: middle;
   white-space: nowrap;
 }
 
-.md-table tr + tr > td,
-.md-table tbody tr:first-child > td {
-  box-shadow: inset 0 1px 0 var(--color-hairline);
+.md-table th {
+  background-color: var(--color-table-head);
+  color: var(--color-fg-2);
+  font:
+    var(--font-weight-semibold) var(--text-callout) / var(--text-callout--line-height)
+    var(--font-ui);
+}
+
+.md-table tbody td {
+  box-shadow: inset 0 1px 0 var(--color-separator);
 }
 
 .md-table [data-align="center"] {
@@ -485,6 +596,14 @@
 
 .md-table [data-align="right"] {
   text-align: end;
+}
+
+/* On a phone the table runs to the screen's edge, so that it scrolls is plain to see. */
+@media (--phone) {
+  .md-table {
+    margin-right: calc(var(--spacing) * -4);
+    border-radius: var(--radius-md) 0 0 var(--radius-md);
+  }
 }
 
 /* dot's question reads as its message, its fields under it while dot waits; then your answer as
@@ -575,18 +694,34 @@
   }
 }
 
-/* The chevron's ink lines up with the text above it. */
+/* The work line (design-v2 §10.21): a 32 px row with the turn's glyph, what it did and how long,
+   and a chevron at the far end that opens its steps. Its glyph's ink lines up with the text. */
 .thread-work-steps {
-  margin-inline: calc(var(--spacing) * -3) calc(var(--spacing) * -2);
+  margin-inline: calc(var(--spacing) * -2);
 }
 
 .thread-work-steps > .ui-collapse {
-  margin-inline: calc(var(--spacing) * 3) calc(var(--spacing) * 2);
+  margin-inline: calc(var(--spacing) * 2);
+}
+
+.thread-work-steps .ui-disclosure-chevron {
+  order: 2;
+  margin-left: auto;
+}
+
+.thread-work-steps .ui-disclosure-summary {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+}
+
+.thread-work-glyph {
+  width: 14px;
+  height: 14px;
 }
 
 .thread-work-meta {
-  color: var(--color-fg-3);
-  font-weight: var(--font-weight-normal);
+  white-space: pre;
 }
 
 .thread-work-list {
@@ -853,6 +988,10 @@
     opacity var(--dur-fade) var(--ease-standard),
     translate var(--dur-default) var(--ease-spring),
     scale var(--dur-default) var(--ease-spring);
+}
+
+.thread-jump-label {
+  color: var(--color-fg-1);
 }
 
 .thread-jump[data-shown] {

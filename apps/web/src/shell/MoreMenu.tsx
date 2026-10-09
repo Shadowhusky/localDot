@@ -1,7 +1,7 @@
-import { useRef, useState } from "react";
+import { Fragment, useRef, useState } from "react";
 import { IconButton } from "../ui/IconButton.tsx";
 import type { IconName } from "../ui/icons.ts";
-import { Menu, MenuItem } from "../ui/Menu.tsx";
+import { Menu, MenuItem, MenuSeparator } from "../ui/Menu.tsx";
 import { triggerProps } from "../ui/Popover.tsx";
 
 export interface MoreItem {
@@ -10,6 +10,8 @@ export interface MoreItem {
   // Given the More button, which takes the focus back when what it opens closes.
   run(trigger: HTMLButtonElement): void;
   disabledReason?: string;
+  // A line above it, where a new group of items starts.
+  startsGroup?: boolean;
 }
 
 // Where a phone keeps what a wider screen shows in its top bar: at the toolbar's trailing end, its
@@ -36,18 +38,21 @@ export function MoreMenu({ items }: { items: readonly MoreItem[] }) {
         side="top"
         align="end"
         label="More"
+        dim
       >
-        {items.map((item) => (
-          <MenuItem
-            key={item.label}
-            icon={item.icon}
-            disabledReason={item.disabledReason}
-            onSelect={() => {
-              if (button.current) item.run(button.current);
-            }}
-          >
-            {item.label}
-          </MenuItem>
+        {items.map((item, index) => (
+          <Fragment key={item.label}>
+            {item.startsGroup && index > 0 && <MenuSeparator />}
+            <MenuItem
+              icon={item.icon}
+              disabledReason={item.disabledReason}
+              onSelect={() => {
+                if (button.current) item.run(button.current);
+              }}
+            >
+              {item.label}
+            </MenuItem>
+          </Fragment>
         ))}
       </Menu>
     </>

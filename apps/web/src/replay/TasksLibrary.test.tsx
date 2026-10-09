@@ -50,12 +50,14 @@ function Library({
   onSelect = () => {},
   onDeleted = () => {},
   continueTask,
+  variant,
 }: {
   api: ReturnType<typeof createApi>;
   selected?: string | null;
   onSelect?(id: string): void;
   onDeleted?(id: string): void;
   continueTask?: ContinueTask;
+  variant?: "library" | "phone" | "rail";
 }) {
   const index = useTaskIndex(api);
   const [search, setSearch] = useState("");
@@ -70,34 +72,49 @@ function Library({
         onSelect={onSelect}
         onDeleted={onDeleted}
         continueTask={continueTask}
+        variant={variant}
       />
     </>
   );
 }
 
-it("groups tasks by day under plain headings, with a verdict on each row", async () => {
+const row = (name: string) => screen.findByRole("button", { name });
+
+it("groups recordings by day under plain headings, with a verdict and a length on each row", async () => {
   const { api } = daemon([[card("Today's report", 0), card("Yesterday's sort", DAY)]]);
   render(<Library api={api} />);
   const today = await screen.findByRole("region", { name: "Today" });
-  expect(within(today).getByRole("link", { name: /^Today's report/ })).toBeTruthy();
+  expect(within(today).getByRole("button", { name: "Today's report" })).toBeTruthy();
   const yesterday = screen.getByRole("region", { name: "Yesterday" });
-  const row = within(yesterday).getByRole("link", { name: /^Yesterday's sort/ });
-  expect(row.textContent).toContain("1:01");
-  expect(within(row).getByRole("img", { name: "Done" })).toBeTruthy();
+  const item = within(yesterday).getByRole("listitem");
+  expect(within(item).getByRole("button", { name: "Yesterday's sort" })).toBeTruthy();
+  expect(item.textContent).toContain("1:01");
+  expect(item.textContent).toContain("1 step");
+  expect(within(item).getByRole("img", { name: "Done" })).toBeTruthy();
 });
 
-it("opens a task from its row and marks the open one as the current page", async () => {
+it("chooses a recording from its row and marks the chosen one", async () => {
   const onSelect = vi.fn();
   const first = card("Sort the downloads", 0);
   const { api } = daemon([[first, card("Monthly report", 1000)]]);
   render(<Library api={api} selected={first.id} onSelect={onSelect} />);
-  const row = await screen.findByRole("link", { name: /^Monthly report/ });
-  expect(
-    screen.getByRole("link", { name: /^Sort the downloads/ }).getAttribute("aria-current"),
-  ).toBe("page");
-  fireEvent.click(row);
-  expect(onSelect).toHaveBeenCalledWith(expect.stringMatching(/^01M4/));
-  expect(onSelect).toHaveBeenCalledTimes(1);
+  const other = await row("Monthly report");
+  expect((await row("Sort the downloads")).getAttribute("aria-pressed")).toBe("true");
+  expect(other.getAttribute("aria-pressed")).toBe("false");
+  fireEvent.click(other);
+  expect(onSelect).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^01M4/));
+});
+
+it("keeps every row's actions in a cell of their own, never laid over the row above", async () => {
+  const { api } = daemon([[card("First", 0), card("Second", 1000)]]);
+  const view = render(<Library api={api} continueTask={{ current: null, run: () => {} }} />);
+  await row("First");
+  for (const item of view.container.querySelectorAll(".replay-task")) {
+    const actions = item.querySelector(".ui-list-row > .ui-list-row-actions");
+    expect(actions).not.toBeNull();
+    expect(within(actions as HTMLElement).getByRole("button", { name: "Continue" })).toBeTruthy();
+    expect(within(actions as HTMLElement).getByRole("button", { name: /^Delete / })).toBeTruthy();
+  }
 });
 
 it("searches every word of the title, reading the pages a scroll has not reached", async () => {
@@ -106,35 +123,35 @@ it("searches every word of the title, reading the pages a scroll has not reached
     [card("Email the monthly totals", 2000)],
   ]);
   render(<Library api={api} />);
-  await screen.findByRole("link", { name: /^Sort the downloads/ });
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tasks" }), {
+  await row("Sort the downloads");
+  fireEvent.change(screen.getByRole("textbox", { name: "Search recordings" }), {
     target: { value: "MONTHLY" },
   });
-  await screen.findByRole("link", { name: /^Email the monthly totals/ });
+  await row("Email the monthly totals");
   expect(asked).toEqual(["", "?before=1"]);
-  expect(screen.getByRole("link", { name: /^Monthly report/ })).toBeTruthy();
-  expect(screen.queryByRole("link", { name: /^Sort the downloads/ })).toBeNull();
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tasks" }), {
+  expect(screen.getByRole("button", { name: "Monthly report" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Sort the downloads" })).toBeNull();
+  fireEvent.change(screen.getByRole("textbox", { name: "Search recordings" }), {
     target: { value: "totals email" },
   });
-  expect(screen.getAllByRole("link")).toHaveLength(1);
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tasks" }), {
+  expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  fireEvent.change(screen.getByRole("textbox", { name: "Search recordings" }), {
     target: { value: "weather" },
   });
-  expect(screen.getByText("No tasks match “weather”")).toBeTruthy();
+  expect(screen.getByText("No recordings match “weather”")).toBeTruthy();
 });
 
 it("moves between rows with the arrow keys", async () => {
   const { api } = daemon([[card("First", 0), card("Second", 1000), card("Third", 2000)]]);
   render(<Library api={api} />);
-  const first = await screen.findByRole("link", { name: /^First/ });
+  const first = await row("First");
   first.focus();
   fireEvent.keyDown(first, { key: "ArrowDown" });
-  expect(document.activeElement).toBe(screen.getByRole("link", { name: /^Second/ }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Second" }));
   fireEvent.keyDown(document.activeElement as Element, { key: "End" });
-  expect(document.activeElement).toBe(screen.getByRole("link", { name: /^Third/ }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Third" }));
   fireEvent.keyDown(document.activeElement as Element, { key: "ArrowUp" });
-  expect(document.activeElement).toBe(screen.getByRole("link", { name: /^Second/ }));
+  expect(document.activeElement).toBe(screen.getByRole("button", { name: "Second" }));
 });
 
 it("deletes a recording only after an anchored confirmation, and says why one cannot go", async () => {
@@ -144,10 +161,10 @@ it("deletes a recording only after an anchored confirmation, and says why one ca
     id === running.id ? new Response("live", { status: 409 }) : new Response(null, { status: 204 }),
   );
   render(<Library api={api} onDeleted={onDeleted} />);
-  const row = await screen.findByRole("link", { name: /^Still running/ });
-  row.focus();
-  fireEvent.keyDown(row, { key: "Backspace" });
-  let confirm = await screen.findByRole("alertdialog", { name: "Delete this task's recording?" });
+  const first = await row("Still running");
+  first.focus();
+  fireEvent.keyDown(first, { key: "Backspace" });
+  let confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
   await act(async () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
   });
@@ -158,20 +175,19 @@ it("deletes a recording only after an anchored confirmation, and says why one ca
   expect(onDeleted).not.toHaveBeenCalled();
   fireEvent.click(within(confirm).getByRole("button", { name: "Cancel" }));
 
-  fireEvent.click(screen.getByRole("button", { name: "More for Old notes" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: /^Delete recording/ }));
-  confirm = await screen.findByRole("alertdialog", { name: "Delete this task's recording?" });
-  expect(confirm.textContent).toContain("“Old notes”");
+  fireEvent.click(screen.getByRole("button", { name: "Delete Old notes" }));
+  confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
   await act(async () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
   });
   await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(screen.queryByRole("button", { name: "Old notes" })).toBeNull());
 });
 
 it("says when there is nothing recorded yet", async () => {
   const { api } = daemon([[]]);
   render(<Library api={api} />);
-  expect(await screen.findByText("No tasks yet")).toBeTruthy();
+  expect(await screen.findByText("No recordings yet")).toBeTruthy();
 });
 
 it("asks once for a page a search needs when it fails, then waits for Try again", async () => {
@@ -187,8 +203,8 @@ it("asks once for a page a search needs when it fails, then waits for Try again"
     return Response.json({ sessions: [card("Monthly report", 0)], next: "1" });
   }) as typeof fetch;
   render(<Library api={createApi("a".repeat(43), { fetchImpl, origin: "http://127.0.0.1" })} />);
-  await screen.findByRole("link", { name: /^Monthly report/ });
-  fireEvent.change(screen.getByRole("textbox", { name: "Search tasks" }), {
+  await row("Monthly report");
+  fireEvent.change(screen.getByRole("textbox", { name: "Search recordings" }), {
     target: { value: "monthly" },
   });
   const alert = await screen.findByRole("alert");
@@ -196,7 +212,7 @@ it("asks once for a page a search needs when it fails, then waits for Try again"
   expect(asked).toEqual(["", "?before=1"]);
   failing = false;
   fireEvent.click(within(alert).getByRole("button", { name: "Try again" }));
-  await screen.findByRole("link", { name: /^Email the monthly totals/ });
+  await row("Email the monthly totals");
   expect(asked).toEqual(["", "?before=1", "?before=1"]);
 });
 
@@ -212,42 +228,68 @@ it("keeps the delete confirmation open while the recording is being deleted", as
   };
   const onDeleted = vi.fn();
   render(<Library api={slow} onDeleted={onDeleted} />);
-  const row = await screen.findByRole("link", { name: /^Old notes/ });
-  row.focus();
-  fireEvent.keyDown(row, { key: "Backspace" });
-  const confirm = await screen.findByRole("alertdialog", { name: "Delete this task's recording?" });
+  const first = await row("Old notes");
+  first.focus();
+  fireEvent.keyDown(first, { key: "Backspace" });
+  const confirm = await screen.findByRole("alertdialog", { name: "Delete this recording?" });
   fireEvent.click(within(confirm).getByRole("button", { name: "Delete" }));
   const cancel = within(confirm).getByRole("button", { name: "Cancel" });
   await waitFor(() => expect(cancel.getAttribute("aria-disabled")).toBe("true"));
   fireEvent.click(cancel);
-  expect(screen.getByRole("alertdialog", { name: "Delete this task's recording?" })).toBe(confirm);
+  expect(screen.getByRole("alertdialog", { name: "Delete this recording?" })).toBe(confirm);
   await act(async () => finish());
   await waitFor(() => expect(onDeleted).toHaveBeenCalledTimes(1));
 });
 
-it("continues an ended task's conversation from its menu, but not the current or a running one", async () => {
+it("continues a task's conversation from its row, and says why when it has to wait", async () => {
   const run = vi.fn();
   const current = card("Book the hotel", 0);
-  const running = card("Still running", 0, "live");
   const older = card("Plan the trip", DAY);
-  const { api } = daemon([[current, running, older]]);
+  const { api } = daemon([[current, older]]);
   const view = render(<Library api={api} continueTask={{ current: current.id, run }} />);
-  for (const title of ["Book the hotel", "Still running"]) {
-    fireEvent.click(await screen.findByRole("button", { name: `More for ${title}` }));
-    await screen.findByRole("menuitem", { name: /^Delete recording/ });
-    expect(screen.queryByRole("menuitem", { name: "Continue conversation" })).toBeNull();
-    fireEvent.keyDown(document.activeElement ?? document.body, { key: "Escape" });
-  }
-  fireEvent.click(screen.getByRole("button", { name: "More for Plan the trip" }));
-  fireEvent.click(await screen.findByRole("menuitem", { name: "Continue conversation" }));
+  await row("Plan the trip");
+  const continueOn = (title: string) =>
+    within(screen.getByRole("button", { name: title }).closest("li") as HTMLElement).getByRole(
+      "button",
+      { name: "Continue" },
+    );
+  fireEvent.click(continueOn("Plan the trip"));
   expect(run).toHaveBeenCalledExactlyOnceWith(older.id);
 
   view.rerender(
     <Library api={api} continueTask={{ current: current.id, run, reason: "Finish first." }} />,
   );
-  fireEvent.click(screen.getByRole("button", { name: "More for Plan the trip" }));
-  const item = await screen.findByRole("menuitem", { name: "Continue conversation" });
-  expect(item.getAttribute("aria-disabled")).toBe("true");
-  fireEvent.click(item);
+  expect(continueOn("Plan the trip").getAttribute("aria-disabled")).toBe("true");
+  fireEvent.click(continueOn("Plan the trip"));
   expect(run).toHaveBeenCalledTimes(1);
+  // The conversation already open goes on in Watch, which nothing holds up.
+  expect(continueOn("Book the hotel").hasAttribute("aria-disabled")).toBe(false);
+});
+
+it("slides a phone's row aside to a Delete face that a keyboard can reach too", async () => {
+  const { api } = daemon([[card("Old notes", 0)]], () => new Response(null, { status: 204 }));
+  render(<Library api={api} variant="phone" continueTask={{ current: null, run: () => {} }} />);
+  const face = await screen.findByRole("button", { name: "Delete Old notes" });
+  expect(face.closest(".ui-list-row-swipe")).not.toBeNull();
+  expect(screen.queryByRole("img", { hidden: true, name: "trash" })).toBeNull();
+  fireEvent.click(face);
+  expect(await screen.findByRole("alertdialog", { name: "Delete this recording?" })).toBeTruthy();
+});
+
+it("lists recordings in the player's rail with nothing but the row to open", async () => {
+  const onSelect = vi.fn();
+  const first = card("Sort the downloads", 0);
+  const { api } = daemon([[first]]);
+  render(
+    <Library
+      api={api}
+      variant="rail"
+      onSelect={onSelect}
+      continueTask={{ current: null, run: () => {} }}
+    />,
+  );
+  fireEvent.click(await row("Sort the downloads"));
+  expect(onSelect).toHaveBeenCalledWith(first.id);
+  expect(screen.queryByRole("button", { name: "Continue" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Delete / })).toBeNull();
 });

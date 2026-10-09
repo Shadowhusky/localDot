@@ -97,6 +97,7 @@ import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
 import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
+import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { IconButton } from "./ui/IconButton.tsx";
 import { isApple } from "./ui/Kbd.tsx";
@@ -118,6 +119,11 @@ const RETRY_CHECK_MS = 2000;
 // The island waits at most this long on opening for the task's history.
 const OPENING_MAX_MS = 2000;
 const FROM_WATCH = { fromWatch: true };
+const FROM_LIBRARY = { fromLibrary: true };
+// Replay's address names the recording that plays, or this for the library of recordings.
+const LIBRARY = "library";
+const replayAddress = (selected: string | null) =>
+  selected && (selected === LIBRARY || ULID_PATTERN.test(selected)) ? selected : null;
 const ACTIVITY_DETENTS = ["medium", "large"] as const;
 const PHONE_CONTROL_LINE = "Tap to click, drag to scroll. Hand back when you're done.";
 const UNCONFIRMED_LINE = "I couldn't confirm your last input. Stop the task to be safe.";
@@ -250,10 +256,10 @@ const SIGN_IN: Record<Exclude<Rejected, null> | "none", SignInState> = {
 function Theatre({ api }: { api: ApiClient }) {
   const appearance = useAppearance();
   const showDot = useShowDot();
-  const [replayId, setReplayId] = useState<string | null>(() => {
-    const selected = new URLSearchParams(window.location.search).get("replay");
-    return selected && ULID_PATTERN.test(selected) ? selected : null;
-  });
+  const [replayId, setReplayId] = useState<string | null>(() =>
+    replayAddress(new URLSearchParams(window.location.search).get("replay")),
+  );
+  const playing = replayId === LIBRARY ? null : replayId;
   const [newestReplayId, setNewestReplayId] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<RecordedTitle | null>(null);
   const shownRecording = replayId && recorded?.sessionId === replayId ? recorded : null;
@@ -264,25 +270,42 @@ function Theatre({ api }: { api: ApiClient }) {
   const historyOwner = useRef(0);
   const replayIdRef = useRef(replayId);
   replayIdRef.current = replayId;
-  // Entering Replay from Watch adds one marked entry and leaving steps back over it, so browser
-  // Back returns to Watch without stacking entries. A deletion only replaces the current entry.
+  // Entering Replay from Watch adds one marked entry, and so does opening a recording from the
+  // library; leaving steps back over the entry it came by, so browser Back goes up one level without
+  // stacking entries. A deletion only replaces the current entry.
   const selectReplay = (id: string | null, entry: "navigate" | "replace" = "navigate") => {
+    const was = replayIdRef.current;
     const address = new URL(window.location.href);
     if (id) address.searchParams.set("replay", id);
     else address.searchParams.delete("replay");
-    if (id !== replayIdRef.current) address.searchParams.delete("t");
-    const leaving = id === null && replayIdRef.current !== null;
-    if (entry === "navigate" && id !== null && replayIdRef.current === null)
+    if (id !== was) address.searchParams.delete("t");
+    const leaving = id === null && was !== null;
+    const up = id === LIBRARY && was !== null && was !== LIBRARY;
+    if (entry === "navigate" && id !== null && was === null)
       window.history.pushState(FROM_WATCH, "", address);
+    else if (entry === "navigate" && id !== null && id !== LIBRARY && was === LIBRARY)
+      window.history.pushState(FROM_LIBRARY, "", address);
+    else if (entry === "navigate" && up && window.history.state?.fromLibrary) window.history.back();
     else if (entry === "navigate" && leaving && window.history.state?.fromWatch)
       window.history.back();
     else window.history.replaceState(leaving ? null : window.history.state, "", address);
     setReplayId(id);
   };
+  // Back and Forward never reopen a recording deleted since the page opened: its entries show the
+  // library instead.
+  const deletedRecordings = useRef(new Set<string>());
   useEffect(() => {
     const restore = () => {
-      const selected = new URLSearchParams(window.location.search).get("replay");
-      setReplayId(selected && ULID_PATTERN.test(selected) ? selected : null);
+      const selected = replayAddress(new URLSearchParams(window.location.search).get("replay"));
+      if (selected && deletedRecordings.current.has(selected)) {
+        const address = new URL(window.location.href);
+        address.searchParams.set("replay", LIBRARY);
+        address.searchParams.delete("t");
+        window.history.replaceState(window.history.state, "", address);
+        setReplayId(LIBRARY);
+        return;
+      }
+      setReplayId(selected);
     };
     window.addEventListener("popstate", restore);
     return () => window.removeEventListener("popstate", restore);
@@ -741,7 +764,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const place = presencePlace({
     showDot: showDot.value,
     curtain: curtain.up,
-    stageHidden: !!replayId,
+    replaying: !!replayId,
     keyboard,
     setup: onboarding.open,
     full,
@@ -968,6 +991,14 @@ function Theatre({ api }: { api: ApiClient }) {
     () => (focus && working ? workSteps(rows, agent.model).length : 0),
     [focus, working, rows, agent.model],
   );
+  const replayContinue = {
+    current: conversation.sessions.at(-1) ?? null,
+    reason: conversationReason,
+    run: (id: string) =>
+      void conversation.continueFrom(id).then((done) => {
+        if (done) selectReplay(null);
+      }),
+  };
   const page = useRef<HTMLDivElement>(null);
   useKeyboardFit(page, keyboard);
   return (
@@ -984,17 +1015,45 @@ function Theatre({ api }: { api: ApiClient }) {
     >
       <TopBar
         title={
-          replayId
-            ? (shownRecording?.title ?? RECORDED_TASK)
-            : (session.model.title ??
-              (curtain.up && !agent.sessionId && conversation.sessions.length === 0
-                ? undefined
-                : "New conversation"))
+          replayId === LIBRARY
+            ? "Replay"
+            : replayId
+              ? (shownRecording?.title ?? RECORDED_TASK)
+              : (session.model.title ??
+                (curtain.up && !agent.sessionId && conversation.sessions.length === 0
+                  ? undefined
+                  : "New conversation"))
         }
         note={shownRecording?.note}
+        lead={
+          shownRecording && (
+            <Button
+              variant="primary"
+              size="sm"
+              icon="continue"
+              disabledReason={
+                shownRecording.verdict !== "live" &&
+                shownRecording.sessionId !== conversation.sessions.at(-1)
+                  ? conversationReason
+                  : undefined
+              }
+              onClick={() =>
+                shownRecording.verdict === "live" ||
+                shownRecording.sessionId === conversation.sessions.at(-1)
+                  ? selectReplay(null)
+                  : replayContinue.run(shownRecording.sessionId)
+              }
+            >
+              Continue
+            </Button>
+          )
+        }
         mode={replayId ? "replay" : "watch"}
         replayEnabled={!!(replayId || newestReplayId)}
-        onMode={(mode) => selectReplay(mode === "watch" ? null : (replayId ?? newestReplayId))}
+        onMode={(mode) => selectReplay(mode === "watch" ? null : LIBRARY)}
+        onModeAgain={() => {
+          if (playing) selectReplay(LIBRARY);
+        }}
         keys={keysState}
         keysOpen={settings.open && settingsAt.section === "keys"}
         onKeys={() => showKeys(keysButton.current)}
@@ -1243,9 +1302,10 @@ function Theatre({ api }: { api: ApiClient }) {
                       {
                         label: "Replay",
                         icon: "history",
+                        startsGroup: true,
                         disabledReason:
                           replayId || newestReplayId ? undefined : "No recordings yet",
-                        run: () => selectReplay(replayId ?? newestReplayId),
+                        run: () => selectReplay(LIBRARY),
                       },
                       {
                         label: "Settings",
@@ -1342,26 +1402,22 @@ function Theatre({ api }: { api: ApiClient }) {
         <ErrorBoundary className="replay-failed">
           <ReplayView
             api={api}
-            sessionId={replayId}
+            sessionId={playing}
             onSelect={selectReplay}
+            onLibrary={() => selectReplay(LIBRARY)}
             onGoLive={() => selectReplay(null)}
             onDeleted={(id) => {
+              deletedRecordings.current.add(id);
               if (id === newestReplayId) setNewestReplayId(null);
               historyOwner.current++;
               setHistoryRevision(historyOwner.current);
-              if (id === replayId) selectReplay(null, "replace");
+              if (id === replayId) selectReplay(LIBRARY, "replace");
             }}
             onTitle={setRecorded}
-            continueTask={{
-              current: conversation.sessions.at(-1) ?? null,
-              reason: conversationReason,
-              run: (id) =>
-                void conversation.continueFrom(id).then((done) => {
-                  if (done) selectReplay(null);
-                }),
-            }}
+            continueTask={replayContinue}
             exportJob={exportJob}
             visible={!settings.open && !safety.approval}
+            showDot={showDot.value}
           />
         </ErrorBoundary>
       )}
