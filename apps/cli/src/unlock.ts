@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import type { KeydStatus, KeydVault, Sealed } from "../../../packages/protocol/src/keyd.ts";
 import { sealPassphrase } from "../../../packages/protocol/src/seal.ts";
 import { KeydError } from "../../daemon/src/keyd/client.ts";
@@ -12,19 +12,29 @@ export interface PassphrasePrompt {
   read(prompt: string, signal: AbortSignal): Promise<string>;
 }
 
-// Whether this machine's passphrase was chosen or entered with localdot unlock. The first
-// passphrase keyd hears becomes the vault's, from whichever program sends it.
+// Which vault's passphrase was chosen or entered with localdot unlock, by keyd's fingerprint of
+// it. The first passphrase keyd hears becomes the vault's, from whichever program sends it, and a
+// vault made anew has a new fingerprint.
 export interface PassphraseRecord {
-  known(): boolean;
-  remember(): void;
+  known(fingerprint: string | undefined): boolean;
+  remember(fingerprint: string): void;
 }
 
 export function passphraseRecord(path: string): PassphraseRecord {
   return {
-    known: () => existsSync(path),
-    remember: () => writeFileSync(path, `${new Date().toISOString()}\n`, { mode: 0o600 }),
+    known(fingerprint) {
+      try {
+        return fingerprint !== undefined && readFileSync(path, "utf8").trim() === fingerprint;
+      } catch {
+        return false;
+      }
+    },
+    remember: (fingerprint) => writeFileSync(path, `${fingerprint}\n`, { mode: 0o600 }),
   };
 }
+
+const CHOSEN_ELSEWHERE =
+  "Your saved keys already have a passphrase that wasn't set with localdot unlock. If you don't know it, something else chose it: see Saved keys in docs/install.md to start over.";
 
 export interface UnlockKeyd {
   status(): Promise<Pick<KeydStatus, "sealKey" | "vault">>;
@@ -46,15 +56,14 @@ export async function runUnlock(
     io.out("Your saved keys don't use a passphrase on this machine.");
     return 0;
   }
+  const hasPassphrase =
+    vault.state === "locked" || (vault.state === "ready" && vault.key === "passphrase");
+  if (hasPassphrase && !record.known(vault.fingerprint)) io.err(CHOSEN_ELSEWHERE);
   if (vault.state === "ready") {
     io.out("Your saved keys are already unlocked.");
     return 0;
   }
   const setup = vault.state === "setup";
-  if (!setup && !record.known())
-    io.err(
-      "Your saved keys already have a passphrase that wasn't set with localdot unlock. If you don't know it, something else chose it: see Saved keys in docs/install.md to start over.",
-    );
   const passphrase = await prompt.read(
     setup
       ? `Choose a passphrase for your saved keys (${MIN_PASSPHRASE} or more characters): `
@@ -76,8 +85,9 @@ export async function runUnlock(
     return 1;
   }
   signal.throwIfAborted();
+  let unlocked: KeydVault;
   try {
-    await keyd.unlockVault(await sealPassphrase(status.sealKey, passphrase));
+    unlocked = await keyd.unlockVault(await sealPassphrase(status.sealKey, passphrase));
   } catch (error) {
     if (error instanceof KeydError && error.status === 403) {
       io.err("That passphrase doesn't unlock your saved keys.");
@@ -85,7 +95,7 @@ export async function runUnlock(
     }
     throw error;
   }
-  record.remember();
+  if (unlocked.fingerprint) record.remember(unlocked.fingerprint);
   io.out(
     setup
       ? "Your saved keys are protected. You'll need this passphrase each time this machine restarts."

@@ -1,16 +1,34 @@
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { KeydVault, Sealed } from "../../../packages/protocol/src/keyd.ts";
 import { KeydError } from "../../daemon/src/keyd/client.ts";
 import { parseArgs } from "./args.ts";
-import { type PassphrasePrompt, runUnlock, terminalPrompt } from "./unlock.ts";
+import { type PassphrasePrompt, passphraseRecord, runUnlock, terminalPrompt } from "./unlock.ts";
 
 const SEAL_KEY =
   "BG2x8-BG3l6OwZSDEY2jv15f49mKcudyq5wvNeAMGomjt95F3U2ihX3pW1kqXeAogtDMs6rhGvlhvnCeU3XFwgM";
+const MINE = "0123456789abcdef0123456789abcdef";
+const ANEW = "fedcba9876543210fedcba9876543210";
+const MADE = "00112233445566778899aabbccddeeff";
 
-function harness(vault: KeydVault | null, answers: string[], refuse = false, known = true) {
+const homes: string[] = [];
+afterEach(() => {
+  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true });
+});
+
+function harness(
+  vault: KeydVault | null,
+  answers: string[],
+  { refuse = false, chosen = MINE }: { refuse?: boolean; chosen?: string | null } = {},
+) {
+  const home = mkdtempSync(join(tmpdir(), "localdot-unlock-"));
+  homes.push(home);
+  const path = join(home, "passphrase-chosen");
+  if (chosen !== null) writeFileSync(path, `${chosen}\n`);
   const out: string[] = [];
-  const record = { known: () => known, remembered: 0, remember: () => record.remembered++ };
   const err: string[] = [];
   const sent: Sealed[] = [];
   const prompts: string[] = [];
@@ -19,7 +37,12 @@ function harness(vault: KeydVault | null, answers: string[], refuse = false, kno
     unlockVault: async (sealed: Sealed): Promise<KeydVault> => {
       sent.push(sealed);
       if (refuse) throw new KeydError(403, "wrong-passphrase", "no", "/v1/vault/unlock");
-      return { backend: "file", state: "ready", key: "passphrase" };
+      return {
+        backend: "file",
+        state: "ready",
+        key: "passphrase",
+        fingerprint: vault?.fingerprint ?? MADE,
+      };
     },
   };
   const prompt: PassphrasePrompt = {
@@ -34,40 +57,66 @@ function harness(vault: KeydVault | null, answers: string[], refuse = false, kno
       { out: (m) => out.push(m), err: (m) => err.push(m) },
       keyd,
       prompt,
-      record,
+      passphraseRecord(path),
     );
-  return { run, out, err, sent, prompts, record };
+  const remembered = () => (existsSync(path) ? readFileSync(path, "utf8").trim() : undefined);
+  return { run, out, err, sent, prompts, remembered, path };
 }
 
+const locked = (fingerprint?: string): KeydVault => ({
+  backend: "file",
+  state: "locked",
+  key: "passphrase",
+  ...(fingerprint ? { fingerprint } : {}),
+});
 const PASS = "correct horse battery staple";
 
 describe("localdot unlock", () => {
   it("warns when the passphrase wasn't set with localdot unlock, and remembers one that works", async () => {
-    const elsewhere = harness(
-      { backend: "file", state: "locked", key: "passphrase" },
-      [PASS],
-      false,
-      false,
-    );
+    const elsewhere = harness(locked(MINE), [PASS], { chosen: null });
     expect(await elsewhere.run()).toBe(0);
     expect(elsewhere.err.join(" ")).toContain("wasn't set with localdot unlock");
-    expect(elsewhere.record.remembered).toBe(1);
-    const mine = harness({ backend: "file", state: "locked", key: "passphrase" }, [PASS]);
+    expect(elsewhere.remembered()).toBe(MINE);
+    const mine = harness(locked(MINE), [PASS]);
     expect(await mine.run()).toBe(0);
     expect(mine.err).toEqual([]);
-    const fresh = harness({ backend: "file", state: "setup" }, [PASS, PASS], false, false);
+    const fresh = harness({ backend: "file", state: "setup" }, [PASS, PASS], { chosen: null });
     expect(await fresh.run()).toBe(0);
     expect(fresh.err).toEqual([]);
-    expect(fresh.record.remembered).toBe(1);
-    const wrong = harness({ backend: "file", state: "locked", key: "passphrase" }, [PASS], true);
+    expect(fresh.remembered()).toBe(MADE);
+    const wrong = harness(locked(MINE), [PASS], { refuse: true, chosen: null });
     expect(await wrong.run()).toBe(1);
-    expect(wrong.record.remembered).toBe(0);
+    expect(wrong.remembered()).toBeUndefined();
+  });
+
+  it("warns about a vault made anew, though an earlier vault's passphrase was chosen here", async () => {
+    const anew = harness(locked(ANEW), [PASS]);
+    expect(await anew.run()).toBe(0);
+    expect(anew.err.join(" ")).toContain("wasn't set with localdot unlock");
+    expect(anew.remembered()).toBe(ANEW);
+    const unnamed = harness(locked(), [PASS]);
+    await unnamed.run();
+    expect(unnamed.err.join(" ")).toContain("wasn't set with localdot unlock");
+    const undated = harness(locked(MINE), [PASS], { chosen: "2026-10-09T12:00:00.000Z" });
+    await undated.run();
+    expect(undated.err.join(" ")).toContain("wasn't set with localdot unlock");
+  });
+
+  it("warns about an unlocked vault whose passphrase something else chose", async () => {
+    const ready = { backend: "file", state: "ready", key: "passphrase" } as const;
+    const anew = harness({ ...ready, fingerprint: ANEW }, []);
+    expect(await anew.run()).toBe(0);
+    expect(anew.prompts).toHaveLength(0);
+    expect(anew.err.join(" ")).toContain("wasn't set with localdot unlock");
+    expect(anew.out).toEqual(["Your saved keys are already unlocked."]);
+    expect(anew.remembered()).toBe(MINE);
+    const mine = harness({ ...ready, fingerprint: MINE }, []);
+    expect(await mine.run()).toBe(0);
+    expect(mine.err).toEqual([]);
   });
 
   it("refuses a passphrase longer than keyd takes before sending it", async () => {
-    const long = harness({ backend: "file", state: "locked", key: "passphrase" }, [
-      "é".repeat(600),
-    ]);
+    const long = harness(locked(MINE), ["é".repeat(600)]);
     expect(await long.run()).toBe(1);
     expect(long.err.join(" ")).toContain("Use at most 1024 characters");
     expect(long.sent).toHaveLength(0);
@@ -91,16 +140,16 @@ describe("localdot unlock", () => {
     const differ = harness({ backend: "file", state: "setup" }, [PASS, `${PASS}!`]);
     expect(await differ.run()).toBe(1);
     expect(differ.sent).toHaveLength(0);
-    const short = harness({ backend: "file", state: "locked", key: "passphrase" }, ["short"]);
+    const short = harness(locked(MINE), ["short"]);
     expect(await short.run()).toBe(1);
     expect(short.sent).toHaveLength(0);
   });
 
   it("unlocks a locked vault, and says so plainly when the passphrase is wrong", async () => {
-    const ok = harness({ backend: "file", state: "locked", key: "passphrase" }, [PASS]);
+    const ok = harness(locked(MINE), [PASS]);
     expect(await ok.run()).toBe(0);
     expect(ok.prompts).toEqual(["Passphrase for your saved keys: "]);
-    const wrong = harness({ backend: "file", state: "locked", key: "passphrase" }, [PASS], true);
+    const wrong = harness(locked(MINE), [PASS], { refuse: true });
     expect(await wrong.run()).toBe(1);
     expect(wrong.err).toEqual(["That passphrase doesn't unlock your saved keys."]);
   });
@@ -111,9 +160,10 @@ describe("localdot unlock", () => {
       { backend: "file", state: "ready" as const, key: "tpm" as const },
       null,
     ]) {
-      const h = harness(vault, []);
+      const h = harness(vault, [], { chosen: null });
       expect(await h.run()).toBe(0);
       expect(h.prompts).toHaveLength(0);
+      expect(h.err).toEqual([]);
     }
   });
 });

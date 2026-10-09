@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -146,7 +147,7 @@ func TestFileVaultPassphrase(t *testing.T) {
 		t.Fatal("the vault file holds the passphrase or the value")
 	}
 	locked := fastFileVault(t, path, &machineCreds{key: 1})
-	if got := locked.State(); got != (VaultState{Backend: "file", State: "locked", Key: "passphrase"}) {
+	if got := locked.State(); got != (VaultState{Backend: "file", State: "locked", Key: "passphrase", Fingerprint: f.State().Fingerprint}) {
 		t.Fatalf("reopened state = %+v", got)
 	}
 	if _, err := locked.Get("weather", testBinding); !errors.Is(err, ErrLocked) {
@@ -167,6 +168,42 @@ func TestFileVaultPassphrase(t *testing.T) {
 	machine := fastFileVault(t, filepath.Join(t.TempDir(), "vault.json"), &machineCreds{key: 2})
 	if err := machine.Unlock([]byte(testPassphrase)); err == nil {
 		t.Fatal("a machine-unlocked vault took a passphrase")
+	}
+}
+
+func TestFileVaultFingerprintNamesThePassphraseVault(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "vault.json")
+	first := fastFileVault(t, path, nil)
+	if err := first.Unlock([]byte(testPassphrase)); err != nil {
+		t.Fatal(err)
+	}
+	made := first.State().Fingerprint
+	if !regexp.MustCompile(`^[0-9a-f]{32}$`).MatchString(made) {
+		t.Fatalf("fingerprint = %q", made)
+	}
+	data, _ := os.ReadFile(path)
+	if bytes.Contains(data, []byte(made)) {
+		t.Fatal("the fingerprint is written in the vault file")
+	}
+	if got := fastFileVault(t, path, nil).State().Fingerprint; got != made {
+		t.Fatalf("a locked reopen says %q, want %q", got, made)
+	}
+	if err := os.Remove(path); err != nil {
+		t.Fatal(err)
+	}
+	again := fastFileVault(t, path, nil)
+	if got := again.State().Fingerprint; got != "" {
+		t.Fatalf("a vault waiting for its passphrase has fingerprint %q", got)
+	}
+	if err := again.Unlock([]byte(testPassphrase)); err != nil {
+		t.Fatal(err)
+	}
+	if got := again.State().Fingerprint; got == "" || got == made {
+		t.Fatalf("a vault made anew with the same passphrase has fingerprint %q, the old one %q", got, made)
+	}
+	if got := fastFileVault(t, filepath.Join(dir, "machine.json"), &machineCreds{key: 3}).State().Fingerprint; got != "" {
+		t.Fatalf("a machine-unlocked vault has fingerprint %q", got)
 	}
 }
 

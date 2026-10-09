@@ -102,8 +102,9 @@ Until then the app says the keys are locked and keeps them unused.
 
 The first passphrase the key service receives becomes the vault's. If `localdot unlock` says your
 keys already have a passphrase you didn't set, start over: `localdot down`, delete
-`~/.localdot/keyd/vault.json` (or `vault-passphrase.json` for a passphrase vault), `localdot up`,
-run `localdot unlock` to choose your own passphrase, then add your keys again.
+`~/.localdot/keyd/vault.json` (or `vault-passphrase.json` for a passphrase vault) and
+`~/.localdot/passphrase-chosen`, `localdot up`, run `localdot unlock` to choose your own
+passphrase, then add your keys again.
 
 ## Upgrade, change settings, uninstall
 

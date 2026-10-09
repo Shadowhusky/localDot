@@ -67,6 +67,7 @@ const (
 	maxPassphraseLen     = 1024
 	fileItemInfo         = "localdot-keyd file vault item v1"
 	fileKeyInfo          = "localdot-keyd file vault key v1"
+	fileFingerprintInfo  = "localdot-keyd file vault fingerprint v1"
 )
 
 var (
@@ -152,6 +153,8 @@ type VaultState struct {
 	State string `json:"state"`
 	// What unwraps a file vault's key: tpm, host or passphrase.
 	Key string `json:"key,omitempty"`
+	// Names a passphrase vault: one made anew, even with the same passphrase, has another.
+	Fingerprint string `json:"fingerprint,omitempty"`
 }
 
 func (f *FileVault) State() VaultState {
@@ -168,6 +171,7 @@ func (f *FileVault) State() VaultState {
 	case f.file == nil:
 	case f.file.Key.Source == sourcePassphrase:
 		state.Key = "passphrase"
+		state.Fingerprint = passphraseFingerprint(f.file.Key.Salt)
 	case f.file.Key.TPM:
 		state.Key = "tpm"
 	default:
@@ -199,6 +203,12 @@ func (f *FileVault) Unlock(passphrase []byte) error {
 	defer f.mu.Unlock()
 	f.key = key
 	return nil
+}
+
+// Each passphrase vault is made with a random salt, which it keeps.
+func passphraseFingerprint(salt string) string {
+	sum := sha256.Sum256([]byte(fileFingerprintInfo + "\x00" + salt))
+	return hex.EncodeToString(sum[:16])
 }
 
 func (f *FileVault) create(wrap func(key []byte) (wrappedKey, error)) error {

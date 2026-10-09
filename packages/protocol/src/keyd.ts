@@ -108,6 +108,12 @@ export const KeydVault = z.object({
   backend: z.string().max(32),
   state: z.enum(["ready", "locked", "setup"]).catch("locked"),
   key: z.enum(["tpm", "host", "passphrase"]).optional().catch(undefined),
+  // Names a passphrase vault; one made anew has another.
+  fingerprint: z
+    .string()
+    .regex(/^[0-9a-f]{32}$/)
+    .optional()
+    .catch(undefined),
 });
 export type KeydVault = z.infer<typeof KeydVault>;
 

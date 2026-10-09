@@ -96,7 +96,8 @@ func TestFileVaultUnlocksThroughTheAdminSocket(t *testing.T) {
 	}
 	pass, _ := vault.SealPassphrase(key, []byte("correct horse battery staple"))
 	code, state := adminCall(t, admin, "POST", "/v1/vault/unlock", map[string]any{"sealed": pass})
-	if code != 200 || state["state"] != "ready" || state["key"] != "passphrase" {
+	fingerprint, _ := state["fingerprint"].(string)
+	if code != 200 || state["state"] != "ready" || state["key"] != "passphrase" || len(fingerprint) != 32 {
 		t.Fatalf("unlock = %d %v", code, state)
 	}
 	if code, _ := adminCall(t, admin, "PUT", "/v1/secrets/anthropic", body); code != 200 {
@@ -111,7 +112,7 @@ func TestFileVaultUnlocksThroughTheAdminSocket(t *testing.T) {
 	defer d.Close()
 	admin = socketClient(d.Socket)
 	_, status = adminCall(t, admin, "GET", "/v1/status", nil)
-	if status["vault"].(map[string]any)["state"] != "locked" {
+	if v := status["vault"].(map[string]any); v["state"] != "locked" || v["fingerprint"] != fingerprint {
 		t.Fatalf("restarted vault = %v", status["vault"])
 	}
 	locked, _ := vault.Seal(status["sealKey"].(string), rec, []byte("real-secret-value-for-test"))
