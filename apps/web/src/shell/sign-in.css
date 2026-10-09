@@ -17,7 +17,7 @@
   max-width: calc(var(--spacing) * 110);
   transition:
     opacity var(--dur-fade) var(--ease-enter),
-    translate var(--dur-spring) var(--ease-spring);
+    translate var(--dur-default) var(--ease-spring);
 }
 
 @starting-style {
@@ -33,9 +33,9 @@
 
 .sign-in-title {
   font:
-    var(--text-display--font-weight) var(--text-display) / var(--text-display--line-height)
+    var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
     var(--font-ui);
-  letter-spacing: var(--text-display--letter-spacing);
+  letter-spacing: var(--text-title-1--letter-spacing);
 }
 
 .sign-in-message {
@@ -66,5 +66,5 @@
 .sign-in-foot {
   margin-top: calc(var(--spacing) * 4);
   color: var(--color-fg-3);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }

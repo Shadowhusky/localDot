@@ -11,7 +11,7 @@
     justify-self: start;
     color: var(--color-fg-2);
     font:
-      var(--font-weight-medium) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height)
       var(--font-ui);
   }
 
@@ -19,7 +19,7 @@
      so swapping one for another never moves what sits below. Empty, it still holds one line. */
   .ui-field-message {
     display: grid;
-    min-height: var(--text-footnote--line-height);
+    min-height: var(--text-callout--line-height);
   }
 
   .ui-field-message > * {
@@ -36,7 +36,7 @@
 
   .ui-field-description,
   .ui-field-error {
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .ui-field-description {
@@ -82,7 +82,7 @@
 
   /* The edge every text-like control draws: a text field, a text area and a picker's trigger. */
   .ui-field-box {
-    --_h: calc(var(--spacing) * 8);
+    --_h: calc(var(--spacing) * 9);
     --_lh: var(--text-body--line-height);
     min-width: 0;
     border: 1px solid var(--color-field-line);
@@ -96,8 +96,12 @@
       box-shadow var(--dur-fade) var(--ease-standard);
   }
 
-  .ui-field-box[data-size="lg"] {
-    --_h: calc(var(--spacing) * 9);
+  .ui-text-field[data-size="sm"] {
+    --_h: calc(var(--spacing) * 8);
+  }
+
+  .ui-text-field[data-size="lg"] {
+    --_h: calc(var(--spacing) * 10);
   }
 
   @media (hover: hover) {
@@ -107,15 +111,13 @@
   }
 
   .ui-text-field:focus-within,
-  .ui-text-area:focus,
-  .ui-select-trigger:is(:focus-visible, [data-open]) {
+  .ui-text-area:focus {
     border-color: var(--color-fg-2);
     box-shadow: 0 0 0 3px var(--color-field-ring);
   }
 
   .ui-input:focus-visible,
-  .ui-text-area:focus-visible,
-  .ui-select-trigger:focus-visible {
+  .ui-text-area:focus-visible {
     outline: none;
   }
 
@@ -135,7 +137,7 @@
     align-items: center;
     gap: calc(var(--spacing) * 2);
     height: var(--_h);
-    padding: 0 calc(var(--spacing) * 2.5);
+    padding: 0 calc(var(--spacing) * 3);
     cursor: text;
   }
 
@@ -189,19 +191,19 @@
 
   .ui-text-field[data-code] .ui-input {
     font:
-      var(--font-weight-semibold) var(--text-display) / var(--text-display--line-height)
+      var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
       var(--font-mono);
     letter-spacing: 0.12em;
   }
 
   /* One line to start, growing with its text to --_rows lines, then scrolling. */
   .ui-text-area {
-    --_pad: calc(var(--spacing) * 1.5);
+    --_pad: calc(var(--spacing) * 2);
     display: block;
     width: 100%;
     min-height: var(--_h);
     max-height: calc(var(--_rows) * var(--_lh) + var(--_pad) * 2 + 2px);
-    padding: var(--_pad) calc(var(--spacing) * 2.5);
+    padding: var(--_pad) calc(var(--spacing) * 3);
     field-sizing: content;
     overflow-y: auto;
     resize: none;
@@ -280,7 +282,7 @@
 
   .ui-choice-note {
     color: var(--color-fg-3);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   :is(.ui-choice, .ui-radio-card)[data-unavailable] .ui-choice-label {
@@ -290,12 +292,12 @@
   .ui-checkbox {
     position: relative;
     flex-shrink: 0;
-    width: calc(var(--spacing) * 4);
-    height: calc(var(--spacing) * 4);
-    margin-top: 1px;
+    width: var(--size-checkbox);
+    height: var(--size-checkbox);
+    margin-top: calc((var(--text-body--line-height) - var(--size-checkbox)) / 2);
     border-radius: var(--radius-xs);
-    background-color: var(--color-field);
-    box-shadow: inset 0 0 0 1px var(--color-field-line);
+    background-color: transparent;
+    box-shadow: inset 0 0 0 var(--stroke-ring) var(--color-fg-3);
     color: var(--color-void);
     transition:
       background-color var(--dur-hover) var(--ease-standard),
@@ -305,13 +307,13 @@
 
   @media (hover: hover) {
     .ui-choice:not([data-unavailable]):hover .ui-checkbox:not(:has(> :checked)) {
-      box-shadow: inset 0 0 0 1px var(--color-field-line-hover);
+      box-shadow: inset 0 0 0 var(--stroke-ring) var(--color-fg-2);
     }
   }
 
   .ui-checkbox:has(> :is(:checked, [data-indeterminate])) {
-    background-color: var(--color-fg-1);
-    box-shadow: inset 0 0 0 1px var(--color-fg-1);
+    background-color: var(--color-fg-2);
+    box-shadow: inset 0 0 0 var(--stroke-ring) var(--color-fg-2);
   }
 
   .ui-checkbox-mark {
@@ -337,25 +339,27 @@
   .ui-checkbox > :checked:not([data-indeterminate]) ~ .ui-checkbox-mark .ui-checkbox-check,
   .ui-checkbox > [data-indeterminate] ~ .ui-checkbox-mark .ui-checkbox-dash {
     stroke-dashoffset: 0;
-    transition: stroke-dashoffset var(--dur-sheet) var(--ease-enter) 40ms;
+    transition: stroke-dashoffset var(--dur-snappy) var(--ease-enter) 40ms;
   }
 
   .ui-choice[data-unavailable] :is(.ui-checkbox, .ui-switch) {
     opacity: var(--opacity-disabled);
   }
 
+  /* Off, a porcelain knob on a faint track; on, the track lights to fg-1 and the knob turns to dark
+     porcelain as it travels. */
   .ui-switch {
-    --_w: calc(var(--spacing) * 8);
-    --_h: calc(var(--spacing) * 5);
-    --_knob: calc(var(--_h) - 4px);
+    --_w: 38px;
+    --_h: 22px;
+    --_knob: 18px;
     --_stretch: calc(var(--spacing) * 1);
     position: relative;
     flex-shrink: 0;
     width: var(--_w);
     height: var(--_h);
     border-radius: var(--radius-full);
-    background-color: var(--color-control-hover);
-    transition: background-color var(--dur-fade) var(--ease-standard);
+    background-color: var(--color-track-strong);
+    transition: background-color var(--dur-snappy) var(--ease-standard);
   }
 
   .ui-switch-knob {
@@ -365,13 +369,23 @@
     width: var(--_knob);
     height: var(--_knob);
     border-radius: var(--radius-full);
-    background-color: var(--color-fg-1);
-    box-shadow: var(--shadow-thumb);
+    background-image: var(--porcelain-knob);
+    box-shadow: var(--shadow-knob);
     pointer-events: none;
     transition:
-      translate var(--dur-spring) var(--ease-spring),
-      width var(--dur-spring) var(--ease-spring),
-      background-color var(--dur-fade) var(--ease-standard);
+      translate var(--dur-snappy) var(--ease-spring),
+      width var(--dur-snappy) var(--ease-spring);
+  }
+
+  .ui-switch-knob::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background-image: var(--porcelain-dark);
+    box-shadow: var(--shadow-knob-on);
+    opacity: 0;
+    transition: opacity var(--dur-snappy) var(--ease-standard);
   }
 
   .ui-switch:has(> :checked) {
@@ -380,7 +394,10 @@
 
   .ui-switch > :checked ~ .ui-switch-knob {
     translate: calc(var(--_w) - var(--_knob) - 4px) 0;
-    background-color: var(--color-void);
+  }
+
+  .ui-switch > :checked ~ .ui-switch-knob::after {
+    opacity: 1;
   }
 
   /* While held, the knob stretches toward the side it would go to, as a physical switch gives. */
@@ -404,25 +421,31 @@
     outline-offset: var(--focus-offset);
   }
 
+  /* Rows sit in one raised group, divided by separators: a radio at the left, the title and its
+     one-line description beside it. Tiles stand side by side, each its own raised card, and the
+     chosen one wears an fg-1 rim and a check. */
   .ui-radio-cards {
     display: grid;
-    gap: calc(var(--spacing) * 2);
+  }
+
+  .ui-radio-cards[data-layout="rows"] {
+    overflow: hidden;
+    border-radius: var(--radius-group);
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-raised);
   }
 
   .ui-radio-cards[data-layout="tiles"] {
     grid-template-columns: repeat(auto-fit, minmax(calc(var(--spacing) * 36), 1fr));
+    gap: calc(var(--spacing) * 2.5);
   }
 
   .ui-radio-card {
     position: relative;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: calc(var(--spacing) * 3);
-    min-height: calc(var(--spacing) * 11);
-    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 3);
-    border-radius: var(--radius-md);
-    background-color: var(--color-field);
-    box-shadow: inset 0 0 0 1px var(--color-hairline);
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3.5);
     cursor: pointer;
     user-select: none;
     touch-action: manipulation;
@@ -430,6 +453,25 @@
     transition:
       background-color var(--dur-hover) var(--ease-standard),
       box-shadow var(--dur-fade) var(--ease-standard);
+  }
+
+  .ui-radio-card + .ui-radio-card {
+    box-shadow: inset 0 1px 0 var(--color-separator);
+  }
+
+  .ui-radio-cards[data-layout="tiles"] > .ui-radio-card {
+    flex-direction: column;
+    gap: 0;
+    padding: calc(var(--spacing) * 3) calc(var(--spacing) * 3) calc(var(--spacing) * 3.5);
+    border-radius: var(--radius-group);
+    background-color: var(--color-raised);
+    box-shadow: var(--shadow-raised);
+  }
+
+  .ui-radio-cards[data-layout="tiles"] > .ui-radio-card:has(> :checked) {
+    box-shadow:
+      inset 0 0 0 var(--stroke-ring) var(--color-fg-1),
+      var(--shadow-raised);
   }
 
   @media (hover: hover) {
@@ -443,12 +485,59 @@
     transition-duration: var(--dur-press);
   }
 
-  .ui-radio-card:has(> :checked) {
-    box-shadow: inset 0 0 0 1px var(--color-fg-2);
-  }
-
   .ui-radio-card[data-unavailable] {
     cursor: default;
+  }
+
+  .ui-radio-card .ui-choice-text {
+    gap: 2px;
+  }
+
+  .ui-radio-card-title {
+    display: flex;
+    align-items: center;
+    gap: calc(var(--spacing) * 2);
+  }
+
+  .ui-radio-card .ui-radio-card-title > .ui-choice-label {
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .ui-radio-card .ui-choice-note {
+    color: var(--color-fg-2);
+  }
+
+  .ui-radio-mark {
+    display: grid;
+    flex-shrink: 0;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    margin-top: 0;
+    border-radius: var(--radius-full);
+    box-shadow: inset 0 0 0 var(--stroke-ring) var(--color-fg-3);
+    transition:
+      background-color var(--dur-snappy) var(--ease-standard),
+      box-shadow var(--dur-snappy) var(--ease-standard);
+  }
+
+  .ui-radio-mark::after {
+    content: "";
+    width: 7px;
+    height: 7px;
+    border-radius: var(--radius-full);
+    background-color: var(--color-void);
+    scale: 0;
+    transition: scale var(--dur-snappy) var(--ease-spring);
+  }
+
+  .ui-radio-card > :checked ~ .ui-radio-mark {
+    background-color: var(--color-fg-1);
+    box-shadow: none;
+  }
+
+  .ui-radio-card > :checked ~ .ui-radio-mark::after {
+    scale: 1;
   }
 
   .ui-radio-card-preview {
@@ -456,13 +545,27 @@
     flex-shrink: 0;
   }
 
+  .ui-radio-cards[data-layout="tiles"] .ui-radio-card-preview {
+    margin-bottom: calc(var(--spacing) * 2.5);
+  }
+
+  /* The tile's check: an fg-1 disc with a void tick, in its top-right corner. */
   .ui-radio-card-check {
-    color: var(--color-fg-1);
+    position: absolute;
+    top: calc(var(--spacing) * 2.5);
+    right: calc(var(--spacing) * 2.5);
+    display: grid;
+    place-items: center;
+    width: 18px;
+    height: 18px;
+    border-radius: var(--radius-full);
+    background-color: var(--color-fg-1);
+    color: var(--color-void);
     opacity: 0;
     scale: 0.6;
     transition:
       opacity var(--dur-fade) var(--ease-standard),
-      scale var(--dur-spring) var(--ease-spring);
+      scale var(--dur-snappy) var(--ease-spring);
   }
 
   .ui-radio-card > :checked ~ .ui-radio-card-check {
@@ -470,24 +573,40 @@
     scale: 1;
   }
 
-  /* Segmented control and tabs: equal segments on a sunken track, and a thumb that slides under the
-     chosen one. A thumb interrupted mid-slide sets off again from where it is. */
-  /* Segments fill the track edge to edge, so all of it takes a press; the thumb sits 2 px inside
-     the chosen one. */
+  .ui-radio-cards[data-layout="tiles"] .ui-radio-mark,
+  .ui-radio-cards[data-layout="rows"] .ui-radio-card-check {
+    display: none;
+  }
+
+  /* Segmented control and tabs: equal segments on a sunken track, and a raised thumb that slides
+     under the chosen one. A thumb interrupted mid-slide sets off again from where it is. Segments
+     fill the track edge to edge, so all of it takes a press; the thumb sits 2 px inside. */
   .ui-segmented {
     --_h: calc(var(--spacing) * 7);
+    --_min: 64px;
+    --_thumb-radius: var(--radius-sm);
     position: relative;
     display: inline-grid;
     grid-auto-columns: 1fr;
     grid-auto-flow: column;
     height: var(--_h);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-track-28);
     background-color: var(--color-track);
     isolation: isolate;
   }
 
+  .ui-segmented[data-size="32"] {
+    --_h: calc(var(--spacing) * 8);
+    --_min: 84px;
+    --_thumb-radius: var(--radius-row);
+    border-radius: var(--radius-md);
+  }
+
   .ui-segmented[data-size="24"] {
     --_h: calc(var(--spacing) * 6);
+    --_min: 48px;
+    --_thumb-radius: var(--radius-thumb-24);
+    border-radius: var(--radius-row);
   }
 
   .ui-segmented-thumb {
@@ -496,13 +615,13 @@
     bottom: 2px;
     left: 2px;
     width: calc(100% / var(--_count) - 4px);
-    border-radius: var(--radius-sm);
-    background-color: var(--color-control-hover);
+    border-radius: var(--_thumb-radius);
+    background-color: var(--color-raised-2);
     box-shadow: var(--shadow-thumb);
     translate: calc(var(--_index) * (100% + 4px)) 0;
     transition:
-      translate var(--dur-spring) var(--ease-spring),
-      scale var(--dur-exit) var(--ease-enter),
+      translate var(--dur-snappy) var(--ease-spring),
+      scale var(--dur-snappy) var(--ease-spring),
       opacity var(--dur-fade) var(--ease-standard);
   }
 
@@ -513,7 +632,7 @@
   .ui-segmented:has(> .ui-segment[data-pressed]:is([aria-checked="true"], [aria-selected="true"]))
     > .ui-segmented-thumb {
     scale: 0.96;
-    transition-duration: var(--dur-spring), var(--dur-press), var(--dur-fade);
+    transition-duration: var(--dur-snappy), var(--dur-press), var(--dur-fade);
   }
 
   .ui-segment {
@@ -523,13 +642,15 @@
     align-items: center;
     justify-content: center;
     gap: calc(var(--spacing) * 1.5);
-    min-width: 0;
-    padding: 0 calc(var(--spacing) * 3);
+    min-width: var(--_min);
+    padding: 0 calc(var(--spacing) * 2.5);
     border: 0;
     border-radius: var(--radius-md);
     background: none;
     color: var(--color-fg-2);
-    font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+    font:
+      var(--font-weight-medium) var(--text-callout) / var(--text-callout--line-height)
+      var(--font-ui);
     white-space: nowrap;
     cursor: pointer;
     user-select: none;
@@ -542,7 +663,15 @@
       opacity var(--dur-press) var(--ease-standard);
   }
 
+  .ui-segmented[data-size="32"] > .ui-segment {
+    padding: 0 calc(var(--spacing) * 3.5);
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    letter-spacing: var(--text-body--letter-spacing);
+  }
+
   .ui-segmented[data-size="24"] > .ui-segment {
+    padding: 0 calc(var(--spacing) * 2);
     font-size: var(--text-footnote);
     line-height: var(--text-footnote--line-height);
   }
@@ -550,7 +679,7 @@
   /* The chosen label brightens as the thumb arrives under it, not before. */
   .ui-segment:is([aria-checked="true"], [aria-selected="true"]) {
     color: var(--color-fg-1);
-    transition-duration: var(--dur-spring), var(--dur-press);
+    transition-duration: var(--dur-snappy), var(--dur-press);
   }
 
   @media (hover: hover) {
@@ -578,13 +707,50 @@
     text-overflow: ellipsis;
   }
 
+  .ui-segment-attention {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: var(--radius-full);
+    background-color: var(--color-attention);
+  }
+
   @media (--coarse) {
+    /* A segmented control keeps its drawn size and gives a finger the full 44 px: the track is drawn
+       inside a taller box. */
+    .ui-segmented,
+    .ui-segmented[data-size] {
+      --_reach: calc(var(--spacing) * 11);
+      height: var(--_reach);
+      background-color: transparent;
+    }
+
+    .ui-segmented::before {
+      content: "";
+      position: absolute;
+      inset: calc((var(--_reach) - var(--_h)) / 2) 0;
+      z-index: -1;
+      border-radius: inherit;
+      background-color: var(--color-track);
+    }
+
+    .ui-segmented > .ui-segmented-thumb {
+      top: calc((var(--_reach) - var(--_h)) / 2 + 2px);
+      bottom: calc((var(--_reach) - var(--_h)) / 2 + 2px);
+    }
+
+    .ui-radio-card {
+      min-height: calc(var(--spacing) * 11);
+    }
+
+    /* 16 px, so iOS never zooms into a focused field. */
     .ui-field-box,
     .ui-field-box[data-size] {
       --_h: calc(var(--spacing) * 11);
-      --_lh: var(--text-title-2--line-height);
-      /* 17 px, the system's reading size, so iOS does not zoom into a focused field. */
-      font-size: var(--text-title-2);
+      --_lh: var(--text-touch--line-height);
+      font-size: var(--text-touch);
     }
 
     .ui-text-area {
@@ -592,9 +758,9 @@
     }
 
     .ui-text-area[data-bare] {
-      --_lh: var(--text-title-2--line-height);
+      --_lh: var(--text-touch--line-height);
       --_pad: calc(var(--spacing) * 1.5);
-      font-size: var(--text-title-2);
+      font-size: var(--text-touch);
       letter-spacing: normal;
     }
 
@@ -602,31 +768,17 @@
       min-height: calc(var(--spacing) * 11);
       align-items: center;
     }
-
-    .ui-switch {
-      --_w: calc(var(--spacing) * 10);
-      --_h: calc(var(--spacing) * 6);
-    }
-
-    .ui-radio-card {
-      min-height: calc(var(--spacing) * 12);
-    }
-
-    .ui-segmented,
-    .ui-segmented[data-size] {
-      --_h: calc(var(--spacing) * 11);
-    }
-
-    .ui-segmented[data-size] > .ui-segment {
-      font-size: var(--text-reading);
-      line-height: var(--text-reading--line-height);
-    }
   }
 
   @media (prefers-reduced-motion: reduce) {
     .ui-switch-knob,
-    .ui-segmented-thumb {
+    .ui-segmented-thumb,
+    .ui-radio-mark::after {
       transition-property: background-color, opacity;
+    }
+
+    .ui-radio-card-check {
+      scale: none;
     }
 
     .ui-choice[data-pressed] .ui-checkbox,
@@ -683,11 +835,15 @@
     }
 
     .ui-switch-knob {
-      background-color: ButtonText;
+      background: ButtonText;
+    }
+
+    .ui-switch-knob::after {
+      display: none;
     }
 
     .ui-switch > :checked ~ .ui-switch-knob {
-      background-color: HighlightText;
+      background: HighlightText;
     }
 
     .ui-radio-card:has(> :checked),

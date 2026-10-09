@@ -71,8 +71,8 @@ function unreadLabel(kinds: readonly ThreadKind[]): string {
 function easeDown(element: HTMLElement, from: number) {
   const style = getComputedStyle(element);
   const frames = [{ transform: `translateY(${from}px)` }, { transform: "none" }];
-  const spring = style.getPropertyValue("--dur-spring").trim();
-  const duration = Number.parseFloat(spring) * (spring.endsWith("ms") ? 1 : 1000) || 360;
+  const spring = style.getPropertyValue("--dur-default").trim();
+  const duration = Number.parseFloat(spring) * (spring.endsWith("ms") ? 1 : 1000) || 470;
   try {
     element.animate(frames, { duration, easing: style.getPropertyValue("--ease-spring").trim() });
   } catch {

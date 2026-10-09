@@ -1,6 +1,6 @@
 /* Below this width the rails give way to the stage, so the HUD and the caption keep their room
    (with both rails, the HUD's widest state was clipped below ~880 px). */
-@custom-media --rails-collapse (width < 1180px);
+@custom-media --rails-collapse (width < 1100px);
 
 .app {
   display: grid;
@@ -209,7 +209,7 @@
   place-items: center;
   padding: 0 var(--spacing-gutter);
   text-align: center;
-  background: var(--color-hud-solid);
+  background: var(--color-glass-solid);
   color: var(--color-text-2);
   font-size: 15px;
   font-weight: 500;
@@ -227,7 +227,7 @@
   max-width: calc(100% - 24px);
   padding: 6px 10px;
   border-radius: 8px;
-  background: var(--color-hud-solid);
+  background: var(--color-glass-solid);
   color: var(--color-text-2);
   font-size: 12px;
   pointer-events: none;
@@ -266,9 +266,9 @@
   height: var(--spacing-pill);
   padding: 0 var(--spacing-hud-inset) 0 var(--spacing-hud-x);
   border-radius: var(--radius-full);
-  background: var(--color-hud);
-  -webkit-backdrop-filter: blur(var(--blur-hud)) saturate(140%);
-  backdrop-filter: blur(var(--blur-hud)) saturate(140%);
+  background: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(140%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(140%);
   box-shadow: var(--shadow-hud);
   white-space: nowrap;
   z-index: 4;
@@ -334,7 +334,7 @@
 
 @media (prefers-reduced-transparency: reduce) {
   .hud {
-    background: var(--color-hud-solid);
+    background: var(--color-glass-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -474,7 +474,7 @@
 
 /* Wide, the inspector covers the bar's right end but for its top inset, where a pressed button
    would show through. */
-@media (width >= 760px) {
+@media (width >= 700px) {
   .keys-btn[aria-expanded="true"] {
     background: none;
   }
@@ -499,7 +499,7 @@
 .keys-btn {
   white-space: nowrap;
 }
-@media (width < 760px) {
+@media (width < 700px) {
   .bar {
     grid-template-columns: auto minmax(0, 1fr) auto;
     column-gap: var(--spacing-bar-gap);
@@ -542,7 +542,7 @@
   }
 }
 
-@media (width < 760px) {
+@media (width < 700px) {
   .hud.paused {
     width: calc(100% - 24px);
     max-width: 360px;

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 
-export const PHONE = "(width < 760px)";
+export const PHONE = "(width < 700px)";
 export const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
 
 export function matches(query: string): boolean {

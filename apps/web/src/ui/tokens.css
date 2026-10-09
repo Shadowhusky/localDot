@@ -1,28 +1,36 @@
-/* One ramp per appearance, from the same OKLCH lightness steps: Graphite near-neutral, Midnight at
-   hue 255. Midnight's void and well hold chroma about .02 and its raised steps about .038, the least
-   that keeps the two appearances (and their picker tiles) visibly apart. Roles below point into the
-   ramp of the active appearance. */
+/* One ramp per appearance: Graphite near-neutral, Midnight the same steps at hue 255. Roles below
+   point into the ramp of the active appearance, so components name roles, never hex. */
 @layer theme {
   :root {
     --graphite-void: #0a0b0d;
-    --graphite-raised: #1a1c1f;
-    --graphite-raised-2: #25262a;
-    --graphite-overlay: #2c2e31;
+    --graphite-console: #111215;
+    --graphite-raised: #18191c;
+    --graphite-raised-2: #222327;
+    --graphite-overlay: #1b1c20;
+    --graphite-popover: #25262a;
     --graphite-well: #070809;
     --graphite-fg-1: #eeeff1;
-    --graphite-hud: rgba(14, 15, 18, 0.8);
-    --graphite-hud-solid: rgba(14, 15, 18, 0.92);
-    --graphite-stage-dim: rgba(10, 11, 13, 0.45);
+    --graphite-fg-2: #a8abb0;
+    --graphite-fg-3: #83868b;
+    --graphite-field-line: #6b6e75;
+    --graphite-glass: rgba(20, 21, 24, 0.72);
+    --graphite-glass-solid: rgba(20, 21, 24, 0.94);
+    --graphite-stage-dim: rgba(10, 11, 13, 0.42);
 
-    --midnight-void: #050b14;
-    --midnight-raised: #0f1c2d;
-    --midnight-raised-2: #192739;
-    --midnight-overlay: #212f41;
-    --midnight-well: #030811;
-    --midnight-fg-1: #edeff2;
-    --midnight-hud: rgba(9, 16, 24, 0.8);
-    --midnight-hud-solid: rgba(9, 16, 24, 0.92);
-    --midnight-stage-dim: rgba(5, 11, 20, 0.45);
+    --midnight-void: #060b14;
+    --midnight-console: #0b1320;
+    --midnight-raised: #111a28;
+    --midnight-raised-2: #182334;
+    --midnight-overlay: #121c2b;
+    --midnight-popover: #1c2738;
+    --midnight-well: #040810;
+    --midnight-fg-1: #edf0f5;
+    --midnight-fg-2: #a7afbc;
+    --midnight-fg-3: #818a99;
+    --midnight-field-line: #6e7686;
+    --midnight-glass: rgba(10, 16, 26, 0.72);
+    --midnight-glass-solid: rgba(10, 16, 26, 0.94);
+    --midnight-stage-dim: rgba(6, 11, 20, 0.42);
   }
 }
 
@@ -43,34 +51,46 @@
   --animate-*: initial;
   --breakpoint-*: initial;
 
+  /* The house, the rail's console, cards, the thumb and bubbles, sheets, popovers, code. */
   --color-void: var(--graphite-void);
+  --color-console: var(--graphite-console);
   --color-raised: var(--graphite-raised);
   --color-raised-2: var(--graphite-raised-2);
   --color-overlay: var(--graphite-overlay);
+  --color-popover: var(--graphite-popover);
   --color-well: var(--graphite-well);
 
-  /* fg-3 holds 4.5:1 on void, well and raised only: never on raised-2 or overlay. fg-4 is never text. */
+  /* fg-3 holds 4.5:1 on void, console, well and raised only: never on raised-2, overlay or
+     popover. fg-4 is never text. */
   --color-fg-1: var(--graphite-fg-1);
-  --color-fg-2: #a8abb0;
-  --color-fg-3: #83868b;
+  --color-fg-2: var(--graphite-fg-2);
+  --color-fg-3: var(--graphite-fg-3);
   --color-fg-4: rgba(255, 255, 255, 0.28);
 
-  /* Hairline is decorative only; every field and outlined control uses field-line (3:1). */
+  /* Hairline is decorative only; separators divide lists; every field and outlined control uses
+     field-line (3:1). */
   --color-hairline: rgba(255, 255, 255, 0.07);
-  --color-field-line: #6b6e75;
+  --color-separator: rgba(255, 255, 255, 0.09);
+  --color-field-line: var(--graphite-field-line);
   --color-field-line-hover: #83868b;
-  /* A field's fill inside its field-line edge, the ring it wears while focused, and the sunken track
-     of a segmented control or switch. */
   --color-field: rgba(255, 255, 255, 0.04);
   --color-field-ring: rgba(255, 255, 255, 0.08);
-  --color-track: rgba(255, 255, 255, 0.05);
+  --color-track: rgba(255, 255, 255, 0.06);
+  /* A switch's off track and an in-progress glyph's ring. */
+  --color-track-strong: rgba(255, 255, 255, 0.14);
+  --color-grabber: rgba(255, 255, 255, 0.24);
+  --color-row-hover: rgba(255, 255, 255, 0.035);
   --color-scrollbar: rgba(255, 255, 255, 0.16);
 
-  /* Xenon means "dot has control" and nothing else. Attention is a dot or a 1 px rim, never a fill. */
+  /* Light tells who has the computer. Xenon means "dot has control" and nothing else; you are
+     porcelain; attention is a 7–10 px point next to words, never a fill or a rim. */
   --color-xenon: #3fb5de;
+  --color-xenon-glow: rgba(63, 181, 222, 0.32);
   --color-xenon-a08: rgba(63, 181, 222, 0.08);
   --color-xenon-a10: rgba(63, 181, 222, 0.1);
   --color-xenon-a40: rgba(63, 181, 222, 0.4);
+  --color-you: #f2f3f5;
+  --color-you-glow: rgba(242, 243, 245, 0.16);
   --color-attention: #e9b44c;
 
   --color-diff-add-fg: #8fd6a6;
@@ -88,33 +108,106 @@
 
   --color-state-hover: rgba(255, 255, 255, 0.06);
   --color-state-pressed: rgba(255, 255, 255, 0.1);
-  --color-state-selected: rgba(255, 255, 255, 0.12);
+  --color-state-selected: var(--color-selected);
+  --color-selected: rgba(255, 255, 255, 0.1);
   --color-selection: rgba(238, 239, 241, 0.22);
   --opacity-disabled: 0.45;
 
-  /* Filled controls (secondary buttons, chips): rest, hover and pressed. */
+  /* Filled controls (secondary buttons, filled icon buttons, chips): rest, hover and pressed. */
   --color-control: rgba(255, 255, 255, 0.08);
   --color-control-hover: rgba(255, 255, 255, 0.12);
   --color-control-pressed: rgba(255, 255, 255, 0.16);
   --color-key-bevel: rgba(255, 255, 255, 0.06);
 
-  --color-scrim: rgba(0, 0, 0, 0.45);
+  /* Porcelain is dot's material and the one primary action's: a top-lit face with dark ink. */
+  --color-porcelain-top: #f8f9fa;
+  --color-porcelain-bottom: #dfe2e6;
+  --color-porcelain-pressed-top: #e9ebee;
+  --color-porcelain-pressed-bottom: #d6d9dd;
+  --color-porcelain-ink: #0b0c0e;
+  --color-porcelain-dark-top: #2a2b2f;
+  --color-porcelain-dark-bottom: #17181b;
+  --color-porcelain-tint: rgba(11, 12, 14, 0.035);
+
+  --color-scrim: rgba(0, 0, 0, 0.42);
   --color-stage-dim: var(--graphite-stage-dim);
 
-  /* The HUD sits on video only. At .8 the elapsed time (fg-2) keeps 4.5:1 over a white frame. */
-  --color-hud: var(--graphite-hud);
-  --color-hud-solid: var(--graphite-hud-solid);
-  --color-hud-line: rgba(255, 255, 255, 0.1);
-  --blur-hud: 20px;
+  /* Glass sits only over the picture: the island, the transport, overlay chips, the phone toolbar.
+     Text on it is 500 weight, fg-1 or fg-2. Thick glass is the decision, read like a page. */
+  --color-glass: var(--graphite-glass);
+  --color-glass-solid: var(--graphite-glass-solid);
+  --color-glass-line: rgba(255, 255, 255, 0.14);
+  --color-glass-hover: rgba(255, 255, 255, 0.1);
+  --color-glass-pressed: rgba(255, 255, 255, 0.16);
+  --color-thick-glass: rgba(24, 25, 29, 0.97);
+  --blur-glass: 24px;
+  --blur-thick-glass: 30px;
+
+  --porcelain: linear-gradient(180deg, var(--color-porcelain-top), var(--color-porcelain-bottom));
+  --porcelain-pressed: linear-gradient(
+    180deg,
+    var(--color-porcelain-pressed-top),
+    var(--color-porcelain-pressed-bottom)
+  );
+  /* A switch's knob: porcelain lit a little brighter, as it sits on a dark track. */
+  --porcelain-knob: linear-gradient(180deg, #ffffff, #e4e6e9);
+  --porcelain-dark: linear-gradient(
+    180deg,
+    var(--color-porcelain-dark-top),
+    var(--color-porcelain-dark-bottom)
+  );
+
+  /* The stage's light. The rim is always mounted and only its opacity changes; the spill is the
+     light it throws on the floor below the stage. */
+  --rim-none: inset 0 0 0 1px var(--color-hairline);
+  --rim-xenon: inset 0 0 0 1.5px var(--color-xenon), inset 0 0 18px rgba(63, 181, 222, 0.22);
+  --rim-xenon-glow:
+    0 0 0 1px rgba(63, 181, 222, 0.35), 0 0 28px var(--color-xenon-glow),
+    0 0 90px rgba(63, 181, 222, 0.14);
+  --rim-you: inset 0 0 0 1.5px rgba(242, 243, 245, 0.9), inset 0 0 18px rgba(242, 243, 245, 0.12);
+  --rim-you-glow:
+    0 0 0 1px rgba(242, 243, 245, 0.3), 0 0 28px var(--color-you-glow),
+    0 0 90px rgba(242, 243, 245, 0.06);
+  --spill: radial-gradient(ellipse 50% 70% at 50% 0, rgba(220, 228, 238, 0.07), transparent 70%);
+  --spill-xenon: radial-gradient(
+    ellipse 50% 70% at 50% 0,
+    rgba(63, 181, 222, 0.11),
+    transparent 70%
+  );
+  --spill-you: radial-gradient(
+    ellipse 50% 70% at 50% 0,
+    rgba(242, 243, 245, 0.08),
+    transparent 70%
+  );
 
   --shadow-edge: inset 0 1px 0 rgba(255, 255, 255, 0.06);
-  --shadow-raised:
-    inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 0 0 0.5px rgba(0, 0, 0, 0.6),
-    0 6px 16px rgba(0, 0, 0, 0.35);
-  --shadow-overlay: inset 0 0 0 1px rgba(255, 255, 255, 0.08), 0 24px 64px rgba(0, 0, 0, 0.55);
+  --shadow-stage:
+    0 0 0 1px rgba(255, 255, 255, 0.06), 0 12px 32px rgba(0, 0, 0, 0.45),
+    0 40px 100px rgba(0, 0, 0, 0.55);
+  --shadow-console: inset 0 1px 0 rgba(255, 255, 255, 0.035), 0 0 0 1px rgba(255, 255, 255, 0.045);
+  --shadow-raised: inset 0 1px 0 rgba(255, 255, 255, 0.045), 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow-overlay:
+    inset 0 0 0 0.5px rgba(255, 255, 255, 0.12), 0 4px 12px rgba(0, 0, 0, 0.35),
+    0 24px 64px rgba(0, 0, 0, 0.55);
+  --shadow-glass:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.22), 0 0 0 0.5px rgba(255, 255, 255, 0.1),
+    0 10px 30px rgba(0, 0, 0, 0.4);
+  --shadow-thick-glass:
+    inset 0 0.5px 0 rgba(255, 255, 255, 0.2), 0 0 0 0.5px rgba(255, 255, 255, 0.12),
+    0 24px 64px rgba(0, 0, 0, 0.6), 0 6px 18px rgba(0, 0, 0, 0.35);
+  --shadow-porcelain:
+    inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(0, 0, 0, 0.1),
+    0 1px 2px rgba(0, 0, 0, 0.45), 0 6px 16px rgba(0, 0, 0, 0.28);
+  /* A small porcelain disc (Send, play) carries the top light without the long drop. */
+  --shadow-porcelain-sm: inset 0 1px 0 rgba(255, 255, 255, 0.95), 0 1px 2px rgba(0, 0, 0, 0.45);
   /* A small part that slides inside a track: a segmented control's thumb, a switch's knob. */
   --shadow-thumb: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 3px rgba(0, 0, 0, 0.45);
-  --shadow-stage: 0 30px 80px rgba(0, 0, 0, 0.55), 0 0 0 1px rgba(255, 255, 255, 0.05);
+  --shadow-knob: 0 1px 3px rgba(0, 0, 0, 0.45);
+  --shadow-knob-on: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.5);
+  --shadow-thumbnail: 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+  /* The ring of a radio, a checkbox and a chosen tile. */
+  --stroke-ring: 1.5px;
+  --size-checkbox: 15px;
 
   --focus-width: 2px;
   --focus-offset: 2px;
@@ -127,57 +220,96 @@
   --font-weight-medium: 500;
   --font-weight-semibold: 600;
 
-  --text-micro: 11px;
-  --text-micro--line-height: 14px;
-  --text-micro--font-weight: 500;
-  --text-micro--letter-spacing: 0.01em;
-  --text-footnote: 12px;
-  --text-footnote--line-height: 16px;
-  --text-body: 13px;
-  --text-body--line-height: 18px;
-  --text-reading: 14px;
-  --text-reading--line-height: 22px;
-  --text-reading--letter-spacing: -0.003em;
-  --text-headline: 13px;
-  --text-headline--line-height: 18px;
-  --text-headline--font-weight: 600;
-  --text-title: 15px;
-  --text-title--line-height: 20px;
-  --text-title--font-weight: 600;
-  --text-title--letter-spacing: -0.01em;
-  --text-title-2: 17px;
-  --text-title-2--line-height: 22px;
+  /* Size, leading, weight and tracking as one set; tracking tightens as the size grows. In rem, so
+     a larger user font scales the layout with it. */
+  --text-title-1: 1.375rem;
+  --text-title-1--line-height: 1.75rem;
+  --text-title-1--font-weight: 600;
+  --text-title-1--letter-spacing: -0.019em;
+  --text-title-2: 1.0625rem;
+  --text-title-2--line-height: 1.375rem;
   --text-title-2--font-weight: 600;
-  --text-title-2--letter-spacing: -0.015em;
-  --text-display: 22px;
-  --text-display--line-height: 28px;
-  --text-display--font-weight: 600;
-  --text-display--letter-spacing: -0.02em;
+  --text-title-2--letter-spacing: -0.025em;
+  --text-title-3: 0.9375rem;
+  --text-title-3--line-height: 1.25rem;
+  --text-title-3--font-weight: 600;
+  --text-title-3--letter-spacing: -0.015em;
+  --text-narration: 1rem;
+  --text-narration--line-height: 1.375rem;
+  --text-narration--font-weight: 500;
+  --text-narration--letter-spacing: -0.019em;
+  --text-reading: 0.875rem;
+  --text-reading--line-height: 1.3125rem;
+  --text-reading--letter-spacing: -0.011em;
+  --text-body: 0.8125rem;
+  --text-body--line-height: 1.125rem;
+  --text-body--letter-spacing: -0.006em;
+  --text-callout: 0.75rem;
+  --text-callout--line-height: 1rem;
+  --text-callout--font-weight: 500;
+  --text-footnote: 0.6875rem;
+  --text-footnote--line-height: 0.875rem;
+  --text-footnote--font-weight: 500;
+  --text-footnote--letter-spacing: 0.0055em;
+  --text-mono: 0.78125rem;
+  --text-mono--line-height: 1.1875rem;
+  /* Rows in menus, pickers and lists; on a phone, rows and every text field (so iOS never zooms). */
+  --text-row: 0.875rem;
+  --text-row--line-height: 1.25rem;
+  --text-row--letter-spacing: -0.011em;
+  --text-touch: 1rem;
+  --text-touch--line-height: 1.375rem;
+  --text-touch--letter-spacing: -0.019em;
+  /* Tags ("Recommended") and the extension on a file's tile. */
+  --text-tag: 0.625rem;
+  --text-tag--line-height: 0.875rem;
+  --text-tag--font-weight: 600;
+  --text-tag--letter-spacing: 0.02em;
+  --text-tile: 0.5625rem;
+  --text-tile--line-height: 0.625rem;
 
   --spacing: 4px;
 
   /* Concentric: an inner radius is the outer radius minus the inset, and never under 4 px. */
   --radius-xs: 4px;
-  --radius-sm: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-xl: 16px;
+  --radius-sm: 7px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+  --radius-2xl: 24px;
   --radius-full: 9999px;
+  /* Between the steps: 28 px controls and rows inset 6 in a popover (8), groups, list rows and
+     40 px buttons (12), 44 px buttons (13), tags (5), the island and its toasts (20), and the
+     tracks and thumbs of the smaller segmented controls. */
+  --radius-row: 8px;
+  --radius-group: 12px;
+  --radius-button-xl: 13px;
+  --radius-tag: 5px;
+  --radius-island: 20px;
+  --radius-track-28: 9px;
+  --radius-thumb-24: 6px;
 
-  /* A critically damped spring (response .30 s) sampled every 30 ms. */
+  /* Every spring is critically damped, so all share this one shape, sampled to 0.2 % error; the
+     response sets the duration (1.337 × response): snappy .25 s, default .35 s, gentle .5 s. */
   --ease-spring: linear(
     0,
-    0.131,
-    0.358,
-    0.562,
-    0.715,
-    0.821,
-    0.89,
-    0.934,
-    0.96,
-    0.977,
-    0.986,
-    0.992,
+    0.081,
+    0.242,
+    0.412,
+    0.561,
+    0.681,
+    0.772,
+    0.84,
+    0.889,
+    0.924,
+    0.948,
+    0.965,
+    0.976,
+    0.984,
+    0.989,
+    0.993,
+    0.995,
+    0.997,
     1
   );
   --ease-enter: cubic-bezier(0.23, 1, 0.32, 1);
@@ -187,8 +319,13 @@
   --dur-hover: 120ms;
   --dur-fade: 150ms;
   --dur-exit: 180ms;
-  --dur-sheet: 280ms;
-  --dur-spring: 360ms;
+  --dur-sheet-exit: 280ms;
+  /* Press release, switches, the segmented thumb, checkboxes. */
+  --dur-snappy: 340ms;
+  /* Popovers, menus, toasts, rows coming and going, the island's width. */
+  --dur-default: 470ms;
+  /* Sheets, the curtain, the stage materialising, full screen. */
+  --dur-gentle: 670ms;
   /* Loops, which reduced motion stops rather than shortens. */
   --loop-sweep: 1400ms;
   --loop-turn: 1200ms;
@@ -197,38 +334,64 @@
 
   /* Stacking across the page. A kit control's face sits at 1 and anything drawn on a control at 2,
      and the stage's own parts stay under the toasts, which hang over the page around the stage and
-     go back under the HUD they come out of. Overlays (50) and pickers (60) cover them all. */
+     go back under the island they come out of. Overlays (50) and pickers (60) cover them all. */
   --layer-toast: 10;
-  --layer-hud: 11;
+  --layer-island: 11;
 
-  --breakpoint-tablet: 760px;
-  --breakpoint-laptop: 1180px;
-  --breakpoint-wide: 1680px;
-  --chrome-h: 140px;
-  --rail-w: clamp(300px, 18vw, 360px);
-  --rail-tabbed-w: 340px;
+  --breakpoint-tablet: 700px;
+  --breakpoint-laptop: 1100px;
+  --breakpoint-wide: 1880px;
+
+  /* The stage is placed first and everything else around it. */
+  --bar-h: 52px;
+  --rail-w: 368px;
+  --rail-inset: 8px;
+  --gutter: 20px;
+  --stage-top: 76px;
+  --band-min: 112px;
+  --island-h: 40px;
+  --sheet-medium-top: 214px;
+  --sheet-large-top: 40px;
 }
 
 /* Lightning CSS resolves these per stylesheet, so they work only in files that stack.css imports.
    Any other stylesheet restates the query, as app.css does; kit markup uses tablet:, laptop:, wide:. */
-@custom-media --wide (width >= 1680px);
-@custom-media --laptop (1180px <= width < 1680px);
-@custom-media --tablet (760px <= width < 1180px);
-@custom-media --phone (width < 760px);
+@custom-media --wide (width >= 1880px);
+@custom-media --laptop (1100px <= width < 1880px);
+@custom-media --tablet (700px <= width < 1100px);
+@custom-media --phone (width < 700px);
 @custom-media --coarse (pointer: coarse);
 
 /* Later in the theme layer than the @theme block, so these win at equal specificity. */
 @layer theme {
   :root[data-appearance="midnight"] {
     --color-void: var(--midnight-void);
+    --color-console: var(--midnight-console);
     --color-raised: var(--midnight-raised);
     --color-raised-2: var(--midnight-raised-2);
     --color-overlay: var(--midnight-overlay);
+    --color-popover: var(--midnight-popover);
     --color-well: var(--midnight-well);
     --color-fg-1: var(--midnight-fg-1);
+    --color-fg-2: var(--midnight-fg-2);
+    --color-fg-3: var(--midnight-fg-3);
+    --color-field-line: var(--midnight-field-line);
     --color-stage-dim: var(--midnight-stage-dim);
-    --color-hud: var(--midnight-hud);
-    --color-hud-solid: var(--midnight-hud-solid);
+    --color-glass: var(--midnight-glass);
+    --color-glass-solid: var(--midnight-glass-solid);
+  }
+
+  /* A phone reads at 15 px and keeps the island at 32. */
+  @media (width < 700px) {
+    :root {
+      --text-reading: 0.9375rem;
+      --text-reading--letter-spacing: -0.015em;
+      --text-narration: 0.9375rem;
+      --text-narration--line-height: 1.3125rem;
+      --gutter: 16px;
+      --island-h: 32px;
+      --radius-island: 16px;
+    }
   }
 
   @media (prefers-contrast: more) {
@@ -238,7 +401,7 @@
       --color-field-ring: rgba(255, 255, 255, 0.24);
       --color-fg-2: #c4c7cd;
       --color-fg-3: #a6a9b0;
-      --color-hud: var(--color-hud-solid);
+      --color-glass: var(--color-glass-solid);
       --focus-width: 3px;
     }
   }
@@ -246,7 +409,8 @@
   @media (prefers-reduced-transparency: reduce) {
     :root,
     :root[data-appearance="midnight"] {
-      --color-hud: var(--color-hud-solid);
+      --color-glass: var(--color-glass-solid);
+      --blur-glass: 0px;
     }
   }
 }

@@ -31,7 +31,7 @@ import "./replay.css";
 
 // The task list keeps a rail of its own only where the picture keeps its size beside it; elsewhere
 // it opens as a sheet from the bar.
-const LIBRARY_RAIL = "(width >= 1680px)";
+const LIBRARY_RAIL = "(width >= 1880px)";
 // A recording with no video says so on the picture for this long, then as a chip in the transport.
 const NOTICE_MS = 3000;
 const SCREENS = [

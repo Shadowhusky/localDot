@@ -33,7 +33,10 @@ function style(locator: Locator, property: "transform" | "opacity"): Promise<str
 }
 
 // A control draws its fill, and squeezes, on its face: the ::before above every neighbour's reach.
-function face(locator: Locator, property: "scale" | "backgroundColor"): Promise<string> {
+function face(
+  locator: Locator,
+  property: "scale" | "backgroundColor" | "backgroundImage",
+): Promise<string> {
   return locator.evaluate((element, name) => getComputedStyle(element, "::before")[name], property);
 }
 
@@ -131,12 +134,13 @@ for (const [engine, launch] of Object.entries(ENGINES))
       await expect.poll(() => face(button, "scale")).toBe("none");
       await expect(page.getByText("Pressed 1 time", { exact: true })).toBeVisible();
 
+      // The wide one is porcelain: its face darkens to the pressed porcelain.
       const wide = page.getByRole("button", { name: /^Turn on your computer/ });
-      const wideRest = await face(wide, "backgroundColor");
+      const wideRest = await face(wide, "backgroundImage");
       const at = await middle(wide);
       await page.mouse.move(at.x, at.y);
       await page.mouse.down();
-      await expect.poll(() => face(wide, "backgroundColor")).not.toBe(wideRest);
+      await expect.poll(() => face(wide, "backgroundImage")).not.toBe(wideRest);
       await page.waitForTimeout(250);
       expect(await face(wide, "scale")).toBe("none");
       await page.mouse.up();

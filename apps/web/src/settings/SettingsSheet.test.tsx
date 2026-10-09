@@ -410,7 +410,7 @@ describe("settings inspector", () => {
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     view.unmount();
     vi.stubGlobal("matchMedia", (query: string) => ({
-      matches: query === "(width < 760px)",
+      matches: query === "(width < 700px)",
       media: query,
       addEventListener: () => {},
       removeEventListener: () => {},

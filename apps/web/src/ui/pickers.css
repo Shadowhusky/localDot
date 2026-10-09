@@ -1,13 +1,18 @@
-/* Select and Combobox: a trigger drawn like a field, and a list that opens beside it on a desktop
-   or rises as a bottom sheet on a phone. */
+/* Select and Combobox: a trigger on a control face (or, inline in a settings row, just its value and
+   an up-down chevron), and a list that opens from it on a desktop or rises as a bottom sheet on a
+   phone. */
 @layer kit {
   .ui-select-trigger {
+    --_h: calc(var(--spacing) * 8);
     display: flex;
     align-items: center;
     gap: calc(var(--spacing) * 2);
     width: 100%;
     height: var(--_h);
-    padding: 0 calc(var(--spacing) * 2) 0 calc(var(--spacing) * 2.5);
+    padding: 0 calc(var(--spacing) * 2) 0 calc(var(--spacing) * 3);
+    border-color: transparent;
+    background-color: var(--color-control);
+    font-weight: var(--font-weight-medium);
     text-align: start;
     cursor: pointer;
     user-select: none;
@@ -18,8 +23,61 @@
     transform: none;
   }
 
+  .ui-select-trigger[data-size="lg"] {
+    --_h: calc(var(--spacing) * 9);
+  }
+
+  @media (hover: hover) {
+    .ui-select-trigger:not([data-unavailable]):hover {
+      border-color: transparent;
+      background-color: var(--color-control-hover);
+    }
+  }
+
   .ui-select-trigger[data-open] {
-    background-color: var(--color-state-hover);
+    background-color: var(--color-control-pressed);
+  }
+
+  .ui-select-chevron {
+    color: var(--color-fg-2);
+  }
+
+  /* Inline in a grouped list: the value in fg-2 and a chevron, no box, as a pop-up in a settings
+     row. */
+  .ui-select-trigger[data-appearance="inline"] {
+    --_h: auto;
+    position: relative;
+    width: auto;
+    max-width: 100%;
+    gap: calc(var(--spacing) * 1.5);
+    padding: 0;
+    background-color: transparent;
+    color: var(--color-fg-2);
+    font-weight: var(--font-weight-normal);
+  }
+
+  .ui-select-trigger[data-appearance="inline"]::after {
+    content: "";
+    position: absolute;
+    inset: calc(var(--spacing) * -3) calc(var(--spacing) * -2);
+  }
+
+  @media (hover: hover) {
+    .ui-select-trigger[data-appearance="inline"]:not([data-unavailable]):hover,
+    .ui-select-trigger[data-appearance="inline"][data-open] {
+      background-color: transparent;
+      color: var(--color-fg-1);
+    }
+  }
+
+  .ui-select-trigger[data-appearance="inline"] .ui-select-chevron {
+    color: var(--color-fg-3);
+  }
+
+  .ui-select-trigger:focus-visible,
+  .ui-select-trigger[data-appearance="inline"]:focus-visible {
+    outline: var(--focus-width) solid var(--color-fg-1);
+    outline-offset: var(--focus-offset);
   }
 
   .ui-select-trigger[data-unavailable] {
@@ -38,15 +96,6 @@
     color: var(--color-fg-3);
   }
 
-  .ui-select-chevron {
-    color: var(--color-fg-2);
-    transition: rotate var(--dur-spring) var(--ease-spring);
-  }
-
-  .ui-select-trigger[data-open] .ui-select-chevron {
-    rotate: 180deg;
-  }
-
   .ui-picker {
     position: fixed;
     z-index: 60;
@@ -56,16 +105,17 @@
     font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
   }
 
-  /* It grows out of its trigger and goes back the same way, faster. */
+  /* It grows out of its trigger and goes back the same way: in on the default spring, out in a
+     120 ms fade. */
   .ui-picker-popover {
     min-height: 0;
-    padding: var(--spacing);
+    padding: calc(var(--spacing) * 1.5);
     border-radius: var(--radius-lg);
-    background-color: var(--color-overlay);
+    background-color: var(--color-popover);
     box-shadow: var(--shadow-overlay);
     transition:
       opacity var(--dur-hover) var(--ease-standard),
-      scale var(--dur-sheet) var(--ease-spring);
+      scale var(--dur-default) var(--ease-spring);
   }
 
   @starting-style {
@@ -77,10 +127,7 @@
 
   .ui-picker-popover[data-closing] {
     opacity: 0;
-    scale: 0.97;
-    transition:
-      opacity var(--dur-exit) var(--ease-exit),
-      scale var(--dur-exit) var(--ease-exit);
+    transition: opacity var(--dur-hover) var(--ease-exit);
   }
 
   .ui-listbox {
@@ -94,21 +141,26 @@
     scrollbar-color: var(--color-scrollbar) transparent;
   }
 
+  /* fg-3 is too faint on the popover, so the group labels are fg-2. */
   .ui-listbox-heading {
-    padding: calc(var(--spacing) * 1.5) calc(var(--spacing) * 2) var(--spacing);
+    padding: calc(var(--spacing) * 2) calc(var(--spacing) * 2.5) var(--spacing);
     color: var(--color-fg-2);
     font:
-      var(--font-weight-medium) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
-    letter-spacing: var(--text-micro--letter-spacing);
+      var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-footnote--letter-spacing);
   }
 
   .ui-option {
     display: flex;
     align-items: center;
-    gap: calc(var(--spacing) * 2);
-    min-height: calc(var(--spacing) * 8);
-    padding: 0 calc(var(--spacing) * 1.5) 0 calc(var(--spacing) * 2);
-    border-radius: var(--radius-md);
+    gap: calc(var(--spacing) * 2.5);
+    min-height: calc(var(--spacing) * 9);
+    padding: 0 calc(var(--spacing) * 2.5);
+    border-radius: var(--radius-row);
+    font-size: var(--text-row);
+    line-height: var(--text-row--line-height);
+    letter-spacing: var(--text-row--letter-spacing);
     cursor: default;
     user-select: none;
     -webkit-tap-highlight-color: transparent;
@@ -117,9 +169,9 @@
   .ui-listbox-group + .ui-listbox-group,
   .ui-listbox-group + .ui-option,
   .ui-option + .ui-listbox-group {
-    margin-top: var(--spacing);
-    padding-top: var(--spacing);
-    border-top: 1px solid var(--color-hairline);
+    margin-top: calc(var(--spacing) * 1.25);
+    padding-top: calc(var(--spacing) * 1.25);
+    border-top: 1px solid var(--color-separator);
   }
 
   /* The typed value sits apart from the matches, its rule drawn outside the row so the row lights
@@ -144,7 +196,7 @@
   }
 
   .ui-option[data-active] {
-    background-color: var(--color-state-pressed);
+    background-color: var(--color-selected);
   }
 
   .ui-option-text {
@@ -166,7 +218,7 @@
 
   .ui-option-note {
     color: var(--color-fg-2);
-    font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+    font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
   }
 
   .ui-option[aria-disabled="true"] .ui-option-label {
@@ -201,9 +253,9 @@
 
   .ui-combobox-search {
     flex-shrink: 0;
-    margin-bottom: var(--spacing);
-    padding-bottom: var(--spacing);
-    border-bottom: 1px solid var(--color-hairline);
+    margin-bottom: calc(var(--spacing) * 1.5);
+    padding-bottom: calc(var(--spacing) * 1.5);
+    border-bottom: 1px solid var(--color-separator);
   }
 
   .ui-picker-scrim {
@@ -212,7 +264,7 @@
     z-index: 59;
     background-color: var(--color-scrim);
     touch-action: none;
-    transition: opacity var(--dur-sheet) var(--ease-standard);
+    transition: opacity var(--dur-fade) var(--ease-standard);
   }
 
   @starting-style {
@@ -233,10 +285,10 @@
     left: 0;
     max-height: calc(100dvh - var(--spacing) * 12);
     padding-bottom: env(safe-area-inset-bottom);
-    border-radius: var(--radius-xl) var(--radius-xl) 0 0;
-    background-color: var(--color-raised);
+    border-radius: var(--radius-2xl) var(--radius-2xl) 0 0;
+    background-color: var(--color-overlay);
     box-shadow: var(--shadow-overlay);
-    transition: translate var(--dur-sheet) var(--ease-spring);
+    transition: translate var(--dur-gentle) var(--ease-spring);
   }
 
   .ui-picker-sheet[data-full] {
@@ -252,7 +304,7 @@
 
   .ui-picker-sheet[data-closing] {
     translate: 0 100%;
-    transition: translate var(--dur-sheet) var(--ease-exit);
+    transition: translate var(--dur-sheet-exit) var(--ease-exit);
   }
 
   .ui-picker-sheet-head {
@@ -268,16 +320,17 @@
 
   .ui-picker-sheet-grabber {
     width: calc(var(--spacing) * 9);
-    height: var(--spacing);
+    height: 5px;
     border-radius: var(--radius-full);
-    background-color: var(--color-fg-4);
+    background-color: var(--color-grabber);
   }
 
   .ui-picker-sheet-title {
     color: var(--color-fg-1);
     font:
-      var(--font-weight-semibold) var(--text-title) / var(--text-title--line-height) var(--font-ui);
-    letter-spacing: var(--text-title--letter-spacing);
+      var(--font-weight-semibold) var(--text-title-2) / var(--text-title-2--line-height)
+      var(--font-ui);
+    letter-spacing: var(--text-title-2--letter-spacing);
     text-align: center;
   }
 
@@ -296,12 +349,13 @@
     padding: var(--spacing) calc(var(--spacing) * 2) calc(var(--spacing) * 2);
   }
 
-  /* Rows at the system's reading size, as the trigger is on a touch screen. */
+  /* 48 px rows at the phone's list size; choosing commits and closes. */
   .ui-picker-sheet .ui-option {
     min-height: calc(var(--spacing) * 12);
-    padding: 0 calc(var(--spacing) * 3);
-    font-size: var(--text-title-2);
-    line-height: var(--text-title-2--line-height);
+    padding: 0 calc(var(--spacing) * 3.5);
+    font-size: var(--text-touch);
+    line-height: var(--text-touch--line-height);
+    letter-spacing: var(--text-touch--letter-spacing);
   }
 
   .ui-picker-sheet .ui-option-note {
@@ -334,17 +388,13 @@
   }
 
   @media (prefers-reduced-motion: reduce) {
-    .ui-select-chevron {
-      transition: none;
-    }
-
     .ui-picker-popover,
     .ui-picker-popover[data-closing] {
       scale: none;
     }
 
     .ui-picker-sheet {
-      transition: opacity var(--dur-sheet) var(--ease-standard);
+      transition: opacity var(--dur-gentle) var(--ease-standard);
     }
 
     @starting-style {

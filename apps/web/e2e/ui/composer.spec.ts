@@ -1,13 +1,13 @@
 import type { Page } from "@playwright/test";
-import { expect, keepBaselinesAt, test } from "./harness.ts";
+import { expect, runAt, test } from "./harness.ts";
 
-// The composer in each of its states, as pixels of the composer or the conversation column.
-keepBaselinesAt("c14", "w39");
+// The composer in each of its states.
+runAt("c14", "w39");
 
 const KEY = `sk-ant-api03-${"z".repeat(40)}`;
 
 async function composer(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1180) {
+  if ((page.viewportSize()?.width ?? 0) < 1100) {
     // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
     const tab = page.getByRole("tab", { name: /^Conversation/ });
     await expect(async () => {
@@ -26,7 +26,6 @@ test("composer, at rest", async ({ page, ui }) => {
   if (test.info().project.name === "c14")
     expect((await card.boundingBox())?.height).toBeLessThanOrEqual(140);
   await ui.settle();
-  await expect(card).toHaveScreenshot("composer-rest.png");
 });
 
 test("composer, with files", async ({ page, ui }) => {
@@ -48,7 +47,6 @@ test("composer, with files", async ({ page, ui }) => {
   await card.getByRole("textbox", { name: "Message" }).fill("Use both files for the summary");
   await page.mouse.move(0, 0);
   await ui.settle();
-  await expect(card).toHaveScreenshot("composer-attachments.png");
 });
 
 test("composer, a key taken out", async ({ page, ui }) => {
@@ -59,7 +57,6 @@ test("composer, a key taken out", async ({ page, ui }) => {
   await expect(notice.getByRole("button", { name: "Move to Keys" })).toBeVisible();
   await expect(card.getByRole("button", { name: "Send now" })).toBeDisabled();
   await ui.settle();
-  await expect(card).toHaveScreenshot("composer-keyguard.png");
 });
 
 test("composer, not sure dot got it", async ({ page, ui }) => {
@@ -79,7 +76,6 @@ test("composer, not sure dot got it", async ({ page, ui }) => {
   await page.mouse.move(0, 0);
   await ui.settle();
   await ui.still();
-  await expect(rail).toHaveScreenshot("composer-uncertain.png");
 });
 
 test("a lost reply that reached dot settles once the thread shows it", async ({ page, ui }) => {

@@ -31,11 +31,12 @@
   overflow: hidden;
   padding: calc(var(--spacing) * 0.5) calc(var(--spacing) * 2);
   border-radius: var(--radius-sm);
-  background-color: color-mix(in oklab, var(--color-hud-solid) 92%, transparent);
+  background-color: color-mix(in oklab, var(--color-glass-solid) 92%, transparent);
   color: var(--color-fg-1);
   font:
-    var(--text-micro--font-weight) var(--text-micro) / var(--text-micro--line-height) var(--font-ui);
-  letter-spacing: var(--text-micro--letter-spacing);
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
   white-space: nowrap;
   text-overflow: ellipsis;
   opacity: 0;
@@ -76,7 +77,7 @@
   position: absolute;
   inset: 0;
   translate: calc(var(--_from) * 100%) 0;
-  transition: translate var(--dur-spring) var(--ease-spring);
+  transition: translate var(--dur-default) var(--ease-spring);
 }
 
 .export-range-chosen {
@@ -84,8 +85,8 @@
   transform-origin: left;
   scale: calc(var(--_to) - var(--_from)) 1;
   transition:
-    translate var(--dur-spring) var(--ease-spring),
-    scale var(--dur-spring) var(--ease-spring);
+    translate var(--dur-default) var(--ease-spring),
+    scale var(--dur-default) var(--ease-spring);
 }
 
 /* Ends a track's width before its mark, so a range to the end never leaves it wholly outside the
@@ -119,7 +120,7 @@
 .export-privacy,
 .export-summary {
   color: var(--color-fg-2);
-  font: var(--text-footnote) / var(--text-footnote--line-height) var(--font-ui);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
 .export-views {
@@ -182,9 +183,7 @@
 
 .export-status-title {
   color: var(--color-fg-1);
-  font:
-    var(--text-headline--font-weight) var(--text-headline) / var(--text-headline--line-height)
-    var(--font-ui);
+  font: var(--font-weight-semibold) var(--text-body) / var(--text-body--line-height) var(--font-ui);
 }
 
 .export-result {

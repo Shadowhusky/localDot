@@ -3,11 +3,12 @@ import { createElement, type SVGProps } from "react";
 import { ICONS, type IconName, type IconNode } from "./icons.ts";
 
 const GRID = 24;
-const STROKE = 1.5;
+// In grid units, so the line thins a little as the icon shrinks, like the system's symbols.
+const STROKE = 1.6;
 
 export interface IconProps extends Omit<SVGProps<SVGSVGElement>, "name"> {
   name: IconName;
-  size?: 12 | 14 | 16 | 20;
+  size?: 12 | 14 | 16 | 18 | 20 | 22;
   label?: string;
 }
 
@@ -20,7 +21,7 @@ export function Icon({ name, size = 16, label, className, ...props }: IconProps)
       height={size}
       fill="none"
       stroke="currentColor"
-      strokeWidth={(STROKE * GRID) / size}
+      strokeWidth={STROKE}
       strokeLinecap="round"
       strokeLinejoin="round"
       focusable="false"

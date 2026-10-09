@@ -4,8 +4,8 @@ import { useFieldControl } from "./Field.tsx";
 
 export interface TextFieldProps
   extends Omit<ComponentProps<"input">, "size" | "prefix" | "disabled"> {
-  // 32 px, or 36 px inside a sheet; 44 px on a touch screen either way.
-  size?: "md" | "lg";
+  // 36 px; 32 in a popup's search, 40 for a key on its own; 44 px on a touch screen.
+  size?: "sm" | "md" | "lg";
   prefix?: ReactNode;
   suffix?: ReactNode;
   // A code someone reads out or types elsewhere: large monospace, spaced out.

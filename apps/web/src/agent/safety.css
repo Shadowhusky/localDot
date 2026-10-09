@@ -388,7 +388,7 @@
   font-weight: 600;
 }
 .always-notice-undo:hover:not(:disabled) {
-  background: var(--color-hud-line);
+  background: var(--color-glass-line);
 }
 .always-notice-undo:disabled {
   opacity: 0.55;
