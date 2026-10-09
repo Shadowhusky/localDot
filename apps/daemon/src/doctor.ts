@@ -124,7 +124,7 @@ export function vaultCheck(vault: KeydVault): DoctorCheck {
       name,
       ok: true,
       detail:
-        "Saved keys are kept in an encrypted file that only your passphrase opens, so other users, the computers and other programs can't read them.",
+        "Saved keys are kept in an encrypted file that only your passphrase opens: safe on disk and while locked, but not from a program already running as you once you unlock them.",
     };
   const where =
     vault.backend === "secret-service"
@@ -133,7 +133,7 @@ export function vaultCheck(vault: KeydVault): DoctorCheck {
   return {
     name,
     ok: true,
-    detail: `Saved keys are kept ${where}: safe from other users and from the computers, but not from programs running as you. A passphrase vault keeps them from those too; see docs/install.md.`,
+    detail: `Saved keys are kept ${where}: safe from other users and from the computers, but not from programs running as you. A passphrase vault keeps them from those until you unlock it; see docs/install.md.`,
   };
 }
 

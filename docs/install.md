@@ -92,9 +92,12 @@ Your provider keys are kept by the key service, and the computers only ever see 
 On Linux, the keyring and systemd-creds keep saved keys safe from other users of the machine and
 from the computers, but not from programs running as you: any of them can read the keyring
 (`secret-tool`) or have systemd-creds open the file's key. A **passphrase vault** is the stronger
-choice: its file opens only with your passphrase, which no program running as you can read. Install
-with `--passphrase-vault` (or run `localdot update --passphrase-vault`) to use one. It starts
-empty, so add your keys again afterwards.
+choice: its file opens only with your passphrase, so no program running as you can read your keys
+from the disk or while they're locked. It can't keep them from such a program once you unlock
+them: that program could have swapped the `localdot` command or the key service for its own to
+catch your passphrase, and on some Linux systems it can read the unlocked key service's memory.
+Install with `--passphrase-vault` (or run `localdot update --passphrase-vault`) to use one. It
+starts empty, so add your keys again afterwards.
 
 When a passphrase protects your keys, run `localdot unlock` after the computer restarts, or after
 an upgrade that changed the key service. The installer asks for it when you run it in a terminal.

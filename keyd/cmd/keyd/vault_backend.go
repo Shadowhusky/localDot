@@ -74,9 +74,11 @@ func openVaultBackend(mode, dir string, host vaultHost) (vaultBackend, error) {
 		}
 		return vaultBackend{store: file, index: index, state: file.State, unlock: file.Unlock}, nil
 	case "passphrase":
-		// A file only the passphrase opens: unlike the keyring or systemd-creds, no other program
-		// running as this user can read the keys. Its own file, so a vault.json made for
-		// systemd-creds never stops keyd from starting.
+		// A file only the passphrase opens: unlike the keyring or systemd-creds, a program running
+		// as this user can't read the keys from disk or while keyd is locked. After an unlock it
+		// can, having replaced keyd, localdot or the unit to catch the passphrase, or through
+		// ptrace where that is open. Its own file, so a vault.json made for systemd-creds never
+		// stops keyd from starting.
 		file, err := vault.OpenFileVault(filepath.Join(dir, "vault-passphrase.json"), nil)
 		if err != nil {
 			return vaultBackend{}, fmt.Errorf("keyd: %w", err)

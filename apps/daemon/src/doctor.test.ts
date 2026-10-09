@@ -686,9 +686,19 @@ describe("vaultCheck", () => {
     expect(vaultCheck({ backend: "file", state: "ready", key: "host" }).detail).toContain(
       "not from programs running as you",
     );
-    expect(vaultCheck({ backend: "file", state: "ready", key: "passphrase" }).detail).toContain(
-      "only your passphrase opens",
-    );
+    const passphrase = vaultCheck({ backend: "file", state: "ready", key: "passphrase" }).detail;
+    expect(passphrase).toContain("only your passphrase opens");
+    expect(passphrase).toContain("not from a program already running as you once you unlock them");
+    expect(passphrase).not.toContain("other programs can't read them");
+    for (const vault of [
+      { backend: "secret-service", state: "ready" as const },
+      { backend: "file", state: "ready" as const, key: "host" as const },
+    ]) {
+      expect(vaultCheck(vault).detail).toContain(
+        "A passphrase vault keeps them from those until you unlock it",
+      );
+      expect(vaultCheck(vault).detail).not.toContain("keeps them from those too");
+    }
     expect(vaultCheck({ backend: "file", state: "ready", key: "host" }).detail).not.toContain(
       "only this machine",
     );
