@@ -145,9 +145,47 @@ describe("the user takes the computer while dot works", () => {
     await until(() => h.session.manualControl === "ready");
     expect(h.session.isCurrent(generation)).toBe(true);
     expect(h.session.safetyPause).toMatchObject({ phase: "paused", resumeAvailable: false });
+    // Viewers read Continue's availability from the journal, so each change is published.
+    const published = () =>
+      h
+        .events()
+        .filter((event) => event.type === "safety.pause")
+        .map((event) => (event.data.pause as { resumeAvailable: boolean }).resumeAvailable);
+    expect(published().slice(-2)).toEqual([true, false]);
     expect(await h.session.handback(requestId, undefined)).toBe(true);
     expect(h.session.safetyPause).toMatchObject({ phase: "paused", resumeAvailable: true });
+    expect(published().at(-1)).toBe(true);
     expect(h.session.status).toBe("paused");
+  });
+
+  it("journals the user taking the computer dot handed over, once, and keeps dot's hand-off", async () => {
+    const h = setup();
+    const asked = h.call("request_takeover", { reason: "login", note: "Sign in" });
+    await until(() => h.session.manualControl === "ready");
+    const requestId = required(h.session.pendingTakeover);
+    expect(h.session.takeControl()).toBe(requestId);
+    expect(h.session.takeControl()).toBe(requestId);
+    const changes = h.events().filter((event) => event.type === "control.change");
+    expect(changes.map((event) => event.data)).toEqual([
+      { holder: "user", reason: "handoff_request" },
+    ]);
+    expect(await h.session.handback(requestId, undefined)).toBe(true);
+    expect((await asked).result.ok).toBe(true);
+    // dot's own hand-off hears from its tool, not from a note in the inbox.
+    expect(h.session.inboxSequence).toBe(0);
+  });
+
+  it("marks a step the user chose to do themselves as theirs from the start", async () => {
+    const h = setup();
+    void h.session
+      .takeover("other", "Do this yourself", undefined, undefined, true)
+      .catch(() => {});
+    await until(() => h.session.manualControl === "ready");
+    expect(h.events().find((event) => event.type === "takeover.request")?.data).toMatchObject({
+      by: "user",
+    });
+    h.session.takeControl();
+    expect(h.events().some((event) => event.type === "control.change")).toBe(false);
   });
 
   it("waits for a Pause that is still settling", () => {

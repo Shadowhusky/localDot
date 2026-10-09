@@ -76,6 +76,8 @@ interface ControlRecord {
   released: Promise<TakeoverOutcome>;
   resolve(outcome: TakeoverOutcome): void;
   step?: string;
+  // The user has taken the computer: they asked for it, or took the one dot handed over.
+  taken: boolean;
   // The user took the computer themselves, at this time, from a task in this state.
   user?: { since: number; from: SessionStatus };
 }
@@ -948,11 +950,13 @@ export class AgentSession {
     return ask.finish({ ...(option ? { option } : {}), ...(text ? { text } : {}), by: "user" });
   }
 
+  // `taken`: the user chose to do this step themselves, so the computer is theirs at once.
   async takeover(
     reason: string,
     note: string,
     step?: string,
     lease?: ToolLease,
+    taken = false,
   ): Promise<TakeoverOutcome> {
     const generation = lease?.generation ?? this.generation;
     if (!generation) throw new SessionStoppedError();
@@ -973,6 +977,7 @@ export class AgentSession {
       released,
       resolve,
       step,
+      taken,
     };
     this.#approvals.cancel(this.id);
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
@@ -1000,7 +1005,11 @@ export class AgentSession {
     void Promise.all(draining)
       .then(() => {
         if (this.#control !== record || this.stopped) return;
-        this.append("takeover.request", { requestId: record.requestId, reason, note }, step);
+        this.append(
+          "takeover.request",
+          { requestId: record.requestId, reason, note, ...(taken ? { by: "user" } : {}) },
+          step,
+        );
         record.held = true;
         this.status = "waiting_user";
         this.append("agent.state", { state: "waiting_user", reason: "takeover" });
@@ -1021,7 +1030,15 @@ export class AgentSession {
   // boundary, so its brain stays. Control the user already holds is theirs to keep.
   takeControl(): string {
     if (this.stopped) throw new SessionStoppedError();
-    if (this.#control) return this.#control.requestId;
+    const held = this.#control;
+    if (held) {
+      // The user takes the computer dot handed over: from now on it is theirs, as they asked.
+      if (held.held && !held.taken) {
+        held.taken = true;
+        this.append("control.change", { holder: "user", reason: "handoff_request" }, held.step);
+      }
+      return held.requestId;
+    }
     const pause = this.#steps.pause;
     if ((pause && pause.phase !== "paused") || this.#safetyResuming) throw new PausedStepError();
     const generation = this.generation;
@@ -1038,11 +1055,14 @@ export class AgentSession {
       typed: false,
       released,
       resolve,
+      taken: true,
       user: { since: Date.now(), from: this.status },
     };
     this.#approvals.cancel(this.id);
     this.#control = record; // Synchronous admission fence, before abort/drain or any await.
     this.#screenReady = undefined;
+    // A held Pause can't be resumed while the user has the computer; viewers read that from it.
+    if (pause) this.#safetyChanged();
     const draining: Promise<void>[] = this.#screens ? [this.#screens.takeOver()] : [];
     const releasing = this.releaseInput();
     if (releasing) draining.push(releasing);
@@ -1168,6 +1188,7 @@ export class AgentSession {
     if (user) {
       this.#lookFirst = true;
       this.#note(handedBack(Date.now() - user.since));
+      if (this.safetyPause) this.#safetyChanged();
     }
     record.resolve({ ...(note ? { note } : {}), by: "user" });
     this.#wake();

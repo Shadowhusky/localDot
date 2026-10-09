@@ -42,6 +42,13 @@ const cases: [string, Record<string, unknown>, string, string, string][] = [
     "You took control",
     "user",
   ],
+  [
+    "takeover.request",
+    { requestId: "01J9ZQ3V8Y7X6W5T4S3R2Q1P0N", reason: "other", note: "", by: "user" },
+    "takeover",
+    "You took control",
+    "user",
+  ],
   ["control.change", { holder: "user" }, "takeover", "You took control", "user"],
   ["control.change", { holder: "agent" }, "handback", "Handed back to dot", "neutral"],
   ["pause.change", { paused: true }, "pause", "Paused", "neutral"],
