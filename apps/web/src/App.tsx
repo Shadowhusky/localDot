@@ -81,6 +81,8 @@ type Rejected = "stored" | "link" | "code" | null;
 type RailView = "chat" | "activity" | "takeover";
 
 const RETRY_CHECK_MS = 2000;
+// The island waits at most this long on opening for the task's history.
+const OPENING_MAX_MS = 2000;
 const FROM_WATCH = { fromWatch: true };
 
 export function App({ fetchImpl }: AppProps) {
@@ -530,13 +532,28 @@ function Theatre({ api }: { api: ApiClient }) {
     controls.stopStatus.phase === "paused" || controls.stopStatus.phase === "stopped"
       ? hudFor({ cell: stageCell, status, pending })
       : hud;
+  // Which conversation and task the thread shows is not known yet.
+  const threadPending =
+    status === "listing" ||
+    !conversation.known ||
+    (status === "known" && conversation.sessions.length > 0 && !session.sessionId);
+  // On opening, what the task is doing is unknown until its history is in: the island waits rather
+  // than say "Working" for a task that is done. Later tasks start from nothing, so never wait.
+  const [opened, setOpened] = useState(false);
+  const opening = !opened && (threadPending || (!!session.sessionId && agent.history === false));
+  if (!opened && !opening && status !== "listing") setOpened(true);
+  useEffect(() => {
+    if (opened) return;
+    const timer = setTimeout(() => setOpened(true), OPENING_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [opened]);
   const facts = taskFacts(agent.model);
   const now = useNowMs(
     session.model,
     session.version,
     (t) => !!session.sessionId && taskHud(session.model, t, facts).phase === "running",
   );
-  const task = session.sessionId ? taskHud(session.model, now, facts) : null;
+  const task = session.sessionId && !opening ? taskHud(session.model, now, facts) : null;
   // A finished task waits only for a follow-up; one still at work keeps its conversation. Until
   // the daemon says which, the choice is offered and the daemon has the last word.
   const taskStatus = agent.snapshot?.status;
@@ -776,7 +793,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   <HudIsland
                     ref={island}
                     status={appStatus}
-                    shape={islandShape(appStatus, curtainUp)}
+                    shape={islandShape(appStatus, curtainUp || opening)}
                     pause={pauseSlot({
                       pause: safety.pause,
                       canPause: safety.canPause,
@@ -902,11 +919,7 @@ function Theatre({ api }: { api: ApiClient }) {
               onReplayTask={selectReplay}
               sessions={conversation.sessions}
               more={conversation.more}
-              pending={
-                status === "listing" ||
-                !conversation.known ||
-                (status === "known" && conversation.sessions.length > 0 && !session.sessionId)
-              }
+              pending={threadPending}
               covered={shownView !== "chat"}
               cover={
                 <>

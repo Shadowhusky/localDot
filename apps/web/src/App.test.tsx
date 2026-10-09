@@ -683,7 +683,11 @@ describe("App token states", () => {
       FakeWebSocket.instances[0]?.onmessage?.({ data: JSON.stringify(summary("removed")) }),
     );
     expect(screen.getByTestId("hud-status").textContent).toBe("No computer");
-    expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1);
+    // This daemon never says which conversation is current, so the island stops waiting for it.
+    await waitFor(
+      () => expect(screen.getAllByRole("button", { name: "Turn on" })).toHaveLength(1),
+      { timeout: 3000 },
+    );
     expect(FakeWebSocket.instances[0]?.closed).toBe(true);
   });
 });
