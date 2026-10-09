@@ -27,6 +27,9 @@ function boxOf(element: Element | null): Box | null {
   return { x: rect.left, y: rect.top, size: Math.round(rect.width) };
 }
 
+const sameBox = (a: Box, b: Box) =>
+  Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && a.size === b.size;
+
 function centreOf(element: Element | null): Point | null {
   if (!element) return null;
   const rect = element.getBoundingClientRect();
@@ -39,12 +42,18 @@ export interface PresenceOptions {
   reducedMotion: boolean;
 }
 
-// The one live dot, drawn in a fixed layer over the page and moved between the places that keep
-// room for it. Its DotView is made once, so its engine never restarts when it changes places.
+// The one live dot, moved between the places that keep room for it. At rest it sits inside its place,
+// so a scroll, a drag or a bounce that moves the place moves dot with it in the same frame; it flies
+// in a fixed layer over the page. Its DotView is made once, so its engine never restarts when it
+// changes places.
 export class Presence {
   readonly view: DotView;
   private readonly frame: HTMLElement;
   private readonly host: HTMLElement;
+  // The fixed layer dot flies in, where its frame starts.
+  private readonly layer: HTMLElement;
+  // The place dot rests in, which carries it.
+  private home: HTMLElement | null = null;
   private flight: Flight | null = null;
   private motion: Animation | null = null;
   private place: PresencePlace | null = null;
@@ -54,10 +63,15 @@ export class Presence {
   private fade: ReturnType<typeof setTimeout> | undefined;
   private reduced: boolean;
   private focus: Point | null = null;
+  // Tells dot when its place is laid out, hidden or resized, which moves no scroll or resize event.
+  private readonly sizes =
+    typeof ResizeObserver === "function" ? new ResizeObserver(() => this.follow(false)) : null;
+  private watched: Element | null = null;
 
   constructor(frame: HTMLElement, host: HTMLElement, o: PresenceOptions) {
     this.frame = frame;
     this.host = host;
+    this.layer = frame.parentElement ?? document.body;
     this.reduced = o.reducedMotion;
     this.view = new DotView(host, { size: 96, ...o });
   }
@@ -70,7 +84,9 @@ export class Presence {
   goTo(place: PresencePlace | null): void {
     const from = this.place;
     this.place = place;
-    const box = place && boxOf(placeElement(place));
+    const element = place && placeElement(place);
+    this.watch(element);
+    const box = boxOf(element);
     if (!box) {
       this.lost = place !== null;
       this.show(false);
@@ -90,6 +106,7 @@ export class Presence {
       this.show(false);
       clearTimeout(this.fade);
       this.fade = setTimeout(() => {
+        this.fade = undefined;
         const at = this.place && boxOf(placeElement(this.place));
         if (!at) {
           this.lost = this.place !== null;
@@ -101,6 +118,7 @@ export class Presence {
       return;
     }
     const t = frameTime();
+    this.leave(t);
     const current = this.flight.at(t);
     // One flight at a time: a new place mid-flight bends the path, with no second take-off.
     if (current.settled) this.view.hop();
@@ -110,29 +128,35 @@ export class Presence {
     this.animate(t);
   }
 
-  // The place moved under dot: a window resize lands it there, anything else is followed. A dot put
-  // away while its place had no box comes back at once.
+  // The place changed under dot. Resting in it, dot has already moved with it and only takes on its
+  // size; flying, or given a new box for the same place, it turns toward where the place is now. A
+  // window resize lands it there, and a dot put away while its place had no box comes back at once.
   follow(resized: boolean): void {
-    const box = this.place && boxOf(placeElement(this.place));
-    if (!box) return;
+    const element = this.place && placeElement(this.place);
+    this.watch(element);
+    const box = boxOf(element);
+    if (!box || this.fade !== undefined) return;
     if (this.lost) {
       this.land(box);
       this.show(true);
       return;
     }
     if (!this.flight) return;
-    const target = this.flight.target;
-    if (
-      Math.abs(box.x - target.x) < 0.5 &&
-      Math.abs(box.y - target.y) < 0.5 &&
-      box.size === target.size
-    )
+    if (element === this.home) {
+      this.draw(box.size);
+      this.flight.jump(box, frameTime());
       return;
+    }
+    if (sameBox(box, this.flight.target)) {
+      if (this.home) this.land(box);
+      return;
+    }
     if (resized && !this.motion) {
       this.land(box);
       return;
     }
     const t = frameTime();
+    this.leave(t);
     this.draw(Math.max(this.drawn, box.size));
     this.flight.follow(box, t);
     this.animate(t);
@@ -153,12 +177,27 @@ export class Presence {
   destroy(): void {
     this.motion?.cancel();
     clearTimeout(this.fade);
+    this.sizes?.disconnect();
+    this.layer.append(this.frame);
     this.view.destroy();
   }
 
+  private watch(element: Element | null): void {
+    if (element === this.watched) return;
+    this.sizes?.disconnect();
+    this.watched = element;
+    if (element) this.sizes?.observe(element);
+  }
+
   private show(on: boolean): void {
-    if (on) this.frame.dataset.shown = "";
-    else delete this.frame.dataset.shown;
+    if (!on) {
+      delete this.frame.dataset.shown;
+      return;
+    }
+    if (this.frame.dataset.shown !== undefined) return;
+    // A frame that has just moved into its place has no style yet for the fade to start from.
+    void this.frame.offsetWidth;
+    this.frame.dataset.shown = "";
   }
 
   private draw(size: number): void {
@@ -179,12 +218,32 @@ export class Presence {
     if (this.flight) this.flight.jump(box, frameTime());
     else this.flight = new Flight(box);
     this.draw(box.size);
-    // The resting place is written before the flight lets go, so no frame falls between them.
-    this.frame.style.transform = this.transform(box);
+    // dot moves into its place before the flight lets go, so no frame falls between them.
+    const home = this.place && placeElement(this.place);
+    if (home && boxOf(home)) {
+      home.append(this.frame);
+      this.frame.style.transform = "";
+      this.home = home;
+    } else {
+      this.layer.append(this.frame);
+      this.frame.style.transform = this.transform(box);
+      this.home = null;
+    }
     this.motion?.cancel();
     this.motion = null;
     delete this.frame.dataset.flying;
     this.settled();
+  }
+
+  // Out of its place into the layer, from where the page has carried it; from where it last rested
+  // when the place has gone or is hidden.
+  private leave(t: number): void {
+    if (!this.home || !this.flight) return;
+    const box = boxOf(this.frame) ?? this.flight.target;
+    this.home = null;
+    this.flight.jump(box, t);
+    this.frame.style.transform = this.transform(box);
+    this.layer.append(this.frame);
   }
 
   // Replaces the flight on screen with the one from t on. The new one starts at the frame the last
@@ -213,15 +272,19 @@ export class Presence {
     this.motion = motion;
     motion.finished.then(
       () => {
-        if (this.motion === motion) this.land(flight.target);
+        if (this.motion !== motion) return;
+        // The place moved while dot flew, as in a scroll: it turns to where the place is, then lands.
+        const box = this.place && boxOf(placeElement(this.place));
+        if (box && !sameBox(box, flight.target)) this.follow(false);
+        else this.land(flight.target);
       },
       () => {},
     );
   }
 
   private centre(): Point | null {
-    const target = this.flight?.target;
-    return target ? { x: target.x + target.size / 2, y: target.y + target.size / 2 } : null;
+    const at = (this.home && boxOf(this.frame)) || this.flight?.target;
+    return at ? { x: at.x + at.size / 2, y: at.y + at.size / 2 } : null;
   }
 
   // Once dot sits still: where its idle eyes rest, where the decision is, and where its work is.
