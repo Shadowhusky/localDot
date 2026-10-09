@@ -9,6 +9,7 @@ import { createReplacementController } from "./agent/safety/replacement-controll
 import { Transfers } from "./agent/transfers.ts";
 import { createAgent } from "./agent/wiring.ts";
 import { createApp } from "./app.ts";
+import { AppEvents, appEventsRoute } from "./app-events.ts";
 import { BrowserDownloadCollector } from "./browser/download-collector.ts";
 import { QuarantineStore } from "./browser/quarantine.ts";
 import { SessionScreens } from "./browser/session-screens.ts";
@@ -52,6 +53,7 @@ import { KeydEventRouter } from "./keyd/event-router.ts";
 import { cameUp, KeydMonitor } from "./keyd/monitor.ts";
 import { acquireDaemonLock, DaemonLockError, DaemonLockedError } from "./lock.ts";
 import { describeStartupError, runDaemonStartup } from "./main-startup.ts";
+import { createNotify } from "./notify/wiring.ts";
 import { localdotHome, secureHome } from "./paths.ts";
 import { parsePort } from "./port.ts";
 import { SHUTDOWN_FINALIZE_MS } from "./recorder/recorder.ts";
@@ -359,6 +361,18 @@ void (serviceReadiness ? serviceReadiness.runStartup(startup) : startup())
     shutdown.unshift(updates.watch(records, (id) => orchestrator.notify(id)));
   });
 const keydEvents = new KeydEventRouter({ keyd, live, eventLog });
+const appEvents = new AppEvents();
+// Pushes wait on the push service (keyd gives up after 10 s), so they get their own deadline.
+// Test launchers set LOCALDOT_NOTIFY_MAC=off: no suite may post a real Mac banner.
+const notify = createNotify({
+  home,
+  eventLog,
+  keyd: new KeydClient(keydSocketPath(home), 15_000),
+  events: appEvents,
+  ...(process.env.LOCALDOT_NOTIFY_MAC === "off"
+    ? { mac: { available: false, show: async () => "unavailable" as const } }
+    : {}),
+});
 shutdown.push(
   () => keydEvents.stop(),
   () => keydMonitor.stop(),
@@ -370,6 +384,7 @@ shutdown.push(
   () => recorder.stopAll(SHUTDOWN_FINALIZE_MS),
   () => browserStreams.dispose(),
   () => sessionIndex?.close(),
+  () => notify.close(),
   () => eventLog.close(),
 );
 keydMonitor.start();
@@ -417,6 +432,7 @@ const app = createApp({
     prepareDesktopTask: agent.prepareDesktopTask,
   },
   keys: { keyd, monitor: keydMonitor, afterChange: (id) => refreshRunningCells(orchestrator, id) },
+  notify: notify.routes,
 });
 
 const server = serve({ fetch: app.fetch, hostname: "127.0.0.1", port }, () => {
@@ -443,6 +459,7 @@ attachUpgradeRouter(server as Server, { port, token }, [
   cellStatusRoute(browserStreams, "browsers"),
   desktopStreamRoute(desktop),
   desktopStreamRoute(browserViewer, "browser"),
+  appEventsRoute(appEvents, notify.presence),
 ]);
 shutdown.unshift(() => {
   server.close();

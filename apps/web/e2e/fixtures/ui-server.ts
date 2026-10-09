@@ -1,4 +1,4 @@
-import { webcrypto } from "node:crypto";
+import { createECDH, webcrypto } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { createRequire } from "node:module";
@@ -51,6 +51,7 @@ import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession, type AskForm } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
 import { createApp } from "../../../daemon/src/app.ts";
+import { AppEvents, appEventsRoute } from "../../../daemon/src/app-events.ts";
 import type { AccountsDeps } from "../../../daemon/src/browser/accounts.ts";
 import { ComputerUpdateRefused } from "../../../daemon/src/cells/computer-update.ts";
 import type { CellControls } from "../../../daemon/src/cells/orchestrator.ts";
@@ -72,6 +73,7 @@ import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
 import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src/gateway/text.ts";
 import { setPublicOrigin } from "../../../daemon/src/guard.ts";
+import { createNotify } from "../../../daemon/src/notify/wiring.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
 import { SessionIndex } from "../../../daemon/src/sessions/index-store.ts";
@@ -1254,6 +1256,31 @@ const recorder = new Recorder({
 });
 const index = new SessionIndex(HOME, { isLive: (id) => live.cellOf(id) !== undefined });
 
+// Notifications with a stand-in keyd and Mac: nothing leaves the fixture; sends are recorded.
+const appEvents = new AppEvents();
+const pushKey = createECDH("prime256v1");
+pushKey.generateKeys();
+const notified: { mac: [string, string][]; pushes: number } = { mac: [], pushes: 0 };
+const notify = createNotify({
+  home: HOME,
+  eventLog: log,
+  events: appEvents,
+  keyd: {
+    pushKey: async () => ({ publicKey: pushKey.getPublicKey().toString("base64url") }),
+    pushSend: async () => {
+      notified.pushes += 1;
+      return { status: 201, gone: false };
+    },
+  },
+  mac: {
+    available: true,
+    show: async (title, body) => {
+      notified.mac.push([title, body]);
+      return "shown";
+    },
+  },
+});
+
 let app: ReturnType<typeof createApp> | undefined;
 const server: Server = createServer(
   getRequestListener((request) => app?.fetch(request) ?? new Response("starting", { status: 503 })),
@@ -1272,6 +1299,7 @@ attachUpgradeRouter(server, { port: PORT, token: TOKEN }, [
   cellStatusRoute(cells),
   sessionStreamRoute(log),
   manualStreamRoute({ session: (id) => agent.runner.get(id), manual: agent.manual }),
+  appEventsRoute(appEvents, notify.presence),
   ...(realDesktop ? [desktopStreamRoute(realDesktop)] : []),
 ]);
 // Settings > Accounts against the daemon's own routes: the web browser's cookie domains.
@@ -1323,6 +1351,7 @@ const routes = createApp({
     live,
   },
   ui: { dir: fileURLToPath(new URL("../../dist", import.meta.url)) },
+  notify: notify.routes,
 });
 routes.get("/api/keyd", (c) =>
   keydMode === "offline"
@@ -2353,6 +2382,7 @@ routes.post("/__qa/scenario/:name", async (c) => {
   return reply(await STEPS[wanted.step]());
 });
 routes.get("/__qa/manual-inputs", (c) => c.json(manualInputs));
+routes.get("/__qa/notify", (c) => c.json(notified));
 routes.get("/__qa/state", (c) =>
   c.json({
     sessionId: session?.id,
@@ -2402,6 +2432,7 @@ const shutdown = async () => {
       session.stop();
     }
     registry.dispose();
+    notify.close();
     index.close();
     log.close();
   } catch {}

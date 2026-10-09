@@ -49,6 +49,7 @@ describe("daemon startup", () => {
       cwd: DAEMON_DIR,
       env: {
         ...process.env,
+        LOCALDOT_NOTIFY_MAC: "off",
         LOCALDOT_HOME: home,
         LOCALDOT_PORT: String(port),
         DOCKER_HOST: `unix://${socket}`,

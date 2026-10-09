@@ -96,6 +96,7 @@ export async function startDaemon(
         ...process.env,
         LOCALDOT_KEYD_PORTS: E2E_KEYD_PORTS,
         ...env,
+        LOCALDOT_NOTIFY_MAC: "off",
         LOCALDOT_HOME: home,
         LOCALDOT_PORT: String(E2E_PORT),
       },
