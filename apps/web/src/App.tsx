@@ -965,11 +965,16 @@ function Theatre({ api }: { api: ApiClient }) {
     offer: ownHold ? (site, failed) => void signIn.start(site, failed) : undefined,
   });
   const shownTask = !!session.sessionId && !opening && (!ownHold || !!facts.yours);
-  const now = useNowMs(session.model, session.version, (t) => {
-    if (!shownTask) return false;
-    const hud = taskHud(session.model, t, facts);
-    return hud.phase === "running" || hud.elapsedS !== null;
-  });
+  const now = useNowMs(
+    session.model,
+    session.version,
+    (t) => {
+      if (!shownTask) return false;
+      const hud = taskHud(session.model, t, facts);
+      return hud.phase === "running" || hud.elapsedS !== null;
+    },
+    session.clock,
+  );
   const task = shownTask ? taskHud(session.model, now, facts) : null;
   const foot = footWork(task);
   // The daemon refuses an Update in these cases too; the button says so before it is pressed.

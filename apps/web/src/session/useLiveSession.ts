@@ -8,13 +8,15 @@ import type { ApiClient } from "../lib/api.ts";
 import { openSocket, type SocketHandle } from "../lib/socket.ts";
 import { readTaskHistory } from "../replay/useReplay.ts";
 import type { StageHandle } from "../stage/Stage.tsx";
-import { syncClock } from "./clock-sync.ts";
+import { type SessionClock, syncClock } from "./clock-sync.ts";
 
 export interface LiveSession {
   sessionId: string | null;
   agentFeed: AgentFeed & AgentWords;
   model: SessionModel;
   version: number;
+  // The daemon's clock for this task, once synced.
+  clock: SessionClock | null;
   ended: boolean;
   // The task shown is the conversation's latest, and no computer is running it.
   resting: boolean;
@@ -83,6 +85,8 @@ export function useLiveSession(
   const [agentFeed] = useState(createAgentFeed);
   const [version, setVersion] = useState(0);
   const [ended, setEnded] = useState(false);
+  // Read at the next render: the HUD re-reads each second anyway.
+  const clock = useRef<SessionClock | null>(null);
   const modelRef = useRef<SessionModel>(emptyModel());
   // The render that adopts a new session runs before the effect that resets the model.
   const modelOwner = useRef<string | null>(null);
@@ -211,6 +215,7 @@ export function useLiveSession(
       modelOwner.current = sessionId;
       stage.current?.resetSession();
       setEnded(false);
+      clock.current = null;
       setVersion((v) => v + 1);
     }
     if (!sessionId) return;
@@ -223,7 +228,7 @@ export function useLiveSession(
     const origin = api.socketUrl("").replace(/^ws/, "http");
     // The API's own fetch (injected in tests); a failed sync keeps the last clock and retries on
     // the timer instead of surfacing as an unhandled rejection.
-    const clock = async () => {
+    const sync = async () => {
       if (syncing) return;
       syncing = true;
       try {
@@ -231,11 +236,11 @@ export function useLiveSession(
           syncClock(api.fetch, origin, api.token),
           api.get<{ originMicros: number }>(`/api/sessions/${sessionId}/clock`),
         ]);
-        if (!disposed)
-          stage.current?.setClock({
-            offsetMicros: viewer.offsetMicros,
-            originMicros: session.originMicros,
-          });
+        if (!disposed) {
+          const synced = { offsetMicros: viewer.offsetMicros, originMicros: session.originMicros };
+          stage.current?.setClock(synced);
+          clock.current = synced;
+        }
       } catch (err) {
         if (!disposed)
           console.warn(`clock sync failed: ${err instanceof Error ? err.message : String(err)}`);
@@ -243,8 +248,8 @@ export function useLiveSession(
         syncing = false;
       }
     };
-    void clock();
-    const clockTimer = setInterval(() => void clock(), CLOCK_EVERY_MS);
+    void sync();
+    const clockTimer = setInterval(() => void sync(), CLOCK_EVERY_MS);
     const flush = setInterval(() => {
       if (dirty.current) {
         dirty.current = false;
@@ -344,6 +349,7 @@ export function useLiveSession(
     agentFeed,
     model,
     version,
+    clock: owned ? clock.current : null,
     ended: owned && (ended || atRest),
     resting: atRest,
     known,
