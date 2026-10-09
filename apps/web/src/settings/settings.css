@@ -8,6 +8,7 @@
 
 .settings-loading {
   width: 100%;
+  min-height: 320px;
 }
 
 .settings-stop {
@@ -200,6 +201,20 @@
   margin-left: auto;
   color: var(--color-fg-2);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
+}
+
+/* Each check-in is a switch row; turning one on opens its number under it. */
+.settings-check-ins-intro {
+  padding-bottom: calc(var(--spacing) * 1);
+}
+
+.settings-check-in {
+  border-top: 1px solid var(--color-hairline);
+}
+
+.settings-check-in-field {
+  max-width: calc(var(--spacing) * 52);
+  padding-bottom: calc(var(--spacing) * 3);
 }
 
 .settings-preset-notes {

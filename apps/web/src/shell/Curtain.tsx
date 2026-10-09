@@ -5,6 +5,7 @@ import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction } from "../session/status.ts";
 import { Button } from "../ui/Button.tsx";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
+import { VisuallyHidden } from "../ui/VisuallyHidden.tsx";
 import "./stage-frame.css";
 
 type ComputerAction = HudAction & { kind: HudActionKind };
@@ -21,7 +22,17 @@ export interface CurtainProps {
   notice?: string | null;
   action?: ComputerAction;
   onAction(): void;
+  // A computer fenced after an unconfirmed step recovers on a fresh one.
+  replace?: ReplaceAction;
   showDot: boolean;
+}
+
+export interface ReplaceAction {
+  enabled: boolean;
+  busy: boolean;
+  // How the replacement is going, in place of the usual words.
+  note?: string;
+  run(): void;
 }
 
 const STARTING = new Set<ComputerPhase>(["starting", "connecting"]);
@@ -37,17 +48,29 @@ export function Curtain({
   notice,
   action,
   onAction,
+  replace,
   showDot,
 }: CurtainProps) {
   const phone = useMediaQuery(PHONE);
-  const copy = curtainCopy(phase, { first, waking, caption, notice, action });
+  const recovering = phase === "unavailable" && !!replace;
+  const copy = recovering
+    ? {
+        title: "Your computer needs a fresh start",
+        sub:
+          replace.note ??
+          "An earlier step couldn't be confirmed. A fresh computer starts clean; its old Downloads are kept.",
+        progress: false,
+        button: { label: "Replace computer" },
+      }
+    : curtainCopy(phase, { first, waking, caption, notice, action });
+  const enabled = recovering ? replace.enabled : action?.enabled;
   return (
     <section
       className="curtain"
       data-dot={showDot ? "" : undefined}
       aria-label={copy ? copy.title : "Your computer"}
     >
-      {copy && (
+      {copy ? (
         <div className="curtain-col">
           {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
           <h2 className="curtain-title">{copy.title}</h2>
@@ -64,21 +87,28 @@ export function Curtain({
             <span className="curtain-progress" aria-hidden="true">
               <i />
             </span>
-            {action && copy.button && (
+            {(action || recovering) && copy.button && (
               <Button
                 variant="primary"
                 size={phone ? "xl" : "lg"}
                 icon={copy.button.icon}
                 className="curtain-button"
-                disabledReason={action.enabled ? undefined : "Wait a moment"}
+                busy={recovering && replace.busy}
+                disabledReason={enabled ? undefined : "Wait a moment"}
                 aria-hidden={copy.progress || undefined}
                 tabIndex={copy.progress ? -1 : undefined}
-                onClick={copy.progress ? undefined : onAction}
+                onClick={copy.progress ? undefined : recovering ? replace.run : onAction}
               >
                 {copy.button.label}
               </Button>
             )}
           </div>
+        </div>
+      ) : (
+        // Nothing is known yet: dot wakes where it will sit, and no words that could turn out wrong.
+        <div className="curtain-col" role="status">
+          {showDot && <PresenceSlot name="hero" className="curtain-hero" />}
+          <VisuallyHidden>Starting localDot</VisuallyHidden>
         </div>
       )}
     </section>

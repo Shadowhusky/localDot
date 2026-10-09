@@ -88,6 +88,32 @@ describe("the work line of each turn", () => {
     expect(work.map((item) => item.startMs)).toEqual([1000, 10_000]);
   });
 
+  it("says what each turn's model calls cost on its line, an estimate if any call was", () => {
+    const items = threadItems([
+      message("task", 1),
+      message("followup", 10, "user", { kind: "followup" }),
+    ]);
+    const call = (atMs: number, usd: number, estimated = false) => ({
+      atMs,
+      route: "openrouter",
+      model: "glm-5.3",
+      usd,
+      estimated,
+    });
+    const thread = withWork(items, [step("a", 2000), step("c", 11000)], false, [
+      call(2500, 0.1),
+      call(3000, 0.05, true),
+      call(12_000, 0.02),
+      call(13_000, 0),
+    ]);
+    const [first, second] = thread.flatMap((item) => (item.kind === "work" ? [item.spend] : []));
+    expect(first?.usd).toBeCloseTo(0.15);
+    expect(first?.estimated).toBe(true);
+    expect(second).toEqual({ usd: 0.02, estimated: false });
+    const free = withWork(items, [step("a", 2000)], false, [call(2500, 0)]);
+    expect(free.find((item) => item.kind === "work")?.spend).toBeUndefined();
+  });
+
   it("holds a live line on the latest turn before any step, and none on a turn that only talked", () => {
     const items = threadItems([message("hi", 1), message("hello", 2, "assistant")]);
     expect(withWork(items, [], false).map((item) => item.kind)).toEqual(["message", "message"]);

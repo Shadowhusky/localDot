@@ -1,5 +1,5 @@
 import { setTimeout as sleep } from "node:timers/promises";
-import { clipText, type EventDraft, type KeydEvent } from "@localdot/protocol";
+import { clipText, type EventDraft, type KeydEvent, ModelSpendData } from "@localdot/protocol";
 import type { EventLog } from "../event-log.ts";
 import type { LiveSessions } from "../gateway/live.ts";
 import type { KeydClient } from "./client.ts";
@@ -96,7 +96,7 @@ export class KeydEventRouter {
       return;
     }
     const sessionId = this.deps.live.get(event.cell);
-    if (!sessionId) return;
+    if (!sessionId || (event.type === "model.spend" && event.data.taskId !== sessionId)) return;
     let window = this.#window.get(event.cell);
     if (!window) {
       window = { second, count: 0, dropped: 0 };
@@ -107,29 +107,8 @@ export class KeydEventRouter {
       return;
     }
     window.count++;
-    const draft: EventDraft =
-      event.type === "key.use"
-        ? {
-            type: "key.use",
-            agent: "keyd",
-            data: {
-              secretId: eventText(event.data.secretId, 64),
-              host: eventText(event.data.host, 255),
-              method: eventText(event.data.method, 16),
-              path: eventText(event.data.path, 512),
-              decision: event.data.decision,
-            },
-          }
-        : {
-            type: "budget.exceeded",
-            agent: "keyd",
-            data: {
-              ...event.data,
-              ...(event.data.taskId === undefined
-                ? {}
-                : { taskId: eventText(event.data.taskId, 128) }),
-            },
-          };
+    const draft = sessionEvent(event);
+    if (!draft) return;
     try {
       this.deps.eventLog.append(sessionId, draft);
     } catch {
@@ -149,6 +128,45 @@ export class KeydEventRouter {
     console.warn(`keyd: ${this.#lost} events dropped; its audit log has them`);
     this.#lost = 0;
     this.#reportLostAt = this.#now() + 1000;
+  }
+}
+
+function sessionEvent(event: Exclude<KeydEvent, { type: "events.dropped" }>): EventDraft | null {
+  switch (event.type) {
+    case "key.use":
+      return {
+        type: "key.use",
+        agent: "keyd",
+        data: {
+          secretId: eventText(event.data.secretId, 64),
+          host: eventText(event.data.host, 255),
+          method: eventText(event.data.method, 16),
+          path: eventText(event.data.path, 512),
+          decision: event.data.decision,
+        },
+      };
+    case "budget.exceeded":
+      return {
+        type: "budget.exceeded",
+        agent: "keyd",
+        data: {
+          ...event.data,
+          ...(event.data.taskId === undefined ? {} : { taskId: eventText(event.data.taskId, 128) }),
+        },
+      };
+    case "model.spend": {
+      const spend = ModelSpendData.safeParse({
+        route: eventText(event.data.route, 64),
+        model: eventText(event.data.model, 128),
+        costUSD: event.data.costUSD,
+        basis: event.data.billed ? "billed" : "estimated",
+        taskSpentUSD: event.data.taskSpentUSD,
+        daySpentUSD: event.data.daySpentUSD,
+        ...(event.data.taskLimitUSD > 0 ? { taskLimitUSD: event.data.taskLimitUSD } : {}),
+        ...(event.data.dayLimitUSD > 0 ? { dayLimitUSD: event.data.dayLimitUSD } : {}),
+      });
+      return spend.success ? { type: "model.spend", agent: "keyd", data: spend.data } : null;
+    }
   }
 }
 

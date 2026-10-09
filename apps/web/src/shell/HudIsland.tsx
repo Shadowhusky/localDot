@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from "react";
+import { type ReactNode, type RefObject, useLayoutEffect, useRef } from "react";
 import { clock } from "../copy/format.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import type { HudAction, Status } from "../session/status.ts";
@@ -6,6 +6,7 @@ import { Button } from "../ui/Button.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import type { IconName } from "../ui/icons.ts";
 import { PHONE, useMediaQuery } from "../ui/media.ts";
+import { Presence } from "../ui/Presence.tsx";
 import { type IslandShape, islandAttention, type PauseSlot, type TakeSlot } from "./island.ts";
 import "./hud.css";
 
@@ -18,6 +19,10 @@ const COMPUTER: Record<ComputerKind, { label: string; icon?: IconName }> = {
   retry: { label: "Try again" },
 };
 const STOP_KEYS = ["Mod", "Shift", "."] as const;
+// The decision the island grows into: at least this wide, its header the island's own row 2 px
+// taller each way.
+const DECISION_WIDTH = 480;
+const HEADER_GROWTH = 2;
 
 export interface HudIslandProps {
   status: Status;
@@ -31,6 +36,12 @@ export interface HudIslandProps {
   onStopTask(): void;
   onTake(): void;
   onComputer: Record<ComputerKind, () => void>;
+  // What the island grows into while dot waits on the user; the row stays as its header.
+  decision?: ReactNode;
+  // Short notes that drop from the island, under it or under the decision it grew into.
+  notices?: ReactNode;
+  // Toasts hang from the island, or from the decision it grew into.
+  ref?: RefObject<HTMLDivElement | null>;
 }
 
 // Status and the task's controls in one glass island hung on the stage's top edge. Every slot has a
@@ -47,28 +58,54 @@ export function HudIsland({
   onStopTask,
   onTake,
   onComputer,
+  decision,
+  notices,
+  ref,
 }: HudIslandProps) {
   const phone = useMediaQuery(PHONE);
+  const own = useRef<HTMLDivElement>(null);
+  const anchor = ref ?? own;
   const row = useRef<HTMLDivElement>(null);
   const plate = useRef<HTMLSpanElement>(null);
+  const card = useRef<HTMLDivElement>(null);
+  const open = !!decision && shape === "task";
+  // The card keeps what it last showed while it fades back into the island.
+  const shown = useRef<ReactNode>(null);
+  if (open) shown.current = decision;
+  useLayoutEffect(() => {
+    const glass = plate.current;
+    if (!glass) return;
+    // The first width is drawn as it is; only later changes travel.
+    const settle = requestAnimationFrame(() => glass.setAttribute("data-settled", ""));
+    return () => cancelAnimationFrame(settle);
+  }, []);
   useLayoutEffect(() => {
     const content = row.current;
     const glass = plate.current;
-    if (!content || !glass) return;
+    const root = anchor.current;
+    if (!content || !glass || !root) return;
     const fit = () => {
-      glass.style.width = `${content.offsetWidth}px`;
+      const grown = open ? card.current : null;
+      if (!grown) {
+        glass.style.width = `${content.offsetWidth}px`;
+        glass.style.height = "";
+        root.style.removeProperty("--_drop");
+        return;
+      }
+      const width = Math.max(content.offsetWidth, DECISION_WIDTH);
+      const height = content.offsetHeight + HEADER_GROWTH * 2 + grown.offsetHeight;
+      glass.style.width = `${width}px`;
+      glass.style.height = `${height}px`;
+      root.style.setProperty("--_card-w", `${width}px`);
+      root.style.setProperty("--_drop", `${height - HEADER_GROWTH}px`);
     };
     fit();
-    // The first width is drawn as it is; only later changes travel.
-    const settle = requestAnimationFrame(() => glass.setAttribute("data-settled", ""));
-    if (typeof ResizeObserver === "undefined") return () => cancelAnimationFrame(settle);
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(fit);
     observer.observe(content);
-    return () => {
-      cancelAnimationFrame(settle);
-      observer.disconnect();
-    };
-  }, []);
+    if (open && card.current) observer.observe(card.current);
+    return () => observer.disconnect();
+  }, [open, anchor]);
 
   const stop = status.actions.find((action) => action.kind === "stop-task");
   const computerActions = status.actions.filter(
@@ -77,85 +114,102 @@ export function HudIsland({
   const task = shape === "task";
   const control = phone ? 28 : 32;
   return (
-    <div className="island" data-shape={shape} inert={shape === "hidden"}>
-      <span className="island-plate" ref={plate} aria-hidden="true" />
-      <div className="island-row" ref={row}>
-        {badge && <PresenceSlot name="badge" className="island-badge" />}
-        <span className="island-label">
-          {islandAttention(status) && <span className="island-attention" aria-hidden="true" />}
-          <span
-            className="island-label-text"
-            data-testid="hud-status"
-            role="status"
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <span key={status.label}>{status.label}</span>
-          </span>
-        </span>
-        {task && (
-          <span className="island-elapsed num" data-testid="hud-elapsed" aria-live="off">
-            {status.elapsedS === null ? "" : clock(status.elapsedS)}
-          </span>
-        )}
-        <span className="island-divider" aria-hidden="true" />
-        {task && (
-          <>
-            <PauseButton slot={pause} size={control} onPause={onPause} onContinue={onContinue} />
-            <IconButton
-              variant="glass"
-              size={control}
-              icon="stop"
-              label={stop?.busy ? "Stopping" : "Stop"}
-              kbd={STOP_KEYS}
-              data-testid="hud-stop-session"
-              disabledReason={
-                stop?.busy ? "Stopping…" : stop?.enabled ? undefined : "Reconnecting to the task…"
-              }
-              onClick={onStopTask}
-            />
-            <span className="island-divider" aria-hidden="true" />
-          </>
-        )}
-        {(task || shape === "ready") &&
-          (phone && !take.primary ? (
-            <IconButton
-              variant="filled"
-              round
-              size={28}
-              icon="hand"
-              label="Take control"
-              disabledReason={take.reason}
-              onClick={onTake}
-            />
-          ) : (
-            <Button
-              variant={take.primary ? "primary" : "glass"}
-              round
-              size={phone ? "sm" : "md"}
-              icon="hand"
-              disabledReason={take.reason}
-              onClick={onTake}
+    <div className="island-anchor" ref={anchor}>
+      <div
+        className="island"
+        data-shape={shape}
+        data-open={open || undefined}
+        inert={shape === "hidden"}
+      >
+        <span className="island-plate" ref={plate} aria-hidden="true" />
+        <div className="island-row" ref={row}>
+          {badge && <PresenceSlot name="badge" className="island-badge" />}
+          <span className="island-label">
+            {islandAttention(status) && <span className="island-attention" aria-hidden="true" />}
+            <span
+              className="island-label-text"
+              data-testid="hud-status"
+              role="status"
+              aria-live="polite"
+              aria-atomic="true"
             >
-              Take control
-            </Button>
-          ))}
-        {shape === "computer" &&
-          computerActions.map((action) => (
-            <Button
-              key={action.kind}
-              className="island-action"
-              variant="glass"
-              round
-              size={phone ? "sm" : "md"}
-              icon={COMPUTER[action.kind].icon}
-              disabledReason={action.enabled ? undefined : "Wait a moment"}
-              onClick={onComputer[action.kind]}
-            >
-              {COMPUTER[action.kind].label}
-            </Button>
-          ))}
+              <span key={status.label}>{status.label}</span>
+            </span>
+          </span>
+          {task && (
+            <span className="island-elapsed num" data-testid="hud-elapsed" aria-live="off">
+              {status.countdownS !== null
+                ? `in ${status.countdownS} s`
+                : status.elapsedS === null
+                  ? ""
+                  : clock(status.elapsedS)}
+            </span>
+          )}
+          <span className="island-divider" aria-hidden="true" />
+          {task && (
+            <>
+              <PauseButton slot={pause} size={control} onPause={onPause} onContinue={onContinue} />
+              <IconButton
+                variant="glass"
+                size={control}
+                icon="stop"
+                label={stop?.busy ? "Stopping" : "Stop"}
+                kbd={STOP_KEYS}
+                data-testid="hud-stop-session"
+                disabledReason={
+                  stop?.busy ? "Stopping…" : stop?.enabled ? undefined : "Reconnecting to the task…"
+                }
+                onClick={onStopTask}
+              />
+              <span className="island-divider" aria-hidden="true" />
+            </>
+          )}
+          {(task || shape === "ready") &&
+            (phone && !take.primary ? (
+              <IconButton
+                variant="filled"
+                round
+                size={28}
+                icon="hand"
+                label="Take control"
+                disabledReason={take.reason}
+                onClick={onTake}
+              />
+            ) : (
+              <Button
+                variant={take.primary ? "primary" : "glass"}
+                round
+                size={phone ? "sm" : "md"}
+                icon="hand"
+                disabledReason={take.reason}
+                onClick={onTake}
+              >
+                Take control
+              </Button>
+            ))}
+          {shape === "computer" &&
+            computerActions.map((action) => (
+              <Button
+                key={action.kind}
+                className="island-action"
+                variant="glass"
+                round
+                size={phone ? "sm" : "md"}
+                icon={COMPUTER[action.kind].icon}
+                disabledReason={action.enabled ? undefined : "Wait a moment"}
+                onClick={onComputer[action.kind]}
+              >
+                {COMPUTER[action.kind].label}
+              </Button>
+            ))}
+        </div>
+        <Presence show={open}>
+          <div className="island-card" ref={card}>
+            {shown.current}
+          </div>
+        </Presence>
       </div>
+      {notices && <div className="island-notices">{notices}</div>}
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { AgentModelPrice, AgentRoleChoice, AgentSettingsDocument } from "./agent-settings.ts";
+import { DEFAULT_AGENT_LIMITS } from "./tool-api.ts";
 
 describe("whole agent settings and explicit accounting prices", () => {
   it.each([
@@ -68,5 +69,32 @@ describe("a custom endpoint's stated abilities", () => {
     { flat: true },
   ])("refuses %j", (field) => {
     expect(AgentRoleChoice.safeParse({ ...custom, ...field }).success).toBe(false);
+  });
+});
+
+describe("check-ins and spending limits are the user's to turn on", () => {
+  it("has none by default", () => {
+    expect(AgentSettingsDocument.parse({})).toEqual({});
+    expect(DEFAULT_AGENT_LIMITS).toEqual({ maxRetries: 8 });
+  });
+  it("keeps the ones the user set", () => {
+    const settings = {
+      checkIns: { steps: 150, failures: 5, actions: 400 },
+      taskBudgetUSD: 2,
+      dayBudgetUSD: 10,
+    };
+    expect(AgentSettingsDocument.parse(settings)).toEqual(settings);
+    expect(AgentSettingsDocument.parse({ checkIns: {} })).toEqual({ checkIns: {} });
+  });
+  it.each([
+    { checkIns: { steps: 0 } },
+    { checkIns: { steps: 2.5 } },
+    { checkIns: { failures: 1 } },
+    { checkIns: { actions: 5 } },
+    { checkIns: { hours: 2 } },
+    { dayBudgetUSD: 0 },
+    { dayBudgetUSD: 10_001 },
+  ])("refuses %j", (settings) => {
+    expect(AgentSettingsDocument.safeParse(settings).success).toBe(false);
   });
 });

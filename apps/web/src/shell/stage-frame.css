@@ -84,40 +84,6 @@
   opacity: 0;
 }
 
-.stage-dim {
-  position: absolute;
-  inset: 0;
-  z-index: 4;
-  border-radius: var(--radius-lg);
-  background-color: var(--color-stage-dim);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--dur-dim) var(--ease-standard);
-}
-
-.stage-dim[data-on] {
-  opacity: 1;
-}
-
-/* Under the island, over the picture, never in the page's flow. */
-.stage-notices {
-  position: absolute;
-  top: calc(var(--island-h) / 2 + 8px);
-  left: 50%;
-  z-index: var(--layer-toast);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: calc(var(--spacing) * 2);
-  width: min(480px, 100% - 32px);
-  translate: -50% 0;
-  pointer-events: none;
-}
-
-.stage-notices > * {
-  pointer-events: auto;
-}
-
 .stage-band {
   position: relative;
   flex: 1;

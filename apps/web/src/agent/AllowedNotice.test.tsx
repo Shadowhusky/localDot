@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import type { ApprovalCard } from "@localdot/protocol";
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { AllowedNotice, AlwaysAllow } from "./AlwaysAllow.tsx";
+import { AllowedNotice } from "./AllowedNotice.tsx";
 import type { ApprovalOutcome } from "./model.ts";
 import type { AllowedChoice } from "./useSafety.ts";
 
@@ -13,111 +12,6 @@ afterEach(() => {
 
 const ID = "01J00000000000000000000003";
 const RULE = "01J00000000000000000000009";
-const card: ApprovalCard = {
-  approvalId: ID,
-  generation: 2,
-  revision: 3,
-  expiresAt: Date.now() + 60_000,
-  actionClass: "send",
-  risk: "high",
-  title: "Send as you",
-  fields: [["Target", "Send"]],
-  always: [
-    { scope: "task", label: "For this task" },
-    { scope: "site", label: "On mail.example.test", site: "https://mail.example.test" },
-  ],
-};
-const open = () => fireEvent.click(screen.getByRole("button", { name: "Always allow…" }));
-
-it("lists exactly the options the card offers", () => {
-  render(<AlwaysAllow card={card} canApprove onDecision={vi.fn()} />);
-  const toggle = screen.getByRole("button", { name: "Always allow…" });
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(screen.queryByRole("button", { name: "For this task" })).toBeNull();
-  open();
-  expect(toggle.getAttribute("aria-expanded")).toBe("true");
-  const group = screen.getByRole("group", { name: /^Allow sending messages without asking/ });
-  expect(toggle.getAttribute("aria-controls")).toBe(group.id);
-  expect([...group.querySelectorAll("button")].map((button) => button.textContent)).toEqual([
-    "For this task",
-    "On mail.example.test",
-  ]);
-});
-
-it.each([
-  ["no options", undefined],
-  ["an empty list", []],
-])("shows nothing for a card with %s", (_name, always) => {
-  const { container } = render(
-    <AlwaysAllow card={{ ...card, always }} canApprove onDecision={vi.fn()} />,
-  );
-  expect(container.innerHTML).toBe("");
-});
-
-it("approves with the chosen scope and nothing else", () => {
-  const onDecision = vi.fn(async () => true);
-  render(<AlwaysAllow card={card} canApprove onDecision={onDecision} />);
-  open();
-  fireEvent.click(screen.getByRole("button", { name: "On mail.example.test" }));
-  expect(onDecision).toHaveBeenCalledOnce();
-  expect(onDecision).toHaveBeenCalledWith({
-    approvalId: ID,
-    generation: 2,
-    revision: 3,
-    decision: "approve",
-    always: "site",
-  });
-});
-
-it("is disabled while the card cannot approve", () => {
-  const onDecision = vi.fn();
-  const view = render(<AlwaysAllow card={card} canApprove={false} onDecision={onDecision} />);
-  const toggle = screen.getByRole("button", { name: "Always allow…" }) as HTMLButtonElement;
-  expect(toggle.disabled).toBe(true);
-  view.rerender(<AlwaysAllow card={card} canApprove onDecision={onDecision} />);
-  open();
-  view.rerender(<AlwaysAllow card={card} canApprove={false} onDecision={onDecision} />);
-  const option = screen.getByRole("button", { name: "For this task" }) as HTMLButtonElement;
-  expect(option.disabled).toBe(true);
-  fireEvent.click(option);
-  expect(onDecision).not.toHaveBeenCalled();
-});
-
-it("checks the card has not expired at the moment you choose", () => {
-  const onDecision = vi.fn();
-  render(
-    <AlwaysAllow
-      card={{ ...card, expiresAt: Date.now() - 1 }}
-      canApprove
-      onDecision={onDecision}
-    />,
-  );
-  open();
-  fireEvent.click(screen.getByRole("button", { name: "For this task" }));
-  expect(onDecision).not.toHaveBeenCalled();
-});
-
-it("closes with Escape from its own button", () => {
-  render(<AlwaysAllow card={card} canApprove onDecision={vi.fn()} />);
-  open();
-  const toggle = screen.getByRole("button", { name: "Always allow…" });
-  toggle.focus();
-  fireEvent.keyDown(toggle, { key: "Escape" });
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(document.activeElement).toBe(toggle);
-});
-
-it("closes with Escape and returns focus to its button", () => {
-  render(<AlwaysAllow card={card} canApprove onDecision={vi.fn()} />);
-  open();
-  const option = screen.getByRole("button", { name: "For this task" });
-  option.focus();
-  fireEvent.keyDown(option, { key: "Escape" });
-  const toggle = screen.getByRole("button", { name: "Always allow…" });
-  expect(toggle.getAttribute("aria-expanded")).toBe("false");
-  expect(document.activeElement).toBe(toggle);
-});
-
 const choice = (over: Partial<AllowedChoice> = {}): AllowedChoice => ({
   session: "01J00000000000000000000002",
   approvalId: ID,
@@ -155,6 +49,13 @@ it("says what is now allowed and offers Undo", () => {
   expect(toast()?.textContent).toBe("Allowed for this task: sending messages.Undo");
   fireEvent.click(screen.getByRole("button", { name: undoTask }));
   expect(onUndo).toHaveBeenCalledOnce();
+});
+
+it("keeps its live region out of sight, so the line shows once, in the note", () => {
+  render(notice());
+  const region = document.querySelector("[aria-live=polite]");
+  expect(region?.className).toBe("ui-visually-hidden");
+  expect(region?.textContent).toBe("Allowed for this task: sending messages.");
 });
 
 it("announces the line through a live region that is there before it", () => {
@@ -228,7 +129,7 @@ it("confirms an undo and reports one that failed", () => {
   expect(said()).toBe("Allowed for this task: sending messages. Couldn't undo. Try again.");
   expect(screen.getByRole("button", { name: undoTask })).toBeTruthy();
   view.rerender(notice({ choice: choice({ undo: "pending" }) }));
-  expect((screen.getByRole("button", { name: undoTask }) as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByRole("button", { name: undoTask }).getAttribute("aria-disabled")).toBe("true");
   view.rerender(notice({ outcome: created({ ruleRemoved: true }) }));
   expect(said()).toBe("Undone. You'll be asked again next time.");
   expect(screen.queryByRole("button", { name: /^Undo/ })).toBeNull();

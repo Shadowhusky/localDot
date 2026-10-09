@@ -47,11 +47,11 @@ export async function startSafetyTask(page: Page, f: Assembly) {
   return (await reply.json()).sessionId as string;
 }
 export async function approveCurrent(page: Page, f: Assembly) {
-  const card = page.locator(".approval-card");
-  const button = card.getByRole("button", { name: "Approve once", exact: true });
+  const card = page.locator(".decision");
+  const button = card.locator('.decision-actions [data-variant="primary"]');
   // A real pointer returns focus to this panel after the desktop iframe takes it.
   await card.getByRole("heading").click();
-  await expect(button).toBeEnabled({ timeout: 30000 });
+  await expect(button).not.toHaveAttribute("aria-disabled", { timeout: 30000 });
   const label = await card.getAttribute("aria-labelledby");
   expect(label).toMatch(/^approval-.+/);
   const approvalId = label?.slice("approval-".length);
@@ -82,7 +82,7 @@ export async function approveCurrent(page: Page, f: Assembly) {
       ),
     )
     .toBe(true);
-  await expect(page.locator(`.approval-card[aria-labelledby="${label}"]`)).toHaveCount(0);
+  await expect(page.locator(`.decision[aria-labelledby="${label}"]`)).toHaveCount(0);
 }
 export async function answerTable(page: Page) {
   await showPane(page, "Conversation");

@@ -28,12 +28,21 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
-function setup(seen?: (view: ReturnType<typeof useLiveSession>) => void) {
+function setup(
+  seen?: (view: ReturnType<typeof useLiveSession>) => void,
+  histories: Record<string, string> = {},
+) {
   let live: string | null = null;
   const fetchImpl = vi.fn<typeof fetch>(async (input) => {
     const path = new URL(String(input)).pathname;
     if (path.endsWith("/live"))
       return live ? Response.json({ sessionId: live }) : new Response(null, { status: 204 });
+    const history = /\/sessions\/([^/]+)\/history$/.exec(path);
+    if (history)
+      return new Response(histories[history[1] ?? ""] ?? "", {
+        status: history[1] && history[1] in histories ? 200 : 404,
+        headers: { "content-type": "application/x-ndjson" },
+      });
     return Response.json({ originMicros: 0, serverMicros: 0 });
   });
   const api = createApi("fixture", { origin: "http://127.0.0.1:4747", fetchImpl });
@@ -297,4 +306,91 @@ it("on opening, shows a task the computer still runs as running, never as stoppe
   await wait(100);
   expect(view.result.current).toMatchObject({ sessionId: SESSION, resting: false, ended: false });
   expect(shown.filter((entry) => entry.sessionId === SESSION && entry.ended)).toEqual([]);
+});
+
+const line = (seq: number, type: string, data: unknown) =>
+  JSON.stringify(
+    LocalDotEvent.parse({
+      v: 1,
+      id: String(seq + 1).padStart(26, "0"),
+      seq,
+      t: seq * 1000,
+      agent: "main",
+      type,
+      data,
+    }),
+  );
+const opening = line(0, "session.start", {
+  screen: { w: 1280, h: 800, scale: 1 },
+  os: "linux",
+  title: "Draw a dog",
+});
+const asked = line(1, "message.user", {
+  messageId: "01JXYZ00000000000000000MS1",
+  text: "Draw a dog",
+  kind: "task",
+});
+
+it("draws a task's history at once, then goes on live from its last event", async () => {
+  const replied = line(4, "message.assistant", {
+    messageId: "01JXYZ00000000000000000MS2",
+    text: "Drawing it now.",
+  });
+  const f = setup(undefined, { [SESSION]: [opening, asked, replied].join("\n") });
+  f.start(SESSION);
+  await wait(1_000);
+  const feed = f.view.result.current.agentFeed;
+  expect([...feed.read().model.messages.values()].map((message) => message.text)).toEqual([
+    "Draw a dog",
+    "Drawing it now.",
+  ]);
+  expect(feed.read().history).toBe(true);
+  expect(f.view.result.current.model.title).toBe("Draw a dog");
+  const sockets = FakeWebSocket.instances.filter((socket) => socket.url.includes("/stream"));
+  expect(sockets.map((socket) => new URL(socket.url).search)).toEqual(["?fromSeq=4"]);
+  const socket = sockets[0];
+  await act(async () => {
+    socket?.open();
+    socket?.onmessage?.({ data: replied });
+    socket?.onmessage?.({
+      data: line(5, "message.assistant", {
+        messageId: "01JXYZ00000000000000000MS3",
+        text: "Done.",
+      }),
+    });
+  });
+  expect(feed.read().replayed).toBe(true);
+  expect(feed.read().streamError).toBeNull();
+  expect([...feed.read().model.messages.values()].map((message) => message.text)).toEqual([
+    "Draw a dog",
+    "Drawing it now.",
+    "Done.",
+  ]);
+});
+
+it("opens no live feed for a task whose history has ended", async () => {
+  const ended = line(2, "session.end", { reason: "done" });
+  const f = setup(undefined, { [SESSION]: [opening, asked, ended].join("\n") });
+  f.start(SESSION);
+  await wait(1_000);
+  expect(FakeWebSocket.instances.filter((socket) => socket.url.includes("/stream"))).toEqual([]);
+  expect(f.view.result.current.ended).toBe(true);
+  expect(f.view.result.current.agentFeed.read()).toMatchObject({
+    connection: "ended",
+    replayed: true,
+    history: true,
+  });
+});
+
+it("falls back to the live feed's own replay when the history can't be read", async () => {
+  const f = setup();
+  f.start(SESSION);
+  await wait(1_000);
+  const socket = FakeWebSocket.instances.find((socket) => socket.url.includes("/stream"));
+  expect(socket && new URL(socket.url).search).toBe("");
+  await act(async () => {
+    socket?.open();
+    socket?.onmessage?.({ data: opening });
+  });
+  expect(f.view.result.current.agentFeed.read().history).toBe(true);
 });

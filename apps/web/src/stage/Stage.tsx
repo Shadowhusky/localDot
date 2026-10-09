@@ -46,6 +46,8 @@ export interface StageProps {
   api: ApiClient;
   reconnects: number;
   listed: readonly string[];
+  // A decision is open: the picture dims under it.
+  dim?: boolean;
   manual?: {
     enabled: boolean;
     screen: { w: number; h: number };
@@ -62,7 +64,18 @@ export interface StageProps {
 const quiet = () => () => {};
 
 export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
-  { cell, api, reconnects, listed, manual, mode = "live", parentId, selection, onPicture },
+  {
+    cell,
+    api,
+    reconnects,
+    listed,
+    manual,
+    mode = "live",
+    parentId,
+    selection,
+    dim = false,
+    onPicture,
+  },
   ref,
 ) {
   const support =
@@ -177,6 +190,9 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
   useEffect(() => {
     canvas.current?.setView({ selection: mode === "live" ? (selection ?? null) : null });
   }, [mode, selection]);
+  useEffect(() => {
+    canvas.current?.setView({ dim });
+  }, [dim]);
   useEffect(() => {
     canvas.current?.setView({
       freeze: paused,

@@ -12,13 +12,18 @@ import (
 	"sync"
 )
 
+// Limits are the user's spending limits. Zero is no limit, and neither is set until the user sets it.
 type Limits struct {
 	PerTaskUSD float64 `json:"perTaskUSD"`
 	PerDayUSD  float64 `json:"perDayUSD"`
 }
 
-// DefaultLimits are the spec's: $5 per task and $20 per day.
-var DefaultLimits = Limits{PerTaskUSD: 5, PerDayUSD: 20}
+var DefaultLimits = Limits{}
+
+// keyd once wrote these with every model change, whether or not the user chose them.
+var formerDefaults = Limits{PerTaskUSD: 5, PerDayUSD: 20}
+
+const settingsVersion = 2
 
 var modelID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:/@+-]{0,127}$`)
 
@@ -43,7 +48,7 @@ type Settings struct {
 }
 
 func OpenSettings(path string) (*Settings, error) {
-	s := &Settings{path: path, data: settingsFile{V: 1, Limits: DefaultLimits, Models: map[string][]Price{}}}
+	s := &Settings{path: path, data: settingsFile{V: settingsVersion, Limits: DefaultLimits, Models: map[string][]Price{}}}
 	raw, err := os.ReadFile(path)
 	switch {
 	case errors.Is(err, os.ErrNotExist):
@@ -57,7 +62,14 @@ func OpenSettings(path string) (*Settings, error) {
 	if s.data.Models == nil {
 		s.data.Models = map[string][]Price{}
 	}
-	if s.data.V != 1 {
+	switch s.data.V {
+	case 1:
+		if s.data.Limits == formerDefaults {
+			s.data.Limits = DefaultLimits
+		}
+		s.data.V = settingsVersion
+	case settingsVersion:
+	default:
 		return nil, errors.New("llm: unsupported settings version")
 	}
 	if err := ValidateLimits(s.data.Limits); err != nil {
@@ -79,8 +91,13 @@ func (s *Settings) Limits() Limits {
 
 // ValidateLimits checks a proposed policy before any live requests are canceled.
 func ValidateLimits(l Limits) error {
-	if math.IsNaN(l.PerTaskUSD) || math.IsInf(l.PerTaskUSD, 0) || math.IsNaN(l.PerDayUSD) || math.IsInf(l.PerDayUSD, 0) || l.PerTaskUSD <= 0 || l.PerDayUSD <= 0 || l.PerTaskUSD > l.PerDayUSD || l.PerDayUSD > 10_000 || micros(l.PerTaskUSD) < 1 {
-		return errors.New("llm: limits must be finite and positive, per task no more than per day, per day at most $10,000")
+	for _, limit := range []float64{l.PerTaskUSD, l.PerDayUSD} {
+		if math.IsNaN(limit) || math.IsInf(limit, 0) || limit < 0 || limit > 10_000 || limit > 0 && micros(limit) < 1 {
+			return errors.New("llm: a limit is none (0) or from $0.000001 to $10,000")
+		}
+	}
+	if l.PerTaskUSD > 0 && l.PerDayUSD > 0 && l.PerTaskUSD > l.PerDayUSD {
+		return errors.New("llm: the limit per task is no more than the limit per day")
 	}
 	return nil
 }
@@ -113,7 +130,7 @@ func ValidateModels(models []Price) error {
 			return fmt.Errorf("llm: duplicate model id %q", m.Model)
 		}
 		seen[m.Model] = true
-		for _, price := range []float64{m.Input, m.Output, m.CacheRead, m.CacheWrite} {
+		for _, price := range []float64{m.Input, m.Output, m.CacheRead, m.CacheWrite, m.Reasoning} {
 			if math.IsNaN(price) || math.IsInf(price, 0) {
 				return errors.New("llm: model prices must be finite")
 			}
@@ -121,7 +138,7 @@ func ValidateModels(models []Price) error {
 		if !modelID.MatchString(m.Model) {
 			return fmt.Errorf("llm: model id %q", m.Model)
 		}
-		if min(m.Input, m.Output, m.CacheRead, m.CacheWrite) < 0 || max(m.Input, m.Output, m.CacheRead, m.CacheWrite) > maxPrice {
+		if min(m.Input, m.Output, m.CacheRead, m.CacheWrite, m.Reasoning) < 0 || max(m.Input, m.Output, m.CacheRead, m.CacheWrite, m.Reasoning) > maxPrice {
 			return fmt.Errorf("llm: model %s: prices must be $0 to $%d per million tokens", m.Model, maxPrice)
 		}
 		// The gateway bounds every request's output cap by the model's maximum.

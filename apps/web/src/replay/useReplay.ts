@@ -81,22 +81,41 @@ export function replayOrigin(api: ApiClient): string {
   address.protocol = address.protocol === "wss:" ? "https:" : "http:";
   return address.origin;
 }
-export async function readReplayEvents(
+export function readReplayEvents(
   api: ApiClient,
   sessionId: string,
   fromSeq: number,
   signal: AbortSignal,
   onBatch: (events: LocalDotEvent[]) => void,
 ): Promise<void> {
-  const response = await api.fetch(
-    `${replayOrigin(api)}/api/sessions/${sessionId}/events?fromSeq=${fromSeq}`,
-    {
-      headers: { authorization: api.authorization(), accept: "application/x-ndjson" },
-      credentials: "omit",
-      redirect: "error",
-      signal,
-    },
+  return readEventLines(
+    api,
+    `/api/sessions/${sessionId}/events?fromSeq=${fromSeq}`,
+    signal,
+    onBatch,
   );
+}
+// What a conversation shows of a task: its log without the model's thinking or the heartbeats.
+export function readTaskHistory(
+  api: ApiClient,
+  sessionId: string,
+  signal: AbortSignal,
+  onBatch: (events: LocalDotEvent[]) => void,
+): Promise<void> {
+  return readEventLines(api, `/api/sessions/${sessionId}/history`, signal, onBatch);
+}
+async function readEventLines(
+  api: ApiClient,
+  path: string,
+  signal: AbortSignal,
+  onBatch: (events: LocalDotEvent[]) => void,
+): Promise<void> {
+  const response = await api.fetch(`${replayOrigin(api)}${path}`, {
+    headers: { authorization: api.authorization(), accept: "application/x-ndjson" },
+    credentials: "omit",
+    redirect: "error",
+    signal,
+  });
   if (response.status === 401) api.rejectUnauthorized?.();
   if (!response.ok) throw new ApiError(response.status, "Session history could not be loaded.");
   if (!response.body) throw new Error("Session history has no response body.");

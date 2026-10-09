@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
 import { type AgentFeedState, emptyAgentModel } from "./model.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
+import { SafetyNotes } from "./SafetyNotes.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyView, useSafety } from "./useSafety.ts";
 
@@ -40,6 +40,7 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
     epoch: 7,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model: { ...emptyAgentModel(), safetyPause: pause },
   };
@@ -83,7 +84,7 @@ function fixture(fetchImpl: typeof fetch = vi.fn(async () => new Response(null, 
           Parent task draft
           <input aria-label="Parent task draft" />
         </label>
-        <SafetyControls safety={current} agent={agent} cell={cell} />
+        <SafetyNotes safety={current} agent={agent} cell={cell} />
       </>
     );
   }

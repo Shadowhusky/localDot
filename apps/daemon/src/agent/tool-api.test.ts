@@ -158,6 +158,29 @@ describe("Review Focus 4: secrets never in a prompt", () => {
 });
 
 describe("Review Focus 3, the daemon's half: a runaway task", () => {
+  it("has no action limit unless the user set one", async () => {
+    const h = toolHarness();
+    h.session.toolCalls = 400;
+    h.session.actionsSinceUser = 400;
+    const call = await h.call("shell", { command: "echo again" });
+    expect(call.body.final).toBeUndefined();
+    expect(h.desktop.shellCalls).toHaveLength(1);
+  });
+  it("stops at the user's action limit, outside the brain, until their next message", async () => {
+    const h = toolHarness();
+    h.session.actionLimit = 2;
+    const plan = (status: string) => h.call("update_plan", { items: [{ text: "a", status }] });
+    expect((await plan("todo")).body.ok).toBe(true);
+    expect((await plan("doing")).body.ok).toBe(true);
+    const third = await h.call("shell", { command: "echo again" });
+    expect(third.body).toMatchObject({ ok: false, final: true });
+    expect(h.session.actionLimitReached).toBe(true);
+    expect(h.desktop.shellCalls).toEqual([]);
+    h.session.post("followup", "Keep going");
+    expect(h.session.actionLimitReached).toBe(false);
+    expect((await h.call("shell", { command: "echo again" })).body.ok).toBe(true);
+    expect(h.session.toolCalls).toBe(4);
+  });
   it("stops a task at its tool-call cap, outside the brain", async () => {
     const h = toolHarness({ maxToolCalls: 2 });
     expect((await h.call("update_plan", { items: [{ text: "a", status: "todo" }] })).body.ok).toBe(

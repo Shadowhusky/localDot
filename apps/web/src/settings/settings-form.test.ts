@@ -204,23 +204,24 @@ describe("configuration validation before explicit save", () => {
       main: { provider: "minimax-coding-plan", model: "MiniMax-M3", key: "token-plan" },
       taskBudgetUSD: 4,
     });
-    noCeiling.budget = "";
+    noCeiling.spending.task = "";
     expect(validateForm(noCeiling, { taskBudgetUSD: 4 }, index)).toMatchObject({
       ok: true,
       document: { taskBudgetUSD: 4 },
-    });
-    noCeiling.defaultBudget = true;
-    expect(validateForm(noCeiling, {}, { ...index, defaultTaskBudgetUSD: null })).toMatchObject({
-      ok: true,
     });
     noCeiling.choices.fast = {
       provider: "anthropic",
       model: "claude-sonnet-5-5",
       key: "anthropic",
     };
-    expect(validateForm(noCeiling, {}, { ...index, defaultTaskBudgetUSD: null })).toEqual({
+    expect(validateForm(noCeiling, {}, index)).toEqual({
       ok: false,
-      problems: ["No default limit is set. Choose Custom and enter a limit per task."],
+      problems: ["Enter a limit per task, per day or both, or turn the spending limit off."],
+    });
+    noCeiling.spending.on = false;
+    expect(validateForm(noCeiling, { taskBudgetUSD: 4 }, index)).toMatchObject({ ok: true });
+    expect(validateForm(noCeiling, { taskBudgetUSD: 4 }, index)).not.toMatchObject({
+      document: { taskBudgetUSD: 4 },
     });
     // One key cannot be the plan for main and pay as you go for fast.
     const shared = formOf({
@@ -308,7 +309,6 @@ describe("configuration validation before explicit save", () => {
     const index = providerFixture();
     index.keyLayer = "offline";
     index.keys = [];
-    index.defaultTaskBudgetUSD = null;
     const saved = {
       main: { provider: "chatgpt", model: "older-model" },
       fast: { provider: "openai", model: "stored-paid", key: "deleted" },
@@ -325,11 +325,13 @@ describe("configuration validation before explicit save", () => {
   it("reports every problem at once instead of the first one", () => {
     const d = formOf({ main: { provider: "ollama", model: "custom" } });
     d.choices.local = { provider: "ollama", model: "" };
-    d.defaultBudget = false;
-    d.budget = "abc";
+    d.spending = { on: true, task: "abc", day: "" };
     expect(validateForm(d, {}, providerFixture())).toEqual({
       ok: false,
-      problems: ["Local: choose a valid model ID.", "Enter a limit per task in US dollars."],
+      problems: [
+        "Local: choose a valid model ID.",
+        "Enter a limit per task from $0.01 to $10,000, or leave it empty.",
+      ],
     });
     delete d.choices.main;
     expect(validateForm(d, {}, providerFixture())).toMatchObject({
@@ -337,25 +339,68 @@ describe("configuration validation before explicit save", () => {
       problems: [
         "Choose a main provider and model.",
         "Local: choose a valid model ID.",
-        "Enter a limit per task in US dollars.",
+        "Enter a limit per task from $0.01 to $10,000, or leave it empty.",
       ],
     });
   });
-  it("requires a known default or an explicit valid ceiling, with no guessed budget", () => {
-    const index = providerFixture();
-    index.defaultTaskBudgetUSD = null;
+  it("has no spending limit or check-in until the user turns one on", () => {
     const d = formOf({ main: { provider: "ollama", model: "custom" } });
-    expect(validateForm(d, {}, index)).toMatchObject({ ok: false });
-    d.defaultBudget = false;
-    for (const budget of ["", "0", "-1", "10001", "1e999", "0.0000001"]) {
-      d.budget = budget;
-      expect(validateForm(d, {}, index)).toMatchObject({ ok: false });
-    }
-    d.budget = "3.5";
-    expect(validateForm(d, {}, index)).toEqual({
-      ok: true,
-      document: { main: { provider: "ollama", model: "custom" }, taskBudgetUSD: 3.5 },
+    expect(d.spending).toEqual({ on: false, task: "", day: "" });
+    expect(d.checkIns).toEqual({
+      steps: { on: false, value: "150" },
+      failures: { on: false, value: "5" },
+      actions: { on: false, value: "400" },
     });
+    expect(validateForm(d, {}, providerFixture())).toEqual({
+      ok: true,
+      document: { main: { provider: "ollama", model: "custom" } },
+    });
+  });
+  it("keeps the limits and check-ins the user turned on, and drops ones turned off", () => {
+    const saved = {
+      main: { provider: "ollama", model: "custom" },
+      taskBudgetUSD: 2,
+      dayBudgetUSD: 10,
+      checkIns: { steps: 150, actions: 400 },
+    };
+    const d = formOf(saved);
+    expect(d.spending).toEqual({ on: true, task: "2", day: "10" });
+    expect(validateForm(d, saved, providerFixture())).toEqual({ ok: true, document: saved });
+    d.spending = { on: true, task: "", day: "12.5" };
+    d.checkIns.steps.on = false;
+    d.checkIns.failures = { on: true, value: "3" };
+    expect(validateForm(d, saved, providerFixture())).toEqual({
+      ok: true,
+      document: {
+        main: { provider: "ollama", model: "custom" },
+        dayBudgetUSD: 12.5,
+        checkIns: { failures: 3, actions: 400 },
+      },
+    });
+    d.spending.on = false;
+    d.checkIns.failures.on = false;
+    d.checkIns.actions.on = false;
+    expect(validateForm(d, saved, providerFixture())).toEqual({
+      ok: true,
+      document: { main: { provider: "ollama", model: "custom" } },
+    });
+  });
+  it("refuses limits and check-ins it cannot keep, without guessing", () => {
+    const d = formOf({ main: { provider: "ollama", model: "custom" } });
+    d.spending.on = true;
+    for (const task of ["0", "10001", "1e999", "abc"]) {
+      d.spending.task = task;
+      expect(validateForm(d, {}, providerFixture())).toMatchObject({ ok: false });
+    }
+    d.spending.task = "3.5";
+    expect(validateForm(d, {}, providerFixture())).toMatchObject({
+      ok: true,
+      document: { taskBudgetUSD: 3.5 },
+    });
+    for (const value of ["", "1", "100001", "2.5"]) {
+      d.checkIns.actions = { on: true, value };
+      expect(validateForm(d, {}, providerFixture())).toMatchObject({ ok: false });
+    }
   });
 });
 

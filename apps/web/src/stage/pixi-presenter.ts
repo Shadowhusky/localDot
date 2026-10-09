@@ -29,6 +29,10 @@ export interface PresenterOptions {
   warn(message: string): void;
 }
 
+// --color-stage-dim over the picture: what is left of each pixel under its 42 % veil.
+const DIM_LEVEL = 0.58;
+const DIM_MS = 200;
+
 // Video quad and world overlays under one camera matrix, screen overlays on top, on an
 // OffscreenCanvas in the worker (spec "Rendering").
 export class PixiPresenter implements Presenter {
@@ -44,6 +48,7 @@ export class PixiPresenter implements Presenter {
   #frameSize: { w: number; h: number } | null = null;
   #screen: { w: number; h: number } | null = null;
   #backdrop = false;
+  #dim = { from: 1, to: 1, start: 0, ms: 0 };
   readonly #warn: (message: string) => void;
 
   static async create(canvas: OffscreenCanvas, opts: PresenterOptions): Promise<PixiPresenter> {
@@ -153,7 +158,23 @@ export class PixiPresenter implements Presenter {
 
   #lastScene: Scene | null = null;
 
+  // Under an open decision the picture dims and the overlays over it stay lit, so the ring on what
+  // dot will press still shows. The level fades from wherever it is.
+  setDim(on: boolean, reducedMotion = false): void {
+    const now = performance.now();
+    this.#dim = { from: this.#dimLevel(now), to: on ? DIM_LEVEL : 1, start: now, ms: DIM_MS };
+    if (reducedMotion) this.#dim.ms = 0;
+  }
+
+  #dimLevel(now: number): number {
+    const { from, to, start, ms } = this.#dim;
+    const k = ms > 0 ? Math.min(1, (now - start) / ms) : 1;
+    return from + (to - from) * k;
+  }
+
   render(): void {
+    const level = Math.round(255 * this.#dimLevel(performance.now()));
+    this.video.tint = (level << 16) | (level << 8) | level;
     this.app.renderer.render(this.app.stage);
     const pending = this.#pending;
     this.#pending = null;

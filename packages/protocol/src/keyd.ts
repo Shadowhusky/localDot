@@ -151,6 +151,8 @@ export const KeydRouteModel = z.object({
   outputUSDPerMTok: z.number().nonnegative().max(10_000),
   cacheReadUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
   cacheWriteUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
+  // Thinking tokens, where the provider prices them apart from the answer; else the output price.
+  reasoningUSDPerMTok: z.number().nonnegative().max(10_000).optional(),
   maxOutputTokens: z.number().int().min(1).max(100_000_000).optional(),
 });
 export type KeydRouteModel = z.infer<typeof KeydRouteModel>;
@@ -181,6 +183,19 @@ export const BudgetData = z.object({
   needUSD: z.number().optional(),
 });
 
+// One settled model call: billed when the provider's answer named its cost. A limit of 0 is none.
+export const SpendData = z.object({
+  taskId: z.string(),
+  route: z.string(),
+  model: z.string(),
+  costUSD: z.number().nonnegative(),
+  billed: z.boolean(),
+  taskSpentUSD: z.number().nonnegative(),
+  taskLimitUSD: z.number().nonnegative(),
+  daySpentUSD: z.number().nonnegative(),
+  dayLimitUSD: z.number().nonnegative(),
+});
+
 export const KeydEvent = z.discriminatedUnion("type", [
   z.object({ type: z.literal("key.use"), cell: z.string(), time: z.string(), data: KeyUseData }),
   z.object({
@@ -189,6 +204,7 @@ export const KeydEvent = z.discriminatedUnion("type", [
     time: z.string(),
     data: BudgetData,
   }),
+  z.object({ type: z.literal("model.spend"), cell: z.string(), time: z.string(), data: SpendData }),
   z.object({
     type: z.literal("events.dropped"),
     time: z.string(),

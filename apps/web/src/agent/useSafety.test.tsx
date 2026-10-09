@@ -12,12 +12,11 @@ import {
 } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { ApprovalCard } from "./ApprovalCard.tsx";
+import { ApprovalDecision } from "../shell/DecisionIsland.tsx";
 import { notifyApproval } from "./approval-notification.ts";
 import { taskStalled } from "./heartbeat.ts";
 import { type AgentFeed, type AgentFeedState, emptyAgentModel } from "./model.ts";
 import { projectAgentEvent } from "./reducer.ts";
-import { SafetyControls } from "./SafetyControls.tsx";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import { type SafetyProps, useSafety } from "./useSafety.ts";
 import { useStopHotkey } from "./useStopHotkey.ts";
@@ -55,6 +54,7 @@ function fixture(fetchImpl: typeof fetch, approval: Card | null = card) {
     epoch: 7,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model,
   };
@@ -377,15 +377,15 @@ it("uncertain Pause and a queued corrective question never enable Resume", async
 });
 it("renders malicious preview as text with no external images or executable markup", () => {
   const decision = vi.fn();
-  render(<ApprovalCard card={card} pending={false} onDecision={decision} />);
+  render(<ApprovalDecision card={card} pending={false} onDecision={decision} />);
   expect(screen.getByRole("heading").textContent).toBe(card.title);
   expect(document.querySelector("img,script")).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Take control" }));
+  fireEvent.click(screen.getByRole("button", { name: "Don't send" }));
   expect(decision).toHaveBeenCalledWith({
     approvalId: ID,
     generation: 1,
     revision: 1,
-    decision: "take_control",
+    decision: "deny",
   });
 });
 it("Show all reads the rest of a long value from the card's own approval, then allows Approve", async () => {
@@ -401,9 +401,20 @@ it("Show all reads the rest of a long value from the card's own approval, then a
   await expect(f.result.current.readApprovalField("not-an-id", 0, signal)).rejects.toThrow();
   await expect(f.result.current.readApprovalField(ID, 16, signal)).rejects.toThrow();
   expect(fetchImpl).not.toHaveBeenCalled();
-  render(<SafetyControls safety={f.result.current} agent={f.props.agent} cell={f.props.cell} />);
-  const approve = screen.getByRole("button", { name: "Approve once" }) as HTMLButtonElement;
-  expect(approve.disabled).toBe(true);
+  const safety = f.result.current;
+  const approval = safety.approval;
+  if (!approval) throw new Error("no approval");
+  render(
+    <ApprovalDecision
+      card={approval}
+      enabled={safety.canApprove}
+      pending={false}
+      onDecision={safety.answerApproval}
+      loadField={safety.readApprovalField}
+    />,
+  );
+  const approve = screen.getByRole("button", { name: "Send" });
+  expect(approve.getAttribute("aria-disabled")).toBe("true");
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Show all of Content" }));
   });
@@ -414,19 +425,19 @@ it("Show all reads the rest of a long value from the card's own approval, then a
   );
   expect(init?.method).toBe("GET");
   expect(screen.getByRole("dialog").textContent).toContain("attacker.invalid");
-  expect(approve.disabled).toBe(false);
+  expect(approve.getAttribute("aria-disabled")).toBeNull();
 });
 it("expired card leaves all decisions disabled", () => {
   const decision = vi.fn();
   render(
-    <ApprovalCard
+    <ApprovalDecision
       card={{ ...card, expiresAt: Date.now() - 1 }}
       pending={false}
       onDecision={decision}
     />,
   );
   for (const button of screen.getAllByRole("button")) {
-    expect((button as HTMLButtonElement).disabled).toBe(true);
+    expect(button.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(button);
   }
   expect(decision).not.toHaveBeenCalled();
@@ -460,10 +471,8 @@ it("notification permission failure leaves the visible approval usable", () => {
   }
   vi.stubGlobal("Notification", Notice);
   expect(notifyApproval(card, SESSION, new Set(), vi.fn())).toMatch(/could not be shown/);
-  render(<ApprovalCard card={card} pending={false} onDecision={vi.fn()} />);
-  expect((screen.getByRole("button", { name: "Approve once" }) as HTMLButtonElement).disabled).toBe(
-    false,
-  );
+  render(<ApprovalDecision card={card} pending={false} onDecision={vi.fn()} />);
+  expect(screen.getByRole("button", { name: "Send" }).getAttribute("aria-disabled")).toBeNull();
 });
 it("Stop chord stays reachable in text and dialogs without hijacking normal typing or IME", () => {
   const stop = vi.fn();

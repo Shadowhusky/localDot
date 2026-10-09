@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { hudFor } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
 import { statusFor, type TaskHud } from "../session/status.ts";
-import { islandAttention, islandShape, pauseSlot, takeSlot } from "./island.ts";
+import { islandAttention, islandDecision, islandShape, pauseSlot, takeSlot } from "./island.ts";
 
 const cell: CellSummary = {
   id: "01JXYZ0000000000000000ABCD",
@@ -21,6 +21,7 @@ const task = (row: TaskHud["row"], phase: TaskHud["phase"] = "running"): TaskHud
   label: "Selecting February's net total",
   caption: "",
   elapsedS: 42,
+  countdownS: null,
   control: phase === "running",
 });
 
@@ -121,4 +122,31 @@ it("makes Take control the porcelain action when dot hands the computer over", (
   const working = takeSlot(statusFor({ computer: live, task: task("acting") }));
   expect(working.primary).toBe(false);
   expect(working.reason).toBeTruthy();
+});
+
+it("lets Take control answer an approval: the user does the step themselves", () => {
+  const waiting = statusFor({ computer: live, task: task("approval", "waiting") });
+  expect(takeSlot(waiting, "approval")).toEqual({ primary: false });
+  expect(takeSlot(waiting).reason).toBeTruthy();
+});
+
+describe("islandDecision", () => {
+  const base = { shape: "task" as const, approval: false, question: false, chatShown: true };
+  it("grows an approval out of the island wherever the chat is", () => {
+    expect(islandDecision({ ...base, approval: true })).toBe("approval");
+    expect(islandDecision({ ...base, approval: true, question: true, chatShown: false })).toBe(
+      "approval",
+    );
+  });
+
+  it("grows a question only while the chat that holds it is out of sight", () => {
+    expect(islandDecision({ ...base, question: true })).toBeNull();
+    expect(islandDecision({ ...base, question: true, chatShown: false })).toBe("question");
+  });
+
+  it("keeps the island closed without a task", () => {
+    for (const shape of ["hidden", "ready", "computer"] as const)
+      expect(islandDecision({ ...base, shape, approval: true, chatShown: false })).toBeNull();
+    expect(islandDecision(base)).toBeNull();
+  });
 });

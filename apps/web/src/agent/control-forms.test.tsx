@@ -46,6 +46,7 @@ function mount(takeover: boolean) {
     epoch: 0,
     connection: "live",
     replayed: true,
+    history: true,
     streamError: null,
     model,
   };

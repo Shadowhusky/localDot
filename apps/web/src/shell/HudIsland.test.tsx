@@ -12,6 +12,7 @@ const status = (row: StatusRow, label: string, elapsedS: number | null = 42): St
   label,
   caption: { speaker: "dot", text: "" },
   elapsedS,
+  countdownS: null,
   actions: [{ kind: "stop-task", enabled: true }],
   control: true,
   dotPose: "acting",
@@ -37,6 +38,17 @@ it("reads a task over an hour as h:mm:ss, never as seconds", () => {
   view.rerender(<HudIsland {...props({ status: status("acting", "Working", 42) })} />);
   expect(screen.getByTestId("hud-elapsed").textContent).toBe("0:42");
   expect(document.body.textContent).not.toMatch(/\d+ s\b/);
+});
+
+it("counts down to a model retry in the elapsed slot", () => {
+  render(
+    <HudIsland
+      {...props({
+        status: { ...status("retrying", "Model busy · retrying", null), countdownS: 20 },
+      })}
+    />,
+  );
+  expect(screen.getByTestId("hud-elapsed").textContent).toBe("in 20 s");
 });
 
 it("keeps Pause, Stop and Take control in place as dot thinks, acts and checks the screen", () => {
@@ -84,4 +96,31 @@ it("shows only the label and Take control while ready, and makes Take control po
   handed.click();
   expect(onTake).toHaveBeenCalledOnce();
   expect(document.querySelector(".island-attention")).toBeTruthy();
+});
+
+it("grows into a decision under its own row, so Stop and Take control never move", () => {
+  const view = render(
+    <HudIsland {...props({ status: status("approval", "Needs your OK", 24) })} />,
+  );
+  const stop = screen.getByRole("button", { name: "Stop" });
+  const take = screen.getByRole("button", { name: "Take control" });
+  view.rerender(
+    <HudIsland
+      {...props({ status: status("approval", "Needs your OK", 24) })}
+      decision={<p>Send this email?</p>}
+      notices={<p className="island-note">Saved</p>}
+    />,
+  );
+  expect(document.querySelector(".island")?.hasAttribute("data-open")).toBe(true);
+  expect(screen.getByRole("button", { name: "Stop" })).toBe(stop);
+  expect(screen.getByRole("button", { name: "Take control" })).toBe(take);
+  expect(document.querySelector(".island-card")?.textContent).toBe("Send this email?");
+  expect(document.querySelector(".island-notices")?.textContent).toBe("Saved");
+  view.rerender(
+    <HudIsland
+      {...props({ shape: "ready", status: status("ready", "Ready", null) })}
+      decision={<p>Send this email?</p>}
+    />,
+  );
+  expect(document.querySelector(".island")?.hasAttribute("data-open")).toBe(false);
 });

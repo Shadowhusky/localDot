@@ -62,6 +62,7 @@ export class StageEngine implements StageCanvasHandle {
   #worker: Worker | null = null;
   #closed = false;
   #anchor: Element | null = null;
+  #themeStale = false;
   #source: FrameSource | null = null;
   #sourceId = 0;
   #viewport = { w: 1, h: 1 };
@@ -124,6 +125,7 @@ export class StageEngine implements StageCanvasHandle {
     this.#anchor = anchor;
     anchor.before(this.canvas);
     if (!this.#worker && !this.#closed) this.#start();
+    else if (this.#themeStale) this.#readTheme();
   }
 
   // Takes the canvas out of `anchor`'s place, unless a newer placement has it.
@@ -176,8 +178,11 @@ export class StageEngine implements StageCanvasHandle {
       }
     });
     observer.observe(canvas);
-    const onAppearance = () =>
-      this.#post({ type: "theme", theme: readTheme(getComputedStyle(document.documentElement)) });
+    // A kept stage that is not on the page reads the appearance when it is placed again.
+    const onAppearance = () => {
+      if (this.#anchor) this.#readTheme();
+      else this.#themeStale = true;
+    };
     window.addEventListener(APPEARANCE_EVENT, onAppearance);
     this.#worker = worker;
     this.#teardown = () => {
@@ -331,6 +336,11 @@ export class StageEngine implements StageCanvasHandle {
 
   setView(view: StageViewPatch): void {
     this.#post({ type: "view", view });
+  }
+
+  #readTheme(): void {
+    this.#themeStale = false;
+    this.#post({ type: "theme", theme: readTheme(getComputedStyle(document.documentElement)) });
   }
 
   // A theme pack restyles the stage by sending its parsed tokens (the stage reads tokens once).
