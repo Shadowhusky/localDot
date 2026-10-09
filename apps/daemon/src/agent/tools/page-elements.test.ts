@@ -84,7 +84,22 @@ describe("browser_read", () => {
     expect(text).toContain('e14 textbox "Password" password [50, 40, 150, 60]');
     expect(h.requests).toEqual([{ page: true, limit: 150 }]);
     expect([...(h.session.pageRefs?.elements.keys() ?? [])]).toEqual(["e12", "e13", "e14"]);
-    expect(h.session.pageRefs?.cellId).toBe(h.session.cellId);
+    expect(h.session.pageRefs).toMatchObject({
+      cellId: h.session.cellId,
+      url: "https://example.com/",
+    });
+  });
+
+  it("forgets the page's refs when another page opens", async () => {
+    const h = harness(async () => ({
+      url: "https://example.com/",
+      elements: [element({ node: 12 })],
+      truncated: false,
+    }));
+    await h.call("browser_read", {});
+    expect(h.session.pageRefs?.elements.size).toBe(1);
+    await h.call("browser_navigate", { url: "https://elsewhere.example/" });
+    expect(h.session.pageRefs).toBeUndefined();
   });
 
   it("lists no elements of a page other than the one it read", async () => {

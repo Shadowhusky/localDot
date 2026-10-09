@@ -2,21 +2,26 @@ import {
   type BrowserAction,
   type ComputerStep,
   ELEMENT_REF,
+  type FindRequest,
   MODEL_SCREEN,
   type PageElement,
   type ToolResult,
 } from "@localdot/protocol";
 import { checkCombo, keyCombo } from "@localdot/protocol/keys";
+import { pageScreen } from "./browser.ts";
 import { type InputRun, inputResult, nextStep, runInput } from "./computer.ts";
-import { fail, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
+import { fail, screenContext, type ToolCallContext, type ToolDeps, text } from "./deps.ts";
 
 const SECRET =
   "That is a password field. Ask the user with ask_user and a secret field whose target is this field; never type passwords yourself.";
 
+// Acts that type or press keys into the element: never into a password field.
+const ENTERS_TEXT = new Set<BrowserAction["action"]>(["fill", "select", "press"]);
+
 const click: ComputerStep = { action: "click", button: "left", count: 1 };
 
 // An act as the inputs a person would make; the first acts on the element itself.
-function inputsOf(input: BrowserAction, on: boolean): ComputerStep[] | string {
+function inputsOf(input: BrowserAction): ComputerStep[] | string {
   switch (input.action) {
     case "click":
     case "check":
@@ -38,7 +43,7 @@ function inputsOf(input: BrowserAction, on: boolean): ComputerStep[] | string {
       if (!keys) return 'press needs keys in text, such as "Return" or "ctrl+a"';
       const unknown = checkCombo(keys);
       if (unknown) return unknown;
-      return on ? [click, { action: "key", keys }] : [{ action: "key", keys }];
+      return [click, { action: "key", keys }];
     }
     case "scroll": {
       const n = input.scroll_amount ?? 3;
@@ -54,6 +59,14 @@ function inputsOf(input: BrowserAction, on: boolean): ComputerStep[] | string {
   }
 }
 
+// A listed element found again by its node, with the role and name it was listed with, on its page.
+const findOf = (element: PageElement, url: string | undefined): FindRequest => ({
+  node: Number(element.ref.slice(1)),
+  role: element.role,
+  name: element.name,
+  ...(url ? { url } : {}),
+});
+
 function pointOf(coordinate: number[] | undefined) {
   if (!coordinate) return undefined;
   const [x, y] = coordinate.map(Math.round) as [number, number];
@@ -63,9 +76,10 @@ function pointOf(coordinate: number[] | undefined) {
 }
 
 // browser_act: a page element browser_read listed, by its ref. The element is found again at
-// dispatch by its node, and must still have the role and name it was listed with; the input then
-// runs through the same gateway, classifier and approval path as a pixel action at its centre. A
-// stale ref falls back to the coordinate, which is checked against the screenshot like any click.
+// dispatch by its node, and must still have the role and name it was listed with, on the page it
+// was read on; the input then runs through the same gateway, classifier and approval path as a
+// pixel action at its centre. A stale ref falls back to the coordinate, which is checked against
+// the screenshot like any click.
 export async function browserActTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -75,29 +89,41 @@ export async function browserActTool(
   const point = pointOf(input.coordinate);
   if (input.coordinate && !point) return fail("The coordinate is off the screen.");
   let element: PageElement | undefined;
+  let url: string | undefined;
   if (input.ref !== undefined) {
     if (!ELEMENT_REF.test(input.ref))
       return fail(`${input.ref} is not a ref. Use one that browser_read listed, such as e12.`);
     const refs = ctx.session.pageRefs;
-    element =
-      refs?.cellId === (ctx.nativeScreen?.cellId ?? ctx.session.cellId)
-        ? refs.elements.get(input.ref)
-        : undefined;
+    const screen = pageScreen(ctx);
+    if (refs && refs.cellId === screen.cellId && refs.tabId === screen.tabId) {
+      element = refs.elements.get(input.ref);
+      url = refs.url;
+    }
     if (!element && !point)
       return fail(
         `${input.ref} is not in this screen's last page read. Read the page again with browser_read.`,
       );
   } else if (!point) return fail("browser_act needs a ref from browser_read, or a coordinate.");
-  if (element?.secret && input.action === "fill") return fail(SECRET);
+  const entersText = ENTERS_TEXT.has(input.action);
+  if (element?.secret && entersText) return fail(SECRET);
   const wanted = input.action === "check" ? "true" : input.action === "uncheck" ? "false" : "";
-  if (element && wanted && element.checked === wanted)
-    return {
-      ok: true,
-      content: [text(`${input.ref} is already ${wanted === "true" ? "checked" : "unchecked"}.`)],
-    };
-  const inputs = inputsOf(input, !!(element || point));
+  if (element && wanted) {
+    // A click toggles the box as it is now, which may not be as it was read.
+    const now = deps.gateway.find
+      ? await deps.gateway.find(screenContext(ctx), findOf(element, url))
+      : element;
+    ctx.check();
+    if (now && (now.checked ?? element.checked) === wanted)
+      return {
+        ok: true,
+        content: [text(`${input.ref} is already ${wanted === "true" ? "checked" : "unchecked"}.`)],
+      };
+  }
+  const inputs = inputsOf(input);
   if (typeof inputs === "string") return fail(inputs);
-  const basis = input.basedOn ? { basedOn: input.basedOn } : {};
+  // A field found only by its point, or one that became a password field, is refused at dispatch.
+  const guard = entersText ? { refuseSecret: SECRET } : {};
+  const options = { ...(input.basedOn ? { basedOn: input.basedOn } : {}), ...guard };
   const notes: ToolResult["content"] = [];
   let frameId: string | undefined;
   let ok = true;
@@ -107,20 +133,17 @@ export async function browserActTool(
     const pointer = i === 0 && (step.action === "click" || step.action === "scroll");
     let run: InputRun;
     if (pointer && element) {
-      const node = Number(element.ref.slice(1));
-      run = await runInput(deps, ctx, step, {
-        find: { node, role: element.role, name: element.name },
-      });
+      run = await runInput(deps, ctx, step, { find: findOf(element, url), ...guard });
       if (run.gone) {
         if (!point)
           return fail(
-            `${input.ref} is no longer on the page as you read it: it moved off screen, changed or went away. Read the page again.`,
+            `${input.ref} is no longer on the page as you read it: it moved off screen, changed, went away or is covered. Read the page again.`,
           );
         nextStep(ctx, "failed");
         notes.push(text(`${input.ref} is no longer as you read it, so its coordinate was used.`));
-        run = await runInput(deps, ctx, { ...step, point }, basis);
+        run = await runInput(deps, ctx, { ...step, point }, options);
       }
-    } else run = await runInput(deps, ctx, pointer && point ? { ...step, point } : step, basis);
+    } else run = await runInput(deps, ctx, pointer && point ? { ...step, point } : step, options);
     ctx.check();
     if (run.frameId) frameId = run.frameId;
     notes.push(...run.notes);

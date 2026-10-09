@@ -16,7 +16,8 @@ export interface ToolDeps {
     desktop(cellId: string): Pick<DesktopdTools, "inspectUpload" | "readUpload"> | undefined;
     transfers: Pick<Transfers, "acquire">;
   };
-  gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf">;
+  gateway: Pick<ActionGateway, "run" | "observe" | "cursorOf"> &
+    Partial<Pick<ActionGateway, "find">>;
   // Installed with the session's screen controller; one private binding per admitted tool.
   bindScreen?(session: AgentSession, lease: ScreenLease): NativeScreenBinding;
   // The cell's scale, to bring the gateway's device-pixel cursor back to model pixels.
@@ -71,6 +72,8 @@ export interface ToolCallContext {
   permit?: EffectPermit;
   screen?: ScreenLease;
   nativeScreen?: NativeScreenBinding;
+  // The call's last Activity step was stopped before it did anything.
+  stepCancelled?: boolean;
 }
 
 export function text(t: string): ToolResult["content"][number] {

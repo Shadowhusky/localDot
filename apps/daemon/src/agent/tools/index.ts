@@ -306,7 +306,11 @@ async function dispatchAdmitted(
         ctx.check();
         // A step refused for a stale look did nothing: dot looks again, nothing failed.
         append(ctx, "step.end", {
-          status: result.ok ? "ok" : result.cancelled === "stale" ? "cancelled" : "failed",
+          status: result.ok
+            ? "ok"
+            : result.cancelled === "stale" || ctx.stepCancelled
+              ? "cancelled"
+              : "failed",
         });
         break;
       case "shell":

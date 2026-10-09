@@ -48,6 +48,15 @@ function selectedBrowser(ctx: ToolCallContext) {
   if (!screens) throw new Error("The browser is unavailable.");
   return screens.browserAccess(ctx.screen);
 }
+
+// Where a page read belongs: the selected screen's cell and, on the web browser, its tab.
+export function pageScreen(ctx: ToolCallContext): { cellId: string; tabId?: string } {
+  const browser = selectedBrowser(ctx);
+  return {
+    cellId: ctx.nativeScreen?.cellId ?? ctx.session.cellId,
+    ...(browser ? { tabId: browser.tabId } : {}),
+  };
+}
 export async function browserReadTool(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -78,6 +87,8 @@ export async function browserReadTool(
   ctx.session.tainted = true;
   ctx.session.pageRefs = {
     cellId: ctx.nativeScreen?.cellId ?? ctx.session.cellId,
+    ...(browser ? { tabId: browser.tabId } : {}),
+    url: page.url,
     elements: new Map(elements.map((e) => [e.ref, e])),
   };
   append(ctx, "tool.end", { ok: true });
@@ -131,6 +142,8 @@ export async function browserNavigateTool(
   const url = webUrl(input.url);
   if (!browser && !desktop) return fail("The computer is not running.");
   if (!url) return fail("Only http and https pages can be opened.");
+  // Another page's nodes may reuse the old ones' numbers.
+  session.pageRefs = undefined;
   append(ctx, "step.start", { kind: "browser" });
   append(ctx, "tool.start", {
     tool: "browser_navigate",

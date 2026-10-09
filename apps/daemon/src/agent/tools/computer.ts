@@ -31,7 +31,8 @@ const LOOK_AGAIN =
 export const UNCHANGED = "The screen did not change: it still matches your last screenshot.";
 
 // The screen after an action, which counts as a fresh look: no new image when it is the very screen
-// the model last saw.
+// the model last saw. That is the newest screen sent, which in a turn of several actions is an
+// earlier action's, not the turn's basis; a model with no screenshot (no basis) always gets one.
 export async function observation(
   deps: ToolDeps,
   ctx: ToolCallContext,
@@ -39,7 +40,8 @@ export async function observation(
   basedOn: string | undefined,
 ): Promise<ToolResult["content"][number]> {
   ctx.check();
-  if (basedOn && basedOn !== frameId && deps.png.same?.(ctx.session.id, basedOn, frameId)) {
+  const last = ctx.session.lastFrameId;
+  if (basedOn && last && last !== frameId && deps.png.same?.(ctx.session.id, last, frameId)) {
     ctx.session.lastFrameId = frameId;
     ctx.session.freshLook();
     return text(UNCHANGED);
@@ -240,6 +242,8 @@ export interface InputOptions {
   find?: FindRequest;
   // A batched input that needs the user's approval or control is not done, and ends the batch.
   stopOnAsk?: boolean;
+  // An input on a password field is not done; this says why instead.
+  refuseSecret?: string;
 }
 
 export interface InputRun {
@@ -292,6 +296,7 @@ export async function runInput(
       ? untilPaused(session, ctx.signal)
       : undefined;
   let needsUser = false;
+  let secret = false;
   const nativeContext: ActionContext = {
     ...selected,
     ...(hold ? { signal: hold.signal } : {}),
@@ -312,6 +317,11 @@ export async function runInput(
         facts,
         revalidate: request.revalidate,
       };
+      const identity = request.identity;
+      if (options.refuseSecret && (identity.target?.secret || identity.drop?.target?.secret)) {
+        secret = true;
+        throw new Error(options.refuseSecret);
+      }
       if (options.stopOnAsk && !runsUnasked(ctx, prepared)) {
         needsUser = true;
         throw new Error(NEEDS_USER);
@@ -339,6 +349,7 @@ export async function runInput(
   }
   ctx.check();
   if (needsUser) return { ok: false, notes: [], needsUser: true };
+  if (secret && options.refuseSecret) return fail(options.refuseSecret);
   if (outcome.cancelled === "preflight" && outcome.error === ELEMENT_GONE)
     return { ok: false, notes: [], gone: true };
   if (action.verb === "wait" && outcome.ok) {
@@ -405,10 +416,11 @@ export function nextStep(ctx: ToolCallContext, status: "ok" | "failed" = "ok"): 
 const doneBefore = (i: number) =>
   i === 0 ? "" : i === 1 ? " Step 1 was done." : ` Steps 1 to ${i} were done.`;
 
+// A step by its action alone: its point is in model pixels, which a model that gives points in
+// another space would not recognise.
 function ordinal(a: ComputerStep): string {
   const keys = a.keys?.join("+");
   if (a.action === "key" || a.action === "hold_key") return `${a.action} ${keys ?? ""}`.trim();
-  if (a.point) return `${a.action} at (${a.point.x}, ${a.point.y})`;
   return a.action;
 }
 
@@ -426,7 +438,7 @@ async function batch(deps: ToolDeps, ctx: ToolCallContext, a: ComputerAction): P
     if (i > 0) nextStep(ctx);
     if (ctx.session.safetyPause) {
       notes.push(text(`Stopped before ${which}: the task was paused.`));
-      return finish(false);
+      return finish(false, "unrun");
     }
     const run = await runInput(deps, ctx, step, {
       ...(a.basedOn ? { basedOn: a.basedOn } : {}),
@@ -440,20 +452,23 @@ async function batch(deps: ToolDeps, ctx: ToolCallContext, a: ComputerAction): P
           `Stopped before ${which}: it needs the user's approval or control, so do it as its own action.${doneBefore(i)}`,
         ),
       );
-      return finish(false);
+      return finish(false, "unrun");
     }
     if (!run.ok) {
       notes.push(text(`Stopped at ${which}.${doneBefore(i)}`), ...run.notes);
-      return finish(false, run.stale);
+      return finish(false, run.stale ? "stale" : undefined);
     }
     notes.push(...run.notes);
   }
   return finish(true);
 
-  async function finish(ok: boolean, stale?: true): Promise<ToolResult> {
+  // The row of a step stopped before it did anything ends as cancelled, not failed.
+  async function finish(ok: boolean, stop?: "stale" | "unrun"): Promise<ToolResult> {
+    if (stop === "unrun") ctx.stepCancelled = true;
     if (!frameId) frameId = (await deps.gateway.observe(screenContext(ctx))).frameId;
     ctx.check();
-    return inputResult(deps, ctx, { ok, notes, frameId, ...(stale ? { stale } : {}) }, a.basedOn);
+    const stale = stop === "stale" ? { stale: true as const } : {};
+    return inputResult(deps, ctx, { ok, notes, frameId, ...stale }, a.basedOn);
   }
 }
 

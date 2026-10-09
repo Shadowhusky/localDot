@@ -29,7 +29,7 @@ import type { DesktopdRegistry, NativeDevice } from "../desktopd/registry.ts";
 import type { EventLog } from "../event-log.ts";
 import type { FrameStore } from "./frames.ts";
 import { animationKeepsTarget, frameLuma, lumaRegionChanged } from "./freshness.ts";
-import { type NativeActionIdentity, sameNativeIdentity } from "./identity.ts";
+import { type NativeActionIdentity, partOf, sameNativeIdentity } from "./identity.ts";
 import { type OnsetTable, onsetKind } from "./onset-table.ts";
 import type { RingOnsetPolicy } from "./ring-onset.ts";
 import {
@@ -62,7 +62,8 @@ const UNKNOWN_TARGET_PX = 24;
 const MIN_TARGET_PX = 16;
 export const CHANGED_WHILE_DECIDING =
   "The screen changed while the user was deciding. Look again before acting.";
-// A page element found by its node is no longer the one listed: gone, off screen or renamed.
+// A page element found by its node is no longer the one listed: gone, covered, off screen or
+// renamed.
 export const ELEMENT_GONE = "that element is no longer on the page as it was read";
 
 export type GuiAction =
@@ -455,6 +456,26 @@ export class ActionGateway {
     throw new Cancelled("preflight", `the ${held.button} button is no longer down`);
   }
 
+  // A page element by its node where it is now, without acting on it: for a decision that rests
+  // on its current state, such as whether a box is already ticked. Null when it is not there as
+  // listed.
+  async find(ctx: ActionContext, request: FindRequest): Promise<Target | null> {
+    ctx = this.#owner(ctx);
+    const d = await this.#ready(ctx);
+    const found = await this.#locate(d, request);
+    this.#check(ctx);
+    return found.target;
+  }
+
+  // An element by name, or by its node only on the page it was listed on.
+  async #locate(d: NativeDevice, request: FindRequest): Promise<Lookup> {
+    const found = await d.client.find(request);
+    const { url } = request;
+    return found.target && url !== undefined && found.target.url !== url
+      ? { ...found, target: null }
+      : found;
+  }
+
   // A fresh frame for the brain (M4) and for the step thumbnails; also where the cursor starts.
   async observe(ctx: ActionContext): Promise<{ frameId: string; pointer: Point }> {
     ctx = this.#owner(ctx);
@@ -588,7 +609,7 @@ export class ActionGateway {
     let found: Lookup | undefined;
     let point: Point;
     if ((action.verb === "click" || action.verb === "scroll") && action.find) {
-      found = await d.client.find(action.find);
+      found = await this.#locate(d, action.find);
       if (!found.target)
         throw new Cancelled(
           "preflight",
@@ -625,6 +646,8 @@ export class ActionGateway {
           : { ...(await this.#lookup(ctx, d, point)), point },
       );
     const identity = ctx.source === "agent" ? await readIdentity() : undefined;
+    if (found && identity && !dragging && !identity.unknown && !partOf(found, identity))
+      throw new Cancelled("preflight", ELEMENT_GONE);
     const permit = identity
       ? await this.#authorize(ctx, authorized, identity, readIdentity)
       : undefined;

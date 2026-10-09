@@ -124,13 +124,19 @@ describe("the user takes the computer while dot works", () => {
     expect(ends.map((event) => event.data.status)).toEqual(["cancelled", "ok"]);
   });
 
-  it("forgets the frame from before the user had the computer, so a zoom looks afresh", async () => {
+  it("forgets the frame and page from before the user had the computer, so dot looks afresh", async () => {
     const h = setup();
     h.session.lastFrameId = ulid();
+    h.session.pageRefs = {
+      cellId: h.session.cellId,
+      url: "https://example.com/",
+      elements: new Map(),
+    };
     const requestId = h.session.takeControl();
     await until(() => h.session.manualControl === "ready");
     expect(await h.session.handback(requestId, undefined)).toBe(true);
     expect(h.session.lastFrameId).toBeUndefined();
+    expect(h.session.pageRefs).toBeUndefined();
   });
 
   it("owes a look until a screenshot succeeds, and a wait's screenshot pays it", async () => {

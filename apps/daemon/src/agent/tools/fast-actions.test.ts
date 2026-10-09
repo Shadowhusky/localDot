@@ -141,6 +141,8 @@ async function setup() {
   };
   await setFrames(await grey());
   const basis = (await gateway.observe({ source: "manual", sessionId, cellId, signal })).frameId;
+  // The model was sent this screen.
+  session.lastFrameId = basis;
   const inputs = () => fake.calls.filter((c) => c.path === "/input" || c.path === "/type");
   const steps = () => log.read(sessionId).filter((e) => e.type === "step.start");
   return { fake, ctx, deps, session, asks, basis, setFrames, inputs, steps };
@@ -195,11 +197,13 @@ describe("a batch of computer inputs", () => {
     });
     expect(result.ok).toBe(false);
     expect(texts(result.content)).toContain(
-      "Stopped before step 3 of 3 (click at (600, 500)): it needs the user's approval or control, so do it as its own action. Steps 1 to 2 were done.",
+      "Stopped before step 3 of 3 (click): it needs the user's approval or control, so do it as its own action. Steps 1 to 2 were done.",
     );
     expect(s.asks).not.toHaveBeenCalled();
     expect(s.inputs().map((c) => c.path)).toEqual(["/input", "/type"]);
     expect(images(result.content)).toHaveLength(1);
+    // Nothing of step 3 ran, so its Activity step ends as cancelled, not failed.
+    expect(s.ctx.stepCancelled).toBe(true);
   });
 
   it("stops at a step whose target changed since the screenshot it was chosen on", async () => {
@@ -217,9 +221,7 @@ describe("a batch of computer inputs", () => {
       basedOn: s.basis,
     });
     expect(result).toMatchObject({ ok: false, cancelled: "stale" });
-    expect(texts(result.content)).toContain(
-      "Stopped at step 2 of 3 (click at (900, 600)). Step 1 was done.",
-    );
+    expect(texts(result.content)).toContain("Stopped at step 2 of 3 (click). Step 1 was done.");
     expect(s.inputs()).toHaveLength(1);
     expect(images(result.content)).toHaveLength(1);
   });
@@ -260,6 +262,30 @@ describe("screenshot economy", () => {
     expect(images(changed.content)).toHaveLength(1);
   });
 
+  it("compares with the newest screen sent in the turn, not the turn's screenshot", async () => {
+    const s = await setup();
+    s.fake.script.hitTest = (p) => hit(field(p, "Edit"));
+    s.fake.script.focused = () => hit(field({ x: 300, y: 200 }, "Edit"));
+    // The first action opens a menu; the second, on the same turn's screenshot, closes it again.
+    await s.setFrames(await grey({ x: 280, y: 210, w: 200, h: 300 }));
+    const opened = await computerTool(s.deps, s.ctx, {
+      action: "click",
+      point: { x: 300, y: 200 },
+      button: "left",
+      count: 1,
+      basedOn: s.basis,
+    });
+    expect(images(opened.content)).toHaveLength(1);
+    await s.setFrames(await grey());
+    const closed = await computerTool(s.deps, s.ctx, {
+      action: "key",
+      keys: ["Escape"],
+      basedOn: s.basis,
+    });
+    expect(texts(closed.content)).not.toContain(UNCHANGED);
+    expect(images(closed.content)).toHaveLength(1);
+  });
+
   it("always sends the screen to a model with no screenshot to compare it with", async () => {
     const s = await setup();
     const result = await computerTool(s.deps, s.ctx, { action: "wait", ms: 10 });
@@ -277,7 +303,15 @@ describe("browser_act", () => {
   const listed = (s: Awaited<ReturnType<typeof setup>>, ...elements: PageElement[]) => {
     s.session.pageRefs = {
       cellId: s.session.cellId,
+      url: "https://mail.example/inbox",
       elements: new Map(elements.map((e) => [e.ref, e])),
+    };
+  };
+  const findSend = (s: Awaited<ReturnType<typeof setup>>, at: Point, url?: string) => {
+    s.fake.script.find = (req) => {
+      const { node, role, name } = req as { node?: number; role?: string; name?: string };
+      const target = { ...web(at, "Send"), ...(url ? { url } : {}) };
+      return hit(node === 42 && role === "button" && name === "Send" ? target : null);
     };
   };
 
@@ -285,16 +319,51 @@ describe("browser_act", () => {
     const s = await setup();
     listed(s, send);
     const now = { x: 700, y: 450 };
-    s.fake.script.find = (req) => {
-      const { node, role, name } = req as { node?: number; role?: string; name?: string };
-      return hit(node === 42 && role === "button" && name === "Send" ? web(now, "Send") : null);
-    };
+    findSend(s, now);
     s.fake.script.hitTest = (p) => hit(web(p, "Send"));
     const result = await browserActTool(s.deps, s.ctx, { action: "click", ref: "e42" });
     expect(result.ok).toBe(true);
     // Sending is consequential under Balanced: the user approves the click on Send.
     expect(s.asks).toHaveBeenCalledTimes(1);
     expect(s.inputs()).toHaveLength(1);
+    expect(s.inputs()[0]?.body).toMatchObject({ input: { kind: "click", at: now } });
+  });
+
+  it("never acts on a ref read on another page", async () => {
+    const s = await setup();
+    listed(s, send);
+    // Another site's node with the same number, role and name.
+    findSend(s, { x: 700, y: 450 }, "https://shop.example/cart");
+    s.fake.script.hitTest = (p) => hit(web(p, "Send"));
+    const result = await browserActTool(s.deps, s.ctx, { action: "click", ref: "e42" });
+    expect(result.ok).toBe(false);
+    expect(texts(result.content)).toContain("Read the page again");
+    expect(s.inputs()).toHaveLength(0);
+  });
+
+  it("never clicks what covers a listed element since the read", async () => {
+    const s = await setup();
+    listed(s, send);
+    findSend(s, { x: 700, y: 450 });
+    // A banner over the button takes whatever lands on its point.
+    s.fake.script.hitTest = (p) =>
+      hit({ ...web(p, "Accept cookies"), bbox: { x: 0, y: 400, w: 1280, h: 120 } });
+    const result = await browserActTool(s.deps, s.ctx, { action: "click", ref: "e42" });
+    expect(result.ok).toBe(false);
+    expect(texts(result.content)).toContain("Read the page again");
+    expect(s.asks).not.toHaveBeenCalled();
+    expect(s.inputs()).toHaveLength(0);
+  });
+
+  it("clicks a listed element through the text inside it", async () => {
+    const s = await setup();
+    listed(s, send);
+    const now = { x: 700, y: 450 };
+    findSend(s, now);
+    s.fake.script.hitTest = (p) =>
+      hit({ ...web(p, "Send", "StaticText"), bbox: { x: 680, y: 440, w: 40, h: 20 } });
+    const result = await browserActTool(s.deps, s.ctx, { action: "click", ref: "e42" });
+    expect(result.ok).toBe(true);
     expect(s.inputs()[0]?.body).toMatchObject({ input: { kind: "click", at: now } });
   });
 
@@ -308,6 +377,31 @@ describe("browser_act", () => {
     });
     expect(result.ok).toBe(false);
     expect(texts(result.content)).toContain("ask_user");
+    expect(s.inputs()).toHaveLength(0);
+  });
+
+  it("never types into a password field by any act or by its coordinate", async () => {
+    const s = await setup();
+    listed(s, { ...send, ref: "e7", role: "textbox", name: "Password", secret: true });
+    for (const act of [
+      { action: "select" as const, ref: "e7", text: "hunter2" },
+      { action: "press" as const, ref: "e7", text: "ctrl+v" },
+    ]) {
+      const result = await browserActTool(s.deps, s.ctx, act);
+      expect(texts(result.content)).toContain("ask_user");
+    }
+    const password = { ...web({ x: 600, y: 300 }, "Password", "textbox"), secret: true };
+    s.fake.script.hitTest = () => hit(password);
+    s.fake.script.focused = () => hit(password);
+    const byPoint = await browserActTool(s.deps, s.ctx, {
+      action: "fill",
+      coordinate: [600, 300],
+      text: "hunter2",
+      basedOn: s.basis,
+    });
+    expect(byPoint.ok).toBe(false);
+    expect(texts(byPoint.content)).toContain("ask_user");
+    expect(s.asks).not.toHaveBeenCalled();
     expect(s.inputs()).toHaveLength(0);
   });
 
@@ -326,6 +420,23 @@ describe("browser_act", () => {
     expect(s.inputs()[0]?.body).toMatchObject({ input: { kind: "click", at: { x: 600, y: 300 } } });
   });
 
+  it("does not use the coordinate when the screen changed around it since its screenshot", async () => {
+    const s = await setup();
+    listed(s, { ...send, name: "Archive" });
+    s.fake.script.hitTest = (p) => hit(field(p, "Archive"));
+    await s.setFrames(await grey({ x: 580, y: 280, w: 40, h: 40 }));
+    for (const ref of ["e42", undefined]) {
+      const result = await browserActTool(s.deps, s.ctx, {
+        action: "click",
+        ...(ref ? { ref } : {}),
+        coordinate: [600, 300],
+        basedOn: s.basis,
+      });
+      expect(result).toMatchObject({ ok: false, cancelled: "stale" });
+    }
+    expect(s.inputs()).toHaveLength(0);
+  });
+
   it("asks for a new read when the ref is stale and there is no coordinate", async () => {
     const s = await setup();
     listed(s, send);
@@ -337,12 +448,25 @@ describe("browser_act", () => {
     expect(s.inputs()).toHaveLength(0);
   });
 
-  it("leaves a box that is already as asked alone", async () => {
+  it("ticks a box by how it is now, not how it was read", async () => {
     const s = await setup();
-    listed(s, { ...send, ref: "e9", role: "checkbox", name: "Notify me", checked: "true" });
-    const result = await browserActTool(s.deps, s.ctx, { action: "check", ref: "e9" });
-    expect(result).toMatchObject({ ok: true, content: [{ text: "e9 is already checked." }] });
+    const box = (checked: "true" | "false") => {
+      s.fake.script.find = () =>
+        hit({ ...web({ x: 600, y: 300 }, "Notify me", "checkbox"), checked });
+      s.fake.script.hitTest = (p) => hit({ ...web(p, "Notify me", "checkbox"), checked });
+    };
+    // Read unticked, ticked since: nothing to do.
+    listed(s, { ...send, ref: "e9", role: "checkbox", name: "Notify me", checked: "false" });
+    box("true");
+    const already = await browserActTool(s.deps, s.ctx, { action: "check", ref: "e9" });
+    expect(already).toMatchObject({ ok: true, content: [{ text: "e9 is already checked." }] });
     expect(s.inputs()).toHaveLength(0);
+    // Read ticked, unticked since: one click ticks it.
+    listed(s, { ...send, ref: "e9", role: "checkbox", name: "Notify me", checked: "true" });
+    box("false");
+    const ticked = await browserActTool(s.deps, s.ctx, { action: "check", ref: "e9" });
+    expect(ticked.ok).toBe(true);
+    expect(s.inputs()).toHaveLength(1);
   });
 
   it("fills a field: click, select all, type, then Return", async () => {
