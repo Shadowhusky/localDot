@@ -1,23 +1,9 @@
-import type { Page } from "@playwright/test";
-import { expect, keepBaselinesAt, test } from "./harness.ts";
+import { composer, expect, keepBaselinesAt, test } from "./harness.ts";
 
 // The composer in each of its states, as pixels of the composer or the conversation column.
 keepBaselinesAt("c14", "w39");
 
 const KEY = `sk-ant-api03-${"z".repeat(40)}`;
-
-async function composer(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1180) {
-    // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
-    const tab = page.getByRole("tab", { name: /^Conversation/ });
-    await expect(async () => {
-      await tab.click();
-      await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 1000 });
-    }).toPass();
-    await expect(page.locator(".thread-row").first()).toBeVisible();
-  }
-  return page.getByRole("form", { name: "Message dot" });
-}
 
 test("composer, at rest", async ({ page, ui }) => {
   await ui.open("running");

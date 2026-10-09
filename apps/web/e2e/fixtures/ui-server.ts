@@ -1382,40 +1382,66 @@ routes.post("/__qa/step-end", (c) => {
   if (pause?.phase === "pausing") session.confirmSafetyPause(pause.requestId, pause.revision);
   return c.json({ ok: true });
 });
-// Finishes the open step and starts n more, each after a model call, as a live task does.
+// Finishes the open step and starts the next, after a model call, as a live task does.
+function nextStep(owned: AgentSession, planItem: string) {
+  if (liveStep) {
+    owned.append("action.result", { ok: true }, liveStep);
+    owned.append("step.end", { status: "ok" }, liveStep);
+  }
+  owned.append("key.use", {
+    secretId: "anthropic-main",
+    host: "api.anthropic.com",
+    method: "POST",
+    path: "/v1/messages",
+    decision: "allow",
+  });
+  liveStep = ulid();
+  fill++;
+  owned.append("step.start", { kind: "gui", planItem }, liveStep);
+  owned.append(
+    "action.intent",
+    {
+      verb: "click",
+      label: `Fill area ${fill} with brown`,
+      risk: "none",
+      point: { x: 1200, y: 700 },
+    },
+    liveStep,
+  );
+}
 routes.post("/__qa/steps", (c) => {
   if (!session) return c.text("no session", 409);
+  for (let n = Number(c.req.query("n") ?? 1); n > 0; n--)
+    nextStep(session, c.req.query("item") ?? "colour");
+  return c.json({ ok: true });
+});
+// A busy task for `ms`: dot says a word every 40 ms, a new message every 60 words and takes a
+// step every 600 ms.
+routes.post("/__qa/stream", (c) => {
+  if (!session) return c.text("no session", 409);
   const owned = session;
-  for (let n = Number(c.req.query("n") ?? 1); n > 0; n--) {
-    if (liveStep) {
-      owned.append("action.result", { ok: true }, liveStep);
-      owned.append("step.end", { status: "ok" }, liveStep);
+  const until = Date.now() + Number(c.req.query("ms") ?? 10_000);
+  let messageId = ulid();
+  let words: string[] = [];
+  let tick = 0;
+  const said = () => owned.append("message.assistant", { messageId, text: words.join(" ") });
+  const timer = setInterval(() => {
+    if (teardown || session !== owned) return clearInterval(timer);
+    if (Date.now() > until) {
+      clearInterval(timer);
+      if (words.length) said();
+      return;
     }
-    owned.append("key.use", {
-      secretId: "anthropic-main",
-      host: "api.anthropic.com",
-      method: "POST",
-      path: "/v1/messages",
-      decision: "allow",
-    });
-    liveStep = ulid();
-    fill++;
-    owned.append(
-      "step.start",
-      { kind: "gui", planItem: c.req.query("item") ?? "colour" },
-      liveStep,
-    );
-    owned.append(
-      "action.intent",
-      {
-        verb: "click",
-        label: `Fill area ${fill} with brown`,
-        risk: "none",
-        point: { x: 1200, y: 700 },
-      },
-      liveStep,
-    );
-  }
+    const word = `cell${++tick}`;
+    owned.append("message.delta", { messageId, text: `${words.length ? " " : ""}${word}` });
+    words.push(word);
+    if (words.length === 60) {
+      said();
+      messageId = ulid();
+      words = [];
+    }
+    if (tick % 15 === 0) nextStep(owned, "colour");
+  }, 40);
   return c.json({ ok: true });
 });
 // dot says something in the thread: n messages at once, or one sent word by word (stream=1).

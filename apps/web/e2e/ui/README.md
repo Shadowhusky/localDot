@@ -26,6 +26,8 @@ pnpm --filter @localdot/web exec playwright test -c playwright.ui.config.ts --up
   fixture, `POST /__qa/scenario/<name>` takes a scenario's step and `GET /__qa/scenarios` lists
   them all. By hand: `QA_PORT=0 node --import tsx e2e/fixtures/ui-server.ts --scenario approval`,
   then open the `origin` from the ready line with `#token=` and 43 `a`s.
+- **Typing:** `typing.spec.ts` measures each key press to the frame that shows it while
+  `POST /__qa/stream?ms=<n>` streams a busy task. `QA_CPU_THROTTLE=6` slows Chrome to a phone's CPU.
 - **Gallery:** `pnpm --filter @localdot/web build:gallery` builds `gallery.html` into
   `dist-gallery/` (never `dist`); the fixture serves it at `/gallery/` under the app's own page
   policy. Add a page to `GALLERY_PAGES` in `src/gallery/pages.tsx`.
