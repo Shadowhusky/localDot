@@ -126,6 +126,9 @@ importers:
       mediabunny:
         specifier: 1.61.0
         version: 1.61.0
+      pdfjs-dist:
+        specifier: 6.3.289
+        version: 6.3.289
       pixi.js:
         specifier: 8.21.0
         version: 8.21.0
@@ -2076,6 +2079,10 @@ packages:
   path-to-regexp@8.4.2:
     resolution: {integrity: sha512-qRcuIdP69NPm4qbACK+aDogI5CBDMi1jKe0ry5rSQJz8JVLsC7jV8XpiJjGRLLol3N+R5ihGYcrPLTno6pAdBA==}
 
+  pdfjs-dist@6.3.289:
+    resolution: {integrity: sha512-ZHjSVpDa3D6izMq8/04lvkhkATUmL9px6ChPaXc1k6nU2Mrhlg1/7F0bdUqCwUjw3NsPTfPZsMDUU6ZIcRaeQw==}
+    engines: {node: '>=22.13.0 || >=24'}
+
   picocolors@1.1.1:
     resolution: {integrity: sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA==}
 
@@ -2481,6 +2488,7 @@ ignoredOptionalDependencies:
   - '@anthropic-ai/claude-agent-sdk-linux-x64-musl'
   - '@anthropic-ai/claude-agent-sdk-win32-arm64'
   - '@anthropic-ai/claude-agent-sdk-win32-x64'
+  - '@napi-rs/canvas'
 
 snapshots:
 
@@ -3809,6 +3817,8 @@ snapshots:
   path-key@3.1.1: {}
 
   path-to-regexp@8.4.2: {}
+
+  pdfjs-dist@6.3.289: {}
 
   picocolors@1.1.1: {}
 

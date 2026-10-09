@@ -232,6 +232,12 @@
     background-color: var(--color-state-hover);
   }
 
+  .ui-thumbnail[aria-current="true"] {
+    box-shadow:
+      var(--shadow-thumbnail),
+      0 0 0 2px var(--color-fg-1);
+  }
+
   .ui-thumbnail[data-pressed] {
     scale: 0.97;
     transition-duration: var(--dur-press);

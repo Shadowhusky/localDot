@@ -170,11 +170,14 @@ export const SafeMarkdown = memo(function SafeMarkdown({
   text,
   streaming = false,
   announce,
+  shortened = "Message preview shortened.",
 }: {
   text: string;
   // The message is still arriving.
   streaming?: boolean;
   announce?(text: string): void;
+  // Said under text too long to show whole.
+  shortened?: string;
 }) {
   const settled = useSettledText(text, streaming);
   const parsed = useMemo(() => parseMarkdown(settled), [settled]);
@@ -183,7 +186,7 @@ export const SafeMarkdown = memo(function SafeMarkdown({
       {parsed.blocks.map((node, index) => (
         <MarkdownBlock key={index} node={node} announce={announce} />
       ))}
-      {parsed.truncated && <p className="thread-note">Message preview shortened.</p>}
+      {parsed.truncated && <p className="thread-note">{shortened}</p>}
     </div>
   );
 });

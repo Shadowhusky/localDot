@@ -282,6 +282,10 @@
     border-radius: var(--radius-xl);
   }
 
+  .ui-sheet[data-side="inspector"][data-size="wide"] {
+    width: 1120px;
+  }
+
   /* The surface runs on below the screen's edge, so a spring that overshoots never shows a gap.
      Detents: fit hugs its content; medium leaves the stage in view (top 238); large covers all but
      the top 40 and pushes the page back. Holding both, it is sized for large and rests in medium
@@ -599,8 +603,20 @@
     padding-inline-start: calc(var(--spacing) * 3);
   }
 
+  .ui-sheet[data-flush] .ui-sheet-body {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding: 0;
+    scrollbar-gutter: auto;
+  }
+
   .ui-sheet[data-side="bottom"] .ui-sheet-main:last-child > .ui-sheet-body {
     padding-bottom: calc(var(--spacing) * 5 + env(safe-area-inset-bottom));
+  }
+
+  .ui-sheet[data-side="bottom"][data-flush] .ui-sheet-main:last-child > .ui-sheet-body {
+    padding-bottom: 0;
   }
 
   .ui-sheet-sidebar {

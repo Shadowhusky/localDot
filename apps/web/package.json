@@ -21,6 +21,7 @@
     "@localdot/stage": "workspace:*",
     "clsx": "2.1.1",
     "mediabunny": "1.61.0",
+    "pdfjs-dist": "6.3.289",
     "pixi.js": "8.21.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
