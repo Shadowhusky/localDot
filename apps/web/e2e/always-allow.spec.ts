@@ -1,4 +1,6 @@
 import { type Browser, expect, type Page, test } from "@playwright/test";
+import { reach } from "./reach.ts";
+import { openSettings } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // "Always allow" on a real approval card from the fixture daemon: the card offers this task and
@@ -49,7 +51,8 @@ async function requestSend(page: Page, origin: string) {
 async function allow(page: Page, scope: string, phone: boolean) {
   const trigger = page.getByRole("combobox", { name: "How long this answer lasts" });
   if (phone) {
-    expect((await trigger.boundingBox())?.height).toBeGreaterThanOrEqual(44);
+    // An inline pop-up draws as text and takes a finger past its edge.
+    expect(await trigger.evaluate(reach)).toEqual({ width: 44, height: 44 });
     await trigger.tap();
   } else await trigger.click();
   const option = page.getByRole("option", { name: scope });
@@ -94,8 +97,11 @@ for (const size of SIZES)
         { actionClass: "send", scope: "site", site: "https://mail.example.test" },
       ]);
 
-      await press(page, "Settings", size.phone);
-      const sheet = page.getByRole("dialog", { name: "Settings", exact: true });
+      const sheet = await openSettings(
+        page,
+        (target) => (size.phone ? target.tap() : target.click()),
+        "Always allow",
+      );
       const list = sheet.getByRole("list", { name: "Always allowed" });
       await expect(list.getByRole("listitem")).toHaveText([
         "Send as youOn mail.example.testRemove",

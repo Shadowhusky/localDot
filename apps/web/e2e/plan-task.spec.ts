@@ -1,5 +1,6 @@
 import { type Browser, type BrowserContext, expect, type Locator, test } from "@playwright/test";
-import { roleCard, settingsSheet } from "./settings-ui.ts";
+import { showActivity } from "./layout.ts";
+import { closeSettings, openSettings, roleCard } from "./settings-ui.ts";
 import { ENGINES, startUiFixture, TOKEN, type UiFixture } from "./ui-fixture.ts";
 
 // A task on a flat-rate plan, through the daemon's real bindings: no per-token price, no dollar
@@ -52,25 +53,28 @@ for (const run of runs) {
       const press = (l: Locator) => (run.phone ? l.tap() : l.click());
       await page.goto(`${fixture.origin}/#token=${TOKEN}`);
 
-      await press(page.getByRole("button", { name: "Settings", exact: true }));
-      const sheet = settingsSheet(page);
+      const sheet = await openSettings(page, press, "Models");
       const main = roleCard(sheet, "main");
       await expect(main.getByRole("combobox", { name: "Provider", exact: true })).toHaveText(
         "MiniMax Token Plan",
       );
+      await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
+      // A phone shows one section at a time: back to the list, then into Spending.
+      if (run.phone) {
+        await press(sheet.getByRole("button", { name: "Settings", exact: true }));
+        await press(sheet.getByRole("button", { name: /^Spending/ }));
+      }
       await expect(
         sheet
           .getByRole("region", { name: "Spending" })
           .getByText("Your plan's own limits apply, so no limit is needed."),
       ).toBeAttached();
-      await expect(main.getByRole("textbox", { name: "Input price" })).toHaveCount(0);
       await expect(sheet.getByRole("switch", { name: "Spending limit" })).toHaveCount(0);
-      await press(sheet.getByRole("button", { name: "Close settings" }));
+      await closeSettings(page);
 
-      if (run.phone) await press(page.getByRole("tab", { name: "Conversation", exact: true }));
       await page.getByLabel("New task").fill("Tidy the sample folder.");
       await press(page.getByRole("button", { name: "Start task", exact: true }));
-      if (run.phone) await press(page.getByRole("tab", { name: "Activity", exact: true }));
+      await showActivity(page);
       await press(page.getByRole("button", { name: /^Usage:/ }));
       const usage = page.getByRole("region", { name: "Task usage" });
       await expect(usage).toContainText("MainMiniMax-M3");

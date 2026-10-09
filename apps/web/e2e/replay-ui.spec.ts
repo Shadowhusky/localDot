@@ -5,6 +5,7 @@ import { expect, type Locator, type Page, test } from "@playwright/test";
 import sharp from "sharp";
 import type { RunningDaemon } from "./daemon.ts";
 import { type SeededHome, seedHome, startReplayDaemon } from "./seed.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 let daemon: RunningDaemon | undefined;
 let directory: string | undefined;
@@ -62,6 +63,8 @@ async function screenshot(page: Page, name: string): Promise<void> {
 const position = async (page: Page) =>
   Number(await page.getByRole("slider", { name: "Replay timeline" }).getAttribute("aria-valuenow"));
 
+// The real daemon starts with no model; what is under first-run setup is what these check.
+test.beforeEach(({ page }) => skipSetup(page));
 test("plays, scrubs and steps through a seeded session", async ({ page }) => {
   await openReplay(page);
   await page.getByRole("combobox", { name: "Playback speed" }).click();

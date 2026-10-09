@@ -11,6 +11,18 @@ export async function showActivity(page: Page) {
   return page.getByRole("complementary", { name: "Plan and steps" });
 }
 
+// Back to the chat: the rail's first view, or the thread under a phone's Activity sheet.
+export async function showChat(page: Page) {
+  if (isPhone(page)) {
+    const sheet = page.getByRole("dialog", { name: "Activity" });
+    if (await sheet.isVisible()) {
+      await sheet.getByRole("button", { name: "Done", exact: true }).click();
+      await expect(sheet).toBeHidden();
+    }
+  } else await page.getByRole("radio", { name: "Chat", exact: true }).click();
+  return page.getByRole("complementary", { name: "Conversation" });
+}
+
 // The page fits the screen, and the island's Shut down takes a finger without scrolling.
 export async function fits(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);

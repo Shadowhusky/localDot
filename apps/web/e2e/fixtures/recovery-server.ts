@@ -31,6 +31,8 @@ import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
 import { attachUpgradeRouter } from "../../../daemon/src/upgrade-router.ts";
+import { isPhone } from "../layout.ts";
+import { skipSetup } from "../skip-setup.ts";
 
 // Actual production page/CSP, authenticated daemon routes, journal, manual lease and kill
 // switch. Docker/keyd/native desktop are isolated stand-ins; no account or model is used.
@@ -507,12 +509,15 @@ export async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
     external: string[] = [],
     csp: string[] = [];
   page.on("pageerror", (error) => errors.push(error.message));
+  await skipSetup(page);
   if (f.nativeSockets)
     page.on("websocket", (socket) => {
       const url = new URL(socket.url());
       if (
         url.origin.replace(/^ws/, "http") !== f.origin ||
-        ![`/api/cells/${f.cellId}/status`, `/api/sessions/${f.id}/stream`].includes(url.pathname)
+        ![`/api/cells/${f.cellId}/status`, `/api/sessions/${f.id}/stream`, "/api/events"].includes(
+          url.pathname,
+        )
       )
         external.push("Unexpected native socket");
     });
@@ -538,7 +543,8 @@ export async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
           if (id === f.id) ws.send(JSON.stringify(event));
         });
         ws.onClose(unsubscribe);
-      } else throw new Error("Unexpected owned socket");
+        // The app-wide events socket (routines, attention) stays open and quiet.
+      } else if (url.pathname !== "/api/events") throw new Error("Unexpected owned socket");
     });
   await page.addInitScript(() => {
     localStorage.setItem("localdot.token", "a".repeat(43));
@@ -556,7 +562,13 @@ export async function load(page: Page, f: Awaited<ReturnType<typeof fixture>>) {
   expect(response?.headers()["content-security-policy"]).toContain("default-src 'self'");
   expect(response?.headers()["content-security-policy"]).not.toContain("unsafe-");
   try {
-    await expect(page.locator(".title")).toHaveText("Sample · questions and manual control");
+    // A phone has no top bar; its thread shows instead.
+    if (isPhone(page))
+      await expect(
+        page.getByRole("region", { name: "Conversation history" }).locator(".thread-row").first(),
+      ).toBeVisible();
+    else
+      await expect(page.locator(".bar-title")).toHaveText("Sample · questions and manual control");
   } catch (error) {
     throw new Error(
       `Owned page did not load: ${JSON.stringify({ errors, external, dom: (await page.locator("body").innerText()).slice(0, 2000) })}`,

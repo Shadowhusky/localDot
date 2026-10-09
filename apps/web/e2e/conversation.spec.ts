@@ -44,8 +44,6 @@ async function open(
   const context = await browser.newContext(options);
   const page = await context.newPage();
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  if ((options.viewport?.width ?? 0) < 1100)
-    await page.getByRole("tab", { name: /^Conversation/ }).click();
   const thread = page.getByRole("region", { name: "Conversation history" });
   await expect(thread.locator(".thread-row").first()).toBeVisible();
   return { browser, page, thread };
@@ -55,7 +53,7 @@ const qa = (path: string) => fetch(`${fixture?.origin}/__qa/${path}`, { method: 
 
 function scrollers(page: Page) {
   return page.evaluate(() =>
-    [...document.querySelectorAll(".pane-conversation *")]
+    [...document.querySelectorAll(".rail-chat *")]
       .filter((element) => {
         const { overflowY } = getComputedStyle(element);
         return /auto|scroll/.test(overflowY) && element.scrollHeight > element.clientHeight + 1;
@@ -143,7 +141,7 @@ for (const [engine, size, options] of MATRIX) {
     const { browser, page, thread } = await open(engine, options);
     const work = page.locator(".thread-live .thread-work");
     await expect(work).toContainText("Select the Net total cell");
-    await expect(work.getByRole("button", { name: /^Working · 6 steps/ })).toBeVisible();
+    await expect(work.getByRole("button", { name: /Working · 6 steps/ })).toBeVisible();
     // Long enough to scroll, the thread is still the only thing in the column that does.
     await qa("say?n=12&text=Checking that each month adds up");
     await expect(thread.locator(".thread-row")).toHaveCount(14);
@@ -151,10 +149,10 @@ for (const [engine, size, options] of MATRIX) {
     // The thread keeps saying what dot does as it moves on.
     await qa("steps?n=1&item=calc");
     await expect(work).toContainText("Fill area 1 with brown");
-    await expect(work.getByRole("button", { name: /^Working · 7 steps/ })).toBeVisible();
-    // You in a bubble, dot under its name once.
+    await expect(work.getByRole("button", { name: /Working · 7 steps/ })).toBeVisible();
+    // You in a bubble; dot's words go unbubbled, under no name of their own.
     await expect(thread.locator(".thread-bubble").first()).toContainText("Summarise the sample");
-    await expect(thread.locator(".thread-who")).toHaveCount(1);
+    await expect(thread.locator(".thread-message[data-role=dot] .thread-bubble")).toHaveCount(0);
     await browser.close();
   });
 
@@ -185,7 +183,7 @@ for (const [engine, size, options] of MATRIX) {
     await expect(card).toContainText("Sample monthly report prepared.");
     await expect(card.getByRole("button", { name: "Download summary.md" })).toBeVisible();
     await expect(card.getByRole("button", { name: "Download all 2 files" })).toBeVisible();
-    await expect(thread.getByRole("button", { name: /^Worked for/ })).toBeVisible();
+    await expect(thread.getByRole("button", { name: /Worked for/ })).toBeVisible();
     await expect(
       page
         .getByRole("complementary", { name: "Plan and steps", includeHidden: true })
@@ -281,7 +279,7 @@ for (const [engine, size, options] of [
     // Only the composer lies past it, so there is nothing newer to jump to.
     await expect(page.locator(".thread-jump")).not.toHaveAttribute("data-shown");
     await expect(
-      page.locator(".thread-live").getByRole("button", { name: /^Paused · 6 steps/ }),
+      page.locator(".thread-live").getByRole("button", { name: /Paused · 6 steps/ }),
     ).toBeVisible();
     await raise.click();
     await expect(recovery).toHaveCount(0);

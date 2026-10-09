@@ -1,5 +1,6 @@
 import { type BrowserContextOptions, expect, type Page, test } from "@playwright/test";
 import { startUiFixture, TOKEN, type UiFixture } from "./fixtures/start-ui-fixture.ts";
+import { showActivity } from "./layout.ts";
 import { ENGINES } from "./ui-fixture.ts";
 
 // The Activity rail against the fixture daemon's long hand-drawing task: one scroller, the live
@@ -32,18 +33,17 @@ async function open(engine: keyof typeof ENGINES, options: BrowserContextOptions
   const context = await browser.newContext(options);
   const page = await context.newPage();
   await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-  if ((options.viewport?.width ?? 0) < 1100)
-    await page.getByRole("tab", { name: "Activity", exact: true }).click();
-  const rail = page.getByRole("complementary", { name: "Plan and steps" });
+  const rail = await showActivity(page);
   await expect(rail.locator("[data-current]")).toHaveCount(1);
   return { browser, page, rail };
 }
 
 const qa = (path: string) => fetch(`${fixture?.origin}/__qa/${path}`, { method: "POST" });
 
+// What scrolls inside Activity, a view of the rail or a phone's sheet.
 function scrollers(page: Page) {
   return page.evaluate(() =>
-    [...document.querySelectorAll(".pane-activity *")]
+    [...document.querySelectorAll("[aria-label='Plan and steps'] *")]
       .filter((element) => {
         const { overflowY } = getComputedStyle(element);
         return /auto|scroll/.test(overflowY) && element.scrollHeight > element.clientHeight + 1;
@@ -223,8 +223,7 @@ for (const [engine, size, options] of [
       });
     });
     await page.goto(`${fixture.origin}/#token=${TOKEN}`);
-    if (size === "phone") await page.getByRole("tab", { name: "Activity", exact: true }).click();
-    const rail = page.getByRole("complementary", { name: "Plan and steps" });
+    const rail = await showActivity(page);
     await expect(rail.getByTestId("download-row")).toHaveCount(10);
     await expect(rail.getByText("Plan and steps appear here once dot starts.")).toBeVisible();
     expect(await scrollers(page)).toEqual(["ui-scroll-area activity-scroll"]);
@@ -249,7 +248,11 @@ test("steps arriving while the reader follows shift nothing in the rail (chrome)
         value: number;
         sources: { node?: Node }[];
       })[])
-        if (entry.sources.some((source) => source.node?.parentElement?.closest(".pane-activity")))
+        if (
+          entry.sources.some((source) =>
+            source.node?.parentElement?.closest("[aria-label='Plan and steps']"),
+          )
+        )
           shifts.push(entry.value);
     }).observe({ type: "layout-shift" });
   });
@@ -270,7 +273,10 @@ test("a replay's steps are plain rows, not boxed buttons (chrome)", async () => 
   const browser = await ENGINES.chrome();
   const page = await (await browser.newContext(DESKTOP)).newPage();
   await page.goto(`${fixture.origin}/?replay=${fixture.seeded[0]}#token=${TOKEN}`);
-  const head = page.locator(".replay-house .activity-row-head").first();
+  const head = page
+    .getByRole("complementary", { name: "Recording" })
+    .locator(".activity-row-head")
+    .first();
   await expect(head).toBeVisible();
   expect(
     await head.evaluate((element) => {

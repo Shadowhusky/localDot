@@ -6,6 +6,7 @@ import { expect, type Page, test } from "@playwright/test";
 import type { ReplayDebugHook } from "../src/stage/debug-hooks.ts";
 import type { RunningDaemon } from "./daemon.ts";
 import { type SeededHome, seedHome, startReplayDaemon } from "./seed.ts";
+import { skipSetup } from "./skip-setup.ts";
 
 type Hook = ReplayDebugHook;
 let daemon: RunningDaemon | undefined;
@@ -55,6 +56,8 @@ const probe = (page: Page, command: Parameters<Hook["probe"]>[0]) =>
     return hook.probe(command);
   }, command);
 
+// The real daemon starts with no model; what is under first-run setup is what these check.
+test.beforeEach(({ page }) => skipSetup(page));
 test("shows the frame on screen at any scrubbed time (Review Focus 1)", async ({ page }) => {
   await openReplay(page, shortSession.seed.sessionId);
   const { frames, synth } = shortSession.seed;

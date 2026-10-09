@@ -2,6 +2,8 @@ import { writeFileSync } from "node:fs";
 import { ulid } from "@localdot/protocol";
 import { expect, type Page, type TestInfo, test } from "@playwright/test";
 import { fixture, load, proof } from "./fixtures/recovery-server.ts";
+import { showActivity, showChat } from "./layout.ts";
+import { settingsSheet } from "./settings-ui.ts";
 
 test.setTimeout(60_000);
 
@@ -76,7 +78,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
       document.addEventListener(
         "click",
         (event) => {
-          if ((event.target as Element | null)?.closest("button")?.textContent?.trim() === "Stop")
+          if ((event.target as Element | null)?.closest("[data-testid=hud-stop-session]"))
             timing.clickAt = performance.now();
         },
         true,
@@ -93,9 +95,6 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     await expect(page.locator("article.thread-message").last()).toContainText(
       "Recorded message 5000",
     );
-    await expect(page.getByTestId("tool-row").last()).toContainText("Replay command 5000");
-    const initial = await counts(page);
-    expect(initial).toEqual({ messages: 200, steps: 100, outputViewers: 0 });
     expect(
       await page.locator(".thread-scroll").evaluate((element) => element.clientHeight),
     ).toBeGreaterThanOrEqual(160);
@@ -103,6 +102,12 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     await expect(
       page.getByText("Keep the recorded report?", { exact: true }).first(),
     ).toBeVisible();
+    // Activity is the rail's other view at this width; the thread stays mounted under it.
+    await showActivity(page);
+    await expect(page.getByTestId("tool-row").last()).toContainText("Replay command 5000");
+    const initial = await counts(page);
+    // The thread opens on its newest 40 rows (OPENING_ROWS), Activity on its newest 100 steps.
+    expect(initial).toEqual({ messages: 40, steps: 100, outputViewers: 0 });
     const activityPane = page
       .getByRole("complementary", { name: "Plan and steps" })
       .locator(".activity-scroll");
@@ -136,7 +141,8 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     expect((await counts(page)).steps).toBe(100);
     await page.getByRole("button", { name: "Newer steps", exact: true }).click();
     await expect(page.getByTestId("tool-row").last()).toContainText("New Activity marker");
-    await page.getByRole("button", { name: "Older messages", exact: true }).focus();
+    await showChat(page);
+    await page.getByRole("button", { name: "Show earlier messages", exact: true }).focus();
     await page.keyboard.press("Enter");
     const text = page.locator(".thread-message :is(.thread-bubble, .safe-markdown p)");
     const selected = await text.first().textContent();
@@ -169,6 +175,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
     await expect(page.locator("article.thread-message").last()).toContainText(
       "New live history marker",
     );
+    await showActivity(page);
     const outputRow = page.getByRole("button", { name: /Replay command 5000/ });
     await outputRow.click();
     await expect(page.getByRole("region", { name: "Command output", exact: true })).toContainText(
@@ -202,7 +209,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
       fullPage: true,
     });
     const stopReplay = p.replay();
-    await page.getByRole("button", { name: "Stop", exact: true }).first().click();
+    await page.getByTestId("hud-stop-session").click();
     await expect.poll(() => f.effects.includes("pause")).toBe(true);
     const timing = await page.evaluate(
       () =>
@@ -243,7 +250,7 @@ test("10,000 mixed rows stay bounded through replay, explicit history reading an
 });
 
 for (const width of [390, 640])
-  test(`keyboard panes and history controls at ${width}px${width === 640 ? " (200-percent desktop zoom layout)" : " phone"}`, async ({
+  test(`keyboard toolbar and history controls at ${width}px${width === 640 ? " (200-percent desktop zoom layout)" : " phone"}`, async ({
     browser,
   }, info) => {
     const context = await browser.newContext({
@@ -256,23 +263,18 @@ for (const width of [390, 640])
     try {
       await seed(f, 600);
       const p = await load(page, f);
-      const conversation = page.getByRole("tab", { name: /^Conversation/ });
-      await conversation.focus();
-      await page.keyboard.press("ArrowRight");
-      await expect(page.getByRole("tab", { name: "Computer", exact: true })).toBeFocused();
-      await expect(page.getByRole("tabpanel", { name: "Computer", exact: true })).toHaveAttribute(
-        "data-selected",
-        "true",
-      );
-      await page.keyboard.press("ArrowRight");
-      await expect(page.getByRole("tab", { name: "Activity", exact: true })).toBeFocused();
-      await page.getByRole("button", { name: "Older steps", exact: true }).focus();
+      // A phone's toolbar: Activity opens its sheet, whose own pages step through older steps.
+      const activity = page.getByRole("button", { name: "Activity", exact: true });
+      await activity.focus();
       await page.keyboard.press("Enter");
-      await expect(page.getByTestId("tool-row").first()).toContainText("Replay command 101");
-      await page.getByRole("tab", { name: "Activity", exact: true }).focus();
-      await page.keyboard.press("Home");
-      await expect(conversation).toBeFocused();
-      await page.getByRole("button", { name: "Older messages", exact: true }).focus();
+      const sheet = page.getByRole("dialog", { name: "Activity" });
+      await sheet.getByRole("button", { name: "Older steps", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await expect(sheet.getByTestId("tool-row").first()).toContainText("Replay command 101");
+      await page.keyboard.press("Escape");
+      await expect(sheet).toBeHidden();
+      await expect(activity).toBeFocused();
+      await page.getByRole("button", { name: "Show earlier messages", exact: true }).focus();
       await page.keyboard.press("Enter");
       await expect(page.locator("article.thread-message").first()).toContainText(
         "Recorded message",
@@ -297,20 +299,20 @@ for (const width of [390, 640])
       expect(checkBox?.y).toBeGreaterThanOrEqual(0);
       expect((checkBox?.y ?? 850) + (checkBox?.height ?? 44)).toBeLessThanOrEqual(850);
       await expect(page.getByRole("button", { name: "Send answer", exact: true })).toBeDisabled();
-      expect(await page.locator(".hud [role=status]").count()).toBe(1);
-      await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeVisible();
-      await page.getByRole("button", { name: "Settings", exact: true }).focus();
-      await page.keyboard.press("Enter");
-      await expect(page.getByRole("dialog", { name: /settings/i })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Stop", exact: true }).first()).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(page.getByRole("button", { name: "Settings", exact: true })).toBeFocused();
-      await page.getByTestId("keys-button").focus();
-      await page.keyboard.press("Enter");
-      await expect(page.getByRole("dialog", { name: /keys/i })).toBeVisible();
-      await expect(page.getByRole("button", { name: "Stop", exact: true }).first()).toBeVisible();
-      await page.keyboard.press("Escape");
-      await expect(page.getByTestId("keys-button")).toBeFocused();
+      expect(await page.locator(".island [role=status]").count()).toBe(1);
+      // Settings and Keys open from More, over the page, and give the focus back to it.
+      const more = page.getByRole("button", { name: "More", exact: true });
+      for (const item of ["Settings", "Keys"]) {
+        await more.focus();
+        await page.keyboard.press("Enter");
+        await page.getByRole("menuitem", { name: item, exact: true }).focus();
+        await page.keyboard.press("Enter");
+        await expect(settingsSheet(page)).toBeVisible();
+        await expect(page.getByTestId("hud-stop-session")).toBeVisible();
+        await page.keyboard.press("Escape");
+        await expect(settingsSheet(page)).toBeHidden();
+        await expect(more).toBeFocused();
+      }
       await proof(page, p.errors, p.external);
       await attachEvidence(info, "accessibility-layout.json", {
         body: JSON.stringify(
@@ -318,7 +320,7 @@ for (const width of [390, 640])
             chrome: browser.version(),
             width,
             dpr: 2,
-            paneKeyboardTraversal: true,
+            toolbarKeyboardTraversal: true,
             explicitHistoryKeyboardNavigation: true,
             settingsKeysEscapeReturn: true,
             stopVisible: true,
