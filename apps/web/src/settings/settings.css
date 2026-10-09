@@ -383,7 +383,8 @@
   height: calc(var(--spacing) * 4);
 }
 
-/* Notifications: a Mac and a Phone column of switches, their heads above the switches. */
+/* Notifications: a Mac and a Phone column of switches, each head centred over its switch. A
+   switch with a hidden label keeps the kit's gap before it, so each head takes that gap too. */
 .settings-notify-columns {
   display: flex;
   gap: calc(var(--spacing) * 1.5);
@@ -394,21 +395,10 @@
     var(--font-ui);
 }
 
-.settings-notify-columns > span,
-.settings-notify-switch {
-  width: calc(var(--spacing) * 11);
+.settings-notify-columns > span {
+  width: 38px;
+  margin-left: calc(var(--spacing) * 3);
   text-align: center;
-}
-
-.settings-notify-switch.ui-choice {
-  justify-content: center;
-  gap: 0;
-  min-height: calc(var(--spacing) * 11);
-  padding-block: 0;
-}
-
-.settings-notify-switch .ui-choice-text {
-  flex: none;
 }
 
 .settings-notify-result {

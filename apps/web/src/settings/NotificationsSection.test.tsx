@@ -34,9 +34,7 @@ describe("Settings › Notifications", () => {
   it("shows this Mac's line and one switch per event and channel", async () => {
     setup();
     expect(
-      await screen.findByText(
-        "This Mac gets notifications from localDot itself, even with no tab open.",
-      ),
+      await screen.findByText("Notifications come from localDot itself, even with no tab open."),
     ).toBeTruthy();
     for (const label of ["Needs you", "Done", "Failed", "Routine results"]) {
       expect(screen.getByRole("switch", { name: `${label} on this Mac` })).toBeTruthy();

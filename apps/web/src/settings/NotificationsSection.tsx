@@ -128,13 +128,11 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
               trailing={
                 <>
                   <Switch
-                    className="settings-notify-switch"
                     label={<VisuallyHidden>{`${row.label} on this Mac`}</VisuallyHidden>}
                     checked={s.events[row.event].mac}
                     onCheckedChange={(on) => channel(row.event, "mac", on)}
                   />
                   <Switch
-                    className="settings-notify-switch"
                     label={<VisuallyHidden>{`${row.label} on phones`}</VisuallyHidden>}
                     checked={s.events[row.event].phone}
                     onCheckedChange={(on) => channel(row.event, "phone", on)}
@@ -180,7 +178,7 @@ export function NotificationsSection({ view }: { view: NotificationsView }) {
             onCheckedChange={(showTaskText) => save({ showTaskText })}
           />
         </Group>
-        <GroupNote>dot's own words never leave your Mac in a notification.</GroupNote>
+        <GroupNote>What dot writes never goes into a notification.</GroupNote>
       </div>
 
       {view.devices.length > 0 && (

@@ -3,9 +3,9 @@ import { ApiError } from "../lib/api.ts";
 import type { DeviceState } from "../notify/this-device.ts";
 
 export const EVENT_ROWS: readonly { event: NotifyEvent; label: string; description: string }[] = [
-  { event: "needs_you", label: "Needs you", description: "Questions, approvals and take-overs" },
+  { event: "needs_you", label: "Needs you", description: "When dot waits for you" },
   { event: "done", label: "Done", description: "A task finished" },
-  { event: "failed", label: "Failed", description: "Also when a task stops at its budget" },
+  { event: "failed", label: "Failed", description: "Including budget pauses" },
   { event: "routine", label: "Routine results", description: "When a routine has something" },
 ];
 
@@ -18,7 +18,7 @@ export function deviceCopy(state: DeviceState): { line: string; action: DeviceAc
   switch (state.kind) {
     case "this-mac":
       return {
-        line: "This Mac gets notifications from localDot itself, even with no tab open.",
+        line: "Notifications come from localDot itself, even with no tab open.",
         action: null,
       };
     case "needs-https":
