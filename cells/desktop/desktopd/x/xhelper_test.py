@@ -811,6 +811,21 @@ class Cancel(unittest.TestCase):
         self.assertEqual(cmds.cmd_held({}), {"buttons": []})
         self.assertNotIn(X.ButtonRelease, [k for k, _ in kb.events])
 
+    def test_held_forgets_a_button_the_server_let_go_of_and_lets_go_of_its_modifiers(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1, "mods": [0xffe3]})
+        cmds.cmd_move({"x": 300, "y": 400})
+        kb.buttons.discard(1)
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_held({}), {"buttons": []})
+        self.assertEqual(kb.events, [(X.KeyRelease, 37)])
+        self.assertEqual((cmds.buttons, cmds.button_mods, cmds.buttons_until, cmds.button_at),
+                         ([], [], None, None))
+        # Nothing is left to cancel with Escape, and the button can go down again.
+        cmds.cmd_release_all({})
+        self.assertNotIn((X.KeyPress, 9), kb.events)
+        self.assertEqual(cmds.cmd_down({"x": 1, "y": 2, "button": 1}), {"button": 1})
+
     def test_a_scroll_while_held_keeps_the_button_down_as_long_as_a_move(self):
         cmds, kb = keyboard()
         cmds.cmd_down({"x": 10, "y": 20, "button": 1})

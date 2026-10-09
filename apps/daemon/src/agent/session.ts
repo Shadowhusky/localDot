@@ -311,9 +311,9 @@ export class AgentSession {
     if (this.#repeatPauseHandler) throw new Error("task safety controller already installed");
     this.#repeatPauseHandler = handler;
   }
-  // A button the agent left down is let go of before the user gets the screen, and when the task
-  // stops, ends, pauses, switches screens or replaces its brain; settlement waits for that. One
-  // pressed as any of those began is let go of at once.
+  // A button the agent left down is let go of (and a cursor it placed is forgotten) before the user
+  // gets the screen, and when the task stops, ends, pauses, switches screens or replaces its brain;
+  // settlement waits for that. One pressed as any of those began is let go of at once.
   holdInput(release: () => Promise<void>): () => void {
     this.#held.add(release);
     if (this.stopped || !this.#brain || this.#control || this.safetyPause) void this.releaseInput();

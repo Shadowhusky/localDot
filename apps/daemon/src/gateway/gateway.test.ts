@@ -1702,6 +1702,101 @@ describe("ActionGateway drags, moves and held buttons", () => {
     }
   });
 
+  it("lets go of a held button 60 s after its last pointer action, whatever keys came between", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    try {
+      const s = setup({ hitTest: desk }, { heldButtonMs: 60_000 });
+      const releases = () => s.fake.calls.filter((c) => c.path === "/release");
+      const pass = async (ms: number) => {
+        s.clock.advance(msToMicros(ms));
+        await vi.advanceTimersByTimeAsync(ms);
+      };
+      const { ctx } = agentCtx(s);
+      await s.gateway.run(ctx, { verb: "down", point: { x: 10, y: 10 } });
+      await pass(50_000);
+      expect((await s.gateway.run(ctx, { verb: "key", combo: ["shift"] })).ok).toBe(true);
+      await pass(9_000);
+      expect(releases()).toEqual([]);
+      await pass(1_000);
+      expect(releases()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("puts off desktopd's own let-go as soon as a card opens while a button is held", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
+    try {
+      const s = setup({ hitTest: desk }, { heldButtonMs: 60_000 });
+      // desktopd lets go 90 s after the press or the last /held, and says so from then on.
+      let t = 0;
+      let refreshed = 0;
+      let down = true;
+      s.fake.script.held = () => {
+        if (t - refreshed > 90_000) down = false;
+        if (down) refreshed = t;
+        return { buttons: down ? [1] : [] };
+      };
+      const pass = async (ms: number) => {
+        for (let i = 0; i < ms; i += 1000) {
+          t += 1000;
+          s.clock.advance(msToMicros(1000));
+          await vi.advanceTimersByTimeAsync(1000);
+        }
+      };
+      const { ctx } = agentCtx(s);
+      await s.gateway.run(ctx, { verb: "down", point: { x: 10, y: 10 } });
+      await pass(30_000);
+      expect((await s.gateway.run(ctx, { verb: "key", combo: ["shift"] })).ok).toBe(true);
+      // A held move denied at once, then one whose card stays open two minutes.
+      await pass(29_000);
+      ctx.authorizeAgent.mockImplementationOnce(async () => undefined);
+      expect((await s.gateway.run(ctx, { verb: "move", point: { x: 300, y: 300 } })).ok).toBe(
+        false,
+      );
+      await pass(41_000);
+      let answer!: (permit: { consume(): boolean } | undefined) => void;
+      ctx.authorizeAgent.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            answer = resolve;
+          }),
+      );
+      const move = s.gateway.run(ctx, { verb: "move", point: { x: 600, y: 300 } });
+      await vi.waitFor(() => expect(answer).toBeDefined());
+      await pass(120_000);
+      answer({ consume: () => true });
+      expect((await move).ok).toBe(true);
+      expect(down).toBe(true);
+      expect(s.fake.calls.filter((c) => c.path === "/release")).toEqual([]);
+      expect(inputs(s).map((i) => i.input.kind)).toEqual(["down", "key", "move"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("asks desktopd about the button it holds, and records it coming up when it is no longer down", async () => {
+    const s = setup({ hitTest: desk, held: () => ({ buttons: [1] }) });
+    const { ctx } = agentCtx(s);
+    await s.gateway.run(ctx, { verb: "down", point: { x: 100, y: 200 }, button: "right" });
+    expect(await s.gateway.run(ctx, { verb: "move", point: { x: 600, y: 300 } })).toMatchObject({
+      ok: false,
+      cancelled: "preflight",
+      error: "the right button is no longer down",
+    });
+    const intent = s.ofType("action.intent").at(-1);
+    expect(intent?.data).toMatchObject({ label: "The right button came up" });
+    expect(s.ofType("action.dispatch").at(-1)?.data.input).toEqual({
+      kind: "up",
+      button: "right",
+      at: { x: 200, y: 400 },
+    });
+    expect(inputs(s).map((i) => i.input.kind)).toEqual(["down"]);
+    // The gateway forgot it: a hover is no drag, and a press goes through.
+    expect((await s.gateway.run(ctx, { verb: "move", point: { x: 600, y: 300 } })).ok).toBe(true);
+    expect((await s.gateway.run(ctx, { verb: "down" })).ok).toBe(true);
+  });
+
   it("goes on with a held move when desktopd cannot say which buttons are down", async () => {
     const s = setup({ hitTest: desk, held: () => ({ status: 404, body: "not found" }) });
     const { ctx } = agentCtx(s);

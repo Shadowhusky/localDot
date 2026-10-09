@@ -5,6 +5,7 @@ import {
   type Input,
   type InputResult,
   microsToMs,
+  msToMicros,
   type Point,
   type Rect,
   type Target,
@@ -168,8 +169,9 @@ export interface ActionContext {
   beforeEffect?(action: GuiAction, identity: NativeActionIdentity): boolean;
   // The outcome of the input beforeEffect admitted, once it settled: whether the screen changed.
   afterEffect?(action: GuiAction, identity: NativeActionIdentity, changed: boolean): void;
-  // Private daemon callback: a button now stays down past this action. The owner calls `release`
-  // before anyone else gets the screen; the returned function forgets it once it is up.
+  // Private daemon callback: input state outlives this action (a button left down, a cursor placed
+  // for the next press). The owner calls `release` before anyone else gets the screen; the
+  // returned function forgets it once it is gone.
   holdInput?(release: () => Promise<void>): () => void;
   sessionId: string;
   cellId: string;
@@ -234,6 +236,7 @@ interface Placed {
   agent: string;
   basedOn: string;
   point: Point;
+  forget?: () => void;
 }
 
 interface HeldButton {
@@ -242,8 +245,9 @@ interface HeldButton {
   // Where it went down and what was there: a move or a release while it is down drags from it.
   press: NativeActionIdentity;
   owner: Pick<ActionContext, "sessionId" | "agent" | "redact">;
-  // None runs while an approval waits.
+  // None runs while an approval waits; `due` is when it lets go, in daemon time.
   timer?: NodeJS.Timeout;
+  due: number;
   forget?: () => void;
 }
 
@@ -285,9 +289,29 @@ export class ActionGateway {
     const held = this.#held.get(cellId);
     if (!held) return;
     this.#forget(cellId);
-    const ctx: ActionContext = { ...held.owner, cellId };
+    this.#unplace(cellId);
     const at = this.#cursor.get(cellId) ?? (held.press.point as Point);
     const dragged = at.x !== held.press.point?.x || at.y !== held.press.point?.y;
+    await this.#journalUp(
+      cellId,
+      held,
+      `Release the ${held.button} button${dragged ? ", cancelling the drag" : ""}`,
+      async () => {
+        await held.device.client.release?.();
+      },
+    );
+  }
+
+  // The steps record a held button coming up where the pointer is, once `up` let go of it, or at
+  // once when it is already up.
+  async #journalUp(
+    cellId: string,
+    held: HeldButton,
+    label: string,
+    up?: () => Promise<void>,
+  ): Promise<void> {
+    const ctx: ActionContext = { ...held.owner, cellId };
+    const at = this.#cursor.get(cellId) ?? (held.press.point as Point);
     const journal = (type: string, data: Record<string, unknown>) => {
       try {
         this.#append(ctx, type, data);
@@ -295,14 +319,9 @@ export class ActionGateway {
         // A session that is gone keeps no record; the button still comes up.
       }
     };
-    journal("action.intent", {
-      verb: "click",
-      label: `Release the ${held.button} button${dragged ? ", cancelling the drag" : ""}`,
-      point: at,
-      risk: "none",
-    });
+    journal("action.intent", { verb: "click", label, point: at, risk: "none" });
     try {
-      await held.device.client.release?.();
+      await up?.();
     } catch (error) {
       journal("action.result", { ok: false, error: String(error).slice(0, 500) });
       return;
@@ -315,6 +334,33 @@ export class ActionGateway {
       injector: "xtest",
     });
     journal("action.result", { ok: true });
+  }
+
+  #unplace(cellId: string): void {
+    const placed = this.#placed.get(cellId);
+    if (!placed) return;
+    this.#placed.delete(cellId);
+    placed.forget?.();
+  }
+
+  // Only the very next action may press where this move put the cursor, and only while nobody
+  // else had the screen: its owner forgets it before anyone else gets the screen.
+  #place(ctx: ActionContext, basedOn: string, point: Point): void {
+    this.#unplace(ctx.cellId);
+    const placed: Placed = {
+      sessionId: ctx.sessionId,
+      agent: ctx.agent ?? DEFAULT_AGENT,
+      basedOn,
+      point,
+    };
+    this.#placed.set(ctx.cellId, placed);
+    const forget = ctx.holdInput?.(async () => {
+      if (this.#placed.get(ctx.cellId) === placed) this.#unplace(ctx.cellId);
+    });
+    if (forget) {
+      if (this.#placed.get(ctx.cellId) === placed) placed.forget = forget;
+      else forget();
+    }
   }
 
   #forget(cellId: string): void {
@@ -337,7 +383,7 @@ export class ActionGateway {
       ...(ctx.agent ? { agent: ctx.agent } : {}),
       ...(ctx.redact ? { redact: ctx.redact } : {}),
     };
-    const held: HeldButton = { button, device, press, owner };
+    const held: HeldButton = { button, device, press, owner, due: 0 };
     this.#held.set(ctx.cellId, held);
     this.#touch(ctx.cellId);
     // The owner may let go at once (the task stopped as the button went down): set it first.
@@ -350,35 +396,45 @@ export class ActionGateway {
 
   // Another pointer action while a button is down restarts its time.
   #touch(cellId: string): void {
+    this.#letGoIn(cellId, this.deps.heldButtonMs ?? HELD_BUTTON_MS);
+  }
+
+  #letGoIn(cellId: string, ms: number): void {
     const held = this.#held.get(cellId);
     if (!held) return;
     clearTimeout(held.timer);
-    held.timer = setTimeout(
-      () => void this.releaseHeld(cellId),
-      this.deps.heldButtonMs ?? HELD_BUTTON_MS,
-    );
+    held.due = this.deps.now() + msToMicros(ms);
+    held.timer = setTimeout(() => void this.releaseHeld(cellId), ms);
     held.timer.unref();
   }
 
   // While an approval waits, which can take hours, a held button stays down: its own time stands
-  // still and desktopd's backstop is put off. The returned function starts its time again.
-  #keepHeld(cellId: string): () => void {
+  // still, and desktopd's backstop, which only a pointer input or /held puts off, is put off from
+  // the start and then every 30 s. The returned function starts its time again: afresh for a
+  // pointer action, and with what was left for any other, which is no mouse action.
+  #keepHeld(cellId: string, pointer: boolean): () => void {
     const held = this.#held.get(cellId);
     if (!held) return () => {};
     clearTimeout(held.timer);
     held.timer = undefined;
-    const keep = setInterval(() => {
+    const left = Math.max(0, microsToMs(held.due - this.deps.now()));
+    const putOff = () => {
       if (this.#held.get(cellId) === held) void held.device.client.held?.().catch(() => undefined);
-    }, KEEP_HELD_MS);
+    };
+    putOff();
+    const keep = setInterval(putOff, KEEP_HELD_MS);
     keep.unref();
     return () => {
       clearInterval(keep);
-      if (this.#held.get(cellId) === held) this.#touch(cellId);
+      if (this.#held.get(cellId) !== held) return;
+      if (pointer) this.#touch(cellId);
+      else this.#letGoIn(cellId, left);
     };
   }
 
   // desktopd lets go of a button on its own when nothing reached it for long, or when its helper
-  // restarted: a move, scroll or release that goes on from the press needs it still down.
+  // restarted: a move, scroll or release that goes on from the press needs it still down. One that
+  // is up is forgotten, and the steps say it came up.
   async #confirmHeld(ctx: ActionContext, d: NativeDevice, held: HeldButton): Promise<void> {
     // A desktopd from before /held cannot say.
     const reply = await d.client
@@ -388,7 +444,10 @@ export class ActionGateway {
       );
     this.#check(ctx);
     if (!reply || reply.buttons.includes(BUTTON_NUMBER[held.button])) return;
-    if (this.#held.get(ctx.cellId) === held) this.#forget(ctx.cellId);
+    if (this.#held.get(ctx.cellId) === held) {
+      this.#forget(ctx.cellId);
+      await this.#journalUp(ctx.cellId, held, `The ${held.button} button came up`);
+    }
     throw new Cancelled("preflight", `the ${held.button} button is no longer down`);
   }
 
@@ -452,7 +511,7 @@ export class ActionGateway {
     // Only the very next action may use the move that placed the cursor: any other in between,
     // even a key, may have changed what is under it.
     const placed = this.#placed.get(ctx.cellId);
-    this.#placed.delete(ctx.cellId);
+    this.#unplace(ctx.cellId);
     try {
       this.#check(ctx);
       const scale = ctx.screen?.scale ?? this.deps.cells.get(ctx.cellId)?.scale;
@@ -718,13 +777,7 @@ export class ActionGateway {
         this.#forget(ctx.cellId);
         notDown = res.releaseMono === undefined;
       } else this.#touch(ctx.cellId);
-      if (action.verb === "move" && action.basedOn)
-        this.#placed.set(ctx.cellId, {
-          sessionId: ctx.sessionId,
-          agent: ctx.agent ?? DEFAULT_AGENT,
-          basedOn: action.basedOn,
-          point,
-        });
+      if (action.verb === "move" && action.basedOn) this.#place(ctx, action.basedOn, point);
       const pressT = this.#pressT(ctx, d, res.pressMono);
       const ringAt = await this.deps.ringOnset.onset({
         pressT,
@@ -1138,7 +1191,10 @@ export class ActionGateway {
     if (ctx.source !== "agent" || !ctx.authorizeAgent)
       throw new Cancelled("preflight", "this native action has no admitted owner");
     let changed = false;
-    const resume = this.#keepHeld(ctx.cellId);
+    const resume = this.#keepHeld(
+      ctx.cellId,
+      action.verb !== "key" && action.verb !== "type" && action.verb !== "wait",
+    );
     let permit: NativeActionPermit | undefined;
     try {
       permit = await ctx.authorizeAgent({

@@ -398,6 +398,28 @@ describe("gateway freshness", () => {
       s.clicks().filter((c) => (c.body as { input: { kind: string } }).input.kind === "down"),
     ).toEqual([]);
   });
+  it("checks a press after the move's owner handed the screen over, or once a held button was let go", async () => {
+    const s = await setup();
+    s.setFrames(await png(paint(base(), { x: 620, y: 380, w: 40, h: 40 })));
+    const basedOn = s.basis.frameId;
+    const stale = { ok: false, cancelled: "stale" };
+    let release: (() => Promise<void>) | undefined;
+    const ctx = {
+      ...s.ctx,
+      holdInput: (r: () => Promise<void>) => {
+        release = r;
+        return () => {};
+      },
+    };
+    await s.gateway.run(ctx, { verb: "move", point, basedOn });
+    await release?.();
+    expect(await s.gateway.run(ctx, { verb: "down", basedOn })).toMatchObject(stale);
+    // A held button let go of with Escape (its time ran out, or the task stopped).
+    await s.gateway.run(ctx, { verb: "down", point: { x: 100, y: 100 } });
+    await s.gateway.run(ctx, { verb: "move", point, basedOn });
+    await s.gateway.releaseHeld(ctx.cellId);
+    expect(await s.gateway.run(ctx, { verb: "down", basedOn })).toMatchObject(stale);
+  });
   it("checks a drag's start against the screenshot, not the canvas it is about to change", async () => {
     const s = await setup();
     s.setFrames(await png(paint(base(), { x: 80, y: 80, w: 40, h: 40 })));
