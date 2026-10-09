@@ -14,8 +14,11 @@ const AT_WORK = new Set<StatusRow>(["acting", "working", "thinking", "observing"
 export const atWork = (row: StatusRow) => AT_WORK.has(row);
 // Thinking this long with nothing new to say, dot says what it is still working out.
 export const LONG_THINK_MS = 6000;
-// Each line stays at least this long, time to read it, so a quick run of steps never flickers.
+// Each line stays at least this long, time to read it, so a quick run of steps never flickers; then
+// it fades out over this long before the next fades in.
 export const LINE_HOLD_MS = 1500;
+export const LINE_OUT_MS = 120;
+export const LINE_IN_MS = 180;
 
 // The band's line. While dot works: its newest own words in this turn (the line it gave its latest
 // call, or the last sentence it said), unless it has since moved on to a plan item, then the plan

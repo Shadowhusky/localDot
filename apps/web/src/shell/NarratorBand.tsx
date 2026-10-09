@@ -3,9 +3,7 @@ import { RevealedText } from "../agent/ApprovalValue.tsx";
 import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { useFullLine } from "./FullLine.tsx";
-import { LINE_HOLD_MS } from "./narration.ts";
-
-const LINE_OUT_MS = 120;
+import { LINE_HOLD_MS, LINE_OUT_MS } from "./narration.ts";
 
 export interface NarratorBandProps {
   line: string;

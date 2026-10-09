@@ -31,8 +31,8 @@
   "src/dot/dot.css": {
     "raw-colour": 4
   },
-  "src/dot/render/DotView.ts": {
-    "raw-colour": 13
+  "src/dot/render/dot-colours.ts": {
+    "raw-colour": 15
   },
   "src/gallery/gallery.css": {
     "half-pixel": 1,

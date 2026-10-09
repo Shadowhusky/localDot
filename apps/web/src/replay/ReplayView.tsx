@@ -5,7 +5,7 @@ import { isLoopbackPage } from "../deliverables/api.ts";
 import { RecordingFiles } from "../deliverables/RecordingFiles.tsx";
 import { exportRequest, withinRecording } from "../deliverables/replay-link.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
-import { type DotFeed, dotFeed } from "../dot/dot-feed.ts";
+import { type DotFeed, recordedPresence } from "../dot/dot-feed.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { setReplayPresence } from "../dot/replay-presence.ts";
 import { ExportButton } from "../export/ExportButton.tsx";
@@ -19,11 +19,10 @@ import { useExportProbe } from "../export/useExportProbe.ts";
 import type { ApiClient } from "../lib/api.ts";
 import { timelineRows } from "../session/key-uses.ts";
 import { type StepRowView, stepRows } from "../session/session-view.ts";
-import { TASK_POSE, taskHud } from "../session/status.ts";
+import { taskHud } from "../session/status.ts";
 import { ActivityRail } from "../shell/ActivityRail.tsx";
 import { HANDHELD } from "../shell/layout.ts";
 import { NarratorBand } from "../shell/NarratorBand.tsx";
-import { narrationLine } from "../shell/narration.ts";
 import { RailPanel } from "../shell/RailPanel.tsx";
 import { StageFrame } from "../shell/StageFrame.tsx";
 import { Stage, type StageHandle } from "../stage/Stage.tsx";
@@ -628,16 +627,9 @@ function Player({
   const hud = taskHud(replay.model, replay.tMs);
   // A recording that never loaded has no moment to show: the island and dot say so instead.
   const lost = replay.status === "error" && !replay.map && !replay.model.steps.length;
-  const line = opening
-    ? ""
-    : lost
-      ? LOST_LINE
-      : narrationLine(hud.row, hud.caption, replay.model, replay.tMs);
-  const feed = dotFeed(
-    { dotPose: lost ? "error" : TASK_POSE[hud.row], control: hud.control, row: hud.row },
-    replay.model,
-    replay.tMs,
-  );
+  const recorded = recordedPresence(replay.model, replay.tMs, hud);
+  const line = opening ? "" : lost ? LOST_LINE : recorded.line;
+  const feed: DotFeed = lost ? { ...recorded.feed, state: "error" } : recorded.feed;
   useEffect(() => setReplayPresence({ feed, line }));
   const support = exportSupport();
   // A link from a result asks for its part of the recording: Export opens on it once the recording
@@ -721,7 +713,9 @@ function Player({
               />
             )
           }
-          band={<NarratorBand line={line} speaker="dot" showDot={showDot} />}
+          band={
+            <NarratorBand line={line} speaker="dot" showDot={showDot} forUser={recorded.forUser} />
+          }
         >
           <Stage
             key={sessionId}

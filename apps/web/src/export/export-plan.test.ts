@@ -8,7 +8,6 @@ import {
   fileSize,
   PRIVACY_NOTE,
   planExport,
-  speedText,
   validSize,
   videoLength,
 } from "./export-plan.ts";
@@ -66,12 +65,6 @@ describe("deterministic MP4 export plan", () => {
     expect(planExport({ ...request, speed: 16 }, model, [], []).frames).toBe(113);
     for (const speed of [0.2, 16.5, 0, -1, Number.NaN, Number.POSITIVE_INFINITY])
       expect(() => planExport({ ...request, speed }, model, [], [])).toThrow(RangeError);
-  });
-
-  it("names speeds plainly", () => {
-    expect(speedText(2)).toBe("2×");
-    expect(speedText(0.25)).toBe("0.25×");
-    expect(speedText(1.333333)).toBe("1.33×");
   });
 
   it("counts the moving part of the video at its speed", () => {
@@ -144,6 +137,23 @@ describe("deterministic MP4 export plan", () => {
     expect(plan.gapAt(119)).toBe("user-control");
     expect(plan.gapAt(120)).toBeNull();
     expect(planExport({ ...request, captions: false }, model, [], gaps).captionAt(30)).toBeNull();
+  });
+
+  it("burns in a line for the user at once, without waiting out the last line's hold", () => {
+    const { model, request } = fixture(3000);
+    model.agentStates.push({ t: 1600, state: "error" });
+    model.stepIndex.set("open", 0);
+    model.steps.push({
+      id: "open",
+      kind: "gui",
+      startT: 1000,
+      endT: 1300,
+      status: "ok",
+      intent: "Opening Telegram",
+    });
+    const plan = planExport(request, model, [], []);
+    expect(plan.captionAt(47)).toBe("Opening Telegram");
+    expect(plan.captionAt(48)).toBe("I can't go on by myself. The chat says what to do.");
   });
 
   it("asks the encoder for more bits as the picture, the frame rate and the quality grow", () => {

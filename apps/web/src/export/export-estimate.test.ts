@@ -53,6 +53,38 @@ describe("an export's estimate", () => {
   });
 });
 
+describe("an export with dot", () => {
+  it("makes every frame a new picture, and pays for dot's motion through the whole video", () => {
+    const { plan, request } = twoMinutes(60, { w: 1920, h: 1410 }, "high");
+    const clean = estimateExport(plan, request);
+    const withDot = estimateExport(plan, { ...request, dot: "under" });
+    const pictures = 0.45 * plan.movingS * plan.fps + plan.durationS;
+    expect((withDot.ms - 200) / (clean.ms - 200)).toBeCloseTo(plan.frames / pictures, 5);
+    expect(withDot.bytes - clean.bytes).toBeCloseTo((plan.bitrate / 8) * 120 * 0.075, 0);
+  });
+
+  it("is within reach of what Chrome made for Showcase", () => {
+    // Measured: 1:38 of video at 1920 × 1410 and 60 fps, moving for 86 s: 25.6 MB in 19.0 s.
+    const plan = {
+      frames: 5832,
+      fps: 60 as const,
+      durationS: 97.2,
+      movingS: 86,
+      bitrate: exportBitrate({ w: 1920, h: 1410 }, 60, "high"),
+    };
+    const made = estimateExport(plan, {
+      size: { w: 1920, h: 1410 },
+      format: "mp4",
+      quality: "high",
+      dot: "under",
+    });
+    expect(made.bytes / 2 ** 20).toBeGreaterThan(25.6 / 1.5);
+    expect(made.bytes / 2 ** 20).toBeLessThan(25.6 * 1.5);
+    expect(made.ms).toBeGreaterThan(19_000 / 1.5);
+    expect(made.ms).toBeLessThan(19_000 * 1.5);
+  });
+});
+
 describe("calibration", () => {
   it("learns from an export long enough to tell, within bounds", () => {
     const fitted = { bytes: 4_000_000, ms: 4000 };
