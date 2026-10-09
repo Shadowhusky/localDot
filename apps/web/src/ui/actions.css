@@ -265,7 +265,7 @@
     }
   }
 
-  /* A quiet glyph reads in fg-2 unless its bar lights it brighter through --icon-fg, as a phone's
+  /* A quiet glyph reads in fg-2 unless its bar lights it brighter through --_icon-fg, as a phone's
      toolbar does. */
   .ui-icon-button {
     --_size: calc(var(--spacing) * 7);
@@ -274,7 +274,7 @@
     width: var(--_size);
     height: var(--_size);
     border-radius: var(--radius-row);
-    color: var(--icon-fg, var(--color-fg-2));
+    color: var(--_icon-fg, var(--color-fg-2));
   }
 
   .ui-icon-button > .ui-icon {

@@ -1178,7 +1178,7 @@
   }
 
   .toolbar-button {
-    --icon-fg: var(--color-fg-1);
+    --_icon-fg: var(--color-fg-1);
   }
 }
 
@@ -1191,7 +1191,7 @@
   min-height: 44px;
   padding: calc(var(--spacing) * 1) calc(var(--spacing) * 1.5) calc(var(--spacing) * 1)
     var(--spacing);
-  border-radius: 22px;
+  border-radius: var(--radius-full);
   background-color: var(--color-raised);
   box-shadow: 0 0 0 1px var(--color-hairline);
 }

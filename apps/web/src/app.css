@@ -137,8 +137,8 @@
      gives up its height and the toolbar rides on the keyboard, while the stage stays put. */
   .app[data-keyboard] {
     position: relative;
-    top: var(--visible-top, 0px);
-    height: var(--visible-h, 100dvh);
+    top: var(--_visible-top, 0px);
+    height: var(--_visible-h, 100dvh);
   }
 
   .app[data-keyboard] .stage-band {

@@ -270,7 +270,7 @@
 .focus-controls {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: calc(var(--spacing) * 2.5);
 }
 
 /* The curtain (design-v2 §4, §11 A–B): the stage's own box while there is no picture. dot sleeps in

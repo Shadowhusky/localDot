@@ -52,15 +52,15 @@ export function useKeyboardFit(page: { current: HTMLElement | null }, up: boolea
     const view = window.visualViewport;
     if (!element || !view || !up) return;
     const fit = () => {
-      element.style.setProperty("--visible-h", `${view.height}px`);
-      element.style.setProperty("--visible-top", `${view.offsetTop}px`);
+      element.style.setProperty("--_visible-h", `${view.height}px`);
+      element.style.setProperty("--_visible-top", `${view.offsetTop}px`);
     };
     fit();
     const stop = onViewport(fit);
     return () => {
       stop();
-      element.style.removeProperty("--visible-h");
-      element.style.removeProperty("--visible-top");
+      element.style.removeProperty("--_visible-h");
+      element.style.removeProperty("--_visible-top");
     };
   }, [page, up]);
 }
