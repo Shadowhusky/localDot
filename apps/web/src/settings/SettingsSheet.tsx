@@ -23,6 +23,7 @@ import { Switch } from "../ui/Switch.tsx";
 import { AccountsSection } from "./AccountsSection.tsx";
 import { AlwaysAllowed, AutonomyMatrix } from "./AutonomyMatrix.tsx";
 import { ChatgptPanel } from "./ChatgptPanel.tsx";
+import { ClaudeCodePanel } from "./ClaudeCodePanel.tsx";
 import {
   type ModelRole,
   type PickerKey,
@@ -31,7 +32,7 @@ import {
   type RoleChoice,
   type SubscriptionModel,
 } from "./choices.ts";
-import { CHATGPT } from "./chooser.ts";
+import { CHATGPT, CLAUDE_CODE, subscription } from "./chooser.ts";
 import { KnowledgeSection } from "./KnowledgeSection.tsx";
 import { CheckIns, SpendingLimits } from "./Limits.tsx";
 import type { RecentActivityControl } from "./memory/RecentActivity.tsx";
@@ -52,6 +53,7 @@ import {
 import type { CheckInKey, CheckInsDraft, SpendingDraft } from "./settings-form.ts";
 import type { AccountsView } from "./useAccounts.ts";
 import type { ChatgptControls } from "./useChatgpt.ts";
+import type { ClaudeCodeControls } from "./useClaudeCode.ts";
 import type { NotificationsView } from "./useNotifications.ts";
 import type { RulesView } from "./useRules.ts";
 import "./settings.css";
@@ -79,6 +81,7 @@ export interface SettingsSheetProps {
   keyLayer: "online" | "offline" | "unknown";
   subscriptionModels?: readonly SubscriptionModel[];
   chatgpt?: ChatgptControls;
+  claudeCode?: ClaudeCodeControls;
   catalog: CatalogState;
   // When the model list was last fetched.
   catalogAt?: string;
@@ -413,12 +416,12 @@ export function SettingsSheet(props: SettingsSheetProps) {
 }
 
 function shownSections(props: SettingsSheetProps): SettingsSection[] {
-  const chatgptMain = props.choices.main?.provider === CHATGPT;
+  const planMain = subscription(props.choices.main?.provider);
   const has: Record<SettingsSection, boolean> = {
     models: true,
     autonomy: !!props.onAutonomy,
     rules: !!props.rules,
-    spending: !!props.spending && !chatgptMain,
+    spending: !!props.spending && !planMain,
     appearance: !!props.appearance,
     notifications: !!props.notifications,
     knowledge: !!props.knowledge && !!props.known,
@@ -546,9 +549,10 @@ function SectionList({
 }) {
   const main = props.choices.main;
   const mainName = main
-    ? (props.providers
-        .find((row) => row.id === main.provider)
-        ?.models.find((model) => model.id === main.model)?.name ?? main.model)
+    ? ((subscription(main.provider)
+        ? props.subscriptionModels
+        : props.providers.find((row) => row.id === main.provider)?.models
+      )?.find((model) => model.id === main.model)?.name ?? main.model)
     : "";
   const values: Partial<Record<SettingsSection, string>> = {
     models: props.loading ? "" : mainName,
@@ -806,10 +810,19 @@ function SectionContent({
     case "models": {
       if (props.loading)
         return <DotLoader className="settings-loading" label="Loading your settings" />;
-      const chatgptMain = props.choices.main?.provider === CHATGPT;
+      const main = props.choices.main?.provider;
+      const inactive =
+        main === CHATGPT
+          ? "Off while the main model uses the ChatGPT plan."
+          : main === CLAUDE_CODE
+            ? "Off while the main model uses Claude Code."
+            : undefined;
       return (
         <>
-          {chatgptMain && props.chatgpt && <ChatgptPanel account={props.chatgpt} />}
+          {main === CHATGPT && props.chatgpt && <ChatgptPanel account={props.chatgpt} />}
+          {main === CLAUDE_CODE && props.claudeCode && (
+            <ClaudeCodePanel claude={props.claudeCode} />
+          )}
           {(["main", "fast", "local"] as const).map((role) => (
             <RoleCard
               key={role}
@@ -819,7 +832,7 @@ function SectionContent({
               keys={props.keys}
               keyLayer={props.keyLayer}
               subscriptionModels={props.subscriptionModels}
-              inactive={role !== "main" && chatgptMain}
+              inactive={role === "main" ? undefined : inactive}
               manualPrice={props.manualPrices?.[role]}
               onChange={(value) => props.onChange(role, value)}
               onKeys={props.onKeys}

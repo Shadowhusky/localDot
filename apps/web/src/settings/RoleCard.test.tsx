@@ -167,7 +167,7 @@ describe("role card", () => {
       <RoleCard
         {...base()}
         modelRole="local"
-        inactive
+        inactive="Off while the main model uses the ChatGPT plan."
         value={{ provider: "ollama", model: "q" }}
       />,
     );

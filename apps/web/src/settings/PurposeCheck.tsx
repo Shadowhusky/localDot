@@ -1,7 +1,7 @@
 import { Collapse } from "../ui/Disclosure.tsx";
 import { Group, GroupRow } from "../ui/Group.tsx";
 import { Switch } from "../ui/Switch.tsx";
-import { CHATGPT } from "./chooser.ts";
+import { CLAUDE_CODE, subscription } from "./chooser.ts";
 import type { SettingsDraft } from "./settings-form.ts";
 
 // What Auto checks with: a saved Jev key, else the fast model, else nothing yet.
@@ -11,15 +11,16 @@ export interface PurposeCheckControl {
   on: boolean;
   change(on: boolean): void;
   judge: PurposeJudge;
-  // The ChatGPT plan runs no fast model of its own, so only a Jev key can check.
-  plan: boolean;
+  // The plan the main model runs on, if any. A plan runs no fast model of its own, so only a Jev
+  // key can check.
+  plan?: string;
   // Opens Keys with a Jev key's form filled in.
   addJevKey?(trigger: HTMLButtonElement): void;
 }
 
 export function purposeJudge(jevKey: boolean, choices: SettingsDraft["choices"]): PurposeJudge {
   if (jevKey) return "jev";
-  return choices.fast && choices.main?.provider !== CHATGPT ? "fast" : "none";
+  return choices.fast && !subscription(choices.main?.provider) ? "fast" : "none";
 }
 
 const WHY = "Stops dot sending what it read somewhere unrelated to your request.";
@@ -32,7 +33,13 @@ export function purposeDescription({
   if (!on) return WHY;
   if (judge === "jev") return `${WHY} Checked by Jev.`;
   if (judge === "fast") return `${WHY} Checked by your fast model.`;
-  return `${WHY} Needs a Jev key${plan ? " with the ChatGPT plan" : " or a fast model"}.`;
+  const needs =
+    plan === CLAUDE_CODE
+      ? " with Claude Code"
+      : plan
+        ? " with the ChatGPT plan"
+        : " or a fast model";
+  return `${WHY} Needs a Jev key${needs}.`;
 }
 
 export function PurposeCheck({ control }: { control: PurposeCheckControl }) {

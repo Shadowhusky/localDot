@@ -107,6 +107,8 @@ export interface CodexAuthOwnerDeps {
   readonly sessions: () => readonly AgentSession[];
   // Trusted synchronous runner admission state; independent of event-log/UI publication.
   readonly pauseForAuth?: (session: AgentSession, generation: number) => void;
+  // Why no Codex process may start yet: this Mac's sandbox check hasn't passed.
+  readonly sandboxReason?: () => string | undefined;
   readonly now?: () => number;
   readonly statusTtlMs?: number;
   readonly loginTimeoutMs?: number;
@@ -179,6 +181,7 @@ export class CodexAuthOwner {
         ? available.reason
         : (platformUnavailable() ?? CHATGPT_NEEDS_APPLE_SILICON);
     if (this.installer.status().state !== "ready") return CHATGPT_INSTALL_FIRST;
+    return this.#deps.sandboxReason?.();
   }
   #usable(): void {
     const reason = this.#reason();

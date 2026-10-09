@@ -44,9 +44,11 @@ export const PROVIDER_GROUPS: readonly ProviderGroup[] = [
   "Not available here",
   "Later releases",
 ];
-// What people read for a provider: the registry's name, or the ChatGPT plan.
+// What people read for a provider: the registry's name, or a plan's own app.
 export function providerName(id: string): string {
-  return id === "chatgpt" ? "ChatGPT plan" : (providerById(id)?.name ?? id);
+  if (id === "chatgpt") return "ChatGPT plan";
+  if (id === "claude-code") return "Claude Code";
+  return providerById(id)?.name ?? id;
 }
 export function providerAllowed(role: ModelRole, provider: ProviderSpec): boolean {
   return (

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { REDUCED_MOTION, useMediaQuery } from "../ui/media.ts";
 import { type DotFeed, sayMs } from "./dot-feed.ts";
 import type { DotState } from "./engine/states.ts";
+import { useEntrance } from "./entrance.ts";
 import { Glyph } from "./Glyph.tsx";
 import { onPlaces } from "./places.ts";
 import { Presence } from "./presence.ts";
@@ -16,6 +17,8 @@ const COMPOSER = ".composer textarea";
 
 export interface PresenceLayerProps {
   place: PresencePlace | null;
+  // The place is a guess until what the computer is doing is known.
+  provisional?: boolean;
   feed: DotFeed;
   // dot's line beside the stage; each new one gets a talk-bob.
   line: string;
@@ -24,8 +27,9 @@ export interface PresenceLayerProps {
 // The one live dot (design-v2 §10.17), mounted once at the app's root and drawn over the place that
 // keeps room for it: the hero on the curtain, the dock beside the stage or the island's badge. While
 // Replay is open it plays the recording's dot instead of the live one.
-export function PresenceLayer({ place, ...now }: PresenceLayerProps) {
+export function PresenceLayer({ place: asked, provisional = false, ...now }: PresenceLayerProps) {
   const { feed, line } = useReplayPresence() ?? now;
+  const place = useEntrance(asked, provisional);
   const reduced = useMediaQuery(REDUCED_MOTION);
   const frame = useRef<HTMLDivElement>(null);
   const host = useRef<HTMLSpanElement>(null);

@@ -1036,6 +1036,14 @@
                 },
                 "editable": {
                   "type": "boolean"
+                },
+                "checked": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false",
+                    "mixed"
+                  ]
                 }
               },
               "required": [
@@ -2590,6 +2598,14 @@
                 },
                 "editable": {
                   "type": "boolean"
+                },
+                "checked": {
+                  "type": "string",
+                  "enum": [
+                    "true",
+                    "false",
+                    "mixed"
+                  ]
                 }
               },
               "required": [
@@ -4660,7 +4676,10 @@
           "properties": {
             "provider": {
               "type": "string",
-              "const": "chatgpt"
+              "enum": [
+                "chatgpt",
+                "claude-code"
+              ]
             },
             "plan": {
               "type": "string",

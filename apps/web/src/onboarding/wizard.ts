@@ -3,7 +3,10 @@ import type { DotState } from "../dot/engine/states.ts";
 import type { PickerModel } from "../settings/choices.ts";
 
 export type WizardStep = "welcome" | "thinks" | "key" | "model" | "permissions" | "turn-on";
-export type ThinkKind = "api" | "chatgpt" | "plan" | "local" | "custom";
+export type ThinkKind = "api" | "chatgpt" | "claude-code" | "plan" | "local" | "custom";
+// A plan the person signs in to in its own app, which brings its own models.
+export const appKind = (kind: ThinkKind | undefined) =>
+  kind === "chatgpt" || kind === "claude-code";
 
 // The steps the progress bars count; the welcome comes before them.
 export const WIZARD_STEPS = ["thinks", "key", "model", "permissions", "turn-on"] as const;
@@ -12,7 +15,7 @@ type CountedStep = (typeof WIZARD_STEPS)[number];
 export interface WizardProgress {
   step: WizardStep;
   kind?: ThinkKind;
-  // A registry provider's id, or "chatgpt".
+  // A registry provider's id, "chatgpt" or "claude-code".
   provider?: string;
   // The stored key the main model uses.
   key?: string;
@@ -36,7 +39,7 @@ const STEP_TITLES: Record<CountedStep, string> = {
 
 export function stepTitle(step: CountedStep, kind: ThinkKind | undefined): string {
   if (step !== "key") return STEP_TITLES[step];
-  if (kind === "chatgpt") return "Sign-in";
+  if (appKind(kind)) return "Sign-in";
   if (kind === "local") return "Server";
   if (kind === "custom") return "Address";
   return "Key";
@@ -86,7 +89,7 @@ export function wizardShown({
 }
 
 const STEPS = new Set<string>(["welcome", ...WIZARD_STEPS]);
-const KINDS = new Set<string>(["api", "chatgpt", "plan", "local", "custom"]);
+const KINDS = new Set<string>(["api", "chatgpt", "claude-code", "plan", "local", "custom"]);
 const ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 // What a browser kept, read defensively: anything unexpected starts setup over.
@@ -116,6 +119,7 @@ export function parseProgress(raw: string | null): WizardProgress {
 export function kindOf(provider: string | undefined): ThinkKind | undefined {
   if (!provider) return undefined;
   if (provider === "chatgpt") return "chatgpt";
+  if (provider === "claude-code") return "claude-code";
   const spec = providerById(provider);
   if (!spec) return undefined;
   if (spec.local) return "local";
@@ -206,6 +210,8 @@ export function thinksWith(
   switch (kind) {
     case "chatgpt":
       return "ChatGPT plan";
+    case "claude-code":
+      return "Claude Code";
     case "local":
       return name ?? "Local model";
     case "plan":

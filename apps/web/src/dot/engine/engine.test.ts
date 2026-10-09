@@ -311,6 +311,18 @@ describe("dot engine", () => {
     expect(e.pose(800).gaze.y).toBeCloseTo(-3, 0);
   });
 
+  it("carries on with what it was doing when it lands at another size", () => {
+    const landed = new DotEngine({ seed: 9, t: 0, state: "thinking", lod: "hero" });
+    const seated = new DotEngine({ seed: 9, t: 0, state: "thinking", lod: "glance" });
+    for (let t = 0; t <= 900; t += 1000 / 60) {
+      landed.pose(t);
+      seated.pose(t);
+    }
+    landed.setLod("glance", 900);
+    for (let t = 900; t <= 4000; t += 250)
+      expect(fingerprint(landed.pose(t)), `at ${t}`).toBe(fingerprint(seated.pose(t)));
+  });
+
   it("jumps ahead after a long gap without replaying it", () => {
     const e = new DotEngine({ seed: 6, t: 0, state: "idle" });
     e.setState("thinking", 100);

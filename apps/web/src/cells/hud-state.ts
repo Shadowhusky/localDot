@@ -16,6 +16,9 @@ export interface CellView {
   // What this viewer's stage shows of the computer, which the daemon's stream state can lag or
   // miss: another viewer's relay keeps it live while this one reconnects.
   picture?: StreamPicture;
+  // This page has had a picture from the computer since it last came up: a stream that drops or
+  // reconnects after that is a reconnect under the last picture, never the computer starting.
+  streamed?: boolean;
 }
 
 export type HudActionKind = "start" | "stop" | "retry" | "resume";
@@ -56,7 +59,13 @@ const UPDATE_RECORDS_UNREADABLE = "localDot can't read its update records";
 export const NEEDS_FRESH_START =
   "The update couldn't be finished. Start fresh to use your computer again.";
 
-export function hudFor({ cell, status, pending, picture = "none" }: CellView): HudState {
+export function hudFor({
+  cell,
+  status,
+  pending,
+  picture = "none",
+  streamed = false,
+}: CellView): HudState {
   const idle = pending === null;
   const hud = (
     phase: ComputerPhase,
@@ -83,10 +92,11 @@ export function hudFor({ cell, status, pending, picture = "none" }: CellView): H
       "retry",
     );
   }
-  if (pending === "list")
-    return cell?.paused
-      ? hud("frozen", "Paused", "Checking your paused computer.", "resume", false)
-      : hud("checking", "Checking…", "Looking for your computer.", cell ? "stop" : "start");
+  // A list check on a known computer keeps showing it, its controls held until the answer.
+  if (pending === "list" && !cell)
+    return hud("checking", "Checking…", "Looking for your computer.", "start");
+  if (pending === "list" && cell?.paused)
+    return hud("frozen", "Paused", "Checking your paused computer.", "resume", false);
   if (!cell) {
     // The create's answer brings the cell id that Stop needs.
     if (pending === "create") return hud("starting", "Starting…", STARTING, "stop", false);
@@ -164,7 +174,9 @@ export function hudFor({ cell, status, pending, picture = "none" }: CellView): H
     return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");
   if (connection === "live" || picture === "live")
     return hud("live", "Ready", "Your computer is live.", "stop");
-  return hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
+  return streamed
+    ? hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop")
+    : hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
 }
 
 const STOP_FAILED = "stop failed: ";

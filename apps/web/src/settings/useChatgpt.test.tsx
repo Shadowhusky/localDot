@@ -11,6 +11,7 @@ const signedOut = () => ({
   codexVersion: "0.154.0",
   state: "signed_out",
   install: { state: "ready", version: "0.154.0" },
+  sandbox: "passed",
 });
 const signedIn = () => ({
   ...signedOut(),
@@ -18,6 +19,14 @@ const signedIn = () => ({
   account: { email: "fixture@example.test", plan: "plus" },
   checkedAt: Date.now(),
   models: [{ id: "account-model", name: "Account model", isDefault: true }],
+});
+const preparing = (sandbox: string) => ({
+  available: true,
+  codexVersion: "0.154.0",
+  state: "unavailable",
+  install: { state: "ready", version: "0.154.0" },
+  sandbox,
+  reason: "Checking that ChatGPT support runs safely on this Mac…",
 });
 const material = (id = "attempt-a") => ({
   loginId: id,
@@ -46,8 +55,18 @@ function fixture(initial: unknown = signedOut()) {
       if (f.post) return f.post(path);
       if (path.endsWith("/install")) {
         const install = { state: "downloading", receivedBytes: 1 };
-        f.status = { available: true, codexVersion: "0.154.0", state: "unavailable", install };
+        f.status = {
+          available: true,
+          codexVersion: "0.154.0",
+          state: "unavailable",
+          install,
+          sandbox: "unchecked",
+        };
         return Response.json(install, { status: 202 });
+      }
+      if (path.endsWith("/check")) {
+        f.status = preparing("checking");
+        return Response.json({ sandbox: "checking" }, { status: 202 });
       }
       if (path.endsWith("/login")) {
         f.status = { ...signedOut(), state: "signing_in", login: f.nextLogin };
@@ -92,6 +111,7 @@ describe("owned explicit ChatGPT setup", () => {
       codexVersion: "0.154.0",
       state: "unavailable",
       install: { state: "not_installed" },
+      sandbox: "unchecked",
     });
     const v = view(f, false);
     await act(async () => {});
@@ -112,6 +132,7 @@ describe("owned explicit ChatGPT setup", () => {
       codexVersion: "0.154.0",
       state: "unavailable",
       install: { state: "not_installed" },
+      sandbox: "unchecked",
       reason: "ChatGPT plan support isn't switched on in this version yet.",
     });
     await opened(f);
@@ -189,6 +210,7 @@ describe("owned explicit ChatGPT setup", () => {
       codexVersion: "0.154.0",
       state: "unavailable",
       install: { state: "not_installed" },
+      sandbox: "unchecked",
     });
     const v = await opened(f),
       held = Promise.withResolvers<Response>();
@@ -199,6 +221,7 @@ describe("owned explicit ChatGPT setup", () => {
         codexVersion: "0.154.0",
         state: "unavailable",
         install: { state: "failed", code: "cancelled" },
+        sandbox: "unchecked",
       };
       return new Response(null, { status: 204 });
     };
@@ -227,6 +250,7 @@ describe("owned explicit ChatGPT setup", () => {
       codexVersion: "0.154.0",
       state: "unavailable",
       install: { state: "not_installed" },
+      sandbox: "unchecked",
     });
     const v = await opened(f);
     f.state.post = () => Response.json({ state: "not_installed" }, { status: 202 });
@@ -250,6 +274,57 @@ describe("owned explicit ChatGPT setup", () => {
       screen.getByRole("button", { name: "Sign in with code" }).getAttribute("aria-disabled"),
     ).toBeNull();
     expect(posts(f, "/install")).toHaveLength(1);
+  });
+  it("waits for this Mac's safety check after installing before it offers sign-in", async () => {
+    const f = fixture(preparing("checking")),
+      v = await opened(f);
+    const steps = screen.getByRole("list", { name: "Setup" });
+    expect(steps.textContent).toContain("Installed");
+    expect(steps.textContent).toContain("Making sure it can't reach your files…");
+    expect(
+      screen.getByRole("button", { name: "Sign in with code" }).getAttribute("aria-disabled"),
+    ).toBe("true");
+    expect(screen.queryByText("Checking that ChatGPT support runs safely on this Mac…")).toBeNull();
+    await act(async () => {
+      await v.current().login();
+    });
+    expect(posts(f, "/login")).toHaveLength(0);
+    expect(v.current().canStart).toBe(false);
+    f.state.status = signedOut();
+    await waitFor(
+      () =>
+        expect(
+          screen.getByRole("button", { name: "Sign in with code" }).getAttribute("aria-disabled"),
+        ).toBeNull(),
+      { timeout: 2500 },
+    );
+    expect(screen.getByRole("list", { name: "Setup" }).textContent).toContain("Passed");
+    expect(posts(f, "/check")).toHaveLength(0);
+  });
+  it("keeps sign-in closed after a failed safety check and checks again on request", async () => {
+    const f = fixture(preparing("failed")),
+      v = await opened(f);
+    expect(screen.getByRole("list", { name: "Setup" }).textContent).toContain(
+      "Didn't pass, so ChatGPT stays off",
+    );
+    expect(screen.queryByRole("button", { name: "Sign in with code" })).toBeNull();
+    const reads = f.state.calls.length;
+    await act(async () => {
+      await v.current().refresh();
+    });
+    expect(f.state.calls).toHaveLength(reads);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    });
+    await waitFor(() => expect(posts(f, "/check")).toHaveLength(1));
+    await waitFor(() => expect(v.current().summary?.sandbox).toBe("checking"));
+    expect(screen.queryByRole("button", { name: "Check again" })).toBeNull();
+    await act(async () => {
+      await v.current().checkSandbox();
+    });
+    expect(posts(f, "/check")).toHaveLength(1);
+    f.state.status = signedOut();
+    await waitFor(() => expect(v.current().summary?.sandbox).toBe("passed"), { timeout: 2500 });
   });
   it("paints device material only in the current DOM, opens/copies only on explicit action", async () => {
     const f = fixture(),
@@ -381,6 +456,7 @@ describe("owned explicit ChatGPT setup", () => {
         codexVersion: "0.154.0",
         state: "unavailable",
         install: { state: "ready", version: "0.154.0" },
+        sandbox: "passed",
       };
       return new Response("TEST-PRIVATE-RETIREMENT", { status: 503 });
     };
@@ -499,6 +575,7 @@ describe("owned explicit ChatGPT setup", () => {
       codexVersion: "0.154.0",
       state: "unavailable",
       install: { state: "not_installed" },
+      sandbox: "unchecked",
     });
     const v = await opened(f);
     f.state.post = (path) => {

@@ -59,6 +59,16 @@ function knownReason(
       title: "Paused at your plan's limit",
       text: "Your ChatGPT plan is at its limit. Continue once it resets; this task has no spending limit of its own.",
     };
+  if (reason === "claude code sign-in expired")
+    return {
+      title: "Sign in to Claude Code again",
+      text: "Claude Code on this Mac isn't signed in. Run claude auth login in Terminal, then continue this task.",
+    };
+  if (reason === "claude code plan limit reached")
+    return {
+      title: "Paused at your plan's limit",
+      text: "Your Claude plan is at its limit. Continue once it resets; this task has no spending limit of its own.",
+    };
   if (reason === STALL.modelUnavailable)
     return {
       title: "The model isn't answering",
@@ -196,7 +206,10 @@ export function TaskRecovery({
         (state.state === "paused" && ownedPause(state.reason))))
   )
     return null;
-  const subscription = agent.snapshot?.models?.kind === "chatgpt" || !!agent.model.subscription;
+  const subscription =
+    agent.snapshot?.models?.kind === "chatgpt" ||
+    agent.snapshot?.models?.kind === "claude-code" ||
+    !!agent.model.subscription;
   const local =
     agent.snapshot?.models?.kind === "api" &&
     agent.snapshot.models.roles.some(

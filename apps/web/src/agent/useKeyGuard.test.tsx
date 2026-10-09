@@ -268,7 +268,7 @@ describe("key guard at the composer and sealed form boundary", () => {
   );
   it("says a Claude plan token can't be used here and never offers to move it to Keys", () => {
     const SENTENCE =
-      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+      "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";
     const token = `sk-ant-oat01-${"m".repeat(95)}`;
     const f = fixture();
     fireEvent.input(f.task, { target: { value: `use ${token} for this` } });
@@ -297,7 +297,7 @@ describe("key guard at the composer and sealed form boundary", () => {
   });
   it("offers no key to move when every key found is a Claude plan token", () => {
     const SENTENCE =
-      "Claude Pro and Max plans can't be used here: Anthropic doesn't allow other apps to sign in with them. Add an Anthropic API key instead.";
+      "Claude plan tokens can't be used here: Anthropic doesn't allow other apps to sign in with them. To use your plan, choose Claude Code (your plan) in Settings, or add an Anthropic API key.";
     const f = fixture();
     fireEvent.input(f.task, {
       target: { value: `sk-ant-oat01-${"m".repeat(95)} sk-ant-ort01-${"n".repeat(95)}` },
