@@ -385,7 +385,7 @@ async function dispatchAdmitted(
         result = await researchTool(t, ctx, input);
         break;
     }
-    result = withResearchNote(session, name, result);
+    result = withResearchNote(session, name, frozen, result);
     // Containment intentionally stopped the session; its terminal refusal has no image/event.
     if (session.stopped)
       return {

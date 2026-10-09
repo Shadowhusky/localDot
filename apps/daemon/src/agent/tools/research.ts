@@ -65,14 +65,18 @@ export function researchRefusal(
   return research.stopNote();
 }
 
-// After a gathering call: the budget's word to dot once it is reached.
+// After a gathering call: the budget's word to dot once it is reached. Writing the report is what
+// that word asks for, so it is never told again.
 export function withResearchNote(
   session: Pick<AgentSession, "research">,
   name: string,
+  input: unknown,
   result: ToolResult,
 ): ToolResult {
   const research = session.research;
-  if (!research || !GATHERING.has(name) || result.final || !research.stopped) return result;
+  const writing = name === "research" && (input as { op?: unknown }).op === "report";
+  if (!research || !GATHERING.has(name) || writing || result.final || !research.stopped)
+    return result;
   return { ...result, content: [...result.content, text(research.stopNote())] };
 }
 

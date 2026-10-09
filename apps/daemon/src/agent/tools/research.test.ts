@@ -105,6 +105,14 @@ describe("the research budget", () => {
     expect(textOf(unlisted)).toContain("Stop gathering");
     const written = await h.call("files", { op: "write", path: "notes.md", content: "x" });
     expect(textOf(written)).not.toContain("Stop gathering");
+    const report = await h.call("research", {
+      op: "report",
+      title: "Partial",
+      summary: "What the three sources say [1].",
+      body: "Only three sources were read [1][2][3].",
+    });
+    expect(report.body.ok).toBe(true);
+    expect(textOf(report)).not.toContain("Stop gathering");
   });
   it("hears the user's wrap-up at its next gathering step", async () => {
     const h = harness({ sources: 20, minutes: 30 });
