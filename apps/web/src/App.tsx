@@ -75,6 +75,7 @@ import { useCurtain } from "./shell/curtain.ts";
 import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
+import { useEdgeStill, useFullScreen, useFullScreenKeys } from "./shell/fullscreen.ts";
 import { HudIsland, type StageFields } from "./shell/HudIsland.tsx";
 import {
   islandAttention,
@@ -98,6 +99,7 @@ import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { IconButton } from "./ui/IconButton.tsx";
+import { isApple } from "./ui/Kbd.tsx";
 import { Presence } from "./ui/Presence.tsx";
 import type { SegmentItem } from "./ui/SegmentedControl.tsx";
 import { Sheet } from "./ui/Sheet.tsx";
@@ -715,6 +717,14 @@ function Theatre({ api }: { api: ApiClient }) {
     reason: conversationReason,
   };
   const curtain = useCurtain(appStatus.computer, !!replayId);
+  const stageBox = useRef<HTMLDivElement>(null);
+  const fullScreen = useFullScreen({
+    available: !curtain.up && !replayId,
+    phone,
+    frame: stageBox,
+  });
+  // A phone shows full screen as focus mode; a wider screen gives the stage the whole screen.
+  const full = fullScreen.on && !phone;
   const computerAction = appStatus.actions.find(
     (action): action is HudAction & { kind: HudActionKind } => action.kind !== "stop-task",
   );
@@ -734,6 +744,7 @@ function Theatre({ api }: { api: ApiClient }) {
     stageHidden: !!replayId,
     keyboard,
     setup: onboarding.open,
+    full,
   });
   const chosenKey =
     mainChoice?.provider === "chatgpt"
@@ -938,10 +949,21 @@ function Theatre({ api }: { api: ApiClient }) {
   });
   const { focus, leave: leaveFocus } = useFocusMode(
     !curtain.up && !replayId,
-    !!question || (!!takeover && !agent.model.ended),
+    !!question,
+    fullScreen.on && phone,
   );
-  const still = useStill(focus) && !islandAttention(appStatus);
-  const working = !!task;
+  const touchStill = useStill(focus);
+  const edgeStill = useEdgeStill(full);
+  const still = (touchStill || edgeStill) && !islandAttention(appStatus);
+  useFullScreenKeys({
+    enabled: !phone && !curtain.up && !replayId,
+    apple: isApple(),
+    full,
+    yours,
+    enter: fullScreen.enter,
+    exit: fullScreen.exit,
+  });
+  const working = !!task && !yours;
   const stepCount = useMemo(
     () => (focus && working ? workSteps(rows, agent.model).length : 0),
     [focus, working, rows, agent.model],
@@ -955,6 +977,7 @@ function Theatre({ api }: { api: ApiClient }) {
       data-layout={layout}
       data-replaying={replayId ? "" : undefined}
       data-focus={focus ? "" : undefined}
+      data-full={full ? "" : undefined}
       data-still={still ? "" : undefined}
       data-keyboard={keyboard ? "" : undefined}
       data-setup={onboarding.open ? "" : undefined}
@@ -986,6 +1009,8 @@ function Theatre({ api }: { api: ApiClient }) {
         <main className="stage-col" aria-label="Computer">
           <ErrorBoundary>
             <StageFrame
+              boxRef={stageBox}
+              onPictureDoubleClick={!phone && !yours ? fullScreen.enter : undefined}
               light={appStatus.control ? "dot" : yours ? "you" : "none"}
               live={stageHud.live}
               frozen={!!stageHud.paused}
@@ -1038,6 +1063,8 @@ function Theatre({ api }: { api: ApiClient }) {
                     onComputer={onComputer}
                     decision={grown}
                     rise={centre !== undefined}
+                    full={full}
+                    onExitFull={fullScreen.exit}
                     onRowWidth={setIslandWidth}
                     fields={askFields}
                     notices={
@@ -1065,8 +1092,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     showDot={showDot.value}
                     note={focus && stepCount ? `Step ${stepCount}` : undefined}
                   />
-                  {yours && !phone && !focus && (
-                    <ControlStrip send={sendToComputer} blocked={inputBlocked} />
+                  {yours && !phone && (
+                    <ControlStrip
+                      send={sendToComputer}
+                      blocked={inputBlocked}
+                      full={full}
+                      onFullScreen={fullScreen.toggle}
+                    />
                   )}
                 </>
               }
@@ -1080,7 +1112,25 @@ function Theatre({ api }: { api: ApiClient }) {
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
                     onStop={taskStop}
-                    onLeave={leaveFocus}
+                    onLeave={() => {
+                      leaveFocus();
+                      fullScreen.exit();
+                    }}
+                    tools={
+                      yours ? (
+                        <ControlTools
+                          compact
+                          send={sendToComputer}
+                          blocked={inputBlocked}
+                          typing={typing}
+                          onKeyboard={(on) => stage.current?.keyboard(on)}
+                          rightClick={pointerMode === "right"}
+                          onRightClick={(on) => setPointerMode(on ? "right" : "click")}
+                          handBack={handBack.slot}
+                          onHandBack={() => void handBack.run()}
+                        />
+                      ) : undefined
+                    }
                   />
                 )
               }
@@ -1117,6 +1167,19 @@ function Theatre({ api }: { api: ApiClient }) {
                     : undefined
                 }
               />
+              {!phone && !yours && !full && stageHud.live && (
+                <span className="stage-expand">
+                  <IconButton
+                    variant="glass"
+                    round
+                    size={32}
+                    icon="expand"
+                    label="Full screen"
+                    kbd={["F"]}
+                    onClick={fullScreen.enter}
+                  />
+                </span>
+              )}
             </StageFrame>
           </ErrorBoundary>
         </main>
@@ -1190,6 +1253,13 @@ function Theatre({ api }: { api: ApiClient }) {
                         run: (trigger) => showSettings(trigger),
                       },
                       { label: "Keys", icon: "key-round", run: (trigger) => showKeys(trigger) },
+                      {
+                        label: "Full screen",
+                        icon: "expand",
+                        disabledReason:
+                          curtain.up || replayId ? "Turn on your computer first" : undefined,
+                        run: () => fullScreen.enter(),
+                      },
                     ]}
                   />
                 )
@@ -1228,6 +1298,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     onRightClick={(on) => setPointerMode(on ? "right" : "click")}
                     handBack={handBack.slot}
                     onHandBack={() => void handBack.run()}
+                    onFullScreen={fullScreen.enter}
                   />
                 )
               }

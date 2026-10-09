@@ -9,6 +9,7 @@ import {
   islandAttention,
   islandDecision,
   islandShape,
+  liftOverScrim,
   pauseSlot,
   takeReason,
   takeSlot,
@@ -254,5 +255,29 @@ describe("decisionTop", () => {
     expect(decisionTop({ hung, size, stageW: stage.w, rings: [pass], floor: 500 })).toBe(
       500 - size.h,
     );
+  });
+});
+
+describe("liftOverScrim", () => {
+  // The task island at 1440 x 900 and at 1100 x 800, and Settings' inspector at each width.
+  const island1440 = { left: 287, top: 56, right: 777, bottom: 96 };
+  const island1100 = { left: 117, top: 56, right: 607, bottom: 96 };
+  const inspector = (width: number) => ({
+    left: width - 608,
+    top: 8,
+    right: width - 8,
+    bottom: 792,
+  });
+  const activity = { left: 0, top: 214, right: 390, bottom: 900 };
+
+  it("rises over the scrim where no sheet meets it", () => {
+    expect(liftOverScrim(true, island1440, [inspector(1440)])).toBe(true);
+    expect(liftOverScrim(true, { left: 8, top: 8, right: 382, bottom: 40 }, [activity])).toBe(true);
+    expect(liftOverScrim(true, island1440, [])).toBe(true);
+  });
+
+  it("stays under a sheet it would cover, and stays down without a scrim", () => {
+    expect(liftOverScrim(true, island1100, [inspector(1100)])).toBe(false);
+    expect(liftOverScrim(false, island1440, [])).toBe(false);
   });
 });

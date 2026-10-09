@@ -165,3 +165,30 @@ export function decisionTop({ hung, size, stageW, rings, floor }: DecisionPlace)
   }
   return Math.max(hung, Math.min(top, floor - size.h));
 }
+
+// A box on the page, as getBoundingClientRect gives it.
+export interface PageBox {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
+// While a sheet's scrim is up the island rises over it (design-v2 §5), so Stop and Take control stay
+// in reach, unless a sheet would then sit under the island: where they meet, the sheet comes first.
+export function liftOverScrim(
+  scrim: boolean,
+  island: PageBox,
+  sheets: readonly PageBox[],
+): boolean {
+  return (
+    scrim &&
+    !sheets.some(
+      (sheet) =>
+        sheet.left < island.right &&
+        island.left < sheet.right &&
+        sheet.top < island.bottom &&
+        island.top < sheet.bottom,
+    )
+  );
+}

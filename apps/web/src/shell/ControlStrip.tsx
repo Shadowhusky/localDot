@@ -123,8 +123,19 @@ export function TypeText({
 }
 
 // Under the stage's right edge while the user has the computer (design-v2 §11 F): what a keyboard
-// and mouse on this side can't do directly.
-export function ControlStrip({ send, blocked }: { send: Send; blocked?: string }) {
+// and mouse on this side can't do directly, and full screen. In full screen it floats over the
+// picture's foot.
+export function ControlStrip({
+  send,
+  blocked,
+  full,
+  onFullScreen,
+}: {
+  send: Send;
+  blocked?: string;
+  full: boolean;
+  onFullScreen(): void;
+}) {
   const keys = useRef<HTMLButtonElement>(null);
   const typing = useRef<HTMLButtonElement>(null);
   const [open, setOpen] = useState<"keys" | "type" | null>(null);
@@ -178,12 +189,17 @@ export function ControlStrip({ send, blocked }: { send: Send; blocked?: string }
       >
         <TypeText send={send} blocked={blocked} onDone={close} />
       </Popover>
+      <span className="control-strip-divider" aria-hidden="true" />
+      <Button variant="quiet" round icon={full ? "shrink" : "expand"} onClick={onFullScreen}>
+        {full ? "Exit full screen" : "Full screen"}
+      </Button>
     </div>
   );
 }
 
 // A phone's toolbar while the user has the computer (design-v2 §11 F): its keyboard, a right-click
-// for the next tap, typing a pasted text, and Hand back.
+// for the next tap, typing a pasted text, full screen, and Hand back. Compact, as in full screen's
+// margin, Hand back is a round button like the rest.
 export function ControlTools({
   send,
   blocked,
@@ -193,6 +209,8 @@ export function ControlTools({
   onRightClick,
   handBack,
   onHandBack,
+  onFullScreen,
+  compact = false,
 }: {
   send: Send;
   blocked?: string;
@@ -204,13 +222,20 @@ export function ControlTools({
   onRightClick(on: boolean): void;
   handBack: { reason?: string; busy?: boolean };
   onHandBack(): void;
+  onFullScreen?(): void;
+  compact?: boolean;
 }) {
   const [sheet, setSheet] = useState(false);
   const typeButton = useRef<HTMLButtonElement>(null);
   // Pressing the button takes focus from the keyboard field before its click arrives.
   const typingAtPress = useRef<boolean | null>(null);
   return (
-    <div className="control-tools" role="toolbar" aria-label="Computer controls">
+    <div
+      className="control-tools"
+      role="toolbar"
+      aria-label="Computer controls"
+      data-compact={compact || undefined}
+    >
       <IconButton
         size={44}
         round
@@ -249,18 +274,41 @@ export function ControlTools({
         {...triggerProps("dialog", sheet)}
         onClick={() => setSheet(true)}
       />
-      <Button
-        className="control-tools-hand-back"
-        variant="primary"
-        size="xl"
-        round
-        icon="hand-back"
-        busy={handBack.busy}
-        disabledReason={handBack.reason}
-        onClick={onHandBack}
-      >
-        Hand back
-      </Button>
+      {onFullScreen && (
+        <IconButton
+          size={44}
+          round
+          variant="filled"
+          icon="expand"
+          label="Full screen"
+          onClick={onFullScreen}
+        />
+      )}
+      {compact ? (
+        <IconButton
+          size={44}
+          round
+          variant="primary"
+          icon="hand-back"
+          label="Hand back"
+          aria-busy={handBack.busy || undefined}
+          disabledReason={handBack.reason}
+          onClick={handBack.busy ? undefined : onHandBack}
+        />
+      ) : (
+        <Button
+          className="control-tools-hand-back"
+          variant="primary"
+          size="xl"
+          round
+          icon="hand-back"
+          busy={handBack.busy}
+          disabledReason={handBack.reason}
+          onClick={onHandBack}
+        >
+          Hand back
+        </Button>
+      )}
       <Sheet
         open={sheet}
         onClose={() => setSheet(false)}

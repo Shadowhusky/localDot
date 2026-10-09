@@ -189,6 +189,18 @@
   max-width: calc(100% - 2 * (56px + 16px));
 }
 
+@media (orientation: portrait) {
+  .app[data-focus] .stage-col {
+    justify-content: center;
+    padding: 0 8px;
+  }
+
+  .app[data-focus] .stage-col > .stage-frame {
+    width: 100%;
+    max-width: none;
+  }
+}
+
 /* Panels that list things down a column: Activity, and Replay's library. */
 .rail {
   display: flex;

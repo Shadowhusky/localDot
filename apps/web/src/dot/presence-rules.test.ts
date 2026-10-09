@@ -20,6 +20,11 @@ describe("where the one live dot is", () => {
     expect(presencePlace({ ...LIVE, keyboard: true, curtain: true })).toBe("hero");
   });
 
+  it("moves into the island while the stage fills the screen", () => {
+    expect(presencePlace({ ...LIVE, full: true })).toBe("badge");
+    expect(presencePlace({ ...LIVE, full: false })).toBe("dock");
+  });
+
   it("is nowhere while the stage is out of view, or when it is off", () => {
     expect(presencePlace({ ...LIVE, stageHidden: true })).toBeNull();
     for (const curtain of [false, true])

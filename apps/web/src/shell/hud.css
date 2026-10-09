@@ -314,12 +314,57 @@
 
 .app[data-focus] .island .island-label {
   width: auto;
-  max-width: 420px;
+  max-width: min(420px, 100vw - 96px);
+}
+
+/* Full screen (design-v2 §11 G): the minimal island inside the picture's top edge, with dot's badge,
+   Take control as an icon and the way out. It fades after a still moment and comes back when the
+   pointer nears the top, while it is in use, or at once when dot needs the user. */
+.island-anchor[data-full] {
+  top: 12px;
+  translate: none;
+  transition:
+    top var(--dur-default) var(--ease-spring),
+    opacity var(--dur-default) var(--ease-standard);
+}
+
+.app[data-full][data-still] :is(.island-anchor, .control-strip) {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.app[data-full][data-still]
+  :is(.island-anchor, .control-strip):has(:focus-visible, [aria-expanded="true"]) {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (hover: hover) {
+  .app[data-full][data-still] :is(.island-anchor, .control-strip):hover {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+/* dot's badge goes and comes back with the island it sits in. */
+.app[data-full][data-still]:not(
+  :has(.island-anchor:hover, .island-anchor :focus-visible, .island-anchor [aria-expanded="true"])
+) .presence-frame[data-place="badge"] {
+  opacity: 0;
+}
+
+/* Above a sheet's scrim, so Stop and Take control are never behind a sheet (design-v2 §5). */
+.island-anchor[data-lifted] {
+  z-index: var(--layer-island-lifted);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .island-anchor {
     transition: none;
+  }
+
+  .island-anchor[data-full] {
+    transition: opacity var(--dur-fade) var(--ease-standard);
   }
 
   .island-plate[data-settled] {
