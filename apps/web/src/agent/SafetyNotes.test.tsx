@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { useRef } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { emptyAgentModel } from "./model.ts";
 import { SafetyNotes } from "./SafetyNotes.tsx";
@@ -38,31 +39,40 @@ const safety = {
   requestPause: vi.fn(),
 } as unknown as SafetyView;
 
-it("says a task gone quiet in words that fit Watch and Replay", () => {
-  const view = render(<SafetyNotes safety={safety} agent={agent} cell={null} />);
-  expect(screen.getByText(/longer than usual/).textContent).toBe(
-    "dot is taking longer than usual. Use Stop if it seems stuck.",
-  );
-  view.rerender(<SafetyNotes safety={safety} agent={agent} cell={null} replaying />);
-  expect(screen.getByText(/longer than usual/).textContent).toBe(
-    "The live task is taking longer than usual. Switch to Watch to stop it.",
-  );
-});
-
-it("drops a decision the computer could not take as a note with a way to check again", () => {
-  const checkAgain = vi.fn();
-  const failed = {
-    ...safety,
-    allowed: null,
-    dismissAllowed: vi.fn(),
-    error: "Your decision could not be confirmed.",
-    checkAgain,
-  } as unknown as SafetyView;
-  render(<SafetyNotes safety={failed} agent={agent} cell={null} />);
-  const note = screen.getByRole("alert");
-  expect(note.className).toContain("island-note");
-  fireEvent.click(screen.getByRole("button", { name: "Check task status" }));
-  expect(checkAgain).toHaveBeenCalledOnce();
+it("drops a decision the computer could not take as a toast with a way to check again", async () => {
+  vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance"] });
+  try {
+    vi.resetModules();
+    const { Toaster } = await import("../ui/Toast.tsx");
+    const { SafetyNotes: Notes } = await import("./SafetyNotes.tsx");
+    const checkAgain = vi.fn();
+    const failed = {
+      ...safety,
+      allowed: null,
+      dismissAllowed: vi.fn(),
+      error: "Your decision could not be confirmed.",
+      checkAgain,
+    } as unknown as SafetyView;
+    function Island() {
+      const island = useRef<HTMLDivElement>(null);
+      return (
+        <div>
+          <div ref={island}>Island</div>
+          <Notes safety={failed} agent={agent} cell={null} />
+          <Toaster anchor={island} />
+        </div>
+      );
+    }
+    render(<Island />);
+    act(() => vi.advanceTimersByTime(400));
+    const toast = screen.getByRole("listitem");
+    expect(toast.textContent).toContain("Your decision could not be confirmed.");
+    expect(document.querySelector(".island-note")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Check again" }));
+    expect(checkAgain).toHaveBeenCalledOnce();
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 const ID = "01J00000000000000000000003";

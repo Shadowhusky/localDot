@@ -88,7 +88,7 @@ export function ChatThread({
   start?: ReactNode;
 }) {
   const model = agent?.model;
-  const ended = model?.ended?.reason;
+  const ended = agent?.interrupted ? "interrupted" : model?.ended?.reason;
   const sessionId = agent?.sessionId ?? null;
   const steps = useMemo<WorkStep[]>(() => (model ? workSteps(rows, model) : []), [rows, model]);
   const items = useMemo(
@@ -135,7 +135,6 @@ export function ChatThread({
       api={api}
       sessionId={sessionId}
       recovery={recovery}
-      error={agent?.error}
       onReplay={onReplay}
       onReplayTask={onReplayTask}
       computerReady={computerReady}

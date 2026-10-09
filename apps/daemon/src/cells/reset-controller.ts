@@ -36,6 +36,7 @@ export interface ComputerResetControllerDeps {
     | "create"
     | "retireReset"
     | "inspectReplacement"
+    | "thawReplacement"
     | "retireReplacement"
     | "holdReplacement"
     | "publishReplacement"
@@ -103,7 +104,7 @@ export function createComputerResetController(d: ComputerResetControllerDeps) {
     capture,
     hold: (old, fresh, request) => {
       d.holds.hold(old, fresh, request);
-      d.cells.holdReplacement(fresh);
+      if (d.holds.candidateHeld(fresh)) d.cells.holdReplacement(fresh);
     },
     expectedRequests: () => d.holds.records(),
     closeAdmission: () => {
@@ -112,6 +113,16 @@ export function createComputerResetController(d: ComputerResetControllerDeps) {
     },
     inspectFresh,
     oldAbsent,
+    finalised: (record) => d.holds.finalised(record.newCellId),
+    thawFresh: async (record) => {
+      if (d.stopping?.()) throw failure();
+      await d.cells.thawReplacement(record.newCellId);
+      const deadline = Date.now() + (d.readyTimeoutMs ?? 60000);
+      while (!d.stopping?.() && Date.now() < deadline) {
+        if ((await inspectFresh(record)) === "ready") return;
+        await sleep(250);
+      }
+    },
     retireOld: async (record) => {
       // Do not start even the ordinary Stop/browser cleanup path until the captured graph is owned.
       await verifyComputerResetResources(d.docker, record);

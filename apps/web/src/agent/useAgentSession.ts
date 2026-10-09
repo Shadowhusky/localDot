@@ -7,7 +7,7 @@ import { type AgentModel, emptyAgentModel } from "./model.ts";
 
 const EMPTY_AGENT_MODEL = emptyAgentModel();
 // A task at rest whose log stops short of its end (the daemon went away under it) is over all the
-// same.
+// same, and marked `interrupted`.
 const CUT_SHORT = { reason: "stopped" } as const;
 
 interface SnapshotView {
@@ -33,6 +33,8 @@ export interface AgentSessionView {
   readonly authorityEpoch?: number | null;
   // The task's history so far has arrived, so its thread can be drawn whole.
   readonly history?: boolean;
+  // The task is over because localDot went away under it, not because it ended.
+  readonly interrupted?: boolean;
   readonly connection: ReturnType<LiveSession["agentFeed"]["read"]>["connection"];
   reconcile(): void;
 }
@@ -187,6 +189,7 @@ export function useAgentSession(
     error: current.streamError ?? (owned ? view.error : null),
     authorityEpoch: owned ? view.epoch : null,
     history: matches && current.history,
+    interrupted: matches && atRest && current.history && !current.model.ended,
     readFresh,
     fresh: Boolean(
       matches &&

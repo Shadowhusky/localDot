@@ -75,12 +75,12 @@ describe("browser download review controls", () => {
     const { container } = render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
     await screen.findByText("report.pdf");
     expect(f.post).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Review & release" }));
-    const dialog = screen.getByRole("dialog");
+    fireEvent.click(screen.getByRole("button", { name: "Review" }));
+    const dialog = screen.getByRole("alertdialog");
     expect(container.contains(dialog)).toBe(false);
     expect(within(dialog).getByText(held.sha256)).toBeTruthy();
-    expect(within(dialog).getByText("This computer’s Downloads folder")).toBeTruthy();
-    fireEvent.click(within(dialog).getByRole("button", { name: "Release once" }));
+    expect(within(dialog).getByText("Downloads on your computer")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Save to computer" }));
     await screen.findByText("Saved report.pdf to ~/Downloads/report.pdf.");
     const [, request] = f.fetchImpl.mock.calls.find(([, init]) => init?.method === "POST") ?? [];
     expect(JSON.parse(request?.body as string)).toEqual(releaseRequest(held));
@@ -93,9 +93,9 @@ describe("browser download review controls", () => {
   it("cancel closes the floating decision without sending an effect", async () => {
     const f = fixture();
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
-    fireEvent.click(await screen.findByRole("button", { name: "Review & release" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(f.post).not.toHaveBeenCalled();
   });
   it("reconciles an uncertain delivery with the original approved revision", async () => {
@@ -103,7 +103,7 @@ describe("browser download review controls", () => {
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
     fireEvent.click(await screen.findByRole("button", { name: "Check delivery" }));
     fireEvent.click(
-      within(screen.getByRole("dialog")).getByRole("button", { name: "Check delivery" }),
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Check delivery" }),
     );
     await screen.findByText("Saved report.pdf to ~/Downloads/report.pdf.");
     const [, request] = f.fetchImpl.mock.calls.find(([, init]) => init?.method === "POST") ?? [];
@@ -115,7 +115,9 @@ describe("browser download review controls", () => {
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
     fireEvent.click(await screen.findByRole("button", { name: "Discard" }));
     expect(f.post).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Discard download" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Discard" }),
+    );
     await screen.findByText("Discarded report.pdf.");
     expect(screen.queryByText("report.pdf")).toBeNull();
     const [url, request] = f.fetchImpl.mock.calls.find(([, init]) => init?.method === "POST") ?? [];
@@ -125,13 +127,13 @@ describe("browser download review controls", () => {
   it("disables stale decisions after the listed file changes", async () => {
     const f = fixture();
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
-    fireEvent.click(await screen.findByRole("button", { name: "Review & release" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
     f.update(released);
     fireEvent.click(screen.getByRole("button", { name: "Refresh downloads" }));
-    await screen.findByText("This download changed. Cancel and refresh its status.");
+    await screen.findByText("This file changed since you opened it. Cancel, then review it again.");
     expect(
-      (screen.getByRole("button", { name: "Release once" }) as HTMLButtonElement).disabled,
-    ).toBe(true);
+      screen.getByRole("button", { name: "Save to computer" }).getAttribute("aria-disabled"),
+    ).toBe("true");
     expect(f.post).not.toHaveBeenCalled();
   });
   it("does not repeat an uncertain write while refreshing its durable state", async () => {
@@ -141,9 +143,9 @@ describe("browser download review controls", () => {
       throw new Error("lost response");
     });
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
-    fireEvent.click(await screen.findByRole("button", { name: "Review & release" }));
-    fireEvent.click(screen.getByRole("button", { name: "Release once" }));
-    await screen.findByText(/The change was not confirmed/);
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save to computer" }));
+    await screen.findByText(/Couldn't confirm that change/);
     await screen.findByRole("button", { name: "Check delivery" });
     expect(f.post).toHaveBeenCalledOnce();
   });
@@ -152,23 +154,23 @@ describe("browser download review controls", () => {
     const receipt = Promise.withResolvers<typeof released>();
     f.post.mockImplementation(() => receipt.promise);
     const view = render(<BrowserDownloads api={f.api} cellId={parent} releaseReady />);
-    fireEvent.click(await screen.findByRole("button", { name: "Review & release" }));
-    fireEvent.click(screen.getByRole("button", { name: "Release once" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+    fireEvent.click(screen.getByRole("button", { name: "Save to computer" }));
     await waitFor(() => expect(f.post).toHaveBeenCalledOnce());
     const [, request] = f.fetchImpl.mock.calls.find(([, init]) => init?.method === "POST") ?? [];
     view.rerender(<BrowserDownloads api={f.api} cellId={other} releaseReady />);
     expect(request?.signal?.aborted).toBe(true);
     await act(async () => receipt.resolve(released));
     expect(screen.queryByText("Saved report.pdf to ~/Downloads/report.pdf.")).toBeNull();
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
   it("keeps release unavailable for a stopped computer while allowing discard review", async () => {
     const f = fixture();
     render(<BrowserDownloads api={f.api} cellId={parent} releaseReady={false} />);
-    const button = await screen.findByRole("button", { name: "Review & release" });
+    const button = await screen.findByRole("button", { name: "Review" });
     expect(button.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(button);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
     expect(
       screen.getByRole("button", { name: "Discard" }).getAttribute("aria-disabled"),
     ).toBeNull();
@@ -261,12 +263,12 @@ it("keeps an open download decision, in one scroller, when a task starts", async
   const view = render(
     <ActivityRail rows={[]} sessionId={null} cellId={parent} releaseReady scale={1} api={f.api} />,
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Review & release" }));
-  expect(screen.getByRole("dialog")).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Review" }));
+  expect(screen.getByRole("alertdialog")).toBeTruthy();
   view.rerender(
     <ActivityRail rows={[]} sessionId="task" cellId={parent} releaseReady scale={1} api={f.api} />,
   );
-  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(screen.getByRole("alertdialog")).toBeTruthy();
   expect(f.fetchImpl.mock.calls.filter(([, init]) => init?.method !== "POST")).toHaveLength(1);
   expect(view.container.querySelectorAll(".ui-scroll-area")).toHaveLength(1);
   expect(

@@ -25,7 +25,7 @@ type ComputerKind = Exclude<HudAction["kind"], "stop-task">;
 const COMPUTER: Record<ComputerKind, { label: string; icon?: IconName }> = {
   start: { label: "Turn on", icon: "power" },
   stop: { label: "Shut down", icon: "power" },
-  resume: { label: "Continue", icon: "play" },
+  resume: { label: "Resume", icon: "play" },
   retry: { label: "Try again" },
 };
 const STOP_KEYS = ["Mod", "Shift", "."] as const;
@@ -61,6 +61,8 @@ export interface HudIslandProps {
   decision?: ReactNode;
   // Short notes that drop from the island, under it or under the decision it grew into.
   notices?: ReactNode;
+  // The foot of those notes, where toasts hang so the two never overlap.
+  noticesRef?: RefObject<HTMLDivElement | null>;
   // While the user has the computer the island rises into the top bar, where the bar has room.
   rise?: boolean;
   // The stage fills the screen: the island sits inside the picture's top edge, Take control is an
@@ -69,7 +71,7 @@ export interface HudIslandProps {
   onExitFull?(): void;
   // The width of the island's row, as it changes.
   onRowWidth?(width: number): void;
-  // Toasts hang from the island, or from the decision it grew into.
+  // The island's anchor, with the decision it grew into.
   ref?: RefObject<HTMLDivElement | null>;
   // A decision never covers the rings on these; it drops under them instead.
   fields?: StageFields;
@@ -93,6 +95,7 @@ export function HudIsland({
   onComputer,
   decision,
   notices,
+  noticesRef,
   rise = false,
   full = false,
   onExitFull,
@@ -283,20 +286,37 @@ export function HudIsland({
                 </Button>
               ))}
             {shape === "computer" &&
-              computerActions.map((action) => (
-                <Button
-                  key={action.kind}
-                  className="island-action"
-                  variant="glass"
-                  round
-                  size={phone ? "sm" : "md"}
-                  icon={COMPUTER[action.kind].icon}
-                  disabledReason={action.enabled ? undefined : "Wait a moment"}
-                  onClick={onComputer[action.kind]}
-                >
-                  {COMPUTER[action.kind].label}
-                </Button>
-              ))}
+              computerActions.map((action) => {
+                const { label, icon } = COMPUTER[action.kind];
+                const reason = action.enabled ? undefined : "Wait a moment";
+                // A phone's island is one short line: its buttons are glyphs, as Take control is.
+                return phone && icon ? (
+                  <IconButton
+                    key={action.kind}
+                    className="island-action"
+                    variant="glass"
+                    round
+                    size={control}
+                    icon={icon}
+                    label={label}
+                    disabledReason={reason}
+                    onClick={onComputer[action.kind]}
+                  />
+                ) : (
+                  <Button
+                    key={action.kind}
+                    className="island-action"
+                    variant="glass"
+                    round
+                    size={phone ? "sm" : "md"}
+                    icon={icon}
+                    disabledReason={reason}
+                    onClick={onComputer[action.kind]}
+                  >
+                    {label}
+                  </Button>
+                );
+              })}
             {full && (
               <IconButton
                 variant="glass"
@@ -315,7 +335,9 @@ export function HudIsland({
           </div>
         </Presence>
       </div>
-      {notices && <div className="island-notices">{notices}</div>}
+      <div className="island-notices" ref={noticesRef}>
+        {notices}
+      </div>
     </div>
   );
 }

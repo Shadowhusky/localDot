@@ -138,9 +138,8 @@ export function Protection({ health }: { health: KeydHealth | null }) {
                 <div className="keys-status-help">
                   <p>{status.problem}</p>
                   <div className="keys-status-fix">
-                    <span>To fix it, run</span>
+                    <span>To fix it, run this in Terminal:</span>
                     <Command />
-                    <span>in Terminal.</span>
                   </div>
                   {status.details && (
                     <Disclosure summary="Details" className="keys-status-details">
