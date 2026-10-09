@@ -12,6 +12,10 @@
       --dur-snappy: 150ms;
       --dur-default: 150ms;
       --dur-gentle: 150ms;
+      --dur-light-in: 150ms;
+      --dur-light-out: 150ms;
+      --dur-text-in: 120ms;
+      --dur-dim: 150ms;
     }
   }
 }

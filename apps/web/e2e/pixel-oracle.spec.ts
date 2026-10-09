@@ -66,7 +66,7 @@ test("pixel oracle: cursor hotspot, ring order, typing pace, clean observations,
   page,
 }, info) => {
   await page.goto(`${daemon.origin}/?oracle=1#token=${daemon.token}`);
-  await expect(page.getByTestId("hud-status")).toHaveText("Live", { timeout: 120_000 });
+  await expect(page.getByTestId("hud-status")).toHaveText("Ready", { timeout: 120_000 });
   await page.waitForFunction(
     () => Number(document.querySelector("canvas.stage-canvas")?.getAttribute("data-frames")) > 0,
     null,

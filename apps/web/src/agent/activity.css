@@ -49,7 +49,7 @@
   align-items: center;
   gap: calc(var(--spacing) * 3);
   min-height: calc(var(--spacing) * 8);
-  background-color: var(--color-void);
+  background-color: var(--rail-surface);
 }
 
 .plan-head::after {
@@ -57,7 +57,7 @@
   position: absolute;
   inset: 100% 0 auto;
   height: calc(var(--spacing) * 3);
-  background: linear-gradient(var(--color-void), transparent);
+  background: linear-gradient(var(--rail-surface), transparent);
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--dur-fade) var(--ease-standard);
@@ -567,11 +567,10 @@ button.activity-row-head[data-pressed] {
   outline-offset: var(--focus-offset);
 }
 
+/* The usage line ends the list, quietly, rather than staying pinned under it. */
 .activity-usage {
   flex-shrink: 0;
   margin-top: calc(var(--spacing) * 2);
-  padding-top: var(--spacing);
-  border-top: 1px solid var(--color-hairline);
 }
 
 .activity-usage-trigger {

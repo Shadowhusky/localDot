@@ -7,15 +7,8 @@ runAt("c14", "w39");
 const KEY = `sk-ant-api03-${"z".repeat(40)}`;
 
 async function composer(page: Page) {
-  if ((page.viewportSize()?.width ?? 0) < 1100) {
-    // The phone opens on the computer until the task has loaded, so the tab is chosen once it has.
-    const tab = page.getByRole("tab", { name: /^Conversation/ });
-    await expect(async () => {
-      await tab.click();
-      await expect(tab).toHaveAttribute("aria-selected", "true", { timeout: 1000 });
-    }).toPass();
-    await expect(page.locator(".thread-row").first()).toBeVisible();
-  }
+  // The rail opens on the chat; on a phone it sits under the stage.
+  await expect(page.getByRole("radio", { name: "Chat" })).toHaveAttribute("aria-checked", "true");
   return page.getByRole("form", { name: "Message dot" });
 }
 

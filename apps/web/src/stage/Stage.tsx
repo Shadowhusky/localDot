@@ -37,8 +37,6 @@ export interface StageProps {
   parentId?: string;
   selection?: ScreenSelectionSnapshot;
   api: ApiClient;
-  // The agent has control: the stage wears the xenon rim.
-  control?: boolean;
   reconnects: number;
   listed: readonly string[];
   manual?: {
@@ -52,7 +50,7 @@ export interface StageProps {
 }
 
 export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
-  { cell, api, control = false, reconnects, listed, manual, mode = "live", parentId, selection },
+  { cell, api, reconnects, listed, manual, mode = "live", parentId, selection },
   ref,
 ) {
   const support =
@@ -271,7 +269,6 @@ export const Stage = forwardRef<StageHandle, StageProps>(function Stage(
       <div className={reconnecting ? "stage-veil on" : "stage-veil"} aria-hidden={!reconnecting}>
         <p>Reconnecting…</p>
       </div>
-      {mode === "live" && control && <div className="rim" aria-hidden="true" />}
       {mode === "live" && manual && (
         <ManualSurface
           ref={keyboard}

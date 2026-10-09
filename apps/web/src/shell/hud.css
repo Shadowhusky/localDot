@@ -1,0 +1,151 @@
+/* The HUD island (design-v2 §10.15): glass hung on the stage's top edge, half over the house and
+   half over the computer's menu bar. */
+.island {
+  position: absolute;
+  top: calc(var(--island-h) / -2);
+  left: 50%;
+  z-index: var(--layer-island);
+  height: var(--island-h);
+  translate: -50% 0;
+  color: var(--color-fg-1);
+  transition:
+    opacity var(--dur-dim) var(--ease-standard),
+    visibility 0s;
+}
+
+.island[data-shape="hidden"] {
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    opacity var(--dur-dim) var(--ease-standard),
+    visibility 0s var(--dur-dim);
+}
+
+/* The glass is its own layer, so its width can travel while the slots keep theirs. */
+.island-plate {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  translate: -50% 0;
+  border-radius: var(--radius-island);
+  background-color: var(--color-glass);
+  -webkit-backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  backdrop-filter: blur(var(--blur-glass)) saturate(180%);
+  box-shadow: var(--shadow-glass);
+}
+
+.island-plate[data-settled] {
+  transition: width var(--dur-default) var(--ease-spring);
+}
+
+.island-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--spacing) 0 calc(var(--spacing) * 3.5);
+  white-space: nowrap;
+}
+
+/* A slot that joins with a new shape fades in as the glass reaches it. */
+.island-row > * {
+  transition:
+    opacity var(--dur-text-in) var(--ease-standard) calc(var(--dur-text-in) / 2),
+    color var(--dur-hover) var(--ease-standard);
+}
+
+@starting-style {
+  .island-row > * {
+    opacity: 0;
+  }
+}
+
+.island-label {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  min-width: 64px;
+  max-width: 200px;
+  overflow: hidden;
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  letter-spacing: var(--text-body--letter-spacing);
+}
+
+.island[data-shape="task"] .island-label {
+  width: 200px;
+}
+
+.island-label-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.island-label-text > span {
+  animation: island-text-in var(--dur-text-in) var(--ease-standard) both;
+}
+
+@keyframes island-text-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.island-attention {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-full);
+  background-color: var(--color-attention);
+}
+
+.island-elapsed {
+  flex: none;
+  width: 60px;
+  padding-left: calc(var(--spacing) * 2);
+  color: var(--color-fg-2);
+  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.island-divider {
+  flex: none;
+  width: 1px;
+  height: 18px;
+  margin: 0 calc(var(--spacing) * 1.5);
+  background-color: var(--color-control-pressed);
+}
+
+.island-action + .island-action {
+  margin-left: calc(var(--spacing) * 1.5);
+}
+
+@media (width < 700px) {
+  .island-row {
+    padding: 0 calc(var(--spacing) / 2) 0 calc(var(--spacing) * 3);
+  }
+
+  .island[data-shape="task"] .island-label {
+    width: 172px;
+  }
+
+  .island-elapsed {
+    width: 50px;
+    padding-left: calc(var(--spacing) * 1.5);
+  }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .island-plate {
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .island-plate {
+    background-color: var(--color-glass-solid);
+  }
+}

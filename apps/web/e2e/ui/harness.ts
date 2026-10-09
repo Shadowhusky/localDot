@@ -106,11 +106,9 @@ export const test = base.extend<{ ui: Harness }>({
       },
       settle: () => settle(page),
       async still() {
-        await page
-          .locator(".hud .mascot .dot, .welcome-hero .dot, .sign-in .dot")
-          .evaluateAll((dots) => {
-            for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
-          });
+        await page.locator(".welcome-hero .dot, .sign-in .dot").evaluateAll((dots) => {
+          for (const dot of dots) (dot as HTMLElement).style.visibility = "hidden";
+        });
       },
     });
     // Taken before the fixture stops: requests cut off by the shutdown are not the page's fault.

@@ -11,10 +11,13 @@ import "./conversation.css";
 
 const NO_ROWS: TimelineRow<StepRowView>[] = [];
 
-export function ConversationRail({
+// The conversation in the rail, with Activity (or another view) laid over it when chosen.
+export function ChatThread({
   agent,
   composer,
   answer,
+  cover,
+  covered = false,
   recovery,
   visible = true,
   rows = NO_ROWS,
@@ -26,6 +29,8 @@ export function ConversationRail({
   agent?: AgentSessionView;
   composer?: ReactNode;
   answer?: ReactNode;
+  cover?: ReactNode;
+  covered?: boolean;
   recovery?: ReactNode;
   visible?: boolean;
   rows?: TimelineRow<StepRowView>[];
@@ -53,27 +58,24 @@ export function ConversationRail({
   const working = !!live && live.phase !== "finished" && !ended;
   const thread = useMemo(() => withWork(items, steps, working), [items, steps, working]);
   return (
-    <aside className="rail conversation-rail" aria-label="Conversation">
-      <div className="rail-h">
-        <h2>Conversation</h2>
-      </div>
-      <Conversation
-        visible={visible}
-        ownerKey={agent?.sessionId ?? ""}
-        items={thread}
-        truncated={model?.historyTruncated ?? false}
-        live={working ? live : null}
-        ended={ended}
-        pendingAsk={model?.pendingAsk ?? null}
-        api={api}
-        sessionId={agent?.sessionId ?? null}
-        recovery={recovery}
-        error={agent?.error}
-        onReplay={onReplay}
-        computerReady={computerReady}
-        composer={composer}
-        answer={answer}
-      />
-    </aside>
+    <Conversation
+      visible={visible}
+      ownerKey={agent?.sessionId ?? ""}
+      items={thread}
+      truncated={model?.historyTruncated ?? false}
+      live={working ? live : null}
+      ended={ended}
+      pendingAsk={model?.pendingAsk ?? null}
+      api={api}
+      sessionId={agent?.sessionId ?? null}
+      recovery={recovery}
+      error={agent?.error}
+      onReplay={onReplay}
+      computerReady={computerReady}
+      composer={composer}
+      answer={answer}
+      cover={cover}
+      covered={covered}
+    />
   );
 }

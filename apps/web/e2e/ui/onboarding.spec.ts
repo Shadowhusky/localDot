@@ -45,9 +45,9 @@ test("first run shows Turn on without scrolling and keeps the stage where the co
   const before = await box(page, ".stage");
   expect((before?.width ?? 0) / (before?.height ?? 1)).toBeCloseTo(1.6, 2);
   const setup = await box(page, ".welcome-setup");
-  // Inside the stage on a wide screen; over the whole computer pane, and so the stage, on a phone.
-  if (viewport.width >= 760) expect(setup).toEqual(before);
-  else expect(setup).toEqual(await box(page, ".stage-col"));
+  // Over the stage on a wide screen; over the stage and the band under it on a phone.
+  if (viewport.width >= 700) expect(setup).toEqual(before);
+  else expect(setup).toEqual(await box(page, ".stage-frame"));
   await turnOn.click();
   await expect(page.locator(".welcome-setup")).toHaveCount(0);
   expect(await box(page, ".stage")).toEqual(before);

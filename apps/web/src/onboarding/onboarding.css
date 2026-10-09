@@ -1,5 +1,5 @@
-/* First run lies over the 16:10 stage, so turning the computer on never moves the stage: inside it
-   on a wide screen, over the whole computer pane on a phone. dot and the one action stay put on the
+/* First run lies over the 16:10 stage, so turning the computer on never moves the stage: over the stage
+   on a wide screen, over the stage and the band on a phone. dot and the one action stay put on the
    left; the steps scroll on their own on the right. */
 .welcome-setup {
   position: absolute;
@@ -19,10 +19,6 @@
   transition: opacity var(--dur-exit) var(--ease-exit);
 }
 
-.stage-col:has(> .ui-presence > .welcome-setup) {
-  position: relative;
-}
-
 .welcome-layout {
   display: grid;
   grid-template-columns: minmax(0, 2fr) minmax(0, 3fr);
@@ -35,7 +31,7 @@
   }
 }
 
-.stage-col:has(.welcome-setup) > .caption {
+.stage-frame:has(.welcome-setup) .narration {
   visibility: hidden;
 }
 

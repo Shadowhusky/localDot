@@ -65,11 +65,7 @@ export function SafetyControls({
       );
     }
   };
-  const pause = safety.pause;
   const approval = safety.approval;
-  const status = agent.snapshot?.status;
-  const budgetHold = agent.snapshot?.budgetHold;
-  const taskOpen = !replaying && !!agent.sessionId && status !== "ended" && status !== "idle";
   return (
     <div className="safety-controls">
       {approval && (
@@ -112,43 +108,6 @@ export function SafetyControls({
         onUndo={() => void safety.undoAllowed()}
         onDismiss={safety.dismissAllowed}
       />
-      {taskOpen && (
-        <div className="safety-task-controls">
-          {pause ? (
-            <>
-              <p role="status">
-                {pause.phase === "paused"
-                  ? budgetHold === "task"
-                    ? "Paused at the next step. The task also reached its spending limit: set a new task budget in Conversation, then resume."
-                    : budgetHold === "day"
-                      ? "Paused at the next step. Today's spending limit is used up; if you resume before it resets at midnight, the task pauses again."
-                      : "Paused at the next step. Your task and files are retained."
-                  : pause.phase === "uncertain"
-                    ? "Pause is unconfirmed. Resume is unavailable; use Stop to contain the computer."
-                    : pause.phase === "resuming"
-                      ? "Resuming — checking task status…"
-                      : "Pausing after the current step. Its output can finish; the next step is held."}
-              </p>
-              <button
-                type="button"
-                disabled={!safety.canResume || !visible}
-                onClick={() => void safety.resume()}
-              >
-                Resume task
-              </button>
-            </>
-          ) : (
-            <button
-              type="button"
-              disabled={!safety.canPause || !visible}
-              onClick={() => void safety.requestPause()}
-            >
-              Pause after this step
-            </button>
-          )}
-          <span className="stop-hint">Stop: Ctrl/Cmd + Shift + .</span>
-        </div>
-      )}
       {taskStalled(agent, now) && (
         <p role="status">
           {replaying

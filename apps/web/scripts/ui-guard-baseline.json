@@ -11,9 +11,9 @@
     "native-disabled": 4
   },
   "src/agent/SafetyControls.tsx": {
-    "banned-copy": 4,
-    "native-control": 5,
-    "native-disabled": 4
+    "banned-copy": 3,
+    "native-control": 3,
+    "native-disabled": 2
   },
   "src/agent/StopControl.tsx": {
     "native-control": 2
@@ -43,19 +43,17 @@
     "control-selector": 10,
     "half-pixel": 1,
     "radius-literal": 6,
-    "raw-colour": 29,
+    "raw-colour": 28,
     "spacing-literal": 31,
     "stray-stylesheet": 1,
     "token-fallback": 4,
-    "type-literal": 17
+    "type-literal": 16
   },
   "src/app.css": {
-    "control-selector": 12,
-    "half-pixel": 9,
-    "radius-literal": 9,
-    "spacing-literal": 23,
+    "radius-literal": 1,
+    "spacing-literal": 6,
     "stray-stylesheet": 1,
-    "type-literal": 17
+    "type-literal": 2
   },
   "src/browser/BrowserDownloads.tsx": {
     "native-control": 2,
@@ -88,18 +86,6 @@
   },
   "src/shell/ActivityRail.tsx": {
     "native-control": 1
-  },
-  "src/shell/Hud.tsx": {
-    "banned-copy": 1,
-    "native-control": 1
-  },
-  "src/shell/PaneTabs.tsx": {
-    "native-control": 1
-  },
-  "src/shell/TopBar.tsx": {
-    "banned-copy": 1,
-    "native-control": 4,
-    "native-disabled": 1
   },
   "src/stage/ManualSurface.tsx": {
     "native-control": 1
