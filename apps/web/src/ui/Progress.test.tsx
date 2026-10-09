@@ -66,6 +66,13 @@ describe("Meter", () => {
     expect(meter.closest(".ui-meter")?.hasAttribute("data-near")).toBe(true);
   });
 
+  it("says the limit is reached once it is all used, never that it is almost", () => {
+    render(<Meter label="Spent of today's limit" value={20} max={20} />);
+    const meter = screen.getByRole("meter", { name: "Spent of today's limit" });
+    expect(screen.getByText("Limit reached · 100%")).toBeTruthy();
+    expect(meter.getAttribute("aria-valuetext")).toBe("100%, limit reached");
+  });
+
   it("shows a percentage when nothing else is given", () => {
     render(<Meter label="Budget" value={3} max={12} />);
     expect(screen.getByText("25%")).toBeTruthy();

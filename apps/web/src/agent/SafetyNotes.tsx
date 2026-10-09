@@ -1,34 +1,43 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import type { CellSummary } from "../cells/types.ts";
-import { Button } from "../ui/Button.tsx";
+import { dismissToast, showToast } from "../ui/Toast.tsx";
 import { AllowedNotice } from "./AllowedNotice.tsx";
 import { notifyApproval } from "./approval-notification.ts";
-import { taskStalled } from "./heartbeat.ts";
 import type { AgentSessionView } from "./useAgentSession.ts";
 import type { SafetyView } from "./useSafety.ts";
 
-// The safety notes that drop from the island: what an Always allow choice now allows, a task that
-// has gone quiet, and a decision the computer could not take. A granted notification still
-// announces each new approval.
+const ERROR_TOAST = "safety-error";
+
+// The safety notes that drop from the island: what an Always allow choice now allows, and, as a
+// toast, a decision the computer could not take. A granted notification still announces each new
+// approval.
 export function SafetyNotes({
   safety,
   agent,
   cell,
   visible = true,
-  replaying = false,
 }: {
   safety: SafetyView;
   agent: AgentSessionView;
   cell: CellSummary | null;
   visible?: boolean;
-  replaying?: boolean;
 }) {
   const seen = useRef(new Set<string>());
-  const [now, setNow] = useState(() => performance.now());
+  const checkAgain = useRef(safety.checkAgain);
+  checkAgain.current = safety.checkAgain;
   useEffect(() => {
-    const timer = setInterval(() => setNow(performance.now()), 500);
-    return () => clearInterval(timer);
-  }, []);
+    if (!safety.error) {
+      dismissToast(ERROR_TOAST);
+      return;
+    }
+    showToast({
+      id: ERROR_TOAST,
+      title: safety.error,
+      tone: "danger",
+      action: { label: "Check again", onAction: () => checkAgain.current() },
+    });
+  }, [safety.error]);
+  useEffect(() => () => dismissToast(ERROR_TOAST), []);
   useEffect(() => {
     if (
       !safety.approval ||
@@ -46,29 +55,12 @@ export function SafetyNotes({
     });
   }, [safety.approval, safety.canNotify, agent.sessionId, cell?.id]);
   return (
-    <>
-      <AllowedNotice
-        choice={safety.approval ? null : safety.allowed}
-        outcome={agent.model.approvalOutcome}
-        visible={visible}
-        onUndo={() => void safety.undoAllowed()}
-        onDismiss={safety.dismissAllowed}
-      />
-      {taskStalled(agent, now) && (
-        <p className="island-note" role="status">
-          {replaying
-            ? "The live task is taking longer than usual. Switch to Watch to stop it."
-            : "dot is taking longer than usual. Use Stop if it seems stuck."}
-        </p>
-      )}
-      {safety.error && (
-        <div className="island-note" role="alert">
-          <p>{safety.error}</p>
-          <Button variant="quiet" size="sm" onClick={safety.checkAgain}>
-            Check task status
-          </Button>
-        </div>
-      )}
-    </>
+    <AllowedNotice
+      choice={safety.approval ? null : safety.allowed}
+      outcome={agent.model.approvalOutcome}
+      visible={visible}
+      onUndo={() => void safety.undoAllowed()}
+      onDismiss={safety.dismissAllowed}
+    />
   );
 }

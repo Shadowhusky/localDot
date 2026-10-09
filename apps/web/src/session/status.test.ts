@@ -394,7 +394,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     ];
     expect(replay(budget, 8000)).toMatchObject({
       row: "limit",
-      label: "Reached your spending limit",
+      label: "Spending limit reached",
       control: false,
     });
     expect(replay(budget, 9100)).toMatchObject({ row: "working", control: true });
@@ -518,7 +518,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
     expect(task).toMatchObject({
       row: "limit",
       phase: "waiting",
-      label: "Reached your spending limit",
+      label: "Spending limit reached",
     });
     expect(status).toMatchObject({
       actions: stopsTask,
@@ -575,7 +575,7 @@ describe("the task HUD tells the task's state before its last action (QA-D6)", (
       ["model refused", "Model turned down a request", "recovery"],
       ["model unavailable", "Model not answering", "recovery"],
       ["keyd unavailable", "Keys are offline", "recovery"],
-      ["budget", "Reached your spending limit", "limit"],
+      ["budget", "Spending limit reached", "limit"],
     ])("names a pause for %s", (reason, label, row) => {
       const stalled = [
         ...typed(),
@@ -851,6 +851,13 @@ const STATES: Record<string, Status> = {
   working: at(typed()),
   done: at(ended("done")),
   stopped: at(ended("stopped")),
+  interrupted: statusFor({
+    computer: live,
+    task: taskHud(
+      { ...foldEvents(emptyModel(), typed()), ended: { t: 1500, reason: "interrupted" } },
+      9500,
+    ),
+  }),
   failed: at(ended("error")),
   "ready for more": at([...typed(), ev("agent.state", 1700, { state: "idle" })]),
   ready: alone(live),
@@ -905,7 +912,7 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   ["pause unconfirmed", "paused", "Pause not confirmed", "resting", null, "system"],
   ["resuming", "resuming", "Resuming…", "thinking", "working", "system"],
   // 6. Budget or plan recovery.
-  ["spending limit", "limit", "Reached your spending limit", "waiting", "needs_you", "dot"],
+  ["spending limit", "limit", "Spending limit reached", "waiting", "needs_you", "dot"],
   ["needs attention", "recovery", "Needs attention", "resting", "blocked", "dot"],
   // 7–9. dot at work.
   ["acting", "acting", "Typing =SUM(F2:F13)", "acting", "working", "dot"],
@@ -916,6 +923,8 @@ const TABLE: [string, StatusRow, string, DotState, Attention | null, "dot" | "sy
   // 10–11. The task is over, or there is none.
   ["done", "done", "Done", "idle", "done", "system"],
   ["stopped", "stopped", "Task stopped", "idle", null, "system"],
+  // A task localDot went away under: dot says so and offers to carry on.
+  ["interrupted", "interrupted", "Task interrupted", "idle", null, "dot"],
   ["failed", "failed", "Task failed", "error", "blocked", "system"],
   ["ready for more", "ready", "Ready", "idle", null, "system"],
   ["ready", "ready", "Ready", "idle", null, "system"],
@@ -938,7 +947,7 @@ describe("one status model for every surface (T10)", () => {
   it("has a row in the table for every fixture, and every row and phase the model gives", () => {
     expect(TABLE.map(([name]) => name).sort()).toEqual(Object.keys(STATES).sort());
     const rows = new Set(Object.values(STATES).map((status) => status.row));
-    expect(rows.size).toBe(19);
+    expect(rows.size).toBe(20);
     const phases = new Set(Object.values(STATES).map((status) => status.computer));
     expect(phases.size).toBe(12);
   });
@@ -1086,4 +1095,13 @@ describe("one status model for every surface (T10)", () => {
 
 it("says nothing about a lost link once the task is over", () => {
   expect(statusFor({ computer: live, task: null, link: "lost" }).label).toBe("Ready");
+});
+
+it("never leaves an interrupted task silent: dot says so and asks to carry on", () => {
+  const status = STATES.interrupted as Status;
+  expect(status.caption).toEqual({
+    speaker: "dot",
+    text: "I was cut off before I finished. Shall I continue?",
+  });
+  expect(status.actions).toEqual([{ kind: "stop", enabled: true }]);
 });
