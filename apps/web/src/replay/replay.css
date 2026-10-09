@@ -1052,6 +1052,15 @@
   }
 }
 
+/* A phone blurs glass again for every frame of the picture under it: there the transport is solid. */
+@media (pointer: coarse) {
+  .replay-transport {
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
 @media (prefers-reduced-transparency: reduce) {
   :is(.replay-gap-card, .replay-error) {
     backdrop-filter: none;

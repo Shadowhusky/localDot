@@ -685,9 +685,10 @@
   background-clip: text;
   -webkit-background-clip: text;
   color: transparent;
+  /* A few passes for each new line, then the text rests: a shimmer repaints it on every frame. */
   animation:
     thread-line-in var(--dur-default) var(--ease-spring),
-    thread-shimmer 1.8s linear infinite;
+    thread-shimmer 1.8s linear 3;
 }
 
 /* The new line waits for the old one to leave, so the two never show over each other. */

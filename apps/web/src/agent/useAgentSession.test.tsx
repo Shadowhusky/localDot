@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { LocalDotEvent } from "@localdot/protocol";
 import { act, cleanup, renderHook } from "@testing-library/react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { CellSummary } from "../cells/types.ts";
 import { createApi } from "../lib/api.ts";
@@ -472,4 +472,25 @@ it("reads a task at rest as ended, whatever status the daemon can still give for
     expect(view.result.current.fresh).toBe(false);
     view.unmount();
   }
+});
+it("does not render the app again for a status poll that brings the same answer", async () => {
+  const f = server(() => json(snapshot()));
+  let commits = 0;
+  renderHook(() => {
+    const stage = useRef<StageHandle | null>(null);
+    const live = useLiveSession(f.api, cell(), stage);
+    const agent = useAgentSession(f.api, cell(), live);
+    useEffect(() => {
+      commits++;
+    });
+    return agent;
+  });
+  await flush();
+  open();
+  await advance(4000);
+  const settled = commits;
+  const polls = f.calls.filter((path) => path.startsWith("/api/agent/sessions/")).length;
+  await advance(3000);
+  expect(f.calls.filter((path) => path.startsWith("/api/agent/sessions/")).length).toBe(polls + 3);
+  expect(commits).toBe(settled);
 });

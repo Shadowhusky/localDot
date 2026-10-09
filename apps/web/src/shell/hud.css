@@ -372,3 +372,20 @@
     background-color: var(--color-glass-solid);
   }
 }
+
+/* A phone blurs glass again for every frame of the picture under it: there the island, its notes
+   and toasts are solid. */
+@media (pointer: coarse) {
+  .island-plate,
+  .island-note,
+  .ui-toast {
+    background-color: var(--color-glass-solid);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  .island[data-open] .island-plate {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
