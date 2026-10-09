@@ -1,14 +1,18 @@
 import { microsToMs, type SessionCard, type SessionVerdict } from "@localdot/protocol";
 import { chapters, planAt, stepAt } from "@localdot/stage";
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import { bytes } from "../copy/format.ts";
+import { isLoopbackPage } from "../deliverables/api.ts";
+import { RecordingFiles } from "../deliverables/RecordingFiles.tsx";
+import { exportRequest, withinRecording } from "../deliverables/replay-link.ts";
 import { DotLoader } from "../dot/DotLoader.tsx";
 import { type DotFeed, dotFeed } from "../dot/dot-feed.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { setReplayPresence } from "../dot/replay-presence.ts";
 import { ExportButton } from "../export/ExportButton.tsx";
 import { ExportSheet } from "../export/ExportSheet.tsx";
+import { ExportsList } from "../export/ExportsList.tsx";
 import { type ExportContext, exportContext } from "../export/export-context.ts";
+import { type HostExports, hostCanMake, useHostExports } from "../export/host-exports.ts";
 import type { ExportJob } from "../export/job.ts";
 import { exportSupport } from "../export/sink.ts";
 import { useExportProbe } from "../export/useExportProbe.ts";
@@ -116,6 +120,7 @@ export interface ReplayViewProps {
   // Takes a task's conversation up again, in Watch.
   continueTask?: ContinueTask;
   exportJob: ExportJob;
+  hostExports: HostExports;
   visible?: boolean;
   // Settings → Appearance → Show dot.
   showDot?: boolean;
@@ -133,6 +138,7 @@ export function ReplayView({
   onTitle,
   continueTask,
   exportJob,
+  hostExports,
   visible = true,
   showDot = true,
 }: ReplayViewProps) {
@@ -160,6 +166,7 @@ export function ReplayView({
     <Library
       api={api}
       tasks={tasks}
+      hostExports={hostExports}
       chosen={chosen}
       onChoose={setChosen}
       onOpen={onSelect}
@@ -181,6 +188,7 @@ export function ReplayView({
       onTitle={onTitle}
       continueTask={proceed}
       exportJob={exportJob}
+      hostExports={hostExports}
       visible={visible}
       showDot={showDot}
     />
@@ -225,6 +233,7 @@ function useEscape(enabled: boolean, run: () => void) {
 function Library({
   api,
   tasks,
+  hostExports,
   chosen,
   onChoose,
   onOpen,
@@ -236,6 +245,7 @@ function Library({
 }: {
   api: ApiClient;
   tasks: TaskIndex;
+  hostExports: HostExports;
   chosen: string | null;
   onChoose(id: string): void;
   onOpen(id: string): void;
@@ -287,6 +297,13 @@ function Library({
           )}
         </div>
         <ScrollArea className="replay-library-scroll" fade="bottom">
+          {search.trim() === "" && filter === "all" && (
+            <ExportsList
+              api={api}
+              host={hostExports}
+              cover={(id) => tasks.cards.find((entry) => entry.id === id)?.coverFrameId ?? null}
+            />
+          )}
           <TaskList
             api={api}
             index={tasks}
@@ -401,17 +418,12 @@ function RecordingPreview({
             <h3 id={`${card.id}-files`} className="replay-files-title">
               Files
             </h3>
-            <ul>
-              {summary.files.map((file) => (
-                <li key={file.path} className="replay-file">
-                  <Icon name="file-text" size={16} />
-                  <span className="replay-file-text">
-                    <span className="replay-file-name">{file.name}</span>
-                    <span className="replay-file-path num">{bytes(file.bytes)}</span>
-                  </span>
-                </li>
-              ))}
-            </ul>
+            <RecordingFiles
+              api={api}
+              sessionId={card.id}
+              files={summary.files}
+              onMac={isLoopbackPage()}
+            />
           </section>
         )}
       </div>
@@ -491,6 +503,7 @@ function Player({
   onTitle,
   continueTask,
   exportJob: job,
+  hostExports,
   visible,
   showDot,
 }: {
@@ -504,10 +517,14 @@ function Player({
   onTitle?(title: RecordedTitle | null): void;
   continueTask?: ContinueTask;
   exportJob: ExportJob;
+  hostExports: HostExports;
   visible: boolean;
   showDot: boolean;
 }) {
   const stage = useRef<StageHandle>(null);
+  const hostView = useHostExports(hostExports);
+  const onHost = hostCanMake(hostView);
+  const hostAnswered = !!hostView.host && hostView.host.state !== "checking";
   const area = useRef<HTMLElement>(null);
   const replay = useReplay(api, sessionId, stage, { onGoLive, onExit: onLibrary });
   const phone = useMediaQuery(HANDHELD);
@@ -618,6 +635,30 @@ function Player({
   );
   useEffect(() => setReplayPresence({ feed, line }));
   const support = exportSupport();
+  // A link from a result asks for its part of the recording: Export opens on it once the recording
+  // has loaded, where the Export button would open, and the address forgets the request.
+  const asked = useRef(exportRequest(window.location.search));
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the recording having loaded is the trigger.
+  useEffect(() => {
+    const range = asked.current;
+    if (!range || !replay.info || !replay.map) return;
+    const here = exportSupport().ok;
+    // Without this browser's encoder, the host may not have said yet whether it can make it.
+    if (!here && !onHost && !hostAnswered) return;
+    asked.current = null;
+    const address = new URL(window.location.href);
+    address.searchParams.delete("export");
+    try {
+      window.history.replaceState(window.history.state, "", address);
+    } catch {}
+    if (!here && !onHost) return;
+    replay.run({ kind: "pause" });
+    const running = job.snapshot().context;
+    const base = running ?? exportContext(api, sessionId, replay);
+    const selection = running ? null : withinRecording(base.whole, range);
+    const context = selection ? { ...base, selection } : base;
+    setExporting((was) => ({ context, open: true, key: (was?.key ?? 0) + 1 }));
+  }, [replay.info, replay.map, onHost, hostAnswered]);
   const endedAt = replay.map?.endMs ?? 0;
   const baseRows = stepRows(replay.model);
   const chapterRows: StepRowView[] = chapters(replay.model, endedAt).map((chapter) => {
@@ -750,7 +791,11 @@ function Player({
                   job={job}
                   open={exportOpen}
                   disabledReason={
-                    support.ok ? (replay.info && replay.map ? undefined : LOADING) : support.reason
+                    onHost || support.ok
+                      ? replay.info && replay.map
+                        ? undefined
+                        : LOADING
+                      : support.reason
                   }
                   onOpen={() => {
                     replay.run({ kind: "pause" });
@@ -817,6 +862,7 @@ function Player({
           key={exporting.key}
           api={api}
           job={job}
+          host={hostExports}
           context={exporting.context}
           open={exporting.open}
           anchor={exportTrigger}

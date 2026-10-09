@@ -748,58 +748,95 @@
   color: var(--color-fg-3);
 }
 
-/* A result: what dot made, and the files to take away. */
+/* A result: what dot says it did, the files it handed over, and the proof of the work. */
 .result-card {
   display: grid;
   gap: calc(var(--spacing) * 3);
   min-width: 0;
-  padding: calc(var(--spacing) * 3);
-  border-radius: var(--radius-lg);
-  background-color: var(--color-raised);
-  box-shadow: var(--shadow-raised);
 }
 
 .result-summary {
   color: var(--color-fg-1);
-  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+  font: var(--text-reading) / var(--text-reading--line-height) var(--font-ui);
+  letter-spacing: var(--text-reading--letter-spacing);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  text-wrap: pretty;
 }
 
-.result-files {
+.deliverables {
   display: grid;
+  min-width: 0;
   list-style: none;
 }
 
-.result-file {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+/* In Activity, the files dot handed over sit above the files it changed. */
+.activity-deliverables {
+  margin: var(--spacing) 0 calc(var(--spacing) * 2);
+}
+
+/* Over a result's files: how many, and Download all. */
+.deliverables-head {
+  display: flex;
   align-items: center;
-  gap: calc(var(--spacing) * 3);
-  min-height: calc(var(--spacing) * 10);
+  justify-content: space-between;
+  gap: calc(var(--spacing) * 2);
+  height: calc(var(--spacing) * 9);
+  padding: 0 0 0 calc(var(--spacing) * 2);
+  box-shadow: inset 0 -1px 0 var(--color-separator);
 }
 
-.result-file + .result-file {
-  box-shadow: inset 0 1px 0 var(--color-hairline);
+.deliverables-count {
+  color: var(--color-fg-3);
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.result-file-tile {
-  display: grid;
-  place-items: center;
-  width: calc(var(--spacing) * 7);
-  height: calc(var(--spacing) * 7);
-  border-radius: var(--radius-sm);
-  background-color: var(--color-raised-2);
-  color: var(--color-fg-2);
-  font:
-    var(--font-weight-semibold) var(--text-footnote) / var(--text-footnote--line-height)
-    var(--font-ui);
-  letter-spacing: var(--text-footnote--letter-spacing);
-}
-
-.result-file-text {
-  display: grid;
+/* Rows are separated by a line; an open row keeps its preview with it, above the line. */
+.deliverable {
   min-width: 0;
+}
+
+.deliverable + .deliverable {
+  box-shadow: inset 0 1px 0 var(--color-separator);
+}
+
+.deliverable-body {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
+  padding: var(--spacing) calc(var(--spacing) * 1.5) calc(var(--spacing) * 2)
+    calc(var(--spacing) * 2);
+}
+
+/* Under a preview: Revise, Compare and the version, the quiet buttons' ink on the preview's edge. */
+.deliverable-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+  margin-left: calc(var(--spacing) * -2.5);
+}
+
+.deliverable-version {
+  margin-left: auto;
+}
+
+/* The download's ring sits on its button while the file comes down. */
+.result-file-action {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+}
+
+.result-file-ring {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  color: var(--color-fg-2);
+  stroke-width: 1;
+  pointer-events: none;
 }
 
 /* A file's name on one line: the middle gives way, so its end (the extension) stays in view. */
@@ -819,52 +856,188 @@
   flex-shrink: 0;
 }
 
-.result-file .file-name {
-  color: var(--color-fg-1);
-  font: var(--font-weight-medium) var(--text-body) / var(--text-body--line-height) var(--font-ui);
+/* What a file looks like: a picture or page in a well of fixed height, so nothing moves when it
+   arrives; the first lines or rows scroll inside their own box. */
+.file-preview-picture {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+  margin: 0;
 }
 
-.result-file-meta {
+.file-preview-picture img,
+.file-preview-loading[data-shape="picture"] {
+  height: 196px;
+}
+
+.file-preview-picture img {
+  display: block;
+  width: 100%;
+  padding: calc(var(--spacing) * 2);
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  object-fit: contain;
+}
+
+.file-preview-loading {
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: calc(var(--spacing) * 2);
+  height: 96px;
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+}
+
+.file-preview-progress {
+  width: 120px;
+}
+
+.file-preview-excerpt {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+}
+
+.file-preview-text {
+  max-height: 200px;
+  margin: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: calc(var(--spacing) * 2.5) calc(var(--spacing) * 3);
+  border-radius: var(--radius-md);
+  background-color: var(--color-well);
+  box-shadow: inset 0 0 0 1px var(--color-hairline);
+  color: var(--color-code-text);
+  font: var(--text-mono) / var(--text-mono--line-height) var(--font-mono);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-scrollbar) transparent;
+}
+
+.file-preview-table {
+  max-height: 200px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.file-preview-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+/* Inside a file card the table keeps to the card, on a phone too. */
+@media (--phone) {
+  .file-preview-table {
+    margin-right: 0;
+    border-radius: var(--radius-md);
+  }
+}
+
+.file-preview-text:focus-visible {
+  outline-offset: calc(var(--focus-width) * -1);
+}
+
+.file-preview-caption {
+  color: var(--color-fg-3);
+  font:
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+}
+
+.file-preview-note {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 2);
+  min-height: calc(var(--spacing) * 7);
   color: var(--color-fg-3);
   font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
-  transition: color var(--dur-fade) var(--ease-standard);
 }
 
-.result-file[data-state="failed"] .result-file-meta {
-  color: var(--color-fg-1);
+.file-preview-retry {
+  margin-left: auto;
 }
 
-.result-file-action {
-  position: relative;
-  display: inline-grid;
-  place-items: center;
+/* The proof: three moments of the recording, what dot checked, and the way to watch or export it. */
+.proof {
+  display: grid;
+  gap: calc(var(--spacing) * 2);
+  min-width: 0;
 }
 
-.result-file-ring {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
+.proof-frames {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: calc(var(--spacing) * 2);
+  list-style: none;
+}
+
+.proof-frame {
+  display: grid;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
+}
+
+.proof-caption {
+  color: var(--color-fg-3);
+  font:
+    var(--text-footnote--font-weight) var(--text-footnote) / var(--text-footnote--line-height)
+    var(--font-ui);
+  letter-spacing: var(--text-footnote--letter-spacing);
+}
+
+.proof-checked {
+  display: flex;
+  align-items: center;
+  gap: calc(var(--spacing) * 1.5);
+  min-width: 0;
   color: var(--color-fg-2);
-  stroke-width: 1;
-  pointer-events: none;
+  font: var(--text-callout) / var(--text-callout--line-height) var(--font-ui);
 }
 
-.result-actions {
+.proof-checked-icon {
+  flex-shrink: 0;
+}
+
+.proof-checked-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Quiet buttons line their ink up with the text above; anything for the whole result sits at the end. */
+.proof-actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: space-between;
-  gap: calc(var(--spacing) * 2);
+  gap: calc(var(--spacing) * 1.5);
+  margin: 0 calc(var(--spacing) * -2.5);
 }
 
-/* Quiet buttons line their ink up with the card's text. */
-.result-replay {
-  margin-left: calc(var(--spacing) * -2.5);
+.proof-end {
+  display: flex;
+  margin-left: auto;
 }
 
-.result-all {
-  margin: 0 calc(var(--spacing) * -2.5) 0 auto;
+.compare-body {
+  display: grid;
+  gap: calc(var(--spacing) * 3);
+  min-width: 0;
+}
+
+.compare-note {
+  color: var(--color-fg-2);
+  font: var(--text-body) / var(--text-body--line-height) var(--font-ui);
+}
+
+.compare-progress {
+  width: 160px;
+  margin: calc(var(--spacing) * 6) auto;
 }
 
 /* Recovery sits in the thread where the task paused. */
@@ -1513,7 +1686,7 @@
 
 @media (forced-colors: active) {
   .thread-bubble,
-  .result-card,
+  .result-files,
   .thread-recovery,
   .composer-card,
   .composer-drop,

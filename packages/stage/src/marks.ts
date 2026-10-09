@@ -107,7 +107,7 @@ export function markOf(e: LocalDotEvent): TimelineMark | null {
     case "step.verify":
       return mark(
         "verify",
-        { success: "Verified", unexpected: "Unexpected result", failed: "Check failed" }[
+        { success: "Checked", unexpected: "Unexpected result", failed: "Check failed" }[
           e.data.status
         ],
         { success: "neutral", unexpected: "attention", failed: "failure" }[

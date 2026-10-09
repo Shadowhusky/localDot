@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { announce, type Urgency, withdraw as unsay } from "./Announcer.tsx";
 import type { IconName } from "./icons.ts";
 
@@ -31,6 +32,9 @@ export interface ToastOptions {
   action?: ToastAction;
   // Lines behind a quiet Details disclosure; a toast with them stays like one with an action.
   details?: readonly string[];
+  // Shown in the title's place and kept current by itself, such as a progress that counts up; the
+  // title is what is announced. A toast with one stays like one with an action.
+  live?: ReactNode;
   // "assertive" only for an error that stops work.
   urgency?: Urgency;
 }
@@ -46,6 +50,7 @@ export interface Toast {
   icon?: IconName;
   action?: ToastAction;
   details?: readonly string[];
+  live?: ReactNode;
   // Set once dismissed: it fades back under its anchor, or it was swiped away.
   leaving?: "fade" | "swipe";
 }
@@ -98,7 +103,7 @@ export function createToasts(now: () => number = () => performance.now()): Toast
 
   const allowed = ({ toast, withdrawn }: Entry) => {
     if (withdrawn) return SHOWN_AT_LEAST;
-    const stays = !!toast.action || !!toast.details?.length;
+    const stays = !!toast.action || !!toast.details?.length || toast.live !== undefined;
     if (waiting.length) return stays ? SHOWN_AT_MOST : SHOWN_AT_LEAST;
     if (stays) return Number.POSITIVE_INFINITY;
     return toast.tone === "danger" ? SHOWN_AT_MOST : SHOWN_FOR;
@@ -171,6 +176,7 @@ export function createToasts(now: () => number = () => performance.now()): Toast
           icon: options.icon,
           action: options.action,
           details: options.details,
+          live: options.live,
         },
         message,
         urgency: options.urgency,

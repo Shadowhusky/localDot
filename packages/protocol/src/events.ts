@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.ts";
+import { MAX_OUTPUT_VERSION, ReviseLink } from "./deliverables.ts";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
@@ -58,6 +59,8 @@ export const SessionStart = event(
     continues: z.string().regex(ULID_PATTERN).optional(),
     // What started this task when the user did not: a routine or a follow-up.
     origin: SessionOrigin.optional(),
+    // The handed-over file this task revises, from a task that has ended.
+    revises: ReviseLink.optional(),
   }),
 );
 export const SessionEnd = event(
@@ -419,6 +422,7 @@ export const TaskResult = event(
           name: z.string().min(1).max(255),
           path: z.string().max(1024),
           bytes: z.number().int().nonnegative(),
+          version: z.number().int().min(1).max(MAX_OUTPUT_VERSION).optional(),
         }),
       )
       .max(32),

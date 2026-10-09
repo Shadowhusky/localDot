@@ -1,5 +1,6 @@
 import { closeSync, constants, fstatSync, lstatSync, openSync, readSync } from "node:fs";
 import { ULID_PATTERN } from "@localdot/protocol";
+import { outputPath } from "./output-store.ts";
 import { PrivateFiles } from "./private-files.ts";
 
 export const TRANSFER_BYTES = 100 * 1024 * 1024;
@@ -20,6 +21,7 @@ export function downloadFile(
   name: string,
   signal: AbortSignal,
   head = false,
+  version?: number,
 ): Response {
   if (
     !ULID_PATTERN.test(sessionId) ||
@@ -28,11 +30,15 @@ export function downloadFile(
     !name.isWellFormed()
   )
     throw new DownloadError(404);
+  const relative =
+    version === undefined
+      ? `sessions/${sessionId}/out/${name}`
+      : outputPath(sessionId, name, version);
+  if (!relative) throw new DownloadError(404);
   signal.throwIfAborted();
   let fd: number | undefined;
   try {
     const files = new PrivateFiles(home);
-    const relative = `sessions/${sessionId}/out/${name}`;
     const path = files.path(relative);
     const before = lstatSync(path);
     if (!before.isFile()) throw new DownloadError(404);

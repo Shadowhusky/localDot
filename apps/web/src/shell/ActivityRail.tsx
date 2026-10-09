@@ -22,6 +22,9 @@ import { UsageFooter } from "../agent/UsageFooter.tsx";
 import { reducedMotion, useFollowScroll } from "../agent/useFollowScroll.ts";
 import { usePagedRows } from "../agent/usePagedRows.ts";
 import { BrowserDownloads } from "../browser/BrowserDownloads.tsx";
+import { count } from "../copy/format.ts";
+import { isLoopbackPage } from "../deliverables/api.ts";
+import { HandedOverFiles, latestFiles } from "../deliverables/HandedOverFiles.tsx";
 import type { ApiClient } from "../lib/api.ts";
 import { timeLabel } from "../replay/replay-view.ts";
 import type { TimelineRow } from "../session/key-uses.ts";
@@ -117,6 +120,7 @@ export function ActivityRail({
   }, [entries, model.changes, ended]);
   const viewOf = (entry: ActivityEntry) => views.get(entry.key) as EntryView;
   const plan = planSnapshot ?? model.plan;
+  const handed = useMemo(() => latestFiles(model.results).length, [model.results]);
   const started = !!sessionId || !!plan.length;
   const follow = useFollowScroll(`${owner}:${filter}`, !replay && started);
   const timeline = useRef<HTMLElement>(null);
@@ -279,12 +283,27 @@ export function ActivityRail({
                 )}
               </section>
             )}
-            {model.changes.length > 0 && (
+            {(model.changes.length > 0 || handed > 0) && (
               <section className="activity-section" aria-labelledby={`${domId}-files`}>
                 <div className="activity-section-head">
                   <h3 id={`${domId}-files`}>Files</h3>
-                  <span className="activity-section-meta num">{model.changes.length} changed</span>
+                  <span className="activity-section-meta num">
+                    {[
+                      handed > 0 && count(handed, "handed over", "handed over"),
+                      model.changes.length > 0 && `${model.changes.length} changed`,
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")}
+                  </span>
                 </div>
+                {handed > 0 && sessionId && (
+                  <HandedOverFiles
+                    api={api}
+                    sessionId={sessionId}
+                    results={model.results}
+                    onMac={isLoopbackPage()}
+                  />
+                )}
                 {model.changes.map((change) => (
                   <ChangeRow
                     key={change.id}
