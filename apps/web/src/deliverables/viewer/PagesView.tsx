@@ -188,31 +188,35 @@ export function PagesView({
   pageRef.current = shown.page;
 
   // Page Up and Down, the side arrows, Home and End turn pages; up and down and the space bar
-  // scroll, also before the pages have focus.
+  // scroll, also before the pages have focus. On a page zoomed wider than the column the side
+  // arrows scroll it across instead.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const host = scroller.current;
-      if (event.defaultPrevented || !host || !viewerHears(host, event.target)) return;
+      if (event.defaultPrevented || !host || !viewerHears(host, event)) return;
       const turn = keyTurn(event, "pages");
-      if (turn) {
+      const across = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      const wide = turn !== undefined && across !== 0 && host.scrollWidth > host.clientWidth + 1;
+      if (turn && !wide) {
         event.preventDefault();
         go(turned(pageRef.current, turn, count));
         return;
       }
       const inside = event.target instanceof Node && host.contains(event.target);
-      if (inside || event.altKey || event.ctrlKey || event.metaKey) return;
-      const step =
-        event.key === "ArrowDown"
-          ? 48
+      if ((inside && !wide) || event.altKey || event.ctrlKey || event.metaKey) return;
+      const step = wide
+        ? { left: across * 48 }
+        : event.key === "ArrowDown"
+          ? { top: 48 }
           : event.key === "ArrowUp"
-            ? -48
+            ? { top: -48 }
             : event.key === " "
-              ? host.clientHeight * (event.shiftKey ? -0.9 : 0.9)
-              : 0;
+              ? { top: host.clientHeight * (event.shiftKey ? -0.9 : 0.9) }
+              : undefined;
       if (!step) return;
       event.preventDefault();
       pinned.current = null;
-      host.scrollBy({ top: step, behavior: matches(REDUCED_MOTION) ? "instant" : "smooth" });
+      host.scrollBy({ ...step, behavior: matches(REDUCED_MOTION) ? "instant" : "smooth" });
     };
     window.addEventListener("keydown", onKey, true);
     return () => window.removeEventListener("keydown", onKey, true);

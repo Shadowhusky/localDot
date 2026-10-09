@@ -20,7 +20,7 @@ import { type PageSize, PdfPage } from "./PdfPage.tsx";
 import { clampPage, contain, keyTurn, turned } from "./paging.ts";
 import { ViewerBar } from "./states.tsx";
 import { Thumbs } from "./Thumbs.tsx";
-import { viewerHears } from "./viewer-keys.ts";
+import { pressesControl, viewerHears } from "./viewer-keys.ts";
 import { rubberband, swipeTurn } from "./zoom.ts";
 
 // Critically damped for a press or a key; a little give only after a flick (design-v2 §7).
@@ -55,7 +55,7 @@ export function SlidesView({
   useEffect(() => {
     if (presenting) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented || !viewerHears(host.current, event.target)) return;
+      if (event.defaultPrevented || !viewerHears(host.current, event)) return;
       const turn = keyTurn(event, "slides");
       if (!turn) return;
       event.preventDefault();
@@ -386,7 +386,7 @@ function Present({
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
+      if (event.defaultPrevented || pressesControl(event)) return;
       const turn = keyTurn(event, "slides");
       if (!turn) return;
       event.preventDefault();
