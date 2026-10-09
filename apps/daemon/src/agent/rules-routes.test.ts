@@ -260,6 +260,7 @@ describe("a connection's card", () => {
       app: "wechat",
       host: "chat.example.com",
       port: 5222,
+      why: "wechat hasn't used this destination before.",
     });
     const card = session.connections.pending;
     if (!card) throw new Error("no card");
@@ -289,7 +290,8 @@ describe("a connection's card", () => {
         actionClass: "network",
         scope: "destination",
         destination: "chat.example.com:5222",
-        label: "Always for chat.example.com:5222",
+        app: "wechat",
+        label: "Always for wechat on chat.example.com",
       },
     ]);
     expect((await post(answer)).status).toBe(409);

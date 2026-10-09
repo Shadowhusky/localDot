@@ -45,8 +45,16 @@ describe("dot's working rules", () => {
       "Use request_takeover only for a CAPTCHA, a device approval",
       "then wait for them to hand control back",
       "a link a desktop app opens there has none of the user's sign-ins, so open it with browser_navigate",
-      "never get around it with tunnels, proxies or port forwards",
       "never name tools or localDot's internal parts",
+    ])
+      expect(rules, rule).toContain(rule);
+  });
+
+  it("say what the network allows and never work around it", () => {
+    const rules = workingRules("batch");
+    for (const rule of [
+      "Websites work even for apps that skip the proxy; other ports wait for the user's OK.",
+      "Never tunnel around a block.",
     ])
       expect(rules, rule).toContain(rule);
   });

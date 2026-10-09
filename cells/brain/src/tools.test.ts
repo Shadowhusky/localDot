@@ -133,16 +133,6 @@ describe("the model's advertised tools and instructions", () => {
     expect(imagesInToolResults(binding({ client: "google" }))).toBe(false);
     expect(imagesInToolResults(binding({ client: "anthropic-compatible" }))).toBe(false);
   });
-  it("never works around the network rules, and says when a connection waits or was refused", () => {
-    const prompt = systemPrompt(bootConfig(), binding(), [], new Date("2026-10-09T00:00:00Z"));
-    for (const rule of [
-      "Never build tunnels, proxies, relays or port forwards to get around these rules.",
-      "If a connection is waiting for the user's approval or was refused, say so plainly",
-      "waits until the user allows it on a card",
-    ])
-      expect(prompt).toContain(rule);
-  });
-
   it("asks for a line for the user on every call that acts, in a message for Anthropic's screen tool", async () => {
     const today = new Date("2026-10-09T00:00:00Z");
     const generic = binding({ computer: "generic" });

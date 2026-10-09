@@ -97,29 +97,45 @@ const WORK: Readonly<Record<ActionClass, string>> = {
 };
 
 const WAITS = "dot waits here; nothing times out.";
+// A connection is the app's, not dot's: dot keeps working, and the app tries again once allowed.
+const RETRIES = "The app tries again once you allow it; nothing times out.";
 
 // The daemon's own words for this action and its reason win; its plain class name becomes a
 // question.
 export function decisionWords(
-  card: Pick<ApprovalCard, "actionClass" | "title" | "why">,
+  card: Pick<ApprovalCard, "actionClass" | "title" | "why"> & Partial<Pick<ApprovalCard, "fields">>,
 ): DecisionWords {
   const { actionClass } = card;
   const verb = VERB[actionClass] ?? "Allow";
   const always = ALWAYS_ASKS[actionClass];
   const title =
     card.title === ACTION_CLASS_LABELS[actionClass] ? QUESTION[actionClass] : card.title;
+  const network = actionClass === "network";
+  const waits = network ? RETRIES : WAITS;
   return {
     title,
     primary: verb,
     secondary: `Don't ${verb.toLowerCase()}`,
     why: card.why
-      ? `${card.why} ${WAITS}`
+      ? `${card.why} ${waits}`
       : always
-        ? `${always} always needs your OK. ${WAITS}`
-        : `Your settings ask before ${WORK[actionClass]}. ${WAITS}`,
-    line: askLine(actionClass, title),
+        ? `${always} always needs your OK. ${waits}`
+        : network
+          ? `Apps reach websites freely; anything else waits for your OK. ${waits}`
+          : `Your settings ask before ${WORK[actionClass]}. ${waits}`,
+    line: (network && connectionLine(card.fields)) || askLine(actionClass, title),
   };
 }
+
+// dot says which app is reaching out, while the card waits.
+function connectionLine(fields: ApprovalCard["fields"] | undefined): string | undefined {
+  const app = fields?.find(([label]) => label === "App")?.[1];
+  if (!fields) return undefined;
+  return `${app && app !== NOT_KNOWN ? app : "An app"} is trying to reach a new server.`;
+}
+
+// The daemon's word for an app it couldn't name.
+export const NOT_KNOWN = "Not known";
 
 export const ONCE = "once";
 export type DecisionScope = AlwaysScope | typeof ONCE;

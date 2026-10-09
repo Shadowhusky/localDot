@@ -18,13 +18,20 @@ export interface Purpose {
   readonly request: readonly string[];
   readonly plan: readonly string[];
 }
-export type OutboundShape = "web_address" | "web_address_with_parameters" | "text" | "command";
+export type OutboundShape =
+  | "web_address"
+  | "web_address_with_parameters"
+  | "text"
+  | "command"
+  | "connection";
 // What the judge is told about an action. Never the outbound text itself, nor anything read. The
 // destination is the name its owner holds, and the names below it only when they can't be data.
 export interface JudgeAction {
-  readonly kind: "open_page" | "enter_text" | "run_command";
+  readonly kind: "open_page" | "enter_text" | "run_command" | "connect";
   readonly destination: string;
-  readonly method: "GET" | "typed" | "command";
+  // A program's own connection beyond the web's ports names its port.
+  readonly port?: number;
+  readonly method: "GET" | "typed" | "command" | "connect";
   readonly bytes: number;
   readonly shape: OutboundShape;
   readonly overlapsPrivateText: boolean;
@@ -40,7 +47,7 @@ export interface PurposeJudge {
 // Data about to leave, and the host it reaches when the action names one. The text stays here,
 // for the overlap check.
 export interface Outbound {
-  readonly kind: JudgeAction["kind"];
+  readonly kind: Exclude<JudgeAction["kind"], "connect">;
   readonly destination?: string;
   readonly text: string;
 }
@@ -609,7 +616,7 @@ function timed<T>(work: (signal: AbortSignal) => Promise<T>, signal: AbortSignal
   });
 }
 
-const METHOD: Readonly<Record<JudgeAction["kind"], JudgeAction["method"]>> = {
+const METHOD: Readonly<Record<Outbound["kind"], JudgeAction["method"]>> = {
   open_page: "GET",
   enter_text: "typed",
   run_command: "command",
@@ -656,11 +663,83 @@ export interface PurposeGateDeps {
 export class PurposeGate {
   readonly #allowed = new Set<string>();
   readonly #judged = new Map<string, boolean>();
+  readonly #connections = new Map<string, boolean>();
+  #connectionsKey: string | undefined;
   #derived: { key: string; hosts: Promise<readonly string[]> } | undefined;
   #downUntil = 0;
   constructor(private readonly deps: PurposeGateDeps) {}
   get #now(): number {
     return this.deps.now?.() ?? Date.now();
+  }
+  // Whether the request needs a program to connect to this host and port; undefined when nothing
+  // can judge. The judge sees the destination only, so it asks whether or not the task read
+  // private data. Each destination is judged once per request.
+  async fitsConnection(
+    host: string,
+    port: number,
+    signal: AbortSignal,
+  ): Promise<boolean | undefined> {
+    const judge = this.deps.judge();
+    if (!judge) return undefined;
+    const purpose = this.deps.purpose();
+    const key = digest(purpose);
+    if (this.#connectionsKey !== key) {
+      this.#connections.clear();
+      this.#connectionsKey = key;
+    }
+    const destination = `${host}:${port}`;
+    const known = this.#connections.get(destination);
+    if (known !== undefined) return known;
+    if (mentionedHosts(purpose.request).some((named) => covers(named, host))) return true;
+    if (this.#now < this.#downUntil) return undefined;
+    try {
+      const fits =
+        (await this.#derivedHosts(judge, purpose, key, signal)).some((named) =>
+          covers(named, host),
+        ) ||
+        (await timed(
+          (s) =>
+            judge.fits(
+              purpose,
+              {
+                kind: "connect",
+                destination: judgedName(host, purpose),
+                port,
+                method: "connect",
+                bytes: 0,
+                shape: "connection",
+                overlapsPrivateText: false,
+                privateData: this.deps.taint.kinds,
+              },
+              s,
+            ),
+          signal,
+          this.#timeout,
+        )) >= FITS_THRESHOLD;
+      signal.throwIfAborted();
+      this.#connections.set(destination, fits);
+      return fits;
+    } catch {
+      if (signal.aborted) return undefined;
+      if (this.#derived?.key === key) this.#derived = undefined;
+      this.#downUntil = this.#now + DOWN_MS;
+      return undefined;
+    }
+  }
+  async #derivedHosts(
+    judge: PurposeJudge,
+    purpose: Purpose,
+    key: string,
+    signal: AbortSignal,
+  ): Promise<string[]> {
+    if (this.#derived?.key !== key) {
+      const hosts = timed((s) => judge.destinations(purpose, s), signal, this.#timeout);
+      hosts.catch(() => {});
+      this.#derived = { key, hosts };
+    }
+    return (await this.#derived.hosts)
+      .map((named) => named.toLowerCase().replace(/\.$/, ""))
+      .filter((named) => ownerOfHost(named));
   }
   // The user allowed these hosts for the rest of the task.
   allow(destinations: readonly string[]): void {
@@ -716,14 +795,7 @@ export class PurposeGate {
     if (known !== undefined) return known ? undefined : refusal;
     if (this.#now < this.#downUntil) return "unavailable";
     try {
-      if (this.#derived?.key !== key) {
-        const hosts = timed((s) => judge.destinations(purpose, s), signal, this.#timeout);
-        hosts.catch(() => {});
-        this.#derived = { key, hosts };
-      }
-      const derived = (await this.#derived.hosts)
-        .map((named) => named.toLowerCase().replace(/\.$/, ""))
-        .filter((named) => ownerOfHost(named));
+      const derived = await this.#derivedHosts(judge, purpose, key, signal);
       if (derived.some((named) => covers(named, host))) {
         this.#judged.set(host, true);
         return undefined;

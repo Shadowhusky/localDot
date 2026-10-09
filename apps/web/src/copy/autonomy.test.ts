@@ -25,27 +25,28 @@ it("says in words what dot stops to ask about", () => {
   ).toBe("Works without asking, even when buying, sending, posting or deleting.");
 });
 
-it("names the program or destination a connection's choice opened, and how to undo it", () => {
+it("names the destination a connection's choice opened, its program, and how to undo it", () => {
   const task = {
     scope: "task",
     label: "For this task",
     destination: "chat.example.com:5222",
   } as const;
-  const app = { scope: "app", label: "Always for wechat", app: "wechat" } as const;
-  const place = {
+  const app = {
     scope: "destination",
-    label: "Always for chat.example.com:5222",
+    label: "Always for wechat on chat.example.com:5222",
+    app: "wechat",
     destination: "chat.example.com:5222",
   } as const;
   expect(allowedLine("network", task)).toBe(
     "Allowed for this task: connections to chat.example.com:5222.",
   );
-  expect(allowedLine("network", app)).toBe("Always allowed: connections from wechat.");
-  expect(allowedLine("network", place)).toBe(
-    "Always allowed: connections to chat.example.com:5222.",
+  expect(allowedLine("network", app)).toBe(
+    "Always allowed: wechat's connections to chat.example.com:5222.",
   );
   expect(undoAllowedLabel("network", task)).toBe(
     "Undo allowing connections to chat.example.com:5222 for this task",
   );
-  expect(undoAllowedLabel("network", app)).toBe("Undo always allowing connections from wechat");
+  expect(undoAllowedLabel("network", app)).toBe(
+    "Undo always allowing wechat's connections to chat.example.com:5222",
+  );
 });

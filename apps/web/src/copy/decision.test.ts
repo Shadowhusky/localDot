@@ -73,6 +73,37 @@ describe("decisionWords line", () => {
   });
 });
 
+describe("a connection's card", () => {
+  const card = {
+    actionClass: "network" as const,
+    title: "WeChat wants to connect to long.example.com on port 8080",
+    why: "WeChat hasn't used this destination before. It looks related to your task.",
+    fields: [
+      ["App", "WeChat"],
+      ["Destination", "long.example.com · port 8080"],
+      ["For the task", "Message Henry"],
+    ] as [string, string][],
+  };
+  it("asks Allow or Don't allow, says the app tries again, and dot names the app aloud", () => {
+    expect(decisionWords(card)).toEqual({
+      title: card.title,
+      primary: "Allow",
+      secondary: "Don't allow",
+      why: `${card.why} The app tries again once you allow it; nothing times out.`,
+      line: "WeChat is trying to reach a new server.",
+    });
+    const unnamed = { ...card, fields: [["App", "Not known"]] as [string, string][] };
+    expect(decisionWords(unnamed).line).toBe("An app is trying to reach a new server.");
+  });
+
+  it("defaults to this task, so the app's retries in the task never ask again", () => {
+    const always = [
+      { scope: "task" as const, label: "For this task", destination: "long.example.com:8080" },
+    ];
+    expect(defaultScope({ actionClass: "network", always })).toBe("task");
+  });
+});
+
 describe("defaultScope", () => {
   const task = [{ scope: "task" as const, label: "For this task" }];
   it("answers once for anything that acts as you", () => {

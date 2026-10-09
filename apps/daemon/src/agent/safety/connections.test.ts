@@ -5,6 +5,7 @@ import { type ApprovalCard, type KeydAsk, ulid } from "@localdot/protocol";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentSession } from "../session.ts";
 import { ConnectionApprovals, type ConnectionApprovalsDeps, ONCE_MS } from "./connections.ts";
+import { type JudgeAction, PurposeGate, type PurposeJudge } from "./purpose.ts";
 import { RulesStore } from "./rules.ts";
 
 const CELL = ulid();
@@ -107,20 +108,22 @@ describe("connections that wait for the user", () => {
     const [card] = f.cards();
     expect(card).toMatchObject({
       actionClass: "network",
-      title: "wechat wants to connect to chat.example.com:5222",
+      title: "wechat wants to connect to chat.example.com on port 5222",
+      why: "wechat hasn't used this destination before, and the purpose check couldn't tell whether it fits your task.",
       always: [
         { scope: "task", label: "For this task", destination: "chat.example.com:5222" },
-        { scope: "app", label: "Always for wechat", app: "wechat" },
         {
           scope: "destination",
-          label: "Always for chat.example.com:5222",
+          label: "Always for wechat on chat.example.com",
           destination: "chat.example.com:5222",
+          app: "wechat",
         },
       ],
     });
     expect(card?.fields).toEqual([
-      ["Program", "wechat"],
-      ["Destination", "chat.example.com:5222"],
+      ["App", "wechat"],
+      ["Destination", "chat.example.com · port 5222"],
+      ["For the task", "task"],
     ]);
     expect(f.answers).toEqual([]);
     if (!card) throw new Error("no card");
@@ -155,7 +158,7 @@ describe("connections that wait for the user", () => {
     const b = f.approvals.ask(CELL, held("files.example.com", 8080));
     await settle();
     expect(f.cards().map((c) => c.title)).toEqual([
-      "wechat wants to connect to chat.example.com:5222",
+      "wechat wants to connect to chat.example.com on port 5222",
     ]);
     const [first] = f.cards();
     if (!first) throw new Error("no card");
@@ -163,7 +166,7 @@ describe("connections that wait for the user", () => {
     await a;
     await settle();
     const second = f.cards()[1];
-    expect(second?.title).toBe("wechat wants to connect to files.example.com:8080");
+    expect(second?.title).toBe("wechat wants to connect to files.example.com on port 8080");
     if (!second) throw new Error("no second card");
     f.answer(second, "approve");
     await b;
@@ -195,7 +198,7 @@ describe("connections that wait for the user", () => {
     expect(f.cards()).toHaveLength(2);
   });
 
-  it("remembers Always for a program or a destination across a restart of the daemon", async () => {
+  it("remembers Always for this app on this destination across a restart, for no other app or place", async () => {
     const f = setup();
     const pending = f.approvals.ask(CELL, held("chat.example.com", 5222));
     await settle();
@@ -204,32 +207,29 @@ describe("connections that wait for the user", () => {
     f.answer(card, "approve", "destination");
     await pending;
     expect(f.rules.list().rules).toMatchObject([
-      { actionClass: "network", scope: "destination", destination: "chat.example.com:5222" },
+      {
+        actionClass: "network",
+        scope: "destination",
+        destination: "chat.example.com:5222",
+        app: "wechat",
+      },
     ]);
-    const restarted = setup({ owner: async () => "another-program" }, f.dir);
+    const restarted = setup({}, f.dir);
     restarted.endTask();
     await restarted.approvals.ask(CELL, held("chat.example.com", 5222));
     expect(restarted.answers).toEqual([
-      { id: expect.any(String), decision: "allow", app: "another-program" },
+      { id: expect.any(String), decision: "allow", app: "wechat" },
     ]);
+    await restarted.approvals.ask(CELL, held("chat.example.com", 5223));
     await restarted.approvals.ask(CELL, held("other.example.com", 5222));
-    expect(restarted.answers.at(-1)?.decision).toBe("deny");
-  });
-
-  it("lets an Always for the program through to any destination of that program only", async () => {
-    const f = setup();
-    const pending = f.approvals.ask(CELL, held("chat.example.com", 5222));
-    await settle();
-    const [card] = f.cards();
-    if (!card) throw new Error("no card");
-    f.answer(card, "approve", "app");
-    await pending;
-    await f.approvals.ask(CELL, held("elsewhere.example.net", 443));
-    expect(f.answers.at(-1)).toMatchObject({ decision: "allow", app: "wechat" });
     const other = setup({ owner: async () => "curl" }, f.dir);
-    void other.approvals.ask(CELL, held("elsewhere.example.net", 443));
-    await settle();
-    expect(other.cards()).toHaveLength(1);
+    other.endTask();
+    await other.approvals.ask(CELL, held("chat.example.com", 5222));
+    expect([...restarted.answers.slice(1), ...other.answers].map((a) => a.decision)).toEqual([
+      "deny",
+      "deny",
+      "deny",
+    ]);
   });
 
   it("refuses when no task is running, since nobody can say yes", async () => {
@@ -260,7 +260,8 @@ describe("connections that wait for the user", () => {
     void f.approvals.ask(CELL, { ...held("2001:db8::7", 8443), source: undefined });
     await settle();
     const [card] = f.cards();
-    expect(card?.title).toBe("A program wants to connect to 203.0.113.9:8080");
+    expect(card?.title).toBe("An app wants to connect to 203.0.113.9 on port 8080");
+    expect(card?.fields[0]).toEqual(["App", "Not known"]);
     expect(card?.always?.map((o) => o.scope)).toEqual(["task", "destination"]);
     if (!card) throw new Error("no card");
     f.answer(card, "deny");
@@ -285,27 +286,88 @@ describe("connections that wait for the user", () => {
     expect(f.answers).toEqual([]);
   });
 
-  it("lets the purpose judge decide a destination before anyone is asked", async () => {
-    const judge = vi.fn(async ({ host }: { host: string }) =>
-      host === "chat.example.com"
-        ? ("allow" as const)
-        : host === "bad.example.com"
-          ? ("deny" as const)
-          : undefined,
+  it("gives the purpose check's view of the destination as the card's reason, and still asks", async () => {
+    const f = setup();
+    const session = f.session;
+    if (!session) throw new Error("no session");
+    const actions: JudgeAction[] = [];
+    const judge: PurposeJudge = {
+      name: "jev",
+      destinations: async () => [],
+      fits: async (_purpose, action) => {
+        actions.push(action);
+        if (action.destination === "example.org") throw new Error("unavailable");
+        return action.destination === "chat.example.com" ? 0.9 : 0.1;
+      },
+    };
+    session.taint.add("files", "notes.txt");
+    session.purpose = new PurposeGate({
+      taint: session.taint,
+      purpose: () => ({ request: ["Message Henry on the chat app"], plan: [] }),
+      judge: () => judge,
+      trusted: () => false,
+    });
+    const reasons: (string | undefined)[] = [];
+    for (const host of ["chat.example.com", "bad.example.net", "down.example.org"]) {
+      const pending = f.approvals.ask(CELL, held(host, 8080));
+      await vi.waitFor(() => expect(session.connections.pending).toBeDefined());
+      const card = session.connections.pending;
+      if (!card) throw new Error("no card");
+      reasons.push(card.why);
+      f.answer(card, "deny");
+      await pending;
+    }
+    expect(reasons).toEqual([
+      "wechat hasn't used this destination before. It looks related to your task.",
+      "wechat hasn't used this destination before, and it doesn't look related to your task. dot has read your files in this task.",
+      "wechat hasn't used this destination before, and the purpose check couldn't tell whether it fits your task.",
+    ]);
+    // The judge hears the destination and its port, never the app's own name for itself.
+    expect(actions[0]).toEqual({
+      kind: "connect",
+      destination: "chat.example.com",
+      port: 8080,
+      method: "connect",
+      bytes: 0,
+      shape: "connection",
+      overlapsPrivateText: false,
+      privateData: ["files"],
+    });
+    expect(JSON.stringify(actions)).not.toContain("wechat");
+    expect(f.answers.map((a) => a.decision)).toEqual(["deny", "deny", "deny"]);
+  });
+
+  it("tells dot on its next tool result that a connection waits for the user, and what they said", async () => {
+    const f = setup();
+    const session = f.session;
+    if (!session) throw new Error("no session");
+    expect(session.connections.takeNotes()).toBeUndefined();
+    const pending = f.approvals.ask(CELL, held("chat.example.com", 8080));
+    await settle();
+    expect(session.connections.takeNotes()).toBe(
+      'The app "wechat" is waiting for the user\'s OK to connect to chat.example.com:8080. The user sees a card for it; this is not a network fault. Carry on with other steps, or tell the user it is waiting.',
     );
-    const f = setup({ judge });
-    await f.approvals.ask(CELL, held("chat.example.com", 5222));
-    await f.approvals.ask(CELL, held("bad.example.com", 5222));
-    expect(f.answers.map((a) => a.decision)).toEqual(["allow", "deny"]);
-    expect(f.cards()).toEqual([]);
-    expect(judge).toHaveBeenCalledWith(
-      expect.objectContaining({
-        cellId: CELL,
-        app: "wechat",
-        host: "chat.example.com",
-        port: 5222,
-      }),
+    expect(session.connections.takeNotes()).toBeUndefined();
+    const [card] = f.cards();
+    if (!card) throw new Error("no card");
+    f.answer(card, "deny");
+    await pending;
+    expect(session.connections.takeNotes()).toBe(
+      "The user didn't allow the app \"wechat\" to connect to chat.example.com:8080. Don't work around it; tell the user what doesn't work without it.",
     );
+  });
+
+  it("tells dot once that a curl or wget check went through the proxy, and how to test an app's own route", () => {
+    const f = setup();
+    const cards = f.session?.connections;
+    if (!cards) throw new Error("no session");
+    cards.checkedThroughProxy("ls ~/.xwechat");
+    cards.checkedThroughProxy("curl --noproxy '*' -sI https://weixin.qq.com");
+    expect(cards.takeNotes()).toBeUndefined();
+    cards.checkedThroughProxy("ping -c 2 x; curl -sI -m 8 https://weixin.qq.com | head -1");
+    expect(cards.takeNotes()).toContain("test that route with curl --noproxy '*'");
+    cards.checkedThroughProxy("wget -q https://example.com");
+    expect(cards.takeNotes()).toBeUndefined();
   });
 
   it("picks up connections whose event was missed", async () => {

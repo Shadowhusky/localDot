@@ -6,19 +6,26 @@ import {
   type ApprovalCard,
   ApprovalCard as CardSchema,
   type KeydAsk,
+  type TaintKind,
   ulid,
 } from "@localdot/protocol";
+import type { PurposeGate } from "./purpose.ts";
 import type { Place, RulesStore } from "./rules.ts";
+import type { TaskTaint } from "./taint.ts";
 import type { TaskAutonomy } from "./task-autonomy.ts";
 
 // "Allow once" lets the waiting connections through and the program's retries for a minute: a
 // program whose own timeout ran out while the card waited connects again on its next try.
 export const ONCE_MS = 60_000;
+// The card's word for a program desktopd couldn't name.
+export const NOT_KNOWN = "Not known";
 
 export interface ConnectionRequest {
   readonly app?: string;
   readonly host: string;
   readonly port: number;
+  // One sentence on why this asks.
+  readonly why: string;
 }
 export type ConnectionDecision =
   | { readonly allow: true; readonly always?: AlwaysOption }
@@ -39,6 +46,34 @@ function short(text: string, max: number): string {
   return text.length <= max ? text : `${text.slice(0, max - 1)}…`;
 }
 
+const SOURCES: Readonly<Record<TaintKind, string>> = {
+  screen: "pages from your accounts",
+  memory: "what it remembers about you",
+  files: "your files",
+  recall: "your past conversations",
+};
+
+// Why a connection asks, in the purpose check's words when it could judge the destination.
+export function connectionWhy(
+  app: string | undefined,
+  fits: boolean | undefined,
+  read: readonly TaintKind[],
+): string {
+  const who = app ?? "This app";
+  if (fits === true)
+    return `${who} hasn't used this destination before. It looks related to your task.`;
+  if (fits === false) {
+    const sources = read.map((kind) => SOURCES[kind]);
+    const what =
+      sources.length > 1 ? `${sources.slice(0, -1).join(", ")} and ${sources.at(-1)}` : sources[0];
+    return `${who} hasn't used this destination before, and it doesn't look related to your task${what ? `. dot has read ${what} in this task` : ""}.`;
+  }
+  return `${who} hasn't used this destination before, and the purpose check couldn't tell whether it fits your task.`;
+}
+
+const WEB_CHECK = /(?:^|[\s;|&(`])(?:curl|wget2?)(?=\s|$)/;
+const NO_PROXY = /--no-?proxy|no_proxy=/i;
+
 interface Entry {
   readonly key: string;
   readonly request: ConnectionRequest;
@@ -50,11 +85,15 @@ interface Entry {
 // A task's cards for connections that wait for the user: one shown at a time, the rest queued, and
 // the connections one program makes to one destination share a card. They answer through the
 // task's approval route but are no step of the agent's, so its Pause, brain and takeovers leave
-// them waiting; only the end of the task refuses them.
+// them waiting; only the end of the task refuses them. dot hears of each card and answer on its
+// next tool result, so it never takes a held connection for a broken network.
 export class ConnectionCards {
   readonly #queue: Entry[] = [];
+  readonly #notes: string[] = [];
   #revision = 0;
+  #proxyNoted = false;
   constructor(
+    private readonly task: string,
     private readonly publishRequest: (card: ApprovalCard) => void,
     private readonly publishResolution: (resolution: ConnectionResolution) => void,
     private readonly now: () => number = Date.now,
@@ -108,24 +147,48 @@ export class ConnectionCards {
   cancel(note: string): void {
     while (this.#queue.length) this.#finish({ allow: false }, "timeout", note, false);
   }
+  // What changed for the task's connections since dot last heard, in plain words for the model.
+  takeNotes(): string | undefined {
+    const notes = this.#notes.splice(0);
+    return notes.length ? notes.join("\n") : undefined;
+  }
+  // A web check from the shell goes through the proxy, so it says nothing of an app that ignores
+  // the proxy; dot hears that once, the first time it checks that way.
+  checkedThroughProxy(command: string): void {
+    if (this.#proxyNoted || !WEB_CHECK.test(command) || NO_PROXY.test(command)) return;
+    this.#proxyNoted = true;
+    this.#note(
+      "curl and wget in the computer go through its proxy, so they only show that websites work. An app that ignores the proxy takes its own route: test that route with curl --noproxy '*' -m 10 -sv https://<host>, or telnet://<host>:<port> </dev/null for another port.",
+    );
+  }
+  #note(text: string): void {
+    this.#notes.push(text);
+    if (this.#notes.length > 8) this.#notes.shift();
+  }
   #show(): void {
     const entry = this.#queue[0];
     if (!entry) return;
-    const { app, host, port } = entry.request;
+    const { app, host, port, why } = entry.request;
     const destination = destinationOf(host, port);
-    const place = short(destination, 120);
+    const name = short(host, 120);
     entry.card = CardSchema.parse({
       actionClass: "network",
       risk: "medium",
-      title: short(`${app ?? "A program"} wants to connect to ${place}`, 200),
+      title: short(`${app ?? "An app"} wants to connect to ${name} on port ${port}`, 200),
+      why: short(why, 400),
       fields: [
-        ["Program", app ?? "Not known"],
-        ["Destination", destination],
+        ["App", app ?? NOT_KNOWN],
+        ["Destination", `${name} · port ${port}`],
+        ["For the task", short(this.task, 200)],
       ],
       always: [
         { scope: "task", label: "For this task", destination },
-        ...(app ? [{ scope: "app", label: short(`Always for ${app}`, 200), app }] : []),
-        { scope: "destination", label: `Always for ${place}`, destination },
+        {
+          scope: "destination",
+          label: short(app ? `Always for ${app} on ${name}` : `Always for ${name}`, 200),
+          destination,
+          ...(app ? { app } : {}),
+        },
       ],
       approvalId: ulid(),
       generation: 1,
@@ -136,6 +199,9 @@ export class ConnectionCards {
       if (this.#queue[0] === entry) this.#finish({ allow: false }, "timeout");
     }, APPROVAL_TIMEOUT_MS);
     entry.timer.unref?.();
+    this.#note(
+      `${app ? `The app "${app}"` : "An app on the computer"} is waiting for the user's OK to connect to ${destination}. The user sees a card for it; this is not a network fault. Carry on with other steps, or tell the user it is waiting.`,
+    );
     this.publishRequest(structuredClone(entry.card));
   }
   #finish(
@@ -150,6 +216,14 @@ export class ConnectionCards {
     for (const resolve of entry.waiters) resolve(decision);
     const card = entry.card;
     if (card) {
+      const { app, host, port } = entry.request;
+      const who = app ? `the app "${app}"` : "the app";
+      if (by === "user")
+        this.#note(
+          decision.allow
+            ? `The user allowed ${who} to connect to ${destinationOf(host, port)}; it connects on its next try.`
+            : `The user didn't allow ${who} to connect to ${destinationOf(host, port)}. Don't work around it; tell the user what doesn't work without it.`,
+        );
       try {
         this.publishResolution({
           approvalId: card.approvalId,
@@ -172,6 +246,8 @@ export interface ConnectionTask {
   readonly id: string;
   readonly taskAutonomy: Pick<TaskAutonomy, "relaxes">;
   readonly connections: Pick<ConnectionCards, "request">;
+  readonly taint: Pick<TaskTaint, "kinds">;
+  readonly purpose?: Pick<PurposeGate, "fitsConnection"> | undefined;
 }
 export interface ConnectionApprovalsDeps {
   keyd: {
@@ -189,21 +265,16 @@ export interface ConnectionApprovalsDeps {
   // The program behind a local port of the computer, when the computer can say.
   owner(cellId: string, port: number): Promise<string | undefined>;
   cells(): Iterable<string>;
-  // The purpose judge's place: it may decide a destination before anyone is asked. Nothing it says
-  // reaches past keyd's own limits (SMTP, the Mac, its networks, link-local and metadata).
-  judge?(request: {
-    cellId: string;
-    taskId?: string;
-    app?: string;
-    host: string;
-    port: number;
-  }): Promise<"allow" | "deny" | undefined>;
   now?(): number;
 }
 
-// Answers keyd for every connection it holds: a saved rule, the task's allowance or a recent
-// "Allow once" lets it through at once; otherwise the running task shows a card, and without a task
-// nobody can say yes, so it is refused.
+const JUDGE_WAIT_MS = 10_000;
+
+// Answers keyd for every connection it holds beyond the web: a saved rule, the task's allowance or
+// a recent "Allow once" lets it through at once; otherwise the running task shows a card, with the
+// purpose check's view of the destination as its reason. Without a task nobody can say yes, so it
+// is refused. Nothing here reaches past keyd's own limits (SMTP, the Mac, its networks, link-local
+// and metadata), which keyd applies before it asks.
 export class ConnectionApprovals {
   readonly #handling = new Set<string>();
   readonly #once = new Map<string, number>();
@@ -242,19 +313,15 @@ export class ConnectionApprovals {
     for (const [key, until] of this.#once) if (until <= now) this.#once.delete(key);
     const once = `${cellId}\0${app ?? ""}\0${destination}`;
     if (this.#once.has(once)) return true;
-    const judged = await this.deps.judge?.({
-      cellId,
-      ...(task ? { taskId: task.id } : {}),
-      ...(app ? { app } : {}),
-      host: held.host,
-      port: held.port,
-    });
-    if (judged) return judged === "allow";
     if (!task) return false;
+    const fits = await task.purpose
+      ?.fitsConnection(held.host, held.port, AbortSignal.timeout(JUDGE_WAIT_MS))
+      .catch(() => undefined);
     const decision = await task.connections.request({
       ...(app ? { app } : {}),
       host: held.host,
       port: held.port,
+      why: connectionWhy(app, fits, fits === false ? task.taint.kinds : []),
     });
     if (decision.allow && !decision.always)
       this.#once.set(once, (this.deps.now?.() ?? Date.now()) + ONCE_MS);

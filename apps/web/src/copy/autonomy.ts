@@ -30,10 +30,9 @@ const CLASS_WORK: Readonly<Record<ActionClass, string>> = {
 
 const lower = (text: string) => `${text.charAt(0).toLowerCase()}${text.slice(1)}`;
 
-// A connection's choice names the program or the destination it opened.
+// A connection's choice names the destination it opened, and the program when it names one.
 function connectionChoice(option: AlwaysOption): string {
-  if (option.scope === "app") return `connections from ${option.app}`;
-  return `connections to ${option.destination}`;
+  return `${option.app ? `${option.app}'s ` : ""}connections to ${option.destination}`;
 }
 
 export function allowedLine(actionClass: ActionClass, option: AlwaysOption): string {

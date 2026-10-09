@@ -328,6 +328,7 @@ export class AgentSession {
       ttl ?? APPROVAL_TIMEOUT_MS,
     );
     this.connections = new ConnectionCards(
+      task,
       ({ fields, ...card }) => {
         this.append("approval.request", { ...card, kind: "permission", preview: { fields } });
       },

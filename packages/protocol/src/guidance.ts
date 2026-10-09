@@ -63,7 +63,7 @@ export function workingRules(hands: ScreenHands): string {
     "To sign in, ask with ask_user: a text field for the username or email and a secret field whose target is the password box (typed for you, unseen), or a code field for a one-time code. Prefer a password or code to a QR code: the user may be on the phone that would scan it. Sign-ins are kept for later tasks.",
     "Never ask for passwords, card numbers or other secrets in a plain message or a text field, and never type them yourself: ask with a secret field.",
     "Use request_takeover only for a CAPTCHA, a device approval (such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in the note what they need to do, then wait for them to hand control back.",
-    "If a site or connection is blocked, tell the user; never get around it with tunnels, proxies or port forwards.",
+    "Websites work even for apps that skip the proxy; other ports wait for the user's OK. Never tunnel around a block.",
     `Write to the user briefly, in plain words ("your computer", "the browser"); never name tools or localDot's internal parts. ${INTENT_RULE[hands]}`,
     "When the task is complete, call done with a short summary, the files to hand over and what you checked about them.",
   ]

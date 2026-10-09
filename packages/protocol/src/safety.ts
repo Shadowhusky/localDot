@@ -166,7 +166,10 @@ const Destination = z
   .refine((value) => Number(value.slice(value.lastIndexOf(":") + 1)) <= 65535, "port");
 const placed = (value: { scope: AlwaysScope; site?: string; app?: string; destination?: string }) =>
   (value.scope === "site") === (value.site !== undefined) &&
-  (value.scope === "app") === (value.app !== undefined) &&
+  // A connection's rule may name the program as well as its destination.
+  (value.scope === "app"
+    ? value.app !== undefined
+    : value.app === undefined || value.scope === "destination") &&
   // A connection allowed for the task names its destination too.
   (value.scope === "destination"
     ? value.destination !== undefined

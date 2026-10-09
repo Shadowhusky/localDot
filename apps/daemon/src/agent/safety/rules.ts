@@ -31,7 +31,7 @@ export const ALWAYS_SCOPES: Readonly<Record<ActionClass, readonly AlwaysScope[]>
   upload: ["task"],
   credentials: [],
   unknown: ["task"],
-  network: ["task", "app", "destination"],
+  network: ["task", "destination"],
 };
 export interface Place {
   readonly site?: string;
@@ -95,7 +95,9 @@ export class RulesStore {
         (rule.scope === "always" ||
           (rule.scope === "site" && rule.site === place.site) ||
           (rule.scope === "app" && rule.app === place.app) ||
-          (rule.scope === "destination" && rule.destination === place.destination)),
+          (rule.scope === "destination" &&
+            rule.destination === place.destination &&
+            (rule.app === undefined || rule.app === place.app))),
     );
   }
   // A host the user has allowed something on, always: where dot may send what it read.
