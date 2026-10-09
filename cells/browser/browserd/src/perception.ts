@@ -8,7 +8,7 @@ import {
 import { z as schema } from "zod";
 import type { BrowserCaptureMask, BrowserMaskRect } from "./capture-mask.ts";
 import type { BrowserGeometrySnapshot } from "./geometry.ts";
-import { MAX_SECRET_NODES, secretMetadata } from "./secrets.ts";
+import { MAX_SECRET_NODES, secretMetadata, snapshotString } from "./secrets.ts";
 
 const position = schema.number().int().min(0).max(131071);
 const stringIndex = schema.number().int().min(-1).max(131071);
@@ -17,7 +17,7 @@ const coordinate = schema.number().finite().min(-0x7ffffffe).max(0x7ffffffe);
 const extent = schema.number().finite().min(0).max(0x7ffffffe);
 const rectangle = schema.tuple([coordinate, coordinate, extent, extent]);
 const snapshotSchema = schema.object({
-  strings: schema.array(schema.string().max(65536)).max(131072),
+  strings: schema.array(snapshotString).max(131072),
   documents: schema
     .array(
       schema.object({

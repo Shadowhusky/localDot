@@ -1,8 +1,12 @@
 import { z as schema } from "zod";
 import type { BrowserNative } from "./native.ts";
+import { MAX_CDP_MESSAGE_BYTES } from "./pipe.ts";
 import type { BrowserDocument, BrowserTargets } from "./targets.ts";
 
 export const MAX_SECRET_NODES = 32_768;
+// A page's inline script runs to megabytes (Google's sign-in page, almost one); only the CDP
+// message that carries it bounds a snapshot string.
+export const snapshotString = schema.string().max(MAX_CDP_MESSAGE_BYTES);
 const index = schema.number().int().nonnegative().max(131_071);
 const stringIndex = schema.number().int().min(-1).max(131_071);
 const nodeId = schema.number().int().positive().max(Number.MAX_SAFE_INTEGER);
@@ -12,7 +16,7 @@ const rareStrings = schema.object({
   value: schema.array(stringIndex).max(MAX_SECRET_NODES),
 });
 const snapshotSchema = schema.object({
-  strings: schema.array(schema.string().max(65_536)).max(131_072),
+  strings: schema.array(snapshotString).max(131_072),
   documents: schema
     .array(
       schema.object({

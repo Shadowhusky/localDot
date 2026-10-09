@@ -220,7 +220,13 @@ export class BrowserInput {
           scope.check(geometry.document);
           return result;
         }
-        const result = await this.#options.native.command("settle", request.request, scope.signal);
+        // The verb tunes only the desktop's settle; the browser's helper takes the timings.
+        const { quietMs, firstMs, timeoutMs } = request.request;
+        const result = await this.#options.native.command(
+          "settle",
+          { quietMs, firstMs, timeoutMs },
+          scope.signal,
+        );
         scope.check(geometry.document);
         return {
           changed: result.changed.map(([x, y, w, h]) => ({ x, y, w, h })),

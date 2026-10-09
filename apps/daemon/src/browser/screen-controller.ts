@@ -118,6 +118,7 @@ export class ScreenController {
   readonly #active = new Set<Promise<void>>();
   readonly #leases = new WeakSet<ScreenLease>();
   #holding: Promise<void> | undefined;
+  #regranting: Promise<void> | undefined;
   #containment: Promise<void> | undefined;
   #closing: Promise<void> | undefined;
   #finishing = false;
@@ -236,6 +237,15 @@ export class ScreenController {
   // The session's manual lease is required in addition to the physical user grant.
   // It expires before handback, even while the underlying native request is draining.
   manualAccess(scope: BrowserScope) {
+    try {
+      return this.#manualAccess(scope);
+    } catch (error) {
+      this.#regrant();
+      throw error;
+    }
+  }
+
+  #manualAccess(scope: BrowserScope) {
     const owner = this.#browser;
     const permit = owner?.manualPermit;
     if (!owner?.client.manual || !permit) throw new ScreenControlError();
@@ -328,7 +338,10 @@ export class ScreenController {
         }
         // A browser preparation already in flight may have returned while the queue drained.
         await handBack();
-        if (epoch === this.#epoch && !this.#closed && !this.#failed) this.#userReady = true;
+        if (epoch === this.#epoch && !this.#closed && !this.#failed) {
+          this.#userReady = true;
+          this.#regrant();
+        }
       })
       .then(completion.resolve, completion.reject);
     return this.#holding;
@@ -739,6 +752,56 @@ export class ScreenController {
     owner.revoking = pending;
     return pending;
   }
+  // While the user holds the web browser's screen, a browser that stopped or started again holds
+  // no grant of theirs: the running one is prepared and handed to them, so their input reaches it.
+  #regrant(): void {
+    const owner = this.#browser;
+    if (
+      this.#regranting ||
+      !this.#held ||
+      !this.#userReady ||
+      this.#returning ||
+      this.#pending ||
+      this.#closed ||
+      this.#failed ||
+      this.#selection.screen !== "browser" ||
+      !this.deps.desktopReady() ||
+      (owner?.manualPermit &&
+        this.deps.browser.endpoints(this.deps.parentCellId)?.instance === owner.endpoint.instance)
+    )
+      return;
+    const epoch = this.#epoch;
+    const selection = this.#selection;
+    const scope: BrowserScope = {
+      signal: this.#manual.signal,
+      check: () => {
+        if (
+          epoch !== this.#epoch ||
+          selection !== this.#selection ||
+          !this.#held ||
+          this.#returning ||
+          this.#closed ||
+          this.#failed
+        )
+          throw new ScreenControlError();
+      },
+    };
+    const work = this.#prepare(scope)
+      .then(() => {
+        scope.check();
+        return this.#revoke();
+      })
+      .catch(() => {
+        if (!scope.signal.aborted) this.deps.report?.("the web browser couldn't be handed back");
+      });
+    this.#regranting = work;
+    this.#active.add(work);
+    void work.finally(() => {
+      this.#active.delete(work);
+      if (this.#regranting === work) this.#regranting = undefined;
+    });
+  }
+
   // An unconfirmed revocation leaves the browser's holder unknown. Only its confirmed
   // physical stop proves that no agent grant survives; otherwise the session is contained.
   async #retireBrowser(): Promise<void> {

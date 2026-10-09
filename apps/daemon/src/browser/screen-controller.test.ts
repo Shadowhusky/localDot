@@ -931,6 +931,42 @@ describe("a page opened for the user", () => {
     expect(f.deps.contain).not.toHaveBeenCalled();
   });
 
+  // A page that fences browserd as it opens leaves the hand-over nothing to reach: that browser is
+  // stopped, and the one started in its place must still take the user's input.
+  it("hands the user the browser that replaced one they couldn't be given", async () => {
+    const f = fixture();
+    f.client.navigate.mockRejectedValue(new BrowserClientError("unavailable"));
+    f.deps.browser.stop.mockImplementation(async () => f.replace());
+    await f.controller.openForUser("https://accounts.google.com/", f.scope);
+    f.client.control.mockRejectedValueOnce(new BrowserClientError("unavailable"));
+    await f.controller.takeOver();
+    expect(f.deps.browser.stop).toHaveBeenCalledOnce();
+    const scope = { signal: f.abort.signal, check: () => {} };
+    const granted = () => {
+      try {
+        f.controller.manualAccess(scope).finish();
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    await until(granted);
+    const manual = f.controller.manualAccess(scope);
+    await manual.input({ kind: "text", text: "a" });
+    manual.finish();
+    const replacement = f.deps.browser.endpoints().instance;
+    expect(replacement).not.toBe(f.endpoint.instance);
+    expect(f.client.manual).toHaveBeenCalledWith(
+      expect.objectContaining({ instance: replacement }),
+      { kind: "text", text: "a" },
+      expect.anything(),
+    );
+    expect(f.holder()).toBe("user");
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    await f.controller.handback(f.scope);
+    await f.controller.close();
+  });
+
   it("opens only before anyone has used the screens", async () => {
     const f = fixture();
     await f.controller.switchTo("browser", f.scope);

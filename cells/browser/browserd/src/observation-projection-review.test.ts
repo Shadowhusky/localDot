@@ -103,6 +103,13 @@ describe("independent observation editable projection", () => {
     expect(result.mask.redactions).toHaveLength(0);
   });
 
+  it("P4 projects a page whose inline script runs past 64 KiB", () => {
+    const { snapshot, ax } = fixture();
+    snapshot.strings.push("x".repeat(900_000));
+    const result = projectBrowser(snapshot, ax, "root", geometry, 1);
+    expect(result.targets.some((target) => target.name === "Continue")).toBe(true);
+  });
+
   it("I1 must not publish editable descendant contents through an ancestor AX name", () => {
     const { snapshot, ax } = fixture();
     const result = projectBrowser(snapshot, ax, "root", geometry, 1);
