@@ -14,6 +14,7 @@ import ctypes
 import json
 import os
 import select
+import signal
 import sys
 import threading
 import time
@@ -25,6 +26,15 @@ from Xlib.protocol import rq
 
 ACTIVATE_TIMEOUT_MS = 300
 DOUBLE_CLICK_GAP_MS = 90
+MAX_HOLD_MS = 30_000
+# Held keys are released this long after their hold should have ended, if desktopd never asks.
+HOLD_SLACK_MS = 1000
+# A button `down` pressed is released this long after the last pointer command, if nobody asks:
+# the daemon lets go after 60 s without a mouse action.
+BUTTON_HOLD_MS = 90_000
+# After the Escape that cancels a drag, before its button comes up: the drag's owner ungrabs first.
+CANCEL_MS = 100
+MAX_KEYSYM = 0x1FFFFFFF
 # Damage inside a rect that was already changing this long before arm() (a spinner, a clock) is
 # ambient. Settle's quiet window is 250 ms, so the previous action's own changes have stopped
 # before the next arm and are not mistaken for ambient ones.
@@ -69,6 +79,10 @@ KEYSYMS = {
 for _i in range(1, 13):
     KEYSYMS["F%d" % _i] = 0xFFBE + _i - 1
 MODS_FOR_INDEX = {0: [], 1: ["Shift_L"], 2: ["ISO_Level3_Shift"], 3: ["Shift_L", "ISO_Level3_Shift"]}
+NUM_LOCK = 0xFF7F
+# Keypad keysyms. Where a keypad key has two (KP_End, KP_1), NumLock picks the second; Shift
+# would too, but GTK reads Shift with a keypad key as extending a selection.
+KEYPAD = range(0xFF80, 0xFFBE)
 
 out_lock = threading.Lock()
 
@@ -513,6 +527,18 @@ class Commands:
         info = self.d.display.info
         self.min_kc, self.max_kc = info.min_keycode, info.max_keycode
         self.remapped = {}
+        # Keycodes a `hold` pressed, in order, the lock keys it tapped first, and when they are
+        # let go of at the latest.
+        self.held = []
+        self.held_taps = []
+        self.hold_until = None
+        # Buttons a `down` pressed, the modifier keycodes held with them, when they are let go of
+        # at the latest, where they went down and whether the pointer moved since.
+        self.buttons = []
+        self.button_mods = []
+        self.buttons_until = None
+        self.button_at = None
+        self.button_moved = False
         self.d.sync()
 
     # Events queued on the command connection: MappingNotify after our own keymap changes.
@@ -652,7 +678,74 @@ class Commands:
     def cmd_move(self, a):
         self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
         self.d.sync()
+        self.held_pointer(a)
         return {"mono": mono()}
+
+    # A pointer command while a button is down: it stays down as long again, and a move away from
+    # where it went down makes it a drag.
+    def held_pointer(self, a):
+        if not self.buttons:
+            return
+        self.buttons_until = mono() + BUTTON_HOLD_MS
+        if (int(a["x"]), int(a["y"])) != self.button_at:
+            self.button_moved = True
+
+    # Presses a button (and modifiers) at a point and keeps it down until `up`, release_all, or
+    # BUTTON_HOLD_MS without a pointer command.
+    def cmd_down(self, a):
+        button = int(a["button"])
+        if not 1 <= button <= 3:
+            raise ValueError("button %r is not left, middle or right" % button)
+        if button in self.buttons:
+            raise ValueError("button %d is already down" % button)
+        mods = [self.keycode_for_name(m)[0] for m in a.get("mods", [])]
+        self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
+        try:
+            for kc in mods:
+                self.d.xtest_fake_input(X.KeyPress, kc)
+                self.button_mods.append(kc)
+            self.d.xtest_fake_input(X.ButtonPress, button)
+            self.buttons.append(button)
+            self.button_at = (int(a["x"]), int(a["y"]))
+            self.d.sync()
+        except Exception:
+            self.release_buttons()
+            raise
+        self.buttons_until = mono() + BUTTON_HOLD_MS
+        return {"button": button}
+
+    # While the user decides about the next step, desktopd keeps the buttons a `down` pressed down
+    # as long again, and learns which of them the server still has down. One the server let go of
+    # is no longer held: nothing is left to cancel, and once none is, its modifiers come up.
+    def cmd_held(self, a):
+        mask = self.root.query_pointer().mask
+        self.buttons = [b for b in self.buttons if mask & (1 << (7 + b))]
+        if self.buttons:
+            self.buttons_until = mono() + BUTTON_HOLD_MS
+        elif self.buttons_until is not None:
+            mods, self.button_mods = self.button_mods, []
+            self.buttons_until, self.button_at, self.button_moved = None, None, False
+            if mods:
+                self.release_keys(mods)
+        return {"buttons": list(self.buttons)}
+
+    # Lets go of a button at a point, and of the modifiers pressed with the last held button.
+    # `released` is false when the button was not down.
+    def cmd_up(self, a):
+        button = int(a["button"])
+        self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
+        down = bool(self.root.query_pointer().mask & (1 << (7 + button)))
+        try:
+            if down:
+                self.d.xtest_fake_input(X.ButtonRelease, button)
+            self.d.sync()
+        finally:
+            if button in self.buttons:
+                self.buttons.remove(button)
+            if not self.buttons:
+                self.button_at, self.button_moved = None, False
+                self.release_buttons()
+        return {"button": button, "released": down}
 
     def cmd_click(self, a):
         button = int(a.get("button", 1))
@@ -660,37 +753,58 @@ class Commands:
         hold_s = float(a.get("holdMs", 0)) / 1000
         mods = [self.keycode_for_name(m)[0] for m in a.get("mods", [])]
         self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
-        for kc in mods:
-            self.d.xtest_fake_input(X.KeyPress, kc)
-        self.d.sync()
-        for i in range(count):
-            if i:
-                time.sleep(DOUBLE_CLICK_GAP_MS / 1000)
-            self.d.xtest_fake_input(X.ButtonPress, button)
+        down = []
+        try:
+            for kc in mods:
+                self.d.xtest_fake_input(X.KeyPress, kc)
+                down.append(kc)
             self.d.sync()
-            if hold_s:
-                time.sleep(hold_s)
-            self.d.xtest_fake_input(X.ButtonRelease, button)
-            self.d.sync()
-        for kc in reversed(mods):
-            self.d.xtest_fake_input(X.KeyRelease, kc)
-        self.d.sync()
+            for i in range(count):
+                if i:
+                    time.sleep(DOUBLE_CLICK_GAP_MS / 1000)
+                self.d.xtest_fake_input(X.ButtonPress, button)
+                try:
+                    self.d.sync()
+                    if hold_s:
+                        time.sleep(hold_s)
+                finally:
+                    self.d.xtest_fake_input(X.ButtonRelease, button)
+                    self.d.sync()
+        finally:
+            self.release_keys(down)
         return {"button": button, "presses": count}
 
     def cmd_scroll(self, a):
         dx, dy = int(a.get("dx", 0)), int(a.get("dy", 0))
+        mods = [self.keycode_for_name(m)[0] for m in a.get("mods", [])]
         self.d.xtest_fake_input(X.MotionNotify, x=int(a["x"]), y=int(a["y"]))
-        self.d.sync()
+        down = []
         notches = 0
-        for button, n in ((5 if dy > 0 else 4, abs(dy)), (7 if dx > 0 else 6, abs(dx))):
-            for _ in range(n):
-                self.d.xtest_fake_input(X.ButtonPress, button)
-                self.d.xtest_fake_input(X.ButtonRelease, button)
-                self.d.sync()
-                notches += 1
+        try:
+            for kc in mods:
+                self.d.xtest_fake_input(X.KeyPress, kc)
+                down.append(kc)
+            self.d.sync()
+            for button, n in ((5 if dy > 0 else 4, abs(dy)), (7 if dx > 0 else 6, abs(dx))):
+                for _ in range(n):
+                    self.d.xtest_fake_input(X.ButtonPress, button)
+                    self.d.xtest_fake_input(X.ButtonRelease, button)
+                    self.d.sync()
+                    notches += 1
+        finally:
+            self.release_keys(down)
+        self.held_pointer(a)
         return {"notches": notches}
 
     def keysym_for_name(self, name):
+        """A keysym desktopd resolved already (an int), or one of the few names the helper itself
+        and the browser helper use."""
+        if isinstance(name, int) and not isinstance(name, bool):
+            if not 0 < name <= MAX_KEYSYM:
+                raise ValueError("keysym %#x is outside X's range" % name)
+            return name
+        if not isinstance(name, str):
+            raise ValueError("unknown key %r" % (name,))
         if name in KEYSYMS:
             return KEYSYMS[name]
         if len(name) == 1:
@@ -731,26 +845,174 @@ class Commands:
 
     def cmd_char(self, a):
         kc, mods = self.keycodes_for_keysym(keysym_for_char(a["ch"]))
-        mod_codes = [self.keycode_for_name(m)[0] for m in mods]
-        for m in mod_codes:
-            self.d.xtest_fake_input(X.KeyPress, m)
-        self.d.xtest_fake_input(X.KeyPress, kc)
-        self.d.sync()
-        self.d.xtest_fake_input(X.KeyRelease, kc)
-        for m in reversed(mod_codes):
-            self.d.xtest_fake_input(X.KeyRelease, m)
-        self.d.sync()
+        self.press_combo([self.keycode_for_name(m)[0] for m in mods] + [kc])
         return {"keycode": kc, "mods": mods}
 
-    def cmd_keys(self, a):
-        codes = [self.keycode_for_name(n)[0] for n in a["combo"]]
+    def key_for(self, keysym):
+        """A combo key's keycode, the modifiers its level needs, and the NumLock state it needs
+        (None when NumLock does not matter)."""
+        codes = list(self.d.keysym_to_keycodes(keysym))
+        if not codes:
+            return self.remap(keysym), [], None
+        kc, idx = codes[0]
+        if (keysym in KEYPAD and idx in (0, 1)
+                and self.d.keycode_to_keysym(kc, 0) != self.d.keycode_to_keysym(kc, 1)):
+            return kc, [], idx == 1
+        return kc, MODS_FOR_INDEX.get(idx, []), None
+
+    def numlock_on(self):
+        kc = self.keycode_for_name(NUM_LOCK)[0]
+        for i, codes in enumerate(self.d.get_modifier_mapping()):
+            if kc in codes:
+                return bool(self.root.query_pointer().mask & (1 << i))
+        return False
+
+    def combo_plan(self, combo):
+        """The combo's own keycodes; every keycode it presses, in order, with a shifted symbol's
+        level modifiers ('?', '+', '@' on AltGr) before it unless the combo presses them already;
+        and the keys to tap before and after, which turn NumLock to what a keypad key needs."""
+        keys = [self.key_for(self.keysym_for_name(n)) for n in combo]
+        own = [kc for kc, _, _ in keys]
+        codes = []
+        for kc, mods, _ in keys:
+            for m in mods:
+                mc = self.keycode_for_name(m)[0]
+                if mc not in own and mc not in codes:
+                    codes.append(mc)
+            codes.append(kc)
+        wanted = {numlock for _, _, numlock in keys if numlock is not None}
+        taps = []
+        if len(wanted) == 1 and wanted.pop() != self.numlock_on():
+            taps = [self.keycode_for_name(NUM_LOCK)[0]]
+        return own, codes, taps
+
+    def tap(self, codes):
         for kc in codes:
             self.d.xtest_fake_input(X.KeyPress, kc)
+            self.d.xtest_fake_input(X.KeyRelease, kc)
+        if codes:
             self.d.sync()
+
+    def press_combo(self, codes, taps=()):
+        """Presses the keycodes in order and releases them in reverse, including when the server
+        fails between them: a key that went down always comes up, and a lock it turned is turned
+        back."""
+        self.tap(taps)
+        down = []
+        try:
+            for kc in codes:
+                self.d.xtest_fake_input(X.KeyPress, kc)
+                down.append(kc)
+                self.d.sync()
+        finally:
+            self.release_keys(down)
+            self.tap(taps)
+
+    def release_keys(self, codes):
         for kc in reversed(codes):
             self.d.xtest_fake_input(X.KeyRelease, kc)
         self.d.sync()
-        return {"keycodes": codes}
+
+    def cmd_keys(self, a):
+        own, codes, taps = self.combo_plan(a["combo"])
+        self.press_combo(codes, taps)
+        return {"keycodes": own}
+
+    # Presses the combo and keeps it down: desktopd sends `release` when the hold is over, and
+    # serve() lets go on its own HOLD_SLACK_MS after that, or when desktopd goes away.
+    def cmd_hold(self, a):
+        ms = a.get("ms")
+        if type(ms) not in (int, float) or not 0 < ms <= MAX_HOLD_MS:
+            raise ValueError("a hold lasts more than 0 and at most %d ms" % MAX_HOLD_MS)
+        self.release_held()
+        own, codes, taps = self.combo_plan(a["combo"])
+        self.tap(taps)
+        self.held_taps = taps
+        try:
+            for kc in codes:
+                self.d.xtest_fake_input(X.KeyPress, kc)
+                self.held.append(kc)
+                self.d.sync()
+        except Exception:
+            self.release_held()
+            raise
+        self.hold_until = mono() + ms + HOLD_SLACK_MS
+        return {"keycodes": own}
+
+    def release_held(self):
+        held, self.held, self.hold_until = self.held, [], None
+        taps, self.held_taps = self.held_taps, []
+        try:
+            if held:
+                self.release_keys(held)
+        finally:
+            self.tap(taps)
+        return held
+
+    def cmd_release(self, a):
+        return {"keycodes": self.release_held()}
+
+    # Lets go of the buttons a `down` pressed, where the pointer is. A button the pointer moved with
+    # may be dragging something (a file, a window, a toolkit or XDND drag): its modifiers come up,
+    # then Escape cancels the drag while the button is still down, so letting go drops nothing.
+    # The pointer is never taken back with the button down: a paint tool would draw the way back.
+    def release_buttons(self):
+        buttons, self.buttons, self.buttons_until = self.buttons, [], None
+        mods, self.button_mods = self.button_mods, []
+        at, moved = self.button_at, self.button_moved
+        self.button_at, self.button_moved = None, False
+        try:
+            if buttons and (moved or self.pointer_at() != at):
+                moved = True
+                try:
+                    if mods:
+                        self.release_keys(mods)
+                        mods = []
+                finally:
+                    self.escape()
+        finally:
+            try:
+                for b in reversed(buttons):
+                    self.d.xtest_fake_input(X.ButtonRelease, b)
+                if buttons:
+                    self.d.sync()
+            finally:
+                if mods:
+                    self.release_keys(mods)
+        return buttons, bool(buttons) and moved
+
+    def pointer_at(self):
+        p = self.root.query_pointer()
+        return (p.root_x, p.root_y)
+
+    def escape(self):
+        self.tap([self.keycode_for_name("Escape")[0]])
+        self.pause(CANCEL_MS / 1000)
+
+    # Lets go of the buttons a `down` pressed without dropping anything: a stopped drag.
+    def cmd_cancel(self, a):
+        buttons, escaped = self.release_buttons()
+        return {"buttons": len(buttons), "escaped": bool(escaped)}
+
+    # Every key and button the server has down, whoever pressed them: a helper that died while
+    # holding keys leaves them down for the next one to release.
+    def cmd_release_all(self, a):
+        held = self.release_held()
+        pressed, _ = self.release_buttons()
+        keymap = self.d.query_keymap()
+        keys = [i * 8 + bit for i, byte in enumerate(keymap) for bit in range(8) if byte >> bit & 1]
+        for kc in keys:
+            self.d.xtest_fake_input(X.KeyRelease, kc)
+        self.d.sync()
+        # Whoever pressed these, nobody knows where they went down: each may be dragging.
+        mask = self.root.query_pointer().mask
+        buttons = [b for b in range(1, 6) if mask & (1 << (7 + b))]
+        if buttons:
+            self.escape()
+        for b in buttons:
+            self.d.xtest_fake_input(X.ButtonRelease, b)
+        self.d.sync()
+        return {"keys": len(set(held) | set(keys)), "buttons": len(set(pressed) | set(buttons))}
 
     def cmd_arm(self, a):
         return {"mono": self.screen.arm()}
@@ -839,7 +1101,67 @@ class Commands:
         return {"width": g.width, "height": g.height, "stride": stride, "mono": t}
 
 
+def handle(cmds, line):
+    """Answers one request line; False once it asked the helper to quit."""
+    line = line.strip()
+    if not line:
+        return True
+    rid = None
+    try:
+        req = json.loads(line)
+        rid = req.get("id")
+        cmd = req.get("cmd")
+        if cmd == "quit":
+            emit({"id": rid, "ok": True})
+            return False
+        fn = getattr(cmds, "cmd_" + str(cmd), None)
+        if fn is None:
+            emit({"id": rid, "ok": False, "error": "unknown command %r" % cmd})
+            return True
+        cmds.drain()
+        res = fn(req)
+        res["id"] = rid
+        res["ok"] = True
+        emit(res)
+    except Exception as err:  # noqa: BLE001 - every failure is reported on the reply line
+        emit({"id": rid, "ok": False, "error": "%s: %s" % (type(err).__name__, err)})
+    return True
+
+
+def serve(cmds, fd):
+    """Request lines from `fd` until it closes or a quit; between them, a hold or a held button
+    whose time is up is released. However the loop ends, nothing it held stays down."""
+    pending = b""
+    try:
+        while True:
+            deadlines = [t for t in (cmds.hold_until, cmds.buttons_until) if t is not None]
+            wait = max(0.0, min(deadlines) - mono()) / 1000 if deadlines else None
+            ready, _, _ = select.select([fd], [], [], wait)
+            if not ready:
+                now = mono()
+                if cmds.hold_until is not None and now >= cmds.hold_until:
+                    cmds.release_held()
+                if cmds.buttons_until is not None and now >= cmds.buttons_until:
+                    cmds.release_buttons()
+                continue
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                return
+            pending += chunk
+            while b"\n" in pending:
+                line, pending = pending.split(b"\n", 1)
+                if not handle(cmds, line.decode("utf-8", "replace")):
+                    return
+    finally:
+        try:
+            cmds.release_held()
+        finally:
+            cmds.release_buttons()
+
+
 def main():
+    # SIGTERM unwinds through serve(), which releases what it holds.
+    signal.signal(signal.SIGTERM, lambda *_: sys.exit(0))
     screen = Screen()
     listener = Listener(screen)
     listener.start()
@@ -847,30 +1169,9 @@ def main():
     if listener.error:
         sys.exit(1)
     cmds = Commands(screen)
+    cmds.cmd_release_all({})
     emit({"ev": "ready", "mono": mono()})
-    for line in sys.stdin:
-        line = line.strip()
-        if not line:
-            continue
-        rid = None
-        try:
-            req = json.loads(line)
-            rid = req.get("id")
-            cmd = req.get("cmd")
-            if cmd == "quit":
-                emit({"id": rid, "ok": True})
-                break
-            fn = getattr(cmds, "cmd_" + str(cmd), None)
-            if fn is None:
-                emit({"id": rid, "ok": False, "error": "unknown command %r" % cmd})
-                continue
-            cmds.drain()
-            res = fn(req)
-            res["id"] = rid
-            res["ok"] = True
-            emit(res)
-        except Exception as err:  # noqa: BLE001 - every failure is reported on the reply line
-            emit({"id": rid, "ok": False, "error": "%s: %s" % (type(err).__name__, err)})
+    serve(cmds, sys.stdin.fileno())
 
 
 if __name__ == "__main__":

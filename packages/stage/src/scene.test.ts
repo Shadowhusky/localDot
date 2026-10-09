@@ -328,6 +328,130 @@ describe("typing and keys", () => {
   });
 });
 
+describe("drag path", () => {
+  const travel = (from: { x: number; y: number }, to: { x: number; y: number }, at: number) => ({
+    from,
+    to,
+    startsAt: at,
+    durationMs: 200,
+    seed: 3,
+    curve: "minjerk-bow-v1" as const,
+  });
+  const step = (n: number, verb: string, label: string, pointer?: object) =>
+    ev("action.intent", n, { verb, label, risk: "none", ...(pointer ? { pointer } : {}) }, label);
+  const sent = (n: number, input: object, label: string, pressMs = n) =>
+    ev(
+      "action.dispatch",
+      n,
+      { input, pressT: msToMicros(pressMs), ringAt: msToMicros(pressMs), injector: "xtest" },
+      label,
+    );
+  const done = (n: number, label: string) => ev("action.result", n, { ok: true }, label);
+  const from = { x: 200, y: 200 };
+  const to = { x: 1200, y: 600 };
+
+  it("draws a one-step drag's path as it goes, moves the cursor along it, then fades it after the drop", () => {
+    const input = {
+      kind: "drag",
+      from,
+      to,
+      path: [{ x: 700, y: 200 }],
+      button: "left",
+      durationMs: 1000,
+    };
+    const log = [
+      ...base(),
+      step(1000, "drag", "drag", travel({ x: 0, y: 0 }, from, 1000)),
+      sent(1300, input, "drag"),
+      done(2500, "drag"),
+    ];
+    expect(motion(log, 1200).drag).toBeNull();
+    const early = motion(log, 1500);
+    expect(early.drag?.points[0]).toEqual(from);
+    expect(early.drag?.points.length).toBeGreaterThan(2);
+    expect(early.drag?.points.every((p) => p.y === 200)).toBe(true);
+    expect(early.cursor).toMatchObject(early.drag?.points.at(-1) ?? {});
+    const late = motion(log, 2200);
+    expect(late.drag?.points.at(-1)?.y).toBeGreaterThan(200);
+    expect(late.drag?.points.length).toBeGreaterThan(early.drag?.points.length ?? 0);
+    expect(motion(log, 2600).drag).toEqual({ points: [from, { x: 700, y: 200 }, to], alpha: 1 });
+    expect(motion(log, 2600).cursor).toMatchObject(to);
+    expect(motion(log, 3250).drag?.alpha).toBeCloseTo(0.5, 1);
+    expect(motion(log, 3500).drag).toBeNull();
+  });
+
+  it("stops the path where a stopped drag was cancelled", () => {
+    const input = { kind: "drag", from, to, button: "left", durationMs: 1000 };
+    const log = [
+      ...base(),
+      step(1000, "drag", "drag", travel({ x: 0, y: 0 }, from, 1000)),
+      sent(1300, input, "drag"),
+      ev("action.cancel", 1800, { reason: "user" }, "drag"),
+    ];
+    const stopped = motion(log, 1800).drag?.points.at(-1);
+    expect(motion(log, 2000).drag?.points.at(-1)).toEqual(stopped);
+    expect(stopped?.x).toBeGreaterThan(from.x);
+    expect(stopped?.x).toBeLessThan(to.x);
+  });
+
+  it("follows a button held between actions through each move and its release", () => {
+    const a = { x: 600, y: 300 };
+    const log = [
+      ...base(),
+      step(1000, "click", "down", travel({ x: 0, y: 0 }, from, 1000)),
+      sent(1250, { kind: "down", button: "left", at: from }, "down"),
+      done(1300, "down"),
+      step(2000, "move", "move", travel(from, a, 2000)),
+      sent(2200, { kind: "move", to: a, durationMs: 200 }, "move"),
+      done(2300, "move"),
+      step(3000, "click", "up", travel(a, to, 3000)),
+      sent(3200, { kind: "up", button: "left", at: to }, "up"),
+      done(3300, "up"),
+    ];
+    // The press alone is no path yet; the travel to it is no drag.
+    expect(motion(log, 1100).drag).toBeNull();
+    expect(motion(log, 1500).drag).toBeNull();
+    const gliding = motion(log, 2100);
+    expect(gliding.drag?.points[0]).toEqual(from);
+    const head = gliding.drag?.points.at(-1) as { x: number; y: number };
+    // On the straight line the button glides along, with the cursor on it.
+    expect(head.x).toBeGreaterThan(from.x);
+    expect(
+      Math.abs((head.y - from.y) / (head.x - from.x) - (a.y - from.y) / (a.x - from.x)),
+    ).toBeLessThan(0.01);
+    expect(gliding.cursor).toMatchObject(head);
+    expect(motion(log, 2500).drag?.points).toEqual([from, a]);
+    expect(motion(log, 3400).drag?.points).toEqual([from, a, to]);
+    expect(motion(log, 4300).drag).toBeNull();
+  });
+
+  it("ends the held path at an automatic release, and draws it whole at once under reduced motion", () => {
+    const a = { x: 600, y: 300 };
+    const log = [
+      ...base(),
+      step(1000, "click", "down"),
+      sent(1000, { kind: "down", button: "left", at: from }, "down"),
+      done(1010, "down"),
+      step(2000, "move", "move", travel(from, a, 2000)),
+      ev("action.intent", 2600, {
+        verb: "click",
+        label: "Release the left button, cancelling the drag",
+        risk: "none",
+      }),
+      ev("action.dispatch", 2610, {
+        input: { kind: "up", button: "left", at: a },
+        pressT: msToMicros(2610),
+        ringAt: msToMicros(2610),
+        injector: "xtest",
+      }),
+      ev("action.result", 2620, { ok: true }),
+    ];
+    expect(sceneAt(fold(log), 2050, { reducedMotion: true }).drag?.points).toEqual([from, a]);
+    expect(motion(log, 2700).drag?.points).toEqual([from, a]);
+    expect(motion(log, 3600).drag).toBeNull();
+  });
+});
+
 describe("hud and control", () => {
   it("lights control while the agent acts and turns it off at the end", () => {
     const log = [

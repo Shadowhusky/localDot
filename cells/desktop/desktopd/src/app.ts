@@ -1,5 +1,6 @@
 import {
   FindRequest,
+  HeldResult,
   HitTestRequest,
   InputRequest,
   type InputResult,
@@ -11,7 +12,7 @@ import {
   type TypeResult,
   ZoomRequest,
 } from "@localdot/protocol";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { stream } from "hono/streaming";
 import {
@@ -21,6 +22,7 @@ import {
 import { bearerMatches } from "./auth.ts";
 import {
   ActivationError,
+  DropChangedError,
   type Injectors,
   inject,
   NoPressError,
@@ -92,7 +94,7 @@ export const monoNow = (): number => Number(process.hrtime.bigint()) / 1e6;
 function statusOf(err: unknown): number {
   if (err instanceof NoPressError) return 504;
   if (err instanceof UnsupportedInputError) return 501;
-  if (err instanceof ActivationError) return 409;
+  if (err instanceof ActivationError || err instanceof DropChangedError) return 409;
   if (err instanceof RangeError) return 400;
   return 500;
 }
@@ -181,39 +183,68 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     }
   };
 
+  // NDJSON lines from `run`, then an {error, status} line if it fails. Hono's response cancellation
+  // is separate from the incoming request's signal in Node: either one stops `run`.
+  const ndjson = (
+    c: Context,
+    run: (write: (line: object) => Promise<void>, signal: AbortSignal) => Promise<void>,
+  ) => {
+    c.header("content-type", "application/x-ndjson");
+    return stream(c, async (out) => {
+      const stopped = new AbortController();
+      out.onAbort(() => stopped.abort());
+      if (out.aborted) stopped.abort();
+      const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
+      try {
+        await run(async (line) => {
+          signal.throwIfAborted();
+          await out.write(`${JSON.stringify(line)}\n`);
+        }, signal);
+      } catch (err) {
+        if (signal.aborted) return;
+        await out.write(
+          `${JSON.stringify({ error: err instanceof Error ? err.message : String(err), status: statusOf(err) })}\n`,
+        );
+      }
+    });
+  };
+
   app.post("/input", async (c) =>
     withX(async (x) => {
       const parsed = InputRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      const result: InputResult = await inject(x, parsed.data, deps.injectors);
-      return c.json(result);
+      const { input } = parsed.data;
+      const long =
+        input.kind === "drag" || (input.kind === "key" && (input.repeat || input.holdMs));
+      if (!long) {
+        const result: InputResult = await inject(x, parsed.data, deps.injectors, c.req.raw.signal);
+        return c.json(result);
+      }
+      // Each press is reported as it lands, so a request stopped part-way knows what was pressed.
+      return ndjson(c, async (write, signal) => {
+        const result = await inject(x, parsed.data, deps.injectors, signal, write);
+        await write({ ...result, done: true });
+      });
     })(),
+  );
+
+  // Every key and button the X server has down, whoever pressed them: after a Stop or a failure.
+  app.post("/release", async (c) =>
+    withX(async (x) => c.json(await x.call<{ keys: number; buttons: number }>("release_all")))(),
+  );
+
+  // Keeps the buttons the agent holds between actions down while the daemon waits on the user.
+  app.post("/held", async (c) =>
+    withX(async (x) => c.json(HeldResult.parse(await x.call("held"))))(),
   );
 
   app.post("/type", async (c) =>
     withX(async (x) => {
       const parsed = TypeRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      c.header("content-type", "application/x-ndjson");
-      return stream(c, async (out) => {
-        // Hono's response cancellation is separate from the incoming request's signal in Node.
-        const stopped = new AbortController();
-        out.onAbort(() => stopped.abort());
-        if (out.aborted) stopped.abort();
-        const signal = AbortSignal.any([c.req.raw.signal, stopped.signal]);
-        try {
-          const write = async (line: unknown) => {
-            signal.throwIfAborted();
-            await out.write(`${JSON.stringify(line)}\n`);
-          };
-          const result: TypeResult = await typeText(x, parsed.data, write, deps.injectors, signal);
-          await write(result);
-        } catch (err) {
-          if (signal.aborted) return;
-          await out.write(
-            `${JSON.stringify({ error: err instanceof Error ? err.message : String(err), status: statusOf(err) })}\n`,
-          );
-        }
+      return ndjson(c, async (write, signal) => {
+        const result: TypeResult = await typeText(x, parsed.data, write, deps.injectors, signal);
+        await write(result);
       });
     })(),
   );
@@ -271,7 +302,7 @@ export function createDesktopdApp(deps: DesktopdDeps): Hono {
     withPerception(async (p) => {
       const parsed = HitTestRequest.safeParse(await c.req.json().catch(() => ({})));
       if (!parsed.success) return c.text(parsed.error.message, 400);
-      return c.json(await hitTest(p, parsed.data.point));
+      return c.json(await hitTest(p, parsed.data.point, parsed.data.managed));
     })(),
   );
   app.post("/find", (c) =>

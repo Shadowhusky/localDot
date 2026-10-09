@@ -1,3 +1,4 @@
+import { GenericComputerInput } from "@localdot/protocol";
 import { describe, expect, it } from "vitest";
 import { imagesInToolResults, languageModel } from "./models.ts";
 import { systemPrompt } from "./prompt.ts";
@@ -36,6 +37,13 @@ describe("the model's advertised tools and instructions", () => {
     expect(
       toolSet(binding({ computer: "generic", coords: "pixels" })).computer?.description,
     ).toContain("screenshot pixels");
+  });
+  it("tells generic models about every computer action the schema accepts", () => {
+    const description = toolSet(binding({ computer: "generic" })).computer?.description ?? "";
+    for (const action of GenericComputerInput.shape.action.options)
+      expect(description, action).toContain(action);
+    for (const field of ["path", "button", "start_coordinate", "modifier"])
+      expect(description, field).toContain(field);
   });
   it("does not label model-written memory as user instructions or allow it to close its delimiter", () => {
     const prompt = systemPrompt(

@@ -89,6 +89,39 @@ describe("DesktopdClient", () => {
     expect(fake.calls[0]).toMatchObject({ path: "/input", body: { input: { kind: "click" } } });
   });
 
+  it("streams the presses of a repeated key and returns the final result", async () => {
+    const lines = (...ls: object[]) =>
+      (async () =>
+        new Response(ls.map((l) => `${JSON.stringify(l)}\n`).join(""), {
+          headers: { "content-type": "application/x-ndjson" },
+        })) as typeof fetch;
+    const result = { pressMono: 10, presses: [10, 30], injector: "xtest", armedMono: 5 };
+    const repeat = {
+      input: { kind: "key" as const, combo: ["Delete"], repeat: 2 },
+      injector: "xtest" as const,
+      holdMs: 0,
+    };
+    const seen: number[] = [];
+    const c = (fetchImpl: typeof fetch) =>
+      new DesktopdClient({ baseUrl: "http://127.0.0.1:1", token: "fake" }, fetchImpl);
+    const res = await c(
+      lines(
+        { presses: 1, pressMono: 10 },
+        { presses: 2, pressMono: 30 },
+        { ...result, done: true },
+      ),
+    ).input(repeat, undefined, (p) => {
+      seen.push(p.presses);
+    });
+    expect(seen).toEqual([1, 2]);
+    expect(res).toEqual(result);
+    await expect(
+      c(lines({ presses: 1, pressMono: 10 }, { error: "the helper went away", status: 500 })).input(
+        repeat,
+      ),
+    ).rejects.toMatchObject({ status: 500, path: "/input" });
+  });
+
   it("streams typing progress lines and returns the final result", async () => {
     const fake = new FakeDesktopd({
       type: () => ({

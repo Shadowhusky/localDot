@@ -1,13 +1,16 @@
 import {
   ClockResult,
   type FindRequest,
+  HeldResult,
   HitTestResult,
   type InputRequest,
   InputResult,
+  KeyProgress,
   type LaunchRequest,
   LaunchResult,
   ObserveResult,
   type Point,
+  ReleaseResult,
   type SettleRequest,
   SettleResult,
   TypeProgress,
@@ -37,6 +40,9 @@ const TIMEOUT_MS = {
   hitTest: 5000,
   zoom: 5000,
 } as const;
+// A press of a repeated key takes about 25 ms on an idle desktop; this leaves room under load.
+const REPEAT_PRESS_MS = 50;
+const LINE_MAX = 64 * 1024;
 
 export class DesktopdClient {
   constructor(
@@ -48,8 +54,43 @@ export class DesktopdClient {
     return this.#json("GET", "/clock", undefined, TIMEOUT_MS.clock, ClockResult.parse);
   }
 
-  input(req: InputRequest, signal?: AbortSignal): Promise<InputResult> {
-    return this.#json("POST", "/input", req, TIMEOUT_MS.input, InputResult.parse, signal);
+  // A repeated or held key, or a drag, answers as NDJSON: `onPress` hears each press of a repeat,
+  // and a hold or a drag once its keys or button are down. Aborting `signal` (a Stop) ends a repeat
+  // after the press in progress, and a drag where it is (it lets go where it started).
+  async input(
+    req: InputRequest,
+    signal?: AbortSignal,
+    onPress?: (p: KeyProgress) => void | Promise<void>,
+  ): Promise<InputResult> {
+    const { input } = req;
+    const key = input.kind === "key" ? input : undefined;
+    const motionMs = input.kind === "drag" || input.kind === "move" ? (input.durationMs ?? 0) : 0;
+    const timeoutMs =
+      TIMEOUT_MS.input + (key?.holdMs ?? 0) + (key?.repeat ?? 0) * REPEAT_PRESS_MS + motionMs;
+    signal?.throwIfAborted();
+    const res = await this.#send("POST", "/input", req, timeoutMs, signal);
+    const streamed = res.headers.get("content-type")?.includes("application/x-ndjson");
+    if (!res.ok || !res.body || !streamed) {
+      const text = await res.text();
+      if (!res.ok) throw new DesktopdError(res.status, text || res.statusText, "/input");
+      return InputResult.parse(JSON.parse(text));
+    }
+    return InputResult.parse(
+      await this.#lines(res.body, "/input", signal, async (line) => {
+        await onPress?.(KeyProgress.parse(line));
+      }),
+    );
+  }
+
+  // Releases every key and button that is down on the desktop.
+  release(): Promise<ReleaseResult> {
+    return this.#json("POST", "/release", {}, TIMEOUT_MS.input, ReleaseResult.parse);
+  }
+
+  // Keeps the buttons the agent holds down between actions down for another while; says which
+  // of them are still down.
+  held(): Promise<HeldResult> {
+    return this.#json("POST", "/held", {}, TIMEOUT_MS.input, HeldResult.parse);
   }
 
   settle(req: Partial<SettleRequest> = {}): Promise<SettleResult> {
@@ -82,8 +123,14 @@ export class DesktopdClient {
     return this.#json("POST", "/focused", {}, TIMEOUT_MS.hitTest, HitTestResult.parse);
   }
 
-  hitTest(point: Point): Promise<HitTestResult> {
-    return this.#json("POST", "/hitTest", { point }, TIMEOUT_MS.hitTest, HitTestResult.parse);
+  hitTest(point: Point, opts: { managed?: boolean } = {}): Promise<HitTestResult> {
+    return this.#json(
+      "POST",
+      "/hitTest",
+      { point, ...(opts.managed ? { managed: true } : {}) },
+      TIMEOUT_MS.hitTest,
+      HitTestResult.parse,
+    );
   }
 
   find(req: FindRequest): Promise<HitTestResult> {
@@ -99,7 +146,21 @@ export class DesktopdClient {
   ): Promise<TypeResult> {
     const res = await this.#send("POST", "/type", req, 60_000 + req.text.length * 50, signal);
     if (!res.ok || !res.body) throw new DesktopdError(res.status, await res.text(), "/type");
-    const reader = res.body.getReader();
+    return TypeResult.parse(
+      await this.#lines(res.body, "/type", signal, async (line) => {
+        await onProgress(TypeProgress.parse(line));
+      }),
+    );
+  }
+
+  // Progress lines until the one with `done: true`, which it returns.
+  async #lines(
+    body: ReadableStream<Uint8Array>,
+    path: string,
+    signal: AbortSignal | undefined,
+    onLine: (line: Record<string, unknown>) => Promise<void>,
+  ): Promise<Record<string, unknown>> {
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffered = "";
     const abort = () => {
@@ -117,19 +178,19 @@ export class DesktopdClient {
           buffered = buffered.slice(nl + 1);
           nl = buffered.indexOf("\n");
           if (!line) continue;
-          if (line.length > 64 * 1024)
-            throw new DesktopdError(502, "typing line exceeds its limit", "/type");
+          if (line.length > LINE_MAX)
+            throw new DesktopdError(502, "a progress line exceeds its limit", path);
           const msg = JSON.parse(line) as Record<string, unknown>;
           if ("error" in msg)
-            throw new DesktopdError(Number(msg.status) || 500, String(msg.error), "/type");
-          if (msg.done === true) return TypeResult.parse(msg);
-          else await onProgress(TypeProgress.parse(msg));
+            throw new DesktopdError(Number(msg.status) || 500, String(msg.error), path);
+          if (msg.done === true) return msg;
+          await onLine(msg);
         }
-        if (buffered.length > 64 * 1024)
-          throw new DesktopdError(502, "typing line exceeds its limit", "/type");
+        if (buffered.length > LINE_MAX)
+          throw new DesktopdError(502, "a progress line exceeds its limit", path);
         if (done) break;
       }
-      throw new DesktopdError(502, "typing ended without a result line", "/type");
+      throw new DesktopdError(502, "the reply ended without a result line", path);
     } finally {
       signal?.removeEventListener("abort", abort);
       await reader.cancel().catch(() => {});

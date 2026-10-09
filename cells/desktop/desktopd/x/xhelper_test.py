@@ -1,8 +1,11 @@
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
+import time
 import types
 import unittest
 from unittest.mock import patch
@@ -519,6 +522,445 @@ class Capture(unittest.TestCase):
             with self.assertRaises(OSError):
                 cmds.cmd_capture({"path": os.path.join(tmp, "frame.raw")})
             self.assertEqual(Path(target).read_bytes(), b"keep")
+
+
+# A US layout: keysym -> [(keycode, level)]. Level 1 needs Shift.
+US_KEYS = {
+    0xffe3: [(37, 0)], 0xffe1: [(50, 0)], 0xffe9: [(64, 0)], 0xfe03: [(92, 0)],
+    0x2f: [(61, 0)], 0x3f: [(61, 1)], 0x3d: [(21, 0)], 0x2b: [(21, 1)], 0x61: [(38, 0)],
+    0x5d: [(35, 0)], 0x7e: [(49, 1)], 0xff0d: [(36, 0)], 0x40: [(11, 2)], 0xff7f: [(77, 0)],
+    0xff9c: [(87, 0)], 0xffb1: [(87, 1)], 0xffab: [(86, 0)], 0xff1b: [(9, 0)],
+}
+# Both levels of the keypad keys (KP_End/KP_1, KP_Add/KP_Add).
+KEYPAD_LEVELS = {(87, 0): 0xff9c, (87, 1): 0xffb1, (86, 0): 0xffab, (86, 1): 0xffab}
+
+
+class Keyboard:
+    """A fake X keyboard: XTest presses and releases, and the keys the server holds down."""
+
+    def __init__(self, fail_on=None, numlock=False, fail_button=None):
+        self.events = []
+        self.down = set()
+        self.buttons = set()
+        self.fail_on = fail_on
+        self.fail_button = fail_button
+        self.numlock = numlock
+        self.pointer = (0, 0)
+
+    def xtest_fake_input(self, kind, detail=0, x=0, y=0):
+        if self.fail_on is not None and kind == X.KeyPress and detail == self.fail_on:
+            raise RuntimeError("BadValue")
+        if kind == X.ButtonPress and detail == self.fail_button:
+            raise RuntimeError("BadValue")
+        self.events.append((kind, (x, y) if kind == X.MotionNotify else detail))
+        if kind == X.MotionNotify:
+            self.pointer = (x, y)
+        elif kind == X.KeyPress:
+            self.down.add(detail)
+            if detail == 77:
+                self.numlock = not self.numlock
+        elif kind == X.KeyRelease:
+            self.down.discard(detail)
+        elif kind == X.ButtonPress:
+            self.buttons.add(detail)
+        elif kind == X.ButtonRelease:
+            self.buttons.discard(detail)
+
+    def sync(self):
+        pass
+
+    def pending_events(self):
+        return 0
+
+    def keysym_to_keycodes(self, keysym):
+        return iter(US_KEYS.get(keysym, []))
+
+    def keycode_to_keysym(self, keycode, index):
+        return KEYPAD_LEVELS.get((keycode, index), 0)
+
+    def get_modifier_mapping(self):
+        return [[50], [66], [37], [64], [77], [], [], [92]]
+
+    def query_keymap(self):
+        return [sum(1 << b for b in range(8) if i * 8 + b in self.down) for i in range(32)]
+
+
+def keyboard(fail_on=None, numlock=False, fail_button=None):
+    cmds = xhelper.Commands.__new__(xhelper.Commands)
+    kb = Keyboard(fail_on, numlock, fail_button)
+    cmds.d = kb
+    cmds.held = []
+    cmds.held_taps = []
+    cmds.hold_until = None
+    cmds.buttons = []
+    cmds.button_mods = []
+    cmds.buttons_until = None
+    cmds.button_at = None
+    cmds.button_moved = False
+    cmds.remapped = {}
+    cmds.pause = lambda s: None
+    cmds.root = types.SimpleNamespace(
+        query_pointer=lambda: types.SimpleNamespace(
+            mask=sum(1 << (7 + b) for b in kb.buttons) | (1 << 4 if kb.numlock else 0),
+            root_x=kb.pointer[0], root_y=kb.pointer[1]))
+    return cmds, kb
+
+
+def presses(kb):
+    return [(("down" if k == X.KeyPress else "up"), d) for k, d in kb.events]
+
+
+class Keys(unittest.TestCase):
+    def test_a_shifted_symbol_presses_its_level_modifier_around_its_own_key(self):
+        cmds, kb = keyboard()
+        reply = cmds.cmd_keys({"combo": ["Control_L", 0x3f]})
+        self.assertEqual(reply, {"keycodes": [37, 61]})
+        self.assertEqual(presses(kb), [("down", 37), ("down", 50), ("down", 61),
+                                       ("up", 61), ("up", 50), ("up", 37)])
+
+    def test_plus_is_shift_and_equal_and_altgr_symbols_press_altgr(self):
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": [0xffe3, 0x2b]})
+        self.assertEqual(presses(kb)[:3], [("down", 37), ("down", 50), ("down", 21)])
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": [0x40]})
+        self.assertEqual(presses(kb), [("down", 92), ("down", 11), ("up", 11), ("up", 92)])
+
+    def test_a_combo_that_holds_shift_already_does_not_press_it_twice(self):
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": ["Shift_L", 0x7e]})
+        self.assertEqual(presses(kb), [("down", 50), ("down", 49), ("up", 49), ("up", 50)])
+
+    def test_names_still_work_for_the_browser_helper(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_keys({"combo": ["Control_L", "a"]}), {"keycodes": [37, 38]})
+
+    def test_a_failure_mid_combo_releases_what_went_down(self):
+        cmds, kb = keyboard(fail_on=61)
+        with self.assertRaises(RuntimeError):
+            cmds.cmd_keys({"combo": [0xffe3, 0x2f]})
+        self.assertEqual(kb.down, set())
+        self.assertEqual(presses(kb), [("down", 37), ("up", 37)])
+
+    def test_a_keypad_digit_turns_numlock_on_around_it_rather_than_pressing_shift(self):
+        cmds, kb = keyboard()
+        cmds.cmd_keys({"combo": [0xffb1]})
+        self.assertEqual(presses(kb), [("down", 77), ("up", 77), ("down", 87), ("up", 87),
+                                       ("down", 77), ("up", 77)])
+        self.assertFalse(kb.numlock)
+
+    def test_numlock_already_right_is_left_alone(self):
+        cmds, kb = keyboard(numlock=True)
+        cmds.cmd_keys({"combo": [0xffb1]})
+        self.assertEqual(presses(kb), [("down", 87), ("up", 87)])
+        cmds, kb = keyboard(numlock=True)
+        cmds.cmd_keys({"combo": [0xff9c]})
+        self.assertEqual(presses(kb)[2:4], [("down", 87), ("up", 87)])
+        self.assertTrue(kb.numlock)
+        cmds, kb = keyboard(numlock=True)
+        cmds.cmd_keys({"combo": [0xffab]})
+        self.assertEqual(presses(kb), [("down", 86), ("up", 86)])
+
+    def test_refuses_keysyms_outside_x(self):
+        cmds, _ = keyboard()
+        for bad in (0, -1, 0x20000000, True):
+            with self.assertRaises(ValueError):
+                cmds.cmd_keys({"combo": [bad]})
+
+
+class Clicks(unittest.TestCase):
+    def test_a_click_stopped_while_its_button_is_down_still_releases_it_and_its_modifiers(self):
+        cmds, kb = keyboard()
+        with patch.object(xhelper.time, "sleep", side_effect=KeyboardInterrupt), \
+                self.assertRaises(KeyboardInterrupt):
+            cmds.cmd_click({"x": 1, "y": 2, "button": 1, "holdMs": 50, "mods": ["Shift_L"]})
+        self.assertEqual(kb.events[-4:], [(X.KeyPress, 50), (X.ButtonPress, 1),
+                                          (X.ButtonRelease, 1), (X.KeyRelease, 50)])
+
+
+class Buttons(unittest.TestCase):
+    def test_down_keeps_the_button_and_its_modifiers_down_until_up(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_down({"x": 10, "y": 20, "button": 1, "mods": [0xffe1]}),
+                         {"button": 1})
+        self.assertEqual((kb.buttons, kb.down), ({1}, {50}))
+        self.assertIsNotNone(cmds.buttons_until)
+        before = cmds.buttons_until
+        time.sleep(0.01)
+        cmds.cmd_move({"x": 30, "y": 40})
+        self.assertGreater(cmds.buttons_until, before)
+        self.assertEqual(cmds.cmd_up({"x": 50, "y": 60, "button": 1}), {"button": 1, "released": True})
+        self.assertEqual((kb.buttons, kb.down, cmds.buttons_until), (set(), set(), None))
+        self.assertEqual(kb.events, [(X.MotionNotify, (10, 20)), (X.KeyPress, 50), (X.ButtonPress, 1),
+                                     (X.MotionNotify, (30, 40)), (X.MotionNotify, (50, 60)),
+                                     (X.ButtonRelease, 1), (X.KeyRelease, 50)])
+
+    def test_up_says_when_the_button_was_not_down_and_sends_no_release(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_up({"x": 1, "y": 2, "button": 3}), {"button": 3, "released": False})
+        self.assertNotIn(X.ButtonRelease, [k for k, _ in kb.events])
+
+    def test_refuses_a_button_already_down_or_out_of_range(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 1, "y": 2, "button": 1})
+        for button in (1, 4, 0):
+            with self.assertRaises(ValueError):
+                cmds.cmd_down({"x": 1, "y": 2, "button": button})
+        self.assertEqual(kb.buttons, {1})
+
+    def test_a_press_that_failed_lets_go_of_its_modifiers(self):
+        cmds, kb = keyboard(fail_button=1)
+        with self.assertRaises(RuntimeError):
+            cmds.cmd_down({"x": 1, "y": 2, "button": 1, "mods": [0xffe3, 0xffe1]})
+        self.assertEqual((kb.down, kb.buttons, cmds.buttons, cmds.button_mods),
+                         (set(), set(), [], []))
+
+    def test_release_all_lets_go_of_a_held_button_and_its_modifiers(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 1, "y": 2, "button": 2, "mods": [0xffe3]})
+        self.assertEqual(cmds.cmd_release_all({}), {"keys": 0, "buttons": 1})
+        self.assertEqual((kb.down, kb.buttons, cmds.buttons, cmds.buttons_until),
+                         (set(), set(), [], None))
+
+    def test_a_key_hold_leaves_a_held_button_alone(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 1, "y": 2, "button": 1})
+        cmds.cmd_hold({"combo": [0xffe1], "ms": 500})
+        cmds.cmd_release({})
+        self.assertEqual((kb.buttons, kb.down), ({1}, set()))
+
+    def test_scroll_holds_its_modifiers_around_the_notches(self):
+        cmds, kb = keyboard()
+        cmds.cmd_scroll({"x": 5, "y": 6, "dy": 2, "mods": [0xffe3]})
+        self.assertEqual(kb.events, [(X.MotionNotify, (5, 6)), (X.KeyPress, 37),
+                                     (X.ButtonPress, 5), (X.ButtonRelease, 5),
+                                     (X.ButtonPress, 5), (X.ButtonRelease, 5), (X.KeyRelease, 37)])
+
+
+class Cancel(unittest.TestCase):
+    def test_letting_go_after_a_move_cancels_the_drag_with_escape_where_the_pointer_is(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1, "mods": [0xffe3]})
+        cmds.cmd_move({"x": 300, "y": 400})
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 1, "escaped": True})
+        self.assertEqual(kb.events, [(X.KeyRelease, 37), (X.KeyPress, 9), (X.KeyRelease, 9),
+                                     (X.ButtonRelease, 1)])
+        self.assertEqual((kb.buttons, kb.down, kb.pointer), (set(), set(), (300, 400)))
+        self.assertEqual((cmds.buttons, cmds.button_at, cmds.button_moved), ([], None, False))
+
+    def test_a_button_that_never_moved_comes_up_where_it_went_down_without_escape(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1, "mods": [0xffe3]})
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 1, "escaped": False})
+        self.assertEqual(kb.events, [(X.ButtonRelease, 1), (X.KeyRelease, 37)])
+
+    def test_a_move_back_to_the_press_point_still_counts_as_a_drag(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        cmds.cmd_move({"x": 300, "y": 400})
+        cmds.cmd_move({"x": 10, "y": 20})
+        cmds.release_buttons()
+        self.assertIn((X.KeyPress, 9), kb.events)
+
+    def test_release_all_cancels_a_held_drag_and_one_pressed_by_someone_else(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        cmds.cmd_scroll({"x": 50, "y": 60, "dy": 1})
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_release_all({}), {"keys": 0, "buttons": 1})
+        self.assertEqual(kb.events[:3], [(X.KeyPress, 9), (X.KeyRelease, 9), (X.ButtonRelease, 1)])
+        self.assertNotIn(X.MotionNotify, [k for k, _ in kb.events])
+        cmds, kb = keyboard()
+        kb.buttons.add(1)
+        cmds.cmd_release_all({})
+        self.assertEqual(kb.events[:3], [(X.KeyPress, 9), (X.KeyRelease, 9), (X.ButtonRelease, 1)])
+
+    def test_nothing_down_sends_no_escape(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 0, "escaped": False})
+        cmds.cmd_release_all({})
+        self.assertEqual(kb.events, [])
+
+    def test_the_explicit_release_is_no_cancel(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        cmds.cmd_move({"x": 300, "y": 400})
+        cmds.cmd_up({"x": 300, "y": 400, "button": 1})
+        self.assertNotIn((X.KeyPress, 9), kb.events)
+
+    def test_a_pointer_moved_by_anyone_else_since_the_press_still_cancels_with_escape(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        kb.pointer = (200, 220)
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_cancel({}), {"buttons": 1, "escaped": True})
+        self.assertEqual(kb.events, [(X.KeyPress, 9), (X.KeyRelease, 9), (X.ButtonRelease, 1)])
+
+    def test_held_puts_off_the_backstop_and_names_the_buttons_still_down(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_held({}), {"buttons": []})
+        self.assertIsNone(cmds.buttons_until)
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        before = cmds.buttons_until
+        time.sleep(0.01)
+        self.assertEqual(cmds.cmd_held({}), {"buttons": [1]})
+        self.assertGreater(cmds.buttons_until, before)
+        kb.buttons.discard(1)
+        self.assertEqual(cmds.cmd_held({}), {"buttons": []})
+        self.assertNotIn(X.ButtonRelease, [k for k, _ in kb.events])
+
+    def test_held_forgets_a_button_the_server_let_go_of_and_lets_go_of_its_modifiers(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1, "mods": [0xffe3]})
+        cmds.cmd_move({"x": 300, "y": 400})
+        kb.buttons.discard(1)
+        kb.events.clear()
+        self.assertEqual(cmds.cmd_held({}), {"buttons": []})
+        self.assertEqual(kb.events, [(X.KeyRelease, 37)])
+        self.assertEqual((cmds.buttons, cmds.button_mods, cmds.buttons_until, cmds.button_at),
+                         ([], [], None, None))
+        # Nothing is left to cancel with Escape, and the button can go down again.
+        cmds.cmd_release_all({})
+        self.assertNotIn((X.KeyPress, 9), kb.events)
+        self.assertEqual(cmds.cmd_down({"x": 1, "y": 2, "button": 1}), {"button": 1})
+
+    def test_a_scroll_while_held_keeps_the_button_down_as_long_as_a_move(self):
+        cmds, kb = keyboard()
+        cmds.cmd_down({"x": 10, "y": 20, "button": 1})
+        before = cmds.buttons_until
+        time.sleep(0.01)
+        cmds.cmd_scroll({"x": 10, "y": 20, "dy": 1})
+        self.assertGreater(cmds.buttons_until, before)
+
+
+class Holds(unittest.TestCase):
+    def test_holds_keys_down_until_released(self):
+        cmds, kb = keyboard()
+        self.assertEqual(cmds.cmd_hold({"combo": [0xffe1, 0x61], "ms": 500}), {"keycodes": [50, 38]})
+        self.assertEqual(kb.down, {50, 38})
+        self.assertIsNotNone(cmds.hold_until)
+        self.assertEqual(cmds.cmd_release({}), {"keycodes": [50, 38]})
+        self.assertEqual(kb.down, set())
+        self.assertEqual(presses(kb)[-2:], [("up", 38), ("up", 50)])
+        self.assertIsNone(cmds.hold_until)
+        self.assertEqual(cmds.cmd_release({}), {"keycodes": []})
+
+    def test_a_new_hold_releases_the_last_one_first(self):
+        cmds, kb = keyboard()
+        cmds.cmd_hold({"combo": [0xffe1], "ms": 500})
+        cmds.cmd_hold({"combo": [0x61], "ms": 500})
+        self.assertEqual(kb.down, {38})
+
+    def test_refuses_holds_out_of_range_and_releases_a_hold_that_failed(self):
+        cmds, kb = keyboard()
+        for ms in (0, 30_001, "1"):
+            with self.assertRaises(ValueError):
+                cmds.cmd_hold({"combo": [0xffe1], "ms": ms})
+        cmds, kb = keyboard(fail_on=38)
+        with self.assertRaises(RuntimeError):
+            cmds.cmd_hold({"combo": [0xffe1, 0x61], "ms": 500})
+        self.assertEqual((kb.down, cmds.held), (set(), []))
+
+    def test_a_held_keypad_digit_turns_numlock_back_once_released(self):
+        cmds, kb = keyboard()
+        cmds.cmd_hold({"combo": [0xffb1], "ms": 500})
+        self.assertEqual((kb.down, kb.numlock), ({87}, True))
+        cmds.cmd_release({})
+        self.assertEqual((kb.down, kb.numlock), (set(), False))
+
+    def test_release_all_lets_go_of_every_key_and_button_the_server_has_down(self):
+        cmds, kb = keyboard()
+        cmds.cmd_hold({"combo": [0xffe3], "ms": 500})
+        kb.down.update({50, 64})
+        kb.buttons.add(1)
+        reply = cmds.cmd_release_all({})
+        self.assertEqual(reply, {"keys": 3, "buttons": 1})
+        self.assertEqual((kb.down, kb.buttons, cmds.held), (set(), set(), []))
+
+
+class Serve(unittest.TestCase):
+    def serve(self, lines, close_after=0.0, slack=None):
+        cmds, kb = keyboard()
+        read, write = os.pipe()
+        out = []
+        released_at = []
+        release = cmds.release_held
+
+        def tracked():
+            if cmds.held:
+                released_at.append(xhelper.mono())
+            return release()
+        cmds.release_held = tracked
+
+        def feed():
+            for line in lines:
+                os.write(write, (json.dumps(line) + "\n").encode())
+            time.sleep(close_after)
+            os.close(write)
+        threading.Thread(target=feed).start()
+        with patch.object(xhelper, "emit", out.append), \
+                patch.object(xhelper, "HOLD_SLACK_MS", 0 if slack is None else slack):
+            start = xhelper.mono()
+            xhelper.serve(cmds, read)
+            end = xhelper.mono()
+        os.close(read)
+        return cmds, kb, out, [t - start for t in released_at], end - start
+
+    def test_answers_each_request_line(self):
+        _, kb, out, _, _ = self.serve([{"id": 1, "cmd": "keys", "combo": [0x61]},
+                                       {"id": 2, "cmd": "nope"}])
+        self.assertEqual(out[0], {"keycodes": [38], "id": 1, "ok": True})
+        self.assertEqual((out[1]["id"], out[1]["ok"]), (2, False))
+
+    def test_a_hold_nobody_ends_is_released_when_its_time_is_up(self):
+        _, kb, _, released, took = self.serve([{"id": 1, "cmd": "hold", "combo": [0xffe1], "ms": 50}],
+                                              close_after=0.4)
+        self.assertEqual(kb.down, set())
+        self.assertEqual(len(released), 1)
+        self.assertLess(released[0], 300)
+        self.assertGreater(took, 350)
+
+    def test_held_keys_are_released_when_desktopd_goes_away(self):
+        _, kb, _, released, _ = self.serve([{"id": 1, "cmd": "hold", "combo": [0xffe1], "ms": 20_000}],
+                                           close_after=0.05, slack=1000)
+        self.assertEqual(kb.down, set())
+        self.assertEqual(len(released), 1)
+
+    def test_a_held_button_nobody_releases_is_let_go_when_its_time_is_up(self):
+        let_go = []
+        release = xhelper.Commands.release_buttons
+
+        def tracked(cmds):
+            if cmds.buttons:
+                let_go.append(xhelper.mono())
+            return release(cmds)
+        start = xhelper.mono()
+        with patch.object(xhelper, "BUTTON_HOLD_MS", 50), \
+                patch.object(xhelper.Commands, "release_buttons", tracked):
+            cmds, kb, _, _, took = self.serve(
+                [{"id": 1, "cmd": "down", "x": 1, "y": 2, "button": 1, "mods": [0xffe1]},
+                 {"id": 2, "cmd": "move", "x": 40, "y": 50}],
+                close_after=0.4)
+        self.assertEqual((kb.buttons, kb.down, cmds.buttons), (set(), set(), []))
+        self.assertEqual(kb.events[-4:], [(X.KeyRelease, 50), (X.KeyPress, 9), (X.KeyRelease, 9),
+                                          (X.ButtonRelease, 1)])
+        self.assertEqual(len(let_go), 1)
+        self.assertLess(let_go[0] - start, 300)
+        self.assertGreater(took, 350)
+
+    def test_a_held_button_is_released_when_desktopd_goes_away(self):
+        cmds, kb, _, _, took = self.serve(
+            [{"id": 1, "cmd": "down", "x": 1, "y": 2, "button": 1}], close_after=0.05)
+        self.assertEqual((kb.buttons, cmds.buttons), (set(), []))
+        self.assertLess(took, 1000)
+
+    def test_quit_releases_held_keys(self):
+        _, kb, out, _, _ = self.serve([{"id": 1, "cmd": "hold", "combo": [0xffe1], "ms": 20_000},
+                                       {"id": 2, "cmd": "quit"}], close_after=0.3, slack=1000)
+        self.assertEqual(kb.down, set())
+        self.assertEqual(out[-1], {"id": 2, "ok": True})
 
 
 if __name__ == "__main__":

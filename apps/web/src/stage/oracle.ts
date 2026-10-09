@@ -366,6 +366,7 @@ export class OracleCapture {
           },
           target: null,
           rings: [],
+          drag: null,
           typing: null,
           keycaps: null,
           cancel: null,

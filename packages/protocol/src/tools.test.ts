@@ -64,12 +64,78 @@ describe("the v1 tool table", () => {
     ).toBe(false);
   });
 
+  it("describes a drag's path as an array of [x, y] arrays, with no tuple or union anywhere", () => {
+    const schema = z.toJSONSchema(GenericComputerInput);
+    const text = JSON.stringify(schema);
+    for (const shape of ["prefixItems", "anyOf", "oneOf", "allOf"])
+      expect(text).not.toContain(shape);
+    expect(schema).toMatchObject({
+      properties: {
+        path: {
+          type: "array",
+          minItems: 2,
+          maxItems: 64,
+          items: { type: "array", minItems: 2, maxItems: 2, items: { type: "number" } },
+        },
+        button: { type: "string", enum: ["left", "right", "middle"] },
+      },
+    });
+    const drag = (path: number[][]) =>
+      GenericComputerInput.safeParse({ action: "left_click_drag", path }).success;
+    const points = (n: number) => Array.from({ length: n }, (_, i) => [i, i]);
+    expect([drag(points(2)), drag(points(64))]).toEqual([true, true]);
+    expect([
+      drag(points(1)),
+      drag(points(65)),
+      drag([
+        [1, 2, 3],
+        [4, 5],
+      ]),
+    ]).toEqual([false, false, false]);
+  });
+
+  it("gives Codex's computer schema no tuple or union either", () => {
+    const text = JSON.stringify(z.toJSONSchema(TOOL_INPUTS.computer));
+    for (const shape of ["prefixItems", "anyOf", "oneOf", "allOf"])
+      expect(text).not.toContain(shape);
+  });
+
   it("refuses inputs outside a tool's schema", () => {
     expect(TOOL_INPUTS.shell.safeParse({ command: "" }).success).toBe(false);
     expect(TOOL_INPUTS.files.safeParse({ op: "chmod", path: "a" }).success).toBe(false);
     expect(
       TOOL_INPUTS.computer.safeParse({ action: "click", point: { x: 1.5, y: 2 } }).success,
     ).toBe(false);
+    const keys = (repeat: number) =>
+      TOOL_INPUTS.computer.safeParse({ action: "key", keys: ["Delete"], repeat }).success;
+    expect([keys(1), keys(100), keys(101), keys(0)]).toEqual([true, true, false, false]);
+    const computer = (input: Record<string, unknown>) =>
+      TOOL_INPUTS.computer.safeParse(input).success;
+    const path = (n: number) => Array.from({ length: n }, (_, i) => ({ x: i, y: i }));
+    expect([
+      computer({ action: "drag", path: path(2), button: "left", mods: ["shift"], ms: 800 }),
+      computer({ action: "drag", path: path(64) }),
+      computer({ action: "move", point: { x: 1, y: 2 } }),
+      computer({ action: "mouse_down", button: "right" }),
+      computer({ action: "mouse_up", point: { x: 1, y: 2 } }),
+      computer({ action: "click", point: { x: 1, y: 2 }, mods: ["ctrl", "shift"], count: 3 }),
+      computer({ action: "scroll", dy: 3, mods: ["ctrl"] }),
+    ]).toEqual([true, true, true, true, true, true, true]);
+    expect([
+      computer({ action: "drag", path: path(1) }),
+      computer({ action: "drag", path: path(65) }),
+      computer({
+        action: "drag",
+        path: [
+          { x: 1.5, y: 2 },
+          { x: 3, y: 4 },
+        ],
+      }),
+      computer({ action: "click", count: 4 }),
+      computer({ action: "click", mods: [] }),
+      computer({ action: "click", mods: ["a", "b", "c", "d", "e"] }),
+      computer({ action: "left_click_drag" }),
+    ]).toEqual([false, false, false, false, false, false, false]);
     expect(
       TOOL_INPUTS.ask_user.safeParse({
         question: "Which?",

@@ -12,6 +12,9 @@ import {
   CAREFUL_AUTONOMY,
   CHATGPT_DEVICE_CODE_OFF,
   type KeydRecord,
+  microsToMs,
+  msToMicros,
+  type Point,
   type TaskModelSelection,
   type ToolName,
   toBase64url,
@@ -40,6 +43,7 @@ import {
 } from "../../../daemon/src/agent/safety/authorize.ts";
 import { decide } from "../../../daemon/src/agent/safety/autonomy.ts";
 import { nativeActionFacts } from "../../../daemon/src/agent/safety/classify.ts";
+import type { RiskFacts } from "../../../daemon/src/agent/safety/risk.ts";
 import { RulesStore } from "../../../daemon/src/agent/safety/rules.ts";
 import { AgentSession } from "../../../daemon/src/agent/session.ts";
 import { type AgentSettings, SettingsStore } from "../../../daemon/src/agent/settings.ts";
@@ -56,8 +60,10 @@ import { FakeDesktopd } from "../../../daemon/src/desktopd/testing/fake-desktopd
 import { EventLog } from "../../../daemon/src/event-log.ts";
 import { sessionStreamRoute } from "../../../daemon/src/event-stream.ts";
 import { FrameStore } from "../../../daemon/src/gateway/frames.ts";
+import type { GuiAction } from "../../../daemon/src/gateway/gateway.ts";
 import { KillSwitch } from "../../../daemon/src/gateway/kill-switch.ts";
 import { LiveSessions } from "../../../daemon/src/gateway/live.ts";
+import { buttonLabel, dragLabel, keyLabel, moveLabel } from "../../../daemon/src/gateway/text.ts";
 import { setPublicOrigin } from "../../../daemon/src/guard.ts";
 import { Recorder } from "../../../daemon/src/recorder/recorder.ts";
 import { seedSession } from "../../../daemon/src/recorder/testing/seed-session.ts";
@@ -1156,15 +1162,71 @@ interface ToolCall {
   tool: ToolName;
   input: unknown;
 }
+// Keyboard and pointer cards as the daemon builds them (?kind=): a held modifier (hold), a held
+// key that repeats (hold-repeat), a file dragged from the file manager onto a web page (drag), and
+// the release of a button held down since the file (held).
+function computerCard(kind: string): (ToolCall & { facts: RiskFacts }) | undefined {
+  const file = {
+    point: { x: 428, y: 360 },
+    source: "ax" as const,
+    role: "list item",
+    name: "report.txt",
+    app: "Files",
+  };
+  const attach = {
+    point: { x: 2360, y: 1280 },
+    source: "dom" as const,
+    role: "button",
+    name: "Attach files",
+    url: "https://mail.example.test/compose",
+  };
+  const from = { x: 214, y: 180 };
+  const to = { x: 1180, y: 640 };
+  const actions: Record<string, [GuiAction, Record<string, unknown>]> = {
+    hold: [
+      { verb: "key", combo: ["shift"], holdMs: 1500, speed: "auto" },
+      { action: "hold_key", keys: ["shift"], ms: 1500 },
+    ],
+    "hold-repeat": [
+      { verb: "key", combo: ["Delete"], holdMs: 3000, speed: "auto" },
+      { action: "hold_key", keys: ["Delete"], ms: 3000 },
+    ],
+    drag: [
+      {
+        verb: "drag",
+        path: [from, { x: 400, y: 260 }, { x: 700, y: 420 }, { x: 960, y: 560 }, to],
+        button: "left",
+        mods: ["shift"],
+        speed: "auto",
+      },
+      { action: "drag", path: [from, to], mods: ["shift"] },
+    ],
+    held: [
+      { verb: "up", button: "left", speed: "auto", drag: { from, to } },
+      { action: "mouse_up" },
+    ],
+  };
+  const known = actions[kind];
+  if (!known) return undefined;
+  const [action, toolInput] = known;
+  const pointer = action.verb !== "key";
+  return {
+    tool: "computer",
+    input: { toolInput, action },
+    facts: nativeActionFacts(action, pointer ? file : null, pointer ? attach : undefined),
+  };
+}
 // With a tool call, the card is the one the daemon builds for that call.
 // `always` and `repeat` go through the real authorization instead, for the card the daemon builds.
 function requestApproval(
   risk: "medium" | "high",
   call?: ToolCall,
-  { always = false, repeat = 1 } = {},
+  { always = false, repeat = 1, kind = "" } = {},
 ): string | undefined {
   if (!session?.generation) return "no brain";
-  const facts = call && toolRisk(call.tool, call.input);
+  const card = computerCard(kind);
+  const facts = card?.facts ?? (call && toolRisk(call.tool, call.input));
+  call = card ?? call;
   const controller = new AbortController();
   pendingApprovals.push(controller);
   const ctx = {
@@ -1208,14 +1270,13 @@ function requestApproval(
   if (repeat > 1) {
     // The card a repeated key press gets under QA_AUTONOMY=careful, from the real authorization.
     const keys = ["bracketright"];
-    const action = { verb: "key" as const, combo: keys, speed: "auto" as const };
+    const action = { verb: "key" as const, combo: keys, repeat, speed: "auto" as const };
     void authorizePrepared(ctx, {
       tool: "computer",
       input: { toolInput: { action: "key", keys, repeat }, action },
       target: { target: null, window: 9, point: null },
       facts: nativeActionFacts(action, null),
       revalidate: async () => true,
-      count: repeat,
     })
       .then((permit) => effects.push(`approval:${permit ? "approve" : "refused"}`))
       .catch((e) => effects.push(`approval-error:${String(e)}`));
@@ -1253,6 +1314,211 @@ function requestApproval(
     )
     .then((o) => effects.push(`approval:${JSON.stringify(o)}`))
     .catch((e) => effects.push(`approval-error:${String(e)}`));
+}
+// Keyboard steps with the gateway's own labels: a key pressed five times, a held key, and a held
+// key stopped part-way (delivered, then failed).
+function keySteps(): string | undefined {
+  if (!session) return "no session";
+  for (const [combo, how, error] of [
+    [["]"], { repeat: 5 }, undefined],
+    [["shift"], { holdMs: 1500 }, undefined],
+    [["Delete"], { holdMs: 10_000 }, "Stopped after holding for 3.1 s of 10 s: stopped"],
+  ] as const) {
+    const step = ulid();
+    session.append("step.start", { kind: "gui", planItem: "calc" }, step);
+    session.append(
+      "action.intent",
+      { verb: "key", label: keyLabel([...combo], how), risk: "none" },
+      step,
+    );
+    session.append(
+      "action.dispatch",
+      { input: { kind: "key", combo, ...how }, pressT: 0, ringAt: 0, injector: "xtest" },
+      step,
+    );
+    session.append("action.result", error ? { ok: false, error } : { ok: true }, step);
+    session.append("step.end", { status: error ? "failed" : "ok" }, step);
+  }
+}
+// Pointer steps with the gateway's own labels (model pixels): a file dragged onto Trash, a hover,
+// a button held down and released, a drag stopped by you and one whose drop window changed (both
+// delivered, then cancelled before the drop), and a held button let go of when the task stopped.
+function pointerSteps(): string | undefined {
+  if (!session) return "no session";
+  const report = { point: { x: 428, y: 360 }, source: "ax" as const, name: "report.txt" };
+  const trash = { point: { x: 2360, y: 1280 }, source: "ax" as const, name: "Trash" };
+  const at = (x: number, y: number) => ({ x, y });
+  const model = (p: { x: number; y: number }) => at(p.x / 2, p.y / 2);
+  for (const [verb, label, input, cancel] of [
+    [
+      "drag",
+      dragLabel(
+        { target: report, point: model(report.point) },
+        { target: trash, point: model(trash.point) },
+      ),
+      { kind: "drag", from: report.point, to: trash.point, button: "left", durationMs: 600 },
+      undefined,
+    ],
+    ["move", moveLabel(null, at(640, 320)), { kind: "move", to: at(1280, 640) }, undefined],
+    [
+      "click",
+      buttonLabel("down", "left", null, at(640, 320)),
+      { kind: "down", button: "left", at: at(1280, 640) },
+      undefined,
+    ],
+    [
+      "click",
+      buttonLabel("up", "left", null, at(900, 420)),
+      { kind: "up", button: "left", at: at(1800, 840) },
+      undefined,
+    ],
+    [
+      "drag",
+      dragLabel({ target: null, point: at(150, 450) }, { target: null, point: at(950, 150) }),
+      { kind: "drag", from: at(300, 900), to: at(1900, 300), button: "left", durationMs: 900 },
+      "user",
+    ],
+    [
+      "drag",
+      dragLabel(
+        { target: report, point: model(report.point) },
+        { target: null, point: at(950, 150) },
+      ),
+      { kind: "drag", from: report.point, to: at(1900, 300), button: "left", durationMs: 900 },
+      "stale",
+    ],
+  ] as const) {
+    const step = ulid();
+    session.append("step.start", { kind: "gui", planItem: "calc" }, step);
+    session.append("action.intent", { verb, label, risk: "none" }, step);
+    session.append("action.dispatch", { input, pressT: 0, ringAt: 0, injector: "xtest" }, step);
+    if (cancel) session.append("action.cancel", { reason: cancel }, step);
+    else session.append("action.result", { ok: true }, step);
+    session.append(
+      "step.end",
+      { status: cancel === "user" ? "cancelled" : cancel ? "failed" : "ok" },
+      step,
+    );
+  }
+  session.append("action.intent", {
+    verb: "click",
+    label: "Release the left button, cancelling the drag",
+    point: at(1800, 840),
+    risk: "none",
+  });
+  session.append("action.dispatch", {
+    input: { kind: "up", button: "left", at: at(1800, 840) },
+    pressT: 0,
+    ringAt: 0,
+    injector: "xtest",
+  });
+  session.append("action.result", { ok: true });
+}
+// A drag played live with the gateway's own events, so the stage draws its path as it goes: a
+// stroke through four points, or (held) a button held down through eight moves around a loop.
+function liveDrag(held: boolean): string | undefined {
+  if (!session) return "no session";
+  const owned = session;
+  const now = () => Math.round(microsToMs(log.toSessionT(owned.id, clock.nowMicros())));
+  const model = (p: Point) => ({ x: Math.round(p.x / 2), y: Math.round(p.y / 2) });
+  const travel = (from: Point, to: Point, durationMs: number) => ({
+    from,
+    to,
+    startsAt: now() + 50,
+    durationMs,
+    seed: 7,
+    curve: "minjerk-bow-v1" as const,
+  });
+  const later = (ms: number, act: () => void) => setTimeout(act, ms).unref();
+  const run = (
+    at: number,
+    verb: "drag" | "move" | "click",
+    label: string,
+    from: Point,
+    to: Point,
+    input: Record<string, unknown>,
+    motionMs: number,
+  ) =>
+    later(at, () => {
+      const step = ulid();
+      owned.append("step.start", { kind: "gui", planItem: "calc" }, step);
+      owned.append(
+        "action.intent",
+        { verb, label, point: to, risk: "none", pointer: travel(from, to, motionMs) },
+        step,
+      );
+      const press = () => {
+        const pressT = msToMicros(now());
+        owned.append("action.dispatch", { input, pressT, ringAt: pressT, injector: "xtest" }, step);
+      };
+      // A drag's press comes after its travel and its motion after the press; a held move's
+      // dispatch comes once its glide is over.
+      later(verb === "drag" ? motionMs + 100 : motionMs, press);
+      later(motionMs + 100 + (verb === "drag" ? Number(input.durationMs) + 200 : 0), () => {
+        owned.append("action.result", { ok: true }, step);
+        owned.append("step.end", { status: "ok" }, step);
+      });
+    });
+  const centre = { x: 1280, y: 800 };
+  if (!held) {
+    const way = [
+      { x: 700, y: 1000 },
+      { x: 1100, y: 600 },
+      { x: 1500, y: 1000 },
+      { x: 1900, y: 600 },
+    ];
+    const [from, to] = [way[0] as Point, way.at(-1) as Point];
+    run(
+      0,
+      "drag",
+      dragLabel({ target: null, point: model(from) }, { target: null, point: model(to) }),
+      centre,
+      from,
+      { kind: "drag", from, to, path: way.slice(1, -1), button: "left", durationMs: 3000 },
+      400,
+    );
+    return;
+  }
+  const loop = Array.from({ length: 8 }, (_, i) => ({
+    x: Math.round(1280 + 420 * Math.cos((2 * Math.PI * (i + 1)) / 8)),
+    y: Math.round(800 + 300 * Math.sin((2 * Math.PI * (i + 1)) / 8)),
+  }));
+  const start = { x: 1700, y: 800 };
+  run(
+    0,
+    "click",
+    buttonLabel("down", "left", null, model(start)),
+    centre,
+    start,
+    { kind: "down", button: "left", at: start },
+    400,
+  );
+  loop.forEach((to, i) => {
+    const from = i === 0 ? start : (loop[i - 1] as Point);
+    run(
+      700 + i * 650,
+      "move",
+      moveLabel(null, model(to)),
+      from,
+      to,
+      {
+        kind: "move",
+        to,
+        durationMs: 500,
+      },
+      500,
+    );
+  });
+  const end = loop.at(-1) as Point;
+  run(
+    700 + loop.length * 650,
+    "click",
+    buttonLabel("up", "left", null, model(end)),
+    end,
+    end,
+    { kind: "up", button: "left", at: end },
+    0,
+  );
 }
 function ask(allowText: boolean): string | undefined {
   if (!session) return "no session";
@@ -1361,9 +1627,13 @@ routes.post("/__qa/approval", async (c) => {
     requestApproval((c.req.query("risk") ?? "high") as "medium" | "high", call, {
       always: c.req.query("always") === "1",
       repeat: Number(c.req.query("repeat") ?? 1),
+      kind: c.req.query("kind") ?? "",
     }),
   );
 });
+routes.post("/__qa/keys", () => reply(keySteps()));
+routes.post("/__qa/pointer", () => reply(pointerSteps()));
+routes.post("/__qa/drag", (c) => reply(liveDrag(c.req.query("held") === "1")));
 routes.post("/__qa/ask", (c) => reply(ask(c.req.query("text") !== "0")));
 routes.post("/__qa/takeover", (c) =>
   reply(takeover(c.req.query("field"), c.req.query("known") === "1")),

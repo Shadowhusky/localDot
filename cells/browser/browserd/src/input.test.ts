@@ -35,6 +35,7 @@ async function setup(scale: 1 | 2 = 2) {
     frame: "root",
     rawEvents: true,
     contentX: 20 * scale,
+    revision: 1,
   };
   const hooks = new Map<string, () => void | Promise<void>>();
   const counts = new Map<string, number>();
@@ -51,7 +52,10 @@ async function setup(scale: 1 | 2 = 2) {
       await checkpoint("geometry");
       if (tabId !== "tab") throw new Error("foreign tab");
       return {
-        document,
+        document:
+          state.revision === document.revision
+            ? document
+            : Object.freeze({ ...document, revision: state.revision }),
         content: [state.contentX, 100 * scale, 1000 * scale, 600 * scale],
         factor: scale * 1.25,
         width: 800,
@@ -91,6 +95,18 @@ async function setup(scale: 1 | 2 = 2) {
     if (name === "settle")
       return { changed: [[2, 4, 40, 50]], lastChange: clock, quiet: true, noVisibleChange: false };
     if (name === "move") return { mono: ++clock };
+    if (name === "pointer") return { x: 40, y: 220 };
+    if (name === "cancel") return { buttons: 1, escaped: true };
+    if (name === "down" || name === "up") {
+      const event = {
+        ev: name === "down" ? "press" : "release",
+        kind: "button",
+        detail: Number(args.button),
+        mono: ++clock,
+      } as NativeEvent;
+      if (state.rawEvents) for (const listener of listeners) listener(event);
+      return name === "down" ? { button: args.button } : { button: args.button, released: true };
+    }
     if (name === "click" || name === "userClick") {
       for (let count = 0; count < Number(args.count); count += 1)
         emit("button", Number(args.button));
@@ -166,6 +182,126 @@ async function setup(scale: 1 | 2 = 2) {
     progress,
   };
 }
+
+describe("browser drags", () => {
+  const drag = (more: object = {}) => ({
+    input: {
+      kind: "drag",
+      from: { x: 100, y: 150 },
+      to: { x: 300, y: 250 },
+      path: [{ x: 200, y: 200 }],
+      button: "left",
+      mods: ["shift"],
+      durationMs: 100,
+      ...more,
+    },
+  });
+  // Model pixel → native pixel in the fixture's geometry at scale 2.
+  const native = (x: number, y: number) => ({
+    x: Math.round(40 + ((x * 2 - 40) / 2.5) * 2.5),
+    y: Math.round(200 + ((y * 2 - 200) / 2.5) * 2.5),
+  });
+
+  it("presses at the start, follows every point inside the checked page and lets go at the end", async () => {
+    const peer = await setup();
+    const result = await peer.input.inject(permit, "tab", drag(), peer.abort.signal);
+    const effects = peer.effects();
+    expect(effects[0]).toEqual({
+      name: "down",
+      args: { ...native(100, 150), button: 1, mods: ["Shift_L"] },
+    });
+    expect(effects.at(-1)).toEqual({ name: "up", args: { ...native(300, 250), button: 1 } });
+    const moves = effects.filter((e) => e.name === "move").map((e) => e.args);
+    expect(moves.length).toBeGreaterThanOrEqual(5);
+    expect(moves).toContainEqual(native(200, 200));
+    expect(moves.at(-1)).toEqual(native(300, 250));
+    expect(
+      peer.command.mock.calls.filter(([, method]) => method === "DOM.getNodeForLocation"),
+    ).toHaveLength(4);
+    expect(result.presses).toEqual([result.pressMono]);
+    await peer.control.close();
+  });
+
+  it.each([
+    drag({ to: { x: 1279, y: 250 } }),
+    drag({ path: [{ x: 5, y: 5 }] }),
+    drag({ mods: ["Alt"] }),
+    drag({ button: "back" }),
+    drag({ durationMs: 10_001 }),
+    drag({ path: Array.from({ length: 63 }, () => ({ x: 200, y: 200 })) }),
+  ])(
+    "refuses a drag outside the page or out of bounds before any native input %#",
+    async (request) => {
+      const peer = await setup();
+      await expect(peer.input.inject(permit, "tab", request, peer.abort.signal)).rejects.toThrow();
+      expect(peer.effects()).toHaveLength(0);
+      await peer.control.close();
+    },
+  );
+
+  it("refuses a drag onto a protected field before any native input", async () => {
+    const peer = await setup();
+    peer.hooks.set("inspect:2", () => {
+      peer.state.protectedNode = true;
+    });
+    await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
+      "secret",
+    );
+    expect(peer.effects()).toHaveLength(0);
+    await peer.control.close();
+  });
+
+  it("is cancelled where it is when it is stopped part-way, never moving back to the start", async () => {
+    const peer = await setup();
+    peer.hooks.set("native.move:3", () => peer.abort.abort());
+    await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
+      "aborted",
+    );
+    expect(peer.effects().at(-1)).toEqual({ name: "cancel", args: {} });
+    expect(peer.effects().filter((e) => e.name === "up")).toEqual([]);
+    await peer.control.close();
+  });
+
+  it("is cancelled before its drop when the page moved", async () => {
+    const peer = await setup();
+    peer.hooks.set("geometry:6", () => {
+      peer.state.contentX += 2;
+    });
+    await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
+      "target",
+    );
+    expect(peer.effects().at(-1)).toEqual({ name: "cancel", args: {} });
+    expect(peer.effects().filter((e) => e.name === "up")).toEqual([]);
+    await peer.control.close();
+  });
+
+  it("refuses a drag whose page changed between reading its drop and its own snapshot", async () => {
+    const peer = await setup();
+    peer.hooks.set("geometry:5", () => {
+      peer.state.revision = 2;
+    });
+    await expect(peer.input.inject(permit, "tab", drag(), peer.abort.signal)).rejects.toThrow(
+      "target",
+    );
+    expect(peer.effects()).toHaveLength(0);
+    await peer.control.close();
+  });
+
+  it("glides a move with a duration from where the pointer is", async () => {
+    const peer = await setup();
+    await peer.input.inject(
+      permit,
+      "tab",
+      { input: { kind: "move", to: { x: 300, y: 250 }, durationMs: 100 } },
+      peer.abort.signal,
+    );
+    const moves = peer.effects().filter((e) => e.name === "move");
+    expect(peer.effects()[0]?.name).toBe("pointer");
+    expect(moves.length).toBeGreaterThanOrEqual(5);
+    expect(moves.at(-1)?.args).toEqual(native(300, 250));
+    await peer.control.close();
+  });
+});
 
 describe("guarded browser input", () => {
   it("allows browser shortcuts and modifiers only through a completed manual grant", async () => {

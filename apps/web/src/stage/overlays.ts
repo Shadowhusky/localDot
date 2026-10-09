@@ -2,6 +2,7 @@ import type {
   Camera,
   CancelScene,
   CursorScene,
+  DragScene,
   KeycapsScene,
   RingScene,
   Scene,
@@ -56,6 +57,7 @@ export class Overlays {
   #viewport = { w: 1, h: 1 };
   readonly #targetG = new Graphics();
   readonly #ringsG = new Graphics();
+  readonly #dragG = new Graphics();
   readonly #cursor = new Container();
   readonly #cursorG = new Graphics();
   readonly #nameChip: Chip;
@@ -95,6 +97,7 @@ export class Overlays {
     this.#cursor.addChild(this.#cursorG, this.#nameChip);
     this.world.addChild(
       this.#targetG,
+      this.#dragG,
       this.#ringsG,
       this.#targetChip,
       this.#typing,
@@ -120,6 +123,7 @@ export class Overlays {
 
   draw(scene: Scene | null): void {
     this.#targetG.clear();
+    this.#dragG.clear();
     this.#ringsG.clear();
     this.#cursor.visible = false;
     this.#targetChip.visible = false;
@@ -128,6 +132,7 @@ export class Overlays {
     this.#keycaps.visible = false;
     if (!scene) return;
     if (scene.target) this.#drawTarget(scene.target, scene.control);
+    if (scene.drag) this.#drawDrag(scene.drag, scene.control);
     for (const ring of scene.rings) this.#drawRing(ring, scene.control);
     if (scene.cursor?.visible) this.#drawCursor(scene.cursor, scene.control);
     if (scene.typing) this.#drawTyping(scene.typing, scene.control);
@@ -197,6 +202,31 @@ export class Overlays {
       }
       g.circle(t.point.x, t.point.y, 2 * u).fill({ color: accent.color, alpha: t.alpha });
     }
+  }
+
+  // The way a held button has gone: a line over a soft halo that keeps it legible on any screen.
+  #drawDrag(drag: DragScene, control: boolean): void {
+    const u = this.#unit;
+    const g = this.#dragG;
+    const [start, ...rest] = drag.points;
+    if (!start) return;
+    const line = (width: number, color: ThemeColor) => {
+      g.moveTo(start.x, start.y);
+      for (const p of rest) g.lineTo(p.x, p.y);
+      g.stroke({
+        width: width * u,
+        color: color.color,
+        alpha: color.alpha * drag.alpha,
+        cap: "round",
+        join: "round",
+      });
+    };
+    line(6, this.#theme.haloTarget);
+    line(2.5, this.#accent(control));
+    g.circle(start.x, start.y, 3.5 * u).fill({
+      color: this.#accent(control).color,
+      alpha: drag.alpha,
+    });
   }
 
   #dashedRect(

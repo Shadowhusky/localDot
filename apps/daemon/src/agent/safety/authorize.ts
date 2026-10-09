@@ -1,6 +1,7 @@
 import { ApprovalRequestDraft, type ToolName, UploadApproval } from "@localdot/protocol";
+import { repeatsWhileHeld } from "@localdot/protocol/keys";
 import type { ToolCallContext } from "../tools/deps.ts";
-import { CountedPermit } from "./approvals.ts";
+import { OncePermit } from "./approvals.ts";
 import { actingFacts, alwaysOptions, decideAutonomy, screenOf } from "./autonomy.ts";
 import { handoffFor } from "./handoff.ts";
 import { actionDigest, buildApprovalCard, type RiskDecision, type RiskFacts } from "./risk.ts";
@@ -17,8 +18,6 @@ export interface PreparedEffect {
   readonly target: unknown;
   readonly facts: RiskFacts;
   readonly upload?: UploadApproval;
-  // Identical dispatches one decision covers, such as a key's repeat.
-  readonly count?: number;
   revalidate(): Promise<boolean>;
 }
 export function freezeExecutionInput<T>(input: T): T {
@@ -48,8 +47,29 @@ export function approvalDraft(
   fields.push(["Tool", tool]);
   if (tool === "computer" && object?.action && typeof object.action === "object") {
     const action = object.action as Record<string, unknown>;
-    add("Action", String(action.verb));
+    const verb = String(action.verb);
+    add("Action", VERBS[verb] ?? verb);
     if (Array.isArray(action.combo)) add("Keys", action.combo.join(" + "));
+    if (Array.isArray(action.mods)) add("Keys held", action.mods.join(" + "));
+    const at = (p: unknown) => {
+      const { x, y } = p as { x: unknown; y: unknown };
+      return `(${String(x)}, ${String(y)})`;
+    };
+    if (Array.isArray(action.path) && action.path.length >= 2) {
+      add("Drag", `${at(action.path[0])} to ${at(action.path.at(-1))}`);
+      if (action.path.length > 2) add("Path", `${action.path.length} points`);
+    }
+    // A move, scroll or release while a button is down: the drag from where it went down.
+    if (action.drag && typeof action.drag === "object") {
+      const { from, to } = action.drag as { from: unknown; to: unknown };
+      add("Drag", `${at(from)} to ${at(to)}`);
+    }
+    if (["drag", "down", "up"].includes(verb)) add("Button", String(action.button ?? "left"));
+    if (typeof action.repeat === "number") add("Repeat", `× ${action.repeat}`);
+    if (typeof action.holdMs === "number") {
+      const repeats = Array.isArray(action.combo) && repeatsWhileHeld(action.combo.map(String));
+      add("Hold", `${action.holdMs / 1000} s${repeats ? " (repeats while held)" : ""}`);
+    }
     if (action.point && typeof action.point === "object")
       add("Pointer", JSON.stringify(action.point));
     if (action.verb === "click")
@@ -84,8 +104,7 @@ export async function authorizePrepared(
   const inputDigest = actionDigest(input),
     targetDigest = actionDigest(target);
   const digest = actionDigest({ tool: prepared.tool, input, target });
-  const uses = prepared.count ?? 1;
-  const permit = new CountedPermit(digest, uses);
+  const permit = new OncePermit(digest);
   const decision = decideAutonomy(ctx, prepared.facts);
   const upload = prepared.upload ? UploadApproval.parse(prepared.upload) : undefined;
   if (upload && (prepared.tool !== "browser_upload" || prepared.facts.operation !== "files_upload"))
@@ -122,7 +141,6 @@ export async function authorizePrepared(
       },
       ApprovalRequestDraft.parse({
         ...draft,
-        fields: uses > 1 ? [...draft.fields, ["Repeat", `× ${uses}`]] : draft.fields,
         always: alwaysOptions(decision.actionClass, actingFacts(ctx, prepared.facts), ctx.redact),
       }),
       {
@@ -161,6 +179,12 @@ export async function authorizePrepared(
     },
   });
 }
+// The card's words for gateway verbs that are not plain English on their own.
+const VERBS: Record<string, string> = {
+  down: "hold down a mouse button",
+  up: "release a mouse button",
+  move: "move the pointer",
+};
 export function toolRisk(tool: ToolName, raw: unknown): RiskFacts | undefined {
   const input = raw as Record<string, unknown>;
   switch (tool) {

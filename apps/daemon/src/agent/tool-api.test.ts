@@ -199,13 +199,230 @@ describe("the tools", () => {
     expect(stale.body.content[1]?.type).toBe("image");
   });
 
-  it("answers cursor_position in model pixels and repeats a key", async () => {
+  it("answers cursor_position in model pixels and repeats a key as one input", async () => {
     const h = toolHarness();
     expect((await h.call("computer", { action: "cursor_position" })).body.content[0]?.text).toBe(
       "The cursor is at (300, 200).",
     );
     await h.call("computer", { action: "key", keys: ["Down"], repeat: 3 });
-    expect(h.actions.map((a) => a.action.verb)).toEqual(["key", "key", "key"]);
+    expect(h.actions.map((a) => a.action)).toEqual([
+      { verb: "key", combo: ["Down"], repeat: 3, speed: "auto" },
+    ]);
+  });
+
+  it("holds keys as one input, and refuses an unknown key before the computer", async () => {
+    const h = toolHarness();
+    await h.call("computer", { action: "hold_key", keys: ["shift"], ms: 1500 });
+    expect(h.actions.map((a) => a.action)).toEqual([
+      { verb: "key", combo: ["shift"], holdMs: 1500, speed: "auto" },
+    ]);
+    const refused = await h.call("computer", { action: "key", keys: ["ctrl", "Retrun"] });
+    expect(refused.body).toMatchObject({ ok: false });
+    expect(refused.body.content[0]?.text).toMatch(/unknown key "Retrun"; did you mean Return/);
+    expect((await h.call("computer", { action: "hold_key", keys: ["shift"] })).body.ok).toBe(false);
+    const held = await h.call("computer", { action: "hold_key", keys: ["shfit"], ms: 1000 });
+    expect(held.body.content[0]?.text).toMatch(/unknown key "shfit"; did you mean shift/);
+    expect(h.actions).toHaveLength(1);
+  });
+
+  it("tells the model where typing and keys went, and when nothing changed", async () => {
+    const h = toolHarness();
+    const field = {
+      point: { x: 10, y: 10 },
+      source: "ax" as const,
+      role: "text",
+      name: "HTML notation",
+      window: "Change Foreground Color",
+    };
+    const note = async (input: unknown, focus: unknown, changed: boolean) => {
+      h.setOutcome(() => ({ ok: true, frameId: ulid(), changed, focus }) as never);
+      const r = await h.call("computer", input);
+      expect(r.body.content.at(-1)?.type).toBe("image");
+      return r.body.content[0]?.text;
+    };
+    const typing = { action: "type", text: "A9743E" };
+    expect(await note(typing, { target: field }, true)).toBe(
+      'Typed 6 characters into "HTML notation" (text) in "Change Foreground Color".',
+    );
+    expect(await note(typing, { target: null }, false)).toBe(
+      "Typed 6 characters, but no element had keyboard focus. No visible change.",
+    );
+    const selectAll = { action: "key", keys: ["ctrl", "a"] };
+    expect(await note(selectAll, { target: field }, false)).toBe(
+      'Pressed ctrl+a. No visible change: keyboard focus is on "HTML notation" (text) in "Change Foreground Color".',
+    );
+    expect(await note(selectAll, { target: null, unknown: true }, false)).toBe(
+      "Pressed ctrl+a. No visible change: keyboard focus is unknown.",
+    );
+    expect(await note({ action: "key", keys: ["]"], repeat: 5 }, { target: field }, true)).toBe(
+      'Pressed ] 5 times. Keyboard focus is on "HTML notation" (text) in "Change Foreground Color".',
+    );
+    expect(
+      await note({ action: "hold_key", keys: ["shift"], ms: 2000 }, { target: null }, true),
+    ).toBe("Held shift for 2 s. No element has keyboard focus.");
+    expect(await note(typing, { target: null, unknown: true }, true)).toBe(
+      "Typed 6 characters; keyboard focus is unknown.",
+    );
+    expect(await note(selectAll, { target: { ...field, name: PROXY_TOKEN } }, true)).toBe(
+      'Pressed ctrl+a. Keyboard focus is on "[redacted]" (text) in "Change Foreground Color".',
+    );
+  });
+
+  it("tells the model how far a repeat or a hold got before it stopped", async () => {
+    const h = toolHarness();
+    const stopped = async (input: unknown, partial: unknown) => {
+      h.setOutcome(
+        () =>
+          ({
+            ok: false,
+            cancelled: "user",
+            error: "the task was paused",
+            partial,
+            focus: { target: null },
+          }) as never,
+      );
+      return (await h.call("computer", input)).body.content.map((c) => c.text);
+    };
+    expect(
+      await stopped(
+        { action: "hold_key", keys: ["shift"], ms: 10_000 },
+        { presses: 1, heldMs: 3100 },
+      ),
+    ).toEqual([
+      "Held shift for 3.1 s of 10 s, then stopped: the task was paused. No element has keyboard focus.",
+    ]);
+    expect(
+      await stopped({ action: "key", keys: ["Delete"], repeat: 100 }, { presses: 37 }),
+    ).toEqual([
+      "Pressed Delete 37 of 100 times, then stopped: the task was paused. No element has keyboard focus.",
+    ]);
+  });
+
+  it("ends a hold when the task is paused", async () => {
+    const h = toolHarness();
+    let signal: AbortSignal | undefined;
+    h.tools.gateway.run = async (ctx) => {
+      signal = ctx.signal;
+      await new Promise((resolve) => ctx.signal?.addEventListener("abort", resolve));
+      return { ok: false, cancelled: "user", error: "session stopped" };
+    };
+    const holding = h.call("computer", { action: "hold_key", keys: ["shift"], ms: 20_000 });
+    await until(() => signal !== undefined);
+    expect(signal?.aborted).toBe(false);
+    h.session.requestSafetyPause(ulid());
+    await until(() => signal?.aborted === true);
+    expect((await holding).body.ok).toBe(false);
+  });
+
+  it("sends drags, moves, button presses and modifier clicks to the gateway, and refuses malformed ones", async () => {
+    const h = toolHarness();
+    const FRAME = ulid();
+    const path = [
+      { x: 10, y: 20 },
+      { x: 30, y: 40 },
+      { x: 50, y: 60 },
+    ];
+    for (const input of [
+      { action: "drag", path, mods: ["shift"], ms: 800 },
+      { action: "move", point: { x: 5, y: 6 }, basedOn: FRAME },
+      { action: "mouse_down", button: "right", mods: ["ctrl"] },
+      { action: "mouse_up", point: { x: 7, y: 8 }, button: "right" },
+      { action: "click", mods: ["ctrl", "shift"] },
+      { action: "scroll", dy: 2, mods: ["ctrl"] },
+    ])
+      expect((await h.call("computer", input)).body.ok, input.action).toBe(true);
+    expect(h.actions.map((a) => a.action)).toEqual([
+      { verb: "drag", path, button: "left", mods: ["shift"], durationMs: 800, speed: "auto" },
+      { verb: "move", point: { x: 5, y: 6 }, speed: "auto", basedOn: FRAME },
+      { verb: "down", button: "right", mods: ["ctrl"], speed: "auto" },
+      { verb: "up", point: { x: 7, y: 8 }, button: "right", speed: "auto" },
+      { verb: "click", button: "left", count: 1, mods: ["ctrl", "shift"], speed: "auto" },
+      { verb: "scroll", dx: 0, dy: 2, mods: ["ctrl"], speed: "auto" },
+    ]);
+    for (const [input, message] of [
+      [{ action: "drag" }, "drag needs a path"],
+      [{ action: "drag", path, ms: 10_001 }, "a drag lasts more than 0 and at most 10000 ms"],
+      [{ action: "move" }, "move needs a point"],
+      [{ action: "click", mods: ["ctrl", "a"] }, /"a" is not a modifier key/],
+      [{ action: "mouse_up", mods: ["shift"] }, /mouse_up takes no keys/],
+    ] as const) {
+      const refused = await h.call("computer", input);
+      expect(refused.body.ok).toBe(false);
+      expect(refused.body.content[0]?.text).toMatch(message);
+    }
+    expect(h.actions).toHaveLength(6);
+  });
+
+  it("tells the model a pressed button stays down, a released one was not, and a drag was cancelled", async () => {
+    const h = toolHarness();
+    h.setOutcome(() => ({ ok: true, frameId: ulid() }));
+    expect((await h.call("computer", { action: "mouse_down" })).body.content[0]?.text).toBe(
+      "The left button is down. It stays down until mouse up, or 60 s without another mouse action. A mouse move, a scroll and the mouse up while it is down drag from where it went down.",
+    );
+    h.setOutcome(() => ({ ok: true, frameId: ulid(), notDown: true }));
+    expect((await h.call("computer", { action: "mouse_up" })).body.content[0]?.text).toBe(
+      "The left button was not down.",
+    );
+    const path = [
+      { x: 1, y: 1 },
+      { x: 9, y: 9 },
+    ];
+    for (const action of [{ action: "drag", path }, { action: "mouse_up" }]) {
+      h.setOutcome(() => ({
+        ok: false,
+        error: "another window is at the drop point now",
+        dropCancelled: true,
+      }));
+      expect((await h.call("computer", action)).body.content.map((c) => c.text)).toEqual([
+        "The drag was cancelled before its drop: Escape was pressed if the pointer had moved, then the button came up where the pointer was. Some apps keep what the drag did so far.",
+        "Failed: another window is at the drop point now",
+      ]);
+    }
+    // A drag that failed for any other reason may have dropped: nothing is claimed.
+    h.setOutcome(() => ({ ok: false, error: "no raw release observed" }));
+    expect(
+      (await h.call("computer", { action: "drag", path })).body.content.map((c) => c.text),
+    ).toEqual(["Failed: no raw release observed"]);
+  });
+
+  it("ends a drag when the task is paused", async () => {
+    const h = toolHarness();
+    let signal: AbortSignal | undefined;
+    h.tools.gateway.run = async (ctx) => {
+      signal = ctx.signal;
+      await new Promise((resolve) => ctx.signal?.addEventListener("abort", resolve));
+      return { ok: false, cancelled: "user", error: "session stopped" };
+    };
+    const dragging = h.call("computer", {
+      action: "drag",
+      path: [
+        { x: 1, y: 1 },
+        { x: 9, y: 9 },
+      ],
+    });
+    await until(() => signal !== undefined);
+    h.session.requestSafetyPause(ulid());
+    await until(() => signal?.aborted === true);
+    expect((await dragging).body.ok).toBe(false);
+  });
+
+  it("gives the session a pressed button to let go of, before a takeover hands over the screen", async () => {
+    const h = toolHarness();
+    const releases: string[] = [];
+    h.tools.gateway.run = async (ctx, action) => {
+      if (action.verb === "down")
+        ctx.holdInput?.(async () => {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          releases.push("released");
+        });
+      return { ok: true, frameId: ulid() };
+    };
+    expect((await h.call("computer", { action: "mouse_down" })).body.ok).toBe(true);
+    const taking = h.session.takeover("other", "Finish the stroke");
+    await until(() => h.session.manualControl === "ready");
+    expect(releases).toEqual(["released"]);
+    h.session.stop();
+    await taking.catch(() => {});
   });
 
   it("keeps the plan as plan.set, then plan.update for status changes", async () => {

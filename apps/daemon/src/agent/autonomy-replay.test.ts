@@ -29,7 +29,8 @@ const CALLS: Call[] = MANUAL_DRAWING_TASK.flatMap((row: EvidenceRow): Call[] => 
   const action = row.id === "30" ? { ...row.action, repeat: 5 } : row.action;
   return [{ id: row.id, tool: "computer", input: action }];
 });
-const PRESSES = CALLS.filter((c) => c.tool === "computer").length + 4;
+// One input per computer call: the repeat-5 call presses its key five times in one input.
+const INPUTS = CALLS.filter((c) => c.tool === "computer").length;
 const COMMANDS = CALLS.filter((c) => c.tool === "shell").map(
   (c) => (c.input as { command: string }).command,
 );
@@ -134,7 +135,7 @@ describe("the manual drawing task replayed through the tool dispatcher", () => {
     expect(h.desktop.shellCalls).toEqual(COMMANDS);
     expect(h.desktop.files.has("sketch.py")).toBe(true);
     expect(h.desktop.editCalls).toEqual(["sketch.py", "sketch.py"]);
-    expect(dispatched).toHaveLength(PRESSES);
+    expect(dispatched).toHaveLength(INPUTS);
   });
 
   it("Careful shows one card per call and never hands off", async () => {
@@ -150,7 +151,7 @@ describe("the manual drawing task replayed through the tool dispatcher", () => {
     expect(repeated?.preview.fields).toContainEqual(["Repeat", "× 5"]);
     expect(h.desktop.shellCalls).toEqual(COMMANDS);
     expect(h.desktop.editCalls).toEqual(["sketch.py", "sketch.py"]);
-    expect(dispatched).toHaveLength(PRESSES);
+    expect(dispatched).toHaveLength(INPUTS);
   });
 
   it("Careful keeps a card open for ten minutes and runs the click when it is approved", async () => {

@@ -25,6 +25,8 @@ export type WindowInfo = z.infer<typeof WindowInfo>;
 export const InputRequest = z.object({
   input: Input,
   window: z.number().int().nonnegative().optional(),
+  // A drag lets go only over the window its drop point was in when it was approved (0: none).
+  dropWindow: z.number().int().nonnegative().optional(),
   injector: Injector.default("xtest"),
   holdMs: z.number().nonnegative().max(500).default(0),
 });
@@ -38,6 +40,26 @@ export const InputResult = z.object({
   armedMono: z.number(),
 });
 export type InputResult = z.infer<typeof InputResult>;
+// /input answers a repeated or held key, or a drag, as NDJSON: a line per press of a repeat, or
+// one once a hold's keys or a drag's button are down; then the InputResult with `done: true`, or an
+// {error, status} line.
+export const KeyProgress = z.object({
+  presses: z.number().int().positive(),
+  pressMono: z.number(),
+});
+export type KeyProgress = z.infer<typeof KeyProgress>;
+
+export const ReleaseResult = z.object({
+  keys: z.number().int().nonnegative(),
+  buttons: z.number().int().nonnegative(),
+});
+export type ReleaseResult = z.infer<typeof ReleaseResult>;
+// /held keeps the buttons the agent holds down between actions down for another while, and names
+// those the X server still has down (1 left, 2 middle, 3 right).
+export const HeldResult = z.object({
+  buttons: z.array(z.number().int().min(1).max(3)),
+});
+export type HeldResult = z.infer<typeof HeldResult>;
 
 export const TypePace = z.object({
   firstMs: z.number().nonnegative(),
@@ -125,7 +147,9 @@ export type ObserveResult = z.infer<typeof ObserveResult>;
 export const ZoomRequest = z.object({ frameId: z.string().regex(ULID_PATTERN), region: Rect });
 export type ZoomRequest = z.infer<typeof ZoomRequest>;
 
-export const HitTestRequest = z.object({ point: Point });
+// `managed`: only managed windows count, so popups over the point (a drag's own icon) are looked
+// through.
+export const HitTestRequest = z.object({ point: Point, managed: z.boolean().optional() });
 export type HitTestRequest = z.infer<typeof HitTestRequest>;
 // desktopd clips names at the source and the gateway's clipTarget cuts to the event limits before
 // it appends, so the wire repeats neither limit: an over-long name is cut, never a failed call.

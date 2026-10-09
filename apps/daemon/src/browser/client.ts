@@ -20,8 +20,8 @@ import {
   TypeResult,
   ULID_PATTERN,
 } from "@localdot/protocol";
+import { keyName } from "@localdot/protocol/keys";
 import { z } from "zod";
-import { keyName } from "../../../../cells/desktop/desktopd/src/x/keys.ts";
 import {
   BrowserActionPermit,
   BrowserControlReply,
@@ -666,12 +666,16 @@ export class BrowserClient {
     request: InputRequest,
     scope: BrowserScope,
   ): Promise<InputResult> {
+    const motionMs =
+      request.input.kind === "drag" || request.input.kind === "move"
+        ? (request.input.durationMs ?? 0)
+        : 0;
     return this.#json(
       "POST",
       "/input",
       { ...this.#action(permit, tabId), request },
       scope,
-      10000,
+      10000 + motionMs,
       inputReply,
       65536,
     );

@@ -310,12 +310,13 @@ describe("one decision for a repeated key", () => {
     expect(out.result.ok).toBe(true);
     expect(cards).toHaveLength(1);
     expect(cards[0]).toEqual(expect.arrayContaining(["Repeat", "× 5"]));
-    expect(dispatched).toHaveLength(5);
+    expect(dispatched).toEqual([expect.objectContaining({ verb: "key", repeat: 5 })]);
   });
 
-  it("stops the rest when the target changes partway through", async () => {
+  it("presses nothing when the target changes after its card", async () => {
     const h = harness();
-    const dispatched = contractGateway(h, (run) => (run < 2 ? canvas() : canvas(600)));
+    let reads = 0;
+    const dispatched = contractGateway(h, () => (reads++ < 1 ? canvas() : canvas(600)));
     let cards = 0;
     h.eventLog.subscribe((_id, event) => {
       if (event.type !== "approval.request") return;
@@ -323,9 +324,9 @@ describe("one decision for a repeated key", () => {
       queueMicrotask(() => approve(h));
     });
     const out = await dispatch(h, { action: "key", keys: ["bracketright"], repeat: 5 });
-    expect(out.result).toMatchObject({ ok: false, cancelled: "stale" });
+    expect(out.result).toMatchObject({ ok: false });
     expect(cards).toBe(1);
-    expect(dispatched).toHaveLength(2);
+    expect(dispatched).toHaveLength(0);
   });
 
   it("asks again for a different call with the same keys", async () => {
@@ -340,6 +341,6 @@ describe("one decision for a repeated key", () => {
     await dispatch(h, { action: "key", keys: ["bracketright"], repeat: 2 });
     await dispatch(h, { action: "key", keys: ["bracketright"], repeat: 2 });
     expect(cards).toBe(2);
-    expect(dispatched).toHaveLength(4);
+    expect(dispatched).toHaveLength(2);
   });
 });

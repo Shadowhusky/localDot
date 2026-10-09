@@ -5,11 +5,14 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./csp": "./src/csp.ts"
+    "./csp": "./src/csp.ts",
+    "./keys": "./src/keys.ts",
+    "./motion": "./src/motion.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit -p .",
-    "schema": "tsx src/export-json-schema.ts"
+    "schema": "tsx src/export-json-schema.ts",
+    "keysyms": "node scripts/keysyms.mjs"
   },
   "dependencies": {
     "zod": "4.6.5"

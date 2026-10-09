@@ -969,6 +969,54 @@ describe("session-owned screen authority", () => {
     expect(h.actions.at(-1)?.ctx.source).toBe("agent");
   });
 
+  it("refuses to hold keys on the browser screen before asking for or starting any input", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    const held = await h.call({ action: "hold_key", keys: ["shift"], ms: 1000 });
+    expect(held.result).toEqual({
+      ok: false,
+      content: [{ type: "text", text: "Holding keys is not available on the browser screen." }],
+    });
+    expect(h.actions).toEqual([]);
+  });
+
+  it("refuses a mouse button held between actions on the browser screen, before any input", async () => {
+    const f = fixture();
+    await f.browser();
+    const h = tools(f);
+    for (const action of ["mouse_down", "mouse_up"]) {
+      const held = await h.call({ action });
+      expect(held.result).toEqual({
+        ok: false,
+        content: [
+          {
+            type: "text",
+            text: "Holding a mouse button between actions is not available on the browser screen; drag with left_click_drag instead.",
+          },
+        ],
+      });
+    }
+    expect(h.actions).toEqual([]);
+  });
+
+  it("lets go of a held button before it switches screens", async () => {
+    const f = fixture();
+    const generation = await f.ready();
+    const releasing = Promise.withResolvers<void>();
+    const release = vi.fn(() => releasing.promise);
+    f.session.holdInput(release);
+    const lease = f.session.admit(generation);
+    const switching = f.session.switchScreen("browser", lease);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(release).toHaveBeenCalledOnce();
+    expect(f.deps.browser.start).not.toHaveBeenCalled();
+    releasing.resolve();
+    await switching;
+    lease.finish();
+    expect(f.deps.browser.start).toHaveBeenCalled();
+  });
+
   it("fails closed when a screen-enabled session has no gateway binding", async () => {
     const f = fixture();
     await f.browser();
