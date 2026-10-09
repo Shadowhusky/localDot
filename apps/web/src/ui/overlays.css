@@ -344,7 +344,10 @@
       translate: calc(var(--_nudge) * 6) 0;
     }
 
-    .ui-sheet[data-side="bottom"] {
+    /* A sheet that rests at medium below large rises from the edge too, rather than appearing
+       there: its resting offset outranks the plain starting point. */
+    .ui-sheet[data-side="bottom"],
+    .ui-sheet[data-side="bottom"][data-detents~="large"][data-detent="medium"] {
       translate: 0 calc(100% * var(--_motion));
     }
   }

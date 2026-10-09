@@ -19,6 +19,7 @@ import { announce as speak, withdraw } from "../ui/Announcer.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Chip } from "../ui/Chip.tsx";
 import { Collapse } from "../ui/Disclosure.tsx";
+import { riseIn } from "../ui/motion.ts";
 import { ScrollArea } from "../ui/ScrollArea.tsx";
 import { Spinner } from "../ui/Spinner.tsx";
 import { SentFiles } from "./Attachments.tsx";
@@ -360,6 +361,8 @@ export interface ConversationProps {
   computerUpdating?: boolean;
   // In place of the empty thread's suggestions, such as the steps setup has left.
   start?: ReactNode;
+  // Counts the conversations the user chose: each one's thread comes in anew.
+  reveal?: number;
 }
 
 export function Conversation({
@@ -389,6 +392,7 @@ export function Conversation({
   computerReady = false,
   computerUpdating = false,
   start,
+  reveal = 0,
 }: ConversationProps) {
   // While its task is live, the latest turn's work line sits in the foot, always in view; once the
   // turn is over it joins the thread as that turn's last row.
@@ -655,6 +659,15 @@ export function Conversation({
     observer.observe(history.current);
     return () => observer.disconnect();
   }, [seeEnd]);
+  // A conversation chosen anew, and a history that has finished arriving, come in rising; what
+  // arrives in a thread already on show eases in row by row instead.
+  const revealed = useRef({ reveal, loading });
+  useLayoutEffect(() => {
+    const was = revealed.current;
+    revealed.current = { reveal, loading };
+    if (history.current && (was.reveal !== reveal || (was.loading && !loading)))
+      riseIn(history.current);
+  }, [reveal, loading]);
   // Scrolled back only as far as the foot, the reader has nothing newer to jump to.
   const jumpShown = !follow.pinned && (unread.length > 0 || !endSeen);
 

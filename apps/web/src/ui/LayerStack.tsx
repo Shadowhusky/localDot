@@ -226,6 +226,14 @@ export function useLayer(options: LayerOptions): LayerEntry | undefined {
 // closed it is still down (up to a limit), so the release cannot land on whatever lies beneath.
 const HOLD_LIMIT = 1000;
 
+// What a layer showed as it began to close: it leaves as it was, whatever the choice that closed it
+// changes behind it (a list re-read, a form reset), so its way out never redraws it.
+export function useLeaving<T>(value: T, closing: boolean): T {
+  const kept = useRef(value);
+  if (!closing) kept.current = value;
+  return kept.current;
+}
+
 export function useExit(
   open: boolean,
   root: RefObject<HTMLElement | null>,

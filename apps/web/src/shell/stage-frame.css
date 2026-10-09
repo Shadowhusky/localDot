@@ -24,6 +24,29 @@
   box-shadow: var(--shadow-stage);
 }
 
+/* Back from Replay, Watch fades up in its place; its rail keeps its own spring. */
+.watch > .stage-col {
+  transition: opacity var(--dur-fade) var(--ease-standard);
+}
+
+@starting-style {
+  .watch > :is(.stage-col, .rail-panel) {
+    opacity: 0;
+  }
+}
+
+/* The page's entrance (design-v2 §7): until everything it shows is read, the stage stays dark under
+   the curtain, so the picture never shows through a curtain still fading in; it comes up as the
+   curtain lifts. */
+.stage-box > :is(.stage, .stage-rim, .stage-spill) {
+  transition: opacity var(--dur-curtain) var(--ease-standard);
+}
+
+.app[data-entering] .stage-box > :is(.stage, .stage-rim, .stage-spill) {
+  opacity: 0;
+  transition: none;
+}
+
 /* Light on the floor below the stage: neutral, xenon while dot has the computer, porcelain while
    you do. Gradients cannot fade into each other, so each is its own layer. */
 .stage-spill {
@@ -661,6 +684,17 @@
     var(--font-weight-semibold) var(--text-title-1) / var(--text-title-1--line-height)
     var(--font-ui);
   letter-spacing: var(--text-title-1--letter-spacing);
+}
+
+/* The words come in under dot once what the computer is doing is known. */
+:is(.curtain-title, .curtain-sub, .curtain-act) {
+  transition: opacity var(--dur-text-in) var(--ease-standard);
+}
+
+@starting-style {
+  :is(.curtain-title, .curtain-sub, .curtain-act) {
+    opacity: 0;
+  }
 }
 
 .curtain-sub {
