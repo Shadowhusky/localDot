@@ -1,3 +1,4 @@
+import type { StreamPicture } from "../stage/live-stream.ts";
 import { DOCKER_DOWN } from "./errors.ts";
 import type { CellSummary } from "./types.ts";
 
@@ -12,6 +13,9 @@ export interface CellView {
   cell: CellSummary | null;
   status: CellStatus;
   pending: Pending | null;
+  // What this viewer's stage shows of the computer, which the daemon's stream state can lag or
+  // miss: another viewer's relay keeps it live while this one reconnects.
+  picture?: StreamPicture;
 }
 
 export type HudActionKind = "start" | "stop" | "retry" | "resume";
@@ -47,7 +51,7 @@ export interface HudState {
 const RESTART_NOTE = /; restarting \(attempt (\d+) of (\d+)\)$/;
 const STARTING = "Starting your computer. The first start takes about a minute.";
 
-export function hudFor({ cell, status, pending }: CellView): HudState {
+export function hudFor({ cell, status, pending, picture = "none" }: CellView): HudState {
   const idle = pending === null;
   const hud = (
     phase: ComputerPhase,
@@ -144,15 +148,13 @@ export function hudFor({ cell, status, pending }: CellView): HudState {
       "resume",
     );
   }
-  switch (cell.stream.connection) {
-    case "live":
-      return hud("live", "Ready", "Your computer is live.", "stop");
-    case "stalled":
-    case "disconnected":
-      return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");
-    default:
-      return hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
-  }
+  // A stage that has shown the computer keeps its picture through a reconnect.
+  const connection = cell.stream.connection;
+  if (connection === "stalled" || connection === "disconnected" || picture === "held")
+    return hud("reconnecting", "Reconnecting…", "The stream paused. Reconnecting.", "stop");
+  if (connection === "live" || picture === "live")
+    return hud("live", "Ready", "Your computer is live.", "stop");
+  return hud("connecting", "Connecting…", "Connecting to the stream.", "stop");
 }
 
 const STOP_FAILED = "stop failed: ";

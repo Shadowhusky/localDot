@@ -23,7 +23,7 @@ const LANDMARKS: Record<UiScenarioName, (page: Page) => Promise<void>> = {
   budget: hud("Reached your spending limit"),
   done: hud("Done"),
   continued: hud("Done"),
-  reconnecting: shows((page) => page.locator(".stage-veil.on")),
+  reconnecting: hud("Reconnecting…"),
   paused: hud("Paused"),
   failed: hud("Failed"),
   fenced: shows((page) =>

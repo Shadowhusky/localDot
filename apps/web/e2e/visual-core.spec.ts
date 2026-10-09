@@ -82,10 +82,11 @@ test("the puppet runs a multi-app sequence live in the Theatre with the overlays
   const container = desktopContainer(cell.id);
   expect(container).toBe(`localdot-desktop-${cell.id}`);
   execFileSync("docker", ["pause", container]);
-  await expect(page.locator(".stage-veil.on")).toBeVisible({ timeout: 10_000 });
+  // The stage keeps its last picture and the island says why it is still.
+  await expect(page.getByTestId("hud-status")).toHaveText("Reconnecting…", { timeout: 10_000 });
+  await expect(page.locator(".stage.lit > canvas")).toHaveCSS("opacity", "1");
   await page.waitForTimeout(2500);
   execFileSync("docker", ["unpause", container]);
-  await expect(page.locator(".stage-veil.on")).toHaveCount(0, { timeout: 20_000 });
   await expect(page.getByTestId("hud-status")).toHaveText('Clicking "Page two"', {
     timeout: 120_000,
   });

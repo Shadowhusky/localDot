@@ -469,6 +469,8 @@ const DOT_SPEAKS = new Set<TaskRow>([
   "observing",
 ]);
 
+const AT_WORK = new Set<TaskRow>(["acting", "working", "thinking", "observing"]);
+
 // Computers that can't carry a task: off, failing or not up yet. A late picture (connecting,
 // reconnecting) or a list check leaves the task in charge, since dot works on the computer itself.
 const DOWN = new Set<ComputerPhase>([
@@ -499,12 +501,16 @@ export function statusFor({
   const row: StatusRow = stop
     ? "stopping"
     : (shown?.row ?? (computer.phase === "live" ? "ready" : "computer"));
+  // A reconnecting stream holds its last picture still, so dot's work names why; anything that
+  // waits on the user keeps its own label.
   const label =
     stop === "stopping"
       ? "Stopping…"
       : stop === "unconfirmed"
         ? "Stop unconfirmed"
-        : (shown ?? computer).label;
+        : computer.phase === "reconnecting" && shown && AT_WORK.has(shown.row)
+          ? computer.label
+          : (shown ?? computer).label;
   const actions: HudAction[] =
     stop || (held && held.phase !== "finished")
       ? [

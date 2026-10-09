@@ -291,7 +291,7 @@ test("Keys keeps keyboard focus, an accessible Stop and reduced-preference rende
   const proof = await load(page);
   expect(
     await page
-      .locator(".stage-veil")
+      .locator(".stage > canvas")
       .evaluate((element) => getComputedStyle(element).transitionDuration),
   ).toBe("0s");
   expect(

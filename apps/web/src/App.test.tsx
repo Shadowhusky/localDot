@@ -834,6 +834,17 @@ describe("App HUD", () => {
     pushState(summary("ready", "live"));
     expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
   });
+
+  it("keeps the stage lit while the stream reconnects, and says so in the island", async () => {
+    render(<App fetchImpl={daemon(() => json([summary("ready", "live")])).fetchImpl} />);
+    await waitFor(() => expect(status()).toBe("Ready"));
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(1));
+    pushState(summary("ready", "stalled"));
+    expect(status()).toBe("Reconnecting…");
+    expect(document.querySelector(".stage")?.classList.contains("lit")).toBe(true);
+    pushState(summary("ready", "live"));
+    expect(status()).toBe("Ready");
+  });
 });
 
 // The daemon refuses a status socket before the handshake: 403 for a revoked token, 404 for a cell
