@@ -1,9 +1,10 @@
 import { z } from "zod";
+import { AskFieldId, AskFieldKind, AskFieldRecord, MAX_ASK_FIELDS } from "./ask.ts";
 import { Point, Rect } from "./geometry.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { Input } from "./input.ts";
 import { ActionClass, AlwaysOption, ApprovalCard, PauseSnapshot } from "./safety.ts";
-import { ScreenSwitchData } from "./screens.ts";
+import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
@@ -313,6 +314,28 @@ export const MessageAssistant = event(
   "message.assistant",
   z.object({ messageId: MessageId, text: z.string().max(20_000) }),
 );
+export const AskRequestField = z.object({
+  id: AskFieldId,
+  kind: AskFieldKind,
+  label: z.string().min(1).max(200),
+  hint: z.string().min(1).max(300).optional(),
+  options: z.array(z.string().min(1).max(200)).min(1).max(6).optional(),
+  length: z.number().int().min(4).max(12).optional(),
+  value: z.string().min(1).max(2000).optional(),
+  // secret: where the field the answer is typed into was when dot asked, in the screen's pixels,
+  // and the site whose page holds it.
+  target: z
+    .object({
+      screen: ScreenName,
+      point: Point,
+      bbox: Rect.optional(),
+      site: z.string().min(1).max(255).optional(),
+    })
+    .optional(),
+});
+export type AskRequestField = z.infer<typeof AskRequestField>;
+// A request with `fields` answers per field (options is empty and allowText false); one without
+// is a plain question with lettered options.
 export const AskRequest = event(
   "ask.request",
   z.object({
@@ -322,6 +345,11 @@ export const AskRequest = event(
       .array(z.object({ key: z.string().regex(/^[A-F]$/), text: z.string().min(1).max(200) }))
       .max(6),
     allowText: z.boolean(),
+    fields: z.array(AskRequestField).min(1).max(MAX_ASK_FIELDS).optional(),
+    submit: z.string().min(1).max(40).optional(),
+    decline: z.string().min(1).max(40).optional(),
+    // Only an answer ends it: there is no way out ("Not now").
+    declinable: z.literal(false).optional(),
   }),
 );
 export const SafetyPause = event(
@@ -338,6 +366,10 @@ export const AskAnswer = event(
       .regex(/^[A-F]$/)
       .optional(),
     text: z.string().max(2000).optional(),
+    // Per field id; a secret only as { provided: true }.
+    fields: z.record(AskFieldId, AskFieldRecord).optional(),
+    // The user chose the way out ("Not now").
+    declined: z.literal(true).optional(),
     by: z.enum(["user", "timeout", "stop", "pause"]),
   }),
 );

@@ -124,3 +124,56 @@ it("grows into a decision under its own row, so Stop and Take control never move
   );
   expect(document.querySelector(".island")?.hasAttribute("data-open")).toBe(false);
 });
+
+it("drops a decision under the ring on a field dot will fill, and hangs it back once answered", () => {
+  const box = (element: Element, sizes: Record<string, number>) =>
+    Object.entries(sizes).find(([name]) => element.classList.contains(name))?.[1] ?? 0;
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return box(this, { "island-row": 487 });
+  });
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockImplementation(function (
+    this: HTMLElement,
+  ) {
+    return box(this, { "island-row": 40, "island-card": 276 });
+  });
+  vi.spyOn(Element.prototype, "clientWidth", "get").mockImplementation(function (this: Element) {
+    return box(this, { "stage-box": 1024 });
+  });
+  vi.spyOn(Element.prototype, "clientHeight", "get").mockImplementation(function (this: Element) {
+    return box(this, { "stage-box": 640 });
+  });
+  try {
+    const fields = {
+      screen: { w: 2560, h: 1600 },
+      marks: [
+        {
+          screen: "desktop" as const,
+          point: { x: 1280, y: 760 },
+          bbox: { x: 1040, y: 732, w: 480, h: 56 },
+        },
+      ],
+    };
+    const asking = props({ status: status("question", "Needs your answer", 2) });
+    const view = render(
+      <div className="stage-box">
+        <HudIsland {...asking} fields={fields} decision={<p>Sign in to your mail</p>} />
+      </div>,
+    );
+    const anchor = document.querySelector<HTMLElement>(".island-anchor");
+    // The ring's foot is 324.2 px down the stage; the decision's top goes 12 under it, from -22.
+    expect(Number.parseFloat(anchor?.style.getPropertyValue("--_lower") ?? "")).toBeCloseTo(
+      358.2,
+      6,
+    );
+    view.rerender(
+      <div className="stage-box">
+        <HudIsland {...asking} fields={fields} />
+      </div>,
+    );
+    expect(anchor?.style.getPropertyValue("--_lower")).toBe("");
+  } finally {
+    vi.restoreAllMocks();
+  }
+});

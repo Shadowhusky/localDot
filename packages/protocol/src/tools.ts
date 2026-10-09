@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ASK_FIELD_ID, AskFieldKind, MAX_ASK_FIELDS } from "./ask.ts";
 import { DesktopUploadPath } from "./desktop-uploads.ts";
 import { ULID_PATTERN } from "./ids.ts";
 import { SwitchScreenInput } from "./screens.ts";
@@ -163,11 +164,63 @@ export const UpdatePlanInput = z.object({
 });
 export type UpdatePlanInput = z.infer<typeof UpdatePlanInput>;
 
-export const AskUserInput = z.object({
-  question: z.string().min(1).max(1000),
-  options: z.array(z.string().min(1).max(200)).max(6).optional(),
-  allow_text: z.boolean().optional(),
+// The id's pattern is checked below, not declared: some providers refuse `pattern` in a schema.
+export const AskField = z.object({
+  id: z.string().min(1).max(32),
+  kind: AskFieldKind,
+  label: z.string().min(1).max(200),
+  hint: z.string().min(1).max(300).optional(),
+  // choice and multichoice.
+  options: z.array(z.string().min(1).max(200)).min(1).max(6).optional(),
+  // secret: the field to type the answer into, as [x, y] in the computer tool's coordinates;
+  // without it, the field that has keyboard focus.
+  target: z.array(z.number()).length(2).optional(),
+  // code: how many characters the code has.
+  length: z.number().int().min(4).max(12).optional(),
+  // qr: the text or link the QR code holds.
+  value: z.string().min(1).max(2000).optional(),
 });
+export type AskField = z.infer<typeof AskField>;
+
+const FIELD_ONLY = {
+  options: ["choice", "multichoice"],
+  target: ["secret"],
+  length: ["code"],
+  value: ["qr"],
+} as const satisfies Record<string, readonly AskFieldKind[]>;
+
+export const AskUserInput = z
+  .object({
+    question: z.string().min(1).max(1000),
+    options: z.array(z.string().min(1).max(200)).max(6).optional(),
+    allow_text: z.boolean().optional(),
+    fields: z.array(AskField).min(1).max(MAX_ASK_FIELDS).optional(),
+    // The answer buttons: dot's verb ("Sign in") and the way out ("Not now").
+    submit: z.string().min(1).max(40).optional(),
+    decline: z.string().min(1).max(40).optional(),
+  })
+  .superRefine((input, ctx) => {
+    const issue = (message: string) => ctx.addIssue({ code: "custom", message });
+    if (!input.fields) return;
+    if (input.options || input.allow_text !== undefined)
+      issue("fields replace options and allow_text");
+    const ids = new Set<string>();
+    for (const field of input.fields) {
+      if (!ASK_FIELD_ID.test(field.id))
+        issue(`field id ${JSON.stringify(field.id)} must be lowercase letters, digits or _`);
+      if (ids.has(field.id)) issue(`field id ${field.id} is used twice`);
+      ids.add(field.id);
+      for (const [key, kinds] of Object.entries(FIELD_ONLY))
+        if (
+          field[key as keyof typeof FIELD_ONLY] !== undefined &&
+          !kinds.includes(field.kind as never)
+        )
+          issue(`${key} is only for ${kinds.join(" and ")} fields`);
+      if ((field.kind === "choice" || field.kind === "multichoice") && !field.options)
+        issue(`${field.kind} fields need options`);
+      if (field.kind === "qr" && !field.value) issue("qr fields need the value the code holds");
+    }
+  });
 export type AskUserInput = z.infer<typeof AskUserInput>;
 
 export const RequestTakeoverInput = z.object({

@@ -46,18 +46,27 @@ export const CODEX_TOOL_DESCRIPTIONS: Record<ToolName, string> = {
   browser_upload:
     "Assign 1–10 desktop-home files (100 MiB total maximum) to the currently open file chooser in the web browser, after explicit approval of the exact files and receiving page. This does not submit the page's form. Never retry an uncertain upload automatically.",
   switch_screen:
-    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. Use request_takeover when a site needs the user to sign in. Request a fresh screenshot after switching; shell and files remain on the desktop.",
+    "Switch between the desktop and the web browser: a separate browser that keeps the user's sign-ins between tasks, for anything online. When a site needs the user to sign in, ask for the details with ask_user fields. Request a fresh screenshot after switching; shell and files remain on the desktop.",
   update_plan:
     "Replace the task's plan: the whole list of steps, each todo, doing, done or skipped.",
   ask_user:
     "Ask the user a question and wait for the answer (up to 30 minutes). Only when you cannot continue " +
     "without the user's information or a choice that would change the result; otherwise pick a sensible " +
     "default and mention it in your summary. Never ask for permission: the safety system asks the user " +
-    "before consequential steps. Give up to six short options, and set allow_text to accept a free answer.",
+    "before consequential steps. For a quick choice, give up to six short options, and set allow_text to " +
+    "accept a free answer. " +
+    "To get what the user types, give fields instead of options (up to 4, each with an id, a kind and a short " +
+    "label): text, longtext, secret (a password, PIN or recovery code), code (a one-time code; length if you know " +
+    "it), choice or multichoice (with options), confirm, number, date, email, url, phone, file (the user adds a " +
+    "file and you get its path) or qr (shows value as a QR code for the user's other device). Name the buttons " +
+    'with submit, such as "Sign in", and decline, such as "Not now". A secret answer is typed straight into the ' +
+    "password box at target ([x, y] in screen pixels), or into the password box that has keyboard focus when " +
+    "there is no target; you only learn that it was provided. Answers come back by field id. If the user declines, carry on " +
+    "without it.",
   request_takeover:
-    "Hand the screen to the user and wait until they hand it back. Only for a login, 2FA, a CAPTCHA or " +
-    "payment card entry, or after you have tried at least two different approaches and cannot continue; " +
-    "say in the note what you tried. Never type passwords or card numbers yourself.",
+    "Hand the screen to the user and wait until they hand it back. Only for a CAPTCHA, a device approval " +
+    "(such as confirming a sign-in on the user's phone), or when the user prefers to do it themselves; say in " +
+    "the note what they need to do. For passwords and codes, ask with ask_user fields instead.",
   remember:
     "Add to or replace text in USER.md (about the user) or MEMORY.md (facts worth keeping).",
   done: "Finish the task: a summary for the user, and the paths of any files in the home to hand over.",

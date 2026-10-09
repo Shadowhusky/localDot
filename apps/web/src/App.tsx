@@ -1,14 +1,18 @@
 import {
   DEFAULT_AUTONOMY,
   LLM_PROVIDERS,
+  type QuestionAnswerRequest,
   SessionIndexPage,
   ULID_PATTERN,
 } from "@localdot/protocol";
 import { providerById } from "@localdot/providers";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { AskForm } from "./agent/AskForm.tsx";
-import { Composer } from "./agent/Composer.tsx";
+import { AskForm, type AskUpload } from "./agent/AskForm.tsx";
+import { useAskDraft } from "./agent/ask-draft.ts";
+import { composerReply } from "./agent/ask-form.ts";
+import { Composer, type ReplyOutcome } from "./agent/Composer.tsx";
+import { uploadFile } from "./agent/file-transfer.ts";
 import { SafetyNotes } from "./agent/SafetyNotes.tsx";
 import { StopControl } from "./agent/StopControl.tsx";
 import { TakeoverPanel } from "./agent/TakeoverPanel.tsx";
@@ -66,10 +70,10 @@ import { ActivityRail } from "./shell/ActivityRail.tsx";
 import { ChatThread, type NewConversation, NewConversationButton } from "./shell/ChatThread.tsx";
 import { Curtain } from "./shell/Curtain.tsx";
 import { useCurtain } from "./shell/curtain.ts";
-import { ApprovalDecision, DecisionSheet, QuestionDecision } from "./shell/DecisionIsland.tsx";
+import { ApprovalDecision, DecisionSheet } from "./shell/DecisionIsland.tsx";
 import { FocusControls } from "./shell/FocusControls.tsx";
 import { useFocusMode, useStill } from "./shell/focus.ts";
-import { HudIsland } from "./shell/HudIsland.tsx";
+import { HudIsland, type StageFields } from "./shell/HudIsland.tsx";
 import {
   islandAttention,
   islandDecision,
@@ -84,8 +88,10 @@ import { RailPanel } from "./shell/RailPanel.tsx";
 import { SignIn, type SignInState } from "./shell/SignIn.tsx";
 import { StageFrame } from "./shell/StageFrame.tsx";
 import { TopBar } from "./shell/TopBar.tsx";
+import { useTabAttention } from "./shell/tab-attention.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
 import { Button } from "./ui/Button.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
@@ -497,6 +503,44 @@ function Theatre({ api }: { api: ApiClient }) {
     (!agent.fresh || agent.snapshot?.pendingTakeover === agent.model.pendingTakeover)
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
+  const askDraft = useAskDraft(question);
+  const answer = useRef(controls.answer);
+  answer.current = controls.answer;
+  const answerAsk = useCallback((request: QuestionAnswerRequest) => answer.current(request), []);
+  const askCell = cell?.state === "ready" && !cell.paused ? cell.id : null;
+  const uploadAsk = useMemo<AskUpload | undefined>(
+    () => (askCell ? (file, signal) => uploadFile(api, askCell, file, signal) : undefined),
+    [api, askCell],
+  );
+  const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
+  // While dot waits on the answer, the stage keeps its ring on each field a secret goes into.
+  const askMarks = useMemo<readonly FieldMark[] | undefined>(
+    () =>
+      askDraft?.question.fields?.flatMap(({ target }) =>
+        target
+          ? [
+              {
+                screen: target.screen,
+                point: target.point,
+                ...(target.bbox ? { bbox: target.bbox } : {}),
+              },
+            ]
+          : [],
+      ),
+    [askDraft],
+  );
+  const shownScreen = selectedScreen?.screen ?? "desktop";
+  const askFields = useMemo<StageFields | undefined>(() => {
+    const marks = askMarks?.filter((mark) => mark.screen === shownScreen);
+    return manualGeometry && marks?.length ? { screen: manualGeometry, marks } : undefined;
+  }, [askMarks, shownScreen, manualGeometry]);
+  const replyAsk = async (text: string, attached: boolean): Promise<ReplyOutcome> => {
+    if (!askDraft) return "failed";
+    const plan = composerReply(askDraft.question, text, attached);
+    if (plan.kind === "hold") return { hold: plan.reason };
+    if (!(await answerAsk(plan.request))) return "failed";
+    return plan.kind === "answer" ? "answered" : "declined";
+  };
   const manualLive =
     !!takeover &&
     controls.canInput &&
@@ -674,9 +718,7 @@ function Theatre({ api }: { api: ApiClient }) {
       if (context?.request === request) void settings.keySaved(context.capture, key);
     },
   };
-  useEffect(() => {
-    document.title = appStatus.title;
-  }, [appStatus.title]);
+  useTabAttention(appStatus);
   const newConversation: NewConversation = {
     run: () => {
       void conversation.startNew();
@@ -825,22 +867,51 @@ function Theatre({ api }: { api: ApiClient }) {
       layout={phone ? "sheet" : "island"}
     />
   );
+  // One question, answered where you are: in the thread, in the island while you watch the
+  // computer, or in a phone's sheet. Each is the same draft, so answering one answers all.
+  const askIn =
+    !askDraft || replayId || !sheetsClosed
+      ? null
+      : phone
+        ? "sheet"
+        : decision === "question"
+          ? "island"
+          : "thread";
+  const askThread = useMemo(
+    () =>
+      askDraft && askIn === "thread" ? (
+        <AskForm
+          key={askDraft.question.askId}
+          draft={askDraft}
+          layout="thread"
+          answer={answerAsk}
+          reason={askReason}
+          upload={uploadAsk}
+          receiveKey={receiveKey}
+        />
+      ) : undefined,
+    [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey],
+  );
+  const askOver = (layout: "island" | "sheet") =>
+    askDraft && (
+      <AskForm
+        key={askDraft.question.askId}
+        draft={askDraft}
+        layout={layout}
+        answer={answerAsk}
+        reason={askReason}
+        upload={uploadAsk}
+        receiveKey={receiveKey}
+      />
+    );
   const grown =
     phone || !decision
       ? undefined
       : decision === "approval"
         ? approvalView
-        : question && (
-            <QuestionDecision question={question.question}>
-              <AskForm
-                key={question.askId}
-                question={question}
-                controls={controls}
-                visible
-                receiveKey={receiveKey}
-              />
-            </QuestionDecision>
-          );
+        : askIn === "island"
+          ? askOver("island")
+          : undefined;
   const take = () => {
     if (decision !== "approval" || !approval) {
       setRailView("takeover");
@@ -865,6 +936,9 @@ function Theatre({ api }: { api: ApiClient }) {
         ? appStatus.caption.text
         : "";
   const speaker = phone && approvalView ? "dot" : appStatus.caption.speaker;
+  const asked = agent.model.pendingAsk
+    ? agent.model.questions.get(agent.model.pendingAsk)?.question
+    : undefined;
   const pause = pauseSlot({
     pause: safety.pause,
     canPause: safety.canPause,
@@ -1005,6 +1079,7 @@ function Theatre({ api }: { api: ApiClient }) {
                     onTake={take}
                     onComputer={onComputer}
                     decision={grown}
+                    fields={askFields}
                     notices={
                       <>
                         <StopControl controls={controls} inIsland />
@@ -1025,6 +1100,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 <NarratorBand
                   line={narration}
                   speaker={speaker}
+                  reveal={!!asked && narration === asked}
                   showDot={showDot.value}
                   note={focus && stepCount ? `Step ${stepCount}` : undefined}
                 />
@@ -1056,6 +1132,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 ref={stage}
                 mode={replayId ? "replay" : "live"}
                 dim={decision !== null}
+                fields={replayId ? undefined : askMarks}
                 cell={stageCell}
                 parentId={cell?.id}
                 selection={selectedScreen}
@@ -1184,17 +1261,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   onContinue={continueTask}
                 />
               }
-              answer={
-                question && !agent.model.ended && decision !== "question" ? (
-                  <AskForm
-                    key={question.askId}
-                    question={question}
-                    controls={controls}
-                    visible={shownView === "chat" && !settings.open}
-                    receiveKey={receiveKey}
-                  />
-                ) : undefined
-              }
+              ask={askThread}
               composer={
                 <Composer
                   api={api}
@@ -1215,6 +1282,7 @@ function Theatre({ api }: { api: ApiClient }) {
                   onSettings={(trigger) => showSettings(trigger, "models")}
                   onTaskStarted={session.check}
                   layout={phone ? "pill" : "card"}
+                  reply={askDraft ? replyAsk : undefined}
                 />
               }
             />
@@ -1341,10 +1409,10 @@ function Theatre({ api }: { api: ApiClient }) {
           }}
         />
       </ErrorBoundary>
-      {phone && approvalView && (
+      {phone && (approvalView || askIn === "sheet") && (
         <ErrorBoundary floating>
           <DecisionSheet label={appStatus.label} elapsedS={appStatus.elapsedS}>
-            {approvalView}
+            {approvalView || askOver("sheet")}
           </DecisionSheet>
         </ErrorBoundary>
       )}
