@@ -764,7 +764,7 @@ export class AgentSession {
         finished = true;
         if (uncertain) {
           record.manualUnconfirmed = true;
-          if (confirm) record.confirm = confirm;
+          record.confirm = confirm;
         }
         this.#manual.delete(lease);
         resolve();

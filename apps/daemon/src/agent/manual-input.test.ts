@@ -222,6 +222,28 @@ describe("daemon-owned manual input", () => {
     expect(await f.outcome).toEqual({ by: "user" });
     expect(f.access.confirm).toHaveBeenCalledOnce();
   });
+  it("never lifts a later input's fence with an earlier screen's confirmation", async () => {
+    const f = await setup();
+    const confirm = vi.fn(async () => {});
+    f.access.confirm = confirm;
+    f.input.mockRejectedValueOnce(new Error("synthetic press not seen"));
+    await expect(f.send(click)).rejects.toBeInstanceOf(ManualInputUncertain);
+    await vi.waitFor(() => expect(f.session.manualControl).toBe("ready"));
+    // The next input goes to a screen that cannot confirm what landed.
+    const unconfirmable: ManualDesktop = { ...f.access, confirm: undefined };
+    f.input.mockRejectedValueOnce(new Error("synthetic press not seen"));
+    await expect(
+      sendManualInput(
+        f.session,
+        { requestId: f.requestId, input: click },
+        new AbortController().signal,
+        () => unconfirmable,
+      ),
+    ).rejects.toBeInstanceOf(ManualInputUncertain);
+    expect(await f.session.handback(f.requestId, undefined)).toBe(false);
+    expect(f.session.manualControl).toBe("unconfirmed");
+    expect(confirm).toHaveBeenCalledOnce();
+  });
   it("asks the computer again until it confirms, and hand-back asks too", async () => {
     vi.useFakeTimers();
     try {
