@@ -93,6 +93,9 @@ const PATTERNS = {
     ["eval", {}],
     ["chroot", { long: /^--(?:userspec|groups)$/, operands: 1 }],
     ["exec", { value: "a" }],
+    ["busybox", {}],
+    // watch runs its words as one command string, through a shell.
+    ["watch", { value: "nq", long: /^--(?:interval|equexit)$/ }],
     [
       "xargs",
       {
@@ -856,6 +859,7 @@ function program(stage: Stage): Run {
       const options = PATTERNS.wrappers.get(name);
       const rest = options && unwrap(args, options);
       if (!rest) return { words: tokens, nested };
+      if (name === "watch" && rest.length) nested.push(rest.join(" "));
       tokens = rest;
     }
   }
