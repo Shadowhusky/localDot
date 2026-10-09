@@ -23,7 +23,9 @@ const (
 	// linkAddr is the gate's end of the desktop's link (cells/gate/link.sh).
 	linkAddr    = "192.0.0.1"
 	capturePort = 3130
-	dnsPort     = 5353
+	// keydRelayPort is the gate's relay to keyd on the cell network (cells/gate/relay.sh).
+	keydRelayPort = 3128
+	dnsPort       = 5353
 	// keyd holds a connection for the user for at most two minutes; its answer comes within this.
 	answerWithin = 3 * time.Minute
 	// A program that connected to an address says within this which name it means, if it ever does.
@@ -43,10 +45,6 @@ func run() error {
 	self, err := netip.ParseAddr(os.Getenv("LD_INTERNAL_ADDR"))
 	if err != nil || !self.Is4() {
 		return fmt.Errorf("LD_INTERNAL_ADDR must be the gate's IPv4 address on the cell network")
-	}
-	port, err := strconv.Atoi(os.Getenv("LD_KEYD_PORT"))
-	if err != nil || port < 1 || port > 65535 {
-		return fmt.Errorf("LD_KEYD_PORT must be keyd's listener port")
 	}
 	token := os.Getenv("LD_CAPTURE_TOKEN")
 	if !tokenPattern.MatchString(token) {
@@ -74,8 +72,9 @@ func run() error {
 		go func() { failed <- gate.ServeTCP(tcp, pool) }()
 	}
 	var d net.Dialer
+	// keyd through the gate's own relay out (relay.sh), which knows the way on every engine.
 	capture := &gate.Capture{
-		Keyd: net.JoinHostPort("host.docker.internal", strconv.Itoa(port)), Token: token,
+		Keyd: at(self.String(), keydRelayPort), Token: token,
 		Self: netip.MustParseAddr(linkAddr), Pool: pool, Original: gate.OriginalDst, Dial: d.DialContext,
 		Answer: answerWithin, Limit: 256, Sniff: sniffWithin,
 	}
