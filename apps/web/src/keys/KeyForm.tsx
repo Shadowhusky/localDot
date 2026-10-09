@@ -34,7 +34,7 @@ import {
   valueHint,
   valueProblem,
 } from "./binding.ts";
-import { problemText } from "./keys-api.ts";
+import { lockedVaultError, problemText } from "./keys-api.ts";
 
 export interface KeyFormProps {
   active: boolean;
@@ -366,7 +366,12 @@ export function KeyForm({
       setSaved(restart ? `Saved ${id}. Restart your computer to use it there.` : `Saved ${id}.`);
     } catch (err) {
       if (!current()) return;
-      setProblem({ field: "form", message: `${problemText(err)} Paste the key again to retry.` });
+      setProblem({
+        field: "form",
+        message: lockedVaultError(err)
+          ? `${problemText(err)}, then paste the key again.`
+          : `${problemText(err)} Paste the key again to retry.`,
+      });
     } finally {
       savingRef.current = false;
       if (mounted.current) setSaving(false);

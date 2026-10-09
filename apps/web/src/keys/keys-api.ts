@@ -2,6 +2,7 @@ import {
   clipText,
   type HairpinGuard,
   KeydRecord,
+  type KeydVault,
   SECRET_ID_PATTERN,
   type Sealed,
   SecretBinding,
@@ -17,8 +18,16 @@ export interface KeydHealth {
   sealKey?: string;
   audit?: { ok: boolean; error?: string };
   hairpin?: HairpinGuard;
+  // Off macOS: where saved keys live, and whether they wait for localdot unlock.
+  vault?: KeydVault;
   error?: string;
 }
+
+export const UNLOCK = "localdot unlock";
+export const VAULT_LOCKED = `Saved keys are locked. On that computer, run: ${UNLOCK}`;
+
+export const vaultLocked = (health: KeydHealth | null) =>
+  health?.online === true && (health.vault?.state === "locked" || health.vault?.state === "setup");
 
 export interface KeyRecord {
   id: string;
@@ -107,6 +116,7 @@ export const deleteKey = (api: ApiClient, id: string) =>
 // The daemon's refusals are `{ error, message }`; anything else becomes one plain sentence.
 export function problemText(err: unknown): string {
   if (err instanceof KeyProblem) return err.message;
+  if (lockedVaultError(err)) return VAULT_LOCKED;
   if (err instanceof ApiError) {
     const body = parse(err.message);
     if (body?.message) return sentence(body.message);
@@ -114,6 +124,9 @@ export function problemText(err: unknown): string {
   }
   return "Something went wrong saving the key. Try again.";
 }
+
+export const lockedVaultError = (err: unknown) =>
+  err instanceof ApiError && err.status === 423 && errorCode(err) === "vault-locked";
 
 function errorCode(err: unknown): string | undefined {
   return err instanceof ApiError ? parse(err.message)?.error : undefined;

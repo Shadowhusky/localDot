@@ -1110,3 +1110,29 @@ func TestASecretReplacedWhileARequestWaitsIsNotSent(t *testing.T) {
 		t.Fatalf("the waiting request got %d; the provider saw keys %q", status, sent)
 	}
 }
+
+type lockedGets struct{ vault.Store }
+
+func (lockedGets) Get(string, string) ([]byte, error) { return nil, vault.ErrLocked }
+
+// A file vault waiting for its passphrase says so, instead of a generic missing secret.
+func TestALockedVaultAnswers423(t *testing.T) {
+	var reached atomic.Bool
+	g := newGateway(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) { reached.Store(true) }), nil)
+	path := filepath.Join(t.TempDir(), "secrets.json")
+	store := vault.NewMemory()
+	v, err := vault.Open(store, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := v.Put(vault.Record{ID: "anthropic", Kind: vault.KindLLM, Provider: "anthropic"}, []byte(realValue)); err != nil {
+		t.Fatal(err)
+	}
+	if g.cell.deps.Vault, err = vault.Open(lockedGets{store}, path); err != nil {
+		t.Fatal(err)
+	}
+	resp, _ := g.post(t, "http://llm.ldot/anthropic/messages", g.key(), sonnet)
+	if resp.StatusCode != http.StatusLocked || resp.Header.Get("X-Keyd-Reason") != ReasonVaultLocked || reached.Load() {
+		t.Fatalf("%d %q reached=%v", resp.StatusCode, resp.Header.Get("X-Keyd-Reason"), reached.Load())
+	}
+}

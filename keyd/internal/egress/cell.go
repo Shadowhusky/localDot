@@ -48,6 +48,7 @@ const (
 	ReasonRevoked       = "revoked"
 	ReasonEncoding      = "undecodable-encoding"
 	ReasonSecret        = "secret-unavailable"
+	ReasonVaultLocked   = "vault-locked"
 	ReasonNoAudit       = "audit-unavailable"
 	ReasonConnectionCap = "connection-cap"
 )

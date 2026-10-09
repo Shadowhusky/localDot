@@ -15,7 +15,7 @@ import { PHONE, useMediaQuery } from "../ui/media.ts";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { KeyForm, type KeyFormPreset, type KeyIntake } from "./KeyForm.tsx";
 import { KeyList } from "./KeyList.tsx";
-import type { KeyRecord } from "./keys-api.ts";
+import { type KeyRecord, vaultLocked } from "./keys-api.ts";
 import { Protection } from "./Protection.tsx";
 import type { KeysController } from "./useKeys.ts";
 import "./keys.css";
@@ -24,6 +24,7 @@ export const KEYS_DESCRIPTION =
   "Your keys stay on this Mac. Apps on your computer get stand-in keys and never see the real ones.";
 
 const HELD = "Keys are held until the audit log works again";
+const LOCKED = "Saved keys are locked until you unlock them on the computer running localDot";
 
 export interface KeysPanelProps {
   active: boolean;
@@ -63,6 +64,7 @@ export function KeysPanel({
   const health = keys.health;
   const offline = health?.online === false;
   const held = health?.online === true && health.audit?.ok === false;
+  const locked = vaultLocked(health);
   // Only the first list waits with a placeholder: a reload keeps the list it had.
   const loading =
     !health ||
@@ -75,7 +77,9 @@ export function KeysPanel({
       ? "Key protection is off"
       : held
         ? HELD
-        : undefined;
+        : locked
+          ? LOCKED
+          : undefined;
 
   // Asked for a key for a provider, Keys opens the form and brings it into view.
   useLayoutEffect(() => {
@@ -173,7 +177,7 @@ export function KeysPanel({
                 <KeyList
                   active={active}
                   keys={keys.keys}
-                  unavailable={held ? HELD : undefined}
+                  unavailable={held ? HELD : locked ? LOCKED : undefined}
                   busy={keys.busy}
                   uses={uses}
                   fresh={fresh}

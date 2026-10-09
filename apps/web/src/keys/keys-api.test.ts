@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { type ApiClient, ApiError } from "../lib/api.ts";
-import { deleteKey, KeyProblem, problemText, saveKey } from "./keys-api.ts";
+import { deleteKey, KeyProblem, lockedVaultError, problemText, saveKey } from "./keys-api.ts";
+import { protectionOf } from "./Protection.tsx";
 import { keyStatus } from "./useKeys.ts";
 
 const binding = {
@@ -175,6 +176,18 @@ describe("problemText", () => {
     );
     expect(problemText(new Error("boom"))).toBe("Something went wrong saving the key. Try again.");
   });
+
+  it("says where to unlock saved keys that are locked", () => {
+    const locked = new ApiError(
+      423,
+      JSON.stringify({ error: "vault-locked", message: "anything the daemon says" }),
+    );
+    expect(lockedVaultError(locked)).toBe(true);
+    expect(problemText(locked)).toBe(
+      "Saved keys are locked. On that computer, run: localdot unlock",
+    );
+    expect(lockedVaultError(new ApiError(423, "{}"))).toBe(false);
+  });
 });
 
 describe("deleteKey", () => {
@@ -210,5 +223,34 @@ describe("keyStatus", () => {
       label: "Keys",
       state: "ok",
     });
+    for (const state of ["locked", "setup"] as const)
+      expect(
+        keyStatus({ online: true, hairpin: active, vault: { backend: "file", state } }),
+      ).toEqual({ label: "Keys locked", state: "locked" });
+  });
+});
+
+describe("protectionOf", () => {
+  const active = { state: "active" as const, source: "nat-pmp", addresses: 1 };
+  const row = (health: Parameters<typeof protectionOf>[0]) =>
+    protectionOf(health).find((status) => status.name === "Saved keys");
+
+  it("adds saved keys off macOS, with the command that unlocks them", () => {
+    expect(row({ online: true, hairpin: active })).toBeUndefined();
+    expect(
+      row({ online: true, hairpin: active, vault: { backend: "file", state: "locked" } }),
+    ).toEqual({
+      name: "Saved keys",
+      state: "Locked",
+      tone: "bad",
+      problem: "Saved keys are locked.",
+      fix: { lead: "On that computer, run:", command: "localdot unlock" },
+    });
+    expect(
+      row({ online: true, hairpin: active, vault: { backend: "file", state: "setup" } })?.state,
+    ).toBe("Needs a passphrase");
+    expect(
+      row({ online: true, hairpin: active, vault: { backend: "secret-service", state: "ready" } }),
+    ).toEqual({ name: "Saved keys", state: "In your keyring", tone: "ok" });
   });
 });

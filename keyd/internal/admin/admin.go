@@ -217,6 +217,10 @@ func (s *Server) putSecret(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	revoked, err := s.Manager.PutSecret(rec, value)
+	if errors.Is(err, vault.ErrLocked) {
+		failLocked(w)
+		return
+	}
 	if err != nil {
 		log.Printf("keyd: storing secret %s failed", id)
 		fail(w, http.StatusInternalServerError, "vault", "the secret could not be stored")
@@ -233,6 +237,10 @@ func (s *Server) deleteSecret(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, vault.ErrNotFound) {
 			fail(w, http.StatusNotFound, "not-found", "no such secret")
+			return
+		}
+		if errors.Is(err, vault.ErrLocked) {
+			failLocked(w)
 			return
 		}
 		fail(w, http.StatusInternalServerError, "vault", "the secret could not be deleted")
@@ -456,6 +464,11 @@ func reply(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	json.NewEncoder(w).Encode(v)
+}
+
+// failLocked: the file vault waits for its passphrase, which only localdot unlock can give it.
+func failLocked(w http.ResponseWriter) {
+	fail(w, http.StatusLocked, "vault-locked", "saved keys are locked until localdot unlock is run on this machine")
 }
 
 func fail(w http.ResponseWriter, status int, code, message string) {

@@ -3,7 +3,7 @@ import { Badge } from "../ui/Badge.tsx";
 import { Disclosure } from "../ui/Disclosure.tsx";
 import { Group, GroupRow, IconTile } from "../ui/Group.tsx";
 import type { IconName } from "../ui/icons.ts";
-import type { KeydHealth } from "./keys-api.ts";
+import { type KeydHealth, UNLOCK, vaultLocked } from "./keys-api.ts";
 
 export const DOCTOR = "localdot doctor";
 
@@ -16,6 +16,8 @@ interface Status {
   // Unhealthy: what it means, in one sentence, and the raw error behind it.
   problem?: string;
   details?: string;
+  // The command that fixes it, and where to run it.
+  fix?: { lead: string; command: string };
 }
 
 const CHECKING: Pick<Status, "state" | "tone"> = { state: "Checking…", tone: "wait" };
@@ -70,7 +72,35 @@ export function protectionOf(health: KeydHealth | null): Status[] {
                 "It's still finding this network's public address. Until then, your computer could reach your router through it.",
               details: guard?.error,
             };
-  return [isolation, audit, network];
+  return health?.online && health.vault
+    ? [isolation, audit, network, savedKeys(health)]
+    : [isolation, audit, network];
+}
+
+// Off macOS only: keyd's vault may wait for a passphrase that only localdot unlock gives it.
+function savedKeys(health: KeydHealth): Status {
+  const name = "Saved keys";
+  const fix = { lead: "On that computer, run:", command: UNLOCK };
+  if (vaultLocked(health))
+    return health.vault?.state === "setup"
+      ? {
+          name,
+          state: "Needs a passphrase",
+          tone: "bad",
+          problem: "Choose a passphrase for saved keys before you add one.",
+          fix,
+        }
+      : { name, state: "Locked", tone: "bad", problem: "Saved keys are locked.", fix };
+  const vault = health.vault;
+  const state =
+    vault?.backend === "secret-service"
+      ? "In your keyring"
+      : vault?.backend === "memory"
+        ? "Until restart"
+        : vault?.key === "passphrase"
+          ? "Unlocked"
+          : "Encrypted";
+  return { name, state, tone: "ok" };
 }
 
 function Glyph({ tone }: { tone: Exclude<Tone, "ok"> }) {
@@ -82,6 +112,7 @@ const TILE: Record<string, IconName> = {
   "Key isolation": "lock",
   "Audit log": "file-text",
   "Network protection": "shield",
+  "Saved keys": "key-round",
 };
 
 // What keeps keys safe, one row each, so a problem says what it means and how to fix it.
@@ -105,8 +136,8 @@ export function Protection({ health }: { health: KeydHealth | null }) {
                 <div className="keys-status-help">
                   <p>{status.problem}</p>
                   <div className="keys-status-fix">
-                    <span>To fix it, run this in Terminal:</span>
-                    <CommandChip text={DOCTOR} />
+                    <span>{status.fix?.lead ?? "To fix it, run this in Terminal:"}</span>
+                    <CommandChip text={status.fix?.command ?? DOCTOR} />
                   </div>
                   {status.details && (
                     <Disclosure summary="Details" className="keys-status-details">

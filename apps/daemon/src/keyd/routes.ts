@@ -16,6 +16,8 @@ export interface KeyRoutesDeps {
   afterChange?: (secretId: string) => Promise<{ restart: boolean }>;
 }
 
+export const VAULT_LOCKED = "Saved keys are locked. On that computer, run: localdot unlock";
+
 // A sealed v1 blob of the largest value keyd takes is about 11 KB; nothing a browser sends here
 // is legitimately bigger.
 const MAX_BODY = 64 * 1024;
@@ -117,6 +119,7 @@ async function withKeyd(c: Context, fn: () => Promise<Response>): Promise<Respon
       // bad-seal: keyd restarted with a new seal key, or the binding changed after sealing; the UI
       // fetches /api/keyd again and seals once more.
       if (err.code === "bad-seal") return refuse(c, 409, "bad-seal", "seal the key again");
+      if (err.code === "vault-locked") return refuse(c, 423, "vault-locked", VAULT_LOCKED);
       if (err.code === "vault")
         return refuse(c, 502, "vault", "key protection could not store the key");
       if (err.status === 404) return refuse(c, 404, "not-found", "no such key");
@@ -129,7 +132,7 @@ async function withKeyd(c: Context, fn: () => Promise<Response>): Promise<Respon
 
 function refuse(
   c: Context,
-  status: 400 | 404 | 409 | 413 | 502 | 503,
+  status: 400 | 404 | 409 | 413 | 423 | 502 | 503,
   error: string,
   message: string,
 ): Response {
