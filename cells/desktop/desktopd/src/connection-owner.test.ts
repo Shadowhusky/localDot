@@ -41,6 +41,21 @@ describe("connectionOwner", () => {
     expect(await connectionOwner(41234, dir)).toBe("wechat");
   });
 
+  it("calls an app by the name its launcher entry gives it", async () => {
+    const dir = proc(row("020000C0:A112", "020012C6:1466", "01", 7001), {
+      "100": { comm: "wechat", sockets: [7001] },
+    });
+    const apps = join(dir, "applications");
+    mkdirSync(apps);
+    writeFileSync(
+      join(apps, "wechat.desktop"),
+      "[Desktop Entry]\nName=WeChat\nName[zh_CN]=\u5fae\u4fe1\nExec=/usr/bin/wechat %U\nType=Application\n[Desktop Action New]\nName=New window\nExec=other\n",
+    );
+    writeFileSync(join(apps, "editor.desktop"), "[Desktop Entry]\nName=Editor\nExec=mousepad %F\n");
+    expect(await connectionOwner(41234, dir, [apps])).toBe("WeChat");
+    expect(await connectionOwner(41234, dir, [join(dir, "none")])).toBe("wechat");
+  });
+
   it("ignores listening sockets and says nothing for a port nobody holds", async () => {
     const dir = proc(row("00000000:A112", "00000000:0000", "0A", 7001), {
       "100": { comm: "server", sockets: [7001] },
