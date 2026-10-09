@@ -19,6 +19,8 @@ import {
   type ServiceSettings,
   serviceConfigurationId,
   serviceLocation,
+  serviceManager,
+  systemdWord,
 } from "./service-definition.ts";
 
 const readInstalled = vi.hoisted(() => vi.fn());
@@ -219,7 +221,7 @@ it("separates ownership generations and refuses malformed ownership inputs", () 
     f.manifest,
   );
   expect(next.daemon.label).not.toBe(first.daemon.label);
-  expect(next.daemon.plist).not.toBe(first.daemon.plist);
+  expect(next.daemon.file).not.toBe(first.daemon.file);
   for (const id of ["", "foreign", "a".repeat(31), "A".repeat(32), `../${"a".repeat(32)}`])
     expect(() =>
       defineReleaseServices({ ...settings, ownerId: id }, f.identity, f.manifest),
@@ -246,12 +248,13 @@ describe("start at login agent", () => {
   it("lives in the user's LaunchAgents folder under a per-installation label", () => {
     const suffix = createHash("sha256").update(loginSettings.home).digest("hex");
     const label = `dev.localdot.${suffix}.${"a".repeat(32)}.login`;
-    expect(loginServiceLocation(loginSettings)).toEqual({
+    expect(loginServiceLocation(loginSettings, "launchd")).toEqual({
+      manager: "launchd",
       label,
       domain: "gui/501",
       target: `gui/501/${label}`,
       directory: "/Users/sam/Library/LaunchAgents",
-      plist: `/Users/sam/Library/LaunchAgents/${label}.plist`,
+      file: `/Users/sam/Library/LaunchAgents/${label}.plist`,
     });
   });
 
@@ -297,5 +300,59 @@ describe("start at login agent", () => {
       expect(services[role].contents).toContain("<key>RunAtLoad</key><false/>");
       expect(services[role].contents).toContain("<key>KeepAlive</key><false/>");
     }
+  });
+});
+
+describe("systemd user units", () => {
+  it("chooses launchd on macOS and systemd on Linux, and nothing elsewhere", () => {
+    expect(serviceManager("darwin")).toBe("launchd");
+    expect(serviceManager("linux")).toBe("systemd");
+    expect(() => serviceManager("win32")).toThrow();
+  });
+
+  it("names each unit file by its label, so the user manager can link it", () => {
+    const configuration = "d".repeat(64);
+    const daemon = serviceLocation(
+      settings.state,
+      settings.home,
+      settings.uid,
+      settings.ownerId,
+      configuration,
+      "systemd",
+    ).daemon;
+    expect(daemon.target).toBe(`${daemon.label}.service`);
+    expect(daemon.domain).toBe("user");
+    expect(daemon.file).toBe(
+      `${settings.state}/services/${settings.ownerId}/${configuration}/${daemon.label}.service`,
+    );
+  });
+
+  it("quotes every ExecStart word so systemd passes it on unchanged", () => {
+    expect(systemdWord('A={"o":"1"}')).toBe('"A={\\"o\\":\\"1\\"}"');
+    expect(systemdWord("100% of $HOME")).toBe('"100%% of $$HOME"');
+    expect(systemdWord("a\\b")).toBe('"a\\\\b"');
+  });
+
+  it("starts nothing on its own and runs the same cleared command as the plist", () => {
+    const f = fixture(),
+      launchd = defineReleaseServices(settings, f.identity, f.manifest, "launchd"),
+      systemd = defineReleaseServices(settings, f.identity, f.manifest, "systemd");
+    for (const role of ["keyd", "daemon"] as const) {
+      const unit = systemd[role];
+      expect(unit.arguments).toEqual(launchd[role].arguments);
+      expect(unit.contents).toContain("[Service]\nType=exec\n");
+      expect(unit.contents).toContain(`ExecStart=${unit.arguments.map(systemdWord).join(" ")}\n`);
+      expect(unit.contents).toContain("Restart=no\n");
+      expect(unit.contents).toContain(`StandardOutput=append:${settings.state}/logs/${role}.log\n`);
+      expect(unit.contents).not.toContain("[Install]");
+    }
+  });
+
+  it("enables the login unit for the user's default target", () => {
+    const login = defineLoginService(loginSettings, loginRelease, "systemd");
+    expect(login.file).toBe(`/Users/sam/.config/systemd/user/${login.label}.service`);
+    expect(login.contents).toContain("Type=oneshot\n");
+    expect(login.contents).toContain("[Install]\nWantedBy=default.target\n");
+    expect(login.contents).toContain('"up" "--from-login"');
   });
 });

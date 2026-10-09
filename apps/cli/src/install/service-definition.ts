@@ -10,6 +10,8 @@ import { readInstalledRelease } from "./promote-release.ts";
 import { releaseDirectoryName } from "./release-layout.ts";
 
 export type ServiceRole = "keyd" | "daemon";
+// launchd on macOS, the systemd user manager on Linux and WSL 2.
+export type ServiceManager = "launchd" | "systemd";
 export interface ServiceSettings {
   state: string;
   home: string;
@@ -21,6 +23,11 @@ export interface ServiceSettings {
   ownerId: string;
 }
 const invalid = () => new Error("Invalid localDot service configuration.");
+export function serviceManager(platform: NodeJS.Platform = process.platform): ServiceManager {
+  if (platform === "darwin") return "launchd";
+  if (platform === "linux") return "systemd";
+  throw invalid();
+}
 const unsafeCharacter = (value: string) =>
   [...value].some((character) => {
     const code = character.codePointAt(0) ?? 0;
@@ -55,22 +62,33 @@ export function serviceLocation(
   uid: number,
   ownerId: string,
   configuration: string,
+  manager: ServiceManager = serviceManager(),
 ) {
   const state = path(stateInput),
     home = path(homeInput);
   if (!Number.isSafeInteger(uid) || uid <= 0 || uid > 0xffff_fffe) throw invalid();
   if (!/^[a-f0-9]{32}$/.test(ownerId) || !/^[a-f0-9]{64}$/.test(configuration)) throw invalid();
+  if (manager !== "launchd" && manager !== "systemd") throw invalid();
   const suffix = createHash("sha256").update(home).digest("hex");
-  const domain = `gui/${uid}`;
+  // systemd names a user unit by its file, so the file carries the label.
+  const domain = manager === "launchd" ? `gui/${uid}` : "user";
   const location = (role: ServiceRole) => {
     if (role !== "keyd" && role !== "daemon") throw invalid();
     const label = `dev.localdot.${suffix}.${ownerId}.${role}`;
+    const unit = `${label}.service`;
     return Object.freeze({
       role,
+      manager,
       label,
       domain,
-      target: `${domain}/${label}`,
-      plist: join(state, "services", ownerId, configuration, `${role}.plist`),
+      target: manager === "launchd" ? `${domain}/${label}` : unit,
+      file: join(
+        state,
+        "services",
+        ownerId,
+        configuration,
+        manager === "launchd" ? `${role}.plist` : unit,
+      ),
       state,
       home,
       uid,
@@ -149,14 +167,39 @@ export function plistDocument(values: Record<string, PlistValue>): string {
     .join("")}</dict></plist>\n`;
 }
 
+// systemd splits ExecStart= on spaces, expands $VAR and %-specifiers and reads C escapes inside
+// quotes, so every word is quoted with each of those characters escaped: it reaches the program
+// exactly as written.
+export function systemdWord(value: string): string {
+  return `"${value
+    .replace(/[\\"]/g, (c) => `\\${c}`)
+    .replaceAll("%", "%%")
+    .replaceAll("$", "$$$$")}"`;
+}
+// A path in a unit setting that expands specifiers but not quotes.
+const systemdPath = (value: string) => value.replaceAll("%", "%%");
+
+export function systemdUnit(sections: Record<string, Record<string, string>>): string {
+  return `${Object.entries(sections)
+    .map(
+      ([name, entries]) =>
+        `[${name}]\n${Object.entries(entries)
+          .map(([key, value]) => `${key}=${value}\n`)
+          .join("")}`,
+    )
+    .join("\n")}`;
+}
+
 /** Pure builder: inputs must already be verified. No filesystem/process effects, no shell, no
  * dev-image defaults. The production entry point below obtains manifest authority from the
- * installed anchor. env -i also clears launchd's inherited environment, including NODE_OPTIONS.
+ * installed anchor. env -i also clears the service manager's inherited environment, including
+ * NODE_OPTIONS.
  */
 export function defineReleaseServices(
   input: ServiceSettings,
   identityInput: ReleaseIdentity,
   manifestInput: ReleaseManifest,
+  manager: ServiceManager = serviceManager(),
 ) {
   const settings = { ...input };
   const identity = ReleaseIdentity.parse(identityInput);
@@ -172,6 +215,7 @@ export function defineReleaseServices(
     settings.uid,
     settings.ownerId,
     configuration,
+    manager,
   );
   const release = join(settings.state, "releases", releaseDirectoryName(identity));
   const common = {
@@ -214,33 +258,54 @@ export function defineReleaseServices(
       configuration,
       role,
     ]);
-    const values: Record<string, PlistValue> = {
-      Label: location.label,
-      ProgramArguments: args,
-      WorkingDirectory: settings.home,
-      RunAtLoad: false,
-      KeepAlive: false,
-      ProcessType: "Background",
-      Umask: 0o077,
-      ExitTimeOut: 20,
-      StandardOutPath: join(settings.state, "logs", `${role}.log`),
-      StandardErrorPath: join(settings.state, "logs", `${role}.error.log`),
-    };
-    const plist = plistDocument(values);
-    return Object.freeze({ ...location, arguments: args, contents: plist });
+    const out = join(settings.state, "logs", `${role}.log`),
+      err = join(settings.state, "logs", `${role}.error.log`);
+    // Neither manager starts or restarts a role on its own: only the journaled lifecycle does.
+    const contents =
+      manager === "launchd"
+        ? plistDocument({
+            Label: location.label,
+            ProgramArguments: args,
+            WorkingDirectory: settings.home,
+            RunAtLoad: false,
+            KeepAlive: false,
+            ProcessType: "Background",
+            Umask: 0o077,
+            ExitTimeOut: 20,
+            StandardOutPath: out,
+            StandardErrorPath: err,
+          })
+        : systemdUnit({
+            Unit: { Description: `localDot ${role}` },
+            Service: {
+              Type: "exec",
+              ExecStart: args.map(systemdWord).join(" "),
+              WorkingDirectory: systemdPath(settings.home),
+              UMask: "0077",
+              Restart: "no",
+              TimeoutStopSec: "20",
+              StandardOutput: `append:${systemdPath(out)}`,
+              StandardError: `append:${systemdPath(err)}`,
+            },
+          });
+    return Object.freeze({ ...location, arguments: args, contents });
   };
   return Object.freeze({ keyd: definition("keyd"), daemon: definition("daemon") });
 }
 
 export interface LoginServiceLocation {
+  readonly manager: ServiceManager;
   readonly label: string;
   readonly domain: string;
   readonly target: string;
   readonly directory: string;
-  readonly plist: string;
+  readonly file: string;
 }
 
-export function loginServiceLocation(input: ServiceSettings): LoginServiceLocation {
+export function loginServiceLocation(
+  input: ServiceSettings,
+  manager: ServiceManager = serviceManager(),
+): LoginServiceLocation {
   const settings = { ...input };
   const home = path(settings.home),
     userHome = path(settings.userHome);
@@ -249,14 +314,28 @@ export function loginServiceLocation(input: ServiceSettings): LoginServiceLocati
   if (!/^[a-f0-9]{32}$/.test(settings.ownerId)) throw invalid();
   const suffix = createHash("sha256").update(home).digest("hex");
   const label = `dev.localdot.${suffix}.${settings.ownerId}.login`;
+  if (manager === "systemd") {
+    const directory = join(userHome, ".config", "systemd", "user");
+    const unit = `${label}.service`;
+    return Object.freeze({
+      manager,
+      label,
+      domain: "user",
+      target: unit,
+      directory,
+      file: join(directory, unit),
+    });
+  }
+  if (manager !== "launchd") throw invalid();
   const domain = `gui/${settings.uid}`;
   const directory = join(userHome, "Library", "LaunchAgents");
   return Object.freeze({
+    manager,
     label,
     domain,
     target: `${domain}/${label}`,
     directory,
-    plist: join(directory, `${label}.plist`),
+    file: join(directory, `${label}.plist`),
   });
 }
 
@@ -264,12 +343,16 @@ export function loginServiceLocation(input: ServiceSettings): LoginServiceLocati
  * and starts both roles through the journaled lifecycle, the only start keyd's service-exec
  * admits. The service plists themselves stay RunAtLoad/KeepAlive false.
  */
-export function defineLoginService(input: ServiceSettings, identityInput: ReleaseIdentity) {
+export function defineLoginService(
+  input: ServiceSettings,
+  identityInput: ReleaseIdentity,
+  manager: ServiceManager = serviceManager(),
+) {
   const settings = { ...input };
   for (const field of ["state", "home", "userHome", "node"] as const) path(settings[field]);
   if (settings.node.includes(":")) throw invalid();
   const identity = ReleaseIdentity.parse(identityInput);
-  const location = loginServiceLocation(settings);
+  const location = loginServiceLocation(settings, manager);
   const cli = join(
     settings.state,
     "releases",
@@ -290,18 +373,34 @@ export function defineLoginService(input: ServiceSettings, identityInput: Releas
     "up",
     "--from-login",
   ]);
-  const contents = plistDocument({
-    Label: location.label,
-    ProgramArguments: args,
-    WorkingDirectory: settings.home,
-    RunAtLoad: true,
-    KeepAlive: false,
-    LimitLoadToSessionType: "Aqua",
-    ProcessType: "Background",
-    Umask: 0o077,
-    StandardOutPath: join(settings.state, "logs", "login.log"),
-    StandardErrorPath: join(settings.state, "logs", "login.log"),
-  });
+  const log = join(settings.state, "logs", "login.log");
+  // systemd starts the user's default.target at the first sign-in, or at boot with lingering on.
+  const contents =
+    manager === "launchd"
+      ? plistDocument({
+          Label: location.label,
+          ProgramArguments: args,
+          WorkingDirectory: settings.home,
+          RunAtLoad: true,
+          KeepAlive: false,
+          LimitLoadToSessionType: "Aqua",
+          ProcessType: "Background",
+          Umask: 0o077,
+          StandardOutPath: log,
+          StandardErrorPath: log,
+        })
+      : systemdUnit({
+          Unit: { Description: "Start localDot" },
+          Service: {
+            Type: "oneshot",
+            ExecStart: args.map(systemdWord).join(" "),
+            WorkingDirectory: systemdPath(settings.home),
+            UMask: "0077",
+            StandardOutput: `append:${systemdPath(log)}`,
+            StandardError: `append:${systemdPath(log)}`,
+          },
+          Install: { WantedBy: "default.target" },
+        });
   return Object.freeze({ ...location, arguments: args, contents });
 }
 

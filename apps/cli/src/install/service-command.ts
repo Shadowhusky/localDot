@@ -24,13 +24,15 @@ export function runServiceCommand(
     supplied.uid,
     supplied.ownerId,
     supplied.configuration,
+    supplied.manager,
   )[supplied.role];
-  for (const field of ["label", "domain", "target", "plist"] as const)
+  for (const field of ["manager", "label", "domain", "target", "file"] as const)
     if (supplied[field] !== generated[field]) throw failure();
+  if (generated.manager === "systemd") return systemdCommand(generated, operation, signal);
   let args: string[];
   switch (operation) {
     case "bootstrap":
-      args = ["bootstrap", generated.domain, generated.plist];
+      args = ["bootstrap", generated.domain, generated.file];
       break;
     case "kickstart":
       args = ["kickstart", "-p", generated.target];
@@ -43,6 +45,78 @@ export function runServiceCommand(
       throw failure();
   }
   return launchctl(args, signal);
+}
+
+/** The same operations for a systemd user unit. link puts the unit in the user manager's search
+ * path, as bootstrap loads a plist; bootout stops it and takes the link away; kickstart starts it
+ * and reports MainPID the way kickstart -p reports its PID. */
+async function systemdCommand(
+  location: ServiceLocation,
+  operation: ServiceOperation,
+  signal: AbortSignal,
+): Promise<ServiceCommandResult> {
+  const unit = location.target;
+  switch (operation) {
+    case "bootstrap":
+      return systemctl(location.uid, ["link", location.file], signal);
+    case "kickstart": {
+      const started = await systemctl(location.uid, ["start", unit], signal);
+      if (started.code !== 0) return started;
+      return systemctl(location.uid, ["show", "--property=MainPID", "--value", unit], signal);
+    }
+    case "bootout": {
+      const stopped = await systemctl(location.uid, ["stop", unit], signal);
+      if (stopped.code !== 0) return stopped;
+      return systemctl(location.uid, ["disable", unit], signal);
+    }
+    case "print":
+      return systemctl(location.uid, ["show", "--property=LoadState", unit], signal);
+    default:
+      throw failure();
+  }
+}
+
+/** Reads one owned unit's state; systemd prints the properties in an order of its own. */
+export function runUnitObservation(
+  location: ServiceLocation,
+  signal: AbortSignal,
+): Promise<ServiceCommandResult> {
+  signal.throwIfAborted();
+  if (location.manager !== "systemd" || !SERVICE_UNIT.test(location.target)) throw failure();
+  return systemctl(
+    location.uid,
+    ["show", "--property=LoadState,ActiveState,MainPID", location.target],
+    signal,
+  );
+}
+
+const SERVICE_UNIT = /^dev\.localdot\.[a-f0-9]{64}\.[a-f0-9]{32}\.(?:keyd|daemon)\.service$/;
+const LOGIN_UNIT = /^dev\.localdot\.[a-f0-9]{64}\.[a-f0-9]{32}\.login\.service$/;
+
+/** Turns this installation's login unit on or off in the user manager; reload picks up a changed
+ * file. The unit is always derived by loginServiceLocation. */
+export function runLoginUnit(
+  operation: "enable" | "disable" | "daemon-reload",
+  unit: string,
+  uid: number,
+  signal: AbortSignal,
+): Promise<ServiceCommandResult> {
+  signal.throwIfAborted();
+  if (!LOGIN_UNIT.test(unit) || !["enable", "disable", "daemon-reload"].includes(operation))
+    throw failure();
+  return systemctl(uid, operation === "daemon-reload" ? [operation] : [operation, unit], signal);
+}
+
+// The user manager answers on the runtime directory systemd makes for this UID, never one the
+// environment names.
+function systemctl(uid: number, args: string[], signal: AbortSignal) {
+  if (!Number.isSafeInteger(uid) || uid <= 0 || uid !== process.getuid?.()) throw failure();
+  return run(
+    "/usr/bin/systemctl",
+    ["--user", ...args],
+    { PATH: "/usr/bin:/bin", LC_ALL: "C", XDG_RUNTIME_DIR: `/run/user/${uid}` },
+    signal,
+  );
 }
 
 /** These legacy commands have documented output. No arbitrary command, label or print parser. */
@@ -69,11 +143,20 @@ export function runLoginAgentBootout(
 }
 
 function launchctl(args: string[], signal: AbortSignal): Promise<ServiceCommandResult> {
+  return run("/bin/launchctl", args, { PATH: "/usr/bin:/bin", LC_ALL: "C" }, signal);
+}
+
+function run(
+  program: string,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+  signal: AbortSignal,
+): Promise<ServiceCommandResult> {
   return new Promise((resolve, reject) => {
     const create = () =>
-      spawn("/bin/launchctl", args, {
+      spawn(program, args, {
         cwd: "/",
-        env: { PATH: "/usr/bin:/bin", LC_ALL: "C" },
+        env,
         stdio: ["ignore", "pipe", "pipe"],
       });
     let child: ReturnType<typeof create>;
