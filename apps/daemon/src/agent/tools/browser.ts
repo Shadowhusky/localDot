@@ -6,6 +6,7 @@ import {
   type ToolResult,
   webUrl,
 } from "@localdot/protocol";
+import { BrowserClientError } from "../../browser/client.ts";
 import { DesktopdError } from "../../desktopd/client.ts";
 import { hostOf } from "../safety/purpose.ts";
 import { untrusted } from "../untrusted.ts";
@@ -146,9 +147,16 @@ export async function browserNavigateTool(
   if (browser) {
     await browser.client.navigate(browser.permit, browser.tabId, url.href, ctx);
     ctx.check();
-    const page = await browser.client.read(browser.permit, browser.tabId, { maxChars: 500 }, ctx);
+    // The page opened; one that keeps changing as it settles may not be readable yet.
+    const page = await browser.client
+      .read(browser.permit, browser.tabId, { maxChars: 500 }, ctx)
+      .catch((error: unknown) => {
+        ctx.check();
+        if (!(error instanceof BrowserClientError)) throw error;
+        return undefined;
+      });
     ctx.check();
-    result = { url: page.url, title: page.title, loaded: true };
+    result = { url: page?.url ?? url.href, title: page?.title ?? "", loaded: true };
   } else if (desktop) {
     try {
       result = await desktop.browserNavigate(url.href, ctx.signal);

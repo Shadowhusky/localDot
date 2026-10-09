@@ -35,3 +35,9 @@ export function avcCodecString(au: Uint8Array): string | null {
   }
   return null;
 }
+
+// The same stream at another level: a viewer's lower frame rate makes the encoder pick a lower level
+// for the same picture, which decodes alike.
+export function sameAvcStream(codec: string | null, recorded: string | null): boolean {
+  return !!codec && !!recorded && codec.slice(0, -2) === recorded.slice(0, -2);
+}

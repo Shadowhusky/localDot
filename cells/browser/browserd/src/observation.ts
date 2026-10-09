@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from "node:timers/promises";
 import { types } from "node:util";
 import {
   BrowserReadRequest,
@@ -15,7 +16,13 @@ import { captureBrowserRequest } from "./input.ts";
 import type { BrowserNative } from "./native.ts";
 import { type BrowserProjection, projectBrowser } from "./perception.ts";
 import type { BrowserSecrets } from "./secrets.ts";
-import type { BrowserDocument, BrowserTargets } from "./targets.ts";
+import {
+  type BrowserDocument,
+  type BrowserTargets,
+  PAGE_READ_ATTEMPTS,
+  PAGE_READ_RETRY_MS,
+  pageChanged,
+} from "./targets.ts";
 
 export const BROWSER_OBSERVATION_TIMEOUT_MS = 15000;
 const frameSchema = schema.object({
@@ -262,119 +269,140 @@ export class BrowserObservation {
         check(geometry.document);
         return { geometry, projection, rootFrame: frame };
       };
-      const before = await read();
-      check(before.geometry.document);
-      if (query?.kind === "read") {
-        const after = await read();
+      // Each attempt reads the page afresh; one the page changed under is taken again.
+      const attempt = async (): Promise<
+        BrowserObservationResult | HitTestResult | BrowserReadResult
+      > => {
+        const before = await read();
         check(before.geometry.document);
-        check(after.geometry.document);
-        if (
-          !before.projection.page ||
-          !after.projection.page ||
-          !sameGeometry(before.geometry, after.geometry) ||
-          before.projection.signature !== after.projection.signature ||
-          JSON.stringify(before.projection.page) !== JSON.stringify(after.projection.page)
-        )
-          throw new BrowserObservationError("stale");
-        return after.projection.page;
-      }
-      if (query) {
-        const pick = async (snapshot: Awaited<ReturnType<typeof read>>) => {
-          const projection = snapshot.projection;
-          if (query.kind === "focused") return { target: projection.focused };
-          if (query.kind === "node") {
-            const target = projection.targetOf(query.node);
-            const same =
-              target &&
-              (query.role === undefined || target.role === query.role) &&
-              (query.name === undefined || target.name === query.name);
-            return { target: same ? target : null };
-          }
-          if (query.kind === "find") {
-            const matches = projection.targets.filter(
-              (target) =>
-                target.name?.toLocaleLowerCase() === query.name.toLocaleLowerCase() &&
-                (!query.role || target.role === query.role) &&
-                (!query.app || target.app === query.app),
-            );
-            // Ambiguous names cannot silently authorize a different element.
-            return { target: matches.length === 1 ? (matches[0] ?? null) : null };
-          }
-          const geometry = snapshot.geometry;
-          const point = this.#options.geometry.point?.(
-            geometry,
-            (query.point.x * this.#options.scale - geometry.content[0]) / geometry.factor,
-            (query.point.y * this.#options.scale - geometry.content[1]) / geometry.factor,
-            combined,
-          );
-          if (!point) throw new BrowserObservationError("unavailable");
-          check(geometry.document);
-          const hit = hitSchema.parse(
-            await this.#options.targets.command(
-              geometry.document,
-              "DOM.getNodeForLocation",
-              {
-                ...point.document,
-                includeUserAgentShadowDOM: false,
-                ignorePointerEventsNone: false,
-              },
+        if (query?.kind === "read") {
+          const after = await read();
+          check(before.geometry.document);
+          check(after.geometry.document);
+          if (
+            !before.projection.page ||
+            !after.projection.page ||
+            !sameGeometry(before.geometry, after.geometry) ||
+            before.projection.signature !== after.projection.signature ||
+            JSON.stringify(before.projection.page) !== JSON.stringify(after.projection.page)
+          )
+            throw new BrowserObservationError("stale");
+          return after.projection.page;
+        }
+        if (query) {
+          const pick = async (snapshot: Awaited<ReturnType<typeof read>>) => {
+            const projection = snapshot.projection;
+            if (query.kind === "focused") return { target: projection.focused };
+            if (query.kind === "node") {
+              const target = projection.targetOf(query.node);
+              const same =
+                target &&
+                (query.role === undefined || target.role === query.role) &&
+                (query.name === undefined || target.name === query.name);
+              return { target: same ? target : null };
+            }
+            if (query.kind === "find") {
+              const matches = projection.targets.filter(
+                (target) =>
+                  target.name?.toLocaleLowerCase() === query.name.toLocaleLowerCase() &&
+                  (!query.role || target.role === query.role) &&
+                  (!query.app || target.app === query.app),
+              );
+              // Ambiguous names cannot silently authorize a different element.
+              return { target: matches.length === 1 ? (matches[0] ?? null) : null };
+            }
+            const geometry = snapshot.geometry;
+            const point = this.#options.geometry.point?.(
+              geometry,
+              (query.point.x * this.#options.scale - geometry.content[0]) / geometry.factor,
+              (query.point.y * this.#options.scale - geometry.content[1]) / geometry.factor,
               combined,
-            ),
-          );
-          check(geometry.document);
-          if (hit.frameId !== snapshot.rootFrame) throw new BrowserObservationError("stale");
-          return { target: projection.targetForNode(hit.backendNodeId), node: hit.backendNodeId };
-        };
-        const first = await pick(before);
-        const after = await read();
+            );
+            if (!point) throw new BrowserObservationError("unavailable");
+            check(geometry.document);
+            const hit = hitSchema.parse(
+              await this.#options.targets.command(
+                geometry.document,
+                "DOM.getNodeForLocation",
+                {
+                  ...point.document,
+                  includeUserAgentShadowDOM: false,
+                  ignorePointerEventsNone: false,
+                },
+                combined,
+              ),
+            );
+            check(geometry.document);
+            if (hit.frameId !== snapshot.rootFrame) throw new BrowserObservationError("stale");
+            return { target: projection.targetForNode(hit.backendNodeId), node: hit.backendNodeId };
+          };
+          const first = await pick(before);
+          const after = await read();
+          check(before.geometry.document);
+          check(after.geometry.document);
+          const second = await pick(after);
+          check(before.geometry.document);
+          check(after.geometry.document);
+          if (
+            !sameGeometry(before.geometry, after.geometry) ||
+            before.projection.signature !== after.projection.signature ||
+            JSON.stringify(first) !== JSON.stringify(second)
+          )
+            throw new BrowserObservationError("stale");
+          return {
+            target: second.target,
+            window: null,
+            ms: Math.max(0, performance.now() - started),
+          };
+        }
+        const image = await this.#options.capture.masked(before.projection.mask, combined);
         check(before.geometry.document);
-        check(after.geometry.document);
-        const second = await pick(after);
+        const pointer = await this.#options.native.command("pointer", {}, combined);
+        check(before.geometry.document);
+        const after = await read();
         check(before.geometry.document);
         check(after.geometry.document);
         if (
           !sameGeometry(before.geometry, after.geometry) ||
-          before.projection.signature !== after.projection.signature ||
-          JSON.stringify(first) !== JSON.stringify(second)
+          before.projection.signature !== after.projection.signature
         )
           throw new BrowserObservationError("stale");
-        return {
-          target: second.target,
-          window: null,
-          ms: Math.max(0, performance.now() - started),
+        if (
+          !Number.isFinite(pointer.x) ||
+          !Number.isFinite(pointer.y) ||
+          pointer.x < 0 ||
+          pointer.y < 0 ||
+          pointer.x >= 1280 * this.#options.scale ||
+          pointer.y >= 800 * this.#options.scale
+        )
+          throw new BrowserObservationError("unavailable");
+        const frame: ObserveResult = {
+          frameId: ulid(),
+          width: 1280,
+          height: 800,
+          image: image.toString("base64"),
+          pointer: { x: pointer.x / this.#options.scale, y: pointer.y / this.#options.scale },
+          windows: [],
         };
-      }
-      const image = await this.#options.capture.masked(before.projection.mask, combined);
-      check(before.geometry.document);
-      const pointer = await this.#options.native.command("pointer", {}, combined);
-      check(before.geometry.document);
-      const after = await read();
-      check(before.geometry.document);
-      check(after.geometry.document);
-      if (
-        !sameGeometry(before.geometry, after.geometry) ||
-        before.projection.signature !== after.projection.signature
-      )
-        throw new BrowserObservationError("stale");
-      if (
-        !Number.isFinite(pointer.x) ||
-        !Number.isFinite(pointer.y) ||
-        pointer.x < 0 ||
-        pointer.y < 0 ||
-        pointer.x >= 1280 * this.#options.scale ||
-        pointer.y >= 800 * this.#options.scale
-      )
-        throw new BrowserObservationError("unavailable");
-      const frame: ObserveResult = {
-        frameId: ulid(),
-        width: 1280,
-        height: 800,
-        image: image.toString("base64"),
-        pointer: { x: pointer.x / this.#options.scale, y: pointer.y / this.#options.scale },
-        windows: [],
+        check(after.geometry.document);
+        return Object.freeze({ frame, targets: after.projection.targets });
       };
-      check(after.geometry.document);
-      return Object.freeze({ frame, targets: after.projection.targets });
+      for (let attempts = 1; ; attempts++) {
+        const begun = performance.now();
+        try {
+          return await attempt();
+        } catch (error) {
+          const changed =
+            pageChanged(error) ||
+            (error instanceof BrowserObservationError && error.reason === "stale");
+          // Another attempt starts only while it can still finish before the deadline.
+          const now = performance.now();
+          const left = BROWSER_OBSERVATION_TIMEOUT_MS - (now - started) - PAGE_READ_RETRY_MS;
+          if (!changed || attempts >= PAGE_READ_ATTEMPTS || combined.aborted || left < now - begun)
+            throw error;
+        }
+        await sleep(PAGE_READ_RETRY_MS, undefined, { signal: combined }).catch(() => {});
+      }
     } catch (error) {
       if (operationSignal?.aborted || signal.aborted || this.#lifetime.signal.aborted)
         throw new BrowserObservationError("aborted");

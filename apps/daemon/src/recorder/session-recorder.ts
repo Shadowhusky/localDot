@@ -11,7 +11,7 @@ import {
   type RecordingGapReason,
   type RecordingManifest,
 } from "@localdot/protocol";
-import { avcCodecString } from "./annexb.ts";
+import { avcCodecString, sameAvcStream } from "./annexb.ts";
 import type { RecordingUsage } from "./budget.ts";
 import { ControlGate } from "./control-gate.ts";
 import {
@@ -292,7 +292,7 @@ export class SessionRecorder {
       await this.#writer.start();
     } else if (
       frame.key &&
-      (avcCodecString(frame.data) !== this.#manifest.codec ||
+      (!sameAvcStream(avcCodecString(frame.data), this.#manifest.codec) ||
         frame.width !== this.#manifest.width ||
         frame.height !== this.#manifest.height)
     ) {
