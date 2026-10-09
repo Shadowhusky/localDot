@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import type { SignInSite } from "../../../../packages/protocol/src/accounts.ts";
 import { Button } from "../ui/Button.tsx";
 import { Dialog } from "../ui/Dialog.tsx";
 import { EmptyState } from "../ui/EmptyState.tsx";
@@ -8,7 +9,9 @@ import type { AccountsView } from "./useAccounts.ts";
 
 const PLACEHOLDER_ROWS = 3;
 
-// The sites signed in to in dot's web browser, which keeps them between tasks and restarts.
+const otherHosts = (entry: SignInSite) => entry.hosts.filter((host) => host !== entry.site);
+
+// The sites with sign-ins in dot's web browser, which keeps them between tasks and restarts.
 export function AccountsSection({ accounts }: { accounts: AccountsView }) {
   const clearTrigger = useRef<HTMLButtonElement>(null);
   const [confirming, setConfirming] = useState(false);
@@ -16,8 +19,8 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
   return (
     <div className="settings-accounts">
       <p className="settings-note">
-        Sites you or dot signed in to in dot's web browser. They stay signed in between tasks and
-        restarts, and never reach the computer's own apps.
+        Where you and dot are signed in. dot's web browser keeps these sign-ins between tasks and
+        restarts, away from the computer's own apps.
       </p>
       {phase === "off" ? (
         <EmptyState layout="start" icon="monitor" title="Turn on your computer to see them." />
@@ -50,8 +53,8 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
                   </Skeleton>
                   {!entry ? (
                     <Skeleton loading width="24ch" />
-                  ) : entry.hosts.some((host) => host !== entry.site) ? (
-                    <span className="settings-accounts-hosts">{entry.hosts.join(", ")}</span>
+                  ) : otherHosts(entry).length ? (
+                    <span className="settings-accounts-hosts">{otherHosts(entry).join(", ")}</span>
                   ) : null}
                 </span>
                 {entry ? (
@@ -104,7 +107,7 @@ export function AccountsSection({ accounts }: { accounts: AccountsView }) {
         onClose={() => setConfirming(false)}
         anchor={clearTrigger}
         title="Sign out of every site?"
-        description="dot's web browser restarts and forgets every sign-in and everything sites saved in it. You can't undo this."
+        description="dot's web browser restarts and forgets every sign-in and everything sites saved in it. A task using it now loses its open pages. You can't undo this."
       >
         <Button variant="quiet" onClick={() => setConfirming(false)}>
           Cancel

@@ -5,7 +5,7 @@ import { clearSignIns, listSignIns, signOutOf } from "./accounts-api.ts";
 
 // While the web browser starts, the list is asked for again this often, a few times.
 export const STARTING_RETRY_MS = 3000;
-const STARTING_RETRIES = 20;
+export const STARTING_RETRIES = 20;
 
 export type AccountsPhase = "loading" | "ready" | "off" | "starting" | "error";
 
@@ -52,9 +52,11 @@ export function useAccounts(api: ApiClient, cellId: string | null, visible: bool
       (error: unknown) => {
         if (abort.signal.aborted) return;
         const next = phaseOf(error);
-        setPhase(next);
-        if (next === "starting" && retries.current++ < STARTING_RETRIES)
+        if (next !== "starting") setPhase(next);
+        else if (retries.current++ < STARTING_RETRIES) {
+          setPhase("starting");
           timer = setTimeout(() => setAttempt((value) => value + 1), STARTING_RETRY_MS);
+        } else setPhase("error");
       },
     );
     return () => {
@@ -75,15 +77,24 @@ export function useAccounts(api: ApiClient, cellId: string | null, visible: bool
       setPending(site);
       setFailure(null);
       signOutOf(api, cellId, site)
-        .then(setSites, (error: unknown) => {
-          setFailure(
-            error instanceof ApiError && error.status === 404
-              ? null
-              : `Couldn't sign out of ${site}. Try again.`,
-          );
-          if (error instanceof ApiError && error.status === 404)
-            setSites((current) => current.filter((entry) => entry.site !== site));
-        })
+        .then(
+          (left) => {
+            setSites(left);
+            if (left.some((entry) => entry.site === site))
+              setFailure(
+                `Some of ${site}'s sign-in is still saved. Sign out of all sites to remove everything.`,
+              );
+          },
+          (error: unknown) => {
+            setFailure(
+              error instanceof ApiError && error.status === 404
+                ? null
+                : `Couldn't sign out of ${site}. Try again.`,
+            );
+            if (error instanceof ApiError && error.status === 404)
+              setSites((current) => current.filter((entry) => entry.site !== site));
+          },
+        )
         .finally(() => setPending(null));
     },
     [api, cellId],

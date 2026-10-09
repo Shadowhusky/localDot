@@ -2,7 +2,7 @@
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { createApi } from "../lib/api.ts";
-import { STARTING_RETRY_MS, useAccounts } from "./useAccounts.ts";
+import { STARTING_RETRIES, STARTING_RETRY_MS, useAccounts } from "./useAccounts.ts";
 
 afterEach(() => {
   cleanup();
@@ -62,6 +62,19 @@ it("waits for a starting browser and asks again, then shows the sites", async ()
   expect(hook.result.current.sites).toEqual([]);
 });
 
+it("stops waiting once the retries run out, and a browser that couldn't start fails at once", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const slow = setup(Array.from({ length: STARTING_RETRIES + 1 }, () => ({ status: 503 })));
+  await waitFor(() => expect(slow.hook.result.current.phase).toBe("starting"));
+  for (let retry = 0; retry < STARTING_RETRIES; retry += 1)
+    await act(() => vi.advanceTimersByTimeAsync(STARTING_RETRY_MS));
+  await waitFor(() => expect(slow.hook.result.current.phase).toBe("error"));
+  expect(slow.fetchImpl).toHaveBeenCalledTimes(STARTING_RETRIES + 1);
+  const failed = setup([{ status: 502, body: "the web browser couldn't start" }]);
+  await waitFor(() => expect(failed.hook.result.current.phase).toBe("error"));
+  expect(failed.fetchImpl).toHaveBeenCalledOnce();
+});
+
 it("treats a stopped computer and a malformed reply apart", async () => {
   const stopped = setup([{ status: 409, body: "the computer is off" }]);
   await waitFor(() => expect(stopped.hook.result.current.phase).toBe("off"));
@@ -89,6 +102,17 @@ it("signs out of one site and shows what is left; a failure is said, not hidden"
   await waitFor(() => expect(hook.result.current.pending).toBeNull());
   expect(hook.result.current.failure).toBe("Couldn't sign out of telegram.org. Try again.");
   expect(hook.result.current.sites).toEqual([TELEGRAM]);
+});
+
+it("says so when part of a site's sign-in is still saved after signing out", async () => {
+  const { hook } = setup([
+    { status: 200, body: { sites: [GOOGLE] } },
+    { status: 200, body: { sites: [{ ...GOOGLE, cookies: 1 }] } },
+  ]);
+  await waitFor(() => expect(hook.result.current.phase).toBe("ready"));
+  act(() => hook.result.current.signOut("google.com"));
+  await waitFor(() => expect(hook.result.current.pending).toBeNull());
+  expect(hook.result.current.failure).toContain("Sign out of all sites");
 });
 
 it("clears every sign-in", async () => {
