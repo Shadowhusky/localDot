@@ -604,6 +604,25 @@ describe("session screen coordinator", () => {
     expect(f.deps.fenceSession).not.toHaveBeenCalled();
   });
 
+  it("takeover during a switch stops only a browser that no longer answers, not the computer", async () => {
+    const f = fixture();
+    const grant = Promise.withResolvers<void>();
+    f.controlBarrier.mockImplementation((request) =>
+      request.holder === "agent"
+        ? grant.promise
+        : Promise.reject(new Error("browser stopped answering")),
+    );
+    const switching = f.controller.switchTo("browser", f.scope).catch((error: unknown) => error);
+    await until(() => f.client.control.mock.calls.some(([request]) => request.holder === "agent"));
+    const held = f.controller.takeOver();
+    grant.resolve();
+    expect(await switching).toBeInstanceOf(Error);
+    await held;
+    expect(f.deps.browser.stop).toHaveBeenCalledWith(f.deps.parentCellId);
+    expect(f.deps.contain).not.toHaveBeenCalled();
+    expect(f.deps.fenceSession).not.toHaveBeenCalled();
+  });
+
   it("handback explicitly grants the selected screen to the current generation", async () => {
     const f = fixture();
     await f.controller.switchTo("browser", f.scope);

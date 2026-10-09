@@ -323,6 +323,32 @@ describe("session-owned screen authority", () => {
     expect(f.deps.browser.stop).toHaveBeenCalledOnce();
   });
 
+  it("keeps the computer running when the web browser a task used no longer answers as it finishes", async () => {
+    const f = fixture(true),
+      generation = await f.browser();
+    const lease = f.session.admit(generation);
+    await f.session.switchScreen("desktop", lease);
+    lease.finish();
+    f.client.control.mockRejectedValue(new Error("browser stopped answering"));
+    f.session.retireBrain(generation);
+    await f.session.screensSettled();
+    expect(f.session.stopped).toBe(false);
+    expect(await f.session.finish()).toBe(true);
+    expect(f.deps.browser.stop).toHaveBeenCalledWith(f.session.cellId);
+    expect(f.physicalStop).not.toHaveBeenCalled();
+  });
+
+  it("still stops the computer when a finished task's web browser can neither hand back nor stop", async () => {
+    const f = fixture(true),
+      generation = await f.browser();
+    f.client.control.mockRejectedValue(new Error("browser stopped answering"));
+    vi.mocked(f.deps.browser.stop).mockRejectedValue(new Error("shutdown unconfirmed"));
+    f.session.retireBrain(generation);
+    await f.session.screensSettled().catch(() => {});
+    expect(f.session.stopped).toBe(true);
+    expect(f.physicalStop).toHaveBeenCalledWith(f.session.cellId);
+  });
+
   it("lets Stop contain an in-progress successful cleanup and retains both physical receipts", async () => {
     const f = fixture(),
       generation = await f.browser();
