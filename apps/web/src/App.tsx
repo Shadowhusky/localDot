@@ -89,6 +89,7 @@ import { TopBar } from "./shell/TopBar.tsx";
 import { useTabAttention } from "./shell/tab-attention.ts";
 import type { PointerMode } from "./stage/ManualSurface.tsx";
 import { Stage, type StageHandle } from "./stage/Stage.tsx";
+import type { FieldMark } from "./stage/worker-protocol.ts";
 import { Announcer } from "./ui/Announcer.tsx";
 import { ErrorBoundary } from "./ui/ErrorBoundary.tsx";
 import { IconButton } from "./ui/IconButton.tsx";
@@ -500,9 +501,25 @@ function Theatre({ api }: { api: ApiClient }) {
     [api, askCell],
   );
   const askReason = controls.canAnswer ? undefined : "Check the current task before answering.";
-  const replyAsk = async (text: string): Promise<ReplyOutcome> => {
+  // While dot waits on the answer, the stage keeps its ring on each field a secret goes into.
+  const askMarks = useMemo<readonly FieldMark[] | undefined>(
+    () =>
+      askDraft?.question.fields?.flatMap(({ target }) =>
+        target
+          ? [
+              {
+                screen: target.screen,
+                point: target.point,
+                ...(target.bbox ? { bbox: target.bbox } : {}),
+              },
+            ]
+          : [],
+      ),
+    [askDraft],
+  );
+  const replyAsk = async (text: string, attached: boolean): Promise<ReplyOutcome> => {
     if (!askDraft) return "failed";
-    const plan = composerReply(askDraft.question, text);
+    const plan = composerReply(askDraft.question, text, attached);
     if (plan.kind === "hold") return { hold: plan.reason };
     if (!(await answerAsk(plan.request))) return "failed";
     return plan.kind === "answer" ? "answered" : "declined";
@@ -862,9 +879,10 @@ function Theatre({ api }: { api: ApiClient }) {
           answer={answerAsk}
           reason={askReason}
           upload={uploadAsk}
+          receiveKey={receiveKey}
         />
       ) : undefined,
-    [askDraft, askIn, answerAsk, askReason, uploadAsk],
+    [askDraft, askIn, answerAsk, askReason, uploadAsk, receiveKey],
   );
   const askOver = (layout: "island" | "sheet") =>
     askDraft && (
@@ -875,6 +893,7 @@ function Theatre({ api }: { api: ApiClient }) {
         answer={answerAsk}
         reason={askReason}
         upload={uploadAsk}
+        receiveKey={receiveKey}
       />
     );
   const grown =
@@ -1063,6 +1082,7 @@ function Theatre({ api }: { api: ApiClient }) {
                 ref={stage}
                 mode={replayId ? "replay" : "live"}
                 dim={decision !== null}
+                fields={replayId ? undefined : askMarks}
                 cell={stageCell}
                 parentId={cell?.id}
                 selection={selectedScreen}

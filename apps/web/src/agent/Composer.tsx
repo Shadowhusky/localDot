@@ -64,8 +64,9 @@ export interface ComposerProps {
   configured?: boolean;
   onSettings?(trigger: HTMLElement): void;
   onTaskStarted?(): void;
-  // While dot waits on a question: a message answers it, or turns it down so dot reads the message.
-  reply?(text: string): Promise<ReplyOutcome>;
+  // While dot waits on a question: a message answers it, or turns it down so dot reads the message
+  // and its files.
+  reply?(text: string, attached: boolean): Promise<ReplyOutcome>;
   // A card in the rail, or one rounded field in a phone's toolbar with its controls inside it.
   layout?: "card" | "pill";
 }
@@ -493,10 +494,10 @@ export function Composer(props: ComposerProps) {
       return;
     }
     const reply = now.reply;
-    if (reply && chosen !== "new" && !uploads.rows.length) {
+    if (reply && chosen !== "new") {
       replying.current = true;
       setProblem(null);
-      void reply(text).then((outcome) => {
+      void reply(text, uploads.rows.length > 0).then((outcome) => {
         replying.current = false;
         if (!mounted.current) return;
         const box = field();

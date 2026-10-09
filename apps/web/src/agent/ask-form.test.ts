@@ -6,12 +6,9 @@ import {
   composerReply,
   type Draft,
   emptyDraft,
-  enterCode,
-  eraseCode,
   fieldValue,
   OTHER,
   submitProblem,
-  withoutKeys,
 } from "./ask-form.ts";
 import type { AgentQuestion } from "./model.ts";
 
@@ -75,6 +72,8 @@ describe("answers", () => {
       "Fill in password first",
     );
     expect(answerRequest(login, fields, draft({ email: "henry", password: "x" }))).toBeUndefined();
+    const file = askFields({ ...login, fields: [{ id: "photo", kind: "file", label: "Photo" }] });
+    expect(submitProblem(file, emptyDraft(file))).toBe("Choose photo first");
   });
 
   it("answers a plain question with the option's letter, or with the text written", () => {
@@ -133,27 +132,6 @@ describe("answers", () => {
   });
 });
 
-describe("code cells", () => {
-  it("fills every cell from a pasted or messaged code, without spaces or dashes", () => {
-    expect(enterCode("", 0, "123 456", 6)).toEqual({ code: "123456", focus: 5 });
-    expect(enterCode("12", 3, "98-7654", 6)).toEqual({ code: "987654", focus: 5 });
-  });
-
-  it("moves on as each character is typed, from the first empty cell", () => {
-    expect(enterCode("", 0, "4", 6)).toEqual({ code: "4", focus: 1 });
-    expect(enterCode("4", 4, "2", 6)).toEqual({ code: "42", focus: 2 });
-    expect(enterCode("421", 1, "9", 6)).toEqual({ code: "491", focus: 2 });
-    expect(enterCode("12345", 5, "6", 6)).toEqual({ code: "123456", focus: 5 });
-    expect(enterCode("123", 1, " ", 6)).toEqual({ code: "123", focus: 1 });
-  });
-
-  it("steps back on Backspace", () => {
-    expect(eraseCode("123", 1)).toEqual({ code: "13", focus: 1 });
-    expect(eraseCode("123", 4)).toEqual({ code: "12", focus: 2 });
-    expect(eraseCode("", 0)).toEqual({ code: "", focus: 0 });
-  });
-});
-
 describe("composerReply", () => {
   it("answers a plain question with the message, or the option it names", () => {
     expect(composerReply(plain, " pdf ")).toEqual({
@@ -194,6 +172,27 @@ describe("composerReply", () => {
     };
     expect(composerReply(two, "a").kind).toBe("decline");
   });
+
+  it("turns the question down for a message with files, so dot reads both at once", () => {
+    expect(composerReply(plain, "PDF", true)).toEqual({
+      kind: "decline",
+      request: { askId: ASK, declined: true },
+    });
+    expect(composerReply(login, "here it is", true).kind).toBe("hold");
+  });
+
+  it("holds what can't answer a question that has no way out", () => {
+    const only: AgentQuestion = { ...plain, allowText: false, declinable: false };
+    expect(composerReply(only, "PDF")).toEqual({
+      kind: "answer",
+      request: { askId: ASK, option: "B" },
+    });
+    expect(composerReply(only, "something else")).toEqual({
+      kind: "hold",
+      reason: "Answer dot's question above first. Your message stays here.",
+    });
+    expect(composerReply({ ...plain, declinable: false }, "Try the menu", true).kind).toBe("hold");
+  });
 });
 
 describe("answerSummary", () => {
@@ -227,10 +226,4 @@ describe("answerSummary", () => {
       "Markdown",
     );
   });
-});
-
-it("takes recognisable keys out of plain answers", () => {
-  const key = `sk-proj-${"z".repeat(40)}`;
-  expect(withoutKeys(`token ${key} here`)).toEqual({ text: "token  here", found: true });
-  expect(withoutKeys("plain words")).toEqual({ text: "plain words", found: false });
 });

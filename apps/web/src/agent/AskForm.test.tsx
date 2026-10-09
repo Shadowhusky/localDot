@@ -139,3 +139,76 @@ it("puts a chosen file on the computer and answers with its path there", async (
   expect(draft.state().draft.values.photo).toBe("~/Downloads/me.png");
   expect(screen.getByText("On your computer, in Downloads")).toBeTruthy();
 });
+
+it("shows hidden characters in dot's question and a field's label, and names the password's site", () => {
+  const disguised = "Password for ‮moc.knab‬";
+  mount(
+    {
+      ...login,
+      question: "Sign in to ‮kcab‬ your bank",
+      fields: [
+        {
+          id: "password",
+          kind: "secret",
+          label: disguised,
+          target: { screen: "browser", point: { x: 10, y: 10 }, site: "bank.example.test" },
+        },
+      ],
+    },
+    "island",
+  );
+  const title = screen.getByRole("heading");
+  expect(title.textContent).toBe("Sign in to·U+202EkcabU+202C·your bank");
+  expect(title.textContent).not.toContain("‮");
+  const password = screen.getByLabelText("Password for·[U+202E]moc.knab[U+202C]");
+  expect((password as HTMLInputElement).type).toBe("password");
+  expect(screen.getAllByText(/hidden characters that change text direction/)).toHaveLength(2);
+  expect(screen.getByText("bank.example.test").className).toBe("ask-site");
+});
+
+it("offers no way out of a question that only an answer ends", () => {
+  mount(
+    {
+      askId: ASK,
+      question: "I repeated the same action twice. What should I change?",
+      options: [{ key: "A", text: "I will change the instructions" }],
+      allowText: true,
+      declinable: false,
+    },
+    "island",
+  );
+  expect(screen.queryByRole("button", { name: "Not now" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Send answer" })).toBeTruthy();
+});
+
+it("shows what a QR code holds to copy when it is not a link and dot gave no hint", () => {
+  mount({
+    ...login,
+    fields: [{ id: "pair", kind: "qr", label: "Pair the TV", value: "TV-PAIR-4K7Q" }],
+  });
+  fireEvent.click(screen.getByRole("button", { name: "On this phone? Use a code instead" }));
+  expect(screen.getByText("TV-PAIR-4K7Q")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+  expect(screen.queryByRole("link")).toBeNull();
+});
+
+it("offers to move a key pasted into a field to Keys", () => {
+  const key = `sk-proj-${"k".repeat(40)}`;
+  const draft = new AskDraft(login);
+  const received: string[] = [];
+  const receiveKey = vi.fn((source: HTMLInputElement) => {
+    received.push(source.value);
+    return true;
+  });
+  render(
+    <AskForm draft={draft} layout="thread" answer={async () => true} receiveKey={receiveKey} />,
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Username" }), {
+    target: { value: `henry ${key}` },
+  });
+  expect(draft.state().draft.values.user).toBe("henry ");
+  fireEvent.click(screen.getByRole("button", { name: "Move to Keys" }));
+  expect(receiveKey).toHaveBeenCalledOnce();
+  expect(received).toEqual([key]);
+  expect(draft.state().found).toBeNull();
+});

@@ -4,8 +4,7 @@ import { qrModules } from "./qr.ts";
 // Modules of light margin a scanner needs around the code.
 const QUIET = 4;
 
-// A QR code drawn dark on a light tile, as scanners expect whatever the theme. Null when the text
-// is too long for one.
+// A QR code drawn dark on a light tile. Null when the text is too long for one.
 export function QrCode({
   value,
   size = 168,
@@ -37,8 +36,8 @@ export function QrCode({
       aria-label={label}
       shapeRendering="crispEdges"
     >
-      <rect width={extent} height={extent} rx={2} fill="#fff" />
-      <path d={path} fill="#0b0c0e" />
+      <rect className="ui-qr-tile" width={extent} height={extent} rx={2} />
+      <path className="ui-qr-dots" d={path} />
     </svg>
   );
 }

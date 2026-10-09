@@ -16,11 +16,14 @@ export function KeyFound({
   receive,
   noticeId,
   className,
+  within = "message",
 }: {
-  guard: KeyGuard;
+  guard: Pick<KeyGuard, "notice" | "move" | "remove">;
   receive?: KeyIntake["receive"];
   noticeId?: string;
   className?: string;
+  // What the key was typed into, as the notice names it.
+  within?: "message" | "answer";
 }) {
   const [choice, setChoice] = useState<{ notice: KeyNotice | null; index: number }>({
     notice: null,
@@ -93,8 +96,8 @@ export function KeyFound({
                   : onlyPlanTokens
                     ? CLAUDE_PLAN_REFUSAL
                     : count === 1
-                      ? "A key in your message was taken out before anything was sent. Move it to Keys to keep it safe, or discard it."
-                      : `${count} keys in your message were taken out before anything was sent. Move one to Keys, or discard them.`}
+                      ? `A key in your ${within} was taken out before anything was sent. Move it to Keys to keep it safe, or discard it.`
+                      : `${count} keys in your ${within} were taken out before anything was sent. Move one to Keys, or discard them.`}
             </p>
             {choosing && planToken && <p>{CLAUDE_PLAN_REFUSAL}</p>}
           </div>

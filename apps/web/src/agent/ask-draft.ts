@@ -1,4 +1,4 @@
-import type { QuestionAnswerRequest } from "@localdot/protocol";
+import { type KeyMatch, type QuestionAnswerRequest, scanKeyLike } from "@localdot/protocol";
 import { useEffect, useMemo, useSyncExternalStore } from "react";
 import {
   type AskField,
@@ -8,16 +8,17 @@ import {
   type DraftValue,
   emptyDraft,
   OTHER,
-  withoutKeys,
 } from "./ask-form.ts";
 import type { AgentQuestion } from "./model.ts";
+import type { KeyNotice } from "./useKeyGuard.ts";
 
 export interface AskState {
   readonly draft: Draft;
   // Fields left at least once: their problems show from then on, as they are typed.
   readonly left: ReadonlySet<string>;
-  // Fields a key was taken out of.
+  // Fields a key was taken out of, and where the keys were: never the keys themselves.
   readonly keys: ReadonlySet<string>;
+  readonly found: KeyNotice | null;
   // Sending, and once sent until the question closes, so nothing goes twice.
   readonly sending: "answer" | "decline" | null;
   readonly failed: string | null;
@@ -40,6 +41,7 @@ export class AskDraft {
       draft: emptyDraft(this.fields),
       left: new Set(),
       keys: new Set(),
+      found: null,
       sending: null,
       failed: null,
     };
@@ -61,15 +63,38 @@ export class AskDraft {
 
   #secret = (id: string) => this.fields.some((field) => field.id === id && field.kind === "secret");
 
+  // Keys taken out of the fields wait here, never in the draft, until moved to Keys or discarded.
+  #taken: string[] = [];
+
+  // The text with any recognisable key taken out, and the field marked as having held one.
+  #withoutKeys(id: string, text: string): { text: string; keys: Set<string> } {
+    const keys = new Set(this.#state.keys);
+    const scan = scanKeyLike(text);
+    if (!scan.overflow && !scan.matches.length) {
+      keys.delete(id);
+      return { text, keys };
+    }
+    keys.add(id);
+    let clean = "";
+    let found: KeyNotice = { kind: "overflow", candidates: [] };
+    this.#taken = [];
+    if (!scan.overflow) {
+      clean = text;
+      for (const match of [...scan.matches].reverse())
+        clean = clean.slice(0, match.start) + clean.slice(match.end);
+      this.#taken = scan.matches.map((match) => text.slice(match.start, match.end));
+      found = { kind: "found", candidates: scan.matches };
+    }
+    this.#state = { ...this.#state, found };
+    return { text: clean, keys };
+  }
+
   set(id: string, value: DraftValue) {
     if (this.#state.sending) return;
     let next = value;
-    let found = false;
+    let keys = this.#state.keys;
     if (typeof value === "string" && !this.#secret(id))
-      ({ text: next, found } = withoutKeys(value));
-    const keys = new Set(this.#state.keys);
-    if (found) keys.add(id);
-    else if (typeof value === "string") keys.delete(id);
+      ({ text: next, keys } = this.#withoutKeys(id, value));
     this.#set({
       draft: { ...this.#state.draft, values: { ...this.#state.draft.values, [id]: next } },
       keys,
@@ -77,13 +102,41 @@ export class AskDraft {
     });
   }
 
+  // Moves a key taken out of a field into Keys, through the same hand-over as the composer's.
+  moveKey = (
+    index: number,
+    receive: (source: HTMLInputElement, provider?: KeyMatch["provider"]) => boolean,
+  ): boolean => {
+    const candidate = this.#state.found?.candidates[index];
+    const key = this.#taken[index];
+    if (!candidate || key === undefined || this.#state.found?.kind !== "found") return false;
+    const scan = scanKeyLike(key);
+    const whole =
+      !scan.overflow && scan.matches[0]?.start === 0 && scan.matches[0]?.end === key.length;
+    let received = false;
+    const source = document.createElement("input");
+    source.value = whole && scan.matches.length === 1 ? key : "";
+    try {
+      received = !!source.value && receive(source, candidate.provider) === true;
+    } catch {
+      received = false;
+    } finally {
+      source.value = "";
+    }
+    this.#taken = [];
+    this.#set({ found: received ? null : { kind: "transfer_failed", candidates: [] } });
+    return received;
+  };
+
+  discardKeys = () => {
+    this.#taken = [];
+    if (this.#state.found) this.#set({ found: null });
+  };
+
   // Text in a choice's "Something else…" row, which picks that row while it has any.
   setOther(id: string, text: string) {
     if (this.#state.sending) return;
-    const { text: clean, found } = withoutKeys(text);
-    const keys = new Set(this.#state.keys);
-    if (found) keys.add(id);
-    else keys.delete(id);
+    const { text: clean, keys } = this.#withoutKeys(id, text);
     const values = this.#state.draft.values;
     const picked = values[id];
     this.#set({
@@ -104,8 +157,10 @@ export class AskDraft {
     this.#set({ left: new Set(this.#state.left).add(id) });
   }
 
-  // Every secret typed into this draft goes, as after an answer is sent or the question closes.
+  // Every secret typed into this draft goes, and any key taken out of it, as after an answer is
+  // sent or the question closes.
   forget() {
+    this.discardKeys();
     const values = { ...this.#state.draft.values };
     let had = false;
     for (const field of this.fields)

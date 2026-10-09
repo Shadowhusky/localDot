@@ -15,7 +15,13 @@ import { OracleCapture } from "./oracle.ts";
 import { PixiPresenter } from "./pixi-presenter.ts";
 import { meanLuma, type ProbeRect, wallNow } from "./probe.ts";
 import { type Presenter, type PumpStats, pumpFrames } from "./pump.ts";
-import type { StageClock, StageViewPatch, WorkerIn, WorkerOut } from "./worker-protocol.ts";
+import type {
+  FieldMark,
+  StageClock,
+  StageViewPatch,
+  WorkerIn,
+  WorkerOut,
+} from "./worker-protocol.ts";
 
 const scope = self as unknown as {
   postMessage(message: WorkerOut, transfer?: Transferable[]): void;
@@ -34,6 +40,7 @@ let probe: { rect: ProbeRect; threshold: number; last: boolean | null } | null =
 let model: SessionModel = emptyModel();
 let view: View = { reducedMotion: false };
 let selection: StageViewPatch["selection"] = null;
+let fields: readonly FieldMark[] = [];
 let zoom = 1;
 let freeze = false;
 let frozenT: number | null = null;
@@ -42,6 +49,15 @@ let viewport = { w: 1, h: 1 };
 let lastScene: Scene | null = null;
 const oracle = new OracleCapture();
 let animationFrame: number | null = null;
+
+// The rings on the fields dot will fill, on the screen shown.
+function showFields(): void {
+  const shown = selection?.screen ?? "desktop";
+  presenter?.overlays.setFields(
+    fields.filter((field) => field.screen === shown),
+    view.reducedMotion,
+  );
+}
 
 function scheduleTick(): void {
   if (animationFrame !== null) cancelAnimationFrame(animationFrame);
@@ -153,6 +169,7 @@ async function handle(m: WorkerIn): Promise<void> {
           warn: (message) => scope.postMessage({ type: "warn", message }),
         });
         oracle.dpr = m.dpr;
+        if (fields.length) showFields();
         scheduleTick();
         return;
       }
@@ -191,6 +208,7 @@ async function handle(m: WorkerIn): Promise<void> {
         if (m.view.reducedMotion !== undefined)
           view = { ...view, reducedMotion: m.view.reducedMotion };
         if (m.view.dim !== undefined) presenter?.setDim(m.view.dim, view.reducedMotion);
+        if (m.view.fields !== undefined) fields = m.view.fields;
         if (m.view.selection !== undefined) {
           selection = m.view.selection;
           view = {
@@ -200,6 +218,7 @@ async function handle(m: WorkerIn): Promise<void> {
           };
           lastScene = null;
         }
+        if (m.view.fields !== undefined || m.view.selection !== undefined) showFields();
         replay?.invalidate();
         scheduleTick();
         return;

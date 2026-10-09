@@ -2,6 +2,7 @@
 
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
+import attentionIcon from "../favicon-attention.svg";
 import type { Status } from "../session/status.ts";
 import { tabTitle, useTabAttention } from "./tab-attention.ts";
 
@@ -43,7 +44,7 @@ it("gives the tab's icon the amber point while hidden and puts it back on return
   expect(link.getAttribute("href")).toBe("/favicon.svg");
   expect(document.title).toBe("localDot — Needs your answer");
   act(() => hide(true));
-  expect(link.getAttribute("href")).toMatch(/^data:image\/svg\+xml,.*e9b44c/);
+  expect(link.getAttribute("href")).toBe(attentionIcon);
   expect(document.title).toBe("• Needs your answer · localDot");
   act(() => hide(false));
   expect(link.getAttribute("href")).toBe("/favicon.svg");

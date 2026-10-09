@@ -1770,6 +1770,7 @@ const ASK_FORMS: Record<string, AskForm> = {
           screen: "desktop",
           point: { x: 1280, y: 760 },
           bbox: { x: 1040, y: 732, w: 480, h: 56 },
+          site: "mail.example.test",
         },
       },
     ],
@@ -1858,6 +1859,11 @@ const ASK_FORMS: Record<string, AskForm> = {
         hint: "Code: A1B2-C3",
       },
     ],
+    submit: "Done",
+  },
+  pair: {
+    question: "Show this to the TV to link it.",
+    fields: [{ id: "pair", kind: "qr", label: "Pair the TV", value: "TV-PAIR-4K7Q-82LM" }],
     submit: "Done",
   },
 };

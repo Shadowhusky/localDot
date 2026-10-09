@@ -1,18 +1,21 @@
 import type { QuestionAnswerRequest } from "@localdot/protocol";
 import { clsx } from "clsx";
 import {
-  type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
   type ReactNode,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
 } from "react";
+import type { KeyIntake } from "../keys/KeyForm.tsx";
 import { Button } from "../ui/Button.tsx";
 import { Checkbox } from "../ui/Checkbox.tsx";
-import { Field, useFieldControl } from "../ui/Field.tsx";
+import { CodeField } from "../ui/CodeField.tsx";
+import { Field } from "../ui/Field.tsx";
+import { ChooseFileButton } from "../ui/FileButton.tsx";
 import { Icon } from "../ui/Icon.tsx";
 import { IconButton } from "../ui/IconButton.tsx";
 import { isApple, Kbd } from "../ui/Kbd.tsx";
@@ -21,23 +24,24 @@ import { QrCode } from "../ui/QrCode.tsx";
 import { RadioCards } from "../ui/RadioCards.tsx";
 import { TextArea } from "../ui/TextArea.tsx";
 import { TextField, type TextFieldProps } from "../ui/TextField.tsx";
+import { RevealedText } from "./ApprovalValue.tsx";
 import { type AskDraft, type AskState, useAskState } from "./ask-draft.ts";
 import {
   type AskField,
   confirmsBySubmit,
-  enterCode,
-  eraseCode,
   fieldProblem,
   fieldValue,
   submitProblem,
 } from "./ask-form.ts";
+import { CopyButton } from "./CopyButton.tsx";
 import { FileTransferFailure } from "./file-transfer.ts";
-import "./ask.css";
+import { KeyFound } from "./KeyFound.tsx";
+import { hiddenWarning, plainReveal, revealText } from "./reveal-text.ts";
+import "../shell/decision.css";
 
 const TOUCH = "(hover: none) and (pointer: coarse)";
 const COARSE = "(pointer: coarse)";
-const SECRET_NOTE = "dot types this in for you and never sees it.";
-const KEY_TAKEN = "That looked like a key, so it was left out. Keys belong in Keys.";
+const KEY_TAKEN = "That looked like a key, so it was taken out.";
 
 // Where the question is answered: under dot's message in the thread, in the island over the
 // computer, or in a phone's sheet.
@@ -52,6 +56,8 @@ export interface AskFormProps {
   reason?: string;
   // Puts a file on the computer and gives its path there; absent while the computer can't take one.
   upload?: AskUpload;
+  // Takes a key pasted into a field into Keys.
+  receiveKey?: KeyIntake["receive"];
 }
 
 const TYPED = new Set<AskField["kind"]>([
@@ -75,7 +81,7 @@ const TEXT_INPUT: Partial<Record<AskField["kind"], Partial<TextFieldProps>>> = {
 
 // dot's question answered in place: its fields, then Not now and dot's own verb. The same draft
 // backs every surface, so what is typed in one shows in the others.
-export function AskForm({ draft, layout, answer, reason, upload }: AskFormProps) {
+export function AskForm({ draft, layout, answer, reason, upload, receiveKey }: AskFormProps) {
   const state = useAskState(draft);
   const titleId = useId();
   const composing = useRef(false);
@@ -86,6 +92,7 @@ export function AskForm({ draft, layout, answer, reason, upload }: AskFormProps)
   const waiting = state.sending ? "Wait a moment" : undefined;
   const incomplete = submitProblem(fields, state.draft);
   const choice = fields.length === 1 && fields[0]?.kind === "choice" ? fields[0] : undefined;
+  const asked = useMemo(() => revealText(question.question), [question.question]);
 
   // Typing starts in the first field when it takes typing and nothing else has focus, so a question
   // never takes the keys from what you were typing elsewhere. A phone keeps its keyboard down until
@@ -141,6 +148,12 @@ export function AskForm({ draft, layout, answer, reason, upload }: AskFormProps)
           upload={upload}
         />
       ))}
+      <KeyFound
+        className="ask-key"
+        guard={{ notice: state.found, move: draft.moveKey, remove: draft.discardKeys }}
+        receive={receiveKey}
+        within="answer"
+      />
     </div>
   );
   const foot = (
@@ -148,17 +161,19 @@ export function AskForm({ draft, layout, answer, reason, upload }: AskFormProps)
       <p className="ask-problem" role="status">
         {state.failed}
       </p>
-      <div className="ask-actions">
-        <Button
-          size={sheet ? "xxl" : "md"}
-          busy={state.sending === "decline"}
-          disabledReason={reason ?? (state.sending === "answer" ? waiting : undefined)}
-          onClick={() => {
-            if (!reason && !state.sending) void draft.decline(answer);
-          }}
-        >
-          {question.decline ?? "Not now"}
-        </Button>
+      <div className="ask-actions" data-single={question.declinable === false || undefined}>
+        {question.declinable !== false && (
+          <Button
+            size={sheet ? "xxl" : "md"}
+            busy={state.sending === "decline"}
+            disabledReason={reason ?? (state.sending === "answer" ? waiting : undefined)}
+            onClick={() => {
+              if (!reason && !state.sending) void draft.decline(answer);
+            }}
+          >
+            {question.decline ?? "Not now"}
+          </Button>
+        )}
         <Button
           type="submit"
           variant="primary"
@@ -198,8 +213,9 @@ export function AskForm({ draft, layout, answer, reason, upload }: AskFormProps)
       ) : (
         <div className="decision-body">
           <h2 id={titleId} className="decision-title">
-            {question.question}
+            <RevealedText text={question.question} />
           </h2>
+          {asked.hidden && <p className="decision-warning">{hiddenWarning(asked)}</p>}
           {body}
         </div>
       )}
@@ -233,6 +249,8 @@ function AskFieldControl({
   const raw = state.draft.values[field.id];
   const text = typeof raw === "string" ? raw : "";
   const filled = fieldValue(field, state.draft, fields) !== undefined;
+  const named = useMemo(() => revealText(field.label), [field.label]);
+  const label = plainReveal(named.parts);
   // A problem shows once the field has been left with something in it, and then as it is typed.
   const problem = state.keys.has(field.id)
     ? KEY_TAKEN
@@ -240,8 +258,12 @@ function AskFieldControl({
       ? fieldProblem(field, state.draft, fields)
       : undefined;
   const common = {
-    label: field.label,
-    description: field.kind === "secret" ? SECRET_NOTE : field.hint,
+    label,
+    description: fieldNote(
+      hiddenWarning(named),
+      field.kind === "secret" ? (field.site ?? "") : undefined,
+      field.hint,
+    ),
     error: problem,
     validates: true,
     disabledReason: reason,
@@ -265,7 +287,7 @@ function AskFieldControl({
       return (
         <Field {...common}>
           <SecretInput
-            label={field.label}
+            label={label}
             value={text}
             onChange={(value) => draft.set(field.id, value)}
             onBlur={leave}
@@ -275,8 +297,8 @@ function AskFieldControl({
     case "code":
       return (
         <Field {...common}>
-          <CodeCells
-            label={field.label}
+          <CodeField
+            label={label}
             length={field.length}
             value={text}
             unavailable={!!reason}
@@ -289,6 +311,8 @@ function AskFieldControl({
       return (
         <ChoiceRows
           field={field}
+          label={label}
+          note={common.description}
           picked={text}
           other={state.draft.other[field.id] ?? ""}
           problem={problem}
@@ -301,7 +325,7 @@ function AskFieldControl({
     case "multichoice": {
       const picked = Array.isArray(raw) ? raw : [];
       return (
-        <ChoiceGroup label={field.label} hint={field.hint}>
+        <ChoiceGroup label={label} note={common.description}>
           {field.options.map((option) => (
             <Checkbox
               key={option}
@@ -322,8 +346,8 @@ function AskFieldControl({
     case "confirm":
       return confirmsBySubmit(fields) ? null : (
         <Checkbox
-          label={field.label}
-          description={field.hint}
+          label={label}
+          description={common.description}
           checked={raw === true}
           disabledReason={reason}
           onCheckedChange={(on) => draft.set(field.id, on)}
@@ -331,7 +355,7 @@ function AskFieldControl({
       );
     case "file":
       return (
-        <ChoiceGroup label={field.label} hint={field.hint}>
+        <ChoiceGroup label={label} note={common.description}>
           <FileDrop
             value={text}
             reason={reason}
@@ -342,7 +366,7 @@ function AskFieldControl({
       );
     case "qr":
       return field.value ? (
-        <ChoiceGroup label={field.label}>
+        <ChoiceGroup label={label}>
           <QrAnswer value={field.value} hint={field.hint} />
         </ChoiceGroup>
       ) : null;
@@ -366,21 +390,41 @@ function AskFieldControl({
   }
 }
 
-// A label and hint over controls that are not one input, such as checkbox rows.
+// Under a field: a warning when its name hides characters, the site a secret is typed into, and
+// dot's hint, drawn as an approval card draws a value so nothing in it can disguise the rest.
+function fieldNote(warning?: string, site?: string, hint?: string): ReactNode {
+  if (!warning && site === undefined && !hint) return undefined;
+  return (
+    <>
+      {warning && <span className="ask-warning">{warning} </span>}
+      {site !== undefined &&
+        (site ? (
+          <>
+            dot types this into <span className="ask-site">{site}</span> for you and never sees it.{" "}
+          </>
+        ) : (
+          "dot types this in for you and never sees it. "
+        ))}
+      {hint && <RevealedText text={hint} />}
+    </>
+  );
+}
+
+// A label and note over controls that are not one input, such as checkbox rows.
 function ChoiceGroup({
   label,
-  hint,
+  note,
   children,
 }: {
   label: string;
-  hint?: string;
+  note?: ReactNode;
   children: ReactNode;
 }) {
   return (
     <fieldset className="ui-field ask-field ask-fieldset">
       <legend className="ui-field-label">{label}</legend>
       <div className="ask-group">{children}</div>
-      {hint && <p className="ui-field-description">{hint}</p>}
+      {note && <p className="ui-field-description">{note}</p>}
     </fieldset>
   );
 }
@@ -420,94 +464,10 @@ function SecretInput({
   );
 }
 
-// One cell per character: typing moves on, a pasted or messaged code fills them all, and
-// Backspace steps back.
-function CodeCells({
-  label,
-  length,
-  value,
-  unavailable,
-  onChange,
-  onBlur,
-}: {
-  label: string;
-  length: number;
-  value: string;
-  unavailable: boolean;
-  onChange(value: string): void;
-  onBlur(): void;
-}) {
-  const cells = useRef<(HTMLInputElement | null)[]>([]);
-  const control = useFieldControl({});
-  const chars = [...value];
-  const go = (index: number) => {
-    const cell = cells.current[index];
-    if (!cell) return;
-    cell.focus();
-    cell.select();
-  };
-  const enter = (index: number, input: string) => {
-    const next = enterCode(value, index, input, length);
-    onChange(next.code);
-    requestAnimationFrame(() => go(next.focus));
-  };
-  return (
-    <fieldset className="ask-code" aria-label={label}>
-      {Array.from({ length }, (_, index) => (
-        <input
-          // biome-ignore lint/suspicious/noArrayIndexKey: a cell is its position
-          key={index}
-          ref={(cell) => {
-            cells.current[index] = cell;
-          }}
-          id={index === 0 ? control.id : undefined}
-          className="ask-code-cell"
-          value={chars[index] ?? ""}
-          inputMode="numeric"
-          autoComplete={index === 0 ? "one-time-code" : "off"}
-          enterKeyHint={index === length - 1 ? "done" : "next"}
-          aria-label={`${label}, ${index + 1} of ${length}`}
-          aria-describedby={control.describedBy}
-          aria-invalid={control.invalid}
-          readOnly={unavailable}
-          aria-disabled={unavailable || undefined}
-          onFocus={(event) => event.currentTarget.select()}
-          onBlur={onBlur}
-          onChange={(event) => {
-            const now = event.currentTarget.value;
-            const had = chars[index] ?? "";
-            if (!now) {
-              onChange(eraseCode(value, index).code);
-              return;
-            }
-            enter(index, had && now.length > had.length ? now.replace(had, "") : now);
-          }}
-          onPaste={(event: ClipboardEvent<HTMLInputElement>) => {
-            event.preventDefault();
-            if (!unavailable) enter(index, event.clipboardData.getData("text/plain"));
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Backspace" && !event.currentTarget.value && !unavailable) {
-              event.preventDefault();
-              const next = eraseCode(value, index);
-              onChange(next.code);
-              go(next.focus);
-            } else if (event.key === "ArrowLeft" && index > 0) {
-              event.preventDefault();
-              go(index - 1);
-            } else if (event.key === "ArrowRight" && index < Math.min(chars.length, length - 1)) {
-              event.preventDefault();
-              go(index + 1);
-            }
-          }}
-        />
-      ))}
-    </fieldset>
-  );
-}
-
 function ChoiceRows({
   field,
+  label,
+  note,
   picked,
   other,
   problem,
@@ -517,6 +477,8 @@ function ChoiceRows({
   draft,
 }: {
   field: AskField;
+  label: string;
+  note: ReactNode;
   picked: string;
   other: string;
   problem?: string;
@@ -528,8 +490,8 @@ function ChoiceRows({
   const id = useId();
   return (
     <Field
-      label={field.label}
-      description={field.hint}
+      label={label}
+      description={note}
       error={problem}
       validates
       disabledReason={reason}
@@ -589,7 +551,6 @@ function FileDrop({
     value ? { phase: "done", name: value.split("/").at(-1) ?? value } : { phase: "idle" },
   );
   const [over, setOver] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
   const flight = useRef<AbortController | null>(null);
   useEffect(() => () => flight.current?.abort(), []);
   const unavailable = reason ?? (upload ? undefined : "Turn on your computer first");
@@ -650,25 +611,14 @@ function FileDrop({
                 : "or choose one"}
         </span>
       </span>
-      <Button
+      <ChooseFileButton
         size="sm"
         busy={state.phase === "uploading"}
         disabledReason={unavailable}
-        onClick={() => input.current?.click()}
+        onFiles={(files) => void take(files[0])}
       >
         {named ? "Choose another" : "Choose a file"}
-      </Button>
-      <input
-        ref={input}
-        type="file"
-        hidden
-        tabIndex={-1}
-        onChange={(event) => {
-          const chosen = event.currentTarget;
-          void take(chosen.files?.[0]);
-          chosen.value = "";
-        }}
-      />
+      </ChooseFileButton>
     </div>
   );
 }
@@ -683,7 +633,7 @@ const linkOf = (value: string) => {
 };
 
 // A code for another device to scan. A phone can't scan its own screen, so there the code's
-// fallback comes first.
+// fallback comes first: dot's hint, and the link to open or the text the code holds to copy.
 function QrAnswer({ value, hint }: { value: string; hint?: string }) {
   const coarse = useMediaQuery(COARSE);
   const [fallback, setFallback] = useState(coarse);
@@ -692,12 +642,23 @@ function QrAnswer({ value, hint }: { value: string; hint?: string }) {
     <div className="ask-qr" data-fallback={fallback || undefined}>
       {fallback ? (
         <div className="ask-qr-code">
-          {hint && <p className="ask-qr-hint">{hint}</p>}
-          {link && (
+          {hint && (
+            <p className="ask-qr-hint">
+              <RevealedText text={hint} />
+            </p>
+          )}
+          {link ? (
             <a className="ask-qr-link" href={link.href} target="_blank" rel="noopener noreferrer">
               Open {link.host}
               <Icon name="arrow-right" size={14} />
             </a>
+          ) : (
+            <div className="ask-qr-value">
+              <p>
+                <RevealedText text={value} />
+              </p>
+              <CopyButton text={value} label="Copy" />
+            </div>
           )}
         </div>
       ) : (

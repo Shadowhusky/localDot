@@ -3,7 +3,6 @@ import {
   type AskFieldValue,
   askValueProblem,
   type QuestionAnswerRequest,
-  scanKeyLike,
 } from "@localdot/protocol";
 import type { AgentQuestion } from "./model.ts";
 
@@ -21,6 +20,8 @@ export interface AskField {
   readonly length: number;
   // What a QR code holds.
   readonly value?: string;
+  // A secret's site: whose page the field it is typed into is on.
+  readonly site?: string;
 }
 
 // What a field holds while it is filled in. A choice holds the picked option's index as text, or
@@ -57,6 +58,7 @@ export function askFields(question: AgentQuestion): readonly AskField[] {
       other: field.kind === "choice",
       length: field.length ?? CODE_LENGTH,
       ...(field.value ? { value: field.value } : {}),
+      ...(field.target?.site ? { site: field.target.site } : {}),
     }));
   return [
     {
@@ -127,7 +129,7 @@ export function submitProblem(fields: readonly AskField[], draft: Draft): string
     const problem = fieldProblem(field, draft, fields);
     if (!problem) continue;
     if (fieldValue(field, draft, fields) === undefined)
-      return field.kind === "choice"
+      return field.kind === "choice" || field.kind === "file"
         ? `Choose ${lower(field.label)} first`
         : field.kind === "confirm"
           ? `Tick ${lower(field.label)} first`
@@ -167,15 +169,29 @@ export function answerRequest(
 }
 
 // What the composer does with a message while dot waits on a question: answer it when the message
-// can be the whole answer; otherwise turn the question down so dot reads the message at once. A
-// question with a secret holds the message, which would reach dot in plain text.
+// can be the whole answer; otherwise turn the question down so dot reads the message, and any files
+// with it, at once. A question with a secret holds the message, which would reach dot in plain
+// text, and so does one that can only be answered.
 export type ComposerReply =
   | { readonly kind: "answer"; readonly request: QuestionAnswerRequest }
   | { readonly kind: "decline"; readonly request: QuestionAnswerRequest }
   | { readonly kind: "hold"; readonly reason: string };
 
-export function composerReply(question: AgentQuestion, text: string): ComposerReply {
-  const decline = { kind: "decline", request: { askId: question.askId, declined: true } } as const;
+export function composerReply(
+  question: AgentQuestion,
+  text: string,
+  attached = false,
+): ComposerReply {
+  if (question.fields?.some((field) => field.kind === "secret"))
+    return {
+      kind: "hold",
+      reason: "Type it in dot's question above. Messages aren't kept secret.",
+    };
+  const decline: ComposerReply =
+    question.declinable === false
+      ? { kind: "hold", reason: "Answer dot's question above first. Your message stays here." }
+      : { kind: "decline", request: { askId: question.askId, declined: true } };
+  if (attached) return decline;
   const said = text.trim();
   if (!question.fields?.length) {
     const option = question.options.find(
@@ -186,11 +202,6 @@ export function composerReply(question: AgentQuestion, text: string): ComposerRe
       ? { kind: "answer", request: { askId: question.askId, text: said } }
       : decline;
   }
-  if (question.fields.some((field) => field.kind === "secret"))
-    return {
-      kind: "hold",
-      reason: "Type it in dot's question above. Messages aren't kept secret.",
-    };
   const [field] = askFields(question);
   if (question.fields.length !== 1 || !field || !FREE_TEXT.has(field.kind)) return decline;
   const value =
@@ -200,47 +211,6 @@ export function composerReply(question: AgentQuestion, text: string): ComposerRe
   return askValueProblem(field, value)
     ? decline
     : { kind: "answer", request: { askId: question.askId, fields: { [field.id]: value } } };
-}
-
-// A code typed, pasted or filled in from a text message at cell `at`: a whole code fills every
-// cell, a few characters fill from the first empty cell on. Spaces and dashes are left out.
-export function enterCode(
-  code: string,
-  at: number,
-  input: string,
-  length: number,
-): { code: string; focus: number } {
-  const chars = [...input].filter((char) => !/[\s-]/.test(char));
-  const now = [...code];
-  if (!chars.length) return { code, focus: Math.min(at, now.length, length - 1) };
-  if (chars.length >= length) return { code: chars.slice(0, length).join(""), focus: length - 1 };
-  const start = Math.min(at, now.length);
-  const next = [...now.slice(0, start), ...chars, ...now.slice(start + chars.length)].slice(
-    0,
-    length,
-  );
-  return { code: next.join(""), focus: Math.min(start + chars.length, length - 1) };
-}
-
-// Backspace at cell `at`: its own character goes, or the one before when it is empty.
-export function eraseCode(code: string, at: number): { code: string; focus: number } {
-  const now = [...code];
-  const gone = at < now.length ? at : now.length - 1;
-  if (gone < 0) return { code, focus: 0 };
-  now.splice(gone, 1);
-  return { code: now.join(""), focus: gone };
-}
-
-// Text for a non-secret field with any recognisable key taken out, so a pasted key never sits in
-// the draft; `found` says one was.
-export function withoutKeys(text: string): { text: string; found: boolean } {
-  const scan = scanKeyLike(text);
-  if (scan.overflow) return { text: "", found: true };
-  if (!scan.matches.length) return { text, found: false };
-  let clean = text;
-  for (const match of [...scan.matches].reverse())
-    clean = clean.slice(0, match.start) + clean.slice(match.end);
-  return { text: clean, found: true };
 }
 
 const SECRET_SHOWN = "kept secret";

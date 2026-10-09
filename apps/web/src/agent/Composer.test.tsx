@@ -1098,14 +1098,14 @@ describe("typing", () => {
 });
 describe("answering dot from the composer", () => {
   it("answers dot's question, turns it down before sending the message on, or holds the message", async () => {
-    const reply = vi.fn<(text: string) => Promise<ReplyOutcome>>();
+    const reply = vi.fn<(text: string, attached: boolean) => Promise<ReplyOutcome>>();
     const f = setup(undefined, { reply });
     expect(f.field.placeholder).toBe("Answer dot");
     reply.mockResolvedValueOnce("answered");
     f.input("PDF");
     f.submit();
     await waitFor(() => expect(f.field.value).toBe(""));
-    expect(reply).toHaveBeenLastCalledWith("PDF");
+    expect(reply).toHaveBeenLastCalledWith("PDF", false);
     expect(f.requests).toEqual([]);
     reply.mockResolvedValueOnce("declined");
     f.input("use my work account");
@@ -1123,5 +1123,33 @@ describe("answering dot from the composer", () => {
     expect(f.requests).toHaveLength(1);
     f.update({ reply: undefined });
     expect(f.field.placeholder).toBe("Message dot");
+  });
+
+  it("turns the question down before a message with files goes, rather than leaving it unread", async () => {
+    const calls: { path: string; body: unknown }[] = [];
+    const api = createApi("fixture", {
+      origin: "http://127.0.0.1:4790",
+      fetchImpl: async (url, init) => {
+        const target = new URL(String(url));
+        calls.push({ path: target.pathname, body: init?.body });
+        return target.pathname.endsWith("/upload")
+          ? Response.json({ path: "~/Downloads/plan.pdf" }, { status: 201 })
+          : new Response(null, { status: 202 });
+      },
+    });
+    const reply = vi.fn(async (_text: string, _attached: boolean): Promise<ReplyOutcome> => {
+      return "declined";
+    });
+    const f = setup(undefined, { api, reply });
+    f.input("Use this plan instead");
+    f.attach(new File(["plan"], "plan.pdf"));
+    await waitFor(() => expect(screen.getByText("Uploaded to Downloads")).toBeTruthy());
+    f.submit();
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(reply).toHaveBeenCalledExactlyOnceWith("Use this plan instead", true);
+    expect(JSON.parse(String(calls[1]?.body))).toEqual({
+      kind: "steer",
+      text: "Use this plan instead\n\nAttached files on this computer:\n- ~/Downloads/plan.pdf",
+    });
   });
 });
