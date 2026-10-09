@@ -1,10 +1,16 @@
 import { type LocalDotEvent, msToMicros } from "@localdot/protocol";
-import { type ActionState, emptyModel, foldEvents, type SessionModel } from "@localdot/stage";
+import {
+  type ActionState,
+  emptyModel,
+  foldEvents,
+  type SessionModel,
+  type StepState,
+} from "@localdot/stage";
 import { describe, expect, it } from "vitest";
 import { hudFor } from "../cells/hud-state.ts";
 import type { CellSummary } from "../cells/types.ts";
 import { STATE_CAPTIONS, statusFor, type TaskHud, taskHud } from "../session/status.ts";
-import { dotFeed, recordedPresence, sayMs } from "./dot-feed.ts";
+import { dotFeed, recordedPresence, sayMs, toolFor } from "./dot-feed.ts";
 
 const cell: CellSummary = {
   id: "01JXYZ0000000000000000ABCD",
@@ -122,5 +128,94 @@ describe("dot in a recording", () => {
     const end = recordedPresence(recorded, 3000);
     expect(end.line).toBe(taskHud(recorded, 3000).caption);
     expect(end.forUser).toBe(true);
+  });
+});
+
+describe("the tool dot works with", () => {
+  const action = (verb: ActionState["verb"], label: string, more: Partial<ActionState> = {}) =>
+    ({ id: "a1", step: "s1", verb, label, intentT: 100, progress: [], ...more }) as ActionState;
+  const step = (tool: string | undefined, title = "", kind = "gui"): StepState => ({
+    id: "s1",
+    kind,
+    startT: 50,
+    ...(tool ? { tool, title } : {}),
+  });
+
+  it("follows the action in progress", () => {
+    const of = (verb: ActionState["verb"], label: string) =>
+      toolFor("acting", step(undefined), action(verb, label));
+    expect(of("type", "Type “london”")).toBe("typing");
+    expect(of("key", "Press Enter")).toBe("typing");
+    expect(of("key", "Press Ctrl+S")).toBe("filing");
+    expect(of("click", "Click “Telegram”")).toBe("pointing");
+    expect(of("move", "Move to (20, 40)")).toBe("pointing");
+    expect(of("click", "Click “Send”")).toBe("sending");
+    expect(of("click", "Click “Post reply”")).toBe("sending");
+    expect(of("drag", "Drag to (300, 200)")).toBe("dragging");
+    expect(of("scroll", "Scroll down")).toBe("browsing");
+    expect(of("wait", "Wait")).toBe("waiting");
+  });
+
+  it("follows the tool a step runs when it has no action of its own", () => {
+    const of = (tool: string, title = "", kind = "gui") =>
+      toolFor("acting", step(tool, title, kind), undefined);
+    expect(of("shell", "ls -la", "shell")).toBe("terminal");
+    expect(of("shell", "cat > app.py <<'EOF'", "shell")).toBe("typing");
+    expect(of("shell", "tee notes.txt", "shell")).toBe("typing");
+    expect(of("files", "write src/app.ts", "file")).toBe("typing");
+    expect(of("files", "write notes.md", "file")).toBe("filing");
+    expect(of("files", "read report.pdf", "file")).toBe("looking");
+    expect(of("browser_navigate", "Opening bbc.co.uk", "browser")).toBe("browsing");
+    expect(of("browser_read", "Reading page", "browser")).toBe("browsing");
+    expect(of("browser_upload", "Uploading photo.jpg", "browser")).toBe("sending");
+    expect(of("find", "Looking for “Save”")).toBe("looking");
+    expect(of("recall", "Recall", "think")).toBe("recalling");
+    expect(of("people", "Look up Mum", "think")).toBe("recalling");
+    expect(of("ask_user", "Ask", "ask")).toBe("needs-you");
+    expect(toolFor("acting", step(undefined, "", "shell"), undefined)).toBe("terminal");
+  });
+
+  it("prefers the step's own newer tool over an older action", () => {
+    const old = action("click", "Click A", { step: "s0", intentT: 10 });
+    expect(toolFor("acting", step("shell", "make", "shell"), old)).toBe("terminal");
+  });
+
+  it("takes needing the user, thinking and looking from the row, and puts tools down otherwise", () => {
+    const busy = action("type", "Type");
+    expect(toolFor("approval", step(undefined), busy)).toBe("needs-you");
+    expect(toolFor("question", undefined, undefined)).toBe("needs-you");
+    expect(toolFor("takeover", undefined, undefined)).toBe("needs-you");
+    expect(toolFor("thinking", step(undefined), busy)).toBe("thinking");
+    expect(toolFor("retrying", undefined, undefined)).toBe("thinking");
+    expect(toolFor("observing", step(undefined), busy)).toBe("looking");
+    for (const row of ["done", "ready", "stopped", "control", "failed"] as const)
+      expect(toolFor(row, step(undefined), busy)).toBeNull();
+  });
+
+  it("counts typing progress per action and output per command, up to the moment", () => {
+    const m = model({
+      id: "a1",
+      verb: "type",
+      label: "Type",
+      progress: [
+        { t: 150, count: 3, masked: false },
+        { t: 300, count: 9, masked: true },
+      ],
+    });
+    expect(dotFeed(status("acting"), m, 200).beat).toEqual({ key: "a1", n: 3 });
+    expect(dotFeed(status("acting"), m, 400).beat).toEqual({ key: "a1", n: 9 });
+    const shell = emptyModel();
+    shell.steps.push({ id: "s9", kind: "shell", startT: 10, tool: "shell", outputs: [20, 40, 90] });
+    expect(dotFeed(status("acting"), shell, 50)).toMatchObject({
+      tool: "terminal",
+      beat: { key: "s9", n: 2 },
+    });
+  });
+
+  it("winces for a failed action, briefly", () => {
+    const failed = model({ verb: "click", resultT: 300, ok: false });
+    expect(dotFeed(status("acting"), failed, 500).failed).toBe("a1");
+    expect(dotFeed(status("acting"), failed, 2000).failed).toBeNull();
+    expect(dotFeed(status("acting"), model({ resultT: 300, ok: true }), 500).failed).toBeNull();
   });
 });

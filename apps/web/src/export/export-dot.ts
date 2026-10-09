@@ -12,6 +12,7 @@ import {
 import { type RecordedPresence, sayMs } from "../dot/dot-feed.ts";
 import { DotEngine, type Point } from "../dot/engine/engine.ts";
 import type { DotState } from "../dot/engine/states.ts";
+import type { DotTool } from "../dot/engine/tools.ts";
 import { gazeTo } from "../dot/gaze.ts";
 import { PLATE_FILES, plateFile, SHADOW_FILES } from "../dot/plates.ts";
 import { canvasColour, SHADE } from "../dot/render/dot-colours.ts";
@@ -151,6 +152,9 @@ export class ExportDot extends Container {
   #control: boolean;
   #focus: string | null = null;
   #dispatched: string | null;
+  #failed: string | null = null;
+  #tool: DotTool | null = null;
+  #beat = "";
   #done: boolean;
   #said: string;
   #shown = "";
@@ -198,6 +202,7 @@ export class ExportDot extends Container {
     );
     this.#engine.setBias({ x: bias.x * BIAS_SHARE, y: bias.y * BIAS_SHARE }, o.t);
     this.#aim(feed.focus, o.t);
+    this.#use(feed, o.t);
     if (line) this.#engine.say(o.t, sayMs(line));
 
     const band = layout.band;
@@ -270,8 +275,11 @@ export class ExportDot extends Container {
     if (feed.control !== this.#control) engine.setControl(feed.control, t);
     this.#control = feed.control;
     this.#aim(feed.focus, t);
+    this.#use(feed, t);
     if (feed.dispatched && feed.dispatched !== this.#dispatched) engine.react("dispatch", t);
     this.#dispatched = feed.dispatched;
+    if (feed.failed && feed.failed !== this.#failed) engine.react("wince", t);
+    this.#failed = feed.failed ?? null;
     if (feed.done && !this.#done) engine.react("success", t);
     this.#done = feed.done;
     if (line && line !== this.#said) engine.say(t, sayMs(line));
@@ -295,6 +303,16 @@ export class ExportDot extends Container {
     const shown = this.#track.at(line, t, forUser);
     if (shown.text !== this.#shown) this.#say(shown.text);
     this.#words.alpha = shown.alpha;
+  }
+
+  // The tool dot works with and its progress, as the app's dot takes them.
+  #use(feed: RecordedPresence["feed"], t: number): void {
+    const tool = feed.tool ?? null;
+    if (tool !== this.#tool) this.#engine.setTool(tool, t);
+    this.#tool = tool;
+    const beat = feed.beat ? `${feed.beat.key}:${feed.beat.n}` : "";
+    if (feed.beat && beat !== this.#beat) this.#engine.beat(feed.beat.key, feed.beat.n, t);
+    this.#beat = beat;
   }
 
   #centre(): Point {

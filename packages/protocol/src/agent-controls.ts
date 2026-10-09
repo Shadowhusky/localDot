@@ -38,7 +38,12 @@ export const QuestionAnswerRequest = z
       ].filter(Boolean).length === 1,
   );
 export type QuestionAnswerRequest = z.infer<typeof QuestionAnswerRequest>;
-export const HandbackRequest = z.strictObject({ requestId: Id, note: Text(1000).optional() });
+export const HandbackRequest = z.strictObject({
+  requestId: Id,
+  note: Text(1000).optional(),
+  // "Not now": the user won't do what dot handed the computer over for.
+  declined: z.literal(true).optional(),
+});
 export type HandbackRequest = z.infer<typeof HandbackRequest>;
 // The user took the computer themselves: the control their input and hand-back name.
 export const TakeControlReply = z.strictObject({ requestId: Id });

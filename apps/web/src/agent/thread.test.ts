@@ -1,6 +1,13 @@
 import { describe, expect, it } from "vitest";
 import type { AgentMessage, AgentQuestion, AgentResult } from "./model.ts";
-import { threadItems, threadRows, timeLabel, type WorkStep, withWork } from "./thread.ts";
+import {
+  controlLine,
+  threadItems,
+  threadRows,
+  timeLabel,
+  type WorkStep,
+  withWork,
+} from "./thread.ts";
 
 // ULIDs whose time part is a known wall-clock ms.
 const ulidAt = (ms: number, tail = "0000000000000000") => {
@@ -110,6 +117,32 @@ describe("the conversation's order", () => {
     expect(threadRows(items).every((row) => row.item.kind !== "control" || !row.separator)).toBe(
       true,
     );
+  });
+
+  it("says dot handed the computer over, and a Not now the user said to it", () => {
+    const handed = ulidAt(1_000);
+    const items = threadItems(
+      [],
+      [],
+      [],
+      [
+        {
+          requestId: handed,
+          reason: "login",
+          note: "Sign in",
+          seq: 1,
+          time: 1_000,
+          taken: { seq: 2, time: 1_100 },
+          end: { requestId: handed, by: "user", declined: true },
+          endSeq: 3,
+          endTime: 2_000,
+        },
+      ],
+    );
+    expect(items.flatMap((item) => (item.kind === "control" ? [controlLine(item)] : []))).toEqual([
+      "dot handed you the computer",
+      "You said not now",
+    ]);
   });
 });
 

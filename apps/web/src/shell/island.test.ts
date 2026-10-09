@@ -126,10 +126,10 @@ describe("pauseSlot", () => {
   });
 });
 
-it("makes Take control the porcelain action when dot hands the computer over", () => {
-  expect(takeSlot(statusFor({ computer: live, task: task("takeover", "waiting") }))).toEqual({
-    primary: true,
-  });
+it("makes Take control the porcelain action when dot hands the computer over, busy as the page takes it", () => {
+  const handed = statusFor({ computer: live, task: task("takeover", "waiting") });
+  expect(takeSlot(handed)).toEqual({ primary: true });
+  expect(takeSlot(handed, { taking: true })).toEqual({ primary: true, busy: true });
 });
 
 it("offers Take control whatever dot is doing, and says why only when it can't be had", () => {

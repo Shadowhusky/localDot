@@ -1,6 +1,7 @@
 import type { Knowledge } from "../agent/useKnowledge.ts";
 import { Badge } from "../ui/Badge.tsx";
 import { Button } from "../ui/Button.tsx";
+import { EmptyState } from "../ui/EmptyState.tsx";
 import { Group, GroupHead, GroupRow } from "../ui/Group.tsx";
 import { Skeleton } from "../ui/Skeleton.tsx";
 import { MemoryEditor } from "./memory/MemoryEditor.tsx";
@@ -25,8 +26,8 @@ export function KnowledgeSection({
   return (
     <div className="settings-knowledge">
       <p className="settings-lede">
-        What dot remembers, who you reach through it and what it hears about your recent tasks. It
-        stays on the computer running localDot, and you can change or remove any of it.
+        What dot remembers, the people it reaches and your recent tasks. It all stays on the
+        computer running localDot.
       </p>
       <MemoryEditor known={known} knowledge={knowledge} onOpenTask={onOpenTask} />
       <PeopleList known={known} onOpenTask={onOpenTask} />
@@ -36,7 +37,7 @@ export function KnowledgeSection({
         {knowledge.skillsPhase === "error" ? (
           <Group>
             <GroupRow
-              label="Skills couldn't be read."
+              label="Couldn't load skills"
               trailing={
                 <Button variant="quiet" size="sm" onClick={knowledge.reloadSkills}>
                   Try again
@@ -67,7 +68,7 @@ export function KnowledgeSection({
           </Group>
         ) : (
           <Group>
-            <GroupRow label="No skills yet." />
+            <EmptyState icon="book" title="No skills yet" />
           </Group>
         )}
       </div>

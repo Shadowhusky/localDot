@@ -23,6 +23,7 @@ import { useAgentSession } from "./agent/useAgentSession.ts";
 import { useControlToast } from "./agent/useControlToast.ts";
 import { FINISH_FIRST, useConversation } from "./agent/useConversation.ts";
 import { useHandBack } from "./agent/useHandBack.ts";
+import { useHandOff } from "./agent/useHandOff.ts";
 import { useKnowledge } from "./agent/useKnowledge.ts";
 import { useManualChannel } from "./agent/useManualChannel.ts";
 import { useSafety } from "./agent/useSafety.ts";
@@ -655,6 +656,14 @@ function Theatre({ api }: { api: ApiClient }) {
       ? agent.model.takeovers.get(agent.model.pendingTakeover)
       : undefined;
   const yours = !!takeover && takeover === heldByUser(agent.model);
+  useHandOff({
+    sessionId: agent.sessionId,
+    fresh: agent.fresh,
+    offered: yours ? undefined : takeover,
+    shown: !replayId && !settings.open,
+    canTake: controls.canTake,
+    take: controls.take,
+  });
   const askDraft = useAskDraft(question);
   const answer = useRef(controls.answer);
   answer.current = controls.answer;
@@ -907,6 +916,7 @@ function Theatre({ api }: { api: ApiClient }) {
   const stopNote = stopped ? { line: stopped.title, details: stopped.details } : undefined;
   const sheetStopControl = sheetStop && {
     label: sheetStop.kind === "stop" ? "Shut down" : sheetStop.busy ? "Stopping…" : "Stop",
+    task: sheetStop.kind === "stop-task",
     enabled: sheetStop.enabled,
     run: sheetStop.kind === "stop" ? guardComputerStop : taskStop,
   };
@@ -1356,11 +1366,13 @@ function Theatre({ api }: { api: ApiClient }) {
                     pause={pause}
                     take={takeState}
                     handBack={handBack.slot}
+                    decline={handBack.declinable ? handBack.declineSlot : undefined}
                     onPause={() => void safety.requestPause()}
                     onContinue={() => void safety.resume()}
                     onStopTask={taskStop}
                     onTake={take}
                     onHandBack={() => void handBack.run()}
+                    onDecline={() => void handBack.decline()}
                     onComputer={onComputer}
                     decision={grown}
                     full={full}
@@ -1418,6 +1430,12 @@ function Theatre({ api }: { api: ApiClient }) {
                           onRightClick={(on) => setPointerMode(on ? "right" : "click")}
                           handBack={handBack.slot}
                           onHandBack={() => void handBack.run()}
+                          {...(handBack.declinable
+                            ? {
+                                decline: handBack.declineSlot,
+                                onDecline: () => void handBack.decline(),
+                              }
+                            : {})}
                         />
                       ) : undefined
                     }

@@ -505,7 +505,10 @@ describe("runDoctor's probe network", () => {
 
   it("is removed even when the create's reply or the inspect is lost", async () => {
     fake = await startFakeDocker();
-    for (const lost of ["POST /networks/create", `GET /networks/${"2".padStart(64, "0")}`]) {
+    // The fake's ids are zero-padded and the probe's names start with "localdot-", so this loses
+    // the first inspect by id: the one right after the create, whatever id the fake handed out.
+    const inspectById = "GET /networks/0000";
+    for (const lost of ["POST /networks/create", inspectById]) {
       fake.state.loseReplies.add(lost);
       const docker = new DockerClient(fake.socketPath);
       const report = await runDoctor({ docker, images, port: await freePort() });

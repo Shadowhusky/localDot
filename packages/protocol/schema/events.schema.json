@@ -772,6 +772,10 @@
             },
             "planItem": {
               "type": "string"
+            },
+            "intent": {
+              "type": "string",
+              "maxLength": 240
             }
           },
           "required": [
@@ -4362,6 +4366,10 @@
               ]
             },
             "typed": {
+              "type": "boolean",
+              "const": true
+            },
+            "declined": {
               "type": "boolean",
               "const": true
             }
