@@ -184,7 +184,7 @@ export class Presence {
 
   private watch(element: Element | null): void {
     if (element === this.watched) return;
-    if (this.watched) this.sizes?.unobserve(this.watched);
+    this.sizes?.disconnect();
     this.watched = element;
     if (element) this.sizes?.observe(element);
   }
