@@ -152,6 +152,9 @@ export function ExportSheet({
   if (open) shown.current = live;
   const state = shown.current;
   const hostView = useHostExports(host);
+  useEffect(() => {
+    if (open) host.refresh();
+  }, [open, host]);
   // The host makes the video when it can; this page makes it only when the host can't.
   const where =
     hostView.host?.state === "ready"
@@ -616,9 +619,11 @@ function ExportStatus({ state, open }: { state: ExportJobState; open: boolean })
       <p className="export-progress-line num">
         {picking
           ? "Waiting for a place to save it"
-          : !state.total
-            ? "Getting the recording ready"
-            : `${percent}% · ${remaining === null ? "working out the time left" : `about ${timeLabel(remaining)} left`}`}
+          : state.waiting
+            ? "Waiting to start"
+            : !state.total
+              ? "Getting the recording ready"
+              : `${percent}% · ${remaining === null ? "working out the time left" : `about ${timeLabel(remaining)} left`}`}
       </p>
       {!picking && (
         <>

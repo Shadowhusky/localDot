@@ -16,6 +16,7 @@ function job(state: Partial<ExportJobState>): ExportJob {
     note: null,
     context: null,
     where: null,
+    waiting: false,
     ...state,
   };
   return {

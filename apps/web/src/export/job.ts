@@ -47,6 +47,8 @@ export interface ExportJobState {
   context: ExportContext | null;
   // Made by the host, which goes on when this page closes, or by this page, which has to stay open.
   where: "host" | "page" | null;
+  // The host makes another video first.
+  waiting: boolean;
 }
 
 // An export outlives the popover that started it, and Replay itself, so it lives here and the
@@ -57,8 +59,9 @@ export interface ExportJob {
   start(context: ExportContext, request: ExportRequest, expected: ExpectedExport): Promise<void>;
   cancel(): void;
   save(): void;
-  // The popover was put away: a saved or downloaded file or a note has been seen and goes; a running
-  // export or a video waiting to be saved stays.
+  // The popover was put away: a saved or downloaded file or a note has been seen and goes, and so
+  // does a host's finished video, which stays in the host's exports; a running export or a video
+  // only this page holds stays.
   dismiss(): void;
   reset(): void;
   dispose(): void;
@@ -101,6 +104,7 @@ const IDLE: ExportJobState = {
   note: null,
   context: null,
   where: null,
+  waiting: false,
 };
 
 export function busy(phase: ExportPhase): boolean {
@@ -108,14 +112,15 @@ export function busy(phase: ExportPhase): boolean {
 }
 
 // With the host's exports at hand, a video is made there and this page only shows its progress
-// and saves the file; it also follows a video another page started. Without them, this page makes
-// it, as before.
+// and saves the file, also after a reload. Without them, this page makes it, as before.
 export function createExportJob(host?: HostExports): ExportJob {
   let state = IDLE;
   let handle: ExportHandle | null = null;
   // The host's video this job shows, and the estimate it was started with, if this page started it.
   let following: { id: string; expected?: ExpectedExport } | null = null;
   let cancelling = false;
+  // Cancel was pressed before the host said which video it is.
+  let cancelSoon = false;
   let held: Blob | null = null;
   let heldUrl: string | null = null;
   // Each start and each dispose takes a new run; a run that is no longer current goes quiet.
@@ -148,6 +153,7 @@ export function createExportJob(host?: HostExports): ExportJob {
         total: record.total,
         startedAt: performance.now() - record.elapsedMs,
         where: "host",
+        waiting: record.phase === "queued",
       });
       return;
     }
@@ -171,6 +177,7 @@ export function createExportJob(host?: HostExports): ExportJob {
       done: record.done,
       total: record.total,
       where: "host",
+      waiting: false,
       file: {
         name: record.name,
         bytes: record.bytes,
@@ -179,17 +186,15 @@ export function createExportJob(host?: HostExports): ExportJob {
       },
     });
   };
-  // Each change the host reports: the followed video moves on, or one another page started is
-  // taken up while nothing else is shown.
+  // Each change the host reports: the followed video moves on, or this tab's video is taken up
+  // again after a reload. Videos other pages started are only listed with the host's exports.
   const fromHost = () => {
     if (!host) return;
     const { exports } = host.view();
     if (!following) {
       if (state.phase !== "options" || state.note) return;
       const kept = remembered();
-      const taken =
-        exports.find((entry) => entry.id === kept && entry.phase !== "failed") ??
-        exports.find((entry) => entry.phase === "queued" || entry.phase === "making");
+      const taken = exports.find((entry) => entry.id === kept && entry.phase !== "failed");
       if (!taken) return;
       following = { id: taken.id };
       remember(taken.id);
@@ -218,22 +223,38 @@ export function createExportJob(host?: HostExports): ExportJob {
         const mine = ++run;
         release();
         unfollow();
+        cancelSoon = false;
         set({ ...IDLE, phase: "exporting", startedAt: performance.now(), context, where: "host" });
         try {
           const made = await host.start({
             request,
             screen: context.source.screen ?? "desktop",
           });
-          if (mine !== run) return;
+          if (mine !== run) {
+            if (cancelSoon) void host.cancel(made.id).catch(() => {});
+            return;
+          }
           following = { id: made.id, expected: { durationS, fitted } };
           remember(made.id);
+          if (cancelSoon) {
+            cancelSoon = false;
+            cancelling = true;
+            void host.cancel(made.id).catch(() => {
+              cancelling = false;
+            });
+          }
           fromHost();
         } catch (error) {
           if (mine !== run) return;
           set({
             ...IDLE,
-            note: error instanceof ApiError && error.status !== 500 ? error.message : NOT_STARTED,
+            note: cancelSoon
+              ? CANCELLED_NOTE
+              : error instanceof ApiError && error.status !== 500
+                ? error.message
+                : NOT_STARTED,
           });
+          cancelSoon = false;
         }
         return;
       }
@@ -310,6 +331,10 @@ export function createExportJob(host?: HostExports): ExportJob {
         });
         return;
       }
+      if (state.where === "host" && state.phase === "exporting") {
+        cancelSoon = true;
+        return;
+      }
       handle?.cancel();
     },
     save() {
@@ -335,7 +360,13 @@ export function createExportJob(host?: HostExports): ExportJob {
       set({ phase: "downloaded" });
     },
     dismiss() {
-      if (state.phase === "saved" || state.phase === "downloaded" || state.note) reset();
+      if (
+        state.phase === "saved" ||
+        state.phase === "downloaded" ||
+        state.note ||
+        (state.phase === "ready" && state.where === "host")
+      )
+        reset();
     },
     reset,
     // A video the host makes goes on without this page.

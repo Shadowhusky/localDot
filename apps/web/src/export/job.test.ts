@@ -342,14 +342,73 @@ describe("an export the host makes", () => {
     expect(run.cancel).not.toHaveBeenCalled();
   });
 
-  it("takes up a video another page started, or one still going after a reload", () => {
+  it("leaves a video another page started to the host's list", () => {
+    sessionStorage.clear();
     const { host, show } = fakeHost();
     const running = hostExport({ done: 15, total: 30, elapsedMs: 500 });
     show([running]);
     const job = createExportJob(host);
-    expect(job.snapshot()).toMatchObject({ phase: "exporting", where: "host", done: 15 });
+    expect(job.snapshot()).toMatchObject({ phase: "options", where: null });
     show([{ ...running, phase: "done", bytes: 10, durationS: 2 }]);
+    expect(job.snapshot().phase).toBe("options");
+  });
+
+  it("takes up this tab's video still being made after a reload", async () => {
+    sessionStorage.clear();
+    const { host, show } = fakeHost();
+    const first = createExportJob(host);
+    await first.start(context, request, expected);
+    const made = host.view().exports[0] as HostExport;
+    first.dispose();
+    show([{ ...made, phase: "making", done: 15, total: 30 }]);
+    const reloaded = createExportJob(host);
+    expect(reloaded.snapshot()).toMatchObject({ phase: "exporting", where: "host", done: 15 });
+  });
+
+  it("says a video is waiting while the host makes another first", async () => {
+    const { host, show } = fakeHost();
+    const job = createExportJob(host);
+    await job.start(context, request, expected);
+    expect(job.snapshot()).toMatchObject({ phase: "exporting", waiting: true });
+    const made = host.view().exports[0] as HostExport;
+    show([{ ...made, phase: "making", done: 1, total: 30 }]);
+    expect(job.snapshot().waiting).toBe(false);
+  });
+
+  it("lets a finished host video go when the sheet is put away; the host keeps it", async () => {
+    const { host, show } = fakeHost();
+    const job = createExportJob(host);
+    await job.start(context, request, expected);
+    const made = host.view().exports[0] as HostExport;
+    show([{ ...made, phase: "done", bytes: 10, durationS: 2 }]);
     expect(job.snapshot().phase).toBe("ready");
+    job.dismiss();
+    expect(job.snapshot()).toMatchObject({ phase: "options", where: null, file: null });
+    expect(host.remove).not.toHaveBeenCalled();
+  });
+
+  it("cancels a video asked for before the host has said which it is", async () => {
+    const { host, show } = fakeHost();
+    let answer = (_made: HostExport) => {};
+    host.start.mockImplementationOnce(
+      () =>
+        new Promise<HostExport>((resolve) => {
+          answer = (made) => {
+            show([made]);
+            resolve(made);
+          };
+        }),
+    );
+    const job = createExportJob(host);
+    const starting = job.start(context, request, expected);
+    expect(job.snapshot()).toMatchObject({ phase: "exporting", where: "host" });
+    job.cancel();
+    const made = hostExport({ phase: "queued", request });
+    answer(made);
+    await starting;
+    expect(host.cancel).toHaveBeenCalledWith(made.id);
+    show([]);
+    expect(job.snapshot()).toMatchObject({ phase: "options", note: CANCELLED_NOTE });
   });
 
   it("still shows this tab's video after a reload, finished while the page was away", async () => {

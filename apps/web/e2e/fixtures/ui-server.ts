@@ -1430,11 +1430,11 @@ await new Promise<void>((resolve, reject) => {
   server.listen(REQUESTED_PORT, "127.0.0.1", resolve);
 });
 const PORT = (server.address() as AddressInfo).port;
-// QA_EXPORTS=fake: videos move only when /__qa/export/* says; none: the host can't make videos
-// (Export falls back to the page); otherwise this Mac's Chrome makes them for real.
-const exportsMode = env.QA_EXPORTS ?? "chrome";
+// QA_EXPORTS=fake: videos move only when /__qa/export/* says; chrome: this computer's Chrome makes
+// them for real; otherwise the host can't make videos and Export falls back to the page.
+const exportsMode = env.QA_EXPORTS ?? "none";
 const fakeRenderer = new FakeRenderer();
-if (exportsMode === "none") fakeRenderer.able = null;
+if (exportsMode !== "fake") fakeRenderer.able = null;
 const exportJobs = new ExportJobs({
   store: new ExportStore(HOME),
   renderer:

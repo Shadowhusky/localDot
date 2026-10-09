@@ -28,6 +28,7 @@ const IDLE: ExportJobState = {
   note: null,
   context: null,
   where: null,
+  waiting: false,
 };
 
 function context(patch: Partial<ExportContext> = {}, endMs = 60_000): ExportContext {
@@ -126,14 +127,16 @@ const description = (element: Element) =>
     .map((id) => document.getElementById(id)?.textContent)
     .join(" ");
 
-// A recording of the computer's whole 2560 × 1600 screen, with video.
+let recordings = 0;
+// A recording of the computer's whole 2560 × 1600 screen, with video. Each is a new recording: the
+// sheet reads a recording's frame rate once.
 function screenContext(patch: Partial<ExportContext> = {}): ExportContext {
   const base = context(patch);
   base.source = {
     ...base.source,
     video: { upto: null },
     geometry: { w: 2560, h: 1600, scale: 1 },
-    sessionId: `${sessionId.slice(0, -1)}${Math.floor(Math.random() * 10)}`,
+    sessionId: `${sessionId.slice(0, -2)}${String(++recordings).padStart(2, "0")}`,
   };
   base.sessionId = base.source.sessionId;
   return base;
@@ -453,6 +456,20 @@ describe("Export video made by the host", () => {
     cleanup();
     const options = await show(fakeJob());
     expect(options.textContent).toContain("keep it open until it's saved");
+  });
+
+  it("says a host's video is waiting while another is made first", async () => {
+    const panel = await show(
+      fakeJob({ phase: "exporting", where: "host", waiting: true, startedAt: performance.now() }),
+    );
+    expect(panel.textContent).toContain("Waiting to start");
+    expect(panel.textContent).not.toContain("Getting the recording ready");
+  });
+
+  it("asks the host again each time the sheet opens", async () => {
+    const host = fakeHost();
+    await show(fakeJob(), context(), undefined, host);
+    expect(host.refresh).toHaveBeenCalledOnce();
   });
 
   it("shows a host's video getting ready before its frames are counted", async () => {

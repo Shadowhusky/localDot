@@ -22,7 +22,8 @@ export interface HostExportsView {
 export interface HostExports {
   view(): HostExportsView;
   subscribe(listener: () => void): () => void;
-  // Asks the host again, after it could not be reached.
+  // Asks the host again, after it could not be reached; also done when the page comes back into
+  // view or online.
   refresh(): void;
   start(start: ExportStart): Promise<HostExport>;
   cancel(id: string): Promise<void>;
@@ -84,6 +85,11 @@ export function createHostExports(
       });
   };
   refresh();
+  const again = () => {
+    if (document.visibilityState === "visible") refresh();
+  };
+  document.addEventListener("visibilitychange", again);
+  window.addEventListener("online", again);
   return {
     view: () => view,
     subscribe(listener) {
@@ -112,6 +118,8 @@ export function createHostExports(
     },
     dispose() {
       disposed = true;
+      document.removeEventListener("visibilitychange", again);
+      window.removeEventListener("online", again);
       socket?.close();
       socket = null;
       listeners.clear();

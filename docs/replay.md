@@ -66,11 +66,12 @@ that screen; browser exports add `-browser` to the suggested filename. The selec
 gaps and the committed recording snapshot remain fixed for that export.
 
 **Export** asks the computer to make the video. It keeps going if you close the page, lock the
-phone, or switch apps; every signed-in page sees the same progress, in the sheet, on the Export
-button's ring, and in a toast under the island anywhere in the app. **Save video** downloads the
-finished file through a short-lived link. Replay's library lists the exported videos to save
-again, try again, or remove; the newest ten are kept for seven days, 2 GiB at most. A video
-that localDot's restart interrupts is marked failed with **Try again**.
+phone, or switch apps; the page that asked shows its progress in the sheet, on the Export button's
+ring, and in a toast under the island anywhere in the app, also after a reload. **Save video**
+downloads the finished file through a short-lived link. Replay's library lists every exported
+video, including ones other pages asked for, to save again, try again, or remove; the newest ten
+are kept for seven days, 2 GiB at most. A video that localDot's restart interrupts is marked failed
+with **Try again**.
 
 The computer needs a Chrome-family browser: Google Chrome, Chromium, or Edge, or the one
 `LOCALDOT_EXPORT_BROWSER` names. It draws with the GPU where there is one and in software where

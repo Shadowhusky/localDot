@@ -65,6 +65,25 @@ it("opens no socket to a daemon that can't make videos in the background", async
   expect(hostCanMake(exports.view())).toBe(false);
 });
 
+it("asks again when the page comes back after the host could not be reached", async () => {
+  let reachable = false;
+  const { api, calls } = daemon(() =>
+    reachable ? json(READY) : new Response("restarting", { status: 503 }),
+  );
+  const exports = createHostExports(api);
+  await settle();
+  expect(exports.view().host).toBeNull();
+  reachable = true;
+  window.dispatchEvent(new Event("online"));
+  await settle();
+  expect(hostCanMake(exports.view())).toBe(true);
+  expect(FakeWebSocket.instances).toHaveLength(1);
+  document.dispatchEvent(new Event("visibilitychange"));
+  await settle();
+  expect(calls).toEqual(["GET /api/exports", "GET /api/exports"]);
+  exports.dispose();
+});
+
 it("starts, cancels, retries, removes and links by the host's routes", async () => {
   const made = hostExport();
   const { api, calls } = daemon((method, path) => {
