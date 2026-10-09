@@ -51,6 +51,17 @@ describe("dot's working rules", () => {
       expect(rules, rule).toContain(rule);
   });
 
+  it("ask for a line for the user on every call that acts, said in a message for a native screen tool", () => {
+    expect(workingRules("batch")).toContain(
+      "Give every computer, browser_act and shell call its intent, in that voice.",
+    );
+    expect(workingRules("calls")).toContain(
+      "Give every browser_act and shell call its intent, in that voice, and say such a line before computer actions.",
+    );
+    expect(workingRules("none")).toContain("Give every browser_act and shell call its intent");
+    expect(workingRules("none")).not.toContain("computer actions");
+  });
+
   it("stay short and never name localDot's own parts", () => {
     for (const rules of MODES.map(workingRules)) {
       expect(rules.length).toBeLessThan(3000);

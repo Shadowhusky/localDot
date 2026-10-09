@@ -3,9 +3,8 @@ import { RevealedText } from "../agent/ApprovalValue.tsx";
 import { hiddenWarning, revealText } from "../agent/reveal-text.ts";
 import { PresenceSlot } from "../dot/PresenceSlot.tsx";
 import { useFullLine } from "./FullLine.tsx";
+import { LINE_HOLD_MS } from "./narration.ts";
 
-// Each line stays at least this long, so a quick run of steps never flickers.
-export const LINE_HOLD_MS = 1000;
 const LINE_OUT_MS = 120;
 
 export interface NarratorBandProps {
@@ -17,12 +16,22 @@ export interface NarratorBandProps {
   note?: string;
   // The line is dot's question, right above where the answer goes: nothing in it may hide.
   reveal?: boolean;
+  // Not a line about dot's work but one for the user (a question, an approval, a problem, a stop):
+  // it comes in at once.
+  forUser?: boolean;
 }
 
 // The band under the stage (design-v2 §10.17, §11 D): dot docked at the stage's corner and its line
 // beside it, two lines at most, crossfading one line to the next.
-export function NarratorBand({ line, speaker, showDot, note, reveal = false }: NarratorBandProps) {
-  const { text, revealed, leaving } = useLine(line, reveal);
+export function NarratorBand({
+  line,
+  speaker,
+  showDot,
+  note,
+  reveal = false,
+  forUser = false,
+}: NarratorBandProps) {
+  const { text, revealed, leaving } = useLine(line, reveal, reveal || forUser);
   const warning = useMemo(
     () => (revealed ? hiddenWarning(revealText(text)) : undefined),
     [revealed, text],
@@ -63,9 +72,9 @@ export function NarratorBand({ line, speaker, showDot, note, reveal = false }: N
   );
 }
 
-// The line on show: a new one waits until the last has had its moment, fades the last out, then in.
-// Whether a line is revealed goes with the line.
-function useLine(line: string, reveal: boolean) {
+// The line on show: a new one waits until the last has had its moment, unless it is urgent, fades
+// the last out, then in. Whether a line is revealed goes with the line.
+function useLine(line: string, reveal: boolean, urgent: boolean) {
   const [text, setText] = useState(line);
   const [revealed, setRevealed] = useState(reveal);
   const [leaving, setLeaving] = useState(false);
@@ -76,7 +85,8 @@ function useLine(line: string, reveal: boolean) {
       setRevealed(reveal);
       return;
     }
-    const wait = Math.max(0, since.current + LINE_HOLD_MS - Date.now());
+    // Silence has nothing to read, so the first line after it comes in at once.
+    const wait = text && !urgent ? Math.max(0, since.current + LINE_HOLD_MS - Date.now()) : 0;
     let swap: ReturnType<typeof setTimeout> | undefined;
     const out = setTimeout(() => {
       setLeaving(true);
@@ -94,6 +104,6 @@ function useLine(line: string, reveal: boolean) {
       clearTimeout(out);
       clearTimeout(swap);
     };
-  }, [line, text, reveal]);
+  }, [line, text, reveal, urgent]);
   return { text, revealed: revealed || (reveal && line === text), leaving };
 }

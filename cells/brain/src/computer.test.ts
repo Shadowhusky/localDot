@@ -423,6 +423,34 @@ describe("batches", () => {
     ).toBe("steps are only for a batch");
   });
 
+  it("carries the call's line for the user on its first daemon action only", () => {
+    const [click, ...rest] = toComputerActions(
+      {
+        action: "type",
+        coordinate: [10, 20],
+        text: "Mum",
+        clear: true,
+        intent: "  Searching for your chat with Mum ",
+      },
+      "pixels",
+      F,
+    ) as ComputerAction[];
+    expect(click?.intent).toBe("Searching for your chat with Mum");
+    expect(rest.length).toBeGreaterThan(0);
+    for (const action of rest) expect(action).not.toHaveProperty("intent");
+    const [batch] = toComputerActions(
+      {
+        action: "batch",
+        intent: "Filling in the form",
+        steps: [{ action: "key", text: "Tab", intent: "a step's own" } as never],
+      },
+      "pixels",
+      F,
+    ) as [ComputerAction];
+    expect(batch.intent).toBe("Filling in the form");
+    expect(batch.steps?.[0]).not.toHaveProperty("intent");
+  });
+
   it("needs a screenshot to choose a point in any of its steps", () => {
     const [batch] = toComputerActions(
       { action: "batch", steps: [{ action: "key", text: "Tab" }, { action: "scroll" }] },

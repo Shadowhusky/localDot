@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
-import { LINE_HOLD_MS, NarratorBand } from "./NarratorBand.tsx";
+import { NarratorBand } from "./NarratorBand.tsx";
+import { LINE_HOLD_MS } from "./narration.ts";
 
 afterEach(() => {
   cleanup();
@@ -11,7 +12,7 @@ afterEach(() => {
 
 const line = () => document.querySelector(".narration-line");
 
-it("holds each line for a second, then fades it out before the next comes in", () => {
+it("holds each line long enough to read, then fades it out before the next comes in", () => {
   vi.useFakeTimers();
   const band = render(<NarratorBand line="Opening the report" speaker="dot" showDot />);
   band.rerender(<NarratorBand line="Selecting February's net total" speaker="dot" showDot />);
@@ -23,6 +24,36 @@ it("holds each line for a second, then fades it out before the next comes in", (
   act(() => vi.advanceTimersByTime(120));
   expect(line()?.textContent).toBe("dot: Selecting February's net total");
   expect(line()?.hasAttribute("data-leaving")).toBe(false);
+});
+
+it("never flips back and forth: a line that returns within its hold keeps the band still", () => {
+  vi.useFakeTimers();
+  const band = render(<NarratorBand line="Opening Telegram" speaker="dot" showDot />);
+  band.rerender(<NarratorBand line="Clicked “Search”" speaker="dot" showDot />);
+  act(() => vi.advanceTimersByTime(LINE_HOLD_MS / 2));
+  band.rerender(<NarratorBand line="Opening Telegram" speaker="dot" showDot />);
+  act(() => vi.advanceTimersByTime(LINE_HOLD_MS * 2));
+  expect(line()?.textContent).toBe("dot: Opening Telegram");
+  expect(line()?.hasAttribute("data-leaving")).toBe(false);
+});
+
+it("brings the first line after a silence in at once", () => {
+  vi.useFakeTimers();
+  const band = render(<NarratorBand line="" speaker="dot" showDot />);
+  band.rerender(<NarratorBand line="Opening Telegram" speaker="dot" showDot />);
+  act(() => vi.advanceTimersByTime(1));
+  expect(line()?.textContent).toBe("dot: Opening Telegram");
+});
+
+it("brings a line for the user in at once, without waiting out the last line's hold", () => {
+  vi.useFakeTimers();
+  const band = render(<NarratorBand line="Opening the report" speaker="dot" showDot />);
+  band.rerender(<NarratorBand line="Which report?" speaker="dot" showDot forUser />);
+  act(() => vi.advanceTimersByTime(120));
+  expect(line()?.textContent).toBe("dot: Which report?");
+  band.rerender(<NarratorBand line="Sign in to your bank" speaker="dot" showDot reveal />);
+  act(() => vi.advanceTimersByTime(120));
+  expect(line()?.textContent).toBe("dot: Sign in to your bank");
 });
 
 it("names its speaker on screen only when dot isn't beside it", () => {

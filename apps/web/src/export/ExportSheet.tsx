@@ -1,5 +1,5 @@
 import type { ScreenName } from "@localdot/protocol";
-import { chapters, observeAt, type SessionModel } from "@localdot/stage";
+import { observeAt, type SessionModel } from "@localdot/stage";
 import {
   type CSSProperties,
   type ReactNode,
@@ -32,6 +32,7 @@ import {
   waitText,
 } from "./export-estimate.ts";
 import {
+  bandLineAt,
   EXPORT_FRAME_RATES,
   EXPORT_QUALITIES,
   type ExportQuality,
@@ -107,13 +108,6 @@ function previewFrame(
     model.observes.find(
       (entry) => entry.t >= range.fromMs && (entry.screen ?? "desktop") === screen,
     )?.frameId ?? null
-  );
-}
-
-function stepLabel(model: SessionModel, atMs: number, endMs: number): string | null {
-  return (
-    chapters(model, endMs).find((chapter) => chapter.startT <= atMs && atMs < chapter.endT)
-      ?.label ?? null
   );
 }
 
@@ -245,10 +239,9 @@ export function ExportSheet({
     chosen,
     context.source.screen ?? "desktop",
   );
-  const step = stepLabel(
+  const caption = bandLineAt(
     context.model,
     Math.max(chosen.fromMs, Math.min(chosen.toMs, context.atMs)),
-    context.whole.toMs,
   );
   const span = context.whole.toMs - context.whole.fromMs;
   const share = (time: number) => (span > 0 ? (time - context.whole.fromMs) / span : 0);
@@ -283,10 +276,10 @@ export function ExportSheet({
               <ReplayImage api={api} sessionId={context.sessionId} frameId={frame} full />
               <span
                 className="export-preview-caption"
-                data-shown={choices.captions && step ? "" : undefined}
+                data-shown={choices.captions && caption ? "" : undefined}
                 aria-hidden="true"
               >
-                {step}
+                {caption}
               </span>
             </div>
             <div className="export-range">

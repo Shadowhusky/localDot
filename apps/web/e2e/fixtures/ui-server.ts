@@ -572,7 +572,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   });
   a("plan.set", { items: planItems(finished) });
   const click = ulid();
-  a("step.start", { kind: "gui", planItem: "open" }, click);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "open", intent: "Opening the monthly report to read the sales table" },
+    click,
+  );
   a(
     "action.intent",
     { verb: "click", label: "Open monthly-report.ods", risk: "none", point: { x: 1280, y: 420 } },
@@ -600,7 +604,11 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "allow",
   });
   const typing = ulid();
-  a("step.start", { kind: "gui", planItem: "calc" }, typing);
+  a(
+    "step.start",
+    { kind: "gui", planItem: "calc", intent: "Adding up the net total for each month" },
+    typing,
+  );
   a(
     "action.intent",
     { verb: "type", label: "Type =SUM(F2:F13)", risk: "low", point: { x: 1900, y: 1300 } },
@@ -621,7 +629,11 @@ function seedTask(s: AgentSession, finished: boolean) {
   observe(typing);
   a("step.end", { status: "ok" }, typing);
   const shell = ulid();
-  a("step.start", { kind: "shell", planItem: "calc" }, shell);
+  a(
+    "step.start",
+    { kind: "shell", planItem: "calc", intent: "Checking the totals against the raw data" },
+    shell,
+  );
   a("tool.start", { tool: "shell", title: "Check totals with csvstat" }, shell);
   a(
     "tool.output",
@@ -649,7 +661,7 @@ function seedTask(s: AgentSession, finished: boolean) {
     decision: "deny",
   });
   const file = ulid();
-  a("step.start", { kind: "file", planItem: "write" }, file);
+  a("step.start", { kind: "file", planItem: "write", intent: "Writing the short report" }, file);
   a(
     "file.change",
     {
@@ -696,7 +708,15 @@ function seedTask(s: AgentSession, finished: boolean) {
     s.setStatus("running");
     a("agent.state", { state: "acting" });
     liveStep = ulid();
-    a("step.start", { kind: "gui", planItem: "calc" }, liveStep);
+    a(
+      "step.start",
+      {
+        kind: "gui",
+        planItem: "calc",
+        intent: "Checking February's net total against revenue minus returns",
+      },
+      liveStep,
+    );
     a(
       "action.intent",
       {
@@ -2544,11 +2564,12 @@ routes.post("/__qa/stream", (c) => {
   }, 40);
   return c.json({ ok: true });
 });
-// dot thinks aloud: the narrator band speaks its latest sentence (thoughts are not kept in history).
+// dot thinks: its thoughts are never the band's line, which holds dot's last line for the user.
 routes.post("/__qa/think", (c) => {
   if (!session) return c.text("no session", 409);
   session.append("thought.delta", {
-    text: c.req.query("text") ?? "Checking February's net total against revenue minus returns.",
+    text:
+      c.req.query("text") ?? "The Net column must be revenue minus returns. Let me check row 3.",
   });
   return c.json({ ok: true });
 });

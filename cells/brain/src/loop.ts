@@ -39,7 +39,7 @@ import {
 } from "./context.ts";
 import type { EventSink } from "./events.ts";
 import { imagesInToolResults } from "./models.ts";
-import { type PlanLine, systemPrompt } from "./prompt.ts";
+import { type PlanLine, screenHands, systemPrompt } from "./prompt.ts";
 import type { ToolClient } from "./tool-client.ts";
 import { toolSet } from "./tools.ts";
 
@@ -50,6 +50,8 @@ const ACTS_ON_SCREEN = new Set(["computer", "browser_act"]);
 // Tools whose screenshot shows the screen after them.
 const SHOWS_SCREEN = new Set(["computer", "browser_act", "browser_navigate"]);
 const LEFT_OUT = "(Screenshot left out: a later action in this turn returned a newer one.)";
+// The longest line said before a computer call that goes with the call, as its step's line does.
+const MAX_OPENING = 120;
 
 const fullFrames = (result: ToolResult) =>
   result.content.filter((c) => c.type === "image" && !c.region).length;
@@ -512,6 +514,14 @@ export class Agent {
       signal.throwIfAborted();
       const binding = this.#binding();
       const calls: Call[] = [];
+      // Anthropic's own computer tool has no field for dot's line, so dot says it just before
+      // its computer actions. That line goes with the call, beside dot, not into the
+      // conversation: a short opening waits until the reply shows what follows it.
+      let opening = screenHands(binding) === "calls" ? "" : undefined;
+      const say = (text: string) => {
+        sink.text(text);
+        this.#o.onEvent?.({ type: "message_update", delta: text });
+      };
       // This exact pruned prompt and full-frame basis belong to the whole returned tool batch.
       const messages = pruneScreenshots(this.#history);
       const basedOn = newestFullFrame(messages);
@@ -528,12 +538,25 @@ export class Agent {
         for await (const part of result.fullStream) {
           signal.throwIfAborted();
           if (part.type === "text-delta") {
-            sink.text(part.text);
-            this.#o.onEvent?.({ type: "message_update", delta: part.text });
+            if (opening === undefined) say(part.text);
+            else {
+              opening += part.text;
+              if (opening.length > MAX_OPENING || opening.trim().includes("\n")) {
+                say(opening);
+                opening = undefined;
+              }
+            }
           } else if (part.type === "reasoning-delta") {
             sink.push({ type: "thought.delta", data: { text: part.text } });
           } else if (part.type === "tool-call") {
-            calls.push(part as Call);
+            const line = opening?.trim();
+            if (line && part.toolName === "computer" && !part.invalid)
+              calls.push({ ...part, input: { intent: line, ...(part.input as object) } } as Call);
+            else {
+              if (opening) say(opening);
+              calls.push(part as Call);
+            }
+            opening = undefined;
           } else if (part.type === "error") {
             throw part.error;
           } else if (part.type === "finish") {
@@ -552,6 +575,7 @@ export class Agent {
             });
           }
         }
+        if (opening) say(opening);
         signal.throwIfAborted();
         const response = await result.response;
         signal.throwIfAborted();

@@ -29,6 +29,7 @@ export interface ProviderComputerInput {
   path?: number[][];
   button?: "left" | "right" | "middle";
   steps?: ProviderComputerInput[];
+  intent?: string;
 }
 
 const CLICKS: Record<string, { button: "left" | "right" | "middle"; count: 1 | 2 | 3 }> = {
@@ -337,9 +338,13 @@ export function toComputerActions(
         ? typeSteps(input, coords, basedOn)
         : normalizeComputerAction(input, coords, basedOn);
   if (typeof result === "string") return result;
+  // The call's line for the user goes with its first daemon action, which starts its first step.
+  const intent = typeof input.intent === "string" ? input.intent.trim().slice(0, 500) : "";
   const actions: ComputerAction[] = [];
   for (const action of Array.isArray(result) ? result : [result]) {
-    const parsed = ComputerAction.safeParse(action);
+    const parsed = ComputerAction.safeParse(
+      intent && !actions.length ? { ...action, intent } : action,
+    );
     if (!parsed.success) return "Invalid computer action fields";
     actions.push(parsed.data);
   }

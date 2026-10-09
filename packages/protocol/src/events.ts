@@ -17,6 +17,7 @@ import { ScreenName, ScreenSwitchData } from "./screens.ts";
 import { SubscriptionUsageData } from "./subscription.ts";
 import { Target } from "./target.ts";
 import { boundedText } from "./text.ts";
+import { INTENT_CHARS } from "./tools.ts";
 
 const envelope = {
   v: z.literal(1),
@@ -113,6 +114,8 @@ export const StepStart = event(
   z.object({
     kind: z.enum(["gui", "shell", "file", "browser", "ask", "think"]),
     planItem: z.string().optional(),
+    // The model's own line for the user about the call this step starts, as plain text.
+    intent: boundedText(INTENT_CHARS).optional(),
   }),
 );
 export const StepEnd = event(
